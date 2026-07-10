@@ -6,6 +6,7 @@ import Data.List (isInfixOf, isSuffixOf, nub)
 import System.Exit (exitFailure)
 import Text.Read (readMaybe)
 
+import Environment (validateEnvironment)
 import HCheck (htCheckEnv, htCheckType)
 import HTypes
 import LJT
@@ -54,6 +55,7 @@ tests =
     , ("type-check generated proofs independently", testGeneratedProofsCheck)
     , ("reject malformed proof terms", testMalformedProofTerms)
     , ("preserve nominal empty types", testNominalEmptyTypes)
+    , ("validate declaration mutations transactionally", testEnvironmentValidation)
     ]
 
 testPrefixArrowParsing :: IO ()
@@ -314,6 +316,31 @@ testNominalEmptyTypes = do
     assertLeft "a direct identity cast between empty types must be rejected"
         (checkProof [] cast $ Lam (Symbol "x") (Var $ Symbol "x"))
 
+testEnvironmentValidation :: IO ()
+testEnvironmentValidation = do
+    let base =
+            [ ("Base", ([], HTUnion [("Base", [])], KStar))
+            , ("Alias", ([], HTCon "Base", KStar))
+            ]
+        withoutBase = filter ((/= "Base") . fst) base
+        changedArity =
+            ("Base", (["a"], HTVar "a", KStar)) : withoutBase
+        axiom = ("given", HTCon "Base")
+        classDefinition =
+            ("UsesBase", ([], [("useBase", HTCon "Base")]))
+    assertLeft "deletion must reject a dependent synonym"
+        (validateEnvironment withoutBase [] [])
+    assertLeft "replacement must reject a newly unsaturated dependency"
+        (validateEnvironment changedArity [] [])
+    assertLeft "deletion must reject a dependent axiom"
+        (validateEnvironment [] [axiom] [])
+    assertLeft "deletion must reject a dependent class method"
+        (validateEnvironment [] [] [classDefinition])
+    assertRight "an unrelated declaration set should still rebuild"
+        (validateEnvironment
+            [("Other", ([], HTUnion [("Other", [])], KStar))]
+            [] [])
+
 atomA :: Formula
 atomA = PVar $ Symbol "a"
 
@@ -332,6 +359,11 @@ assertLeft :: Show a => String -> Either String a -> IO ()
 assertLeft _ (Left _) = return ()
 assertLeft message (Right value) =
     fail $ message ++ ": expected an error, got " ++ show value
+
+assertRight :: Show a => String -> Either String a -> IO ()
+assertRight _ (Right _) = return ()
+assertRight message (Left errorMessage) =
+    fail $ message ++ ": unexpected error: " ++ errorMessage
 
 assertContains :: String -> String -> String -> IO ()
 assertContains message needle haystack =

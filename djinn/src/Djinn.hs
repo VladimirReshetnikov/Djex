@@ -15,6 +15,7 @@ import System.Environment(getArgs)
 import System.IO.Error(tryIOError)
 
 import REPL
+import Environment(validateEnvironment)
 import LJT
 import HTypes
 import HCheck(htCheckEnv, htCheckType)
@@ -161,10 +162,21 @@ runCmd s (Add i t) =
     Right _ -> return (False, s { axioms = replace i (i, t) (axioms s) })
 runCmd _ Clear =
     return (False, startState)
-runCmd s (Del i) =
-    return (False, s { axioms   = filter ((i /=) . fst) (axioms s)
-                     , synonyms = filter ((i /=) . fst) (synonyms s)
-                     , classes = filter ((i /=) . fst) (classes s) })
+runCmd s (Del i) = do
+    let candidateAxioms = filter ((i /=) . fst) (axioms s)
+        candidateSynonyms = filter ((i /=) . fst) (synonyms s)
+        candidateClasses = filter ((i /=) . fst) (classes s)
+    case validateEnvironment candidateSynonyms candidateAxioms
+            candidateClasses of
+        Left message -> do
+            putStrLn $ "Error: cannot delete " ++ i ++ ": " ++ message
+            return (False, s)
+        Right checked ->
+            return (False, s {
+                axioms = candidateAxioms,
+                synonyms = checked,
+                classes = candidateClasses
+                })
 runCmd s Env = do
     let showType (i, (_, HTAbstract _ kind, _)) =
             "type " ++ i ++ " :: " ++ show kind
@@ -181,7 +193,8 @@ runCmd s (Type syn@(name, (params, body, _))) =
     case requireUnusedName "class" name (classes s) >>
          requireDistinct "type parameter" params >>
          checkConstructors name body (synonyms s) >>
-         htCheckEnv (replace name syn (synonyms s)) of
+         validateEnvironment (replace name syn (synonyms s))
+            (axioms s) (classes s) of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
         Right syns -> return (False, s { synonyms = syns })
 runCmd s (Set f) =

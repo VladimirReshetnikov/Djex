@@ -329,6 +329,7 @@ termToHExpr term = do
             ", expected a tuple of arity " ++ show n
 
         unTupleP 0 _ = Right []
+        unTupleP 1 pattern' = Right [pattern']
         unTupleP n (HPTuple ps) | length ps == n = Right ps
         unTupleP n p = Left $ "constructor pattern has shape " ++ show p ++
             ", expected a tuple of arity " ++ show n
@@ -393,6 +394,13 @@ termToHExpr term = do
         combPat p p' | p == p' = Right p
         combPat (HPVar v) p = Right $ HPAt v p
         combPat p (HPVar v) = Right $ HPAt v p
+        combPat (HPAt v p) (HPAt v' p') = do
+                merged <- combPat p p'
+                return $ case v == v' of
+                    True -> HPAt v merged
+                    False -> HPAt v $ HPAt v' merged
+        combPat (HPAt v p) p' = HPAt v `fmap` combPat p p'
+        combPat p (HPAt v p') = HPAt v `fmap` combPat p p'
         combPat (HPTuple ps) (HPTuple ps') | length ps == length ps' =
                 HPTuple `fmap` zipWithM combPat ps ps'
         combPat p p' = Left $ "cannot merge incompatible patterns " ++

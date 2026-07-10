@@ -49,7 +49,9 @@ test-suite djinn-tests
   Build-Depends:    base >= 4 && < 6,
                     mtl < 10,
                     pretty < 10,
-                    containers < 10
+                    containers < 10,
+                    tasty >= 1.4 && < 2,
+                    tasty-hunit >= 0.10 && < 1
 
   Other-Modules:    Environment,
                     HCheck,
@@ -59,3 +61,38 @@ test-suite djinn-tests
                     LJTFormula,
                     ProofCheck,
                     ProofEnv
+
+test-suite djinn-property-tests
+  Type:             exitcode-stdio-1.0
+  Main-Is:          PropertySpec.hs
+  Hs-Source-Dirs:   test, src
+  Default-Language: Haskell2010
+  Ghc-Options:      -Wall -Wcompat
+
+  Build-Depends:    base >= 4 && < 6,
+                    containers < 10,
+                    mtl < 10,
+                    pretty < 10,
+                    QuickCheck >= 2.14 && < 3,
+                    tasty >= 1.4 && < 2,
+                    tasty-quickcheck >= 0.10 && < 1
+
+  Other-Modules:    HIdentifier,
+                    HTypes,
+                    LJT,
+                    LJTFormula,
+                    ProofCheck
+
+test-suite djinn-cli-tests
+  Type:               exitcode-stdio-1.0
+  Main-Is:            CLISpec.hs
+  Hs-Source-Dirs:     test
+  Default-Language:   Haskell2010
+  Ghc-Options:        -Wall -Wcompat
+
+  Build-Depends:      base >= 4 && < 6,
+                      process < 2,
+                      tasty >= 1.4 && < 2,
+                      tasty-hunit >= 0.10 && < 1
+
+  Build-Tool-Depends: djinn:djinn

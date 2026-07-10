@@ -1,9 +1,8 @@
 module Main (main) where
 
-import Control.Exception (SomeException, displayException, try)
-import Control.Monad (unless)
 import Data.List (isInfixOf, isSuffixOf, nub)
-import System.Exit (exitFailure)
+import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
@@ -15,30 +14,11 @@ import LJT
 import ProofCheck (checkProof)
 import ProofEnv
 
-type Test = (String, IO ())
-
 main :: IO ()
-main = do
-    failures <- concat <$> mapM runTest tests
-    unless (null failures) $ do
-        putStrLn ""
-        putStrLn $ show (length failures) ++ " test(s) failed:"
-        mapM_ (putStrLn . ("  - " ++)) failures
-        exitFailure
+main = defaultMain $ testGroup "Djinn unit tests" $
+    [testCase name action | (name, action) <- tests]
 
-runTest :: Test -> IO [String]
-runTest (name, action) = do
-    result <- try action :: IO (Either SomeException ())
-    case result of
-        Right () -> do
-            putStrLn $ "PASS  " ++ name
-            return []
-        Left exception -> do
-            let failure = name ++ ": " ++ displayException exception
-            putStrLn $ "FAIL  " ++ failure
-            return [failure]
-
-tests :: [Test]
+tests :: [(String, Assertion)]
 tests =
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
@@ -53,6 +33,8 @@ tests =
     , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
     , ("preserve residual application after Csplit", testCsplitResidualArguments)
     , ("preserve residual application after Ccases", testCcasesResidualArguments)
+    , ("preserve tuple payloads in unary constructors", testUnaryTuplePayload)
+    , ("merge tuple refinements across case branches", testBranchRefinements)
     , ("isolate external proof identities", testProofEnvironment)
     , ("type-check generated proofs independently", testGeneratedProofsCheck)
     , ("reject malformed proof terms", testMalformedProofTerms)
@@ -145,11 +127,15 @@ testProvableBasics =
     mapM_ (uncurry assertTrue)
         [ ("identity", atomA :-> atomA)
         , ("conjunction commutes", (atomA & atomB) :-> (atomB & atomA))
+        , ( "conjunction commutes for nested implications"
+          , (nested & atomA) :-> (atomA & nested)
+          )
         , ("a value injects into a disjunction", atomA :-> (atomA |: atomB))
         , ("false eliminates", false :-> atomA)
         ]
   where
     assertTrue name formula = assertBool name (provable formula)
+    nested = fnot $ fnot $ Empty $ Symbol "EmptyA"
 
 testNonTheorems :: IO ()
 testNonTheorems =
@@ -224,6 +210,48 @@ testCcasesResidualArguments = do
     assertContains "Ccases should retain its second alternative" "RightC" rendered
     assertWordsSuffix "Ccases residual arguments must not be dropped or reordered"
         ["arg1", "arg2"] rendered
+
+testUnaryTuplePayload :: IO ()
+testUnaryTuplePayload = do
+    let constructor = ConsDesc "Only" 1
+        payload = Symbol "payload"
+        left = Symbol "left"
+        right = Symbol "right"
+        handler = Lam payload $ applys (Csplit 2)
+            [ Lam left $ Lam right $ Apply (Var $ Symbol "consume") $
+                applys (Ctuple 2) [Var left, Var right]
+            , Var payload
+            ]
+        term = applys (Ccases [constructor])
+            [Var $ Symbol "value", handler]
+    rendered <- renderTerm "unwrap" term
+    assertContains "the tuple must remain one constructor field"
+        "Only (a, b)" rendered
+
+testBranchRefinements :: IO ()
+testBranchRefinements = do
+    let outer = Symbol "outer"
+        choice = Symbol "choice"
+        shared = Symbol "shared"
+        leftConstructor = ConsDesc "LeftC" 1
+        rightConstructor = ConsDesc "RightC" 1
+        splitShared prefix =
+            let first = Symbol $ prefix ++ "First"
+                second = Symbol $ prefix ++ "Second"
+            in applys (Csplit 2)
+                [ Lam first $ Lam second $
+                    applys (Ctuple 2) [Var first, Var second]
+                , Var shared
+                ]
+        body = applys (Ccases [leftConstructor, rightConstructor])
+            [ Var choice
+            , Lam (Symbol "leftPayload") $ splitShared "left"
+            , Lam (Symbol "rightPayload") $ splitShared "right"
+            ]
+        term = Lam outer $ applys (Csplit 2)
+            [Lam choice $ Lam shared body, Var outer]
+    _ <- renderTerm "mergeBranches" term
+    return ()
 
 testProofEnvironment :: IO ()
 testProofEnvironment = do
@@ -414,14 +442,6 @@ atomA = PVar $ Symbol "a"
 
 atomB :: Formula
 atomB = PVar $ Symbol "b"
-
-assertEqual :: (Eq a, Show a) => String -> a -> a -> IO ()
-assertEqual message expected actual =
-    unless (expected == actual) $
-        fail $ message ++ ": expected " ++ show expected ++ ", got " ++ show actual
-
-assertBool :: String -> Bool -> IO ()
-assertBool message condition = unless condition $ fail message
 
 assertLeft :: Show a => String -> Either String a -> IO ()
 assertLeft _ (Left _) = return ()

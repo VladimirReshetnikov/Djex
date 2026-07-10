@@ -435,10 +435,32 @@ redant more antes atomImps nestImps atoms goal =
                     | (i, (constructor, d)) <- zip [0 ..] alternatives]
         redant0 injections v
     redsucc (Empty _) = mzero
-    redsucc (a :-> b) = do
-        s <- newSym "x"
-        proof <- redant1 (A (Var s) a) [] b
-        return $ Lam s proof
+    redsucc implication@(a :-> b) =
+        cutSearch more (choose $ findIndexedImplications implication)
+        `mplus`
+        do
+            s <- newSym "x"
+            proof <- redant1 (A (Var s) a) [] b
+            return $ Lam s proof
+
+    -- Implications are indexed after antecedent processing.  Consult those
+    -- indexes before eta-expanding an implication goal; otherwise moving a
+    -- complex implication through a tuple can lose its direct identity proof.
+    findIndexedImplications :: Formula -> [Term]
+    findIndexedImplications (PVar atom :-> consequent) =
+        [proof |
+            AtomImp indexedAtom consequences <- atomImps,
+            indexedAtom == atom,
+            A proof indexedConsequent <- consequences,
+            indexedConsequent == consequent]
+    findIndexedImplications ((argument :-> result) :-> consequent) =
+        [proof |
+            NestImp proof indexedArgument indexedResult indexedConsequent <-
+                nestImps,
+            indexedArgument == argument,
+            indexedResult == result,
+            indexedConsequent == consequent]
+    findIndexedImplications _ = []
 
     -- Nested implications are the branching point of the search.  Try each
     -- one once, removing the selected implication from the recursive calls.

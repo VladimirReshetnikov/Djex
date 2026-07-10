@@ -15,7 +15,8 @@ import Text.PrettyPrint.HughesPJ(Doc, renderStyle, style, text, (<>), parens, ($
          sep, fsep, nest, comma, (<+>))
 import Data.Char(isAlphaNum, isAlpha, isUpper)
 import Data.List(union, (\\))
-import Control.Monad(zipWithM)
+import Control.Monad(foldM, zipWithM)
+import qualified Data.Set as Set
 import Text.ParserCombinators.ReadP
 import LJTFormula
 
@@ -265,90 +266,161 @@ pparens False d = d
 unSymbol :: Symbol -> HSymbol
 unSymbol (Symbol s) = s
 
-termToHExpr :: Term -> HExpr
-termToHExpr term =
-    niceNames $ etaReduce $ remUnusedVars $ collapseCase $ fixSillyAt $
-        remUnusedVars $ fst $ conv [] term
+termToHExpr :: Term -> Either String HExpr
+termToHExpr term = do
+    (expression, _) <- conv [] $ alphaRenameTerm term
+    return $ niceNames $ etaReduce $ remUnusedVars $ collapseCase $
+        fixSillyAt $ remUnusedVars expression
   -- Besides the expression, conversion records how enclosing variables are
   -- decomposed.  convV later turns those refinements into tuple/as-patterns.
-  where conv _vs (Var s) = (HEVar $ unSymbol s, [])
-        conv vs (Lam s te) =
+  where conv _vs (Var s) = Right (HEVar $ unSymbol s, [])
+        conv vs (Lam s te) = do
                 let hs = unSymbol s
-                    (te', ss) = conv (hs : vs) te
-                in  (hELam [convV hs ss] te', ss)
-        conv vs (Apply (Cinj (ConsDesc s n) _) a) = (f $ foldl HEApply (HECon s) as, ss)
-                where (f, as) = unTuple n ha
-                      (ha, ss) = conv vs a
+                (te', ss) <- conv (hs : vs) te
+                pattern' <- convV hs ss
+                return (hELam [pattern'] te', ss)
+        conv vs (Apply (Cinj (ConsDesc s n) _) a) = do
+                (ha, ss) <- conv vs a
+                (wrap, arguments) <- unTuple n ha
+                return
+                    (wrap $ foldl HEApply (HECon s) arguments, ss)
         conv vs (Apply te1 te2) = convAp vs te1 [te2]
-        conv _vs (Ctuple 0) = (HECon "()", [])
-        conv _vs e = error $ "termToHExpr " ++ show e
+        conv _vs (Ctuple 0) = Right (HECon "()", [])
+        conv _vs e = Left $ "unsupported proof term: " ++ show e
 
-        unTuple 0 _ = (id, [])
-        unTuple 1 a = (id, [a])
-        unTuple n (HETuple as) | length as == n = (id, as)
-        unTuple n e = error $ "unTuple: unimplemented " ++ show (n, e)
+        unTuple 0 _ = Right (id, [])
+        unTuple 1 a = Right (id, [a])
+        unTuple n (HETuple as) | length as == n = Right (id, as)
+        unTuple n e = Left $ "constructor payload has shape " ++ show e ++
+            ", expected a tuple of arity " ++ show n
 
-        unTupleP 0 _ = []
-        unTupleP n (HPTuple ps) | length ps == n = ps
-        unTupleP n p = error $ "unTupleP: unimplemented " ++ show (n, p)
+        unTupleP 0 _ = Right []
+        unTupleP n (HPTuple ps) | length ps == n = Right ps
+        unTupleP n p = Left $ "constructor pattern has shape " ++ show p ++
+            ", expected a tuple of arity " ++ show n
 
         convAp vs (Apply te1 te2) as = convAp vs te1 (te2:as)
-        convAp vs (Ctuple n) as | length as == n =
-                let (es, sss) = unzip $ map (conv vs) as
-                in  (hETuple es, concat sss)
+        convAp vs (Ctuple n) as | length as == n = do
+                converted <- mapM (conv vs) as
+                let (es, sss) = unzip converted
+                return (hETuple es, concat sss)
+        convAp _ (Ctuple n) as = Left $
+                "tuple constructor expects " ++ show n ++
+                " arguments, got " ++ show (length as)
         convAp vs (Ccases cds) (se : args) | length args >= numAlts =
-                let (handlers, rest) = splitAt numAlts args
-                    (alts, ass) = unzip $ zipWith cAlt handlers cds
-                    cAlt (Lam v e) (ConsDesc c n) =
-                        let hv = unSymbol v
-                            (he, ss) = conv (hv : vs) e
-                            ps = case lookup hv ss of
-                                 Nothing -> replicate n (HPVar "_")
-                                 Just p -> unTupleP n p
-                        in  ((foldl HPApply (HPCon c) ps, he), ss)
-                    cAlt e _ = error $ "cAlt " ++ show e
-                    (e', ess) = conv vs se
-                    (rest', rss) = unzip $ map (conv vs) rest
-                in  (foldl HEApply (hECase e' alts) rest',
-                     ess ++ concat ass ++ concat rss)
+                do
+                    let (handlers, rest) = splitAt numAlts args
+                    convertedAlts <- zipWithM (cAlt vs) handlers cds
+                    (e', ess) <- conv vs se
+                    convertedRest <- mapM (conv vs) rest
+                    let (alts, ass) = unzip convertedAlts
+                        (rest', rss) = unzip convertedRest
+                    return
+                        ( foldl HEApply (hECase e' alts) rest'
+                        , ess ++ concat ass ++ concat rss
+                        )
           where numAlts = length cds
         convAp _ (Ccases cds) args =
-                error $ "Ccases: expected a scrutinee and " ++ show (length cds) ++
-                        " alternatives, got " ++ show (length args) ++ " arguments"
-        convAp vs (Csplit n) (b : a : as) =
-                let (hb, sb) = conv vs b
-                    (a', sa) = conv vs a
-                    (as', sss) = unzip $ map (conv vs) as
-                    (ps, b') = unLam n hb
-                    unLam 0 e = ([], e)
-                    unLam k (HELam ps0 e) | length ps0 >= k =
-                        let (ps1, ps2) = splitAt k ps0
-                        in  (ps1, hELam ps2 e)
-                    unLam k e = error $ "unLam: unimplemented " ++ show (k, e)
-                in  case a' of
-                        HEVar v | v `elem` vs && null as -> (b', [(v, HPTuple ps)] ++ sb ++ sa)
-                        _ -> (foldl HEApply (hECase a' [(HPTuple ps, b')]) as',
-                              sb ++ sa ++ concat sss)
+                Left $ "case eliminator expects a scrutinee and " ++
+                    show (length cds) ++ " alternatives, got " ++
+                    show (length args) ++ " arguments"
+        convAp vs (Csplit n) (b : a : as) = do
+                (hb, sb) <- conv vs b
+                (a', sa) <- conv vs a
+                convertedArgs <- mapM (conv vs) as
+                (ps, b') <- unLam n hb
+                let (as', sss) = unzip convertedArgs
+                case a' of
+                    HEVar v | v `elem` vs && null as ->
+                        return (b', [(v, HPTuple ps)] ++ sb ++ sa)
+                    _ -> return
+                        ( foldl HEApply
+                            (hECase a' [(HPTuple ps, b')]) as'
+                        , sb ++ sa ++ concat sss
+                        )
+        convAp _ (Csplit n) args = Left $
+                "tuple eliminator of arity " ++ show n ++
+                " expects a handler and tuple, got " ++
+                show (length args) ++ " arguments"
 
-        convAp vs f as =
-                let (es, sss) = unzip $ map (conv vs) (f:as)
-                in  (foldl1 HEApply es, concat sss)
+        convAp vs f as = do
+                converted <- mapM (conv vs) (f:as)
+                let (es, sss) = unzip converted
+                return (foldl1 HEApply es, concat sss)
 
         convV hs ss =
                 case [ y | (x, y) <- ss, x == hs ] of
-                [] -> HPVar hs
-                [p] -> HPAt hs p
-                ps -> HPAt hs $ foldr1 combPat ps
+                [] -> Right $ HPVar hs
+                [p] -> Right $ HPAt hs p
+                p : ps -> do
+                    merged <- foldM combPat p ps
+                    return $ HPAt hs merged
 
-        combPat p p' | p == p' = p
-        combPat (HPVar v) p = HPAt v p
-        combPat p (HPVar v) = HPAt v p
+        combPat p p' | p == p' = Right p
+        combPat (HPVar v) p = Right $ HPAt v p
+        combPat p (HPVar v) = Right $ HPAt v p
         combPat (HPTuple ps) (HPTuple ps') | length ps == length ps' =
-                HPTuple (zipWith combPat ps ps')
-        combPat p p' = error $ "unimplemented combPat: " ++ show (p, p')
+                HPTuple `fmap` zipWithM combPat ps ps'
+        combPat p p' = Left $ "cannot merge incompatible patterns " ++
+            show p ++ " and " ++ show p'
+
+        cAlt vs (Lam v e) (ConsDesc c n) = do
+            let hv = unSymbol v
+            (he, ss) <- conv (hv : vs) e
+            patterns <- case lookup hv ss of
+                Nothing -> Right $ replicate n (HPVar "_")
+                Just pattern' -> unTupleP n pattern'
+            return ((foldl HPApply (HPCon c) patterns, he), ss)
+        cAlt _ handler _ = Left $
+            "case alternative is not a lambda: " ++ show handler
+
+        unLam 0 e = Right ([], e)
+        unLam n (HELam patterns e) | length patterns >= n =
+            let (used, remaining) = splitAt n patterns
+            in Right (used, hELam remaining e)
+        unLam n e = Left $ "tuple handler has shape " ++ show e ++
+            ", expected " ++ show n ++ " lambda argument(s)"
 
         hETuple [e] = e
         hETuple es = HETuple es
+
+-- Downstream Haskell-AST rewrites historically assumed that every binder had
+-- a globally unique name.  Enforce that invariant even for externally built
+-- terms, while retaining all free assumption names verbatim.
+alphaRenameTerm :: Term -> Term
+alphaRenameTerm term = renamed
+  where
+    (renamed, _, _) =
+        rename [] (Set.fromList $ freeVars term) (1 :: Integer) term
+
+    rename environment used next proofTerm =
+        case proofTerm of
+            Var symbol ->
+                (Var $ maybe symbol id $ lookup symbol environment, used, next)
+            Lam binder body ->
+                let (fresh, used', next') = freshBinder used next
+                    (body', used'', next'') =
+                        rename ((binder, fresh) : environment)
+                            used' next' body
+                in (Lam fresh body', used'', next'')
+            Apply function argument ->
+                let (function', used', next') =
+                        rename environment used next function
+                    (argument', used'', next'') =
+                        rename environment used' next' argument
+                in (Apply function' argument', used'', next'')
+            Xsel index arity expression ->
+                let (expression', used', next') =
+                        rename environment used next expression
+                in (Xsel index arity expression', used', next')
+            _ -> (proofTerm, used, next)
+
+    freshBinder used next =
+        let candidate = Symbol $ "__djinn" ++ show next
+        in if candidate `Set.member` used then
+               freshBinder used (next + 1)
+           else
+               (candidate, Set.insert candidate used, next + 1)
 
 -- Eliminate degenerate as-patterns such as x@y by retaining y and renaming x.
 -- XXX This should be integrated into some earlier phase, but this is simpler.
@@ -477,11 +549,12 @@ hPSubst s (HPAt v p) = HPAt (maybe v id $ lookup v s) (hPSubst s p)
 hPSubst s (HPApply f a) = HPApply (hPSubst s f) (hPSubst s a)
 
 
-termToHClause :: HSymbol -> Term -> HClause
-termToHClause i term =
-    case termToHExpr term of
-    HELam ps e -> HClause i ps e
-    e -> HClause i [] e
+termToHClause :: HSymbol -> Term -> Either String HClause
+termToHClause name term = toClause `fmap` termToHExpr term
+  where
+    toClause (HELam patterns expression) =
+        HClause name patterns expression
+    toClause expression = HClause name [] expression
 
 remUnusedVars :: HExpr -> HExpr
 remUnusedVars expr = fst $ remE expr

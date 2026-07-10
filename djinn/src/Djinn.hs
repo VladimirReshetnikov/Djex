@@ -249,25 +249,30 @@ query prType s i ctx g =
                 putStrLn $ "Error: generated an invalid proof: " ++ message
               Right _ -> do
                 let proofs = map (restoreProofTerm proofEnv) internalProofs
-                    score proof =
-                       let c = termToHClause i proof
-                           bvs = getBinderVars c
-                           r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
-                       in  (r, c)
-                    clauses = nub $
-                            if sorted s then
-                                map snd $ sortBy (\ (x,_) (y,_) -> compare x y) $ map score proofs
-                            else
-                                map (termToHClause i) proofs
-                    pr = putStrLn . hPrClause
-                    sctx = if null ctx then "" else showContexts ctx ++ " => "
-                when (debug s) $ putStrLn ("+++ " ++ show p)
-                when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
-                case clauses of
-                    [] -> return () -- internalProofs is non-empty.
-                    e:es -> do
-                        pr e
-                        when (multi s) $ mapM_ (\ x -> putStrLn "-- or" >> pr x) es
+                case mapM (termToHClause i) proofs of
+                  Left message ->
+                    putStrLn $ "Error: cannot render generated proof: " ++
+                        message
+                  Right rendered -> do
+                    let score clause =
+                           let bvs = getBinderVars clause
+                               r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
+                           in  (r, clause)
+                        clauses = nub $
+                                if sorted s then
+                                    map snd $ sortBy (\ (x,_) (y,_) -> compare x y) $ map score rendered
+                                else
+                                    rendered
+                        pr = putStrLn . hPrClause
+                        sctx = if null ctx then "" else showContexts ctx ++ " => "
+                    when (debug s) $ putStrLn ("+++ " ++ show p)
+                    when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
+                    case clauses of
+                        [] -> return () -- rendered is non-empty.
+                        e:es -> do
+                            pr e
+                            when (multi s) $
+                                mapM_ (\ x -> putStrLn "-- or" >> pr x) es
             return (False, s)
 
 cannotBeRealized :: ProofEnvironment -> String

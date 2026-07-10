@@ -56,6 +56,8 @@ tests =
     , ("reject malformed proof terms", testMalformedProofTerms)
     , ("preserve nominal empty types", testNominalEmptyTypes)
     , ("validate declaration mutations transactionally", testEnvironmentValidation)
+    , ("render shadowing terms without capture", testScopeSafeRendering)
+    , ("report malformed proof rendering", testMalformedRendering)
     ]
 
 testPrefixArrowParsing :: IO ()
@@ -170,8 +172,8 @@ testCallerSymbolCapture = do
     case proofs of
         [] -> fail "expected b -> a to be realizable from x2 :: a"
         proof : _ ->
-            assertEqual "the rendered proof must refer to the caller's x2"
-                "f _ = x2" (hPrClause $ termToHClause "f" proof)
+            assertRendered "the rendered proof must refer to the caller's x2"
+                "f _ = x2" "f" proof
 
 -- The continuation atom introduced while proving a disjunction lives in the
 -- same Symbol namespace as caller formula atoms.  `_2` in the environment is
@@ -193,7 +195,7 @@ testCsplitResidualArguments = do
             , Var $ Symbol "arg1"
             , Var $ Symbol "arg2"
             ]
-        rendered = hPrClause $ termToHClause "f" term
+    rendered <- renderTerm "f" term
     assertContains "Csplit should still render its tuple case" "case pair of" rendered
     assertWordsSuffix "Csplit residual arguments must retain left-to-right order"
         ["arg1", "arg2"] rendered
@@ -213,7 +215,7 @@ testCcasesResidualArguments = do
             , Var $ Symbol "arg1"
             , Var $ Symbol "arg2"
             ]
-        rendered = hPrClause $ termToHClause "f" term
+    rendered <- renderTerm "f" term
     assertContains "Ccases should still render its scrutiny" "case choice of" rendered
     assertContains "Ccases should retain its first alternative" "LeftC" rendered
     assertContains "Ccases should retain its second alternative" "RightC" rendered
@@ -309,8 +311,9 @@ testNominalEmptyTypes = do
                 binder used
             assertEqual "the explicit empty elimination should type-check"
                 (Right ()) (checkProof [] cast proof)
+            rendered <- renderTerm "cast" proof
             assertContains "empty elimination should render via void"
-                "void" (hPrClause $ termToHClause "cast" proof)
+                "void" rendered
         proofs -> fail $ "expected one explicit empty elimination, got " ++
             show proofs
     assertLeft "a direct identity cast between empty types must be rejected"
@@ -341,6 +344,25 @@ testEnvironmentValidation = do
             [("Other", ([], HTUnion [("Other", [])], KStar))]
             [] [])
 
+testScopeSafeRendering :: IO ()
+testScopeSafeRendering = do
+    let shadowed = Symbol "x"
+        term = Lam shadowed $
+            Apply (Var shadowed) (Lam shadowed $ Var shadowed)
+    rendered <- renderTerm "applyIdentity" term
+    assertEqual "nested shadowing binders should receive distinct names"
+        "applyIdentity a = a (\\ b -> b)" rendered
+
+testMalformedRendering :: IO ()
+testMalformedRendering = do
+    assertLeft "legacy selectors should return a conversion error"
+        (termToHExpr $ Xsel 0 1 $ Var $ Symbol "x")
+    assertLeft "bare non-unit tuple combinators should not crash"
+        (termToHExpr $ Ctuple 2)
+    assertLeft "case alternatives must be lambdas"
+        (termToHExpr $ applys (Ccases [ConsDesc "Only" 1])
+            [Var $ Symbol "choice", Var $ Symbol "handler"])
+
 atomA :: Formula
 atomA = PVar $ Symbol "a"
 
@@ -364,6 +386,17 @@ assertRight :: Show a => String -> Either String a -> IO ()
 assertRight _ (Right _) = return ()
 assertRight message (Left errorMessage) =
     fail $ message ++ ": unexpected error: " ++ errorMessage
+
+assertRendered :: String -> String -> HSymbol -> Term -> IO ()
+assertRendered message expected name term = do
+    actual <- renderTerm name term
+    assertEqual message expected actual
+
+renderTerm :: HSymbol -> Term -> IO String
+renderTerm name term =
+    case termToHClause name term of
+        Left message -> fail $ "proof rendering failed: " ++ message
+        Right clause -> return $ hPrClause clause
 
 assertContains :: String -> String -> String -> IO ()
 assertContains message needle haystack =

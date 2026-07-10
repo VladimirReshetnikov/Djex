@@ -3,6 +3,7 @@
 - Date: 2026-07-10
 - Reviewed Djinn baseline: `7eac947` (`Add djinn/LICENSE`)
 - Integrated `origin/main` tip before commit: `e6b0097`
+- R-01 through R-06 remediation commits: `9b3e383` through `6f089d5`
 - Imported release: `djinn-2025.2.21`
 - Toolchain: GHC 9.12.4, Cabal 3.16.1.0, Windows 11
 
@@ -28,11 +29,13 @@ crash, broken intrinsic list/function-constructor syntax, silently truncated
 class contexts, EOF looping, unchecked declarations, and multiple smaller CLI
 and packaging defects. A new Cabal regression suite locks down the core failures.
 
-The proof calculus itself remains compact and recognizable. The changes avoid
-speculative alterations to proof order or completeness. The main remaining risks
-are at representation boundaries: untyped public proof terms, partial downstream
-conversion, nominally distinct empty types collapsing to one logical falsehood,
-and a few CLI/name-resolution cases where emitted Haskell can still be misleading.
+The proof calculus itself remains compact and recognizable. Follow-up work closed
+R-01 through R-06 with isolated proof identities, an independent proof checker,
+nominal empty propositions, transactional declaration validation, total and
+scope-safe proof rendering, and centralized Haskell lexical rules. The principal
+remaining risks are search fairness, the intentionally shallow class model,
+batch diagnostics, public raw AST constructors, totality assumptions, and
+unsaturated type synonyms.
 
 ## Scope and method
 
@@ -62,9 +65,13 @@ commit.
 | `Djinn` | CLI, command parser, mutable environment, query orchestration | Validation and error paths strengthened; duplicated state-update logic simplified. |
 | `REPL` | Haskeline loop | EOF/interrupt handling fixed; obsolete implementation removed. |
 | `HCheck` | Kind inference/unification and declaration ordering | Higher-kinded state leak fixed; intrinsic kinds and total errors added. |
-| `HTypes` | Haskell-like types, parsing, logical translation, Haskell AST cleanup/printing | Several conversion and equality bugs fixed; responsibilities remain too broad. |
-| `LJTFormula` | Formula and proof-term representation | Show helpers made total and formatting clarified. |
+| `Environment` | Pure declaration-graph transactions | Type mutations now revalidate every dependent declaration atomically. |
+| `HIdentifier` | Haskell lexical validation | Parser and printer now share identifier, qualification, and operator rules. |
+| `HTypes` | Haskell-like types, parsing, logical translation, Haskell AST cleanup/printing | Conversion is total and alpha-renames external terms; responsibilities remain broad. |
+| `LJTFormula` | Formula and proof-term representation | Empty propositions preserve nominal identity; display is total. |
 | `LJT` | Dyckhoff-style proof search and proof normalization | Freshness soundness fixed; dead tracing/heuristic code removed; invariants guarded. |
+| `ProofEnv` | External proof-identity isolation | Self-reference collisions are excluded and display names restored after checking. |
+| `ProofCheck` | Independent proof-term checking | Every selected proof is unified with the requested formula before rendering. |
 | `Help` | Extended built-in manual | Incorrect examples, option descriptions, command spelling, and typos corrected. |
 
 The operational pipeline is:
@@ -76,13 +83,17 @@ command
   -> intuitionistic Formula
   -> LJT proof search
   -> proof-term normalization
+  -> independent proof check
+  -> external-name restoration
+  -> scope-safe Haskell conversion
   -> Haskell expression cleanup
   -> pretty-printed clause
 ```
 
-The two most delicate boundaries are `HType -> Formula` (where nominal Haskell
-types become propositions) and `Term -> HExpr` (where proof combinators become
-surface Haskell patterns and cases).
+The two historically delicate boundaries are `HType -> Formula` (where nominal
+Haskell types become propositions) and `Term -> HExpr` (where proof combinators
+become surface Haskell patterns and cases). Nominal empty tags, independent proof
+checking, alpha-renaming, and explicit conversion errors now guard both seams.
 
 ## Fixed findings
 
@@ -373,9 +384,9 @@ and duplicated implementation was shortened where safe, while formerly implicit
 correctness invariants were made explicit rather than optimized for a negative
 line-count diff.
 
-## Remaining findings and recommendations
+## Resolved follow-up findings
 
-### R-01 — High: emitted definitions can self-reference an assumption of the same name
+### R-01 — Resolved: emitted definitions self-referenced same-named assumptions
 
 Current reproduction:
 
@@ -386,70 +397,66 @@ token :: a
 token = token
 ```
 
-The proof object correctly refers to the available assumption, but after printing
-it as a definition with the same top-level name, Haskell resolves the RHS as
-recursive bottom. This contradicts Djinn's total-inhabitant model.
+`ProofEnv` now removes target-named assumptions before search and assigns every
+remaining external assumption a fresh internal identity. It restores printable
+names only after independent checking. A lone collision produces an explicit
+"cannot be safely realized without a recursive self-reference" diagnostic; if a
+different assumption is available, the generated RHS names that safe fallback.
+This policy applies uniformly to explicit queries and generated instance methods.
 
-A simple blanket filter is risky for generated instance methods and context
-methods, whose prescribed names occupy related namespaces. The recommended fix
-is to distinguish assumption identities from printable Haskell names in the term
-IR, then either qualify/alias external references or reject explicit collisions
-with a diagnostic before search. Instance generation needs a separately specified
-policy.
+### R-02 — Resolved: proof objects were not independently checked
 
-### R-02 — High: proof objects are not independently checked
+`ProofCheck` independently infers proof-term types using metavariables and
+unification. It checks variables, lambdas, applications, products, splits, sums,
+injections, and empty elimination, validates constructor metadata and indices,
+and rejects ambiguous or legacy `Xsel` terms. Every bounded candidate selected by
+the query is checked against its requested formula before name restoration or
+rendering. Tests both validate representative LJT output and forge malformed
+terms that must be rejected.
 
-The LJT calculus constructs a `Term`, but no independent checker verifies that
-the term proves the requested `Formula`, and generated Haskell is not compiled.
-The new tests catch known failures but are not a soundness boundary.
+### R-03 — Resolved: distinct empty types collapsed to one proposition
 
-Add a small proof-term type checker before `termToHExpr`. Longer term, replace raw
-integer arities and public `Term(..)` construction with smart constructors or a
-typed IR. Property tests should assert that every bounded generated proof checks.
-
-### R-03 — High: distinct empty types collapse to one proposition
-
-Every `HTUnion []` becomes `Disj []`. Distinct nominal empty types therefore
-compare equal during proof search. This is the root of upstream issues
+This was the root of upstream issues
 [#2](https://github.com/augustss/djinn/issues/2) and
-[#3](https://github.com/augustss/djinn/issues/3), where Djinn can emit a direct
-cast between distinct empty types instead of an explicit empty-case eliminator.
+[#3](https://github.com/augustss/djinn/issues/3). `Formula` now has a tagged
+`Empty` proposition. Expansion retains the datatype application that introduced
+the empty type while aliases inherit the underlying tag. LJT uses identity only
+for the same tag and emits `Ccases []` for elimination into a different type; the
+checker permits that eliminator for every empty tag but rejects direct nominal
+casts. Thus `EmptyA -> EmptyA` renders as identity and `EmptyA -> EmptyB` as
+explicit `void`.
 
-Preserving a nominal tag on false propositions, or always materializing an
-elimination term at type boundaries, is an architectural change but important if
-empty user datatypes are meant to produce compilable Haskell.
+### R-04 — Resolved: environment mutation staled dependent declarations
 
-### R-04 — High/medium: environment mutation can stale dependent declarations
+`Environment.validateEnvironment` rebuilds every inferred kind, then checks every
+stored axiom and class method against the rebuilt type graph. Type replacement
+and `:delete` construct a candidate state and install it only after this entire
+transaction succeeds. Diagnostics identify the dependent synonym, axiom, or
+method; rejected deletion and arity-changing replacement leave the prior state
+unchanged.
 
-Replacement is now duplicate-free, but deleting or redefining a type does not
-transactionally revalidate existing axioms, classes, or dependent synonyms.
-Queries also trust axiom types that were valid when added. A changed dependency
-can therefore leave a state that no longer corresponds to a valid Haskell
-environment.
+### R-05 — Resolved: `Term -> HExpr` was partial and scope-sensitive
 
-Represent declarations as source definitions and rebuild all derived kinds in
-one transaction after every type mutation. Reject the mutation with dependency
-diagnostics if rebuilding fails.
+`termToHExpr` and `termToHClause` now return `Either String`. Every former
+`error` in tuple destructuring, case conversion, lambda extraction, and pattern
+merging is a controlled shape diagnostic; unsupported `Xsel` is reported the
+same way. Before conversion, a scope-aware alpha-renamer gives all binders unique
+internal names disjoint from free assumptions, restoring the invariant required
+by the Haskell-AST simplifiers even for externally constructed terms. The query
+prints conversion failures without terminating the REPL.
 
-### R-05 — Medium: `Term -> HExpr` remains partial and scope-sensitive
+### R-06 — Resolved: accepted identifiers did not match Haskell lexical rules
 
-`unTuple`, `unTupleP`, `unLam`, constructor-handler conversion, and pattern
-merging still use `error` for violated proof-shape invariants. `Xsel` remains in
-the public `Term` type but is not supported by downstream conversion. An
-externally constructed shadowing term can also defeat the global-freshness
-assumption used by `hESubst`, `remUnusedVars`, and alpha-equivalence.
+`HIdentifier` is now the shared lexical authority for parser and printer. It
+recognizes Haskell variable and constructor identifiers, leading underscores,
+well-formed qualified names, the full ASCII symbol alphabet, and Unicode symbol
+operators, while rejecting reserved identifiers/operators, constructor
+operators as binding names, empty module segments, lowercase module segments,
+and trailing dots. Generated declaration names stay local; external assumptions
+and type constructors may be qualified. Printer decisions use the same
+predicates, fixing the previous misrendering of `_name` and qualified variables.
 
-Either make `Term` opaque and guarantee that only LJT produces it, or return a
-structured conversion error and perform scope-aware renaming.
-
-### R-06 — Medium: the accepted identifier language is not Haskell's
-
-The parser accepts reserved words and malformed dotted identifiers, while its
-operator alphabet omits valid Haskell operators. For example a reserved word can
-reach a printed type signature and make the output invalid.
-
-Use a real Haskell lexer/parser library or centralize lexical validation,
-including reserved identifiers, qualified-name grammar, and operator rules.
+## Remaining findings and recommendations
 
 ### R-07 — Medium: list nondeterminism is left-biased and unbudgeted
 
@@ -540,11 +547,21 @@ another kind constraint.
 10. caller proof-symbol capture;
 11. synthetic disjunction-atom capture;
 12. `Csplit` residual argument order;
-13. `Ccases` residual argument preservation and order.
+13. `Ccases` residual argument preservation and order;
+14. external proof-identity isolation and self-reference prevention;
+15. independent checking of representative generated proofs;
+16. rejection of forged malformed proof terms;
+17. nominal empty types, aliases, identity, and explicit elimination;
+18. transactional validation of dependent declaration graphs;
+19. capture-free rendering of externally shadowed terms;
+20. controlled conversion errors for malformed proof shapes;
+21. Haskell identifier, qualification, reserved-token, and operator rules.
 
-The suite intentionally compiles the core modules directly. A future split of
-the pure command evaluator from `Main` should add parser/state-machine tests for
-cutoff, contexts, definitions, and batch error statuses.
+The suite intentionally compiles the core modules directly. Pure environment,
+proof-checking, conversion, and lexical boundaries are therefore covered without
+driving terminal IO. A future split of the remaining command evaluator from
+`Main` should add direct state-machine tests for cutoff, contexts, and batch
+error statuses.
 
 ## Validation performed
 
@@ -572,7 +589,8 @@ this review is that caller input can no longer corrupt proof freshness, and the
 historical higher-kinded crash is gone. The new tests cover those boundaries
 directly rather than only sampling friendly type queries.
 
-The next highest-value engineering step is an independent proof-object checker,
-followed by a pure command/state layer. Those two changes would turn many current
-comments and partial conversions into enforceable boundaries without disturbing
-the proof calculus itself.
+The follow-up work supplies the independent proof-object checker and extracts the
+pure declaration transaction boundary. The next highest-value engineering work
+is an explicit proof-search budget/fairness benchmark, followed by richer class
+kind signatures and structured batch-command outcomes. Those changes should be
+measured carefully because they can alter search order or the accepted language.

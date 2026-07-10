@@ -3,7 +3,8 @@
 Djinn generates a Haskell expression from its type. It reads a small Haskell-like
 declaration language, translates types through the Curry–Howard correspondence,
 and uses a terminating proof search for intuitionistic propositional logic to
-construct a proof term. That proof term is simplified and printed as Haskell.
+construct a proof term. Each candidate is independently type-checked, converted
+through a total error-reporting boundary, simplified, and printed as Haskell.
 
 This directory is a reviewed local import of
 [`djinn-2025.2.21`](https://hackage.haskell.org/package/djinn-2025.2.21), based on
@@ -74,6 +75,13 @@ pipeline :: Input -> Output
 pipeline a = second (first a)
 ```
 
+An assumption may use a qualified external name, allowing emitted code to retain
+an imported reference such as `Data.Function.id`. Generated query, class, and
+method names are deliberately unqualified because they introduce local bindings.
+Names follow Haskell lexical rules: leading underscores are accepted, reserved
+words and reserved operators are rejected, and operators are written in
+parentheses in prefix positions.
+
 `type T :: kind` declares an abstract type constructor. This is the right way to
 introduce an opaque type such as `Int`; `data T` instead declares an empty type.
 Ordinary synonyms and finite algebraic data types use familiar syntax:
@@ -131,6 +139,11 @@ Commands may be abbreviated to an unambiguous prefix.
 Methods in a `class` declaration are separated with semicolons. Kinds use `*`
 and right-associative `->`, for example `type F :: * -> *`.
 
+Type replacement and deletion are transactional. Djinn rebuilds inferred kinds
+and revalidates every remaining synonym, axiom, and class method; a mutation that
+would leave a dangling or ill-kinded dependency is rejected without changing the
+environment.
+
 ### Settings
 
 The Boolean settings use `+name` to enable and `-name` to disable them:
@@ -159,16 +172,21 @@ The same Boolean options can precede file names on the command line, such as
 | `Djinn` (`src/Djinn.hs`) | Process entry point, state, command parser, and query orchestration. |
 | `REPL` | Haskeline loop and EOF handling. |
 | `HCheck` | Kind inference and validation for declared Haskell-like types. |
+| `Environment` | Transactional rebuilding and validation of stored declarations. |
+| `HIdentifier` | Shared Haskell identifier, qualification, and operator rules. |
 | `HTypes` | Type parser, logical translation, proof-term conversion, simplification, and pretty-printing. |
 | `LJTFormula` | Formula and proof-term data types. |
 | `LJT` | Dyckhoff-style contraction-free proof search and proof normalization. |
+| `ProofEnv` | Isolation of external proof identities from printable names. |
+| `ProofCheck` | Independent type checking of generated proof terms. |
 | `Help` | Extended in-program help. |
 
 The central pipeline is:
 
 ```text
 command -> HType -> kind check -> Formula -> LJT proof search
-        -> proof-term normalization -> Haskell AST cleanup -> pretty-printed clause
+        -> proof-term normalization -> independent proof check
+        -> scope-safe Haskell conversion -> Haskell AST cleanup -> printed clause
 ```
 
 ## Important limitations
@@ -182,9 +200,9 @@ command -> HType -> kind check -> Formula -> LJT proof search
   unsaturated synonym use that GHC will reject.
 - Recursive data types cannot be declared structurally. List types are therefore
   treated opaquely rather than expanded into `[]` and `(:)`.
-- Every empty data type translates to logical falsehood. Consequently distinct
-  empty types are logically interchangeable in Djinn, unlike nominal Haskell
-  types.
+- Empty data types are logically false but retain nominal tags. Identity is used
+  only for the same empty type; conversion to another result uses explicit empty
+  elimination.
 - The simplifier assumes total semantics. Reordering or eliminating pattern
   matches need not preserve Haskell's behavior in the presence of bottoms or
   `seq`.
@@ -194,8 +212,9 @@ command -> HType -> kind check -> Formula -> LJT proof search
 - Proof search is a decision procedure, but the search space and the number of
   inhabitants can grow rapidly. Keep `cutoff` modest when requesting multiple
   or sorted solutions.
-- Generated clauses are not passed through GHC automatically. Treat the output
-  as a strong candidate that still belongs in the normal compile/test loop.
+- Proof terms are independently checked, but generated clauses are not passed
+  through GHC automatically. Treat the output as a strong candidate that still
+  belongs in the normal compile/test loop.
 
 See [`docs/reports/`](docs/reports/) for the local source review, fixed defects,
 remaining engineering risks, and validation details.

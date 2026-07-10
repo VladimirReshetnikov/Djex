@@ -294,16 +294,25 @@ testNominalEmptyTypes = do
             [ ("EmptyA", ([], HTUnion [], ()))
             , ("EmptyB", ([], HTUnion [], ()))
             , ("AliasA", ([], HTCon "EmptyA", ()))
+            , ("EmptyOf", (["a"], HTUnion [], ()))
+            , ("Flag", ([], HTUnion [("Flag", [])], ()))
+            , ("FlagAlias", ([], HTCon "Flag", ()))
             ]
         emptyA = hTypeToFormula definitions $ HTCon "EmptyA"
         emptyB = hTypeToFormula definitions $ HTCon "EmptyB"
         aliasA = hTypeToFormula definitions $ HTCon "AliasA"
+        emptyOfFlag = hTypeToFormula definitions $
+            HTApp (HTCon "EmptyOf") (HTCon "Flag")
+        emptyOfAlias = hTypeToFormula definitions $
+            HTApp (HTCon "EmptyOf") (HTCon "FlagAlias")
         cast = emptyA :-> emptyB
         identity = emptyA :-> emptyA
     assertBool "distinct empty datatypes need distinct propositions"
         (emptyA /= emptyB)
     assertEqual "an alias should retain its underlying nominal identity"
         emptyA aliasA
+    assertEqual "aliases in empty-type arguments should be transparent"
+        emptyOfFlag emptyOfAlias
     case prove True [] identity of
         [Lam binder (Var used)] ->
             assertEqual "the same empty type should use identity" binder used
@@ -388,6 +397,8 @@ testIdentifiers = do
         pQualifiedVarId "Data.value."
     assertDoesNotParse "reserved operators are invalid binding names"
         pParenthesizedVarOp "(->)"
+    assertDoesNotParse "a line-comment introducer is not an operator name"
+        pParenthesizedVarOp "(--)"
     assertEqual "underscore identifiers must not be printed as operators"
         "_compose" (prHSymbolOp "_compose")
     assertEqual "qualified variables must remain prefix names"

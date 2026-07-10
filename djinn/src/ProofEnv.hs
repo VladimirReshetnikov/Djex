@@ -27,15 +27,18 @@ prepareProofEnvironment target bindings =
     safeBindings = filter ((/= target) . fst) bindings
     initiallyUsed = Set.fromList $
         map fst bindings ++ concatMap (formulaSymbols . snd) bindings
-    (internal, display, _, _) = foldl addBinding
-        ([], [], initiallyUsed, 1 :: Integer) safeBindings
+    (internal, display, _, _) =
+        build safeBindings initiallyUsed (1 :: Integer)
 
-    addBinding (env, names, used, next) (external, formula) =
+    build [] used next = ([], [], used, next)
+    build ((external, formula) : rest) used next =
         let (internalName, next', used') = freshInternal used next
-        in ( env ++ [(internalName, formula)]
-           , names ++ [(internalName, external)]
-           , used'
-           , next'
+            (env, names, finalUsed, finalNext) =
+                build rest used' next'
+        in ( (internalName, formula) : env
+           , (internalName, external) : names
+           , finalUsed
+           , finalNext
            )
 
     freshInternal used next =

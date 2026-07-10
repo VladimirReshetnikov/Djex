@@ -118,4 +118,4 @@ reservedIdentifiers =
 
 reservedOperators :: [String]
 reservedOperators =
-    [ "..", ":", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>" ]
+    [ "..", "--", ":", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>" ]

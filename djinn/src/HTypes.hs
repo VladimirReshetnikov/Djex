@@ -178,8 +178,46 @@ hTypeToFormula ss t =
     Nothing -> PVar $ Symbol $ show t
     -- Tag an empty datatype at the declaration that introduced it.  An alias
     -- is expanded again first, so aliases share the underlying nominal tag.
-    Just (HTUnion []) -> Empty $ Symbol $ show t
+    Just (HTUnion []) -> Empty $ Symbol $ show $ normalizeAliases ss t
     Just t' -> hTypeToFormula ss t'
+
+-- Empty propositions use their applied datatype as a nominal identity.  Type
+-- synonyms inside that application are definitionally transparent in Haskell,
+-- so normalize aliases without expanding the datatype declaration itself.
+normalizeAliases :: [(HSymbol, ([HSymbol], HType, a))] -> HType -> HType
+normalizeAliases definitions source =
+    case application source [] of
+        (HTCon name, arguments) ->
+            case lookup name definitions of
+                Just (parameters, body, _)
+                    | length parameters == length arguments &&
+                      isAliasBody body ->
+                        normalizeAliases definitions $
+                            substHT (zip parameters arguments) body
+                _ -> foldl hTApp (HTCon name) $
+                    map (normalizeAliases definitions) arguments
+        _ -> normalizeStructure source
+  where
+    application (HTApp function argument) arguments =
+        application function (argument : arguments)
+    application headType arguments = (headType, arguments)
+
+    isAliasBody (HTUnion _) = False
+    isAliasBody (HTAbstract _ _) = False
+    isAliasBody _ = True
+
+    normalizeStructure (HTApp function argument) =
+        hTApp (normalizeAliases definitions function) $
+            normalizeAliases definitions argument
+    normalizeStructure (HTTuple types) =
+        HTTuple $ map (normalizeAliases definitions) types
+    normalizeStructure (HTArrow argument result) =
+        HTArrow (normalizeAliases definitions argument) $
+            normalizeAliases definitions result
+    normalizeStructure (HTUnion constructors) = HTUnion
+        [(constructor, map (normalizeAliases definitions) types) |
+            (constructor, types) <- constructors]
+    normalizeStructure other = other
 
 expandSyn :: [(HSymbol, ([HSymbol], HType, a))] -> HType -> [HType] -> Maybe HType
 expandSyn ss (HTApp f a) as = expandSyn ss f (a:as)

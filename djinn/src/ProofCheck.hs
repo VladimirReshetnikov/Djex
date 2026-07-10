@@ -6,7 +6,7 @@ module ProofCheck (checkProof) where
 import Control.Monad (unless, when)
 import Control.Monad.State.Strict
 import qualified Data.IntMap as IntMap
-import Data.List (nub)
+import qualified Data.Set as Set
 
 import LJTFormula
 
@@ -53,13 +53,15 @@ checkProof environment expected term =
 
 ensureUniqueEnvironment :: [(Symbol, Formula)] -> Check ()
 ensureUniqueEnvironment environment =
-    case [symbol | symbol <- nub names,
-                   length (filter (== symbol) names) > 1] of
-        [] -> return ()
-        symbol : _ -> failCheck $
+    case firstDuplicate Set.empty $ map fst environment of
+        Nothing -> return ()
+        Just symbol -> failCheck $
             "duplicate proof identity in environment: " ++ show symbol
   where
-    names = map fst environment
+    firstDuplicate _ [] = Nothing
+    firstDuplicate seen (symbol : symbols)
+        | symbol `Set.member` seen = Just symbol
+        | otherwise = firstDuplicate (Set.insert symbol seen) symbols
 
 infer :: Environment -> Term -> Check ProofType
 infer environment term =

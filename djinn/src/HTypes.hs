@@ -171,10 +171,16 @@ getHTVars (HTAbstract _ _) = []
 hTypeToFormula :: [(HSymbol, ([HSymbol], HType, a))] -> HType -> Formula
 hTypeToFormula ss (HTTuple ts) = Conj (map (hTypeToFormula ss) ts)
 hTypeToFormula ss (HTArrow t1 t2) = hTypeToFormula ss t1 :-> hTypeToFormula ss t2
-hTypeToFormula ss (HTUnion ctss) = Disj [ (ConsDesc c (length ts), hTypeToFormula ss (HTTuple ts)) | (c, ts) <- ctss ]
+hTypeToFormula _ (HTUnion []) = false
+hTypeToFormula ss (HTUnion ctss) = Disj
+    [(ConsDesc c (length ts), hTypeToFormula ss (HTTuple ts)) |
+        (c, ts) <- ctss]
 hTypeToFormula ss t =
     case expandSyn ss t [] of
     Nothing -> PVar $ Symbol $ show t
+    -- Tag an empty datatype at the declaration that introduced it.  An alias
+    -- is expanded again first, so aliases share the underlying nominal tag.
+    Just (HTUnion []) -> Empty $ Symbol $ show t
     Just t' -> hTypeToFormula ss t'
 
 expandSyn :: [(HSymbol, ([HSymbol], HType, a))] -> HType -> [HType] -> Maybe HType

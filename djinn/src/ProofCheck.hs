@@ -14,6 +14,7 @@ data ProofType
     = Meta Int
     | Product [ProofType]
     | Sum [(ConsDesc, ProofType)]
+    | EmptyType Symbol
     | ProofType :~> ProofType
     | Atom Symbol
     deriving (Eq)
@@ -150,6 +151,7 @@ unify left right = do
             unless (firstConstructors == secondConstructors) $
                 mismatch left' right'
             unifyLists "sum" (map snd first) (map snd second)
+        (EmptyType first, EmptyType second) | first == second -> return ()
         (firstArgument :~> firstResult,
          secondArgument :~> secondResult) -> do
             unify firstArgument secondArgument
@@ -182,6 +184,7 @@ occurs index proofType = do
         Meta other -> return $ index == other
         Product elements -> anyM (occurs index) elements
         Sum alternatives -> anyM (occurs index . snd) alternatives
+        EmptyType _ -> return False
         argument :~> result -> do
             inArgument <- occurs index argument
             if inArgument then return True else occurs index result
@@ -218,6 +221,7 @@ zonk proofType = do
         Sum alternatives -> do
             alternatives' <- mapM zonkAlternative alternatives
             return $ Sum alternatives'
+        EmptyType _ -> return proofType'
         argument :~> result -> do
             argument' <- zonk argument
             result' <- zonk result
@@ -274,6 +278,7 @@ solveConstraint constraint =
             case input' of
                 Meta _ -> return False
                 Sum [] -> return True
+                EmptyType _ -> return True
                 _ -> failCheck $ "empty eliminator received " ++
                     showProofType input'
 
@@ -286,6 +291,7 @@ isGround :: ProofType -> Bool
 isGround (Meta _) = False
 isGround (Product elements) = all isGround elements
 isGround (Sum alternatives) = all (isGround . snd) alternatives
+isGround (EmptyType _) = True
 isGround (argument :~> result) = isGround argument && isGround result
 isGround (Atom _) = True
 
@@ -294,6 +300,7 @@ fromFormula (Conj formulas) = Product (map fromFormula formulas)
 fromFormula (Disj alternatives) = Sum
     [(constructor, fromFormula formula) |
         (constructor, formula) <- alternatives]
+fromFormula (Empty name) = EmptyType name
 fromFormula (argument :-> result) =
     fromFormula argument :~> fromFormula result
 fromFormula (PVar symbol) = Atom symbol
@@ -311,6 +318,7 @@ showProofType (Sum alternatives) =
     "{" ++ joinWith " | "
         [show constructor ++ " " ++ showProofType branch |
             (constructor, branch) <- alternatives] ++ "}"
+showProofType (EmptyType name) = "empty[" ++ show name ++ "]"
 showProofType (argument :~> result) =
     "(" ++ showProofType argument ++ " -> " ++ showProofType result ++ ")"
 showProofType (Atom symbol) = show symbol

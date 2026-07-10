@@ -26,6 +26,8 @@ data ConsDesc = ConsDesc String Int     -- name and arity
 data Formula
         = Conj [Formula]
         | Disj [(ConsDesc, Formula)]
+        -- Empty datatypes are logically false but remain nominally distinct.
+        | Empty Symbol
         | Formula :-> Formula
         | PVar Symbol
      deriving (Eq, Ord)
@@ -43,7 +45,7 @@ fnot :: Formula -> Formula
 fnot x = x :-> false
 
 false :: Formula
-false = Disj []
+false = Empty $ Symbol "Void"
 
 true :: Formula
 true = Conj []
@@ -64,7 +66,9 @@ instance Show Formula where
             showsPrec 31 d . foldr showDisjunct id ds
       where
         showDisjunct (_, f) rest = showString " v " . showsPrec 31 f . rest
-    showsPrec _ (f1 :-> Disj []) =
+    showsPrec _ (Empty name) =
+        showString "false[" . showsPrec 0 name . showString "]"
+    showsPrec _ (f1 :-> Empty _) =
         showString "~" . showsPrec 100 f1
     showsPrec p (f1 :-> f2) =
         showParen (p > 20) $

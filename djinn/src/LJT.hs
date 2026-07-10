@@ -44,6 +44,7 @@ prove more env goal =
 formulaSymbols :: Formula -> [Symbol]
 formulaSymbols (Conj fs) = concatMap formulaSymbols fs
 formulaSymbols (Disj alternatives) = concatMap (formulaSymbols . snd) alternatives
+formulaSymbols (Empty name) = [name]
 formulaSymbols (a :-> b) = formulaSymbols a ++ formulaSymbols b
 formulaSymbols (PVar s) = [s]
 
@@ -311,9 +312,16 @@ redant more antes atomImps nestImps atoms goal =
 
     redant1 :: Antecedent -> Antecedents -> Goal -> P Proof
     redant1 antecedent@(A p f) pending g
+        -- Prefer the direct identity between the same nominal empty type.
+        -- Exploring elimination as an alternative would cause result scoring
+        -- to print the less useful @void@ instead.
+        | f == g && isNominalEmpty f = return p
         | f /= g = reduceAntecedent antecedent pending g
         | more = return p `mplus` reduceAntecedent antecedent pending g
         | otherwise = return p
+      where
+        isNominalEmpty (Empty _) = True
+        isNominalEmpty _ = False
 
     -- Reduce and classify the first pending antecedent.
     reduceAntecedent :: Antecedent -> Antecedents -> Goal -> P Proof
@@ -342,6 +350,10 @@ redant more antes atomImps nestImps atoms goal =
                     (p : zipWith Lam variables proofs)
       where
         proveAlternative (v, (_, f)) = redant1 (A (Var v) f) pending g
+    -- Empty datatypes have no constructors.  Preserve their nominal identity
+    -- for equality, but eliminate any one of them explicitly with @void@.
+    reduceAntecedent (A p (Empty _)) _ _ =
+        return $ Apply (Ccases []) p
     reduceAntecedent (A p (a :-> b)) pending g =
         reduceImp p a b pending g
 
@@ -365,18 +377,23 @@ redant more antes atomImps nestImps atoms goal =
       where
         substituteInjection result (i, v, (constructor, _)) =
             subst (inj constructor i p) v result
+    -- An implication from an empty type is always available and contributes
+    -- no usable premise.
+    reduceImp _ (Empty _) _ pending g = redant0 pending g
     -- p : (c -> d) -> b
     reduceImp p (c :-> d) b pending g = reduceNestedImp p c d b pending g
 
     -- Reduce a nested implication antecedent.
     reduceNestedImp ::
         Term -> Formula -> Formula -> Formula -> Antecedents -> Goal -> P Proof
-    -- Exploit ~(C->D) <=> (~~C & ~D), except when D is already false.
-    reduceNestedImp p c d (Disj []) pending g | d /= false = do
+    -- Exploit ~(C->D) <=> (~~C & ~D), retaining the particular empty result
+    -- type throughout the transformation.
+    reduceNestedImp p c d emptyResult@(Empty _) pending g
+        | d /= emptyResult = do
         x <- newSym "x"
         y <- newSym "y"
-        proof <- reduceNestedImp (Var x) c false false
-            (A (Var y) (d :-> false) : pending) g
+        proof <- reduceNestedImp (Var x) c emptyResult emptyResult
+            (A (Var y) (d :-> emptyResult) : pending) g
         cImpDImpFalse x y p proof
     reduceNestedImp p c d b pending g =
         redant more pending atomImps
@@ -417,6 +434,7 @@ redant more antes atomImps nestImps atoms goal =
                 [A (Cinj constructor i) (d :-> v)
                     | (i, (constructor, d)) <- zip [0 ..] alternatives]
         redant0 injections v
+    redsucc (Empty _) = mzero
     redsucc (a :-> b) = do
         s <- newSym "x"
         proof <- redant1 (A (Var s) a) [] b
@@ -448,6 +466,7 @@ goalMayBeReachable goal atomImps nestImps =
 
 mayYield :: Symbol -> Formula -> Bool
 mayYield goal (Disj alternatives) = all (mayYield goal . snd) alternatives
+mayYield _ (Empty _) = True
 mayYield goal (Conj conjuncts) = any (mayYield goal) conjuncts
 mayYield goal (_ :-> consequent) = mayYield goal consequent
 mayYield goal (PVar atom) = goal == atom

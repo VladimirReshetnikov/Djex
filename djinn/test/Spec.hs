@@ -53,6 +53,7 @@ tests =
     , ("isolate external proof identities", testProofEnvironment)
     , ("type-check generated proofs independently", testGeneratedProofsCheck)
     , ("reject malformed proof terms", testMalformedProofTerms)
+    , ("preserve nominal empty types", testNominalEmptyTypes)
     ]
 
 testPrefixArrowParsing :: IO ()
@@ -279,6 +280,39 @@ testMalformedProofTerms = do
     assertLeft "an injection index must be in range"
         (checkProof [] (atomA :-> (atomA |: atomB)) $
             Lam a $ Apply (Cinj leftConstructor 2) (Var a))
+
+testNominalEmptyTypes :: IO ()
+testNominalEmptyTypes = do
+    let definitions =
+            [ ("EmptyA", ([], HTUnion [], ()))
+            , ("EmptyB", ([], HTUnion [], ()))
+            , ("AliasA", ([], HTCon "EmptyA", ()))
+            ]
+        emptyA = hTypeToFormula definitions $ HTCon "EmptyA"
+        emptyB = hTypeToFormula definitions $ HTCon "EmptyB"
+        aliasA = hTypeToFormula definitions $ HTCon "AliasA"
+        cast = emptyA :-> emptyB
+        identity = emptyA :-> emptyA
+    assertBool "distinct empty datatypes need distinct propositions"
+        (emptyA /= emptyB)
+    assertEqual "an alias should retain its underlying nominal identity"
+        emptyA aliasA
+    case prove True [] identity of
+        [Lam binder (Var used)] ->
+            assertEqual "the same empty type should use identity" binder used
+        proofs -> fail $ "expected only empty identity, got " ++ show proofs
+    case prove False [] cast of
+        [proof@(Lam binder (Apply (Ccases []) (Var used)))] -> do
+            assertEqual "empty conversion must eliminate its argument explicitly"
+                binder used
+            assertEqual "the explicit empty elimination should type-check"
+                (Right ()) (checkProof [] cast proof)
+            assertContains "empty elimination should render via void"
+                "void" (hPrClause $ termToHClause "cast" proof)
+        proofs -> fail $ "expected one explicit empty elimination, got " ++
+            show proofs
+    assertLeft "a direct identity cast between empty types must be rejected"
+        (checkProof [] cast $ Lam (Symbol "x") (Var $ Symbol "x"))
 
 atomA :: Formula
 atomA = PVar $ Symbol "a"

@@ -49,6 +49,7 @@ formulaSymbols :: Formula -> [Symbol]
 formulaSymbols (Conj formulas) = concatMap formulaSymbols formulas
 formulaSymbols (Disj alternatives) =
     concatMap (formulaSymbols . snd) alternatives
+formulaSymbols (Empty name) = [name]
 formulaSymbols (left :-> right) = formulaSymbols left ++ formulaSymbols right
 formulaSymbols (PVar symbol) = [symbol]
 

@@ -19,6 +19,8 @@ import LJT
 import HTypes
 import HCheck(htCheckEnv, htCheckType)
 import Help
+import ProofCheck(checkProof)
+import ProofEnv
 import qualified Paths_djinn
 
 version :: String
@@ -217,36 +219,49 @@ query prType s i ctx g =
    Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
    Right mss -> do
     let form = hTypeToFormula (synonyms s) g
-        env = [ (Symbol v, hTypeToFormula (synonyms s) t) | (v, t) <- axioms s ] ++ ctxEnv
+        externalEnv = [ (Symbol v, hTypeToFormula (synonyms s) t) | (v, t) <- axioms s ] ++ ctxEnv
         ctxEnv = [ (Symbol v, hTypeToFormula (synonyms s) t) | ms <- mss, (v, t) <- ms ]
-        mpr = prove (multi s || sorted s) env form
+        proofEnv = prepareProofEnvironment (Symbol i) externalEnv
+        internalEnv = proofBindings proofEnv
+        mpr = prove (multi s || sorted s) internalEnv form
     when (debug s) $ putStrLn ("*** " ++ show form)
     case mpr of
         [] -> do
-            putStrLn $ "-- " ++ i ++ " cannot be realized."
+            putStrLn $ "-- " ++ i ++ cannotBeRealized proofEnv
             return (False, s)
         p:ps -> do
-            let proofs = p : take (cutOff s - 1) ps
-                score proof =
-                   let c = termToHClause i proof
-                       bvs = getBinderVars c
-                       r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
-                   in  (r, c)
-                clauses = nub $
-                        if sorted s then
-                            map snd $ sortBy (\ (x,_) (y,_) -> compare x y) $ map score proofs
-                        else
-                            map (termToHClause i) proofs
-                pr = putStrLn . hPrClause
-                sctx = if null ctx then "" else showContexts ctx ++ " => "
-            when (debug s) $ putStrLn ("+++ " ++ show p)
-            when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
-            case clauses of
-                [] -> return () -- proofs is non-empty, so this is unreachable.
-                e:es -> do
-                    pr e
-                    when (multi s) $ mapM_ (\ x -> putStrLn "-- or" >> pr x) es
+            let internalProofs = p : take (cutOff s - 1) ps
+            case mapM (checkProof internalEnv form) internalProofs of
+              Left message ->
+                putStrLn $ "Error: generated an invalid proof: " ++ message
+              Right _ -> do
+                let proofs = map (restoreProofTerm proofEnv) internalProofs
+                    score proof =
+                       let c = termToHClause i proof
+                           bvs = getBinderVars c
+                           r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
+                       in  (r, c)
+                    clauses = nub $
+                            if sorted s then
+                                map snd $ sortBy (\ (x,_) (y,_) -> compare x y) $ map score proofs
+                            else
+                                map (termToHClause i) proofs
+                    pr = putStrLn . hPrClause
+                    sctx = if null ctx then "" else showContexts ctx ++ " => "
+                when (debug s) $ putStrLn ("+++ " ++ show p)
+                when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
+                case clauses of
+                    [] -> return () -- internalProofs is non-empty.
+                    e:es -> do
+                        pr e
+                        when (multi s) $ mapM_ (\ x -> putStrLn "-- or" >> pr x) es
             return (False, s)
+
+cannotBeRealized :: ProofEnvironment -> String
+cannotBeRealized environment
+    | targetWasExcluded environment =
+        " cannot be safely realized without a recursive self-reference."
+    | otherwise = " cannot be realized."
 
 loadFile :: State -> String -> IO (Bool, State)
 loadFile s name = do

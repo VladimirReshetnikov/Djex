@@ -2,13 +2,15 @@ module Main (main) where
 
 import Control.Exception (SomeException, displayException, try)
 import Control.Monad (unless)
-import Data.List (isInfixOf, isSuffixOf)
+import Data.List (isInfixOf, isSuffixOf, nub)
 import System.Exit (exitFailure)
 import Text.Read (readMaybe)
 
 import HCheck (htCheckEnv, htCheckType)
 import HTypes
 import LJT
+import ProofCheck (checkProof)
+import ProofEnv
 
 type Test = (String, IO ())
 
@@ -48,6 +50,9 @@ tests =
     , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
     , ("preserve residual application after Csplit", testCsplitResidualArguments)
     , ("preserve residual application after Ccases", testCcasesResidualArguments)
+    , ("isolate external proof identities", testProofEnvironment)
+    , ("type-check generated proofs independently", testGeneratedProofsCheck)
+    , ("reject malformed proof terms", testMalformedProofTerms)
     ]
 
 testPrefixArrowParsing :: IO ()
@@ -211,6 +216,69 @@ testCcasesResidualArguments = do
     assertContains "Ccases should retain its second alternative" "RightC" rendered
     assertWordsSuffix "Ccases residual arguments must not be dropped or reordered"
         ["arg1", "arg2"] rendered
+
+testProofEnvironment :: IO ()
+testProofEnvironment = do
+    let target = Symbol "answer"
+        duplicate = Symbol "shared"
+        environment = prepareProofEnvironment target
+            [ (target, atomA)
+            , (duplicate, atomA)
+            , (duplicate, atomB)
+            ]
+        bindings = proofBindings environment
+    assertBool "a target-named assumption must be excluded"
+        (targetWasExcluded environment)
+    assertEqual "only the unsafe target binding should be removed"
+        [atomA, atomB] (map snd bindings)
+    assertEqual "every remaining assumption needs a unique proof identity"
+        2 (length $ nub $ map fst bindings)
+    case bindings of
+        (internal, _) : _ -> do
+            assertEqual "free proof identities should regain their display names"
+                (Var duplicate) (restoreProofTerm environment $ Var internal)
+            assertEqual "a safe alternate assumption should prove the target"
+                [Var duplicate]
+                (map (restoreProofTerm environment) $
+                    prove False bindings atomA)
+        [] -> fail "expected safe proof bindings"
+
+testGeneratedProofsCheck :: IO ()
+testGeneratedProofsCheck = do
+    let cases =
+            [ ([], atomA :-> atomA)
+            , ([], (atomA & atomB) :-> (atomB & atomA))
+            , ([], atomA :-> (atomA |: atomB))
+            , ([], false :-> atomA)
+            , ([(Symbol "given", atomA)], atomB :-> atomA)
+            ]
+    mapM_ checkGenerated cases
+  where
+    checkGenerated (environment, formula) =
+        case prove False environment formula of
+            [] -> fail $ "expected a generated proof of " ++ show formula
+            proof : _ -> assertEqual
+                ("independent checker rejected " ++ show proof)
+                (Right ()) (checkProof environment formula proof)
+
+testMalformedProofTerms :: IO ()
+testMalformedProofTerms = do
+    let a = Symbol "a"
+        b = Symbol "b"
+        leftConstructor = ConsDesc "Left" 1
+    assertLeft "identity cannot prove a -> b"
+        (checkProof [] (atomA :-> atomB) $ Lam a $ Var a)
+    assertLeft "an injection must name the expected constructor"
+        (checkProof [] (atomA :-> (atomA |: atomB)) $
+            Lam a $ Apply (Cinj (ConsDesc "Wrong" 1) 0) (Var a))
+    assertLeft "a one-element tuple cannot prove a pair"
+        (checkProof [] ((atomA & atomB) :-> (atomA & atomB)) $
+            Lam a $ Apply (Ctuple 1) (Var a))
+    assertLeft "legacy selectors have no independently checkable semantics"
+        (checkProof [(b, atomA)] atomA $ Xsel 0 1 (Var b))
+    assertLeft "an injection index must be in range"
+        (checkProof [] (atomA :-> (atomA |: atomB)) $
+            Lam a $ Apply (Cinj leftConstructor 2) (Var a))
 
 atomA :: Formula
 atomA = PVar $ Symbol "a"

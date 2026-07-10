@@ -32,7 +32,8 @@ executable djinn
                   pretty < 10,
                   containers < 10
 
-  Other-modules:  Help, HCheck, HTypes, LJT, LJTFormula, Paths_djinn, REPL
+  Other-modules:  Help, HCheck, HTypes, LJT, LJTFormula, Paths_djinn,
+                  ProofCheck, ProofEnv, REPL
   Autogen-Modules: Paths_djinn
 
   Hs-Source-Dirs: src
@@ -52,4 +53,6 @@ test-suite djinn-tests
   Other-Modules:    HCheck,
                     HTypes,
                     LJT,
-                    LJTFormula
+                    LJTFormula,
+                    ProofCheck,
+                    ProofEnv

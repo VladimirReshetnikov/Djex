@@ -4,10 +4,12 @@ import Control.Exception (SomeException, displayException, try)
 import Control.Monad (unless)
 import Data.List (isInfixOf, isSuffixOf, nub)
 import System.Exit (exitFailure)
+import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
 import Environment (validateEnvironment)
 import HCheck (htCheckEnv, htCheckType)
+import HIdentifier
 import HTypes
 import LJT
 import ProofCheck (checkProof)
@@ -58,6 +60,7 @@ tests =
     , ("validate declaration mutations transactionally", testEnvironmentValidation)
     , ("render shadowing terms without capture", testScopeSafeRendering)
     , ("report malformed proof rendering", testMalformedRendering)
+    , ("accept only Haskell identifiers and operators", testIdentifiers)
     ]
 
 testPrefixArrowParsing :: IO ()
@@ -363,6 +366,38 @@ testMalformedRendering = do
         (termToHExpr $ applys (Ccases [ConsDesc "Only" 1])
             [Var $ Symbol "choice", Var $ Symbol "handler"])
 
+testIdentifiers :: IO ()
+testIdentifiers = do
+    assertParses "leading underscores are valid variable identifiers"
+        pVarId "_compose'"
+    assertParses "qualified external variables are valid"
+        pQualifiedVarId "Data.Function.id"
+    assertParses "qualified constructors are valid"
+        pQualifiedConId "Data.Maybe.Maybe"
+    assertParses "the full ASCII operator alphabet is available"
+        pParenthesizedVarOp "(/?)"
+    assertParses "Unicode Haskell operators are available"
+        pParenthesizedVarOp "(⊕)"
+    assertDoesNotParse "reserved words are not identifiers" pVarId "case"
+    assertDoesNotParse "a bare underscore is not a binding name" pVarId "_"
+    assertDoesNotParse "module segments must be constructors"
+        pQualifiedVarId "data.module.value"
+    assertDoesNotParse "empty qualification segments are invalid"
+        pQualifiedVarId "Data..value"
+    assertDoesNotParse "trailing qualification dots are invalid"
+        pQualifiedVarId "Data.value."
+    assertDoesNotParse "reserved operators are invalid binding names"
+        pParenthesizedVarOp "(->)"
+    assertEqual "underscore identifiers must not be printed as operators"
+        "_compose" (prHSymbolOp "_compose")
+    assertEqual "qualified variables must remain prefix names"
+        "Data.Function.id" (prHSymbolOp "Data.Function.id")
+    assertEqual "operators should be parenthesized in prefix positions"
+        "(/?)" (prHSymbolOp "/?")
+    assertEqual "qualified type constructors should parse structurally"
+        (Just $ HTApp (HTCon "Data.Maybe.Maybe") (HTVar "a"))
+        (readMaybe "Data.Maybe.Maybe a")
+
 atomA :: Formula
 atomA = PVar $ Symbol "a"
 
@@ -397,6 +432,24 @@ renderTerm name term =
     case termToHClause name term of
         Left message -> fail $ "proof rendering failed: " ++ message
         Right clause -> return $ hPrClause clause
+
+assertParses :: String -> ReadP String -> String -> IO ()
+assertParses message parser input =
+    assertBool message $ not $ null $ parseFully parser input
+
+assertDoesNotParse :: String -> ReadP String -> String -> IO ()
+assertDoesNotParse message parser input =
+    assertBool message $ null $ parseFully parser input
+
+parseFully :: ReadP a -> String -> [a]
+parseFully parser input =
+    [value | (value, "") <- readP_to_S complete input]
+  where
+    complete = do
+        value <- parser
+        skipSpaces
+        eof
+        return value
 
 assertContains :: String -> String -> String -> IO ()
 assertContains message needle haystack =

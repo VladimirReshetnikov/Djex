@@ -18,6 +18,7 @@ import REPL
 import Environment(validateEnvironment)
 import LJT
 import HTypes
+import HIdentifier
 import HCheck(htCheckEnv, htCheckType)
 import Help
 import ProofCheck(checkProof)
@@ -427,7 +428,7 @@ helpColumn = 2 + maximum [length cmd | (cmd, _, _) <- commands]
 
 pDel :: ReadP Cmd
 pDel = do
-    s <- pHSymbol True +++ pHSymbolOp
+    s <- pConId +++ pLocalTermName
     return $ Del s
 
 pLoad :: ReadP Cmd
@@ -438,7 +439,7 @@ pLoad = do
 
 pAdd :: ReadP Cmd
 pAdd = do
-    i <- pHSymbolOp
+    i <- pExternalTermName
     sstring "::"
     t <- pHType
     optional $ schar ';'
@@ -446,7 +447,7 @@ pAdd = do
 
 pQuery :: ReadP Cmd
 pQuery = do
-    i <- pHSymbolOp
+    i <- pLocalTermName
     schar '?'
     c <- option [] pContext
     t <- pHType
@@ -456,7 +457,7 @@ pQuery = do
 pQuery' :: ReadP Cmd
 pQuery' = do
     schar '?'
-    i <- pHSymbolOp
+    i <- pLocalTermName
     sstring "::"
     c <- option [] pContext
     t <- pHType
@@ -530,15 +531,16 @@ type Method = (HSymbol, HType)
 
 pMethod :: ReadP Method
 pMethod = do
-    i <- pHSymbolOp
+    i <- pLocalTermName
     sstring "::"
     t <- pHType
     return (i, t)
 
-pHSymbolOp :: ReadP HSymbol
-pHSymbolOp = do
-    let pOpSym = satisfy (`elem` "~!#$%^&*-+=<>.:")
-    pHSymbol False +++ do schar '('; op <- many1 pOpSym; schar ')'; return op
+pLocalTermName :: ReadP HSymbol
+pLocalTermName = pVarId +++ pParenthesizedVarOp
+
+pExternalTermName :: ReadP HSymbol
+pExternalTermName = pQualifiedVarId +++ pParenthesizedVarOp
 
 pSet :: ReadP Cmd
 pSet = pSetFlag +++ pSetVal

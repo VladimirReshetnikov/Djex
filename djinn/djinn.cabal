@@ -32,7 +32,8 @@ executable djinn
                   pretty < 10,
                   containers < 10
 
-  Other-modules:  Environment, Help, HCheck, HTypes, LJT, LJTFormula, Paths_djinn,
+  Other-modules:  Environment, Help, HCheck, HIdentifier, HTypes, LJT,
+                  LJTFormula, Paths_djinn,
                   ProofCheck, ProofEnv, REPL
   Autogen-Modules: Paths_djinn
 
@@ -52,6 +53,7 @@ test-suite djinn-tests
 
   Other-Modules:    Environment,
                     HCheck,
+                    HIdentifier,
                     HTypes,
                     LJT,
                     LJTFormula,

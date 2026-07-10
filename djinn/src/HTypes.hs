@@ -13,11 +13,11 @@ module HTypes(
 import Prelude hiding ((<>))
 import Text.PrettyPrint.HughesPJ(Doc, renderStyle, style, text, (<>), parens, ($$), vcat, punctuate,
          sep, fsep, nest, comma, (<+>))
-import Data.Char(isAlphaNum, isAlpha, isUpper)
 import Data.List(union, (\\))
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
 import Text.ParserCombinators.ReadP
+import HIdentifier
 import LJTFormula
 
 type HSymbol = String
@@ -57,7 +57,8 @@ instance Show HType where
     showsPrec p (HTApp f a) = showParen (p > 2) $ showsPrec 2 f . showString " " . showsPrec 3 a
     showsPrec _ (HTVar s) = showString s
     showsPrec _ (HTCon "()") = showString "()"
-    showsPrec _ (HTCon s@(c:_)) | not (isAlpha c) = showParen True $ showString s
+    showsPrec _ (HTCon s) | not (isQualifiedConId s) =
+        showParen True $ showString s
     showsPrec _ (HTCon s) = showString s
     showsPrec _ (HTTuple ss) = showParen True $ f ss
         where f [] = id
@@ -104,7 +105,7 @@ pUnit = do
     return $ HTCon "()"
 
 pHTCon :: ReadP HType
-pHTCon = (pHSymbol True >>= return . HTCon)
+pHTCon = (pQualifiedConId >>= return . HTCon)
        +++
          do schar '('; schar '-'; schar '>'; schar ')'; return (HTCon "->")
 
@@ -112,12 +113,8 @@ pHTVar :: ReadP HType
 pHTVar = pHSymbol False >>= return . HTVar
 
 pHSymbol :: Bool -> ReadP HSymbol
-pHSymbol con = do
-    skipSpaces
-    c <- satisfy $ \ c -> isAlpha c && isUpper c == con
-    let isSym d = isAlphaNum d || d == '\'' || d == '.'
-    cs <- munch isSym
-    return $ c:cs
+pHSymbol True = pConId
+pHSymbol False = pVarId
 
 pHTTuple :: ReadP HType
 pHTTuple = do
@@ -231,8 +228,7 @@ ppClause (HClause f ps e) =
         sep [sep (map (ppPat 10) ps) <+> text "=", nest 2 $ ppExpr 0 e]
 
 prHSymbolOp :: HSymbol -> String
-prHSymbolOp s@(c:_) | not (isAlphaNum c) = "(" ++ s ++ ")"
-prHSymbolOp s = s
+prHSymbolOp = renderVarName
 
 ppPat :: Int -> HPat -> Doc
 ppPat _ (HPVar s) = text s
@@ -244,11 +240,11 @@ ppPat p (HPApply a b) = pparens (p > 1) $ ppPat 1 a <+> ppPat 2 b
 ppExpr :: Int -> HExpr -> Doc
 ppExpr p (HELam ps e) = pparens (p > 0) $ sep [ text "\\" <+> sep (map (ppPat 10) ps) <+> text "->",
                                                 ppExpr 0 e]
-ppExpr p (HEApply (HEApply (HEVar f@(c:_)) a1) a2) | not (isAlphaNum c) =
+ppExpr p (HEApply (HEApply (HEVar f) a1) a2) | isVarOperator f =
      pparens (p > 4) $ ppExpr 5 a1 <+> text f <+> ppExpr 5 a2
 ppExpr p (HEApply f a) = pparens (p > 11) $ ppExpr 11 f <+> ppExpr 12 a
 ppExpr _ (HECon s) = text s
-ppExpr _ (HEVar s@(c:_)) | not (isAlphaNum c) = pparens True $ text s
+ppExpr _ (HEVar s) | isVarOperator s = pparens True $ text s
 ppExpr _ (HEVar s) = text s
 ppExpr _ (HETuple es) = parens $ fsep $ punctuate comma (map (ppExpr 0) es)
 ppExpr p (HECase s alts) = pparens (p > 0) $ (text "case" <+> ppExpr 0 s <+> text "of") $$

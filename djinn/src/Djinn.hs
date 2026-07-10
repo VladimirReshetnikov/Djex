@@ -5,24 +5,24 @@
 --
 module Main(main) where
 import Data.Char(isAlpha, isSpace)
-import Data.List(sortBy, nub, intersperse)
-import Data.Ratio
+import Data.List(sortBy, nub, intercalate)
+import Data.Ratio((%))
+import Data.Version(showVersion)
 import Text.ParserCombinators.ReadP
 import Control.Monad(when)
-import Control.Monad.Except()
-import System.Exit
-import System.Environment
+import System.Exit(exitWith, ExitCode(..))
+import System.Environment(getArgs)
+import System.IO.Error(tryIOError)
 
 import REPL
 import LJT
 import HTypes
 import HCheck(htCheckEnv, htCheckType)
 import Help
-
---import Debug.Trace
+import qualified Paths_djinn
 
 version :: String
-version = "version 2011-07-23"
+version = "version " ++ showVersion Paths_djinn.version
 
 main :: IO ()
 main = do
@@ -77,13 +77,13 @@ startState = State {
     debug = False,
     cutOff = 200
     }
- where syns = either (const $ error "Bad initial environment") id $ htCheckEnv $ reverse [
-        ("()",     ([],        HTUnion [("()",[])],                         undefined)),
-        ("Either", (["a","b"], HTUnion [("Left", [a]), ("Right", [b])],     undefined)),
-        ("Maybe",  (["a"],     HTUnion [("Nothing", []), ("Just", [a])],    undefined)),
-        ("Bool",   ([],        HTUnion [("False", []), ("True", [])],       undefined)),
-        ("Void",   ([],        HTUnion [],                                  undefined)),
-        ("Not",    (["x"],     htNot "x",                                   undefined))
+ where syns = either (error . ("Bad initial environment: " ++)) id $ htCheckEnv $ reverse [
+        ("()",     rawType []        (HTUnion [("()",[])])),
+        ("Either", rawType ["a","b"] (HTUnion [("Left", [a]), ("Right", [b])])),
+        ("Maybe",  rawType ["a"]     (HTUnion [("Nothing", []), ("Just", [a])])),
+        ("Bool",   rawType []        (HTUnion [("False", []), ("True", [])])),
+        ("Void",   rawType []        (HTUnion [])),
+        ("Not",    rawType ["x"]     (htNot "x"))
         ]
        clss = [("Eq", (["a"], [("==", a `HTArrow` (a `HTArrow` HTCon "Bool"))])),
                ("Monad", (["m"], [("return", a `HTArrow` ma),
@@ -103,19 +103,20 @@ inIt state = do
 eval :: State -> String -> IO (Bool, State)
 eval s line =
     case filter (null . snd) (readP_to_S pCmd line) of
-    [] -> do
-                putStrLn $ "Cannot parse command"
-                return (False, s)
-    (cmd, "") : _ -> runCmd s cmd
-    _ -> error "eval"
+        [] -> do
+            putStrLn "Cannot parse command"
+            return (False, s)
+        (cmd, _) : _ -> runCmd s cmd
 
 exit :: State -> IO ()
-exit _s = do
-    putStrLn "Bye."
-    return ()
+exit _ = putStrLn "Bye."
 
 type Context = (HSymbol, [HType])
 type ClassDef = (HSymbol, ([HSymbol], [Method]))
+
+-- htCheckEnv replaces this placeholder with the definition's inferred kind.
+rawType :: [HSymbol] -> HType -> ([HSymbol], HType, HKind)
+rawType params body = (params, body, KStar)
 
 data Cmd = Help Bool | Quit | Add HSymbol HType | Query HSymbol [Context] HType | Del HSymbol | Load HSymbol | Noop | Env |
            Type (HSymbol, ([HSymbol], HType, HKind)) | Set (State -> State) | Clear | Class ClassDef |
@@ -126,17 +127,17 @@ pCmd = do
     skipSpaces
     let adds (':':s) p = do schar ':'; pPrefix (takeWhile (/= ' ') s); c <- p; skipSpaces; return c
         adds _ p = do c <- p; skipSpaces; return c
-    cmd <- foldr1 (+++) [ adds s p | (s, _, p) <- commands ]
+    cmd <- foldr1 (+++) [adds s p | (s, p) <- commandParsers]
     skipSpaces
     return cmd
 
-pPrefix :: String -> ReadP String
+pPrefix :: String -> ReadP ()
 pPrefix s = do
     skipSpaces
     cs <- look
-    let w = takeWhile isAlpha cs
+    let w = takeWhile (\ c -> isAlpha c || c == '-') cs
     if isPrefix w s then
-        string w
+        string w >> return ()
      else
         pfail
 
@@ -155,7 +156,7 @@ runCmd s (Load f) = loadFile s f
 runCmd s (Add i t) =
     case htCheckType (synonyms s) t of
     Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
-    Right _ -> return (False, s { axioms = (i, t) : filter ((/= i) . fst) (axioms s) })
+    Right _ -> return (False, s { axioms = replace i (i, t) (axioms s) })
 runCmd _ Clear =
     return (False, startState)
 runCmd s (Del i) =
@@ -163,41 +164,56 @@ runCmd s (Del i) =
                      , synonyms = filter ((i /=) . fst) (synonyms s)
                      , classes = filter ((i /=) . fst) (classes s) })
 runCmd s Env = do
---    print s
-    let tname t = if isHTUnion t then "data" else "type"
+    let showType (i, (_, HTAbstract _ kind, _)) =
+            "type " ++ i ++ " :: " ++ show kind
+        showType (i, (vs, t, _)) =
+            tname t ++ " " ++ unwords (i:vs) ++ showd t
+        tname t = if isHTUnion t then "data" else "type"
         showd (HTUnion []) = ""
         showd t = " = " ++ show t
-    mapM_ (\ (i, (vs, t, _)) -> putStrLn $ tname t ++ " " ++ unwords (i:vs) ++ showd t) (reverse $ synonyms s)
+    mapM_ (putStrLn . showType) (reverse $ synonyms s)
     mapM_ (\ (i, t) -> putStrLn $ prHSymbolOp i ++ " :: " ++ show t) (reverse $ axioms s)
     mapM_ (putStrLn . showClass) (reverse $ classes s)
     return (False, s)
-runCmd s (Type syn) = do
-    case htCheckEnv (syn : synonyms s) of
+runCmd s (Type syn@(name, (params, body, _))) =
+    case requireUnusedName "class" name (classes s) >>
+         requireDistinct "type parameter" params >>
+         checkConstructors name body (synonyms s) >>
+         htCheckEnv (replace name syn (synonyms s)) of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
         Right syns -> return (False, s { synonyms = syns })
 runCmd s (Set f) =
     return (False, f s)
 runCmd s (Query i ctx g) =
     query True s i ctx g
-runCmd s (Class c) = do
-    return (False, s { classes = c : classes s })
+runCmd s (Class c@(name, (params, methods))) =
+    case requireUnusedName "type" name (synonyms s) >>
+         requireDistinct "class parameter" params >>
+         requireDistinct "method" (map fst methods) >>
+         checkMethodNames name methods (classes s) >>
+         checkMethods s methods of
+        Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
+        Right _ -> return (False, s { classes = replace name c (classes s) })
 runCmd s (QueryInstance ctx cls ts) =
-    case lookup cls (classes s) of
-    Nothing -> do putStrLn $ "No class " ++ cls; return (False, s)
-    Just (vs, ms) -> if length ts /= length vs then do putStrLn "Wrong number of type arguments"; return (False, s) else do
-               let sctx = if null ctx then "" else showContexts ctx ++ " => "
-               let r = zip vs ts
-                   method (i, t) = do
---                       print (substHT r t)
-                       putStr "   "
-                       query False s i ctx (substHT r t)
-               putStrLn $ "instance " ++ sctx ++ show (foldl HTApp (HTCon cls) ts) ++ " where"
-               mapM_ method ms
-               return (False, s)
+    case do
+        methods <- ctxLookup (classes s) (cls, ts)
+        _ <- checkContexts s ctx
+        checkMethods s methods
+        return methods
+      of
+        Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
+        Right methods -> do
+            let sctx = if null ctx then "" else showContexts ctx ++ " => "
+                method (i, t) = do
+                    putStr "   "
+                    query False s i ctx t
+            putStrLn $ "instance " ++ sctx ++ show (foldl HTApp (HTCon cls) ts) ++ " where"
+            mapM_ method methods
+            return (False, s)
 
 query :: Bool -> State -> String -> [Context] -> HType -> IO (Bool, State)
 query prType s i ctx g =
-   case htCheckType (synonyms s) g >> mapM (ctxLookup (classes s)) ctx of
+   case htCheckType (synonyms s) g >> checkContexts s ctx of
    Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
    Right mss -> do
     let form = hTypeToFormula (synonyms s) g
@@ -209,31 +225,39 @@ query prType s i ctx g =
         [] -> do
             putStrLn $ "-- " ++ i ++ " cannot be realized."
             return (False, s)
-        ps -> do
-            let ps' = take (cutOff s) ps
-            let score p =
-                   let c = termToHClause i p
+        p:ps -> do
+            let proofs = p : take (cutOff s - 1) ps
+                score proof =
+                   let c = termToHClause i proof
                        bvs = getBinderVars c
                        r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
-                   in  --trace (hPrClause c ++ " ++++ " ++ show r)
-                       (r, c)
-                e:es = nub $
+                   in  (r, c)
+                clauses = nub $
                         if sorted s then
-                            map snd $ sortBy (\ (x,_) (y,_) -> compare x y) $ map score ps'
+                            map snd $ sortBy (\ (x,_) (y,_) -> compare x y) $ map score proofs
                         else
-                            map (termToHClause i) ps'
+                            map (termToHClause i) proofs
                 pr = putStrLn . hPrClause
                 sctx = if null ctx then "" else showContexts ctx ++ " => "
-            when (debug s) $ putStrLn ("+++ " ++ show (ps !! 0))
+            when (debug s) $ putStrLn ("+++ " ++ show p)
             when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
-            pr e
-            when (multi s) $ mapM_ (\ x -> putStrLn "-- or" >> pr x) es
+            case clauses of
+                [] -> return () -- proofs is non-empty, so this is unreachable.
+                e:es -> do
+                    pr e
+                    when (multi s) $ mapM_ (\ x -> putStrLn "-- or" >> pr x) es
             return (False, s)
 
 loadFile :: State -> String -> IO (Bool, State)
 loadFile s name = do
-    file <- readFile name
-    evalCmds s $ lines $ stripComments file
+    result <- tryIOError $ do
+        file <- readFile name
+        evalCmds s $ lines $ stripComments file
+    case result of
+        Left err -> do
+            putStrLn $ "Error loading " ++ show name ++ ": " ++ show err
+            return (False, s)
+        Right result' -> return result'
 
 stripComments :: String -> String
 stripComments "" = ""
@@ -244,7 +268,7 @@ stripComments ('-':'-':cs) = skip cs
 stripComments (c:cs) = c : stripComments cs
 
 showClass :: ClassDef -> String
-showClass (c, (as, ms)) = "class " ++ showContext (c, map HTVar as) ++ " where " ++ concat (intersperse "; " $ map sm ms)
+showClass (c, (as, ms)) = "class " ++ showContext (c, map HTVar as) ++ " where " ++ intercalate "; " (map sm ms)
   where sm (i, t) = prHSymbolOp i ++ " :: " ++ show t
 
 showContext :: Context -> String
@@ -252,13 +276,74 @@ showContext (c, as) = show $ foldl HTApp (HTCon c) as
 
 showContexts :: [Context] -> String
 showContexts [] = ""
-showContexts cs = "(" ++ concat (intersperse ", " $ map showContext cs) ++ ")"
+showContexts cs = "(" ++ intercalate ", " (map showContext cs) ++ ")"
 
 ctxLookup :: [ClassDef] -> Context -> Either String [Method]
 ctxLookup clss (c, as) =
     case lookup c clss of
-    Nothing -> Left $ "Class not found: " ++ c
-    Just (ps, ms) -> Right [(m, substHT (zip ps as) t) | (m, t) <- ms ]
+        Nothing -> Left $ "Class not found: " ++ c
+        Just (ps, ms)
+            | length ps == length as ->
+                Right [(m, substHT (zip ps as) t) | (m, t) <- ms]
+            | otherwise -> Left $
+                "Class " ++ c ++ " expects " ++ show (length ps) ++
+                " type argument(s), but got " ++ show (length as)
+
+checkContexts :: State -> [Context] -> Either String [[Method]]
+checkContexts s ctx = do
+    methods <- mapM (ctxLookup (classes s)) ctx
+    mapM_ (checkMethods s) methods
+    return methods
+
+checkMethods :: State -> [Method] -> Either String ()
+checkMethods s methods =
+    htCheckType (synonyms s) (HTTuple (map snd methods))
+
+checkMethodNames :: HSymbol -> [Method] -> [ClassDef] -> Either String ()
+checkMethodNames owner methods definitions =
+    case [(method, className)
+            | (className, (_, existing)) <- definitions
+            , className /= owner
+            , (method, _) <- existing
+            , method `elem` names] of
+        [] -> Right ()
+        (method, className):_ -> Left $
+            "Method " ++ prHSymbolOp method ++
+            " is already defined by class " ++ className
+  where names = map fst methods
+
+checkConstructors :: HSymbol
+                  -> HType
+                  -> [(HSymbol, ([HSymbol], HType, HKind))]
+                  -> Either String ()
+checkConstructors owner (HTUnion constructors) definitions = do
+    requireDistinct "data constructor" names
+    case [(constructor, typeName)
+            | (typeName, (_, HTUnion existing, _)) <- definitions
+            , typeName /= owner
+            , (constructor, _) <- existing
+            , constructor `elem` names] of
+        [] -> Right ()
+        (constructor, typeName):_ -> Left $
+            "Data constructor " ++ constructor ++
+            " is already defined by " ++ typeName
+  where names = map fst constructors
+checkConstructors _ _ _ = Right ()
+
+requireDistinct :: String -> [HSymbol] -> Either String ()
+requireDistinct what names =
+    case [name | name <- nub names, length (filter (== name) names) > 1] of
+        [] -> Right ()
+        name:_ -> Left $ "Duplicate " ++ what ++ ": " ++ name
+
+requireUnusedName :: String -> HSymbol -> [(HSymbol, a)] -> Either String ()
+requireUnusedName existingKind name definitions
+    | name `elem` map fst definitions =
+        Left $ name ++ " is already defined as a " ++ existingKind
+    | otherwise = Right ()
+
+replace :: HSymbol -> (HSymbol, a) -> [(HSymbol, a)] -> [(HSymbol, a)]
+replace name binding = (binding :) . filter ((/= name) . fst)
 
 evalCmds :: State -> [String] -> IO (Bool, State)
 evalCmds state [] = return (False, state)
@@ -271,23 +356,28 @@ evalCmds state (l:ls) = do
 
 commands :: [(String, String, ReadP Cmd)]
 commands = [
-        (":clear",              "Clear the envirnment",         return Clear),
+        (":clear",              "Clear environment and settings", return Clear),
         (":delete <sym>",       "Delete from environment.",     pDel),
         (":environment",        "Show environment",             return Env),
         (":help",               "Print this message.",          return (Help False)),
         (":load <file>",        "Load a file",                  pLoad),
         (":quit",               "Quit program.",                return Quit),
         (":set <option>",       "Set options",                  pSet),
-        (":verboseHelp",        "Print verbose help.",          return (Help True)),
+        (":verbose-help",       "Print verbose help.",          return (Help True)),
         ("type <sym> <vars> = <type>", "Add a type synonym",    pType),
         ("data <sym> <vars> = <datatype>", "Add a data type",   pData),
         ("class <sym> <vars> where <methods>", "Add a class",   pClass),
         ("<sym> :: <type>",     "Add to environment",           pAdd),
         ("? <sym> :: <type>",   "Query",                        pQuery'),
         ("<sym> ? <type>",      "Query",                        pQuery),
-        ("?instance <sym> <types>","Query instance",            pQueryInstance),
-        ("",                    "",                             return Noop)
+        ("?instance <sym> <types>","Query instance",            pQueryInstance)
         ]
+
+-- Keep accepting the historical camel-case spelling without advertising it.
+commandParsers :: [(String, ReadP Cmd)]
+commandParsers =
+    [(name, parser) | (name, _, parser) <- commands] ++
+    [(":verboseHelp", return (Help True)), ("", return Noop)]
 
 options :: [(String, String, State->Bool, Bool->State->State)]
 options = [
@@ -297,7 +387,10 @@ options = [
           ]
 
 getHelp :: (String, String, a) -> String
-getHelp (cmd, help, _) = cmd ++ replicate (35 - length cmd) ' ' ++ help
+getHelp (cmd, help, _) = cmd ++ replicate (helpColumn - length cmd) ' ' ++ help
+
+helpColumn :: Int
+helpColumn = 2 + maximum [length cmd | (cmd, _, _) <- commands]
 
 pDel :: ReadP Cmd
 pDel = do
@@ -343,7 +436,7 @@ pQueryInstance = do
     sstring "instance"
     c <- option [] pContext
     cls <- pHSymbol True
-    ts <- many1 pHTAtom
+    ts <- many pHTAtom
     optional $ schar ';'
     return $ QueryInstance c cls ts
 
@@ -370,12 +463,12 @@ pType = do
     do args <- many (pHSymbol False)
        schar '='
        t <- pHType
-       return $ Type (syn, (args, t, undefined))
+       return $ Type (syn, rawType args t)
      +++
       do
        schar ':'; char ':'
        k <- pHKind
-       return $ Type (syn, ([], HTAbstract syn k, undefined))
+       return $ Type (syn, rawType [] (HTAbstract syn k))
 
 pData :: ReadP Cmd
 pData = do
@@ -384,10 +477,12 @@ pData = do
     args <- many (pHSymbol False)
     do schar '='
        t <- pHDataType
-       return $ Type (syn, (args, t, undefined))
+       case t of
+           HTUnion [] -> pfail
+           _ -> return $ Type (syn, rawType args t)
       +++
      do
-       return $ Type (syn, (args, HTUnion [], undefined))
+       return $ Type (syn, rawType args (HTUnion []))
 
 pClass :: ReadP Cmd
 pClass = do
@@ -425,8 +520,12 @@ pSetVal :: ReadP Cmd
 pSetVal = do
     pPrefix "cutoff"
     schar '='
-    n <- many1 (satisfy (`elem` ['0'..'9']))
-    return $ Set $ \ s -> s { cutOff = read n }
+    digits <- many1 (satisfy (`elem` ['0'..'9']))
+    let n = read digits :: Integer
+    if n > 0 && n <= toInteger (maxBound :: Int) then
+        return $ Set $ \ s -> s { cutOff = fromInteger n }
+     else
+        pfail
 
 schar :: Char -> ReadP ()
 schar c = do
@@ -447,10 +546,10 @@ helpText = "\
 \if one exists.  If the Djinn says the type is not realizable it is\n\
 \because there is no (total) expression of the given type.\n\
 \Djinn only knows about tuples, ->, and some data types in the\n\
-\initial environment (do :e for a list).\n\
+\initial environment (use :environment for a list).\n\
 \\n\
-\Caveat emptor: The expression will have the right type, but it\n\
-\may not be what you were looking for.\n\
+\Caveat emptor: Treat the generated expression as a candidate.  It may\n\
+\need supporting declarations and still belongs in your compile/test loop.\n\
 \\n\
 \Send any comments and feedback to lennart@augustsson.net\n\
 \\n\

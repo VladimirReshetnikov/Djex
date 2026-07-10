@@ -5,40 +5,47 @@
 module HCheck(htCheckEnv, htCheckType) where
 import Data.List(union)
 import Control.Monad(liftM2)
-import Control.Monad.Except()
 import Control.Monad.State
-import Data.IntMap(IntMap, insert, (!), empty)
+import Data.IntMap(IntMap)
+import qualified Data.IntMap as IntMap
 import Data.Graph(stronglyConnComp, SCC(..))
 
 import HTypes
 
--- import Debug.Trace
-
 type KState = (Int, IntMap (Maybe HKind))
 initState :: KState
-initState = (0, empty)
+initState = (0, IntMap.empty)
 
 type M a = StateT KState (Either String) a
 
 type KEnv = [(HSymbol, HKind)]
 
+-- These constructors are part of the type grammar rather than the mutable
+-- synonym environment, so the kind checker must know about them explicitly.
+intrinsicKinds :: KEnv
+intrinsicKinds =
+    [("[]", KArrow KStar KStar),
+     ("->", KArrow KStar (KArrow KStar KStar))]
+
 newKVar :: M HKind
 newKVar = do
     (i, m) <- get
-    put (i+1, insert i Nothing m)
+    put (i+1, IntMap.insert i Nothing m)
     return $ KVar i
 
-getVar :: Int -> M (Maybe HKind)
-getVar i = do
+follow :: HKind -> M HKind
+follow k@(KVar i) = do
     (_, m) <- get
-    case m!i of
-        Just (KVar i') -> getVar i'
-        mk -> return mk
+    case IntMap.lookup i m of
+        Nothing -> lift $ Left $ "Unknown kind variable: " ++ show i
+        Just Nothing -> return k
+        Just (Just k') -> follow k'
+follow k = return k
 
 addMap :: Int -> HKind -> M ()
 addMap i k = do
     (n, m) <- get
-    put (n, insert i (Just k) m)
+    put (n, IntMap.insert i (Just k) m)
 
 clearState :: M ()
 clearState = put initState
@@ -47,7 +54,7 @@ htCheckType :: [(HSymbol, ([HSymbol], HType, HKind))] -> HType -> Either String 
 htCheckType its t = flip evalStateT initState $ do
     let vs = getHTVars t
     ks <- mapM (const newKVar) vs
-    let env = zip vs ks ++ [(i, k) | (i, (_, _, k)) <- its ]
+    let env = zip vs ks ++ [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
     iHKindStar env t
 
 htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))] -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
@@ -58,9 +65,13 @@ htCheckEnv its =
         c : _ -> Left $ "Recursive types are not allowed: " ++ unwords [ i | (i, _) <- c ]
         [] -> flip evalStateT initState $ addKinds
             where addKinds = do
-                        env <- inferHKinds [] $ map (\ (AcyclicSCC n) -> n) order
-                        let getK i = maybe (error $ "htCheck " ++ i) id $ lookup i env
-                        return [ (i, (vs, t, getK i)) | (i, (vs, t, _)) <- its ]
+                        env <- inferHKinds intrinsicKinds [n | AcyclicSCC n <- order]
+                        let addKind (i, (vs, t, _)) =
+                                case lookup i env of
+                                    Nothing -> lift $ Left $
+                                        "Internal kind inference error for " ++ i
+                                    Just k -> return (i, (vs, t, k))
+                        mapM addKind its
 
 inferHKinds :: KEnv -> [(HSymbol, ([HSymbol], HType, a))] -> M KEnv
 inferHKinds env [] = return env
@@ -74,8 +85,10 @@ inferHKind env vs t = do
     clearState
     ks <- mapM (const newKVar) vs
     let env' = zip vs ks ++ env
-    k <- iHKind env' t
-    ground $ foldr KArrow k ks
+    -- A Haskell type synonym or data declaration must produce a proper type;
+    -- only an explicit HTAbstract declaration may end in a higher kind.
+    iHKindStar env' t
+    ground $ foldr KArrow KStar ks
 
 iHKind :: KEnv -> HType -> M HKind
 iHKind env (HTApp f a) = do
@@ -98,7 +111,7 @@ iHKind env (HTArrow f a) = do
 iHKind env (HTUnion cs) = do
     mapM_ (\ (_, ts) -> mapM_ (iHKindStar env) ts) cs
     return KStar
-iHKind _ (HTAbstract _ _) = error "iHKind HTAbstract"
+iHKind _ (HTAbstract _ k) = return k
 
 iHKindStar :: KEnv -> HType -> M ()
 iHKindStar env t = do
@@ -107,17 +120,21 @@ iHKindStar env t = do
 
 unifyK :: HKind -> HKind -> M ()
 unifyK k1 k2 = do
-    let follow k@(KVar i) = getVar i >>= return . maybe k id
-        follow k = return k
-        unify KStar KStar = return ()
+    let unify KStar KStar = return ()
         unify (KArrow k11 k12) (KArrow k21 k22) = do unifyK k11 k21; unifyK k12 k22
         unify (KVar i1) (KVar i2) | i1 == i2 = return ()
         unify (KVar i) k = do occurs i k; addMap i k
         unify k (KVar i) = do occurs i k; addMap i k
-        unify _ _ = lift $ Left $ "kind error: " ++ show (k1, k2)
-        occurs _ KStar = return ()
-        occurs i (KArrow f a) = do follow f >>= occurs i; follow a >>= occurs i
-        occurs i (KVar i') = if i == i' then lift $ Left "cyclic kind" else return ()
+        unify left right = lift $ Left $
+            "kind mismatch: " ++ show left ++ " vs " ++ show right
+        occurs i k = do
+            k' <- follow k
+            case k' of
+                KStar -> return ()
+                KArrow f a -> occurs i f >> occurs i a
+                KVar i'
+                    | i == i' -> lift $ Left "cyclic kind"
+                    | otherwise -> return ()
     k1' <- follow k1
     k2' <- follow k2
     unify k1' k2'
@@ -136,13 +153,13 @@ getConHKind env v =
     Nothing -> lift $ Left $ "Undefined type " ++ v
 
 ground :: HKind -> M HKind
-ground KStar = return KStar
-ground (KArrow k1 k2) = liftM2 KArrow (ground k1) (ground k2)
-ground (KVar i) = do
-    mk <- getVar i
-    case mk of
-        Just k -> return k
-        Nothing -> return KStar
+ground k = do
+    k' <- follow k
+    case k' of
+        KStar -> return KStar
+        KArrow k1 k2 -> liftM2 KArrow (ground k1) (ground k2)
+        -- Unconstrained kind variables default to *, as Haskell98 requires.
+        KVar _ -> return KStar
 
 getHTCons :: HType -> [HSymbol]
 getHTCons (HTApp f a) = getHTCons f `union` getHTCons a

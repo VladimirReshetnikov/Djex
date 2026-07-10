@@ -1,4 +1,4 @@
-module Help where
+module Help(verboseHelp) where
 verboseHelp :: String
 verboseHelp = "\
 \\n\
@@ -25,7 +25,7 @@ verboseHelp = "\
 \  Djinn will always find a (total) function if one exists.  (The worst\n\
 \case complexity is bad, but unlikely for typical examples.)  If no\n\
 \function exists Djinn will always terminate and say so.\n\
-\  When multiple implementations of the type exists Djinn will only\n\
+\  When multiple implementations of the type exist, Djinn will only\n\
 \give one of them.  Example:\n\
 \  Djinn> f ? a->a->a\n\
 \  f :: a -> a -> a\n\
@@ -35,6 +35,8 @@ verboseHelp = "\
 \<sym> :: <type>\n\
 \  Add a new function available for Djinn to construct the result.\n\
 \Example:\n\
+\   Djinn> type Int :: *\n\
+\   Djinn> type Char :: *\n\
 \   Djinn> foo :: Int -> Char\n\
 \   Djinn> bar :: Char -> Bool\n\
 \   Djinn> f ? Int -> Bool\n\
@@ -57,7 +59,7 @@ verboseHelp = "\
 \   f a = a\n\
 \\n\
 \type <sym> :: <kind>\n\
-\  Add an abstract (uninterpreted) type of the given type.\n\
+\  Add an abstract (uninterpreted) type of the given kind.\n\
 \An uninterpreted type behaves like a type variable during deduction.\n\
 \\n\
 \data <sym> <vars> = <type>\n\
@@ -77,15 +79,15 @@ verboseHelp = "\
 \\n\
 \\n\
 \:clear\n\
-\  Set the environment to the start environment.\n\
+\  Restore the initial environment and runtime settings.\n\
 \\n\
 \\n\
 \:delete <sym>\n\
-\  Remove a symbol that has been added with the add command.\n\
+\  Remove a function, type, or class from the environment.\n\
 \\n\
 \\n\
 \:environment\n\
-\  List all added symbols and their types.\n\
+\  List the current functions, types, and classes.\n\
 \\n\
 \\n\
 \:help\n\
@@ -101,18 +103,19 @@ verboseHelp = "\
 \  Quit Djinn.\n\
 \\n\
 \\n\
-\:set\n\
+\:set <option>\n\
 \  Set runtime options.\n\
 \     +multi    show multiple solutions\n\
 \               This will not show all solutions since there might be\n\
-\               infinitly many.\n\
+\               infinitely many.\n\
 \     -multi    show one solution\n\
 \     +sorted   sort solutions according to a heuristic criterion\n\
 \     -sorted   do not sort solutions\n\
-\     cutoff=N  compute at most N solutions\n\
-\  The heuristic used to sort the solutions is that as many of the\n\
-\bound variables as possible should be used and that the function\n\
-\should be as short as possible.\n\
+\     +debug    show the internal proof formula and proof term\n\
+\     -debug    hide internal proof details\n\
+\     cutoff=N  compute at most positive N solutions\n\
+\  The sorting heuristic first minimizes the fraction of unused bound\n\
+\variables, then the total number of bound variables.\n\
 \\n\
 \:verbose-help\n\
 \  Print this message.\n\
@@ -120,8 +123,8 @@ verboseHelp = "\
 \\n\
 \Further examples\n\
 \================\n\
-\  calvin% djinn\n\
-\  Welcome to Djinn version 2005-12-11.\n\
+\  $ djinn\n\
+\  Welcome to Djinn version <package-version>.\n\
 \  Type :h to get help.\n\
 \\n\
 \   -- return, bind, and callCC in the continuation monad\n\
@@ -169,7 +172,7 @@ verboseHelp = "\
 \do not work as expected.\n\
 \\n\
 \It is also possible to query for an instance of a class, which is executed\n\
-\as q query for each of the methods, e.g.,\n\
+\as a query for each of the methods, e.g.,\n\
 \  Djinn> ?instance Monad Maybe\n\
 \  instance Monad Maybe where\n\
 \     return = Just\n\

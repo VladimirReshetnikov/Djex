@@ -2,7 +2,7 @@ Cabal-version:  3.0
 Name:           djinn
 Version:        2025.2.21
 Synopsis:       Generate Haskell code from a type
-Description:    Djinn uses an theorem prover for intuitionistic propositional logic
+Description:    Djinn uses a theorem prover for intuitionistic propositional logic
                 to generate a Haskell expression when given a type.
 Bug-reports:    https://github.com/augustss/djinn/issues
 License:        BSD-3-Clause
@@ -13,6 +13,9 @@ Copyright:      2014 Lennart Augustsson
 Category:       source-tools
 Build-type:     Simple
 Stability:      experimental
+Extra-Source-Files:
+                README.md
+                docs/reports/*.md
 
 source-repository head
   type:     git
@@ -21,14 +24,32 @@ source-repository head
 executable djinn
   Default-Language: Haskell98
   Main-Is:        Djinn.hs
+  Ghc-Options:    -Wall -Wcompat
 
   Build-Depends:  base >= 4 && < 6,
                   mtl < 10,
                   haskeline < 10,
                   pretty < 10,
-                  array < 10,
                   containers < 10
 
-  Other-modules:  Help, HCheck,  LJT, HTypes, LJTFormula, REPL
+  Other-modules:  Help, HCheck, HTypes, LJT, LJTFormula, Paths_djinn, REPL
+  Autogen-Modules: Paths_djinn
 
   Hs-Source-Dirs: src
+
+test-suite djinn-tests
+  Type:             exitcode-stdio-1.0
+  Main-Is:          Spec.hs
+  Hs-Source-Dirs:   test, src
+  Default-Language: Haskell2010
+  Ghc-Options:      -Wall -Wcompat
+
+  Build-Depends:    base >= 4 && < 6,
+                    mtl < 10,
+                    pretty < 10,
+                    containers < 10
+
+  Other-Modules:    HCheck,
+                    HTypes,
+                    LJT,
+                    LJTFormula

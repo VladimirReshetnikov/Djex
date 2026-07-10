@@ -2,11 +2,12 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module LJTFormula(Symbol(..), Formula(..), (<->), (&), (|:), fnot, false, true,
-        ConsDesc(..),
-        Term(..), applys, freeVars
-        ) where
-import Data.List(union, (\\))
+module LJTFormula (
+    Symbol(..), Formula(..), (<->), (&), (|:), fnot, false, true,
+    ConsDesc(..), Term(..), applys, freeVars
+    ) where
+
+import Data.List (union, (\\))
 
 infixr 2 :->
 infix  2 <->
@@ -51,22 +52,23 @@ true = Conj []
 instance Show Formula where
     showsPrec _ (Conj []) = showString "true"
     showsPrec _ (Conj [c]) = showParen True $ showString "&" . showsPrec 0 c
-    showsPrec p (Conj cs) =
-        showParen (p>40) $ loop cs
-          where loop [f] = showsPrec 41 f
-                loop (f : fs) = showsPrec 41 f . showString " & " . loop fs
-                loop [] = error "showsPrec Conj"
+    showsPrec p (Conj (c : cs)) =
+        showParen (p > 40) $
+            showsPrec 41 c . foldr showConjunct id cs
+      where
+        showConjunct f rest = showString " & " . showsPrec 41 f . rest
     showsPrec _ (Disj []) = showString "false"
-    showsPrec _ (Disj [(_,c)]) = showParen True $ showString "|" . showsPrec 0 c
-    showsPrec p (Disj ds) =
-        showParen (p>30) $ loop ds
-          where loop [(_,f)] = showsPrec 31 f
-                loop ((_,f) : fs) = showsPrec 31 f . showString " v " . loop fs
-                loop [] = error "showsPrec Disj"
+    showsPrec _ (Disj [(_, c)]) = showParen True $ showString "|" . showsPrec 0 c
+    showsPrec p (Disj ((_, d) : ds)) =
+        showParen (p > 30) $
+            showsPrec 31 d . foldr showDisjunct id ds
+      where
+        showDisjunct (_, f) rest = showString " v " . showsPrec 31 f . rest
     showsPrec _ (f1 :-> Disj []) =
         showString "~" . showsPrec 100 f1
     showsPrec p (f1 :-> f2) =
-        showParen (p>20) $ showsPrec 21 f1 . showString " -> " . showsPrec 20 f2
+        showParen (p > 20) $
+            showsPrec 21 f1 . showString " -> " . showsPrec 20 f2
     showsPrec p (PVar s) = showsPrec p s
 
 ------------------------------
@@ -79,21 +81,28 @@ data Term
         | Csplit Int
         | Cinj ConsDesc Int
         | Ccases [ConsDesc]
-        | Xsel Int Int Term             --- XXX just temporary by MJ
+        -- Legacy selector retained for compatibility; the prover no longer
+        -- constructs it.
+        | Xsel Int Int Term
     deriving (Eq, Ord)
 
 instance Show Term where
     showsPrec p (Var s) = showsPrec p s
-    showsPrec p (Lam s e) = showParen (p > 0) $ showString "\\" . showsPrec 0 s . showString "." . showsPrec 0 e
-    showsPrec p (Apply f a) = showParen (p > 1) $ showsPrec 1 f . showString " " . showsPrec 2 a
+    showsPrec p (Lam s e) =
+        showParen (p > 0) $
+            showString "\\" . showsPrec 0 s . showString "." . showsPrec 0 e
+    showsPrec p (Apply f a) =
+        showParen (p > 1) $ showsPrec 1 f . showString " " . showsPrec 2 a
     showsPrec _ (Cinj _ i) = showString $ "Inj" ++ show i
     showsPrec _ (Ctuple i) = showString $ "Tuple" ++ show i
     showsPrec _ (Csplit n) = showString $ "split" ++ show n
     showsPrec _ (Ccases cds) = showString $ "cases" ++ show (length cds)
-    showsPrec p (Xsel i n e) = showParen (p > 0) $ showString ("sel_" ++ show i ++ "_" ++ show n) . showString " " . showsPrec 2 e
+    showsPrec p (Xsel i n e) =
+        showParen (p > 0) $
+            showString ("sel_" ++ show i ++ "_" ++ show n ++ " ") . showsPrec 2 e
 
 applys :: Term -> [Term] -> Term
-applys f as = foldl Apply f as
+applys = foldl Apply
 
 freeVars :: Term -> [Symbol]
 freeVars (Var s) = [s]

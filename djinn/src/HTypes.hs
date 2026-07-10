@@ -3,10 +3,13 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module HTypes(HKind(..), HType(..), HSymbol, hTypeToFormula, pHSymbol, pHType, pHDataType, pHTAtom, pHKind,
-        prHSymbolOp,
-        htNot, isHTUnion, getHTVars, substHT,
-        HClause, HPat, HExpr(HEVar), hPrClause, termToHExpr, termToHClause, getBinderVars) where
+module HTypes(
+        HKind(..), HType(..), HSymbol,
+        hTypeToFormula, pHSymbol, pHType, pHDataType, pHTAtom, pHKind,
+        prHSymbolOp, htNot, isHTUnion, getHTVars, substHT,
+        HClause, HPat, HExpr(HEVar), hPrClause, termToHExpr, termToHClause,
+        getBinderVars
+    ) where
 import Prelude hiding ((<>))
 import Text.PrettyPrint.HughesPJ(Doc, renderStyle, style, text, (<>), parens, ($$), vcat, punctuate,
          sep, fsep, nest, comma, (<+>))
@@ -15,9 +18,6 @@ import Data.List(union, (\\))
 import Control.Monad(zipWithM)
 import Text.ParserCombinators.ReadP
 import LJTFormula
-import Prelude hiding ((<>))
-
---import Debug.Trace
 
 type HSymbol = String
 
@@ -25,7 +25,14 @@ data HKind
     = KStar
     | KArrow HKind HKind
     | KVar Int
-    deriving (Eq, Show)
+    deriving (Eq)
+
+instance Show HKind where
+    showsPrec _ KStar = showString "*"
+    showsPrec p (KArrow from to) =
+        showParen (p > 0) $
+            showsPrec 1 from . showString " -> " . showsPrec 0 to
+    showsPrec _ (KVar i) = showString "k" . shows i
 
 data HType
         = HTApp HType HType
@@ -48,10 +55,11 @@ instance Show HType where
     showsPrec _ (HTApp (HTCon "[]") t) = showString "[" . showsPrec 0 t . showString "]"
     showsPrec p (HTApp f a) = showParen (p > 2) $ showsPrec 2 f . showString " " . showsPrec 3 a
     showsPrec _ (HTVar s) = showString s
+    showsPrec _ (HTCon "()") = showString "()"
     showsPrec _ (HTCon s@(c:_)) | not (isAlpha c) = showParen True $ showString s
     showsPrec _ (HTCon s) = showString s
     showsPrec _ (HTTuple ss) = showParen True $ f ss
-        where f [] = error "showsPrec HType"
+        where f [] = id
               f [t] = showsPrec 0 t
               f (t:ts) = showsPrec 0 t . showString ", " . f ts
     showsPrec p (HTArrow s t) = showParen (p > 0) $ showsPrec 1 s . showString " -> " . showsPrec 0 t
@@ -119,7 +127,7 @@ pHTTuple = do
 pHTypeApp :: ReadP HType
 pHTypeApp = do
     ts <- many1 pHTAtom
-    return $ foldl1 HTApp ts
+    return $ foldl1 hTApp ts
 
 pHTList :: ReadP HType
 pHTList = do
@@ -155,7 +163,8 @@ getHTVars (HTVar v) = [v]
 getHTVars (HTCon _) = []
 getHTVars (HTTuple ts) = foldr union [] (map getHTVars ts)
 getHTVars (HTArrow f a) = getHTVars f `union` getHTVars a
-getHTVars _ = error "getHTVars"
+getHTVars (HTUnion ctss) = foldr union [] [ getHTVars t | (_, ts) <- ctss, t <- ts ]
+getHTVars (HTAbstract _ _) = []
 
 -------------------------------
 
@@ -185,9 +194,10 @@ substHT r t@(HTVar v) =
 substHT _ t@(HTCon _) = t
 substHT r (HTTuple ts) = HTTuple (map (substHT r) ts)
 substHT r (HTArrow f a) = HTArrow (substHT r f) (substHT r a)
-substHT r (HTUnion (ctss)) = HTUnion [ (c, map (substHT r) ts) | (c, ts) <- ctss ]
+substHT r (HTUnion ctss) = HTUnion [ (c, map (substHT r) ts) | (c, ts) <- ctss ]
 substHT _ t@(HTAbstract _ _) = t
 
+-- Keep the prefix spelling `(->) a b` in the same canonical form as `a -> b`.
 hTApp :: HType -> HType -> HType
 hTApp (HTApp (HTCon "->") a) b = HTArrow a b
 hTApp a b = HTApp a b
@@ -206,11 +216,12 @@ data HExpr = HELam [HPat] HExpr | HEApply HExpr HExpr | HECon HSymbol | HEVar HS
     deriving (Show, Eq)
 
 hPrClause :: HClause -> String
-hPrClause c = renderStyle style $ ppClause 0 c
+hPrClause = renderStyle style . ppClause
 
-ppClause :: Int -> HClause -> Doc
-ppClause _p (HClause f ps e) = text (prHSymbolOp f) <+> sep [sep (map (ppPat 10) ps) <+> text "=",
-                                                                        nest 2 $ ppExpr 0 e]
+ppClause :: HClause -> Doc
+ppClause (HClause f ps e) =
+    text (prHSymbolOp f) <+>
+        sep [sep (map (ppPat 10) ps) <+> text "=", nest 2 $ ppExpr 0 e]
 
 prHSymbolOp :: HSymbol -> String
 prHSymbolOp s@(c:_) | not (isAlphaNum c) = "(" ++ s ++ ")"
@@ -249,7 +260,11 @@ unSymbol :: Symbol -> HSymbol
 unSymbol (Symbol s) = s
 
 termToHExpr :: Term -> HExpr
-termToHExpr term = niceNames $ etaReduce $ remUnusedVars $ collapeCase $ fixSillyAt $ remUnusedVars $ fst $ conv [] term
+termToHExpr term =
+    niceNames $ etaReduce $ remUnusedVars $ collapseCase $ fixSillyAt $
+        remUnusedVars $ fst $ conv [] term
+  -- Besides the expression, conversion records how enclosing variables are
+  -- decomposed.  convV later turns those refinements into tuple/as-patterns.
   where conv _vs (Var s) = (HEVar $ unSymbol s, [])
         conv vs (Lam s te) =
                 let hs = unSymbol s
@@ -268,7 +283,6 @@ termToHExpr term = niceNames $ etaReduce $ remUnusedVars $ collapeCase $ fixSill
         unTuple n e = error $ "unTuple: unimplemented " ++ show (n, e)
 
         unTupleP 0 _ = []
---      unTupleP 1 p = [p]
         unTupleP n (HPTuple ps) | length ps == n = ps
         unTupleP n p = error $ "unTupleP: unimplemented " ++ show (n, p)
 
@@ -276,8 +290,9 @@ termToHExpr term = niceNames $ etaReduce $ remUnusedVars $ collapeCase $ fixSill
         convAp vs (Ctuple n) as | length as == n =
                 let (es, sss) = unzip $ map (conv vs) as
                 in  (hETuple es, concat sss)
-        convAp vs (Ccases cds) (se : es) =
-                let (alts, ass) = unzip $ zipWith cAlt es cds
+        convAp vs (Ccases cds) (se : args) | length args >= numAlts =
+                let (handlers, rest) = splitAt numAlts args
+                    (alts, ass) = unzip $ zipWith cAlt handlers cds
                     cAlt (Lam v e) (ConsDesc c n) =
                         let hv = unSymbol v
                             (he, ss) = conv (hv : vs) e
@@ -287,18 +302,26 @@ termToHExpr term = niceNames $ etaReduce $ remUnusedVars $ collapeCase $ fixSill
                         in  ((foldl HPApply (HPCon c) ps, he), ss)
                     cAlt e _ = error $ "cAlt " ++ show e
                     (e', ess) = conv vs se
-                in  (hECase e' alts, ess ++ concat ass)
+                    (rest', rss) = unzip $ map (conv vs) rest
+                in  (foldl HEApply (hECase e' alts) rest',
+                     ess ++ concat ass ++ concat rss)
+          where numAlts = length cds
+        convAp _ (Ccases cds) args =
+                error $ "Ccases: expected a scrutinee and " ++ show (length cds) ++
+                        " alternatives, got " ++ show (length args) ++ " arguments"
         convAp vs (Csplit n) (b : a : as) =
                 let (hb, sb) = conv vs b
                     (a', sa) = conv vs a
                     (as', sss) = unzip $ map (conv vs) as
                     (ps, b') = unLam n hb
                     unLam 0 e = ([], e)
-                    unLam k (HELam ps0 e) | length ps0 >= n = let (ps1, ps2) = splitAt k ps0 in (ps1, hELam ps2 e)
-                    unLam k e = error $ "unLam: unimplemented" ++ show (k, e)
+                    unLam k (HELam ps0 e) | length ps0 >= k =
+                        let (ps1, ps2) = splitAt k ps0
+                        in  (ps1, hELam ps2 e)
+                    unLam k e = error $ "unLam: unimplemented " ++ show (k, e)
                 in  case a' of
                         HEVar v | v `elem` vs && null as -> (b', [(v, HPTuple ps)] ++ sb ++ sa)
-                        _ -> (foldr HEApply (hECase a' [(HPTuple ps, b')]) as',
+                        _ -> (foldl HEApply (hECase a' [(HPTuple ps, b')]) as',
                               sb ++ sa ++ concat sss)
 
         convAp vs f as =
@@ -314,12 +337,14 @@ termToHExpr term = niceNames $ etaReduce $ remUnusedVars $ collapeCase $ fixSill
         combPat p p' | p == p' = p
         combPat (HPVar v) p = HPAt v p
         combPat p (HPVar v) = HPAt v p
-        combPat (HPTuple ps) (HPTuple ps') = HPTuple (zipWith combPat ps ps')
+        combPat (HPTuple ps) (HPTuple ps') | length ps == length ps' =
+                HPTuple (zipWith combPat ps ps')
         combPat p p' = error $ "unimplemented combPat: " ++ show (p, p')
 
         hETuple [e] = e
         hETuple es = HETuple es
 
+-- Eliminate degenerate as-patterns such as x@y by retaining y and renaming x.
 -- XXX This should be integrated into some earlier phase, but this is simpler.
 fixSillyAt :: HExpr -> HExpr
 fixSillyAt = fixAt []
@@ -340,16 +365,16 @@ fixSillyAt = fixAt []
 
 -- XXX This shouldn't be needed.  There's similar code in hECase,
 -- but the fixSillyAt reveals new opportunities.
-collapeCase :: HExpr -> HExpr
-collapeCase (HELam ps e) = HELam ps (collapeCase e)
-collapeCase (HEApply f a) = HEApply (collapeCase f) (collapeCase a)
-collapeCase e@(HECon _) = e
-collapeCase e@(HEVar _) = e
-collapeCase (HETuple es) = HETuple (map collapeCase es)
-collapeCase (HECase e alts) =
-    case [(p, collapeCase b) | (p, b) <- alts ] of
+collapseCase :: HExpr -> HExpr
+collapseCase (HELam ps e) = HELam ps (collapseCase e)
+collapseCase (HEApply f a) = HEApply (collapseCase f) (collapseCase a)
+collapseCase e@(HECon _) = e
+collapseCase e@(HEVar _) = e
+collapseCase (HETuple es) = HETuple (map collapseCase es)
+collapseCase (HECase e alts) =
+    case [(p, collapseCase b) | (p, b) <- alts ] of
     (p, b) : pes | noBound p && all (\ (p', b') -> alphaEq b b' && noBound p') pes -> b
-    pes -> HECase (collapeCase e) pes
+    pes -> HECase (collapseCase e) pes
  where noBound = all (== "_") . getBinderVarsHP
 
 niceNames :: HExpr -> HExpr
@@ -377,7 +402,9 @@ hECase se alts@((_, HELam ops _):_) | m > 0 = HELam (take m ops) $ hECase se alt
         numBind _ = 0
         isPVar (HPVar _) = True
         isPVar _ = False
-        alts' = [ let (ps1, ps2) = splitAt m ps in (cps, hELam ps2 $ hESubst (zipWith (\ (HPVar v) n -> (v, n)) ps1 ns) e)
+        alts' = [ let (ps1, ps2) = splitAt m ps
+                      sub = zip [v | HPVar v <- ps1] ns
+                  in (cps, hELam ps2 $ hESubst sub e)
                   | (cps, HELam ps e) <- alts ]
         ns = [ n | HPVar n <- take m ops ]
 -- if all arms are equal and there are at least two alternatives there can be no bound vars
@@ -388,25 +415,29 @@ hECase e alts = HECase e alts
 eqPatExpr :: HPat -> HExpr -> Bool
 eqPatExpr (HPVar s) (HEVar s') = s == s'
 eqPatExpr (HPCon s) (HECon s') = s == s'
-eqPatExpr (HPTuple ps) (HETuple es) = and (zipWith eqPatExpr ps es)
+eqPatExpr (HPTuple ps) (HETuple es) =
+    length ps == length es && and (zipWith eqPatExpr ps es)
 eqPatExpr (HPApply pf pa) (HEApply ef ea) = eqPatExpr pf ef && eqPatExpr pa ea
 eqPatExpr _ _ = False
 
+-- Converter-generated binders are globally fresh, so this simultaneous rename
+-- is capture-free even though hESubst is deliberately simpler than a general
+-- capture-avoiding substitution.
 alphaEq :: HExpr -> HExpr -> Bool
 alphaEq e1 e2 | e1 == e2 = True
 alphaEq (HELam ps1 e1) (HELam ps2 e2) =
-    Nothing /= do
-        s <- matchPat (HPTuple ps1) (HPTuple ps2)
-        if alphaEq (hESubst s e1) e2 then
-            return ()
-         else
-            Nothing
+    case matchPat (HPTuple ps1) (HPTuple ps2) of
+    Just s -> alphaEq (hESubst s e1) e2
+    Nothing -> False
 alphaEq (HEApply f1 a1) (HEApply f2 a2) = alphaEq f1 f2 && alphaEq a1 a2
 alphaEq (HECon s1) (HECon s2) = s1 == s2
 alphaEq (HEVar s1) (HEVar s2) = s1 == s2
 alphaEq (HETuple es1) (HETuple es2) | length es1 == length es2 = and (zipWith alphaEq es1 es2)
 alphaEq (HECase e1 alts1) (HECase e2 alts2) =
-    alphaEq e1 e2 && and (zipWith alphaEq [ HELam [p] e | (p, e) <- alts1 ] [ HELam [p] e | (p, e) <- alts2 ])
+    length alts1 == length alts2 && alphaEq e1 e2 &&
+        and (zipWith alphaEq
+            [ HELam [p] e | (p, e) <- alts1 ]
+            [ HELam [p] e | (p, e) <- alts2 ])
 alphaEq _ _ = False
 
 matchPat :: HPat -> HPat -> Maybe [(HSymbol, HSymbol)]
@@ -448,6 +479,9 @@ termToHClause i term =
 
 remUnusedVars :: HExpr -> HExpr
 remUnusedVars expr = fst $ remE expr
+  -- The auxiliary lists contain every referenced name, including locally bound
+  -- ones.  Converter-generated names are globally unique, so an enclosing
+  -- pattern can use the list directly to decide which binders are unused.
   where remE (HELam ps e) =
             let (e', vs) = remE e
             in  (HELam (map (remP vs) ps) e', vs)
@@ -478,29 +512,29 @@ getBinderVars :: HClause -> [HSymbol]
 getBinderVars (HClause _ pats expr) = concatMap getBinderVarsHP pats ++ getBinderVarsHE expr
 
 getBinderVarsHE :: HExpr -> [HSymbol]
-getBinderVarsHE expr = gbExp expr
-  where gbExp (HELam ps e) = concatMap getBinderVarsHP ps ++ gbExp e
-        gbExp (HEApply f a) = gbExp f ++ gbExp a
-        gbExp (HETuple es) = concatMap gbExp es
-        gbExp (HECase se alts) = gbExp se ++ concatMap (\ (p, e) -> getBinderVarsHP p ++ gbExp e) alts
-        gbExp _ = []
+getBinderVarsHE (HELam ps e) = concatMap getBinderVarsHP ps ++ getBinderVarsHE e
+getBinderVarsHE (HEApply f a) = getBinderVarsHE f ++ getBinderVarsHE a
+getBinderVarsHE (HETuple es) = concatMap getBinderVarsHE es
+getBinderVarsHE (HECase se alts) =
+    getBinderVarsHE se ++
+        concatMap (\ (p, e) -> getBinderVarsHP p ++ getBinderVarsHE e) alts
+getBinderVarsHE _ = []
 
 getBinderVarsHP :: HPat -> [HSymbol]
-getBinderVarsHP pat = gbPat pat
-  where gbPat (HPVar s) = [s]
-        gbPat (HPCon _) = []
-        gbPat (HPTuple ps) = concatMap gbPat ps
-        gbPat (HPAt s p) = s : gbPat p
-        gbPat (HPApply f a) = gbPat f ++ gbPat a
+getBinderVarsHP (HPVar s) = [s]
+getBinderVarsHP (HPCon _) = []
+getBinderVarsHP (HPTuple ps) = concatMap getBinderVarsHP ps
+getBinderVarsHP (HPAt s p) = s : getBinderVarsHP p
+getBinderVarsHP (HPApply f a) = getBinderVarsHP f ++ getBinderVarsHP a
 
 getAllVars :: HExpr -> [HSymbol]
-getAllVars expr = gaExp expr
-  where gaExp (HELam _ps e) = gaExp e
-        gaExp (HEApply f a) = gaExp f `union` gaExp a
-        gaExp (HETuple es) = foldr union [] (map gaExp es)
-        gaExp (HECase se alts) = foldr union (gaExp se) (map (\ (_p, e) -> gaExp e) alts)
-        gaExp (HEVar s) = [s]
-        gaExp _ = []
+getAllVars (HELam _ e) = getAllVars e
+getAllVars (HEApply f a) = getAllVars f `union` getAllVars a
+getAllVars (HETuple es) = foldr union [] (map getAllVars es)
+getAllVars (HECase se alts) =
+    foldr union (getAllVars se) [ getAllVars e | (_, e) <- alts ]
+getAllVars (HEVar s) = [s]
+getAllVars _ = []
 
 etaReduce :: HExpr -> HExpr
 etaReduce expr = fst $ eta expr

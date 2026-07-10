@@ -1,0 +1,242 @@
+module Main (main) where
+
+import Control.Exception (SomeException, displayException, try)
+import Control.Monad (unless)
+import Data.List (isInfixOf, isSuffixOf)
+import System.Exit (exitFailure)
+import Text.Read (readMaybe)
+
+import HCheck (htCheckEnv, htCheckType)
+import HTypes
+import LJT
+
+type Test = (String, IO ())
+
+main :: IO ()
+main = do
+    failures <- concat <$> mapM runTest tests
+    unless (null failures) $ do
+        putStrLn ""
+        putStrLn $ show (length failures) ++ " test(s) failed:"
+        mapM_ (putStrLn . ("  - " ++)) failures
+        exitFailure
+
+runTest :: Test -> IO [String]
+runTest (name, action) = do
+    result <- try action :: IO (Either SomeException ())
+    case result of
+        Right () -> do
+            putStrLn $ "PASS  " ++ name
+            return []
+        Left exception -> do
+            let failure = name ++ ": " ++ displayException exception
+            putStrLn $ "FAIL  " ++ failure
+            return [failure]
+
+tests :: [Test]
+tests =
+    [ ("parse prefix function constructor", testPrefixArrowParsing)
+    , ("kind-check intrinsic list syntax", testIntrinsicListKind)
+    , ("render canonical units and kinds", testCanonicalRendering)
+    , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
+    , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
+    , ("reject a higher-kinded synonym body", testHigherKindedSynonymBody)
+    , ("prove intuitionistic tautologies", testProvableBasics)
+    , ("reject non-theorems", testNonTheorems)
+    , ("use an assumption as its named proof", testNamedAssumption)
+    , ("do not capture a caller-supplied proof symbol", testCallerSymbolCapture)
+    , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
+    , ("preserve residual application after Csplit", testCsplitResidualArguments)
+    , ("preserve residual application after Ccases", testCcasesResidualArguments)
+    ]
+
+testPrefixArrowParsing :: IO ()
+testPrefixArrowParsing = do
+    let expected = HTArrow (HTVar "a") (HTVar "b")
+        parsed = readMaybe "(->) a b"
+    assertEqual "prefix and infix arrows should have one representation"
+        (Just expected) parsed
+    assertEqual "the canonical rendering should use infix arrow syntax"
+        "a -> b" (show expected)
+
+testIntrinsicListKind :: IO ()
+testIntrinsicListKind = do
+    let listOfA = HTApp (HTCon "[]") (HTVar "a")
+    assertEqual "list syntax should parse to the intrinsic [] constructor"
+        (Just listOfA) (readMaybe "[a]")
+    assertEqual "the intrinsic list constructor should render canonically"
+        "[a]" (show listOfA)
+    assertEqual "a list type should kind-check without an environment declaration"
+        (Right ()) (htCheckType [] $ HTArrow listOfA listOfA)
+
+testCanonicalRendering :: IO ()
+testCanonicalRendering = do
+    assertEqual "unit should not acquire an extra pair of parentheses"
+        "()" (show $ HTCon "()")
+    assertEqual "kinds should use the syntax accepted by the parser"
+        "(* -> *) -> * -> *"
+        (show $ KArrow (KArrow KStar KStar) (KArrow KStar KStar))
+
+-- Grounding must recursively eliminate every unification variable.  Foo's
+-- inferred kind is reused after kind inference has reset its local IntMap;
+-- leaving a KVar behind used to make this second check crash at IntMap.!
+testHigherKindedGrounding :: IO ()
+testHigherKindedGrounding = do
+    checked <- checkedKindEnvironment
+    let expectedFooKind = KArrow (KArrow KStar KStar) (KArrow KStar KStar)
+        actualFooKind = lookup "Foo"
+            [(name, kind) | (name, (_, _, kind)) <- checked]
+        fooMaybeBool = HTApp (HTApp (HTCon "Foo") (HTCon "Maybe")) (HTCon "Bool")
+    assertEqual "Foo f a = f a has kind (* -> *) -> * -> *"
+        (Just expectedFooKind) actualFooKind
+    assertEqual "a grounded higher kind remains usable in a later check"
+        (Right ()) (htCheckType checked (HTArrow fooMaybeBool fooMaybeBool))
+
+testIllKindedApplication :: IO ()
+testIllKindedApplication = do
+    checked <- checkedKindEnvironment
+    let fooBoolBool = HTApp (HTApp (HTCon "Foo") (HTCon "Bool")) (HTCon "Bool")
+    assertLeft "Foo's first argument must have kind * -> *"
+        (htCheckType checked fooBoolBool)
+
+testHigherKindedSynonymBody :: IO ()
+testHigherKindedSynonymBody =
+    assertLeft "an ordinary synonym body must have result kind *"
+        (htCheckEnv
+            [("Endo", (["a"], HTApp (HTCon "->") (HTVar "a"), ()))])
+
+checkedKindEnvironment :: IO [(HSymbol, ([HSymbol], HType, HKind))]
+checkedKindEnvironment =
+    case htCheckEnv kindDefinitions of
+        Left message -> fail $ "kind environment was rejected: " ++ message
+        Right checked -> return checked
+
+kindDefinitions :: [(HSymbol, ([HSymbol], HType, ()))]
+kindDefinitions =
+    [ ( "Foo"
+      , (["f", "a"], HTApp (HTVar "f") (HTVar "a"), ())
+      )
+    , ( "Maybe"
+      , ( ["a"]
+        , HTUnion [("Nothing", []), ("Just", [HTVar "a"])]
+        , ()
+        )
+      )
+    , ( "Bool"
+      , ([], HTUnion [("False", []), ("True", [])], ())
+      )
+    ]
+
+testProvableBasics :: IO ()
+testProvableBasics =
+    mapM_ (uncurry assertTrue)
+        [ ("identity", atomA :-> atomA)
+        , ("conjunction commutes", (atomA & atomB) :-> (atomB & atomA))
+        , ("a value injects into a disjunction", atomA :-> (atomA |: atomB))
+        , ("false eliminates", false :-> atomA)
+        ]
+  where
+    assertTrue name formula = assertBool name (provable formula)
+
+testNonTheorems :: IO ()
+testNonTheorems =
+    mapM_ (uncurry assertFalse)
+        [ ("an unconstrained atom", atomA)
+        , ("Peirce's law is not intuitionistic", ((atomA :-> atomB) :-> atomA) :-> atomA)
+        ]
+  where
+    assertFalse name formula = assertBool name (not $ provable formula)
+
+testNamedAssumption :: IO ()
+testNamedAssumption = do
+    let assumption = Symbol "givenA"
+    assertEqual "proof search should preserve the assumption's term symbol"
+        [Var assumption] (prove False [(assumption, atomA)] atomA)
+
+-- The generated binder for b must not reuse x2.  Reuse changed the intended
+-- constant function into the ill-typed identity `f a = a` during rendering.
+testCallerSymbolCapture :: IO ()
+testCallerSymbolCapture = do
+    let caller = Symbol "x2"
+        proofs = prove False [(caller, atomA)] (atomB :-> atomA)
+    case proofs of
+        [] -> fail "expected b -> a to be realizable from x2 :: a"
+        proof : _ ->
+            assertEqual "the rendered proof must refer to the caller's x2"
+                "f _ = x2" (hPrClause $ termToHClause "f" proof)
+
+-- The continuation atom introduced while proving a disjunction lives in the
+-- same Symbol namespace as caller formula atoms.  `_2` in the environment is
+-- unrelated to a or b and must not accidentally make their disjunction true.
+testContinuationAtomCapture :: IO ()
+testContinuationAtomCapture =
+    assertEqual "an unrelated _2 assumption cannot prove a | b"
+        [] (prove False [(Symbol "u", PVar $ Symbol "_2")] (atomA |: atomB))
+
+testCsplitResidualArguments :: IO ()
+testCsplitResidualArguments = do
+    let left = Symbol "left"
+        right = Symbol "right"
+        handler = Lam left $ Lam right $
+            applys (Var $ Symbol "combine") [Var left, Var right]
+        term = applys (Csplit 2)
+            [ handler
+            , Var $ Symbol "pair"
+            , Var $ Symbol "arg1"
+            , Var $ Symbol "arg2"
+            ]
+        rendered = hPrClause $ termToHClause "f" term
+    assertContains "Csplit should still render its tuple case" "case pair of" rendered
+    assertWordsSuffix "Csplit residual arguments must retain left-to-right order"
+        ["arg1", "arg2"] rendered
+
+testCcasesResidualArguments :: IO ()
+testCcasesResidualArguments = do
+    let leftConstructor = ConsDesc "LeftC" 1
+        rightConstructor = ConsDesc "RightC" 1
+        left = Symbol "leftPayload"
+        right = Symbol "rightPayload"
+        leftHandler = Lam left $ Apply (Var $ Symbol "onLeft") (Var left)
+        rightHandler = Lam right $ Apply (Var $ Symbol "onRight") (Var right)
+        term = applys (Ccases [leftConstructor, rightConstructor])
+            [ Var $ Symbol "choice"
+            , leftHandler
+            , rightHandler
+            , Var $ Symbol "arg1"
+            , Var $ Symbol "arg2"
+            ]
+        rendered = hPrClause $ termToHClause "f" term
+    assertContains "Ccases should still render its scrutiny" "case choice of" rendered
+    assertContains "Ccases should retain its first alternative" "LeftC" rendered
+    assertContains "Ccases should retain its second alternative" "RightC" rendered
+    assertWordsSuffix "Ccases residual arguments must not be dropped or reordered"
+        ["arg1", "arg2"] rendered
+
+atomA :: Formula
+atomA = PVar $ Symbol "a"
+
+atomB :: Formula
+atomB = PVar $ Symbol "b"
+
+assertEqual :: (Eq a, Show a) => String -> a -> a -> IO ()
+assertEqual message expected actual =
+    unless (expected == actual) $
+        fail $ message ++ ": expected " ++ show expected ++ ", got " ++ show actual
+
+assertBool :: String -> Bool -> IO ()
+assertBool message condition = unless condition $ fail message
+
+assertLeft :: Show a => String -> Either String a -> IO ()
+assertLeft _ (Left _) = return ()
+assertLeft message (Right value) =
+    fail $ message ++ ": expected an error, got " ++ show value
+
+assertContains :: String -> String -> String -> IO ()
+assertContains message needle haystack =
+    assertBool (message ++ ": " ++ show needle ++ " not found in " ++ show haystack)
+        (needle `isInfixOf` haystack)
+
+assertWordsSuffix :: String -> [String] -> String -> IO ()
+assertWordsSuffix message suffix rendered =
+    assertBool (message ++ ": got " ++ show rendered)
+        (suffix `isSuffixOf` words rendered)

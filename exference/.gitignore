@@ -1,0 +1,12 @@
+*.prof
+*.aux
+*.eventlog
+*.hp
+*.ps
+dist
+.cabal-sandbox/
+cabal.sandbox.config
+**/*.gui~
+\#*.gui\#
+Main
+.stack-work

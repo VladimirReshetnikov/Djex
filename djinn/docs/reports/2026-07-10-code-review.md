@@ -565,21 +565,29 @@ error statuses.
 
 ## Validation performed
 
-The final validation set includes:
+The original review and R-01 through R-06 follow-up were finally revalidated
+from a new build directory with:
 
 ```text
-cabal build all --builddir=dist-final
-cabal test all --builddir=dist-final --test-show-details=direct
+cabal build all --builddir=dist-completion-audit
+cabal test all --builddir=dist-completion-audit --test-show-details=direct
 cabal check
-cabal sdist --builddir=dist-final
+cabal sdist --builddir=dist-completion-audit
 git diff --check
 ```
 
-All source and test targets compile with `-Wall -Wcompat`. Manual CLI checks
-covered identity, tuples, list and prefix-arrow syntax, higher-kinded reuse,
-caller-name freshness, invalid cutoff, context arity, zero-parameter classes,
-invalid `data T =`, missing files, verbose help, quit, and EOF. The source
-distribution includes the license, README, report, sources, and tests.
+All source and test targets compile with `-Wall -Wcompat` and no warnings; all 21
+named regression groups pass. `cabal check` reports no errors or warnings. The
+source distribution contains the license, README, report, tests, and all new
+modules (`Environment`, `HIdentifier`, `ProofCheck`, and `ProofEnv`).
+
+The final CLI matrix additionally verified that a same-named assumption is
+diagnosed instead of emitted recursively, a safe fallback is retained, same-type
+empty identity differs from cross-empty elimination, invalid deletion preserves
+a dependent synonym, qualified external assumptions and underscore targets
+render correctly, and reserved or malformed names fail to parse. Earlier manual
+checks also covered tuples, lists, prefix arrows, higher-kinded reuse, cutoff,
+contexts, zero-parameter classes, file errors, verbose help, quit, and EOF.
 
 ## Conclusion
 

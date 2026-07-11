@@ -27,7 +27,9 @@ testHelp = do
 testIdentity :: Assertion
 testIdentity = do
   output <- runExference ["--first", "a -> a"]
-  assertContains "identity should be synthesized" "id" output
+  -- The environment-free simplifier deliberately keeps the checked lambda
+  -- instead of assuming that an unqualified Prelude.id is available.
+  assertContains "identity should be synthesized" "\\ a -> a" output
   assertBool "a valid query must not be rejected during input validation"
     (not $ "invalid search input" `isInfixOf` output)
 

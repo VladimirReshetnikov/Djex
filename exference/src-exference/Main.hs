@@ -24,7 +24,6 @@ import Language.Haskell.Exference.EnvironmentParser
 
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Name as SharedName
-import Language.Haskell.Exference.Core.ExpressionSimplify
 
 import Control.Monad ( when, forM_ )
 import Data.List ( sortBy, intercalate, nub )
@@ -205,7 +204,7 @@ main = do
                         then lift $ putStrLn "[no results]"
                         else forM_ rs
                           $ \(e, constrs, ExferenceStats n d m) -> do
-                            let hsE = convert qualification $ simplifyExpression e
+                            let hsE = convert qualification e
                             lift $ putStrLn $ prettyPrint hsE
                             when (not $ null constrs) $ do
                               let constrStrs = map (showHsConstraint tVarIndex)
@@ -238,7 +237,7 @@ main = do
                       case r :: [ExferenceOutputElement] of
                         [] -> lift $ putStrLn "[no results]"
                         rs -> rs `forM_` \(e, constrs, ExferenceStats n d m) -> do
-                            let hsE = convert qualification $ simplifyExpression e
+                            let hsE = convert qualification e
                             lift $ putStrLn $ prettyPrint hsE
                             when (not $ null constrs) $ do
                               let constrStrs = map (showHsConstraint tVarIndex)

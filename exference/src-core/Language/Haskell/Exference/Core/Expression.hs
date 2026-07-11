@@ -1,14 +1,11 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DataKinds #-}
 
 module Language.Haskell.Exference.Core.Expression
   ( Expression (..)
   , showExpression
   , fillExprHole
   , collectVarTypes
+  , allocateVariableNames
   )
 where
 
@@ -16,8 +13,9 @@ where
 
 import Language.Haskell.Exference.Core.Types
 import Data.List ( intercalate )
-import Control.Monad ( forM, forM_ )
-import Data.Functor.Identity ( runIdentity )
+import qualified Data.List as L
+import Data.Maybe ( maybeToList )
+import Control.Monad ( forM_ )
 
 import Control.DeepSeq
 import GHC.Generics
@@ -27,6 +25,8 @@ import Control.Monad.Trans.MultiRWS
 -- import Debug.Hood.Observe
 import Data.Map ( Map )
 import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 
 
@@ -120,76 +120,132 @@ collectVarTypes (ExpCaseMatch se matches) = do
     vars `forM_` uncurry refreshVarTypeBinding
     collectVarTypes me
 
-showExpression :: Expression -> String
-showExpression e = runIdentity
-                 $ runMultiRWSTNil
-                 $ withMultiStateA (M.empty :: Map TVarId HsType)
-                 $ [ shs ""
-                   | _ <- collectVarTypes e
-                   , shs <- h 0 e
-                   ]
+-- | Allocate one stable Haskell binder spelling per variable identity.
+--
+-- Type-derived names are preferences, not identities: two different IDs can
+-- both suggest @t6@, and an emitted global may already use the same spelling.
+-- The caller describes which global names will be emitted unqualified under
+-- its rendering policy and may reserve additional names (for example, a
+-- generated top-level function).  Apostrophes preserve readability while
+-- remaining legal identifier continuations.
+allocateVariableNames
+  :: (QualifiedName -> Maybe String)
+  -> S.Set String
+  -> Expression
+  -> M.Map TVarId String
+allocateVariableNames emittedIdentifier initiallyReserved expression = names
  where
-  h :: Int -> Expression -> MultiRWS r w (Map TVarId HsType ': s) ShowS
-  h _ (ExpVar i _) = showString <$> showTypedVar i
-  h _ (ExpName s)  = return $ shows s
+  observations = variableObservations expression
+  variableTypes = L.foldl' recordType M.empty observations
+  reservedGlobals = S.fromList
+    [ spelling
+    | global <- expressionGlobals expression
+    , spelling <- maybeToList $ emittedIdentifier global
+    ]
+  (names, _) = L.foldl' allocate
+    (M.empty, initiallyReserved `S.union` reservedGlobals)
+    $ map fst observations
+
+  recordType types (variable, ty) = M.alter update variable types
+    where
+      update Nothing = Just ty
+      update (Just TypeVar{}) = Just ty
+      update (Just TypeConstant{}) = Just ty
+      update existing = existing
+
+  allocate state@(allocated, used) variable
+    | M.member variable allocated = state
+    | otherwise =
+        (M.insert variable chosen allocated, S.insert chosen used)
+    where
+      preferred = maybe (showVar variable) (preferredVarName variable)
+        $ M.lookup variable variableTypes
+      chosen = freshName used preferred
+
+  freshName used candidate
+    | candidate `S.member` used = freshName used $ candidate ++ "'"
+    | otherwise = candidate
+
+variableObservations :: Expression -> [(TVarId, HsType)]
+variableObservations (ExpVar variable ty) = [(variable, ty)]
+variableObservations ExpName{} = []
+variableObservations (ExpLambda variable ty body) =
+  (variable, ty) : variableObservations body
+variableObservations (ExpApply function argument) =
+  variableObservations function ++ variableObservations argument
+variableObservations ExpHole{} = []
+variableObservations (ExpLetMatch _ variables binding body) =
+  variables ++ variableObservations binding ++ variableObservations body
+variableObservations (ExpLet variable ty binding body) =
+  (variable, ty) : variableObservations binding ++ variableObservations body
+variableObservations (ExpCaseMatch scrutinee alternatives) =
+  variableObservations scrutinee
+  ++ concat
+    [ variables ++ variableObservations body
+    | (_, variables, body) <- alternatives
+    ]
+
+expressionGlobals :: Expression -> [QualifiedName]
+expressionGlobals ExpVar{} = []
+expressionGlobals (ExpName name) = [name]
+expressionGlobals (ExpLambda _ _ body) = expressionGlobals body
+expressionGlobals (ExpApply function argument) =
+  expressionGlobals function ++ expressionGlobals argument
+expressionGlobals ExpHole{} = []
+expressionGlobals (ExpLetMatch constructor _ binding body) =
+  constructor : expressionGlobals binding ++ expressionGlobals body
+expressionGlobals (ExpLet _ _ binding body) =
+  expressionGlobals binding ++ expressionGlobals body
+expressionGlobals (ExpCaseMatch scrutinee alternatives) =
+  expressionGlobals scrutinee
+  ++ concat
+    [ constructor : expressionGlobals body
+    | (constructor, _, body) <- alternatives
+    ]
+
+showExpression :: Expression -> String
+showExpression expression = h 0 expression ""
+ where
+  variableNames = allocateVariableNames textualIdentifier S.empty expression
+  variableName variable = M.findWithDefault (showVar variable) variable variableNames
+  textualIdentifier name = case qualifiedNameModule name of
+    Nothing -> SharedName.nameIdentifier $ toSynthesisName name
+    Just _ -> Nothing
+
+  h :: Int -> Expression -> ShowS
+  h _ (ExpVar i _) = showString $ variableName i
+  h _ (ExpName s)  = shows s
   h d (ExpLambda i _ e1) =
-    [ showParen (d>0) $ showString ("\\" ++ vname ++ " -> ") . eShows
-    | eShows <- h 1 e1
-    , vname <- showTypedVar i
-    ]
+    showParen (d>0) $ showString ("\\" ++ variableName i ++ " -> ") . h 1 e1
   h d (ExpApply e1 e2) =
-    [ showParen (d>1) $ e1Shows . showString " " . e2Shows
-    | e1Shows <- h 2 e1
-    , e2Shows <- h 3 e2
-    ]    
-  h _ (ExpHole i) = return $ showString $ "_" ++ showVar i
+    showParen (d>1) $ h 2 e1 . showString " " . h 3 e2
+  h _ (ExpHole i) = showString $ "_" ++ showVar i
   h d (ExpLetMatch n vars bindExp inExp) =
-    [ showParen (d>2)
+    showParen (d>2)
     $ showString ("let ("
-                  ++nStr
+                  ++ show n
                   ++" "
-                  ++intercalate " " varNames
+                  ++ intercalate " " (map (variableName . fst) vars)
                   ++ ") = ")
-    . bindShows . showString " in " . inShows
-    | bindShows <- h 0 bindExp
-    , inShows   <- h 0 inExp
-    , let nStr = show n
-    , varNames  <- mapM (showTypedVar . fst) vars
-    ]
-      
+    . h 0 bindExp . showString " in " . h 0 inExp
   h d (ExpLet i _ bindExp inExp) =
-    [ showParen (d>2)
-    $ showString ("let " ++ varName ++ " = ")
-    . bindShows
+    showParen (d>2)
+    $ showString ("let " ++ variableName i ++ " = ")
+    . h 3 bindExp
     . showString " in "
-    . inShows
-    | bindShows <- h 3 bindExp
-    , inShows <- h 0 inExp
-    , varName <- showTypedVar i
-    ]
+    . h 0 inExp
   h d (ExpCaseMatch bindExp alts) =
-    [ showParen (d>2)
+    showParen (d>2)
     $ showString "case "
-    . bindShows
+    . h 3 bindExp
     . showString " of { "
-    . ( \s -> intercalate "; "
-           (map (\(cons, varNames, expr) ->
-              cons ""++" "++intercalate " " varNames++" -> "
-              ++expr "")
-            altsShows)
-         ++ s
-      )
+    . showString (intercalate "; " $ map showAlternative alts)
     . showString " }"
-    | bindShows <- h 3 bindExp
-    , altsShows <- alts `forM` \(cons, vars, expr) ->
-        [ ( shows cons
-          , varNames
-          , exprShows
-          )
-        | exprShows <- h 3 expr
-        , varNames <- mapM (showTypedVar . fst) vars
-        ]
-    ]
+    where
+      showAlternative (constructor, variables, body) =
+        show constructor ++ " "
+        ++ intercalate " " (map (variableName . fst) variables)
+        ++ " -> " ++ h 3 body ""
 
 -- instance Observable Expression where
 --   observer x = observeOpaque (show x) x

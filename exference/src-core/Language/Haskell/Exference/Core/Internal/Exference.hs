@@ -29,6 +29,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.ExpressionCheck
+import Language.Haskell.Exference.Core.ExpressionSimplify
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -227,8 +228,9 @@ findExpressions (ExferenceInput rawType
         -- if allowUnused, there may be unused variables in the
         -- output. Otherwise the solution is discarded.
       , allowUnused || unusedVarCount==0
-      , let e = view expression solution
-      , Right () <- [checkExpression contxt funcs deconss' t remainingConstraints e]
+      , rawExpression <- [view expression solution]
+      , e <- maybeToList $ checkedSimplification
+          contxt remainingConstraints rawExpression
       , let d = view depth solution
               + ( heuristics_unusedVar heuristics
                 * fromIntegral unusedVarCount
@@ -242,6 +244,22 @@ findExpressions (ExferenceInput rawType
         | Q.null newNodes = SearchExhausted
         | n' >= maxSteps = SearchStepLimitReached
         | otherwise = SearchRunning
+      -- Validate the exact tree returned to callers.  This used to check the
+      -- raw search result and let the CLI rewrite it afterwards, so a
+      -- simplifier bug could invalidate an already-approved candidate.  The
+      -- raw term remains a safe fallback, but it too must pass independently.
+      checkedSimplification contxt constraints rawExpression =
+        firstChecked candidates
+       where
+        simplified = simplifyExpression rawExpression
+        candidates
+          | simplified == rawExpression = [rawExpression]
+          | otherwise = [simplified, rawExpression]
+        firstChecked [] = Nothing
+        firstChecked (candidate : remainingCandidates) =
+          case checkExpression contxt funcs deconss' t constraints candidate of
+            Right () -> Just candidate
+            Left _ -> firstChecked remainingCandidates
   helper :: FindExpressionsState -> Maybe (ExferenceChunkElement, FindExpressionsState)
   helper state | view n state >= maxSteps = Nothing
   helper state = runStateT (do

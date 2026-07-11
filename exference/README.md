@@ -51,6 +51,12 @@ and boxed tuples can no longer be confused by rendered spelling.  The legacy
 code can use checked smart constructors.  Unqualified frontend lookup now
 rejects ambiguous imported type names instead of silently choosing the first.
 
+Completed candidates are simplified inside the core and the exact transformed
+tree is independently type-checked before it is returned.  Simplification is
+environment-free and never invents globals such as `id` or `(.)`.  Both the
+text and Haskell-AST renderers allocate names by variable identity, avoiding
+binder collisions and globals that will be emitted unqualified.
+
 The `exference` executable is a normal build target again. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been
 removed; deterministic regressions live in `exference-tests` and the separate

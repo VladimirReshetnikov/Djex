@@ -13,11 +13,14 @@ import Data.Function ( on )
 
 
 simplifyExpression :: Expression -> Expression
-simplifyExpression = simplifyId . simplifyCompose . simplifyEta . simplifyLets
+simplifyExpression = simplifyEta . simplifyLets
 
 -- The rewrites below rely on the search engine's global-variable-ID invariant:
 -- every binder receives a distinct ID. They also use Exference's total-term
 -- model, under which removing an unused let binding preserves semantics.
+-- They deliberately never introduce a global name: an environment-free
+-- simplifier cannot assume that Prelude.id or (.) is in scope, unshadowed, or
+-- has its standard type.
 
 simplifyLets :: Expression -> Expression
 simplifyLets e@ExpVar{}       = e
@@ -55,70 +58,6 @@ simplifyEta' :: Expression -> Expression
 simplifyEta' (ExpLambda i _ (ExpApply e1 (ExpVar j _)))
   | i==j && 0==countUses i e1 = e1
 simplifyEta' e = e
-
-
-simplifyId :: Expression -> Expression
-simplifyId e@ExpVar{}                 = e
-simplifyId e@ExpName{}                = e
-simplifyId e@(ExpLambda i _ (ExpVar j _))
-  | i == j                            = case mkQualifiedName [] "id" of
-      Right identityName -> ExpName identityName
-      -- This branch is unreachable for the fixed literal, but keeping the
-      -- checked construction total makes the invariant explicit.
-      Left _ -> e
-  | otherwise                         = e
-simplifyId (ExpLambda i ty e)         = ExpLambda i ty $ simplifyId e
-simplifyId (ExpApply e1 e2)           = ExpApply (simplifyId e1) (simplifyId e2)
-simplifyId e@ExpHole{}                = e
-simplifyId (ExpLetMatch name vids bindExp inExp)
-                                      = ExpLetMatch name
-                                                    vids
-                                                    (simplifyId bindExp)
-                                                    (simplifyId inExp)
-simplifyId (ExpLet i ty bindExp inExp)   =
-  ExpLet i ty (simplifyId bindExp) (simplifyId inExp)
-simplifyId (ExpCaseMatch bindExp alts) =
-  ExpCaseMatch (simplifyId bindExp) [ (c, vars, simplifyId expr)
-                                    | (c, vars, expr) <- alts
-                                    ]
-
-simplifyCompose :: Expression -> Expression
-simplifyCompose e@ExpVar{}         = e
-simplifyCompose e@ExpName{}        = e
-simplifyCompose (ExpLambda i ty e) = simplifyCompose' i ty [] e
-simplifyCompose (ExpApply e1 e2)   = ExpApply (simplifyCompose e1) (simplifyCompose e2)
-simplifyCompose e@ExpHole{}        = e
-simplifyCompose (ExpLetMatch name vids bindExp inExp)
-                                 = ExpLetMatch name
-                                               vids
-                                               (simplifyCompose bindExp)
-                                               (simplifyCompose inExp)
-simplifyCompose (ExpLet i ty bindExp inExp)
-                                 = ExpLet i
-                                          ty
-                                          (simplifyCompose bindExp)
-                                          (simplifyCompose inExp)
-simplifyCompose (ExpCaseMatch bindExp alts)
-                                 = ExpCaseMatch
-                                     (simplifyCompose bindExp)
-                                     [ (c, vars, simplifyCompose expr)
-                                     | (c, vars, expr) <- alts
-                                     ]
-
-simplifyCompose' :: Int -> HsType -> [Expression] -> Expression -> Expression
-simplifyCompose' i ty [] e@ExpVar{} = ExpLambda i ty e
-simplifyCompose' i ty l e@(ExpVar j _)
-  | i == j    = case mkQualifiedName [] "." of
-      Right compositionName ->
-        foldl1 (\e1 e2 -> ExpApply
-                            (ExpApply (ExpName compositionName) e2) e1)
-          l
-      Left _ -> ExpLambda i ty $ foldl (flip ExpApply) e l
-  | otherwise = ExpLambda i ty $ foldl (flip ExpApply) e l
-simplifyCompose' i ty l (ExpApply e1 e2)
-  | countUses i e1==0 = simplifyCompose' i ty (simplifyCompose e1:l) e2
-simplifyCompose' i ty l e = ExpLambda i ty
-                          $ foldl (flip ExpApply) (simplifyCompose e) l
 
 replaceVar :: TVarId -> Expression -> Expression -> Expression
 replaceVar vid t orig@(ExpVar j _) | vid==j = t

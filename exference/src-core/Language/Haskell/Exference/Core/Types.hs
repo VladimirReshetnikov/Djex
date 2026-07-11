@@ -26,6 +26,7 @@ module Language.Haskell.Exference.Core.Types
   -- , typeParser
   , containsVar
   , showVar
+  , preferredVarName
   , showTypedVar
   , mkQueryClassEnv
   , addQueryClassEnv
@@ -271,24 +272,15 @@ showVar 0 = "v0"
 showVar i | i<27      = [chr (ord 'a' + i - 1)]
           | otherwise = "t"++show (i-27)
 
-showTypedVar :: forall m
-              . ( MonadMultiState (M.Map TVarId HsType) m )
-             => TVarId
-             -> m String
-showTypedVar i = do
-  m <- mGet
-  case M.lookup i m of
-    -- Prefer the stable generic spelling when a renderer is used directly
-    -- without the optional type-collection pass.  The old implementation
-    -- raised an exception here through Safe.fromJustNote, even though the
-    -- variable ID alone is enough to produce a legal binder.
-    Nothing -> return $ showVar i
-    Just ty -> h ty
+-- | Suggest a readable binder spelling from its type.  This is only a
+-- preference: a renderer must still allocate a fresh name because distinct
+-- variable IDs can have the same suggestion and globals may use it too.
+preferredVarName :: TVarId -> HsType -> String
+preferredVarName i = h
  where
-  -- h t | traceShow (i, t) False = undefined
-  h TypeVar{}          = return $ showVar i
-  h TypeConstant{}     = return $ showVar i
-  h (TypeCons qName) = return $ case qualifiedNameOccurrence qName of
+  h TypeVar{}          = showVar i
+  h TypeConstant{}     = showVar i
+  h (TypeCons qName) = case qualifiedNameOccurrence qName of
     SharedName.IdentifierOccurrence _ (c : _) -> toLower c : show i
     SharedName.IdentifierOccurrence _ [] -> showVar i
     -- A symbolic type constructor has no identifier stem from which to form a
@@ -296,9 +288,19 @@ showTypedVar i = do
     SharedName.OperatorOccurrence _ _ -> showVar i
     SharedName.SpecialOccurrence SharedName.ListConstructor -> showVar i ++ "s"
     SharedName.SpecialOccurrence _ -> showVar i
-  h TypeArrow{}        = return $ "f" ++ show i
+  h TypeArrow{}        = "f" ++ show i
   h (TypeApp t _)      = h t
   h (TypeForall _ _ t) = h t
+
+showTypedVar :: forall m
+              . ( MonadMultiState (M.Map TVarId HsType) m )
+             => TVarId
+             -> m String
+showTypedVar i = do
+  m <- mGet
+  -- The ID-only fallback keeps this compatibility helper total when a caller
+  -- did not run the optional 'collectVarTypes' pass first.
+  return $ maybe (showVar i) (preferredVarName i) $ M.lookup i m
 
 applySubst :: Subst -> HsType -> HsType
 applySubst (Subst i t) v@(TypeVar j) = if i==j then t else v

@@ -12,6 +12,7 @@ import Control.Monad.Trans.MultiState
 import Data.Functor.Identity (runIdentity)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
 import Language.Haskell.Exts.Syntax
 
@@ -21,39 +22,38 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HsExp = Exp SrcSpanInfo
 type HsDecl = Decl SrcSpanInfo
-type Conversion = MultiState '[Map T.TVarId T.HsType]
+type Conversion = MultiState '[Map T.TVarId String]
 
 -- Qualification level: 0 emits unqualified names, 1 qualifies ordinary
 -- identifiers but keeps operators infix-friendly, and 2 qualifies everything.
 convert :: Int -> E.Expression -> HsExp
 convert qualification expression = runIdentity
   $ runMultiStateTNil
-  $ withMultiStateA (Map.empty :: Map T.TVarId T.HsType)
-  $ do
-      E.collectVarTypes expression
-      gatherLambdas expression []
+  $ withMultiStateA
+      (E.allocateVariableNames (emittedIdentifier qualification) Set.empty expression)
+  $ gatherLambdas expression []
   where
     gatherLambdas (E.ExpLambda variable ty body) parameters =
       gatherLambdas body ((variable, ty) : parameters)
     gatherLambdas body [] = convertExp qualification body
     gatherLambdas body parameters = do
       converted <- convertExp qualification body
-      names <- mapM (T.showTypedVar . fst) (reverse parameters)
+      names <- mapM (renderVariable . fst) (reverse parameters)
       pure $ Lambda noLoc (map variablePattern names) converted
 
 convertToFunc :: Int -> String -> E.Expression -> HsDecl
 convertToFunc qualification functionName expression = runIdentity
   $ runMultiStateTNil
-  $ withMultiStateA (Map.empty :: Map T.TVarId T.HsType)
-  $ do
-      E.collectVarTypes expression
-      gatherLambdas expression []
+  $ withMultiStateA
+      (E.allocateVariableNames (emittedIdentifier qualification)
+        (Set.singleton functionName) expression)
+  $ gatherLambdas expression []
   where
     gatherLambdas (E.ExpLambda variable ty body) parameters =
       gatherLambdas body ((variable, ty) : parameters)
     gatherLambdas body parameters = do
       converted <- convertExp qualification body
-      names <- mapM (T.showTypedVar . fst) (reverse parameters)
+      names <- mapM (renderVariable . fst) (reverse parameters)
       pure $ FunBind noLoc
         [Match noLoc (Ident noLoc functionName) (map variablePattern names)
           (UnGuardedRhs noLoc converted) Nothing]
@@ -63,12 +63,12 @@ convertExp qualification = convertInternal qualification 0
 
 convertInternal :: Int -> Int -> E.Expression -> Conversion HsExp
 convertInternal _ _ (E.ExpVar variable _) =
-  variableExpression <$> T.showTypedVar variable
+  variableExpression <$> renderVariable variable
 convertInternal qualification _ (E.ExpName name) =
   pure $ namedExpression qualification name
 convertInternal qualification precedence (E.ExpLambda variable _ body) = do
   converted <- convertInternal qualification 0 body
-  name <- T.showTypedVar variable
+  name <- renderVariable variable
   pure $ parenthesize (precedence >= 1)
     $ Lambda noLoc [variablePattern name] converted
 convertInternal qualification precedence (E.ExpApply function parameter) =
@@ -112,7 +112,7 @@ convertInternal _ _ (E.ExpHole variable) =
   pure $ variableExpression ('_' : T.showVar variable)
 convertInternal qualification precedence (E.ExpLet variable _ binding body) = do
   convertedBinding <- convertInternal qualification 0 binding
-  name <- T.showTypedVar variable
+  name <- renderVariable variable
   convertedBody <- convertInternal qualification 0 body
   pure $ parenthesize (precedence >= 2)
     $ mergeLet
@@ -121,7 +121,7 @@ convertInternal qualification precedence (E.ExpLet variable _ binding body) = do
         convertedBody
 convertInternal qualification precedence (E.ExpLetMatch constructor variables binding body) = do
   convertedBinding <- convertInternal qualification 0 binding
-  names <- mapM (T.showTypedVar . fst) variables
+  names <- mapM (renderVariable . fst) variables
   convertedBody <- convertInternal qualification 0 body
   let patternBinding = PatBind noLoc
         (PParen noLoc $ constructorPattern qualification constructor names)
@@ -132,13 +132,29 @@ convertInternal qualification precedence (E.ExpCaseMatch scrutinee alternatives)
   convertedScrutinee <- convertInternal qualification 0 scrutinee
   convertedAlternatives <- alternatives `forM` \(constructor, variables, body) -> do
     convertedBody <- convertInternal qualification 0 body
-    names <- mapM (T.showTypedVar . fst) variables
+    names <- mapM (renderVariable . fst) variables
     pure $ Alt noLoc
       (constructorPattern qualification constructor names)
       (UnGuardedRhs noLoc convertedBody)
       Nothing
   pure $ parenthesize (precedence >= 2)
     $ Case noLoc convertedScrutinee convertedAlternatives
+
+renderVariable :: T.TVarId -> Conversion String
+renderVariable variable = do
+  names <- mGet
+  pure $ Map.findWithDefault (T.showVar variable) variable names
+
+-- Only ordinary identifiers can collide with local Haskell binders.  Module
+-- qualification is discarded at level zero; module-less names remain
+-- unqualified at every level.  Operators and constructors occupy different
+-- lexical namespaces and need not consume binder spellings.
+emittedIdentifier :: Int -> T.QualifiedName -> Maybe String
+emittedIdentifier qualification name = case T.qualifiedNameOccurrence name of
+  SharedName.IdentifierOccurrence SharedName.VariableLike spelling
+    | qualification == 0 || T.qualifiedNameModule name == Nothing ->
+        Just spelling
+  _ -> Nothing
 
 namedExpression :: Int -> T.QualifiedName -> HsExp
 namedExpression qualification name

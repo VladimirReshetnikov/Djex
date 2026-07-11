@@ -38,8 +38,12 @@ import Language.Haskell.Exference.Core
   , findExpressionsWithStats
   )
 import Language.Haskell.Exference.Core.ConstraintSolver
-import Language.Haskell.Exference.Core.Expression (Expression (..))
+import Language.Haskell.Exference.Core.Expression
+  ( Expression (..)
+  , showExpression
+  )
 import Language.Haskell.Exference.Core.ExpressionCheck
+import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.TypeUtils
@@ -58,7 +62,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , parseRatings
   )
 import Language.Haskell.Exference.Diagnostic
-import Language.Haskell.Exference.ExpressionToHaskellSrc (convert)
+import Language.Haskell.Exference.ExpressionToHaskellSrc (convert, convertToFunc)
 import Language.Haskell.Exference.BindingsFromHaskellSrc (getClassMethods)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
@@ -522,9 +526,79 @@ tests = testGroup "Exference"
                 HSE.ParseOk _ -> pure ()
                 failure -> fail $ "invalid generated binder: " ++ show failure
             expression -> fail $ "unexpected lambda: " ++ show expression
+      , testCase "binders cannot capture globals made unqualified" $ do
+          global <- expectRight $ mkQualifiedName ["M"] "a"
+          unqualifiedGlobal <- expectRight $ mkQualifiedName [] "a"
+          integer <- expectRight $ mkQualifiedName [] "Int"
+          boolean <- expectRight $ mkQualifiedName [] "Bool"
+          let expression = ExpLambda 1 (TypeVar 10) (ExpName global)
+              functions = [FunctionBinding (TypeCons boolean) global 0 [] []]
+              classes = mkQueryClassEnv (mkStaticClassEnv [] []) []
+          checkExpression classes functions []
+            (TypeArrow (TypeCons integer) (TypeCons boolean)) [] expression
+            @?= Right ()
+          case convert 0 expression of
+            HSE.Lambda _ [HSE.PVar _ (HSE.Ident _ binder)]
+                (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ occurrence))) -> do
+              binder @?= "a'"
+              occurrence @?= "a"
+            rendered -> fail $ "capturing unqualified render: " ++ show rendered
+          case convert 2 expression of
+            HSE.Lambda _ [HSE.PVar _ (HSE.Ident _ binder)]
+                (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ modul)
+                  (HSE.Ident _ occurrence))) -> do
+              binder @?= "a"
+              modul @?= "M"
+              occurrence @?= "a"
+            rendered -> fail $ "unexpected qualified render: " ++ show rendered
+          showExpression (ExpLambda 1 (TypeVar 10) $ ExpName unqualifiedGlobal)
+            @?= "\\a' -> a"
+      , testCase "distinct binder IDs receive distinct spellings" $ do
+          typeName <- expectRight $ mkQualifiedName [] "T"
+          let expression = ExpLambda 6 (TypeCons typeName)
+                $ ExpLambda 33 (TypeVar 100)
+                $ ExpVar 6 (TypeCons typeName)
+          case convert 0 expression of
+            HSE.Lambda _
+                [ HSE.PVar _ (HSE.Ident _ outer)
+                , HSE.PVar _ (HSE.Ident _ inner)
+                ]
+                (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ body))) -> do
+              outer @?= "t6"
+              inner @?= "t6'"
+              body @?= outer
+              assertBool "text renderer reused a captured binder"
+                $ "t6'" `isInfixOf` showExpression expression
+            rendered -> fail $ "colliding binder render: " ++ show rendered
+      , testCase "function conversion reserves its declaration name" $ do
+          let expression = ExpLambda 1 (TypeVar 0) (ExpVar 1 $ TypeVar 0)
+          case convertToFunc 0 "a" expression of
+            HSE.FunBind _
+                [HSE.Match _ (HSE.Ident _ function)
+                  [HSE.PVar _ (HSE.Ident _ parameter)]
+                  (HSE.UnGuardedRhs _
+                    (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ body)))) Nothing] -> do
+                function @?= "a"
+                parameter @?= "a'"
+                body @?= parameter
+            rendered -> fail $ "capturing function render: " ++ show rendered
       ]
   , testGroup "independent expression checking"
-      [ testCase "accepts a typed identity" $ do
+      [ testCase "environment-free simplification introduces no globals" $ do
+          let variable = TypeConstant 0
+              identity = ExpLambda 1 variable (ExpVar 1 variable)
+              composeLike = ExpLambda 1 variable
+                $ ExpApply (ExpName $ name "f")
+                $ ExpApply (ExpName $ name "g") (ExpVar 1 variable)
+              classEnvironment = mkQueryClassEnv (mkStaticClassEnv [] []) []
+          assertBool "identity simplification introduced a global"
+            $ simplifyExpression identity == identity
+          assertBool "composition simplification introduced a global"
+            $ simplifyExpression composeLike == composeLike
+          checkExpression classEnvironment [] []
+            (TypeArrow variable variable) [] (simplifyExpression identity)
+            @?= Right ()
+      , testCase "accepts a typed identity" $ do
           let variable = TypeVar 0
               identity = ExpLambda 1 variable (ExpVar 1 variable)
               classEnvironment = mkQueryClassEnv (mkStaticClassEnv [] []) []
@@ -546,7 +620,13 @@ tests = testGroup "Exference"
                 False False 0 False 20 Nothing Nothing defaultHeuristicsConfig
           case findOneExpression input of
             Nothing -> fail "identity search produced no checked result"
-            Just _ -> pure ()
+            Just (expression, constraints, _) -> do
+              assertBool "search returned a pre-simplification expression"
+                $ expression == simplifyExpression expression
+              checkExpression
+                (mkQueryClassEnv emptyClassEnv []) [] []
+                (TypeArrow variable variable) constraints expression
+                @?= Right ()
       ]
   ]
 

@@ -113,7 +113,7 @@ verboseHelp = "\
 \     -sorted   do not sort solutions\n\
 \     +debug    show the internal proof formula and proof term\n\
 \     -debug    hide internal proof details\n\
-\     cutoff=N  compute at most positive N solutions\n\
+\     cutoff=N  consider at most N solutions (N must be positive)\n\
 \  The sorting heuristic first minimizes the fraction of unused bound\n\
 \variables, then the total number of bound variables.\n\
 \\n\

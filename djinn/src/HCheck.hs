@@ -11,6 +11,10 @@ import Data.Graph(stronglyConnComp, SCC(..))
 
 import HTypes
 
+-- Kind inference uses numbered unification variables (KVar).  The state maps
+-- each variable to its solution: Nothing while unconstrained, and possibly a
+-- chain of KVars that 'follow' resolves.  'ground' finally defaults any
+-- still-unconstrained variable to *, as Haskell98 does.
 type KState = (Int, IntMap (Maybe HKind))
 initState :: KState
 initState = (0, IntMap.empty)

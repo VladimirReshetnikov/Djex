@@ -646,6 +646,9 @@ getAllVars (HECase se alts) =
 getAllVars (HEVar s) = [s]
 getAllVars _ = []
 
+-- Rewrite \ v -> f v to f when v does not occur free in f.  Each traversal
+-- returns the variables referenced by the rewritten expression so the guard
+-- can make that occurs check without a second pass.
 etaReduce :: HExpr -> HExpr
 etaReduce expr = fst $ eta expr
   where eta (HELam [HPVar v] (HEApply f (HEVar v'))) | v == v' && v `notElem` vs = (f', vs)

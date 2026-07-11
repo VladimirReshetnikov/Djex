@@ -55,7 +55,7 @@ usage = putStrLn "Usage: djinn [option ...] [file ...]"
 
 hsGenRepl :: State -> REPL State
 hsGenRepl state = REPL {
-    repl_init = inIt state,
+    repl_init = welcome state,
     repl_eval = eval,
     repl_exit = exit
     }
@@ -98,8 +98,8 @@ startState = State {
        m = HTVar "m"
 
 
-inIt :: State -> IO (String, State)
-inIt state = do
+welcome :: State -> IO (String, State)
+welcome state = do
     putStrLn $ "Welcome to Djinn " ++ version ++ "."
     putStrLn $ "Type :h to get help."
     return ("Djinn> ", state)
@@ -163,6 +163,11 @@ runCmd s (Add i t) =
     Right _ -> return (False, s { axioms = replace i (i, t) (axioms s) })
 runCmd _ Clear =
     return (False, startState)
+runCmd s (Del i)
+    | i `notElem` (map fst (axioms s) ++ map fst (synonyms s) ++
+                   map fst (classes s)) = do
+        putStrLn $ "Error: cannot delete " ++ i ++ ": it is not defined"
+        return (False, s)
 runCmd s (Del i) = do
     let candidateAxioms = filter ((i /=) . fst) (axioms s)
         candidateSynonyms = filter ((i /=) . fst) (synonyms s)
@@ -432,9 +437,11 @@ getHelp (cmd, help, _) = cmd ++ replicate (helpColumn - length cmd) ' ' ++ help
 helpColumn :: Int
 helpColumn = 2 + maximum [length cmd | (cmd, _, _) <- commands]
 
+-- Accept anything that could have been declared: type and class names are
+-- plain constructor identifiers, but axioms may carry a qualified name.
 pDel :: ReadP Cmd
 pDel = do
-    s <- pConId +++ pLocalTermName
+    s <- pConId +++ pExternalTermName
     return $ Del s
 
 pLoad :: ReadP Cmd

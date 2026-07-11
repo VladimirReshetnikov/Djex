@@ -43,6 +43,9 @@ prove more env goal =
     reservedSymbols =
         map fst env ++ concatMap (formulaSymbols . snd) env ++ formulaSymbols goal
 
+-- Fold the environment into the goal as premises, prove the resulting
+-- implication, then apply the proof to the environment variables and
+-- normalize, leaving a term whose free variables are the assumption names.
 redtop :: MoreSolutions -> [(Symbol, Formula)] -> Formula -> P Proof
 redtop more env goal = do
     let form = foldr (:->) goal (map snd env)

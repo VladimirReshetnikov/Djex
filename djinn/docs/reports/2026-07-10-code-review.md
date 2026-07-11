@@ -4,6 +4,7 @@
 - Reviewed Djinn baseline: `7eac947` (`Add djinn/LICENSE`)
 - Integrated `origin/main` tip before commit: `e6b0097`
 - R-01 through R-06 remediation commits: `9b3e383` through `6f089d5`
+- Test-infrastructure commits: `d6e9ce7`, `b46695f`
 - Imported release: `djinn-2025.2.21`
 - Toolchain: GHC 9.12.4, Cabal 3.16.1.0, Windows 11
 
@@ -585,29 +586,30 @@ tests run without HPC to avoid combining multiple executable processes into one
 
 ## Validation performed
 
-The original review and R-01 through R-06 follow-up were finally revalidated
-from a new build directory with:
+The original review, R-01 through R-06 follow-up, and layered test infrastructure
+were finally revalidated from a new build directory with:
 
 ```text
-cabal build all --builddir=dist-completion-audit
-cabal test all --builddir=dist-completion-audit --test-show-details=direct
+cabal build all --builddir=dist-test-audit
+cabal test all --builddir=dist-test-audit --test-show-details=direct
 cabal check
-cabal sdist --builddir=dist-completion-audit
+cabal sdist --builddir=dist-test-audit
 git diff --check
 ```
 
-All source and test targets compile with `-Wall -Wcompat` and no warnings; all 21
-named regression groups pass. `cabal check` reports no errors or warnings. The
-source distribution contains the license, README, report, tests, and all new
-modules (`Environment`, `HIdentifier`, `ProofCheck`, and `ProofEnv`).
+All library, executable, and test targets compile with `-Wall -Wcompat` and no
+warnings. All 23 unit regressions, 600 generated property cases, and seven CLI
+integration scenarios pass. `cabal check` reports no errors or warnings. The
+source distribution contains the license, README, report, internal library,
+launcher, all three test drivers, and all production modules.
 
-The final CLI matrix additionally verified that a same-named assumption is
-diagnosed instead of emitted recursively, a safe fallback is retained, same-type
-empty identity differs from cross-empty elimination, invalid deletion preserves
-a dependent synonym, qualified external assumptions and underscore targets
-render correctly, and reserved or malformed names fail to parse. Earlier manual
-checks also covered tuples, lists, prefix arrows, higher-kinded reuse, cutoff,
-contexts, zero-parameter classes, file errors, verbose help, quit, and EOF.
+The automated CLI matrix verifies that a same-named assumption is diagnosed
+instead of emitted recursively, a safe fallback is retained, same-type empty
+identity differs from cross-empty elimination, invalid deletion preserves a
+dependent synonym, qualified external assumptions and underscore targets render
+correctly, file failures recover, EOF exits, and reserved or malformed names
+fail to parse. Earlier manual checks also covered tuples, lists, prefix arrows,
+higher-kinded reuse, contexts, zero-parameter classes, and verbose help.
 
 ## Conclusion
 

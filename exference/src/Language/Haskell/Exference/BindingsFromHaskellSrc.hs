@@ -203,9 +203,12 @@ getClassMethods tcs ds tDeclMap modules = fmap join $ sequence $ do
                $ rEithers
   where
     addConstraint :: HsConstraint -> HsFunctionDecl -> HsFunctionDecl
-    addConstraint c (n, TypeForall vs cs t) = (n, TypeForall vs (c:cs) t)
-    addConstraint _ _                       = error "addConstraint for non-forall type = bad"
-      --(n, ForallType [] [c] t)
+    addConstraint c (name, ty) = case forallify ty of
+      TypeForall variables constraints body ->
+        (name, TypeForall variables (c : constraints) body)
+      -- 'forallify' always produces 'TypeForall'; retaining a total fallback
+      -- makes this boundary robust if its normalization policy later changes.
+      body -> (name, TypeForall [] [c] body)
 
 getDataTypes :: [Module SrcSpanInfo] -> [QualifiedName]
 getDataTypes modules = d1 ++ d2

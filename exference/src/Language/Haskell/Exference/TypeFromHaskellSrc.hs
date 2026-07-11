@@ -28,10 +28,11 @@ import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Exference.Core.TypeUtils as TU
+import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map as M
 
-import Control.Applicative ( (<$>), (<*>), Applicative, liftA2 )
+import Control.Applicative ( (<$>), (<*>), Applicative )
 import Data.Maybe ( fromMaybe )
 import Data.List ( find )
 import Control.Arrow ( (&&&) )
@@ -169,14 +170,54 @@ convertName (Ident _ s)  = T.QualifiedName [] s
 convertName (Symbol _ s) = T.QualifiedName [] $ "(" ++ s ++ ")"
 
 convertModuleName :: ModuleName SrcSpanInfo -> Name SrcSpanInfo -> T.QualifiedName
-convertModuleName (ModuleName _ n) (Ident _ s)  = parseQualifiedName
-                                            $ n ++ "." ++ s
-convertModuleName (ModuleName _ n) (Symbol _ s) = parseQualifiedName
-                                            $ "(" ++ n ++ "." ++ s ++ ")"
+convertModuleName (ModuleName _ moduleName) name =
+  T.QualifiedName (wordsBy (== '.') moduleName) $ case name of
+    Ident _ value -> value
+    Symbol _ value -> '(' : value ++ ")"
 
-parseQualifiedName :: String -> T.QualifiedName
-parseQualifiedName s = let (prebracket, operator) = span (/='(') s
-  in liftA2 T.QualifiedName init last $ wordsBy (=='.') prebracket ++ words operator
+-- | Parse the external spelling used by rating files.  Operators use the
+-- conventional @Module.(<*>)@ form and remain parenthesized in the core name.
+parseQualifiedName :: String -> Either Diagnostic T.QualifiedName
+parseQualifiedName input
+  | null input = invalid "qualified name is empty"
+  | otherwise = case break (== '(') input of
+      (ordinary, "") -> fromParts $ splitDots ordinary
+      (prefix, operator)
+        | validOperator operator -> do
+            modules <- parseModules $ dropTrailingDot prefix
+            pure $ T.QualifiedName modules operator
+        | otherwise -> invalid "malformed parenthesized operator"
+  where
+    fromParts :: [String] -> Either Diagnostic T.QualifiedName
+    fromParts parts = case parts of
+      [] -> invalid "qualified name is empty"
+      _ | any null parts -> invalid "qualified name contains an empty segment"
+      _ -> pure $ T.QualifiedName (init parts) (last parts)
+
+    parseModules :: String -> Either Diagnostic [String]
+    parseModules "" = pure []
+    parseModules value = case splitDots value of
+      parts | any null parts -> invalid "module name contains an empty segment"
+            | otherwise -> pure parts
+
+    validOperator value = case value of
+      '(' : rest -> not (null rest) && last rest == ')'
+        && '(' `notElem` rest && ')' `notElem` init rest
+      _ -> False
+
+    dropTrailingDot value = case reverse value of
+      '.' : rest -> reverse rest
+      _ -> value
+
+    splitDots = foldr splitCharacter [[]]
+      where
+        splitCharacter '.' parts = [] : parts
+        splitCharacter character (part : parts) = (character : part) : parts
+        splitCharacter _ [] = [] -- unreachable for the non-empty seed
+
+    invalid :: String -> Either Diagnostic a
+    invalid message = Left $ diagnostic
+      $ "invalid qualified name " ++ show input ++ ": " ++ message
 
 convertConstraint
   :: (MonadMultiState ConvData m)

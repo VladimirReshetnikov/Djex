@@ -30,6 +30,7 @@ import Language.Haskell.Exference.SimpleDict
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.Score
+import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.DeepSeq
@@ -71,41 +72,32 @@ import Text.Read ( readMaybe )
 
 
 builtInDeclsM :: (Monad m) => MultiRWST r w s m [HsFunctionDecl]
-builtInDeclsM = do
-  let consType = (Cons, TypeArrow
+builtInDeclsM = pure $ consType : unitConstructor : map tupleConstructor [2 .. 7]
+ where
+  consType = (Cons, TypeArrow
             (TypeVar 0)
             (TypeArrow (TypeApp (TypeCons ListCon)
                                 (TypeVar 0))
                        (TypeApp (TypeCons ListCon)
                                 (TypeVar 0))))
-  tupleConss <- mapM (\(a,b) -> [(a,y) | y <- unsafeReadType0 b])
-    [ (,) (TupleCon 0) "Unit"
-    , (,) (TupleCon 2) "a -> b -> (a, b)"
-    , (,) (TupleCon 3) "a -> b -> c -> (a, b, c)"
-    , (,) (TupleCon 4) "a -> b -> c -> d -> (a, b, c, d)"
-    , (,) (TupleCon 5) "a -> b -> c -> d -> e -> (a, b, c, d, e)"
-    , (,) (TupleCon 6) "a -> b -> c -> d -> e -> f -> (a, b, c, d, e, f)"
-    , (,) (TupleCon 7) "a -> b -> c -> d -> e -> f -> g -> (a, b, c, d, e, f, g)"
-    ]
-  return $ consType : tupleConss
+  unitConstructor = (TupleCon 0, TypeCons $ QualifiedName [] "Unit")
+  tupleConstructor arity =
+    (TupleCon arity, foldr TypeArrow (tupleType arity) $ typeVariables arity)
 
 builtInDeconstructorsM :: (Monad m) => MultiRWST r w s m [DeconstructorBinding]
-builtInDeconstructorsM = mapM helper ds
+builtInDeconstructorsM = pure $ map deconstructor [2 .. 7]
  where
-  helper (t, xs) = [ DeconstructorBinding
-                       x
-                       [ConstructorBinding constructor fields
-                       | (constructor, fields) <- xs]
-                       False
-                   | x <- unsafeReadType0 t
-                   ]
-  ds = [ (,) "(a, b)" [(TupleCon 2, [TypeVar 0, TypeVar 1])]
-       , (,) "(a, b, c)" [(TupleCon 3, [TypeVar 0, TypeVar 1, TypeVar 2])]
-       , (,) "(a, b, c, d)" [(TupleCon 4, [TypeVar 0, TypeVar 1, TypeVar 2, TypeVar 3])]
-       , (,) "(a, b, c, d, e)" [(TupleCon 5, [TypeVar 0, TypeVar 1, TypeVar 2, TypeVar 3, TypeVar 4])]
-       , (,) "(a, b, c, d, e, f)" [(TupleCon 6, [TypeVar 0, TypeVar 1, TypeVar 2, TypeVar 3, TypeVar 4, TypeVar 5])]
-       , (,) "(a, b, c, d, e, f, g)" [(TupleCon 7, [TypeVar 0, TypeVar 1, TypeVar 2, TypeVar 3, TypeVar 4, TypeVar 5, TypeVar 6])]
-       ]
+  deconstructor arity = DeconstructorBinding
+    (tupleType arity)
+    [ConstructorBinding (TupleCon arity) (typeVariables arity)]
+    False
+
+typeVariables :: Int -> [HsType]
+typeVariables arity = map TypeVar [0 .. arity - 1]
+
+tupleType :: Int -> HsType
+tupleType arity = foldl TypeApp (TypeCons $ TupleCon arity)
+  $ typeVariables arity
 
 -- | Takes a list of bindings, and a dictionary of desired
 -- functions and their rating, and compiles a list of
@@ -238,22 +230,28 @@ parseModulesSimple s = helper
   addRating (a,b) = (a,0.0,b)
   helper (decls, deconss, cntxt, ds, tdm) = (addRating <$> decls, deconss, cntxt, ds, tdm)
 
-parseRatings :: String -> Either String [(QualifiedName, Penalty)]
+parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
   where
     go [] = Right []
-    go [_] = Left "rating file ends with a name but no numeric rating"
+    go [_] = Left $ diagnostic
+      "rating file ends with a name but no numeric rating"
     go (name : value : rest) = case readMaybe value :: Maybe Double of
-      Nothing -> Left $ "invalid rating for " ++ name ++ ": " ++ value
+      Nothing -> Left $ diagnostic
+        $ "invalid rating for " ++ name ++ ": " ++ value
       Just rating | isNaN rating || isInfinite rating ->
-        Left $ "rating for " ++ name ++ " must be finite: " ++ value
-      Just rating -> ((parseQualifiedName name, Penalty rating) :) <$> go rest
+        Left $ diagnostic
+          $ "rating for " ++ name ++ " must be finite: " ++ value
+      Just rating -> do
+        qualifiedName <- parseQualifiedName name
+        ((qualifiedName, Penalty rating) :) <$> go rest
 
-ratingsFromFile :: String -> IO (Either String [(QualifiedName, Penalty)])
+ratingsFromFile :: String -> IO (Either Diagnostic [(QualifiedName, Penalty)])
 ratingsFromFile path = do
   contents <- try (readFile path >>= evaluate . force)
     :: IO (Either SomeException String)
-  return $ first show contents >>= parseRatings
+  return $ first (Diagnostic (Just path) Nothing . show) contents
+    >>= first (\result -> result { diagnosticSource = Just path }) . parseRatings
 
 
 -- TODO: add warnings for ratings not applied
@@ -288,7 +286,7 @@ environmentFromModuleAndRatings s1 s2 = do
   r <- lift $ ratingsFromFile s2
   case r of
     Left e -> do
-      mTell ["could not parse ratings!",e]
+      mTell ["could not parse ratings!", show e]
       return ([], [], cntxt, [], tdm)
     Right ratings -> do
       let f (a,b) = declToBinding
@@ -323,7 +321,7 @@ environmentFromPath p = do
   let rs = [x | Right xs <- rResult, x <- xs]
   sequence_ $ do
     Left err <- rResult
-    return $ mTell ["could not parse rating file", err]
+    return $ mTell ["could not parse rating file", show err]
   (rs' :: [(QualifiedName, Penalty)]) <- fmap join $ sequence $ do
     (rName, rVal) <- rs
     return $ do

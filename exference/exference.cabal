@@ -134,6 +134,7 @@ Library
                    Language.Haskell.Exference.Core.SearchTree
                    Language.Haskell.Exference.Core.Score
   exposed-modules: Language.Haskell.Exference
+                   Language.Haskell.Exference.Diagnostic
                    Language.Haskell.Exference.SimpleDict
                    Language.Haskell.Exference.ExpressionToHaskellSrc
                    Language.Haskell.Exference.TypeFromHaskellSrc

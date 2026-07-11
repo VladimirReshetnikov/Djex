@@ -9,8 +9,6 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , convertType
   , convertTypeInternal
   , parseType
-  , unsafeReadType
-  , unsafeReadType0
   )
 where
 
@@ -20,10 +18,14 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
+import Language.Haskell.Exference.Diagnostic
 
 import Language.Haskell.Exts.Syntax hiding (TypeApp)
 import qualified Language.Haskell.Exts.Parser as P
-import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
+import Language.Haskell.Exts.SrcLoc
+  ( SrcLoc (..)
+  , SrcSpanInfo
+  )
 
 import Control.Monad.Trans.MultiRWS
 import Data.HList.ContainsType
@@ -37,7 +39,7 @@ import Control.Monad.Except ( liftEither )
 
 import Control.Monad ( forM, join, liftM )
 import Data.Either ( lefts, rights )
-import Data.Bifunctor ( bimap )
+import Data.Bifunctor ( bimap, first )
 import Data.Maybe ( maybeToList )
 import Data.List ( intercalate )
 
@@ -163,30 +165,24 @@ parseType
   -> P.ParseMode
   -> String
   -> ExceptT
-       String
+       Diagnostic
        (MultiRWST r w s m)
        (HsType, TypeVarIndex)
 parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
-  f@(P.ParseFailed _ _) -> throwE $ show f
-  P.ParseOk t           -> convertType tcs mn ds tDeclMap t
+  P.ParseFailed location message -> throwE $ Diagnostic
+    (Just $ srcFilename location)
+    (Just $ let position = SourcePosition
+                  (srcLine location) (srcColumn location)
+            in SourceSpan position position)
+    message
+  P.ParseOk ty -> ExceptT $ first conversionDiagnostic
+    <$> runExceptT (convertType tcs mn ds tDeclMap ty)
+  where
+    conversionDiagnostic message = Diagnostic
+      (Just $ P.parseFilename m)
+      (Just $ SourceSpan (SourcePosition 1 1) (endPosition s))
+      message
 
-unsafeReadType
-  :: (Monad m)
-  => [HsTypeClass]
-  -> [QualifiedName]
-  -> TypeDeclMap
-  -> String
-  -> MultiRWST r w s m HsType
-unsafeReadType tcs ds tDeclMap s = do
-  parseRes <- runExceptT $ parseType tcs Nothing ds tDeclMap (haskellSrcExtsParseMode "type") s
-  return $ case parseRes of
-    Left _ -> error $ "unsafeReadType: could not parse type: " ++ s
-    Right (t, _) -> t
-
-
-unsafeReadType0 :: (Monad m) => String -> MultiRWST r w s m HsType
-unsafeReadType0 s = do
-  parseRes <- runExceptT $ parseType [] Nothing [] (M.empty) (haskellSrcExtsParseMode "type") s
-  return $ case parseRes of
-    Left _ -> error $ "unsafeReadType: could not parse type: " ++ s
-    Right (t, _) -> t
+    endPosition = foldl advance (SourcePosition 1 1)
+    advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
+    advance (SourcePosition line column) _ = SourcePosition line (column + 1)

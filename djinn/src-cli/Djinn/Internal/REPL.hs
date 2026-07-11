@@ -2,8 +2,8 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module Djinn.Internal.REPL(REPL(..), repl) where
-import Control.Monad.Trans(liftIO)
+module Djinn.Internal.REPL (REPL(..), repl) where
+import Control.Monad.IO.Class (liftIO)
 import System.Console.Haskeline
 
 data REPL s = REPL {

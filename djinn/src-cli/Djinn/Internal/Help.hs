@@ -1,4 +1,4 @@
-module Djinn.Internal.Help(verboseHelp) where
+module Djinn.Internal.Help (verboseHelp) where
 verboseHelp :: String
 verboseHelp = "\
 \\n\

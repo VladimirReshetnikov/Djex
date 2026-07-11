@@ -2,7 +2,7 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module Djinn(main) where
+module Djinn (main) where
 import Data.Char(isAlpha, isDigit, isSpace)
 import Data.List(isPrefixOf, intercalate)
 import Data.Version(showVersion)

@@ -22,22 +22,21 @@ source-repository head
   location: https://github.com/augustss/djinn
 
 library djinn-core
-  Default-Language: Haskell98
+  Visibility:       public
+  Default-Language: Haskell2010
   Hs-Source-Dirs:   src
   Ghc-Options:      -Wall -Wcompat
 
   Build-Depends:    base >= 4.18 && < 5,
                     haskell-synthesis >= 0.1 && < 0.2,
-                    haskeline >= 0.8 && < 0.9,
-                    mtl >= 2.2 && < 2.4,
+                    transformers >= 0.5 && < 0.7,
                     pretty >= 1.1 && < 1.2,
                     containers >= 0.6 && < 0.9
 
-  -- Djinn.Core is the stable library API.  Djinn is the CLI frontend.
-  -- Djinn.Internal.* expose the raw machinery without stability or
-  -- invariant guarantees; see the README's library section.
-  Exposed-Modules:  Djinn,
-                    Djinn.Core,
+  -- Djinn.Core is the stable library API.  The core Djinn.Internal.*
+  -- modules expose raw machinery without stability or invariant guarantees;
+  -- see the README's library section.
+  Exposed-Modules:  Djinn.Core,
                     Djinn.Internal.Environment,
                     Djinn.Internal.HCheck,
                     Djinn.Internal.HIdentifier,
@@ -47,18 +46,34 @@ library djinn-core
                     Djinn.Internal.ProofCheck,
                     Djinn.Internal.ProofEnv
 
+library
+  Default-Language: Haskell2010
+  Hs-Source-Dirs:   src-cli
+  Ghc-Options:      -Wall -Wcompat
+
+  Build-Depends:    base >= 4.18 && < 5,
+                    djinn:djinn-core,
+                    haskeline >= 0.8 && < 0.9,
+                    transformers >= 0.5 && < 0.7
+
+  -- The main library is the CLI facade.  Re-exporting Djinn.Core lets
+  -- consumers choose either `djinn` or the smaller `djinn-core` component
+  -- without changing their stable API imports.
+  Exposed-Modules:    Djinn
+  Reexported-Modules: Djinn.Core
+
   Other-Modules:    Djinn.Internal.Help,
                     Djinn.Internal.REPL,
                     Paths_djinn
   Autogen-Modules:  Paths_djinn
 
 executable djinn
-  Default-Language: Haskell98
+  Default-Language: Haskell2010
   Main-Is:        Main.hs
   Ghc-Options:    -Wall -Wcompat
 
   Build-Depends:  base >= 4.18 && < 5,
-                  djinn:djinn-core
+                  djinn
 
   Hs-Source-Dirs: app
 

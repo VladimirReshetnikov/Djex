@@ -55,9 +55,11 @@ cabal test djinn-property-tests --test-show-details=direct
 cabal test djinn-tests --test-options='-p /nominal empty/'
 ```
 
-The core and frontend live in the named internal `djinn-core` library, so tests
-and the executable consume one authoritative compilation. HPC coverage is
-available for the in-process unit and property suites:
+The proof/search engine lives in the public named `djinn-core` library. The
+package's unnamed `djinn` library is a separate CLI facade that re-exports
+`Djinn.Core`; the executable depends only on that facade. This keeps Haskeline
+out of core consumers while preserving one authoritative core compilation. HPC
+coverage is available for the in-process unit and property suites:
 
 ```console
 cabal test djinn-tests djinn-property-tests --enable-coverage
@@ -317,7 +319,7 @@ The same Boolean options can precede file names on the command line, such as
 | --- | --- |
 | `app/Main.hs` | Thin executable launcher. |
 | `Djinn.Core` | The stable, validated library API (see below). |
-| `Djinn` (`src/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
+| `Djinn` (`src-cli/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Kind inference and validation for declared Haskell-like types. |
 | `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
@@ -329,9 +331,12 @@ The same Boolean options can precede file names on the command line, such as
 | `Djinn.Internal.ProofCheck` | Independent type checking of generated proof terms. |
 | `Djinn.Internal.Help` | Extended in-program help. |
 
-These modules form the `djinn-core` library. Keeping the launcher in a
-separate source directory prevents Cabal from recompiling imported core modules
-as executable home modules.
+`Djinn.Core` and the proof, type, environment, and validation modules under
+`src/` form the public named `djinn-core` component. `Djinn`,
+`Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-cli/` in the
+unnamed `djinn` library; Help and REPL are private implementation modules. The
+executable's `app/` source root contains only its launcher, so neither the
+frontend nor executable can accidentally compile core modules as home modules.
 
 ## Using djinn-core as a library
 
@@ -373,9 +378,10 @@ prerequisites before returning the target's instantiated methods. A query's
 goal and every class argument are likewise kind-checked together, so a free
 type variable has one kind throughout the complete signature. Public query
 budgets must be non-negative; `Nothing` is unlimited and `Just 0` expires at
-the first choice point. The `Djinn.Internal.*` modules remain importable for
-research use, but they expose raw constructors that can violate the invariants
-above and carry no stability promise.
+the first choice point. The core `Djinn.Internal.*` modules listed above remain
+exposed by `djinn-core` for research use, but they provide raw constructors
+that can violate these invariants and carry no stability promise. The
+frontend-only Help and REPL modules are deliberately not exposed.
 
 The central pipeline is:
 

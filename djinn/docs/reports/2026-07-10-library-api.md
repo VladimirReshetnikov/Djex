@@ -31,12 +31,14 @@ Djinn.Core                 -- NEW: the stable, validated API
 Djinn.Internal.Environment -- formerly Environment
 Djinn.Internal.HCheck      -- formerly HCheck        (likewise HIdentifier,
 Djinn.Internal.HTypes      --   HTypes, LJT, LJTFormula, ProofCheck,
-Djinn.Internal.LJT         --   ProofEnv, REPL, Help)
+Djinn.Internal.LJT         --   and ProofEnv)
+Djinn.Internal.REPL        -- private frontend support (likewise Help)
 ```
 
-The `Internal` name is the contract: those modules expose raw constructors
-and carry no stability or invariant guarantees, which the cabal file and
-haddocks now say explicitly.
+The `Internal` name is the contract: the core internal modules expose raw
+constructors and carry no stability or invariant guarantees, while frontend
+support modules are private altogether. The cabal file and haddocks now say
+this explicitly.
 
 ### 2. `Djinn.Core`: invalid data is unconstructible
 
@@ -89,7 +91,21 @@ Two deliberate user-visible refinements came along: `:delete nosuch` now
 says "nosuch is not defined" (the message is produced by the library),
 and `:environment` lists the initial classes in declaration order.
 
-### 4. Display invariants documented
+### 4. The Cabal boundary now matches the API boundary
+
+The public named component `djinn:djinn-core` owns `src/` and exposes
+`Djinn.Core` together with the explicitly unstable proof/search internals. It
+depends only on `base`, `containers`, `pretty`, `transformers`, and the neutral
+`haskell-synthesis` vocabulary; in particular, it no longer pulls in `mtl` or
+Haskeline.
+
+The package's unnamed `djinn` library owns the physically separate `src-cli/`
+tree. It exposes `Djinn`, re-exports `Djinn.Core`, and keeps Help, REPL, and its
+generated `Paths_djinn` module private. The executable depends on this frontend
+library and contains only the thin `app/Main.hs` launcher. Separate source roots
+make accidental home-module recompilation across the boundary impossible.
+
+### 5. Display invariants documented
 
 The `Show HType` non-round-trip cases (singleton tuples, empty unions
 outside declarations) are documented at the instance; `Djinn.Core` cannot
@@ -116,7 +132,7 @@ wanted.
   Peirce decided unrealizable, zero-budget undecided, same-named
   assumption flagged, `Eq` context realized and ranked first,
   kind-mismatched context rejected).
-- All suites green (28 unit / 4 properties / 9 CLI); warning-clean build;
+- All suites green (35 unit / 4 properties / 10 CLI); warning-clean build;
   `cabal check` clean; `cabal haddock djinn-core` builds; `cabal sdist`
   packages the relocated tree.
 - Full interactive smoke battery after the rewiring: theorem queries,

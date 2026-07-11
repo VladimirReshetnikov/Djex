@@ -7,7 +7,8 @@ module Djinn.Internal.HCheck(
     htInferClassKinds
     ) where
 import Data.List(union, (\\))
-import Control.Monad.State
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (StateT, evalStateT, get, put)
 import Data.IntMap(IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Graph(stronglyConnComp, SCC(..))

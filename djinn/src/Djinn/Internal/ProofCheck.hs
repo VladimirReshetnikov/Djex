@@ -4,7 +4,9 @@
 module Djinn.Internal.ProofCheck (checkProof) where
 
 import Control.Monad (replicateM, unless, when)
-import Control.Monad.State.Strict
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (
+    StateT, evalStateT, get, gets, modify, put)
 import Data.List (intercalate, (!?))
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set

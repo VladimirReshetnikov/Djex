@@ -11,6 +11,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   [ testCase "no arguments print help" testHelp
   , testCase "the shipped environment supports identity search" testIdentity
   , testCase "parse failures are controlled diagnostics" testParseFailure
+  , testCase "invalid searches never enter reporting modes" testInvalidSearch
   , testCase "version mode does not load the environment" testVersion
   ]
 
@@ -38,6 +39,14 @@ testParseFailure = do
   output <- runExference ["--first", "("]
   assertContains "invalid types should carry a controlled diagnostic"
     "could not parse input type:" output
+
+testInvalidSearch :: Assertion
+testInvalidSearch = do
+  output <- runExference ["--envUsage", "(forall a. a) -> Int"]
+  assertContains "rank-N input should fail at the checked search boundary"
+    "invalid search input: NestedForallInGoal" output
+  assertBool "environment-usage reporting must not evaluate an empty trace"
+    (not $ "Prelude.last" `isInfixOf` output)
 
 testVersion :: Assertion
 testVersion = do

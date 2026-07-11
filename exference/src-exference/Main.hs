@@ -10,10 +10,6 @@ where
 
 
 
-import Language.Haskell.Exference.Core ( ExferenceChunkElement(..)
-                                       , ExferenceHeuristicsConfig(..)
-                                       , findExpressionsWithStats
-                                       , validateExferenceInput )
 import Language.Haskell.Exference
 import Language.Haskell.Exference.ExpressionToHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
@@ -27,8 +23,9 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Control.Monad ( when, forM_ )
 import Data.List ( sortBy, intercalate, nub )
+import qualified Data.List as List
 import Data.Ord ( comparing )
-import Data.Maybe ( listToMaybe, fromMaybe, maybeToList )
+import Data.Maybe ( listToMaybe, fromMaybe )
 import Control.Monad.Writer.Strict
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -193,60 +190,58 @@ main = do
                 when (verbosity>0) $ lift $ do
                   putStrLn $ "full input:"
                   print input
-                case validateExferenceInput input of
-                  Left err -> lift $ putStrLn $ "invalid search input: " ++ show err
-                  Right () -> return ()
-                if
-                  | PrintAll `elem` flags -> do
-                      when (verbosity>0) $ lift $ putStrLn "[running findExpressions ..]"
-                      let rs = findExpressions input
-                      if null rs
-                        then lift $ putStrLn "[no results]"
-                        else forM_ rs
-                          $ \(e, constrs, ExferenceStats n d m) -> do
-                            let hsE = convert qualification e
-                            lift $ putStrLn $ prettyPrint hsE
-                            when (not $ null constrs) $ do
-                              let constrStrs = map (showHsConstraint tVarIndex)
-                                             $ S.toList
-                                             $ S.fromList
-                                             $ constrs
-                              lift $ putStrLn $ "but only with additional contraints: " ++ intercalate ", " constrStrs
-                            lift $ putStrLn $ replicate 40 ' ' ++ "(depth " ++ show d
-                                        ++ ", " ++ show n ++ " steps, " ++ show m ++ " max pqueue size)"
-                  | EnvUsage `elem` flags -> lift $ do
-                      when (verbosity>0) $ putStrLn "[running findExpressionsWithStats ..]"
-                      let stats = chunkBindingUsages $ last $ findExpressionsWithStats input
-                          highest = take 8 $ sortBy (flip $ comparing snd) $ M.toList stats
-                      putStrLn $ show $ highest
-                  | otherwise -> do
-                      r <- lift $ if
-                        | FirstSol `elem` flags -> do
-                            when (verbosity>0) $ putStrLn "[running findOneExpression ..]"
-                            return $ maybeToList $ findOneExpression input
-                        | Best `elem` flags -> do
-                            when (verbosity>0) $ putStrLn "[running findBestNExpressions ..]"
-                            return $ findBestNExpressions 999 input
-                        | Constraints `elem` flags -> do
-                            when (verbosity>0) $ putStrLn "[running findFirstBestExpressionsLookahead ..]"
-                            return $ findFirstBestExpressionsLookahead 256 input
-                        | otherwise -> do
-                            when (verbosity>0) $ putStrLn "[running findFirstBestExpressionsLookaheadPreferNoConstraints ..]"
-                            return $ findFirstBestExpressionsLookaheadPreferNoConstraints 256
-                              input {input_allowConstraints = True}
-                      case r :: [ExferenceOutputElement] of
-                        [] -> lift $ putStrLn "[no results]"
-                        rs -> rs `forM_` \(e, constrs, ExferenceStats n d m) -> do
-                            let hsE = convert qualification e
-                            lift $ putStrLn $ prettyPrint hsE
-                            when (not $ null constrs) $ do
-                              let constrStrs = map (showHsConstraint tVarIndex)
-                                             $ S.toList
-                                             $ S.fromList
-                                             $ constrs
-                              lift $ putStrLn $ "but only with additional contraints: " ++ intercalate ", " constrStrs
-                            lift $ putStrLn $ replicate 40 ' ' ++ "(depth " ++ show d
-                                       ++ ", " ++ show n ++ " steps, " ++ show m ++ " max pqueue size)"
+                -- The default selector searches with constraints enabled so it
+                -- can use them as a fallback, then prefers constraint-free
+                -- answers.  Every presentation mode consumes the same lazy
+                -- chunk trace while retaining validation and completion
+                -- information that the historical list adapters discarded.
+                let preferNoConstraints = not $ any (`elem` flags)
+                      [PrintAll, EnvUsage, FirstSol, Best, Constraints]
+                    searchInput
+                      | preferNoConstraints = input
+                          {input_allowConstraints = True}
+                      | otherwise = input
+                case findExpressionsWithStatsEither searchInput of
+                  Left err -> lift $ putStrLn $
+                    "invalid search input: " ++ show err
+                  Right chunks -> do
+                    if
+                      | PrintAll `elem` flags -> lift $ do
+                          when (verbosity>0) $
+                            putStrLn "[running complete search ..]"
+                          printAllResults qualification tVarIndex chunks
+                      | EnvUsage `elem` flags -> lift $ do
+                          when (verbosity>0) $
+                            putStrLn "[running complete search ..]"
+                          let stats = maybe M.empty chunkBindingUsages
+                                $ lastMaybe chunks
+                              highest = take 8
+                                $ sortBy (flip $ comparing snd)
+                                $ M.toList stats
+                          print highest
+                      | otherwise -> do
+                          selection <- lift $ if
+                            | FirstSol `elem` flags -> do
+                                when (verbosity>0) $
+                                  putStrLn "[selecting first expression ..]"
+                                pure $ selectOneExpression chunks
+                            | Best `elem` flags -> do
+                                when (verbosity>0) $
+                                  putStrLn "[selecting best expressions ..]"
+                                pure $ selectBestNExpressions 999 chunks
+                            | Constraints `elem` flags -> do
+                                when (verbosity>0) $ putStrLn
+                                  "[selecting with constrained lookahead ..]"
+                                pure $ selectFirstBestExpressionsLookahead
+                                  256 chunks
+                            | otherwise -> do
+                                when (verbosity>0) $ putStrLn
+                                  "[selecting with constraint-free preference ..]"
+                                pure $
+                                  selectFirstBestExpressionsLookaheadPreferNoConstraints
+                                    256 chunks
+                          lift $ printSelection qualification tVarIndex
+                            selection
 
         -- printChecks     testHeuristicsConfig env
         -- printStatistics testHeuristicsConfig env
@@ -259,6 +254,60 @@ main = do
             t = read "m a->( ( a->m b)->( m b))"
         print $ t
         -}
+
+printSelection
+  :: Int
+  -> TypeVarIndex
+  -> SearchSelection [ExferenceOutputElement]
+  -> IO ()
+printSelection _ _ (SearchSelection status []) =
+  putStrLn $ noResultsMessage status
+printSelection qualification tVarIndex (SearchSelection _ results) =
+  mapM_ (printResult qualification tVarIndex) results
+
+printAllResults
+  :: Int
+  -> TypeVarIndex
+  -> [ExferenceChunkElement]
+  -> IO ()
+printAllResults qualification tVarIndex = go Nothing False
+ where
+  go status foundAny [] = when (not foundAny) $
+    putStrLn $ noResultsMessage status
+  go _ foundAny (chunk : chunks) = case chunkElements chunk of
+    [] -> go (Just $ chunkStatus chunk) foundAny chunks
+    results -> do
+      mapM_ (printResult qualification tVarIndex) results
+      go (Just $ chunkStatus chunk) True chunks
+
+printResult :: Int -> TypeVarIndex -> ExferenceOutputElement -> IO ()
+printResult qualification tVarIndex
+    (expression, constraints, ExferenceStats steps depth queueSize) = do
+  putStrLn $ prettyPrint $ convert qualification expression
+  when (not $ null constraints) $ do
+    let constraintStrings = map (showHsConstraint tVarIndex)
+          $ S.toList
+          $ S.fromList constraints
+    putStrLn $ "but only with additional constraints: "
+      ++ intercalate ", " constraintStrings
+  putStrLn $ replicate 40 ' '
+    ++ "(depth " ++ show depth
+    ++ ", " ++ show steps ++ " steps, "
+    ++ show queueSize ++ " max pqueue size)"
+
+noResultsMessage :: Maybe SearchStatus -> String
+noResultsMessage status = case searchCompletion <$> status of
+  Just SearchExhausted -> "[no results: search space exhausted]"
+  Just SearchPruned ->
+    "[no results found after pruning; inhabitation is undecided]"
+  Just SearchStepLimitReached ->
+    "[no results found before the step limit; inhabitation is undecided]"
+  Just SearchRunning ->
+    "[no results in the inspected search prefix; inhabitation is undecided]"
+  Nothing -> "[no search states were produced]"
+
+lastMaybe :: [a] -> Maybe a
+lastMaybe = List.foldl' (\_ value -> Just value) Nothing
 
 filterBindingsSimple :: [String] -> [FunctionBinding] -> [FunctionBinding]
 filterBindingsSimple excluded = filter $ \binding ->

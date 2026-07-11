@@ -63,6 +63,17 @@ two inputs reuse numeric IDs.  The independent checker consumes every prenex
 `forall` layer with the same rigid-ID order as search, and type rendering uses
 one source-name map for quantifiers, constraints, and body occurrences.
 
+The status-bearing search API is `findExpressionsWithStatsEither`. It retains
+structured input failures and distinguishes a genuinely exhausted search space
+from a step-limited search and one made incomplete by queue/depth pruning. The
+historical list-returning entry points remain compatibility adapters (including
+their “invalid input means no elements” convention). Selection functions are
+also available separately over chunk streams. They return `SearchSelection`,
+which folds the last inspected status through the policy without retaining the
+consumed trace. The executable therefore validates and runs search once, then
+says when an empty result is conclusive versus when inhabitation remains
+undecided.
+
 The `exference` executable is a normal build target again. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been
 removed; deterministic regressions live in `exference-tests` and the separate
@@ -106,9 +117,9 @@ any / the right solution. Some common current limitations are:
 ## Other known (technical) issues
 
 - **Memory consumption is large** (even more so when profiling);
-- The executable still owns environment loading and presentation policy. A
-  reusable session layer should move those decisions below the CLI before the
-  Djinn and Exference frontends are unified.
+- The executable still owns environment loading. Search execution and result
+  selection now have a reusable boundary, but a common Djinn/Exference session
+  layer still needs to move environment policy below both CLIs.
 - The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
   records concrete correctness reproducers, shared-IR boundaries, and the
   staged migration order.

@@ -123,8 +123,15 @@ data ExferenceInputError
 type ExferenceOutputElement = (Expression, [HsConstraint], ExferenceStats)
 data SearchCompletion
   = SearchRunning
+    -- ^ Retained search nodes remain after this chunk.
   | SearchExhausted
+    -- ^ No retained nodes remain and no node was discarded by a configured
+    -- bound. Failure is conclusive for this search calculus and environment.
   | SearchStepLimitReached
+    -- ^ Retained nodes remain, but the configured step budget is spent.
+  | SearchPruned
+    -- ^ No retained nodes remain, but queue or depth bounds discarded nodes;
+    -- absence of an answer is therefore not a non-inhabitation result.
   deriving (Eq, Show)
 
 data SearchStatus = SearchStatus
@@ -241,6 +248,8 @@ findExpressions (ExferenceInput rawType
       ]
     where
       completion
+        | Q.null newNodes
+        , totalQueuePruned > 0 || totalDepthPruned > 0 = SearchPruned
         | Q.null newNodes = SearchExhausted
         | n' >= maxSteps = SearchStepLimitReached
         | otherwise = SearchRunning

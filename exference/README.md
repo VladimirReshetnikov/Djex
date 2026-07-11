@@ -91,6 +91,9 @@ any / the right solution. Some common current limitations are:
 - The executable still owns environment loading and presentation policy. A
   reusable session layer should move those decisions below the CLI before the
   Djinn and Exference frontends are unified.
+- The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
+  records concrete correctness reproducers, shared-IR boundaries, and the
+  staged migration order.
 
 ## Contributing
 

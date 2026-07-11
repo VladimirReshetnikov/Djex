@@ -16,6 +16,8 @@ module Language.Haskell.Synthesis.Name
   , mkModuleNameSegments
   , moduleNameSegments
   , renderModuleName
+  , isIdentifierCharacter
+  , isOperatorCharacter
   , mkIdentifier
   , mkQualifiedIdentifier
   , mkOperator
@@ -29,6 +31,7 @@ module Language.Haskell.Synthesis.Name
   , nameOccurrence
   , nameLexicalClass
   , occurrenceLexicalClass
+  , nameSpelling
   , nameIdentifier
   , nameOperator
   , nameSpecial
@@ -247,6 +250,15 @@ occurrenceLexicalClass :: Occurrence -> LexicalClass
 occurrenceLexicalClass (IdentifierOccurrence lexicalClass _) = lexicalClass
 occurrenceLexicalClass (OperatorOccurrence lexicalClass _) = lexicalClass
 occurrenceLexicalClass (SpecialOccurrence _) = ConstructorLike
+
+-- | The bare, unqualified spelling of an ordinary identifier or operator.
+-- Contextual delimiters such as parentheses and backticks are not part of
+-- the spelling.  Built-in list, tuple, cons, and function names return
+-- 'Nothing' because their identity is represented by 'SpecialName'.
+nameSpelling :: Name -> Maybe String
+nameSpelling (OrdinaryName _ (IdentifierPart _ spelling)) = Just spelling
+nameSpelling (OrdinaryName _ (OperatorPart _ spelling)) = Just spelling
+nameSpelling (BuiltInName _) = Nothing
 
 nameIdentifier :: Name -> Maybe String
 nameIdentifier (OrdinaryName _ (IdentifierPart _ spelling)) = Just spelling
@@ -500,10 +512,19 @@ looksLikeIdentifier (first : _) =
   isLower first || isUpper first || first == '_'
 looksLikeIdentifier [] = False
 
+-- | Whether a character may occur after the initial character of a Haskell
+-- identifier or within a module-name segment.  Initial-character case and
+-- reserved-word checks remain the responsibility of the name constructors.
+-- This is the exact continuation predicate used by those constructors.
 isIdentifierCharacter :: Char -> Bool
 isIdentifierCharacter character =
   isAlphaNum character || character == '_' || character == '\''
 
+-- | Whether a character belongs to Haskell's symbolic-operator alphabet.
+-- Reserved whole operators and the leading-colon lexical class are checked
+-- separately by the name constructors.  Tokenizers can use this predicate to
+-- make exactly the same character-level decision as 'mkOperator' and
+-- 'parseName'.
 isOperatorCharacter :: Char -> Bool
 isOperatorCharacter character =
   character `elem` "!#$%&*+./<=>?@\\^|-~:" ||

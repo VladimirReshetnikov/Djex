@@ -76,6 +76,15 @@ ordinaryTests = testGroup "ordinary names"
         OperatorOccurrence VariableLike "<*>"
       nameOccurrence (right (mkOperator ":+:")) @?=
         OperatorOccurrence ConstructorLike ":+:"
+  , testCase "expose the lexical character predicates used by constructors" $ do
+      assertBool "valid identifier continuation characters"
+        $ all isIdentifierCharacter "aZ0_'\955"
+      assertBool "invalid identifier continuation characters"
+        $ all (not . isIdentifierCharacter) ".- \8853"
+      assertBool "valid operator characters"
+        $ all isOperatorCharacter "!#$%&*+./<=>?@\\^|-~:\8853"
+      assertBool "invalid operator characters"
+        $ all (not . isOperatorCharacter) "a0_ (),;[]`{}\"'"
   , testCase "accept valid operators" $
       forM_ ["+", "++", ".", "<*>", ":+:", "--*", "⊕"] $ \spelling ->
         assertBool spelling (not (isLeft (mkOperator spelling)))
@@ -92,6 +101,13 @@ ordinaryTests = testGroup "ordinary names"
       nameModule name @?= Just qualifier
       nameOccurrence name @?=
         IdentifierOccurrence VariableLike "map"
+      nameSpelling name @?= Just "map"
+  , testCase "return bare ordinary spellings but not structural specials" $ do
+      let qualifier = right (mkModuleName "Control.Applicative")
+      nameSpelling (right $ mkIdentifier "foldl'") @?= Just "foldl'"
+      nameSpelling (right $ mkQualifiedOperator qualifier "<*>") @?= Just "<*>"
+      map nameSpelling [listName, consName, functionName,
+        right (tupleName Boxed 3)] @?= replicate 4 Nothing
   , testCase "render every identifier context" $ do
       let qualifier = right (mkModuleName "Data.List")
           name = right (mkQualifiedIdentifier qualifier "map")
@@ -247,6 +263,14 @@ propertyTests = testGroup "round trips"
       show name QC.=== renderCanonical name
   , QC.testProperty "occurrence accessors agree" $ \(ValidName name) ->
       accessorsAgree name
+  , QC.testProperty "identifier continuation predicate agrees with construction" $
+      \character ->
+        not (isLeft $ mkIdentifier ("zz" ++ [character])) QC.===
+          isIdentifierCharacter character
+  , QC.testProperty "operator character predicate agrees with construction" $
+      \character ->
+        not (isLeft $ mkOperator ['+', character]) QC.===
+          isOperatorCharacter character
   , QC.testProperty "module render/parse" $ \(ValidModule moduleName) ->
       mkModuleName (renderModuleName moduleName) QC.=== Right moduleName
   ]
@@ -265,19 +289,22 @@ assertTuple boxity arity expected = do
 accessorsAgree :: Name -> QC.Property
 accessorsAgree name = case nameOccurrence name of
   IdentifierOccurrence lexicalClass spelling -> QC.conjoin
-    [ nameIdentifier name QC.=== Just spelling
+    [ nameSpelling name QC.=== Just spelling
+    , nameIdentifier name QC.=== Just spelling
     , nameOperator name QC.=== Nothing
     , nameSpecial name QC.=== Nothing
     , nameLexicalClass name QC.=== lexicalClass
     ]
   OperatorOccurrence lexicalClass spelling -> QC.conjoin
-    [ nameIdentifier name QC.=== Nothing
+    [ nameSpelling name QC.=== Just spelling
+    , nameIdentifier name QC.=== Nothing
     , nameOperator name QC.=== Just spelling
     , nameSpecial name QC.=== Nothing
     , nameLexicalClass name QC.=== lexicalClass
     ]
   SpecialOccurrence builtIn -> QC.conjoin
-    [ nameIdentifier name QC.=== Nothing
+    [ nameSpelling name QC.=== Nothing
+    , nameIdentifier name QC.=== Nothing
     , nameOperator name QC.=== Nothing
     , nameSpecial name QC.=== Just builtIn
     , nameLexicalClass name QC.=== ConstructorLike

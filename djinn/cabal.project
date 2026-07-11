@@ -1,0 +1,7 @@
+-- Keep the neutral package in the local plan before Djinn starts depending on
+-- it, so each migration commit remains buildable from this directory.
+packages:
+  .
+  ../synthesis
+
+tests: True

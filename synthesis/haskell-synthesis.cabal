@@ -1,0 +1,46 @@
+Cabal-Version: 3.0
+Name:          haskell-synthesis
+Version:       0.1.0.0
+Synopsis:      Shared vocabulary for Haskell program synthesis
+Description:
+  Parser-independent names, diagnostics, and (eventually) surface syntax for
+  Haskell synthesis backends such as Djinn and Exference.
+Category:      Language
+License:       BSD-3-Clause
+License-File:  LICENSE
+Author:        Vladimir Reshetnikov and contributors
+Maintainer:    Vladimir Reshetnikov
+Build-Type:    Simple
+Stability:     experimental
+
+Extra-Source-Files:
+  README.md
+
+Library
+  Default-Language: Haskell2010
+  Hs-Source-Dirs:   src
+  Ghc-Options:      -Wall -Wcompat
+
+  Exposed-Modules:
+    Language.Haskell.Synthesis.Diagnostic
+    Language.Haskell.Synthesis.Name
+
+  Build-Depends:
+    base    >= 4.18 && < 5,
+    deepseq >= 1.4  && < 1.6
+
+Test-Suite synthesis-tests
+  Type:             exitcode-stdio-1.0
+  Main-Is:          Spec.hs
+  Hs-Source-Dirs:   test
+  Default-Language: Haskell2010
+  Ghc-Options:      -Wall -Wcompat
+
+  Build-Depends:
+    base               >= 4.18 && < 5,
+    deepseq            >= 1.4  && < 1.6,
+    haskell-synthesis,
+    QuickCheck         >= 2.14 && < 3,
+    tasty              >= 1.4  && < 2,
+    tasty-hunit        >= 0.10 && < 1,
+    tasty-quickcheck   >= 0.10 && < 1

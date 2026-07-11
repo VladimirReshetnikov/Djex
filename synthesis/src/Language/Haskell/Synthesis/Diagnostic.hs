@@ -1,0 +1,137 @@
+-- | Parser-independent structured diagnostics and deterministic rendering.
+module Language.Haskell.Synthesis.Diagnostic
+  ( Severity (..)
+  , SourcePosition (..)
+  , SourceSpan (..)
+  , Diagnostic (..)
+  , diagnostic
+  , withCode
+  , withSource
+  , withSpan
+  , withContext
+  , renderDiagnostic
+  ) where
+
+import Control.DeepSeq (NFData (rnf))
+import Data.List (intercalate)
+
+data Severity = Error | Warning | Info
+  deriving (Eq, Ord, Show, Enum, Bounded)
+
+-- | A one-based line and column in a source file or input buffer.
+data SourcePosition = SourcePosition
+  { sourceLine :: !Int
+  , sourceColumn :: !Int
+  }
+  deriving (Eq, Ord, Show)
+
+-- | A half-open source range.  The representation is deliberately neutral;
+-- parser adapters decide how their native locations map into it.
+data SourceSpan = SourceSpan
+  { sourceStart :: !SourcePosition
+  , sourceEnd :: !SourcePosition
+  }
+  deriving (Eq, Ord, Show)
+
+data Diagnostic = Diagnostic
+  { diagnosticSeverity :: !Severity
+  , diagnosticCode :: Maybe String
+  , diagnosticSource :: Maybe FilePath
+  , diagnosticSpan :: Maybe SourceSpan
+  , diagnosticMessage :: String
+  , diagnosticContext :: [String]
+  }
+  deriving (Eq, Show)
+
+instance NFData Severity where
+  rnf Error = ()
+  rnf Warning = ()
+  rnf Info = ()
+
+instance NFData SourcePosition where
+  rnf (SourcePosition line column) = rnf line `seq` rnf column
+
+instance NFData SourceSpan where
+  rnf (SourceSpan start end) = rnf start `seq` rnf end
+
+instance NFData Diagnostic where
+  rnf value =
+    rnf (diagnosticSeverity value) `seq`
+    rnf (diagnosticCode value) `seq`
+    rnf (diagnosticSource value) `seq`
+    rnf (diagnosticSpan value) `seq`
+    rnf (diagnosticMessage value) `seq`
+    rnf (diagnosticContext value)
+
+-- | Start a diagnostic without optional code, source, span, or context.
+diagnostic :: Severity -> String -> Diagnostic
+diagnostic severity message = Diagnostic
+  { diagnosticSeverity = severity
+  , diagnosticCode = Nothing
+  , diagnosticSource = Nothing
+  , diagnosticSpan = Nothing
+  , diagnosticMessage = message
+  , diagnosticContext = []
+  }
+
+withCode :: String -> Diagnostic -> Diagnostic
+withCode code value = value { diagnosticCode = Just code }
+
+withSource :: FilePath -> Diagnostic -> Diagnostic
+withSource source value = value { diagnosticSource = Just source }
+
+withSpan :: SourceSpan -> Diagnostic -> Diagnostic
+withSpan span' value = value { diagnosticSpan = Just span' }
+
+-- | Add outer-to-inner explanatory context.  Rendering preserves insertion
+-- order so adapters can build a readable trail such as module, declaration,
+-- and query.
+withContext :: String -> Diagnostic -> Diagnostic
+withContext context value =
+  value { diagnosticContext = diagnosticContext value ++ [context] }
+
+-- | Render in a compiler-style, single-header format.
+--
+-- Examples include @file.hs:3:7-12: error [SYN001]: message@ and, without a
+-- source, @warning: message@.  Context entries follow on indented lines.
+renderDiagnostic :: Diagnostic -> String
+renderDiagnostic value =
+  renderLocation value ++
+  renderSeverity (diagnosticSeverity value) ++
+  renderCode (diagnosticCode value) ++
+  ": " ++ diagnosticMessage value ++
+  concatMap ("\n  context: " ++) (diagnosticContext value)
+
+renderLocation :: Diagnostic -> String
+renderLocation value =
+  case locationParts of
+    [] -> ""
+    parts -> intercalate ":" parts ++ ": "
+  where
+    locationParts =
+      maybe [] (: []) (diagnosticSource value) ++
+      maybe [] ((: []) . renderSpan) (diagnosticSpan value)
+
+renderSpan :: SourceSpan -> String
+renderSpan (SourceSpan start end)
+  | sourceLine start == sourceLine end =
+      show (sourceLine start) ++ ":" ++ show (sourceColumn start) ++
+      renderSameLineEnd start end
+  | otherwise =
+      show (sourceLine start) ++ ":" ++ show (sourceColumn start) ++
+      "-" ++ show (sourceLine end) ++ ":" ++ show (sourceColumn end)
+
+renderSameLineEnd :: SourcePosition -> SourcePosition -> String
+renderSameLineEnd start end
+  | sourceColumn start == sourceColumn end = ""
+  | otherwise = "-" ++ show (sourceColumn end)
+
+renderSeverity :: Severity -> String
+renderSeverity Error = "error"
+renderSeverity Warning = "warning"
+renderSeverity Info = "info"
+
+renderCode :: Maybe String -> String
+renderCode Nothing = ""
+renderCode (Just "") = ""
+renderCode (Just code) = " [" ++ code ++ "]"

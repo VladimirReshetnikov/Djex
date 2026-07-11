@@ -120,11 +120,13 @@ checkExpression classEnvironment functions deconstructors goal expected expressi
       alternativeType <- infer checkedVariables body
       unifyTypes resultType alternativeType
 
-    instantiateBinding name = case [binding | binding@(_, bindingName, _, _, _) <- functions,
-                                              bindingName == name] of
+    instantiateBinding name = case
+        [binding | binding <- functions, functionName binding == name] of
       [] -> throwCheck $ UnknownBinding name
       binding : _ -> do
-        let (result, _, _, constraints, parameters) = binding
+        let result = functionResult binding
+            constraints = functionConstraints binding
+            parameters = functionParameters binding
         (freshTypes, freshConstraints) <- freshenTypes
           [foldr TypeArrow result parameters] constraints
         freshType <- case freshTypes of
@@ -135,10 +137,10 @@ checkExpression classEnvironment functions deconstructors goal expected expressi
         pure freshType
 
     instantiateConstructor name scrutineeType = case
-        [ (input, fields)
-        | (input, alternatives, _) <- deconstructors
-        , (constructor, fields) <- alternatives
-        , constructor == name
+        [ (deconstructorInput deconstructor, constructorFields alternative)
+        | deconstructor <- deconstructors
+        , alternative <- deconstructorConstructors deconstructor
+        , constructorName alternative == name
         ] of
       [] -> throwCheck $ UnknownConstructor name
       (input, fields) : _ -> do

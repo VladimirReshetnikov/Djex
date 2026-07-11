@@ -215,7 +215,7 @@ findExpressions (ExferenceInput rawType
     (Q.singleton 0 rootSearchNode)
   t = forallify rawType
   rootSearchNode = SearchNode
-    { _searchNodeGoals           = (Seq.singleton (VarBinding 0 t, 0))
+    { _searchNodeGoals           = Seq.singleton (TGoal (VarBinding 0 t) 0)
     , _searchNodeConstraintGoals = []
     , _searchNodeProvidedScopes  = initialScopes
     , _searchNodeVarUses         = IntMap.empty
@@ -345,13 +345,14 @@ validateExferenceInput input
   | Just (field, invalid) <- find (not . isFinitePenalty . snd)
       (heuristicFields $ input_heuristicsConfig input) =
       Left $ InvalidHeuristic field invalid
-  | Just (_, name, rating, _, _) <- find (not . isFinitePenalty . functionRating)
-      (input_envFuncs input) = Left $ InvalidHeuristic (show name) rating
+  | Just binding <- find (not . isFinitePenalty . functionPenalty)
+      (input_envFuncs input) = Left $ InvalidHeuristic
+        (show $ functionName binding) (functionPenalty binding)
   | containsNestedForall $ input_goalType input =
       Left $ NestedForallInGoal $ input_goalType input
-  | Just (binding@(_, name, _, _, _)) <- find (containsForall . functionBindingType)
+  | Just binding <- find (containsForall . functionBindingType)
       (input_envFuncs input) =
-      Left $ NestedForallInBinding name $ functionBindingType binding
+      Left $ NestedForallInBinding (functionName binding) $ functionBindingType binding
   | Just deconstructor <- find (containsForall . deconstructorBindingType)
       (input_envDeconsS input) =
       Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
@@ -365,11 +366,8 @@ limitQueue (Just maximumSize) queue =
   in (Q.fromList retained, length entries - length retained)
 
 functionBindingType :: FunctionBinding -> HsType
-functionBindingType (result, _, _, _, parameters) =
-  foldr TypeArrow result parameters
-
-functionRating :: FunctionBinding -> Penalty
-functionRating (_, _, rating, _, _) = rating
+functionBindingType binding =
+  foldr TypeArrow (functionResult binding) (functionParameters binding)
 
 heuristicFields :: ExferenceHeuristicsConfig -> [(String, Penalty)]
 heuristicFields config =
@@ -389,8 +387,9 @@ heuristicFields config =
   ]
 
 deconstructorBindingType :: DeconstructorBinding -> HsType
-deconstructorBindingType (inputType, alternatives, _) =
-  foldr TypeArrow inputType $ concatMap snd alternatives
+deconstructorBindingType binding =
+  foldr TypeArrow (deconstructorInput binding)
+    $ concatMap constructorFields (deconstructorConstructors binding)
 
 containsNestedForall :: HsType -> Bool
 containsNestedForall ty@TypeForall{} = containsForall $ stripOuterForalls ty
@@ -417,7 +416,7 @@ rateNode h s = Priority
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sum . fmap rateGoal
   where
-    rateGoal (VarBinding _ t,_) = tComplexity t
+    rateGoal (TGoal (VarBinding _ t) _) = tComplexity t
     -- TODO: actually measure performance with different values,
     --       use derived values instead of (arbitrarily) chosen ones.
     tComplexity (TypeVar _)         = heuristics_goalVar h
@@ -475,7 +474,7 @@ stateStep multiPM allowConstrs h = do
   contxt <- use queryClassEnv
   constraintGoals' <- use constraintGoals
 
-  ((VarBinding var goalType, scopeId) Seq.:< gr) <- Seq.viewl <$> use goals
+  (TGoal (VarBinding var goalType) scopeId Seq.:< gr) <- Seq.viewl <$> use goals
   goals .= gr
 
   let
@@ -513,7 +512,7 @@ stateStep multiPM allowConstrs h = do
       builderSetReason "forall-type goal transformation"
       lastStepBinding .= Nothing
       let substs = IntMap.fromList $ zip vs $ TypeConstant <$> dataIds
-      goals %= ((VarBinding var $ snd $ applySubsts substs t, scopeId) <|)
+      goals %= (TGoal (VarBinding var $ snd $ applySubsts substs t) scopeId <|)
       queryClassEnv %= addQueryClassEnv (snd . constraintApplySubsts substs <$> cs)
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
@@ -522,10 +521,14 @@ stateStep multiPM allowConstrs h = do
 
     byProvided :: StateT SearchNode [] ()
     byProvided = do
-      (provId, provT, provPs, forallTypes, constraints)
-        <- lift =<< uses providedScopes (scopeGetAllBindings scopeId)
+      provided <- lift =<< uses providedScopes (scopeGetAllBindings scopeId)
       offset <- uses maxTVarId (+1)
       let
+        provId      = varPVariable provided
+        provT       = varPResult provided
+        provPs      = varPParameters provided
+        forallTypes = varPForallVariables provided
+        constraints = varPConstraints provided
         incF        = incVarIds (+offset)
         ss          = IntMap.fromList $ zip forallTypes (incF . TypeVar <$> forallTypes)
         provType    = snd $ applySubsts ss provT
@@ -545,21 +548,21 @@ stateStep multiPM allowConstrs h = do
     -- try to resolve the goal by looking at functions from the environment.
     byFunctionSimple :: StateT SearchNode [] ()
     byFunctionSimple = do
-      (funcR, funcId, funcRating, funcConstrs, funcParams)
-        <- lift =<< uses functions V.toList
+      binding <- lift =<< uses functions V.toList
       offset <- uses maxTVarId (+1)
       let
         incF     = incVarIds (+offset)
-        provType = incF funcR
+        provType = incF $ functionResult binding
       mapStateT maybeToList $ byGenericUnify
-        (Left funcId)
+        (Left $ functionName binding)
         provType
-        (map (constraintMapTypes incF) funcConstrs)
-        (map incF funcParams)
-        (heuristics_stepEnvGood h + funcRating)
-        (heuristics_stepEnvBad h + funcRating)
-        ("applying function " ++ show funcId)
-        (unifyOffset goalType (HsTypeOffset funcR offset))
+        (map (constraintMapTypes incF) $ functionConstraints binding)
+        (map incF $ functionParameters binding)
+        (heuristics_stepEnvGood h + functionPenalty binding)
+        (heuristics_stepEnvBad h + functionPenalty binding)
+        ("applying function " ++ show (functionName binding))
+        (unifyOffset goalType
+          $ HsTypeOffset (functionResult binding) offset)
 
     -- on code for byProvided and byFunctionSimple
     byGenericUnify :: Either QualifiedName (TVarId, HsType)
@@ -595,7 +598,7 @@ stateStep multiPM allowConstrs h = do
             provided
             (ExpApply coreExp $ ExpHole vParam)
             (ExpHole var))
-          goals %= ((VarBinding vParam d, scopeId) <|)
+          goals %= (TGoal (VarBinding vParam d) scopeId <|)
           newScopeId <- builderAddScope scopeId
           constraintGoals <>= provConstrs
           traverse_ (\r -> varUses . singular (ix $ fst r) += 1) applierr
@@ -608,8 +611,8 @@ stateStep multiPM allowConstrs h = do
             goalType
             var
             newScopeId
-            (let (r,ps,fs,cs) = splitArrowResultParams provided
-              in [(vResult, r, ds++ps, fs, cs)])
+            (let (r, ps, fs, cs) = splitArrowResultParams provided
+              in [VarPBinding vResult r (ds ++ ps) fs cs])
           goals <>= Seq.fromList additionalGoals
 
       byUnified :: Substs -> Substs -> StateT SearchNode Maybe ()
@@ -675,8 +678,11 @@ addScopePatternMatch :: MonadState SearchNode m
                      -> [VarPBinding]
                      -> m [TGoal]
 addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
-  []                                    -> return [(VarBinding vid goalType, sid)]
-  (b@(v,vtResult,vtParams,_,_):bindingRest) -> do
+  [] -> return [TGoal (VarBinding vid goalType) sid]
+  (b : bindingRest) -> do
+    let v = varPVariable b
+        vtResult = varPResult b
+        vtParams = varPParameters b
     offset <- builderGetTVarOffset
     let incF = incVarIds (+offset)
     let expVar = ExpVar v (foldr TypeArrow vtResult vtParams)
@@ -693,7 +699,8 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
         | otherwise -> fromMaybe defaultHandleRest . asum . map mapFunc =<< use deconss
          where
           mapFunc :: MonadState SearchNode m => DeconstructorBinding -> Maybe (m [TGoal])
-          mapFunc (matchParam, [(matchId, matchRs)], False) = let
+          mapFunc (DeconstructorBinding matchParam
+                    [ConstructorBinding matchId matchRs] False) = let
             resultTypes = map incF matchRs
             unifyResult = unifyRightOffset vtResult
                                            (HsTypeOffset matchParam offset)
@@ -726,12 +733,15 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
                                    sid
                                    (reverse newBinds ++ bindingRest)
             in liftM mapFunc1 unifyResult
-          mapFunc (matchParam, matchers@(_:_), False) | multiPM = let
+          mapFunc (DeconstructorBinding matchParam matchers@(_ : _) False)
+            | multiPM = let
             unifyResult = unifyRightOffset vtResult
                                            (HsTypeOffset matchParam offset)
             -- inputType = incF matchParam
             mapFunc2 substs = do -- m
-              mData <- matchers `forM` \(matchId, matchRs) -> do -- m
+              mData <- matchers `forM` \matcher -> do -- m
+                let matchId = constructorName matcher
+                    matchRs = constructorFields matcher
                 newSid <- builderAddScope sid
                 let resultTypes = map incF matchRs
                 vars <- replicateM (length matchRs) builderAllocVar

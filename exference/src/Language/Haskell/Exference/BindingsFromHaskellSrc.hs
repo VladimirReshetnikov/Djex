@@ -152,7 +152,11 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
       return $ ( [ (n, foldr TypeArrow rtype ts)
                  | (n, ts) <- consDatas
                  ]
-               , (rtype, consDatas, False)
+               , DeconstructorBinding
+                   rtype
+                   [ConstructorBinding constructor fields
+                   | (constructor, fields) <- consDatas]
+                   False
                )
         -- TODO: actually determine if stuff is recursive or not
   return $ do

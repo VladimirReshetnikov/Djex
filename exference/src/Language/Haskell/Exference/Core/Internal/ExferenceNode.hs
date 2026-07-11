@@ -9,11 +9,11 @@
 
 module Language.Haskell.Exference.Core.Internal.ExferenceNode
   ( SearchNode (..)
-  , TGoal
+  , TGoal (..)
   , Scopes (..)
   , Scope (..)
   , ScopeId
-  , VarPBinding
+  , VarPBinding (..)
   , VarBinding (..)
   , VarUsageMap
   , varBindingApplySubsts
@@ -89,8 +89,18 @@ import Data.List ( intercalate )
 
 data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
-type VarPBinding = (TVarId, HsType, [HsType], [TVarId], [HsConstraint])
-                -- var, result, params, forallTypes, constraints
+
+-- | A variable together with the prenex decomposition of its type.  Naming
+-- these components prevents the five adjacent lists and types from being
+-- silently transposed at search-state boundaries.
+data VarPBinding = VarPBinding
+  { varPVariable :: !TVarId
+  , varPResult :: HsType
+  , varPParameters :: [HsType]
+  , varPForallVariables :: [TVarId]
+  , varPConstraints :: [HsConstraint]
+  }
+  deriving (Generic, Show)
 
 
 instance Show VarBinding where
@@ -101,19 +111,22 @@ varBindingApplySubsts substs (VarBinding v t) =
   VarBinding v (snd $ applySubsts substs t)
 
 varPBindingApplySubsts :: Substs -> VarPBinding -> VarPBinding
-varPBindingApplySubsts ss (v,rt,pt,fvs,cs) =
+varPBindingApplySubsts ss binding =
   let
+    v = varPVariable binding
+    rt = varPResult binding
+    pt = varPParameters binding
+    fvs = varPForallVariables binding
+    cs = varPConstraints binding
     relevantSS = foldr IntMap.delete ss fvs
     (newResult, params, newForalls, newCs) = splitArrowResultParams
                                            $ snd
                                            $ applySubsts relevantSS rt
   in
-  ( v
-  , newResult
-  , map (snd . applySubsts relevantSS) pt ++ params
-  , newForalls ++ fvs
-  , cs ++ newCs
-  )
+  VarPBinding v newResult
+    (map (snd . applySubsts relevantSS) pt ++ params)
+    (newForalls ++ fvs)
+    (cs ++ newCs)
 
 type ScopeId = Int
 
@@ -165,12 +178,19 @@ addScope parent (Scopes nid sMap) = (nid, Scopes (nid+1) newMap)
 
 type VarUsageMap = IntMap.IntMap Int
 
-type TGoal = (VarBinding, ScopeId)
-           -- goal,    id of innermost scope available
+-- | An expression hole and the innermost lexical scope visible from it.
+data TGoal = TGoal
+  { goalBinding :: VarBinding
+  , goalScope :: !ScopeId
+  }
+  deriving Generic
 
 goalApplySubst :: Substs -> TGoal -> TGoal
 goalApplySubst ss | IntMap.null ss = id
-                  | otherwise      = first (varBindingApplySubsts ss)
+                  | otherwise      = \goal -> goal
+                      { goalBinding = varBindingApplySubsts ss
+                          $ goalBinding goal
+                      }
 
 -- takes a new goal data, and a new set of provided stuff, and
 -- returns some actual goal/newScope pair
@@ -180,21 +200,21 @@ addGoalProvided :: ScopeId
                 -> Scopes
                 -> (TGoal, Scopes)
 addGoalProvided sid goalBind givenBinds (Scopes nid sMap) =
-    ((goalBind, nid),Scopes (nid+1) newMap)
+    (TGoal goalBind nid, Scopes (nid+1) newMap)
   where
     newMap = IntMap.insert nid (Scope transformedBinds [sid]) sMap
     transformedBinds = map splitBinding givenBinds
 
 addNewScopeGoal :: ScopeId -> VarBinding -> Scopes -> (TGoal, ScopeId, Scopes)
 addNewScopeGoal sid goalBind (Scopes nid sMap) =
-    ((goalBind, nid), nid, Scopes (nid+1) newMap)
+    (TGoal goalBind nid, nid, Scopes (nid+1) newMap)
   where
     newMap = IntMap.insert nid (Scope [] [sid]) sMap
 
 mkGoals :: ScopeId
         -> [VarBinding]
         -> [TGoal]
-mkGoals sid vbinds = [(b,sid)|b<-vbinds]
+mkGoals sid = map (`TGoal` sid)
 
 data SearchNode = SearchNode
   { _searchNodeGoals           :: Seq TGoal
@@ -218,6 +238,8 @@ data SearchNode = SearchNode
   deriving Generic
 
 instance NFData VarBinding   where rnf = genericRnf
+instance NFData VarPBinding  where rnf = genericRnf
+instance NFData TGoal        where rnf = genericRnf
 instance NFData Scope        where rnf = genericRnf
 instance NFData Scopes       where rnf = genericRnf
 instance NFData SearchNode   where rnf = genericRnf
@@ -316,8 +338,8 @@ showSearchNode
     )
  where
   tgoal :: TGoal -> Doc
-  tgoal (vt,scopeId) =  tVarType vt
-                     <> text (" in " ++ show scopeId)
+  tgoal goal = tVarType (goalBinding goal)
+            <> text (" in " ++ show (goalScope goal))
   tScope :: (ScopeId, Scope) -> Doc
   tScope (sid, Scope binds supers) =
         text (show sid ++ " ")
@@ -328,9 +350,13 @@ showSearchNode
                         )
   tVarType :: VarBinding -> Doc
   tVarType (VarBinding i t) = text $ showVar i ++ " :: " ++ show t
-  tVarPType :: (TVarId, HsType, [HsType], [TVarId], [HsConstraint]) -> Doc
-  tVarPType (i, t, ps, [], []) = tVarType $ VarBinding i (foldr TypeArrow t ps)
-  tVarPType (i, t, ps, fs, cs) = tVarType $ VarBinding i (TypeForall fs cs (foldr TypeArrow t ps))
+  tVarPType :: VarPBinding -> Doc
+  tVarPType binding = tVarType $ VarBinding (varPVariable binding) type'
+    where
+      body = foldr TypeArrow (varPResult binding) (varPParameters binding)
+      type' = case (varPForallVariables binding, varPConstraints binding) of
+        ([], []) -> body
+        (variables, constraints) -> TypeForall variables constraints body
 
 showNodeDevelopment :: SearchNode -> String
 #if LINK_NODES
@@ -345,6 +371,8 @@ showNodeDevelopment _ = "[showNodeDevelopment: exference-core was not compiled w
 --   observer state = observeOpaque (show state) state
 
 splitBinding :: VarBinding -> VarPBinding
-splitBinding (VarBinding v t) = let (rt,pts,fvs,cs) = splitArrowResultParams t in (v,rt,pts,fvs,cs)
+splitBinding (VarBinding v t) =
+  let (result, parameters, variables, constraints) = splitArrowResultParams t
+  in VarPBinding v result parameters variables constraints
 
 makeFields ''SearchNode

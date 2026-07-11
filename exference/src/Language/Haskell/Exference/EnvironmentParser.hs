@@ -92,7 +92,11 @@ builtInDeclsM = do
 builtInDeconstructorsM :: (Monad m) => MultiRWST r w s m [DeconstructorBinding]
 builtInDeconstructorsM = mapM helper ds
  where
-  helper (t, xs) = [ (x,xs,False)
+  helper (t, xs) = [ DeconstructorBinding
+                       x
+                       [ConstructorBinding constructor fields
+                       | (constructor, fields) <- xs]
+                       False
                    | x <- unsafeReadType0 t
                    ]
   ds = [ (,) "(a, b)" [(TupleCon 2, [TypeVar 0, TypeVar 1])]

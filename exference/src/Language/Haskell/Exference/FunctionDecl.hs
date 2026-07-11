@@ -22,6 +22,6 @@ type RatedHsFunctionDecl = (QualifiedName, Penalty, HsType)
 
 declToBinding :: RatedHsFunctionDecl -> FunctionBinding
 declToBinding (a,r,t) =
-  (result, a, r, constrs, params)
+  FunctionBinding result a r constrs params
  where
   (result, params, _, constrs) = splitArrowResultParams t

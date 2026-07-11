@@ -3,7 +3,8 @@
 --
 module Djinn.Internal.ProofEnv (
     ProofEnvironment, prepareProofEnvironment,
-    proofBindings, targetWasExcluded, restoreProofTerm
+    proofBindings, proofBindingsIncludingTarget,
+    targetWasExcluded, restoreProofTerm
     ) where
 
 import Data.Maybe (fromMaybe)
@@ -12,7 +13,12 @@ import qualified Data.Set as Set
 import Djinn.Internal.LJTFormula
 
 data ProofEnvironment = ProofEnvironment {
+    -- Bindings that are safe to use in the generated definition.
     proofBindings :: [(Symbol, Formula)],
+    -- Every binding, including target-named assumptions.  This environment
+    -- exists only to prove whether the more specific self-reference
+    -- diagnostic is justified; its proofs must never be rendered.
+    proofBindingsIncludingTarget :: [(Symbol, Formula)],
     displayBindings :: [(Symbol, Symbol)],
     targetWasExcluded :: Bool
     }
@@ -22,19 +28,26 @@ data ProofEnvironment = ProofEnvironment {
 -- proof checking never has to guess between overloaded display names.
 prepareProofEnvironment :: Symbol -> [(Symbol, Formula)] -> ProofEnvironment
 prepareProofEnvironment target bindings =
-    ProofEnvironment internal display excluded
+    ProofEnvironment {
+        proofBindings = strip safe,
+        proofBindingsIncludingTarget = strip internalized,
+        displayBindings =
+            [(internalName, external)
+            | (external, internalName, _) <- safe],
+        targetWasExcluded = length safe /= length internalized
+        }
   where
-    excluded = any ((== target) . fst) bindings
-    safeBindings = filter ((/= target) . fst) bindings
     initiallyUsed = Set.fromList $
         map fst bindings ++ concatMap (formulaSymbols . snd) bindings
-    (internal, display) = build safeBindings initiallyUsed (1 :: Integer)
+    internalized = build bindings initiallyUsed (1 :: Integer)
+    safe = filter (\ (external, _, _) -> external /= target) internalized
+    strip entries =
+        [(internalName, formula) | (_, internalName, formula) <- entries]
 
-    build [] _ _ = ([], [])
+    build [] _ _ = []
     build ((external, formula) : rest) used next =
         let (internalName, used', next') = freshInternal used next
-            (env, names) = build rest used' next'
-        in ((internalName, formula) : env, (internalName, external) : names)
+        in (external, internalName, formula) : build rest used' next'
 
     freshInternal used next =
         let candidate = Symbol ("$assumption" ++ show next)

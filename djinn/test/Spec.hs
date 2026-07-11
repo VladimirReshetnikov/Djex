@@ -12,7 +12,8 @@ import Djinn.Core (
     functionDeclarations, inhabit,
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
     parseHKind, parseHType, removeDeclaration,
-    reportOutcome, resolveContext, standardEnvironment, typeDeclarations)
+    reportOutcome, resolveContext, resolveInstanceMethods,
+    standardEnvironment, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
@@ -52,6 +53,10 @@ tests =
     , ("preserve tuple payloads in unary constructors", testUnaryTuplePayload)
     , ("merge tuple refinements across case branches", testBranchRefinements)
     , ("reconstruct whole constructor payloads", testWholeConstructorPayload)
+    , ("resolve instance contexts in one kind scope",
+          testResolveInstanceMethods)
+    , ("justify self-reference diagnostics with proof evidence",
+          testSelfReferenceEvidence)
     , ("isolate external proof identities", testProofEnvironment)
     , ("type-check generated proofs independently", testGeneratedProofsCheck)
     , ("reject malformed proof terms", testMalformedProofTerms)
@@ -403,11 +408,15 @@ testSearchModes = do
         [] (searchProofs complete)
     assertBool "a finished search must not be marked exhausted" $
         not (searchExhausted complete)
+    assertEqual "an unlimited search has no finite fuel remainder"
+        Nothing (remainingSearchBudget complete)
 
     -- A zero budget cannot decide anything that branches.
     let starved = run unlimited { searchBudget = Just 0 } peirce
     assertEqual "a starved search finds nothing" [] (searchProofs starved)
     assertBool "an expired budget must be reported" $ searchExhausted starved
+    assertEqual "an expired search has no fuel left"
+        (Just 0) (remainingSearchBudget starved)
 
     -- Internal callers can construct SearchMode directly.  Treat a negative
     -- budget as already expired rather than accidentally making it unlimited.
@@ -416,6 +425,27 @@ testSearchModes = do
         [] (searchProofs invalidBudget)
     assertBool "a negative internal budget must be reported as expired" $
         searchExhausted invalidBudget
+    assertEqual "expired negative fuel is normalized to zero"
+        (Just 0) (remainingSearchBudget invalidBudget)
+    let immediateWithNegativeFuel =
+            run unlimited { searchBudget = Just (-1) } (Conj [])
+    assertEqual "a zero-step proof remains available at zero normalized fuel"
+        [Ctuple 0] (searchProofs immediateWithNegativeFuel)
+    assertBool "a zero-step proof does not exhaust normalized fuel" $
+        not (searchExhausted immediateWithNegativeFuel)
+    assertEqual "even a finished zero-step search reports non-negative fuel"
+        (Just 0) (remainingSearchBudget immediateWithNegativeFuel)
+
+    -- A complete refutation reports exactly the fuel that a diagnostic
+    -- follow-up may spend without exceeding the original query budget.
+    let atomicRefutation =
+            run unlimited { searchBudget = Just 1 } atomA
+    assertEqual "one choice point suffices to refute an unconstrained atom"
+        [] (searchProofs atomicRefutation)
+    assertBool "the one-step atomic refutation is complete" $
+        not (searchExhausted atomicRefutation)
+    assertEqual "the atomic refutation spends its complete budget"
+        (Just 0) (remainingSearchBudget atomicRefutation)
 
     -- A bounded depth-first search yields a prefix of the unbounded stream.
     let full = searchProofs $ run unlimited pick3
@@ -424,6 +454,8 @@ testSearchModes = do
         searchProofs bounded `isPrefixOf` full
     assertBool "the pick-3 space is larger than one step" $
         searchExhausted bounded
+    assertEqual "bounded alternative search consumes all available fuel"
+        (Just 0) (remainingSearchBudget bounded)
 
     -- Interleaving may reorder proofs but proves and refutes the same
     -- formulas over a finite space.
@@ -607,6 +639,69 @@ testWholeConstructorPayload = do
     assertEqual "the public boundary should de-duplicate equivalent clauses"
         (Realized [expected]) (reportOutcome report)
 
+testResolveInstanceMethods :: IO ()
+testResolveInstanceMethods = do
+    let parameter = HTVar "f"
+        local = HTVar "a"
+        applied = HTApp parameter local
+        valueClass = ClassDecl "Value" ["a"] []
+        higherClass = ClassDecl "Higher" ["f"]
+            [("use", HTArrow applied applied)]
+    environment <- expectRight $ do
+        withValue <- declare valueClass standardEnvironment
+        declare higherClass withValue
+
+    let target = ("Higher", [HTCon "Maybe"])
+    assertEqual "joint resolution preserves exact target method substitution"
+        (resolveContext environment target)
+        (resolveInstanceMethods environment [] target)
+
+    assertLeftContains
+        "an instance head and its prerequisites share kind variables"
+        "argument f of class Higher" $
+        resolveInstanceMethods environment
+            [("Value", [HTVar "f"]), ("Higher", [HTVar "f"])]
+            ("Value", [HTVar "x"])
+
+testSelfReferenceEvidence :: IO ()
+testSelfReferenceEvidence = do
+    let a = HTVar "a"
+        b = HTVar "b"
+
+    unrelatedEnvironment <- expectRight $
+        declare (Function "token" $ HTCon "Bool") standardEnvironment
+    unrelated <- expectRight $
+        inhabit defaultQueryOptions unrelatedEnvironment [] "token"
+            (HTArrow a b)
+    assertEqual "an unrelated collision does not justify a recursion warning"
+        Unrealizable (reportOutcome unrelated)
+
+    combinedEnvironment <- expectRight $ do
+        withSeed <- declare (Function "seed" a) standardEnvironment
+        declare (Function "token" $ HTArrow a b) withSeed
+    combined <- expectRight $
+        inhabit defaultQueryOptions combinedEnvironment [] "token" b
+    assertEqual
+        "a proof needing both safe and excluded assumptions justifies the warning"
+        UnrealizableWithoutSelfReference (reportOutcome combined)
+
+    exactEnvironment <- expectRight $
+        declare (Function "token" a) standardEnvironment
+    exact <- expectRight $
+        inhabit defaultQueryOptions exactEnvironment [] "token" a
+    assertEqual "an exact target assumption still justifies the warning"
+        UnrealizableWithoutSelfReference (reportOutcome exact)
+
+    diagnosticHeavyEnvironment <- expectRight $
+        declare (Function "token" $ HTArrow (HTArrow a b) a)
+            standardEnvironment
+    diagnosticHeavy <- expectRight $
+        inhabit defaultQueryOptions { optionBudget = Just 1 }
+            diagnosticHeavyEnvironment [] "token" b
+    assertEqual
+        "diagnostic fuel exhaustion cannot undo a completed safe refutation"
+        Unrealizable (reportOutcome diagnosticHeavy)
+
 testProofEnvironment :: IO ()
 testProofEnvironment = do
     let target = Symbol "answer"
@@ -617,12 +712,17 @@ testProofEnvironment = do
             , (duplicate, atomB)
             ]
         bindings = proofBindings environment
+        allBindings = proofBindingsIncludingTarget environment
     assertBool "a target-named assumption must be excluded"
         (targetWasExcluded environment)
     assertEqual "only the unsafe target binding should be removed"
         [atomA, atomB] (map snd bindings)
     assertEqual "every remaining assumption needs a unique proof identity"
         2 (length $ nub $ map fst bindings)
+    assertEqual "the diagnostic environment retains every assumption"
+        [atomA, atomA, atomB] (map snd allBindings)
+    assertEqual "excluded assumptions also receive unique proof identities"
+        3 (length $ nub $ map fst allBindings)
     case bindings of
         (internal, _) : _ -> do
             assertEqual "free proof identities should regain their display names"

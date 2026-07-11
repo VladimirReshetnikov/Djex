@@ -173,11 +173,7 @@ runCmd s (Query i ctx g) =
 runCmd s (Class (name, (params, methods))) =
     updateEnvironment s $ declare $ ClassDecl name params methods
 runCmd s (QueryInstance ctx cls ts) =
-    case do
-        methods <- resolveContext (environment s) (cls, ts)
-        mapM_ (resolveContext (environment s)) ctx
-        return methods
-      of
+    case resolveInstanceMethods (environment s) ctx (cls, ts) of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
         Right methods -> do
             let sctx = if null ctx then "" else showContexts ctx ++ " => "

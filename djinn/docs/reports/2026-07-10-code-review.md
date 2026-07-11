@@ -397,11 +397,17 @@ token :: a
 token = token
 ```
 
-`ProofEnv` now removes target-named assumptions before search and assigns every
-remaining external assumption a fresh internal identity. It restores printable
-names only after independent checking. A lone collision produces an explicit
-"cannot be safely realized without a recursive self-reference" diagnostic; if a
-different assumption is available, the generated RHS names that safe fallback.
+`ProofEnv` now removes target-named assumptions from the safe search and assigns
+every external assumption, including excluded ones, a fresh internal identity.
+It restores printable names only after independent checking.  Excluded bindings
+survive solely in a non-renderable diagnostic environment: after a complete safe
+refutation, Djinn reports "cannot be safely realized without a recursive
+self-reference" only if a second, independently checked proof exists with those
+bindings restored.  An unrelated same-named assumption therefore produces the
+ordinary `Unrealizable` result rather than a false recursion diagnosis.  The
+diagnostic pass receives only the original query budget's remaining fuel and
+cannot turn the completed safe decision back into `Undecided`.  If a different
+safe assumption is sufficient, the generated RHS names that fallback normally.
 This policy applies uniformly to explicit queries and generated instance methods.
 
 ### R-02 — Resolved: proof objects were not independently checked

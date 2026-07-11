@@ -65,7 +65,9 @@ data SearchMode = SearchMode {
     searchBudget       :: Maybe Integer }
 proveWithMode :: SearchMode -> [(Symbol, Formula)] -> Formula -> SearchOutcome
 data SearchOutcome = SearchOutcome {
-    searchProofs :: [Proof], searchExhausted :: Bool }
+    searchProofs :: [Proof],
+    searchExhausted :: Bool,
+    remainingSearchBudget :: Maybe Integer }
 ```
 
 `prove`/`provable` are thin wrappers over the default mode and behave as
@@ -78,6 +80,14 @@ expired, the answer is
 ```
 
 so "cannot be realized" continues to mean *proved uninhabited*.
+
+`remainingSearchBudget` also keeps auxiliary proof searches honest.  After a
+safe search has completely refuted a query, Djinn may reintroduce an excluded
+same-named assumption to determine whether the sharper self-reference
+diagnostic is justified.  That diagnostic pass receives only the first pass's
+remainder and stops at its first proof.  If it exhausts the remainder, the
+already-decided safe result stays `Unrealizable`; diagnostic work can neither
+double the configured budget nor turn a decision back into `Undecided`.
 
 ## The corpus
 

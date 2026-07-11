@@ -43,7 +43,7 @@ cabal test all --test-show-details=direct
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 33 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 35 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Nine subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, and stateful query behavior. |
 
@@ -176,6 +176,10 @@ Djinn> ?instance Monad Bool
 Error: argument Bool of class Monad: kind mismatch: * vs * -> *
 ```
 
+Each `?instance` head and all of its prerequisite constraints are checked in
+one kind-variable scope, so a shared variable cannot silently acquire
+different kinds in different parts of the generated instance signature.
+
 ## Worked examples
 
 Djinn is strongest exactly where hand-writing plumbing is most error-prone:
@@ -290,7 +294,9 @@ With the default unlimited budget, proof search is a decision procedure:
 "cannot be realized" is a proof of uninhabitedness. A positive budget bounds
 the work instead; if it expires before any proof is found, Djinn reports
 `no proof found within budget N; inhabitation is undecided` rather than
-claiming unprovability.
+claiming unprovability. Any follow-up search used solely to refine a
+self-reference diagnostic receives only the first search's unspent fuel, so
+the setting remains a total per-query bound rather than a per-pass allowance.
 
 For example:
 
@@ -358,13 +364,15 @@ The essentials: `declare`/`removeDeclaration` grow and shrink an
 `parseHType`/`parseHKind` parse with full-input validation; `inhabit` runs
 the full pipeline — translation, budgeted proof search, independent proof
 checking, and rendering — and reports the formula and first proof term for
-debugging. `resolveContext` instantiates a class context the way queries
-do. A query's goal and every class argument are kind-checked together, so a
-free type variable has one kind throughout the complete signature. Public
-query budgets must be non-negative; `Nothing` is unlimited and `Just 0`
-expires at the first choice point. The `Djinn.Internal.*` modules remain
-importable for research use, but they expose raw constructors that can violate
-the invariants above and carry no stability promise.
+debugging. `resolveContext` instantiates one class context;
+`resolveInstanceMethods` jointly checks an instance target and all of its
+prerequisites before returning the target's instantiated methods. A query's
+goal and every class argument are likewise kind-checked together, so a free
+type variable has one kind throughout the complete signature. Public query
+budgets must be non-negative; `Nothing` is unlimited and `Just 0` expires at
+the first choice point. The `Djinn.Internal.*` modules remain importable for
+research use, but they expose raw constructors that can violate the invariants
+above and carry no stability promise.
 
 The central pipeline is:
 
@@ -419,7 +427,10 @@ knowing before editing the source:
   occurring in the environment and the goal (`formulaSymbols`), and every
   generated name is recorded in the search state. Assumptions are additionally
   given fresh internal identities (`ProofEnv`) so a query can never capture,
-  shadow, or recursively reference a caller-supplied name.
+  shadow, or recursively reference a caller-supplied name. Target-named
+  assumptions are retained only in a non-renderable diagnostic environment:
+  Djinn reports "without a recursive self-reference" only after finding and
+  independently checking a proof that actually needs that enlarged environment.
 - **Unique binders.** The Haskell-AST simplifiers assume that no two binders
   share a name and that binders are disjoint from free variables. The
   converter enforces this with an explicit alpha-renaming pass rather than

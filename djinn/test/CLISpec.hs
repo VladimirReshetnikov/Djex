@@ -33,6 +33,9 @@ testClassKindEnforcement = do
         [ "class Empty a where"
         , "bad ? Empty (Bool a) => b -> b"
         , "?instance Monad Bool"
+        , "class Value a where"
+        , "class Higher f where use :: f a -> f a"
+        , "?instance (Value f, Higher f) => Value x"
         , "good ? Empty c => c -> c"
         , "fine ? Monad m => a -> m a"
         , ":quit"
@@ -41,6 +44,11 @@ testClassKindEnforcement = do
         "Error: argument Bool a of class Empty" output
     assertContains "a kind-mismatched instance argument is rejected"
         "Error: argument Bool of class Monad" output
+    assertContains "an instance request has one shared kind scope"
+        "argument f of class Higher" output
+    assertBool "an invalid joint instance must not print a declaration header" $
+        not $ "instance (Value f, Higher f) => Value x where"
+            `isInfixOf` output
     assertContains "a well-kinded phantom context still works"
         "good a = a" output
     assertContains "a higher-kinded context still works"

@@ -25,6 +25,11 @@ of `shared` was checked in isolation. The same defect crossed the context/goal
 boundary: a method-less `Value f` context could require `f :: *` while the goal
 used `f Bool`, requiring `f :: * -> *`.
 
+A follow-up audit found one remaining adapter-level instance of the defect.
+`?instance` called `resolveContext` separately for its target and every
+prerequisite.  Thus `(Value f, Higher f) => Value x` was accepted even when
+`Value` required `f :: *` and `Higher` required `f :: * -> *`.
+
 This is a frontend soundness defect rather than a proof-search defect. The
 logical translation only runs after kind validation and therefore cannot
 recover the lost equality between the source-level variables.
@@ -36,6 +41,11 @@ inference scope. `Djinn.Core` resolves class names and arities first, collects
 the goal and all class arguments as labelled obligations, checks them jointly,
 and only then substitutes class methods. A small `ResolvedContext` record makes
 those phases explicit instead of passing another positional tuple.
+
+The public `resolveInstanceMethods` operation now routes an instance target and
+all prerequisites through that same joint resolver, returning only the target's
+exact instantiated methods.  The CLI uses this operation directly; it no longer
+reassembles a supposedly validated instance from separately checked pieces.
 
 Diagnostics retain their previous precision. If one component is independently
 ill-kinded, its existing label is reported (for example, `argument Bool of class
@@ -61,6 +71,9 @@ The unit suite now covers:
 
 - conflicting kinds for one variable across two class arguments;
 - conflicting kinds across a class context and the query goal;
+- conflicting kinds across an instance target and its prerequisites, at both
+  the Core API and packaged CLI boundaries;
+- equivalence of ordinary and instance-target method instantiation;
 - direct joint-kind checking in `HCheck`;
 - rejection of a negative public query budget; and
 - safe expiry of a negative raw `SearchMode` budget.

@@ -77,7 +77,8 @@ out — and validates every boundary:
 ### 3. The CLI is now the façade's first consumer
 
 `Djinn.query` and every declaration command delegate to `Djinn.Core`
-(`declare`, `removeDeclaration`, `resolveContext`, `inhabit`); the shared
+(`declare`, `removeDeclaration`, `resolveContext`,
+`resolveInstanceMethods`, `inhabit`); the shared
 shape checks (`requireDistinct`, `checkConstructors`, `checkMethodNames`,
 ...) moved to `Djinn.Internal.Environment`. There is exactly one
 implementation of the pipeline, exercised by all nine CLI scenarios, so

@@ -66,7 +66,11 @@ defaultSearchMode more = SearchMode {
 data SearchOutcome = SearchOutcome {
     searchProofs :: [Proof],
     -- True when the budget ran out with unexplored search space left.
-    searchExhausted :: Bool
+    searchExhausted :: Bool,
+    -- Fuel left after the explored prefix.  A caller that performs a
+    -- follow-up search can pass this remainder on without silently turning
+    -- one query budget into two.  For an unbounded search it stays 'Nothing'.
+    remainingSearchBudget :: Maybe Integer
     }
 
 provable :: Formula -> Bool
@@ -77,9 +81,9 @@ prove more env = searchProofs . proveWithMode (defaultSearchMode more) env
 
 proveWithMode :: SearchMode -> [(Symbol, Formula)] -> Formula -> SearchOutcome
 proveWithMode mode env goal =
-    SearchOutcome proofs exhausted
+    SearchOutcome proofs exhausted remaining
   where
-    (proofs, exhausted) =
+    (proofs, exhausted, remaining) =
         runBounded (searchBudget mode) (searchStrategy mode) reservedSymbols $
             redtop (searchAlternatives mode) env goal
     -- Symbol is shared by proof variables and propositional atoms.  Reserving
@@ -300,16 +304,19 @@ atMostOne p = P $ \ strat s sk fk ->
 
 -- Run a proof search, exploring at most the given number of choice points.
 -- The Bool reports whether the budget expired with search space remaining;
--- it is False whenever the search space was genuinely finished.
-runBounded :: Maybe Integer -> Strategy -> [Symbol] -> P a -> ([a], Bool)
+-- it is False whenever the search space was genuinely finished.  The final
+-- component is the unspent fuel, for budget-honest follow-up work.
+runBounded :: Maybe Integer -> Strategy -> [Symbol] -> P a
+           -> ([a], Bool, Maybe Integer)
 runBounded budget strat reserved p =
-    consume budget (reify strat (startPS reserved) p)
+    consume (fmap (max 0) budget) (reify strat (startPS reserved) p)
   where
-    consume _ Done = ([], False)
+    consume b Done = ([], False, b)
     consume b (Yield (_, x) rest) =
-        let (xs, exhausted) = consume b rest
-        in (x : xs, exhausted)
-    consume (Just remaining) (Step _) | remaining <= 0 = ([], True)
+        let (xs, exhausted, remaining) = consume b rest
+        in (x : xs, exhausted, remaining)
+    consume (Just remaining) (Step _) | remaining <= 0 =
+        ([], True, Just 0)
     consume b (Step rest) = consume (fmap (subtract 1) b) rest
 
 

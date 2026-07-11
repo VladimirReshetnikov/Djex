@@ -23,7 +23,7 @@ module Djinn.Core (
     declare, removeDeclaration,
     typeDeclarations, functionDeclarations, classDeclarations,
     -- * Queries
-    Context, resolveContext,
+    Context, resolveContext, resolveInstanceMethods,
     QueryOptions(..), defaultQueryOptions,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
@@ -291,6 +291,18 @@ resolveContext :: Environment -> Context -> Either String [(HSymbol, HType)]
 resolveContext environment context =
     concat <$> resolveContexts environment [] [context]
 
+-- | Resolve the methods of an instance target while checking the target and
+-- all prerequisite contexts in one kind-variable scope.  The returned methods
+-- belong only to the target and are instantiated exactly as by
+-- 'resolveContext'.
+resolveInstanceMethods :: Environment -> [Context] -> Context
+                       -> Either String [(HSymbol, HType)]
+resolveInstanceMethods environment prerequisites target = do
+    resolved <- resolveContexts environment [] (target : prerequisites)
+    case resolved of
+        targetMethods : _ -> Right targetMethods
+        [] -> Left "internal error: instance target was not resolved"
+
 -- The intermediate record keeps lookup/arity validation separate from the
 -- joint kind check and substitution.  In particular, every argument and the
 -- query goal must share one scope for their free type variables.
@@ -444,22 +456,41 @@ inhabit options environment contexts name goal = do
             searchBudget = optionBudget options
             }
         outcome = proveWithMode mode internalEnv form
+        labeled what = either (Left . ((what ++ ": ") ++)) Right
     case searchProofs outcome of
-        [] ->
-            let failure
-                    | searchExhausted outcome = Undecided
-                    | targetWasExcluded proofEnv =
-                        UnrealizableWithoutSelfReference
-                    | otherwise = Unrealizable
-            in return QueryReport {
+        [] -> do
+            failure <-
+                if searchExhausted outcome then
+                    return Undecided
+                else if not (targetWasExcluded proofEnv) then
+                    return Unrealizable
+                else do
+                    -- The safe search has already decided that no admissible
+                    -- proof exists.  Reintroduce target-named assumptions only
+                    -- to justify the sharper diagnostic, spending no more than
+                    -- the first search's unused fuel.  Exhaustion here cannot
+                    -- make the already-decided safe result 'Undecided'.
+                    let diagnosticEnv =
+                            proofBindingsIncludingTarget proofEnv
+                        diagnosticMode = mode {
+                            searchAlternatives = False,
+                            searchBudget = remainingSearchBudget outcome
+                            }
+                        diagnosticOutcome =
+                            proveWithMode diagnosticMode diagnosticEnv form
+                    case searchProofs diagnosticOutcome of
+                        diagnosticProof : _ -> do
+                            labeled "generated an invalid self-reference proof" $
+                                checkProof diagnosticEnv form diagnosticProof
+                            return UnrealizableWithoutSelfReference
+                        [] -> return Unrealizable
+            return QueryReport {
                 reportFormula = show form,
                 reportProof = Nothing,
                 reportOutcome = failure
                 }
         p : ps -> do
             let internalProofs = p : take (optionCutoff options - 1) ps
-                labeled what =
-                    either (Left . ((what ++ ": ") ++)) Right
             -- Every candidate must check against the requested formula
             -- before display names are restored and it is rendered.
             labeled "generated an invalid proof" $

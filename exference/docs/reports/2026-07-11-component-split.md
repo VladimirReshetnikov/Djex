@@ -24,6 +24,10 @@ src-core/  -> public named library exference:exference-core (18 modules)
 src/       -> unnamed exference frontend library             (13 modules)
 ```
 
+The named component is explicitly `visibility: public`; Cabal's default for a
+named sublibrary is private, so source separation alone was not enough to make
+the documented consumer boundary real.
+
 The core owns only the internal type system, unifier, constraint solver,
 expression representation/checker/simplifier, search state, and search engine.
 The frontend owns Haskell source conversion, diagnostics, environment loading,
@@ -45,6 +49,19 @@ remain independent.
 - `process` and `directory`
 - `bifunctors`
 - `split`
+- `mmorph`
+- `safe`
+- `deepseq-generics`
+
+The last three were legacy implementation conveniences rather than semantic
+requirements: `transformers` supplies `lift`, an explicit lookup replaces the
+partial `fromJustNote`, and modern `deepseq` supplies Generic defaults for the
+same `NFData` instances. The resulting direct core dependency set is:
+
+```text
+base, haskell-synthesis, containers, pretty, deepseq, pqueue,
+transformers, mtl, vector, lens, multistate
+```
 
 The frontend retains `deepseq` because environment parsing deliberately forces
 lazy file contents while still inside its exception boundary. That dependency
@@ -58,7 +75,12 @@ once as 18 modules and the frontend once as 13 modules. The following then
 passed:
 
 ```text
-cabal test all --test-show-details=direct   # 33 deterministic regressions
+cabal test all --test-show-details=direct   # 57 library + 4 CLI + 44 shared
 cabal check                                 # no errors or warnings
 git diff --check
 ```
+
+The current matrix has grown to 57 deterministic library/frontend regressions,
+four CLI subprocess scenarios, and the 44 shared-foundation tests. All Cabal
+components import one Haskell2010/`-Wall -Wcompat` policy stanza, and test-only
+dependency bounds now match the production packages.

@@ -19,7 +19,6 @@ import Data.List ( intercalate )
 import Control.Monad ( forM, forM_ )
 import Data.Functor.Identity ( runIdentity )
 
-import Control.DeepSeq.Generics
 import Control.DeepSeq
 import GHC.Generics
 
@@ -47,7 +46,7 @@ data Expression = ExpVar TVarId HsType -- a
                      -- case mExp of Foo a b -> e1; Bar c d -> e2
   deriving (Eq, Generic)
 
-instance NFData Expression where rnf = genericRnf
+instance NFData Expression
 
 -- instance Show Expression where
 --   showsPrec _ (ExpVar i) = showString $ showVar i

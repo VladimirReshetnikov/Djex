@@ -25,7 +25,9 @@ sometimes stopping with "i could not find any solutions".
 # Building from source
 
 The library and deterministic test suite build with GHC 9.12.4 and Cabal
-3.16.1.0:
+3.16.1.0. Cabal is the maintained build path; the historical Stack file
+targeted LTS 5.18 and dependencies that no longer exist in this tree, so it has
+been removed rather than pretending to provide a second supported toolchain.
 
 ```text
 cabal build all
@@ -33,6 +35,9 @@ cabal test all --test-show-details=direct
 ```
 
 `exference-core` is a named, parser-independent library rooted at `src-core/`.
+It is explicitly public and depends only on the shared synthesis vocabulary
+plus its search data structures and transformer stack; it does not inherit
+`haskell-src-exts`, filesystem/process libraries, or executable dependencies.
 The unnamed `exference` library contains the `haskell-src-exts` frontend and
 environment loader and re-exports the historical core API for compatibility.
 This mirrors Djinn's library-first organization and lets future shared

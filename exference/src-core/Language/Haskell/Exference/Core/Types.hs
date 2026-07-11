@@ -54,12 +54,10 @@ import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 import Language.Haskell.Exference.Core.Name
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
-import Control.DeepSeq.Generics
 import Control.DeepSeq
 import GHC.Generics
 import Data.Data ( Data )
 import Control.Monad.Trans.MultiState
-import Safe
 
 
 
@@ -127,12 +125,16 @@ data QueryClassEnv = QueryClassEnv
   }
   deriving (Generic)
 
-instance NFData HsType         where rnf = genericRnf
-instance NFData HsTypeClass    where rnf = genericRnf
-instance NFData HsInstance     where rnf = genericRnf
-instance NFData HsConstraint   where rnf = genericRnf
-instance NFData StaticClassEnv where rnf = genericRnf
-instance NFData QueryClassEnv  where rnf = genericRnf
+-- deepseq provides the same Generic-derived default that this package used to
+-- obtain from deepseq-generics.  In particular, forcing the current recursive
+-- class graph retains its historical semantics until constraints are moved to
+-- the planned non-recursive shared representation.
+instance NFData HsType
+instance NFData HsTypeClass
+instance NFData HsInstance
+instance NFData HsConstraint
+instance NFData StaticClassEnv
+instance NFData QueryClassEnv
 
 instance Show HsType where
   showsPrec _ (TypeVar i) = showString $ showVar i
@@ -275,8 +277,13 @@ showTypedVar :: forall m
              -> m String
 showTypedVar i = do
   m <- mGet
-  fromJustNote "missing collectVarTypes before showTypedVar"
-    $ h <$> M.lookup i m
+  case M.lookup i m of
+    -- Prefer the stable generic spelling when a renderer is used directly
+    -- without the optional type-collection pass.  The old implementation
+    -- raised an exception here through Safe.fromJustNote, even though the
+    -- variable ID alone is enough to produce a legal binder.
+    Nothing -> return $ showVar i
+    Just ty -> h ty
  where
   -- h t | traceShow (i, t) False = undefined
   h TypeVar{}          = return $ showVar i

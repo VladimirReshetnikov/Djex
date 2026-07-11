@@ -86,15 +86,15 @@ source-repository head {
   location: git@github.com:lspitzner/exference.git
 }
 
+common build-settings
+  default-language: Haskell2010
+  ghc-options: -Wall -Wcompat
 
 
 Library exference-core
-  default-language: Haskell2010
-  ghc-options: -Wall
-               -fno-warn-orphans
-               -fno-spec-constr
-  if impl(ghc > 8.0)
-    ghc-options: -fno-warn-redundant-constraints
+  import: build-settings
+  visibility: public
+  ghc-options: -fno-spec-constr
   exposed-modules: Language.Haskell.Exference.Core
                    Language.Haskell.Exference.Core.Name
                    Language.Haskell.Exference.Core.Types
@@ -126,13 +126,10 @@ Library exference-core
     containers           >=0.6 && <0.9,
     pretty               >=1.1 && <1.2,
     deepseq              >=1.4 && <1.6,
-    deepseq-generics     >=0.1.1.2 && <0.3,
     pqueue               >=1.3.1 && <1.8,
-    mmorph               >=1.0.4 && <1.3,
     transformers         >=0.5 && <0.7,
     mtl                  >=2.2 && <2.4,
     vector               >=0.12 && <0.14,
-    safe                 >=0.3.9 && <0.4,
     lens                 >=5.0 && <5.4,
     multistate           >=0.8 && <0.9
 
@@ -140,12 +137,8 @@ Library exference-core
 -- Keep it above the search core so future frontends can depend on
 -- exference-core without pulling in haskell-src-exts or filesystem concerns.
 Library
-  default-language: Haskell2010
-  ghc-options: -Wall
-               -fno-warn-orphans
-               -fno-spec-constr
-  if impl(ghc > 8.0)
-    ghc-options: -fno-warn-redundant-constraints
+  import: build-settings
+  ghc-options: -fno-spec-constr
   exposed-modules: Language.Haskell.Exference
                    Language.Haskell.Exference.Diagnostic
                    Language.Haskell.Exference.SimpleDict
@@ -192,13 +185,12 @@ Library
 
 
 Executable exference
-  default-language: Haskell2010
+  import: build-settings
   build-depends:
     base                 >=4.18 && <5,
     exference,
     haskell-synthesis    >=0.1 && <0.2,
     containers           >=0.6 && <0.9,
-    deepseq              >=1.4 && <1.6,
     transformers         >=0.5 && <0.7,
     mtl                  >=2.2 && <2.4,
     haskell-src-exts     >=1.24 && <1.25,
@@ -210,13 +202,9 @@ Executable exference
   main-is: Main.hs
   hs-source-dirs: src-exference
   ghc-options: -rtsopts
-               -Wall
-               -fno-warn-orphans
                -threaded
                -fno-spec-constr
                -- -fllvm
-  if impl(ghc > 8.0)
-    ghc-options: -fno-warn-redundant-constraints
   ghc-options: -with-rtsopts "-H2G -M4G -N"
 
 
@@ -226,33 +214,31 @@ Executable exference
               TemplateHaskell
 
 Test-Suite exference-tests
-  default-language: Haskell2010
+  import: build-settings
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules: Paths_exference
                  CompatibilityImport
   autogen-modules: Paths_exference
   hs-source-dirs: test
-  ghc-options: -Wall
   build-depends:
-    base,
-    containers,
+    base                 >=4.18 && <5,
+    containers           >=0.6 && <0.9,
     deepseq              >=1.4 && <1.6,
     exference,
     exference:exference-core,
     haskell-synthesis    >=0.1 && <0.2,
-    haskell-src-exts,
-    multistate,
-    tasty,
-    tasty-hunit,
-    transformers
+    haskell-src-exts     >=1.24 && <1.25,
+    multistate           >=0.8 && <0.9,
+    tasty                >=1.4 && <2,
+    tasty-hunit          >=0.10 && <1,
+    transformers         >=0.5 && <0.7
 
 Test-Suite exference-cli-tests
-  default-language: Haskell2010
+  import: build-settings
   type: exitcode-stdio-1.0
   main-is: CLISpec.hs
   hs-source-dirs: test
-  ghc-options: -Wall -Wcompat
   build-depends:
     base                 >=4.18 && <5,
     process              >=1.6 && <1.7,

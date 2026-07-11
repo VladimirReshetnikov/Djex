@@ -62,7 +62,6 @@ import Data.Foldable ( toList )
 
 import Text.PrettyPrint
 
-import Control.DeepSeq.Generics
 import Control.DeepSeq
 import GHC.Generics
 import Control.Lens.TH ( makeFields )
@@ -185,10 +184,10 @@ data SearchNode = SearchNode
   }
   deriving Generic
 
-instance NFData VarBinding   where rnf = genericRnf
-instance NFData VarPBinding  where rnf = genericRnf
-instance NFData TGoal        where rnf = genericRnf
-instance NFData SearchNode   where rnf = genericRnf
+instance NFData VarBinding
+instance NFData VarPBinding
+instance NFData TGoal
+instance NFData SearchNode
 
 showSearchNode :: SearchNode -> String
 showSearchNode

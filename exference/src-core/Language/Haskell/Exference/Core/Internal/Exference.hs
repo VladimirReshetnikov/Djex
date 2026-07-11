@@ -51,7 +51,7 @@ import Data.List ( find, partition, unfoldr, intercalate )
 import Data.Functor ( ($>) )
 import Data.Monoid ( Any(..), Endo(..) )
 import Data.Foldable ( sum, asum, traverse_ )
-import Control.Monad.Morph ( lift )
+import Control.Monad.Trans.Class ( lift )
 import Control.Lens
 import Control.Monad.State ( StateT(..), gets, execStateT, runStateT, mapStateT )
 import Control.Monad.State ( MonadState )

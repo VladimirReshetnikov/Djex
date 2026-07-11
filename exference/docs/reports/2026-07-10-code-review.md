@@ -13,12 +13,13 @@ This review covered every Haskell module under `exference/src/` and
 the hand-maintained environment, the historical test driver, and the reviewed
 Djinn implementation with which Exference is eventually intended to merge.
 
-The production source is 195 lines shorter even after adding comments and a
-shared closure helper. Most of that reduction came from deleting roughly 180
-lines of commented-out, decade-old dictionary experiments in `SimpleDict`; the
-remainder removes dead imports and duplicated closure machinery. A real Cabal
-test suite now records focused regressions instead of relying exclusively on the
-executable's manual/performance-oriented `MainTest` mode.
+The initial simplification pass made the production source 195 lines shorter,
+mostly by deleting roughly 180 lines of commented-out, decade-old dictionary
+experiments in `SimpleDict`. The subsequent remediation necessarily added
+explicit policy and correctness machinery: checked results, structured
+diagnostics, cycle detection, named budgets/statuses, and regression tests. A
+real Cabal test suite now records focused regressions instead of relying
+exclusively on the executable's manual/performance-oriented `MainTest` mode.
 
 The review fixed eleven local defects:
 
@@ -53,6 +54,37 @@ above and below proof search: identifiers, source types, declarations,
 environments, diagnostics, generated-expression ASTs, simplification, printing,
 budgets/statistics, and verification. Preserve two search backends behind one
 front end and one checked output pipeline.
+
+## Remediation status
+
+All findings requested for immediate remediation, R-01 through R-12, are now
+resolved on this branch. The changes were deliberately split into recoverable,
+validated milestones:
+
+- `0767e54` ports the supported library frontend to `haskell-src-exts` 1.24 and
+  GHC 9.12;
+- `31107b3` makes constraint solving and emitted results conservative and
+  independently checked;
+- `7ad85bc` introduces explicit search budgets/status, validated score types,
+  and cycle-safe synonym expansion;
+- `eb944c5` replaces the five tuple-heavy binding/goal models named in R-12
+  with records;
+- `48f4eb5` makes public parsing total and source-diagnostic, and verifies
+  syntactically faithful output ASTs.
+
+The resulting default package builds on GHC 9.12.4, `cabal check` is clean, and
+all 33 deterministic tests pass. The tests include direct regressions for each
+behavioral finding: constraint-relaxation timing, cyclic instances, nested
+foralls, independent result checking, queue/depth/step status, non-finite
+scores, synonym cycles and arity, qualified names/operators, symbolic patterns,
+and parser source spans.
+
+The historical CLI remains opt-in and disabled by default. Enabling it still
+selects the obsolete `hood -> FPretty` dependency chain, whose `base < 4.11`
+bound is incompatible with GHC 9.12. That is the separately recorded R-14
+boundary problem, not a remaining library/frontend R-01 failure; the CLI should
+be decomposed rather than carrying its old interactive test harness into the
+merged library.
 
 ## Scope and method
 
@@ -212,8 +244,10 @@ separate benchmark corpus, following the structure now present in `djinn/`.
 
 ## Build and compatibility audit
 
-The imported package is not buildable as written on the repository's documented
-GHC 9.12.4 toolchain.
+The imported baseline was not buildable as written on the repository's
+documented GHC 9.12.4 toolchain. This section records the reproduced baseline
+failure and its disposition; the supported library has since been migrated and
+validated as described above.
 
 1. A normal `cabal build` cannot solve dependencies because bounds stop around
    the 2016 ecosystem (for example, `haskell-src-exts < 1.18`, `lens < 4.15`,
@@ -232,19 +266,15 @@ GHC 9.12.4 toolchain.
    build with that compiler's Cabal 1.22 because current Stack requires Cabal
    2.2 or newer. Reproducing the historical build therefore needs an old Stack
    binary or a separately curated legacy environment.
-5. `cabal check` now parses the package without the former indentation warning.
-   Remaining metadata warnings concern `-O2`, old executable dependency bounds,
-   and trailing-zero upper bounds.
+5. The migration at `0767e54` updates the Cabal package, annotated HSE AST,
+   module/context representations, and `ExceptT` usage. The default library and
+   test suite now compile and run normally on GHC 9.12.4.
+6. `cabal check` reports no errors or warnings. The opt-in historical executable
+   still cannot solve its `hood` dependency on the modern toolchain; see R-14.
 
-Consequently, the new tests are present but cannot yet execute on GHC 9.12
-without the frontend migration described below. This is not hidden as a green
-validation claim: `git diff --check` and Cabal metadata parsing succeed; both
-modern and legacy parser build attempts fail for the independently reproduced
-compatibility reasons above.
+## Findings and remediation status
 
-## Open findings
-
-### R-01 — High: migrate or replace `haskell-src-exts`
+### R-01 — Resolved: migrate or replace `haskell-src-exts`
 
 This is the immediate integration blocker. Porting to 1.24 is possible but not
 mechanical: annotations must be normalized before names become map keys, module
@@ -259,7 +289,7 @@ faithful Haskell syntax but is heavy; a deliberately small Megaparsec parser is
 reasonable if the accepted language is explicitly a subset. Continuing with
 `haskell-src-exts` is viable only as a short-term compatibility step.
 
-### R-02 — High: `input_allowConstraintsStopStep` is dead configuration
+### R-02 — Resolved: `input_allowConstraintsStopStep` is dead configuration
 
 The field claims that constraints will stop being ignored after a given search
 step, but `findExpressions` binds it as `_allowConstraintsStopStep` and never
@@ -267,7 +297,7 @@ uses it. Callers can believe they requested a soundness/performance boundary
 that has no effect. Decide the intended policy and implement it in the search
 state, or delete the field in the eventual API redesign.
 
-### R-03 — High: instance solving can recurse forever
+### R-03 — Resolved: instance solving can recurse forever
 
 `checkPossibleGeneric` recursively follows matching instances with no visited
 set or decreasing measure. An instance cycle such as `C a => C a`, or a cycle
@@ -275,7 +305,7 @@ across classes, can diverge. The superclass closure fix does not address this
 separate proof search. Use a memoized goal stack keyed by normalized class
 application and distinguish "proved", "refuted", and "cycle/undecided".
 
-### R-04 — High: higher-rank behavior is inconsistent and can be unsound
+### R-04 — Resolved: higher-rank behavior is inconsistent and can be unsound
 
 The README advertises experimental `RankNTypes`, but symmetric unification
 throws on `TypeForall`, while offset and right-biased variants strip foralls and
@@ -284,7 +314,7 @@ needs skolemization, instantiation, and escape checks; erasing quantifiers can
 accept invalid programs. Until implemented, reject unsupported rank-N positions
 with a structured diagnostic rather than mixing crashes and erasure.
 
-### R-05 — High: generated programs are not independently checked
+### R-05 — Resolved: generated programs are not independently checked
 
 Search nodes build an `Expression`, which is simplified and converted to a
 Haskell AST, but no independent checker validates the final term against the
@@ -296,7 +326,7 @@ eventual strongest boundary is GHC typechecking of a generated temporary module.
 A lightweight internal checker is still useful for fast invariant checks before
 that boundary.
 
-### R-06 — Medium/high: memory limiting is opaque and likely mis-keyed
+### R-06 — Resolved: memory limiting is opaque and likely mis-keyed
 
 The queue cutoff activates when `qsize > maxSteps`, not when it exceeds the
 configured memory-limit scale. It derives a rating cutoff from the previous
@@ -305,7 +335,7 @@ completeness. The public field describes memory scaling, not this condition.
 Replace it with an explicit maximum queue size and a documented eviction policy;
 report truncation in the result status.
 
-### R-07 — Medium: a hard-coded depth cutoff silently prunes search
+### R-07 — Resolved: a hard-coded depth cutoff silently prunes search
 
 `stateStep` contains `guard . (<= 200.0) =<< use depth`. This limit is neither an
 input field nor reported to callers, and "depth" is a heuristic floating score,
@@ -314,7 +344,7 @@ undocumented heuristic ceiling. Make every termination resource an explicit
 budget and distinguish exhausted/undecided from searched-without-results, as
 Djinn now does.
 
-### R-08 — Medium: priority and result APIs encode policy with raw `Float`
+### R-08 — Resolved: priority and result APIs encode policy with raw `Float`
 
 Heuristic weights, queue priorities, function ratings, solution complexity,
 and sentinels are undifferentiated `Float`s. Although external non-finite values
@@ -323,7 +353,7 @@ validated newtypes (`Priority`, `Penalty`) and use `Double` or exact ordered
 components. Result selection should compare a named score record rather than
 destructure statistics repeatedly.
 
-### R-09 — Medium: type-synonym expansion lacks cycle detection
+### R-09 — Resolved: type-synonym expansion lacks cycle detection
 
 `getTypeDecls` ties a recursive map and recursively expands synonyms. Direct or
 mutual synonym cycles can diverge, and arity errors are represented indirectly
@@ -331,7 +361,7 @@ through `Either` values in the same map. Resolve declarations with a DFS state
 (`unseen`, `visiting`, `done`) and emit a cycle path. Decide and test the policy
 for unsaturated synonyms explicitly.
 
-### R-10 — Medium: output AST constructors are not syntactically faithful
+### R-10 — Resolved: output AST constructors are not syntactically faithful
 
 `ExpressionToHaskellSrc` represents every `ExpName` as `Con`, even lowercase
 functions, and constructs patterns with `Ident` even for symbolic or special
@@ -341,7 +371,7 @@ distinguish local variables, qualified value names, data constructors, and
 operators; rendering should use the same identifier rules already centralized
 in Djinn's `HIdentifier`.
 
-### R-11 — Medium: parser failures still contain partial paths
+### R-11 — Resolved: parser failures still contain partial paths
 
 Examples include `convertQName` calling `error` for `FunCon`, `addConstraint`
 assuming a `TypeForall`, `unsafeReadType*`, and `parseQualifiedName` using
@@ -349,7 +379,7 @@ assuming a `TypeForall`, `unsafeReadType*`, and `parseQualifiedName` using
 boundaries to `Either Diagnostic` and reserve exceptions for violated internal
 invariants. Diagnostics should carry file and source span after R-01.
 
-### R-12 — Medium: the public data model is tuple-heavy and mutation-prone
+### R-12 — Resolved: the public data model is tuple-heavy and mutation-prone
 
 `FunctionBinding`, `DeconstructorBinding`, `EnvDictionary`, `VarPBinding`, and
 `TGoal` are positional tuples. Their adjacent fields share types, making swaps

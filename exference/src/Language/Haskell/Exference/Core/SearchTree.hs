@@ -49,8 +49,9 @@ buildSearchTree :: forall a
 buildSearchTree (assocs,processed) root = ff $ unfoldTree (\x -> (x, children x)) root where
   ff (Node x xs)
     | subtrees <- map ff xs
-    = Node (                         1        + sumOf (folded . to rootLabel . _1) subtrees
-           , if elemProcessed x then 1 else 0 + sumOf (folded . to rootLabel . _2) subtrees
+    = Node (1 + sumOf (folded . to rootLabel . _1) subtrees
+           , (if elemProcessed x then 1 else 0)
+             + sumOf (folded . to rootLabel . _2) subtrees
            , values x)
            subtrees
   elemProcessed = flip HS.member $ HS.fromList processed

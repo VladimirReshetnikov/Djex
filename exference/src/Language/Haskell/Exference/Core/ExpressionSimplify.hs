@@ -15,7 +15,9 @@ import Data.Function ( on )
 simplifyExpression :: Expression -> Expression
 simplifyExpression = simplifyId . simplifyCompose . simplifyEta . simplifyLets
 
-
+-- The rewrites below rely on the search engine's global-variable-ID invariant:
+-- every binder receives a distinct ID. They also use Exference's total-term
+-- model, under which removing an unused let binding preserves semantics.
 
 simplifyLets :: Expression -> Expression
 simplifyLets e@ExpVar{}       = e
@@ -144,4 +146,3 @@ countUses i (ExpCaseMatch bindExp alts)   = sum $ countUses i bindExp
                                                 : [ countUses i expr
                                                   | (_, _, expr) <- alts
                                                   ]
-

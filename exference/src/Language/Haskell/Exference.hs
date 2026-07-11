@@ -87,7 +87,7 @@ findFirstBestExpressions input
 findFirstExpressionLookahead :: Int
                              -> ExferenceInput
                              -> Maybe ExferenceOutputElement
-findFirstExpressionLookahead n = f 999999 Nothing . findExpressionsChunked
+findFirstExpressionLookahead n = f maxBound Nothing . findExpressionsChunked
   where
     f :: Int
       -> Maybe ExferenceOutputElement
@@ -117,7 +117,7 @@ findFirstBestExpressionsLookahead :: Int
                                   -> ExferenceInput
                                   -> [ExferenceOutputElement]
 findFirstBestExpressionsLookahead n =
-  f 999999 99999.9 [] . findExpressionsChunked
+  f maxBound (1 / 0) [] . findExpressionsChunked
  where
   f :: Int
     -> Float
@@ -143,7 +143,7 @@ findFirstBestExpressionsLookaheadPreferNoConstraints :: Int
                                                      -> ExferenceInput
                                                      -> [ExferenceOutputElement]
 findFirstBestExpressionsLookaheadPreferNoConstraints n =
-  f 999999 99999.9 [] [] . findExpressionsChunked
+  f maxBound (1 / 0) [] [] . findExpressionsChunked
  where
   f :: Int
     -> Float

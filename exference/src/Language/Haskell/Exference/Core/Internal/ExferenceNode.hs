@@ -51,6 +51,7 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   )
 where
 
+import Prelude hiding ((<>))
 
 
 import Language.Haskell.Exference.Core.Types

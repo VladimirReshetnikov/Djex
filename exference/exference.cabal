@@ -112,16 +112,12 @@ Library
                -fno-warn-unused-imports
                -fno-warn-orphans
                -fno-spec-constr
-  if impl(ghc > 8.0) {
-    ghc-options: {
-      -fno-warn-redundant-constraints
-    }
-  }
-  if flag(exference-dev) {
+  if impl(ghc > 8.0)
+    ghc-options: -fno-warn-redundant-constraints
+  if flag(exference-dev)
     ghc-options: -Werror
                  -auto-all
                  -caf-all
-  }
   If flag(linkNodes) || flag(buildSearchTree)
     cpp-options: -DLINK_NODES
   If flag(buildSearchTree)
@@ -147,6 +143,7 @@ Library
                    Flags_exference
   other-modules:   Language.Haskell.Exference.Core.Internal.Unify,
                    Language.Haskell.Exference.Core.Internal.ConstraintSolver,
+                   Language.Haskell.Exference.Core.Internal.Closure,
                    Language.Haskell.Exference.Core.Internal.ExferenceNode,
                    Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder,
                    Language.Haskell.Exference.Core.Internal.Exference
@@ -159,7 +156,6 @@ Library
   hs-source-dirs: src
   Build-Depends:
     base                 >=4.7.0.2 && <5,
-    base-orphans         >=0.5.1   && <0.6,
     containers           >=0.5.0.0 && <0.6,
     pretty               >=1.1     && <1.2,
     deepseq              >=1.3.0.1 && <1.5,
@@ -173,7 +169,6 @@ Library
     vector               >=0.11    && <0.13.0.0,
     either               >=4.4     && <4.5,
     haskell-src-exts     >=1.17.1  && <1.18,
-    hood                 >=0.3     && <0.4,
     process              >=1.2.3.0 && <1.5,
     parsec               >=3.1.11  && <3.2,
     directory            >=1.2     && <1.3,
@@ -188,7 +183,7 @@ Library
 
 
 Executable exference
-  if flag(build-executables) {
+  if flag(build-executables)
     buildable: True
     build-depends:
       exference,
@@ -203,9 +198,9 @@ Executable exference
       process,
       either,
       multistate >= 0.6.2
-  } else {
+  else
     buildable: False
-  }
+
   other-modules: Main
                  MainConfig
                  MainTest
@@ -219,24 +214,18 @@ Executable exference
                -threaded
                -fno-spec-constr
                -- -fllvm
-  if impl(ghc > 8.0) {
-    ghc-options: {
-      -fno-warn-redundant-constraints
-    }
-  }
-  if flag(exference-dev) {
+  if impl(ghc > 8.0)
+    ghc-options: -fno-warn-redundant-constraints
+  if flag(exference-dev)
     ghc-options: -Werror
                  -auto-all
                  -caf-all
-  }
-  If flag(buildSearchTree) {
+  if flag(buildSearchTree)
     ghc-options:
                -with-rtsopts "-H4G -M6G -N"
-  } else {
+  else
     ghc-options:
                -with-rtsopts "-H2G -M4G -N"
-
-  }
 
 
   extensions: NoMonomorphismRestriction
@@ -244,3 +233,15 @@ Executable exference
               ScopedTypeVariables
               CPP
               TemplateHaskell
+
+Test-Suite exference-tests
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs: test
+  ghc-options: -Wall
+  build-depends:
+    base,
+    containers,
+    exference,
+    tasty,
+    tasty-hunit

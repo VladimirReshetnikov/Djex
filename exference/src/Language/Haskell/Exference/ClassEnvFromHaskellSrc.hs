@@ -99,7 +99,8 @@ getTypeClasses ds tDeclMap ms = do
       (tempAssts, tVarIds) <- eTcRawData
       HsTypeClass qnid tVarIds
         <$> tempAssts `forM` \(cQnid, vars) ->
-          flip HsConstraint vars <$> M.findWithDefault (Right unknownTypeClass) cQnid resultMap
+          flip HsConstraint vars
+            <$> M.findWithDefault (Right $ unknownTypeClass cQnid) cQnid resultMap
 
     resultMap :: LazyMap.Map QualifiedName (Either String HsTypeClass)
       -- CARE: DONT USE STRICT METHODS ON THIS MAP

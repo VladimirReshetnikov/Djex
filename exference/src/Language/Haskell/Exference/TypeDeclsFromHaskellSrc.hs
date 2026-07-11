@@ -4,6 +4,7 @@
 module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , TypeDeclMap
+  , applyTypeDecls
   , getTypeDecls
   , convertType
   , convertTypeInternal
@@ -68,8 +69,9 @@ applyTypeDecls m = go
   goApp rs (TypeApp l r)      = goApp (r:rs) l
   goApp rs (TypeCons qn)    = case M.lookup qn m of
     Nothing                  -> foldl TypeApp (TypeCons qn) `liftM` mapM go rs
-    Just (Left _)            -> Right $ TypeCons qn -- no need to show the
-                                   -- same error multiple times, or is there?
+    -- The declaration error is reported separately by 'getTypeDecls'. Keep an
+    -- unexpanded use here, but do not lose its already converted arguments.
+    Just (Left _)            -> foldl TypeApp (TypeCons qn) `liftM` mapM go rs
     Just (Right (HsTypeDecl _ vs t))
                              | i <- length vs
                              , i <= length rs

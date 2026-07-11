@@ -1,8 +1,4 @@
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DataKinds #-}
 
 module Language.Haskell.Exference.Core.TypeUtils
   ( incVarIds
@@ -23,28 +19,9 @@ where
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
-import Data.Char ( ord, chr, isLower, isUpper )
-import Control.Applicative ( (<$>), (<*>), (*>), (<*) )
-import Data.Maybe ( maybeToList, fromMaybe )
-import Text.Printf ( printf )
-
-import Control.Monad.State.Strict
-import Control.DeepSeq.Generics
-import GHC.Generics
 
 import Language.Haskell.Exference.Core.Types
--- import Language.Haskell.Exference.Core.Internal.Unify
-import Data.List ( intercalate, find )
-import Control.Monad ( mplus, guard )
-import Control.Monad.Identity ( Identity(runIdentity) )
-
-import Control.Monad.Trans.MultiState ( MonadMultiState(..) )
-import Control.Monad.Trans.MultiRWS
-
-import Control.Lens ( ala )
-
--- import Debug.Hood.Observe
-import Debug.Trace
+import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 
 
 
@@ -73,7 +50,8 @@ largestId (TypeConstant _)  = -1
 largestId (TypeCons _)      = -1
 largestId (TypeArrow t1 t2) = largestId t1 `max` largestId t2
 largestId (TypeApp t1 t2)   = largestId t1 `max` largestId t2
-largestId (TypeForall _ _ t)  = largestId t
+largestId (TypeForall ids cs t) = maximum
+  (largestId t : ids ++ [ largestId p | c <- cs, p <- constraint_params c ])
 
 largestSubstsId :: Substs -> TVarId
 largestSubstsId = IntMap.foldl' (\a b -> a `max` largestId b) 0
@@ -92,19 +70,18 @@ mkStaticClassEnv tclasses insts = StaticClassEnv tclasses (helper insts)
 constraintContainsVariables :: HsConstraint -> Bool
 constraintContainsVariables = any ((-1/=).largestId) . constraint_params
 
--- TODO: it probably is a bad idea to have any unknown type class mapped to
---       this, as they might unify at some point.. even if they distinct.
-unknownTypeClass :: HsTypeClass
-unknownTypeClass = HsTypeClass qid [] []
-  where
-    qid = QualifiedName [] "EXFUnknownTC"
+-- Keep undeclared classes nominally distinct. Mapping every unknown class to
+-- one sentinel makes unrelated constraints such as @Foo a@ and @Bar a@
+-- indistinguishable to the solver.
+unknownTypeClass :: QualifiedName -> HsTypeClass
+unknownTypeClass name = HsTypeClass name [] []
   
 
 inflateInstances :: [HsInstance] -> [HsInstance]
-inflateInstances = ala S.fromList id . concat . takeWhile (not . null) . iterate (concatMap f)
+inflateInstances = S.toList . closure (S.fromList . superclasses) . S.fromList
   where
-    f :: HsInstance -> [HsInstance]
-    f (HsInstance iconstrs tclass iparams)
+    superclasses :: HsInstance -> [HsInstance]
+    superclasses (HsInstance iconstrs tclass iparams)
       | (HsTypeClass _ tparams tconstrs) <- tclass
       , substs <- IntMap.fromList $ zip tparams iparams
       = let 

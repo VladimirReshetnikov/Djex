@@ -13,7 +13,14 @@ import Control.Monad.Trans.MultiRWS (runMultiRWSTNil)
 import qualified Language.Haskell.Exts.Syntax as HSE
 
 import Language.Haskell.Exference.Core.SearchTree
-import Language.Haskell.Exference.Core (constraintsRelaxedAtStep)
+import Language.Haskell.Exference.Core
+  ( ExferenceChunkElement (..)
+  , ExferenceHeuristicsConfig (..)
+  , SearchCompletion (..)
+  , SearchStatus (..)
+  , constraintsRelaxedAtStep
+  , findExpressionsWithStats
+  )
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Expression (Expression (..))
 import Language.Haskell.Exference.Core.ExpressionCheck
@@ -23,12 +30,17 @@ import Language.Haskell.Exference.Core.Unify
 import Language.Haskell.Exference
   ( ExferenceInput (..)
   , ExferenceInputError (..)
+  , Penalty (..)
   , findExpressionsEither
   , findOneExpression
   )
 import Language.Haskell.Exference.EnvironmentParser (parseRatings)
 import Language.Haskell.Exference.ExpressionToHaskellSrc (convert)
-import Language.Haskell.Exference.TypeDeclsFromHaskellSrc (applyTypeDecls, parseType)
+import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
+  ( HsTypeDecl (..)
+  , applyTypeDecls
+  , parseType
+  )
 import Language.Haskell.Exference.TypeFromHaskellSrc (haskellSrcExtsParseMode)
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
 
@@ -98,6 +110,20 @@ tests = testGroup "Exference"
           applyTypeDecls (Map.singleton alias $ Left "invalid declaration")
             (TypeApp (TypeCons alias) argument)
             @?= Right (TypeApp (TypeCons alias) argument)
+      , testCase "type synonym cycles report their path" $ do
+          let aliasA = name "A"
+              aliasB = name "B"
+              declarations = Map.fromList
+                [ (aliasA, Right $ HsTypeDecl aliasA [] $ TypeCons aliasB)
+                , (aliasB, Right $ HsTypeDecl aliasB [] $ TypeCons aliasA)
+                ]
+          applyTypeDecls declarations (TypeCons aliasA)
+            @?= Left "cyclic type synonym: A -> B -> A"
+      , testCase "unsaturated synonyms are rejected explicitly" $ do
+          let alias = name "Alias"
+              declaration = HsTypeDecl alias [0] (TypeVar 0)
+          applyTypeDecls (Map.singleton alias $ Right declaration) (TypeCons alias)
+            @?= Left "wrong number of parameters for type declaration Alias"
       ]
   , testGroup "search policy"
       [ testCase "constraint relaxation ends at the configured step" $ do
@@ -109,10 +135,35 @@ tests = testGroup "Exference"
           let polymorphic = TypeForall [0] [] (TypeVar 0)
               goal = TypeArrow polymorphic polymorphic
               input = ExferenceInput goal [] [] emptyClassEnv
-                False False 0 False 20 Nothing defaultHeuristicsConfig
+                False False 0 False 20 Nothing Nothing defaultHeuristicsConfig
           case findExpressionsEither input of
             Left actual -> actual @?= NestedForallInGoal goal
             Right _ -> fail "nested forall was accepted"
+      , testCase "step exhaustion is reported explicitly" $ do
+          chunk <- onlyChunk $ identityInput {input_maxSteps = 1}
+          searchCompletion (chunkStatus chunk) @?= SearchStepLimitReached
+      , testCase "queue pruning is bounded and reported" $ do
+          chunk <- onlyChunk $ identityInput {input_maxQueueSize = Just 0}
+          searchCompletion (chunkStatus chunk) @?= SearchExhausted
+          searchQueuePruned (chunkStatus chunk) @?= 1
+      , testCase "depth pruning is configured and reported" $ do
+          let config = defaultHeuristicsConfig
+                {heuristics_functionGoalTransform = 1}
+          chunk <- onlyChunk $ identityInput
+            { input_maxDepth = Just 0
+            , input_heuristicsConfig = config
+            }
+          searchCompletion (chunkStatus chunk) @?= SearchExhausted
+          searchDepthPruned (chunkStatus chunk) @?= 1
+      , testCase "non-finite heuristic inputs are rejected" $ do
+          let config = defaultHeuristicsConfig
+                {heuristics_goalVar = Penalty (0 / 0)}
+          case findExpressionsEither identityInput
+              {input_heuristicsConfig = config} of
+            Left (InvalidHeuristic "goalVar" (Penalty value)) ->
+              isNaN value @?= True
+            Left other -> fail $ "unexpected validation error: " ++ show other
+            Right _ -> fail "non-finite heuristic was accepted"
       ]
   , testGroup "parsing and diagnostics"
       [ testCase "ratings reject a missing value" $
@@ -160,7 +211,7 @@ tests = testGroup "Exference"
               input = ExferenceInput
                 (TypeArrow variable variable)
                 [] [] emptyClassEnv
-                False False 0 False 20 Nothing defaultHeuristicsConfig
+                False False 0 False 20 Nothing Nothing defaultHeuristicsConfig
           case findOneExpression input of
             Nothing -> fail "identity search produced no checked result"
             Just _ -> pure ()
@@ -182,3 +233,14 @@ parseTypePure source = runIdentity
   $ runMultiRWSTNil
   $ runExceptT
   $ parseType [] Nothing [] Map.empty (haskellSrcExtsParseMode "test") source
+
+identityInput :: ExferenceInput
+identityInput = ExferenceInput
+  (TypeArrow (TypeVar 0) (TypeVar 0))
+  [] [] emptyClassEnv
+  False False 0 False 20 Nothing Nothing defaultHeuristicsConfig
+
+onlyChunk :: ExferenceInput -> IO ExferenceChunkElement
+onlyChunk input = case findExpressionsWithStats input of
+  [chunk] -> pure chunk
+  chunks -> fail $ "expected one search chunk, got " ++ show (length chunks)

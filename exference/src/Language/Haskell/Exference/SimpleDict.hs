@@ -8,6 +8,7 @@ import qualified Data.Map.Strict as Map
 
 import Language.Haskell.Exference.Core (ExferenceHeuristicsConfig (..))
 import Language.Haskell.Exference.Core.Types (StaticClassEnv (..))
+import Language.Haskell.Exference.Core.Score (Penalty (..))
 
 emptyClassEnv :: StaticClassEnv
 emptyClassEnv = StaticClassEnv
@@ -17,17 +18,17 @@ emptyClassEnv = StaticClassEnv
 
 defaultHeuristicsConfig :: ExferenceHeuristicsConfig
 defaultHeuristicsConfig = ExferenceHeuristicsConfig
-  { heuristics_goalVar = 4.0
-  , heuristics_goalCons = 0.55
-  , heuristics_goalArrow = 5.0
-  , heuristics_goalApp = 1.9
-  , heuristics_stepProvidedGood = 0.2
-  , heuristics_stepProvidedBad = 5.0
-  , heuristics_stepEnvGood = 6.0
-  , heuristics_stepEnvBad = 22.0
-  , heuristics_tempUnusedVarPenalty = 5.0
-  , heuristics_tempMultiVarUsePenalty = 3.0
-  , heuristics_functionGoalTransform = 0.0
-  , heuristics_unusedVar = 20.0
-  , heuristics_solutionLength = 0.0153
+  { heuristics_goalVar = Penalty 4.0
+  , heuristics_goalCons = Penalty 0.55
+  , heuristics_goalArrow = Penalty 5.0
+  , heuristics_goalApp = Penalty 1.9
+  , heuristics_stepProvidedGood = Penalty 0.2
+  , heuristics_stepProvidedBad = Penalty 5.0
+  , heuristics_stepEnvGood = Penalty 6.0
+  , heuristics_stepEnvBad = Penalty 22.0
+  , heuristics_tempUnusedVarPenalty = Penalty 5.0
+  , heuristics_tempMultiVarUsePenalty = Penalty 3.0
+  , heuristics_functionGoalTransform = Penalty 0.0
+  , heuristics_unusedVar = Penalty 20.0
+  , heuristics_solutionLength = Penalty 0.0153
   }

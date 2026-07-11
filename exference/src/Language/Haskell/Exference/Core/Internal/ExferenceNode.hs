@@ -59,6 +59,7 @@ import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
+import Language.Haskell.Exference.Core.Score
 
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
@@ -207,7 +208,7 @@ data SearchNode = SearchNode
   , _searchNodeNextVarId       :: {-# UNPACK #-} !TVarId
   , _searchNodeMaxTVarId       :: {-# UNPACK #-} !TVarId
   , _searchNodeNextNVarId      :: {-# UNPACK #-} !TVarId -- id used when resolving rankN-types
-  , _searchNodeDepth           :: {-# UNPACK #-} !Float
+  , _searchNodeDepth           :: {-# UNPACK #-} !Penalty
 #if LINK_NODES
   , _searchNodePreviousNode    :: Maybe SearchNode
 #endif

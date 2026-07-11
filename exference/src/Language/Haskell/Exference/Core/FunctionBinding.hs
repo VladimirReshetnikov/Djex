@@ -9,10 +9,11 @@ where
 
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Expression
+import Language.Haskell.Exference.Core.Score
 
 
 
-type FunctionBinding = (HsType, QualifiedName, Float, [HsConstraint], [HsType])
+type FunctionBinding = (HsType, QualifiedName, Penalty, [HsConstraint], [HsType])
                       -- input-type, name, rating, contraints, result-types
 
 type DeconstructorBinding = (HsType, [(QualifiedName, [HsType])], Bool)

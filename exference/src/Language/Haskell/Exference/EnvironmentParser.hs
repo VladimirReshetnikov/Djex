@@ -29,6 +29,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.SimpleDict
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.ExferenceStats
+import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.DeepSeq
@@ -110,7 +111,7 @@ builtInDeconstructorsM = mapM helper ds
 -- Left is returned with the corresponding name.
 --
 -- Otherwise, the result is Right.
-compileWithDict :: [(QualifiedName, Float)]
+compileWithDict :: [(QualifiedName, Penalty)]
                 -> [HsFunctionDecl]
                 -> Either String [RatedHsFunctionDecl]
                 -- function_not_found or all bindings
@@ -233,18 +234,18 @@ parseModulesSimple s = helper
   addRating (a,b) = (a,0.0,b)
   helper (decls, deconss, cntxt, ds, tdm) = (addRating <$> decls, deconss, cntxt, ds, tdm)
 
-parseRatings :: String -> Either String [(QualifiedName, Float)]
+parseRatings :: String -> Either String [(QualifiedName, Penalty)]
 parseRatings = go . words
   where
     go [] = Right []
     go [_] = Left "rating file ends with a name but no numeric rating"
-    go (name : value : rest) = case readMaybe value of
+    go (name : value : rest) = case readMaybe value :: Maybe Double of
       Nothing -> Left $ "invalid rating for " ++ name ++ ": " ++ value
       Just rating | isNaN rating || isInfinite rating ->
         Left $ "rating for " ++ name ++ " must be finite: " ++ value
-      Just rating -> ((parseQualifiedName name, rating) :) <$> go rest
+      Just rating -> ((parseQualifiedName name, Penalty rating) :) <$> go rest
 
-ratingsFromFile :: String -> IO (Either String [(QualifiedName, Float)])
+ratingsFromFile :: String -> IO (Either String [(QualifiedName, Penalty)])
 ratingsFromFile path = do
   contents <- try (readFile path >>= evaluate . force)
     :: IO (Either SomeException String)
@@ -319,7 +320,7 @@ environmentFromPath p = do
   sequence_ $ do
     Left err <- rResult
     return $ mTell ["could not parse rating file", err]
-  (rs' :: [(QualifiedName, Float)]) <- fmap join $ sequence $ do
+  (rs' :: [(QualifiedName, Penalty)]) <- fmap join $ sequence $ do
     (rName, rVal) <- rs
     return $ do
       dIds <- fmap join $ sequence $ do

@@ -39,6 +39,7 @@ import Control.Monad ( forM, join, liftM )
 import Data.Either ( lefts, rights )
 import Data.Bifunctor ( bimap )
 import Data.Maybe ( maybeToList )
+import Data.List ( intercalate )
 
 import Data.Map ( Map )
 import Data.IntMap ( IntMap )
@@ -58,35 +59,43 @@ type TypeDeclMap = Map QualifiedName HsTypeDecl
 applyTypeDecls :: Map QualifiedName (Either String HsTypeDecl)
                -> HsType 
                -> Either String HsType
-applyTypeDecls m = go
+applyTypeDecls declarations = go []
  where
-  go (TypeVar i)      = Right $ TypeVar i
-  go (TypeConstant i) = Right $ TypeConstant i
-  go t@(TypeCons _)  = goApp [] t
-  go (TypeArrow t1 t2) = [ TypeArrow t1' t2'
-                         | t1' <- go t1
-                         , t2' <- go t2
+  go _ (TypeVar i)      = Right $ TypeVar i
+  go _ (TypeConstant i) = Right $ TypeConstant i
+  go path t@(TypeCons _)  = goApp path [] t
+  go path (TypeArrow t1 t2) = [ TypeArrow t1' t2'
+                         | t1' <- go path t1
+                         , t2' <- go path t2
                          ]
-  go (TypeApp l r) = goApp [r] l
-  go (TypeForall vars constrs t) = TypeForall vars constrs `liftM` go t
-  goApp rs (TypeApp l r)      = goApp (r:rs) l
-  goApp rs (TypeCons qn)    = case M.lookup qn m of
-    Nothing                  -> foldl TypeApp (TypeCons qn) `liftM` mapM go rs
+  go path (TypeApp l r) = goApp path [r] l
+  go path (TypeForall vars constraints t) = do
+    constraints' <- mapM (mapConstraint $ go path) constraints
+    TypeForall vars constraints' <$> go path t
+  goApp path rs (TypeApp l r) = goApp path (r:rs) l
+  goApp path rs (TypeCons qn) = case M.lookup qn declarations of
+    Nothing -> foldl TypeApp (TypeCons qn) <$> mapM (go path) rs
     -- The declaration error is reported separately by 'getTypeDecls'. Keep an
     -- unexpanded use here, but do not lose its already converted arguments.
-    Just (Left _)            -> foldl TypeApp (TypeCons qn) `liftM` mapM go rs
+    Just (Left _) -> foldl TypeApp (TypeCons qn) <$> mapM (go path) rs
+    Just (Right _) | qn `elem` path -> Left $ "cyclic type synonym: "
+      ++ intercalate " -> " (map show $ reverse path ++ [qn])
     Just (Right (HsTypeDecl _ vs t))
                              | i <- length vs
                              , i <= length rs
-                             -> [ foldl TypeApp substituted pUnchanged
-                                | rs' <- mapM go rs
+                             -> [ foldl TypeApp expanded pUnchanged
+                                | rs' <- mapM (go path) rs
                                 , let pAffected = take i rs'
                                 , let pUnchanged = drop i rs'
                                 , let substs = IntMap.fromList $ zip vs pAffected
                                 , let substituted = snd $ applySubsts substs t
+                                , expanded <- go (qn : path) substituted
                                 ]
     _                        -> Left $ "wrong number of parameters for type declaration " ++ show qn
-  goApp rs l               = foldl1 TypeApp `liftM` mapM go (l:rs)
+  goApp path rs l = foldl1 TypeApp <$> mapM (go path) (l:rs)
+
+  mapConstraint f (HsConstraint typeClass parameters) =
+    HsConstraint typeClass <$> mapM f parameters
 
 getTypeDecls :: ( Monad m
                 )
@@ -108,13 +117,14 @@ getTypeDecls ds modules = do
       -- no new type variables should appear on the left hand side.
       vars <- mapExceptT (withMultiStateA (ConvData 1000 tyVarIndex)) $ rawVars `forM` tyVarTransform
       return $ HsTypeDecl qname vars ty
-  let converter (HsTypeDecl n vs t) = HsTypeDecl n vs `liftM` applyTypeDecls resultMap t
-      resultMap :: Map QualifiedName (Either String HsTypeDecl)
-      resultMap = M.map converter
-                $ M.fromList
-                $ map (\x -> (tdecl_name x, x))
-                $ rights rawList
-  return $ [ e | e@(Left _) <- rawList ] ++ M.elems resultMap
+  let validDeclarations = rights rawList
+      declarationMap = M.fromList
+        [(tdecl_name declaration, Right declaration) | declaration <- validDeclarations]
+      resolve declaration = HsTypeDecl
+        (tdecl_name declaration)
+        (tdecl_params declaration)
+        <$> applyTypeDecls declarationMap (tdecl_result declaration)
+  return $ [ e | e@(Left _) <- rawList ] ++ map resolve validDeclarations
 
 convertType :: ( Monad m
                )

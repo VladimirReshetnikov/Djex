@@ -16,6 +16,10 @@ module Language.Haskell.Exference
   , ExferenceStats (..)
   , ExferenceInputError (..)
   , findExpressionsEither
+  , SearchCompletion (..)
+  , SearchStatus (..)
+  , Penalty (..)
+  , Priority (..)
   )
 where
 
@@ -24,6 +28,7 @@ where
 import Language.Haskell.Exference.Core
 
 import Language.Haskell.Exference.Core.ExferenceStats
+import Language.Haskell.Exference.Core.Score
 
 import Data.Maybe ( maybeToList, listToMaybe, fromMaybe )
 import Control.Arrow ( first, second, (***) )
@@ -119,10 +124,10 @@ findFirstBestExpressionsLookahead :: Int
                                   -> ExferenceInput
                                   -> [ExferenceOutputElement]
 findFirstBestExpressionsLookahead n =
-  f maxBound (1 / 0) [] . findExpressionsChunked
+  f maxBound maxPenalty [] . findExpressionsChunked
  where
   f :: Int
-    -> Float
+    -> Penalty
     -> [ExferenceOutputElement]
     -> [[ExferenceOutputElement]]
     -> [ExferenceOutputElement]
@@ -145,10 +150,10 @@ findFirstBestExpressionsLookaheadPreferNoConstraints :: Int
                                                      -> ExferenceInput
                                                      -> [ExferenceOutputElement]
 findFirstBestExpressionsLookaheadPreferNoConstraints n =
-  f maxBound (1 / 0) [] [] . findExpressionsChunked
+  f maxBound maxPenalty [] [] . findExpressionsChunked
  where
   f :: Int
-    -> Float
+    -> Penalty
     -> [ExferenceOutputElement] -- solutions without constraints
     -> [ExferenceOutputElement] -- solution(s) with constraints
     -> [[ExferenceOutputElement]]

@@ -27,6 +27,7 @@ library djinn-core
   Ghc-Options:      -Wall -Wcompat
 
   Build-Depends:    base >= 4.18 && < 5,
+                    haskell-synthesis >= 0.1 && < 0.2,
                     haskeline >= 0.8 && < 0.9,
                     mtl >= 2.2 && < 2.4,
                     pretty >= 1.1 && < 1.2,

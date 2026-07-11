@@ -987,26 +987,62 @@ testIdentifiers :: IO ()
 testIdentifiers = do
     assertParses "leading underscores are valid variable identifiers"
         pVarId "_compose'"
+    assertParses "Unicode lowercase letters are variable identifiers"
+        pVarId "λvalue"
+    assertParses "Unicode uppercase letters are constructor identifiers"
+        pConId "Δelta"
     assertParses "qualified external variables are valid"
         pQualifiedVarId "Data.Function.id"
+    assertParses "qualified Unicode variables are valid"
+        pQualifiedVarId "Data.λvalue"
     assertParses "qualified constructors are valid"
         pQualifiedConId "Data.Maybe.Maybe"
+    assertBool "identifier lexical classes remain distinct"
+        (isVarId "value" && not (isConId "value") &&
+         isConId "Value" && not (isVarId "Value"))
+    assertBool "qualified constructor lexical classes remain distinct"
+        (isQualifiedConId "Data.Maybe.Just" &&
+         not (isQualifiedVarId "Data.Maybe.Just"))
     assertParses "the full ASCII operator alphabet is available"
         pParenthesizedVarOp "(/?)"
     assertParses "Unicode Haskell operators are available"
         pParenthesizedVarOp "(⊕)"
+    assertBool "Unicode operators retain their variable lexical class"
+        (isVarOperator "⊕" && renderVarName "⊕" == "(⊕)")
+    assertDoesNotParse "constructor operators are not term binding names"
+        pParenthesizedVarOp "(:+:)"
+    assertBool "constructor operators remain outside the variable namespace"
+        (not (isVarOperator ":+:") && renderVarName ":+:" == ":+:")
     assertDoesNotParse "reserved words are not identifiers" pVarId "case"
     assertDoesNotParse "a bare underscore is not a binding name" pVarId "_"
+    assertBool "the complete shared reserved-word policy reaches Djinn"
+        (all (not . isVarId) ["_", "as", "case", "module", "where"])
     assertDoesNotParse "module segments must be constructors"
         pQualifiedVarId "data.module.value"
+    assertDoesNotParse "lowercase intermediate module segments are invalid"
+        pQualifiedVarId "Data.internal.value"
+    assertDoesNotParse "leading qualification dots are invalid"
+        pQualifiedVarId ".Data.value"
     assertDoesNotParse "empty qualification segments are invalid"
         pQualifiedVarId "Data..value"
     assertDoesNotParse "trailing qualification dots are invalid"
         pQualifiedVarId "Data.value."
+    assertBool "classification does not inherit parseName whitespace trimming"
+        (not $ isQualifiedVarId " Data.value")
+    assertParses "ReadP still owns and consumes leading whitespace"
+        pQualifiedVarId " Data.value"
+    assertDoesNotParse "qualified operators remain outside Djinn's grammar"
+        pQualifiedVarId "Data.(+)"
+    assertBool "qualified operators are not reclassified as identifiers"
+        (not (isQualifiedVarId "Data.(+)") &&
+         renderVarName "Data.(+)" == "Data.(+)")
     assertDoesNotParse "reserved operators are invalid binding names"
         pParenthesizedVarOp "(->)"
     assertDoesNotParse "a line-comment introducer is not an operator name"
         pParenthesizedVarOp "(--)"
+    assertBool "the complete shared reserved-operator policy reaches Djinn"
+        (all (not . isVarOperator)
+            ["..", "--", ":", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>"])
     assertEqual "underscore identifiers must not be printed as operators"
         "_compose" (prHSymbolOp "_compose")
     assertEqual "qualified variables must remain prefix names"
@@ -1022,6 +1058,9 @@ testIdentifiers = do
     assertEqual "dash-prefixed operators are not mistaken for comments"
         "(--*) :: a -> a\n"
         (stripLineComments "(--*) :: a -> a\n")
+    assertEqual "Unicode symbols also continue dash-prefixed operators"
+        "(--⊕) :: a -> a\n"
+        (stripLineComments "(--⊕) :: a -> a\n")
 
 atomA :: Formula
 atomA = PVar $ Symbol "a"

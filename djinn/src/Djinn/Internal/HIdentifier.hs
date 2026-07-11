@@ -11,7 +11,13 @@ module Djinn.Internal.HIdentifier (
     schar, sstring, pParen
     ) where
 
-import Data.Char (isAlphaNum, isLower, isPunctuation, isSymbol, isUpper)
+import Data.Maybe (isJust)
+import Language.Haskell.Synthesis.Name (
+    LexicalClass(..), Name,
+    isIdentifierCharacter, isOperatorCharacter,
+    mkIdentifier, mkOperator,
+    nameIdentifier, nameLexicalClass,
+    parseName, renderCanonical, renderPrefix)
 import Text.ParserCombinators.ReadP
 
 -- Match a single token after skipping leading white space.
@@ -57,46 +63,54 @@ pValidated valid character = do
     if valid token then return token else pfail
 
 isVarId :: String -> Bool
-isVarId identifier =
-    case identifier of
-        first : rest ->
-            (isLower first || first == '_') &&
-            all isIdentifierCharacter rest &&
-            identifier `notElem` reservedIdentifiers
-        [] -> False
+isVarId = isJust . unqualifiedIdentifier VariableLike
 
 isConId :: String -> Bool
-isConId (first : rest) =
-    isUpper first && all isIdentifierCharacter rest
-isConId [] = False
+isConId = isJust . unqualifiedIdentifier ConstructorLike
 
+-- These predicates historically accept both qualified and unqualified
+-- identifiers despite their names.  Requiring canonical rendering preserves
+-- their exact token semantics: unlike 'parseName', they do not trim outer
+-- whitespace or accept alternate contextual syntax.
 isQualifiedVarId :: String -> Bool
-isQualifiedVarId identifier =
-    case splitOnDots identifier of
-        Just segments ->
-            not (null segments) &&
-            all isConId (init segments) && isVarId (last segments)
-        Nothing -> False
+isQualifiedVarId = isJust . qualifiedIdentifier VariableLike
 
 isQualifiedConId :: String -> Bool
-isQualifiedConId identifier =
-    case splitOnDots identifier of
-        Just segments -> not (null segments) && all isConId segments
-        Nothing -> False
+isQualifiedConId = isJust . qualifiedIdentifier ConstructorLike
 
 isVarOperator :: String -> Bool
-isVarOperator operator =
-    case operator of
-        first : _ ->
-            first /= ':' && all isOperatorCharacter operator &&
-            operator `notElem` reservedOperators
-        [] -> False
+isVarOperator = isJust . variableOperator
 
 renderVarName :: String -> String
-renderVarName name
-    | isQualifiedVarId name = name
-    | isVarOperator name = "(" ++ name ++ ")"
-    | otherwise = name
+renderVarName source =
+    case qualifiedIdentifier VariableLike source of
+        Just name -> renderPrefix name
+        Nothing -> case variableOperator source of
+            Just name -> renderPrefix name
+            Nothing -> source
+
+unqualifiedIdentifier :: LexicalClass -> String -> Maybe Name
+unqualifiedIdentifier expected source =
+    case mkIdentifier source of
+        Right name
+            | nameLexicalClass name == expected -> Just name
+        _ -> Nothing
+
+qualifiedIdentifier :: LexicalClass -> String -> Maybe Name
+qualifiedIdentifier expected source =
+    case parseName source of
+        Right name
+            | isJust (nameIdentifier name)
+            , nameLexicalClass name == expected
+            , renderCanonical name == source -> Just name
+        _ -> Nothing
+
+variableOperator :: String -> Maybe Name
+variableOperator source =
+    case mkOperator source of
+        Right name
+            | nameLexicalClass name == VariableLike -> Just name
+        _ -> Nothing
 
 -- Strip Haskell-style line comments without mistaking a longer symbolic
 -- operator such as @--*@ for a comment introducer.  Djinn has no string or
@@ -112,41 +126,6 @@ stripLineComments ('-' : '-' : rest)
 stripLineComments (character : rest) =
     character : stripLineComments rest
 
-isIdentifierCharacter :: Char -> Bool
-isIdentifierCharacter character =
-    isAlphaNum character || character == '_' || character == '\''
-
 isQualifiedCharacter :: Char -> Bool
 isQualifiedCharacter character =
     isIdentifierCharacter character || character == '.'
-
-isOperatorCharacter :: Char -> Bool
-isOperatorCharacter character =
-    character `elem` "!#$%&*+./<=>?@\\^|-~:" ||
-    ((isSymbol character || isPunctuation character) &&
-        character `notElem` "(),;[]`{}_\"'")
-
-splitOnDots :: String -> Maybe [String]
-splitOnDots input = traverseNonEmpty $ split input
-  where
-    split value =
-        case break (== '.') value of
-            (segment, []) -> [segment]
-            (segment, _ : rest) -> segment : split rest
-
-    traverseNonEmpty [] = Nothing
-    traverseNonEmpty segments
-        | any null segments = Nothing
-        | otherwise = Just segments
-
-reservedIdentifiers :: [String]
-reservedIdentifiers =
-    [ "_", "as", "case", "class", "data", "default", "deriving"
-    , "do", "else", "foreign", "hiding", "if", "import", "in"
-    , "infix", "infixl", "infixr", "instance", "let", "module"
-    , "newtype", "of", "qualified", "then", "type", "where"
-    ]
-
-reservedOperators :: [String]
-reservedOperators =
-    [ "..", "--", ":", "::", "=", "\\", "|", "<-", "->", "@", "~", "=>" ]

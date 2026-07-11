@@ -1,4 +1,3 @@
-{-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 --
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
@@ -42,8 +41,8 @@ data HType
         | HTCon HSymbol
         | HTTuple [HType]
         | HTArrow HType HType
-        | HTUnion [(HSymbol, [HType])]          -- Only for data types; only at top level
-        | HTAbstract HSymbol HKind              -- XXX Uninterpreted type, like a variable but different kind checking
+        | HTUnion [(HSymbol, [HType])] -- Data declarations only; top-level.
+        | HTAbstract HSymbol HKind     -- Opaque constructor with a declared kind.
         deriving (Eq)
 
 isHTUnion :: HType -> Bool
@@ -106,7 +105,7 @@ pHTAtom = pHTVar +++ pHTCon +++ pHTList +++ pParen pHTTuple +++ pParen pHType ++
 pUnit :: ReadP HType
 pUnit = do
     schar '('
-    char ')'
+    schar ')'
     return $ HTCon "()"
 
 -- The prefix spelling of the function arrow, "(->)", is lexed like the infix

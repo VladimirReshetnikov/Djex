@@ -299,6 +299,12 @@ expanded into named pattern, alternative, and equality helpers; this costs a
 few physical lines but removes a traversal and makes the scope-sensitive
 renaming invariant visible.
 
+Finally, both stale module-wide `-fno-warn-unused-do-bind` pragmas were removed.
+The only hidden warning was the unit parser discarding `char ')'`; expressing
+the close parenthesis through the existing space-skipping token helper both
+made the intent explicit and correctly accepts the ordinary Haskell spelling
+`( )`.
+
 ## Change footprint
 
 | Module | Change |

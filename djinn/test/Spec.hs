@@ -191,6 +191,8 @@ testCanonicalRendering :: IO ()
 testCanonicalRendering = do
     assertEqual "unit should not acquire an extra pair of parentheses"
         "()" (show $ HTCon "()")
+    assertEqual "unit syntax permits ordinary token whitespace"
+        (Just $ HTCon "()") (readMaybe "( )")
     assertEqual "kinds should use the syntax accepted by the parser"
         "(* -> *) -> * -> *"
         (show $ KArrow (KArrow KStar KStar) (KArrow KStar KStar))

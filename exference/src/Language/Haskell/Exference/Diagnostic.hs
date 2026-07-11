@@ -1,32 +1,36 @@
+-- | Compatibility facade for the shared synthesis diagnostic vocabulary.
+--
+-- Exference historically exposed a one-argument 'diagnostic' constructor.
+-- Keep that convenience while using the same structured value, source span,
+-- rendering, and context model as every other synthesis backend.
 module Language.Haskell.Exference.Diagnostic
   ( Diagnostic (..)
+  , Severity (..)
   , SourcePosition (..)
   , SourceSpan (..)
   , diagnostic
+  , withCode
+  , withSource
+  , withSpan
+  , withContext
+  , renderDiagnostic
   )
 where
 
--- | A source position deliberately independent of haskell-src-exts.  Keeping
--- diagnostics in the shared frontend vocabulary will make them reusable by a
--- future Djinn/Exference parser without leaking either parser's AST types.
-data SourcePosition = SourcePosition
-  { sourceLine :: !Int
-  , sourceColumn :: !Int
-  }
-  deriving (Eq, Show)
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic (..)
+  , Severity (..)
+  , SourcePosition (..)
+  , SourceSpan (..)
+  , renderDiagnostic
+  , withCode
+  , withContext
+  , withSource
+  , withSpan
+  )
+import qualified Language.Haskell.Synthesis.Diagnostic as Shared
 
-data SourceSpan = SourceSpan
-  { sourceStart :: SourcePosition
-  , sourceEnd :: SourcePosition
-  }
-  deriving (Eq, Show)
-
-data Diagnostic = Diagnostic
-  { diagnosticSource :: Maybe FilePath
-  , diagnosticSpan :: Maybe SourceSpan
-  , diagnosticMessage :: String
-  }
-  deriving (Eq, Show)
-
+-- | Construct an error diagnostic with no code, source, span, or context.
+-- This is the source-compatible form of Exference's historical helper.
 diagnostic :: String -> Diagnostic
-diagnostic = Diagnostic Nothing Nothing
+diagnostic = Shared.diagnostic Error

@@ -235,7 +235,7 @@ ratingsFromFile :: String -> IO (Either Diagnostic [(QualifiedName, Penalty)])
 ratingsFromFile path = do
   contents <- try (readFile path >>= evaluate . force)
     :: IO (Either SomeException String)
-  return $ first (Diagnostic (Just path) Nothing . show) contents
+  return $ first (withSource path . diagnostic . show) contents
     >>= first (\result -> result { diagnosticSource = Just path }) . parseRatings
 
 

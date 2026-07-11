@@ -166,19 +166,19 @@ parseType
        (MultiRWST r w s m)
        (HsType, TypeVarIndex)
 parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
-  P.ParseFailed location message -> throwE $ Diagnostic
-    (Just $ srcFilename location)
-    (Just $ let position = SourcePosition
-                  (srcLine location) (srcColumn location)
-            in SourceSpan position position)
-    message
+  P.ParseFailed location message -> throwE
+    $ withSpan (let position = SourcePosition
+                      (srcLine location) (srcColumn location)
+                in SourceSpan position position)
+    $ withSource (srcFilename location)
+    $ diagnostic message
   P.ParseOk ty -> ExceptT $ first conversionDiagnostic
     <$> runExceptT (convertType tcs mn ds tDeclMap ty)
   where
-    conversionDiagnostic message = Diagnostic
-      (Just $ P.parseFilename m)
-      (Just $ SourceSpan (SourcePosition 1 1) (endPosition s))
-      message
+    conversionDiagnostic message =
+      withSpan (SourceSpan (SourcePosition 1 1) (endPosition s))
+      $ withSource (P.parseFilename m)
+      $ diagnostic message
 
     endPosition = foldl advance (SourcePosition 1 1)
     advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1

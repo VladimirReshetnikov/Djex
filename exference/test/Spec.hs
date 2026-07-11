@@ -352,11 +352,21 @@ tests = testGroup "Exference"
             constructors
       , testCase "type parse failures carry source positions" $
           case parseTypePure "(" of
-            Left (Diagnostic (Just "test.hs")
-                (Just (SourceSpan (SourcePosition line column) _)) _) ->
-              (line > 0 && column > 0) @?= True
+            Left Diagnostic
+                { diagnosticSeverity = Error
+                , diagnosticSource = Just "test.hs"
+                , diagnosticSpan = Just
+                    (SourceSpan (SourcePosition line column) _)
+                } -> (line > 0 && column > 0) @?= True
             Left result -> fail $ "incomplete diagnostic: " ++ show result
             Right result -> fail $ "malformed type was accepted: " ++ show result
+      , testCase "diagnostics use the shared code and context model" $
+          renderDiagnostic
+            (withContext "while parsing an Exference query"
+              $ withCode "EXF001"
+              $ diagnostic "invalid type")
+            @?= "error [EXF001]: invalid type\n\
+                \  context: while parsing an Exference query"
       , testCase "current HSE parses and elaborates constrained types" $
           case parseTypePure "Eq a => a -> a" of
             Left result -> fail $ show result

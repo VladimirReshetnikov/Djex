@@ -43,8 +43,8 @@ cabal test all --test-show-details=direct
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 23 focused Tasty/HUnit regressions over parsing, kinds, proof search/checking, rendering, environments, and identifiers. |
-| `djinn-property-tests` | Three QuickCheck properties, 200 generated cases each, covering proof production/checking/rendering, arbitrary identity, and `HType` display/parser round-trips. |
+| `djinn-tests` | 27 focused Tasty/HUnit regressions over parsing, kinds, proof search/checking, rendering, environments, and identifiers. |
+| `djinn-property-tests` | Three QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Seven subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, and stateful query behavior. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
@@ -368,8 +368,12 @@ knowing before editing the source:
   through GHC automatically. Treat the output as a strong candidate that still
   belongs in the normal compile/test loop.
 
-See [`docs/reports/`](docs/reports/) for the local source review, fixed defects,
-remaining engineering risks, and validation details.
+See [`docs/reports/`](docs/reports/) for the local review history:
+[the correctness review](docs/reports/2026-07-10-code-review.md) covering the
+import's fixed defects and remaining engineering risks, and
+[the simplification pass](docs/reports/2026-07-10-simplification-pass.md)
+covering deduplication, readability work, and the empty-goal completeness
+fix.
 
 ## License and provenance
 

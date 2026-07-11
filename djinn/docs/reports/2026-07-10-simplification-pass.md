@@ -10,23 +10,32 @@
 
 This pass re-read every module under `djinn/src/` with a different question
 than the earlier correctness review: not "is it right?" but "is it as short,
-deduplicated, and readable as it should be?" The result is a net reduction of
-27 physical lines across `src/` *including* newly added clarifying comments,
-with no behavioral change to valid inputs beyond three deliberate, small
-fixes:
+deduplicated, and readable as it should be?" The mechanical outcome is a net
+reduction across `src/` *including* newly added clarifying comments, with the
+dominant theme being **deduplication**: three helper functions were maintained
+in two modules each, and two more re-derived standard-library functions.
 
-1. `:delete` of an undefined name now reports an error instead of silently
-   succeeding.
-2. `:delete` now parses qualified axiom names, so an axiom added as
-   `Data.Function.id :: a -> a` is no longer undeletable.
-3. The prefix function arrow `(->)` is lexed as one token, so the previously
-   accepted `( - > )` (which GHC rejects) is now a parse error.
+Smoke-testing the pass against the built-in help's own examples then exposed
+the most important finding of the day, a **completeness regression** that had
+survived the earlier correctness review: after the nominal-`Empty` rework,
+`redsucc` rejected every empty goal outright, so no theorem whose final goal
+is an empty type could be proven. The flagship example from the built-in
+help — the double negation of the law of excluded middle — was reported
+"cannot be realized". The fix (N-01 below) restores upstream provability and
+uncovered a follow-on defect in the independent proof checker (N-02), found
+by QuickCheck within two full-matrix runs.
 
-The dominant theme of the mechanical changes is **deduplication**: three
-helper functions were maintained in two modules each, and two more re-derived
-standard-library functions. Every change was validated against the full test
-matrix (23 unit regressions, 600 property cases, 7 CLI subprocess scenarios),
-plus manual REPL smoke tests of the touched paths.
+Five further deliberate fixes ride along: unary constructor fields no longer
+render with singleton-tuple parentheses (`CD (c)` → `CD c`); `:delete` of an
+undefined name reports an error instead of silently succeeding; `:delete`
+accepts qualified axiom names, so a qualified axiom is no longer undeletable;
+the prefix arrow `(->)` is lexed as one token (the accidentally accepted
+`( - > )` is now a parse error); and the property suite's 200-case setting is
+now a floor that `--quickcheck-tests` can raise.
+
+Every change was validated against the full test matrix — now 27 unit
+regressions, three properties at 200 cases (also exercised at 2,000), and 7
+CLI subprocess scenarios — plus manual REPL smoke tests of the touched paths.
 
 ## Scope and method
 
@@ -35,16 +44,18 @@ plus manual REPL smoke tests of the touched paths.
 2. Inventoried duplicated helpers, hand-rolled standard functions, dead
    tuple-threading, nesting that obscured control flow, and comments that were
    missing where the code is genuinely subtle.
-3. Applied changes in two commits, running `cabal build all` (warning-clean
+3. Applied changes in four commits, running `cabal build all` (warning-clean
    under `-Wall -Wcompat`) and `cabal test all` after each.
-4. Smoke-tested the interactive executable on the touched surfaces: prefix
-   arrows, contexts, tuple projections, `+multi`, `cutoff`, qualified axiom
-   addition/deletion, and unknown-name deletion.
+4. Smoke-tested the interactive executable against the verbose help's own
+   worked examples plus the touched surfaces: prefix arrows, contexts, tuple
+   projections, `+multi`, `cutoff`, qualified axiom addition/deletion, and
+   unknown-name deletion. This step is what exposed N-01 and N-03.
 
-Changes that could alter proof-search order, latency, or the accepted type
-language were deliberately out of scope, with the one lexical exception noted
-below. The open findings R-07 through R-12 from the companion report remain
-open and are not restated in full here.
+Changes that could alter proof-search order or latency for already-working
+queries were deliberately out of scope; N-01 restores provability the
+calculus was always supposed to have, and the lexical fix N-06 only rejects
+an accidentally accepted spelling. The open findings R-07 through R-12 from
+the companion report remain open and are not restated in full here.
 
 ## Simplifications applied
 
@@ -132,7 +143,88 @@ now one `lookupHKind` parameterized by the message, and the two call sites in
 
 ## Fixed flaws
 
-### N-01 — `:delete` silently accepted undefined names
+### N-01 — Critical: empty goals were unprovable (completeness regression)
+
+Baseline reproduction, straight from the built-in verbose help's own example:
+
+```text
+Djinn> f ? Not (Not (Either x (Not x)))
+-- f cannot be realized.
+```
+
+The double negation of the law of excluded middle is an intuitionistic
+theorem, and upstream Djinn proves it. The regression came from the
+nominal-`Empty` rework (R-03 in the companion report): upstream encoded
+falsehood as `Disj []`, so an empty *goal* flowed through the disjunction
+rule — introduce a fresh continuation atom, add one implication antecedent
+per disjunct (none), and prove the atom, which is only reachable through
+ex falso reasoning. The rework's `redsucc (Empty _) = mzero` kept empty
+*antecedents* working but silently removed that goal-side path, so any
+query whose final goal reduces to an empty type with contradictory
+antecedents — the entire "theorem proving with `Not`" use case advertised
+in the help — failed.
+
+`redsucc` now routes an empty goal through the same fresh-atom encoding as
+a zero-alternative disjunction. The proof is parametric in the fresh atom,
+so it proves the empty goal as well, and the independent checker verifies
+it against the actual `Empty` formula. The help's example now produces
+exactly the output the help promises:
+
+```text
+f :: Not (Not (Either x (Not x)))
+f a = void (a (Right (\ b -> a (Left b))))
+```
+
+Bare `Void`, the law of excluded middle itself, and nominal-empty identity
+versus cross-empty elimination all still behave correctly. A unit
+regression covers the theorem end to end (search plus independent check).
+
+The lesson recorded for future passes: the prior review validated the
+nominal-empty change against empty *hypotheses* (`EmptyA -> EmptyB`) but
+never re-ran the help file's `Not`-based theorem examples, which are the
+only stock queries whose *goal* is empty.
+
+### N-02 — High: the proof checker rejected valid ex-falso chains
+
+Found by QuickCheck immediately after N-01 was fixed, because N-01 made a
+new class of proofs reachable. For
+
+```text
+Not x -> Not c -> Not (Either x c)    where x = (a -> a) -> (b)
+```
+
+the LJT proof feeds one `Ccases []` (ex falso) result into another. The
+intermediate proof type is a genuinely free metavariable — any empty
+instantiation types the term — but `solveConstraints` treated "no constraint
+made progress" as failure and reported `unresolved proof constraints: 1`,
+so the query printed "generated an invalid proof" for a correct proof.
+
+When the solver stalls, an `EmptyEliminator` constraint whose input is
+still an unsolved metavariable is now defaulted to `Sum []` and solving
+resumes. This is safe: the variable is unconstrained elsewhere (otherwise
+some constraint would have made progress), and a term that also injects
+into the defaulted type still fails unification on the next pass. Stuck
+`Injection` constraints remain hard errors. The discovered formula is
+pinned as a deterministic unit regression, and the failing QuickCheck seed
+(`SMGen 4298580404438746955 8158366780631436653`, case 74) replays green.
+
+### N-03 — unary constructor fields rendered as singleton tuples
+
+A unary constructor's field arrives at the proof-term converter as a 1-ary
+split (its field list is translated as a one-element conjunction), and the
+resulting pattern kept a one-element `HPTuple` wrapper:
+
+```text
+bindCD a b = case a of CD (c) -> ...     -- before
+bindCD a b = case a of CD c -> ...       -- after
+```
+
+`(c)` is legal Haskell, but the expression side already collapsed singleton
+tuples (`hETuple [e] = e`); the pattern side now mirrors it at the split
+conversion. This also restores the exact output shown in the built-in
+help's continuation-monad examples. Covered by a unit regression.
+
+### N-04 — `:delete` silently accepted undefined names
 
 `:delete nosuch` filtered three lists, removed nothing, revalidated the
 unchanged environment, and reported success. Typos in a deletion therefore
@@ -140,14 +232,14 @@ went unnoticed — particularly misleading in command files. `runCmd` now
 checks membership across axioms, types, and classes first and reports
 `Error: cannot delete nosuch: it is not defined`.
 
-### N-02 — qualified axioms could be added but not deleted
+### N-05 — qualified axioms could be added but not deleted
 
 `pAdd` accepts qualified external names (`Data.Function.id :: a -> a`), but
 `pDel` parsed only unqualified identifiers, so such an axiom could never be
 removed short of `:clear`. `pDel` now uses the same name grammar as `pAdd`
 (plus plain constructor names for types and classes).
 
-### N-03 — the prefix arrow tolerated interior white space
+### N-06 — the prefix arrow tolerated interior white space
 
 `(->)` was parsed as four independent space-skipping tokens, so `( - > )`
 was accepted as the function-type constructor even though GHC rejects it,
@@ -156,7 +248,10 @@ Both spellings now lex the arrow as one token. (Strictly a language change,
 but only for inputs that were previously accepted by accident.)
 
 Also fixed in passing: the verbose help described `cutoff=N` with the
-garbled phrase "compute at most positive N solutions".
+garbled phrase "compute at most positive N solutions", and the property
+suite's `localOption (QuickCheckTests 200)` silently *capped* the case
+count; it is now `adjustOption (max ...)`, a floor that
+`--test-options='--quickcheck-tests=N'` can raise.
 
 ## Observations kept out of scope
 
@@ -187,30 +282,44 @@ These were noticed but deliberately not changed; none is a soundness issue.
 ## Change footprint
 
 | Module | Change |
-| --- | ---: |
-| `Djinn.hs` | −5 lines, plus the two `:delete` fixes |
-| `HCheck.hs` | −8 lines |
+| --- | --- |
+| `Djinn.hs` | −5 lines of ladder/duplication, plus the two `:delete` fixes |
+| `HCheck.hs` | −8 lines (merged lookups, applicative `ground`) |
 | `HIdentifier.hs` | +17 lines (now hosts the shared token helpers) |
-| `HTypes.hs` | −11 lines |
-| `LJT.hs` | −13 lines |
+| `HTypes.hs` | −11 lines, plus the singleton-pattern fix (N-03) |
+| `LJT.hs` | −13 lines, plus the empty-goal fix (N-01) |
 | `LJTFormula.hs` | +11 lines (now hosts `formulaSymbols`) |
-| `ProofCheck.hs` | −21 lines |
+| `ProofCheck.hs` | −21 lines, plus stuck-constraint defaulting (N-02) |
 | `ProofEnv.hs` | −10 lines |
 | `Help.hs` | wording fix |
+| `test/Spec.hs` | two new regression groups (25 → 27 cases) |
+| `test/PropertySpec.hs` | case-count cap became a floor |
 
-Net: −27 lines (2,872 → 2,845) with more comments than before. The two
-helper-hosting modules grew so that four other modules could shrink and stop
-diverging.
+The simplification portion alone was net −27 source lines with more comments
+than before; the two helper-hosting modules grew so that four other modules
+could shrink and stop diverging. The N-01/N-02 fixes then added back a
+commented dozen.
 
 ## Validation
 
 ```text
 cabal build all        -- warning-clean under -Wall -Wcompat
-cabal test all         -- djinn-tests 23/23, djinn-property-tests 3×200,
-                       -- djinn-cli-tests 7/7
+cabal test all         -- djinn-tests 27/27, djinn-property-tests 3×200,
+                       -- djinn-cli-tests 7/7; five consecutive full-matrix
+                       -- runs (fresh QuickCheck seeds each)
+cabal test djinn-property-tests --test-options='--quickcheck-tests=2000'
+                       -- 3×2000, 100% proof-generation rate
 ```
 
-Manual REPL checks: `(->) a b -> a -> b`, `(Eq a) => a -> Bool`,
-`((a,b),(c,d)) -> (b,c)`, `:set cutoff=5`, `:set +multi` with
+The property suite's proof-generation rate rose from ~99.5% to 100%: with
+N-01 fixed, every formula the generator constructs as provable now actually
+yields a proof.
+
+Manual REPL checks: the full verbose-help example set (continuation monad
+`returnCD`/`bindCD`/`callCCD`, state monad, double-negated excluded middle —
+all outputs now match the help text exactly), `(->) a b -> a -> b`,
+`(Eq a) => a -> Bool`, `((a,b),(c,d)) -> (b,c)`, `Not (Not (Not a)) -> Not a`,
+De Morgan for `Either`, `EmptyA -> EmptyA` vs `EmptyA -> EmptyB`, bare `Void`
+and `Either x (Not x)` still unprovable, `:set cutoff=5`, `:set +multi` with
 `a -> a -> a` (both solutions, correct order), qualified axiom add/delete
 round-trip, unknown-name deletion diagnostic, and EOF exit.

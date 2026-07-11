@@ -3,7 +3,7 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module HTypes(
+module Djinn.Internal.HTypes(
         HKind(..), HType(..), HSymbol,
         hTypeToFormula, pHSymbol, pHType, pHDataType, pHTAtom, pHKind,
         prHSymbolOp, htNot, isHTUnion, getHTVars, substHT,
@@ -18,8 +18,8 @@ import Data.Maybe(fromMaybe)
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
 import Text.ParserCombinators.ReadP
-import HIdentifier
-import LJTFormula
+import Djinn.Internal.HIdentifier
+import Djinn.Internal.LJTFormula
 
 type HSymbol = String
 
@@ -53,6 +53,10 @@ isHTUnion _ = False
 htNot :: HSymbol -> HType
 htNot x = HTArrow (HTVar x) (HTCon "Void")
 
+-- Show renders parser-produced types in parseable syntax.  Raw
+-- constructions with no Haskell spelling do not round-trip: HTTuple [t]
+-- prints as a parenthesized t, HTTuple [] as unit, and HTUnion only makes
+-- sense inside a data declaration.  Djinn.Core never builds such values.
 instance Show HType where
     showsPrec _ (HTApp (HTCon "[]") t) = showString "[" . showsPrec 0 t . showString "]"
     showsPrec p (HTApp f a) = showParen (p > 2) $ showsPrec 2 f . showString " " . showsPrec 3 a

@@ -32,18 +32,22 @@ library djinn-core
                     pretty < 10,
                     containers < 10
 
+  -- Djinn.Core is the stable library API.  Djinn is the CLI frontend.
+  -- Djinn.Internal.* expose the raw machinery without stability or
+  -- invariant guarantees; see the README's library section.
   Exposed-Modules:  Djinn,
-                    Environment,
-                    HCheck,
-                    HIdentifier,
-                    HTypes,
-                    LJT,
-                    LJTFormula,
-                    ProofCheck,
-                    ProofEnv
+                    Djinn.Core,
+                    Djinn.Internal.Environment,
+                    Djinn.Internal.HCheck,
+                    Djinn.Internal.HIdentifier,
+                    Djinn.Internal.HTypes,
+                    Djinn.Internal.LJT,
+                    Djinn.Internal.LJTFormula,
+                    Djinn.Internal.ProofCheck,
+                    Djinn.Internal.ProofEnv
 
-  Other-Modules:    Help,
-                    REPL,
+  Other-Modules:    Djinn.Internal.Help,
+                    Djinn.Internal.REPL,
                     Paths_djinn
   Autogen-Modules:  Paths_djinn
 

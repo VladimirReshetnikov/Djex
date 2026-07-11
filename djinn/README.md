@@ -43,7 +43,7 @@ cabal test all --test-show-details=direct
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 27 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, environments, and identifiers. |
+| `djinn-tests` | 28 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, environments, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Nine subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, and stateful query behavior. |
 
@@ -296,21 +296,61 @@ The same Boolean options can precede file names on the command line, such as
 | Module | Responsibility |
 | --- | --- |
 | `app/Main.hs` | Thin executable launcher. |
-| `Djinn` (`src/Djinn.hs`) | Frontend state, command parser, and query orchestration. |
-| `REPL` | Haskeline loop and EOF handling. |
-| `HCheck` | Kind inference and validation for declared Haskell-like types. |
-| `Environment` | Transactional rebuilding and validation of stored declarations. |
-| `HIdentifier` | Shared Haskell identifier, qualification, and operator rules. |
-| `HTypes` | Type parser, logical translation, proof-term conversion, simplification, and pretty-printing. |
-| `LJTFormula` | Formula and proof-term data types. |
-| `LJT` | Dyckhoff-style contraction-free proof search and proof normalization. |
-| `ProofEnv` | Isolation of external proof identities from printable names. |
-| `ProofCheck` | Independent type checking of generated proof terms. |
-| `Help` | Extended in-program help. |
+| `Djinn.Core` | The stable, validated library API (see below). |
+| `Djinn` (`src/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
+| `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
+| `Djinn.Internal.HCheck` | Kind inference and validation for declared Haskell-like types. |
+| `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
+| `Djinn.Internal.HIdentifier` | Shared Haskell identifier, qualification, and operator rules. |
+| `Djinn.Internal.HTypes` | Type parser, logical translation, proof-term conversion, simplification, and pretty-printing. |
+| `Djinn.Internal.LJTFormula` | Formula and proof-term data types. |
+| `Djinn.Internal.LJT` | Dyckhoff-style contraction-free proof search and proof normalization. |
+| `Djinn.Internal.ProofEnv` | Isolation of external proof identities from printable names. |
+| `Djinn.Internal.ProofCheck` | Independent type checking of generated proof terms. |
+| `Djinn.Internal.Help` | Extended in-program help. |
 
-These modules form the internal `djinn-core` library. Keeping the launcher in a
+These modules form the `djinn-core` library. Keeping the launcher in a
 separate source directory prevents Cabal from recompiling imported core modules
 as executable home modules.
+
+## Using djinn-core as a library
+
+`Djinn.Core` is the supported programmatic interface. It keeps invalid data
+unrepresentable: environments are opaque and only constructible through
+validating operations, every declaration is name-checked, kind-checked, and
+revalidated transactionally, and query outcomes distinguish honest answers:
+
+```haskell
+import Djinn.Core
+
+demo :: Either String [String]
+demo = do
+    first  <- parseHType "Input -> Middle"
+    second <- parseHType "Middle -> Output"
+    goal   <- parseHType "Input -> Output"
+    env <- pure standardEnvironment
+       >>= declare (AbstractType "Input" kStar)
+       >>= declare (AbstractType "Middle" kStar)
+       >>= declare (AbstractType "Output" kStar)
+       >>= declare (Function "first" first)
+       >>= declare (Function "second" second)
+    report <- inhabit defaultQueryOptions env [] "pipeline" goal
+    case reportOutcome report of
+        Realized clauses -> Right clauses      -- best candidate first
+        Unrealizable -> Left "no total inhabitant exists"
+        UnrealizableWithoutSelfReference -> Left "only via recursion"
+        Undecided -> Left "the search budget expired"
+```
+
+The essentials: `declare`/`removeDeclaration` grow and shrink an
+`Environment` (starting from `emptyEnvironment` or `standardEnvironment`);
+`parseHType`/`parseHKind` parse with full-input validation; `inhabit` runs
+the full pipeline — translation, budgeted proof search, independent proof
+checking, and rendering — and reports the formula and first proof term for
+debugging. `resolveContext` instantiates a class context the way queries
+do. The `Djinn.Internal.*` modules remain importable for research use, but
+they expose raw constructors that can violate the invariants above and
+carry no stability promise.
 
 The central pipeline is:
 
@@ -405,8 +445,9 @@ import's fixed defects and remaining engineering risks,
 [the simplification pass](docs/reports/2026-07-10-simplification-pass.md)
 covering deduplication, readability work, and the empty-goal completeness
 fix, [the search-mode and budget work](docs/reports/2026-07-10-search-budget.md)
-with its benchmark-driven engine decisions, and
-[the class parameter kind enforcement](docs/reports/2026-07-10-class-kinds.md).
+with its benchmark-driven engine decisions,
+[the class parameter kind enforcement](docs/reports/2026-07-10-class-kinds.md),
+and [the library API hardening](docs/reports/2026-07-10-library-api.md).
 
 ## License and provenance
 

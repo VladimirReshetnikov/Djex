@@ -514,6 +514,12 @@ location, and continuation policy.
 
 ### R-10 — Low: API and display invariants remain public
 
+> **Resolved** on 2026-07-10 — see
+> [2026-07-10-library-api.md](2026-07-10-library-api.md): modules are
+> namespaced (`Djinn.Internal.*`), the new validated `Djinn.Core` façade
+> makes invalid environments unconstructible, the CLI consumes it, and
+> the display caveats are documented and unreachable from the façade.
+
 `Formula(..)`, `Term(..)`, `HType(..)`, and `HKind(..)` permit negative arities,
 bad injection indices, duplicate constructor descriptions, dangling `KVar`s,
 and unchecked cyclic synonym environments. Some `Show` forms (singleton tuples

@@ -6,13 +6,18 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
-import Environment (validateEnvironment)
-import HCheck (htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds)
-import HIdentifier
-import HTypes
-import LJT
-import ProofCheck (checkProof)
-import ProofEnv
+import Djinn.Core (
+    Declaration(..), QueryOutcome(..),
+    declare, defaultQueryOptions, emptyEnvironment, inhabit,
+    optionBudget, parseHKind, parseHType, removeDeclaration,
+    reportOutcome, resolveContext, standardEnvironment)
+import Djinn.Internal.Environment (validateEnvironment)
+import Djinn.Internal.HCheck (htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds)
+import Djinn.Internal.HIdentifier
+import Djinn.Internal.HTypes
+import Djinn.Internal.LJT
+import Djinn.Internal.ProofCheck (checkProof)
+import Djinn.Internal.ProofEnv
 
 main :: IO ()
 main = defaultMain $ testGroup "Djinn unit tests" $
@@ -48,7 +53,90 @@ tests =
     , ("render shadowing terms without capture", testScopeSafeRendering)
     , ("report malformed proof rendering", testMalformedRendering)
     , ("accept only Haskell identifiers and operators", testIdentifiers)
+    , ("validate every boundary of the Djinn.Core facade", testCoreFacade)
     ]
+
+-- The library facade must make invalid environments unrepresentable and
+-- report search results honestly.
+testCoreFacade :: IO ()
+testCoreFacade = do
+    -- Boundary validation of declarations.
+    assertLeft "a lowercase type name is rejected"
+        (declare (DataType "bad" [] []) emptyEnvironment)
+    assertLeft "a duplicate type parameter is rejected"
+        (declare (TypeSynonym "Pair" ["a", "a"]
+            (HTTuple [HTVar "a", HTVar "a"])) emptyEnvironment)
+    assertLeft "a recursive data type is rejected"
+        (declare (DataType "Nat" []
+            [("Zero", []), ("Succ", [HTCon "Nat"])]) emptyEnvironment)
+    assertLeft "a constructor owned by another type is rejected"
+        (declare (DataType "MyBool" [] [("True", [])])
+            standardEnvironment)
+    assertLeft "an unsolved kind variable cannot be declared"
+        (declare (AbstractType "Mystery" (KVar 0)) emptyEnvironment)
+    assertLeft "an ill-kinded function type is rejected"
+        (declare (Function "f" (HTApp (HTCon "Bool") (HTVar "a")))
+            standardEnvironment)
+    assertLeft "a method-owning clash across classes is rejected"
+        (declare (ClassDecl "Eq2" ["a"]
+            [("==", HTVar "a")]) standardEnvironment)
+
+    -- Removal is transactional and total.
+    assertLeft "removing an undefined name is an error"
+        (removeDeclaration "nosuch" standardEnvironment)
+    assertLeft "removing a depended-upon type is rejected"
+        (removeDeclaration "Void" standardEnvironment)
+    case removeDeclaration "Not" standardEnvironment of
+        Left message -> fail $ "removing a leaf synonym failed: " ++ message
+        Right environment ->
+            assertLeft "the removal must actually take effect"
+                (removeDeclaration "Not" environment)
+
+    -- Parsing consumes the whole input.
+    assertEqual "parseHType parses ordinary types"
+        (Right $ HTArrow (HTVar "a") (HTVar "a")) (parseHType "a -> a")
+    assertLeft "trailing garbage is a parse error" (parseHType "a -> a ->")
+    assertEqual "parseHKind parses higher kinds"
+        (Right $ KArrow (KArrow KStar KStar) KStar)
+        (parseHKind "(* -> *) -> *")
+
+    -- Queries report honest outcomes.
+    swap <- expectRight $ parseHType "(a, b) -> (b, a)"
+    swapReport <- expectRight $
+        inhabit defaultQueryOptions standardEnvironment [] "swap" swap
+    assertEqual "swap is realized with the canonical clause"
+        (Realized ["swap (a, b) = (b, a)"]) (reportOutcome swapReport)
+    peirce <- expectRight $ parseHType "((a -> b) -> a) -> a"
+    peirceReport <- expectRight $
+        inhabit defaultQueryOptions standardEnvironment [] "peirce" peirce
+    assertEqual "Peirce's law is decided unrealizable"
+        Unrealizable (reportOutcome peirceReport)
+    starved <- expectRight $ inhabit
+        defaultQueryOptions { optionBudget = Just 0 }
+        standardEnvironment [] "peirce" peirce
+    assertEqual "an expired budget is undecided, not unrealizable"
+        Undecided (reportOutcome starved)
+    selfRef <- expectRight $ do
+        environment <- declare (Function "token" (HTVar "a"))
+            standardEnvironment
+        inhabit defaultQueryOptions environment [] "token" (HTVar "a")
+    assertEqual "a lone same-named assumption is flagged, not recursed"
+        UnrealizableWithoutSelfReference (reportOutcome selfRef)
+
+    -- Contexts resolve through inferred kinds.
+    assertLeft "a kind-mismatched class argument is rejected"
+        (resolveContext standardEnvironment ("Monad", [HTCon "Bool"]))
+    reflexive <- expectRight $ inhabit defaultQueryOptions
+        standardEnvironment [("Eq", [HTVar "a"])] "reflexive"
+        (HTArrow (HTVar "a") (HTCon "Bool"))
+    case reportOutcome reflexive of
+        Realized (best : _) ->
+            assertEqual "an Eq context supplies its method, ranked first"
+                "reflexive a = a == a" best
+        other -> fail $ "reflexive was not realized: " ++ show other
+
+expectRight :: Either String a -> IO a
+expectRight = either fail return
 
 testPrefixArrowParsing :: IO ()
 testPrefixArrowParsing = do

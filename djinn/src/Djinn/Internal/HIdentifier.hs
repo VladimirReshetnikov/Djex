@@ -2,7 +2,7 @@
 -- Haskell identifier and operator syntax shared by parsers and printers,
 -- plus the token-level ReadP helpers shared by every Djinn parser.
 --
-module HIdentifier (
+module Djinn.Internal.HIdentifier (
     pVarId, pConId, pQualifiedVarId, pQualifiedConId,
     pParenthesizedVarOp,
     isVarId, isConId, isQualifiedVarId, isQualifiedConId,

@@ -2,7 +2,7 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module HCheck(
+module Djinn.Internal.HCheck(
     htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds
     ) where
 import Data.List(union, (\\))
@@ -11,7 +11,7 @@ import Data.IntMap(IntMap)
 import qualified Data.IntMap as IntMap
 import Data.Graph(stronglyConnComp, SCC(..))
 
-import HTypes
+import Djinn.Internal.HTypes
 
 -- Kind inference uses numbered unification variables (KVar).  The state maps
 -- each variable to its solution: Nothing while unconstrained, and possibly a

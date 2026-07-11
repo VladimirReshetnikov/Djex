@@ -1,7 +1,7 @@
 --
 -- Assign stable internal identities to external proof assumptions.
 --
-module ProofEnv (
+module Djinn.Internal.ProofEnv (
     ProofEnvironment, prepareProofEnvironment,
     proofBindings, targetWasExcluded, restoreProofTerm
     ) where
@@ -9,7 +9,7 @@ module ProofEnv (
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 
-import LJTFormula
+import Djinn.Internal.LJTFormula
 
 data ProofEnvironment = ProofEnvironment {
     proofBindings :: [(Symbol, Formula)],

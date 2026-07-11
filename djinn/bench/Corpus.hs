@@ -10,7 +10,7 @@ module Corpus (
     atom, nots, implChain, pickOne, wideDisj, projection
     ) where
 
-import LJTFormula
+import Djinn.Internal.LJTFormula
 
 data Entry = Entry {
     entryName :: String,

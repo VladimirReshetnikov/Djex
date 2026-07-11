@@ -1,7 +1,7 @@
 --
 -- Independent type checking for LJT proof terms.
 --
-module ProofCheck (checkProof) where
+module Djinn.Internal.ProofCheck (checkProof) where
 
 import Control.Monad (replicateM, unless, when)
 import Control.Monad.State.Strict
@@ -9,7 +9,7 @@ import Data.List (intercalate, (!?))
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 
-import LJTFormula
+import Djinn.Internal.LJTFormula
 
 data ProofType
     = Meta Int

@@ -18,8 +18,8 @@
 -- properly, taking account of first-argument indexing,
 -- and I learnt a trick or two from Neil Tennant's "Autologic" book.
 
-module LJT (
-    module LJTFormula, provable, prove, Proof,
+module Djinn.Internal.LJT (
+    module Djinn.Internal.LJTFormula, provable, prove, Proof,
     SearchMode(..), Strategy(..), SearchOutcome(..),
     defaultSearchMode, proveWithMode
     ) where
@@ -31,7 +31,7 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import LJTFormula
+import Djinn.Internal.LJTFormula
 
 -- Whether local proof-search cuts should retain their alternative paths.
 type MoreSolutions = Bool

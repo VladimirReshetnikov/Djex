@@ -13,7 +13,7 @@ module Main (main) where
 
 import Test.Tasty.Bench
 
-import LJT
+import Djinn.Internal.LJT
 import Corpus
 
 main :: IO ()

@@ -2,9 +2,9 @@ module Main (main) where
 
 import Text.Read (readMaybe)
 
-import HTypes
-import LJT
-import ProofCheck (checkProof)
+import Djinn.Internal.HTypes
+import Djinn.Internal.LJT
+import Djinn.Internal.ProofCheck (checkProof)
 import Test.Tasty (adjustOption, defaultMain, testGroup)
 import qualified Test.Tasty.QuickCheck as QC
 

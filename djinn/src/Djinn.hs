@@ -5,8 +5,7 @@
 --
 module Djinn(main) where
 import Data.Char(isAlpha, isDigit, isSpace)
-import Data.List(isPrefixOf, nub, sortOn, intercalate)
-import Data.Ratio((%))
+import Data.List(isPrefixOf, intercalate)
 import Data.Version(showVersion)
 import Text.ParserCombinators.ReadP
 import Control.Monad(when)
@@ -14,15 +13,11 @@ import System.Exit(exitWith, ExitCode(..))
 import System.Environment(getArgs)
 import System.IO.Error(tryIOError)
 
-import REPL
-import Environment(validateEnvironment)
-import LJT
-import HTypes
-import HIdentifier
-import HCheck(htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds)
-import Help
-import ProofCheck(checkProof)
-import ProofEnv
+import Djinn.Core
+import Djinn.Internal.REPL
+import Djinn.Internal.HTypes
+import Djinn.Internal.HIdentifier
+import Djinn.Internal.Help
 import qualified Paths_djinn
 
 version :: String
@@ -61,9 +56,7 @@ hsGenRepl state = REPL {
     }
 
 data State = State {
-    synonyms :: [(HSymbol, ([HSymbol], HType, HKind))],
-    axioms :: [(HSymbol, HType)],
-    classes :: [ClassDef],
+    environment :: Environment,
     multi :: Bool,
     sorted :: Bool,
     debug :: Bool,
@@ -71,39 +64,16 @@ data State = State {
     -- Search-step budget; 0 keeps the search an unlimited decision procedure.
     budget :: Integer
     }
-    deriving (Show)
 
 startState :: State
 startState = State {
-    synonyms = syns,
-    classes = clss,
-    axioms = [],
+    environment = standardEnvironment,
     multi = False,
     sorted = True,
     debug = False,
     cutOff = 200,
     budget = 0
     }
- where syns = either (error . ("Bad initial environment: " ++)) id $ htCheckEnv $ reverse [
-        ("()",     rawType []        (HTUnion [("()",[])])),
-        ("Either", rawType ["a","b"] (HTUnion [("Left", [a]), ("Right", [b])])),
-        ("Maybe",  rawType ["a"]     (HTUnion [("Nothing", []), ("Just", [a])])),
-        ("Bool",   rawType []        (HTUnion [("False", []), ("True", [])])),
-        ("Void",   rawType []        (HTUnion [])),
-        ("Not",    rawType ["x"]     (htNot "x"))
-        ]
-       clss = map addParamKinds
-              [("Eq", (["a"], [("==", a `HTArrow` (a `HTArrow` HTCon "Bool"))])),
-               ("Monad", (["m"], [("return", a `HTArrow` ma),
-                                  (">>=", ma `HTArrow` ((a `HTArrow` mb) `HTArrow` mb))]))
-              ] where ma = HTApp m a; mb = HTApp m b
-       addParamKinds (name, (params, methods)) =
-           either (error . (("Bad initial class " ++ name ++ ": ") ++))
-               (\ kinds -> (name, (kinds, methods)))
-               (htInferClassKinds syns params (map snd methods))
-       a = HTVar "a"
-       b = HTVar "b"
-       m = HTVar "m"
 
 
 welcome :: State -> IO (String, State)
@@ -123,16 +93,11 @@ eval s line =
 exit :: State -> IO ()
 exit _ = putStrLn "Bye."
 
-type Context = (HSymbol, [HType])
-
--- A stored class carries the kind of each parameter, inferred from the
--- method types at declaration time (Haskell98 style, with unconstrained
--- parameters defaulting to *).  The parser produces the raw form; kinds
--- are attached before a class enters the state.
-type ClassDef = (HSymbol, ([(HSymbol, HKind)], [Method]))
+-- The raw parser output; Djinn.Core.declare attaches inferred kinds and
+-- validates before anything enters the environment.
 type RawClassDef = (HSymbol, ([HSymbol], [Method]))
 
--- htCheckEnv replaces this placeholder with the definition's inferred kind.
+-- Kind checking replaces this placeholder with the inferred kind.
 rawType :: [HSymbol] -> HType -> ([HSymbol], HType, HKind)
 rawType params body = (params, body, KStar)
 
@@ -171,32 +136,16 @@ runCmd s (Help verbose) = do
 runCmd s Quit =
     return (True, s)
 runCmd s (Load f) = loadFile s f
-runCmd s (Add i t) =
-    case htCheckType (synonyms s) t of
-    Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
-    Right _ -> return (False, s { axioms = replace i (i, t) (axioms s) })
+runCmd s (Add i t) = updateEnvironment s $ declare (Function i t)
 runCmd _ Clear =
     return (False, startState)
-runCmd s (Del i)
-    | i `notElem` (map fst (axioms s) ++ map fst (synonyms s) ++
-                   map fst (classes s)) = do
-        putStrLn $ "Error: cannot delete " ++ i ++ ": it is not defined"
-        return (False, s)
-runCmd s (Del i) = do
-    let candidateAxioms = filter ((i /=) . fst) (axioms s)
-        candidateSynonyms = filter ((i /=) . fst) (synonyms s)
-        candidateClasses = filter ((i /=) . fst) (classes s)
-    case validateEnvironment candidateSynonyms candidateAxioms
-            candidateClasses of
+runCmd s (Del i) =
+    case removeDeclaration i (environment s) of
         Left message -> do
             putStrLn $ "Error: cannot delete " ++ i ++ ": " ++ message
             return (False, s)
-        Right (checkedSynonyms, refreshedClasses) ->
-            return (False, s {
-                axioms = candidateAxioms,
-                synonyms = checkedSynonyms,
-                classes = refreshedClasses
-                })
+        Right environment' ->
+            return (False, s { environment = environment' })
 runCmd s Env = do
     let showType (i, (_, HTAbstract _ kind, _)) =
             "type " ++ i ++ " :: " ++ show kind
@@ -205,40 +154,29 @@ runCmd s Env = do
         tname t = if isHTUnion t then "data" else "type"
         showd (HTUnion []) = ""
         showd t = " = " ++ show t
-    mapM_ (putStrLn . showType) (reverse $ synonyms s)
-    mapM_ (\ (i, t) -> putStrLn $ prHSymbolOp i ++ " :: " ++ show t) (reverse $ axioms s)
-    mapM_ (putStrLn . showClass) (reverse $ classes s)
+    mapM_ (putStrLn . showType)
+        (reverse $ typeDeclarations $ environment s)
+    mapM_ (\ (i, t) -> putStrLn $ prHSymbolOp i ++ " :: " ++ show t)
+        (reverse $ functionDeclarations $ environment s)
+    mapM_ (putStrLn . showClass)
+        (reverse $ classDeclarations $ environment s)
     return (False, s)
-runCmd s (Type syn@(name, (params, body, _))) =
-    case requireUnusedName "class" name (classes s) >>
-         requireDistinct "type parameter" params >>
-         checkConstructors name body (synonyms s) >>
-         validateEnvironment (replace name syn (synonyms s))
-            (axioms s) (classes s) of
-        Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
-        Right (syns, refreshedClasses) ->
-            return (False, s { synonyms = syns, classes = refreshedClasses })
+runCmd s (Type (name, (params, body, _))) =
+    updateEnvironment s $ declare $
+        case body of
+            HTUnion constructors -> DataType name params constructors
+            HTAbstract _ kind -> AbstractType name kind
+            _ -> TypeSynonym name params body
 runCmd s (Set f) =
     return (False, f s)
 runCmd s (Query i ctx g) =
     query True s i ctx g
 runCmd s (Class (name, (params, methods))) =
-    case requireUnusedName "type" name (synonyms s) >>
-         requireDistinct "class parameter" params >>
-         requireDistinct "method" (map fst methods) >>
-         checkMethodNames name methods (classes s) >>
-         -- Kind inference also kind-checks every method type.
-         htInferClassKinds (synonyms s) params (map snd methods) of
-        Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
-        Right kinds ->
-            return (False, s {
-                classes = replace name (name, (kinds, methods)) (classes s)
-                })
+    updateEnvironment s $ declare $ ClassDecl name params methods
 runCmd s (QueryInstance ctx cls ts) =
     case do
-        methods <- ctxLookup s (cls, ts)
-        _ <- checkContexts s ctx
-        checkMethods s methods
+        methods <- resolveContext (environment s) (cls, ts)
+        mapM_ (resolveContext (environment s)) ctx
         return methods
       of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
@@ -251,75 +189,55 @@ runCmd s (QueryInstance ctx cls ts) =
             mapM_ method methods
             return (False, s)
 
-query :: Bool -> State -> String -> [Context] -> HType -> IO (Bool, State)
-query prType s i ctx g =
-   case htCheckType (synonyms s) g >> checkContexts s ctx of
-   Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
-   Right mss -> do
-    let form = hTypeToFormula (synonyms s) g
-        externalEnv = [ (Symbol v, hTypeToFormula (synonyms s) t) | (v, t) <- axioms s ] ++ ctxEnv
-        ctxEnv = [ (Symbol v, hTypeToFormula (synonyms s) t) | ms <- mss, (v, t) <- ms ]
-        proofEnv = prepareProofEnvironment (Symbol i) externalEnv
-        internalEnv = proofBindings proofEnv
-        mode = (defaultSearchMode (multi s || sorted s)) {
-            searchBudget = if budget s > 0 then Just (budget s) else Nothing
-            }
-        outcome = proveWithMode mode internalEnv form
-    when (debug s) $ putStrLn ("*** " ++ show form)
-    case searchProofs outcome of
-        [] -> do
-            -- A budgeted search that ran out of steps has not decided
-            -- anything; only a finished search justifies "cannot".
-            if searchExhausted outcome then
-                putStrLn $ "-- " ++ i ++ ": no proof found within budget " ++
-                    show (budget s) ++ "; inhabitation is undecided."
-             else
-                putStrLn $ "-- " ++ i ++ cannotBeRealized proofEnv
+updateEnvironment :: State -> (Environment -> Either String Environment)
+                  -> IO (Bool, State)
+updateEnvironment s change =
+    case change (environment s) of
+        Left msg -> do
+            putStrLn $ "Error: " ++ msg
             return (False, s)
-        p:ps -> do
-            let internalProofs = p : take (cutOff s - 1) ps
-                labeled what = either (Left . ((what ++ ": ") ++)) Right
-                -- Every bounded candidate must check against the requested
-                -- formula before display names are restored and it is
-                -- converted to a Haskell clause.
-                renderedProofs = do
-                    labeled "generated an invalid proof" $
-                        mapM_ (checkProof internalEnv form) internalProofs
-                    labeled "cannot render generated proof" $
-                        mapM (termToHClause i . restoreProofTerm proofEnv)
-                            internalProofs
-            case renderedProofs of
-              Left message -> putStrLn $ "Error: " ++ message
-              Right rendered -> do
-                -- Rank a clause by the fraction of its binders that are
-                -- unused, then by the total binder count: solutions that use
-                -- more of their arguments are usually the intended ones.
-                let score clause =
-                       let bvs = getBinderVars clause
-                           r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
-                       in  (r, clause)
-                    clauses = nub $
-                            if sorted s then
-                                map snd $ sortOn fst $ map score rendered
-                            else
-                                rendered
-                    pr = putStrLn . hPrClause
-                    sctx = if null ctx then "" else showContexts ctx ++ " => "
-                when (debug s) $ putStrLn ("+++ " ++ show p)
-                when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
-                case clauses of
-                    [] -> return () -- rendered is non-empty.
-                    e:es -> do
-                        pr e
-                        when (multi s) $
-                            mapM_ (\ x -> putStrLn "-- or" >> pr x) es
-            return (False, s)
+        Right environment' ->
+            return (False, s { environment = environment' })
 
-cannotBeRealized :: ProofEnvironment -> String
-cannotBeRealized environment
-    | targetWasExcluded environment =
-        " cannot be safely realized without a recursive self-reference."
-    | otherwise = " cannot be realized."
+query :: Bool -> State -> String -> [Context] -> HType -> IO (Bool, State)
+query prType s i ctx g = do
+    case inhabit queryOptions (environment s) ctx i g of
+        Left msg -> putStrLn $ "Error: " ++ msg
+        Right report -> do
+            when (debug s) $ putStrLn ("*** " ++ reportFormula report)
+            case reportOutcome report of
+                Undecided ->
+                    -- A budgeted search that ran out of steps has not
+                    -- decided anything; only a finished search justifies
+                    -- "cannot".
+                    putStrLn $ "-- " ++ i ++
+                        ": no proof found within budget " ++
+                        show (budget s) ++ "; inhabitation is undecided."
+                UnrealizableWithoutSelfReference ->
+                    putStrLn $ "-- " ++ i ++ " cannot be safely realized \
+                        \without a recursive self-reference."
+                Unrealizable ->
+                    putStrLn $ "-- " ++ i ++ " cannot be realized."
+                Realized clauses -> do
+                    when (debug s) $
+                        mapM_ (putStrLn . ("+++ " ++)) (reportProof report)
+                    when prType $ putStrLn $
+                        prHSymbolOp i ++ " :: " ++ sctx ++ show g
+                    case clauses of
+                        [] -> return ()
+                        e:es -> do
+                            putStrLn e
+                            when (multi s) $ mapM_
+                                (\ x -> putStrLn "-- or" >> putStrLn x) es
+    return (False, s)
+  where
+    queryOptions = QueryOptions {
+        optionAlternatives = multi s,
+        optionSorted = sorted s,
+        optionCutoff = cutOff s,
+        optionBudget = if budget s > 0 then Just (budget s) else Nothing
+        }
+    sctx = if null ctx then "" else showContexts ctx ++ " => "
 
 loadFile :: State -> String -> IO (Bool, State)
 loadFile s name = do
@@ -340,7 +258,7 @@ stripComments ('-':'-':cs) = skip cs
         skip (_:s) = skip s
 stripComments (c:cs) = c : stripComments cs
 
-showClass :: ClassDef -> String
+showClass :: (HSymbol, ([(HSymbol, HKind)], [Method])) -> String
 showClass (c, (as, ms)) =
     "class " ++ showContext (c, map (HTVar . fst) as) ++ " where " ++
         intercalate "; " (map sm ms)
@@ -352,86 +270,6 @@ showContext (c, as) = show $ foldl HTApp (HTCon c) as
 showContexts :: [Context] -> String
 showContexts [] = ""
 showContexts cs = "(" ++ intercalate ", " (map showContext cs) ++ ")"
-
--- Look up a class use, requiring exact arity and that every type argument
--- fits the kind inferred for its parameter.  A bare type variable fits any
--- parameter kind; an ill-kinded or kind-mismatched application is rejected
--- even for classes whose method list provides nothing else to check.
-ctxLookup :: State -> Context -> Either String [Method]
-ctxLookup s (c, as) =
-    case lookup c (classes s) of
-        Nothing -> Left $ "Class not found: " ++ c
-        Just (ps, ms)
-            | length ps == length as -> do
-                sequence_
-                    [ withArgument argument $
-                        htCheckTypeKind (synonyms s) kind argument
-                    | ((_, kind), argument) <- zip ps as ]
-                Right [(m, substHT (zip (map fst ps) as) t) | (m, t) <- ms]
-            | otherwise -> Left $
-                "Class " ++ c ++ " expects " ++ show (length ps) ++
-                " type argument(s), but got " ++ show (length as)
-  where
-    withArgument argument = either
-        (Left . (("argument " ++ show argument ++ " of class " ++ c ++
-            ": ") ++))
-        Right
-
-checkContexts :: State -> [Context] -> Either String [[Method]]
-checkContexts s ctx = do
-    methods <- mapM (ctxLookup s) ctx
-    mapM_ (checkMethods s) methods
-    return methods
-
-checkMethods :: State -> [Method] -> Either String ()
-checkMethods s methods =
-    htCheckType (synonyms s) (HTTuple (map snd methods))
-
-checkMethodNames :: HSymbol -> [Method] -> [ClassDef] -> Either String ()
-checkMethodNames owner methods definitions =
-    case [(method, className)
-            | (className, (_, existing)) <- definitions
-            , className /= owner
-            , (method, _) <- existing
-            , method `elem` names] of
-        [] -> Right ()
-        (method, className):_ -> Left $
-            "Method " ++ prHSymbolOp method ++
-            " is already defined by class " ++ className
-  where names = map fst methods
-
-checkConstructors :: HSymbol
-                  -> HType
-                  -> [(HSymbol, ([HSymbol], HType, HKind))]
-                  -> Either String ()
-checkConstructors owner (HTUnion constructors) definitions = do
-    requireDistinct "data constructor" names
-    case [(constructor, typeName)
-            | (typeName, (_, HTUnion existing, _)) <- definitions
-            , typeName /= owner
-            , (constructor, _) <- existing
-            , constructor `elem` names] of
-        [] -> Right ()
-        (constructor, typeName):_ -> Left $
-            "Data constructor " ++ constructor ++
-            " is already defined by " ++ typeName
-  where names = map fst constructors
-checkConstructors _ _ _ = Right ()
-
-requireDistinct :: String -> [HSymbol] -> Either String ()
-requireDistinct what names =
-    case [name | name <- nub names, length (filter (== name) names) > 1] of
-        [] -> Right ()
-        name:_ -> Left $ "Duplicate " ++ what ++ ": " ++ name
-
-requireUnusedName :: String -> HSymbol -> [(HSymbol, a)] -> Either String ()
-requireUnusedName existingKind name definitions
-    | name `elem` map fst definitions =
-        Left $ name ++ " is already defined as a " ++ existingKind
-    | otherwise = Right ()
-
-replace :: HSymbol -> (HSymbol, a) -> [(HSymbol, a)] -> [(HSymbol, a)]
-replace name binding = (binding :) . filter ((/= name) . fst)
 
 evalCmds :: State -> [String] -> IO (Bool, State)
 evalCmds state [] = return (False, state)

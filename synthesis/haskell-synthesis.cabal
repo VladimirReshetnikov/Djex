@@ -40,7 +40,6 @@ Test-Suite synthesis-tests
     base               >= 4.18 && < 5,
     deepseq            >= 1.4  && < 1.6,
     haskell-synthesis,
-    QuickCheck         >= 2.14 && < 3,
     tasty              >= 1.4  && < 2,
     tasty-hunit        >= 0.10 && < 1,
     tasty-quickcheck   >= 0.10 && < 1

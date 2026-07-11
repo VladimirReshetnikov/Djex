@@ -97,7 +97,6 @@ test-suite djinn-property-tests
   Ghc-Options:      -Wall -Wcompat
 
   Build-Depends:    base >= 4.18 && < 5,
-                    QuickCheck >= 2.14 && < 3,
                     djinn:djinn-core,
                     tasty >= 1.4 && < 2,
                     tasty-quickcheck >= 0.10 && < 1

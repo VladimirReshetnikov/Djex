@@ -21,7 +21,24 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testFileErrorRecovery
     , testCase "invalid settings and names are controlled parse errors"
         testParseErrors
+    , testCase "an expired search budget reports an undecided result"
+        testSearchBudget
     ]
+
+testSearchBudget :: Assertion
+testSearchBudget = do
+    output <- runSession
+        [ ":set budget=2"
+        , "f ? ((a -> b) -> a) -> a"
+        , ":set budget=0"
+        , "g ? ((a -> b) -> a) -> a"
+        , ":quit"
+        ]
+    assertContains "an expired budget must not claim unprovability"
+        "f: no proof found within budget 2; inhabitation is undecided."
+        output
+    assertContains "an unlimited search remains a decision procedure"
+        "g cannot be realized" output
 
 testEof :: Assertion
 testEof = do

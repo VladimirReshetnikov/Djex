@@ -82,6 +82,18 @@ test-suite djinn-property-tests
                     tasty >= 1.4 && < 2,
                     tasty-quickcheck >= 0.10 && < 1
 
+benchmark djinn-bench
+  Type:             exitcode-stdio-1.0
+  Main-Is:          Bench.hs
+  Other-Modules:    Corpus
+  Hs-Source-Dirs:   bench
+  Default-Language: Haskell2010
+  Ghc-Options:      -Wall -Wcompat
+
+  Build-Depends:    base >= 4 && < 6,
+                    djinn:djinn-core,
+                    tasty-bench >= 0.3 && < 0.5
+
 test-suite djinn-cli-tests
   Type:               exitcode-stdio-1.0
   Main-Is:            CLISpec.hs

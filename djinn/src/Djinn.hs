@@ -67,7 +67,9 @@ data State = State {
     multi :: Bool,
     sorted :: Bool,
     debug :: Bool,
-    cutOff :: Int
+    cutOff :: Int,
+    -- Search-step budget; 0 keeps the search an unlimited decision procedure.
+    budget :: Integer
     }
     deriving (Show)
 
@@ -79,7 +81,8 @@ startState = State {
     multi = False,
     sorted = True,
     debug = False,
-    cutOff = 200
+    cutOff = 200,
+    budget = 0
     }
  where syns = either (error . ("Bad initial environment: " ++)) id $ htCheckEnv $ reverse [
         ("()",     rawType []        (HTUnion [("()",[])])),
@@ -242,11 +245,20 @@ query prType s i ctx g =
         ctxEnv = [ (Symbol v, hTypeToFormula (synonyms s) t) | ms <- mss, (v, t) <- ms ]
         proofEnv = prepareProofEnvironment (Symbol i) externalEnv
         internalEnv = proofBindings proofEnv
-        mpr = prove (multi s || sorted s) internalEnv form
+        mode = (defaultSearchMode (multi s || sorted s)) {
+            searchBudget = if budget s > 0 then Just (budget s) else Nothing
+            }
+        outcome = proveWithMode mode internalEnv form
     when (debug s) $ putStrLn ("*** " ++ show form)
-    case mpr of
+    case searchProofs outcome of
         [] -> do
-            putStrLn $ "-- " ++ i ++ cannotBeRealized proofEnv
+            -- A budgeted search that ran out of steps has not decided
+            -- anything; only a finished search justifies "cannot".
+            if searchExhausted outcome then
+                putStrLn $ "-- " ++ i ++ ": no proof found within budget " ++
+                    show (budget s) ++ "; inhabitation is undecided."
+             else
+                putStrLn $ "-- " ++ i ++ cannotBeRealized proofEnv
             return (False, s)
         p:ps -> do
             let internalProofs = p : take (cutOff s - 1) ps
@@ -565,15 +577,24 @@ pSetFlag = do
     return $ Set $ f
 
 pSetVal :: ReadP Cmd
-pSetVal = do
-    pPrefix "cutoff"
+pSetVal = pCutoff +++ pBudget
+  where
+    pCutoff = do
+        n <- pNumericSetting "cutoff"
+        if n > 0 && n <= toInteger (maxBound :: Int) then
+            return $ Set $ \ s -> s { cutOff = fromInteger n }
+         else
+            pfail
+    pBudget = do
+        n <- pNumericSetting "budget"
+        return $ Set $ \ s -> s { budget = n }
+
+pNumericSetting :: String -> ReadP Integer
+pNumericSetting name = do
+    pPrefix name
     schar '='
     digits <- munch1 isDigit
-    let n = read digits :: Integer
-    if n > 0 && n <= toInteger (maxBound :: Int) then
-        return $ Set $ \ s -> s { cutOff = fromInteger n }
-     else
-        pfail
+    return (read digits)
 
 helpText :: String
 helpText = "\
@@ -597,4 +618,5 @@ getSettings s = unlines $ [
     "",
     "Current settings" ] ++ [ "    " ++ (if gett s then "+" else "-") ++ name ++ replicate (10 - length name) ' ' ++ descr |
                               (name, descr, gett, _set) <- options ] ++
-    [ "    cutoff=" ++ show (cutOff s) ++ " maximum number of solutions generated" ]
+    [ "    cutoff=" ++ show (cutOff s) ++ " maximum number of solutions generated",
+      "    budget=" ++ show (budget s) ++ " search-step budget, 0 = unlimited" ]

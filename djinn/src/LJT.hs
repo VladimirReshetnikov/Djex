@@ -17,7 +17,11 @@
 -- properly, taking account of first-argument indexing,
 -- and I learnt a trick or two from Neil Tennant's "Autologic" book.
 
-module LJT (module LJTFormula, provable, prove, Proof) where
+module LJT (
+    module LJTFormula, provable, prove, Proof,
+    SearchMode(..), Strategy(..), SearchOutcome(..),
+    defaultSearchMode, proveWithMode
+    ) where
 
 import Control.Applicative (Alternative(empty, (<|>)))
 import Control.Monad (MonadPlus(mzero, mplus), ap, foldM)
@@ -30,13 +34,52 @@ import LJTFormula
 -- Whether local proof-search cuts should retain their alternative paths.
 type MoreSolutions = Bool
 
+-- How alternative branches are explored at each choice point.  DepthFirst
+-- is the classical order (fully explore the first branch before the
+-- second); Interleave alternates between branches at every choice point,
+-- so an expensive dead end cannot starve a cheap alternative.
+data Strategy = DepthFirst | Interleave
+    deriving (Eq, Show)
+
+-- A named description of one proof search.
+data SearchMode = SearchMode {
+    -- Retain alternative proofs at local search cuts (multiple solutions).
+    searchAlternatives :: Bool,
+    searchStrategy :: Strategy,
+    -- Maximum number of choice points to explore; Nothing is unlimited.
+    -- With a limit the search is no longer a decision procedure: an empty
+    -- result with searchExhausted set means "not found", not "unprovable".
+    searchBudget :: Maybe Integer
+    }
+    deriving (Show)
+
+-- The classical search: depth-first, unbudgeted, complete.
+defaultSearchMode :: MoreSolutions -> SearchMode
+defaultSearchMode more = SearchMode {
+    searchAlternatives = more,
+    searchStrategy = DepthFirst,
+    searchBudget = Nothing
+    }
+
+data SearchOutcome = SearchOutcome {
+    searchProofs :: [Proof],
+    -- True when the budget ran out with unexplored search space left.
+    searchExhausted :: Bool
+    }
+
 provable :: Formula -> Bool
 provable = not . null . prove False []
 
 prove :: MoreSolutions -> [(Symbol, Formula)] -> Formula -> [Proof]
-prove more env goal =
-    runP reservedSymbols $ redtop more env goal
+prove more env = searchProofs . proveWithMode (defaultSearchMode more) env
+
+proveWithMode :: SearchMode -> [(Symbol, Formula)] -> Formula -> SearchOutcome
+proveWithMode mode env goal =
+    SearchOutcome proofs exhausted
   where
+    (proofs, exhausted) =
+        runBounded (searchBudget mode) (searchStrategy mode) reservedSymbols $
+            redtop (searchAlternatives mode) env goal
     -- Symbol is shared by proof variables and propositional atoms.  Reserving
     -- both namespaces prevents generated binders from capturing environment
     -- variables and keeps the atom introduced for disjunction genuinely fresh.
@@ -153,32 +196,69 @@ nf term = spine term []
 
 
 ------------------------------
------ Our Proof monad, P, a monad with state and multiple results
+----- Our Proof monad, P: a reader (strategy) + state monad with multiple
+----- results delivered as a lazy stream of explicit choice points.
+
+-- A result stream.  Step marks one explored choice point, so consuming the
+-- stream under a budget bounds the amount of search performed, and a fair
+-- strategy can alternate branches at Step granularity.  With Steps ignored
+-- the stream is exactly the classical lazy result list.
+data Steps a
+    = Done
+    | Yield a (Steps a)
+    | Step (Steps a)
+
+mapS :: (a -> b) -> Steps a -> Steps b
+mapS _ Done = Done
+mapS f (Yield x rest) = Yield (f x) (mapS f rest)
+mapS f (Step rest) = Step (mapS f rest)
+
+-- Sequential (depth-first) combination: the classical list append.
+appendS :: Steps a -> Steps a -> Steps a
+appendS Done ys = ys
+appendS (Yield x xs) ys = Yield x (appendS xs ys)
+appendS (Step xs) ys = Step (appendS xs ys)
+
+-- Fair combination: swap branches at every choice point, so results from
+-- the second branch surface even while the first is still searching.
+interleaveS :: Steps a -> Steps a -> Steps a
+interleaveS Done ys = ys
+interleaveS (Yield x xs) ys = Yield x (interleaveS ys xs)
+interleaveS (Step xs) ys = Step (interleaveS ys xs)
+
+combineS :: Strategy -> Steps a -> Steps a -> Steps a
+combineS DepthFirst = appendS
+combineS Interleave = interleaveS
 
 -- Note, this is the non-standard way to combine state with multiple
--- results.  But this is much better for backtracking.
-newtype P a = P { unP :: PS -> [(PS, a)] }
+-- results.  But this is much better for backtracking: every alternative
+-- restarts from the state at its choice point.
+newtype P a = P { unP :: Strategy -> PS -> Steps (PS, a) }
 
 instance Functor P where
-    fmap f (P m) = P $ \ s ->
-        [(s', f x) | (s', x) <- m s]
+    fmap f (P m) = P $ \ strat s ->
+        mapS (\ (s', x) -> (s', f x)) (m strat s)
 
 instance Applicative P where
-    pure x = P $ \ s -> [(s, x)]
+    pure x = P $ \ _ s -> Yield (s, x) Done
     (<*>) = ap
 
 instance Monad P where
     return = pure
-    P m >>= f = P $ \ s ->
-        [ y | (s',x) <- m s, y <- unP (f x) s' ]
+    P m >>= f = P $ \ strat s ->
+        let go Done = Done
+            go (Yield (s', x) rest) = unP (f x) strat s' `appendS` go rest
+            go (Step rest) = Step (go rest)
+        in go (m strat s)
 
 instance Alternative P where
     empty = mzero
     (<|>) = mplus
 
 instance MonadPlus P where
-    mzero = P $ \ _s -> []
-    P fxs `mplus` P fys = P $ \ s -> fxs s ++ fys s
+    mzero = P $ \ _ _ -> Done
+    P fxs `mplus` P fys = P $ \ strat s ->
+        combineS strat (fxs strat s) (Step (fys strat s))
 
 -- The state carries both the next suffix and every symbol already in use.
 -- The initial used set contains caller-supplied term and formula symbols; each
@@ -189,13 +269,32 @@ startPS :: [Symbol] -> PS
 startPS = PS 1 . Set.fromList
 
 choose :: [a] -> P a
-choose xs = P $ \ s -> [(s, x) | x <- xs]
+choose values = P $ \ _ s ->
+    let stream [] = Done
+        stream [x] = Yield (s, x) Done
+        stream (x : xs) = Yield (s, x) (Step (stream xs))
+    in stream values
 
 atMostOne :: P a -> P a
-atMostOne (P f) = P $ \ s -> take 1 (f s)
+atMostOne (P f) = P $ \ strat s ->
+    let takeOne Done = Done
+        takeOne (Yield x _) = Yield x Done
+        takeOne (Step rest) = Step (takeOne rest)
+    in takeOne (f strat s)
 
-runP :: [Symbol] -> P a -> [a]
-runP reserved (P m) = map snd (m (startPS reserved))
+-- Run a proof search, exploring at most the given number of choice points.
+-- The Bool reports whether the budget expired with search space remaining;
+-- it is False whenever the search space was genuinely finished.
+runBounded :: Maybe Integer -> Strategy -> [Symbol] -> P a -> ([a], Bool)
+runBounded budget strat reserved (P m) =
+    consume budget (m strat (startPS reserved))
+  where
+    consume _ Done = ([], False)
+    consume b (Yield (_, x) rest) =
+        let (xs, exhausted) = consume b rest
+        in (x : xs, exhausted)
+    consume (Just 0) (Step _) = ([], True)
+    consume b (Step rest) = consume (fmap (subtract 1) b) rest
 
 
 ------------------------------
@@ -252,14 +351,14 @@ addNestImp nested nestedImps
 ------------------------------
 ----- Generate a new unique variable
 newSym :: String -> P Symbol
-newSym prefix = P $ \ (PS next used) ->
+newSym prefix = P $ \ _ (PS next used) ->
     let (suffix, symbol) = firstUnused next
         firstUnused i =
             let candidate = Symbol (prefix ++ show i)
             in if candidate `Set.member` used
                then firstUnused (i + 1)
                else (i, candidate)
-    in [(PS (suffix + 1) (Set.insert symbol used), symbol)]
+    in Yield (PS (suffix + 1) (Set.insert symbol used), symbol) Done
 
 ------------------------------
 ----- Generate all ways to select one element of a list

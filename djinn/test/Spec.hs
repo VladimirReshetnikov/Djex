@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Data.List (isInfixOf, isSuffixOf, nub)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
@@ -29,6 +29,7 @@ tests =
     , ("prove intuitionistic tautologies", testProvableBasics)
     , ("prove empty goals from contradictions", testEmptyGoalContradiction)
     , ("reject non-theorems", testNonTheorems)
+    , ("honor search budgets and strategies", testSearchModes)
     , ("use an assumption as its named proof", testNamedAssumption)
     , ("do not capture a caller-supplied proof symbol", testCallerSymbolCapture)
     , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
@@ -171,6 +172,41 @@ testNonTheorems =
         ]
   where
     assertFalse name formula = assertBool name (not $ provable formula)
+
+testSearchModes :: IO ()
+testSearchModes = do
+    let peirce = ((atomA :-> atomB) :-> atomA) :-> atomA
+        pick3 = atomA :-> (atomA :-> (atomA :-> atomA))
+        unlimited = defaultSearchMode True
+        run mode = proveWithMode mode []
+
+    -- A finished search decides; it is never marked exhausted.
+    let complete = run unlimited peirce
+    assertEqual "a finished search refutes a non-theorem"
+        [] (searchProofs complete)
+    assertBool "a finished search must not be marked exhausted" $
+        not (searchExhausted complete)
+
+    -- A zero budget cannot decide anything that branches.
+    let starved = run unlimited { searchBudget = Just 0 } peirce
+    assertEqual "a starved search finds nothing" [] (searchProofs starved)
+    assertBool "an expired budget must be reported" $ searchExhausted starved
+
+    -- A bounded depth-first search yields a prefix of the unbounded stream.
+    let full = searchProofs $ run unlimited pick3
+        bounded = run unlimited { searchBudget = Just 1 } pick3
+    assertBool "bounded proofs must be a prefix of the unbounded stream" $
+        searchProofs bounded `isPrefixOf` full
+    assertBool "the pick-3 space is larger than one step" $
+        searchExhausted bounded
+
+    -- Interleaving may reorder proofs but proves and refutes the same
+    -- formulas over a finite space.
+    let fair = unlimited { searchStrategy = Interleave }
+    assertBool "interleaved search still refutes Peirce's law" $
+        null $ searchProofs $ run fair peirce
+    assertEqual "interleaved search finds the same pick-3 proof set"
+        (sort full) (sort $ searchProofs $ run fair pick3)
 
 testNamedAssumption :: IO ()
 testNamedAssumption = do

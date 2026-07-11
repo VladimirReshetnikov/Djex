@@ -355,12 +355,17 @@ termToHExpr term = do
                 convertedArgs <- mapM (conv vs) as
                 (ps, b') <- unLam n hb
                 let (as', sss) = unzip convertedArgs
+                    -- Haskell has no 1-tuples: a unary split matches the
+                    -- payload directly (a unary constructor field arrives
+                    -- here as Conj [t], mirroring hETuple on expressions).
+                    tuplePat [p] = p
+                    tuplePat qs = HPTuple qs
                 case a' of
                     HEVar v | v `elem` vs && null as ->
-                        return (b', [(v, HPTuple ps)] ++ sb ++ sa)
+                        return (b', [(v, tuplePat ps)] ++ sb ++ sa)
                     _ -> return
                         ( foldl HEApply
-                            (hECase a' [(HPTuple ps, b')]) as'
+                            (hECase a' [(tuplePat ps, b')]) as'
                         , sb ++ sa ++ concat sss
                         )
         convAp _ (Csplit n) args = Left $

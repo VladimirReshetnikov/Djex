@@ -427,7 +427,16 @@ redant more antes atomImps nestImps atoms goal =
                 [A (Cinj constructor i) (d :-> v)
                     | (i, (constructor, d)) <- zip [0 ..] alternatives]
         redant0 injections v
-    redsucc (Empty _) = mzero
+    -- An empty goal follows exactly when the antecedents are contradictory.
+    -- Use the disjunction encoding with no injections: prove a fresh atom
+    -- that nothing else mentions, so only ex falso reasoning can reach it.
+    -- The proof is parametric in that atom and therefore proves the empty
+    -- goal as well.  (Returning mzero here would wrongly reject theorems
+    -- such as Not (Not (Either a (Not a))), whose final goal is Void and
+    -- needs the nested-implication machinery below.)
+    redsucc (Empty _) = do
+        continuation <- newSym "_"
+        redant0 [] (PVar continuation)
     redsucc implication@(a :-> b) =
         cutSearch more (choose $ findIndexedImplications implication)
         `mplus`

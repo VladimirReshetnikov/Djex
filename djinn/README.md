@@ -146,6 +146,72 @@ This is not Haskell instance resolution. Djinn neither imports the installed
 package environment nor instantiates arbitrary polymorphic methods. Classes and
 methods needed beyond the small initial environment must be declared explicitly.
 
+## Worked examples
+
+Djinn is strongest exactly where hand-writing plumbing is most error-prone:
+continuation- and state-passing code. The classic demonstration derives the
+`Monad` operations, and `callCC`, for a continuation type:
+
+```text
+Djinn> data CD r a = CD ((a -> r) -> r)
+Djinn> returnCD ? a -> CD r a
+returnCD :: a -> CD r a
+returnCD a = CD (\ b -> b a)
+
+Djinn> bindCD ? CD r a -> (a -> CD r b) -> CD r b
+bindCD :: CD r a -> (a -> CD r b) -> CD r b
+bindCD a b =
+      case a of
+      CD c -> CD (\ d ->
+                  c (\ e ->
+                     case b e of
+                     CD f -> f d))
+
+Djinn> callCCD ? ((a -> CD r b) -> CD r a) -> CD r a
+callCCD :: ((a -> CD r b) -> CD r a) -> CD r a
+callCCD a =
+       CD (\ b ->
+           case a (\ c -> CD (\ _ -> b c)) of
+           CD d -> d b)
+```
+
+The state monad works the same way through a synonym:
+
+```text
+Djinn> type S s a = s -> (a, s)
+Djinn> bindS ? S s a -> (a -> S s b) -> S s b
+bindS :: S s a -> (a -> S s b) -> S s b
+bindS a b c =
+     case a c of
+     (d, e) -> b d e
+```
+
+Because Djinn implements intuitionistic propositional logic, it can also
+answer small logical questions. The double negation of the law of excluded
+middle is provable; the law itself is not:
+
+```text
+Djinn> f ? Not (Not (Either x (Not x)))
+f :: Not (Not (Either x (Not x)))
+f a = void (a (Right (\ b -> a (Left b))))
+
+Djinn> g ? Either x (Not x)
+-- g cannot be realized.
+```
+
+When a type has several inhabitants, `:set +multi` prints de-duplicated
+alternatives, ranked (under the default `+sorted`) so that solutions using
+more of their arguments come first:
+
+```text
+Djinn> :set +multi
+Djinn> k ? a -> a -> a
+k :: a -> a -> a
+k _ a = a
+-- or
+k a _ = a
+```
+
 ## Command reference
 
 Commands may be abbreviated to an unambiguous prefix.
@@ -175,7 +241,8 @@ and right-associative `->`, for example `type F :: * -> *`.
 Type replacement and deletion are transactional. Djinn rebuilds inferred kinds
 and revalidates every remaining synonym, axiom, and class method; a mutation that
 would leave a dangling or ill-kinded dependency is rejected without changing the
-environment.
+environment. Deleting a name that was never defined is reported as an error, and
+qualified axiom names can be deleted with the same spelling used to add them.
 
 ### Settings
 
@@ -226,6 +293,53 @@ command -> HType -> kind check -> Formula -> LJT proof search
         -> proof-term normalization -> independent proof check
         -> scope-safe Haskell conversion -> Haskell AST cleanup -> printed clause
 ```
+
+## How proof search works
+
+Djinn translates the query type into a formula of intuitionistic propositional
+logic: tuples become conjunctions, `data` alternatives become disjunctions
+tagged with their constructors, functions become implications, empty data
+types become nominally tagged falsehoods, and everything else (opaque
+constructors, variables, list types) becomes a propositional atom. By the
+Curry–Howard correspondence, a constructive proof of that formula *is* a
+program of the original type.
+
+The prover in `LJT.hs` is Roy Dyckhoff's contraction-free sequent calculus
+LJT ("Contraction-free sequent calculi for intuitionistic logic", JSL 1992),
+translated from Dyckhoff's 1991 Prolog implementation. Its key property is
+termination without loop checking: the usual troublesome rule for a nested
+implication `(a -> b) -> c` on the left is replaced by rules that always
+reduce a well-founded measure, so the search is a decision procedure — when
+Djinn says a type cannot be realized, that is a proof of uninhabitedness (in
+the total, propositional model), not a timeout.
+
+Operationally, `redant` classifies antecedents into four groups — unprocessed
+formulas, implications indexed by their atomic premise (`AtomImps`), nested
+implications (`NestImps`), and bare atoms — and `redsucc` then reduces the
+goal. Nested implications are the branching point of the search; everything
+else is deterministic reduction. The search runs in a small state-plus-list
+monad `P` that supports backtracking; with `+multi` the local cuts are
+disabled so alternative proofs stream out lazily.
+
+Each selected proof term is normalized (`nf`), checked against the requested
+formula by an independent unification-based type checker (`ProofCheck`),
+alpha-renamed so every binder is globally unique, converted to a small
+Haskell AST, cleaned up (case collapsing, unused-binder elision, eta
+reduction, nicer names), and pretty-printed.
+
+Two invariants make the back half of that pipeline safe, and both are worth
+knowing before editing the source:
+
+- **Global freshness.** `Symbol` is shared by proof variables and
+  propositional atoms. Before searching, the prover reserves every symbol
+  occurring in the environment and the goal (`formulaSymbols`), and every
+  generated name is recorded in the search state. Assumptions are additionally
+  given fresh internal identities (`ProofEnv`) so a query can never capture,
+  shadow, or recursively reference a caller-supplied name.
+- **Unique binders.** The Haskell-AST simplifiers assume that no two binders
+  share a name and that binders are disjoint from free variables. The
+  converter enforces this with an explicit alpha-renaming pass rather than
+  trusting term producers.
 
 ## Important limitations
 

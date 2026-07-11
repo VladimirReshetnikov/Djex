@@ -27,11 +27,14 @@ tests =
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
     , ("reject a higher-kinded synonym body", testHigherKindedSynonymBody)
     , ("prove intuitionistic tautologies", testProvableBasics)
+    , ("prove empty goals from contradictions", testEmptyGoalContradiction)
     , ("reject non-theorems", testNonTheorems)
     , ("use an assumption as its named proof", testNamedAssumption)
     , ("do not capture a caller-supplied proof symbol", testCallerSymbolCapture)
     , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
     , ("preserve residual application after Csplit", testCsplitResidualArguments)
+    , ("bind unary constructor fields without tuple parentheses",
+          testUnaryConstructorPattern)
     , ("preserve residual application after Ccases", testCcasesResidualArguments)
     , ("preserve tuple payloads in unary constructors", testUnaryTuplePayload)
     , ("merge tuple refinements across case branches", testBranchRefinements)
@@ -137,6 +140,19 @@ testProvableBasics =
     assertTrue name formula = assertBool name (provable formula)
     nested = fnot $ fnot $ Empty $ Symbol "EmptyA"
 
+-- The goal of the double negation of excluded middle reduces to Void with
+-- contradictory antecedents.  redsucc must route an Empty goal through the
+-- same fresh-atom encoding as a disjunction; rejecting it outright (mzero)
+-- silently lost every theorem whose final goal is an empty type.
+testEmptyGoalContradiction :: IO ()
+testEmptyGoalContradiction = do
+    let goal = fnot $ fnot $ atomA |: fnot atomA
+    case prove False [] goal of
+        [] -> fail "Not (Not (Either a (Not a))) must be provable"
+        proof : _ ->
+            assertRight "the empty-goal proof must check against its formula"
+                (checkProof [] goal proof)
+
 testNonTheorems :: IO ()
 testNonTheorems =
     mapM_ (uncurry assertFalse)
@@ -188,6 +204,24 @@ testCsplitResidualArguments = do
     assertContains "Csplit should still render its tuple case" "case pair of" rendered
     assertWordsSuffix "Csplit residual arguments must retain left-to-right order"
         ["arg1", "arg2"] rendered
+
+-- A unary constructor field arrives as a 1-ary split.  Haskell has no
+-- 1-tuples, so the field must bind as `Wrap a`, not as `Wrap (a)`.
+testUnaryConstructorPattern :: IO ()
+testUnaryConstructorPattern = do
+    let payload = Symbol "payload"
+        field = Symbol "field"
+        handler = Lam payload $ applys (Csplit 1)
+            [ Lam field $ Apply (Var $ Symbol "use") (Var field)
+            , Var payload
+            ]
+        term = applys (Ccases [ConsDesc "Wrap" 1])
+            [Var $ Symbol "value", handler]
+    rendered <- renderTerm "unwrap" term
+    assertContains "a unary constructor field binds the payload directly"
+        "Wrap a" rendered
+    assertBool "no singleton tuple pattern may remain in the output" $
+        not $ "(a)" `isInfixOf` rendered
 
 testCcasesResidualArguments :: IO ()
 testCcasesResidualArguments = do

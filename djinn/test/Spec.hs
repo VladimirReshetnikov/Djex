@@ -684,6 +684,12 @@ testIdentifiers = do
     assertEqual "qualified type constructors should parse structurally"
         (Just $ HTApp (HTCon "Data.Maybe.Maybe") (HTVar "a"))
         (readMaybe "Data.Maybe.Maybe a")
+    assertEqual "ordinary command-file comments are removed"
+        "identity ? a -> a \n\n"
+        (stripLineComments "identity ? a -> a -- trailing\n-- whole line\n")
+    assertEqual "dash-prefixed operators are not mistaken for comments"
+        "(--*) :: a -> a\n"
+        (stripLineComments "(--*) :: a -> a\n")
 
 atomA :: Formula
 atomA = PVar $ Symbol "a"

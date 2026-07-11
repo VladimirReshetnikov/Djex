@@ -243,20 +243,12 @@ loadFile :: State -> String -> IO (Bool, State)
 loadFile s name = do
     result <- tryIOError $ do
         file <- readFile name
-        evalCmds s $ lines $ stripComments file
+        evalCmds s $ lines $ stripLineComments file
     case result of
         Left err -> do
             putStrLn $ "Error loading " ++ show name ++ ": " ++ show err
             return (False, s)
         Right result' -> return result'
-
-stripComments :: String -> String
-stripComments "" = ""
-stripComments ('-':'-':cs) = skip cs
-  where skip "" = ""
-        skip s@('\n':_) = stripComments s
-        skip (_:s) = skip s
-stripComments (c:cs) = c : stripComments cs
 
 showClass :: (HSymbol, ([(HSymbol, HKind)], [Method])) -> String
 showClass (c, (as, ms)) =

@@ -258,12 +258,12 @@ count; it is now `adjustOption (max ...)`, a floor that
 
 These were noticed but deliberately not changed; none is a soundness issue.
 
-- **O-01 — comment stripping is lexically naive.** `stripComments` treats
-  every `--` in a command file as a comment start, so a (legal) operator such
-  as `(--*)` cannot appear in a file even though the interactive parser
-  accepts it. Real Haskell lexing treats `--*` as an operator. Fixing this
-  means teaching the stripper operator lexing for a vanishingly rare case;
-  the current behavior loses nothing but that corner.
+- **O-01 — fixed later: comment stripping was lexically naive.** The old
+  `stripComments` treated every `--` in a command file as a comment start, so
+  a legal operator such as `(--*)` could not appear in a file even though the
+  interactive parser accepted it. `stripLineComments` now lives beside the
+  shared operator lexer and uses its symbol-continuation rule, matching
+  Haskell's distinction between a line comment and a longer operator.
 - **O-02 — a bare `HTCon "[]"` displays as `([])`.** It cannot be produced by
   the parser (list types only arrive fully applied via `[a]`), so the
   non-round-tripping display is reachable only through the raw constructors

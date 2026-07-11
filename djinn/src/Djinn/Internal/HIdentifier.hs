@@ -7,6 +7,7 @@ module Djinn.Internal.HIdentifier (
     pParenthesizedVarOp,
     isVarId, isConId, isQualifiedVarId, isQualifiedConId,
     isVarOperator, renderVarName,
+    stripLineComments,
     schar, sstring, pParen
     ) where
 
@@ -96,6 +97,20 @@ renderVarName name
     | isQualifiedVarId name = name
     | isVarOperator name = "(" ++ name ++ ")"
     | otherwise = name
+
+-- Strip Haskell-style line comments without mistaking a longer symbolic
+-- operator such as @--*@ for a comment introducer.  Djinn has no string or
+-- character literals, so operator continuation is the only lexical ambiguity.
+stripLineComments :: String -> String
+stripLineComments [] = []
+stripLineComments ('-' : '-' : rest)
+    | continuesOperator rest = '-' : '-' : stripLineComments rest
+    | otherwise = stripLineComments $ dropWhile (/= '\n') rest
+  where
+    continuesOperator (character : _) = isOperatorCharacter character
+    continuesOperator [] = False
+stripLineComments (character : rest) =
+    character : stripLineComments rest
 
 isIdentifierCharacter :: Char -> Bool
 isIdentifierCharacter character =

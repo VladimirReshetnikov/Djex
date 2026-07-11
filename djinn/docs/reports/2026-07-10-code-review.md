@@ -461,6 +461,11 @@ predicates, fixing the previous misrendering of `_name` and qualified variables.
 
 ### R-07 — Medium: list nondeterminism is left-biased and unbudgeted
 
+> **Resolved** on 2026-07-10 — see
+> [2026-07-10-search-budget.md](2026-07-10-search-budget.md) for the named
+> search mode, choice-point budget, benchmark corpus, and measured
+> interleaving/indexing decisions.
+
 An expensive earlier proof branch can starve later branches. `MoreSolutions=True`
 also grows cross-products quickly, and the user cutoff is applied to the lazy
 result stream rather than carried as a search budget. `AtomFs`, `AtomImps`, and

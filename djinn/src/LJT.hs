@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 --
 -- Copyright (c) 2005, 2008 Lennart Augustsson
 -- See LICENSE for licensing details.
@@ -27,6 +28,7 @@ import Control.Applicative (Alternative(empty, (<|>)))
 import Control.Monad (MonadPlus(mzero, mplus), ap, foldM)
 import Data.List ((!?))
 import Data.Maybe (fromMaybe)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import LJTFormula
@@ -92,7 +94,7 @@ proveWithMode mode env goal =
 redtop :: MoreSolutions -> [(Symbol, Formula)] -> Formula -> P Proof
 redtop more env goal = do
     let form = foldr (:->) goal (map snd env)
-    p <- redant more [] [] [] [] form
+    p <- redant more [] Map.empty [] [] form
     nf (applys p (map (Var . fst) env))
 
 ------------------------------
@@ -196,8 +198,9 @@ nf term = spine term []
 
 
 ------------------------------
------ Our Proof monad, P: a reader (strategy) + state monad with multiple
------ results delivered as a lazy stream of explicit choice points.
+----- Our Proof monad, P: backtracking with per-branch state, delivered
+----- through success/failure continuations that emit a lazy stream of
+----- results punctuated by explicit choice-point markers.
 
 -- A result stream.  Step marks one explored choice point, so consuming the
 -- stream under a budget bounds the amount of search performed, and a fair
@@ -208,57 +211,68 @@ data Steps a
     | Yield a (Steps a)
     | Step (Steps a)
 
-mapS :: (a -> b) -> Steps a -> Steps b
-mapS _ Done = Done
-mapS f (Yield x rest) = Yield (f x) (mapS f rest)
-mapS f (Step rest) = Step (mapS f rest)
-
--- Sequential (depth-first) combination: the classical list append.
-appendS :: Steps a -> Steps a -> Steps a
-appendS Done ys = ys
-appendS (Yield x xs) ys = Yield x (appendS xs ys)
-appendS (Step xs) ys = Step (appendS xs ys)
-
--- Fair combination: swap branches at every choice point, so results from
--- the second branch surface even while the first is still searching.
+-- Fair merge: swap branches at every choice point, so results from the
+-- second branch surface even while the first is still searching.
 interleaveS :: Steps a -> Steps a -> Steps a
 interleaveS Done ys = ys
 interleaveS (Yield x xs) ys = Yield x (interleaveS ys xs)
 interleaveS (Step xs) ys = Step (interleaveS ys xs)
 
-combineS :: Strategy -> Steps a -> Steps a -> Steps a
-combineS DepthFirst = appendS
-combineS Interleave = interleaveS
+-- The success continuation receives the value's final state and the rest
+-- of the stream (all remaining alternatives) as an already-built tail.
+type Success r a = PS -> a -> Steps r -> Steps r
 
--- Note, this is the non-standard way to combine state with multiple
--- results.  But this is much better for backtracking: every alternative
--- restarts from the state at its choice point.
-newtype P a = P { unP :: Strategy -> PS -> Steps (PS, a) }
+-- The continuation encoding (a LogicT-style two-continuation monad) makes
+-- bind constant-time and builds each stream node exactly once.  A direct
+-- Steps-returning implementation was measured first and rejected: failed
+-- branches leave Step-node chains that nested appends re-traverse, which
+-- made refutation-heavy searches several times slower on the benchmark
+-- corpus.  Every alternative restarts from the state of its choice point,
+-- which is what makes backtracking cheap.
+newtype P a = P {
+    unP :: forall r. Strategy -> PS -> Success r a -> Steps r -> Steps r
+    }
 
 instance Functor P where
-    fmap f (P m) = P $ \ strat s ->
-        mapS (\ (s', x) -> (s', f x)) (m strat s)
+    fmap f (P m) = P $ \ strat s sk fk ->
+        m strat s (\ s' x rest -> sk s' (f x) rest) fk
 
 instance Applicative P where
-    pure x = P $ \ _ s -> Yield (s, x) Done
+    pure x = P $ \ _ s sk fk -> sk s x fk
     (<*>) = ap
 
 instance Monad P where
     return = pure
-    P m >>= f = P $ \ strat s ->
-        let go Done = Done
-            go (Yield (s', x) rest) = unP (f x) strat s' `appendS` go rest
-            go (Step rest) = Step (go rest)
-        in go (m strat s)
+    P m >>= f = P $ \ strat s sk fk ->
+        m strat s (\ s' x rest -> unP (f x) strat s' sk rest) fk
 
 instance Alternative P where
     empty = mzero
     (<|>) = mplus
 
 instance MonadPlus P where
-    mzero = P $ \ _ _ -> Done
-    P fxs `mplus` P fys = P $ \ strat s ->
-        combineS strat (fxs strat s) (Step (fys strat s))
+    mzero = P $ \ _ _ _ fk -> fk
+    P m `mplus` P n = P $ \ strat s sk fk ->
+        case strat of
+            DepthFirst -> m strat s sk (Step (n strat s sk fk))
+            -- Fairness needs both branch streams reified before merging;
+            -- laziness ensures only the explored prefixes are built.
+            Interleave ->
+                replay sk fk $
+                    interleaveS (reify strat s (P m))
+                                (Step (reify strat s (P n)))
+
+-- Reify a computation to its result stream.
+reify :: Strategy -> PS -> P a -> Steps (PS, a)
+reify strat s (P m) = m strat s (\ s' x rest -> Yield (s', x) rest) Done
+
+-- Feed a reified stream back through continuation form.
+replay :: Success r a -> Steps r -> Steps (PS, a) -> Steps r
+replay sk fk = go
+  where
+    go Done = fk
+    go (Yield (s', x) rest) = sk s' x (go rest)
+    go (Step rest) = Step (go rest)
 
 -- The state carries both the next suffix and every symbol already in use.
 -- The initial used set contains caller-supplied term and formula symbols; each
@@ -269,25 +283,27 @@ startPS :: [Symbol] -> PS
 startPS = PS 1 . Set.fromList
 
 choose :: [a] -> P a
-choose values = P $ \ _ s ->
-    let stream [] = Done
-        stream [x] = Yield (s, x) Done
-        stream (x : xs) = Yield (s, x) (Step (stream xs))
+choose values = P $ \ _ s sk fk ->
+    let stream [] = fk
+        stream [x] = sk s x fk
+        stream (x : xs) = sk s x (Step (stream xs))
     in stream values
 
+-- Cut a subsearch to its first result, preserving the choice points that
+-- were explored to reach it so budgets stay honest.
 atMostOne :: P a -> P a
-atMostOne (P f) = P $ \ strat s ->
-    let takeOne Done = Done
-        takeOne (Yield x _) = Yield x Done
-        takeOne (Step rest) = Step (takeOne rest)
-    in takeOne (f strat s)
+atMostOne p = P $ \ strat s sk fk ->
+    let cut Done = fk
+        cut (Yield (s', x) _) = sk s' x fk
+        cut (Step rest) = Step (cut rest)
+    in cut (reify strat s p)
 
 -- Run a proof search, exploring at most the given number of choice points.
 -- The Bool reports whether the budget expired with search space remaining;
 -- it is False whenever the search space was genuinely finished.
 runBounded :: Maybe Integer -> Strategy -> [Symbol] -> P a -> ([a], Bool)
-runBounded budget strat reserved (P m) =
-    consume budget (m strat (startPS reserved))
+runBounded budget strat reserved p =
+    consume budget (reify strat (startPS reserved) p)
   where
     consume _ Done = ([], False)
     consume b (Yield (_, x) rest) =
@@ -313,26 +329,17 @@ addAtom atom atoms
     | otherwise = atom : atoms
 
 ------------------------------
------ Implications of one atom
+----- Implications of one atom, indexed by that atom.
 
-data AtomImp = AtomImp Symbol Antecedents
-type AtomImps = [AtomImp]
+type AtomImps = Map.Map Symbol Antecedents
 
 extract :: AtomImps -> Symbol -> ([Antecedent], AtomImps)
-extract aatomImps@(atomImp@(AtomImp a' bs) : atomImps) a =
-    case compare a a' of
-    GT -> let (rbs, restImps) = extract atomImps a in (rbs, atomImp : restImps)
-    EQ -> (bs, atomImps)
-    LT -> ([], aatomImps)
-extract [] _ = ([], [])
+extract atomImps a =
+    case Map.updateLookupWithKey (\ _ _ -> Nothing) a atomImps of
+        (found, rest) -> (fromMaybe [] found, rest)
 
-insert :: AtomImps -> AtomImp -> AtomImps
-insert [] ai = [ ai ]
-insert aatomImps@(atomImp@(AtomImp a' bs') : atomImps) ai@(AtomImp a bs) =
-    case compare a a' of
-    GT -> atomImp : insert atomImps ai
-    EQ -> AtomImp a (bs ++ bs') : atomImps
-    LT -> ai : aatomImps
+insert :: AtomImps -> Symbol -> Antecedents -> AtomImps
+insert atomImps a bs = Map.insertWith (++) a bs atomImps
 
 ------------------------------
 ----- Nested implications, (a -> b) -> c
@@ -351,14 +358,14 @@ addNestImp nested nestedImps
 ------------------------------
 ----- Generate a new unique variable
 newSym :: String -> P Symbol
-newSym prefix = P $ \ _ (PS next used) ->
+newSym prefix = P $ \ _ (PS next used) sk fk ->
     let (suffix, symbol) = firstUnused next
         firstUnused i =
             let candidate = Symbol (prefix ++ show i)
             in if candidate `Set.member` used
                then firstUnused (i + 1)
                else (i, candidate)
-    in Yield (PS (suffix + 1) (Set.insert symbol used), symbol) Done
+    in sk (PS (suffix + 1) (Set.insert symbol used)) symbol fk
 
 ------------------------------
 ----- Generate all ways to select one element of a list
@@ -501,7 +508,7 @@ redant more antes atomImps nestImps atoms goal =
             proof <- redant1 (A (Var x) b) pending g
             subst (Apply p atom) x proof)
         `mplus`
-        redant more pending (insert atomImps (AtomImp s [A p b]))
+        redant more pending (insert atomImps s [A p b])
             nestImps atoms g
 
     -- Reduce the goal once every antecedent has been classified.
@@ -550,9 +557,8 @@ redant more antes atomImps nestImps atoms goal =
     findIndexedImplications :: Formula -> [Term]
     findIndexedImplications (PVar atom :-> consequent) =
         [proof |
-            AtomImp indexedAtom consequences <- atomImps,
-            indexedAtom == atom,
-            A proof indexedConsequent <- consequences,
+            A proof indexedConsequent <-
+                Map.findWithDefault [] atom atomImps,
             indexedConsequent == consequent]
     findIndexedImplications ((argument :-> result) :-> consequent) =
         [proof |
@@ -581,10 +587,9 @@ redant more antes atomImps nestImps atoms goal =
 -- (an empty conjunction) yields none.
 goalMayBeReachable :: Symbol -> AtomImps -> NestImps -> Bool
 goalMayBeReachable goal atomImps nestImps =
-    any atomImpMayYield atomImps || any nestedImpMayYield nestImps
+    any atomImpMayYield (Map.elems atomImps) || any nestedImpMayYield nestImps
   where
-    atomImpMayYield (AtomImp _ consequences) =
-        any (\ (A _ f) -> mayYield goal f) consequences
+    atomImpMayYield = any (\ (A _ f) -> mayYield goal f)
     nestedImpMayYield (NestImp _ _ _ consequent) = mayYield goal consequent
 
 mayYield :: Symbol -> Formula -> Bool

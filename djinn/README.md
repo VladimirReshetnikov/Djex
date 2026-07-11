@@ -66,6 +66,15 @@ cabal test djinn-tests djinn-property-tests --enable-coverage
 The CLI suite is intentionally run without HPC: it launches multiple copies of
 the instrumented executable, whose shared `.tix` file would conflate processes.
 
+A `tasty-bench` benchmark target measures proof-search performance over a
+size-parameterized formula corpus ([`bench/Corpus.hs`](bench/Corpus.hs)) —
+first-proof latency, multi-solution enumeration, and decision cost for
+non-theorems:
+
+```console
+cabal bench djinn-bench --benchmark-options='--stdev 5'
+```
+
 ## Quick tour
 
 Ask for an implementation by putting `?` between a name and a type:
@@ -254,6 +263,13 @@ The Boolean settings use `+name` to enable and `-name` to disable them:
 | `sorted` | on | Rank by the fraction of unused binders, then binder count. |
 | `debug` | off | Print the translated formula and internal proof term. |
 | `cutoff=N` | `200` | Consider at most positive `N` proof candidates. |
+| `budget=N` | `0` | Explore at most `N` proof-search steps; `0` is unlimited. |
+
+With the default unlimited budget, proof search is a decision procedure:
+"cannot be realized" is a proof of uninhabitedness. A positive budget bounds
+the work instead; if it expires before any proof is found, Djinn reports
+`no proof found within budget N; inhabitation is undecided` rather than
+claiming unprovability.
 
 For example:
 
@@ -317,9 +333,13 @@ Operationally, `redant` classifies antecedents into four groups — unprocessed
 formulas, implications indexed by their atomic premise (`AtomImps`), nested
 implications (`NestImps`), and bare atoms — and `redsucc` then reduces the
 goal. Nested implications are the branching point of the search; everything
-else is deterministic reduction. The search runs in a small state-plus-list
-monad `P` that supports backtracking; with `+multi` the local cuts are
-disabled so alternative proofs stream out lazily.
+else is deterministic reduction. The search runs in a small backtracking
+monad `P` producing a lazy stream with explicit choice-point markers, which
+is what the `budget` setting counts; with `+multi` the local cuts are
+disabled so alternative proofs stream out lazily. The `LJT` module also
+exposes `proveWithMode` with a named `SearchMode` (alternatives, depth-first
+or interleaved strategy, optional budget) for programmatic use; the CLI uses
+the classical depth-first order.
 
 Each selected proof term is normalized (`nf`), checked against the requested
 formula by an independent unification-based type checker (`ProofCheck`),
@@ -363,7 +383,8 @@ knowing before editing the source:
   `Data.Void.absurd`.
 - Proof search is a decision procedure, but the search space and the number of
   inhabitants can grow rapidly. Keep `cutoff` modest when requesting multiple
-  or sorted solutions.
+  or sorted solutions, and consider `:set budget=N` as a safety net for
+  queries that may explode; an expired budget is reported as undecided.
 - Proof terms are independently checked, but generated clauses are not passed
   through GHC automatically. Treat the output as a strong candidate that still
   belongs in the normal compile/test loop.

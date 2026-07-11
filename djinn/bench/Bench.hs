@@ -27,7 +27,37 @@ main = defaultMain
     , bgroup "decide"
         [ bench (entryName e) $ whnf provable (entryFormula e)
         | e <- corpus ]
+    -- First-result latency under each branch-exploration strategy.
+    , bgroup "strategy"
+        [ bench (entryName e ++ "/" ++ show strat) $
+            whnf (firstIn strat) (entryFormula e)
+        | e <- corpus
+        , strat <- [DepthFirst, Interleave] ]
+    -- What the Step-counting consumer costs when a budget is set but never
+    -- reached (versus the unlimited path above).
+    , bgroup "budgetOverhead"
+        [ bench (entryName e) $ whnf budgetedFirst (entryFormula e)
+        | e <- corpus ]
     ]
+
+firstIn :: Strategy -> Formula -> Int
+firstIn strat formula =
+    case searchProofs outcome of
+        [] -> 0
+        proof : _ -> termSize proof
+  where
+    outcome = proveWithMode
+        (defaultSearchMode False) { searchStrategy = strat } [] formula
+
+budgetedFirst :: Formula -> Int
+budgetedFirst formula =
+    case searchProofs outcome of
+        [] -> 0
+        proof : _ -> termSize proof
+  where
+    outcome = proveWithMode
+        (defaultSearchMode False) { searchBudget = Just 1000000000 }
+        [] formula
 
 -- Fully force one proof term without needing an NFData instance.
 termSize :: Term -> Int

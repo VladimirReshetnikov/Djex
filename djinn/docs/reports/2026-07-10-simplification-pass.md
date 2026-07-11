@@ -278,6 +278,8 @@ These were noticed but deliberately not changed; none is a soundness issue.
 - **O-05 — the `P` monad's list-based backtracking** and the linear
   `AtomImps`/`NestImps` structures are unchanged, per the standing decision
   (R-07) that search-order changes need a benchmark corpus first.
+  (Superseded later the same day: see
+  [2026-07-10-search-budget.md](2026-07-10-search-budget.md).)
 
 ## Change footprint
 

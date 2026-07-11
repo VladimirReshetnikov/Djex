@@ -21,6 +21,9 @@ main = defaultMain $
             , QC.testProperty
                 "surface HType rendering round-trips through its parser"
                 propHTypeRoundTrip
+            , QC.testProperty
+                "budgeted search yields a prefix and stays honest"
+                propBudgetedSearch
             ]
 
 newtype ProvableFormula = ProvableFormula Formula
@@ -77,6 +80,27 @@ proofIsValid formula proof =
     checked = checkProof [] formula proof
     rendering = termToHClause "generated" proof
     rendered = either id (const "success") rendering
+
+-- Under the default depth-first strategy, a budgeted search must produce a
+-- prefix of the unbudgeted proof stream, and it may claim exhaustion only
+-- when it truly stopped early: an exhausted flag with the full proof list
+-- already found is fine, but a non-exhausted budgeted search must agree
+-- exactly with the complete search.
+propBudgetedSearch :: ArbitraryFormula -> QC.NonNegative Integer
+                   -> QC.Property
+propBudgetedSearch (ArbitraryFormula formula) (QC.NonNegative fuel) =
+    QC.counterexample context $
+        (bounded `isPrefixOf` complete) &&
+        (searchExhausted outcome || bounded == complete)
+  where
+    goal = formula :-> formula
+    complete = take 5 $ prove True [] goal
+    outcome = proveWithMode (defaultSearchMode True)
+        { searchBudget = Just fuel } [] goal
+    bounded = take 5 $ searchProofs outcome
+    context = "goal: " ++ show goal ++ "\nfuel: " ++ show fuel ++
+        "\nbounded: " ++ show bounded ++ "\ncomplete: " ++ show complete
+    isPrefixOf xs ys = take (length xs) ys == xs
 
 genFormula :: Int -> QC.Gen Formula
 genFormula depth

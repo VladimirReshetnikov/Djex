@@ -176,13 +176,42 @@ runCmd s (QueryInstance ctx cls ts) =
     case resolveInstanceMethods (environment s) ctx (cls, ts) of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
         Right methods -> do
-            let sctx = if null ctx then "" else showContexts ctx ++ " => "
-                method (i, t) = do
+            let instanceHeading = "instance " ++ contextPrefix ctx ++
+                    show (foldl HTApp (HTCon cls) ts)
+                prepareMethod method@(name, goal) =
+                    case makeQueryReport s name ctx goal of
+                        Left message -> Left $
+                            "cannot generate method " ++ prHSymbolOp name ++
+                            ": " ++ message
+                        Right report -> Right (method, report)
+                methodRealized (_, report) =
+                    case reportOutcome report of
+                        Realized (_ : _) -> True
+                        _ -> False
+                printMethod ((name, goal), report) = do
                     putStr "   "
-                    query False s i ctx t
-            putStrLn $ "instance " ++ sctx ++ show (foldl HTApp (HTCon cls) ts) ++ " where"
-            mapM_ method methods
-            return (False, s)
+                    printQueryReport False s name ctx goal report
+                printFailedMethod ((name, goal), report) =
+                    printQueryReport False s name ctx goal report
+            case mapM prepareMethod methods of
+                Left msg -> do
+                    putStrLn $ "Error: " ++ msg
+                    return (False, s)
+                Right reports -> do
+                    let failures = filter (not . methodRealized) reports
+                    case failures of
+                      [] -> do
+                        putStrLn $ instanceHeading ++ " where"
+                        mapM_ printMethod reports
+                      _ -> do
+                        -- Do not print an instance-shaped prefix unless every
+                        -- method has a body.  A partial block is not useful
+                        -- Haskell and can easily be mistaken for generated
+                        -- code that merely needs a small edit.
+                        putStrLn $ "-- cannot generate " ++ instanceHeading ++
+                            ": one or more methods have no realization."
+                        mapM_ printFailedMethod failures
+                    return (False, s)
 
 updateEnvironment :: State -> (Environment -> Either String Environment)
                   -> IO (Bool, State)
@@ -196,43 +225,55 @@ updateEnvironment s change =
 
 query :: Bool -> State -> String -> [Context] -> HType -> IO (Bool, State)
 query prType s i ctx g = do
-    case inhabit queryOptions (environment s) ctx i g of
+    case makeQueryReport s i ctx g of
         Left msg -> putStrLn $ "Error: " ++ msg
-        Right report -> do
-            when (debug s) $ putStrLn ("*** " ++ reportFormula report)
-            case reportOutcome report of
-                Undecided ->
-                    -- A budgeted search that ran out of steps has not
-                    -- decided anything; only a finished search justifies
-                    -- "cannot".
-                    putStrLn $ "-- " ++ i ++
-                        ": no proof found within budget " ++
-                        show (budget s) ++ "; inhabitation is undecided."
-                UnrealizableWithoutSelfReference ->
-                    putStrLn $ "-- " ++ i ++ " cannot be safely realized \
-                        \without a recursive self-reference."
-                Unrealizable ->
-                    putStrLn $ "-- " ++ i ++ " cannot be realized."
-                Realized clauses -> do
-                    when (debug s) $
-                        mapM_ (putStrLn . ("+++ " ++)) (reportProof report)
-                    when prType $ putStrLn $
-                        prHSymbolOp i ++ " :: " ++ sctx ++ show g
-                    case clauses of
-                        [] -> return ()
-                        e:es -> do
-                            putStrLn e
-                            when (multi s) $ mapM_
-                                (\ x -> putStrLn "-- or" >> putStrLn x) es
+        Right report -> printQueryReport prType s i ctx g report
     return (False, s)
-  where
-    queryOptions = QueryOptions {
+
+makeQueryReport :: State -> String -> [Context] -> HType
+                -> Either String QueryReport
+makeQueryReport s name contexts goal =
+    inhabit queryOptions (environment s) contexts name goal
+  where queryOptions = QueryOptions {
         optionAlternatives = multi s,
         optionSorted = sorted s,
         optionCutoff = cutOff s,
         optionBudget = if budget s > 0 then Just (budget s) else Nothing
         }
-    sctx = if null ctx then "" else showContexts ctx ++ " => "
+
+printQueryReport :: Bool -> State -> String -> [Context] -> HType
+                 -> QueryReport -> IO ()
+printQueryReport prType s name ctx goal report = do
+    when (debug s) $ putStrLn ("*** " ++ reportFormula report)
+    case reportOutcome report of
+        Undecided ->
+            -- A budgeted search that ran out of steps has not decided
+            -- anything; only a finished search justifies "cannot".
+            putStrLn $ "-- " ++ name ++
+                ": no proof found within budget " ++
+                show (budget s) ++ "; inhabitation is undecided."
+        UnrealizableWithoutSelfReference ->
+            putStrLn $ "-- " ++ name ++ " cannot be safely realized \
+                \without a recursive self-reference."
+        Unrealizable ->
+            putStrLn $ "-- " ++ name ++ " cannot be realized."
+        Realized clauses -> do
+            when (debug s) $
+                mapM_ (putStrLn . ("+++ " ++)) (reportProof report)
+            when prType $ putStrLn $
+                prHSymbolOp name ++ " :: " ++ contextPrefix ctx ++ show goal
+            case clauses of
+                [] -> return ()
+                clause : alternatives -> do
+                    putStrLn clause
+                    when (multi s) $ mapM_
+                        (\ alternative ->
+                            putStrLn "-- or" >> putStrLn alternative)
+                        alternatives
+
+contextPrefix :: [Context] -> String
+contextPrefix [] = ""
+contextPrefix contexts = showContexts contexts ++ " => "
 
 loadFile :: State -> String -> IO (Bool, State)
 loadFile s name = do

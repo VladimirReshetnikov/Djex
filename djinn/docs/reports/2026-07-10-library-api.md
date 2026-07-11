@@ -81,7 +81,7 @@ out — and validates every boundary:
 `resolveInstanceMethods`, `inhabit`); the shared
 shape checks (`requireDistinct`, `checkConstructors`, `checkMethodNames`,
 ...) moved to `Djinn.Internal.Environment`. There is exactly one
-implementation of the pipeline, exercised by all nine CLI scenarios, so
+implementation of the pipeline, exercised by all ten CLI scenarios, so
 the façade is proven sufficient rather than aspirational. `Djinn.hs`
 shrank by roughly 180 lines while total library functionality grew.
 

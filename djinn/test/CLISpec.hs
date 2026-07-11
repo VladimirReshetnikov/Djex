@@ -25,7 +25,31 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testSearchBudget
     , testCase "class arguments are checked against inferred kinds"
         testClassKindEnforcement
+    , testCase "instance output is atomic across all methods"
+        testInstanceOutputAtomic
     ]
+
+testInstanceOutputAtomic :: Assertion
+testInstanceOutputAtomic = do
+    output <- runSession
+        [ "class Partial a where impossible :: x -> y; identity :: z -> z"
+        , "?instance Partial Bool"
+        , "class Total a where keep :: z -> z"
+        , "?instance Total Bool"
+        , ":quit"
+        ]
+    assertContains "the unrealizable method is diagnosed"
+        "impossible cannot be realized" output
+    assertContains "the whole instance failure is explicit"
+        "cannot generate instance Partial Bool" output
+    assertBool "a failed method must suppress the instance-shaped header" $
+        not $ "instance Partial Bool where" `isInfixOf` output
+    assertBool "successful siblings must not be emitted as loose methods" $
+        not $ "identity a = a" `isInfixOf` output
+    assertContains "a complete instance still gets its declaration header"
+        "instance Total Bool where" output
+    assertContains "a complete instance still gets its method body"
+        "keep a = a" output
 
 testClassKindEnforcement :: Assertion
 testClassKindEnforcement = do

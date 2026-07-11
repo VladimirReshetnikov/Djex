@@ -45,7 +45,7 @@ cabal test all --test-show-details=direct
 | --- | --- |
 | `djinn-tests` | 35 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
-| `djinn-cli-tests` | Nine subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, and stateful query behavior. |
+| `djinn-cli-tests` | Ten subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, and stateful query behavior. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
 named test. For example:
@@ -179,6 +179,9 @@ Error: argument Bool of class Monad: kind mismatch: * vs * -> *
 Each `?instance` head and all of its prerequisite constraints are checked in
 one kind-variable scope, so a shared variable cannot silently acquire
 different kinds in different parts of the generated instance signature.
+Djinn also searches every method before printing the header: an unrealizable
+method produces diagnostics without leaving a partial, non-compiling instance
+block in the output.
 
 ## Worked examples
 

@@ -8,8 +8,10 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
   , convertName
+  , convertNameChecked
   , convertQName
   , convertModuleName
+  , convertModuleNameChecked
   , getVar
   -- , ConversionMonad
   , parseQualifiedName
@@ -33,12 +35,12 @@ import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map as M
 
 import Data.Maybe ( fromMaybe )
-import Data.List ( find )
+import Data.List ( find, intercalate, nub )
 
 import Control.Monad.Trans.Except
 
-import Data.List.Split ( wordsBy )
 import Control.Monad.Trans.MultiRWS
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Language.Haskell.Exts.Extension ( Language (..)
                                        , Extension (..)
@@ -103,8 +105,10 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
                               <$> helper a
                               <*> helper b
   helper tuple@(TyTuple _ Boxed ts)
-    | length ts >= 2 = foldl T.TypeApp (T.TypeCons $ T.TupleCon (length ts))
-        <$> mapM helper ts
+    | length ts >= 2 = do
+        tupleName <- either throwE pure $ qualifiedNameResult
+          $ T.mkBoxedTupleName (length ts)
+        foldl T.TypeApp (T.TypeCons tupleName) <$> mapM helper ts
     | otherwise = throwE $ "invalid boxed tuple arity " ++ show (length ts)
         ++ " in " ++ prettyPrint tuple
   helper tuple@(TyTuple _ Unboxed _)
@@ -119,7 +123,10 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
   helper (TyCon _ name)     = T.TypeCons
                           <$> either throwE pure
                                 (convertQName defModuleName ds name)
-  helper (TyList _ t)       = T.TypeApp (T.TypeCons T.ListCon) <$> helper t
+  helper (TyList _ t)       = do
+    listName <- either throwE pure $ qualifiedNameResult
+      $ T.fromSynthesisName SharedName.listName
+    T.TypeApp (T.TypeCons listName) <$> helper t
   helper (TyParen _ t)      = helper t
   helper TyInfix{}        = throwE "infix operator"
   helper TyKind{}         = throwE "kind annotation"
@@ -154,99 +161,86 @@ convertQName
   -> [T.QualifiedName]
   -> QName SrcSpanInfo
   -> Either String T.QualifiedName
-convertQName _ _ (Special _ (UnitCon _)) = Right $ T.TupleCon 0
-convertQName _ _ (Special _ (ListCon _)) = Right T.ListCon
-convertQName _ _ (Special _ (FunCon _)) = Right $ T.QualifiedName [] "->"
+convertQName _ _ (Special _ (UnitCon _)) = qualifiedNameResult
+  $ T.mkBoxedTupleName 0
+convertQName _ _ (Special _ (ListCon _)) = qualifiedNameResult
+  $ T.fromSynthesisName SharedName.listName
+convertQName _ _ (Special _ (FunCon _)) = qualifiedNameResult
+  $ T.fromSynthesisName SharedName.functionName
 convertQName _ _ (Special _ special@(TupleCon _ Unboxed _)) = Left
   $ "unsupported unboxed tuple constructor: " ++ prettyPrint special
 convertQName _ _ (Special _ special@(TupleCon _ Boxed arity))
-  | arity >= 2 = Right $ T.TupleCon arity
+  | arity >= 2 = qualifiedNameResult $ T.mkBoxedTupleName arity
   | otherwise = Left $ "invalid boxed tuple constructor arity " ++ show arity
       ++ ": " ++ prettyPrint special
-convertQName _ _ (Special _ (Cons _)) = Right T.Cons
+convertQName _ _ (Special _ (Cons _)) = qualifiedNameResult
+  $ T.fromSynthesisName SharedName.consName
 convertQName _ _ (Special _ special@(UnboxedSingleCon _)) = Left
   $ "unsupported unboxed single constructor: " ++ prettyPrint special
 convertQName _ _ (Special _ special@(ExprHole _)) = Left
   $ "unsupported special constructor: " ++ prettyPrint special
-convertQName _ _ (Qual _ mn s) = Right $ convertModuleName mn s
-convertQName (Just d) _ (UnQual _ s) = Right $ convertModuleName d s
-convertQName Nothing ds (UnQual _ (Ident _ s)) = Right
-  $ fromMaybe (T.QualifiedName [] s) $ find p ds
- where
-  p (T.QualifiedName _ x) = x==s
-  p _ = False
-convertQName Nothing _ (UnQual _ s) = Right $ convertName s
+convertQName _ _ (Qual _ mn syntaxName) =
+  convertModuleNameChecked mn syntaxName
+convertQName (Just defaultModule) _ (UnQual _ syntaxName) =
+  convertModuleNameChecked defaultModule syntaxName
+convertQName Nothing dataTypes (UnQual _ syntaxName) = do
+  unqualified <- convertNameChecked syntaxName
+  let candidates = nub
+        [ candidate
+        | candidate <- dataTypes
+        , T.qualifiedNameOccurrence candidate
+            == T.qualifiedNameOccurrence unqualified
+        ]
+  case candidates of
+    [] -> Right unqualified
+    [candidate] -> Right candidate
+    _ -> Left $ "ambiguous unqualified name " ++ show unqualified
+      ++ "; matches " ++ intercalate ", " (map show candidates)
 
+-- | Source-compatible unchecked facade.  HSE exposes its syntax constructors,
+-- so an arbitrary 'Name' need not contain a valid Haskell occurrence.  New
+-- code should use 'convertNameChecked'; Exference's own call sites do so.
 convertName :: Name SrcSpanInfo -> T.QualifiedName
-convertName (Ident _ s)  = T.QualifiedName [] s
-convertName (Symbol _ s) = T.QualifiedName [] s
+convertName = either (error . ("invalid Haskell name: " ++)) id
+  . convertNameChecked
 
+convertNameChecked :: Name SrcSpanInfo -> Either String T.QualifiedName
+convertNameChecked (Ident _ spelling) = qualifiedNameResult
+  $ T.mkQualifiedName [] spelling
+convertNameChecked (Symbol _ spelling) = qualifiedNameResult
+  $ T.mkQualifiedName [] spelling
+
+-- | Source-compatible unchecked facade.  Prefer
+-- 'convertModuleNameChecked' for syntax not known to have come from a parser.
 convertModuleName :: ModuleName SrcSpanInfo -> Name SrcSpanInfo -> T.QualifiedName
-convertModuleName (ModuleName _ moduleName) name =
-  T.QualifiedName (wordsBy (== '.') moduleName) $ case name of
-    Ident _ value -> value
-    Symbol _ value -> value
+convertModuleName moduleName syntaxName = either
+  (error . ("invalid qualified Haskell name: " ++))
+  id
+  (convertModuleNameChecked moduleName syntaxName)
+
+convertModuleNameChecked
+  :: ModuleName SrcSpanInfo
+  -> Name SrcSpanInfo
+  -> Either String T.QualifiedName
+convertModuleNameChecked (ModuleName _ moduleSource) syntaxName = do
+  qualifier <- either (Left . SharedName.renderNameError) Right
+    $ SharedName.mkModuleName moduleSource
+  let modules = SharedName.moduleNameSegments qualifier
+      spelling = case syntaxName of
+        Ident _ value -> value
+        Symbol _ value -> value
+  qualifiedNameResult $ T.mkQualifiedName modules spelling
 
 -- | Parse the external spelling used by rating files.  Operators use the
 -- conventional @Module.(<*>)@ form, but their core payload is bare.  Built-in
 -- constructors are recovered as their structural 'T.QualifiedName' variants
 -- so rating lookup does not depend on rendered-text coincidences.
 parseQualifiedName :: String -> Either Diagnostic T.QualifiedName
-parseQualifiedName input
-  | null input = invalid "qualified name is empty"
-  | input == "[]" = pure T.ListCon
-  | input == "()" = pure $ T.TupleCon 0
-  | input == "(:)" = pure T.Cons
-  | Just arity <- tupleArity input = pure $ T.TupleCon arity
-  | otherwise = case break (== '(') input of
-      (ordinary, "") -> fromParts $ splitDots ordinary
-      (prefix, parenthesizedOperator)
-        | Just operator <- validOperator parenthesizedOperator -> do
-            modules <- parseOperatorModules prefix
-            pure $ T.QualifiedName modules operator
-        | otherwise -> invalid "malformed parenthesized operator"
+parseQualifiedName input = do
+  shared <- either (invalid . SharedName.renderNameError) Right
+    $ SharedName.parseName input
+  either (invalid . show) Right $ T.fromSynthesisName shared
   where
-    fromParts :: [String] -> Either Diagnostic T.QualifiedName
-    fromParts parts = case parts of
-      [] -> invalid "qualified name is empty"
-      _ | any null parts -> invalid "qualified name contains an empty segment"
-      _ -> pure $ T.QualifiedName (init parts) (last parts)
-
-    parseModules :: String -> Either Diagnostic [String]
-    parseModules "" = pure []
-    parseModules value = case splitDots value of
-      parts | any null parts -> invalid "module name contains an empty segment"
-            | otherwise -> pure parts
-
-    parseOperatorModules "" = pure []
-    parseOperatorModules value = case reverse value of
-      '.' : rest -> parseModules $ reverse rest
-      _ -> invalid "qualified operator is missing the dot before its parentheses"
-
-    validOperator value = case value of
-      '(' : rest -> case reverse rest of
-        ')' : reversedOperator
-          | let operator = reverse reversedOperator
-          , T.qualifiedNameOperator (T.QualifiedName [] operator)
-              == Just operator -> Just operator
-        _ -> Nothing
-      _ -> Nothing
-
-    tupleArity value = case value of
-      '(' : rest -> case reverse rest of
-        ')' : reversedCommas
-          | let commas = reverse reversedCommas
-          , not (null commas)
-          , all (== ',') commas -> Just $ length commas + 1
-        _ -> Nothing
-      _ -> Nothing
-
-    splitDots = foldr splitCharacter [[]]
-      where
-        splitCharacter '.' parts = [] : parts
-        splitCharacter character (part : parts) = (character : part) : parts
-        splitCharacter _ [] = [] -- unreachable for the non-empty seed
-
     invalid :: String -> Either Diagnostic a
     invalid message = Left $ diagnostic
       $ "invalid qualified name " ++ show input ++ ": " ++ message
@@ -283,8 +277,9 @@ findInvalidNames :: [T.QualifiedName] -> T.HsType -> [T.QualifiedName]
 findInvalidNames _ T.TypeVar {}          = []
 findInvalidNames _ T.TypeConstant {}     = []
 findInvalidNames valids (T.TypeCons qn) = case qn of
-    n@(T.QualifiedName _ _) -> [ n | n `notElem` valids ]
-    _                       -> []
+    n | SharedName.SpecialOccurrence _ <- T.qualifiedNameOccurrence n -> []
+      | n `notElem` valids -> [n]
+      | otherwise -> []
 findInvalidNames valids (T.TypeArrow t1 t2)   =
   findInvalidNames valids t1 ++ findInvalidNames valids t2
 findInvalidNames valids (T.TypeApp t1 t2)     =
@@ -292,3 +287,8 @@ findInvalidNames valids (T.TypeApp t1 t2)     =
 findInvalidNames valids (T.TypeForall _ constraints t1) =
   findInvalidNames valids t1
   ++ concatMap (concatMap (findInvalidNames valids) . T.constraint_params) constraints
+
+qualifiedNameResult
+  :: Either T.QualifiedNameError T.QualifiedName
+  -> Either String T.QualifiedName
+qualifiedNameResult = either (Left . show) Right

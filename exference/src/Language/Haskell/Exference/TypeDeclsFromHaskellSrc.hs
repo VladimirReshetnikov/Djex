@@ -111,7 +111,7 @@ getTypeDecls ds modules = do
            $ runExceptT
            $ do
       (ty, tyVarIndex) <- convertTypeNoDecl [] (Just mn) ds rawTy
-      let qname = convertModuleName mn name
+      qname <- either throwE pure $ convertModuleNameChecked mn name
       -- the 1000 is arbitrary, but it should not be used anyway.
       -- no new type variables should appear on the left hand side.
       vars <- mapExceptT (withMultiStateA (ConvData 1000 tyVarIndex)) $ rawVars `forM` tyVarTransform

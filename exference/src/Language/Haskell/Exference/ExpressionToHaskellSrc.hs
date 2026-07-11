@@ -9,9 +9,7 @@ where
 
 import Control.Monad (forM)
 import Control.Monad.Trans.MultiState
-import Data.Char (isUpper)
 import Data.Functor.Identity (runIdentity)
-import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
@@ -19,6 +17,7 @@ import Language.Haskell.Exts.Syntax
 
 import qualified Language.Haskell.Exference.Core.Expression as E
 import qualified Language.Haskell.Exference.Core.Types as T
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HsExp = Exp SrcSpanInfo
 type HsDecl = Decl SrcSpanInfo
@@ -87,11 +86,17 @@ convertInternal qualification precedence (E.ExpApply function parameter) =
       pure $ parenthesize (precedence >= 3)
         $ foldl (App noLoc) convertedFunction convertedParameters
 
-    specialApplication _ (T.TupleCon arity) parameters
-      | qualification < 2 && arity == length parameters =
+    specialApplication _ name parameters
+      | SharedName.SpecialOccurrence
+          (SharedName.TupleConstructor SharedName.Boxed arity) <-
+            T.qualifiedNameOccurrence name
+      , qualification < 2
+      , arity == length parameters =
           Tuple noLoc Boxed <$> mapM (convertInternal qualification 0) parameters
-    specialApplication _ T.Cons [left, right]
-      | qualification < 2 = infixApplication T.Cons left right
+    specialApplication _ name [left, right]
+      | SharedName.SpecialOccurrence SharedName.ConsConstructor <-
+          T.qualifiedNameOccurrence name
+      , qualification < 2 = infixApplication name left right
     specialApplication _ name [left, right]
       | qualification < 2 && isOperator name = infixApplication name left right
     specialApplication original _ parameters = defaultApplication original parameters
@@ -153,44 +158,49 @@ constructorPattern qualification constructor names =
   PApp noLoc (toQName qualification constructor) (map variablePattern names)
 
 toQName :: Int -> T.QualifiedName -> QName SrcSpanInfo
-toQName _ T.ListCon = Special noLoc (ListCon noLoc)
-toQName _ (T.TupleCon arity) = Special noLoc (TupleCon noLoc Boxed arity)
-toQName _ T.Cons = Special noLoc (Cons noLoc)
-toQName qualification qualifiedName@(T.QualifiedName modules rawName) =
-  qualify modules parsedName
+toQName qualification qualifiedName = case T.qualifiedNameOccurrence qualifiedName of
+  SharedName.SpecialOccurrence SharedName.ListConstructor ->
+    Special noLoc (ListCon noLoc)
+  SharedName.SpecialOccurrence
+      (SharedName.TupleConstructor SharedName.Boxed arity) ->
+    Special noLoc (TupleCon noLoc Boxed arity)
+  SharedName.SpecialOccurrence SharedName.ConsConstructor ->
+    Special noLoc (Cons noLoc)
+  SharedName.SpecialOccurrence SharedName.FunctionConstructor ->
+    Special noLoc (FunCon noLoc)
+  SharedName.SpecialOccurrence
+      (SharedName.TupleConstructor SharedName.Unboxed arity) ->
+    Special noLoc (TupleCon noLoc Unboxed arity)
+  SharedName.IdentifierOccurrence _ spelling ->
+    qualify $ Ident noLoc spelling
+  SharedName.OperatorOccurrence _ spelling ->
+    qualify $ Symbol noLoc spelling
   where
-    parsedName = maybe (Ident noLoc rawName) (Symbol noLoc)
-      (T.qualifiedNameOperator qualifiedName)
-    qualify [] syntaxName = UnQual noLoc syntaxName
-    qualify namespace syntaxName
-      | qualification == 0 = UnQual noLoc syntaxName
-      | qualification == 1 && isOperatorName syntaxName = UnQual noLoc syntaxName
-      | otherwise = Qual noLoc
-          (ModuleName noLoc $ intercalate "." namespace)
+    qualify syntaxName = case T.qualifiedNameModule qualifiedName of
+      Nothing -> UnQual noLoc syntaxName
+      Just namespace ->
+        if qualification == 0
+          || (qualification == 1 && isOperatorName syntaxName)
+        then UnQual noLoc syntaxName
+        else Qual noLoc
+          (ModuleName noLoc $ SharedName.renderModuleName namespace)
           syntaxName
 
 isConstructor :: T.QualifiedName -> Bool
-isConstructor T.ListCon = True
-isConstructor T.TupleCon{} = True
-isConstructor T.Cons = True
-isConstructor name@(T.QualifiedName _ rawName) = case T.qualifiedNameOperator name of
-  Just (':' : _) -> True
-  Just _ -> False
-  Nothing -> maybe False isUpper (safeHead rawName)
+isConstructor = (== SharedName.ConstructorLike)
+  . SharedName.occurrenceLexicalClass
+  . T.qualifiedNameOccurrence
 
 isOperator :: T.QualifiedName -> Bool
-isOperator T.Cons = True
-isOperator name@T.QualifiedName{} = maybe False (const True)
-  (T.qualifiedNameOperator name)
-isOperator _ = False
+isOperator name = case T.qualifiedNameOccurrence name of
+  SharedName.OperatorOccurrence _ _ -> True
+  SharedName.SpecialOccurrence SharedName.ConsConstructor -> True
+  SharedName.SpecialOccurrence SharedName.FunctionConstructor -> True
+  _ -> False
 
 isOperatorName :: Name l -> Bool
 isOperatorName Symbol{} = True
 isOperatorName _ = False
-
-safeHead :: [a] -> Maybe a
-safeHead [] = Nothing
-safeHead (value : _) = Just value
 
 parenthesize :: Bool -> HsExp -> HsExp
 parenthesize True = Paren noLoc

@@ -54,34 +54,49 @@ import Data.HList.ContainsType
 
 import qualified Data.Map as M
 import Text.Read ( readMaybe )
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 
-builtInDeclsM :: (Monad m) => MultiRWST r w s m [HsFunctionDecl]
-builtInDeclsM = pure $ consType : unitConstructor : map tupleConstructor [2 .. 7]
+builtInDeclsM
+  :: Monad m
+  => MultiRWST r w s m (Either QualifiedNameError [HsFunctionDecl])
+builtInDeclsM = pure $ do
+  consName <- fromSynthesisName SharedName.consName
+  listName <- fromSynthesisName SharedName.listName
+  unitConstructor <- do
+    unitName <- mkBoxedTupleName 0
+    pure (unitName, TypeCons unitName)
+  tupleConstructors <- mapM tupleConstructor [2 .. 7]
+  pure $ consType consName listName : unitConstructor : tupleConstructors
  where
-  consType = (Cons, TypeArrow
+  consType consName listName = (consName, TypeArrow
             (TypeVar 0)
-            (TypeArrow (TypeApp (TypeCons ListCon)
+            (TypeArrow (TypeApp (TypeCons listName)
                                 (TypeVar 0))
-                       (TypeApp (TypeCons ListCon)
+                       (TypeApp (TypeCons listName)
                                 (TypeVar 0))))
-  unitConstructor = (TupleCon 0, TypeCons $ TupleCon 0)
-  tupleConstructor arity =
-    (TupleCon arity, foldr TypeArrow (tupleType arity) $ typeVariables arity)
+  tupleConstructor arity = do
+    tupleName <- mkBoxedTupleName arity
+    pure (tupleName,
+      foldr TypeArrow (tupleType tupleName arity) $ typeVariables arity)
 
-builtInDeconstructorsM :: (Monad m) => MultiRWST r w s m [DeconstructorBinding]
-builtInDeconstructorsM = pure $ map deconstructor [2 .. 7]
+builtInDeconstructorsM
+  :: Monad m
+  => MultiRWST r w s m (Either QualifiedNameError [DeconstructorBinding])
+builtInDeconstructorsM = pure $ mapM deconstructor [2 .. 7]
  where
-  deconstructor arity = DeconstructorBinding
-    (tupleType arity)
-    [ConstructorBinding (TupleCon arity) (typeVariables arity)]
-    False
+  deconstructor arity = do
+    tupleName <- mkBoxedTupleName arity
+    pure $ DeconstructorBinding
+      (tupleType tupleName arity)
+      [ConstructorBinding tupleName (typeVariables arity)]
+      False
 
 typeVariables :: Int -> [HsType]
 typeVariables arity = map TypeVar [0 .. arity - 1]
 
-tupleType :: Int -> HsType
-tupleType arity = foldl TypeApp (TypeCons $ TupleCon arity)
+tupleType :: QualifiedName -> Int -> HsType
+tupleType tupleName arity = foldl TypeApp (TypeCons tupleName)
   $ typeVariables arity
 
 -- | Takes a list of bindings, and a dictionary of desired
@@ -133,7 +148,11 @@ parseModules l = do
   -- forM_ (rights eParsed) $ \m -> pprintTo 10000 m >>= print
   mapM_ (mTell . (:[])) $ lefts eParsed
   let mods = rights eParsed
-  let ds = getDataTypes mods
+  ds <- case getDataTypesChecked mods of
+    Left conversionError -> do
+      mTell ["could not extract data-type names: " ++ conversionError]
+      pure []
+    Right dataTypes -> pure dataTypes
   typeDeclsE <- getTypeDecls ds mods
   lefts typeDeclsE `forM_` (mTell . (:[]))
   let typeDecls = M.fromList $ (\x -> (tdecl_name x, x)) <$> rights typeDeclsE
@@ -163,8 +182,16 @@ parseModules l = do
   mTell ["and " ++ show (n_insts) ++ " instances"]
   mTell ["(-> " ++ show (length $ concat $ M.elems $ insts) ++ " instances after inflation)"]
   mTell ["and " ++ show (length decls) ++ " function decls"]
-  builtInDecls          <- builtInDeclsM
-  builtInDeconstructors <- builtInDeconstructorsM
+  builtInDeclsResult          <- builtInDeclsM
+  builtInDeconstructorsResult <- builtInDeconstructorsM
+  let reportBuiltInFailure kind failure =
+        mTell ["could not construct built-in " ++ kind ++ ": " ++ show failure]
+  builtInDecls <- case builtInDeclsResult of
+    Left failure -> reportBuiltInFailure "bindings" failure >> pure []
+    Right bindings -> pure bindings
+  builtInDeconstructors <- case builtInDeconstructorsResult of
+    Left failure -> reportBuiltInFailure "deconstructors" failure >> pure []
+    Right deconstructors -> pure deconstructors
   return $ ( builtInDecls++decls
            , builtInDeconstructors++deconss
            , cntxt

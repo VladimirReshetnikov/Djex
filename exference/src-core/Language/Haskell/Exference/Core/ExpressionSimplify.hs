@@ -61,7 +61,11 @@ simplifyId :: Expression -> Expression
 simplifyId e@ExpVar{}                 = e
 simplifyId e@ExpName{}                = e
 simplifyId e@(ExpLambda i _ (ExpVar j _))
-  | i == j                            = ExpName (QualifiedName [] "id")
+  | i == j                            = case mkQualifiedName [] "id" of
+      Right identityName -> ExpName identityName
+      -- This branch is unreachable for the fixed literal, but keeping the
+      -- checked construction total makes the invariant explicit.
+      Left _ -> e
   | otherwise                         = e
 simplifyId (ExpLambda i ty e)         = ExpLambda i ty $ simplifyId e
 simplifyId (ExpApply e1 e2)           = ExpApply (simplifyId e1) (simplifyId e2)
@@ -104,10 +108,12 @@ simplifyCompose (ExpCaseMatch bindExp alts)
 simplifyCompose' :: Int -> HsType -> [Expression] -> Expression -> Expression
 simplifyCompose' i ty [] e@ExpVar{} = ExpLambda i ty e
 simplifyCompose' i ty l e@(ExpVar j _)
-  | i == j    = foldl1 (\e1 e2 -> ExpApply
-                                    (ExpApply
-                                      (ExpName (QualifiedName [] ".")) e2) e1)
-                       l
+  | i == j    = case mkQualifiedName [] "." of
+      Right compositionName ->
+        foldl1 (\e1 e2 -> ExpApply
+                            (ExpApply (ExpName compositionName) e2) e1)
+          l
+      Left _ -> ExpLambda i ty $ foldl (flip ExpApply) e l
   | otherwise = ExpLambda i ty $ foldl (flip ExpApply) e l
 simplifyCompose' i ty l (ExpApply e1 e2)
   | countUses i e1==0 = simplifyCompose' i ty (simplifyCompose e1:l) e2

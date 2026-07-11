@@ -74,11 +74,25 @@ getTypeClasses :: forall m r w s m0
                -> [Module SrcSpanInfo]
                -> m [Either String HsTypeClass]
 getTypeClasses ds tDeclMap ms = do
+  let rawClasses =
+        [ (moduleName, name, vars, context)
+        | modul <- ms
+        , Just (moduleName, decls) <- [moduleNameAndDecls modul]
+        , ClassDecl _ context rawHead _ _ <- decls
+        , let (name, vars) = splitDeclHead rawHead
+        ]
+      namedClasses =
+        [ (convertModuleNameChecked moduleName name, moduleName, vars, context)
+        | (moduleName, name, vars, context) <- rawClasses
+        ]
+      invalidNames =
+        [ Left $ "invalid type-class name: " ++ conversionError
+        | (Left conversionError, _, _, _) <- namedClasses
+        ]
   secondMap :: M.Map QualifiedName (Either String ([TempAsst], [TVarId])) <-
     fmap M.fromList $ sequence
-      [ [ (qn, x) --m (inner) -- []
-        | let qn = convertModuleName moduleName name
-        , x <- withMultiStateA (ConvData 0 M.empty) $ runExceptT $ let
+      [ do
+          x <- withMultiStateA (ConvData 0 M.empty) $ runExceptT $ let
               convF (TypeA _ classType) = do
                 (qname, types) <- maybe
                   (throwE $ "invalid superclass constraint: " ++ prettyPrint classType)
@@ -92,11 +106,8 @@ getTypeClasses ds tDeclMap ms = do
               convF c = throwE $ "unknown superclass constraint: " ++ show c
             in (,) <$> mapM convF (contextConstraints context)
                    <*> mapM tyVarTransform vars
-        ]
-      | modul <- ms
-      , Just (moduleName, decls) <- [moduleNameAndDecls modul]
-      , ClassDecl _ context rawHead _ _ <- decls
-      , let (name, vars) = splitDeclHead rawHead
+          return (qn, x)
+      | (Right qn, moduleName, vars, context) <- namedClasses
       ]
   let
     helper :: QualifiedName
@@ -113,7 +124,7 @@ getTypeClasses ds tDeclMap ms = do
       -- CARE: DONT USE STRICT METHODS ON THIS MAP
       --       (COMPILER WONT COMPLAIN)
     resultMap = LazyMap.mapWithKey helper secondMap
-  return $ LazyMap.elems $ resultMap
+  return $ invalidNames ++ LazyMap.elems resultMap
 
 getInstances :: forall m m0 r w s
               . ( m ~ MultiRWST r w s m0

@@ -6,8 +6,7 @@
 
 module Language.Haskell.Exference.Core.Types
   ( TVarId
-  , QualifiedName(..)
-  , qualifiedNameOperator
+  , module Language.Haskell.Exference.Core.Name
   , HsType (..)
   , HsTypeOffset (..)
   , Subst (..)
@@ -39,7 +38,7 @@ where
 
 
 
-import Data.Char ( ord, chr, isPunctuation, isSymbol, toLower )
+import Data.Char ( ord, chr, toLower )
 import Data.List ( intercalate, intersperse )
 import Data.Maybe ( fromMaybe )
 import Data.Monoid ( Any(..) )
@@ -52,6 +51,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as L
 
 import Language.Haskell.Exference.Core.Internal.Closure ( closure )
+import Language.Haskell.Exference.Core.Name
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Control.DeepSeq.Generics
 import Control.DeepSeq
@@ -66,13 +67,6 @@ import Safe
 type TVarId = Int
 data Subst  = Subst {-# UNPACK #-} !TVarId !HsType
 type Substs = IntMap.IntMap HsType
-
-data QualifiedName
-  = QualifiedName [String] String
-  | ListCon
-  | TupleCon Int
-  | Cons
-  deriving (Eq, Ord, Generic, Data)
 
 data HsType = TypeVar      {-# UNPACK #-} !TVarId
             | TypeConstant {-# UNPACK #-} !TVarId
@@ -133,45 +127,12 @@ data QueryClassEnv = QueryClassEnv
   }
   deriving (Generic)
 
-instance NFData QualifiedName  where rnf = genericRnf
 instance NFData HsType         where rnf = genericRnf
 instance NFData HsTypeClass    where rnf = genericRnf
 instance NFData HsInstance     where rnf = genericRnf
 instance NFData HsConstraint   where rnf = genericRnf
 instance NFData StaticClassEnv where rnf = genericRnf
 instance NFData QueryClassEnv  where rnf = genericRnf
-
-instance Show QualifiedName where
-  show name@(QualifiedName ns rawName) = intercalate "."
-    $ ns ++ [maybe rawName (\operator -> '(' : operator ++ ")")
-        (qualifiedNameOperator name)]
-  show ListCon              = "[]"
-  show (TupleCon 0)         = "()"
-  show (TupleCon i)         = "(" ++ replicate (i-1) ',' ++ ")"
-  show Cons                 = "(:)"
-
--- | Return the bare spelling of a symbolic ordinary name.  Symbols are kept
--- bare in 'QualifiedName'; parentheses belong to Haskell's prefix syntax and
--- are added only by renderers.  Accepting the historical parenthesized payload
--- here keeps hand-constructed values readable while frontend constructors
--- maintain the canonical representation.
-qualifiedNameOperator :: QualifiedName -> Maybe String
-qualifiedNameOperator (QualifiedName _ rawName) = case rawName of
-  '(' : rest -> case reverse rest of
-    ')' : reversedOperator
-      | isOperator (reverse reversedOperator) -> Just (reverse reversedOperator)
-    _ -> Nothing
-  operator
-    | isOperator operator -> Just operator
-  _ -> Nothing
-  where
-    isOperator [] = False
-    isOperator characters = all isOperatorCharacter characters
-    isOperatorCharacter character =
-      character `elem` ("!#$%&*+./<=>?@\\^|-~:" :: String)
-      || ((isSymbol character || isPunctuation character)
-          && character `notElem` ("(),;[]`{}_\"'" :: String))
-qualifiedNameOperator _ = Nothing
 
 instance Show HsType where
   showsPrec _ (TypeVar i) = showString $ showVar i
@@ -320,13 +281,14 @@ showTypedVar i = do
   -- h t | traceShow (i, t) False = undefined
   h TypeVar{}          = return $ showVar i
   h TypeConstant{}     = return $ showVar i
-  h (TypeCons qName) = do
-    return $ case qName of
-      QualifiedName _ (c:_) -> toLower c : show i
-      QualifiedName{}       -> showVar i
-      ListCon               -> showVar i ++ "s"
-      TupleCon{}            -> showVar i
-      Cons                  -> showVar i
+  h (TypeCons qName) = return $ case qualifiedNameOccurrence qName of
+    SharedName.IdentifierOccurrence _ (c : _) -> toLower c : show i
+    SharedName.IdentifierOccurrence _ [] -> showVar i
+    -- A symbolic type constructor has no identifier stem from which to form a
+    -- legal term binder.  Falling back avoids historical names such as @:1@.
+    SharedName.OperatorOccurrence _ _ -> showVar i
+    SharedName.SpecialOccurrence SharedName.ListConstructor -> showVar i ++ "s"
+    SharedName.SpecialOccurrence _ -> showVar i
   h TypeArrow{}        = return $ "f" ++ show i
   h (TypeApp t _)      = h t
   h (TypeForall _ _ t) = h t

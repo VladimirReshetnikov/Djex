@@ -39,6 +39,13 @@ This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
 
+Core names are validated, structural wrappers over `haskell-synthesis`: module
+segments, ordinary identifiers and operators, list/cons/function constructors,
+and boxed tuples can no longer be confused by rendered spelling.  The legacy
+`QualifiedName(..)` constructor surface remains source-compatible, while new
+code can use checked smart constructors.  Unqualified frontend lookup now
+rejects ambiguous imported type names instead of silently choosing the first.
+
 The `exference` executable is a normal build target again. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been
 removed; deterministic regressions live in `exference-tests` and the separate

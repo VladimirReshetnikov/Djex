@@ -1,12 +1,24 @@
 module Main (main) where
 
+import Control.DeepSeq (force)
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
+import Data.Data
+  ( dataTypeConstrs
+  , dataTypeName
+  , dataTypeOf
+  , fromConstr
+  , gmapQ
+  , showConstr
+  , toConstr
+  )
+import Data.Either (rights)
 import Data.Functor.Identity (runIdentity)
 import Data.List (find, isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import qualified GHC.Generics as Generic
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 import Control.Monad.Trans.Except (runExceptT)
@@ -47,6 +59,7 @@ import Language.Haskell.Exference.EnvironmentParser
   )
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc (convert)
+import Language.Haskell.Exference.BindingsFromHaskellSrc (getClassMethods)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
@@ -58,6 +71,8 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
   , convertQName
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
+import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified CompatibilityImport
 import Paths_exference (getDataFileName)
 
 main :: IO ()
@@ -83,6 +98,22 @@ tests = testGroup "Exference"
           IntMap.keys (qClassEnv_varConstraints env1) @?= [1, 2]
       , testCase "unknown classes remain nominally distinct" $
           unknownTypeClass (name "Foo") == unknownTypeClass (name "Bar") @?= False
+      , testCase "class methods attach to the exactly qualified class" $ do
+          classAName <- expectRight $ mkQualifiedName ["A"] "C"
+          classBName <- expectRight $ mkQualifiedName ["B"] "C"
+          let classA = HsTypeClass classAName [0] []
+              classB = HsTypeClass classBName [0] []
+          parsedModule <- expectParsedModule $ unlines
+            [ "module A where"
+            , "class C a where"
+            , "  method :: a -> a"
+            ]
+          let methods = runIdentity $ runMultiRWSTNil
+                $ getClassMethods [classB, classA] [] Map.empty [parsedModule]
+          case rights methods of
+            [(_, TypeForall _ (constraint : _) _)] ->
+              tclass_name (constraint_tclass constraint) @?= classAName
+            result -> fail $ "unexpected class methods: " ++ show result
       , testCase "cyclic instance prerequisites remain unresolved" $ do
           let cls = HsTypeClass (name "C") [0] []
               prerequisite = HsConstraint cls [TypeVar 0]
@@ -223,6 +254,59 @@ tests = testGroup "Exference"
             Left err -> fail $ "signed rating was rejected: " ++ show err
             Right _ -> pure ()
       ]
+  , testGroup "validated names"
+      [ testCase "legacy bundled constructors remain import-compatible" $
+          map show CompatibilityImport.legacyConstructorValues
+            @?= ["id", "[]", "()", "(:)"]
+      , testCase "checked ordinary construction canonicalizes operators" $ do
+          operator <- expectRight
+            $ mkQualifiedName ["Control", "Applicative"] "(<*>)"
+          show operator @?= "Control.Applicative.(<*>)"
+          qualifiedNameOperator operator @?= Just "<*>"
+          function <- expectRight $ mkQualifiedName [] "->"
+          qualifiedNameOperator function @?= Just "->"
+          function @?= QualifiedName [] "->"
+      , testCase "checked ordinary construction rejects contextual syntax" $
+          mapM_ (assertNameRejected . uncurry mkQualifiedName)
+            [ ([], " map")
+            , ([], "map ")
+            , ([], "`map`")
+            , (["Data"], "Data.map")
+            ]
+      , testCase "shared conversion rejects unboxed tuples" $ do
+          shared <- expectRight $ SharedName.tupleName SharedName.Unboxed 2
+          fromSynthesisName shared @?= Left
+            (UnsupportedSpecialName
+              $ SharedName.TupleConstructor SharedName.Unboxed 2)
+      , testCase "shared conversion round-trips the Exference subset" $ do
+          operator <- expectRight $ mkQualifiedName ["Data", "Function"] "."
+          tuple <- expectRight $ mkBoxedTupleName 3
+          mapM_ (\qualifiedName ->
+              fromSynthesisName (toSynthesisName qualifiedName)
+                @?= Right qualifiedName)
+            [operator, tuple, ListCon, Cons, QualifiedName [] "->"]
+      , testCase "Eq, Ord, Show, Generic, and NFData observe one value" $ do
+          value <- expectRight $ mkQualifiedName ["Data", "List"] "map"
+          value @?= value
+          compare value value @?= EQ
+          show value @?= "Data.List.map"
+          Generic.to (Generic.from value) @?= value
+          force value @?= value
+      , testCase "Data retains the historical four-constructor view" $ do
+          ordinary <- expectRight $ mkQualifiedName ["Data", "List"] "map"
+          tuple <- expectRight $ mkBoxedTupleName 3
+          map (showConstr . toConstr) [ordinary, ListCon, tuple, Cons]
+            @?= ["QualifiedName", "ListCon", "TupleCon", "Cons"]
+          map (length . gmapQ (const ())) [ordinary, ListCon, tuple, Cons]
+            @?= [2, 0, 1, 0]
+          map showConstr (dataTypeConstrs $ dataTypeOf ordinary)
+            @?= ["QualifiedName", "ListCon", "TupleCon", "Cons"]
+          dataTypeName (dataTypeOf ordinary)
+            @?= "Language.Haskell.Exference.Core.Types.QualifiedName"
+          let constructors = dataTypeConstrs $ dataTypeOf ordinary
+          (fromConstr (constructors !! 1) :: QualifiedName) @?= ListCon
+          (fromConstr (constructors !! 3) :: QualifiedName) @?= Cons
+      ]
   , testGroup "parsing and diagnostics"
       [ testCase "ratings reject a missing value" $
           first diagnosticMessage (parseRatings "foo") @?= Left
@@ -240,6 +324,17 @@ tests = testGroup "Exference"
       , testCase "qualified operators retain module and spelling" $
           parseQualifiedName "Control.Applicative.(<*>)"
             @?= Right (QualifiedName ["Control", "Applicative"] "<*>")
+      , testCase "broad unqualified lookup diagnoses ambiguity" $ do
+          typeA <- expectRight $ mkQualifiedName ["A"] "T"
+          typeB <- expectRight $ mkQualifiedName ["B"] "T"
+          let syntaxName = HSE.UnQual HSE.noSrcSpan
+                (HSE.Ident HSE.noSrcSpan "T")
+          case convertQName Nothing [typeA, typeB] syntaxName of
+            Left message -> do
+              assertBool message $ "ambiguous unqualified name" `isInfixOf` message
+              assertBool message $ "A.T" `isInfixOf` message
+              assertBool message $ "B.T" `isInfixOf` message
+            Right result -> fail $ "ambiguous name resolved as " ++ show result
       , testCase "qualified operators render canonically and round-trip" $ do
           let names =
                 [ QualifiedName [] "."
@@ -417,6 +512,16 @@ tests = testGroup "Exference"
                   HSE.ParseOk _ -> pure ()
                   failure -> fail $ "rendered pattern does not parse: " ++ show failure
               _ -> fail $ "unexpected constructor pattern: " ++ show expression
+      , testCase "symbolic type constructors use a legal binder fallback" $ do
+          symbolic <- expectRight $ mkQualifiedName [] ":+:"
+          case convert 0 $ ExpLambda 1 (TypeCons symbolic)
+              (ExpVar 1 $ TypeCons symbolic) of
+            HSE.Lambda _ [HSE.PVar _ (HSE.Ident _ binder)] _ -> do
+              binder @?= "a"
+              case HSE.parseExp $ "\\" ++ binder ++ " -> " ++ binder of
+                HSE.ParseOk _ -> pure ()
+                failure -> fail $ "invalid generated binder: " ++ show failure
+            expression -> fail $ "unexpected lambda: " ++ show expression
       ]
   , testGroup "independent expression checking"
       [ testCase "accepts a typed identity" $ do
@@ -498,3 +603,16 @@ onlyChunk input = case findExpressionsWithStats input of
 
 expectRight :: Show problem => Either problem result -> IO result
 expectRight = either (fail . show) pure
+
+assertNameRejected
+  :: Either QualifiedNameError QualifiedName
+  -> IO ()
+assertNameRejected (Left _) = pure ()
+assertNameRejected (Right result) =
+  fail $ "invalid name was accepted as " ++ show result
+
+expectParsedModule :: String -> IO (HSE.Module HSE.SrcSpanInfo)
+expectParsedModule source = case HSE.parseModuleWithMode
+    (haskellSrcExtsParseMode "qualified-class-test") source of
+  HSE.ParseOk modul -> pure modul
+  failure -> fail $ "module did not parse: " ++ show failure

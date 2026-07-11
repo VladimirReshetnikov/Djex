@@ -23,6 +23,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.EnvironmentParser
 
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Name as SharedName
 import Language.Haskell.Exference.Core.ExpressionSimplify
 
 import Control.Monad ( when, forM_ )
@@ -261,9 +262,13 @@ main = do
         -}
 
 filterBindingsSimple :: [String] -> [FunctionBinding] -> [FunctionBinding]
-filterBindingsSimple excluded = filter $ \binding -> case functionName binding of
-  QualifiedName _ name -> name `notElem` excluded
-  _ -> True
+filterBindingsSimple excluded = filter $ \binding ->
+  case qualifiedNameOccurrence $ functionName binding of
+    SharedName.IdentifierOccurrence _ spelling -> spelling `notElem` excluded
+    SharedName.OperatorOccurrence _ spelling -> spelling `notElem` excluded
+    SharedName.SpecialOccurrence SharedName.FunctionConstructor ->
+      "->" `notElem` excluded
+    SharedName.SpecialOccurrence _ -> True
 
 bindingIsSupported :: FunctionBinding -> Bool
 bindingIsSupported binding = all (not . containsForall)

@@ -8,6 +8,7 @@ module Language.Haskell.Exference.BindingsFromHaskellSrc
   , getDataConss
   , getClassMethods
   , getDataTypes
+  , getDataTypesChecked
   )
 where
 
@@ -61,7 +62,7 @@ transformDecl
 transformDecl tcs ds mn tDeclMap (TypeSig _loc names qtype)
   = insName qtype $ do
       (ctype, _) <- convertType tcs (Just mn) ds tDeclMap qtype
-      return $ helper mn ctype <$> names
+      mapM (either throwE pure . helper mn ctype) names
 transformDecl _ _ _ _ _ = return []
 
 transformDecl'
@@ -75,15 +76,20 @@ transformDecl'
 transformDecl' tcs ds mn tDeclMap (TypeSig _loc names qtype)
   = insName qtype $ do
       ctype <- convertTypeInternal tcs (Just mn) ds tDeclMap qtype
-      return $ helper mn ctype <$> names
+      mapM (either throwE pure . helper mn ctype) names
 transformDecl' _ _ _ _ _ = return []
 
 insName :: (Functor m, Monad m)
         => Type SrcSpanInfo -> ExceptT String m a -> ExceptT String m a
 insName qtype = withExceptT (\x -> x ++ " in " ++ prettyPrint qtype)
 
-helper :: ModuleName SrcSpanInfo -> HsType -> Name SrcSpanInfo -> HsFunctionDecl
-helper mn t x = (convertModuleName mn x, forallify t)
+helper
+  :: ModuleName SrcSpanInfo
+  -> HsType
+  -> Name SrcSpanInfo
+  -> Either String HsFunctionDecl
+helper mn t syntaxName = (, forallify t)
+  <$> convertModuleNameChecked mn syntaxName
 
 getDataConss
   :: (Monad m)
@@ -106,7 +112,7 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
     rTypeM :: ( MonadMultiState ConvData m )
            => ExceptT String m HsType
     rTypeM = do
-      let rName = convertModuleName moduleName name
+      rName <- either throwE pure $ convertModuleNameChecked moduleName name
       ps  <- mapM pTransform params
       return $ (forallify . foldl TypeApp (TypeCons rName)) ps
     pTransform :: MonadMultiState ConvData m
@@ -132,7 +138,7 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
         ConDecl _ c t -> pure (c, t)
         x           -> throwE $ "unknown ConDecl: " ++ show x
       convTs <- convertTypeInternal tcs (Just moduleName) ds tDeclMap `mapM` tys
-      let qName = convertModuleName moduleName cname
+      qName <- either throwE pure $ convertModuleNameChecked moduleName cname
       return $ (qName, convTs)
   let
     addConsMsg = (++) $ show name ++ ": "
@@ -169,31 +175,30 @@ getClassMethods tcs ds tDeclMap modules = fmap join $ sequence $ do
   (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
   ClassDecl _ _ rawHead _ maybeClassDecls <- decls
   let (name, vars) = splitDeclHead rawHead
-  Ident _ nameStr <- [name]
   let cdecls = fromMaybe [] maybeClassDecls
   return $ do
     let errorMod = (++) ("class method for "++show name++": ")
-    let tcsTuples = (\tc -> (tclass_name tc, tc)) <$> tcs
-    let searchF (QualifiedName _ n) = n==nameStr
-        searchF _                   = False
-    let maybeClass = snd <$> find (searchF . fst) tcsTuples
-    case maybeClass of
-      Nothing -> return [Left $ "unknown type class: "++show name]
-      Just cls -> do
-        let cnstrA = HsConstraint cls <$> mapM ((TypeVar <$>) . tyVarTransform) vars
-        --     action :: ( MonadMultiState ConvData m ) => m [Either String [HsFunctionDecl]]
-        rEithers <- withMultiStateA (ConvData 0 M.empty) $ do
-          cnstrE <- runExceptT cnstrA
-          case cnstrE of
-            Left x -> return [Left x]
-            Right cnstr ->
-              mapM ( runExceptT
-                   . fmap (map (addConstraint cnstr))
-                   . transformDecl' tcs ds moduleName tDeclMap)
-                $ [ d | ClsDecl _ d <- cdecls ]
-        let _ = rEithers :: [Either String [HsFunctionDecl]]
-        return $ concatMap (either (return . Left . errorMod) (map Right))
-               $ rEithers
+    case convertModuleNameChecked moduleName name of
+      Left conversionError -> return [Left $ errorMod conversionError]
+      Right className -> case find ((== className) . tclass_name) tcs of
+        Nothing -> return [Left $ "unknown type class: " ++ show className]
+        Just cls -> do
+          let cnstrA = HsConstraint cls
+                <$> mapM ((TypeVar <$>) . tyVarTransform) vars
+          -- action :: MonadMultiState ConvData m
+          --        => m [Either String [HsFunctionDecl]]
+          rEithers <- withMultiStateA (ConvData 0 M.empty) $ do
+            cnstrE <- runExceptT cnstrA
+            case cnstrE of
+              Left x -> return [Left x]
+              Right cnstr ->
+                mapM ( runExceptT
+                     . fmap (map (addConstraint cnstr))
+                     . transformDecl' tcs ds moduleName tDeclMap)
+                  $ [ d | ClsDecl _ d <- cdecls ]
+          let _ = rEithers :: [Either String [HsFunctionDecl]]
+          return $ concatMap (either (return . Left . errorMod) (map Right))
+                 $ rEithers
   where
     addConstraint :: HsConstraint -> HsFunctionDecl -> HsFunctionDecl
     addConstraint c (name, ty) = case forallify ty of
@@ -203,18 +208,30 @@ getClassMethods tcs ds tDeclMap modules = fmap join $ sequence $ do
       -- makes this boundary robust if its normalization policy later changes.
       body -> (name, TypeForall [] [c] body)
 
-getDataTypes :: [Module SrcSpanInfo] -> [QualifiedName]
-getDataTypes modules = d1 ++ d2
+-- | Checked extraction used by Exference itself.  Keeping construction
+-- failures explicit matters because HSE syntax constructors are public and can
+-- carry malformed module or occurrence spellings.
+getDataTypesChecked
+  :: [Module SrcSpanInfo]
+  -> Either String [QualifiedName]
+getDataTypesChecked modules = mapM (uncurry convertModuleNameChecked) $ d1 ++ d2
  where
   d1 = do
     modul <- modules
     (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
     DataDecl _ _ _ rawHead _ _ <- decls
     let (name, _) = splitDeclHead rawHead
-    return $ convertModuleName moduleName name
+    return (moduleName, name)
   d2 = do
     modul <- modules
     (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
     TypeDecl _ rawHead _ <- decls
     let (name, _) = splitDeclHead rawHead
-    return $ convertModuleName moduleName name
+    return (moduleName, name)
+
+-- | Historical unchecked facade.  New code should use
+-- 'getDataTypesChecked'; malformed hand-built HSE nodes cannot be represented
+-- by the validated core name type.
+getDataTypes :: [Module SrcSpanInfo] -> [QualifiedName]
+getDataTypes = either (error . ("invalid data-type name: " ++)) id
+  . getDataTypesChecked

@@ -14,6 +14,12 @@ module Language.Haskell.Exference
   , ExferenceInput ( .. )
   , ExferenceOutputElement
   , ExferenceStats (..)
+  , ExferenceInputError (..)
+  , findExpressionsEither
+  , SearchCompletion (..)
+  , SearchStatus (..)
+  , Penalty (..)
+  , Priority (..)
   )
 where
 
@@ -22,6 +28,7 @@ where
 import Language.Haskell.Exference.Core
 
 import Language.Haskell.Exference.Core.ExferenceStats
+import Language.Haskell.Exference.Core.Score
 
 import Data.Maybe ( maybeToList, listToMaybe, fromMaybe )
 import Control.Arrow ( first, second, (***) )
@@ -68,7 +75,7 @@ findFirstBestExpressions :: ExferenceInput
                          -> [ExferenceOutputElement]
 findFirstBestExpressions input
   | r <- findExpressions input
-  , f <- head . groupBy (\(~(_, _, stats1)) (~(_, _, stats2)) -> 
+  , f <- firstGroupBy (\(~(_, _, stats1)) (~(_, _, stats2)) ->
                               exference_complexityRating stats1
                            >= exference_complexityRating stats2)
   = case r of
@@ -117,10 +124,10 @@ findFirstBestExpressionsLookahead :: Int
                                   -> ExferenceInput
                                   -> [ExferenceOutputElement]
 findFirstBestExpressionsLookahead n =
-  f maxBound (1 / 0) [] . findExpressionsChunked
+  f maxBound maxPenalty [] . findExpressionsChunked
  where
   f :: Int
-    -> Float
+    -> Penalty
     -> [ExferenceOutputElement]
     -> [[ExferenceOutputElement]]
     -> [ExferenceOutputElement]
@@ -143,10 +150,10 @@ findFirstBestExpressionsLookaheadPreferNoConstraints :: Int
                                                      -> ExferenceInput
                                                      -> [ExferenceOutputElement]
 findFirstBestExpressionsLookaheadPreferNoConstraints n =
-  f maxBound (1 / 0) [] [] . findExpressionsChunked
+  f maxBound maxPenalty [] [] . findExpressionsChunked
  where
   f :: Int
-    -> Float
+    -> Penalty
     -> [ExferenceOutputElement] -- solutions without constraints
     -> [ExferenceOutputElement] -- solution(s) with constraints
     -> [[ExferenceOutputElement]]
@@ -187,7 +194,13 @@ findBestNExpressions n input
   | r <- findSortNExpressions n input
   = case r of
     [] -> []
-    _  -> head $ groupBy (\(~(_, _, stats1)) (~(_, _, stats2)) -> 
+    _  -> firstGroupBy (\(~(_, _, stats1)) (~(_, _, stats2)) ->
                               exference_complexityRating stats1
                            >= exference_complexityRating stats2)
                          r
+
+firstGroupBy :: (a -> a -> Bool) -> [a] -> [a]
+firstGroupBy _ [] = []
+firstGroupBy relation values = case groupBy relation values of
+  group : _ -> group
+  [] -> []

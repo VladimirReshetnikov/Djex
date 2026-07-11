@@ -88,6 +88,8 @@ unify ut1 ut2 = unify' $ UniState2 [TypeEq ut1 ut2] IntMap.empty IntMap.empty
       ) -- up here is the same control flow again, with the deconsing and the growing of the tail... maybe make your own hof for now? oh wait you also modify the tail
       -}
     uniStep :: TypeEq -> StepResult
+    uniStep (TypeEq TypeForall{} _) = StepFailed
+    uniStep (TypeEq _ TypeForall{}) = StepFailed
     -- uniStep (TypeEq (TypeVar i1) (TypeVar i2)) | i1==i2 = Just (Right [])
     uniStep (TypeEq t1 (TypeVar i2)) = if occursIn i2 t1
       then StepFailed
@@ -99,12 +101,8 @@ unify ut1 ut2 = unify' $ UniState2 [TypeEq ut1 ut2] IntMap.empty IntMap.empty
     uniStep (TypeEq (TypeCons s1) (TypeCons s2)) | s1 == s2 = StepClear
     uniStep (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = StepNewEqs [TypeEq t1 t3, TypeEq t2 t4]
     uniStep (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = StepNewEqs [TypeEq t1 t3, TypeEq t2 t4]
-    -- TODO TypeForall unification
-    -- THIS IS WRONG; WE IGNORE FORALLS FOR THE MOMENT
-    -- uniStep (TypeEq (TypeForall _ _ t1) (t2)) = uniStep $ TypeEq t1 t2
-    -- uniStep (TypeEq (t1) (TypeForall _ _ t2)) = uniStep $ TypeEq t1 t2
-    uniStep (TypeEq TypeForall{} _) = error "this probably does not ever happen anymore, as foralls are treated previously."
-    uniStep (TypeEq _ TypeForall{}) = error "this probably does not ever happen anymore, as foralls are treated previously."
+    -- Higher-rank subsumption requires skolemization and escape checks.
+    -- Conservatively reject nested foralls instead of erasing the quantifier.
     uniStep _ = StepFailed
 
 
@@ -131,6 +129,8 @@ unifyOffset ut1 (HsTypeOffset ut2 offset) = unify' $ UniState2 [TypeEq ut1 ut2]
         Right eqs -> UniState2 (eqs++xr) l r
       )
     uniStep :: TypeEq -> Maybe (Either (Either Subst (Subst, Subst)) [TypeEq])
+    uniStep (TypeEq TypeForall{} _) = Nothing
+    uniStep (TypeEq _ TypeForall{}) = Nothing
     uniStep (TypeEq (TypeVar i1) (TypeVar i2)) | i1==offset+i2 = Just (Right [])
     uniStep (TypeEq (t1) (TypeVar i2)) = if occursIn (offset+i2) t1
       then Nothing
@@ -142,10 +142,6 @@ unifyOffset ut1 (HsTypeOffset ut2 offset) = unify' $ UniState2 [TypeEq ut1 ut2]
     uniStep (TypeEq (TypeCons s1) (TypeCons s2)) | s1==s2 = Just (Right [])
     uniStep (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
     uniStep (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
-    -- TODO TypeForall unification
-    -- THIS IS WRONG; WE IGNORE FORALLS FOR THE MOMENT
-    uniStep (TypeEq (TypeForall _ _ t1) (t2)) = uniStep $ TypeEq t1 t2
-    uniStep (TypeEq (t1) (TypeForall _ _ t2)) = uniStep $ TypeEq t1 t2
     uniStep _ = Nothing
 
 -- treats the variables in the first parameter as constants, and returns
@@ -185,6 +181,8 @@ unifyRightOffset ut1 (HsTypeOffset ut2 offset) = unify' $ UniState1 [TypeEq ut1 
         Right eqs -> UniState1 (eqs++xr) ss
       )
     uniStep :: TypeEq -> Maybe (Either (Subst, Subst) [TypeEq])
+    uniStep (TypeEq TypeForall{} _) = Nothing
+    uniStep (TypeEq _ TypeForall{}) = Nothing
     uniStep (TypeEq (TypeVar i1) (TypeVar i2)) | i1==offset+i2 = Just (Right [])
     uniStep (TypeEq (t1) (TypeVar i2)) = if occursIn (i2+offset) t1
       then Nothing
@@ -194,14 +192,12 @@ unifyRightOffset ut1 (HsTypeOffset ut2 offset) = unify' $ UniState1 [TypeEq ut1 
     uniStep (TypeEq (TypeCons s1) (TypeCons s2)) | s1==s2 = Just (Right [])
     uniStep (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
     uniStep (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
-    -- TODO TypeForall unification
-    -- THIS IS WRONG; WE IGNORE FORALLS FOR THE MOMENT
-    uniStep (TypeEq (TypeForall _ _ t1) t2)   = uniStep $ TypeEq t1 t2
-    uniStep (TypeEq (t1) (TypeForall _ _ t2)) = uniStep $ TypeEq t1 t2
     uniStep _ = Nothing
 
 
 uniStepRight :: TypeEq -> Maybe (Either Subst [TypeEq])
+uniStepRight (TypeEq TypeForall{} _) = Nothing
+uniStepRight (TypeEq _ TypeForall{}) = Nothing
 uniStepRight (TypeEq (TypeVar i1) (TypeVar i2)) | i1==i2 = Just (Right [])
 uniStepRight (TypeEq (t1) (TypeVar i2)) = if occursIn i2 t1
   then Nothing
@@ -211,10 +207,6 @@ uniStepRight (TypeEq (TypeConstant i1) (TypeConstant i2)) | i1==i2 = Just (Right
 uniStepRight (TypeEq (TypeCons s1) (TypeCons s2)) | s1==s2 = Just (Right [])
 uniStepRight (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
 uniStepRight (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
--- TODO TypeForall unification
--- THIS IS WRONG; WE IGNORE FORALLS FOR THE MOMENT
-uniStepRight (TypeEq (TypeForall _ _ t1) t2)   = uniStepRight $ TypeEq t1 t2
-uniStepRight (TypeEq (t1) (TypeForall _ _ t2)) = uniStepRight $ TypeEq t1 t2
 uniStepRight _ = Nothing
 
 

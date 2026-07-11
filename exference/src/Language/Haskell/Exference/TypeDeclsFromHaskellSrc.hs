@@ -9,8 +9,6 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , convertType
   , convertTypeInternal
   , parseType
-  , unsafeReadType
-  , unsafeReadType0
   )
 where
 
@@ -19,23 +17,31 @@ where
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.TypeFromHaskellSrc
+import Language.Haskell.Exference.HaskellSrcUtils
+import Language.Haskell.Exference.Diagnostic
 
-import Language.Haskell.Exts.Syntax
+import Language.Haskell.Exts.Syntax hiding (TypeApp)
 import qualified Language.Haskell.Exts.Parser as P
+import Language.Haskell.Exts.SrcLoc
+  ( SrcLoc (..)
+  , SrcSpanInfo
+  )
 
 import Control.Monad.Trans.MultiRWS
 import Data.HList.ContainsType
 
-import Control.Monad.Trans.Either ( runEitherT
-                                  , mapEitherT
-                                  , EitherT(..)
-                                  , hoistEither
-                                  , left
+import Control.Monad.Trans.Except ( runExceptT
+                                  , mapExceptT
+                                  , ExceptT(..)
+                                  , throwE
                                   )
+import Control.Monad.Except ( liftEither )
 
 import Control.Monad ( forM, join, liftM )
 import Data.Either ( lefts, rights )
-import Data.Bifunctor ( bimap )
+import Data.Bifunctor ( bimap, first )
+import Data.Maybe ( maybeToList )
+import Data.List ( intercalate )
 
 import Data.Map ( Map )
 import Data.IntMap ( IntMap )
@@ -55,122 +61,128 @@ type TypeDeclMap = Map QualifiedName HsTypeDecl
 applyTypeDecls :: Map QualifiedName (Either String HsTypeDecl)
                -> HsType 
                -> Either String HsType
-applyTypeDecls m = go
+applyTypeDecls declarations = go []
  where
-  go (TypeVar i)      = Right $ TypeVar i
-  go (TypeConstant i) = Right $ TypeConstant i
-  go t@(TypeCons _)  = goApp [] t
-  go (TypeArrow t1 t2) = [ TypeArrow t1' t2'
-                         | t1' <- go t1
-                         , t2' <- go t2
+  go _ (TypeVar i)      = Right $ TypeVar i
+  go _ (TypeConstant i) = Right $ TypeConstant i
+  go path t@(TypeCons _)  = goApp path [] t
+  go path (TypeArrow t1 t2) = [ TypeArrow t1' t2'
+                         | t1' <- go path t1
+                         , t2' <- go path t2
                          ]
-  go (TypeApp l r) = goApp [r] l
-  go (TypeForall vars constrs t) = TypeForall vars constrs `liftM` go t
-  goApp rs (TypeApp l r)      = goApp (r:rs) l
-  goApp rs (TypeCons qn)    = case M.lookup qn m of
-    Nothing                  -> foldl TypeApp (TypeCons qn) `liftM` mapM go rs
+  go path (TypeApp l r) = goApp path [r] l
+  go path (TypeForall vars constraints t) = do
+    constraints' <- mapM (mapConstraint $ go path) constraints
+    TypeForall vars constraints' <$> go path t
+  goApp path rs (TypeApp l r) = goApp path (r:rs) l
+  goApp path rs (TypeCons qn) = case M.lookup qn declarations of
+    Nothing -> foldl TypeApp (TypeCons qn) <$> mapM (go path) rs
     -- The declaration error is reported separately by 'getTypeDecls'. Keep an
     -- unexpanded use here, but do not lose its already converted arguments.
-    Just (Left _)            -> foldl TypeApp (TypeCons qn) `liftM` mapM go rs
+    Just (Left _) -> foldl TypeApp (TypeCons qn) <$> mapM (go path) rs
+    Just (Right _) | qn `elem` path -> Left $ "cyclic type synonym: "
+      ++ intercalate " -> " (map show $ reverse path ++ [qn])
     Just (Right (HsTypeDecl _ vs t))
                              | i <- length vs
                              , i <= length rs
-                             -> [ foldl TypeApp substituted pUnchanged
-                                | rs' <- mapM go rs
+                             -> [ foldl TypeApp expanded pUnchanged
+                                | rs' <- mapM (go path) rs
                                 , let pAffected = take i rs'
                                 , let pUnchanged = drop i rs'
                                 , let substs = IntMap.fromList $ zip vs pAffected
                                 , let substituted = snd $ applySubsts substs t
+                                , expanded <- go (qn : path) substituted
                                 ]
     _                        -> Left $ "wrong number of parameters for type declaration " ++ show qn
-  goApp rs l               = foldl1 TypeApp `liftM` mapM go (l:rs)
+  goApp path rs l = foldl1 TypeApp <$> mapM (go path) (l:rs)
+
+  mapConstraint f (HsConstraint typeClass parameters) =
+    HsConstraint typeClass <$> mapM f parameters
 
 getTypeDecls :: ( Monad m
                 )
              => [QualifiedName]
-             -> [Module]
+             -> [Module SrcSpanInfo]
              -> MultiRWST r w s m [Either String HsTypeDecl]
 getTypeDecls ds modules = do
   rawList <- sequence $ do
-    Module _loc mn _pragma _warning _mexp _imp decls <- modules
-    TypeDecl _loc name rawVars rawTy <- decls
+    modul <- modules
+    (mn, decls) <- maybeToList $ moduleNameAndDecls modul
+    TypeDecl _ rawHead rawTy <- decls
+    let (name, rawVars) = splitDeclHead rawHead
     return $ liftM (bimap (("when parsing type declaration "++show name++": ")++) id)
-           $ runEitherT
+           $ runExceptT
            $ do
       (ty, tyVarIndex) <- convertTypeNoDecl [] (Just mn) ds rawTy
       let qname = convertModuleName mn name
       -- the 1000 is arbitrary, but it should not be used anyway.
       -- no new type variables should appear on the left hand side.
-      vars <- mapEitherT (withMultiStateA (ConvData 1000 tyVarIndex)) $ rawVars `forM` tyVarTransform
+      vars <- mapExceptT (withMultiStateA (ConvData 1000 tyVarIndex)) $ rawVars `forM` tyVarTransform
       return $ HsTypeDecl qname vars ty
-  let converter (HsTypeDecl n vs t) = HsTypeDecl n vs `liftM` applyTypeDecls resultMap t
-      resultMap :: Map QualifiedName (Either String HsTypeDecl)
-      resultMap = M.map converter
-                $ M.fromList
-                $ map (\x -> (tdecl_name x, x))
-                $ rights rawList
-  return $ [ e | e@(Left _) <- rawList ] ++ M.elems resultMap
+  let validDeclarations = rights rawList
+      declarationMap = M.fromList
+        [(tdecl_name declaration, Right declaration) | declaration <- validDeclarations]
+      resolve declaration = HsTypeDecl
+        (tdecl_name declaration)
+        (tdecl_params declaration)
+        <$> applyTypeDecls declarationMap (tdecl_result declaration)
+  return $ [ e | e@(Left _) <- rawList ] ++ map resolve validDeclarations
 
 convertType :: ( Monad m
                )
             => [HsTypeClass]
-            -> Maybe ModuleName
+            -> Maybe (ModuleName SrcSpanInfo)
             -> [QualifiedName]
             -> TypeDeclMap
-            -> Type
-            -> EitherT String (MultiRWST r w s m) (HsType, TypeVarIndex)
+            -> Type SrcSpanInfo
+            -> ExceptT String (MultiRWST r w s m) (HsType, TypeVarIndex)
 convertType tcs mn ds declMap t = do
   (ty, index) <- convertTypeNoDecl tcs mn ds t
-  ty' <- hoistEither $ applyTypeDecls (M.map Right declMap) ty
+  ty' <- liftEither $ applyTypeDecls (M.map Right declMap) ty
   return $ (ty', index)
 
 convertTypeInternal
   :: (MonadMultiState ConvData m)
   => [HsTypeClass]
-  -> Maybe ModuleName -- default (for unqualified stuff)
+  -> Maybe (ModuleName SrcSpanInfo) -- default (for unqualified stuff)
                       -- Nothing uses a broad search for lookups
   -> [QualifiedName] -- list of fully qualified data types
                                          -- (to keep things unique)
   -> TypeDeclMap
-  -> Type
-  -> EitherT String m HsType
+  -> Type SrcSpanInfo
+  -> ExceptT String m HsType
 convertTypeInternal tcs defModuleName ds declMap t = do
   ty <- convertTypeNoDeclInternal tcs defModuleName ds t
-  ty' <- hoistEither $ applyTypeDecls (M.map Right declMap) ty
+  ty' <- liftEither $ applyTypeDecls (M.map Right declMap) ty
   return $ ty'
 
 parseType
   :: (Monad m)
   => [HsTypeClass]
-  -> Maybe ModuleName
+  -> Maybe (ModuleName SrcSpanInfo)
   -> [QualifiedName]
   -> TypeDeclMap
   -> P.ParseMode
   -> String
-  -> EitherT
-       String
+  -> ExceptT
+       Diagnostic
        (MultiRWST r w s m)
        (HsType, TypeVarIndex)
 parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
-  f@(P.ParseFailed _ _) -> left $ show f
-  P.ParseOk t           -> convertType tcs mn ds tDeclMap t
+  P.ParseFailed location message -> throwE $ Diagnostic
+    (Just $ srcFilename location)
+    (Just $ let position = SourcePosition
+                  (srcLine location) (srcColumn location)
+            in SourceSpan position position)
+    message
+  P.ParseOk ty -> ExceptT $ first conversionDiagnostic
+    <$> runExceptT (convertType tcs mn ds tDeclMap ty)
+  where
+    conversionDiagnostic message = Diagnostic
+      (Just $ P.parseFilename m)
+      (Just $ SourceSpan (SourcePosition 1 1) (endPosition s))
+      message
 
-unsafeReadType
-  :: (Monad m)
-  => [HsTypeClass]
-  -> [QualifiedName]
-  -> TypeDeclMap
-  -> String
-  -> MultiRWST r w s m HsType
-unsafeReadType tcs ds tDeclMap s = do
-  parseRes <- runEitherT $ parseType tcs Nothing ds tDeclMap (haskellSrcExtsParseMode "type") s
-  return $ case parseRes of
-    Left _ -> error $ "unsafeReadType: could not parse type: " ++ s
-    Right (t, _) -> t
-
-unsafeReadType0 :: (Monad m) => String -> MultiRWST r w s m HsType
-unsafeReadType0 s = do
-  parseRes <- runEitherT $ parseType [] Nothing [] (M.empty) (haskellSrcExtsParseMode "type") s
-  return $ case parseRes of
-    Left _ -> error $ "unsafeReadType: could not parse type: " ++ s
-    Right (t, _) -> t
+    endPosition = foldl advance (SourcePosition 1 1)
+    advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
+    advance (SourcePosition line column) _ = SourcePosition line (column + 1)

@@ -15,6 +15,11 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInput (..)
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
+  , SearchCompletion (..)
+  , SearchStatus (..)
+  , constraintsRelaxedAtStep
+  , ExferenceInputError (..)
+  , validateExferenceInput
   )
 where
 
@@ -23,6 +28,8 @@ where
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
+import Language.Haskell.Exference.Core.ExpressionCheck
+import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.SearchTree
@@ -49,14 +56,13 @@ import Control.Arrow ( first, second, (***), (&&&) )
 import Control.Monad ( when, unless, guard, mzero, replicateM
                      , replicateM_, forM, join, forM_, liftM )
 import Control.Applicative ( (<$>), (<*>), (*>), (<|>), empty )
-import Data.List ( partition, sortBy, groupBy, unfoldr, intercalate )
+import Data.List ( find, partition, sortBy, groupBy, unfoldr, intercalate )
 import Data.Ord ( comparing )
 import Data.Function ( on )
 import Data.Functor ( ($>) )
 import Data.Monoid ( Any(..), Endo(..), Sum(..) )
 import Data.Foldable ( foldMap, sum, asum, traverse_ )
 import Control.Monad.Morph ( lift )
-import Data.Typeable ( Typeable )
 import Control.Lens
 import Control.Monad.State ( StateT(..), State, gets, execStateT, get, runStateT, mapStateT )
 import Control.Monad.State ( MonadState )
@@ -76,21 +82,21 @@ import Prelude hiding ( sum )
 
 
 data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
-  { heuristics_goalVar                :: Float
-  , heuristics_goalCons               :: Float
-  , heuristics_goalArrow              :: Float
-  , heuristics_goalApp                :: Float
-  , heuristics_stepProvidedGood       :: Float
-  , heuristics_stepProvidedBad        :: Float
-  , heuristics_stepEnvGood            :: Float
-  , heuristics_stepEnvBad             :: Float
-  , heuristics_tempUnusedVarPenalty   :: Float
-  , heuristics_tempMultiVarUsePenalty :: Float
-  , heuristics_functionGoalTransform  :: Float
-  , heuristics_unusedVar              :: Float
-  , heuristics_solutionLength         :: Float
+  { heuristics_goalVar                :: Penalty
+  , heuristics_goalCons               :: Penalty
+  , heuristics_goalArrow              :: Penalty
+  , heuristics_goalApp                :: Penalty
+  , heuristics_stepProvidedGood       :: Penalty
+  , heuristics_stepProvidedBad        :: Penalty
+  , heuristics_stepEnvGood            :: Penalty
+  , heuristics_stepEnvBad             :: Penalty
+  , heuristics_tempUnusedVarPenalty   :: Penalty
+  , heuristics_tempMultiVarUsePenalty :: Penalty
+  , heuristics_functionGoalTransform  :: Penalty
+  , heuristics_unusedVar              :: Penalty
+  , heuristics_solutionLength         :: Penalty
   }
-  deriving (Show, Data, Typeable)
+  deriving (Show, Data)
 
 data ExferenceInput = ExferenceInput
   { input_goalType    :: HsType                 -- ^ try to find a expression
@@ -115,35 +121,51 @@ data ExferenceInput = ExferenceInput
                                                 -- if true. serverly increases
                                                 -- search space (decreases
                                                 -- performance).
-  , input_maxSteps    :: Int                    -- ^ the maximum number of
-                                                -- steps to perform (otherwise
-                                                -- would not terminate if
-                                                -- there were no (more)
-                                                -- solutions).
-  , input_memoryLimit :: Maybe Int              -- ^ allows to limit memory
-                                                -- usage. no effect if Nothing;
-                                                -- for (Just x), memory usage
-                                                -- scales with x.
-                                                -- Lower memory usage discards
-                                                -- states (and, thus, potential
-                                                -- solutions).
+  , input_maxSteps    :: Int                    -- ^ maximum processed nodes
+  , input_maxQueueSize :: Maybe Int             -- ^ keep the best N queued nodes
+  , input_maxDepth    :: Maybe Penalty          -- ^ optional heuristic-depth cap
   , input_heuristicsConfig :: ExferenceHeuristicsConfig
   }
-  deriving (Show, Data, Typeable)
+  deriving (Show, Data)
+
+data ExferenceInputError
+  = NestedForallInGoal HsType
+  | NestedForallInBinding QualifiedName HsType
+  | NestedForallInDeconstructor HsType
+  | InvalidMaxSteps Int
+  | InvalidMaxQueueSize Int
+  | InvalidMaxDepth Penalty
+  | InvalidHeuristic String Penalty
+  deriving (Eq, Show)
 
 type ExferenceOutputElement = (Expression, [HsConstraint], ExferenceStats)
+data SearchCompletion
+  = SearchRunning
+  | SearchExhausted
+  | SearchStepLimitReached
+  deriving (Eq, Show)
+
+data SearchStatus = SearchStatus
+  { searchCompletion :: SearchCompletion
+  , searchQueuePruned :: Int
+  , searchDepthPruned :: Int
+  }
+  deriving (Eq, Show)
+
 data ExferenceChunkElement = ExferenceChunkElement
-  { chunkBindingUsages :: BindingUsages
+  { chunkStatus :: SearchStatus
+  , chunkBindingUsages :: BindingUsages
 #if BUILD_SEARCH_TREE
   , chunkSearchTree :: SearchTree
 #endif
   , chunkElements :: [ExferenceOutputElement]
   }
 
-type RatedNodes = Q.MaxPQueue Float SearchNode
+type RatedNodes = Q.MaxPQueue Priority SearchNode
 data FindExpressionsState = FindExpressionsState
   { _findExpressionsStateN :: Int    -- number of steps already performed
-  , _findExpressionsStateWorst :: Float  -- worst rating of state in pqueue
+  , _findExpressionsStateQueuePruned :: Int
+  , _findExpressionsStateDepthPruned :: Int
   , _findExpressionsStateBindingUsages :: BindingUsages
 #if BUILD_SEARCH_TREE
   , _findExpressionsStateSt :: SearchTreeBuilder (StableName SearchNode)
@@ -174,29 +196,26 @@ findExpressions (ExferenceInput rawType
                                 sClassEnv
                                 allowUnused
                                 allowConstraints
-                                _allowConstraintsStopStep
+                                allowConstraintsStopStep
                                 multiPM
-                                maxSteps -- since we output a [[x]],
-                                         -- this would not really be
-                                         -- necessary anymore. but
-                                         -- we also use it for calculating
-                                         -- memory limit stuff, and it is
-                                         -- not worth the refactor atm.
-                                memLimit
+                                maxSteps
+                                maxQueueSize
+                                maxDepth
                                 heuristics) =
-  take maxSteps $ unfoldr helper rootFindExpressionState
+  unfoldr helper rootFindExpressionState
  where
   rootFindExpressionState = FindExpressionsState
+    0
     0
     0
     M.empty
 #if BUILD_SEARCH_TREE
     (initialSearchTreeBuilder initNodeName (ExpHole 0))
 #endif
-    (Q.singleton 0.0 rootSearchNode)
+    (Q.singleton 0 rootSearchNode)
   t = forallify rawType
   rootSearchNode = SearchNode
-    { _searchNodeGoals           = (Seq.singleton (VarBinding 0 t, 0))
+    { _searchNodeGoals           = Seq.singleton (TGoal (VarBinding 0 t) 0)
     , _searchNodeConstraintGoals = []
     , _searchNodeProvidedScopes  = initialScopes
     , _searchNodeVarUses         = IntMap.empty
@@ -220,13 +239,15 @@ findExpressions (ExferenceInput rawType
   transformSolutions :: [SearchNode] -> FindExpressionsState -> ExferenceChunkElement
   transformSolutions potentialSolutions (FindExpressionsState
       n'
-      _
+      totalQueuePruned
+      totalDepthPruned
       newBindingUsages
 #if BUILD_SEARCH_TREE
       newSearchTreeBuilder
 #endif
       newNodes
     ) = ExferenceChunkElement
+      (SearchStatus completion totalQueuePruned totalDepthPruned)
       newBindingUsages
 #if BUILD_SEARCH_TREE
       (buildSearchTree newSearchTreeBuilder initNodeName)
@@ -247,6 +268,7 @@ findExpressions (ExferenceInput rawType
       , allowUnused || unusedVarCount==0
       , let e = -- trace (showNodeDevelopment solution) $
                 view expression solution
+      , Right () <- [checkExpression contxt funcs deconss' t remainingConstraints e]
       , let d = view depth solution
               + ( heuristics_unusedVar heuristics
                 * fromIntegral unusedVarCount
@@ -255,40 +277,46 @@ findExpressions (ExferenceInput rawType
               --   * fromIntegral (length $ show e)<
               --   )
       ]
+    where
+      completion
+        | Q.null newNodes = SearchExhausted
+        | n' >= maxSteps = SearchStepLimitReached
+        | otherwise = SearchRunning
   helper :: FindExpressionsState -> Maybe (ExferenceChunkElement, FindExpressionsState)
-  helper = runStateT $ do
+  helper state | view n state >= maxSteps = Nothing
+  helper state = runStateT (do
     s <- zoom states $ StateT Q.maxView
-    qsize <- uses states Q.size
     n' <- n <<+= 1
-    worst' <- use worst
     let
       -- actual work happens in stateStep
+      -- Constraint checks are deliberately relaxed only during the configured
+      -- warm-up window. Afterwards unresolved constraints are allowed solely
+      -- when the caller explicitly requested constrained results.
+      relaxConstraints = constraintsRelaxedAtStep
+        allowConstraints allowConstraintsStopStep n'
       rNodes = (`execStateT` s)
         $ stateStep multiPM
-                    allowConstraints
+                    relaxConstraints
                     heuristics
-      -- distinguish "finished"/"unfinished" sub-SearchNodes
-      (potentialSolutions, futures) = partition (views goals Seq.null) rNodes
-      -- this cutoff is somewhat arbitrary, and can, theoretically,
-      -- distort the order of the results (i.e.: lead to results being
-      -- omitted).
-      filteredNew = fromMaybe id
-        [ filter ((>cutoff) . fst)
-        | qsize > maxSteps
-        , mmax <- memLimit
-        , let cutoff = worst' * fromIntegral mmax
-                              / fromIntegral qsize
-        ]
-        [ ( rateNode heuristics newS + 4.5*f (fromIntegral n')
+      (withinDepth, tooDeep) = partition depthAllowed rNodes
+      (potentialSolutions, futures) = partition (views goals Seq.null) withinDepth
+      ratedNew =
+        [ ( rateNode heuristics newS + Priority (4.5*f (fromIntegral n'))
           , newS)
         | newS <- futures
-        , let f :: Float -> Float
+        , let f :: Double -> Double
               f x | x > 900 = 0.0
                   | otherwise = let k = 1.111e-3*x
                                  in 1 + 2*k**3 - 3*k**2
         ]
+      depthAllowed node = maybe True (view depth node <=) maxDepth
     bindingUsages . maybe ignored at (view lastStepBinding s) . non 0 += 1
-    states %= Q.union (Q.fromList filteredNew)
+    depthPruned += length tooDeep
+    queued <- use states
+    let combined = Q.union queued (Q.fromList ratedNew)
+        (retained, queueDiscarded) = limitQueue maxQueueSize combined
+    states .= retained
+    queuePruned += queueDiscarded
 #if BUILD_SEARCH_TREE
     st %=
       ( ((++) [ unsafePerformIO $ do
@@ -301,17 +329,94 @@ findExpressions (ExferenceInput rawType
         ((:) (unsafePerformIO (makeStableName $! s)))
       )
 #endif
-    worst %= minimum . (: map fst filteredNew)
-    gets $ transformSolutions potentialSolutions
+    gets $ transformSolutions potentialSolutions) state
 
-rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Float
-rateNode h s = 0.0 - rateGoals h (view goals s) - view depth s + rateUsage h s
+constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
+constraintsRelaxedAtStep allowConstraints stopStep currentStep =
+  allowConstraints || currentStep <= stopStep
+
+validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
+validateExferenceInput input
+  | input_maxSteps input <= 0 = Left $ InvalidMaxSteps $ input_maxSteps input
+  | Just limit <- input_maxQueueSize input, limit < 0 =
+      Left $ InvalidMaxQueueSize limit
+  | Just limit <- input_maxDepth input, not $ isFinitePenalty limit =
+      Left $ InvalidMaxDepth limit
+  | Just (field, invalid) <- find (not . isFinitePenalty . snd)
+      (heuristicFields $ input_heuristicsConfig input) =
+      Left $ InvalidHeuristic field invalid
+  | Just binding <- find (not . isFinitePenalty . functionPenalty)
+      (input_envFuncs input) = Left $ InvalidHeuristic
+        (show $ functionName binding) (functionPenalty binding)
+  | containsNestedForall $ input_goalType input =
+      Left $ NestedForallInGoal $ input_goalType input
+  | Just binding <- find (containsForall . functionBindingType)
+      (input_envFuncs input) =
+      Left $ NestedForallInBinding (functionName binding) $ functionBindingType binding
+  | Just deconstructor <- find (containsForall . deconstructorBindingType)
+      (input_envDeconsS input) =
+      Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
+  | otherwise = Right ()
+
+limitQueue :: Maybe Int -> RatedNodes -> (RatedNodes, Int)
+limitQueue Nothing queue = (queue, 0)
+limitQueue (Just maximumSize) queue =
+  let entries = Q.toDescList queue
+      retained = take maximumSize entries
+  in (Q.fromList retained, length entries - length retained)
+
+functionBindingType :: FunctionBinding -> HsType
+functionBindingType binding =
+  foldr TypeArrow (functionResult binding) (functionParameters binding)
+
+heuristicFields :: ExferenceHeuristicsConfig -> [(String, Penalty)]
+heuristicFields config =
+  [ ("goalVar", heuristics_goalVar config)
+  , ("goalCons", heuristics_goalCons config)
+  , ("goalArrow", heuristics_goalArrow config)
+  , ("goalApp", heuristics_goalApp config)
+  , ("stepProvidedGood", heuristics_stepProvidedGood config)
+  , ("stepProvidedBad", heuristics_stepProvidedBad config)
+  , ("stepEnvGood", heuristics_stepEnvGood config)
+  , ("stepEnvBad", heuristics_stepEnvBad config)
+  , ("tempUnusedVarPenalty", heuristics_tempUnusedVarPenalty config)
+  , ("tempMultiVarUsePenalty", heuristics_tempMultiVarUsePenalty config)
+  , ("functionGoalTransform", heuristics_functionGoalTransform config)
+  , ("unusedVar", heuristics_unusedVar config)
+  , ("solutionLength", heuristics_solutionLength config)
+  ]
+
+deconstructorBindingType :: DeconstructorBinding -> HsType
+deconstructorBindingType binding =
+  foldr TypeArrow (deconstructorInput binding)
+    $ concatMap constructorFields (deconstructorConstructors binding)
+
+containsNestedForall :: HsType -> Bool
+containsNestedForall ty@TypeForall{} = containsForall $ stripOuterForalls ty
+  where
+    stripOuterForalls (TypeForall _ _ body) = stripOuterForalls body
+    stripOuterForalls other = other
+containsNestedForall ty = containsForall ty
+
+containsForall :: HsType -> Bool
+containsForall TypeForall{} = True
+containsForall (TypeArrow parameter result) =
+  containsForall parameter || containsForall result
+containsForall (TypeApp function parameter) =
+  containsForall function || containsForall parameter
+containsForall _ = False
+
+rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority
+rateNode h s = Priority
+  $ negate (penaltyValue (rateGoals h $ view goals s)
+            + penaltyValue (view depth s))
+  + priorityValue (rateUsage h s)
  -- + 0.6 * rateScopes (view providedScopes s)
 
-rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Float
+rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sum . fmap rateGoal
   where
-    rateGoal (VarBinding _ t,_) = tComplexity t
+    rateGoal (TGoal (VarBinding _ t) _) = tComplexity t
     -- TODO: actually measure performance with different values,
     --       use derived values instead of (arbitrarily) chosen ones.
     tComplexity (TypeVar _)         = heuristics_goalVar h
@@ -328,12 +433,13 @@ rateScopes (Scopes _ sMap) = alaf Sum foldMap f sMap where
     f (Scope binds _) = fromIntegral (length binds)
 -}
 
-rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Float
-rateUsage h = sumOf $ varUses . folded . to f where
-  f :: Int -> Float
-  f 0 = - heuristics_tempUnusedVarPenalty h
+rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Priority
+rateUsage h = Priority . sumOf (varUses . folded . to f) where
+  f :: Int -> Double
+  f 0 = negate $ penaltyValue $ heuristics_tempUnusedVarPenalty h
   f 1 = 0
-  f k = - fromIntegral (k-1) * heuristics_tempMultiVarUsePenalty h
+  f k = negate $ fromIntegral (k-1)
+    * penaltyValue (heuristics_tempMultiVarUsePenalty h)
 
 getUnusedVarCount :: SearchNode -> Int
 getUnusedVarCount s = length $ filter (==0) $ s ^.. varUses . folded
@@ -368,10 +474,8 @@ stateStep multiPM allowConstrs h = do
   contxt <- use queryClassEnv
   constraintGoals' <- use constraintGoals
 
-  ((VarBinding var goalType, scopeId) Seq.:< gr) <- Seq.viewl <$> use goals
+  (TGoal (VarBinding var goalType) scopeId Seq.:< gr) <- Seq.viewl <$> use goals
   goals .= gr
-
-  guard . (<= 200.0) =<< use depth
 
   let
     -- if type is TypeArrow, transform to lambda expression.
@@ -408,7 +512,7 @@ stateStep multiPM allowConstrs h = do
       builderSetReason "forall-type goal transformation"
       lastStepBinding .= Nothing
       let substs = IntMap.fromList $ zip vs $ TypeConstant <$> dataIds
-      goals %= ((VarBinding var $ snd $ applySubsts substs t, scopeId) <|)
+      goals %= (TGoal (VarBinding var $ snd $ applySubsts substs t) scopeId <|)
       queryClassEnv %= addQueryClassEnv (snd . constraintApplySubsts substs <$> cs)
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
@@ -417,10 +521,14 @@ stateStep multiPM allowConstrs h = do
 
     byProvided :: StateT SearchNode [] ()
     byProvided = do
-      (provId, provT, provPs, forallTypes, constraints)
-        <- lift =<< uses providedScopes (scopeGetAllBindings scopeId)
+      provided <- lift =<< uses providedScopes (scopeGetAllBindings scopeId)
       offset <- uses maxTVarId (+1)
       let
+        provId      = varPVariable provided
+        provT       = varPResult provided
+        provPs      = varPParameters provided
+        forallTypes = varPForallVariables provided
+        constraints = varPConstraints provided
         incF        = incVarIds (+offset)
         ss          = IntMap.fromList $ zip forallTypes (incF . TypeVar <$> forallTypes)
         provType    = snd $ applySubsts ss provT
@@ -440,29 +548,29 @@ stateStep multiPM allowConstrs h = do
     -- try to resolve the goal by looking at functions from the environment.
     byFunctionSimple :: StateT SearchNode [] ()
     byFunctionSimple = do
-      (funcR, funcId, funcRating, funcConstrs, funcParams)
-        <- lift =<< uses functions V.toList
+      binding <- lift =<< uses functions V.toList
       offset <- uses maxTVarId (+1)
       let
         incF     = incVarIds (+offset)
-        provType = incF funcR
+        provType = incF $ functionResult binding
       mapStateT maybeToList $ byGenericUnify
-        (Left funcId)
+        (Left $ functionName binding)
         provType
-        (map (constraintMapTypes incF) funcConstrs)
-        (map incF funcParams)
-        (heuristics_stepEnvGood h + funcRating)
-        (heuristics_stepEnvBad h + funcRating)
-        ("applying function " ++ show funcId)
-        (unifyOffset goalType (HsTypeOffset funcR offset))
+        (map (constraintMapTypes incF) $ functionConstraints binding)
+        (map incF $ functionParameters binding)
+        (heuristics_stepEnvGood h + functionPenalty binding)
+        (heuristics_stepEnvBad h + functionPenalty binding)
+        ("applying function " ++ show (functionName binding))
+        (unifyOffset goalType
+          $ HsTypeOffset (functionResult binding) offset)
 
     -- on code for byProvided and byFunctionSimple
     byGenericUnify :: Either QualifiedName (TVarId, HsType)
                    -> HsType
                    -> [HsConstraint]
                    -> [HsType]
-                   -> Float
-                   -> Float
+                   -> Penalty
+                   -> Penalty
                    -> String
                    -> Maybe (Substs, Substs)
                    -> StateT SearchNode Maybe ()
@@ -490,7 +598,7 @@ stateStep multiPM allowConstrs h = do
             provided
             (ExpApply coreExp $ ExpHole vParam)
             (ExpHole var))
-          goals %= ((VarBinding vParam d, scopeId) <|)
+          goals %= (TGoal (VarBinding vParam d) scopeId <|)
           newScopeId <- builderAddScope scopeId
           constraintGoals <>= provConstrs
           traverse_ (\r -> varUses . singular (ix $ fst r) += 1) applierr
@@ -503,8 +611,8 @@ stateStep multiPM allowConstrs h = do
             goalType
             var
             newScopeId
-            (let (r,ps,fs,cs) = splitArrowResultParams provided
-              in [(vResult, r, ds++ps, fs, cs)])
+            (let (r, ps, fs, cs) = splitArrowResultParams provided
+              in [VarPBinding vResult r (ds ++ ps) fs cs])
           goals <>= Seq.fromList additionalGoals
 
       byUnified :: Substs -> Substs -> StateT SearchNode Maybe ()
@@ -570,8 +678,11 @@ addScopePatternMatch :: MonadState SearchNode m
                      -> [VarPBinding]
                      -> m [TGoal]
 addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
-  []                                    -> return [(VarBinding vid goalType, sid)]
-  (b@(v,vtResult,vtParams,_,_):bindingRest) -> do
+  [] -> return [TGoal (VarBinding vid goalType) sid]
+  (b : bindingRest) -> do
+    let v = varPVariable b
+        vtResult = varPResult b
+        vtParams = varPParameters b
     offset <- builderGetTVarOffset
     let incF = incVarIds (+offset)
     let expVar = ExpVar v (foldr TypeArrow vtResult vtParams)
@@ -588,7 +699,8 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
         | otherwise -> fromMaybe defaultHandleRest . asum . map mapFunc =<< use deconss
          where
           mapFunc :: MonadState SearchNode m => DeconstructorBinding -> Maybe (m [TGoal])
-          mapFunc (matchParam, [(matchId, matchRs)], False) = let
+          mapFunc (DeconstructorBinding matchParam
+                    [ConstructorBinding matchId matchRs] False) = let
             resultTypes = map incF matchRs
             unifyResult = unifyRightOffset vtResult
                                            (HsTypeOffset matchParam offset)
@@ -621,12 +733,15 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
                                    sid
                                    (reverse newBinds ++ bindingRest)
             in liftM mapFunc1 unifyResult
-          mapFunc (matchParam, matchers@(_:_), False) | multiPM = let
+          mapFunc (DeconstructorBinding matchParam matchers@(_ : _) False)
+            | multiPM = let
             unifyResult = unifyRightOffset vtResult
                                            (HsTypeOffset matchParam offset)
             -- inputType = incF matchParam
             mapFunc2 substs = do -- m
-              mData <- matchers `forM` \(matchId, matchRs) -> do -- m
+              mData <- matchers `forM` \matcher -> do -- m
+                let matchId = constructorName matcher
+                    matchRs = constructorFields matcher
                 newSid <- builderAddScope sid
                 let resultTypes = map incF matchRs
                 vars <- replicateM (length matchRs) builderAllocVar

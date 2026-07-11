@@ -3,8 +3,9 @@
 --
 module ProofCheck (checkProof) where
 
-import Control.Monad (unless, when)
+import Control.Monad (replicateM, unless, when)
 import Control.Monad.State.Strict
+import Data.List (intercalate, (!?))
 import qualified Data.IntMap as IntMap
 import qualified Data.Set as Set
 
@@ -129,7 +130,7 @@ freshMeta = do
     return $ Meta index
 
 freshMetas :: Int -> Check [ProofType]
-freshMetas count = mapM (const freshMeta) [1 .. count]
+freshMetas count = replicateM count freshMeta
 
 addConstraint :: Constraint -> Check ()
 addConstraint constraint =
@@ -216,23 +217,11 @@ zonk :: ProofType -> Check ProofType
 zonk proofType = do
     proofType' <- prune proofType
     case proofType' of
-        Meta _ -> return proofType'
-        Product elements -> do
-            elements' <- mapM zonk elements
-            return $ Product elements'
-        Sum alternatives -> do
-            alternatives' <- mapM zonkAlternative alternatives
-            return $ Sum alternatives'
-        EmptyType _ -> return proofType'
-        argument :~> result -> do
-            argument' <- zonk argument
-            result' <- zonk result
-            return $ argument' :~> result'
-        Atom _ -> return proofType'
-  where
-    zonkAlternative (constructor, branch) = do
-        branch' <- zonk branch
-        return (constructor, branch')
+        Product elements -> Product <$> mapM zonk elements
+        Sum alternatives -> Sum <$> mapM (traverse zonk) alternatives
+        argument :~> result -> (:~>) <$> zonk argument <*> zonk result
+        -- Meta, EmptyType, and Atom are leaves after pruning.
+        _ -> return proofType'
 
 solveConstraints :: Check ()
 solveConstraints = do
@@ -261,7 +250,7 @@ solveConstraint constraint =
             case result' of
                 Meta _ -> return False
                 Sum alternatives ->
-                    case atIndex index alternatives of
+                    case alternatives !? index of
                         Nothing -> failCheck $
                             "injection index " ++ show index ++
                             " is outside a sum with " ++
@@ -283,11 +272,6 @@ solveConstraint constraint =
                 EmptyType _ -> return True
                 _ -> failCheck $ "empty eliminator received " ++
                     showProofType input'
-
-atIndex :: Int -> [a] -> Maybe a
-atIndex 0 (value : _) = Just value
-atIndex index (_ : values) | index > 0 = atIndex (index - 1) values
-atIndex _ _ = Nothing
 
 isGround :: ProofType -> Bool
 isGround (Meta _) = False
@@ -315,21 +299,15 @@ mismatch left right = failCheck $
 showProofType :: ProofType -> String
 showProofType (Meta index) = "t" ++ show index
 showProofType (Product elements) =
-    "(" ++ joinWith ", " (map showProofType elements) ++ ")"
+    "(" ++ intercalate ", " (map showProofType elements) ++ ")"
 showProofType (Sum alternatives) =
-    "{" ++ joinWith " | "
+    "{" ++ intercalate " | "
         [show constructor ++ " " ++ showProofType branch |
             (constructor, branch) <- alternatives] ++ "}"
 showProofType (EmptyType name) = "empty[" ++ show name ++ "]"
 showProofType (argument :~> result) =
     "(" ++ showProofType argument ++ " -> " ++ showProofType result ++ ")"
 showProofType (Atom symbol) = show symbol
-
-joinWith :: String -> [String] -> String
-joinWith _ [] = ""
-joinWith _ [value] = value
-joinWith separator (value : values) =
-    value ++ separator ++ joinWith separator values
 
 failCheck :: String -> Check a
 failCheck = lift . Left

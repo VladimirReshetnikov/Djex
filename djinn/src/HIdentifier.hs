@@ -1,15 +1,31 @@
 --
--- Haskell identifier and operator syntax shared by parsers and printers.
+-- Haskell identifier and operator syntax shared by parsers and printers,
+-- plus the token-level ReadP helpers shared by every Djinn parser.
 --
 module HIdentifier (
     pVarId, pConId, pQualifiedVarId, pQualifiedConId,
     pParenthesizedVarOp,
     isVarId, isConId, isQualifiedVarId, isQualifiedConId,
-    isVarOperator, renderVarName
+    isVarOperator, renderVarName,
+    schar, sstring, pParen
     ) where
 
 import Data.Char (isAlphaNum, isLower, isPunctuation, isSymbol, isUpper)
 import Text.ParserCombinators.ReadP
+
+-- Match a single token after skipping leading white space.
+schar :: Char -> ReadP ()
+schar c = skipSpaces >> char c >> return ()
+
+sstring :: String -> ReadP ()
+sstring s = skipSpaces >> string s >> return ()
+
+pParen :: ReadP a -> ReadP a
+pParen p = do
+    schar '('
+    e <- p
+    schar ')'
+    return e
 
 pVarId :: ReadP String
 pVarId = pValidated isVarId isIdentifierCharacter

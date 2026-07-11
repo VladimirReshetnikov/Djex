@@ -4,6 +4,7 @@
 --
 module LJTFormula (
     Symbol(..), Formula(..), (<->), (&), (|:), fnot, false, true,
+    formulaSymbols,
     ConsDesc(..), Term(..), applys, freeVars
     ) where
 
@@ -49,6 +50,16 @@ false = Empty $ Symbol "Void"
 
 true :: Formula
 true = Conj []
+
+-- Every symbol occurring in a formula: propositional atoms and the nominal
+-- tags of empty types.  Freshness machinery reserves all of them, because
+-- Symbol is shared by proof variables and propositional atoms.
+formulaSymbols :: Formula -> [Symbol]
+formulaSymbols (Conj fs) = concatMap formulaSymbols fs
+formulaSymbols (Disj alternatives) = concatMap (formulaSymbols . snd) alternatives
+formulaSymbols (Empty name) = [name]
+formulaSymbols (a :-> b) = formulaSymbols a ++ formulaSymbols b
+formulaSymbols (PVar s) = [s]
 
 -- Show formulae the LJT way
 instance Show Formula where

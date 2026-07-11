@@ -4,7 +4,6 @@
 --
 module HCheck(htCheckEnv, htCheckType) where
 import Data.List(union)
-import Control.Monad(liftM2)
 import Control.Monad.State
 import Data.IntMap(IntMap)
 import qualified Data.IntMap as IntMap
@@ -97,10 +96,8 @@ iHKind env (HTApp f a) = do
     r <- newKVar
     unifyK (KArrow ka r) kf
     return r
-iHKind env (HTVar v) = do
-    getVarHKind env v
-iHKind env (HTCon c) = do
-    getConHKind env c
+iHKind env (HTVar v) = lookupHKind "Undefined type variable" env v
+iHKind env (HTCon c) = lookupHKind "Undefined type" env c
 iHKind env (HTTuple ts) = do
     mapM_ (iHKindStar env) ts
     return KStar
@@ -140,24 +137,18 @@ unifyK k1 k2 = do
     unify k1' k2'
 
 
-getVarHKind :: KEnv -> HSymbol -> M HKind
-getVarHKind env v =
+lookupHKind :: String -> KEnv -> HSymbol -> M HKind
+lookupHKind missing env v =
     case lookup v env of
     Just k -> return k
-    Nothing -> lift $ Left $ "Undefined type variable " ++ v
-
-getConHKind :: KEnv -> HSymbol -> M HKind
-getConHKind env v =
-    case lookup v env of
-    Just k -> return k
-    Nothing -> lift $ Left $ "Undefined type " ++ v
+    Nothing -> lift $ Left $ missing ++ " " ++ v
 
 ground :: HKind -> M HKind
 ground k = do
     k' <- follow k
     case k' of
         KStar -> return KStar
-        KArrow k1 k2 -> liftM2 KArrow (ground k1) (ground k2)
+        KArrow k1 k2 -> KArrow <$> ground k1 <*> ground k2
         -- Unconstrained kind variables default to *, as Haskell98 requires.
         KVar _ -> return KStar
 

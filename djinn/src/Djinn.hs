@@ -4,8 +4,8 @@
 -- See LICENSE for licensing details.
 --
 module Djinn(main) where
-import Data.Char(isAlpha, isSpace)
-import Data.List(sortBy, nub, intercalate)
+import Data.Char(isAlpha, isDigit, isSpace)
+import Data.List(isPrefixOf, nub, sortOn, intercalate)
 import Data.Ratio((%))
 import Data.Version(showVersion)
 import Text.ParserCombinators.ReadP
@@ -146,7 +146,7 @@ pPrefix s = do
         pfail
 
 isPrefix :: String -> String -> Bool
-isPrefix p s = not (null p) && length p <= length s && take (length p) s == p
+isPrefix p s = not (null p) && p `isPrefixOf` s
 
 runCmd :: State -> Cmd -> IO (Bool, State)
 runCmd s Noop = return (False, s)
@@ -245,35 +245,41 @@ query prType s i ctx g =
             return (False, s)
         p:ps -> do
             let internalProofs = p : take (cutOff s - 1) ps
-            case mapM (checkProof internalEnv form) internalProofs of
-              Left message ->
-                putStrLn $ "Error: generated an invalid proof: " ++ message
-              Right _ -> do
-                let proofs = map (restoreProofTerm proofEnv) internalProofs
-                case mapM (termToHClause i) proofs of
-                  Left message ->
-                    putStrLn $ "Error: cannot render generated proof: " ++
-                        message
-                  Right rendered -> do
-                    let score clause =
-                           let bvs = getBinderVars clause
-                               r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
-                           in  (r, clause)
-                        clauses = nub $
-                                if sorted s then
-                                    map snd $ sortBy (\ (x,_) (y,_) -> compare x y) $ map score rendered
-                                else
-                                    rendered
-                        pr = putStrLn . hPrClause
-                        sctx = if null ctx then "" else showContexts ctx ++ " => "
-                    when (debug s) $ putStrLn ("+++ " ++ show p)
-                    when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
-                    case clauses of
-                        [] -> return () -- rendered is non-empty.
-                        e:es -> do
-                            pr e
-                            when (multi s) $
-                                mapM_ (\ x -> putStrLn "-- or" >> pr x) es
+                labeled what = either (Left . ((what ++ ": ") ++)) Right
+                -- Every bounded candidate must check against the requested
+                -- formula before display names are restored and it is
+                -- converted to a Haskell clause.
+                renderedProofs = do
+                    labeled "generated an invalid proof" $
+                        mapM_ (checkProof internalEnv form) internalProofs
+                    labeled "cannot render generated proof" $
+                        mapM (termToHClause i . restoreProofTerm proofEnv)
+                            internalProofs
+            case renderedProofs of
+              Left message -> putStrLn $ "Error: " ++ message
+              Right rendered -> do
+                -- Rank a clause by the fraction of its binders that are
+                -- unused, then by the total binder count: solutions that use
+                -- more of their arguments are usually the intended ones.
+                let score clause =
+                       let bvs = getBinderVars clause
+                           r = if null bvs then (0, 0) else (length (filter (== "_") bvs) % length bvs, length bvs)
+                       in  (r, clause)
+                    clauses = nub $
+                            if sorted s then
+                                map snd $ sortOn fst $ map score rendered
+                            else
+                                rendered
+                    pr = putStrLn . hPrClause
+                    sctx = if null ctx then "" else showContexts ctx ++ " => "
+                when (debug s) $ putStrLn ("+++ " ++ show p)
+                when prType $ putStrLn $ prHSymbolOp i ++ " :: " ++ sctx ++ show g
+                case clauses of
+                    [] -> return () -- rendered is non-empty.
+                    e:es -> do
+                        pr e
+                        when (multi s) $
+                            mapM_ (\ x -> putStrLn "-- or" >> pr x) es
             return (False, s)
 
 cannotBeRealized :: ProofEnvironment -> String
@@ -500,7 +506,7 @@ pType = do
        return $ Type (syn, rawType args t)
      +++
       do
-       schar ':'; char ':'
+       sstring "::"
        k <- pHKind
        return $ Type (syn, rawType [] (HTAbstract syn k))
 
@@ -555,24 +561,12 @@ pSetVal :: ReadP Cmd
 pSetVal = do
     pPrefix "cutoff"
     schar '='
-    digits <- many1 (satisfy (`elem` ['0'..'9']))
+    digits <- munch1 isDigit
     let n = read digits :: Integer
     if n > 0 && n <= toInteger (maxBound :: Int) then
         return $ Set $ \ s -> s { cutOff = fromInteger n }
      else
         pfail
-
-schar :: Char -> ReadP ()
-schar c = do
-    skipSpaces
-    char c
-    return ()
-
-sstring :: String -> ReadP ()
-sstring s = do
-    skipSpaces
-    string s
-    return ()
 
 helpText :: String
 helpText = "\

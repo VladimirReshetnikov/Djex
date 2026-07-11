@@ -14,6 +14,7 @@ import Prelude hiding ((<>))
 import Text.PrettyPrint.HughesPJ(Doc, renderStyle, style, text, (<>), parens, ($$), vcat, punctuate,
          sep, fsep, nest, comma, (<+>))
 import Data.List(union, (\\))
+import Data.Maybe(fromMaybe)
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
 import Text.ParserCombinators.ReadP
@@ -83,7 +84,7 @@ pHType' = do
 
 pHType :: ReadP HType
 pHType = do
-    ts <- sepBy1 pHTypeApp (do schar '-'; char '>')
+    ts <- sepBy1 pHTypeApp (sstring "->")
     return $ foldr1 HTArrow ts
 
 pHDataType :: ReadP HType
@@ -104,13 +105,15 @@ pUnit = do
     char ')'
     return $ HTCon "()"
 
+-- The prefix spelling of the function arrow, "(->)", is lexed like the infix
+-- arrow: white space may surround the token but not split it.
 pHTCon :: ReadP HType
-pHTCon = (pQualifiedConId >>= return . HTCon)
+pHTCon = fmap HTCon pQualifiedConId
        +++
-         do schar '('; schar '-'; schar '>'; schar ')'; return (HTCon "->")
+         do pParen (sstring "->"); return (HTCon "->")
 
 pHTVar :: ReadP HType
-pHTVar = pHSymbol False >>= return . HTVar
+pHTVar = fmap HTVar (pHSymbol False)
 
 pHSymbol :: Bool -> ReadP HSymbol
 pHSymbol True = pConId
@@ -136,24 +139,11 @@ pHTList = do
 
 pHKind :: ReadP HKind
 pHKind = do
-    ts <- sepBy1 pHKindA (do schar '-'; char '>')
+    ts <- sepBy1 pHKindA (sstring "->")
     return $ foldr1 KArrow ts
 
 pHKindA :: ReadP HKind
 pHKindA = (do schar '*'; return KStar) +++ pParen pHKind
-
-pParen :: ReadP a -> ReadP a
-pParen p = do
-    schar '('
-    e <- p
-    schar ')'
-    return e
-
-schar :: Char -> ReadP ()
-schar c = do
-    skipSpaces
-    char c
-    return ()
 
 getHTVars :: HType -> [HSymbol]
 getHTVars (HTApp f a) = getHTVars f `union` getHTVars a
@@ -396,9 +386,8 @@ termToHExpr term = do
         combPat p (HPVar v) = Right $ HPAt v p
         combPat (HPAt v p) (HPAt v' p') = do
                 merged <- combPat p p'
-                return $ case v == v' of
-                    True -> HPAt v merged
-                    False -> HPAt v $ HPAt v' merged
+                return $ if v == v' then HPAt v merged
+                         else HPAt v $ HPAt v' merged
         combPat (HPAt v p) p' = HPAt v `fmap` combPat p p'
         combPat p (HPAt v p') = HPAt v `fmap` combPat p p'
         combPat (HPTuple ps) (HPTuple ps') | length ps == length ps' =
@@ -438,7 +427,7 @@ alphaRenameTerm term = renamed
     rename environment used next proofTerm =
         case proofTerm of
             Var symbol ->
-                (Var $ maybe symbol id $ lookup symbol environment, used, next)
+                (Var $ fromMaybe symbol $ lookup symbol environment, used, next)
             Lam binder body ->
                 let (fresh, used', next') = freshBinder used next
                     (body', used'', next'') =
@@ -579,15 +568,15 @@ hESubst :: [(HSymbol, HSymbol)] -> HExpr -> HExpr
 hESubst s (HELam ps e) = HELam (map (hPSubst s) ps) (hESubst s e)
 hESubst s (HEApply f a) = HEApply (hESubst s f) (hESubst s a)
 hESubst _ e@(HECon _) = e
-hESubst s (HEVar v) = HEVar $ maybe v id $ lookup v s
+hESubst s (HEVar v) = HEVar $ fromMaybe v $ lookup v s
 hESubst s (HETuple es) = HETuple (map (hESubst s) es)
 hESubst s (HECase e alts) = HECase (hESubst s e) [(hPSubst s p, hESubst s b) | (p, b) <- alts]
 
 hPSubst :: [(HSymbol, HSymbol)] -> HPat -> HPat
-hPSubst s (HPVar v) = HPVar $ maybe v id $ lookup v s
+hPSubst s (HPVar v) = HPVar $ fromMaybe v $ lookup v s
 hPSubst _ p@(HPCon _) = p
 hPSubst s (HPTuple ps) = HPTuple (map (hPSubst s) ps)
-hPSubst s (HPAt v p) = HPAt (maybe v id $ lookup v s) (hPSubst s p)
+hPSubst s (HPAt v p) = HPAt (fromMaybe v $ lookup v s) (hPSubst s p)
 hPSubst s (HPApply f a) = HPApply (hPSubst s f) (hPSubst s a)
 
 

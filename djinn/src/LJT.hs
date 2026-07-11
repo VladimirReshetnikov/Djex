@@ -20,7 +20,9 @@
 module LJT (module LJTFormula, provable, prove, Proof) where
 
 import Control.Applicative (Alternative(empty, (<|>)))
-import Control.Monad (MonadPlus(mzero, mplus), ap, foldM, liftM, liftM2)
+import Control.Monad (MonadPlus(mzero, mplus), ap, foldM)
+import Data.List ((!?))
+import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 
 import LJTFormula
@@ -40,13 +42,6 @@ prove more env goal =
     -- variables and keeps the atom introduced for disjunction genuinely fresh.
     reservedSymbols =
         map fst env ++ concatMap (formulaSymbols . snd) env ++ formulaSymbols goal
-
-formulaSymbols :: Formula -> [Symbol]
-formulaSymbols (Conj fs) = concatMap formulaSymbols fs
-formulaSymbols (Disj alternatives) = concatMap (formulaSymbols . snd) alternatives
-formulaSymbols (Empty name) = [name]
-formulaSymbols (a :-> b) = formulaSymbols a ++ formulaSymbols b
-formulaSymbols (PVar s) = [s]
 
 redtop :: MoreSolutions -> [(Symbol, Formula)] -> Formula -> P Proof
 redtop more env goal = do
@@ -70,18 +65,18 @@ subst replacement variable = substitute
         | otherwise = return t
     substitute t@(Lam s body)
         | variable == s = return t
-        | otherwise = liftM (Lam s) (substitute body)
-    substitute (Apply f a) = liftM2 Apply (substitute f) (substitute a)
-    substitute (Xsel i n e) = liftM (Xsel i n) (substitute e)
+        | otherwise = Lam s <$> substitute body
+    substitute (Apply f a) = Apply <$> substitute f <*> substitute a
+    substitute (Xsel i n e) = Xsel i n <$> substitute e
     substitute t = return t
 
 copy :: [(Symbol, Symbol)] -> Term -> P Term
-copy renamings (Var s) = return $ Var $ maybe s id $ lookup s renamings
+copy renamings (Var s) = return $ Var $ fromMaybe s $ lookup s renamings
 copy renamings (Lam s body) = do
     s' <- newSym "c"
-    liftM (Lam s') $ copy ((s, s') : renamings) body
-copy renamings (Apply f a) = liftM2 Apply (copy renamings f) (copy renamings a)
-copy renamings (Xsel i n e) = liftM (Xsel i n) (copy renamings e)
+    Lam s' <$> copy ((s, s') : renamings) body
+copy renamings (Apply f a) = Apply <$> copy renamings f <*> copy renamings a
+copy renamings (Xsel i n e) = Xsel i n <$> copy renamings e
 copy _ t = return t
 
 ------------------------------
@@ -130,7 +125,7 @@ nf term = spine term []
     spine (Apply f a) args = do
         a' <- nf a
         spine f (a' : args)
-    spine (Lam s body) [] = liftM (Lam s) (nf body)
+    spine (Lam s body) [] = Lam s <$> nf body
     spine (Lam s body) (a : args) = do
         body' <- subst a s body
         spine body' args
@@ -145,18 +140,13 @@ nf term = spine term []
     spine (Ccases []) (e@(Apply (Ccases []) _) : args) = spine e args
     spine cases@(Ccases constructors) (injected@(Apply (Cinj constructor i) x) : args)
         | length args >= branchCount =
-            case (atIndex i constructors, atIndex i args) of
+            case (constructors !? i, args !? i) of
             (Just expected, Just branch) | constructor == expected ->
                 spine (Apply branch x) (drop branchCount args)
             _ -> return $ applys cases (injected : args)
       where
         branchCount = length constructors
     spine f args = return $ applys f args
-
-atIndex :: Int -> [a] -> Maybe a
-atIndex 0 (x : _) = Just x
-atIndex n (_ : xs) | n > 0 = atIndex (n - 1) xs
-atIndex _ _ = Nothing
 
 
 ------------------------------

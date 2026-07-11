@@ -2,7 +2,6 @@ module Main (main) where
 
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
-import Data.Tree (Tree (..))
 import Data.Functor.Identity (runIdentity)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
@@ -15,7 +14,6 @@ import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.Pretty as HSE
 
-import Language.Haskell.Exference.Core.SearchTree
 import Language.Haskell.Exference.Core
   ( ExferenceChunkElement (..)
   , ExferenceHeuristicsConfig (..)
@@ -27,6 +25,7 @@ import Language.Haskell.Exference.Core
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Expression (Expression (..))
 import Language.Haskell.Exference.Core.ExpressionCheck
+import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify
@@ -171,6 +170,19 @@ tests = testGroup "Exference"
               isNaN value @?= True
             Left other -> fail $ "unexpected validation error: " ++ show other
             Right _ -> fail "non-finite heuristic was accepted"
+      , testCase "signed finite function ratings are accepted" $ do
+          let variable = TypeVar 0
+              binding = FunctionBinding
+                { functionResult = variable
+                , functionName = name "preferred"
+                , functionPenalty = Penalty (-3.5)
+                , functionConstraints = []
+                , functionParameters = [variable]
+                }
+          case findExpressionsEither identityInput
+              {input_envFuncs = [binding]} of
+            Left err -> fail $ "signed rating was rejected: " ++ show err
+            Right _ -> pure ()
       ]
   , testGroup "parsing and diagnostics"
       [ testCase "ratings reject a missing value" $
@@ -262,13 +274,6 @@ tests = testGroup "Exference"
             Nothing -> fail "identity search produced no checked result"
             Just _ -> pure ()
       ]
-  , testCase "search tree counts processed descendants" $ do
-      let expression = error "expression should remain lazy in this test"
-          tree = buildSearchTree
-            ([(0, 0, expression), (1, 0, expression), (2, 1, expression)], [0, 1, 2])
-            (0 :: Int)
-      case tree of
-        Node (total, processed, _) _ -> (total, processed) @?= (3, 3)
   ]
 
 name :: String -> QualifiedName

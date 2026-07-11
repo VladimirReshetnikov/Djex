@@ -15,7 +15,6 @@ where
 
 
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.Diagnostic
@@ -28,7 +27,6 @@ import Language.Haskell.Exts.SrcLoc
   )
 
 import Control.Monad.Trans.MultiRWS
-import Data.HList.ContainsType
 
 import Control.Monad.Trans.Except ( runExceptT
                                   , mapExceptT
@@ -37,14 +35,13 @@ import Control.Monad.Trans.Except ( runExceptT
                                   )
 import Control.Monad.Except ( liftEither )
 
-import Control.Monad ( forM, join, liftM )
-import Data.Either ( lefts, rights )
+import Control.Monad ( forM, liftM )
+import Data.Either ( rights )
 import Data.Bifunctor ( bimap, first )
 import Data.Maybe ( maybeToList )
 import Data.List ( intercalate )
 
 import Data.Map ( Map )
-import Data.IntMap ( IntMap )
 import qualified Data.Map as M
 import qualified Data.IntMap as IntMap
 

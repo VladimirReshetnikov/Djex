@@ -30,15 +30,10 @@ import Language.Haskell.Exference.Core
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.Score
 
-import Data.Maybe ( maybeToList, listToMaybe, fromMaybe )
-import Control.Arrow ( first, second, (***) )
-import Control.Monad ( guard, mzero )
-import Control.Applicative ( (<$>), (<*>) )
-import Data.List ( partition, sortBy, groupBy, minimumBy )
+import Data.Maybe ( listToMaybe )
+import Data.List ( sortBy, groupBy, minimumBy )
 import Data.Ord ( comparing )
-import Data.Function ( on )
 
-import Debug.Trace
 
 
 

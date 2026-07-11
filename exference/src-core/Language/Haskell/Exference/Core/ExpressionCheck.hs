@@ -4,10 +4,9 @@ module Language.Haskell.Exference.Core.ExpressionCheck
   )
 where
 
-import Control.Monad (foldM, unless, when, zipWithM_)
+import Control.Monad (foldM, unless, when)
 import Control.Monad.State.Strict
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Expression

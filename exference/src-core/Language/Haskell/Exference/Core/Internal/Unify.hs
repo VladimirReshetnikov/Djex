@@ -15,12 +15,9 @@ where
 
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
-import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
-import Data.Maybe
 
 -- import Debug.Hood.Observe
-import Debug.Trace
 
 
 

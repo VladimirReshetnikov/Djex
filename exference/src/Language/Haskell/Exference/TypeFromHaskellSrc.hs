@@ -32,26 +32,18 @@ import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map as M
 
-import Control.Applicative ( (<$>), (<*>), Applicative )
 import Data.Maybe ( fromMaybe )
 import Data.List ( find )
-import Control.Arrow ( (&&&) )
 
-import Control.Monad.State.Strict
-import Control.Monad.Trans.Maybe
-import Control.Monad.Identity
 import Control.Monad.Trans.Except
 
 import Data.List.Split ( wordsBy )
 import Control.Monad.Trans.MultiRWS
-import Control.Monad.Trans.MultiState ( MonadMultiState(..) )
-import Data.HList.ContainsType
 
 import Language.Haskell.Exts.Extension ( Language (..)
                                        , Extension (..)
                                        , KnownExtension (..) )
 
-import Debug.Trace
 
 
 

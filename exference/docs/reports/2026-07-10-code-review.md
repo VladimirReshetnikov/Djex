@@ -395,7 +395,7 @@ the invariant; the constructors are nevertheless exported and malformed or
 future merged state can loop. Hide constructors, document the invariant, and
 use a checked lookup with an impossible-state diagnostic.
 
-### R-14 — Medium: the CLI/test module boundary is inverted
+### R-14 — Partially resolved: the CLI/test module boundary is inverted
 
 The executable owns test data, test execution, rendering policy, environment
 loading, CLI parsing, and query orchestration. No-argument execution runs tests,
@@ -403,13 +403,28 @@ and help still prints `TODO`. Extract a pure library/session API first, make the
 CLI a thin adapter, and move examples into golden files or benchmarks. Djinn's
 current internal-library plus thin-launcher organization is the useful model.
 
-### R-15 — Low/medium: stale feature flags and debug dependencies remain
+The embedded `MainTest` harness and its `--tests`/`--examples` modes were
+deleted on 2026-07-11, along with the obsolete Hood and `data-pprint`
+dependencies. The executable now builds normally on GHC 9.12 and its no-argument
+behavior is help rather than running tests. Environment loading and rendering
+policy still need extraction into a reusable session layer before this finding
+is fully closed.
+
+### R-15 — Resolved: stale feature flags and debug dependencies remain
 
 CPP flags (`LINK_NODES`, `BUILD_SEARCH_TREE`) materially change node shape and
 use `unsafePerformIO`/stable names to reconstruct trees. The executable also
 retains Hood, `Debug.Trace`, external pointfree tools, and parallel flags whose
 branches say the parallel version is unimplemented. Remove or isolate these
 before merging; observational tooling should not alter production data types.
+
+Resolved on 2026-07-11 by deleting both compile-time personalities and the
+unreachable search-tree module. Search nodes and chunk results now have one
+stable shape; the core no longer uses stable names or `unsafePerformIO` and no
+longer depends on `unordered-containers` or `hashable`. The historical CLI's
+nonfunctional tree and parallel options were removed with the corresponding
+dead branches. See
+[`2026-07-11-debug-instrumentation.md`](2026-07-11-debug-instrumentation.md).
 
 ## Djinn/Exference merge analysis
 

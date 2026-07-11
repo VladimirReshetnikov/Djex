@@ -16,22 +16,12 @@ where
 
 
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
-import Language.Haskell.Exference.Core.FunctionBinding
 
 import Control.Monad.State ( State
-                           , StateT( StateT )
                            , execState
-                           , modify
-                           , get
-                           , put
                            )
 import Control.Monad.State.Lazy ( MonadState )
-import Control.Applicative
-import qualified Data.Map as M
-import qualified Data.IntMap.Strict as IntMap
-import qualified Data.Vector as V
 import Control.Monad ( liftM )
 
 import Control.Lens
@@ -43,18 +33,10 @@ type SearchNodeBuilder a = State SearchNode a
 modifyNodeBy :: SearchNode -> SearchNodeBuilder () -> SearchNode
 modifyNodeBy = flip execState
 
-{-
-builderAddVars :: [TVarId] -> SearchNodeBuilder ()
-builderAddVars = (varUses <>=) . M.fromList . map (,0)
--}
-
--- sets reason, and, as appropriate, lastNode
+-- Record why the node was produced. This feeds diagnostics and usage reports;
+-- search ancestry is deliberately not retained in production nodes.
 builderSetReason :: MonadState SearchNode m => String -> m ()
-builderSetReason r = do
-  lastStepReason .= r
-#if LINK_NODES
-  previousNode <~ liftM Just get
-#endif
+builderSetReason r = lastStepReason .= r
 
 builderAppendReason :: MonadState SearchNode m => String -> m ()
 builderAppendReason r = do

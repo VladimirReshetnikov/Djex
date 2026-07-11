@@ -39,9 +39,13 @@ This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
 
-The historical executable is disabled by default. Its combined CLI/test driver
-still depends on the obsolete `hood` package and is being decomposed rather
-than carried into the eventual Djinn/Exference library.
+The `exference` executable is a normal build target again. Its obsolete Hood,
+search-tree, parallel-mode, and embedded manual-test machinery has been
+removed; deterministic regressions live in `exference-tests`.
+
+```text
+cabal run exference -- --first "a -> a"
+```
 
 # Usage notes
 
@@ -76,10 +80,9 @@ any / the right solution. Some common current limitations are:
 ## Other known (technical) issues
 
 - **Memory consumption is large** (even more so when profiling);
-- The historical executable still mixes CLI policy, environment loading,
-  benchmarks, and manual test tables. The supported regressions live in the
-  Cabal `exference-tests` suite; the executable will be replaced with a thin
-  adapter before it is enabled by default again.
+- The executable still owns environment loading and presentation policy. A
+  reusable session layer should move those decisions below the CLI before the
+  Djinn and Exference frontends are unified.
 
 ## Contributing
 

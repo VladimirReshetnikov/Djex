@@ -24,21 +24,14 @@ import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.FunctionDecl
 import Language.Haskell.Exference.HaskellSrcUtils
 
-import Control.Applicative ( (<$>), (<*>) )
-
 import Control.Monad ( join )
-import Control.Monad.Identity
-import Control.Monad.Trans.Maybe
 import Control.Monad.Trans.Except
-import Control.Monad.State.Strict
 import qualified Data.Map as M
 import Data.List ( find )
 import Data.Maybe ( fromMaybe, maybeToList )
 
 import Control.Monad.Trans.MultiRWS
-import Data.HList.ContainsType
 
-import Debug.Trace
 
 
 

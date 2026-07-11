@@ -16,7 +16,6 @@ where
 import Language.Haskell.Exts.Syntax
 import Language.Haskell.Exts.Pretty
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
-import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.Core.Types
@@ -25,24 +24,18 @@ import Language.Haskell.Exference.HaskellSrcUtils
 
 import qualified Data.Map.Strict as M
 import qualified Data.Map.Lazy as LazyMap
-import Control.Monad.State.Strict
 import Control.Monad.Trans.Except
 import Control.Monad.Except ( liftEither )
-import Control.Monad.Writer.Strict
 import Control.Monad.Fix ( MonadFix )
 import Control.Monad ( forM )
 
-import Control.Applicative ( (<$>), (<*>), Applicative )
-
-import Data.Maybe ( fromMaybe, mapMaybe, maybeToList )
+import Data.Maybe ( maybeToList )
 import Data.Either ( lefts, rights )
 import Data.List ( find )
-import Data.Traversable ( traverse, for )
 
 import Control.Monad.Trans.MultiRWS
-import Data.HList.ContainsType
+import Data.HList.ContainsType (ContainsType)
 
-import Debug.Trace
 
 
 

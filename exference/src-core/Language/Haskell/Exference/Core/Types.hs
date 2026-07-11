@@ -40,7 +40,6 @@ where
 
 import Data.Char ( ord, chr, toLower )
 import Data.List ( intercalate, intersperse )
-import Data.Foldable ( foldMap )
 import Data.Maybe ( fromMaybe )
 import Data.Monoid ( Any(..) )
 import Control.Monad ( liftM2 )

@@ -17,7 +17,6 @@ where
 
 
 import Language.Haskell.Exference
-import Language.Haskell.Exference.ExpressionToHaskellSrc
 import Language.Haskell.Exference.BindingsFromHaskellSrc
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
@@ -26,36 +25,25 @@ import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.FunctionDecl
 
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.SimpleDict
-import Language.Haskell.Exference.Core.Expression
-import Language.Haskell.Exference.Core.ExferenceStats
-import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Diagnostic
-import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.DeepSeq
 
-import System.Process
-
-import Control.Applicative ( (<$>), (<*>), (<*) )
 import Control.Arrow ( (***) )
-import Control.Monad ( when, forM_, guard, forM, mplus, mzero, join )
-import Data.List ( sort, sortBy, find, isSuffixOf )
-import Data.Ord ( comparing )
-import Text.Printf
-import Data.Maybe ( listToMaybe, fromMaybe, maybeToList, catMaybes )
+import Control.Monad ( forM_, guard, forM, join )
+import Data.List ( sort, find, isSuffixOf )
+import Data.Maybe ( fromMaybe )
 import Data.Either ( lefts, rights )
 import Control.Monad.Writer.Strict
 import System.Directory ( getDirectoryContents )
 import Control.Exception ( evaluate, try, SomeException )
-import Data.Bifunctor ( first, second )
+import Data.Bifunctor ( first )
 
-import Language.Haskell.Exts.Syntax ( Module(..), Decl(..), ModuleName(..) )
+import Language.Haskell.Exts.Syntax ( Module(..) )
 import Language.Haskell.Exts.Parser ( parseModuleWithMode
-                                    , parseModule
                                     , ParseResult (..)
                                     , ParseMode (..)
-                                    , defaultParseMode )
+                                    )
 import Language.Haskell.Exts.Extension ( Language (..)
                                        , Extension (..)
                                        , KnownExtension (..) )
@@ -64,10 +52,7 @@ import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 import Control.Monad.Trans.MultiRWS
 import Data.HList.ContainsType
 
-import Language.Haskell.Exference.Core.TypeUtils
-
 import qualified Data.Map as M
-import qualified Data.IntMap as IntMap
 import Text.Read ( readMaybe )
 
 

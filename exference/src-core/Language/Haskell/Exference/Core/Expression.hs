@@ -15,20 +15,15 @@ where
 
 
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.TypeUtils
 import Data.List ( intercalate )
-import Data.Function ( on )
-import Data.Maybe ( fromMaybe )
-import Control.Monad ( forM, forM_, liftM )
+import Control.Monad ( forM, forM_ )
 import Data.Functor.Identity ( runIdentity )
-import Data.Functor ( (<$>) )
 
 import Control.DeepSeq.Generics
 import Control.DeepSeq
 import GHC.Generics
 
 import Control.Monad.Trans.MultiRWS
-import Data.HList.ContainsType
 
 -- import Debug.Hood.Observe
 import Data.Map ( Map )
@@ -216,4 +211,3 @@ fillExprHole vid t (ExpCaseMatch bindExp alts) =
                                             ]
 fillExprHole _ _ t@ExpName{} = t
 fillExprHole _ _ t@ExpVar{}  = t
-

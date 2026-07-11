@@ -32,13 +32,10 @@ import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
-import Language.Haskell.Exference.Core.SearchTree
 import Language.Haskell.Exference.Core.Internal.Unify
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
-
-import Control.Monad.Trans.MultiState
 
 import qualified Data.PQueue.Prio.Max as Q
 import qualified Data.Map as M
@@ -47,35 +44,19 @@ import qualified Data.Set as S
 import qualified Data.Vector as V
 import qualified Data.Sequence as Seq
 
-import Control.DeepSeq.Generics
-import System.Mem.StableName ( StableName, makeStableName )
-import System.IO.Unsafe ( unsafePerformIO )
-
-import Data.Maybe ( maybeToList, listToMaybe, fromMaybe, catMaybes, mapMaybe, isNothing )
-import Control.Arrow ( first, second, (***), (&&&) )
-import Control.Monad ( when, unless, guard, mzero, replicateM
-                     , replicateM_, forM, join, forM_, liftM )
-import Control.Applicative ( (<$>), (<*>), (*>), (<|>), empty )
-import Data.List ( find, partition, sortBy, groupBy, unfoldr, intercalate )
-import Data.Ord ( comparing )
-import Data.Function ( on )
+import Data.Maybe ( maybeToList, fromMaybe )
+import Control.Monad ( unless, mzero, replicateM, forM, liftM )
+import Control.Applicative ( (<|>) )
+import Data.List ( find, partition, unfoldr, intercalate )
 import Data.Functor ( ($>) )
-import Data.Monoid ( Any(..), Endo(..), Sum(..) )
-import Data.Foldable ( foldMap, sum, asum, traverse_ )
+import Data.Monoid ( Any(..), Endo(..) )
+import Data.Foldable ( sum, asum, traverse_ )
 import Control.Monad.Morph ( lift )
 import Control.Lens
-import Control.Monad.State ( StateT(..), State, gets, execStateT, get, runStateT, mapStateT )
+import Control.Monad.State ( StateT(..), gets, execStateT, runStateT, mapStateT )
 import Control.Monad.State ( MonadState )
 
--- import Control.Concurrent.Chan
-import Control.Concurrent ( forkIO )
-import qualified GHC.Conc.Sync
-
 import Data.Data ( Data )
-
--- import Data.DeriveTH
--- import Debug.Hood.Observe
-import Debug.Trace
 
 import Prelude hiding ( sum )
 
@@ -155,9 +136,6 @@ data SearchStatus = SearchStatus
 data ExferenceChunkElement = ExferenceChunkElement
   { chunkStatus :: SearchStatus
   , chunkBindingUsages :: BindingUsages
-#if BUILD_SEARCH_TREE
-  , chunkSearchTree :: SearchTree
-#endif
   , chunkElements :: [ExferenceOutputElement]
   }
 
@@ -167,9 +145,6 @@ data FindExpressionsState = FindExpressionsState
   , _findExpressionsStateQueuePruned :: Int
   , _findExpressionsStateDepthPruned :: Int
   , _findExpressionsStateBindingUsages :: BindingUsages
-#if BUILD_SEARCH_TREE
-  , _findExpressionsStateSt :: SearchTreeBuilder (StableName SearchNode)
-#endif
   , _findExpressionsStateStates :: RatedNodes -- pqueue
   }
 makeFields ''FindExpressionsState
@@ -209,9 +184,6 @@ findExpressions (ExferenceInput rawType
     0
     0
     M.empty
-#if BUILD_SEARCH_TREE
-    (initialSearchTreeBuilder initNodeName (ExpHole 0))
-#endif
     (Q.singleton 0 rootSearchNode)
   t = forallify rawType
   rootSearchNode = SearchNode
@@ -227,31 +199,19 @@ findExpressions (ExferenceInput rawType
     , _searchNodeMaxTVarId       = (largestId t)
     , _searchNodeNextNVarId      = 0
     , _searchNodeDepth           = 0.0
-#if LINK_NODES
-    , _searchNodePreviousNode    = Nothing
-#endif
     , _searchNodeLastStepReason  = ""
     , _searchNodeLastStepBinding = Nothing
     }
-#if BUILD_SEARCH_TREE
-  initNodeName = unsafePerformIO $ makeStableName $! rootSearchNode
-#endif
   transformSolutions :: [SearchNode] -> FindExpressionsState -> ExferenceChunkElement
   transformSolutions potentialSolutions (FindExpressionsState
       n'
       totalQueuePruned
       totalDepthPruned
       newBindingUsages
-#if BUILD_SEARCH_TREE
-      newSearchTreeBuilder
-#endif
       newNodes
     ) = ExferenceChunkElement
       (SearchStatus completion totalQueuePruned totalDepthPruned)
       newBindingUsages
-#if BUILD_SEARCH_TREE
-      (buildSearchTree newSearchTreeBuilder initNodeName)
-#endif
       [ (e, remainingConstraints, ExferenceStats n' d $ Q.size newNodes)
       | solution <- potentialSolutions
       , let contxt = view queryClassEnv solution
@@ -266,8 +226,7 @@ findExpressions (ExferenceInput rawType
         -- if allowUnused, there may be unused variables in the
         -- output. Otherwise the solution is discarded.
       , allowUnused || unusedVarCount==0
-      , let e = -- trace (showNodeDevelopment solution) $
-                view expression solution
+      , let e = view expression solution
       , Right () <- [checkExpression contxt funcs deconss' t remainingConstraints e]
       , let d = view depth solution
               + ( heuristics_unusedVar heuristics
@@ -317,18 +276,6 @@ findExpressions (ExferenceInput rawType
         (retained, queueDiscarded) = limitQueue maxQueueSize combined
     states .= retained
     queuePruned += queueDiscarded
-#if BUILD_SEARCH_TREE
-    st %=
-      ( ((++) [ unsafePerformIO $ do
-               n1 <- makeStableName $! ns
-               n2 <- makeStableName $! s
-               return (n1,n2,view expression ns)
-             | ns<-rNodes
-             ])
-      ***
-        ((:) (unsafePerformIO (makeStableName $! s)))
-      )
-#endif
     gets $ transformSolutions potentialSolutions) state
 
 constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
@@ -345,7 +292,10 @@ validateExferenceInput input
   | Just (field, invalid) <- find (not . isFinitePenalty . snd)
       (heuristicFields $ input_heuristicsConfig input) =
       Left $ InvalidHeuristic field invalid
-  | Just binding <- find (not . isFinitePenalty . functionPenalty)
+  -- Historical function ratings are signed: negative values are bonuses.
+  -- Heuristic penalties above remain non-negative, but conflating the two
+  -- policies makes the shipped environment fail validation.
+  | Just binding <- find (not . isFiniteRating . functionPenalty)
       (input_envFuncs input) = Left $ InvalidHeuristic
         (show $ functionName binding) (functionPenalty binding)
   | containsNestedForall $ input_goalType input =
@@ -357,6 +307,10 @@ validateExferenceInput input
       (input_envDeconsS input) =
       Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
   | otherwise = Right ()
+
+isFiniteRating :: Penalty -> Bool
+isFiniteRating = \rating -> let value = penaltyValue rating
+  in not (isNaN value || isInfinite value)
 
 limitQueue :: Maybe Int -> RatedNodes -> (RatedNodes, Int)
 limitQueue Nothing queue = (queue, 0)
@@ -456,20 +410,6 @@ stateStep :: Bool
           -> ExferenceHeuristicsConfig
           -> StateT SearchNode [] ()
 stateStep multiPM allowConstrs h = do
-
-  do
-    _s <- get
-    id
-      -- $ trace (showSearchNode' qNameIndex _s ++ " " ++ show (rateNode h _s))
-      $ return ()
-    -- trace (unlines [ show (view  depth _s)
-    --                , show (view  goals _s)
-    --                , show (view  constraintGoals _s)
-    --                , show (view  providedScopes _s)
-    --                , showExpression (view  expression                _s)
-    --                , view lastStepReason _s
-    --                ]) $ return ()
-
   -- This paragraph is evil, and hopefully temporary. (Scoping issues make it necessary.)
   contxt <- use queryClassEnv
   constraintGoals' <- use constraintGoals

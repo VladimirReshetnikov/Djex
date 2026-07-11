@@ -9,7 +9,8 @@ import Text.Read (readMaybe)
 import Djinn.Core (
     Declaration(..), QueryOutcome(..),
     declare, defaultQueryOptions, emptyEnvironment, inhabit,
-    kArrow, kStar, optionBudget, parseHKind, parseHType, removeDeclaration,
+    kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
+    parseHKind, parseHType, removeDeclaration,
     reportOutcome, resolveContext, standardEnvironment)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
@@ -30,6 +31,7 @@ tests =
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
+    , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
     , ("reject a higher-kinded synonym body", testHigherKindedSynonymBody)
@@ -42,11 +44,13 @@ tests =
     , ("do not capture a caller-supplied proof symbol", testCallerSymbolCapture)
     , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
     , ("preserve residual application after Csplit", testCsplitResidualArguments)
+    , ("preserve a whole product through Csplit", testCsplitProductIdentity)
     , ("bind unary constructor fields without tuple parentheses",
           testUnaryConstructorPattern)
     , ("preserve residual application after Ccases", testCcasesResidualArguments)
     , ("preserve tuple payloads in unary constructors", testUnaryTuplePayload)
     , ("merge tuple refinements across case branches", testBranchRefinements)
+    , ("reconstruct whole constructor payloads", testWholeConstructorPayload)
     , ("isolate external proof identities", testProofEnvironment)
     , ("type-check generated proofs independently", testGeneratedProofsCheck)
     , ("reject malformed proof terms", testMalformedProofTerms)
@@ -197,6 +201,39 @@ testCanonicalRendering = do
         "(* -> *) -> * -> *"
         (show $ KArrow (KArrow KStar KStar) (KArrow KStar KStar))
 
+-- Type synonyms are transparent even when they occur below an opaque type
+-- constructor.  The whole opaque application remains one proposition, but
+-- its atom name must use the normalized type rather than the surface alias.
+testOpaqueAliasAtoms :: IO ()
+testOpaqueAliasAtoms = do
+    let definitions =
+            [ ("Id", (["a"], HTVar "a", ()))
+            , ("Pair", (["a"], HTTuple [HTVar "a", HTVar "a"], ()))
+            , ("F", ([], HTAbstract "F" (KArrow KStar KStar), ()))
+            ]
+        app constructor argument = HTApp (HTCon constructor) argument
+    assertEqual "an alias below an abstract constructor is transparent"
+        (hTypeToFormula definitions $ app "F" $ HTVar "a")
+        (hTypeToFormula definitions $ app "F" $ app "Id" $ HTVar "a")
+    assertEqual "aliases normalize recursively below intrinsic applications"
+        (hTypeToFormula definitions $ app "[]" $
+            HTTuple [HTVar "b", HTVar "b"])
+        (hTypeToFormula definitions $ app "[]" $ app "Pair" $ HTVar "b")
+
+    let result = do
+            idBody <- parseHType "a"
+            goal <- parseHType "F (Id a) -> F a"
+            environment <- declare
+                (TypeSynonym "Id" ["a"] idBody) emptyEnvironment
+            environment' <- declare
+                (AbstractType "F" $ kArrow kStar kStar) environment
+            inhabit defaultQueryOptions environment' [] "coerce" goal
+    case result of
+        Left message -> fail $ "opaque alias query failed: " ++ message
+        Right report -> assertEqual
+            "the normalized opaque application should admit identity"
+            (Realized ["coerce a = a"]) (reportOutcome report)
+
 -- Grounding must recursively eliminate every unification variable.  Foo's
 -- inferred kind is reused after kind inference has reset its local IntMap;
 -- leaving a KVar behind used to make this second check crash at IntMap.!
@@ -325,6 +362,19 @@ testEmptyGoalContradiction = do
     let nested = (atomA :-> atomA) :-> Conj [atomB]
     assertProvableAndChecked "Not x -> Not c -> Not (Either x c)" $
         fnot nested :-> (fnot atomC :-> fnot (nested |: atomC))
+    -- Raw internal clients can still construct the old structural encoding
+    -- of false.  It eliminates into nominal Void, but is not definitionally
+    -- identical to it and therefore needs an explicit empty-case term.
+    let structuralToNominal = Disj [] :-> false
+    case prove False [] structuralToNominal of
+        [proof@(Lam binder (Apply (Ccases []) (Var used)))] -> do
+            assertEqual "empty elimination must consume its premise" binder used
+            assertRight "the structural-to-nominal proof must check" $
+                checkProof [] structuralToNominal proof
+            assertRendered "structural false should render with void"
+                "eliminate = void" "eliminate" proof
+        proofs -> fail $ "expected one structural empty eliminator, got " ++
+            show proofs
 
 testNonTheorems :: IO ()
 testNonTheorems =
@@ -421,6 +471,22 @@ testCsplitResidualArguments = do
     assertWordsSuffix "Csplit residual arguments must retain left-to-right order"
         ["arg1", "arg2"] rendered
 
+-- If a split handler returns the original product, its component patterns are
+-- unused but the as-binder is not.  Simplifying @pair@_@ to @_@ used to emit a
+-- typed hole; it must simplify to the still-bound @pair@ instead.
+testCsplitProductIdentity :: IO ()
+testCsplitProductIdentity = do
+    let pair = Symbol "pair"
+        left = Symbol "left"
+        right = Symbol "right"
+        term = Lam pair $ applys (Csplit 2)
+            [Lam left $ Lam right $ Var pair, Var pair]
+        formula = (atomA & atomB) :-> (atomA & atomB)
+    assertRight "the raw product identity must be a valid proof" $
+        checkProof [] formula term
+    assertRendered "an as-pattern over wildcards must retain its binder"
+        "identity a = a" "identity" term
+
 -- A unary constructor field arrives as a 1-ary split.  Haskell has no
 -- 1-tuples, so the field must bind as `Wrap a`, not as `Wrap (a)`.
 testUnaryConstructorPattern :: IO ()
@@ -502,6 +568,39 @@ testBranchRefinements = do
             [Lam choice $ Lam shared body, Var outer]
     _ <- renderTerm "mergeBranches" term
     return ()
+
+-- A disjunction handler receives one logical payload value.  For a constructor
+-- with several Haskell fields that value is their tuple, so a handler that
+-- returns it whole must bind the fields and reconstruct the tuple explicitly.
+testWholeConstructorPayload :: IO ()
+testWholeConstructorPayload = do
+    let constructor = ConsDesc "C" 2
+        payload = Conj [atomA, atomB]
+        formula = Disj [(constructor, payload)] :-> payload
+        proofs = prove True [] formula
+        expected = "f a =\n" ++
+            "    case a of\n" ++
+            "    C b c -> (b, c)"
+    assertEqual "the theorem should expose both proof-search alternatives"
+        2 (length proofs)
+    rendered <- mapM (renderTerm "f") proofs
+    assertEqual "every alternative must reconstruct the constructor payload"
+        [expected, expected] rendered
+    assertBool "no alpha-renamed implementation binder may escape" $
+        all (not . isInfixOf "__djinn") rendered
+
+    goal <- either fail return $ parseHType "T a b -> (a, b)"
+    environment <- either fail return $
+        declare (DataType "T" ["a", "b"]
+            [("C", [HTVar "a", HTVar "b"])]) emptyEnvironment
+    let options = defaultQueryOptions {
+            optionAlternatives = True,
+            optionSorted = False
+            }
+    report <- either fail return $
+        inhabit options environment [] "f" goal
+    assertEqual "the public boundary should de-duplicate equivalent clauses"
+        (Realized [expected]) (reportOutcome report)
 
 testProofEnvironment :: IO ()
 testProofEnvironment = do
@@ -642,6 +741,30 @@ testScopeSafeRendering = do
     rendered <- renderTerm "applyIdentity" term
     assertEqual "nested shadowing binders should receive distinct names"
         "applyIdentity a = a (\\ b -> b)" rendered
+    let generatedPrefix = Symbol "__djinn1"
+        argument = Symbol "argument"
+        externalTerm = Lam argument $
+            Apply (Var generatedPrefix) (Var argument)
+    assertRendered "a generated-prefix external assumption remains free"
+        "applyExternal = __djinn1" "applyExternal" externalTerm
+
+    -- This spelling is also the first field name the payload elaborator would
+    -- prefer for its first alpha-renamed branch binder.  Reserving all source
+    -- names forces a different local binder and prevents a string collision
+    -- from hiding a scope leak from the final validator.
+    let externalField = Symbol "__djinn1_field1"
+        choice = Symbol "choice"
+        payload = Symbol "payload"
+        constructor = ConsDesc "C" 2
+        caseTerm = applys (Ccases [constructor])
+            [ Var choice
+            , Lam payload $ Apply (Var externalField) (Var payload)
+            ]
+    renderedCase <- renderTerm "applyPayload" caseTerm
+    assertContains "the adversarial external name must remain untouched"
+        "__djinn1_field1" renderedCase
+    assertContains "the constructor fields must still be lexically bound"
+        "C a b -> __djinn1_field1 (a, b)" renderedCase
 
 testMalformedRendering :: IO ()
 testMalformedRendering = do

@@ -168,7 +168,10 @@ hTypeToFormula ss (HTUnion ctss) = Disj
         (c, ts) <- ctss]
 hTypeToFormula ss t =
     case expandSyn ss t [] of
-    Nothing -> PVar $ Symbol $ show t
+    -- Opaque applications are atoms, but aliases inside them are still
+    -- definitionally transparent.  Atomizing the surface spelling made
+    -- @F (Id a)@ different from @F a@ even when @type Id a = a@.
+    Nothing -> PVar $ Symbol $ show $ normalizeAliases ss t
     -- Tag an empty datatype at the declaration that introduced it.  An alias
     -- is expanded again first, so aliases share the underlying nominal tag.
     Just (HTUnion []) -> Empty $ Symbol $ show $ normalizeAliases ss t
@@ -295,12 +298,22 @@ unSymbol (Symbol s) = s
 
 termToHExpr :: Term -> Either String HExpr
 termToHExpr term = do
-    (expression, _) <- conv [] $ alphaRenameTerm term
-    return $ niceNames $ etaReduce $ remUnusedVars $
-        fixSillyAt $ remUnusedVars expression
+    (expression, _) <- conv [] renamedTerm
+    let simplified = niceNames $ etaReduce $ remUnusedVars $
+            fixSillyAt $ remUnusedVars expression
+        allowed = Set.insert "void" $
+            Set.fromList $ map unSymbol $ freeVars term
+        escaped = freeHExpr Set.empty simplified `Set.difference` allowed
+    if Set.null escaped
+        then return simplified
+        else Left $ "proof conversion introduced unbound variable(s): " ++
+            unwords (Set.toAscList escaped)
   -- Besides the expression, conversion records how enclosing variables are
   -- decomposed.  convV later turns those refinements into tuple/as-patterns.
-  where conv _vs (Var s) = Right (HEVar $ unSymbol s, [])
+  where renamedTerm = alphaRenameTerm term
+        reservedNames = termNames renamedTerm
+
+        conv _vs (Var s) = Right (HEVar $ unSymbol s, [])
         conv vs (Lam s te) = do
                 let hs = unSymbol s
                 (te', ss) <- conv (hs : vs) te
@@ -406,12 +419,71 @@ termToHExpr term = do
         cAlt vs (Lam v e) (ConsDesc c n) = do
             let hv = unSymbol v
             (he, ss) <- conv (hv : vs) e
-            patterns <- case lookup hv ss of
+            payloadPattern <- case [p | (owner, p) <- ss, owner == hv] of
+                [] -> Right Nothing
+                p : ps -> Just `fmap` foldM combPat p ps
+            patterns <- case payloadPattern of
                 Nothing -> Right $ replicate n (HPVar "_")
                 Just pattern' -> unTupleP n pattern'
-            return ((foldl HPApply (HPCon c) patterns, he), ss)
+            let payloadIsUsed = hv `elem` getAllVars he
+                branchRefinements = filter ((/= hv) . fst) ss
+            if payloadIsUsed
+                then do
+                    -- A case-handler variable denotes the constructor's
+                    -- logical payload: unit for no fields, the field itself
+                    -- for one, and a tuple for several.  Haskell patterns bind
+                    -- the fields separately, so retain (or introduce) one
+                    -- value binder per field and reconstruct that logical
+                    -- payload in the body.
+                    let (patterns', fields) = payloadValues hv patterns
+                        reconstructed = hETuple fields
+                        he' = replaceVariable hv reconstructed he
+                    return
+                        ( (foldl HPApply (HPCon c) patterns', he')
+                        , branchRefinements
+                        )
+                else
+                    return
+                        ( (foldl HPApply (HPCon c) patterns, he)
+                        , branchRefinements
+                        )
         cAlt _ handler _ = Left $
             "case alternative is not a lambda: " ++ show handler
+
+        -- Return a pattern and expression for every constructor field.  An
+        -- existing variable/as-pattern already names its complete value;
+        -- structural and wildcard patterns acquire a fresh as-binder.  The
+        -- prefix comes from a globally unique proof binder and candidates are
+        -- also checked against every source name, so external assumptions
+        -- cannot be captured.
+        payloadValues owner = go reservedNames (1 :: Integer)
+          where
+            go _ _ [] = ([], [])
+            go used next (pattern' : patterns) =
+                let (pattern'', field, used', next') =
+                        patternValue used next pattern'
+                    (patterns', fields) = go used' next' patterns
+                in (pattern'' : patterns', field : fields)
+
+            patternValue used next pattern' =
+                case pattern' of
+                    HPVar variable | variable /= "_" ->
+                        (pattern', HEVar variable, used, next)
+                    HPAt variable _ | variable /= "_" ->
+                        (pattern', HEVar variable, used, next)
+                    _ ->
+                        let (fresh, used', next') = freshField used next
+                        in (HPAt fresh pattern', HEVar fresh, used', next')
+
+            freshField used next =
+                let candidate = owner ++ "_field" ++ show next
+                in if candidate `Set.member` used then
+                       freshField used (next + 1)
+                   else
+                       ( candidate
+                       , Set.insert candidate used
+                       , next + 1
+                       )
 
         unLam 0 e = Right ([], e)
         unLam n (HELam patterns e) | length patterns >= n =
@@ -422,6 +494,75 @@ termToHExpr term = do
 
         hETuple [e] = e
         hETuple es = HETuple es
+
+-- Names present before Haskell conversion.  Extra binders needed to expose a
+-- constructor's separate fields must avoid this complete set, not only the
+-- variables visible at that particular case alternative.
+termNames :: Term -> Set.Set HSymbol
+termNames proofTerm =
+    case proofTerm of
+        Var symbol -> Set.singleton $ unSymbol symbol
+        Lam symbol body -> Set.insert (unSymbol symbol) $ termNames body
+        Apply function argument ->
+            termNames function `Set.union` termNames argument
+        Xsel _ _ expression -> termNames expression
+        _ -> Set.empty
+
+-- Replace the eliminated logical payload with its Haskell reconstruction.
+-- Alpha-renaming makes binders globally unique, but honoring lexical shadowing
+-- here keeps this helper correct for independently constructed Haskell ASTs.
+replaceVariable :: HSymbol -> HExpr -> HExpr -> HExpr
+replaceVariable target replacement = replace
+  where
+    replace expression =
+        case expression of
+            HELam patterns body
+                | target `Set.member` patternNames patterns -> expression
+                | otherwise -> HELam patterns $ replace body
+            HEApply function argument ->
+                HEApply (replace function) (replace argument)
+            constructor@(HECon _) -> constructor
+            variable@(HEVar name)
+                | name == target -> replacement
+                | otherwise -> variable
+            HETuple expressions -> HETuple $ map replace expressions
+            HECase scrutinee alternatives ->
+                HECase (replace scrutinee) $
+                    map replaceAlternative alternatives
+
+    replaceAlternative alternative@(pattern', body)
+        | target `Set.member` patternNames [pattern'] = alternative
+        | otherwise = (pattern', replace body)
+
+-- Lexical free-variable analysis for the post-conversion safety check.  The
+-- renderer may simplify or eliminate binders, but it must never invent a free
+-- name that was not a free proof assumption (apart from its explicit @void@
+-- eliminator dependency).
+freeHExpr :: Set.Set HSymbol -> HExpr -> Set.Set HSymbol
+freeHExpr bound expression =
+    case expression of
+        HELam patterns body ->
+            freeHExpr (bound `Set.union` patternNames patterns) body
+        HEApply function argument ->
+            freeHExpr bound function `Set.union` freeHExpr bound argument
+        HECon _ -> Set.empty
+        HEVar name
+            | name `Set.member` bound -> Set.empty
+            | otherwise -> Set.singleton name
+        HETuple expressions ->
+            Set.unions $ map (freeHExpr bound) expressions
+        HECase scrutinee alternatives ->
+            freeHExpr bound scrutinee `Set.union`
+                Set.unions
+                    [ freeHExpr
+                        (bound `Set.union` patternNames [pattern']) body
+                    | (pattern', body) <- alternatives
+                    ]
+
+-- The slightly less compact definition makes the branch scope explicit and
+-- avoids accidentally putting one alternative's binders in another branch.
+patternNames :: [HPat] -> Set.Set HSymbol
+patternNames = Set.fromList . filter (/= "_") . concatMap getBinderVarsHP
 
 -- Downstream Haskell-AST rewrites historically assumed that every binder had
 -- a globally unique name.  Enforce that invariant even for externally built
@@ -493,6 +634,10 @@ fixSillyAt = fixAt []
         in (HPTuple patterns', concat renamings)
     findSilly (HPAt variable pattern') =
         case findSilly pattern' of
+            (HPVar "_", renamings) ->
+                -- @x@_@ binds x; replacing the complete as-pattern with the
+                -- wildcard would turn every use of x into the typed hole @_@.
+                (HPVar variable, renamings)
             (pattern''@(HPVar variable'), renamings) ->
                 (pattern'', (variable, variable') : renamings)
             (pattern'', renamings) ->

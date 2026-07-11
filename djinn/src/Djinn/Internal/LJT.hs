@@ -441,13 +441,12 @@ redant more antes atomImps nestImps atoms goal =
     reduceAntecedent (A p (Disj alternatives)) pending g = do
         variables <- mapM (const (newSym "d")) alternatives
         proofs <- mapM proveAlternative (zip variables alternatives)
-        if null alternatives && g == false
-            then
-                -- Avoid constructing @void p :: Void@; @p@ already has type Void.
-                return p
-            else
-                return $ applys (Ccases (map fst alternatives))
-                    (p : zipWith Lam variables proofs)
+        -- Even when both propositions print as @false@, a raw empty
+        -- disjunction and a nominal empty datatype are distinct proof-checker
+        -- types.  Cross that boundary with the proper empty eliminator rather
+        -- than returning an ill-typed identity proof.
+        return $ applys (Ccases (map fst alternatives))
+            (p : zipWith Lam variables proofs)
       where
         proveAlternative (v, (_, f)) = redant1 (A (Var v) f) pending g
     -- Empty datatypes have no constructors.  Preserve their nominal identity

@@ -12,10 +12,6 @@ where
 
 
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
-import qualified Language.Haskell.Exference.Core.ExferenceStats as S
-import qualified Language.Haskell.Exference.Core.SearchTree as ST
-import Control.Monad ( join )
-import Data.Monoid ( mempty )
 
 
 

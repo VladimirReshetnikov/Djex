@@ -9,6 +9,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , environmentFromPath
   , haskellSrcExtsParseMode
   , compileWithDict
+  , parseRatings
   )
 where
 
@@ -35,14 +36,14 @@ import System.Process
 import Control.Applicative ( (<$>), (<*>), (<*) )
 import Control.Arrow ( (***) )
 import Control.Monad ( when, forM_, guard, forM, mplus, mzero )
-import Data.List ( sortBy, find, isSuffixOf )
+import Data.List ( sort, sortBy, find, isSuffixOf )
 import Data.Ord ( comparing )
 import Text.Printf
 import Data.Maybe ( listToMaybe, fromMaybe, maybeToList, catMaybes )
 import Data.Either ( lefts, rights )
 import Control.Monad.Writer.Strict
 import System.Directory ( getDirectoryContents )
-import Control.Exception ( try, SomeException )
+import Control.Exception ( evaluate, try, SomeException )
 import Data.Bifunctor ( first, second )
 
 import Language.Haskell.Exts.Syntax ( Module(..), Decl(..), ModuleName(..) )
@@ -55,7 +56,6 @@ import Language.Haskell.Exts.Extension ( Language (..)
                                        , Extension (..)
                                        , KnownExtension (..) )
 
-import Data.List.Split ( chunksOf )
 import Control.Monad.Trans.MultiRWS
 import Data.HList.ContainsType
 
@@ -63,6 +63,7 @@ import Language.Haskell.Exference.Core.TypeUtils
 
 import qualified Data.Map as M
 import qualified Data.IntMap as IntMap
+import Text.Read ( readMaybe )
 
 
 builtInDeclsM :: (Monad m) => MultiRWST r w s m [HsFunctionDecl]
@@ -229,10 +230,22 @@ parseModulesSimple s = helper
   addRating (a,b) = (a,0.0,b)
   helper (decls, deconss, cntxt, ds, tdm) = (addRating <$> decls, deconss, cntxt, ds, tdm)
 
+parseRatings :: String -> Either String [(QualifiedName, Float)]
+parseRatings = go . words
+  where
+    go [] = Right []
+    go [_] = Left "rating file ends with a name but no numeric rating"
+    go (name : value : rest) = case readMaybe value of
+      Nothing -> Left $ "invalid rating for " ++ name ++ ": " ++ value
+      Just rating | isNaN rating || isInfinite rating ->
+        Left $ "rating for " ++ name ++ " must be finite: " ++ value
+      Just rating -> ((parseQualifiedName name, rating) :) <$> go rest
+
 ratingsFromFile :: String -> IO (Either String [(QualifiedName, Float)])
-ratingsFromFile = (fmap . first) show . (try :: IO a -> IO (Either SomeException a))
-  . fmap (map (\[name, float] -> (parseQualifiedName name, read float)) . chunksOf 2 . words)
-  . readFile
+ratingsFromFile path = do
+  contents <- try (readFile path >>= evaluate . force)
+    :: IO (Either SomeException String)
+  return $ first show contents >>= parseRatings
 
 
 -- TODO: add warnings for ratings not applied
@@ -290,8 +303,10 @@ environmentFromPath :: ( ContainsType [String] w
                          )
 environmentFromPath p = do
   files <- lift $ getDirectoryContents p
-  let modules = ((p ++ "/")++) <$> filter (".hs" `isSuffixOf`) files
-  let ratings = ((p ++ "/")++) <$> filter (".ratings" `isSuffixOf`) files
+  -- Directory enumeration order is platform-dependent; stable ordering keeps
+  -- diagnostics and duplicate resolution reproducible.
+  let modules = ((p ++ "/")++) <$> sort (filter (".hs" `isSuffixOf`) files)
+  let ratings = ((p ++ "/")++) <$> sort (filter (".ratings" `isSuffixOf`) files)
   (decls, deconss, cntxt, dts, tdm) <- parseModules
     [ (mode, m)
     | m <- modules

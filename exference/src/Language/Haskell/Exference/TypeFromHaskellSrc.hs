@@ -23,6 +23,7 @@ where
 
 import Language.Haskell.Exts.Syntax
 import qualified Language.Haskell.Exts.Parser as P
+import Language.Haskell.Exts.Pretty ( prettyPrint )
 
 import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Exference.Core.TypeUtils as TU
@@ -135,9 +136,10 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
 getVar :: MonadMultiState ConvData m => Name -> m Int
 getVar n = do
   ConvData next m <- mGet
-  case M.lookup n m of
+  let key = prettyPrint n
+  case M.lookup key m of
     Nothing -> do
-      mSet $ ConvData (next+1) (M.insert n next m)
+      mSet $ ConvData (next+1) (M.insert key next m)
       return next
     Just i ->
       return i
@@ -185,7 +187,7 @@ convertConstraint tcs defModuleName@(Just _) ds (ClassA qname types)
   , ctypes <- mapM (convertTypeNoDeclInternal tcs defModuleName ds) types
   = do
       ts <- ctypes
-      return $ T.HsConstraint ( fromMaybe TU.unknownTypeClass
+      return $ T.HsConstraint ( fromMaybe (TU.unknownTypeClass str)
                               $ find ((==str) . T.tclass_name)
                               $ tcs)
                               ts
@@ -194,7 +196,7 @@ convertConstraint tcs Nothing ds (ClassA (UnQual (Symbol "[]")) types)
   = do
       ts <- ctypes
       return $ T.HsConstraint
-                 ( fromMaybe TU.unknownTypeClass
+                 ( fromMaybe (TU.unknownTypeClass T.ListCon)
                  $ find ((==T.ListCon) . T.tclass_name)
                  $ tcs )
                  ts
@@ -205,7 +207,7 @@ convertConstraint tcs Nothing ds (ClassA (UnQual (Ident name)) types)
       let tcsTuples = (\tc -> (T.tclass_name tc, tc)) <$> tcs
       let searchF (T.QualifiedName _ n) = n==name
           searchF _                     = False
-      let tc = fromMaybe TU.unknownTypeClass
+      let tc = fromMaybe (TU.unknownTypeClass $ T.QualifiedName [] name)
              $ snd <$> find (searchF . fst) tcsTuples
       return $ T.HsConstraint tc ts
 convertConstraint tcs _ ds (ClassA q@(Qual {}) types)
@@ -214,7 +216,7 @@ convertConstraint tcs _ ds (ClassA q@(Qual {}) types)
   = do
       ts <- ctypes
       return $ T.HsConstraint
-                 ( fromMaybe TU.unknownTypeClass
+                 ( fromMaybe (TU.unknownTypeClass name)
                  $ find (\(T.HsTypeClass n _ _)
                          -> n==name) tcs
                  )
@@ -241,5 +243,6 @@ findInvalidNames valids (T.TypeArrow t1 t2)   =
   findInvalidNames valids t1 ++ findInvalidNames valids t2
 findInvalidNames valids (T.TypeApp t1 t2)     =
   findInvalidNames valids t1 ++ findInvalidNames valids t2
-findInvalidNames valids (T.TypeForall _ _ t1) =
+findInvalidNames valids (T.TypeForall _ constraints t1) =
   findInvalidNames valids t1
+  ++ concatMap (concatMap (findInvalidNames valids) . T.constraint_params) constraints

@@ -58,6 +58,7 @@ checkPossibleGeneric containsVarsResult otherwiseResult qClassEnv = fmap concat 
                            ( sClassEnv_instances
                              $ qClassEnv_env qClassEnv )
     f (HsInstance instConstrs _iclass instParams) = do
+      guard $ length cparams == length instParams
       substs <- unifyRightEqs $ zipWith TypeEq cparams instParams
       checkPossibleGeneric containsVarsResult otherwiseResult
         qClassEnv

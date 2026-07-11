@@ -12,7 +12,6 @@ where
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
-import Language.Haskell.Exference.Core.Expression
 
 
 

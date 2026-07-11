@@ -33,24 +33,17 @@ module Language.Haskell.Exference.Core.Types
   , showHsConstraint
   , TypeVarIndex
   , showHsType
-#if !MIN_VERSION_base(4,8,0)
-  , Alt (..)
-#endif
   )
 where
 
 
 
-import Data.Char ( ord, chr, isLower, isUpper, toLower )
+import Data.Char ( ord, chr, toLower )
 import Data.List ( intercalate, intersperse )
-import Data.Foldable ( fold, foldMap )
-import Control.Applicative ( (<$>), (<*>), (*>), (<*) )
-import Data.Maybe ( maybeToList, fromMaybe )
-import Data.Monoid ( Monoid(..), Any(..) )
-import Control.Monad ( liftM, liftM2, MonadPlus )
-import Control.Applicative ( Applicative, Alternative, empty, (<|>) )
-import Control.Arrow ( first )
-import Data.Orphans ()
+import Data.Foldable ( foldMap )
+import Data.Maybe ( fromMaybe )
+import Data.Monoid ( Any(..) )
+import Control.Monad ( liftM2 )
 
 import qualified Data.Set as S
 import qualified Data.IntSet as IntSet
@@ -58,10 +51,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as L
 
-import Text.ParserCombinators.Parsec hiding (State, (<|>))
-import Text.ParserCombinators.Parsec.Char
-
-import Language.Haskell.Exts.Syntax ( Name (..) )
+import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 
 import Control.DeepSeq.Generics
 import Control.DeepSeq
@@ -71,20 +61,8 @@ import Data.Typeable ( Typeable )
 import Control.Monad.Trans.MultiState
 import Safe
 
-import Debug.Hood.Observe
-import Debug.Trace
 
 
-
-#if !MIN_VERSION_base(4,8,0)
-newtype Alt f a = Alt {getAlt :: f a}
-  deriving (Generic, Generic1, Read, Show, Eq, Ord, Num, Enum,
-            Monad, MonadPlus, Applicative, Alternative, Functor)
-
-instance forall f a . Alternative f => Monoid (Alt f a) where
-        mempty = Alt empty
-        (Alt x) `mappend` (Alt y) = Alt (x <|> y)
-#endif
 
 type TVarId = Int
 data Subst  = Subst {-# UNPACK #-} !TVarId !HsType
@@ -108,14 +86,26 @@ data HsType = TypeVar      {-# UNPACK #-} !TVarId
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
-type TypeVarIndex = M.Map Name Int
+-- Source locations do not belong in variable identity. Keeping only the
+-- spelling also decouples the search core from a particular parser AST.
+type TypeVarIndex = M.Map String Int
 
 data HsTypeClass = HsTypeClass
   { tclass_name :: QualifiedName
   , tclass_params :: [TVarId]
   , tclass_constraints :: [HsConstraint]
   }
-  deriving (Eq, Show, Ord, Generic, Data, Typeable)
+  deriving (Show, Generic, Data, Typeable)
+
+-- Class identity is nominal. Besides matching Haskell's class namespace, this
+-- keeps equality and superclass closure finite for mutually recursive class
+-- declarations; structurally comparing their recursively tied definitions
+-- would diverge.
+instance Eq HsTypeClass where
+  left == right = tclass_name left == tclass_name right
+
+instance Ord HsTypeClass where
+  compare left right = compare (tclass_name left) (tclass_name right)
 
 data HsInstance = HsInstance
   { instance_constraints :: [HsConstraint]
@@ -153,11 +143,9 @@ instance NFData StaticClassEnv where rnf = genericRnf
 instance NFData QueryClassEnv  where rnf = genericRnf
 
 instance Show QualifiedName where
-  show (QualifiedName ns n) = if    length n >= 2
-                                 && head n == '('
-                                 && last n == ')'
-                              then "(" ++ intercalate "." (ns ++ [tail n])
-                              else        intercalate "." (ns ++ [n])
+  show (QualifiedName ns ('(':rest@(_:_)))
+    | ')':_ <- reverse rest = "(" ++ intercalate "." (ns ++ [rest])
+  show (QualifiedName ns n) = intercalate "." (ns ++ [n])
   show ListCon              = "[]"
   show (TupleCon 0)         = "()"
   show (TupleCon i)         = "(" ++ replicate (i-1) ',' ++ ")"
@@ -185,12 +173,12 @@ showHsType convMap t = h 0 t ""
   h :: Int -> HsType -> ShowS
   h _ (TypeVar i)      = showString
                        $ maybe "badNameInternalError"
-                               (\(Ident n, _) -> n)
+                               fst
                        $ L.find ((i ==) .  snd)
                        $ M.toList convMap
   h _ (TypeConstant i) = showString
                        $ maybe "badNameInternalError"
-                               (\(Ident n, _) -> n)
+                               fst
                        $ L.find ((i ==) .  snd)
                        $ M.toList convMap
   h _ (TypeCons s) = shows s
@@ -214,9 +202,6 @@ showHsType convMap t = h 0 t ""
     where
       tShows = h (-2) ty
 
-instance Observable HsType where
-  observer x = observeOpaque (show x) x
-
 -- instance Read HsType where
 --   readsPrec _ = maybeToList . parseType
 
@@ -235,15 +220,6 @@ showHsConstraint convMap (HsConstraint c ps) =
 
 instance Show QueryClassEnv where
   show (QueryClassEnv _ cs _ _) = "(QueryClassEnv _ " ++ show cs ++ " _)"
-instance Observable HsConstraint where
-  observer x = observeOpaque (show x) x
-
-instance Observable QueryClassEnv where
-  observer x = observeOpaque (show x) x
-
-instance Observable HsInstance where
-  observer x = observeOpaque (show x) x
-
 filterHsConstraintsByVarId :: TVarId
                            -> S.Set HsConstraint
                            -> S.Set HsConstraint
@@ -264,30 +240,26 @@ mkQueryClassEnv sClassEnv constrs = addQueryClassEnv constrs $ QueryClassEnv {
 addQueryClassEnv :: [HsConstraint] -> QueryClassEnv -> QueryClassEnv
 addQueryClassEnv constrs env = env {
   qClassEnv_constraints = csSet,
-  qClassEnv_inflatedConstraints = inflateHsConstraints csSet,
-  qClassEnv_varConstraints = helper constrs
+  qClassEnv_inflatedConstraints = inflated,
+  qClassEnv_varConstraints = helper csSet
 }
   where
     csSet = S.fromList constrs `S.union` qClassEnv_constraints env
-    helper :: [HsConstraint] -> IntMap.IntMap (S.Set HsConstraint)
+    inflated = inflateHsConstraints csSet
+    helper :: S.Set HsConstraint -> IntMap.IntMap (S.Set HsConstraint)
     helper cs =
       let ids :: IntSet.IntSet
-          ids = IntSet.fromList $ S.toList $ fold $ freeVars <$> (constraint_params =<< cs)
+          ids = IntSet.fromList . S.toList . foldMap freeVars
+              $ constraint_params =<< S.toList cs
       in IntMap.fromSet (flip filterHsConstraintsByVarId
-                        $ inflateHsConstraints csSet) ids
+                        inflated) ids
 
 inflateHsConstraints :: S.Set HsConstraint -> S.Set HsConstraint
-inflateHsConstraints = inflate (S.fromList . f)
+inflateHsConstraints = closure (S.fromList . superclasses)
   where
-    f :: HsConstraint -> [HsConstraint]
-    f (HsConstraint (HsTypeClass _ ids constrs) ps) =
+    superclasses :: HsConstraint -> [HsConstraint]
+    superclasses (HsConstraint (HsTypeClass _ ids constrs) ps) =
       map (snd . constraintApplySubsts (IntMap.fromList $ zip ids ps)) constrs
-
--- uses f to find new elements. adds these new elements, and recursively
--- tried to find even more elements. will not terminate if there are cycles
--- in the application of f
-inflate :: (Ord a, Show a) => (a -> S.Set a) -> S.Set a -> S.Set a
-inflate f = fold . takeWhile (not . S.null) . iterate (foldMap f)
 
 constraintApplySubst :: Subst -> HsConstraint -> HsConstraint
 constraintApplySubst s (HsConstraint c ps) =
@@ -337,34 +309,6 @@ showTypedVar i = do
   h (TypeApp t _)      = h t
   h (TypeForall _ _ t) = h t
 
--- parseType :: _ => String -> m (Maybe (HsType, String))
--- parseType s = either (const Nothing) Just
---             $ runParser (    (,)
---                          <$> typeParser
---                          <*> many anyChar)
---                         ()
---                         ""
---                         s
--- 
--- typeParser :: forall m . (_) => Parser (m HsType)
--- typeParser = parseAll
---   where
---     parseAll :: Parser (m HsType)
---     parseAll = parseUn >>= parseBin
---     parseUn :: Parser (m HsType) -- TODO: forall
---     parseUn = spaces *> (
---             try (TypeCons . QualifiedName [] <$> ((:) <$> satisfy isUpper <*> many alphaNum))
---         <|> try ((TypeVar . (\x -> x - ord 'a') . ord) <$> satisfy isLower)
---         <|>     (char '(' *> parseAll <* char ')')
---       )
---     parseBin :: HsType -> Parser HsType
---     parseBin left =
---         try (    try (TypeArrow left <$> (spaces *> string "->" *> parseAll))
---              <|>     ((TypeApp   left <$> (space *> parseUn)) >>= parseBin)
---              )
---         <|>
---         (spaces *> return left)
-
 applySubst :: Subst -> HsType -> HsType
 applySubst (Subst i t) v@(TypeVar j) = if i==j then t else v
 applySubst _ c@(TypeConstant _) = c
@@ -382,9 +326,12 @@ applySubsts _ c@(TypeConstant _) = return c
 applySubsts _ c@(TypeCons _)     = return c
 applySubsts s (TypeArrow t1 t2)  = liftM2 TypeArrow (applySubsts s t1) (applySubsts s t2)
 applySubsts s (TypeApp t1 t2)    = liftM2 TypeApp   (applySubsts s t1) (applySubsts s t2)
-applySubsts s (TypeForall js cs t) = liftM2 (TypeForall js) 
-  (sequence $ constraintApplySubsts s <$> cs)
-  (applySubsts (foldr IntMap.delete s js) t)
+applySubsts s (TypeForall js cs t) = liftM2 (TypeForall js)
+  (sequence $ constraintApplySubsts unbound <$> cs)
+  (applySubsts unbound t)
+  where
+    -- Bound variables are protected in both the context and the body.
+    unbound = foldr IntMap.delete s js
 
 freeVars :: HsType -> S.Set TVarId
 freeVars (TypeVar i)         = S.singleton i
@@ -392,8 +339,6 @@ freeVars (TypeConstant _)    = S.empty
 freeVars (TypeCons _)        = S.empty
 freeVars (TypeArrow t1 t2)   = S.union (freeVars t1) (freeVars t2)
 freeVars (TypeApp t1 t2)     = S.union (freeVars t1) (freeVars t2)
-freeVars (TypeForall is _ t) = foldr S.delete (freeVars t) is
-
--- instance Monoid w => Monad ((,) w) where
---   return = (,) mempty
---   (w,x) >>= f = first (mappend w) (f x)
+freeVars (TypeForall is cs t) = foldr S.delete allVars is
+  where
+    allVars = freeVars t `S.union` foldMap (foldMap freeVars . constraint_params) cs

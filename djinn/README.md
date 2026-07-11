@@ -43,7 +43,7 @@ cabal test all --test-show-details=direct
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 28 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, environments, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 33 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Nine subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, and stateful query behavior. |
 
@@ -122,7 +122,10 @@ an imported reference such as `Data.Function.id`. Generated query, class, and
 method names are deliberately unqualified because they introduce local bindings.
 Names follow Haskell lexical rules: leading underscores are accepted, reserved
 words and reserved operators are rejected, and operators are written in
-parentheses in prefix positions.
+parentheses in prefix positions. Function assumptions and class methods share
+Haskell's printed value namespace, so Djinn rejects an unqualified collision in
+either declaration order. A genuinely qualified assumption such as
+`External.select` remains distinct from a method named `select`.
 
 `type T :: kind` declares an abstract type constructor. This is the right way to
 introduce an opaque type such as `Int`; `data T` instead declares an empty type.
@@ -136,6 +139,14 @@ data Empty
 
 Recursive type declarations are rejected because the logical translation
 expands data types structurally.
+
+Unit is deliberately wired in rather than user-declared. The spelling `()` is
+part of Djinn's type grammar but is not an ordinary Haskell constructor
+identifier, so the public API rejects types, classes, and constructors that try
+to claim it. `standardEnvironment` privately installs exactly `data () = ()`,
+and that binding cannot be replaced or deleted; start from `emptyEnvironment`
+when an environment without the standard unit type is wanted. The unit spelling
+remains available normally inside type expressions and constructor fields.
 
 ### Type-class contexts
 

@@ -8,10 +8,11 @@ import Text.Read (readMaybe)
 
 import Djinn.Core (
     Declaration(..), QueryOutcome(..),
-    declare, defaultQueryOptions, emptyEnvironment, inhabit,
+    classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
+    functionDeclarations, inhabit,
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
     parseHKind, parseHType, removeDeclaration,
-    reportOutcome, resolveContext, standardEnvironment)
+    reportOutcome, resolveContext, standardEnvironment, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
@@ -56,6 +57,10 @@ tests =
     , ("reject malformed proof terms", testMalformedProofTerms)
     , ("preserve nominal empty types", testNominalEmptyTypes)
     , ("validate declaration mutations transactionally", testEnvironmentValidation)
+    , ("keep the printed value namespace unambiguous",
+          testPrintedValueNamespace)
+    , ("reserve unit declarations for the standard environment",
+          testTrustedUnitDeclaration)
     , ("render shadowing terms without capture", testScopeSafeRendering)
     , ("report malformed proof rendering", testMalformedRendering)
     , ("accept only Haskell identifiers and operators", testIdentifiers)
@@ -733,6 +738,108 @@ testEnvironmentValidation = do
             [("Other", ([], HTUnion [("Other", [])], KStar))]
             [] [])
 
+testPrintedValueNamespace :: IO ()
+testPrintedValueNamespace = do
+    let bool = HTCon "Bool"
+        selectable = ClassDecl "Selectable" ["a"]
+            [("select", HTVar "a")]
+        conflict =
+            "Function assumption select conflicts with method select " ++
+            "of class Selectable"
+
+    functionFirst <- expectRight $
+        declare (Function "select" bool) standardEnvironment
+    assertLeftMessage "a later class method must not shadow an assumption"
+        conflict (declare selectable functionFirst)
+
+    classFirst <- expectRight $ declare selectable standardEnvironment
+    assertLeftMessage "a later assumption must not shadow a class selector"
+        conflict (declare (Function "select" bool) classFirst)
+    assertLeftMessage "operator selectors share the same printed namespace"
+        "Function assumption (==) conflicts with method (==) of class Eq"
+        (declare (Function "==" bool) standardEnvironment)
+
+    -- Qualified references retain their qualification in generated code and
+    -- therefore cannot shadow an unqualified selector with the same suffix.
+    qualifiedFirst <- expectRight $
+        declare (Function "External.select" bool) standardEnvironment
+    qualifiedWithClass <- expectRight $ declare selectable qualifiedFirst
+    assertEqual "the qualified assumption remains alongside the selector"
+        (Just bool)
+        (lookup "External.select" $ functionDeclarations qualifiedWithClass)
+    assertBool "the class declaration is retained too" $
+        "Selectable" `elem` map fst (classDeclarations qualifiedWithClass)
+    _ <- expectRight $ declare (Function "External.select" bool) classFirst
+
+    -- Removing the owning declaration releases the spelling, while failed
+    -- candidates leave their immutable input environment untouched.
+    withoutFunction <- expectRight $ removeDeclaration "select" functionFirst
+    _ <- expectRight $ declare selectable withoutFunction
+    withoutClass <- expectRight $ removeDeclaration "Selectable" classFirst
+    _ <- expectRight $ declare (Function "select" bool) withoutClass
+
+    -- The internal rebuilding boundary owns the invariant as well; it is not
+    -- merely an ad-hoc check in the two public declaration branches.
+    assertLeftMessage "raw environment validation rejects the same ambiguity"
+        conflict
+        (validateEnvironment [] [("select", HTVar "a")]
+            [("Selectable", ([("a", KStar)], [("select", HTVar "a")]))])
+    assertLeftContains "raw validation rejects duplicate assumptions"
+        "Duplicate function assumption: duplicate"
+        (validateEnvironment []
+            [("duplicate", bool), ("duplicate", bool)] [])
+    assertLeftContains "raw validation rejects duplicate class owners"
+        "Duplicate class: Selectable"
+        (validateEnvironment [] []
+            [ ("Selectable", ([("a", KStar)], []))
+            , ("Selectable", ([("a", KStar)], []))
+            ])
+
+testTrustedUnitDeclaration :: IO ()
+testTrustedUnitDeclaration = do
+    let exactUnit = ([], HTUnion [("()", [])], KStar)
+    assertEqual "the standard environment contains exactly the wired-in unit"
+        (Just exactUnit) (lookup "()" $ typeDeclarations standardEnvironment)
+
+    unitType <- expectRight $ parseHType "()"
+    report <- expectRight $
+        inhabit defaultQueryOptions standardEnvironment [] "unitValue" unitType
+    assertEqual "the trusted constructor still realizes the unit type"
+        (Realized ["unitValue = ()"]) (reportOutcome report)
+
+    -- The spelling remains valid inside ordinary type expressions.
+    assertRight "a synonym body may refer to the built-in unit" $
+        declare (TypeSynonym "UnitAlias" [] unitType) standardEnvironment
+    assertRight "a constructor field may have the built-in unit type" $
+        declare (DataType "CarriesUnit" [] [("CarriesUnit", [unitType])])
+            standardEnvironment
+
+    -- It is not, however, a user-definable ConId.  In particular, the exact
+    -- standard declaration is private rather than a loophole in this rule.
+    assertLeftContains "a unit-named synonym is rejected"
+        "not a valid type constructor name"
+        (declare (TypeSynonym "()" [] $ HTCon "Bool") standardEnvironment)
+    assertLeftContains "a unit-named abstract type is rejected"
+        "not a valid type constructor name"
+        (declare (AbstractType "()" KStar) standardEnvironment)
+    assertLeftContains "a unit-named data type is rejected"
+        "not a valid type constructor name"
+        (declare (DataType "()" [] []) standardEnvironment)
+    assertLeftContains "even the exact built-in data declaration is private"
+        "not a valid data constructor name"
+        (declare (DataType "()" [] [("()", [])]) emptyEnvironment)
+    assertLeftContains "a unit-named class is rejected"
+        "not a valid class name"
+        (declare (ClassDecl "()" [] []) standardEnvironment)
+    assertLeftContains "the unit constructor cannot belong to another type"
+        "not a valid data constructor name"
+        (declare (DataType "CounterfeitUnit" [] [("()", [])])
+            standardEnvironment)
+
+    assertLeftMessage "the trusted unit cannot be deleted and recreated"
+        "() is a built-in type and cannot be removed"
+        (removeDeclaration "()" standardEnvironment)
+
 testScopeSafeRendering :: IO ()
 testScopeSafeRendering = do
     let shadowed = Symbol "x"
@@ -829,6 +936,20 @@ assertLeft :: Show a => String -> Either String a -> IO ()
 assertLeft _ (Left _) = return ()
 assertLeft message (Right value) =
     fail $ message ++ ": expected an error, got " ++ show value
+
+assertLeftMessage :: Show a => String -> String -> Either String a -> IO ()
+assertLeftMessage message expected result =
+    case result of
+        Left actual -> assertEqual message expected actual
+        Right value ->
+            fail $ message ++ ": expected an error, got " ++ show value
+
+assertLeftContains :: Show a => String -> String -> Either String a -> IO ()
+assertLeftContains message expectedFragment result =
+    case result of
+        Left actual -> assertContains message expectedFragment actual
+        Right value ->
+            fail $ message ++ ": expected an error, got " ++ show value
 
 assertRight :: Show a => String -> Either String a -> IO ()
 assertRight _ (Right _) = return ()

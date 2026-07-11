@@ -6,7 +6,7 @@ module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition,
     validateEnvironment,
     replace, requireDistinct, requireUnusedName,
-    checkConstructors, checkMethodNames
+    checkConstructors
     ) where
 
 import Data.List (nub)
@@ -27,10 +27,46 @@ validateEnvironment ::
     [TypeDefinition] -> [Axiom] -> [ClassDefinition] ->
     Either String ([TypeDefinition], [ClassDefinition])
 validateEnvironment definitions axioms classes = do
+    checkValueNamespace axioms classes
     checked <- withContext "type environment" $ htCheckEnv definitions
     mapM_ (checkAxiom checked) axioms
     refreshed <- mapM (checkClass checked) classes
     return (checked, refreshed)
+
+-- Function assumptions and class selectors are both printed as term-level
+-- references in generated Haskell.  Consequently an unqualified assumption
+-- cannot share a spelling with a method: the assumption would shadow the
+-- selector and could make otherwise well-checked output ill-typed.  Exact
+-- comparison is intentional.  A qualified assumption such as @External.f@
+-- remains distinct from the necessarily unqualified method @f@.
+--
+-- Keep this check at the full-environment boundary rather than only in the
+-- individual declaration operations.  Replacement and deletion then rebuild
+-- the same invariant transactionally, and internal callers cannot accidentally
+-- assemble an ambiguous environment either.
+checkValueNamespace :: [Axiom] -> [ClassDefinition] -> Either String ()
+checkValueNamespace axioms classes = do
+    requireDistinct "function assumption" (map fst axioms)
+    requireDistinct "class" (map fst classes)
+    mapM_ checkMethodsWithinClass classes
+    checkMethodsAcrossClasses classes
+    case [(functionName, methodName, className)
+            | (functionName, _) <- axioms
+            , (className, (_, methods)) <- classes
+            , (methodName, _) <- methods
+            , functionName == methodName] of
+        [] -> Right ()
+        (functionName, methodName, className) : _ -> Left $
+            "Function assumption " ++ prHSymbolOp functionName ++
+            " conflicts with method " ++ prHSymbolOp methodName ++
+            " of class " ++ className
+  where
+    checkMethodsWithinClass (className, (_, methods)) =
+        requireDistinct ("method of class " ++ className) (map fst methods)
+
+    checkMethodsAcrossClasses [] = Right ()
+    checkMethodsAcrossClasses ((owner, (_, methods)) : rest) =
+        checkMethodNames owner methods rest >> checkMethodsAcrossClasses rest
 
 checkAxiom :: [TypeDefinition] -> Axiom -> Either String ()
 checkAxiom definitions (name, axiomType) =

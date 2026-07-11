@@ -35,7 +35,7 @@ import Text.ParserCombinators.ReadP (ReadP, readP_to_S, skipSpaces)
 
 import Djinn.Internal.Environment
 import Djinn.Internal.HCheck (
-    htCheckType, htCheckTypeKind, htCheckTypesKinds, htInferClassKinds)
+    htCheckType, htCheckTypeKind, htCheckTypesKinds)
 import Djinn.Internal.HIdentifier (
     isConId, isQualifiedVarId, isVarId, isVarOperator)
 import Djinn.Internal.HTypes
@@ -129,10 +129,10 @@ emptyEnvironment = Environment [] [] []
 -- and @Monad@ classes.
 standardEnvironment :: Environment
 standardEnvironment =
-    either (error . ("Djinn.Core.standardEnvironment: " ++)) id $
-        foldM (flip declare) emptyEnvironment
-            [ DataType "()" [] [("()", [])]
-            , DataType "Either" ["a", "b"]
+    either (error . ("Djinn.Core.standardEnvironment: " ++)) id $ do
+        unitEnvironment <- trustedUnitEnvironment
+        foldM (flip declare) unitEnvironment
+            [ DataType "Either" ["a", "b"]
                 [("Left", [a]), ("Right", [b])]
             , DataType "Maybe" ["a"] [("Nothing", []), ("Just", [a])]
             , DataType "Bool" [] [("False", []), ("True", [])]
@@ -151,6 +151,20 @@ standardEnvironment =
     m = HTVar "m"
     ma = HTApp m a
     mb = HTApp m b
+
+-- @()@ is a grammar-level special form, not a constructor identifier that a
+-- caller may repurpose.  Install exactly the standard nullary type and value
+-- constructor through this private path; all public declarations continue
+-- through the ordinary lexical checks below.
+trustedUnitEnvironment :: Either String Environment
+trustedUnitEnvironment = do
+    (types, classes) <- validateEnvironment
+        [("()", ([], HTUnion [("()", [])], KStar))] [] []
+    return Environment {
+        envTypes = types,
+        envFunctions = [],
+        envClasses = classes
+        }
 
 -- | Add (or overwrite, for the same name in the same category) one
 -- declaration.  The whole environment is revalidated transactionally:
@@ -174,19 +188,28 @@ declare declaration environment =
             requireUnusedName "type" name (envTypes environment)
             requireDistinct "class parameter" params
             requireDistinct "method" (map fst methods)
-            checkMethodNames name methods (envClasses environment)
-            kinds <- htInferClassKinds (envTypes environment) params
-                (map snd methods)
-            return environment {
-                envClasses = replace name (name, (kinds, methods))
+            let uncheckedParameters = [(param, KStar) | param <- params]
+                candidateClasses = replace name
+                    (name, (uncheckedParameters, methods))
                     (envClasses environment)
+            (types, classes) <- validateEnvironment
+                (envTypes environment) (envFunctions environment)
+                candidateClasses
+            return Environment {
+                envTypes = types,
+                envFunctions = envFunctions environment,
+                envClasses = classes
                 }
         Function name declaredType -> do
             requireName "function" isFunctionName name
-            htCheckType (envTypes environment) declaredType
-            return environment {
-                envFunctions = replace name (name, declaredType)
+            let functions = replace name (name, declaredType)
                     (envFunctions environment)
+            (types, classes) <- validateEnvironment
+                (envTypes environment) functions (envClasses environment)
+            return Environment {
+                envTypes = types,
+                envFunctions = functions,
+                envClasses = classes
                 }
   where
     declareType name params body = do
@@ -206,6 +229,12 @@ declare declaration environment =
 -- depends on it; on 'Left' the environment is unchanged.
 removeDeclaration :: HSymbol -> Environment -> Either String Environment
 removeDeclaration name environment
+    -- Unlike an ordinary leaf declaration, the standard unit binding is the
+    -- trusted interpretation of grammar-level @()@ and public 'declare' cannot
+    -- recreate it.  Keep environments derived from 'standardEnvironment'
+    -- stable; callers wanting no built-ins can start from 'emptyEnvironment'.
+    | name == "()" && name `elem` map fst (envTypes environment) =
+        Left "() is a built-in type and cannot be removed"
     | name `notElem` (map fst (envTypes environment) ++
                       map fst (envFunctions environment) ++
                       map fst (envClasses environment)) =
@@ -229,9 +258,12 @@ requireName what valid name
     | valid name = Right ()
     | otherwise = Left $ show name ++ " is not a valid " ++ what ++ " name"
 
--- The unit type is grammar, but the standard environment declares it.
+-- The unit spelling belongs to the type grammar, but is not a Haskell ConId.
+-- Its one legitimate declaration is installed by 'trustedUnitEnvironment';
+-- accepting it here would also admit arbitrary synonyms, classes, or owners
+-- for the @()@ constructor through the public API.
 isTypeName :: HSymbol -> Bool
-isTypeName name = isConId name || name == "()"
+isTypeName = isConId
 
 isMethodName :: HSymbol -> Bool
 isMethodName name = isVarId name || isVarOperator name

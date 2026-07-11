@@ -533,7 +533,8 @@ another kind constraint.
 
 ## Automated regression coverage
 
-`test/Spec.hs` is a lightweight, dependency-free harness with named groups for:
+The test infrastructure now has three independently selectable Tasty suites.
+`test/Spec.hs` contains 23 HUnit regression groups for:
 
 1. prefix function-constructor parsing/canonicalization;
 2. intrinsic list parsing, display, and kind checking;
@@ -548,20 +549,39 @@ another kind constraint.
 11. synthetic disjunction-atom capture;
 12. `Csplit` residual argument order;
 13. `Ccases` residual argument preservation and order;
-14. external proof-identity isolation and self-reference prevention;
-15. independent checking of representative generated proofs;
-16. rejection of forged malformed proof terms;
-17. nominal empty types, aliases, identity, and explicit elimination;
-18. transactional validation of dependent declaration graphs;
-19. capture-free rendering of externally shadowed terms;
-20. controlled conversion errors for malformed proof shapes;
-21. Haskell identifier, qualification, reserved-token, and operator rules.
+14. unary constructors whose single field is itself a tuple;
+15. tuple-refinement merging across case alternatives;
+16. external proof-identity isolation and self-reference prevention;
+17. independent checking of representative generated proofs;
+18. rejection of forged malformed proof terms;
+19. nominal empty types, aliases, identity, and explicit elimination;
+20. transactional validation of dependent declaration graphs;
+21. capture-free rendering of externally shadowed terms;
+22. controlled conversion errors for malformed proof shapes;
+23. Haskell identifier, qualification, reserved-token, and operator rules.
 
-The suite intentionally compiles the core modules directly. Pure environment,
-proof-checking, conversion, and lexical boundaries are therefore covered without
-driving terminal IO. A future split of the remaining command evaluator from
-`Main` should add direct state-machine tests for cutoff, contexts, and batch
-error statuses.
+`test/PropertySpec.hs` runs three QuickCheck properties with 200 cases apiece.
+It requires at least 85% of generated theorem templates to yield proofs, checks
+and renders every bounded proof produced, requires identity for every generated
+bounded formula, and round-trips generated surface `HType` values through
+`show`/`Read`. This suite found three defects that the example tests missed:
+
+- indexed implication identities were lost after moving them through products;
+- a unary constructor flattened a tuple-valued field while pattern matching;
+- independently refined as-patterns from different case branches could not merge.
+
+`test/CLISpec.hs` adds seven subprocess scenarios against the actual Cabal-built
+executable. They cover EOF, same-name collision safety, nominal empty conversion,
+transaction rollback, qualified/underscore names, file-error recovery, and
+controlled parse errors. This replaces the former manual-only CLI matrix.
+
+All production/frontend modules now belong to the named internal `djinn-core`
+library. The launcher is isolated in `app/Main.hs`, so the executable and tests
+share one compiled component and Cabal can generate HPC reports. The unit suite
+currently executes 61% of library expressions and the property suite 52%; these
+are complementary per-suite figures, not a combined coverage claim. Subprocess
+tests run without HPC to avoid combining multiple executable processes into one
+`.tix` file.
 
 ## Validation performed
 

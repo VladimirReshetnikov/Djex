@@ -3,7 +3,7 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module Main(main) where
+module Djinn(main) where
 import Data.Char(isAlpha, isSpace)
 import Data.List(sortBy, nub, intercalate)
 import Data.Ratio((%))

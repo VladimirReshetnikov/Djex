@@ -33,6 +33,39 @@ cabal run djinn -- examples.djinn
 Each non-comment line in a command file is one REPL command. `--` starts a line
 comment. Files are processed from left to right in the same evolving environment.
 
+## Testing
+
+Run the complete test matrix with independently reported test names:
+
+```console
+cabal test all --test-show-details=direct
+```
+
+| Suite | Scope |
+| --- | --- |
+| `djinn-tests` | 23 focused Tasty/HUnit regressions over parsing, kinds, proof search/checking, rendering, environments, and identifiers. |
+| `djinn-property-tests` | Three QuickCheck properties, 200 generated cases each, covering proof production/checking/rendering, arbitrary identity, and `HType` display/parser round-trips. |
+| `djinn-cli-tests` | Seven subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, and stateful query behavior. |
+
+Each suite can be selected independently, and Tasty patterns can isolate one
+named test. For example:
+
+```console
+cabal test djinn-property-tests --test-show-details=direct
+cabal test djinn-tests --test-options='-p /nominal empty/'
+```
+
+The core and frontend live in the named internal `djinn-core` library, so tests
+and the executable consume one authoritative compilation. HPC coverage is
+available for the in-process unit and property suites:
+
+```console
+cabal test djinn-tests djinn-property-tests --enable-coverage
+```
+
+The CLI suite is intentionally run without HPC: it launches multiple copies of
+the instrumented executable, whose shared `.tix` file would conflate processes.
+
 ## Quick tour
 
 Ask for an implementation by putting `?` between a name and a type:
@@ -169,7 +202,8 @@ The same Boolean options can precede file names on the command line, such as
 
 | Module | Responsibility |
 | --- | --- |
-| `Djinn` (`src/Djinn.hs`) | Process entry point, state, command parser, and query orchestration. |
+| `app/Main.hs` | Thin executable launcher. |
+| `Djinn` (`src/Djinn.hs`) | Frontend state, command parser, and query orchestration. |
 | `REPL` | Haskeline loop and EOF handling. |
 | `HCheck` | Kind inference and validation for declared Haskell-like types. |
 | `Environment` | Transactional rebuilding and validation of stored declarations. |
@@ -180,6 +214,10 @@ The same Boolean options can precede file names on the command line, such as
 | `ProofEnv` | Isolation of external proof identities from printable names. |
 | `ProofCheck` | Independent type checking of generated proof terms. |
 | `Help` | Extended in-program help. |
+
+These modules form the internal `djinn-core` library. Keeping the launcher in a
+separate source directory prevents Cabal from recompiling imported core modules
+as executable home modules.
 
 The central pipeline is:
 

@@ -75,12 +75,12 @@ once as 18 modules and the frontend once as 13 modules. The following then
 passed:
 
 ```text
-cabal test all --test-show-details=direct   # 69 library + 5 CLI + 44 shared
+cabal test all --test-show-details=direct   # 69 library + 5 CLI + 48 shared
 cabal check                                 # no errors or warnings
 git diff --check
 ```
 
 The current matrix has grown to 69 deterministic library/frontend regressions,
-five CLI subprocess scenarios, and the 44 shared-foundation tests. All Cabal
+five CLI subprocess scenarios, and the 48 shared-foundation tests. All Cabal
 components import one Haskell2010/`-Wall -Wcompat` policy stanza, and test-only
 dependency bounds now match the production packages.

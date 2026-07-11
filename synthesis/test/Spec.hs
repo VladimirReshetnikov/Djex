@@ -4,6 +4,7 @@ import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Control.Monad (forM_)
 import Data.Either (isLeft)
+import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Name
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
@@ -15,12 +16,45 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "haskell-synthesis"
-  [ moduleTests
+  [ constraintTests
+  , moduleTests
   , ordinaryTests
   , specialTests
   , parserTests
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
+  ]
+
+constraintTests :: TestTree
+constraintTests = testGroup "constraints"
+  [ testCase "retain nominal class identity and argument arity" $ do
+      let equality = right $ mkIdentifier "Eq"
+          constraint = Constraint equality ["a", "b"]
+      constraintClass constraint @?= equality
+      constraintArguments constraint @?= ["a", "b"]
+      constraintArity constraint @?= 2
+      show constraint @?= "Eq \"a\" \"b\""
+      show (Constraint equality [] :: Constraint ()) @?= "Eq"
+  , testCase "qualified classes remain nominally distinct" $ do
+      let moduleA = right $ mkModuleName "A"
+          moduleB = right $ mkModuleName "B"
+          classA = right $ mkQualifiedIdentifier moduleA "C"
+          classB = right $ mkQualifiedIdentifier moduleB "C"
+      Constraint classA [()] @?= Constraint classA [()]
+      assertBool "different qualified classes compared equal"
+        $ Constraint classA [()] /= Constraint classB [()]
+  , testCase "map, fold, and traverse affect only arguments" $ do
+      let equality = right $ mkIdentifier "Eq"
+          constraint = Constraint equality [1 :: Int, 2]
+      fmap (+ 10) constraint @?= Constraint equality [11, 12]
+      sum constraint @?= 3
+      traverse (\value -> if value > 0 then Just (show value) else Nothing)
+        constraint
+        @?= Just (Constraint equality ["1", "2"])
+  , testCase "deep evaluation reaches every argument" $ do
+      let equality = right $ mkIdentifier "Eq"
+      _ <- evaluate $ force $ Constraint equality [[1 :: Int], [2, 3]]
+      pure ()
   ]
 
 moduleTests :: TestTree

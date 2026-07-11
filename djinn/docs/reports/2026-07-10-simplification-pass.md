@@ -276,11 +276,28 @@ These were noticed but deliberately not changed; none is a soundness issue.
   orchestration, help). The companion report's suggestion of a pure command
   evaluator separated from the IO shell still stands (R-09 would fall out of
   it); it is a structural change, not a cleanup.
-- **O-05 — the `P` monad's list-based backtracking** and the linear
-  `AtomImps`/`NestImps` structures are unchanged, per the standing decision
-  (R-07) that search-order changes need a benchmark corpus first.
-  (Superseded later the same day: see
-  [2026-07-10-search-budget.md](2026-07-10-search-budget.md).)
+- **O-05 — proof-search representation.** The original `P` monad and linear
+  antecedent indexes were initially left unchanged pending a benchmark corpus.
+  Subsequent measured work replaced the monad with the CPS search stream,
+  indexed atomic implications, and then indexed atomic proofs; only the
+  inherently selected/removed nested implications remain a list. See
+  [2026-07-10-search-budget.md](2026-07-10-search-budget.md).
+
+## Later traversal and indexing cleanup
+
+A follow-up pass removed one more historical asymmetry in `LJT`: available
+atomic proofs were stored as a deduplicated linear list even after atomic
+implications had gained a `Map` index. Both structures now use the atom symbol
+as their lookup key, avoiding repeated full-list scans without changing the
+per-atom proof order.
+
+The same pass fused `fixSillyAt` and `collapseCase`. Eliminating a degenerate
+as-pattern can reveal equal case branches, so the old code performed two
+consecutive bottom-up traversals. Pattern cleanup now collapses newly equal
+cases as it returns from the same traversal. The dense local equations were
+expanded into named pattern, alternative, and equality helpers; this costs a
+few physical lines but removes a traversal and makes the scope-sensitive
+renaming invariant visible.
 
 ## Change footprint
 

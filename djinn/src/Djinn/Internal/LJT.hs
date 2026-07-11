@@ -94,7 +94,7 @@ proveWithMode mode env goal =
 redtop :: MoreSolutions -> [(Symbol, Formula)] -> Formula -> P Proof
 redtop more env goal = do
     let form = foldr (:->) goal (map snd env)
-    p <- redant more [] Map.empty [] [] form
+    p <- redant more [] Map.empty [] Map.empty form
     nf (applys p (map (Var . fst) env))
 
 ------------------------------
@@ -314,19 +314,19 @@ runBounded budget strat reserved p =
 
 
 ------------------------------
------ Atomic formulae
-data AtomF = AtomF Term Symbol
-    deriving (Eq)
+----- Proofs of atomic formulae, indexed by the formula symbol.
 
-type AtomFs = [AtomF]
+type AtomicProofs = Map.Map Symbol [Term]
 
-findAtoms :: Symbol -> AtomFs -> [Term]
-findAtoms s atoms = [ p | AtomF p s' <- atoms, s == s' ]
+findAtoms :: Symbol -> AtomicProofs -> [Term]
+findAtoms = Map.findWithDefault []
 
-addAtom :: AtomF -> AtomFs -> AtomFs
-addAtom atom atoms
-    | atom `elem` atoms = atoms
-    | otherwise = atom : atoms
+addAtom :: Term -> Symbol -> AtomicProofs -> AtomicProofs
+addAtom proof atom = Map.alter (Just . insertUnique . fromMaybe []) atom
+  where
+    insertUnique proofs
+        | proof `elem` proofs = proofs
+        | otherwise = proof : proofs
 
 ------------------------------
 ----- Implications of one atom, indexed by that atom.
@@ -390,18 +390,20 @@ type Goal = Formula
 -- The redant functions reduce antecedents and the redsucc
 -- function reduces the goal (succedent).
 --
--- The antecedents are kept in four groups: Antecedents, AtomImps, NestImps, AtomFs
+-- The antecedents are kept in four groups: pending antecedents, atomic
+-- implications, nested implications, and indexed atomic proofs.
 --   Antecedents contains as yet unclassified antecedents; the redant functions
 --     go through them one by one and reduces and classifies them.
 --   AtomImps contains implications of the form (a -> b), where `a' is an atom.
 --     To speed up the processing it is stored as a map from the `a' to all the
 --     formulae it implies.
 --   NestImps contains implications of the form ((b -> c) -> d)
---   AtomFs contains atomic formulae.
+--   AtomicProofs maps atomic formulae to their available proofs.
 --
 -- There is also a proof object associated with each antecedent.
 --
-redant :: MoreSolutions -> Antecedents -> AtomImps -> NestImps -> AtomFs -> Goal -> P Proof
+redant :: MoreSolutions -> Antecedents -> AtomImps -> NestImps
+       -> AtomicProofs -> Goal -> P Proof
 redant more antes atomImps nestImps atoms goal =
     case antes of
         [] -> redsucc goal
@@ -425,12 +427,11 @@ redant more antes atomImps nestImps atoms goal =
     -- Reduce and classify the first pending antecedent.
     reduceAntecedent :: Antecedent -> Antecedents -> Goal -> P Proof
     reduceAntecedent (A p (PVar s)) pending g =
-        let atom = AtomF p s
-            (consequences, remainingAtomImps) = extract atomImps s
+        let (consequences, remainingAtomImps) = extract atomImps s
             newAntecedents =
                 [A (Apply f p) b | A f b <- consequences] ++ pending
         in redant more newAntecedents remainingAtomImps nestImps
-             (addAtom atom atoms) g
+             (addAtom p s atoms) g
     reduceAntecedent (A p (Conj conjuncts)) pending g = do
         variables <- mapM (const (newSym "v")) conjuncts
         proof <- redant0

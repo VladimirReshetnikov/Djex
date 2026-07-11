@@ -297,7 +297,7 @@ unSymbol (Symbol s) = s
 termToHExpr :: Term -> Either String HExpr
 termToHExpr term = do
     (expression, _) <- conv [] $ alphaRenameTerm term
-    return $ niceNames $ etaReduce $ remUnusedVars $ collapseCase $
+    return $ niceNames $ etaReduce $ remUnusedVars $
         fixSillyAt $ remUnusedVars expression
   -- Besides the expression, conversion records how enclosing variables are
   -- decomposed.  convV later turns those refinements into tuple/as-patterns.
@@ -463,37 +463,59 @@ alphaRenameTerm term = renamed
                (candidate, Set.insert candidate used, next + 1)
 
 -- Eliminate degenerate as-patterns such as x@y by retaining y and renaming x.
--- XXX This should be integrated into some earlier phase, but this is simpler.
+-- This can make all branches of a case visibly equal, so collapse that case in
+-- the same bottom-up traversal.
 fixSillyAt :: HExpr -> HExpr
 fixSillyAt = fixAt []
-  where fixAt s (HELam ps e) = HELam ps' (fixAt (concat ss ++ s) e) where (ps', ss) = unzip $ map findSilly ps
-        fixAt s (HEApply f a) = HEApply (fixAt s f) (fixAt s a)
-        fixAt _ e@(HECon _) = e
-        fixAt s e@(HEVar v) = maybe e HEVar $ lookup v s
-        fixAt s (HETuple es) = HETuple (map (fixAt s) es)
-        fixAt s (HECase e alts) = HECase (fixAt s e) (map (fixAtAlt s) alts)
-        fixAtAlt s (p, e) = (p', fixAt (s' ++ s) e) where (p', s') = findSilly p
-        findSilly p@(HPVar _) = (p, [])
-        findSilly p@(HPCon _) = (p, [])
-        findSilly (HPTuple ps) = (HPTuple ps', concat ss) where (ps', ss) = unzip $ map findSilly ps
-        findSilly (HPAt v p) = case findSilly p of
-                               (p'@(HPVar v'), s) -> (p', (v, v'):s)
-                               (p', s) -> (HPAt v p', s)
-        findSilly (HPApply f a) = (HPApply f' a', sf ++ sa) where (f', sf) = findSilly f; (a', sa) = findSilly a
+  where
+    fixAt substitutions (HELam patterns expression) =
+        let (patterns', renamings) = unzip $ map findSilly patterns
+        in HELam patterns' $
+            fixAt (concat renamings ++ substitutions) expression
+    fixAt substitutions (HEApply function argument) =
+        HEApply (fixAt substitutions function) (fixAt substitutions argument)
+    fixAt _ expression@(HECon _) = expression
+    fixAt substitutions expression@(HEVar variable) =
+        maybe expression HEVar $ lookup variable substitutions
+    fixAt substitutions (HETuple expressions) =
+        HETuple $ map (fixAt substitutions) expressions
+    fixAt substitutions (HECase scrutinee alternatives) =
+        collapseCase (fixAt substitutions scrutinee) $
+            map (fixAlternative substitutions) alternatives
 
--- XXX This shouldn't be needed.  There's similar code in hECase,
--- but the fixSillyAt reveals new opportunities.
-collapseCase :: HExpr -> HExpr
-collapseCase (HELam ps e) = HELam ps (collapseCase e)
-collapseCase (HEApply f a) = HEApply (collapseCase f) (collapseCase a)
-collapseCase e@(HECon _) = e
-collapseCase e@(HEVar _) = e
-collapseCase (HETuple es) = HETuple (map collapseCase es)
-collapseCase (HECase e alts) =
-    case [(p, collapseCase b) | (p, b) <- alts ] of
-    (p, b) : pes | noBound p && all (\ (p', b') -> alphaEq b b' && noBound p') pes -> b
-    pes -> HECase (collapseCase e) pes
- where noBound = all (== "_") . getBinderVarsHP
+    fixAlternative substitutions (pattern', expression) =
+        let (pattern'', renamings) = findSilly pattern'
+        in (pattern'', fixAt (renamings ++ substitutions) expression)
+
+    findSilly pattern'@(HPVar _) = (pattern', [])
+    findSilly pattern'@(HPCon _) = (pattern', [])
+    findSilly (HPTuple patterns) =
+        let (patterns', renamings) = unzip $ map findSilly patterns
+        in (HPTuple patterns', concat renamings)
+    findSilly (HPAt variable pattern') =
+        case findSilly pattern' of
+            (pattern''@(HPVar variable'), renamings) ->
+                (pattern'', (variable, variable') : renamings)
+            (pattern'', renamings) ->
+                (HPAt variable pattern'', renamings)
+    findSilly (HPApply function argument) =
+        let (function', functionRenamings) = findSilly function
+            (argument', argumentRenamings) = findSilly argument
+        in ( HPApply function' argument'
+           , functionRenamings ++ argumentRenamings
+           )
+
+    collapseCase scrutinee alternatives =
+        case alternatives of
+            (pattern', expression) : rest
+                | noBoundVariables pattern' &&
+                  all (sameUnboundExpression expression) rest -> expression
+            _ -> HECase scrutinee alternatives
+
+    sameUnboundExpression expression (pattern', expression') =
+        noBoundVariables pattern' && alphaEq expression expression'
+
+    noBoundVariables = all (== "_") . getBinderVarsHP
 
 niceNames :: HExpr -> HExpr
 niceNames e =

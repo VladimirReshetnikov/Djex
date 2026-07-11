@@ -106,7 +106,7 @@ simplifyCompose' i ty [] e@ExpVar{} = ExpLambda i ty e
 simplifyCompose' i ty l e@(ExpVar j _)
   | i == j    = foldl1 (\e1 e2 -> ExpApply
                                     (ExpApply
-                                      (ExpName (QualifiedName [] "(.)")) e2) e1)
+                                      (ExpName (QualifiedName [] ".")) e2) e1)
                        l
   | otherwise = ExpLambda i ty $ foldl (flip ExpApply) e l
 simplifyCompose' i ty l (ExpApply e1 e2)

@@ -156,41 +156,37 @@ toQName :: Int -> T.QualifiedName -> QName SrcSpanInfo
 toQName _ T.ListCon = Special noLoc (ListCon noLoc)
 toQName _ (T.TupleCon arity) = Special noLoc (TupleCon noLoc Boxed arity)
 toQName _ T.Cons = Special noLoc (Cons noLoc)
-toQName qualification (T.QualifiedName modules rawName) =
+toQName qualification qualifiedName@(T.QualifiedName modules rawName) =
   qualify modules parsedName
   where
-    parsedName = maybe (Ident noLoc rawName) (Symbol noLoc) (operatorText rawName)
-    qualify [] name = UnQual noLoc name
-    qualify namespace name
-      | qualification == 0 = UnQual noLoc name
-      | qualification == 1 && isOperatorName name = UnQual noLoc name
+    parsedName = maybe (Ident noLoc rawName) (Symbol noLoc)
+      (T.qualifiedNameOperator qualifiedName)
+    qualify [] syntaxName = UnQual noLoc syntaxName
+    qualify namespace syntaxName
+      | qualification == 0 = UnQual noLoc syntaxName
+      | qualification == 1 && isOperatorName syntaxName = UnQual noLoc syntaxName
       | otherwise = Qual noLoc
           (ModuleName noLoc $ intercalate "." namespace)
-          name
+          syntaxName
 
 isConstructor :: T.QualifiedName -> Bool
 isConstructor T.ListCon = True
 isConstructor T.TupleCon{} = True
 isConstructor T.Cons = True
-isConstructor (T.QualifiedName _ name) = case operatorText name of
+isConstructor name@(T.QualifiedName _ rawName) = case T.qualifiedNameOperator name of
   Just (':' : _) -> True
   Just _ -> False
-  Nothing -> maybe False isUpper (safeHead name)
+  Nothing -> maybe False isUpper (safeHead rawName)
 
 isOperator :: T.QualifiedName -> Bool
 isOperator T.Cons = True
-isOperator (T.QualifiedName _ name) = maybe False (const True) (operatorText name)
+isOperator name@T.QualifiedName{} = maybe False (const True)
+  (T.qualifiedNameOperator name)
 isOperator _ = False
 
 isOperatorName :: Name l -> Bool
 isOperatorName Symbol{} = True
 isOperatorName _ = False
-
-operatorText :: String -> Maybe String
-operatorText ('(' : rest) = case reverse rest of
-  ')' : reversedOperator -> Just (reverse reversedOperator)
-  _ -> Nothing
-operatorText _ = Nothing
 
 safeHead :: [a] -> Maybe a
 safeHead [] = Nothing

@@ -7,6 +7,7 @@
 module Language.Haskell.Exference.Core.Types
   ( TVarId
   , QualifiedName(..)
+  , qualifiedNameOperator
   , HsType (..)
   , HsTypeOffset (..)
   , Subst (..)
@@ -38,7 +39,7 @@ where
 
 
 
-import Data.Char ( ord, chr, toLower )
+import Data.Char ( ord, chr, isPunctuation, isSymbol, toLower )
 import Data.List ( intercalate, intersperse )
 import Data.Maybe ( fromMaybe )
 import Data.Monoid ( Any(..) )
@@ -141,13 +142,36 @@ instance NFData StaticClassEnv where rnf = genericRnf
 instance NFData QueryClassEnv  where rnf = genericRnf
 
 instance Show QualifiedName where
-  show (QualifiedName ns ('(':rest@(_:_)))
-    | ')':_ <- reverse rest = "(" ++ intercalate "." (ns ++ [rest])
-  show (QualifiedName ns n) = intercalate "." (ns ++ [n])
+  show name@(QualifiedName ns rawName) = intercalate "."
+    $ ns ++ [maybe rawName (\operator -> '(' : operator ++ ")")
+        (qualifiedNameOperator name)]
   show ListCon              = "[]"
   show (TupleCon 0)         = "()"
   show (TupleCon i)         = "(" ++ replicate (i-1) ',' ++ ")"
   show Cons                 = "(:)"
+
+-- | Return the bare spelling of a symbolic ordinary name.  Symbols are kept
+-- bare in 'QualifiedName'; parentheses belong to Haskell's prefix syntax and
+-- are added only by renderers.  Accepting the historical parenthesized payload
+-- here keeps hand-constructed values readable while frontend constructors
+-- maintain the canonical representation.
+qualifiedNameOperator :: QualifiedName -> Maybe String
+qualifiedNameOperator (QualifiedName _ rawName) = case rawName of
+  '(' : rest -> case reverse rest of
+    ')' : reversedOperator
+      | isOperator (reverse reversedOperator) -> Just (reverse reversedOperator)
+    _ -> Nothing
+  operator
+    | isOperator operator -> Just operator
+  _ -> Nothing
+  where
+    isOperator [] = False
+    isOperator characters = all isOperatorCharacter characters
+    isOperatorCharacter character =
+      character `elem` ("!#$%&*+./<=>?@\\^|-~:" :: String)
+      || ((isSymbol character || isPunctuation character)
+          && character `notElem` ("(),;[]`{}_\"'" :: String))
+qualifiedNameOperator _ = Nothing
 
 instance Show HsType where
   showsPrec _ (TypeVar i) = showString $ showVar i

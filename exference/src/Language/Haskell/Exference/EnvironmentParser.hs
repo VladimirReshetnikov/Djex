@@ -65,7 +65,7 @@ builtInDeclsM = pure $ consType : unitConstructor : map tupleConstructor [2 .. 7
                                 (TypeVar 0))
                        (TypeApp (TypeCons ListCon)
                                 (TypeVar 0))))
-  unitConstructor = (TupleCon 0, TypeCons $ QualifiedName [] "Unit")
+  unitConstructor = (TupleCon 0, TypeCons $ TupleCon 0)
   tupleConstructor arity =
     (TupleCon arity, foldr TypeArrow (tupleType arity) $ typeVariables arity)
 
@@ -314,7 +314,7 @@ environmentFromPath p = do
         (dName, _) <- decls
         return $ do
           return $ do
-            guard (show rName == show dName)
+            guard (rName == dName)
             return (dName, rVal)
       case dIds of
         [] -> do

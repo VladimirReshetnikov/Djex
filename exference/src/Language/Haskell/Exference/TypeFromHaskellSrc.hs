@@ -102,18 +102,23 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
   helper (TyFun _ a b)      = T.TypeArrow
                               <$> helper a
                               <*> helper b
-  helper (TyTuple _ _ ts)   | n <- length ts
-                          = foldl T.TypeApp (T.TypeCons $ T.TupleCon n)
-                            <$> mapM helper ts
+  helper tuple@(TyTuple _ Boxed ts)
+    | length ts >= 2 = foldl T.TypeApp (T.TypeCons $ T.TupleCon (length ts))
+        <$> mapM helper ts
+    | otherwise = throwE $ "invalid boxed tuple arity " ++ show (length ts)
+        ++ " in " ++ prettyPrint tuple
+  helper tuple@(TyTuple _ Unboxed _)
+                            = throwE $ "unsupported unboxed tuple type: "
+                              ++ prettyPrint tuple
   helper (TyApp _ a b)      = T.TypeApp
                               <$> helper a
                               <*> helper b
   helper (TyVar _ vname)    = do
                               i <- getVar vname
                               return $ T.TypeVar i
-  helper (TyCon _ name)     = return
-                          $ T.TypeCons
-                          $ convertQName defModuleName ds name
+  helper (TyCon _ name)     = T.TypeCons
+                          <$> either throwE pure
+                                (convertQName defModuleName ds name)
   helper (TyList _ t)       = T.TypeApp (T.TypeCons T.ListCon) <$> helper t
   helper (TyParen _ t)      = helper t
   helper TyInfix{}        = throwE "infix operator"
@@ -140,43 +145,64 @@ getVar n = do
       return i
 
 -- defaultModule -> potentially-qualified-name-thingy -> exference-q-name
-convertQName :: Maybe (ModuleName SrcSpanInfo) -> [T.QualifiedName] -> QName SrcSpanInfo -> T.QualifiedName
-convertQName _ _ (Special _ (UnitCon _))          = T.TupleCon 0
-convertQName _ _ (Special _ (ListCon _))          = T.ListCon
-convertQName _ _ (Special _ (FunCon _))           = T.QualifiedName [] "(->)"
-convertQName _ _ (Special _ (TupleCon _ _ i))     = T.TupleCon i
-convertQName _ _ (Special _ (Cons _))             = T.Cons
-convertQName _ _ (Special _ (UnboxedSingleCon _)) = T.TupleCon 0
-convertQName _ _ (Special _ special)               = T.QualifiedName [] (prettyPrint special)
-convertQName _ _ (Qual _ mn s)                     = convertModuleName mn s
-convertQName (Just d) _ (UnQual _ s)                = convertModuleName d s
-convertQName Nothing ds (UnQual _ (Ident _ s))      = fromMaybe (T.QualifiedName [] s)
-                                              $ find p ds
+--
+-- Unboxed tuples deliberately have no core representation.  Returning an
+-- error here prevents them from being confused with boxed tuples at every
+-- elaboration site, including constraints and instance heads.
+convertQName
+  :: Maybe (ModuleName SrcSpanInfo)
+  -> [T.QualifiedName]
+  -> QName SrcSpanInfo
+  -> Either String T.QualifiedName
+convertQName _ _ (Special _ (UnitCon _)) = Right $ T.TupleCon 0
+convertQName _ _ (Special _ (ListCon _)) = Right T.ListCon
+convertQName _ _ (Special _ (FunCon _)) = Right $ T.QualifiedName [] "->"
+convertQName _ _ (Special _ special@(TupleCon _ Unboxed _)) = Left
+  $ "unsupported unboxed tuple constructor: " ++ prettyPrint special
+convertQName _ _ (Special _ special@(TupleCon _ Boxed arity))
+  | arity >= 2 = Right $ T.TupleCon arity
+  | otherwise = Left $ "invalid boxed tuple constructor arity " ++ show arity
+      ++ ": " ++ prettyPrint special
+convertQName _ _ (Special _ (Cons _)) = Right T.Cons
+convertQName _ _ (Special _ special@(UnboxedSingleCon _)) = Left
+  $ "unsupported unboxed single constructor: " ++ prettyPrint special
+convertQName _ _ (Special _ special@(ExprHole _)) = Left
+  $ "unsupported special constructor: " ++ prettyPrint special
+convertQName _ _ (Qual _ mn s) = Right $ convertModuleName mn s
+convertQName (Just d) _ (UnQual _ s) = Right $ convertModuleName d s
+convertQName Nothing ds (UnQual _ (Ident _ s)) = Right
+  $ fromMaybe (T.QualifiedName [] s) $ find p ds
  where
   p (T.QualifiedName _ x) = x==s
   p _ = False
-convertQName Nothing _ (UnQual _ s)                 = convertName s
+convertQName Nothing _ (UnQual _ s) = Right $ convertName s
 
 convertName :: Name SrcSpanInfo -> T.QualifiedName
 convertName (Ident _ s)  = T.QualifiedName [] s
-convertName (Symbol _ s) = T.QualifiedName [] $ "(" ++ s ++ ")"
+convertName (Symbol _ s) = T.QualifiedName [] s
 
 convertModuleName :: ModuleName SrcSpanInfo -> Name SrcSpanInfo -> T.QualifiedName
 convertModuleName (ModuleName _ moduleName) name =
   T.QualifiedName (wordsBy (== '.') moduleName) $ case name of
     Ident _ value -> value
-    Symbol _ value -> '(' : value ++ ")"
+    Symbol _ value -> value
 
 -- | Parse the external spelling used by rating files.  Operators use the
--- conventional @Module.(<*>)@ form and remain parenthesized in the core name.
+-- conventional @Module.(<*>)@ form, but their core payload is bare.  Built-in
+-- constructors are recovered as their structural 'T.QualifiedName' variants
+-- so rating lookup does not depend on rendered-text coincidences.
 parseQualifiedName :: String -> Either Diagnostic T.QualifiedName
 parseQualifiedName input
   | null input = invalid "qualified name is empty"
+  | input == "[]" = pure T.ListCon
+  | input == "()" = pure $ T.TupleCon 0
+  | input == "(:)" = pure T.Cons
+  | Just arity <- tupleArity input = pure $ T.TupleCon arity
   | otherwise = case break (== '(') input of
       (ordinary, "") -> fromParts $ splitDots ordinary
-      (prefix, operator)
-        | validOperator operator -> do
-            modules <- parseModules $ dropTrailingDot prefix
+      (prefix, parenthesizedOperator)
+        | Just operator <- validOperator parenthesizedOperator -> do
+            modules <- parseOperatorModules prefix
             pure $ T.QualifiedName modules operator
         | otherwise -> invalid "malformed parenthesized operator"
   where
@@ -192,14 +218,28 @@ parseQualifiedName input
       parts | any null parts -> invalid "module name contains an empty segment"
             | otherwise -> pure parts
 
-    validOperator value = case value of
-      '(' : rest -> not (null rest) && last rest == ')'
-        && '(' `notElem` rest && ')' `notElem` init rest
-      _ -> False
+    parseOperatorModules "" = pure []
+    parseOperatorModules value = case reverse value of
+      '.' : rest -> parseModules $ reverse rest
+      _ -> invalid "qualified operator is missing the dot before its parentheses"
 
-    dropTrailingDot value = case reverse value of
-      '.' : rest -> reverse rest
-      _ -> value
+    validOperator value = case value of
+      '(' : rest -> case reverse rest of
+        ')' : reversedOperator
+          | let operator = reverse reversedOperator
+          , T.qualifiedNameOperator (T.QualifiedName [] operator)
+              == Just operator -> Just operator
+        _ -> Nothing
+      _ -> Nothing
+
+    tupleArity value = case value of
+      '(' : rest -> case reverse rest of
+        ')' : reversedCommas
+          | let commas = reverse reversedCommas
+          , not (null commas)
+          , all (== ',') commas -> Just $ length commas + 1
+        _ -> Nothing
+      _ -> Nothing
 
     splitDots = foldr splitCharacter [[]]
       where
@@ -223,8 +263,8 @@ convertConstraint tcs defModuleName ds (TypeA _ classType) = do
     (throwE $ "invalid class constraint: " ++ prettyPrint classType)
     pure
     (splitClassApplication classType)
-  let name = convertQName defModuleName ds qname
-      typeClass = fromMaybe (TU.unknownTypeClass name)
+  name <- either throwE pure $ convertQName defModuleName ds qname
+  let typeClass = fromMaybe (TU.unknownTypeClass name)
         $ find ((== name) . T.tclass_name) tcs
   T.HsConstraint typeClass
     <$> mapM (convertTypeNoDeclInternal tcs defModuleName ds) types

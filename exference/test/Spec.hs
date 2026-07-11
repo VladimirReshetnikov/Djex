@@ -3,16 +3,19 @@ module Main (main) where
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
 import Data.Functor.Identity (runIdentity)
+import Data.List (find, isInfixOf)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Tasty (TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit ((@?=), testCase)
+import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 import Control.Monad.Trans.Except (runExceptT)
-import Control.Monad.Trans.MultiRWS (runMultiRWSTNil)
+import Control.Monad.Trans.MultiRWS (runMultiRWSTNil, withMultiWriterAW)
 import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.Pretty as HSE
+import qualified Language.Haskell.Exts.Extension as HSE
+import qualified Language.Haskell.Exts.SrcLoc as HSE
 
 import Language.Haskell.Exference.Core
   ( ExferenceChunkElement (..)
@@ -37,7 +40,11 @@ import Language.Haskell.Exference
   , findExpressionsEither
   , findOneExpression
   )
-import Language.Haskell.Exference.EnvironmentParser (parseRatings)
+import Language.Haskell.Exference.EnvironmentParser
+  ( compileWithDict
+  , environmentFromPath
+  , parseRatings
+  )
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc (convert)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
@@ -48,8 +55,10 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
   ( haskellSrcExtsParseMode
   , parseQualifiedName
+  , convertQName
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
+import Paths_exference (getDataFileName)
 
 main :: IO ()
 main = defaultMain tests
@@ -230,7 +239,117 @@ tests = testGroup "Exference"
             Right result -> fail $ "malformed name was accepted: " ++ show result
       , testCase "qualified operators retain module and spelling" $
           parseQualifiedName "Control.Applicative.(<*>)"
-            @?= Right (QualifiedName ["Control", "Applicative"] "(<*>)")
+            @?= Right (QualifiedName ["Control", "Applicative"] "<*>")
+      , testCase "qualified operators render canonically and round-trip" $ do
+          let names =
+                [ QualifiedName [] "."
+                , QualifiedName ["Control", "Applicative"] "<*>"
+                , QualifiedName ["Control", "Monad"] ">>="
+                , QualifiedName [] "⊕"
+                , QualifiedName ["Math", "Operators"] "⊕"
+                , QualifiedName [] "->"
+                , ListCon
+                , TupleCon 0
+                , Cons
+                ] ++ map TupleCon [2 .. 7]
+          show (QualifiedName ["Control", "Applicative"] "<*>")
+            @?= "Control.Applicative.(<*>)"
+          show (QualifiedName ["Math", "Operators"] "⊕")
+            @?= "Math.Operators.(⊕)"
+          mapM_ (\qualifiedName ->
+              parseQualifiedName (show qualifiedName) @?= Right qualifiedName)
+            names
+      , testCase "rating names recover structural built-in constructors" $ do
+          let source = unlines
+                [ "[] 1"
+                , "() 2"
+                , "(:) 3"
+                , "(,) 4"
+                , "(,,) 5"
+                , "(->) 6"
+                ]
+          fmap (map fst) (parseRatings source) @?= Right
+            [ ListCon
+            , TupleCon 0
+            , Cons
+            , TupleCon 2
+            , TupleCon 3
+            , QualifiedName [] "->"
+            ]
+      , testCase "operator ratings apply by structural name equality" $ do
+          let operator = QualifiedName ["Control", "Applicative"] "<*>"
+              ty = TypeArrow (TypeVar 0) (TypeVar 0)
+          ratings <- expectRight
+            $ parseRatings "Control.Applicative.(<*>) 0.3"
+          compileWithDict ratings [(operator, ty)]
+            @?= Right [(operator, Penalty 0.3, ty)]
+      , testCase "the shipped rating file parses and every name round-trips" $ do
+          environmentDirectory <- getDataFileName "environment"
+          contents <- readFile $ environmentDirectory ++ "/all.ratings"
+          ratings <- expectRight $ parseRatings contents
+          assertBool "the shipped rating file unexpectedly parsed no entries"
+            (not $ null ratings)
+          mapM_ (\(qualifiedName, _) ->
+              parseQualifiedName (show qualifiedName) @?= Right qualifiedName)
+            ratings
+      , testCase "the built-in unit value inhabits parsed unit" $ do
+          environmentDirectory <- getDataFileName "environment"
+          (bindings, messages) <- loadBindingsAndMessages environmentDirectory
+          let unitBindings = filter ((== TupleCon 0) . functionName) bindings
+              applicativeOperator = QualifiedName
+                ["Control", "Applicative"] "<*>"
+          case find ((== applicativeOperator) . functionName) bindings of
+            Nothing -> fail "the shipped Applicative operator was not loaded"
+            Just binding -> functionPenalty binding @?= Penalty 0.3
+          mapM_ (\(constructor, expectedPenalty) ->
+              case find ((== constructor) . functionName) bindings of
+                Nothing -> fail $ "built-in constructor was not loaded: "
+                  ++ show constructor
+                Just binding -> functionPenalty binding @?= expectedPenalty)
+            [ (TupleCon 0, Penalty 9.9)
+            , (Cons, Penalty 5.0)
+            , (TupleCon 2, Penalty 5.0)
+            , (TupleCon 3, Penalty 5.0)
+            , (TupleCon 4, Penalty 4.0)
+            , (TupleCon 5, Penalty 3.0)
+            , (TupleCon 6, Penalty 2.0)
+            ]
+          assertBool "structural rating lookup left an operator unmatched"
+            (not $ any ("rating could not be applied: Control.Applicative.(<*>)"
+              `isInfixOf`) messages)
+          (goal, _) <- expectRight $ parseTypePure "()"
+          case findOneExpression identityInput
+              { input_goalType = goal
+              , input_envFuncs = unitBindings
+              } of
+            Just (ExpName (TupleCon 0), _, _) -> pure ()
+            Nothing -> fail "built-in unit did not inhabit ()"
+            Just _ -> fail "unit search returned a different expression"
+      , testCase "unboxed tuple syntax is rejected during elaboration" $ do
+          let mode = enableUnboxedTuples $ haskellSrcExtsParseMode "unboxed"
+          mapM_ (expectUnsupportedUnboxed . parseTypeWithModePure mode)
+            [ "(# Int, Bool #)", "(# Int #)", "(#,#)" ]
+      , testCase "invalid boxed tuple constructor arity is rejected" $
+          mapM_ (\arity ->
+              case convertQName Nothing [] $ HSE.Special HSE.noSrcSpan
+                  (HSE.TupleCon HSE.noSrcSpan HSE.Boxed arity) of
+                Left message -> assertBool message
+                  $ ("arity " ++ show arity) `isInfixOf` message
+                Right result -> fail $ "invalid tuple was accepted as " ++ show result)
+            [-1, 0, 1]
+      , testCase "unboxed special constructors are rejected explicitly" $ do
+          let constructors =
+                [ HSE.TupleCon HSE.noSrcSpan HSE.Unboxed 2
+                , HSE.UnboxedSingleCon HSE.noSrcSpan
+                ]
+          mapM_ (\constructor ->
+              case convertQName Nothing []
+                  (HSE.Special HSE.noSrcSpan constructor) of
+                Left message -> assertBool message
+                  $ "unboxed" `isInfixOf` message
+                Right result -> fail $ "unboxed constructor was accepted as "
+                  ++ show result)
+            constructors
       , testCase "type parse failures carry source positions" $
           case parseTypePure "(" of
             Left (Diagnostic (Just "test.hs")
@@ -262,14 +381,24 @@ tests = testGroup "Exference"
             expression -> fail $ "unexpected qualified value: " ++ show expression
       , testCase "qualified operators use Symbol names" $
           case convert 2 (ExpName
-              $ QualifiedName ["Control", "Applicative"] "(<*>)") of
+              $ QualifiedName ["Control", "Applicative"] "<*>") of
             HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Control.Applicative")
                 (HSE.Symbol _ "<*>")) -> pure ()
             expression -> fail $ "unexpected qualified operator: " ++ show expression
+      , testCase "Unicode operators remain symbols with either qualification" $
+          case ( convert 0 (ExpName $ QualifiedName [] "⊕")
+               , convert 2 (ExpName $ QualifiedName ["Math", "Operators"] "⊕")
+               ) of
+            ( HSE.Var _ (HSE.UnQual _ (HSE.Symbol _ "⊕"))
+              , HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Math.Operators")
+                  (HSE.Symbol _ "⊕"))
+              ) -> pure ()
+            expressions -> fail $ "unexpected Unicode operators: "
+              ++ show expressions
       , testCase "symbolic constructors use Symbol in patterns" $
           let expression = convert 0 $ ExpCaseMatch
                 (ExpVar 0 (TypeCons $ name "T"))
-                [(name "(:+:)", [(1, TypeVar 0), (2, TypeVar 1)],
+                [(name ":+:", [(1, TypeVar 0), (2, TypeVar 1)],
                   ExpVar 1 (TypeVar 0))]
           in case expression of
               HSE.Case _ _ [HSE.Alt _
@@ -310,10 +439,41 @@ name :: String -> QualifiedName
 name = QualifiedName []
 
 parseTypePure :: String -> Either Diagnostic (HsType, TypeVarIndex)
-parseTypePure source = runIdentity
+parseTypePure = parseTypeWithModePure $ haskellSrcExtsParseMode "test"
+
+parseTypeWithModePure
+  :: HSE.ParseMode
+  -> String
+  -> Either Diagnostic (HsType, TypeVarIndex)
+parseTypeWithModePure mode source = runIdentity
   $ runMultiRWSTNil
   $ runExceptT
-  $ parseType [] Nothing [] Map.empty (haskellSrcExtsParseMode "test") source
+  $ parseType [] Nothing [] Map.empty mode source
+
+enableUnboxedTuples :: HSE.ParseMode -> HSE.ParseMode
+enableUnboxedTuples mode = mode
+  { HSE.extensions = HSE.EnableExtension HSE.UnboxedTuples
+      : HSE.extensions mode
+  }
+
+expectUnsupportedUnboxed
+  :: Either Diagnostic (HsType, TypeVarIndex)
+  -> IO ()
+expectUnsupportedUnboxed result = case result of
+  Left Diagnostic
+      { diagnosticSource = Just _
+      , diagnosticSpan = Just _
+      , diagnosticMessage = message
+      } -> assertBool message $ "unboxed" `isInfixOf` message
+  Left diagnosticResult -> fail $ "incomplete diagnostic: " ++ show diagnosticResult
+  Right elaborated -> fail $ "unboxed syntax was accepted as " ++ show elaborated
+
+loadBindingsAndMessages :: FilePath -> IO ([FunctionBinding], [String])
+loadBindingsAndMessages environmentDirectory = runMultiRWSTNil
+  $ withMultiWriterAW
+  $ do
+      (bindings, _, _, _, _) <- environmentFromPath environmentDirectory
+      pure bindings
 
 identityInput :: ExferenceInput
 identityInput = ExferenceInput

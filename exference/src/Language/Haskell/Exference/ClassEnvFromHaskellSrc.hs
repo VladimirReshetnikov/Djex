@@ -84,7 +84,9 @@ getTypeClasses ds tDeclMap ms = do
                   (throwE $ "invalid superclass constraint: " ++ prettyPrint classType)
                   pure
                   (splitClassApplication classType)
-                (,) (convertQName (Just moduleName) ds qname)
+                convertedName <- either throwE pure
+                  $ convertQName (Just moduleName) ds qname
+                (,) convertedName
                   <$> mapM (convertTypeInternal [] (Just moduleName) ds tDeclMap) types
               convF (ParenA _ c) = convF c
               convF c = throwE $ "unknown superclass constraint: " ++ show c
@@ -130,29 +132,30 @@ getInstances tcs ds tDeclMap ms = sequence $ do
     -- vars would be the forall binds in
     -- > instance forall a . Show (Foo a) where [..]
     -- which we can ignore, right?
-  let name = convertQName (Just mn) ds qname
-  return $ do
-    let instClass = maybe (Left $ "unknown type class: "++show name) Right
-                  $ find ((name==).tclass_name) tcs
-    let
-      sAction :: forall m1
-               . ( MonadMultiState ConvData m1
-                 )
-              => ExceptT String m1 HsInstance
-      sAction = do
-        -- varIds <- mapM tyVarTransform vars
-        constrs <- contextConstraints context `forM` \asst ->
-          constrTransform
-            (Just mn)
-            ds
-            tDeclMap
-            (\str -> find ((str==).tclass_name) tcs)
-            asst
-        rtps <- convertTypeInternal tcs (Just mn) ds tDeclMap `mapM` tps
-        ic <- liftEither instClass
-        return $ HsInstance constrs ic rtps
-        -- either (Left . (("instance for "++name++": ")++)) Right
-    withMultiStateA (ConvData 0 M.empty) $ runExceptT sAction
+  return $ case convertQName (Just mn) ds qname of
+    Left err -> return $ Left err
+    Right name -> do
+      let instClass = maybe (Left $ "unknown type class: "++show name) Right
+                    $ find ((name==).tclass_name) tcs
+      let
+        sAction :: forall m1
+                 . ( MonadMultiState ConvData m1
+                   )
+                => ExceptT String m1 HsInstance
+        sAction = do
+          -- varIds <- mapM tyVarTransform vars
+          constrs <- contextConstraints context `forM` \asst ->
+            constrTransform
+              (Just mn)
+              ds
+              tDeclMap
+              (\str -> find ((str==).tclass_name) tcs)
+              asst
+          rtps <- convertTypeInternal tcs (Just mn) ds tDeclMap `mapM` tps
+          ic <- liftEither instClass
+          return $ HsInstance constrs ic rtps
+          -- either (Left . (("instance for "++name++": ")++)) Right
+      withMultiStateA (ConvData 0 M.empty) $ runExceptT sAction
 
 constrTransform
   :: (MonadMultiState ConvData m)
@@ -168,7 +171,7 @@ constrTransform mn ds tDeclMap tcLookupF (TypeA _ classType) = do
     pure
     (splitClassApplication classType)
   let ctypes = convertTypeInternal [] mn ds tDeclMap `mapM` types
-  let qn = convertQName mn ds qname
+  qn <- either throwE pure $ convertQName mn ds qname
   maybe
     (throwE $ "unknown type class: " ++ show qn)
     (\tc -> HsConstraint tc <$> ctypes)

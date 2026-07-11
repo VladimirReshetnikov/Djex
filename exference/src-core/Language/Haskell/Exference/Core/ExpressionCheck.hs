@@ -203,11 +203,19 @@ zonk ty = do
   if applied == ty then pure ty else zonk applied
 
 instantiateGoal :: HsType -> HsType
-instantiateGoal (TypeForall variables _ body) =
-  let substitutions = IntMap.fromList
-        $ zip variables (map TypeConstant [0 ..])
-  in snd $ applySubsts substitutions body
-instantiateGoal goal = goal
+instantiateGoal = instantiateFrom 0
+ where
+  -- Validation permits a chain of prenex quantifiers.  Search consumes one
+  -- layer per step and allocates rigid IDs monotonically, so the independent
+  -- checker must mirror that policy rather than stripping only the first
+  -- layer and rejecting the second as rank-N.
+  instantiateFrom nextConstant (TypeForall variables _ body) =
+    let constants = map TypeConstant
+          [nextConstant .. nextConstant + length variables - 1]
+        substitutions = IntMap.fromList $ zip variables constants
+        instantiatedBody = snd $ applySubsts substitutions body
+    in instantiateFrom (nextConstant + length variables) instantiatedBody
+  instantiateFrom _ goal = goal
 
 expressionTypeIds :: Expression -> [TVarId]
 expressionTypeIds (ExpVar _ ty) = [largestId ty]

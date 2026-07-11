@@ -57,6 +57,12 @@ environment-free and never invents globals such as `id` or `(.)`.  Both the
 text and Haskell-AST renderers allocate names by variable identity, avoiding
 binder collisions and globals that will be emitted unqualified.
 
+Symmetric unification keeps goal and provider variables tagged until the final
+projection, so substitutions returned for either side are closed even when the
+two inputs reuse numeric IDs.  The independent checker consumes every prenex
+`forall` layer with the same rigid-ID order as search, and type rendering uses
+one source-name map for quantifiers, constraints, and body occurrences.
+
 The `exference` executable is a normal build target again. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been
 removed; deterministic regressions live in `exference-tests` and the separate
@@ -92,9 +98,10 @@ any / the right solution. Some common current limitations are:
   `-c --patternMatchMC`, but reduces performance significantly for any
   non-trivial queries. Core algorithm needs re-write to optimize stuff
   sufficiently I fear.
-- Rank-N positions are currently rejected conservatively. The historical
-  implementation erased some quantifiers during unification, which was not a
-  sound implementation of subsumption.
+- Chains of outer (prenex) `forall`s are supported. Rank-N positions are
+  rejected conservatively; the historical implementation erased some nested
+  quantifiers during unification, which was not a sound implementation of
+  subsumption.
 
 ## Other known (technical) issues
 

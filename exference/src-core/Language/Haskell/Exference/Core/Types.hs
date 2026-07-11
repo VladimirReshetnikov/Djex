@@ -40,7 +40,7 @@ where
 
 
 import Data.Char ( ord, chr, toLower )
-import Data.List ( intercalate, intersperse )
+import Data.List ( intercalate )
 import Data.Maybe ( fromMaybe )
 import Data.Monoid ( Any(..) )
 import Control.Monad ( liftM2 )
@@ -148,25 +148,27 @@ instance Show HsType where
   showsPrec d (TypeForall [] [] t) = showsPrec d t
   showsPrec d (TypeForall is cs t) =
     showParen (d>0)
-    $ showString ("forall " ++ intercalate ", " (showVar <$> is) ++ " . ")
-    . showParen True (\x -> foldr (++) x $ intersperse ", " $ map show cs)
-    . showString " => "
+    $ showString quantifier
+    . showString context
     . showsPrec (-2) t
+    where
+      quantifier
+        | null is = ""
+        | otherwise = "forall " ++ intercalate ", " (showVar <$> is) ++ " . "
+      context
+        | null cs = ""
+        | otherwise = "(" ++ intercalate ", " (map show cs) ++ ") => "
 
 showHsType :: TypeVarIndex -> HsType -> String
 showHsType convMap t = h 0 t ""
  where
+  variableName i = fromMaybe (showVar i)
+    $ fst <$> L.find ((i ==) . snd) (M.toList convMap)
+  constantName i = fromMaybe ("C" ++ showVar i)
+    $ fst <$> L.find ((i ==) . snd) (M.toList convMap)
   h :: Int -> HsType -> ShowS
-  h _ (TypeVar i)      = showString
-                       $ maybe "badNameInternalError"
-                               fst
-                       $ L.find ((i ==) .  snd)
-                       $ M.toList convMap
-  h _ (TypeConstant i) = showString
-                       $ maybe "badNameInternalError"
-                               fst
-                       $ L.find ((i ==) .  snd)
-                       $ M.toList convMap
+  h _ (TypeVar i) = showString $ variableName i
+  h _ (TypeConstant i) = showString $ constantName i
   h _ (TypeCons s) = shows s
   h d (TypeArrow t1 t2) =
     showParen (d> -2) $ t1Shows . showString " -> " . t2Shows
@@ -181,11 +183,17 @@ showHsType convMap t = h 0 t ""
   h d (TypeForall [] [] ty) = h d ty
   h d (TypeForall is cs ty) =
     showParen (d>0)
-      $ showString ("forall " ++ intercalate ", " (showVar <$> is) ++ " . ")
-      . showParen True (\x -> foldr (++) x $ intersperse ", " $ map show cs)
-      . showString " => "
+      $ showString quantifier
+      . showString context
       . tShows
     where
+      quantifier
+        | null is = ""
+        | otherwise = "forall " ++ intercalate ", " (map variableName is) ++ " . "
+      context
+        | null cs = ""
+        | otherwise = "(" ++ intercalate ", "
+            (map (showHsConstraint convMap) cs) ++ ") => "
       tShows = h (-2) ty
 
 -- instance Read HsType where

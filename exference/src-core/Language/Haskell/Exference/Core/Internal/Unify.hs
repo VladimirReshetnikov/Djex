@@ -14,8 +14,10 @@ where
 
 
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.TypeUtils
+import Data.Maybe (mapMaybe)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 -- import Debug.Hood.Observe
 
@@ -25,7 +27,6 @@ data TypeEq = TypeEq !HsType
                      !HsType
 
 data UniState1 = UniState1 [TypeEq] Substs
-data UniState2 = UniState2 [TypeEq] Substs Substs
 
 occursIn :: TVarId -> HsType -> Bool
 occursIn i (TypeVar j)         = i==j
@@ -34,14 +35,6 @@ occursIn _ (TypeCons _)        = False
 occursIn i (TypeArrow t1 t2)   = occursIn i t1 || occursIn i t2
 occursIn i (TypeApp t1 t2)     = occursIn i t1 || occursIn i t2
 occursIn i (TypeForall js _ t) = (i `notElem` js) && occursIn i t
-
--- Maybe (Either (Either Subst Subst) [TypeEq])
-data StepResult
-  = StepFailed
-  | StepClear
-  | StepNewEqs ![TypeEq]
-  | StepLeftSubst {-# UNPACK #-} !Subst
-  | StepRightSubst {-# UNPACK #-} !Subst
 
 -- unification of types.
 -- returns two substitutions: one for variables in the first type,
@@ -53,93 +46,182 @@ data StepResult
 -- unify v w -> ([], [w=>v])
 {-# INLINE unify #-}
 unify :: HsType -> HsType -> Maybe (Substs, Substs)
-unify ut1 ut2 = unify' $ UniState2 [TypeEq ut1 ut2] IntMap.empty IntMap.empty
-  where
-    unify' :: UniState2 -> Maybe (Substs, Substs)
-    unify' (UniState2 [] l r)      = Just (l, r)
-    unify' (UniState2 (x:xr) l r) = case uniStep x of
-      StepFailed                       -> Nothing
-      StepClear                        -> unify' $ UniState2 xr l r
-      StepNewEqs eqs                   -> unify' $ UniState2 (eqs++xr) l r
-      StepLeftSubst  subst@(Subst i t) ->
-        unify' $ let f = applySubst subst in UniState2
-          [ TypeEq (f a) b | TypeEq a b <- xr ]
-          (IntMap.insert i t $ IntMap.map f l)
-          r
-      StepRightSubst subst@(Subst i t) ->
-        unify' $ let f = applySubst subst in UniState2
-          [ TypeEq a (f b) | TypeEq a b <- xr ]
-          l
-          (IntMap.insert i t $ IntMap.map f r)
-      {-
-      \ms -> unify' $ case ms of
-        Left (Left subst@(Subst i t)) -> let f = applySubst subst in UniState2
-          [ TypeEq (f a) b | TypeEq a b <- xr ]
-          (IntMap.insert i t $ IntMap.map f l)
-          r
-        Left (Right subst@(Subst i t)) -> let f = applySubst subst in UniState2
-          [ TypeEq a (f b) | TypeEq a b <- xr ]
-          l
-          (IntMap.insert i t $ IntMap.map f r)
-        Right eqs -> UniState2 (eqs++xr) l r
-      ) -- up here is the same control flow again, with the deconsing and the growing of the tail... maybe make your own hof for now? oh wait you also modify the tail
-      -}
-    uniStep :: TypeEq -> StepResult
-    uniStep (TypeEq TypeForall{} _) = StepFailed
-    uniStep (TypeEq _ TypeForall{}) = StepFailed
-    -- uniStep (TypeEq (TypeVar i1) (TypeVar i2)) | i1==i2 = Just (Right [])
-    uniStep (TypeEq t1 (TypeVar i2)) = if occursIn i2 t1
-      then StepFailed
-      else StepRightSubst $ Subst i2 t1
-    uniStep (TypeEq (TypeVar i1) t2) = if occursIn i1 t2
-      then StepFailed
-      else StepLeftSubst $ Subst i1 t2
-    uniStep (TypeEq (TypeConstant i1) (TypeConstant i2)) | i1 == i2 = StepClear
-    uniStep (TypeEq (TypeCons s1) (TypeCons s2)) | s1 == s2 = StepClear
-    uniStep (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = StepNewEqs [TypeEq t1 t3, TypeEq t2 t4]
-    uniStep (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = StepNewEqs [TypeEq t1 t3, TypeEq t2 t4]
-    -- Higher-rank subsumption requires skolemization and escape checks.
-    -- Conservatively reject nested foralls instead of erasing the quantifier.
-    uniStep _ = StepFailed
+unify left right = unifyTagged left right id
 
 
 {-# INLINE unifyOffset #-}                   -- left, rightOffset
 unifyOffset :: HsType -> HsTypeOffset -> Maybe (Substs, Substs)
-unifyOffset ut1 (HsTypeOffset ut2 offset) = unify' $ UniState2 [TypeEq ut1 ut2]
-                                                               IntMap.empty
-                                                               IntMap.empty
-  where
-    unify' :: UniState2 -> Maybe (Substs, Substs)
-    unify' (UniState2 [] l r)      = Just (l, r)
-    unify' (UniState2 (x:xr) l r) = uniStep x >>= (
-      \ms -> unify' $ case ms of
-        Left (Left subst@(Subst i t)) -> let f = applySubst subst in UniState2
-          [ TypeEq (f a) b | TypeEq a b <- xr ]
-          (IntMap.insert i t $ IntMap.map f l)
-          r
-        Left (Right (substInternal, Subst substExtI substExtT)) ->
-          let f = applySubst substInternal
-          in UniState2
-            [ TypeEq a (f b) | TypeEq a b <- xr ]
-            l
-            (IntMap.insert substExtI substExtT $ IntMap.map f r)
-        Right eqs -> UniState2 (eqs++xr) l r
-      )
-    uniStep :: TypeEq -> Maybe (Either (Either Subst (Subst, Subst)) [TypeEq])
-    uniStep (TypeEq TypeForall{} _) = Nothing
-    uniStep (TypeEq _ TypeForall{}) = Nothing
-    uniStep (TypeEq (TypeVar i1) (TypeVar i2)) | i1==offset+i2 = Just (Right [])
-    uniStep (TypeEq (t1) (TypeVar i2)) = if occursIn (offset+i2) t1
-      then Nothing
-      else Just $ Left $ Right (Subst i2 t1, Subst (i2+offset) t1)
-    uniStep (TypeEq (TypeVar i1) (t2)) = if occursIn (i1-offset) t2
-      then Nothing
-      else Just $ Left $ Left $ Subst i1 (incVarIds (+offset) t2)
-    uniStep (TypeEq (TypeConstant i1) (TypeConstant i2)) | i1==i2 = Just (Right [])
-    uniStep (TypeEq (TypeCons s1) (TypeCons s2)) | s1==s2 = Just (Right [])
-    uniStep (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
-    uniStep (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
-    uniStep _ = Nothing
+unifyOffset left (HsTypeOffset right offset) =
+  unifyTagged left right (+ offset)
+
+-- Symmetric unification needs tagged variables internally.  The old pair of
+-- untagged substitution maps lost which namespace a range belonged to; a
+-- later left substitution therefore failed to close an earlier right range
+-- (and vice versa), while equal numeric IDs could be rewritten on the wrong
+-- side.  Projection below chooses a common integer spelling only after the
+-- tagged substitution is fully zonked.
+data TaggedVariable
+  = LeftVariable !TVarId
+  | RightVariable !TVarId
+  deriving (Eq, Ord)
+
+data TaggedType
+  = TaggedVar !TaggedVariable
+  | TaggedConstant !TVarId
+  | TaggedConstructor !QualifiedName
+  | TaggedArrow !TaggedType !TaggedType
+  | TaggedApplication !TaggedType !TaggedType
+  deriving (Eq)
+
+type TaggedSubstitutions = Map.Map TaggedVariable TaggedType
+
+unifyTagged
+  :: HsType
+  -> HsType
+  -> (TVarId -> TVarId)
+  -> Maybe (Substs, Substs)
+unifyTagged left right rightKey = do
+  taggedLeft <- tagType LeftVariable left
+  taggedRight <- tagType RightVariable right
+  substitutions <- solveTagged [(taggedLeft, taggedRight)] Map.empty
+  pure $ projectTagged left right rightKey substitutions
+
+tagType :: (TVarId -> TaggedVariable) -> HsType -> Maybe TaggedType
+tagType side ty = case ty of
+  TypeVar variable -> Just $ TaggedVar $ side variable
+  TypeConstant constant -> Just $ TaggedConstant constant
+  TypeCons constructor -> Just $ TaggedConstructor constructor
+  TypeArrow parameter result ->
+    TaggedArrow <$> tagType side parameter <*> tagType side result
+  TypeApp function argument ->
+    TaggedApplication <$> tagType side function <*> tagType side argument
+  -- Higher-rank subsumption requires skolemization and escape checks.
+  -- Conservatively reject nested foralls instead of erasing the quantifier.
+  TypeForall{} -> Nothing
+
+solveTagged
+  :: [(TaggedType, TaggedType)]
+  -> TaggedSubstitutions
+  -> Maybe TaggedSubstitutions
+solveTagged [] substitutions = Just substitutions
+solveTagged ((rawLeft, rawRight) : equations) substitutions
+  | left == right = solveTagged equations substitutions
+  | TaggedVar variable <- right = bindTagged variable left
+  | TaggedVar variable <- left = bindTagged variable right
+  | TaggedConstant leftConstant <- left
+  , TaggedConstant rightConstant <- right
+  , leftConstant == rightConstant = solveTagged equations substitutions
+  | TaggedConstructor leftConstructor <- left
+  , TaggedConstructor rightConstructor <- right
+  , leftConstructor == rightConstructor = solveTagged equations substitutions
+  | TaggedArrow leftParameter leftResult <- left
+  , TaggedArrow rightParameter rightResult <- right =
+      solveTagged
+        ((leftParameter, rightParameter) : (leftResult, rightResult) : equations)
+        substitutions
+  | TaggedApplication leftFunction leftArgument <- left
+  , TaggedApplication rightFunction rightArgument <- right =
+      solveTagged
+        ((leftFunction, rightFunction) : (leftArgument, rightArgument) : equations)
+        substitutions
+  | otherwise = Nothing
+ where
+  left = zonkTagged substitutions rawLeft
+  right = zonkTagged substitutions rawRight
+  bindTagged variable replacement
+    | occursTagged variable replacement = Nothing
+    | otherwise = solveTagged
+        [ ( substituteTagged variable replacement equationLeft
+          , substituteTagged variable replacement equationRight
+          )
+        | (equationLeft, equationRight) <- equations
+        ]
+        $ Map.insert variable replacement
+        $ Map.map (substituteTagged variable replacement) substitutions
+
+occursTagged :: TaggedVariable -> TaggedType -> Bool
+occursTagged variable ty = case ty of
+  TaggedVar candidate -> variable == candidate
+  TaggedConstant{} -> False
+  TaggedConstructor{} -> False
+  TaggedArrow parameter result ->
+    occursTagged variable parameter || occursTagged variable result
+  TaggedApplication function argument ->
+    occursTagged variable function || occursTagged variable argument
+
+substituteTagged :: TaggedVariable -> TaggedType -> TaggedType -> TaggedType
+substituteTagged variable replacement ty = case ty of
+  TaggedVar candidate
+    | variable == candidate -> replacement
+    | otherwise -> ty
+  TaggedConstant{} -> ty
+  TaggedConstructor{} -> ty
+  TaggedArrow parameter result -> TaggedArrow
+    (substituteTagged variable replacement parameter)
+    (substituteTagged variable replacement result)
+  TaggedApplication function argument -> TaggedApplication
+    (substituteTagged variable replacement function)
+    (substituteTagged variable replacement argument)
+
+zonkTagged :: TaggedSubstitutions -> TaggedType -> TaggedType
+zonkTagged substitutions ty = case ty of
+  TaggedVar variable -> maybe ty (zonkTagged substitutions)
+    $ Map.lookup variable substitutions
+  TaggedConstant{} -> ty
+  TaggedConstructor{} -> ty
+  TaggedArrow parameter result ->
+    TaggedArrow (zonkTagged substitutions parameter) (zonkTagged substitutions result)
+  TaggedApplication function argument -> TaggedApplication
+    (zonkTagged substitutions function) (zonkTagged substitutions argument)
+
+projectTagged
+  :: HsType
+  -> HsType
+  -> (TVarId -> TVarId)
+  -> TaggedSubstitutions
+  -> (Substs, Substs)
+projectTagged left right rightKey substitutions =
+  ( IntMap.fromList $ mapMaybe (project LeftVariable id) leftVariables
+  , IntMap.fromList $ mapMaybe (project RightVariable rightKey) rightVariables
+  )
+ where
+  leftVariables = Set.toAscList $ freeVars left
+  rightVariables = Set.toAscList $ freeVars right
+  rightCanonical = allocateRightVariables
+    (Set.fromList leftVariables) (map rightKey rightVariables)
+  canonicalRight variable = IntMap.findWithDefault (rightKey variable)
+    (rightKey variable) rightCanonical
+
+  project side key variable =
+    let externalKey = key variable
+        resolved = untag $ zonkTagged substitutions
+          $ TaggedVar $ side variable
+    in if resolved == TypeVar externalKey
+       then Nothing
+       else Just (externalKey, resolved)
+
+  untag ty = case ty of
+    TaggedVar (LeftVariable variable) -> TypeVar variable
+    TaggedVar (RightVariable variable) -> TypeVar $ canonicalRight variable
+    TaggedConstant constant -> TypeConstant constant
+    TaggedConstructor constructor -> TypeCons constructor
+    TaggedArrow parameter result -> TypeArrow (untag parameter) (untag result)
+    TaggedApplication function argument -> TypeApp (untag function) (untag argument)
+
+allocateRightVariables :: Set.Set TVarId -> [TVarId] -> IntMap.IntMap TVarId
+allocateRightVariables leftVariables rightVariables = assignments
+ where
+  firstFresh = 1 + maximum (0 : Set.toList leftVariables ++ rightVariables)
+  (_, _, assignments) = foldl allocate
+    (leftVariables, firstFresh, IntMap.empty) rightVariables
+  allocate (used, nextFresh, result) requested
+    | requested `Set.member` used =
+        ( Set.insert nextFresh used
+        , nextFresh + 1
+        , IntMap.insert requested nextFresh result
+        )
+    | otherwise =
+        (Set.insert requested used, nextFresh, IntMap.insert requested requested result)
 
 -- treats the variables in the first parameter as constants, and returns
 -- the variable bindings for the second parameter that unify both types.

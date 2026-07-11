@@ -36,6 +36,7 @@ import Language.Haskell.Exference.Core
   , SearchStatus (..)
   , constraintsRelaxedAtStep
   , findExpressionsWithStats
+  , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Expression
@@ -180,10 +181,49 @@ tests = testGroup "Exference"
           let cls = HsTypeClass (name "C") [0] []
               ty = TypeForall [7] [HsConstraint cls [TypeVar 9]] (TypeVar 2)
           largestId ty @?= 9
+      , testCase "quantified type rendering binds its body spelling" $ do
+          let names = Map.fromList [("x", 0)]
+              cls = HsTypeClass (name "C") [0] []
+          showHsType names (TypeForall [0] [] $ TypeVar 0)
+            @?= "forall x . x"
+          showHsType names
+            (TypeForall [] [HsConstraint cls [TypeVar 0]] $ TypeVar 0)
+            @?= "(C x) => x"
+          show (TypeForall [0] [] $ TypeVar 0)
+            @?= "forall v0 . v0"
       , testCase "unification rejects nested foralls conservatively" $ do
           let polymorphic = TypeForall [0] [] (TypeVar 0)
           unify polymorphic (TypeVar 1) @?= Nothing
           unifyRight (TypeVar 1) polymorphic @?= Nothing
+      , testCase "symmetric unification closes substitutions across sides" $ do
+          let pair pairParameter pairResult = TypeApp
+                (TypeApp (TypeCons $ name "Pair") pairParameter) pairResult
+              integer = TypeCons $ name "Int"
+              left = pair (TypeVar 1) (TypeVar 1)
+              right = pair (TypeVar 2) integer
+          assertUnifierCloses left right
+      , testCase "symmetric unification separates overlapping variable IDs" $ do
+          let pair pairParameter pairResult = TypeApp
+                (TypeApp (TypeCons $ name "Pair") pairParameter) pairResult
+              maybeType value = TypeApp (TypeCons $ name "Maybe") value
+              integer = TypeCons $ name "Int"
+              left = pair (TypeVar 1) (TypeVar 2)
+              right = pair (maybeType $ TypeVar 2) integer
+          assertUnifierCloses left right
+      , testCase "bounded symmetric unifiers satisfy their result contract" $ do
+          let atoms =
+                [ TypeVar 0
+                , TypeVar 1
+                , TypeVar 2
+                , TypeCons $ name "Int"
+                , TypeCons $ name "Bool"
+                ]
+              pair pairParameter pairResult = TypeApp
+                (TypeApp (TypeCons $ name "Pair") pairParameter) pairResult
+              types = atoms ++ [pair left right | left <- atoms, right <- atoms]
+              pairs = [(left, right) | left <- types, right <- types]
+          mapM_ (uncurry assertUnifierCloses) pairs
+          mapM_ (uncurry $ assertOffsetUnifierCloses 20) pairs
       , testCase "failed synonym expansion preserves arguments" $ do
           let alias = name "Alias"
               argument = TypeCons (name "Argument")
@@ -219,6 +259,20 @@ tests = testGroup "Exference"
           case findExpressionsEither input of
             Left actual -> actual @?= NestedForallInGoal goal
             Right _ -> fail "nested forall was accepted"
+      , testCase "prenex forall chains are checked through every layer" $ do
+          let goal = TypeForall [0] []
+                $ TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              identity = ExpLambda 1 (TypeConstant 1)
+                (ExpVar 1 $ TypeConstant 1)
+              input = ExferenceInput goal [] [] emptyClassEnv
+                False False 0 False 20 Nothing Nothing defaultHeuristicsConfig
+          validateExferenceInput input @?= Right ()
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] identity @?= Right ()
+          case findOneExpression input of
+            Just _ -> pure ()
+            Nothing -> fail "prenex forall identity was filtered after search"
       , testCase "step exhaustion is reported explicitly" $ do
           chunk <- onlyChunk $ identityInput {input_maxSteps = 1}
           searchCompletion (chunkStatus chunk) @?= SearchStepLimitReached
@@ -632,6 +686,36 @@ tests = testGroup "Exference"
 
 name :: String -> QualifiedName
 name = QualifiedName []
+
+assertUnifierCloses :: HsType -> HsType -> IO ()
+assertUnifierCloses left right = case unify left right of
+  Nothing -> pure ()
+  Just (leftSubstitutions, rightSubstitutions) -> do
+    let leftResult = snd $ applySubsts leftSubstitutions left
+        rightResult = snd $ applySubsts rightSubstitutions right
+    assertBool
+      ( "unclosed symmetric substitution for " ++ show left ++ " ~ " ++ show right
+        ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
+        ++ " from " ++ show leftSubstitutions
+        ++ " and " ++ show rightSubstitutions
+      )
+      (leftResult == rightResult)
+
+assertOffsetUnifierCloses :: Int -> HsType -> HsType -> IO ()
+assertOffsetUnifierCloses offset left right =
+  case unifyOffset left (HsTypeOffset right offset) of
+    Nothing -> pure ()
+    Just (leftSubstitutions, rightSubstitutions) -> do
+      let shiftedRight = incVarIds (+ offset) right
+          leftResult = snd $ applySubsts leftSubstitutions left
+          rightResult = snd $ applySubsts rightSubstitutions shiftedRight
+      assertBool
+        ( "unclosed offset substitution for " ++ show left ++ " ~ " ++ show right
+          ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
+          ++ " from " ++ show leftSubstitutions
+          ++ " and " ++ show rightSubstitutions
+        )
+        (leftResult == rightResult)
 
 parseTypePure :: String -> Either Diagnostic (HsType, TypeVarIndex)
 parseTypePure = parseTypeWithModePure $ haskellSrcExtsParseMode "test"

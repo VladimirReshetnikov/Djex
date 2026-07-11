@@ -146,12 +146,22 @@ testProvableBasics =
 -- silently lost every theorem whose final goal is an empty type.
 testEmptyGoalContradiction :: IO ()
 testEmptyGoalContradiction = do
-    let goal = fnot $ fnot $ atomA |: fnot atomA
-    case prove False [] goal of
-        [] -> fail "Not (Not (Either a (Not a))) must be provable"
-        proof : _ ->
-            assertRight "the empty-goal proof must check against its formula"
-                (checkProof [] goal proof)
+    let assertProvableAndChecked name goal =
+            case prove False [] goal of
+                [] -> fail $ name ++ " must be provable"
+                proof : _ ->
+                    assertRight
+                        (name ++ ": the proof must check against its formula")
+                        (checkProof [] goal proof)
+    assertProvableAndChecked "Not (Not (Either a (Not a)))" $
+        fnot $ fnot $ atomA |: fnot atomA
+    -- QuickCheck-discovered case: the proof feeds one ex falso result into
+    -- another, leaving an interior proof type free.  The checker must
+    -- default that empty-eliminator input rather than reject the proof
+    -- as ambiguous.
+    let nested = (atomA :-> atomA) :-> Conj [atomB]
+    assertProvableAndChecked "Not x -> Not c -> Not (Either x c)" $
+        fnot nested :-> (fnot atomC :-> fnot (nested |: atomC))
 
 testNonTheorems :: IO ()
 testNonTheorems =
@@ -476,6 +486,9 @@ atomA = PVar $ Symbol "a"
 
 atomB :: Formula
 atomB = PVar $ Symbol "b"
+
+atomC :: Formula
+atomC = PVar $ Symbol "c"
 
 assertLeft :: Show a => String -> Either String a -> IO ()
 assertLeft _ (Left _) = return ()

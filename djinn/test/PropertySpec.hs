@@ -5,12 +5,12 @@ import Text.Read (readMaybe)
 import HTypes
 import LJT
 import ProofCheck (checkProof)
-import Test.Tasty (defaultMain, localOption, testGroup)
+import Test.Tasty (adjustOption, defaultMain, testGroup)
 import qualified Test.Tasty.QuickCheck as QC
 
 main :: IO ()
 main = defaultMain $
-    localOption (QC.QuickCheckTests 200) $
+    adjustOption (max (QC.QuickCheckTests 200)) $
         testGroup "Djinn properties"
             [ QC.testProperty
                 "bounded generated proofs independently check and render"

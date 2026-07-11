@@ -234,13 +234,24 @@ solveConstraints = do
         results <- mapM solveConstraint pending
         let remaining = [constraint |
                 (constraint, resolved) <- zip pending results, not resolved]
-        if null remaining then
-            return ()
-         else if length remaining == length pending then
-            failCheck $ "unresolved proof constraints: " ++
-                show (length remaining)
-         else
+        if length remaining < length pending then
             solve remaining
+         else
+            defaultStuck remaining
+
+    -- Every remaining constraint is stuck on an unsolved metavariable.  An
+    -- empty eliminator whose input type is still free consumes a value the
+    -- rest of the proof leaves unconstrained (for example, one ex falso
+    -- result fed into another); any empty instantiation witnesses a valid
+    -- typing, so choose Sum [] and resume.  A proof that also injects into
+    -- that type still fails unification on the next pass.
+    defaultStuck remaining =
+        case [input | EmptyEliminator input <- remaining] of
+            input : _ -> do
+                unify input (Sum [])
+                solve remaining
+            [] -> failCheck $ "unresolved proof constraints: " ++
+                show (length remaining)
 
 solveConstraint :: Constraint -> Check Bool
 solveConstraint constraint =

@@ -71,11 +71,14 @@ htCheckTypeKind its expected t = htCheckTypesKinds its [(expected, t)]
 -- could incorrectly assign the same variable a different kind each time.
 htCheckTypesKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
                   -> [(HKind, HType)] -> Either String ()
-htCheckTypesKinds its expectedTypes = flip evalStateT initState $ do
-    let vs = foldr union [] [getHTVars t | (_, t) <- expectedTypes]
-    ks <- mapM (const newKVar) vs
-    let env = zip vs ks ++ [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
-    mapM_ (check env) expectedTypes
+htCheckTypesKinds its expectedTypes = do
+    mapM_ (checkSynonymSaturation its . snd) expectedTypes
+    flip evalStateT initState $ do
+        let vs = foldr union [] [getHTVars t | (_, t) <- expectedTypes]
+        ks <- mapM (const newKVar) vs
+        let env = zip vs ks ++
+                  [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
+        mapM_ (check env) expectedTypes
   where
     check env (expected, t) = iHKind env t >>= (`unifyK` expected)
 
@@ -87,21 +90,24 @@ htCheckTypesKinds its expectedTypes = flip evalStateT initState $ do
 htInferClassKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
                   -> [HSymbol] -> [HType]
                   -> Either String [(HSymbol, HKind)]
-htInferClassKinds its params methodTypes = flip evalStateT initState $ do
-    paramKinds <- mapM (const newKVar) params
-    let locals = foldr union [] (map getHTVars methodTypes) \\ params
-    localKinds <- mapM (const newKVar) locals
-    let env = zip params paramKinds ++ zip locals localKinds ++
-              [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
-    mapM_ (iHKindStar env) methodTypes
-    grounded <- mapM ground paramKinds
-    return $ zip params grounded
+htInferClassKinds its params methodTypes = do
+    mapM_ (checkSynonymSaturation its) methodTypes
+    flip evalStateT initState $ do
+        paramKinds <- mapM (const newKVar) params
+        let locals = foldr union [] (map getHTVars methodTypes) \\ params
+        localKinds <- mapM (const newKVar) locals
+        let env = zip params paramKinds ++ zip locals localKinds ++
+                  [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
+        mapM_ (iHKindStar env) methodTypes
+        grounded <- mapM ground paramKinds
+        return $ zip params grounded
 
 htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))] -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
-htCheckEnv its =
+htCheckEnv its = do
+    mapM_ (checkSynonymSaturation its . declarationBody) its
     let graph = [ (n, i, getHTCons t) | n@(i, (_, t, _)) <- its ]
         order = stronglyConnComp graph
-    in  case [ c | CyclicSCC c <- order ] of
+    case [ c | CyclicSCC c <- order ] of
         c : _ -> Left $ "Recursive types are not allowed: " ++ unwords [ i | (i, _) <- c ]
         [] -> flip evalStateT initState $ addKinds
             where addKinds = do
@@ -112,6 +118,57 @@ htCheckEnv its =
                                         "Internal kind inference error for " ++ i
                                     Just k -> return (i, (vs, t, k))
                         mapM addKind its
+  where
+    declarationBody (_, (_, body, _)) = body
+
+-- Type synonyms are unlike data and abstract constructors: Haskell requires
+-- every occurrence to supply the synonym's complete parameter list.  Kind
+-- checking alone cannot detect a partial use when it appears in a compatible
+-- higher-kinded position, so validate saturation from the declaration shape.
+checkSynonymSaturation :: [(HSymbol, ([HSymbol], HType, a))]
+                       -> HType -> Either String ()
+checkSynonymSaturation definitions = checkType
+  where
+    synonymArities =
+        [(name, length parameters)
+        | (name, (parameters, body, _)) <- definitions
+        , isSynonymBody body]
+
+    isSynonymBody (HTUnion _) = False
+    isSynonymBody (HTAbstract _ _) = False
+    isSynonymBody _ = True
+
+    checkType application@(HTApp _ _) = do
+        let (headType, arguments) = splitApplication application
+        checkHead headType (length arguments)
+        case headType of
+            HTCon _ -> return ()
+            _ -> checkType headType
+        mapM_ checkType arguments
+    checkType (HTCon name) = checkName name 0
+    checkType (HTTuple types) = mapM_ checkType types
+    checkType (HTArrow argument result) =
+        checkType argument >> checkType result
+    checkType (HTUnion constructors) =
+        mapM_ (mapM_ checkType . snd) constructors
+    checkType (HTVar _) = return ()
+    checkType (HTAbstract _ _) = return ()
+
+    splitApplication = collect []
+      where
+        collect arguments (HTApp function argument) =
+            collect (argument : arguments) function
+        collect arguments headType = (headType, arguments)
+
+    checkHead (HTCon name) supplied = checkName name supplied
+    checkHead _ _ = Right ()
+
+    checkName name supplied =
+        case lookup name synonymArities of
+            Just expected | supplied /= expected -> Left $
+                "Type synonym " ++ name ++ " expects " ++ show expected ++
+                " argument(s), but got " ++ show supplied
+            _ -> Right ()
 
 inferHKinds :: KEnv -> [(HSymbol, ([HSymbol], HType, a))] -> M KEnv
 inferHKinds env [] = return env

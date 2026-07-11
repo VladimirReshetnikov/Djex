@@ -9,7 +9,7 @@ import Text.Read (readMaybe)
 import Djinn.Core (
     Declaration(..), QueryOutcome(..),
     declare, defaultQueryOptions, emptyEnvironment, inhabit,
-    optionBudget, parseHKind, parseHType, removeDeclaration,
+    kArrow, kStar, optionBudget, parseHKind, parseHType, removeDeclaration,
     reportOutcome, resolveContext, standardEnvironment)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
@@ -79,6 +79,18 @@ testCoreFacade = do
     assertLeft "an ill-kinded function type is rejected"
         (declare (Function "f" (HTApp (HTCon "Bool") (HTVar "a")))
             standardEnvironment)
+    assertLeft "a type synonym must be fully saturated in higher-kinded use" $ do
+        environment <- declare
+            (TypeSynonym "Pair" ["a", "b"]
+                (HTTuple [HTVar "a", HTVar "b"]))
+            standardEnvironment
+        environment' <- declare
+            (AbstractType "HK" $ kArrow (kArrow kStar kStar) kStar)
+            environment
+        let partialPair = HTApp (HTCon "Pair") (HTVar "a")
+            wrapped = HTApp (HTCon "HK") partialPair
+        inhabit defaultQueryOptions environment' [] "badSynonym"
+            (HTArrow wrapped wrapped)
     assertLeft "a method-owning clash across classes is rejected"
         (declare (ClassDecl "Eq2" ["a"]
             [("==", HTVar "a")]) standardEnvironment)

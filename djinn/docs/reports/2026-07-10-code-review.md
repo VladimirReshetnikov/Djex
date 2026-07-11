@@ -35,8 +35,7 @@ R-01 through R-06 with isolated proof identities, an independent proof checker,
 nominal empty propositions, transactional declaration validation, total and
 scope-safe proof rendering, and centralized Haskell lexical rules. The principal
 remaining risks are search fairness, the intentionally shallow class model,
-batch diagnostics, public raw AST constructors, totality assumptions, and
-unsaturated type synonyms.
+batch diagnostics, public raw AST constructors, and totality assumptions.
 
 ## Scope and method
 
@@ -533,7 +532,7 @@ intuitionistic model but can change strictness in real Haskell with `undefined`,
 exceptions, or `seq`. This is now documented in the README and should remain an
 explicit design assumption.
 
-### R-12 — Medium: type-synonym saturation is not enforced at use sites
+### R-12 — Fixed in follow-up: type-synonym saturation at use sites
 
 F-04 ensures that synonym declarations produce proper types, but the kind
 environment records only the resulting kind, not whether a constructor is a
@@ -546,9 +545,11 @@ bad ? HK (Pair a) -> HK (Pair a)
 ```
 
 GHC rejects the unsaturated `Pair a`, whereas abstract/data constructors may
-legitimately be partially applied. Enforcing this distinction requires carrying
-constructor category and synonym arity through kind checking, not merely adding
-another kind constraint.
+legitimately be partially applied. The follow-up fix derives synonym arities
+from the validated declaration shapes and checks saturation before every
+declaration, method, context, or goal kind check. A regression retains the exact
+higher-kinded example above, where ordinary kind unification cannot expose the
+error by itself.
 
 ## Automated regression coverage
 

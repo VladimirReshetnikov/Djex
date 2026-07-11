@@ -421,8 +421,8 @@ knowing before editing the source:
   imported from packages, or general type-class solver.
 - Added functions are used at exactly their declared type; their polymorphic
   type variables are not freshly instantiated at each use.
-- Keep type synonyms fully saturated. Djinn does not yet reject every
-  unsaturated synonym use that GHC will reject.
+- Type synonyms must be fully saturated, matching Haskell. Data and abstract
+  constructors may still be used partially in higher-kinded positions.
 - Recursive data types cannot be declared structurally. List types are therefore
   treated opaquely rather than expanded into `[]` and `(:)`.
 - Empty data types are logically false but retain nominal tags. Identity is used

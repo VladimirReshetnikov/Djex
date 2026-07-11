@@ -56,7 +56,6 @@ import Data.Functor ( ($>) )
 import Data.Monoid ( Any(..), Endo(..), Sum(..) )
 import Data.Foldable ( foldMap, sum, asum, traverse_ )
 import Control.Monad.Morph ( lift )
-import Data.Typeable ( Typeable )
 import Control.Lens
 import Control.Monad.State ( StateT(..), State, gets, execStateT, get, runStateT, mapStateT )
 import Control.Monad.State ( MonadState )
@@ -90,7 +89,7 @@ data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
   , heuristics_unusedVar              :: Float
   , heuristics_solutionLength         :: Float
   }
-  deriving (Show, Data, Typeable)
+  deriving (Show, Data)
 
 data ExferenceInput = ExferenceInput
   { input_goalType    :: HsType                 -- ^ try to find a expression
@@ -129,7 +128,7 @@ data ExferenceInput = ExferenceInput
                                                 -- solutions).
   , input_heuristicsConfig :: ExferenceHeuristicsConfig
   }
-  deriving (Show, Data, Typeable)
+  deriving (Show, Data)
 
 type ExferenceOutputElement = (Expression, [HsConstraint], ExferenceStats)
 data ExferenceChunkElement = ExferenceChunkElement

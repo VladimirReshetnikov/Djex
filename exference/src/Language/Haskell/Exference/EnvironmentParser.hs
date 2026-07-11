@@ -1,6 +1,7 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Language.Haskell.Exference.EnvironmentParser
   ( parseModules
@@ -28,6 +29,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.SimpleDict
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.ExferenceStats
+import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.DeepSeq
 
@@ -35,7 +37,7 @@ import System.Process
 
 import Control.Applicative ( (<$>), (<*>), (<*) )
 import Control.Arrow ( (***) )
-import Control.Monad ( when, forM_, guard, forM, mplus, mzero )
+import Control.Monad ( when, forM_, guard, forM, mplus, mzero, join )
 import Data.List ( sort, sortBy, find, isSuffixOf )
 import Data.Ord ( comparing )
 import Text.Printf
@@ -55,6 +57,7 @@ import Language.Haskell.Exts.Parser ( parseModuleWithMode
 import Language.Haskell.Exts.Extension ( Language (..)
                                        , Extension (..)
                                        , KnownExtension (..) )
+import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import Control.Monad.Trans.MultiRWS
 import Data.HList.ContainsType
@@ -189,16 +192,16 @@ parseModules l = do
   where
     hRead :: (ParseMode, String) -> IO (ParseMode, String)
     hRead (mode, s) = (,) mode <$> readFile s
-    hParse :: (ParseMode, String) -> Either String Module
+    hParse :: (ParseMode, String) -> Either String (Module SrcSpanInfo)
     hParse (mode, content) = case parseModuleWithMode mode content of
       f@(ParseFailed _ _) -> Left $ show f
       ParseOk modul       -> Right modul
     hExtractBinds :: StaticClassEnv
                   -> [QualifiedName]
                   -> TypeDeclMap
-                  -> Module
+                  -> Module SrcSpanInfo
                   -> m ([HsFunctionDecl], [DeconstructorBinding])
-    hExtractBinds cntxt ds tDeclMap modul@(Module _ (ModuleName _mname) _ _ _ _ _) = do
+    hExtractBinds cntxt ds tDeclMap modul = do
       -- tell $ return $ mname
       eFromData <- getDataConss (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
       eDecls <- (++)

@@ -15,21 +15,26 @@ where
 
 import Language.Haskell.Exts.Syntax
 import Language.Haskell.Exts.Pretty
+import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
+import Language.Haskell.Exference.HaskellSrcUtils
 
 import qualified Data.Map.Strict as M
 import qualified Data.Map.Lazy as LazyMap
 import Control.Monad.State.Strict
-import Control.Monad.Trans.Either
+import Control.Monad.Trans.Except
+import Control.Monad.Except ( liftEither )
 import Control.Monad.Writer.Strict
+import Control.Monad.Fix ( MonadFix )
+import Control.Monad ( forM )
 
 import Control.Applicative ( (<$>), (<*>), Applicative )
 
-import Data.Maybe ( fromMaybe, mapMaybe )
+import Data.Maybe ( fromMaybe, mapMaybe, maybeToList )
 import Data.Either ( lefts, rights )
 import Data.List ( find )
 import Data.Traversable ( traverse, for )
@@ -52,7 +57,7 @@ getClassEnv :: ( ContainsType [String] w
                )
             => [QualifiedName]
             -> TypeDeclMap
-            -> [Module]
+            -> [Module SrcSpanInfo]
             -> MultiRWST r w s m (StaticClassEnv, Int)
 getClassEnv ds tDeclMap ms = do
   etcs <- getTypeClasses ds tDeclMap ms
@@ -73,23 +78,30 @@ getTypeClasses :: forall m r w s m0
                   )
                => [QualifiedName]
                -> TypeDeclMap
-               -> [Module]
+               -> [Module SrcSpanInfo]
                -> m [Either String HsTypeClass]
 getTypeClasses ds tDeclMap ms = do
   secondMap :: M.Map QualifiedName (Either String ([TempAsst], [TVarId])) <-
     fmap M.fromList $ sequence
       [ [ (qn, x) --m (inner) -- []
         | let qn = convertModuleName moduleName name
-        , x <- withMultiStateA (ConvData 0 M.empty) $ runEitherT $ let
-              convF (ClassA qname types) =
-                (,) (convertQName    (Just moduleName) ds qname)
-                <$> types `forM` convertTypeInternal [] (Just moduleName) ds tDeclMap
-              convF (ParenA c) = convF c
-              convF c = left $ "unknown HsConstraint: " ++ show c
-            in (,) <$> mapM convF context <*> mapM tyVarTransform vars
+        , x <- withMultiStateA (ConvData 0 M.empty) $ runExceptT $ let
+              convF (TypeA _ classType) = do
+                (qname, types) <- maybe
+                  (throwE $ "invalid superclass constraint: " ++ prettyPrint classType)
+                  pure
+                  (splitClassApplication classType)
+                (,) (convertQName (Just moduleName) ds qname)
+                  <$> mapM (convertTypeInternal [] (Just moduleName) ds tDeclMap) types
+              convF (ParenA _ c) = convF c
+              convF c = throwE $ "unknown superclass constraint: " ++ show c
+            in (,) <$> mapM convF (contextConstraints context)
+                   <*> mapM tyVarTransform vars
         ]
-      | Module _ moduleName _ _ _ _ decls <- ms
-      , ClassDecl _loc context name vars _fdeps _cdecls <- decls
+      | modul <- ms
+      , Just (moduleName, decls) <- [moduleNameAndDecls modul]
+      , ClassDecl _ context rawHead _ _ <- decls
+      , let (name, vars) = splitDeclHead rawHead
       ]
   let
     helper :: QualifiedName
@@ -115,11 +127,13 @@ getInstances :: forall m m0 r w s
              => [HsTypeClass]
              -> [QualifiedName]
              -> TypeDeclMap
-             -> [Module]
+             -> [Module SrcSpanInfo]
              -> m [Either String HsInstance]
 getInstances tcs ds tDeclMap ms = sequence $ do
-  Module _ mn _ _ _ _ decls <- ms
-  InstDecl _ _ _vars cntxt qname tps _ <- decls
+  modul <- ms
+  (mn, decls) <- maybeToList $ moduleNameAndDecls modul
+  InstDecl _ _ rule _ <- decls
+  (_variables, context, qname, tps) <- maybeToList $ splitInstRule rule
     -- vars would be the forall binds in
     -- > instance forall a . Show (Foo a) where [..]
     -- which we can ignore, right?
@@ -131,10 +145,10 @@ getInstances tcs ds tDeclMap ms = sequence $ do
       sAction :: forall m1
                . ( MonadMultiState ConvData m1
                  )
-              => EitherT String m1 HsInstance
+              => ExceptT String m1 HsInstance
       sAction = do
         -- varIds <- mapM tyVarTransform vars
-        constrs <- cntxt `forM` \asst ->
+        constrs <- contextConstraints context `forM` \asst ->
           constrTransform
             (Just mn)
             ds
@@ -142,25 +156,29 @@ getInstances tcs ds tDeclMap ms = sequence $ do
             (\str -> find ((str==).tclass_name) tcs)
             asst
         rtps <- convertTypeInternal tcs (Just mn) ds tDeclMap `mapM` tps
-        ic <- hoistEither instClass
+        ic <- liftEither instClass
         return $ HsInstance constrs ic rtps
         -- either (Left . (("instance for "++name++": ")++)) Right
-    withMultiStateA (ConvData 0 M.empty) $ runEitherT sAction
+    withMultiStateA (ConvData 0 M.empty) $ runExceptT sAction
 
 constrTransform
   :: (MonadMultiState ConvData m)
-  => Maybe ModuleName
+  => Maybe (ModuleName SrcSpanInfo)
   -> [QualifiedName]
   -> TypeDeclMap
   -> (QualifiedName -> Maybe HsTypeClass)
-  -> Asst
-  -> EitherT String m HsConstraint
-constrTransform mn ds tDeclMap tcLookupF (ClassA qname types) = do
+  -> Asst SrcSpanInfo
+  -> ExceptT String m HsConstraint
+constrTransform mn ds tDeclMap tcLookupF (TypeA _ classType) = do
+  (qname, types) <- maybe
+    (throwE $ "invalid instance constraint: " ++ prettyPrint classType)
+    pure
+    (splitClassApplication classType)
   let ctypes = convertTypeInternal [] mn ds tDeclMap `mapM` types
   let qn = convertQName mn ds qname
   maybe
-    (left $ "unknown type class: " ++ show qn)
+    (throwE $ "unknown type class: " ++ show qn)
     (\tc -> HsConstraint tc <$> ctypes)
     (tcLookupF qn)
-constrTransform mn ds tDeclMap tcLookupF (ParenA c) = constrTransform mn ds tDeclMap tcLookupF c
-constrTransform _ _ _ _ c = left $ "unknown HsConstraint: " ++ show c
+constrTransform mn ds tDeclMap tcLookupF (ParenA _ c) = constrTransform mn ds tDeclMap tcLookupF c
+constrTransform _ _ _ _ c = throwE $ "unknown HsConstraint: " ++ show c

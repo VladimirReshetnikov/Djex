@@ -1,8 +1,8 @@
+Cabal-Version: 3.0
 Name:          exference
 Version:       1.6.0.0
-Cabal-Version: >= 1.8
 Build-Type:    Simple
-license:       BSD3
+license:       BSD-3-Clause
 license-file:  LICENSE
 Maintainer:    Lennart Spitzner <hexagoxel@hexagoxel.de>
 Copyright:     Copyright (C) 2014-2017 Lennart Spitzner
@@ -86,7 +86,7 @@ source-repository head {
 
 flag build-executables
   description: build the executables, not just the library
-  default: True
+  default: False
   manual: True
 
 Flag linkNodes
@@ -106,9 +106,8 @@ Flag exference-dev
   manual: True
 
 Library
-  --ghc-options: -fllvm
-  ghc-options: -O2
-               -Wall
+  default-language: Haskell2010
+  ghc-options: -Wall
                -fno-warn-unused-imports
                -fno-warn-orphans
                -fno-spec-constr
@@ -141,13 +140,15 @@ Library
                    Language.Haskell.Exference.FunctionDecl
                    Paths_exference
                    Flags_exference
+  autogen-modules: Paths_exference
   other-modules:   Language.Haskell.Exference.Core.Internal.Unify,
                    Language.Haskell.Exference.Core.Internal.ConstraintSolver,
                    Language.Haskell.Exference.Core.Internal.Closure,
+                   Language.Haskell.Exference.HaskellSrcUtils,
                    Language.Haskell.Exference.Core.Internal.ExferenceNode,
                    Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder,
                    Language.Haskell.Exference.Core.Internal.Exference
-  extensions:      NoMonomorphismRestriction
+  default-extensions: NoMonomorphismRestriction
                    CPP
                    FlexibleContexts
                    ScopedTypeVariables
@@ -155,34 +156,32 @@ Library
                    TemplateHaskell
   hs-source-dirs: src
   Build-Depends:
-    base                 >=4.7.0.2 && <5,
-    containers           >=0.5.0.0 && <0.6,
-    pretty               >=1.1     && <1.2,
-    deepseq              >=1.3.0.1 && <1.5,
+    base                 >=4.18 && <5,
+    containers           >=0.6 && <0.9,
+    pretty               >=1.1 && <1.2,
+    deepseq              >=1.4 && <1.6,
     deepseq-generics     >=0.1.1.2 && < 0.3,
-    unordered-containers >=0.2.5   && < 0.3,
-    hashable             >=1.2.4.0 && <1.3,
-    pqueue               >=1.3.1   && < 1.4,
-    mmorph               >=1.0.4   && < 1.1,
-    transformers         >=0.3     && <0.6,
-    mtl                  >=2.1     && <2.3,
-    vector               >=0.11    && <0.13.0.0,
-    either               >=4.4     && <4.5,
-    haskell-src-exts     >=1.17.1  && <1.18,
-    process              >=1.2.3.0 && <1.5,
-    parsec               >=3.1.11  && <3.2,
-    directory            >=1.2     && <1.3,
-    bifunctors           >=5.2     && <5.5,
+    unordered-containers >=0.2.5 && <0.3,
+    hashable             >=1.2.4 && <1.6,
+    pqueue               >=1.3.1 && <1.8,
+    mmorph               >=1.0.4 && <1.3,
+    transformers         >=0.5 && <0.7,
+    mtl                  >=2.2 && <2.4,
+    vector               >=0.12 && <0.14,
+    haskell-src-exts     >=1.24 && <1.25,
+    process              >=1.6 && <1.7,
+    directory            >=1.3 && <1.4,
+    bifunctors           >=5.5 && <5.7,
     safe                 >=0.3.9   && <0.4,
-    lens                 >=4.12    && <4.15,
+    lens                 >=5.0 && <5.4,
     split                >=0.2.3.1 && <0.3,
-    multistate           >=0.6.2   && <0.8,
+    multistate           >=0.8 && <0.9,
 
-    template-haskell     >=2.8.0.0 && <2.12.0.0
-    -- 2.11.0.0 causes problems on ghc-7.8.4.
+    template-haskell     >=2.18 && <2.24
 
 
 Executable exference
+  default-language: Haskell2010
   if flag(build-executables)
     buildable: True
     build-depends:
@@ -207,7 +206,6 @@ Executable exference
   main-is: Main.hs
   hs-source-dirs: src-exference
   ghc-options: -rtsopts
-               -O2
                -Wall
                -fno-warn-unused-imports
                -fno-warn-orphans
@@ -228,13 +226,14 @@ Executable exference
                -with-rtsopts "-H2G -M4G -N"
 
 
-  extensions: NoMonomorphismRestriction
+  default-extensions: NoMonomorphismRestriction
               FlexibleContexts
               ScopedTypeVariables
               CPP
               TemplateHaskell
 
 Test-Suite exference-tests
+  default-language: Haskell2010
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   hs-source-dirs: test
@@ -243,5 +242,8 @@ Test-Suite exference-tests
     base,
     containers,
     exference,
+    haskell-src-exts,
+    multistate,
     tasty,
-    tasty-hunit
+    tasty-hunit,
+    transformers

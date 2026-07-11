@@ -60,7 +60,7 @@ import Language.Haskell.Exts.Extension ( Language (..)
 import Language.Haskell.Exts.Pretty
 
 import Control.Monad.Trans.MultiRWS
-import Control.Monad.Trans.Either
+import Control.Monad.Trans.Except
 
 import Data.PPrint
 import Data.Tree ( Tree(..) )
@@ -203,7 +203,7 @@ main = runO $ do
           []    -> return () -- probably impossible..
           (x:_) -> do
             when (verbosity>0) $ lift $ putStrLn "[Custom Input]"
-            eParsedType <- runEitherT $ parseType (sClassEnv_tclasses sEnv)
+            eParsedType <- runExceptT $ parseType (sClassEnv_tclasses sEnv)
                                                   Nothing
                                                   validNames
                                                   tdeclMap

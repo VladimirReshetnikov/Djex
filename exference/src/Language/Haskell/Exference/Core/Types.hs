@@ -57,7 +57,6 @@ import Control.DeepSeq.Generics
 import Control.DeepSeq
 import GHC.Generics
 import Data.Data ( Data )
-import Data.Typeable ( Typeable )
 import Control.Monad.Trans.MultiState
 import Safe
 
@@ -73,7 +72,7 @@ data QualifiedName
   | ListCon
   | TupleCon Int
   | Cons
-  deriving (Eq, Ord, Generic, Data, Typeable)
+  deriving (Eq, Ord, Generic, Data)
 
 data HsType = TypeVar      {-# UNPACK #-} !TVarId
             | TypeConstant {-# UNPACK #-} !TVarId
@@ -82,7 +81,7 @@ data HsType = TypeVar      {-# UNPACK #-} !TVarId
             | TypeArrow    !HsType !HsType
             | TypeApp      !HsType !HsType
             | TypeForall   [TVarId] [HsConstraint] !HsType
-  deriving (Ord, Eq, Generic, Data, Typeable)
+  deriving (Ord, Eq, Generic, Data)
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
@@ -95,7 +94,7 @@ data HsTypeClass = HsTypeClass
   , tclass_params :: [TVarId]
   , tclass_constraints :: [HsConstraint]
   }
-  deriving (Show, Generic, Data, Typeable)
+  deriving (Show, Generic, Data)
 
 -- Class identity is nominal. Besides matching Haskell's class namespace, this
 -- keeps equality and superclass closure finite for mutually recursive class
@@ -112,19 +111,19 @@ data HsInstance = HsInstance
   , instance_tclass :: HsTypeClass
   , instance_params :: [HsType]
   }
-  deriving (Eq, Show, Ord, Generic, Data, Typeable)
+  deriving (Eq, Show, Ord, Generic, Data)
 
 data HsConstraint = HsConstraint
   { constraint_tclass :: HsTypeClass
   , constraint_params :: [HsType]
   }
-  deriving (Eq, Ord, Generic, Data, Typeable)
+  deriving (Eq, Ord, Generic, Data)
 
 data StaticClassEnv = StaticClassEnv
   { sClassEnv_tclasses :: [HsTypeClass]
   , sClassEnv_instances :: M.Map QualifiedName [HsInstance]
   }
-  deriving (Show, Generic, Data, Typeable)
+  deriving (Show, Generic, Data)
 
 data QueryClassEnv = QueryClassEnv
   { qClassEnv_env :: StaticClassEnv

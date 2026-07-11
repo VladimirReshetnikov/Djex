@@ -68,7 +68,7 @@ findFirstBestExpressions :: ExferenceInput
                          -> [ExferenceOutputElement]
 findFirstBestExpressions input
   | r <- findExpressions input
-  , f <- head . groupBy (\(~(_, _, stats1)) (~(_, _, stats2)) -> 
+  , f <- firstGroupBy (\(~(_, _, stats1)) (~(_, _, stats2)) ->
                               exference_complexityRating stats1
                            >= exference_complexityRating stats2)
   = case r of
@@ -187,7 +187,13 @@ findBestNExpressions n input
   | r <- findSortNExpressions n input
   = case r of
     [] -> []
-    _  -> head $ groupBy (\(~(_, _, stats1)) (~(_, _, stats2)) -> 
+    _  -> firstGroupBy (\(~(_, _, stats1)) (~(_, _, stats2)) ->
                               exference_complexityRating stats1
                            >= exference_complexityRating stats2)
                          r
+
+firstGroupBy :: (a -> a -> Bool) -> [a] -> [a]
+firstGroupBy _ [] = []
+firstGroupBy relation values = case groupBy relation values of
+  first : _ -> first
+  [] -> []

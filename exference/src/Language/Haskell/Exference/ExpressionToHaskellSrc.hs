@@ -1,9 +1,5 @@
-{-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
 
 module Language.Haskell.Exference.ExpressionToHaskellSrc
   ( convert
@@ -11,183 +7,203 @@ module Language.Haskell.Exference.ExpressionToHaskellSrc
   )
 where
 
-
+import Control.Monad (forM)
+import Control.Monad.Trans.MultiState
+import Data.Char (isUpper)
+import Data.Functor.Identity (runIdentity)
+import Data.List (intercalate)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
+import Language.Haskell.Exts.Syntax
 
 import qualified Language.Haskell.Exference.Core.Expression as E
 import qualified Language.Haskell.Exference.Core.Types as T
-import qualified Language.Haskell.Exference.Core.TypeUtils as TU
-import Language.Haskell.Exts.Syntax
 
-import Control.Monad ( forM )
+type HsExp = Exp SrcSpanInfo
+type HsDecl = Decl SrcSpanInfo
+type Conversion = MultiState '[Map T.TVarId T.HsType]
 
-import Control.Applicative
-
-import qualified Data.Map as M
-import Data.Map ( Map )
-
-import Data.HList.ContainsType
-
-import Data.Functor.Identity
-
-import Control.Monad.Trans.MultiState
-
-
-
--- TODO:
--- 1) merge nested lambdas
-
--- qualification level -> internal-expression -> haskell-src-expression
--- level 0 = no qualication
--- level 1 = qualification for anything but infix operators
--- level 2 = full qualification (prevents infix operators)
-convert :: Int
-        -> E.Expression
-        -> Exp
-convert q e = runIdentity
-            $ runMultiStateTNil
-            $ withMultiStateA (M.empty :: Map T.TVarId T.HsType)
-            $ do
-                E.collectVarTypes e
-                h e []
+-- Qualification level: 0 emits unqualified names, 1 qualifies ordinary
+-- identifiers but keeps operators infix-friendly, and 2 qualifies everything.
+convert :: Int -> E.Expression -> HsExp
+convert qualification expression = runIdentity
+  $ runMultiStateTNil
+  $ withMultiStateA (Map.empty :: Map T.TVarId T.HsType)
+  $ do
+      E.collectVarTypes expression
+      gatherLambdas expression []
   where
-    h (E.ExpLambda i ty e1) is = h e1 ((i, ty):is)
-    h rhsExp [] = convertExp q rhsExp
-    h rhsExp is = [ Lambda noLoc (map (PVar . Ident) params) cr
-                  | cr <- convertExp q rhsExp
-                  , params <- mapM (T.showTypedVar . fst)
-                                   (reverse is)
-                  ]
+    gatherLambdas (E.ExpLambda variable ty body) parameters =
+      gatherLambdas body ((variable, ty) : parameters)
+    gatherLambdas body [] = convertExp qualification body
+    gatherLambdas body parameters = do
+      converted <- convertExp qualification body
+      names <- mapM (T.showTypedVar . fst) (reverse parameters)
+      pure $ Lambda noLoc (map variablePattern names) converted
 
-convertToFunc :: Int
-              -> String
-              -> E.Expression
-              -> Decl
-convertToFunc q ident e = runIdentity
-                        $ runMultiStateTNil
-                        $ withMultiStateA (M.empty :: Map T.TVarId T.HsType)
-                        $ do
-                            E.collectVarTypes e
-                            h e []
+convertToFunc :: Int -> String -> E.Expression -> HsDecl
+convertToFunc qualification functionName expression = runIdentity
+  $ runMultiStateTNil
+  $ withMultiStateA (Map.empty :: Map T.TVarId T.HsType)
+  $ do
+      E.collectVarTypes expression
+      gatherLambdas expression []
   where
-    h (E.ExpLambda i ty e1) is = h e1 ((i, ty):is)
-    h rhsExp is = [ FunBind [Match noLoc
-                                   (Ident ident)
-                                   (map (PVar . Ident) params)
-                                   Nothing
-                                   rhs'
-                                   Nothing]
-                  | rhs' <- UnGuardedRhs <$> convertExp q rhsExp
-                  , params <- mapM (T.showTypedVar . fst) (reverse is)
-                  ]
+    gatherLambdas (E.ExpLambda variable ty body) parameters =
+      gatherLambdas body ((variable, ty) : parameters)
+    gatherLambdas body parameters = do
+      converted <- convertExp qualification body
+      names <- mapM (T.showTypedVar . fst) (reverse parameters)
+      pure $ FunBind noLoc
+        [Match noLoc (Ident noLoc functionName) (map variablePattern names)
+          (UnGuardedRhs noLoc converted) Nothing]
 
--- qualification level -> internal-expression -> haskell-src-expression
--- level 0 = no qualication
--- level 1 = qualification for anything but infix operators
--- level 2 = full qualification (prevents infix operators)
-convertExp :: Int -> E.Expression -> MultiState '[Map T.TVarId T.HsType] Exp
-convertExp q = convertInternal q 0
+convertExp :: Int -> E.Expression -> Conversion HsExp
+convertExp qualification = convertInternal qualification 0
 
-parens :: Bool -> Exp -> Exp
-parens True e = Paren e
-parens False e = e
-
--- qualification level -> precedence -> expression
--- level 0 = no qualication
--- level 1 = qualification for anything but infix operators
--- level 2 = full qualification (prevents infix operators)
-convertInternal
-  :: Int -> Int -> E.Expression -> MultiState '[Map T.TVarId T.HsType] Exp
-convertInternal _ _ (E.ExpVar i _) = Var . UnQual . Ident
-                                    <$> T.showTypedVar i
-convertInternal q _ (E.ExpName qn) =
-  return $ Con $ UnQual $ Ident $ convertName q qn
-convertInternal q p (E.ExpLambda i _ e) =
-  [ parens (p>=1) $ Lambda noLoc [PVar $ Ident $ vname] ce
-  | ce <- convertInternal q 0 e
-  , vname <- T.showTypedVar i
-  ]
-convertInternal q p (E.ExpApply e1 pe) = recurseApply e1 [pe]
+convertInternal :: Int -> Int -> E.Expression -> Conversion HsExp
+convertInternal _ _ (E.ExpVar variable _) =
+  variableExpression <$> T.showTypedVar variable
+convertInternal qualification _ (E.ExpName name) =
+  pure $ namedExpression qualification name
+convertInternal qualification precedence (E.ExpLambda variable _ body) = do
+  converted <- convertInternal qualification 0 body
+  name <- T.showTypedVar variable
+  pure $ parenthesize (precedence >= 1)
+    $ Lambda noLoc [variablePattern name] converted
+convertInternal qualification precedence (E.ExpApply function parameter) =
+  gatherApplications function [parameter]
   where
-    defaultApply :: E.Expression -> [E.Expression] -> MultiState '[Map T.TVarId T.HsType] Exp
-    defaultApply e pes = do
-      f  <- convertInternal q 2 e
-      ps <- mapM (convertInternal q 3) pes
-      return $ parens (p>=3) $ foldl App f ps
-    recurseApply :: E.Expression -> [E.Expression] -> MultiState '[Map T.TVarId T.HsType] Exp
-    recurseApply (E.ExpApply e1' pe') pes = recurseApply e1' (pe':pes)
-    recurseApply e@(E.ExpName qname) pes = do
-      case qname of
-        T.TupleCon i
-          | i==length pes
-          , q<2 ->
-            Tuple Boxed <$> mapM (convertInternal q 0) pes
-        T.Cons
-          | q<2
-          , [p1, p2] <- pes -> do
-              q1 <- convertInternal q 1 p1
-              q2 <- convertInternal q 2 p2
-              return $ parens (p>=2) $ InfixApp
-                q1
-                (QVarOp $ UnQual $ Symbol ":")
-                q2            
-        T.QualifiedName _ ('(':opR)
-          | q<2
-          , [p1, p2] <- pes -> do
-              q1 <- convertInternal q 1 p1
-              q2 <- convertInternal q 2 p2
-              return $ parens (p>=2) $ InfixApp
-                q1
-                (QVarOp $ UnQual $ Symbol $ takeWhile (/=')') opR)
-                q2
-        _ -> defaultApply e pes
-    recurseApply e pes = defaultApply e pes
-convertInternal _ _ (E.ExpHole i) = return $ Var
-                                           $ UnQual
-                                           $ Ident
-                                           $ "_"++T.showVar i
-convertInternal q p (E.ExpLet i _ bindE inE) = do
-  rhs <- convertInternal q 0 bindE
-  varName <- T.showTypedVar i
-  let convBind = PatBind noLoc
-                   (PVar $ Ident $ varName)
-                   (UnGuardedRhs $ rhs)
-                   Nothing
-  e <- convertInternal q 0 inE
-  return $ parens (p>=2) $ mergeLet convBind e
-convertInternal q p (E.ExpLetMatch n ids bindE inE) = do
-  rhs <- convertInternal q 0 bindE
-  let name = convertName q n
-  varNames <- mapM (T.showTypedVar . fst) ids
-  let convBind = PatBind noLoc
-                   (PParen $ PApp (UnQual $ Ident $ name)
-                                  (map (PVar . Ident) varNames))
-                   (UnGuardedRhs $ rhs)
-                   Nothing
-  e <- convertInternal q 0 inE
-  return $ parens (p>=2) $ mergeLet convBind e
-convertInternal q p (E.ExpCaseMatch bindE alts) = do
-  e <- convertInternal q 0 bindE
-  as <- alts `forM` \(c, vars, expr) -> do
-    rhs <- convertInternal q 0 expr
-    let name = convertName q c
-    varNames <- mapM (T.showTypedVar . fst) vars
-    return $ Alt noLoc
-        (PApp (UnQual $ Ident $ name)
-              (map (PVar . Ident) varNames))
-        (UnGuardedRhs $ rhs)
+    gatherApplications (E.ExpApply inner next) parameters =
+      gatherApplications inner (next : parameters)
+    gatherApplications named@(E.ExpName name) parameters =
+      specialApplication named name parameters
+    gatherApplications other parameters = defaultApplication other parameters
+
+    defaultApplication functionExpression parameters = do
+      convertedFunction <- convertInternal qualification 2 functionExpression
+      convertedParameters <- mapM (convertInternal qualification 3) parameters
+      pure $ parenthesize (precedence >= 3)
+        $ foldl (App noLoc) convertedFunction convertedParameters
+
+    specialApplication _ (T.TupleCon arity) parameters
+      | qualification < 2 && arity == length parameters =
+          Tuple noLoc Boxed <$> mapM (convertInternal qualification 0) parameters
+    specialApplication _ T.Cons [left, right]
+      | qualification < 2 = infixApplication T.Cons left right
+    specialApplication _ name [left, right]
+      | qualification < 2 && isOperator name = infixApplication name left right
+    specialApplication original _ parameters = defaultApplication original parameters
+
+    infixApplication name left right = do
+      convertedLeft <- convertInternal qualification 1 left
+      convertedRight <- convertInternal qualification 2 right
+      pure $ parenthesize (precedence >= 2)
+        $ InfixApp noLoc convertedLeft
+            (QVarOp noLoc $ toQName qualification name)
+            convertedRight
+convertInternal _ _ (E.ExpHole variable) =
+  pure $ variableExpression ('_' : T.showVar variable)
+convertInternal qualification precedence (E.ExpLet variable _ binding body) = do
+  convertedBinding <- convertInternal qualification 0 binding
+  name <- T.showTypedVar variable
+  convertedBody <- convertInternal qualification 0 body
+  pure $ parenthesize (precedence >= 2)
+    $ mergeLet
+        (PatBind noLoc (variablePattern name)
+          (UnGuardedRhs noLoc convertedBinding) Nothing)
+        convertedBody
+convertInternal qualification precedence (E.ExpLetMatch constructor variables binding body) = do
+  convertedBinding <- convertInternal qualification 0 binding
+  names <- mapM (T.showTypedVar . fst) variables
+  convertedBody <- convertInternal qualification 0 body
+  let patternBinding = PatBind noLoc
+        (PParen noLoc $ constructorPattern qualification constructor names)
+        (UnGuardedRhs noLoc convertedBinding)
         Nothing
-  return $ parens (p>=2) $ Case e as
+  pure $ parenthesize (precedence >= 2) $ mergeLet patternBinding convertedBody
+convertInternal qualification precedence (E.ExpCaseMatch scrutinee alternatives) = do
+  convertedScrutinee <- convertInternal qualification 0 scrutinee
+  convertedAlternatives <- alternatives `forM` \(constructor, variables, body) -> do
+    convertedBody <- convertInternal qualification 0 body
+    names <- mapM (T.showTypedVar . fst) variables
+    pure $ Alt noLoc
+      (constructorPattern qualification constructor names)
+      (UnGuardedRhs noLoc convertedBody)
+      Nothing
+  pure $ parenthesize (precedence >= 2)
+    $ Case noLoc convertedScrutinee convertedAlternatives
 
-convertName :: Int -> T.QualifiedName -> String
-convertName d qn = case (d, qn) of
-  (0, T.QualifiedName _ n) -> n
-  (_, n)                   -> show n
+namedExpression :: Int -> T.QualifiedName -> HsExp
+namedExpression qualification name
+  | isConstructor name = Con noLoc qname
+  | otherwise = Var noLoc qname
+  where
+    qname = toQName qualification name
 
-mergeLet :: Decl -> Exp -> Exp
-mergeLet convBind (Let (BDecls otherBinds) finalIn)
-  = Let (BDecls $ convBind:otherBinds) finalIn
-mergeLet convBind finalIn                 
-  = Let (BDecls [convBind]) finalIn
+variableExpression :: String -> HsExp
+variableExpression = Var noLoc . UnQual noLoc . Ident noLoc
 
-noLoc :: SrcLoc
-noLoc = SrcLoc "" 0 0
+variablePattern :: String -> Pat SrcSpanInfo
+variablePattern = PVar noLoc . Ident noLoc
+
+constructorPattern :: Int -> T.QualifiedName -> [String] -> Pat SrcSpanInfo
+constructorPattern qualification constructor names =
+  PApp noLoc (toQName qualification constructor) (map variablePattern names)
+
+toQName :: Int -> T.QualifiedName -> QName SrcSpanInfo
+toQName _ T.ListCon = Special noLoc (ListCon noLoc)
+toQName _ (T.TupleCon arity) = Special noLoc (TupleCon noLoc Boxed arity)
+toQName _ T.Cons = Special noLoc (Cons noLoc)
+toQName qualification (T.QualifiedName modules rawName) =
+  qualify modules parsedName
+  where
+    parsedName = maybe (Ident noLoc rawName) (Symbol noLoc) (operatorText rawName)
+    qualify [] name = UnQual noLoc name
+    qualify namespace name
+      | qualification == 0 = UnQual noLoc name
+      | qualification == 1 && isOperatorName name = UnQual noLoc name
+      | otherwise = Qual noLoc
+          (ModuleName noLoc $ intercalate "." namespace)
+          name
+
+isConstructor :: T.QualifiedName -> Bool
+isConstructor T.ListCon = True
+isConstructor T.TupleCon{} = True
+isConstructor T.Cons = True
+isConstructor (T.QualifiedName _ name) = case operatorText name of
+  Just (':' : _) -> True
+  Just _ -> False
+  Nothing -> maybe False isUpper (safeHead name)
+
+isOperator :: T.QualifiedName -> Bool
+isOperator T.Cons = True
+isOperator (T.QualifiedName _ name) = maybe False (const True) (operatorText name)
+isOperator _ = False
+
+isOperatorName :: Name l -> Bool
+isOperatorName Symbol{} = True
+isOperatorName _ = False
+
+operatorText :: String -> Maybe String
+operatorText ('(' : rest) = case reverse rest of
+  ')' : reversedOperator -> Just (reverse reversedOperator)
+  _ -> Nothing
+operatorText _ = Nothing
+
+safeHead :: [a] -> Maybe a
+safeHead [] = Nothing
+safeHead (value : _) = Just value
+
+parenthesize :: Bool -> HsExp -> HsExp
+parenthesize True = Paren noLoc
+parenthesize False = id
+
+mergeLet :: HsDecl -> HsExp -> HsExp
+mergeLet binding (Let _ (BDecls _ bindings) body) =
+  Let noLoc (BDecls noLoc $ binding : bindings) body
+mergeLet binding body = Let noLoc (BDecls noLoc [binding]) body
+
+noLoc :: SrcSpanInfo
+noLoc = noSrcSpan

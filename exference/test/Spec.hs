@@ -2,17 +2,24 @@ module Main (main) where
 
 import Data.Monoid (Any (..))
 import Data.Tree (Tree (..))
+import Data.Functor.Identity (runIdentity)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), testCase)
+import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.MultiRWS (runMultiRWSTNil)
+import qualified Language.Haskell.Exts.Syntax as HSE
 
 import Language.Haskell.Exference.Core.SearchTree
+import Language.Haskell.Exference.Core.Expression (Expression (..))
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.EnvironmentParser (parseRatings)
-import Language.Haskell.Exference.TypeDeclsFromHaskellSrc (applyTypeDecls)
+import Language.Haskell.Exference.ExpressionToHaskellSrc (convert)
+import Language.Haskell.Exference.TypeDeclsFromHaskellSrc (applyTypeDecls, parseType)
+import Language.Haskell.Exference.TypeFromHaskellSrc (haskellSrcExtsParseMode)
 
 main :: IO ()
 main = defaultMain tests
@@ -76,6 +83,23 @@ tests = testGroup "Exference"
           parseRatings "foo nope" @?= Left "invalid rating for foo: nope"
       , testCase "ratings reject non-finite values" $
           parseRatings "foo NaN" @?= Left "rating for foo must be finite: NaN"
+      , testCase "current HSE parses and elaborates constrained types" $
+          case parseTypePure "Eq a => a -> a" of
+            Left message -> fail message
+            Right (TypeForall [] [HsConstraint cls [TypeVar 0]]
+                    (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
+              tclass_name cls @?= name "Eq"
+            Right result -> fail $ "unexpected elaboration: " ++ show result
+      ]
+  , testGroup "Haskell AST conversion"
+      [ testCase "lowercase names use Var rather than Con" $
+          case convert 0 (ExpName $ name "id") of
+            HSE.Var{} -> pure ()
+            expression -> fail $ "expected Var, got " ++ show expression
+      , testCase "uppercase names use Con" $
+          case convert 0 (ExpName $ name "Just") of
+            HSE.Con{} -> pure ()
+            expression -> fail $ "expected Con, got " ++ show expression
       ]
   , testCase "search tree counts processed descendants" $ do
       let expression = error "expression should remain lazy in this test"
@@ -88,3 +112,9 @@ tests = testGroup "Exference"
 
 name :: String -> QualifiedName
 name = QualifiedName []
+
+parseTypePure :: String -> Either String (HsType, TypeVarIndex)
+parseTypePure source = runIdentity
+  $ runMultiRWSTNil
+  $ runExceptT
+  $ parseType [] Nothing [] Map.empty (haskellSrcExtsParseMode "test") source

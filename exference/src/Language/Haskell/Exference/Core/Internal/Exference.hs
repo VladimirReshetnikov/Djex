@@ -15,6 +15,9 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInput (..)
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
+  , constraintsRelaxedAtStep
+  , ExferenceInputError (..)
+  , validateExferenceInput
   )
 where
 
@@ -23,6 +26,7 @@ where
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
+import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.SearchTree
@@ -49,7 +53,7 @@ import Control.Arrow ( first, second, (***), (&&&) )
 import Control.Monad ( when, unless, guard, mzero, replicateM
                      , replicateM_, forM, join, forM_, liftM )
 import Control.Applicative ( (<$>), (<*>), (*>), (<|>), empty )
-import Data.List ( partition, sortBy, groupBy, unfoldr, intercalate )
+import Data.List ( find, partition, sortBy, groupBy, unfoldr, intercalate )
 import Data.Ord ( comparing )
 import Data.Function ( on )
 import Data.Functor ( ($>) )
@@ -130,6 +134,12 @@ data ExferenceInput = ExferenceInput
   }
   deriving (Show, Data)
 
+data ExferenceInputError
+  = NestedForallInGoal HsType
+  | NestedForallInBinding QualifiedName HsType
+  | NestedForallInDeconstructor HsType
+  deriving (Eq, Show)
+
 type ExferenceOutputElement = (Expression, [HsConstraint], ExferenceStats)
 data ExferenceChunkElement = ExferenceChunkElement
   { chunkBindingUsages :: BindingUsages
@@ -173,7 +183,7 @@ findExpressions (ExferenceInput rawType
                                 sClassEnv
                                 allowUnused
                                 allowConstraints
-                                _allowConstraintsStopStep
+                                allowConstraintsStopStep
                                 multiPM
                                 maxSteps -- since we output a [[x]],
                                          -- this would not really be
@@ -246,6 +256,7 @@ findExpressions (ExferenceInput rawType
       , allowUnused || unusedVarCount==0
       , let e = -- trace (showNodeDevelopment solution) $
                 view expression solution
+      , Right () <- [checkExpression contxt funcs deconss' t remainingConstraints e]
       , let d = view depth solution
               + ( heuristics_unusedVar heuristics
                 * fromIntegral unusedVarCount
@@ -262,9 +273,14 @@ findExpressions (ExferenceInput rawType
     worst' <- use worst
     let
       -- actual work happens in stateStep
+      -- Constraint checks are deliberately relaxed only during the configured
+      -- warm-up window. Afterwards unresolved constraints are allowed solely
+      -- when the caller explicitly requested constrained results.
+      relaxConstraints = constraintsRelaxedAtStep
+        allowConstraints allowConstraintsStopStep n'
       rNodes = (`execStateT` s)
         $ stateStep multiPM
-                    allowConstraints
+                    relaxConstraints
                     heuristics
       -- distinguish "finished"/"unfinished" sub-SearchNodes
       (potentialSolutions, futures) = partition (views goals Seq.null) rNodes
@@ -302,6 +318,45 @@ findExpressions (ExferenceInput rawType
 #endif
     worst %= minimum . (: map fst filteredNew)
     gets $ transformSolutions potentialSolutions
+
+constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
+constraintsRelaxedAtStep allowConstraints stopStep currentStep =
+  allowConstraints || currentStep <= stopStep
+
+validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
+validateExferenceInput input
+  | containsNestedForall $ input_goalType input =
+      Left $ NestedForallInGoal $ input_goalType input
+  | Just (binding@(_, name, _, _, _)) <- find (containsForall . functionBindingType)
+      (input_envFuncs input) =
+      Left $ NestedForallInBinding name $ functionBindingType binding
+  | Just deconstructor <- find (containsForall . deconstructorBindingType)
+      (input_envDeconsS input) =
+      Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
+  | otherwise = Right ()
+
+functionBindingType :: FunctionBinding -> HsType
+functionBindingType (result, _, _, _, parameters) =
+  foldr TypeArrow result parameters
+
+deconstructorBindingType :: DeconstructorBinding -> HsType
+deconstructorBindingType (inputType, alternatives, _) =
+  foldr TypeArrow inputType $ concatMap snd alternatives
+
+containsNestedForall :: HsType -> Bool
+containsNestedForall ty@TypeForall{} = containsForall $ stripOuterForalls ty
+  where
+    stripOuterForalls (TypeForall _ _ body) = stripOuterForalls body
+    stripOuterForalls other = other
+containsNestedForall ty = containsForall ty
+
+containsForall :: HsType -> Bool
+containsForall TypeForall{} = True
+containsForall (TypeArrow parameter result) =
+  containsForall parameter || containsForall result
+containsForall (TypeApp function parameter) =
+  containsForall function || containsForall parameter
+containsForall _ = False
 
 rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Float
 rateNode h s = 0.0 - rateGoals h (view goals s) - view depth s + rateUsage h s

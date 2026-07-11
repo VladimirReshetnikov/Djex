@@ -13,13 +13,24 @@ import Control.Monad.Trans.MultiRWS (runMultiRWSTNil)
 import qualified Language.Haskell.Exts.Syntax as HSE
 
 import Language.Haskell.Exference.Core.SearchTree
+import Language.Haskell.Exference.Core (constraintsRelaxedAtStep)
+import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Expression (Expression (..))
+import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.Unify
+import Language.Haskell.Exference
+  ( ExferenceInput (..)
+  , ExferenceInputError (..)
+  , findExpressionsEither
+  , findOneExpression
+  )
 import Language.Haskell.Exference.EnvironmentParser (parseRatings)
 import Language.Haskell.Exference.ExpressionToHaskellSrc (convert)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc (applyTypeDecls, parseType)
 import Language.Haskell.Exference.TypeFromHaskellSrc (haskellSrcExtsParseMode)
+import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
 
 main :: IO ()
 main = defaultMain tests
@@ -44,6 +55,15 @@ tests = testGroup "Exference"
           IntMap.keys (qClassEnv_varConstraints env1) @?= [1, 2]
       , testCase "unknown classes remain nominally distinct" $
           unknownTypeClass (name "Foo") == unknownTypeClass (name "Bar") @?= False
+      , testCase "cyclic instance prerequisites remain unresolved" $ do
+          let cls = HsTypeClass (name "C") [0] []
+              prerequisite = HsConstraint cls [TypeVar 0]
+              cyclicInstance = HsInstance [prerequisite] cls [TypeVar 0]
+              query = HsConstraint cls [TypeCons $ name "Int"]
+              environment = mkQueryClassEnv
+                (mkStaticClassEnv [cls] [cyclicInstance]) []
+          isPossible environment [query] @?= Just [query]
+          filterUnresolved environment [query] @?= Just [query]
       ]
   , testGroup "type traversal"
       [ testCase "forall substitution protects context binders" $ do
@@ -68,12 +88,31 @@ tests = testGroup "Exference"
           let cls = HsTypeClass (name "C") [0] []
               ty = TypeForall [7] [HsConstraint cls [TypeVar 9]] (TypeVar 2)
           largestId ty @?= 9
+      , testCase "unification rejects nested foralls conservatively" $ do
+          let polymorphic = TypeForall [0] [] (TypeVar 0)
+          unify polymorphic (TypeVar 1) @?= Nothing
+          unifyRight (TypeVar 1) polymorphic @?= Nothing
       , testCase "failed synonym expansion preserves arguments" $ do
           let alias = name "Alias"
               argument = TypeCons (name "Argument")
           applyTypeDecls (Map.singleton alias $ Left "invalid declaration")
             (TypeApp (TypeCons alias) argument)
             @?= Right (TypeApp (TypeCons alias) argument)
+      ]
+  , testGroup "search policy"
+      [ testCase "constraint relaxation ends at the configured step" $ do
+          constraintsRelaxedAtStep False 2 1 @?= True
+          constraintsRelaxedAtStep False 2 2 @?= True
+          constraintsRelaxedAtStep False 2 3 @?= False
+          constraintsRelaxedAtStep True 2 3 @?= True
+      , testCase "nested foralls return a structured input error" $ do
+          let polymorphic = TypeForall [0] [] (TypeVar 0)
+              goal = TypeArrow polymorphic polymorphic
+              input = ExferenceInput goal [] [] emptyClassEnv
+                False False 0 False 20 Nothing defaultHeuristicsConfig
+          case findExpressionsEither input of
+            Left actual -> actual @?= NestedForallInGoal goal
+            Right _ -> fail "nested forall was accepted"
       ]
   , testGroup "parsing and diagnostics"
       [ testCase "ratings reject a missing value" $
@@ -100,6 +139,31 @@ tests = testGroup "Exference"
           case convert 0 (ExpName $ name "Just") of
             HSE.Con{} -> pure ()
             expression -> fail $ "expected Con, got " ++ show expression
+      ]
+  , testGroup "independent expression checking"
+      [ testCase "accepts a typed identity" $ do
+          let variable = TypeVar 0
+              identity = ExpLambda 1 variable (ExpVar 1 variable)
+              classEnvironment = mkQueryClassEnv (mkStaticClassEnv [] []) []
+          checkExpression classEnvironment [] []
+            (TypeArrow variable variable) [] identity @?= Right ()
+      , testCase "rejects a mismatched variable annotation" $ do
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              malformed = ExpLambda 1 integer (ExpVar 1 boolean)
+              classEnvironment = mkQueryClassEnv (mkStaticClassEnv [] []) []
+          checkExpression classEnvironment [] []
+            (TypeArrow integer integer) [] malformed
+            @?= Left (TypeMismatch integer boolean)
+      , testCase "guards the live search result boundary" $ do
+          let variable = TypeVar 0
+              input = ExferenceInput
+                (TypeArrow variable variable)
+                [] [] emptyClassEnv
+                False False 0 False 20 Nothing defaultHeuristicsConfig
+          case findOneExpression input of
+            Nothing -> fail "identity search produced no checked result"
+            Just _ -> pure ()
       ]
   , testCase "search tree counts processed descendants" $ do
       let expression = error "expression should remain lazy in this test"

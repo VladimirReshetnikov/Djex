@@ -125,7 +125,10 @@ Library
                    Language.Haskell.Exference.Core.Types
                    Language.Haskell.Exference.Core.TypeUtils
                    Language.Haskell.Exference.Core.ExferenceStats
+                   Language.Haskell.Exference.Core.ConstraintSolver
+                   Language.Haskell.Exference.Core.Unify
                    Language.Haskell.Exference.Core.Expression
+                   Language.Haskell.Exference.Core.ExpressionCheck
                    Language.Haskell.Exference.Core.ExpressionSimplify
                    Language.Haskell.Exference.Core.FunctionBinding
                    Language.Haskell.Exference.Core.SearchTree

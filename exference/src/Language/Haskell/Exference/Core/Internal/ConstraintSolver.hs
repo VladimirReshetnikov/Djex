@@ -1,65 +1,65 @@
-{-# LANGUAGE MonadComprehensions #-}
-
 module Language.Haskell.Exference.Core.Internal.ConstraintSolver
-  ( isPossible
-  , filterUnresolved
+  ( filterUnresolved
+  , isPossible
   )
 where
 
+import Control.Monad (guard)
+import Data.List (minimumBy)
+import Data.Maybe (catMaybes)
+import Data.Ord (comparing)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
-
-import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Internal.Unify
+import Language.Haskell.Exference.Core.TypeUtils
+import Language.Haskell.Exference.Core.Types
 
-import qualified Data.Set as S
-import Control.Monad ( mplus, guard, join )
-import Control.Applicative ( (<|>), (<$>), liftA2 )
-import Data.Foldable ( asum )
-import Data.Maybe ( fromMaybe )
-import Data.Traversable ( traverse )
-
-import qualified Data.Map.Strict as M
-import qualified Data.IntMap.Strict as IntMap
-
-import Debug.Trace
-
-
-
--- returns Nothing if one of the constraints is refutable
--- otherwise Just a list of open constraints (that could neither be
--- solved nor refuted).
+-- | Reject refutable constraints and retain constraints whose variables make
+-- them undecidable at the current search node.
 isPossible :: QueryClassEnv -> [HsConstraint] -> Maybe [HsConstraint]
-isPossible = checkPossibleGeneric (Just . return) (const Nothing)
+isPossible = checkConstraints (Just . pure) (const Nothing)
 
--- returns Nothing if any of the constraints contains variables
--- (as variables cannot be proven).
--- Otherwise returns the list of constraints that cannot be proven,
--- and removing all those that can be proven.
+-- | Discharge every ground constraint that can be proven. Variable-bearing
+-- constraints are not valid final obligations, while ground constraints with
+-- no matching evidence remain explicit in the result.
 filterUnresolved :: QueryClassEnv -> [HsConstraint] -> Maybe [HsConstraint]
-filterUnresolved = checkPossibleGeneric (const Nothing) (Just . return)
+filterUnresolved = checkConstraints (const Nothing) (Just . pure)
 
-checkPossibleGeneric :: (HsConstraint -> Maybe [HsConstraint])
-                     -> (HsConstraint -> Maybe [HsConstraint])
-                     -> QueryClassEnv
-                     -> [HsConstraint]
-                     -> Maybe [HsConstraint]
-checkPossibleGeneric containsVarsResult otherwiseResult qClassEnv = fmap concat . traverse g where
-  g c = if constraintContainsVariables c
-    then containsVarsResult c
-    else possibleFromGiven c <|> possibleFromInstance c <|> otherwiseResult c
-  possibleFromGiven :: HsConstraint -> Maybe [HsConstraint]
-  possibleFromGiven c = [ [] | S.member c $ qClassEnv_inflatedConstraints qClassEnv ]
-  possibleFromInstance :: HsConstraint -> Maybe [HsConstraint]
-  possibleFromInstance c = asum $ f <$> is where
-    (HsConstraint cclass cparams) = c
-    is = M.findWithDefault []
-                           (tclass_name cclass)
-                           ( sClassEnv_instances
-                             $ qClassEnv_env qClassEnv )
-    f (HsInstance instConstrs _iclass instParams) = do
-      guard $ length cparams == length instParams
-      substs <- unifyRightEqs $ zipWith TypeEq cparams instParams
-      checkPossibleGeneric containsVarsResult otherwiseResult
-        qClassEnv
-        (map (snd . constraintApplySubsts substs) instConstrs)
+checkConstraints
+  :: (HsConstraint -> Maybe [HsConstraint])
+  -> (HsConstraint -> Maybe [HsConstraint])
+  -> QueryClassEnv
+  -> [HsConstraint]
+  -> Maybe [HsConstraint]
+checkConstraints variableResult noEvidenceResult environment = solve Set.empty
+  where
+    solve visiting = fmap concat . traverse (resolve visiting)
+
+    resolve visiting constraint
+      | constraintContainsVariables constraint = variableResult constraint
+      | constraint `Set.member` qClassEnv_inflatedConstraints environment = Just []
+      | constraint `Set.member` visiting = Just [constraint]
+      | otherwise =
+          bestResult (map (fromInstance $ Set.insert constraint visiting) instances)
+            `orElse` noEvidenceResult constraint
+      where
+        HsConstraint typeClass parameters = constraint
+        instances = Map.findWithDefault []
+          (tclass_name typeClass)
+          (sClassEnv_instances $ qClassEnv_env environment)
+
+        fromInstance nextVisiting (HsInstance prerequisites _ instanceParameters) = do
+          guard $ length parameters == length instanceParameters
+          substitutions <- unifyRightEqs $ zipWith TypeEq parameters instanceParameters
+          solve nextVisiting
+            $ map (snd . constraintApplySubsts substitutions) prerequisites
+
+bestResult :: [Maybe [a]] -> Maybe [a]
+bestResult results = case catMaybes results of
+  [] -> Nothing
+  candidates -> Just $ minimumBy (comparing length) candidates
+
+orElse :: Maybe a -> Maybe a -> Maybe a
+orElse (Just value) _ = Just value
+orElse Nothing fallback = fallback

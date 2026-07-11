@@ -14,6 +14,8 @@ module Language.Haskell.Exference
   , ExferenceInput ( .. )
   , ExferenceOutputElement
   , ExferenceStats (..)
+  , ExferenceInputError (..)
+  , findExpressionsEither
   )
 where
 
@@ -195,5 +197,5 @@ findBestNExpressions n input
 firstGroupBy :: (a -> a -> Bool) -> [a] -> [a]
 firstGroupBy _ [] = []
 firstGroupBy relation values = case groupBy relation values of
-  first : _ -> first
+  group : _ -> group
   [] -> []

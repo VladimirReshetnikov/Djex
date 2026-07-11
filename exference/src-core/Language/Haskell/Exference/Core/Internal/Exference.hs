@@ -187,7 +187,8 @@ findExpressions (ExferenceInput rawType
     (Q.singleton 0 rootSearchNode)
   t = forallify rawType
   rootSearchNode = SearchNode
-    { _searchNodeGoals           = Seq.singleton (TGoal (VarBinding 0 t) 0)
+    { _searchNodeGoals           = Seq.singleton
+        (TGoal (VarBinding 0 t) initialScopeId)
     , _searchNodeConstraintGoals = []
     , _searchNodeProvidedScopes  = initialScopes
     , _searchNodeVarUses         = IntMap.empty
@@ -365,7 +366,6 @@ rateNode h s = Priority
   $ negate (penaltyValue (rateGoals h $ view goals s)
             + penaltyValue (view depth s))
   + priorityValue (rateUsage h s)
- -- + 0.6 * rateScopes (view providedScopes s)
 
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sum . fmap rateGoal
@@ -379,13 +379,6 @@ rateGoals h = sum . fmap rateGoal
     tComplexity (TypeArrow t1 t2)   = heuristics_goalArrow h + tComplexity t1 + tComplexity t2
     tComplexity (TypeApp   t1 t2)   = heuristics_goalApp h   + tComplexity t1 + tComplexity t2
     tComplexity (TypeForall _ _ t1) = tComplexity t1
-
--- using this rating had bad effect on ordering; not used anymore
-{-
-rateScopes :: Scopes -> Float
-rateScopes (Scopes _ sMap) = alaf Sum foldMap f sMap where
-    f (Scope binds _) = fromIntegral (length binds)
--}
 
 rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Priority
 rateUsage h = Priority . sumOf (varUses . folded . to f) where

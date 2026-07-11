@@ -10,8 +10,7 @@
 module Language.Haskell.Exference.Core.Internal.ExferenceNode
   ( SearchNode (..)
   , TGoal (..)
-  , Scopes (..)
-  , Scope (..)
+  , Scopes
   , ScopeId
   , VarPBinding (..)
   , VarBinding (..)
@@ -25,9 +24,8 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   , scopeGetAllBindings
   , scopesAddPBinding
   , splitBinding
-  , addNewScopeGoal
+  , initialScopeId
   , initialScopes
-  , addGoalProvided -- unused atm
   , showSearchNode
   -- SearchNode lenses
   , HasGoals (..)
@@ -55,6 +53,7 @@ import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Score
+import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Vector as V
@@ -67,10 +66,6 @@ import Control.DeepSeq.Generics
 import Control.DeepSeq
 import GHC.Generics
 import Control.Lens.TH ( makeFields )
-
-import Data.List ( intercalate )
-
-
 
 data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
@@ -113,34 +108,25 @@ varPBindingApplySubsts ss binding =
     (newForalls ++ fvs)
     (cs ++ newCs)
 
-type ScopeId = Int
+type ScopeId = Scope.ScopeId
+type Scopes = Scope.Scopes VarPBinding
 
-data Scope = Scope [VarPBinding] [ScopeId]
-            -- scope bindings,   superscopes
-  deriving Generic
-data Scopes = Scopes ScopeId (IntMap.IntMap Scope)
-  deriving Generic
-              -- next id     scopes
-
-instance Show Scope where
-  show (Scope bindings sids) = "Scope " ++ show bindings ++ " " ++ show sids
-instance Show Scopes where
-  show (Scopes _sid intmap) = "Scopes\n" ++ intercalate ("\n") (fmap ("  " ++) $ fmap show $ IntMap.toAscList intmap)
+initialScopeId :: ScopeId
+initialScopeId = Scope.initialScopeId
 
 initialScopes :: Scopes
-initialScopes = Scopes 1 (IntMap.singleton 0 $ Scope [] [])
+initialScopes = Scope.initialScopes
 
-scopeGetAllBindings :: Int -> Scopes -> [VarPBinding]
-scopeGetAllBindings sid ss@(Scopes _ scopeMap) =
-  case IntMap.lookup sid scopeMap of
-    Nothing -> []
-    Just (Scope binds ids) -> binds ++ concatMap (`scopeGetAllBindings` ss) ids
+-- Search state is assembled exclusively through the checked 'Scope' API, so
+-- failure here means an internal representation invariant was violated.  Keep
+-- that exceptional boundary local instead of threading an impossible error
+-- through every nondeterministic search branch.
+scopeGetAllBindings :: ScopeId -> Scopes -> [VarPBinding]
+scopeGetAllBindings sid = requireValidScopes . Scope.scopeGetAllBindings sid
 
 scopesApplySubsts :: Substs -> Scopes -> Scopes
-scopesApplySubsts substs (Scopes i scopeMap) = Scopes i $ IntMap.map scopeF scopeMap
-  where
-    scopeF (Scope binds ids) = Scope (map bindF binds) ids
-    bindF = varPBindingApplySubsts substs
+scopesApplySubsts substs =
+  Scope.scopesMapBindings (varPBindingApplySubsts substs)
 
 {-
 scopesAddBinding :: ScopeId -> VarBinding -> Scopes -> Scopes
@@ -149,17 +135,16 @@ scopesAddBinding sid binding scopes =
 -}
 
 scopesAddPBinding :: ScopeId -> VarPBinding -> Scopes -> Scopes
-scopesAddPBinding sid binding (Scopes nid sMap) = Scopes nid newMap
-  where
-    newMap = IntMap.adjust addBinding sid sMap
-    addBinding :: Scope -> Scope
-    addBinding (Scope vbinds ids) = Scope (binding:vbinds) ids
+scopesAddPBinding sid binding =
+  requireValidScopes . Scope.scopesAddBinding sid binding
 
 addScope :: ScopeId -> Scopes -> (ScopeId, Scopes)
-addScope parent (Scopes nid sMap) = (nid, Scopes (nid+1) newMap)
-  where
-    newMap   = IntMap.insert nid newScope sMap
-    newScope = Scope [] [parent]
+addScope parent = requireValidScopes . Scope.addScope parent
+
+requireValidScopes :: Either Scope.ScopeInvariantError a -> a
+requireValidScopes = either
+  (error . ("Exference internal scope invariant violated: " ++) . show)
+  id
 
 type VarUsageMap = IntMap.IntMap Int
 
@@ -176,25 +161,6 @@ goalApplySubst ss | IntMap.null ss = id
                       { goalBinding = varBindingApplySubsts ss
                           $ goalBinding goal
                       }
-
--- takes a new goal data, and a new set of provided stuff, and
--- returns some actual goal/newScope pair
-addGoalProvided :: ScopeId
-                -> VarBinding   -- goal binding
-                -> [VarBinding] -- new-given-bindings
-                -> Scopes
-                -> (TGoal, Scopes)
-addGoalProvided sid goalBind givenBinds (Scopes nid sMap) =
-    (TGoal goalBind nid, Scopes (nid+1) newMap)
-  where
-    newMap = IntMap.insert nid (Scope transformedBinds [sid]) sMap
-    transformedBinds = map splitBinding givenBinds
-
-addNewScopeGoal :: ScopeId -> VarBinding -> Scopes -> (TGoal, ScopeId, Scopes)
-addNewScopeGoal sid goalBind (Scopes nid sMap) =
-    (TGoal goalBind nid, nid, Scopes (nid+1) newMap)
-  where
-    newMap = IntMap.insert nid (Scope [] [sid]) sMap
 
 mkGoals :: ScopeId
         -> [VarBinding]
@@ -222,15 +188,13 @@ data SearchNode = SearchNode
 instance NFData VarBinding   where rnf = genericRnf
 instance NFData VarPBinding  where rnf = genericRnf
 instance NFData TGoal        where rnf = genericRnf
-instance NFData Scope        where rnf = genericRnf
-instance NFData Scopes       where rnf = genericRnf
 instance NFData SearchNode   where rnf = genericRnf
 
 showSearchNode :: SearchNode -> String
 showSearchNode
   (SearchNode sgoals
               scgoals
-              (Scopes _ scopeMap)
+              scopeForest
               _svarUses
               _sfuncs
               _sdeconss
@@ -251,7 +215,8 @@ showSearchNode
           )
       $$  (text $ "constrGoals= " ++ show scgoals)
       $$  (text   "scopes     = "
-           <+> brackets (vcat $ punctuate (text ", ") $ map tScope $ IntMap.toList scopeMap)
+           <+> brackets (vcat $ punctuate (text ", ")
+             $ map tScope $ Scope.scopesToAscList scopeForest)
           )
       $$  (text $ "classEnv   = " ++ show qClassEnv)
       $$  (text $ "expression = " ++ exprStr)
@@ -265,10 +230,10 @@ showSearchNode
   tgoal :: TGoal -> Doc
   tgoal goal = tVarType (goalBinding goal)
             <> text (" in " ++ show (goalScope goal))
-  tScope :: (ScopeId, Scope) -> Doc
-  tScope (sid, Scope binds supers) =
+  tScope :: (ScopeId, [VarPBinding], Maybe ScopeId) -> Doc
+  tScope (sid, binds, parent) =
         text (show sid ++ " ")
-    <+> parens (text $ show $ supers)
+    <+> parens (text $ show $ maybe [] pure parent)
     <+> text " " <+> brackets (
                           hcat $ punctuate (text ", ")
                                            (map tVarPType binds)

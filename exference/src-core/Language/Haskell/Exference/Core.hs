@@ -25,25 +25,27 @@ import qualified Language.Haskell.Exference.Core.Score as Score
 
 
 findExpressions :: E.ExferenceInput -> [E.ExferenceOutputElement]
-findExpressions input = either (const [])
-  (const $ concatMap E.chunkElements $ E.findExpressions input)
-  (E.validateExferenceInput input)
+findExpressions = either (const []) id . findExpressionsEither
 
 findExpressionsEither
   :: E.ExferenceInput
   -> Either E.ExferenceInputError [E.ExferenceOutputElement]
 findExpressionsEither input = do
-  E.validateExferenceInput input
-  pure $ findExpressions input
+  chunks <- runSearch input
+  pure $ concatMap E.chunkElements chunks
 
 findExpressionsChunked :: E.ExferenceInput
                    -> [[E.ExferenceOutputElement]]
-findExpressionsChunked input = either (const [])
-  (const $ map E.chunkElements $ E.findExpressions input)
-  (E.validateExferenceInput input)
+findExpressionsChunked = either (const []) (map E.chunkElements) . runSearch
 
 findExpressionsWithStats :: E.ExferenceInput
                          -> [E.ExferenceChunkElement]
-findExpressionsWithStats input = either (const [])
-  (const $ E.findExpressions input)
-  (E.validateExferenceInput input)
+findExpressionsWithStats = either (const []) id . runSearch
+
+-- Keep validation at the public boundary and run it exactly once. The raw
+-- engine assumes a checked input; list-returning compatibility functions
+-- deliberately preserve their historical "invalid means empty" behavior.
+runSearch
+  :: E.ExferenceInput
+  -> Either E.ExferenceInputError [E.ExferenceChunkElement]
+runSearch input = E.validateExferenceInput input >> pure (E.findExpressions input)

@@ -88,10 +88,6 @@ source-repository head {
 
 
 
-Flag exference-dev
-  default: False
-  manual: True
-
 Library exference-core
   default-language: Haskell2010
   ghc-options: -Wall
@@ -99,10 +95,6 @@ Library exference-core
                -fno-spec-constr
   if impl(ghc > 8.0)
     ghc-options: -fno-warn-redundant-constraints
-  if flag(exference-dev)
-    ghc-options: -Werror
-                 -auto-all
-                 -caf-all
   exposed-modules: Language.Haskell.Exference.Core
                    Language.Haskell.Exference.Core.Types
                    Language.Haskell.Exference.Core.TypeUtils
@@ -114,6 +106,7 @@ Library exference-core
                    Language.Haskell.Exference.Core.ExpressionSimplify
                    Language.Haskell.Exference.Core.FunctionBinding
                    Language.Haskell.Exference.Core.Score
+                   Language.Haskell.Exference.Core.Internal.Scope
   other-modules:   Language.Haskell.Exference.Core.Internal.Unify,
                    Language.Haskell.Exference.Core.Internal.ConstraintSolver,
                    Language.Haskell.Exference.Core.Internal.Closure,
@@ -151,10 +144,6 @@ Library
                -fno-spec-constr
   if impl(ghc > 8.0)
     ghc-options: -fno-warn-redundant-constraints
-  if flag(exference-dev)
-    ghc-options: -Werror
-                 -auto-all
-                 -caf-all
   exposed-modules: Language.Haskell.Exference
                    Language.Haskell.Exference.Diagnostic
                    Language.Haskell.Exference.SimpleDict
@@ -224,10 +213,6 @@ Executable exference
                -- -fllvm
   if impl(ghc > 8.0)
     ghc-options: -fno-warn-redundant-constraints
-  if flag(exference-dev)
-    ghc-options: -Werror
-                 -auto-all
-                 -caf-all
   ghc-options: -with-rtsopts "-H2G -M4G -N"
 
 
@@ -246,6 +231,7 @@ Test-Suite exference-tests
     base,
     containers,
     exference,
+    exference:exference-core,
     haskell-src-exts,
     multistate,
     tasty,

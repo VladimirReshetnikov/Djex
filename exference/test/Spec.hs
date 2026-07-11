@@ -26,6 +26,7 @@ import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Expression (Expression (..))
 import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
+import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify
@@ -82,6 +83,35 @@ tests = testGroup "Exference"
                 (mkStaticClassEnv [cls] [cyclicInstance]) []
           isPossible environment [query] @?= Just [query]
           filterUnresolved environment [query] @?= Just [query]
+      ]
+  , testGroup "lexical scopes"
+      [ testCase "safe scopes expose innermost bindings before ancestors" $ do
+          let root = Scope.initialScopeId
+          scopes1 <- expectRight
+            $ Scope.scopesAddBinding root "root" Scope.initialScopes
+          (child, scopes2) <- expectRight $ Scope.addScope root scopes1
+          scopes3 <- expectRight
+            $ Scope.scopesAddBinding child "child" scopes2
+          (leaf, scopes4) <- expectRight $ Scope.addScope child scopes3
+          scopes5 <- expectRight
+            $ Scope.scopesAddBinding leaf "leaf" scopes4
+          Scope.scopeGetAllBindings leaf scopes5
+            @?= Right ["leaf", "child", "root"]
+      , testCase "checked lookup diagnoses a stale scope ID" $ do
+          let oldScopes = Scope.initialScopes :: Scope.Scopes ()
+          (child, _newScopes) <- expectRight
+            $ Scope.addScope Scope.initialScopeId oldScopes
+          Scope.scopeGetAllBindings child oldScopes
+            @?= Left (Scope.MissingScopeId 1 [1])
+      , testCase "raw scope validation diagnoses a dangling parent" $
+          Scope.validateScopeParentGraph
+            (IntMap.fromList [(0, Just 99), (1, Nothing)])
+            @?= Left (Scope.MissingScopeId 99 [0, 99])
+      , testCase "raw scope validation diagnoses the exact cycle" $
+          Scope.validateScopeParentGraph
+            (IntMap.fromList
+              [(0, Just 1), (1, Just 2), (2, Just 1)])
+            @?= Left (Scope.ScopeParentCycle [1, 2, 1])
       ]
   , testGroup "type traversal"
       [ testCase "forall substitution protects context binders" $ do
@@ -295,3 +325,6 @@ onlyChunk :: ExferenceInput -> IO ExferenceChunkElement
 onlyChunk input = case findExpressionsWithStats input of
   [chunk] -> pure chunk
   chunks -> fail $ "expected one search chunk, got " ++ show (length chunks)
+
+expectRight :: Show problem => Either problem result -> IO result
+expectRight = either (fail . show) pure

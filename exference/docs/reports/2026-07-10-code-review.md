@@ -387,13 +387,26 @@ easy and call sites hard to read. Replace them with records during extraction of
 the common IR. In particular, a `Binding` record can be shared between Djinn and
 Exference while backend-specific elaborated forms remain separate.
 
-### R-13 — Medium: scopes assume an undocumented acyclic graph
+### R-13 — Resolved: scopes assume an undocumented acyclic graph
 
 `scopeGetAllBindings` recursively follows parent IDs without a visited set.
 Current constructors create a parent DAG, so this works if all callers preserve
 the invariant; the constructors are nevertheless exported and malformed or
 future merged state can loop. Hide constructors, document the invariant, and
 use a checked lookup with an impossible-state diagnostic.
+
+Resolved on 2026-07-11 by extracting the generic
+`Core.Internal.Scope` abstraction. `Scopes` and `ScopeId` are opaque; each
+scope has at most one parent, and the only edge-creating operation requires an
+existing parent and a fresh child ID. Safe construction therefore preserves a
+rooted forest rather than the previously over-general parent-list graph.
+Binding lookup now returns `Either ScopeInvariantError`, tracks visited IDs,
+and reports the exact missing-link or cycle path. The search adapter unwraps
+that result only at a documented impossible-state boundary, where corruption
+raises an explicit internal-invariant diagnostic rather than silently erasing
+bindings or looping. The same walker backs a raw-parent validation boundary and
+focused regressions for stale IDs, dangling parents, cycles, and normal nested
+visibility.
 
 ### R-14 — Partially resolved: the CLI/test module boundary is inverted
 

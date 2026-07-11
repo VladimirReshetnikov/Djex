@@ -26,11 +26,11 @@ library djinn-core
   Hs-Source-Dirs:   src
   Ghc-Options:      -Wall -Wcompat
 
-  Build-Depends:    base >= 4 && < 6,
-                    haskeline < 10,
-                    mtl < 10,
-                    pretty < 10,
-                    containers < 10
+  Build-Depends:    base >= 4.18 && < 5,
+                    haskeline >= 0.8 && < 0.9,
+                    mtl >= 2.2 && < 2.4,
+                    pretty >= 1.1 && < 1.2,
+                    containers >= 0.6 && < 0.9
 
   -- Djinn.Core is the stable library API.  Djinn is the CLI frontend.
   -- Djinn.Internal.* expose the raw machinery without stability or
@@ -56,7 +56,7 @@ executable djinn
   Main-Is:        Main.hs
   Ghc-Options:    -Wall -Wcompat
 
-  Build-Depends:  base >= 4 && < 6,
+  Build-Depends:  base >= 4.18 && < 5,
                   djinn:djinn-core
 
   Hs-Source-Dirs: app
@@ -68,7 +68,7 @@ test-suite djinn-tests
   Default-Language: Haskell2010
   Ghc-Options:      -Wall -Wcompat
 
-  Build-Depends:    base >= 4 && < 6,
+  Build-Depends:    base >= 4.18 && < 5,
                     djinn:djinn-core,
                     tasty >= 1.4 && < 2,
                     tasty-hunit >= 0.10 && < 1
@@ -80,7 +80,7 @@ test-suite djinn-property-tests
   Default-Language: Haskell2010
   Ghc-Options:      -Wall -Wcompat
 
-  Build-Depends:    base >= 4 && < 6,
+  Build-Depends:    base >= 4.18 && < 5,
                     QuickCheck >= 2.14 && < 3,
                     djinn:djinn-core,
                     tasty >= 1.4 && < 2,
@@ -94,7 +94,7 @@ benchmark djinn-bench
   Default-Language: Haskell2010
   Ghc-Options:      -Wall -Wcompat
 
-  Build-Depends:    base >= 4 && < 6,
+  Build-Depends:    base >= 4.18 && < 5,
                     djinn:djinn-core,
                     tasty-bench >= 0.3 && < 0.5
 
@@ -105,8 +105,8 @@ test-suite djinn-cli-tests
   Default-Language:   Haskell2010
   Ghc-Options:        -Wall -Wcompat
 
-  Build-Depends:      base >= 4 && < 6,
-                      process < 2,
+  Build-Depends:      base >= 4.18 && < 5,
+                      process >= 1.6 && < 1.7,
                       tasty >= 1.4 && < 2,
                       tasty-hunit >= 0.10 && < 1
 

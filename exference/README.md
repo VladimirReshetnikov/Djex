@@ -22,28 +22,26 @@ sometimes stopping with "i could not find any solutions".
     - `/msg exferenceBot help`
     - uses the environment (i.e. known functions+typeclasses) at https://github.com/lspitzner/exference/tree/master/environment
 
-# Compiling from source
+# Building from source
 
-~~~~
-git clone git@github.com:lspitzner/exference.git
-cd exference
-cabal sandbox init
-# note that ghc-7.10 does not work yet;
-# i recommend ghc-7.8.4 for now.
-cabal install --only-dependencies
-cabal configure
-cabal build
-# and, for example
-cabal run -- "(Show b) => (a->b) -> [a] -> [String]"
-~~~~
+The library and deterministic test suite build with GHC 9.12.4 and Cabal
+3.16.1.0:
 
-Alternatively:
+```text
+cabal build all
+cabal test all --test-show-details=direct
+```
 
-~~~~
-git clone git@github.com:lspitzner/exference.git
-cd exference
-stack build
-~~~~
+`exference-core` is a named, parser-independent library rooted at `src-core/`.
+The unnamed `exference` library contains the `haskell-src-exts` frontend and
+environment loader and re-exports the historical core API for compatibility.
+This mirrors Djinn's library-first organization and lets future shared
+frontends depend on the search engine without inheriting source-parser,
+filesystem, or process dependencies.
+
+The historical executable is disabled by default. Its combined CLI/test driver
+still depends on the obsolete `hood` package and is being decomposed rather
+than carried into the eventual Djinn/Exference library.
 
 # Usage notes
 
@@ -56,8 +54,8 @@ any / the right solution. Some common current limitations are:
   `(a->b) -> [a] -> [b]` where a trivial solution would be `\_ _ -> []`.
   This also means that certain functions are not included in the environment,
   e.g. `length` or `mapM_`, as they "lose information";
-- Type synonyms are not supported, e.g. `String -> [Char]` will not give
-  solutions. Should be easy to implement, but I have not come around to it yet;
+- Type synonyms are expanded before search; cycles and unsaturated uses are
+  rejected with diagnostics;
 - Kinds are not checked, e.g. `Maybe -> Either`
   (which can be seen as both advantage and disadvantage, see report);
 - The environment is composed by hand currently, and does only include parts
@@ -71,17 +69,17 @@ any / the right solution. Some common current limitations are:
   `-c --patternMatchMC`, but reduces performance significantly for any
   non-trivial queries. Core algorithm needs re-write to optimize stuff
   sufficiently I fear.
-- I recently added support for RankNTypes, but this is largely untested.
+- Rank-N positions are currently rejected conservatively. The historical
+  implementation erased some quantifiers during unification, which was not a
+  sound implementation of subsumption.
 
 ## Other known (technical) issues
 
 - **Memory consumption is large** (even more so when profiling);
-- The tests should be put in a proper test-suite.
-  (initially the executable was created for testing purposes
-  , but now serves as command-line interface;
-  this is why no parameters run tests.)
-- The dependency bounds of the cabal packages should be cleaned up/checked.
-  I postponed this as there is no automated way to do this. stupid tooling..)
+- The historical executable still mixes CLI policy, environment loading,
+  benchmarks, and manual test tables. The supported regressions live in the
+  Cabal `exference-tests` suite; the executable will be replaced with a thin
+  adapter before it is enabled by default again.
 
 ## Contributing
 

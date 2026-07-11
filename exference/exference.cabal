@@ -31,6 +31,10 @@ Description:
   and instances. The user can add to this environment, but keep in mind that
   each addition enlarges the search space.
 
+Extra-Source-Files:
+  README.md
+  docs/reports/*.md
+
 data-files:
   environment/all.ratings
   environment/Applicative.hs
@@ -105,7 +109,7 @@ Flag exference-dev
   default: False
   manual: True
 
-Library
+Library exference-core
   default-language: Haskell2010
   ghc-options: -Wall
                -fno-warn-unused-imports
@@ -133,6 +137,56 @@ Library
                    Language.Haskell.Exference.Core.FunctionBinding
                    Language.Haskell.Exference.Core.SearchTree
                    Language.Haskell.Exference.Core.Score
+  other-modules:   Language.Haskell.Exference.Core.Internal.Unify,
+                   Language.Haskell.Exference.Core.Internal.ConstraintSolver,
+                   Language.Haskell.Exference.Core.Internal.Closure,
+                   Language.Haskell.Exference.Core.Internal.ExferenceNode,
+                   Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder,
+                   Language.Haskell.Exference.Core.Internal.Exference
+  default-extensions: NoMonomorphismRestriction
+                   CPP
+                   FlexibleContexts
+                   ScopedTypeVariables
+                   DeriveDataTypeable
+                   TemplateHaskell
+  hs-source-dirs: src-core
+  Build-Depends:
+    base                 >=4.18 && <5,
+    containers           >=0.6 && <0.9,
+    pretty               >=1.1 && <1.2,
+    deepseq              >=1.4 && <1.6,
+    deepseq-generics     >=0.1.1.2 && <0.3,
+    unordered-containers >=0.2.5 && <0.3,
+    hashable             >=1.2.4 && <1.6,
+    pqueue               >=1.3.1 && <1.8,
+    mmorph               >=1.0.4 && <1.3,
+    transformers         >=0.5 && <0.7,
+    mtl                  >=2.2 && <2.4,
+    vector               >=0.12 && <0.14,
+    safe                 >=0.3.9 && <0.4,
+    lens                 >=5.0 && <5.4,
+    multistate           >=0.8 && <0.9,
+    template-haskell     >=2.18 && <2.24
+
+-- The unnamed library is the source-syntax and environment-loading frontend.
+-- Keep it above the search core so future frontends can depend on
+-- exference-core without pulling in haskell-src-exts or filesystem concerns.
+Library
+  default-language: Haskell2010
+  ghc-options: -Wall
+               -fno-warn-unused-imports
+               -fno-warn-orphans
+               -fno-spec-constr
+  if impl(ghc > 8.0)
+    ghc-options: -fno-warn-redundant-constraints
+  if flag(exference-dev)
+    ghc-options: -Werror
+                 -auto-all
+                 -caf-all
+  If flag(linkNodes) || flag(buildSearchTree)
+    cpp-options: -DLINK_NODES
+  If flag(buildSearchTree)
+    cpp-options: -DBUILD_SEARCH_TREE
   exposed-modules: Language.Haskell.Exference
                    Language.Haskell.Exference.Diagnostic
                    Language.Haskell.Exference.SimpleDict
@@ -145,14 +199,21 @@ Library
                    Language.Haskell.Exference.FunctionDecl
                    Paths_exference
                    Flags_exference
+  reexported-modules:
+    Language.Haskell.Exference.Core,
+    Language.Haskell.Exference.Core.Types,
+    Language.Haskell.Exference.Core.TypeUtils,
+    Language.Haskell.Exference.Core.ExferenceStats,
+    Language.Haskell.Exference.Core.ConstraintSolver,
+    Language.Haskell.Exference.Core.Unify,
+    Language.Haskell.Exference.Core.Expression,
+    Language.Haskell.Exference.Core.ExpressionCheck,
+    Language.Haskell.Exference.Core.ExpressionSimplify,
+    Language.Haskell.Exference.Core.FunctionBinding,
+    Language.Haskell.Exference.Core.SearchTree,
+    Language.Haskell.Exference.Core.Score
   autogen-modules: Paths_exference
-  other-modules:   Language.Haskell.Exference.Core.Internal.Unify,
-                   Language.Haskell.Exference.Core.Internal.ConstraintSolver,
-                   Language.Haskell.Exference.Core.Internal.Closure,
-                   Language.Haskell.Exference.HaskellSrcUtils,
-                   Language.Haskell.Exference.Core.Internal.ExferenceNode,
-                   Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder,
-                   Language.Haskell.Exference.Core.Internal.Exference
+  other-modules:   Language.Haskell.Exference.HaskellSrcUtils
   default-extensions: NoMonomorphismRestriction
                    CPP
                    FlexibleContexts
@@ -162,27 +223,17 @@ Library
   hs-source-dirs: src
   Build-Depends:
     base                 >=4.18 && <5,
+    exference:exference-core,
     containers           >=0.6 && <0.9,
-    pretty               >=1.1 && <1.2,
     deepseq              >=1.4 && <1.6,
-    deepseq-generics     >=0.1.1.2 && < 0.3,
-    unordered-containers >=0.2.5 && <0.3,
-    hashable             >=1.2.4 && <1.6,
-    pqueue               >=1.3.1 && <1.8,
-    mmorph               >=1.0.4 && <1.3,
     transformers         >=0.5 && <0.7,
     mtl                  >=2.2 && <2.4,
-    vector               >=0.12 && <0.14,
     haskell-src-exts     >=1.24 && <1.25,
     process              >=1.6 && <1.7,
     directory            >=1.3 && <1.4,
     bifunctors           >=5.5 && <5.7,
-    safe                 >=0.3.9   && <0.4,
-    lens                 >=5.0 && <5.4,
     split                >=0.2.3.1 && <0.3,
-    multistate           >=0.8 && <0.9,
-
-    template-haskell     >=2.18 && <2.24
+    multistate           >=0.8 && <0.9
 
 
 Executable exference

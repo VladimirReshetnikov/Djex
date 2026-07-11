@@ -41,7 +41,8 @@ filesystem, or process dependencies.
 
 The `exference` executable is a normal build target again. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been
-removed; deterministic regressions live in `exference-tests`.
+removed; deterministic regressions live in `exference-tests` and the separate
+`exference-cli-tests` subprocess suite.
 
 ```text
 cabal run exference -- --first "a -> a"

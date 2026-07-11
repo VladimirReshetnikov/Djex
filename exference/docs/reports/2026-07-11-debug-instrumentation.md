@@ -55,7 +55,7 @@ A forced build with `-Wall -Wcompat -Wunused-imports` was warning-clean after
 the import cleanup. The normal package checks also passed:
 
 ```text
-cabal test all --test-show-details=direct   # 33 deterministic regressions
+cabal test all --test-show-details=direct   # 33 unit + 4 CLI regressions
 cabal run exference -- --first "a -> a"     # prints id
 cabal check                                 # no errors or warnings
 cabal sdist

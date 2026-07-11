@@ -251,3 +251,16 @@ Test-Suite exference-tests
     tasty,
     tasty-hunit,
     transformers
+
+Test-Suite exference-cli-tests
+  default-language: Haskell2010
+  type: exitcode-stdio-1.0
+  main-is: CLISpec.hs
+  hs-source-dirs: test
+  ghc-options: -Wall -Wcompat
+  build-depends:
+    base                 >=4.18 && <5,
+    process              >=1.6 && <1.7,
+    tasty                >=1.4 && <2,
+    tasty-hunit          >=0.10 && <1
+  build-tool-depends: exference:exference

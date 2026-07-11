@@ -19,7 +19,7 @@ import Environment(validateEnvironment)
 import LJT
 import HTypes
 import HIdentifier
-import HCheck(htCheckEnv, htCheckType)
+import HCheck(htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds)
 import Help
 import ProofCheck(checkProof)
 import ProofEnv
@@ -92,10 +92,15 @@ startState = State {
         ("Void",   rawType []        (HTUnion [])),
         ("Not",    rawType ["x"]     (htNot "x"))
         ]
-       clss = [("Eq", (["a"], [("==", a `HTArrow` (a `HTArrow` HTCon "Bool"))])),
+       clss = map addParamKinds
+              [("Eq", (["a"], [("==", a `HTArrow` (a `HTArrow` HTCon "Bool"))])),
                ("Monad", (["m"], [("return", a `HTArrow` ma),
                                   (">>=", ma `HTArrow` ((a `HTArrow` mb) `HTArrow` mb))]))
               ] where ma = HTApp m a; mb = HTApp m b
+       addParamKinds (name, (params, methods)) =
+           either (error . (("Bad initial class " ++ name ++ ": ") ++))
+               (\ kinds -> (name, (kinds, methods)))
+               (htInferClassKinds syns params (map snd methods))
        a = HTVar "a"
        b = HTVar "b"
        m = HTVar "m"
@@ -119,14 +124,20 @@ exit :: State -> IO ()
 exit _ = putStrLn "Bye."
 
 type Context = (HSymbol, [HType])
-type ClassDef = (HSymbol, ([HSymbol], [Method]))
+
+-- A stored class carries the kind of each parameter, inferred from the
+-- method types at declaration time (Haskell98 style, with unconstrained
+-- parameters defaulting to *).  The parser produces the raw form; kinds
+-- are attached before a class enters the state.
+type ClassDef = (HSymbol, ([(HSymbol, HKind)], [Method]))
+type RawClassDef = (HSymbol, ([HSymbol], [Method]))
 
 -- htCheckEnv replaces this placeholder with the definition's inferred kind.
 rawType :: [HSymbol] -> HType -> ([HSymbol], HType, HKind)
 rawType params body = (params, body, KStar)
 
 data Cmd = Help Bool | Quit | Add HSymbol HType | Query HSymbol [Context] HType | Del HSymbol | Load HSymbol | Noop | Env |
-           Type (HSymbol, ([HSymbol], HType, HKind)) | Set (State -> State) | Clear | Class ClassDef |
+           Type (HSymbol, ([HSymbol], HType, HKind)) | Set (State -> State) | Clear | Class RawClassDef |
            QueryInstance [Context] HSymbol [HType]
 
 pCmd :: ReadP Cmd
@@ -180,11 +191,11 @@ runCmd s (Del i) = do
         Left message -> do
             putStrLn $ "Error: cannot delete " ++ i ++ ": " ++ message
             return (False, s)
-        Right checked ->
+        Right (checkedSynonyms, refreshedClasses) ->
             return (False, s {
                 axioms = candidateAxioms,
-                synonyms = checked,
-                classes = candidateClasses
+                synonyms = checkedSynonyms,
+                classes = refreshedClasses
                 })
 runCmd s Env = do
     let showType (i, (_, HTAbstract _ kind, _)) =
@@ -205,22 +216,27 @@ runCmd s (Type syn@(name, (params, body, _))) =
          validateEnvironment (replace name syn (synonyms s))
             (axioms s) (classes s) of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
-        Right syns -> return (False, s { synonyms = syns })
+        Right (syns, refreshedClasses) ->
+            return (False, s { synonyms = syns, classes = refreshedClasses })
 runCmd s (Set f) =
     return (False, f s)
 runCmd s (Query i ctx g) =
     query True s i ctx g
-runCmd s (Class c@(name, (params, methods))) =
+runCmd s (Class (name, (params, methods))) =
     case requireUnusedName "type" name (synonyms s) >>
          requireDistinct "class parameter" params >>
          requireDistinct "method" (map fst methods) >>
          checkMethodNames name methods (classes s) >>
-         checkMethods s methods of
+         -- Kind inference also kind-checks every method type.
+         htInferClassKinds (synonyms s) params (map snd methods) of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
-        Right _ -> return (False, s { classes = replace name c (classes s) })
+        Right kinds ->
+            return (False, s {
+                classes = replace name (name, (kinds, methods)) (classes s)
+                })
 runCmd s (QueryInstance ctx cls ts) =
     case do
-        methods <- ctxLookup (classes s) (cls, ts)
+        methods <- ctxLookup s (cls, ts)
         _ <- checkContexts s ctx
         checkMethods s methods
         return methods
@@ -325,7 +341,9 @@ stripComments ('-':'-':cs) = skip cs
 stripComments (c:cs) = c : stripComments cs
 
 showClass :: ClassDef -> String
-showClass (c, (as, ms)) = "class " ++ showContext (c, map HTVar as) ++ " where " ++ intercalate "; " (map sm ms)
+showClass (c, (as, ms)) =
+    "class " ++ showContext (c, map (HTVar . fst) as) ++ " where " ++
+        intercalate "; " (map sm ms)
   where sm (i, t) = prHSymbolOp i ++ " :: " ++ show t
 
 showContext :: Context -> String
@@ -335,20 +353,33 @@ showContexts :: [Context] -> String
 showContexts [] = ""
 showContexts cs = "(" ++ intercalate ", " (map showContext cs) ++ ")"
 
-ctxLookup :: [ClassDef] -> Context -> Either String [Method]
-ctxLookup clss (c, as) =
-    case lookup c clss of
+-- Look up a class use, requiring exact arity and that every type argument
+-- fits the kind inferred for its parameter.  A bare type variable fits any
+-- parameter kind; an ill-kinded or kind-mismatched application is rejected
+-- even for classes whose method list provides nothing else to check.
+ctxLookup :: State -> Context -> Either String [Method]
+ctxLookup s (c, as) =
+    case lookup c (classes s) of
         Nothing -> Left $ "Class not found: " ++ c
         Just (ps, ms)
-            | length ps == length as ->
-                Right [(m, substHT (zip ps as) t) | (m, t) <- ms]
+            | length ps == length as -> do
+                sequence_
+                    [ withArgument argument $
+                        htCheckTypeKind (synonyms s) kind argument
+                    | ((_, kind), argument) <- zip ps as ]
+                Right [(m, substHT (zip (map fst ps) as) t) | (m, t) <- ms]
             | otherwise -> Left $
                 "Class " ++ c ++ " expects " ++ show (length ps) ++
                 " type argument(s), but got " ++ show (length as)
+  where
+    withArgument argument = either
+        (Left . (("argument " ++ show argument ++ " of class " ++ c ++
+            ": ") ++))
+        Right
 
 checkContexts :: State -> [Context] -> Either String [[Method]]
 checkContexts s ctx = do
-    methods <- mapM (ctxLookup (classes s)) ctx
+    methods <- mapM (ctxLookup s) ctx
     mapM_ (checkMethods s) methods
     return methods
 

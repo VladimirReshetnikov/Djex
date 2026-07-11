@@ -2,8 +2,10 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module HCheck(htCheckEnv, htCheckType) where
-import Data.List(union)
+module HCheck(
+    htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds
+    ) where
+import Data.List(union, (\\))
 import Control.Monad.State
 import Data.IntMap(IntMap)
 import qualified Data.IntMap as IntMap
@@ -54,11 +56,37 @@ clearState :: M ()
 clearState = put initState
 
 htCheckType :: [(HSymbol, ([HSymbol], HType, HKind))] -> HType -> Either String ()
-htCheckType its t = flip evalStateT initState $ do
+htCheckType its = htCheckTypeKind its KStar
+
+-- Check that a type is well-kinded and has the given (ground) kind.  Free
+-- type variables receive fresh kinds, so a variable argument fits any
+-- expected kind while a mis-kinded application is still rejected.
+htCheckTypeKind :: [(HSymbol, ([HSymbol], HType, HKind))]
+                -> HKind -> HType -> Either String ()
+htCheckTypeKind its expected t = flip evalStateT initState $ do
     let vs = getHTVars t
     ks <- mapM (const newKVar) vs
     let env = zip vs ks ++ [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
-    iHKindStar env t
+    k <- iHKind env t
+    unifyK k expected
+
+-- Infer the kind of every class parameter from the class's method types,
+-- as Haskell98 does.  Parameters left unconstrained (including every
+-- parameter of a method-less class) default to *.  Non-parameter method
+-- variables share one scope across the methods, matching how the stored
+-- method types are validated elsewhere.
+htInferClassKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
+                  -> [HSymbol] -> [HType]
+                  -> Either String [(HSymbol, HKind)]
+htInferClassKinds its params methodTypes = flip evalStateT initState $ do
+    paramKinds <- mapM (const newKVar) params
+    let locals = foldr union [] (map getHTVars methodTypes) \\ params
+    localKinds <- mapM (const newKVar) locals
+    let env = zip params paramKinds ++ zip locals localKinds ++
+              [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
+    mapM_ (iHKindStar env) methodTypes
+    grounded <- mapM ground paramKinds
+    return $ zip params grounded
 
 htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))] -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
 htCheckEnv its =

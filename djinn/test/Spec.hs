@@ -7,7 +7,7 @@ import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
 import Environment (validateEnvironment)
-import HCheck (htCheckEnv, htCheckType)
+import HCheck (htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds)
 import HIdentifier
 import HTypes
 import LJT
@@ -26,6 +26,7 @@ tests =
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
     , ("reject a higher-kinded synonym body", testHigherKindedSynonymBody)
+    , ("infer and enforce class parameter kinds", testClassParameterKinds)
     , ("prove intuitionistic tautologies", testProvableBasics)
     , ("prove empty goals from contradictions", testEmptyGoalContradiction)
     , ("reject non-theorems", testNonTheorems)
@@ -103,6 +104,42 @@ testHigherKindedSynonymBody =
     assertLeft "an ordinary synonym body must have result kind *"
         (htCheckEnv
             [("Endo", (["a"], HTApp (HTCon "->") (HTVar "a"), ()))])
+
+-- Class parameter kinds come from the method types (Haskell98 style) and
+-- default to * when unconstrained, including for method-less classes.
+-- Class arguments must then fit the inferred parameter kind, closing the
+-- historical hole where `class Empty a where` accepted any argument.
+testClassParameterKinds :: IO ()
+testClassParameterKinds = do
+    checked <- checkedKindEnvironment
+    let m = HTVar "m"
+        a = HTVar "a"
+        b = HTVar "b"
+        ma = HTApp m a
+        mb = HTApp m b
+        monadMethods =
+            [ HTArrow a ma
+            , HTArrow ma (HTArrow (HTArrow a mb) mb)
+            ]
+    assertEqual "Monad's parameter must infer to * -> *"
+        (Right [("m", KArrow KStar KStar)])
+        (htInferClassKinds checked ["m"] monadMethods)
+    assertEqual "a method-less class parameter defaults to *"
+        (Right [("phantom", KStar)])
+        (htInferClassKinds checked ["phantom"] [])
+    assertLeft "a method type that misuses a parameter is rejected"
+        (htInferClassKinds checked ["c"]
+            [HTArrow (HTVar "c") (HTApp (HTVar "c") a)])
+    assertRight "a proper-type argument fits kind *"
+        (htCheckTypeKind checked KStar (HTCon "Bool"))
+    assertRight "a variable argument fits any kind"
+        (htCheckTypeKind checked (KArrow KStar KStar) (HTVar "f"))
+    assertRight "a constructor fits its higher kind"
+        (htCheckTypeKind checked (KArrow KStar KStar) (HTCon "Maybe"))
+    assertLeft "an ill-kinded application is rejected even against *"
+        (htCheckTypeKind checked KStar (HTApp (HTCon "Bool") a))
+    assertLeft "a kind-mismatched argument is rejected"
+        (htCheckTypeKind checked (KArrow KStar KStar) (HTCon "Bool"))
 
 checkedKindEnvironment :: IO [(HSymbol, ([HSymbol], HType, HKind))]
 checkedKindEnvironment =

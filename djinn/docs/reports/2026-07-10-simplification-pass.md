@@ -33,9 +33,10 @@ the prefix arrow `(->)` is lexed as one token (the accidentally accepted
 `( - > )` is now a parse error); and the property suite's 200-case setting is
 now a floor that `--quickcheck-tests` can raise.
 
-Every change was validated against the full test matrix — now 27 unit
-regressions, three properties at 200 cases (also exercised at 2,000), and 7
-CLI subprocess scenarios — plus manual REPL smoke tests of the touched paths.
+Every change was validated against the full test matrix — 25 unit
+regressions as of this pass, three properties at 200 cases (also exercised
+at 2,000), and 7 CLI subprocess scenarios — plus manual REPL smoke tests of
+the touched paths.
 
 ## Scope and method
 
@@ -294,7 +295,7 @@ These were noticed but deliberately not changed; none is a soundness issue.
 | `ProofCheck.hs` | −21 lines, plus stuck-constraint defaulting (N-02) |
 | `ProofEnv.hs` | −10 lines |
 | `Help.hs` | wording fix |
-| `test/Spec.hs` | two new regression groups (25 → 27 cases) |
+| `test/Spec.hs` | two new regression groups (23 → 25 cases) |
 | `test/PropertySpec.hs` | case-count cap became a floor |
 
 The simplification portion alone was net −27 source lines with more comments

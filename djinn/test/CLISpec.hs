@@ -23,7 +23,28 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testParseErrors
     , testCase "an expired search budget reports an undecided result"
         testSearchBudget
+    , testCase "class arguments are checked against inferred kinds"
+        testClassKindEnforcement
     ]
+
+testClassKindEnforcement :: Assertion
+testClassKindEnforcement = do
+    output <- runSession
+        [ "class Empty a where"
+        , "bad ? Empty (Bool a) => b -> b"
+        , "?instance Monad Bool"
+        , "good ? Empty c => c -> c"
+        , "fine ? Monad m => a -> m a"
+        , ":quit"
+        ]
+    assertContains "an ill-kinded argument to a method-less class is rejected"
+        "Error: argument Bool a of class Empty" output
+    assertContains "a kind-mismatched instance argument is rejected"
+        "Error: argument Bool of class Monad" output
+    assertContains "a well-kinded phantom context still works"
+        "good a = a" output
+    assertContains "a higher-kinded context still works"
+        "fine = return" output
 
 testSearchBudget :: Assertion
 testSearchBudget = do

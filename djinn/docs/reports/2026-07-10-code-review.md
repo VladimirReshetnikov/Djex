@@ -478,6 +478,13 @@ before changing proof order.
 
 ### R-08 — Medium: the class model is intentionally shallow
 
+> **Resolved (kind signatures)** on 2026-07-10 — see
+> [2026-07-10-class-kinds.md](2026-07-10-class-kinds.md): class parameter
+> kinds are now inferred, stored, refreshed on environment mutation, and
+> enforced for every context/instance argument. The shallow class model
+> itself (no superclasses, instance database, or polymorphic
+> instantiation) remains an intentional, documented design boundary.
+
 There is no superclass or instance database, imported Prelude/package
 environment, or true fresh instantiation of polymorphic methods. Phantom class
 parameters have no inferable or stored kind. In particular:

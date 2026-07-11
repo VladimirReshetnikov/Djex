@@ -43,9 +43,9 @@ cabal test all --test-show-details=direct
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 27 focused Tasty/HUnit regressions over parsing, kinds, proof search/checking, rendering, environments, and identifiers. |
-| `djinn-property-tests` | Three QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, and `HType` display/parser round-trips. |
-| `djinn-cli-tests` | Seven subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, and stateful query behavior. |
+| `djinn-tests` | 27 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, environments, and identifiers. |
+| `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
+| `djinn-cli-tests` | Nine subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, and stateful query behavior. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
 named test. For example:
@@ -154,6 +154,16 @@ instance Monad Maybe where
 This is not Haskell instance resolution. Djinn neither imports the installed
 package environment nor instantiates arbitrary polymorphic methods. Classes and
 methods needed beyond the small initial environment must be declared explicitly.
+
+Class parameter kinds are inferred from the method types when a class is
+declared (defaulting to `*`, so `Monad`'s parameter is `* -> *` while a
+method-less class parameter is `*`), and every context or `?instance`
+argument is checked against that signature:
+
+```text
+Djinn> ?instance Monad Bool
+Error: argument Bool of class Monad: kind mismatch: * vs * -> *
+```
 
 ## Worked examples
 
@@ -391,10 +401,12 @@ knowing before editing the source:
 
 See [`docs/reports/`](docs/reports/) for the local review history:
 [the correctness review](docs/reports/2026-07-10-code-review.md) covering the
-import's fixed defects and remaining engineering risks, and
+import's fixed defects and remaining engineering risks,
 [the simplification pass](docs/reports/2026-07-10-simplification-pass.md)
 covering deduplication, readability work, and the empty-goal completeness
-fix.
+fix, [the search-mode and budget work](docs/reports/2026-07-10-search-budget.md)
+with its benchmark-driven engine decisions, and
+[the class parameter kind enforcement](docs/reports/2026-07-10-class-kinds.md).
 
 ## License and provenance
 

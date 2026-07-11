@@ -12,7 +12,9 @@ import Djinn.Core (
     optionBudget, parseHKind, parseHType, removeDeclaration,
     reportOutcome, resolveContext, standardEnvironment)
 import Djinn.Internal.Environment (validateEnvironment)
-import Djinn.Internal.HCheck (htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds)
+import Djinn.Internal.HCheck (
+    htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
+    htInferClassKinds)
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
@@ -126,6 +128,22 @@ testCoreFacade = do
     -- Contexts resolve through inferred kinds.
     assertLeft "a kind-mismatched class argument is rejected"
         (resolveContext standardEnvironment ("Monad", [HTCon "Bool"]))
+    assertLeft "one variable cannot have inconsistent kinds across arguments" $ do
+        environment <- declare
+            (ClassDecl "ApplyToBool" ["f", "unused"]
+                [("applyToBool", HTApp (HTVar "f") (HTCon "Bool"))])
+            standardEnvironment
+        resolveContext environment
+            ("ApplyToBool", [HTVar "shared", HTVar "shared"])
+    assertLeft "a context and goal must share kind assignments" $ do
+        environment <- declare (ClassDecl "Value" ["a"] [])
+            standardEnvironment
+        let higherKinded = HTApp (HTVar "f") (HTCon "Bool")
+        inhabit defaultQueryOptions environment [("Value", [HTVar "f"])]
+            "badKinds" (HTArrow higherKinded higherKinded)
+    assertLeft "negative public search budgets are rejected" $
+        inhabit defaultQueryOptions { optionBudget = Just (-1) }
+            standardEnvironment [] "identity" (HTArrow (HTVar "a") (HTVar "a"))
     reflexive <- expectRight $ inhabit defaultQueryOptions
         standardEnvironment [("Eq", [HTVar "a"])] "reflexive"
         (HTArrow (HTVar "a") (HTCon "Bool"))
@@ -228,6 +246,11 @@ testClassParameterKinds = do
         (htCheckTypeKind checked KStar (HTApp (HTCon "Bool") a))
     assertLeft "a kind-mismatched argument is rejected"
         (htCheckTypeKind checked (KArrow KStar KStar) (HTCon "Bool"))
+    assertLeft "joint checks share the kind of a free variable"
+        (htCheckTypesKinds checked
+            [ (KStar, HTVar "shared")
+            , (KArrow KStar KStar, HTVar "shared")
+            ])
 
 checkedKindEnvironment :: IO [(HSymbol, ([HSymbol], HType, HKind))]
 checkedKindEnvironment =
@@ -316,6 +339,14 @@ testSearchModes = do
     let starved = run unlimited { searchBudget = Just 0 } peirce
     assertEqual "a starved search finds nothing" [] (searchProofs starved)
     assertBool "an expired budget must be reported" $ searchExhausted starved
+
+    -- Internal callers can construct SearchMode directly.  Treat a negative
+    -- budget as already expired rather than accidentally making it unlimited.
+    let invalidBudget = run unlimited { searchBudget = Just (-1) } peirce
+    assertEqual "a negative internal budget finds nothing"
+        [] (searchProofs invalidBudget)
+    assertBool "a negative internal budget must be reported as expired" $
+        searchExhausted invalidBudget
 
     -- A bounded depth-first search yields a prefix of the unbounded stream.
     let full = searchProofs $ run unlimited pick3

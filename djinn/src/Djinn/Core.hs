@@ -29,13 +29,13 @@ module Djinn.Core (
     ) where
 
 import Control.Monad (foldM, unless)
-import Data.List (nub, sortOn)
+import Data.List (intercalate, nub, sortOn)
 import Data.Ratio ((%))
 import Text.ParserCombinators.ReadP (ReadP, readP_to_S, skipSpaces)
 
 import Djinn.Internal.Environment
 import Djinn.Internal.HCheck (
-    htCheckType, htCheckTypeKind, htInferClassKinds)
+    htCheckType, htCheckTypeKind, htCheckTypesKinds, htInferClassKinds)
 import Djinn.Internal.HIdentifier (
     isConId, isQualifiedVarId, isVarId, isVarOperator)
 import Djinn.Internal.HTypes
@@ -256,34 +256,84 @@ type Context = (HSymbol, [HType])
 -- parameters' inferred kinds, and well-kinded instantiated methods.
 -- Returns each method at its instantiated type.
 resolveContext :: Environment -> Context -> Either String [(HSymbol, HType)]
-resolveContext environment (name, arguments) =
+resolveContext environment context =
+    concat <$> resolveContexts environment [] [context]
+
+-- The intermediate record keeps lookup/arity validation separate from the
+-- joint kind check and substitution.  In particular, every argument and the
+-- query goal must share one scope for their free type variables.
+data ResolvedContext = ResolvedContext {
+    resolvedName :: HSymbol,
+    resolvedArguments :: [HType],
+    resolvedParameters :: [(HSymbol, HKind)],
+    resolvedMethods :: [(HSymbol, HType)]
+    }
+
+resolveContexts :: Environment -> [(String, HKind, HType)] -> [Context]
+                -> Either String [[(HSymbol, HType)]]
+resolveContexts environment additionalTypes contexts = do
+    resolved <- mapM (lookupContext environment) contexts
+    checkKindObligations (envTypes environment) $
+        additionalTypes ++ concatMap argumentObligations resolved
+    mapM (instantiateContext environment) resolved
+
+lookupContext :: Environment -> Context -> Either String ResolvedContext
+lookupContext environment (name, arguments) =
     case lookup name (envClasses environment) of
         Nothing -> Left $ "Class not found: " ++ name
         Just (params, methods)
-            | length params == length arguments -> do
-                sequence_
-                    [ describeArgument argument $
-                        htCheckTypeKind (envTypes environment) kind argument
-                    | ((_, kind), argument) <- zip params arguments ]
-                let instantiated =
-                        [ (methodName,
-                           substHT (zip (map fst params) arguments)
-                               methodType)
-                        | (methodName, methodType) <- methods ]
-                either
-                    (Left . (("methods of class " ++ name ++ ": ") ++))
-                    Right $
-                    htCheckType (envTypes environment)
-                        (HTTuple (map snd instantiated))
-                return instantiated
+            | length params == length arguments ->
+                Right ResolvedContext {
+                    resolvedName = name,
+                    resolvedArguments = arguments,
+                    resolvedParameters = params,
+                    resolvedMethods = methods
+                    }
             | otherwise -> Left $
                 "Class " ++ name ++ " expects " ++ show (length params) ++
                 " type argument(s), but got " ++ show (length arguments)
-  where
-    describeArgument argument = either
-        (Left . (("argument " ++ show argument ++ " of class " ++ name ++
-            ": ") ++))
-        Right
+
+argumentObligations :: ResolvedContext -> [(String, HKind, HType)]
+argumentObligations context =
+    [ ("argument " ++ show argument ++ " of class " ++ resolvedName context,
+       kind, argument)
+    | ((_, kind), argument) <-
+        zip (resolvedParameters context) (resolvedArguments context) ]
+
+-- Retain the precise historical diagnostic when one type is independently
+-- ill-kinded.  If every component works alone, report the actual problem:
+-- inconsistent kinds assigned to a free variable shared by components.
+checkKindObligations :: [TypeDefinition] -> [(String, HKind, HType)]
+                     -> Either String ()
+checkKindObligations definitions obligations =
+    case htCheckTypesKinds definitions
+            [(kind, t) | (_, kind, t) <- obligations] of
+        Right () -> Right ()
+        Left jointError ->
+            case [(label, message)
+                    | (label, kind, t) <- obligations
+                    , Left message <- [htCheckTypeKind definitions kind t]] of
+                (label, message) : _ -> Left $ label ++ ": " ++ message
+                [] -> Left $
+                    "inconsistent kinds across " ++
+                    intercalate ", " [label | (label, _, _) <- obligations] ++
+                    ": " ++ jointError
+
+instantiateContext :: Environment -> ResolvedContext
+                   -> Either String [(HSymbol, HType)]
+instantiateContext environment context = do
+    let instantiated =
+            [ (methodName,
+               substHT
+                   (zip (map fst $ resolvedParameters context)
+                        (resolvedArguments context))
+                   methodType)
+            | (methodName, methodType) <- resolvedMethods context ]
+    either
+        (Left . (("methods of class " ++ resolvedName context ++ ": ") ++))
+        Right $
+        htCheckType (envTypes environment) (HTTuple $ map snd instantiated)
+    return instantiated
 
 data QueryOptions = QueryOptions {
     -- | Collect alternative solutions beyond the first.
@@ -343,8 +393,11 @@ inhabit options environment contexts name goal = do
     requireName "target" isMethodName name
     unless (optionCutoff options > 0) $
         Left "optionCutoff must be positive"
-    htCheckType (envTypes environment) goal
-    contextMethods <- mapM (resolveContext environment) contexts
+    case optionBudget options of
+        Just n | n < 0 -> Left "optionBudget must be non-negative"
+        _ -> Right ()
+    contextMethods <- resolveContexts environment
+        [("goal type " ++ show goal, KStar, goal)] contexts
     let types = envTypes environment
         form = hTypeToFormula types goal
         externalEnv =

@@ -3,7 +3,8 @@
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.HCheck(
-    htCheckEnv, htCheckType, htCheckTypeKind, htInferClassKinds
+    htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
+    htInferClassKinds
     ) where
 import Data.List(union, (\\))
 import Control.Monad.State
@@ -63,12 +64,20 @@ htCheckType its = htCheckTypeKind its KStar
 -- expected kind while a mis-kinded application is still rejected.
 htCheckTypeKind :: [(HSymbol, ([HSymbol], HType, HKind))]
                 -> HKind -> HType -> Either String ()
-htCheckTypeKind its expected t = flip evalStateT initState $ do
-    let vs = getHTVars t
+htCheckTypeKind its expected t = htCheckTypesKinds its [(expected, t)]
+
+-- Check several types in one kind-inference scope.  This matters whenever
+-- free variables are shared between types: checking each type separately
+-- could incorrectly assign the same variable a different kind each time.
+htCheckTypesKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
+                  -> [(HKind, HType)] -> Either String ()
+htCheckTypesKinds its expectedTypes = flip evalStateT initState $ do
+    let vs = foldr union [] [getHTVars t | (_, t) <- expectedTypes]
     ks <- mapM (const newKVar) vs
     let env = zip vs ks ++ [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
-    k <- iHKind env t
-    unifyK k expected
+    mapM_ (check env) expectedTypes
+  where
+    check env (expected, t) = iHKind env t >>= (`unifyK` expected)
 
 -- Infer the kind of every class parameter from the class's method types,
 -- as Haskell98 does.  Parameters left unconstrained (including every

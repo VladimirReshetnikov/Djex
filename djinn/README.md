@@ -348,9 +348,12 @@ The essentials: `declare`/`removeDeclaration` grow and shrink an
 the full pipeline — translation, budgeted proof search, independent proof
 checking, and rendering — and reports the formula and first proof term for
 debugging. `resolveContext` instantiates a class context the way queries
-do. The `Djinn.Internal.*` modules remain importable for research use, but
-they expose raw constructors that can violate the invariants above and
-carry no stability promise.
+do. A query's goal and every class argument are kind-checked together, so a
+free type variable has one kind throughout the complete signature. Public
+query budgets must be non-negative; `Nothing` is unlimited and `Just 0`
+expires at the first choice point. The `Djinn.Internal.*` modules remain
+importable for research use, but they expose raw constructors that can violate
+the invariants above and carry no stability promise.
 
 The central pipeline is:
 

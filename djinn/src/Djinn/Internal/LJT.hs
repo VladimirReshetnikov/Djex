@@ -309,7 +309,7 @@ runBounded budget strat reserved p =
     consume b (Yield (_, x) rest) =
         let (xs, exhausted) = consume b rest
         in (x : xs, exhausted)
-    consume (Just 0) (Step _) = ([], True)
+    consume (Just remaining) (Step _) | remaining <= 0 = ([], True)
     consume b (Step rest) = consume (fmap (subtract 1) b) rest
 
 

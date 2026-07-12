@@ -7,13 +7,16 @@ import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
 import Djinn.Core (
-    Context, Declaration(..), QueryOutcome(..), SynthesisTypeError(..),
+    Context, Declaration(..), QueryOutcome(..),
+    SynthesisDeclarationError(..), SynthesisTypeError(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, inhabit,
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
-    fromSynthesisType, mkContext, parseHKind, parseHType, removeDeclaration,
+    fromSynthesisDeclaration, fromSynthesisKind, fromSynthesisType,
+    mkContext, parseHKind, parseHType, removeDeclaration,
     reportCompletion, reportOutcome, resolveContext, resolveInstanceMethods,
-    standardEnvironment, toSynthesisType, typeDeclarations)
+    standardEnvironment, toSynthesisDeclaration, toSynthesisKind,
+    toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
@@ -26,6 +29,7 @@ import Djinn.Internal.ProofEnv
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -39,6 +43,7 @@ tests =
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
+    , ("round-trip shared declarations", testSharedDeclarationAdapter)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
@@ -276,6 +281,42 @@ testSharedTypeAdapter = do
         (Left SynthesisForallUnsupported)
         (fromSynthesisType $ SharedType.ForallType ["a"] []
             $ SharedType.TypeVariable "a")
+
+testSharedDeclarationAdapter :: IO ()
+testSharedDeclarationAdapter = do
+    let declarations =
+            [ TypeSynonym "Identity" ["a"] (HTVar "a")
+            , DataType "Maybe2" ["a"]
+                [("Nothing2", []), ("Just2", [HTVar "a"])]
+            , AbstractType "HK" $ KArrow (KVar 3) KStar
+            , ClassDecl "Comparable" ["a"]
+                [("compareTo", HTArrow (HTVar "a") (HTVar "a"))]
+            , Function "M.value" $ HTCon "()"
+            ]
+    mapM_ assertRoundTrip declarations
+    let kind = KArrow (KVar 4) (KArrow KStar KStar)
+    assertEqual "kind conversion is lossless"
+        kind (fromSynthesisKind $ toSynthesisKind kind)
+    let parameter = SharedDeclaration.TypeParameter "a" Nothing
+        superclass = Constraint (sharedName "Comparable")
+            [SharedType.TypeVariable "a"]
+        sharedClass = SharedDeclaration.ClassDeclaration ()
+            (sharedName "Comparable") [parameter] [superclass] []
+    assertEqual "Djinn lowering rejects unsupported superclass semantics"
+        (Left ClassSuperclassesUnsupported)
+        (fromSynthesisDeclaration sharedClass)
+    assertEqual "shared validation catches a function in the type namespace"
+        (Left $ InvalidSharedDeclaration
+            $ SharedDeclaration.InvalidDeclaredValueName $ sharedName "T")
+        (toSynthesisDeclaration $ Function "T" $ HTCon "()")
+  where
+    assertRoundTrip declaration = do
+        shared <- either (fail . show) pure
+            $ toSynthesisDeclaration declaration
+        lowered <- either (fail . show) pure
+            $ fromSynthesisDeclaration shared
+        assertEqual "Djinn declaration round-trip changed its compatibility view"
+            (show declaration) (show lowered)
 
 -- Type synonyms are transparent even when they occur below an opaque type
 -- constructor.  The whole opaque application remains one proposition, but

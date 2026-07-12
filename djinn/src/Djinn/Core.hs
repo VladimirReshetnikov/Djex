@@ -18,7 +18,9 @@ module Djinn.Core (
     parseHType, parseHKind, SynthesisTypeError(..),
     toSynthesisType, fromSynthesisType,
     -- * Declarations
-    Constructor, Declaration(..),
+    Constructor, Declaration(..), SynthesisDeclaration,
+    SynthesisDeclarationError(..), toSynthesisKind, fromSynthesisKind,
+    toSynthesisDeclaration, fromSynthesisDeclaration,
     -- * Environments
     Environment, emptyEnvironment, standardEnvironment,
     declare, removeDeclaration,
@@ -41,6 +43,7 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import Djinn.Internal.Environment
+import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck (
     htCheckType, htCheckTypeKind, htCheckTypesKinds)
 import Djinn.Internal.HIdentifier (
@@ -84,25 +87,6 @@ parseWith parser what input =
 
 ------------------------------------------------------------------
 -- Declarations and environments
-
--- | A data constructor: name and field types.
-type Constructor = (HSymbol, [HType])
-
-data Declaration
-    -- | @type Name params = body@.  The body must be a proper type.
-    = TypeSynonym HSymbol [HSymbol] HType
-    -- | @data Name params = C1 fields | ...@.  No constructors declares
-    -- an empty (uninhabited) type.  Recursive types are rejected.
-    | DataType HSymbol [HSymbol] [Constructor]
-    -- | @type Name :: kind@ — an opaque type constructor.
-    | AbstractType HSymbol HKind
-    -- | @class Name params where methods@.  Parameter kinds are inferred
-    -- from the method types and default to @*@.
-    | ClassDecl HSymbol [HSymbol] [(HSymbol, HType)]
-    -- | A function assumption available to proof search, used at exactly
-    -- this monomorphic type.  The name may be qualified.
-    | Function HSymbol HType
-    deriving (Show)
 
 -- | A validated set of declarations.  Values of this type can only be
 -- produced by 'emptyEnvironment', 'standardEnvironment', 'declare', and

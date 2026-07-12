@@ -339,6 +339,7 @@ The same Boolean options can precede file names on the command line, such as
 | --- | --- |
 | `app/Main.hs` | Thin executable launcher. |
 | `Djinn.Core` | The stable, validated library API (see below). |
+| `Djinn.Internal.Declaration` | Djinn declaration compatibility values and checked shared-IR lowering. |
 | `Djinn` (`src-cli/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Kind inference and validation for declared Haskell-like types. |
@@ -408,6 +409,9 @@ budgets must be non-negative; `Nothing` is unlimited and `Just 0` expires at
 the first choice point. `toSynthesisType` and `fromSynthesisType` expose the
 lossless ordinary-type subset of `HType`; they explicitly reject declaration
 bodies, shared foralls, and unboxed tuples instead of conflating those layers.
+`toSynthesisDeclaration` and `fromSynthesisDeclaration` likewise round-trip
+Djinn's synonyms, data/abstract types, classes, and assumptions while rejecting
+shared superclass and instance semantics that Djinn does not implement.
 The core `Djinn.Internal.*` modules listed above remain
 exposed by `djinn-core` for research use, but they provide raw constructors
 that can violate these invariants and carry no stability promise. The

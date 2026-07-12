@@ -29,6 +29,7 @@ module Language.Haskell.Exference.Core.Types
   , StaticClassEnv
   , sClassEnv_tclasses
   , sClassEnv_instances
+  , sClassEnv_explicitInstances
   , emptyStaticClassEnv
   , mkStaticClassEnv
   , validateConstraintInEnv
@@ -281,22 +282,28 @@ data ClassEnvError
   deriving (Eq, Ord, Show)
 
 -- Positional fields are deliberate.  Exported record labels would let a
--- downstream caller update either index and bypass 'mkStaticClassEnv'.
+-- downstream caller update the declarations or either derived index and
+-- bypass 'mkStaticClassEnv'. Explicit instances remain separate because the
+-- per-class map also contains implied superclass instances.
 data StaticClassEnv = StaticClassEnv
   !(M.Map QualifiedName HsTypeClass)
+  ![HsInstance]
   !(M.Map QualifiedName [HsInstance])
   deriving (Eq, Show, Generic)
 
 sClassEnv_tclasses :: StaticClassEnv -> M.Map QualifiedName HsTypeClass
-sClassEnv_tclasses (StaticClassEnv classes _) = classes
+sClassEnv_tclasses (StaticClassEnv classes _ _) = classes
+
+sClassEnv_explicitInstances :: StaticClassEnv -> [HsInstance]
+sClassEnv_explicitInstances (StaticClassEnv _ instances _) = instances
 
 sClassEnv_instances :: StaticClassEnv -> M.Map QualifiedName [HsInstance]
-sClassEnv_instances (StaticClassEnv _ instances) = instances
+sClassEnv_instances (StaticClassEnv _ _ instances) = instances
 
 -- | The canonical validated empty environment, also used for parser recovery.
 -- Every non-empty environment is built with 'mkStaticClassEnv'.
 emptyStaticClassEnv :: StaticClassEnv
-emptyStaticClassEnv = StaticClassEnv M.empty M.empty
+emptyStaticClassEnv = StaticClassEnv M.empty [] M.empty
 
 -- | Validate and index a finite class environment.  Instance inflation runs
 -- only after declarations, heads, prerequisites, arities, and the superclass
@@ -310,9 +317,9 @@ mkStaticClassEnv tclasses instances = do
   traverse_ (validateClass classTable) tclasses
   traverse_ (validateInstance classTable) instances
   validateSuperclassGraph classTable
-  let declarations = StaticClassEnv classTable M.empty
+  let declarations = StaticClassEnv classTable [] M.empty
       allInstances = inflateInstances declarations instances
-  return $ StaticClassEnv classTable $ indexInstances allInstances
+  return $ StaticClassEnv classTable instances $ indexInstances allInstances
  where
   buildClassTable = go M.empty
     where

@@ -6,6 +6,7 @@
 module Language.Haskell.Exference.Core.Declaration
   ( DeclarationMetadata (..)
   , SynthesisDeclaration
+  , SynthesisEnvironment
   , SynthesisDeclarationError (..)
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
@@ -15,12 +16,17 @@ module Language.Haskell.Exference.Core.Declaration
   , fromSynthesisInstanceDeclaration
   , toSynthesisDataDeclaration
   , fromSynthesisDataDeclaration
+  , toSynthesisEnvironment
+  , fromSynthesisEnvironment
   ) where
 
 import Control.DeepSeq (NFData)
+import Control.Monad (foldM)
+import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -38,6 +44,9 @@ data DeclarationMetadata
 instance NFData DeclarationMetadata
 
 type SynthesisDeclaration = SharedDeclaration.Declaration
+  SynthesisVariable Int DeclarationMetadata
+
+type SynthesisEnvironment = SharedEnvironment.Environment
   SynthesisVariable Int DeclarationMetadata
 
 data SynthesisDeclarationError
@@ -59,6 +68,10 @@ data SynthesisDeclarationError
   | InvalidDeconstructorHead HsType
   | NonVariableDataParameter HsType
   | RigidDataParameter TVarId
+  | InvalidSharedEnvironment
+      (SharedEnvironment.EnvironmentError SynthesisVariable)
+  | ClassEnvironmentConversionError ClassEnvError
+  | UnsupportedCoreEnvironmentDeclaration SharedName.Name
   deriving (Eq, Show)
 
 toSynthesisFunctionBinding
@@ -167,6 +180,52 @@ fromSynthesisDataDeclaration declaration = do
             $ map TypeVar variables
       Right $ DeconstructorBinding input convertedConstructors recursive
     _ -> Left ExpectedDataDeclaration
+
+toSynthesisEnvironment
+  :: EnvDictionary
+  -> Either SynthesisDeclarationError SynthesisEnvironment
+toSynthesisEnvironment environment = do
+  declarations <- sequence $
+    map toSynthesisFunctionBinding (environmentFunctions environment) ++
+    map toSynthesisDataDeclaration (environmentDeconstructors environment) ++
+    map toSynthesisClassDeclaration
+      (Map.elems $ sClassEnv_tclasses $ environmentClasses environment) ++
+    map toSynthesisInstanceDeclaration
+      (sClassEnv_explicitInstances $ environmentClasses environment)
+  either (Left . InvalidSharedEnvironment) Right
+    $ SharedEnvironment.mkEnvironment declarations
+
+fromSynthesisEnvironment
+  :: SynthesisEnvironment
+  -> Either SynthesisDeclarationError EnvDictionary
+fromSynthesisEnvironment environment = do
+  (functions, deconstructors, classes, instances) <- foldM collect
+    ([], [], [], []) $ SharedEnvironment.environmentDeclarations environment
+  classEnvironment <- either (Left . ClassEnvironmentConversionError) Right
+    $ mkStaticClassEnv (reverse classes) (reverse instances)
+  Right $ EnvDictionary
+    (reverse functions) (reverse deconstructors) classEnvironment
+ where
+  collect (functions, deconstructors, classes, instances) declaration =
+    case declaration of
+      SharedDeclaration.ValueDeclaration{} -> do
+        binding <- fromSynthesisFunctionBinding declaration
+        Right (binding : functions, deconstructors, classes, instances)
+      SharedDeclaration.DataTypeDeclaration{} -> do
+        deconstructor <- fromSynthesisDataDeclaration declaration
+        Right (functions, deconstructor : deconstructors, classes, instances)
+      SharedDeclaration.ClassDeclaration{} -> do
+        classDeclaration <- fromSynthesisClassDeclaration declaration
+        Right (functions, deconstructors,
+          classDeclaration : classes, instances)
+      SharedDeclaration.InstanceDeclaration{} -> do
+        instanceDeclaration <- fromSynthesisInstanceDeclaration declaration
+        Right (functions, deconstructors, classes,
+          instanceDeclaration : instances)
+      SharedDeclaration.TypeSynonymDeclaration _ name _ _ ->
+        Left $ UnsupportedCoreEnvironmentDeclaration name
+      SharedDeclaration.AbstractTypeDeclaration _ name _ ->
+        Left $ UnsupportedCoreEnvironmentDeclaration name
 
 checked
   :: Either SynthesisDeclarationError SynthesisDeclaration

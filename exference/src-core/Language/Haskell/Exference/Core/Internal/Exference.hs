@@ -213,8 +213,8 @@ toGeneratedSearchBatch
   -> Either SearchStatusError ExferenceGeneratedSearchBatch
 toGeneratedSearchBatch = fmap (fmap convertCandidate) . toSearchBatch
   where
-    convertCandidate (expression, constraints, statistics) =
-      (toGeneratedExpression expression, constraints, statistics)
+    convertCandidate (candidateExpression, constraints, statistics) =
+      (toGeneratedExpression candidateExpression, constraints, statistics)
 
 type RatedNodes = Q.MaxPQueue Priority SearchNode
 data FindExpressionsState = FindExpressionsState

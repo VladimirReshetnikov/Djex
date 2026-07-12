@@ -73,6 +73,13 @@ penalties and recursive-datatype flags survive as explicit metadata, while
 lossy reverse conversions (such as dropping separately stored class methods)
 are rejected.
 
+Whole core environments also round-trip through the shared sealed declaration
+inventory. `StaticClassEnv` retains explicit instance declarations separately
+from its superclass-inflated lookup index, so adapters serialize source facts
+rather than derived cache entries. Frontend-only declarations such as type
+synonyms remain explicit conversion errors until the search core gains a
+representation for them.
+
 ## Exference 1.7 migration
 
 Version 1.7 intentionally breaks the old recursive class representation.

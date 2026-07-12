@@ -60,6 +60,7 @@ import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
+  , EnvDictionary (..)
   , FunctionBinding (..)
   )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
@@ -110,6 +111,7 @@ import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified CompatibilityImport
@@ -356,6 +358,7 @@ tests = testGroup "Exference"
                 $ HsConstraint (name "Base") [integer]
           environment <- expectRight
             $ mkStaticClassEnv [base, derived] [sourceInstance]
+          sClassEnv_explicitInstances environment @?= [sourceInstance]
           Map.lookup (name "Base") (sClassEnv_instances environment)
             @?= Just [impliedInstance]
       , testCase "class methods attach to the exactly qualified class" $ do
@@ -556,6 +559,44 @@ tests = testGroup "Exference"
           tdecl_name lowered @?= tdecl_name declaration
           tdecl_params lowered @?= tdecl_params declaration
           tdecl_result lowered @?= tdecl_result declaration
+      , testCase "core environments round-trip without exporting inflated instances" $ do
+          let cls = HsTypeClass (name "C") [0] []
+              instanceDeclaration = HsInstance []
+                $ HsConstraint (name "C") [TypeCons $ name "Int"]
+              function = FunctionBinding
+                (TypeCons $ name "Int") (name "answer") (Penalty 1) [] []
+              input = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
+              deconstructor = DeconstructorBinding input
+                [ ConstructorBinding (name "Nothing") []
+                , ConstructorBinding (name "Just") [TypeVar 0]
+                ] False
+          classes <- expectRight
+            $ mkStaticClassEnv [cls] [instanceDeclaration]
+          let source = EnvDictionary [function] [deconstructor] classes
+          shared <- expectRight $ toSynthesisEnvironment source
+          Map.keys (SharedEnvironment.valueSignatureMap shared)
+            @?= [toSynthesisName $ name "answer"]
+          Map.keys (SharedEnvironment.classDeclarationMap shared)
+            @?= [toSynthesisName $ name "C"]
+          Map.size (SharedEnvironment.instanceDeclarationMap shared) @?= 1
+          lowered <- expectRight $ fromSynthesisEnvironment shared
+          environmentFunctions lowered @?= [function]
+          environmentDeconstructors lowered @?= [deconstructor]
+          sClassEnv_tclasses (environmentClasses lowered)
+            @?= Map.singleton (name "C") cls
+          sClassEnv_explicitInstances (environmentClasses lowered)
+            @?= [instanceDeclaration]
+      , testCase "core lowering rejects frontend-only declarations" $ do
+          let synonymName = toSynthesisName $ name "Alias"
+              synonym = SharedDeclaration.TypeSynonymDeclaration
+                NoDeclarationMetadata synonymName []
+                (SharedType.TypeConstructor $ toSynthesisName $ name "Int")
+          shared <- expectRight $ SharedEnvironment.mkEnvironment [synonym]
+          case fromSynthesisEnvironment shared of
+            Left (UnsupportedCoreEnvironmentDeclaration actual) ->
+              actual @?= synonymName
+            Left err -> fail $ "unexpected conversion error: " ++ show err
+            Right _ -> fail "frontend-only type synonym reached the search core"
       , testCase "lossy declaration lowerings are rejected" $ do
           let parameter = SharedDeclaration.TypeParameter
                 (SharedType.FlexibleVariable 0) Nothing

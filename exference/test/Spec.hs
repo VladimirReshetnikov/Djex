@@ -101,6 +101,7 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
   , fromSynthesisTypeDeclaration
+  , getTypeDecls
   , parseType
   , toSynthesisTypeDeclaration
   )
@@ -1035,6 +1036,29 @@ tests = testGroup "Exference"
             (SharedEnvironment.dataConstructorMap shared) @?= True
           Map.member SharedName.consName
             (SharedEnvironment.valueSignatureMap shared) @?= False
+      , testCase "duplicate synonyms reach the shared inventory in source order" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module M where"
+            , "type Alias = Int"
+            , "type Alias = Bool"
+            ]
+          let results = runIdentity $ runMultiRWSTNil $
+                getTypeDecls [] [parsedModule]
+              synonyms = rights results
+          aliasName <- expectRight $ mkQualifiedName ["M"] "Alias"
+          map tdecl_name synonyms @?= [aliasName, aliasName]
+          let environment :: SourceEnvironment FunctionBinding
+              environment = SourceEnvironment
+                { sourceFunctions = []
+                , sourceDeconstructors = []
+                , sourceClasses = emptyStaticClassEnv
+                , sourceTypeNames = [aliasName]
+                , sourceTypeSynonyms = synonyms
+                }
+          toSynthesisSourceInventory environment @?= Left
+            (InvalidSharedEnvironment
+              $ SharedEnvironment.DuplicateTypeDeclaration
+              $ toSynthesisName aliasName)
       , testCase "the shipped source environment seals as one inventory" $ do
           environmentDirectory <- getDataFileName "environment"
           (sourceEnvironment, _ :: [String]) <- runMultiRWSTNil
@@ -1069,7 +1093,7 @@ tests = testGroup "Exference"
                     [DeconstructorBinding (TypeCons intName) [] False]
                 , sourceClasses = emptyStaticClassEnv
                 , sourceTypeNames = [intName]
-                , sourceTypeSynonyms = Map.empty
+                , sourceTypeSynonyms = []
                 }
               proper = SharedKind.ProperTypeKind
           toSynthesisSourceEnvironment environment @?= Left

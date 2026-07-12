@@ -11,6 +11,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , environmentFromPath
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
+  , sourceTypeSynonymMap
   , haskellSrcExtsParseMode
   , compileWithDict
   , parseRatings
@@ -74,9 +75,15 @@ data SourceEnvironment function = SourceEnvironment
   , sourceDeconstructors :: [DeconstructorBinding]
   , sourceClasses :: StaticClassEnv
   , sourceTypeNames :: [QualifiedName]
-  , sourceTypeSynonyms :: TypeDeclMap
+  , sourceTypeSynonyms :: [HsTypeDecl]
   }
   deriving (Show)
+
+-- | Unique-only compatibility index used by the historical type elaborator.
+-- The ordered field remains authoritative so duplicate declarations reach the
+-- shared inventory instead of being silently resolved by map insertion order.
+sourceTypeSynonymMap :: SourceEnvironment function -> TypeDeclMap
+sourceTypeSynonymMap = uniqueTypeDeclMap . sourceTypeSynonyms
 
 -- | Seal the complete frontend inventory in the common environment IR.
 -- Unlike the search-core 'EnvDictionary' adapter, this boundary retains type
@@ -121,7 +128,7 @@ toSynthesisSourceInventory environment = do
       $ toSynthesisName $ functionName binding
     [] -> pure ()
   synonyms <- mapM toSynthesisTypeDeclaration
-    $ M.elems $ sourceTypeSynonyms environment
+    $ sourceTypeSynonyms environment
   core <- toSynthesisEnvironment $ EnvDictionary
     valueBindings
     (sourceDeconstructors environment)
@@ -248,7 +255,8 @@ parseModules l = do
     Right dataTypes -> pure dataTypes
   typeDeclsE <- getTypeDecls ds mods
   lefts typeDeclsE `forM_` (mTell . (:[]))
-  let typeDecls = M.fromList $ (\x -> (tdecl_name x, x)) <$> rights typeDeclsE
+  let validTypeDecls = rights typeDeclsE
+      typeDecls = uniqueTypeDeclMap validTypeDecls
   (cntxt, n_insts) <- getClassEnv ds typeDecls mods
   let clss = sClassEnv_tclasses cntxt
       insts = sClassEnv_instances cntxt
@@ -337,7 +345,7 @@ parseModules l = do
     , sourceDeconstructors = builtInDeconstructors ++ deconss
     , sourceClasses = cntxt
     , sourceTypeNames = allValidNames
-    , sourceTypeSynonyms = typeDecls
+    , sourceTypeSynonyms = validTypeDecls
     }
   where
     hRead :: (ParseMode, String) -> IO (ParseMode, String)

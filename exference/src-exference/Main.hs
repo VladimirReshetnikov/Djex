@@ -132,7 +132,7 @@ main = do
             eDeconss = sourceDeconstructors sourceEnvironment
             sEnv = sourceClasses sourceEnvironment
             validNames = sourceTypeNames sourceEnvironment
-            tdeclMap = sourceTypeSynonyms sourceEnvironment
+            tdeclMap = sourceTypeSynonymMap sourceEnvironment
         let clss = sClassEnv_tclasses sEnv
             insts = sClassEnv_instances sEnv
             inventoryResult = toSynthesisSourceInventory sourceEnvironment
@@ -144,7 +144,7 @@ main = do
           Right _ -> pure ()
         when (PrintEnv `elem` flags) $ lift $ do
           when (verbosity>0) $ putStrLn "[Environment]"
-          mapM_ print $ M.elems tdeclMap
+          mapM_ print $ sourceTypeSynonyms sourceEnvironment
           mapM_ print $ M.elems clss
           mapM_ print $ [(i,x)| (i,xs) <- M.toList insts, x <- xs]
           mapM_ print $ eSignatures

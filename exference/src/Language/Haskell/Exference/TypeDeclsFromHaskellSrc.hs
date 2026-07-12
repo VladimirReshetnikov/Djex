@@ -4,6 +4,7 @@
 module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , TypeDeclMap
+  , uniqueTypeDeclMap
   , applyTypeDecls
   , getTypeDecls
   , convertType
@@ -59,9 +60,22 @@ data HsTypeDecl = HsTypeDecl
   { tdecl_name :: QualifiedName
   , tdecl_params :: [TVarId]
   , tdecl_result :: HsType
-  } deriving Show -- (Data, Show, Generic, Typeable)
+  } deriving (Eq, Show) -- (Data, Show, Generic, Typeable)
 
 type TypeDeclMap = Map QualifiedName HsTypeDecl
+
+-- | Build the legacy synonym-expansion index without choosing an arbitrary
+-- winner for duplicate declarations.  The ordered declarations remain the
+-- source of truth and are later sealed by the shared inventory, which can
+-- report the nominal duplicate precisely.
+uniqueTypeDeclMap :: [HsTypeDecl] -> TypeDeclMap
+uniqueTypeDeclMap declarations = M.fromList
+  [ (name, declaration)
+  | (name, [declaration]) <- M.toAscList $ M.fromListWith (++)
+      [ (tdecl_name declaration, [declaration])
+      | declaration <- declarations
+      ]
+  ]
 
 toSynthesisTypeDeclaration
   :: HsTypeDecl
@@ -165,8 +179,7 @@ getTypeDecls ds modules = do
       vars <- mapExceptT (withMultiStateA (ConvData 1000 tyVarIndex)) $ rawVars `forM` tyVarTransform
       return $ HsTypeDecl qname vars ty
   let validDeclarations = rights rawList
-      declarationMap = M.fromList
-        [(tdecl_name declaration, Right declaration) | declaration <- validDeclarations]
+      declarationMap = M.map Right $ uniqueTypeDeclMap validDeclarations
       resolve declaration = HsTypeDecl
         (tdecl_name declaration)
         (tdecl_params declaration)

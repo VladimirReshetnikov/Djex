@@ -21,6 +21,7 @@ import Language.Haskell.Exference.EnvironmentParser
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 
 import Control.Monad ( when, forM_ )
 import Data.List ( sortBy, intercalate, nub )
@@ -134,8 +135,13 @@ main = do
             tdeclMap = sourceTypeSynonyms sourceEnvironment
         let clss = sClassEnv_tclasses sEnv
             insts = sClassEnv_instances sEnv
+            inventoryResult = toSynthesisSourceInventory sourceEnvironment
         when (verbosity>0 && not (null messages)) $ lift $
           forM_ messages $ \m -> putStrLn $ "environment warning: " ++ m
+        case inventoryResult of
+          Left failure -> lift $ putStrLn $
+            "could not validate source environment: " ++ show failure
+          Right _ -> pure ()
         when (PrintEnv `elem` flags) $ lift $ do
           when (verbosity>0) $ putStrLn "[Environment]"
           mapM_ print $ M.elems tdeclMap
@@ -143,16 +149,19 @@ main = do
           mapM_ print $ [(i,x)| (i,xs) <- M.toList insts, x <- xs]
           mapM_ print $ eSignatures
           mapM_ print $ eDeconss
-        case inputs of
-          []    -> return () -- probably impossible..
-          (x:_) -> do
+        case (inputs, either (const Nothing) Just inventoryResult) of
+          ([], _) -> return ()
+          (_, Nothing) -> return ()
+          (x:_, Just inventory) -> do
             when (verbosity>0) $ lift $ putStrLn "[Custom Input]"
-            eParsedType <- runExceptT $ parseType (sClassEnv_tclasses sEnv)
-                                                  Nothing
-                                                  validNames
-                                                  tdeclMap
-                                                  (haskellSrcExtsParseMode "inputtype")
-                                                  x
+            eParsedType <- runExceptT $ parseTypeWithKinds
+              (SharedInventory.inventoryKindAssumptions inventory)
+              (sClassEnv_tclasses sEnv)
+              Nothing
+              validNames
+              tdeclMap
+              (haskellSrcExtsParseMode "inputtype")
+              x
             case eParsedType of
               Left err -> lift $ do
                 putStrLn $ "could not parse input type: " ++ diagnosticMessage err

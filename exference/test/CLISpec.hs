@@ -11,6 +11,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   [ testCase "no arguments print help" testHelp
   , testCase "the shipped environment supports identity search" testIdentity
   , testCase "parse failures are controlled diagnostics" testParseFailure
+  , testCase "ill-kinded queries stop before search" testKindFailure
   , testCase "invalid searches never enter reporting modes" testInvalidSearch
   , testCase "version mode does not load the environment" testVersion
   ]
@@ -39,6 +40,15 @@ testParseFailure = do
   output <- runExference ["--first", "("]
   assertContains "invalid types should carry a controlled diagnostic"
     "could not parse input type:" output
+
+testKindFailure :: Assertion
+testKindFailure = do
+  output <- runExference
+    ["--first", "Data.Maybe.Maybe Data.Maybe.Maybe"]
+  assertContains "ill-kinded input should carry a controlled diagnostic"
+    "ill-kinded input type:" output
+  assertBool "ill-kinded input must not enter search"
+    (not $ "[selecting" `isInfixOf` output)
 
 testInvalidSearch :: Assertion
 testInvalidSearch = do

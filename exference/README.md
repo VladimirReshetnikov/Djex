@@ -100,6 +100,9 @@ external type names after reporting them as warnings.
 `toSynthesisSourceInventory` retains both the sealed environment and those
 inferred assumptions; the older environment-only projection remains available
 for callers that do not yet elaborate queries through the shared frontend.
+The CLI keeps this inventory for the lifetime of its session and
+`parseTypeWithKinds` rejects a query whose proper-type obligation conflicts
+with the retained constructor or class kinds before heuristic search begins.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

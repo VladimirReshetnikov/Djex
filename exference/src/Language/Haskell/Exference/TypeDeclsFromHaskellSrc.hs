@@ -9,6 +9,7 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , convertType
   , convertTypeInternal
   , parseType
+  , parseTypeWithKinds
   , toSynthesisTypeDeclaration
   , fromSynthesisTypeDeclaration
   )
@@ -21,6 +22,8 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.Diagnostic
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
+import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 
 import Language.Haskell.Exts.Syntax hiding (TypeApp)
 import qualified Language.Haskell.Exts.Parser as P
@@ -228,3 +231,35 @@ parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
     endPosition = foldl advance (SourcePosition 1 1)
     advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
     advance (SourcePosition line column) _ = SourcePosition line (column + 1)
+
+-- | Parse, lower, and kind-check a query against the assumptions retained by
+-- the source inventory that will supply its search environment.
+parseTypeWithKinds
+  :: Monad m
+  => SharedKindInference.KindAssumptions
+  -> Map QualifiedName HsTypeClass
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> [QualifiedName]
+  -> TypeDeclMap
+  -> P.ParseMode
+  -> String
+  -> ExceptT Diagnostic (MultiRWST r w s m) (HsType, TypeVarIndex)
+parseTypeWithKinds assumptions tcs mn ds declarations mode source = do
+  result@(typeExpression, _) <-
+    parseType tcs mn ds declarations mode source
+  shared <- either (throwE . kindDiagnostic . show) pure
+    $ toSynthesisType typeExpression
+  either (throwE . kindDiagnostic . show) pure
+    $ SharedKindInference.checkTypesKinds assumptions
+      [(SharedKind.ProperTypeKind, shared)]
+  pure result
+ where
+  kindDiagnostic message =
+    withCode "EXF_KIND"
+    $ withSpan (SourceSpan (SourcePosition 1 1) (endPosition source))
+    $ withSource (P.parseFilename mode)
+    $ diagnostic $ "ill-kinded input type: " ++ message
+
+  endPosition = foldl advance (SourcePosition 1 1)
+  advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
+  advance (SourcePosition line column) _ = SourcePosition line (column + 1)

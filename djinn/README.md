@@ -13,6 +13,12 @@ The date-version bump records the now-source-breaking checked library facade;
 the original one-line import note has been expanded here because upstream ships
 its user guide inside the executable rather than as a README.
 
+`Djinn.Core.toSynthesisInventory` exposes the validated Djinn environment as
+the same retained structural-and-kind artifact used by Exference sessions.
+Standalone declaration adapters still round-trip historical `KVar` syntax,
+while inventory sealing rejects any unsolved kind rather than allowing it into
+query elaboration.
+
 ## Build and run
 
 The package is an independent Cabal project and is tested with GHC 9.12.4 and
@@ -44,7 +50,7 @@ cabal test all --test-show-details=direct
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 35 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 38 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Ten subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, and stateful query behavior. |
 

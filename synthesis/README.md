@@ -66,7 +66,9 @@ backend resolution policies remain explicit later validation layers.
 `Language.Haskell.Synthesis.Inventory` is the frontend handoff that keeps a
 sealed `Environment` together with the kind assumptions inferred from exactly
 the same declarations. Query elaboration can therefore reuse checked kinds
-without rerunning inference or trusting a parallel cache.
+without rerunning inference or trusting a parallel cache. Declarations may
+retain a frontend's kind-variable identity while being edited or round-tripped;
+sealing grounds their explicit kinds and reports the first unsolved identity.
 
 Build and test it independently with:
 

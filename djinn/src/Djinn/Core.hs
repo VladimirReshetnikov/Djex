@@ -23,8 +23,10 @@ module Djinn.Core (
     toSynthesisDeclaration, fromSynthesisDeclaration,
     -- * Environments
     Environment, emptyEnvironment, standardEnvironment,
-    SynthesisEnvironment, SynthesisEnvironmentError(..),
-    toSynthesisEnvironment, fromSynthesisEnvironment,
+    SynthesisEnvironment, SynthesisInventory,
+    SynthesisEnvironmentError(..),
+    toSynthesisEnvironment, toSynthesisInventory,
+    fromSynthesisEnvironment,
     declare, removeDeclaration,
     typeDeclarations, functionDeclarations, classDeclarations,
     -- * Queries

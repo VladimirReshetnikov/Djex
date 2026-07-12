@@ -23,25 +23,33 @@ import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.KindInference
 
 data Inventory typeVariable annotation = Inventory
-  { inventoryEnvironment :: Environment typeVariable Void annotation
+  { inventoryEnvironment ::
+      Environment typeVariable Void annotation
   , inventoryKindAssumptions :: KindAssumptions
   }
   deriving (Eq, Show, Generic)
 
-data InventoryError typeVariable
+data InventoryError typeVariable kindVariable
   = InvalidInventoryEnvironment (EnvironmentError typeVariable)
+  | UngroundedInventoryKind kindVariable
   | InvalidInventoryKinds (KindInferenceError typeVariable)
   deriving (Eq, Ord, Show, Generic)
 
 mkInventory
   :: Ord typeVariable
   => KindInventoryPolicy
-  -> [Declaration typeVariable Void annotation]
-  -> Either (InventoryError typeVariable)
+  -> [Declaration typeVariable kindVariable annotation]
+  -> Either (InventoryError typeVariable kindVariable)
       (Inventory typeVariable annotation)
 mkInventory policy declarations = do
-  environment <- either (Left . InvalidInventoryEnvironment) Right
+  -- Validate first so an ordinary declaration/namespace error is not masked
+  -- by an unrelated unsolved kind elsewhere in the same editable inventory.
+  _ <- either (Left . InvalidInventoryEnvironment) Right
     $ Environment.mkEnvironment declarations
+  grounded <- either (Left . UngroundedInventoryKind) Right
+    $ mapM groundDeclarationKinds declarations
+  environment <- either (Left . InvalidInventoryEnvironment) Right
+    $ Environment.mkEnvironment grounded
   assumptions <- either (Left . InvalidInventoryKinds) Right
-    $ inferDeclarationKindsWith policy declarations
+    $ inferDeclarationKindsWith policy grounded
   pure $ Inventory environment assumptions

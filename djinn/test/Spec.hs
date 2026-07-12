@@ -20,6 +20,7 @@ import Djinn.Core (
     reportCompletion, reportGeneratedClauses, reportOutcome,
     resolveContext, resolveInstanceMethods,
     standardEnvironment, toSynthesisDeclaration, toSynthesisEnvironment,
+    toSynthesisInventory,
     toSynthesisKind,
     toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
@@ -37,6 +38,9 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
+import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -338,6 +342,27 @@ testSharedEnvironmentAdapter :: IO ()
 testSharedEnvironmentAdapter = do
     shared <- either (fail . show) pure
         $ toSynthesisEnvironment standardEnvironment
+    inventory <- either (fail . show) pure
+        $ toSynthesisInventory standardEnvironment
+    assertEqual "inventory and compatibility projection disagree"
+        (Map.keys $ SharedEnvironment.typeDeclarationMap shared)
+        (Map.keys $ SharedEnvironment.typeDeclarationMap
+            $ SharedInventory.inventoryEnvironment inventory)
+    assertEqual "inventory lost Maybe's inferred kind"
+        (Just $ SharedKind.FunctionKind
+            SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
+        (Map.lookup (sharedName "Maybe")
+            $ SharedInference.typeConstructorKinds
+            $ SharedInventory.inventoryKindAssumptions inventory)
+    markerEnvironment <- expectRight $ declare
+        (ClassDecl "Marker" ["a"] []) emptyEnvironment
+    markerInventory <- either (fail . show) pure
+        $ toSynthesisInventory markerEnvironment
+    assertEqual "inventory generalized Djinn's defaulted class kind"
+        (Just [Just SharedKind.ProperTypeKind])
+        (Map.lookup (sharedName "Marker")
+            $ SharedInference.classParameterKinds
+            $ SharedInventory.inventoryKindAssumptions markerInventory)
     assertBool "shared standard environment lost unit"
         $ Map.member (sharedName "()")
         $ SharedEnvironment.typeDeclarationMap shared

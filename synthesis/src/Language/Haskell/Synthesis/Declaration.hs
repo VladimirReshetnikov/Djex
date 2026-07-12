@@ -10,11 +10,13 @@ module Language.Haskell.Synthesis.Declaration
   , Declaration (..)
   , DeclarationError (..)
   , validateDeclaration
+  , groundDeclarationKinds
   ) where
 
 import Control.DeepSeq (NFData)
 import Control.Monad (unless)
 import qualified Data.Set as Set
+import Data.Void (Void)
 import GHC.Generics (Generic)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Kind
@@ -165,6 +167,33 @@ validateDeclaration declaration = case declaration of
 
   validateDeclaredType = either (Left . InvalidDeclarationType) Right
     . validateType
+
+-- | Ground every explicit declaration kind without changing source-type
+-- variables, annotations, or declaration shape.
+groundDeclarationKinds
+  :: Declaration typeVariable kindVariable annotation
+  -> Either kindVariable (Declaration typeVariable Void annotation)
+groundDeclarationKinds declaration = case declaration of
+  TypeSynonymDeclaration annotation name parameters body ->
+    TypeSynonymDeclaration annotation name
+      <$> mapM groundParameter parameters <*> pure body
+  DataTypeDeclaration annotation name parameters constructors ->
+    DataTypeDeclaration annotation name
+      <$> mapM groundParameter parameters <*> pure constructors
+  AbstractTypeDeclaration annotation name kind ->
+    AbstractTypeDeclaration annotation name <$> groundKind kind
+  ValueDeclaration signature -> Right $ ValueDeclaration signature
+  ClassDeclaration annotation name parameters superclasses methods ->
+    ClassDeclaration annotation name
+      <$> mapM groundParameter parameters
+      <*> pure superclasses <*> pure methods
+  InstanceDeclaration annotation variables prerequisites headConstraint ->
+    Right $ InstanceDeclaration annotation variables prerequisites
+      headConstraint
+ where
+  groundParameter parameter = TypeParameter
+    (parameterVariable parameter)
+    <$> traverse groundKind (parameterKind parameter)
 
 isOrdinaryConstructor :: Name -> Bool
 isOrdinaryConstructor name =

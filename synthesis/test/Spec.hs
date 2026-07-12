@@ -248,6 +248,15 @@ environmentTests = testGroup "environments"
         (Inventory.inventoryKindAssumptions inventory) @?=
           Map.singleton typeName
             (Kind.FunctionKind Kind.ProperTypeKind Kind.ProperTypeKind)
+  , testCase "inventories retain the first unsolved declaration kind" $ do
+      let typeName = right $ mkIdentifier "T"
+          declarations :: [Declaration.Declaration String String ()]
+          declarations =
+            [Declaration.AbstractTypeDeclaration () typeName
+              $ Kind.FunctionKind (Kind.KindVariable "k")
+                  Kind.ProperTypeKind]
+      Inventory.mkInventory KindInference.ClosedKindInventory declarations @?=
+        Left (Inventory.UngroundedInventoryKind "k")
   , testCase "index declarations across shared namespaces" $ do
       let typeName = right $ mkIdentifier "T"
           constructorName = right $ mkIdentifier "MkT"

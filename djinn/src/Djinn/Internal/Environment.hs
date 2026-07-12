@@ -4,15 +4,19 @@
 --
 module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
-    SynthesisEnvironment, SynthesisEnvironmentError(..),
-    toSynthesisEnvironment,
+    SynthesisEnvironment, SynthesisInventory,
+    SynthesisEnvironmentError(..),
+    toSynthesisEnvironment, toSynthesisInventory,
     validateEnvironment,
     replace, requireDistinct, requireUnusedName,
     checkConstructors
     ) where
 
 import Data.List (nub)
+import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 
 import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck (htCheckEnv, htCheckType, htInferClassKinds)
@@ -32,10 +36,21 @@ data Environment = Environment {
 type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
 
+type SynthesisInventory = SharedInventory.Inventory HSymbol ()
+
+data ClassKindProjection
+    -- The historical shared-environment round trip lowers through the
+    -- unkinded compatibility 'ClassDecl'. Inventories are one-way checked
+    -- session artifacts and can retain the validated parameter kinds.
+    = OmitInferredClassKinds
+    | RetainInferredClassKinds
+
 data SynthesisEnvironmentError
     = SynthesisEnvironmentDeclarationError SynthesisDeclarationError
     | InvalidSynthesisEnvironment
         (SharedEnvironment.EnvironmentError HSymbol)
+    | InvalidSynthesisInventory
+        (SharedInventory.InventoryError HSymbol Int)
     | DjinnEnvironmentValidationError String
     deriving (Eq, Show)
 
@@ -43,14 +58,34 @@ toSynthesisEnvironment
     :: Environment
     -> Either SynthesisEnvironmentError SynthesisEnvironment
 toSynthesisEnvironment environment = do
-    declarations <- mapM convertedDeclaration $
-        map typeDeclaration (envTypes environment) ++
-        [Function name functionType |
-            (name, functionType) <- envFunctions environment] ++
-        [ClassDecl name (map fst parameters) methods |
-            (name, (parameters, methods)) <- envClasses environment]
+    declarations <- synthesisDeclarations OmitInferredClassKinds environment
     either (Left . InvalidSynthesisEnvironment) Right $
         SharedEnvironment.mkEnvironment declarations
+
+-- | Seal the shared structural view together with the kinds inferred from
+-- exactly those declarations. Standalone declaration adapters may still
+-- round-trip 'KVar'; a checked environment cannot retain one, and the
+-- inventory reports its identity through 'UngroundedInventoryKind'.
+toSynthesisInventory
+    :: Environment
+    -> Either SynthesisEnvironmentError SynthesisInventory
+toSynthesisInventory environment = do
+    declarations <- synthesisDeclarations RetainInferredClassKinds environment
+    either (Left . InvalidSynthesisInventory) Right $
+        SharedInventory.mkInventory
+            SharedInference.ClosedKindInventory declarations
+
+synthesisDeclarations
+    :: ClassKindProjection
+    -> Environment
+    -> Either SynthesisEnvironmentError [SynthesisDeclaration]
+synthesisDeclarations classKindProjection environment = do
+    ordinary <- mapM convertedDeclaration $
+        map typeDeclaration (envTypes environment) ++
+        [Function name functionType |
+            (name, functionType) <- envFunctions environment]
+    classes <- mapM convertedClass $ envClasses environment
+    return $ ordinary ++ classes
   where
     typeDeclaration (name, (parameters, body, kind)) = case body of
         HTUnion constructors -> DataType name parameters constructors
@@ -60,6 +95,31 @@ toSynthesisEnvironment environment = do
     convertedDeclaration = either
         (Left . SynthesisEnvironmentDeclarationError) Right .
         toSynthesisDeclaration
+
+    -- The compatibility 'ClassDecl' stores only source parameter names, while
+    -- a validated Environment stores their inferred kinds as well. Preserve
+    -- those fixed kinds in the session inventory; otherwise a method-less
+    -- Djinn class would incorrectly become poly-kinded at the shared boundary.
+    convertedClass (name, (parameters, methods)) = do
+        declaration <- convertedDeclaration $
+            ClassDecl name (map fst parameters) methods
+        case declaration of
+            SharedDeclaration.ClassDeclaration
+                    annotation sharedName sharedParameters superclasses
+                    sharedMethods ->
+                return $ SharedDeclaration.ClassDeclaration annotation
+                    sharedName
+                    (case classKindProjection of
+                        RetainInferredClassKinds ->
+                            zipWith retainKind sharedParameters parameters
+                        OmitInferredClassKinds -> sharedParameters)
+                    superclasses sharedMethods
+            _ -> Left $ DjinnEnvironmentValidationError $
+                "internal class conversion did not produce a class: " ++ name
+
+    retainKind parameter (_, kind) = parameter {
+        SharedDeclaration.parameterKind = Just $ toSynthesisKind kind
+        }
 
 -- Rebuild inferred kinds first, then check every declaration that depends
 -- on them.  Class parameter kinds are re-inferred against the rebuilt type

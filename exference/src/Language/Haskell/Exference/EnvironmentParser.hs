@@ -58,6 +58,7 @@ import Data.HList.ContainsType
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
+import Data.Void (absurd)
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -131,6 +132,8 @@ toSynthesisSourceInventory environment = do
       SharedKindInference.OpenKindInventory declarations of
     Left (SharedInventory.InvalidInventoryEnvironment failure) ->
       Left $ InvalidSharedEnvironment failure
+    Left (SharedInventory.UngroundedInventoryKind impossible) ->
+      absurd impossible
     Left (SharedInventory.InvalidInventoryKinds failure) ->
       Left $ InvalidSourceEnvironmentKinds failure
     Right inventory -> Right inventory

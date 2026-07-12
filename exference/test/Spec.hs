@@ -537,6 +537,14 @@ tests = testGroup "Exference"
           case findExpressionsWithStatsEither input of
             Left actual -> actual @?= NestedForallInGoal goal
             Right _ -> fail "the checked chunk API discarded validation failure"
+          let nestedConstraint = HsConstraint (name "Inner") [TypeVar 1]
+              outerConstraint = HsConstraint (name "Outer")
+                [TypeForall [1] [nestedConstraint] $ TypeVar 1]
+              constrainedGoal = TypeForall [0] [outerConstraint] $ TypeVar 0
+          typeConstraints constrainedGoal
+            @?= [outerConstraint, nestedConstraint]
+          validateExferenceInput input { input_goalType = constrainedGoal }
+            @?= Left (NestedForallInGoal constrainedGoal)
       , testCase "prenex forall chains are checked through every layer" $ do
           let goal = TypeForall [0] []
                 $ TypeForall [1] []
@@ -910,12 +918,6 @@ tests = testGroup "Exference"
             , (TupleCon 5, Penalty 3.0)
             , (TupleCon 6, Penalty 2.0)
             ]
-          assertBool "structural rating lookup left an operator unmatched"
-            (not $ any ("rating could not be applied: Control.Applicative.(<*>)"
-              `isInfixOf`) messages)
-          assertBool ("class environment was discarded: " ++ show messages)
-            (not $ any ("could not construct class environment" `isInfixOf`)
-              messages)
           assertBool "the shipped class table is empty"
             (not $ Map.null $ sClassEnv_tclasses classEnvironment)
           assertBool "the shipped instance index is empty"
@@ -923,17 +925,12 @@ tests = testGroup "Exference"
           Map.size (sClassEnv_tclasses classEnvironment) @?= 41
           sum (map length $ Map.elems $ sClassEnv_instances classEnvironment)
             @?= 535
-          assertBool "unexpected source-instance count"
-            $ "and 485 instances" `elem` messages
-          assertBool "unexpected function-declaration count"
-            $ "and 156 function decls" `elem` messages
-          assertBool ("unexpected shipped-environment diagnostics: "
-              ++ show messages)
-            $ not $ any (\message -> any (`isInfixOf` message)
-                [ "unknown type constructor"
-                , "unknown constraint class"
-                , "rating could not be applied"
-                ]) messages
+          messages @?=
+            [ "got 41 classes"
+            , "and 485 instances"
+            , "(-> 535 instances after inflation)"
+            , "and 156 function decls"
+            ]
           (goal, _) <- expectRight $ parseTypePure "()"
           case findOneExpression identityInput
               { input_goalType = goal

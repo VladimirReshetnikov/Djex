@@ -596,4 +596,6 @@ typeConstraints (TypeArrow parameter result) =
 typeConstraints (TypeApp function argument) =
   typeConstraints function ++ typeConstraints argument
 typeConstraints (TypeForall _ constraints body) =
-  constraints ++ typeConstraints body
+  constraints
+    ++ concatMap (concatMap typeConstraints . constraint_params) constraints
+    ++ typeConstraints body

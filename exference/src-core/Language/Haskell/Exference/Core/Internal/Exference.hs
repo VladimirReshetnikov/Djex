@@ -394,11 +394,18 @@ deconstructorBindingType binding =
     $ concatMap constructorFields (deconstructorConstructors binding)
 
 containsNestedForall :: HsType -> Bool
-containsNestedForall ty@TypeForall{} = containsForall $ stripOuterForalls ty
+containsNestedForall ty@TypeForall{} =
+  any constraintContainsForall outerConstraints || containsForall body
   where
-    stripOuterForalls (TypeForall _ _ body) = stripOuterForalls body
-    stripOuterForalls other = other
+    (outerConstraints, body) = stripOuterForalls ty
+    stripOuterForalls (TypeForall _ constraints inner) =
+      let (nestedConstraints, result) = stripOuterForalls inner
+      in (constraints ++ nestedConstraints, result)
+    stripOuterForalls other = ([], other)
 containsNestedForall ty = containsForall ty
+
+constraintContainsForall :: HsConstraint -> Bool
+constraintContainsForall = any containsForall . constraint_params
 
 containsForall :: HsType -> Bool
 containsForall TypeForall{} = True

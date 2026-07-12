@@ -3,6 +3,7 @@
 module Main (main) where
 
 import Control.DeepSeq (force)
+import Control.Exception (bracket)
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
 import Data.Data
@@ -16,12 +17,14 @@ import Data.Data
   )
 import Data.Either (rights)
 import Data.Functor.Identity (runIdentity)
-import Data.List (find, isInfixOf)
+import Data.List (find, isInfixOf, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified GHC.Generics as Generic
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 import Control.Monad.Trans.Except (runExceptT)
@@ -1000,6 +1003,84 @@ tests = testGroup "Exference"
       , testCase "ratings reject non-finite values" $
           first diagnosticMessage (parseRatings "foo NaN")
             @?= Left "rating for foo must be finite: NaN"
+      , testCase "missing modules produce source-bearing read errors" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let modulePath = environmentDirectory ++ "/missing-module.hs"
+              ratingPath = environmentDirectory ++ "/all.ratings"
+          (result, messages :: [String]) <- runMultiRWSTNil
+            $ withMultiWriterAW
+            $ environmentFromModuleAndRatings modulePath ratingPath
+          case result of
+            Left (ModuleReadErrors (readError :| remainingErrors)) -> do
+              diagnosticSource readError @?= Just modulePath
+              remainingErrors @?= []
+            Left failure -> fail $ "unexpected load failure: " ++ show failure
+            Right _ -> fail "a missing module was accepted"
+          assertBool ("later loader summaries survived: " ++ show messages)
+            $ not $ any isLoaderSummary messages
+      , testCase "missing environment directories produce source-bearing errors" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let missingDirectory = environmentDirectory ++ "/missing-environment"
+          (result, messages :: [String]) <- runMultiRWSTNil
+            $ withMultiWriterAW
+            $ environmentFromPath missingDirectory
+          case result of
+            Left (EnvironmentDirectoryReadError readError) ->
+              diagnosticSource readError @?= Just missingDirectory
+            Left failure -> fail $ "unexpected load failure: " ++ show failure
+            Right _ -> fail "a missing environment directory was accepted"
+          assertBool ("failed directory load emitted messages: " ++ show messages)
+            $ null messages
+      , testCase "missing ratings retain zero penalties with one warning" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let modulePath = environmentDirectory ++ "/Category.hs"
+              ratingPath = environmentDirectory ++ "/missing.ratings"
+          (result, messages :: [String]) <- runMultiRWSTNil
+            $ withMultiWriterAW
+            $ environmentFromModuleAndRatings modulePath ratingPath
+          checkedEnvironment <- expectRight result
+          let bindings = sourceFunctions
+                $ checkedSourceProjection checkedEnvironment
+              warnings = filter (not . isLoaderSummary) messages
+          assertBool "missing ratings changed a default function penalty"
+            $ all ((== Penalty 0) . functionPenalty) bindings
+          case warnings of
+            [warning] -> assertBool
+              ("rating warning lost its source: " ++ show warning)
+              $ ratingPath `isInfixOf` warning
+            _ -> fail $ "expected one rating warning, got " ++ show warnings
+      , testCase "duplicate ratings are diagnosed and ignored" $
+          withTemporaryFile (unlines
+            [ "module Ratings where"
+            , "identity :: a -> a"
+            ]) $ \modulePath ->
+          withTemporaryFile
+            "Ratings.identity 1.0 Ratings.identity 2.0"
+            $ \ratingPath -> do
+              (result, messages :: [String]) <- runMultiRWSTNil
+                $ withMultiWriterAW
+                $ environmentFromModuleAndRatings modulePath ratingPath
+              environment <- checkedSourceProjection <$> expectRight result
+              identityName <- expectRight
+                $ mkQualifiedName ["Ratings"] "identity"
+              case find ((== identityName) . functionName)
+                  (sourceFunctions environment) of
+                Nothing -> fail "the rated identity declaration was lost"
+                Just binding -> functionPenalty binding @?= Penalty 0
+              assertBool ("duplicate rating was not diagnosed: " ++ show messages)
+                $ "duplicate rating: Ratings.identity" `elem` messages
+      , testCase "malformed modules fail before loader summaries" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let modulePath = environmentDirectory ++ "/all.ratings"
+          (result, messages :: [String]) <- runMultiRWSTNil
+            $ withMultiWriterAW
+            $ parseModules [(haskellSrcExtsParseMode modulePath, modulePath)]
+          case result of
+            Left ModuleParseErrors{} -> pure ()
+            Left failure -> fail $ "unexpected load failure: " ++ show failure
+            Right _ -> fail "a malformed module was accepted"
+          assertBool ("later loader summaries survived: " ++ show messages)
+            $ not $ any isLoaderSummary messages
       , testCase "malformed ratings retain the parsed environment at defaults" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
@@ -1023,7 +1104,7 @@ tests = testGroup "Exference"
             Nothing -> fail "malformed ratings discarded parsed declarations"
             Just binding -> functionPenalty binding @?= Penalty 0
           assertBool ("missing rating diagnostic: " ++ show messages)
-            $ "could not parse rating file" `elem` messages
+            $ any ("could not parse rating file" `isInfixOf`) messages
       , testCase "frontend source environments retain type synonyms" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/String.hs"
@@ -1112,23 +1193,35 @@ tests = testGroup "Exference"
                 (SharedKindInference.KindMismatch proper
                   $ SharedKind.FunctionKind proper proper)))
       , testCase "loader names unknown type constructors precisely" $ do
-          environmentDirectory <- getDataFileName "environment"
-          let modulePath = environmentDirectory ++ "/Char.hs"
-          (_, (messages :: [String])) <- runMultiRWSTNil $ withMultiWriterAW
-            $ parseModules [(haskellSrcExtsParseMode modulePath, modulePath)]
-          assertBool ("missing type-constructor diagnostic: " ++ show messages)
-            $ "unknown type constructor 'Data.Int.Int' used in the binding Data.Char.ord"
-                `elem` messages
-          assertBool ("legacy diagnostic survived: " ++ show messages)
-            $ not $ any ("unknown binding" `isInfixOf`) messages
+          withTemporaryFile (unlines
+            [ "module Warnings where"
+            , "external :: Data.External.External"
+            ]) $ \modulePath -> do
+              (result, messages :: [String]) <- runMultiRWSTNil
+                $ withMultiWriterAW
+                $ parseModules
+                    [(haskellSrcExtsParseMode modulePath, modulePath)]
+              _ <- expectRight result
+              assertBool
+                ("missing type-constructor diagnostic: " ++ show messages)
+                $ "unknown type constructor 'Data.External.External' used in the binding Warnings.external"
+                    `elem` messages
+              assertBool ("legacy diagnostic survived: " ++ show messages)
+                $ not $ any ("unknown binding" `isInfixOf`) messages
       , testCase "loader validates signature classes against its inventory" $ do
-          environmentDirectory <- getDataFileName "environment"
-          let modulePath = environmentDirectory ++ "/Void.hs"
-          (_, (messages :: [String])) <- runMultiRWSTNil $ withMultiWriterAW
-            $ parseModules [(haskellSrcExtsParseMode modulePath, modulePath)]
-          assertBool ("missing constraint-class diagnostic: " ++ show messages)
-            $ "unknown constraint class 'Functor' used in the binding Data.Void.vacuous"
-                `elem` messages
+          withTemporaryFile (unlines
+            [ "module Warnings where"
+            , "constrained :: External.Constraint a => a -> a"
+            ]) $ \modulePath -> do
+              (result, messages :: [String]) <- runMultiRWSTNil
+                $ withMultiWriterAW
+                $ parseModules
+                    [(haskellSrcExtsParseMode modulePath, modulePath)]
+              _ <- expectRight result
+              assertBool
+                ("missing constraint-class diagnostic: " ++ show messages)
+                $ "unknown constraint class 'External.Constraint' used in the binding Warnings.constrained"
+                    `elem` messages
       , testCase "partial class inventories fail before advisory warnings" $ do
           environmentDirectory <- getDataFileName "environment"
           let paths = map ((environmentDirectory ++ "/") ++)
@@ -1142,6 +1235,8 @@ tests = testGroup "Exference"
             Left failure -> fail $ "unexpected load failure: " ++ show failure
             Right _ -> fail "an incomplete class inventory was accepted"
           length (filter (== warning) messages) @?= 0
+          assertBool ("later loader summaries survived: " ++ show messages)
+            $ not $ any isLoaderSummary messages
       , testCase "qualified names reject empty path segments" $
           case parseQualifiedName "Data..map" of
             Left _ -> pure ()
@@ -1570,6 +1665,10 @@ assertOffsetUnifierCloses offset left right =
 parseTypePure :: String -> Either Diagnostic (HsType, TypeVarIndex)
 parseTypePure = parseTypeWithModePure $ haskellSrcExtsParseMode "test"
 
+isLoaderSummary :: String -> Bool
+isLoaderSummary message = any (`isPrefixOf` message)
+  ["got ", "and ", "(-> "]
+
 parseTypeWithModePure
   :: HSE.ParseMode
   -> String
@@ -1644,6 +1743,19 @@ expectParsedModule source = case HSE.parseModuleWithMode
     (haskellSrcExtsParseMode "qualified-class-test") source of
   HSE.ParseOk modul -> pure modul
   failure -> fail $ "module did not parse: " ++ show failure
+
+withTemporaryFile :: String -> (FilePath -> IO a) -> IO a
+withTemporaryFile source action = do
+  temporaryDirectory <- getTemporaryDirectory
+  bracket
+    (do
+      (path, handle) <- openTempFile temporaryDirectory
+        "exference-loader-module.hs"
+      hPutStr handle source
+      hClose handle
+      pure path)
+    removeFile
+    action
 
 classEnvironmentFromSources
   :: [String]

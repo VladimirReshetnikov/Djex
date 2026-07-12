@@ -17,6 +17,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "parse failures are controlled diagnostics" testParseFailure
   , testCase "ill-kinded queries stop before search" testKindFailure
   , testCase "invalid searches never enter reporting modes" testInvalidSearch
+  , testCase "missing environment directories fail closed" testMissingEnvironment
   , testCase "invalid class environments fail closed" testInvalidEnvironment
   , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
   , testCase "invalid environment modules fail closed" testInvalidModule
@@ -65,6 +66,21 @@ testInvalidSearch = do
     "invalid search input: NestedForallInGoal" output
   assertBool "environment-usage reporting must not evaluate an empty trace"
     (not $ "Prelude.last" `isInfixOf` output)
+
+testMissingEnvironment :: Assertion
+testMissingEnvironment = withMissingTemporaryEnvironment $ \environmentDirectory -> do
+  (exitCode, output, errors) <- readProcessWithExitCode "exference"
+    ["--envdir", environmentDirectory, "a -> a"] ""
+  case exitCode of
+    ExitFailure _ -> pure ()
+    ExitSuccess -> fail "missing environment directory returned success"
+  assertContains "directory failures should use the controlled loader diagnostic"
+    "could not load source environment:" errors
+  assertContains "the typed directory failure should remain visible"
+    "EnvironmentDirectoryReadError" errors
+  assertEqual "a missing environment must produce no synthesized output" "" output
+  assertBool "a controlled directory failure must not expose a Haskell call stack"
+    (not $ "CallStack" `isInfixOf` errors)
 
 testInvalidEnvironment :: Assertion
 testInvalidEnvironment = withTemporaryEnvironment $ \environmentDirectory -> do
@@ -162,6 +178,16 @@ withTemporaryEnvironment action = do
   removeFile path
   createDirectory path
   bracket (pure path) removePathForcibly action
+
+-- Reserve a unique temporary name with a file, then remove it so the action is
+-- guaranteed to receive a path that does not exist when it begins.
+withMissingTemporaryEnvironment :: (FilePath -> IO a) -> IO a
+withMissingTemporaryEnvironment action = do
+  temporaryRoot <- getTemporaryDirectory
+  (path, handle) <- openTempFile temporaryRoot "missing-exference-environment"
+  hClose handle
+  removeFile path
+  action path
 
 assertContains :: String -> String -> String -> Assertion
 assertContains message needle haystack = assertBool

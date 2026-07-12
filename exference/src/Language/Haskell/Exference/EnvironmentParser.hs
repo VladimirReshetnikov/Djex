@@ -41,16 +41,17 @@ import Language.Haskell.Exference.Diagnostic
 
 import Control.DeepSeq
 
-import Control.Monad ( forM_, guard, forM, join )
+import Control.Monad ( forM_, forM )
 import Data.List ( sort, find, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
-import Data.Maybe ( fromMaybe )
 import Data.Either ( lefts, rights )
 import Control.Monad.Writer.Strict
-import System.Directory ( getDirectoryContents )
-import Control.Exception ( evaluate, try, SomeException )
+import System.Directory ( listDirectory )
+import Control.Exception ( evaluate )
 import Data.Bifunctor ( first )
+import System.FilePath ( (</>) )
+import System.IO.Error ( tryIOError )
 
 import Language.Haskell.Exts.Syntax ( Module(..) )
 import Language.Haskell.Exts.Parser ( parseModuleWithMode
@@ -63,6 +64,7 @@ import Language.Haskell.Exts.Extension ( Language (..)
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import Control.Monad.Trans.MultiRWS
+import Control.Monad.Trans.Except (runExceptT, throwE)
 import Data.HList.ContainsType
 
 import qualified Data.Map.Strict as M
@@ -98,7 +100,9 @@ data CheckedSourceEnvironment = CheckedSourceEnvironment
 -- | Fatal source-loading phases.  Warnings remain in the writer channel, but
 -- a failed class graph cannot produce a searchable recovery environment.
 data EnvironmentLoadError
-  = ModuleParseErrors (NonEmpty String)
+  = EnvironmentDirectoryReadError Diagnostic
+  | ModuleReadErrors (NonEmpty Diagnostic)
+  | ModuleParseErrors (NonEmpty String)
   | DataTypeNameError String
   | TypeDeclarationErrors (NonEmpty String)
   | ClassEnvironmentLoadFailure ClassEnvironmentLoadError
@@ -106,6 +110,19 @@ data EnvironmentLoadError
   | BuiltInEnvironmentErrors (NonEmpty String)
   | InvalidSourceInventory SynthesisDeclarationError
   deriving (Eq, Show)
+
+-- | Catch only filesystem failures, preserving asynchronous cancellation and
+-- programming exceptions.  The source path is structural diagnostic data, so
+-- callers never need to recover it from platform-specific exception text.
+captureIO :: FilePath -> IO value -> IO (Either Diagnostic value)
+captureIO path action = first
+  (withSource path . diagnostic . show) <$> tryIOError action
+
+-- | Force lazy text while the IOException boundary is still active.  Merely
+-- wrapping 'readFile' would let decoding and deferred reads escape later.
+readTextFile :: FilePath -> IO (Either Diagnostic String)
+readTextFile path = captureIO path
+  $ readFile path >>= evaluate . force
 
 checkSourceEnvironment
   :: SourceEnvironment FunctionBinding
@@ -269,160 +286,184 @@ parseModules :: forall m r w s
              => [(ParseMode, String)]
              -> m (Either EnvironmentLoadError
                     (SourceEnvironment HsFunctionDecl))
-parseModules l = do
-  rawTuples <- lift $ mapM hRead l
-  let eParsed = map hParse rawTuples
-  {-
-  let h :: Decl -> IO ()
-      h i@(InstDecl _ _ _ _ _ _ _) = do
-        pprint i >>= print
-      h _ = return ()
-  forM_ (rights eParsed) $ \(Module _ _ _ _ _ _ ds) ->
-    forM_ ds h
-  -}
-  -- forM_ (rights eParsed) $ \m -> pprintTo 10000 m >>= print
-  let parseErrors = lefts eParsed
-  mapM_ (mTell . (:[])) parseErrors
-  let mods = rights eParsed
-  (ds, dataTypeErrors) <- case getDataTypesChecked mods of
-    Left conversionError -> do
-      let message = "could not extract data-type names: " ++ conversionError
-      mTell [message]
-      pure ([], [message])
-    Right dataTypes -> pure (dataTypes, [])
-  typeDeclsE <- getTypeDecls ds mods
-  let typeDeclarationErrors = lefts typeDeclsE
-  typeDeclarationErrors `forM_` (mTell . (:[]))
-  let validTypeDecls = rights typeDeclsE
-      typeDecls = uniqueTypeDeclMap validTypeDecls
-  classResult <- getClassEnv ds typeDecls mods
-  let (cntxt, n_insts) = either
-        (const (emptyStaticClassEnv, 0)) id classResult
-  let clss = sClassEnv_tclasses cntxt
-      insts = sClassEnv_instances cntxt
-  -- TODO: try to exfere this stuff
-  (decls, deconss, bindingErrors) <- do
-    stuff <- mapM (hExtractBinds cntxt ds typeDecls) mods
-    let (bindingLists, deconstructorLists, errorLists) = unzip3 stuff
-    return
-      ( concat bindingLists
-      , concat deconstructorLists
-      , concat errorLists
-      )
-  let clssNames = M.keys clss
-  let allValidNames = ds ++ clssNames
-  let
-    warnUnknownTypeConstructors :: String -> [HsType] -> m ()
-    warnUnknownTypeConstructors context types = forM_
-      (S.toAscList $ S.fromList $ concatMap (findInvalidNames allValidNames) types)
-      $ \unknownName -> mTell
-          [ "unknown type constructor '" ++ show unknownName
-            ++ "' used in " ++ context
-          ]
-
-    warnBindingConstraints :: QualifiedName -> HsType -> m ()
-    warnBindingConstraints bindingName bindingType = forM_
-      (S.toAscList $ S.fromList
-        [ renderConstraintFailure bindingName constraint failure
-        | constraint <- typeConstraints bindingType
-        , Left failure <-
-            [validateConstraintInEnv cntxt
-              (BindingConstraint bindingName) constraint]
-        ])
-      (mTell . (: []))
-
-    renderConstraintFailure
-      :: QualifiedName
-      -> HsConstraint
-      -> ClassEnvError
-      -> String
-    renderConstraintFailure bindingName _
-        (UnknownConstraintClass _ className) =
-      "unknown constraint class '" ++ show className
-        ++ "' used in the binding " ++ show bindingName
-    renderConstraintFailure bindingName constraint failure =
-      "invalid class constraint '" ++ show constraint
-        ++ "' used in the binding " ++ show bindingName
-        ++ ": " ++ show failure
-
-    instanceTypes =
-      [ parameter
-      | indexedInstances <- M.elems insts
-      , instanceDeclaration <- indexedInstances
-      , constraint <- instance_head instanceDeclaration
-          : instance_constraints instanceDeclaration
-      , parameter <- constraint_params constraint
-      ]
-
-  -- Instance inflation can place the same source type under several implied
-  -- class heads.  Validate their combined type-constructor set once so an
-  -- external constructor produces one useful warning rather than a cascade.
-  warnUnknownTypeConstructors "class instances" instanceTypes
-  forM_ (M.elems clss) $ \typeClass -> warnUnknownTypeConstructors
-    ("the superclass data for " ++ show (tclass_name typeClass))
-    [ parameter
-    | constraint <- tclass_constraints typeClass
-    , parameter <- constraint_params constraint
-    ]
-  forM_ decls $ \(bindingName, bindingType) -> do
-    warnUnknownTypeConstructors
-      ("the binding " ++ show bindingName) [bindingType]
-    -- Module loading has a complete class inventory and therefore uses the
-    -- strict validator.  Public ad-hoc search input deliberately retains its
-    -- separate open-world policy for unknown external classes.
-    warnBindingConstraints bindingName bindingType
-  mTell ["got " ++ show (length clss) ++ " classes"]
-  mTell ["and " ++ show (n_insts) ++ " instances"]
-  mTell ["(-> " ++ show (length $ concat $ M.elems $ insts) ++ " instances after inflation)"]
-  mTell ["and " ++ show (length decls) ++ " function decls"]
-  builtInDeclsResult          <- builtInDeclsM
-  builtInDeconstructorsResult <- builtInDeconstructorsM
-  let reportBuiltInFailure kind failure =
-        mTell ["could not construct built-in " ++ kind ++ ": " ++ show failure]
-  (builtInDecls, builtInBindingErrors) <- case builtInDeclsResult of
-    Left failure -> do
-      let message = "could not construct built-in bindings: " ++ show failure
-      reportBuiltInFailure "bindings" failure
-      pure ([], [message])
-    Right bindings -> pure (bindings, [])
-  (builtInDeconstructors, builtInDeconstructorErrors) <-
-    case builtInDeconstructorsResult of
-      Left failure -> do
-        let message = "could not construct built-in deconstructors: "
-              ++ show failure
-        reportBuiltInFailure "deconstructors" failure
-        pure ([], [message])
-      Right deconstructors -> pure (deconstructors, [])
-  let environment = SourceEnvironment
-        { sourceFunctions = builtInDecls ++ decls
-        , sourceDeconstructors = builtInDeconstructors ++ deconss
-        , sourceClasses = cntxt
-        , sourceTypeNames = allValidNames
-        , sourceTypeSynonyms = validTypeDecls
-        }
-      loadError = case () of
-        _ | Just errors <- NonEmpty.nonEmpty parseErrors ->
-              Just $ ModuleParseErrors errors
-          | errorMessage : _ <- dataTypeErrors ->
-              Just $ DataTypeNameError errorMessage
-          | Just errors <- NonEmpty.nonEmpty typeDeclarationErrors ->
-              Just $ TypeDeclarationErrors errors
-          | Left failure <- classResult ->
-              Just $ ClassEnvironmentLoadFailure failure
-          | Just errors <- NonEmpty.nonEmpty bindingErrors ->
-              Just $ BindingDeclarationErrors errors
-          | Just errors <- NonEmpty.nonEmpty
-              (builtInBindingErrors ++ builtInDeconstructorErrors) ->
-              Just $ BuiltInEnvironmentErrors errors
-          | otherwise -> Nothing
-  return $ maybe (Right environment) Left loadError
+parseModules inputs = do
+  readResults <- lift $ mapM hRead inputs
+  case NonEmpty.nonEmpty $ lefts readResults of
+    Just errors -> do
+      forM_ errors $ mTell . (: []) . renderDiagnostic
+      pure $ Left $ ModuleReadErrors errors
+    Nothing -> parseLoadedModules $ rights readResults
   where
-    hRead :: (ParseMode, String) -> IO (ParseMode, String)
-    hRead (mode, s) = (,) mode <$> readFile s
+    hRead
+      :: (ParseMode, FilePath)
+      -> IO (Either Diagnostic (ParseMode, String))
+    hRead (mode, path) = fmap ((,) mode) <$> readTextFile path
+
     hParse :: (ParseMode, String) -> Either String (Module SrcSpanInfo)
     hParse (mode, content) = case parseModuleWithMode mode content of
       f@(ParseFailed _ _) -> Left $ show f
       ParseOk modul       -> Right modul
+
+    -- Each phase observes only a successful predecessor.  Errors are still
+    -- aggregated within one phase, but an invalid partial inventory is never
+    -- fed into the next extractor as an invented recovery environment.
+    parseLoadedModules
+      :: [(ParseMode, String)]
+      -> m (Either EnvironmentLoadError
+             (SourceEnvironment HsFunctionDecl))
+    parseLoadedModules rawTuples = runExceptT $ do
+      let parsedModules = map hParse rawTuples
+          parseErrors = lefts parsedModules
+      case NonEmpty.nonEmpty parseErrors of
+        Just errors -> do
+          lift $ forM_ errors $ mTell . (: [])
+          throwE $ ModuleParseErrors errors
+        Nothing -> pure ()
+      let modules = rights parsedModules
+
+      dataTypes <- case getDataTypesChecked modules of
+        Left conversionError -> do
+          let message =
+                "could not extract data-type names: " ++ conversionError
+          lift $ mTell [message]
+          throwE $ DataTypeNameError message
+        Right result -> pure result
+
+      typeDeclarationResults <- lift $ getTypeDecls dataTypes modules
+      let typeDeclarationErrors = lefts typeDeclarationResults
+      case NonEmpty.nonEmpty typeDeclarationErrors of
+        Just errors -> do
+          lift $ forM_ errors $ mTell . (: [])
+          throwE $ TypeDeclarationErrors errors
+        Nothing -> pure ()
+      let typeDeclarations = rights typeDeclarationResults
+          typeDeclarationMap = uniqueTypeDeclMap typeDeclarations
+
+      classResult <- lift
+        $ getClassEnv dataTypes typeDeclarationMap modules
+      (classEnvironment, instanceCount) <- either
+        (throwE . ClassEnvironmentLoadFailure)
+        pure
+        classResult
+
+      extracted <- lift $ mapM
+        (hExtractBinds classEnvironment dataTypes typeDeclarationMap)
+        modules
+      let (bindingLists, deconstructorLists, errorLists) = unzip3 extracted
+          declarations = concat bindingLists
+          deconstructors = concat deconstructorLists
+          bindingErrors = concat errorLists
+      case NonEmpty.nonEmpty bindingErrors of
+        Just errors -> throwE $ BindingDeclarationErrors errors
+        Nothing -> pure ()
+
+      builtInDeclarationsResult <- lift builtInDeclsM
+      builtInDeconstructorsResult <- lift builtInDeconstructorsM
+      (builtInDeclarations, builtInDeconstructors) <-
+        case (builtInDeclarationsResult, builtInDeconstructorsResult) of
+          (Right declarationsResult, Right deconstructorsResult) ->
+            pure (declarationsResult, deconstructorsResult)
+          (Left declarationFailure, Right _) ->
+            failBuiltIns
+              $ ("could not construct built-in bindings: "
+                  ++ show declarationFailure) NonEmpty.:| []
+          (Right _, Left deconstructorFailure) ->
+            failBuiltIns
+              $ ("could not construct built-in deconstructors: "
+                  ++ show deconstructorFailure) NonEmpty.:| []
+          (Left declarationFailure, Left deconstructorFailure) ->
+            failBuiltIns
+              $ ("could not construct built-in bindings: "
+                  ++ show declarationFailure) NonEmpty.:|
+                [ "could not construct built-in deconstructors: "
+                    ++ show deconstructorFailure
+                ]
+
+      let classes = sClassEnv_tclasses classEnvironment
+          instances = sClassEnv_instances classEnvironment
+          allValidNames = dataTypes ++ M.keys classes
+
+          warnUnknownTypeConstructors :: String -> [HsType] -> m ()
+          warnUnknownTypeConstructors context types = forM_
+            (S.toAscList $ S.fromList
+              $ concatMap (findInvalidNames allValidNames) types)
+            $ \unknownName -> mTell
+                [ "unknown type constructor '" ++ show unknownName
+                  ++ "' used in " ++ context
+                ]
+
+          warnBindingConstraints :: QualifiedName -> HsType -> m ()
+          warnBindingConstraints bindingName bindingType = forM_
+            (S.toAscList $ S.fromList
+              [ renderConstraintFailure bindingName constraint failure
+              | constraint <- typeConstraints bindingType
+              , Left failure <-
+                  [ validateConstraintInEnv classEnvironment
+                      (BindingConstraint bindingName) constraint
+                  ]
+              ])
+            (mTell . (: []))
+
+          renderConstraintFailure
+            :: QualifiedName
+            -> HsConstraint
+            -> ClassEnvError
+            -> String
+          renderConstraintFailure bindingName _
+              (UnknownConstraintClass _ className) =
+            "unknown constraint class '" ++ show className
+              ++ "' used in the binding " ++ show bindingName
+          renderConstraintFailure bindingName constraint failure =
+            "invalid class constraint '" ++ show constraint
+              ++ "' used in the binding " ++ show bindingName
+              ++ ": " ++ show failure
+
+          instanceTypes =
+            [ parameter
+            | indexedInstances <- M.elems instances
+            , instanceDeclaration <- indexedInstances
+            , constraint <- instance_head instanceDeclaration
+                : instance_constraints instanceDeclaration
+            , parameter <- constraint_params constraint
+            ]
+
+      lift $ do
+        -- Instance inflation can place the same source type under several
+        -- implied class heads.  Diagnose its combined constructor set once.
+        warnUnknownTypeConstructors "class instances" instanceTypes
+        forM_ (M.elems classes) $ \typeClass ->
+          warnUnknownTypeConstructors
+            ("the superclass data for " ++ show (tclass_name typeClass))
+            [ parameter
+            | constraint <- tclass_constraints typeClass
+            , parameter <- constraint_params constraint
+            ]
+        forM_ declarations $ \(bindingName, bindingType) -> do
+          warnUnknownTypeConstructors
+            ("the binding " ++ show bindingName) [bindingType]
+          -- The loader has a complete class inventory, unlike public ad-hoc
+          -- search input, so binding constraints are checked nominally here.
+          warnBindingConstraints bindingName bindingType
+        mTell ["got " ++ show (length classes) ++ " classes"]
+        mTell ["and " ++ show instanceCount ++ " instances"]
+        mTell
+          [ "(-> " ++ show (length $ concat $ M.elems instances)
+              ++ " instances after inflation)"
+          ]
+        mTell ["and " ++ show (length declarations) ++ " function decls"]
+
+      pure SourceEnvironment
+        { sourceFunctions = builtInDeclarations ++ declarations
+        , sourceDeconstructors = builtInDeconstructors ++ deconstructors
+        , sourceClasses = classEnvironment
+        , sourceTypeNames = allValidNames
+        , sourceTypeSynonyms = typeDeclarations
+        }
+
+    failBuiltIns errors = do
+      lift $ forM_ errors $ mTell . (: [])
+      throwE $ BuiltInEnvironmentErrors errors
+
     hExtractBinds :: StaticClassEnv
                   -> [QualifiedName]
                   -> TypeDeclMap
@@ -476,10 +517,50 @@ parseRatings = go . words
 
 ratingsFromFile :: String -> IO (Either Diagnostic [(QualifiedName, Penalty)])
 ratingsFromFile path = do
-  contents <- try (readFile path >>= evaluate . force)
-    :: IO (Either SomeException String)
-  return $ first (withSource path . diagnostic . show) contents
-    >>= first (\result -> result { diagnosticSource = Just path }) . parseRatings
+  contents <- readTextFile path
+  pure $ contents >>= first (withSource path) . parseRatings
+
+ratingFailureMessage :: Diagnostic -> String
+ratingFailureMessage failure =
+  "could not parse rating file: " ++ renderDiagnostic failure
+
+-- | Apply heuristic metadata once by nominal name.  Duplicate ratings are
+-- deliberately ignored rather than acquiring an accidental file-order
+-- meaning, and duplicate declarations remain fatal at shared inventory
+-- sealing after receiving their neutral defaults.
+applyRatings
+  :: [(QualifiedName, Penalty)]
+  -> SourceEnvironment HsFunctionDecl
+  -> (SourceEnvironment FunctionBinding, [String])
+applyRatings ratings environment =
+  ( environment
+      { sourceFunctions = map rateDeclaration
+          $ sourceFunctions environment
+      }
+  , lefts ratingResults
+  )
+ where
+  declarationCounts = M.fromListWith (+)
+    [ (name, 1 :: Int)
+    | (name, _) <- sourceFunctions environment
+    ]
+  ratingsByName = M.fromListWith (++)
+    [ (name, [rating])
+    | (name, rating) <- ratings
+    ]
+  ratingResults = map validateRating $ M.toAscList ratingsByName
+  effectiveRatings = M.fromList $ rights ratingResults
+
+  validateRating (name, values)
+    | M.findWithDefault 0 name declarationCounts == 0 =
+        Left $ "rating could not be applied: " ++ show name
+    | M.findWithDefault 0 name declarationCounts > 1 =
+        Left $ "duplicate function: " ++ show name
+    | [rating] <- values = Right (name, rating)
+    | otherwise = Left $ "duplicate rating: " ++ show name
+
+  rateDeclaration (name, bindingType) = declToBinding
+    (name, M.findWithDefault 0 name effectiveRatings, bindingType)
 
 
 -- TODO: add warnings for ratings not applied
@@ -507,17 +588,18 @@ environmentFromModuleAndRatings modulePath ratingPath = do
                        Nothing
                        False
   environmentResult <- parseModules [(mode, modulePath)]
-  ratingsResult <- lift $ ratingsFromFile ratingPath
-  ratings <- case ratingsResult of
-    Left e -> do
-      mTell ["could not parse rating file", show e]
-      pure []
-    Right parsedRatings -> pure parsedRatings
-  let addRating (name, bindingType) = declToBinding
-        (name, fromMaybe 0.0 $ lookup name ratings, bindingType)
-      addRatings environment = environment
-        { sourceFunctions = map addRating $ sourceFunctions environment }
-  return $ environmentResult >>= checkSourceEnvironment . addRatings
+  case environmentResult of
+    Left failure -> pure $ Left failure
+    Right environment -> do
+      ratingsResult <- lift $ ratingsFromFile ratingPath
+      ratings <- case ratingsResult of
+        Left failure -> do
+          mTell [ratingFailureMessage failure]
+          pure []
+        Right parsedRatings -> pure parsedRatings
+      let (ratedEnvironment, warnings) = applyRatings ratings environment
+      forM_ warnings $ mTell . (: [])
+      pure $ checkSourceEnvironment ratedEnvironment
 
 
 environmentFromPath :: ( ContainsType [String] w
@@ -527,44 +609,29 @@ environmentFromPath :: ( ContainsType [String] w
                          (Either EnvironmentLoadError
                            CheckedSourceEnvironment)
 environmentFromPath p = do
-  files <- lift $ getDirectoryContents p
-  -- Directory enumeration order is platform-dependent; stable ordering keeps
-  -- diagnostics and duplicate resolution reproducible.
-  let modules = ((p ++ "/")++) <$> sort (filter (".hs" `isSuffixOf`) files)
-  let ratings = ((p ++ "/")++) <$> sort (filter (".ratings" `isSuffixOf`) files)
-  environmentResult <- parseModules
-    [ (mode, m)
-    | m <- modules
-    , let mode = haskellSrcExtsParseMode m]
-  rResult <- lift $ ratingsFromFile `mapM` ratings
-  let rs = [x | Right xs <- rResult, x <- xs]
-  sequence_ $ do
-    Left err <- rResult
-    return $ mTell ["could not parse rating file", show err]
-  rs' <- fmap join $ sequence $ do
-    (rName, rVal) <- rs
-    return $ do
-      dIds <- fmap join $ sequence $ do
-        environment <- either (const []) pure environmentResult
-        (dName, _) <- sourceFunctions environment
-        return $ do
-          return $ do
-            guard (rName == dName)
-            return (dName, rVal)
-      case dIds of
-        [] -> do
-          mTell ["rating could not be applied: " ++ show rName]
-          return []
-        [x] ->
-          return [x]
-        _ -> do
-          mTell ["duplicate function: " ++ show rName]
-          return []
-  let f (a,b) = declToBinding
-              $ ( a
-                , fromMaybe 0.0 (lookup a rs')
-                , b
-                )
-      addRatings environment = environment
-        { sourceFunctions = map f $ sourceFunctions environment }
-  return $ environmentResult >>= checkSourceEnvironment . addRatings
+  directoryResult <- lift $ captureIO p
+    $ listDirectory p >>= evaluate . force
+  case directoryResult of
+    Left failure -> pure $ Left $ EnvironmentDirectoryReadError failure
+    Right files -> do
+      -- Enumeration order is platform-dependent; sorting stabilizes module
+      -- diagnostics and rating conflict reports across filesystems.
+      let modules = map (p </>)
+            $ sort $ filter (".hs" `isSuffixOf`) files
+          ratingPaths = map (p </>)
+            $ sort $ filter (".ratings" `isSuffixOf`) files
+      environmentResult <- parseModules
+        [ (haskellSrcExtsParseMode modulePath, modulePath)
+        | modulePath <- modules
+        ]
+      case environmentResult of
+        Left failure -> pure $ Left failure
+        Right environment -> do
+          ratingResults <- lift $ mapM ratingsFromFile ratingPaths
+          forM_ (lefts ratingResults)
+            $ mTell . (: []) . ratingFailureMessage
+          let ratings = concat $ rights ratingResults
+              (ratedEnvironment, warnings) =
+                applyRatings ratings environment
+          forM_ warnings $ mTell . (: [])
+          pure $ checkSourceEnvironment ratedEnvironment

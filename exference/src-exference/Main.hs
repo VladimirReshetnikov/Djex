@@ -1,4 +1,3 @@
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
@@ -34,17 +33,9 @@ import Control.Monad.Writer.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Language.Haskell.Exts.Parser ( parseModuleWithMode
-                                    , ParseResult (..)
-                                    , ParseMode (..) )
-import Language.Haskell.Exts.Extension ( Language (..)
-                                       , Extension (..)
-                                       , KnownExtension (..) )
 import Control.Monad.Trans.MultiRWS
 import Control.Monad.Trans.Except
 
-
-import MainConfig
 
 import Paths_exference
 
@@ -72,6 +63,23 @@ data Flag = Verbose Int
           | Constraints
           | AllowFix
   deriving (Show, Eq)
+
+cliHeuristicsConfig :: ExferenceHeuristicsConfig
+cliHeuristicsConfig = ExferenceHeuristicsConfig
+  { heuristics_goalVar                = 0.8
+  , heuristics_goalCons               = 0.7
+  , heuristics_goalArrow              = 4.3
+  , heuristics_goalApp                = 1.9
+  , heuristics_stepProvidedGood       = 0.22
+  , heuristics_stepProvidedBad        = 5.0
+  , heuristics_stepEnvGood            = 6.0
+  , heuristics_stepEnvBad             = 22.0
+  , heuristics_tempUnusedVarPenalty   = 1.1
+  , heuristics_tempMultiVarUsePenalty = 6.7
+  , heuristics_functionGoalTransform  = 0.1
+  , heuristics_unusedVar              = 20.0
+  , heuristics_solutionLength         = 0.0153
+  }
 
 options :: [OptDescr Flag]
 options =
@@ -124,7 +132,6 @@ main = do
      | Help    `elem` flags -> putStrLn fullUsageInfo
      | otherwise -> runMultiRWSTNil_ $ do
         when (Version `elem` flags || verbosity>0) $ lift printVersion
-        -- ((eSignatures, StaticClassEnv clss insts), messages) <- runWriter <$> parseExternal testBaseInput'
         let envDir = fromMaybe defaultEnvPath $ listToMaybe [d | EnvDir d <- flags]
         when (verbosity>0) $ lift $ do
           putStrLn $ "[Environment]"
@@ -200,8 +207,8 @@ main = do
                       , input_maxQueueSize = Just 8192
                       , input_maxDepth = Nothing
                       , input_heuristicsConfig = if Shortest `elem` flags
-                          then testHeuristicsConfig
-                          else testHeuristicsConfig
+                          then cliHeuristicsConfig
+                          else cliHeuristicsConfig
                             { heuristics_solutionLength = 0.0 }
                       }
                 when (verbosity>0) $ lift $ do
@@ -259,19 +266,6 @@ main = do
                                     256 chunks
                           lift $ printSelection qualification tVarIndex
                             selection
-
-        -- printChecks     testHeuristicsConfig env
-        -- printStatistics testHeuristicsConfig env
-
-        -- print $ compileDict testDictRatings $ eSignatures
-        -- print $ parseConstrainedType defaultClassEnv $ "(Show a) => [a] -> String"
-        -- print $ inflateHsConstraints a b
-        {-
-        let t :: HsType
-            t = read "m a->( ( a->m b)->( m b))"
-        print $ t
-        -}
-
 printSelection
   :: Int
   -> TypeVarIndex
@@ -360,37 +354,3 @@ containsForall (TypeArrow parameter result) =
 containsForall (TypeApp function argument) =
   containsForall function || containsForall argument
 containsForall _ = False
-
-_tryParse :: Bool -> String -> IO ()
-_tryParse shouldBangPattern s = do
-  content <- readFile $ "/home/lsp/asd/prog/haskell/exference/BaseContext/preprocessed/"++s++".hs"
-  let exts1 = (if shouldBangPattern then (BangPatterns:) else id)
-              [ UnboxedTuples
-              , TypeOperators
-              , MagicHash
-              , NPlusKPatterns
-              , ExplicitForAll
-              , ExistentialQuantification
-              , TypeFamilies
-              , PolyKinds
-              , DataKinds ]
-      exts2 = map EnableExtension exts1
-  case parseModuleWithMode (ParseMode (s++".hs")
-                                      Haskell2010
-                                      exts2
-                                      False
-                                      False
-                                      Nothing
-                                      False
-                           )
-                           content of
-    f@(ParseFailed _ _) -> do
-      print f
-    ParseOk _modul -> do
-      putStrLn s
-      --mapM_ putStrLn $ map (either id show)
-      --               $ getBindings defaultClassEnv mod
-      --mapM_ putStrLn $ map (either id show)
-      --               $ getDataConss mod
-      --mapM_ putStrLn $ map (either id show)
-      --               $ getClassMethods defaultClassEnv mod

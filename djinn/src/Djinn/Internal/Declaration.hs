@@ -154,6 +154,7 @@ fromSynthesisDeclaration declaration = do
 
   sharedSymbol name = case
       (SharedName.nameSpecial name, SharedName.nameSpelling name) of
+    (Just (SharedName.TupleConstructor SharedName.Boxed 0), _) -> Right "()"
     (Nothing, Just spelling) -> Right $ maybe spelling
       (\namespace -> SharedName.renderModuleName namespace ++ "." ++ spelling)
       $ SharedName.nameModule name

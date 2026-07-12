@@ -412,6 +412,9 @@ bodies, shared foralls, and unboxed tuples instead of conflating those layers.
 `toSynthesisDeclaration` and `fromSynthesisDeclaration` likewise round-trip
 Djinn's synonyms, data/abstract types, classes, and assumptions while rejecting
 shared superclass and instance semantics that Djinn does not implement.
+The opaque Djinn `Environment` itself now round-trips through
+`Language.Haskell.Synthesis.Environment`; reverse lowering reruns Djinn's
+stricter kind, dependency, recursion, and method validation transactionally.
 Successful `QueryReport`s also expose `reportGeneratedClauses`, the validated
 shared AST from which the legacy rendered strings are derived.
 The core `Djinn.Internal.*` modules listed above remain

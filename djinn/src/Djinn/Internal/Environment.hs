@@ -3,20 +3,63 @@
 -- declaration-shape checks shared by the CLI and the library facade.
 --
 module Djinn.Internal.Environment (
-    TypeDefinition, Axiom, ClassDefinition,
+    TypeDefinition, Axiom, ClassDefinition, Environment(..),
+    SynthesisEnvironment, SynthesisEnvironmentError(..),
+    toSynthesisEnvironment,
     validateEnvironment,
     replace, requireDistinct, requireUnusedName,
     checkConstructors
     ) where
 
 import Data.List (nub)
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 
+import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck (htCheckEnv, htCheckType, htInferClassKinds)
 import Djinn.Internal.HTypes
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
 type Axiom = (HSymbol, HType)
 type ClassDefinition = (HSymbol, ([(HSymbol, HKind)], [Axiom]))
+
+data Environment = Environment {
+    envTypes :: [TypeDefinition],
+    envFunctions :: [Axiom],
+    envClasses :: [ClassDefinition]
+    }
+    deriving (Eq, Show)
+
+type SynthesisEnvironment =
+    SharedEnvironment.Environment HSymbol Int ()
+
+data SynthesisEnvironmentError
+    = SynthesisEnvironmentDeclarationError SynthesisDeclarationError
+    | InvalidSynthesisEnvironment
+        (SharedEnvironment.EnvironmentError HSymbol)
+    | DjinnEnvironmentValidationError String
+    deriving (Eq, Show)
+
+toSynthesisEnvironment
+    :: Environment
+    -> Either SynthesisEnvironmentError SynthesisEnvironment
+toSynthesisEnvironment environment = do
+    declarations <- mapM convertedDeclaration $
+        map typeDeclaration (envTypes environment) ++
+        [Function name functionType |
+            (name, functionType) <- envFunctions environment] ++
+        [ClassDecl name (map fst parameters) methods |
+            (name, (parameters, methods)) <- envClasses environment]
+    either (Left . InvalidSynthesisEnvironment) Right $
+        SharedEnvironment.mkEnvironment declarations
+  where
+    typeDeclaration (name, (parameters, body, kind)) = case body of
+        HTUnion constructors -> DataType name parameters constructors
+        HTAbstract _ _ -> AbstractType name kind
+        _ -> TypeSynonym name parameters body
+
+    convertedDeclaration = either
+        (Left . SynthesisEnvironmentDeclarationError) Right .
+        toSynthesisDeclaration
 
 -- Rebuild inferred kinds first, then check every declaration that depends
 -- on them.  Class parameter kinds are re-inferred against the rebuilt type

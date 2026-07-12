@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
+import qualified Data.Map.Strict as Map
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
@@ -8,15 +9,18 @@ import Text.Read (readMaybe)
 
 import Djinn.Core (
     Context, Declaration(..), QueryOutcome(..),
-    SynthesisDeclarationError(..), SynthesisTypeError(..),
+    SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
+    SynthesisTypeError(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, inhabit,
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
-    fromSynthesisDeclaration, fromSynthesisKind, fromSynthesisType,
+    fromSynthesisDeclaration, fromSynthesisEnvironment,
+    fromSynthesisKind, fromSynthesisType,
     mkContext, parseHKind, parseHType, removeDeclaration,
     reportCompletion, reportGeneratedClauses, reportOutcome,
     resolveContext, resolveInstanceMethods,
-    standardEnvironment, toSynthesisDeclaration, toSynthesisKind,
+    standardEnvironment, toSynthesisDeclaration, toSynthesisEnvironment,
+    toSynthesisKind,
     toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
@@ -32,6 +36,7 @@ import Language.Haskell.Synthesis.Constraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -46,6 +51,7 @@ tests =
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
     , ("round-trip shared declarations", testSharedDeclarationAdapter)
+    , ("round-trip shared environments", testSharedEnvironmentAdapter)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
@@ -327,6 +333,32 @@ testSharedDeclarationAdapter = do
             $ fromSynthesisDeclaration shared
         assertEqual "Djinn declaration round-trip changed its compatibility view"
             (show declaration) (show lowered)
+
+testSharedEnvironmentAdapter :: IO ()
+testSharedEnvironmentAdapter = do
+    shared <- either (fail . show) pure
+        $ toSynthesisEnvironment standardEnvironment
+    assertBool "shared standard environment lost unit"
+        $ Map.member (sharedName "()")
+        $ SharedEnvironment.typeDeclarationMap shared
+    assertBool "shared standard environment lost Eq"
+        $ Map.member (sharedName "Eq")
+        $ SharedEnvironment.classDeclarationMap shared
+    lowered <- either (fail . show) pure $ fromSynthesisEnvironment shared
+    assertEqual "type inventory changed through the shared environment"
+        (sort $ map fst $ typeDeclarations standardEnvironment)
+        (sort $ map fst $ typeDeclarations lowered)
+    assertEqual "class inventory changed through the shared environment"
+        (sort $ map fst $ classDeclarations standardEnvironment)
+        (sort $ map fst $ classDeclarations lowered)
+    let sharedInstance = SharedDeclaration.InstanceDeclaration () ["a"] []
+            $ Constraint (sharedName "Eq") [SharedType.TypeVariable "a"]
+    instanceEnvironment <- either (fail . show) pure
+        $ SharedEnvironment.mkEnvironment [sharedInstance]
+    assertEqual "Djinn does not silently install shared instances"
+        (Left $ SynthesisEnvironmentDeclarationError
+            InstanceDeclarationUnsupported)
+        (fromSynthesisEnvironment instanceEnvironment)
 
 -- Type synonyms are transparent even when they occur below an opaque type
 -- constructor.  The whole opaque application remains one proposition, but

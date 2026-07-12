@@ -113,7 +113,7 @@ validateDeclaration declaration = case declaration of
     mapM_ validateConstraint prerequisites
     validateConstraint headConstraint
  where
-  validateTypeName name = unless (isOrdinaryConstructor name) $
+  validateTypeName name = unless (isTypeConstructorName name) $
     Left $ InvalidDeclaredTypeName name
 
   validateClassName name = unless (isOrdinaryConstructor name) $
@@ -142,6 +142,11 @@ validateDeclaration declaration = case declaration of
 isOrdinaryConstructor :: Name -> Bool
 isOrdinaryConstructor name =
   nameLexicalClass name == ConstructorLike && nameSpecial name == Nothing
+
+isTypeConstructorName :: Name -> Bool
+isTypeConstructorName name =
+  nameLexicalClass name == ConstructorLike &&
+    nameSpecial name /= Just ConsConstructor
 
 isConstructorName :: Name -> Bool
 isConstructorName name =

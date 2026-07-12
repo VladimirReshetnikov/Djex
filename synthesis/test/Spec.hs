@@ -102,6 +102,14 @@ environmentTests = testGroup "environments"
             ]
           environment = right $ Environment.mkEnvironment declarations
       Map.size (Environment.typeDeclarationMap environment) @?= 2
+  , testCase "inventories can represent trusted intrinsic types" $ do
+      let unitName = right $ tupleName Boxed 0
+          unitDeclaration :: Declaration.Declaration String Int ()
+          unitDeclaration = Declaration.DataTypeDeclaration () unitName []
+            [Declaration.DataConstructor () unitName []]
+          environment = right $ Environment.mkEnvironment [unitDeclaration]
+      Map.member unitName (Environment.typeDeclarationMap environment) @?= True
+      Map.member unitName (Environment.dataConstructorMap environment) @?= True
   , testCase "retain the failing declaration index" $ do
       let invalidName = right $ mkIdentifier "value"
           invalid :: Declaration.Declaration String Int ()

@@ -23,6 +23,8 @@ module Djinn.Core (
     toSynthesisDeclaration, fromSynthesisDeclaration,
     -- * Environments
     Environment, emptyEnvironment, standardEnvironment,
+    SynthesisEnvironment, SynthesisEnvironmentError(..),
+    toSynthesisEnvironment, fromSynthesisEnvironment,
     declare, removeDeclaration,
     typeDeclarations, functionDeclarations, classDeclarations,
     -- * Queries
@@ -41,6 +43,7 @@ import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import Djinn.Internal.Environment
@@ -89,17 +92,6 @@ parseWith parser what input =
 ------------------------------------------------------------------
 -- Declarations and environments
 
--- | A validated set of declarations.  Values of this type can only be
--- produced by 'emptyEnvironment', 'standardEnvironment', 'declare', and
--- 'removeDeclaration', so every stored declaration is well-kinded, kinds
--- are never stale, and the declaration graph is acyclic.
-data Environment = Environment {
-    envTypes :: [TypeDefinition],
-    envFunctions :: [Axiom],
-    envClasses :: [ClassDefinition]
-    }
-    deriving (Show)
-
 -- | Stored type declarations: @(name, (parameters, body, kind))@.
 typeDeclarations :: Environment -> [(HSymbol, ([HSymbol], HType, HKind))]
 typeDeclarations = envTypes
@@ -116,6 +108,46 @@ classDeclarations = envClasses
 -- | No declarations at all: no types, no functions, no classes.
 emptyEnvironment :: Environment
 emptyEnvironment = Environment [] [] []
+
+-- | Lower a shared structural environment through Djinn's stricter lexical,
+-- dependency, and kind validation. Unsupported declarations fail before any
+-- mutation is committed.
+fromSynthesisEnvironment
+    :: SynthesisEnvironment
+    -> Either SynthesisEnvironmentError Environment
+fromSynthesisEnvironment shared = do
+    declarations <- mapM lower $
+        SharedEnvironment.environmentDeclarations shared
+    (rawTypes, functions, rawClasses) <-
+        foldM collect ([], [], []) declarations
+    (types, classes) <- either
+        (Left . DjinnEnvironmentValidationError) Right $
+        validateEnvironment rawTypes functions rawClasses
+    return Environment {
+        envTypes = types,
+        envFunctions = functions,
+        envClasses = classes
+        }
+  where
+    lower = either (Left . SynthesisEnvironmentDeclarationError) Right .
+        fromSynthesisDeclaration
+    collect (types, functions, classes) declaration =
+        case declaration of
+            TypeSynonym name parameters body ->
+                return ((name, (parameters, body, KStar)) : types,
+                    functions, classes)
+            DataType name parameters constructors ->
+                return ((name, (parameters, HTUnion constructors, KStar)) : types,
+                    functions, classes)
+            AbstractType name kind ->
+                return ((name, ([], HTAbstract name kind, kind)) : types,
+                    functions, classes)
+            ClassDecl name parameters methods ->
+                return (types, functions,
+                    (name, ([(parameter, KStar) | parameter <- parameters],
+                        methods)) : classes)
+            Function name functionType ->
+                return (types, (name, functionType) : functions, classes)
 
 -- | The environment the interactive Djinn starts with: @()@, @Bool@,
 -- @Either@, @Maybe@, @Void@, @type Not x = x -> Void@, and small @Eq@

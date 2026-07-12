@@ -8,18 +8,21 @@
 module Language.Haskell.Synthesis.KindInference
   ( GroundKind
   , KindAssumptions (..)
+  , KindInventoryPolicy (..)
   , TypeKindDeclaration (..)
   , KindInferenceError (..)
   , emptyKindAssumptions
   , checkTypesKinds
   , inferSharedVariableKinds
   , inferAcyclicTypeConstructorKinds
+  , inferDeclarationKinds
+  , inferDeclarationKindsWith
   ) where
 
 import Control.Monad (foldM, unless, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
-  ( StateT
+  ( StateT (..)
   , evalStateT
   , get
   , modify'
@@ -33,6 +36,7 @@ import Data.Void (Void, absurd)
 import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint
+import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Kind
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Type
@@ -41,12 +45,19 @@ type GroundKind = Kind Void
 
 data KindAssumptions = KindAssumptions
   { typeConstructorKinds :: Map Name GroundKind
-  , classParameterKinds :: Map Name [GroundKind]
+  -- | 'Nothing' denotes a generalized kind parameter, as used by modern
+  -- poly-kinded classes such as @Typeable@.
+  , classParameterKinds :: Map Name [Maybe GroundKind]
   }
   deriving (Eq, Show, Generic)
 
 emptyKindAssumptions :: KindAssumptions
 emptyKindAssumptions = KindAssumptions Map.empty Map.empty
+
+data KindInventoryPolicy
+  = ClosedKindInventory
+  | OpenKindInventory
+  deriving (Eq, Ord, Show, Generic)
 
 -- | A declaration reduced to the information needed for kind inference.
 -- Every inferred body must be a proper type. A synonym contributes its one
@@ -69,6 +80,7 @@ data KindInferenceError variable
   | KindMismatch GroundKind GroundKind
   | InfiniteKind
   | RecursiveTypeDeclarations [Name]
+  | DeclarationKindError Name (KindInferenceError variable)
   deriving (Eq, Ord, Show, Generic)
 
 data InferenceKind
@@ -88,6 +100,11 @@ type Inference variable a =
 initialState :: InferenceState
 initialState = InferenceState 0 IntMap.empty
 
+data InferenceAssumptions = InferenceAssumptions
+  { inferredTypeConstructorKinds :: Map Name InferenceKind
+  , inferredClassParameterKinds :: Map Name [Maybe InferenceKind]
+  }
+
 -- | Check several obligations in one inference scope. Free variables with the
 -- same identity therefore receive one kind across every supplied type.
 checkTypesKinds
@@ -100,7 +117,8 @@ checkTypesKinds assumptions obligations = do
   flip evalStateT initialState $ do
     variables <- allocateVariables $ Set.toAscList $ Set.unions
       [freeVariables typeExpression | (_, typeExpression) <- obligations]
-    mapM_ (checkObligation assumptions variables) obligations
+    mapM_ (checkObligation (toInferenceAssumptions assumptions) variables)
+      obligations
 
 -- | Infer kinds for variables shared by several independently quantified
 -- types. Variables outside the supplied shared set are fresh in each type;
@@ -119,8 +137,325 @@ inferSharedVariableKinds assumptions sharedVariables types = do
       Just duplicate -> lift $ Left $ DuplicateSharedVariable duplicate
       Nothing -> pure ()
     shared <- allocateVariables sharedVariables
-    mapM_ (checkTypeWithFreshLocals assumptions shared) types
+    mapM_ (checkTypeWithFreshLocals
+      (toInferenceAssumptions assumptions) shared) types
     mapM (groundBinding shared) sharedVariables
+
+-- | Infer and check every kind obligation in a sealed source inventory.
+-- Datatypes are allocated before their fields are checked, so recursive and
+-- mutually recursive datatype groups are valid. Type synonyms are also
+-- allocated up front for joint kind inference, but cycles consisting only of
+-- synonym expansion remain invalid.
+--
+-- The kind-variable parameter is 'Void' because every fixed kind produced by
+-- this operation is ground. Generalized class parameters remain explicit as
+-- 'Nothing'. Frontends with explicit kind syntax must resolve it before
+-- crossing this boundary; frontends without such syntax use 'Nothing' on
+-- their 'TypeParameter's.
+inferDeclarationKinds
+  :: Ord variable
+  => [Declaration variable Void annotation]
+  -> Either (KindInferenceError variable) KindAssumptions
+inferDeclarationKinds = inferDeclarationKindsWith ClosedKindInventory
+
+inferDeclarationKindsWith
+  :: Ord variable
+  => KindInventoryPolicy
+  -> [Declaration variable Void annotation]
+  -> Either (KindInferenceError variable) KindAssumptions
+inferDeclarationKindsWith policy declarations = do
+  mapM_ validateDeclarationTypes declarations
+  rejectRecursiveSynonyms declarations
+  externalClassKinds <- collectExternalClassKinds policy declarations
+  flip evalStateT initialState $ do
+    externalTypeKinds <- allocateExternalTypeKinds policy declarations
+    (typeKinds, typeParameters) <-
+      allocateTypeDeclarations externalTypeKinds declarations
+    (classKinds, classParameters) <- allocateClassDeclarations declarations
+    let preliminary = InferenceAssumptions typeKinds
+          $ (map Just <$> classKinds) `Map.union` externalClassKinds
+    mapM_ (checkDefiningDeclaration preliminary
+      typeParameters classParameters) declarations
+    generalizedClasses <- traverse (mapM generalizeKind) classKinds
+    let allClassKinds = generalizedClasses `Map.union` externalClassKinds
+        assumptions = InferenceAssumptions typeKinds allClassKinds
+    mapM_ (checkOperationalDeclaration assumptions
+      typeParameters classParameters) declarations
+    KindAssumptions
+      <$> traverse ground typeKinds
+      <*> traverse (mapM (traverse ground)) allClassKinds
+
+allocateExternalTypeKinds
+  :: KindInventoryPolicy
+  -> [Declaration variable Void annotation]
+  -> Inference variable (Map Name InferenceKind)
+allocateExternalTypeKinds ClosedKindInventory _ = pure Map.empty
+allocateExternalTypeKinds OpenKindInventory declarations = do
+  let declared = Set.fromList
+        [ name
+        | declaration <- declarations
+        , name <- case declaration of
+            TypeSynonymDeclaration _ typeName _ _ -> [typeName]
+            DataTypeDeclaration _ typeName _ _ -> [typeName]
+            AbstractTypeDeclaration _ typeName _ -> [typeName]
+            _ -> []
+        ]
+      referenced = Set.unions
+        $ map (Set.unions . map typeConstructors . declarationTypes)
+        declarations
+      external = Set.toAscList $ Set.filter
+        ((== Nothing) . intrinsicKind)
+        $ referenced `Set.difference` declared
+  kinds <- mapM (const freshKind) external
+  pure $ Map.fromAscList $ zip external kinds
+
+collectExternalClassKinds
+  :: KindInventoryPolicy
+  -> [Declaration variable Void annotation]
+  -> Either (KindInferenceError variable) (Map Name [Maybe InferenceKind])
+collectExternalClassKinds ClosedKindInventory _ = Right Map.empty
+collectExternalClassKinds OpenKindInventory declarations = do
+  arities <- foldM insertArity Map.empty external
+  pure $ replicatePolymorphic <$> arities
+ where
+  declared = Set.fromList
+    [ name
+    | ClassDeclaration _ name _ _ _ <- declarations
+    ]
+  external = filter ((`Set.notMember` declared) . constraintClass)
+    $ concatMap declarationConstraints declarations
+  insertArity arities constraint =
+    let name = constraintClass constraint
+        actual = length $ constraintArguments constraint
+    in case Map.lookup name arities of
+      Nothing -> Right $ Map.insert name actual arities
+      Just expected
+        | expected == actual -> Right arities
+        | otherwise -> Left $ ClassArityMismatch name expected actual
+  replicatePolymorphic arity = replicate arity Nothing
+
+declarationConstraints
+  :: Declaration variable kindVariable annotation
+  -> [Constraint (Type variable)]
+declarationConstraints declaration = direct ++
+    concatMap typeConstraints (declarationTypes declaration)
+ where
+  direct = case declaration of
+    ClassDeclaration _ _ _ superclasses _ -> superclasses
+    InstanceDeclaration _ _ prerequisites headConstraint ->
+      headConstraint : prerequisites
+    _ -> []
+
+typeConstraints :: Type variable -> [Constraint (Type variable)]
+typeConstraints typeExpression = case typeExpression of
+  TypeVariable{} -> []
+  TypeConstructor{} -> []
+  TypeApplication function argument ->
+    typeConstraints function ++ typeConstraints argument
+  FunctionType parameter result ->
+    typeConstraints parameter ++ typeConstraints result
+  TupleType _ elements -> concatMap typeConstraints elements
+  ForallType _ constraints body -> constraints
+    ++ concatMap (concatMap typeConstraints . constraintArguments) constraints
+    ++ typeConstraints body
+
+generalizeKind :: InferenceKind -> Inference variable (Maybe InferenceKind)
+generalizeKind kind = do
+  resolved <- follow kind
+  pure $ case resolved of
+    InferenceVariable _ -> Nothing
+    fixed -> Just fixed
+
+checkDefiningDeclaration
+  :: Ord variable
+  => InferenceAssumptions
+  -> Map Name (Map variable InferenceKind)
+  -> Map Name (Map variable InferenceKind)
+  -> Declaration variable Void annotation
+  -> Inference variable ()
+checkDefiningDeclaration assumptions typeParameters classParameters
+    declaration = case declaration of
+  ValueDeclaration{} -> pure ()
+  InstanceDeclaration{} -> pure ()
+  _ -> checkWithContext assumptions typeParameters classParameters declaration
+
+checkOperationalDeclaration
+  :: Ord variable
+  => InferenceAssumptions
+  -> Map Name (Map variable InferenceKind)
+  -> Map Name (Map variable InferenceKind)
+  -> Declaration variable Void annotation
+  -> Inference variable ()
+checkOperationalDeclaration assumptions typeParameters classParameters
+    declaration = case declaration of
+  ValueDeclaration{} ->
+    checkWithContext assumptions typeParameters classParameters declaration
+  InstanceDeclaration{} ->
+    checkWithContext assumptions typeParameters classParameters declaration
+  _ -> pure ()
+
+checkWithContext
+  :: Ord variable
+  => InferenceAssumptions
+  -> Map Name (Map variable InferenceKind)
+  -> Map Name (Map variable InferenceKind)
+  -> Declaration variable Void annotation
+  -> Inference variable ()
+checkWithContext assumptions typeParameters classParameters declaration =
+  StateT $ \state -> case runStateT
+      (checkDeclaration assumptions typeParameters classParameters declaration)
+      state of
+    Left failure -> Left $ DeclarationKindError
+      (declarationContext declaration) failure
+    Right result -> Right result
+
+declarationContext
+  :: Declaration variable kindVariable annotation
+  -> Name
+declarationContext declaration = case declaration of
+  TypeSynonymDeclaration _ name _ _ -> name
+  DataTypeDeclaration _ name _ _ -> name
+  AbstractTypeDeclaration _ name _ -> name
+  ValueDeclaration signature -> valueName signature
+  ClassDeclaration _ name _ _ _ -> name
+  InstanceDeclaration _ _ _ headConstraint -> constraintClass headConstraint
+
+validateDeclarationTypes
+  :: Ord variable
+  => Declaration variable Void annotation
+  -> Either (KindInferenceError variable) ()
+validateDeclarationTypes declaration = mapM_ validateInferenceType
+  $ declarationTypes declaration
+
+declarationTypes
+  :: Declaration variable kindVariable annotation
+  -> [Type variable]
+declarationTypes declaration = case declaration of
+  TypeSynonymDeclaration _ _ _ body -> [body]
+  DataTypeDeclaration _ _ _ constructors ->
+    concatMap constructorFields constructors
+  AbstractTypeDeclaration{} -> []
+  ValueDeclaration signature -> [valueType signature]
+  ClassDeclaration _ _ _ superclasses methods ->
+    concatMap constraintArguments superclasses ++ map valueType methods
+  InstanceDeclaration _ _ prerequisites headConstraint ->
+    concatMap constraintArguments $ headConstraint : prerequisites
+
+rejectRecursiveSynonyms
+  :: [Declaration variable Void annotation]
+  -> Either (KindInferenceError variable) ()
+rejectRecursiveSynonyms declarations = case
+    [ map synonymName cycleDeclarations
+    | CyclicSCC cycleDeclarations <- stronglyConnComp synonymNodes
+    ] of
+  cycleNames : _ -> Left $ RecursiveTypeDeclarations cycleNames
+  [] -> Right ()
+ where
+  synonyms = Map.fromList
+    [ (name, body)
+    | TypeSynonymDeclaration _ name _ body <- declarations
+    ]
+  synonymNodes =
+    [ ((name, body), name,
+        Set.toAscList $ typeConstructors body `Set.intersection`
+          Map.keysSet synonyms)
+    | (name, body) <- Map.toAscList synonyms
+    ]
+  synonymName = fst
+
+allocateTypeDeclarations
+  :: Ord variable
+  => Map Name InferenceKind
+  -> [Declaration variable Void annotation]
+  -> Inference variable
+      (Map Name InferenceKind, Map Name (Map variable InferenceKind))
+allocateTypeDeclarations initial = foldM allocate (initial, Map.empty)
+ where
+  allocate (kinds, parametersByName) declaration = case declaration of
+    TypeSynonymDeclaration _ name parameters _ ->
+      allocateInferred name parameters kinds parametersByName
+    DataTypeDeclaration _ name parameters _ ->
+      allocateInferred name parameters kinds parametersByName
+    AbstractTypeDeclaration _ name kind -> pure
+      (Map.insert name (fromGroundKind kind) kinds, parametersByName)
+    _ -> pure (kinds, parametersByName)
+
+  allocateInferred name parameters kinds parametersByName = do
+    bindings <- allocateParameterKinds parameters
+    let constructorKind = foldr InferenceFunction InferenceProper
+          [ bindings Map.! parameterVariable parameter
+          | parameter <- parameters
+          ]
+    pure
+      ( Map.insert name constructorKind kinds
+      , Map.insert name bindings parametersByName
+      )
+
+allocateClassDeclarations
+  :: Ord variable
+  => [Declaration variable Void annotation]
+  -> Inference variable
+      (Map Name [InferenceKind], Map Name (Map variable InferenceKind))
+allocateClassDeclarations = foldM allocate (Map.empty, Map.empty)
+ where
+  allocate (kinds, parametersByName) declaration = case declaration of
+    ClassDeclaration _ name parameters _ _ -> do
+      bindings <- allocateParameterKinds parameters
+      pure
+        ( Map.insert name
+            [ bindings Map.! parameterVariable parameter
+            | parameter <- parameters
+            ] kinds
+        , Map.insert name bindings parametersByName
+        )
+    _ -> pure (kinds, parametersByName)
+
+allocateParameterKinds
+  :: Ord variable
+  => [TypeParameter variable Void]
+  -> Inference variable (Map variable InferenceKind)
+allocateParameterKinds = foldM allocate Map.empty
+ where
+  allocate bindings parameter = do
+    kind <- case parameterKind parameter of
+      Nothing -> freshKind
+      Just declared -> pure $ fromGroundKind declared
+    pure $ Map.insert (parameterVariable parameter) kind bindings
+
+checkDeclaration
+  :: Ord variable
+  => InferenceAssumptions
+  -> Map Name (Map variable InferenceKind)
+  -> Map Name (Map variable InferenceKind)
+  -> Declaration variable Void annotation
+  -> Inference variable ()
+checkDeclaration assumptions typeParameters classParameters declaration =
+  case declaration of
+    TypeSynonymDeclaration _ name _ body ->
+      checkProperWith (parameters typeParameters name) body
+    DataTypeDeclaration _ name _ constructors -> mapM_
+      (checkProperWith (parameters typeParameters name))
+      (concatMap constructorFields constructors)
+    AbstractTypeDeclaration{} -> pure ()
+    ValueDeclaration signature -> checkWithFresh Map.empty
+      $ valueType signature
+    ClassDeclaration _ name _ superclasses methods -> do
+      let shared = parameters classParameters name
+      mapM_ (checkConstraint assumptions shared) superclasses
+      mapM_ (checkWithFresh shared . valueType) methods
+    InstanceDeclaration _ variables prerequisites headConstraint -> do
+      bindings <- allocateVariables variables
+      mapM_ (checkConstraint assumptions bindings)
+        $ headConstraint : prerequisites
+ where
+  parameters table name = Map.findWithDefault Map.empty name table
+
+  checkProperWith variables typeExpression = do
+    actual <- inferType assumptions variables typeExpression
+    unify actual InferenceProper
+
+  checkWithFresh shared typeExpression =
+    checkTypeWithFreshLocals assumptions shared typeExpression
 
 validateInferenceType
   :: Ord variable
@@ -173,7 +508,7 @@ declarationDependencies declaration = case declaration of
 
 checkObligation
   :: Ord variable
-  => KindAssumptions
+  => InferenceAssumptions
   -> Map variable InferenceKind
   -> (GroundKind, Type variable)
   -> Inference variable ()
@@ -183,7 +518,7 @@ checkObligation assumptions variables (expected, typeExpression) = do
 
 checkTypeWithFreshLocals
   :: Ord variable
-  => KindAssumptions
+  => InferenceAssumptions
   -> Map variable InferenceKind
   -> Type variable
   -> Inference variable ()
@@ -197,7 +532,7 @@ checkTypeWithFreshLocals assumptions shared typeExpression = do
 
 inferType
   :: Ord variable
-  => KindAssumptions
+  => InferenceAssumptions
   -> Map variable InferenceKind
   -> Type variable
   -> Inference variable InferenceKind
@@ -207,8 +542,9 @@ inferType assumptions variables typeExpression = case typeExpression of
     Nothing -> lift $ Left $ UnknownTypeVariable variable
   TypeConstructor name -> case intrinsicKind name of
     Just kind -> pure $ fromGroundKind kind
-    Nothing -> case Map.lookup name $ typeConstructorKinds assumptions of
-      Just kind -> pure $ fromGroundKind kind
+    Nothing -> case Map.lookup name
+        $ inferredTypeConstructorKinds assumptions of
+      Just kind -> pure kind
       Nothing -> lift $ Left $ UnknownTypeConstructor name
   TypeApplication function argument -> do
     functionKind <- inferType assumptions variables function
@@ -235,13 +571,13 @@ inferType assumptions variables typeExpression = case typeExpression of
 
 checkConstraint
   :: Ord variable
-  => KindAssumptions
+  => InferenceAssumptions
   -> Map variable InferenceKind
   -> Constraint (Type variable)
   -> Inference variable ()
 checkConstraint assumptions variables constraint = do
   parameterKinds <- case Map.lookup (constraintClass constraint)
-      (classParameterKinds assumptions) of
+      (inferredClassParameterKinds assumptions) of
     Just kinds -> pure kinds
     Nothing -> lift $ Left $ UnknownClass $ constraintClass constraint
   let arguments = constraintArguments constraint
@@ -252,7 +588,7 @@ checkConstraint assumptions variables constraint = do
  where
   checkArgument expected argument = do
     actual <- inferType assumptions variables argument
-    unify actual $ fromGroundKind expected
+    mapM_ (unify actual) expected
 
 allocateVariables
   :: Ord variable
@@ -356,6 +692,14 @@ fromGroundKind kind = case kind of
   FunctionKind parameter result -> InferenceFunction
     (fromGroundKind parameter) (fromGroundKind result)
   KindVariable impossible -> absurd impossible
+
+toInferenceAssumptions :: KindAssumptions -> InferenceAssumptions
+toInferenceAssumptions assumptions = InferenceAssumptions
+  { inferredTypeConstructorKinds =
+      fromGroundKind <$> typeConstructorKinds assumptions
+  , inferredClassParameterKinds =
+      map (fmap fromGroundKind) <$> classParameterKinds assumptions
+  }
 
 intrinsicKind :: Name -> Maybe GroundKind
 intrinsicKind name = case nameSpecial name of

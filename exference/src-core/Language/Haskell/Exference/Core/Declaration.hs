@@ -24,10 +24,12 @@ import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Void (Void)
 import GHC.Generics (Generic)
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -45,10 +47,10 @@ data DeclarationMetadata
 instance NFData DeclarationMetadata
 
 type SynthesisDeclaration = SharedDeclaration.Declaration
-  SynthesisVariable Int DeclarationMetadata
+  SynthesisVariable Void DeclarationMetadata
 
 type SynthesisEnvironment = SharedEnvironment.Environment
-  SynthesisVariable Int DeclarationMetadata
+  SynthesisVariable Void DeclarationMetadata
 
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError
@@ -75,6 +77,8 @@ data SynthesisDeclarationError
   | ClassEnvironmentConversionError ClassEnvError
   | UnsupportedCoreEnvironmentDeclaration SharedName.Name
   | OrphanConstructorBinding SharedName.Name
+  | InvalidSourceEnvironmentKinds
+      (SharedKindInference.KindInferenceError SynthesisVariable)
   deriving (Eq, Show)
 
 toSynthesisFunctionBinding
@@ -299,12 +303,12 @@ loweredConstraint (SharedConstraint.Constraint className arguments) =
 
 flexibleParameter
   :: TVarId
-  -> SharedDeclaration.TypeParameter SynthesisVariable Int
+  -> SharedDeclaration.TypeParameter SynthesisVariable Void
 flexibleParameter variable = SharedDeclaration.TypeParameter
   (SharedType.FlexibleVariable variable) Nothing
 
 plainFlexibleParameter
-  :: SharedDeclaration.TypeParameter SynthesisVariable Int
+  :: SharedDeclaration.TypeParameter SynthesisVariable Void
   -> Either SynthesisDeclarationError TVarId
 plainFlexibleParameter parameter = case
     SharedDeclaration.parameterKind parameter of

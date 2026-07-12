@@ -8,6 +8,7 @@ import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Void (Void)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import qualified Language.Haskell.Synthesis.Declaration as Declaration
@@ -75,12 +76,18 @@ kindInferenceTests = testGroup "kind inference"
       let functorName = right $ mkIdentifier "Functor"
           assumptions = KindInference.emptyKindAssumptions
             { KindInference.classParameterKinds =
-                Map.singleton functorName [arrow proper proper]
+                Map.singleton functorName [Just $ arrow proper proper]
             }
           quantified = SharedType.ForallType ["f"]
             [Constraint functorName [SharedType.TypeVariable "f"]]
             (SharedType.TypeVariable "f")
       KindInference.checkTypesKinds assumptions
+        [(arrow proper proper, quantified)] @?= Right ()
+      let polymorphic = assumptions
+            { KindInference.classParameterKinds =
+                Map.singleton functorName [Nothing]
+            }
+      KindInference.checkTypesKinds polymorphic
         [(arrow proper proper, quantified)] @?= Right ()
   , testCase "diagnose unknown classes and constraint arity" $ do
       let className = right $ mkIdentifier "C"
@@ -145,6 +152,76 @@ kindInferenceTests = testGroup "kind inference"
       KindInference.inferAcyclicTypeConstructorKinds
           [refers aName bName] @?=
         Left (KindInference.UnknownTypeConstructor bName)
+  , testCase "infer a whole inventory with recursive higher-kinded data" $ do
+      let fixName = right $ mkIdentifier "Fix"
+          makeFixName = right $ mkIdentifier "MakeFix"
+          className = right $ mkIdentifier "FunctorLike"
+          methodName = right $ mkIdentifier "extract"
+          parameter variable = Declaration.TypeParameter variable Nothing
+          application function argument = SharedType.TypeApplication
+            function argument
+          fixOfF = application (SharedType.TypeConstructor fixName)
+            (SharedType.TypeVariable "f")
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.DataTypeDeclaration () fixName [parameter "f"]
+                [ Declaration.DataConstructor () makeFixName
+                    [application (SharedType.TypeVariable "f") fixOfF]
+                ]
+            , Declaration.ClassDeclaration () className [parameter "f"] []
+                [ Declaration.ValueSignature () methodName
+                    $ SharedType.FunctionType
+                        (application (SharedType.TypeVariable "f")
+                          $ SharedType.TypeVariable "a")
+                        (SharedType.TypeVariable "a")
+                ]
+            ]
+      KindInference.inferDeclarationKinds declarations @?= Right
+        (KindInference.KindAssumptions
+          (Map.singleton fixName $ arrow (arrow proper proper) proper)
+          (Map.singleton className [Just $ arrow proper proper]))
+  , testCase "reject recursive synonyms in a whole inventory" $ do
+      let aName = right $ mkIdentifier "A"
+          bName = right $ mkIdentifier "B"
+          synonym name reference = Declaration.TypeSynonymDeclaration
+            () name [] $ SharedType.TypeConstructor reference
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations = [synonym aName bName, synonym bName aName]
+      KindInference.inferDeclarationKinds declarations @?=
+        Left (KindInference.RecursiveTypeDeclarations [aName, bName])
+  , testCase "infer external names in an open inventory" $ do
+      let externalType = right $ mkIdentifier "External"
+          externalClass = right $ mkIdentifier "ExternalClass"
+          valueName = right $ mkIdentifier "value"
+          signature = SharedType.ForallType ["a"]
+            [Constraint externalClass [SharedType.TypeVariable "a"]]
+            (SharedType.TypeConstructor externalType)
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations = [Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () valueName signature]
+      KindInference.inferDeclarationKindsWith
+          KindInference.OpenKindInventory declarations @?= Right
+        (KindInference.KindAssumptions
+          (Map.singleton externalType proper)
+          (Map.singleton externalClass [Nothing]))
+  , testCase "reject inconsistent external class arities" $ do
+      let externalClass = right $ mkIdentifier "ExternalClass"
+          valueName spelling = right $ mkIdentifier spelling
+          constrained arguments = SharedType.ForallType ["a", "b"]
+            [Constraint externalClass arguments]
+            (SharedType.TypeVariable "a")
+          declaration name arguments = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () (valueName name)
+            $ constrained arguments
+          variable name = SharedType.TypeVariable name
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ declaration "first" [variable "a"]
+            , declaration "second" [variable "a", variable "b"]
+            ]
+      KindInference.inferDeclarationKindsWith
+          KindInference.OpenKindInventory declarations @?=
+        Left (KindInference.ClassArityMismatch externalClass 1 2)
   ]
  where
   proper :: KindInference.GroundKind

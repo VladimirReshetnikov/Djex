@@ -60,6 +60,7 @@ import qualified Data.Set as S
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 
 -- | The complete checked source inventory produced by the HSE frontend.
 -- Parameterizing only the function representation lets parsing, rating, and
@@ -112,9 +113,14 @@ toSynthesisSourceEnvironment environment = do
     valueBindings
     (sourceDeconstructors environment)
     (sourceClasses environment)
-  either (Left . InvalidSharedEnvironment) Right
-    $ SharedEnvironment.mkEnvironment
-    $ synonyms ++ SharedEnvironment.environmentDeclarations core
+  let declarations =
+        synonyms ++ SharedEnvironment.environmentDeclarations core
+  shared <- either (Left . InvalidSharedEnvironment) Right
+    $ SharedEnvironment.mkEnvironment declarations
+  _ <- either (Left . InvalidSourceEnvironmentKinds) Right
+    $ SharedKindInference.inferDeclarationKindsWith
+      SharedKindInference.OpenKindInventory declarations
+  pure shared
 
 
 builtInDeclsM

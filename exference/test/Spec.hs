@@ -114,6 +114,8 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
+import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified CompatibilityImport
@@ -980,6 +982,28 @@ tests = testGroup "Exference"
                 $ not $ Map.null $ SharedEnvironment.typeDeclarationMap shared
               assertBool "shared source inventory lost values"
                 $ not $ Map.null $ SharedEnvironment.valueSignatureMap shared
+      , testCase "source environments reject ill-kinded signatures" $ do
+          let intName = name "Int"
+              badName = name "bad"
+              environment = SourceEnvironment
+                { sourceFunctions =
+                    [ FunctionBinding
+                        (TypeApp (TypeCons intName) (TypeCons intName))
+                        badName (Penalty 0) [] []
+                    ]
+                , sourceDeconstructors =
+                    [DeconstructorBinding (TypeCons intName) [] False]
+                , sourceClasses = emptyStaticClassEnv
+                , sourceTypeNames = [intName]
+                , sourceTypeSynonyms = Map.empty
+                }
+              proper = SharedKind.ProperTypeKind
+          toSynthesisSourceEnvironment environment @?= Left
+            (InvalidSourceEnvironmentKinds
+              (SharedKindInference.DeclarationKindError
+                (toSynthesisName badName)
+                (SharedKindInference.KindMismatch proper
+                  $ SharedKind.FunctionKind proper proper)))
       , testCase "loader names unknown type constructors precisely" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/Char.hs"

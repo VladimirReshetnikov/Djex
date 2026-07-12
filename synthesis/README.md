@@ -47,8 +47,15 @@ The layer does not prescribe backend-specific class or instance resolution.
 checks several types in one variable scope, gives class methods independent
 local quantifiers around shared class parameters, validates constraint arity
 and parameter kinds, recognizes intrinsic function/list/tuple constructors,
-and infers acyclic type declarations in dependency order. Public results use
-an uninhabited kind-variable parameter, so an unsolved kind cannot escape.
+and infers legacy acyclic declaration lists in dependency order. Its
+whole-inventory operation additionally admits recursive datatype groups,
+rejects recursive synonym expansion, checks values and instances, and
+generalizes otherwise unconstrained class parameters for poly-kinded classes
+such as `Typeable`. Public fixed-kind results use an uninhabited kind-variable
+parameter, so an unsolved monomorphic kind cannot escape.
+Closed inventories reject unknown type and class names; open inventories infer
+one stable kind per external type name and require every occurrence of an
+external class to agree on arity.
 
 `Language.Haskell.Synthesis.Environment` seals a declaration inventory and
 builds deterministic type/class, value/method, constructor, and instance-head

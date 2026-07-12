@@ -91,6 +91,12 @@ datatype records, so `(:)` never masquerades as an ordinary value.
 Class-environment construction likewise rejects repeated instance heads before
 building its lookup index; each shipped primitive instance now has one owning
 module instead of a second shadow declaration in `Data.hs`.
+Sealing also runs the shared whole-inventory kind checker. Recursive datatypes
+remain valid, recursive synonyms and ill-kinded signatures do not, and
+unconstrained class parameters can generalize to support the shipped modern
+poly-kinded `Typeable` vocabulary. The frontend selects the explicit open
+inventory policy because loading a subset of modules deliberately retains
+external type names after reporting them as warnings.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

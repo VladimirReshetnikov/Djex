@@ -585,8 +585,10 @@ inhabit options environment contexts name goal = do
                         map snd $ sortOn fst $ map score rendered
                     else
                         rendered
+            renderedClauses <- labeled "cannot render generated clause" $
+                mapM hPrClause clauses
             return QueryReport {
                 reportFormula = show form,
                 reportProof = Just (show p),
-                reportOutcome = Realized (map hPrClause clauses)
+                reportOutcome = Realized renderedClauses
                 }

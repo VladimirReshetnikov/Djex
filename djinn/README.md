@@ -344,7 +344,9 @@ The same Boolean options can precede file names on the command line, such as
 | `Djinn.Internal.HCheck` | Kind inference and validation for declared Haskell-like types. |
 | `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated `haskell-synthesis` name and operator rules. |
-| `Djinn.Internal.HTypes` | Type parser, logical translation, proof-term conversion, simplification, and pretty-printing. |
+| `Djinn.Internal.HTypes` | Type parser, logical translation, and proof-term conversion/cleanup. |
+| `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
+| `Language.Haskell.Synthesis.Generated` | Shared local/global output tree, scope validation, capture-safe naming, qualification, and Haskell rendering. |
 | `Djinn.Internal.LJTFormula` | Formula and proof-term data types. |
 | `Djinn.Internal.LJT` | Dyckhoff-style contraction-free proof search and proof normalization. |
 | `Djinn.Internal.ProofEnv` | Isolation of external proof identities from printable names. |
@@ -408,7 +410,8 @@ The central pipeline is:
 ```text
 command -> HType -> kind check -> Formula -> LJT proof search
         -> proof-term normalization -> independent proof check
-        -> scope-safe Haskell conversion -> Haskell AST cleanup -> printed clause
+        -> Haskell AST cleanup -> shared Generated scope check/renderer
+        -> printed clause
 ```
 
 ## How proof search works
@@ -446,7 +449,10 @@ Each selected proof term is normalized (`nf`), checked against the requested
 formula by an independent unification-based type checker (`ProofCheck`),
 alpha-renamed so every binder is globally unique, converted to a small
 Haskell AST, cleaned up (case collapsing, unused-binder elision, eta
-reduction, nicer names), and pretty-printed.
+reduction, nicer names), and erased into the shared generated-code tree. The
+shared boundary revalidates lexical scope, distinguishes locals from structural
+global names, reserves emitted globals during local-name allocation, and
+pretty-prints the final clause.
 
 Two invariants make the back half of that pipeline safe, and both are worth
 knowing before editing the source:
@@ -463,7 +469,8 @@ knowing before editing the source:
 - **Unique binders.** The Haskell-AST simplifiers assume that no two binders
   share a name and that binders are disjoint from free variables. The
   converter enforces this with an explicit alpha-renaming pass rather than
-  trusting term producers.
+  trusting term producers; the shared output scope checker and allocator then
+  enforce the same invariant at the renderer boundary.
 
 ## Important limitations
 

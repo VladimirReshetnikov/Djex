@@ -658,8 +658,8 @@ testWholeConstructorPayload = do
         formula = Disj [(constructor, payload)] :-> payload
         proofs = prove True [] formula
         expected = "f a =\n" ++
-            "    case a of\n" ++
-            "    C b c -> (b, c)"
+            "  case a of\n" ++
+            "  C b c -> (b, c)"
     assertEqual "the theorem should expose both proof-search alternatives"
         2 (length proofs)
     rendered <- mapM (renderTerm "f") proofs
@@ -1046,7 +1046,7 @@ testScopeSafeRendering = do
             Apply (Var shadowed) (Lam shadowed $ Var shadowed)
     rendered <- renderTerm "applyIdentity" term
     assertEqual "nested shadowing binders should receive distinct names"
-        "applyIdentity a = a (\\ b -> b)" rendered
+        "applyIdentity a = a (\\b -> b)" rendered
     let generatedPrefix = Symbol "__djinn1"
         argument = Symbol "argument"
         externalTerm = Lam argument $
@@ -1203,7 +1203,10 @@ renderTerm :: HSymbol -> Term -> IO String
 renderTerm name term =
     case termToHClause name term of
         Left message -> fail $ "proof rendering failed: " ++ message
-        Right clause -> return $ hPrClause clause
+        Right clause -> either
+            (fail . ("shared clause rendering failed: " ++))
+            return
+            (hPrClause clause)
 
 assertParses :: String -> ReadP String -> String -> IO ()
 assertParses message parser input =

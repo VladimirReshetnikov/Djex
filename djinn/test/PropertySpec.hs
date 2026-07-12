@@ -78,7 +78,7 @@ proofIsValid formula proof =
   where
     context = "formula: " ++ show formula ++ "\nproof: " ++ show proof
     checked = checkProof [] formula proof
-    rendering = termToHClause "generated" proof
+    rendering = termToHClause "generated" proof >>= hPrClause
     rendered = either id (const "success") rendering
 
 -- Under the default depth-first strategy, a budgeted search must produce a

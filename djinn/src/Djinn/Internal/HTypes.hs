@@ -6,17 +6,16 @@ module Djinn.Internal.HTypes(
         HKind(..), HType(..), HSymbol,
         hTypeToFormula, pHSymbol, pHType, pHDataType, pHTAtom, pHKind,
         prHSymbolOp, htNot, isHTUnion, getHTVars, substHT,
-        HClause, HPat, HExpr(HEVar), hPrClause, termToHExpr, termToHClause,
+        HClause, HPat, HExpr(HEVar), hPrClause, toGeneratedClause,
+        termToHExpr, termToHClause,
         getBinderVars
     ) where
-import Prelude hiding ((<>))
-import Text.PrettyPrint.HughesPJ(Doc, renderStyle, style, text, (<>), parens, ($$), vcat, punctuate,
-         sep, fsep, nest, comma, (<+>))
 import Data.List(union, (\\))
 import Data.Maybe(fromMaybe)
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
 import Text.ParserCombinators.ReadP
+import Djinn.Internal.Generated
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.LJTFormula
 
@@ -243,52 +242,8 @@ hTApp a b = HTApp a b
 -------------------------------
 
 
-data HClause = HClause HSymbol [HPat] HExpr
-    deriving (Show, Eq)
-
-data HPat = HPVar HSymbol | HPCon HSymbol | HPTuple [HPat] | HPAt HSymbol HPat | HPApply HPat HPat
-    deriving (Show, Eq)
-
-data HExpr = HELam [HPat] HExpr | HEApply HExpr HExpr | HECon HSymbol | HEVar HSymbol | HETuple [HExpr] |
-        HECase HExpr [(HPat, HExpr)]
-    deriving (Show, Eq)
-
-hPrClause :: HClause -> String
-hPrClause = renderStyle style . ppClause
-
-ppClause :: HClause -> Doc
-ppClause (HClause f ps e) =
-    text (prHSymbolOp f) <+>
-        sep [sep (map (ppPat 10) ps) <+> text "=", nest 2 $ ppExpr 0 e]
-
 prHSymbolOp :: HSymbol -> String
 prHSymbolOp = renderVarName
-
-ppPat :: Int -> HPat -> Doc
-ppPat _ (HPVar s) = text s
-ppPat _ (HPCon s) = text s
-ppPat _ (HPTuple ps) = parens $ fsep $ punctuate comma (map (ppPat 0) ps)
-ppPat _ (HPAt s p) = text s <> text "@" <> ppPat 10 p
-ppPat p (HPApply a b) = pparens (p > 1) $ ppPat 1 a <+> ppPat 2 b
-
-ppExpr :: Int -> HExpr -> Doc
-ppExpr p (HELam ps e) = pparens (p > 0) $ sep [ text "\\" <+> sep (map (ppPat 10) ps) <+> text "->",
-                                                ppExpr 0 e]
-ppExpr p (HEApply (HEApply (HEVar f) a1) a2) | isVarOperator f =
-     pparens (p > 4) $ ppExpr 5 a1 <+> text f <+> ppExpr 5 a2
-ppExpr p (HEApply f a) = pparens (p > 11) $ ppExpr 11 f <+> ppExpr 12 a
-ppExpr _ (HECon s) = text s
-ppExpr _ (HEVar s) | isVarOperator s = pparens True $ text s
-ppExpr _ (HEVar s) = text s
-ppExpr _ (HETuple es) = parens $ fsep $ punctuate comma (map (ppExpr 0) es)
-ppExpr p (HECase s alts) = pparens (p > 0) $ (text "case" <+> ppExpr 0 s <+> text "of") $$
-                            vcat (map ppAlt alts)
-  where ppAlt (pp, e) = ppPat 0 pp <+> text "->" <+> ppExpr 0 e
-
-
-pparens :: Bool -> Doc -> Doc
-pparens True d = parens d
-pparens False d = d
 
 -------------------------------
 
@@ -792,25 +747,6 @@ remUnusedVars expr = fst $ remE expr
         remP vs (HPApply f a) = HPApply (remP vs f) (remP vs a)
         hPTuple ps | all (== HPVar "_") ps = HPVar "_"
         hPTuple ps = HPTuple ps
-
-getBinderVars :: HClause -> [HSymbol]
-getBinderVars (HClause _ pats expr) = concatMap getBinderVarsHP pats ++ getBinderVarsHE expr
-
-getBinderVarsHE :: HExpr -> [HSymbol]
-getBinderVarsHE (HELam ps e) = concatMap getBinderVarsHP ps ++ getBinderVarsHE e
-getBinderVarsHE (HEApply f a) = getBinderVarsHE f ++ getBinderVarsHE a
-getBinderVarsHE (HETuple es) = concatMap getBinderVarsHE es
-getBinderVarsHE (HECase se alts) =
-    getBinderVarsHE se ++
-        concatMap (\ (p, e) -> getBinderVarsHP p ++ getBinderVarsHE e) alts
-getBinderVarsHE _ = []
-
-getBinderVarsHP :: HPat -> [HSymbol]
-getBinderVarsHP (HPVar s) = [s]
-getBinderVarsHP (HPCon _) = []
-getBinderVarsHP (HPTuple ps) = concatMap getBinderVarsHP ps
-getBinderVarsHP (HPAt s p) = s : getBinderVarsHP p
-getBinderVarsHP (HPApply f a) = getBinderVarsHP f ++ getBinderVarsHP a
 
 getAllVars :: HExpr -> [HSymbol]
 getAllVars (HELam _ e) = getAllVars e

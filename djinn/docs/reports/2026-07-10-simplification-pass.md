@@ -8,7 +8,7 @@
 
 ## Executive summary
 
-This pass re-read every module under `djinn/src/` with a different question
+This pass re-read every module now under `djex/djinn/src/` with a different question
 than the earlier correctness review: not "is it right?" but "is it as short,
 deduplicated, and readable as it should be?" The mechanical outcome is a net
 reduction across `src/` *including* newly added clarifying comments, with the

@@ -8,8 +8,8 @@
 
 ## Executive summary
 
-This review covered every Haskell module under `exference/src/` and
-`exference/src-exference/`, the package descriptions, the environment parser,
+This review covered every Haskell module now under `djex/exference/src/` and
+`djex/exference/src-exference/`, the package descriptions, the environment parser,
 the hand-maintained environment, the historical test driver, and the reviewed
 Djinn implementation with which Exference is eventually intended to merge.
 
@@ -101,7 +101,7 @@ The review proceeded in dependency order:
 7. Djinn's corresponding type/environment/proof/rendering layers and its prior
    review reports.
 
-Recent history was examined before changing search-related code. `exference/`
+Recent history was examined before changing search-related code. `djex/exference/`
 was imported unchanged at `8f0034a` (plus the paper at `64227f3`), whereas the
 adjacent Djinn project has already received correctness, simplification, budget,
 benchmark, and layered-test passes.
@@ -240,7 +240,8 @@ The historical `src-exference/MainTest.hs` is not a Cabal test suite. It mixes
 large expected-result tables, performance statistics, tree dumping, console
 printing, and external environment assumptions, and it runs only through the
 CLI. It should eventually be split into deterministic unit/golden tests and a
-separate benchmark corpus, following the structure now present in `djinn/`.
+separate benchmark corpus, following the structure now present in
+`djex/djinn/`.
 
 ## Build and compatibility audit
 

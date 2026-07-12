@@ -1,7 +1,8 @@
 # Djinn source code review
 
 - Date: 2026-07-10
-- Reviewed Djinn baseline: `7eac947` (`Add djinn/LICENSE`)
+- Reviewed Djinn baseline: `7eac947` (`Add djinn/LICENSE`, before the
+  subsequent move to `djex/djinn/`)
 - Integrated `origin/main` tip before commit: `e6b0097`
 - R-01 through R-06 remediation commits: `9b3e383` through `6f089d5`
 - Test-infrastructure commits: `d6e9ce7`, `b46695f`
@@ -10,7 +11,7 @@
 
 ## Executive summary
 
-This review covered every module under `djinn/src/`, the Cabal package, the
+This review covered every module now under `djex/djinn/src/`, the Cabal package, the
 interactive and batch interfaces, and the absence of automated tests. The source
 at the start of the review matched the Hackage 2025.2.21 source byte-for-byte.
 Upstream history and open issues were also checked, most importantly the
@@ -310,7 +311,7 @@ The following cleanup was applied without changing valid proof search:
 - Corrected Cabal's package description.
 - The banner now derives its version from generated `Paths_djinn` rather than a
   2011 hard-coded string.
-- Expanded `djinn/README.md` with build instructions, examples, commands,
+- Expanded `djex/djinn/README.md` with build instructions, examples, commands,
   architecture, semantics, and limitations.
 - Updated the repository layout documentation to include this third Cabal
   project.

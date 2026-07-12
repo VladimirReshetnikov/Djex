@@ -6,7 +6,8 @@
   `Language.Haskell.Synthesis.Name`, subsequently committed as `6b2f6bf`,
   including the new compatibility module
   `Language.Haskell.Exference.Core.Name`
-- Scope: `djinn/`, `exference/`, and the neutral `synthesis/` foundation
+- Scope: `djex/djinn/`, `djex/exference/`, and the neutral
+  `djex/synthesis/` foundation
 
 ## Implementation update
 

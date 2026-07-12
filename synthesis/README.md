@@ -34,6 +34,13 @@ validates lexical/arity/binder invariants, and computes free variables.
 Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
 this AST.
 
+`Language.Haskell.Synthesis.Kind` and `.Declaration` provide the next source
+layer: kind variables/arrows, kinded type parameters, synonyms, data and
+constructor declarations, opaque types, values, classes, and instances. The
+validator enforces declaration namespaces, distinct parameters/members, and
+the common type invariants without prescribing backend-specific class or
+instance resolution.
+
 Build and test it independently with:
 
 ```text

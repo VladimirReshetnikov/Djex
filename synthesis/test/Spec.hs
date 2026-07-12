@@ -10,8 +10,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
+import qualified Language.Haskell.Synthesis.Declaration as Declaration
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
+import qualified Language.Haskell.Synthesis.Kind as Kind
 import Language.Haskell.Synthesis.Search
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
@@ -24,6 +26,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "haskell-synthesis"
   [ constraintTests
+  , declarationTests
   , generatedTests
   , searchTests
   , typeTests
@@ -33,6 +36,68 @@ tests = testGroup "haskell-synthesis"
   , parserTests
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
+  ]
+
+declarationTests :: TestTree
+declarationTests = testGroup "declarations"
+  [ testCase "validate kinded data and class declarations" $ do
+      let maybeName = right $ mkIdentifier "Maybe"
+          justName = right $ mkIdentifier "Just"
+          nothingName = right $ mkIdentifier "Nothing"
+          eqName = right $ mkIdentifier "Eq"
+          equalsName = right $ mkOperator "=="
+          parameter = Declaration.TypeParameter "a"
+            (Just Kind.ProperTypeKind)
+          variable = SharedType.TypeVariable "a"
+          maybeDeclaration = Declaration.DataTypeDeclaration () maybeName
+            [parameter]
+            [ Declaration.DataConstructor () nothingName []
+            , Declaration.DataConstructor () justName [variable]
+            ]
+          eqDeclaration = Declaration.ClassDeclaration () eqName [parameter] []
+            [Declaration.ValueSignature () equalsName
+              $ SharedType.FunctionType variable
+              $ SharedType.FunctionType variable
+              $ SharedType.TypeConstructor (right $ mkIdentifier "Bool")]
+      Declaration.validateDeclaration maybeDeclaration @?= Right ()
+      Declaration.validateDeclaration eqDeclaration @?= Right ()
+  , testCase "reject namespace and duplicate-member mistakes" $ do
+      let typeName = right $ mkIdentifier "T"
+          valueName = right $ mkIdentifier "value"
+          variable = SharedType.TypeVariable "a"
+          duplicateConstructors ::
+            Declaration.Declaration String Int ()
+          duplicateConstructors = Declaration.DataTypeDeclaration () typeName []
+            [ Declaration.DataConstructor () typeName []
+            , Declaration.DataConstructor () typeName []
+            ]
+      Declaration.validateDeclaration
+          (Declaration.TypeSynonymDeclaration () valueName [] variable)
+        @?= Left (Declaration.InvalidDeclaredTypeName valueName)
+      Declaration.validateDeclaration duplicateConstructors
+        @?= Left (Declaration.DuplicateConstructorName typeName)
+      Declaration.validateDeclaration
+          (Declaration.TypeSynonymDeclaration () typeName
+            [ Declaration.TypeParameter "a" Nothing
+            , Declaration.TypeParameter "a" Nothing
+            ] variable)
+        @?= Left (Declaration.DuplicateTypeParameter "a")
+  , testCase "validate instance heads without claiming resolution" $ do
+      let eqName = right $ mkIdentifier "Eq"
+          variable = SharedType.TypeVariable "a"
+          constraint = Constraint eqName [variable]
+          declaration :: Declaration.Declaration String Int ()
+          declaration = Declaration.InstanceDeclaration () ["a"]
+            [constraint] constraint
+      Declaration.validateDeclaration declaration @?= Right ()
+      _ <- evaluate $ force declaration
+      pure ()
+  , testCase "kind variables traverse and report free identities" $ do
+      let kind = Kind.FunctionKind (Kind.KindVariable (1 :: Int))
+            Kind.ProperTypeKind
+      Kind.freeKindVariables kind @?= Set.singleton 1
+      fmap (+ 1) kind @?=
+        Kind.FunctionKind (Kind.KindVariable 2) Kind.ProperTypeKind
   ]
 
 typeTests :: TestTree

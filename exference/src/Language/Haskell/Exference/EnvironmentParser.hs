@@ -52,7 +52,7 @@ import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 import Control.Monad.Trans.MultiRWS
 import Data.HList.ContainsType
 
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
@@ -156,20 +156,27 @@ parseModules l = do
   typeDeclsE <- getTypeDecls ds mods
   lefts typeDeclsE `forM_` (mTell . (:[]))
   let typeDecls = M.fromList $ (\x -> (tdecl_name x, x)) <$> rights typeDeclsE
-  (cntxt@(StaticClassEnv clss insts), n_insts) <- getClassEnv ds typeDecls mods
+  (cntxt, n_insts) <- getClassEnv ds typeDecls mods
+  let clss = sClassEnv_tclasses cntxt
+      insts = sClassEnv_instances cntxt
   -- TODO: try to exfere this stuff
   (decls, deconss) <- do
     stuff <- mapM (hExtractBinds cntxt ds typeDecls) mods
     return $ concat *** concat $ unzip stuff
-  let clssNames = fmap tclass_name clss
+  let clssNames = M.keys clss
   let allValidNames = ds ++ clssNames
   let
     dataToBeChecked :: [(String, HsType)]
     dataToBeChecked =
          [ ("the instance data for " ++ show i, t)
          | insts' <- M.elems insts
-         , i@(HsInstance _ _ ts) <- insts'
-         , t <- ts]
+         , i <- insts'
+         , constraint <- instance_head i : instance_constraints i
+         , t <- constraint_params constraint]
+      ++ [ ("the superclass data for " ++ show (tclass_name typeClass), t)
+         | typeClass <- M.elems clss
+         , constraint <- tclass_constraints typeClass
+         , t <- constraint_params constraint]
       ++ [ ("the binding " ++ show n, t)
          | (n, t) <- decls]
   let

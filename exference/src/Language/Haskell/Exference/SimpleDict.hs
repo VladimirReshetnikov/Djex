@@ -4,17 +4,15 @@ module Language.Haskell.Exference.SimpleDict
   )
 where
 
-import qualified Data.Map.Strict as Map
-
 import Language.Haskell.Exference.Core (ExferenceHeuristicsConfig (..))
-import Language.Haskell.Exference.Core.Types (StaticClassEnv (..))
+import Language.Haskell.Exference.Core.Types
+  ( StaticClassEnv
+  , emptyStaticClassEnv
+  )
 import Language.Haskell.Exference.Core.Score (Penalty (..))
 
 emptyClassEnv :: StaticClassEnv
-emptyClassEnv = StaticClassEnv
-  { sClassEnv_tclasses = []
-  , sClassEnv_instances = Map.empty
-  }
+emptyClassEnv = emptyStaticClassEnv
 
 defaultHeuristicsConfig :: ExferenceHeuristicsConfig
 defaultHeuristicsConfig = ExferenceHeuristicsConfig

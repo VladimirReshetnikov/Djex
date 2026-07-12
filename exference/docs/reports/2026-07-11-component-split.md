@@ -20,8 +20,9 @@ dependency boundary.
 The package now has two physically separate library components:
 
 ```text
-src-core/  -> public named library exference:exference-core (18 modules)
-src/       -> unnamed exference frontend library             (13 modules)
+src-core/  -> public named library exference:exference-core (19 source modules)
+src/       -> unnamed exference frontend library             (11 source modules,
+                                                               plus Paths_exference)
 ```
 
 The named component is explicitly `visibility: public`; Cabal's default for a
@@ -75,12 +76,12 @@ once as 18 modules and the frontend once as 13 modules. The following then
 passed:
 
 ```text
-cabal test all --test-show-details=direct   # 69 library + 5 CLI + 48 shared
+cabal test all --test-show-details=direct   # 98 library + 5 CLI + 48 shared
 cabal check                                 # no errors or warnings
 git diff --check
 ```
 
-The current matrix has grown to 69 deterministic library/frontend regressions,
+The current matrix has grown to 98 deterministic library/frontend regressions,
 five CLI subprocess scenarios, and the 48 shared-foundation tests. All Cabal
 components import one Haskell2010/`-Wall -Wcompat` policy stanza, and test-only
 dependency bounds now match the production packages.

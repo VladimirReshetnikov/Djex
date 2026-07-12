@@ -5,10 +5,13 @@ module Language.Haskell.Exference.Core.TypeUtils
   , largestId
   , largestSubstsId
   , forallify -- unused atm
+  , ConstraintSite (..)
+  , ClassEnvError (..)
   , mkStaticClassEnv
+  , validateConstraintInEnv
+  , validateKnownConstraintInEnv
   , constraintMapTypes
   , constraintContainsVariables
-  , unknownTypeClass
   , inflateInstances
   , splitArrowResultParams
   )
@@ -17,11 +20,9 @@ where
 
 
 import qualified Data.Set as S
-import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
 
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 
 
 
@@ -59,36 +60,9 @@ largestSubstsId = IntMap.foldl' (\a b -> a `max` largestId b) 0
 constraintMapTypes :: (HsType -> HsType) -> HsConstraint -> HsConstraint
 constraintMapTypes f (HsConstraint a ts) = HsConstraint a (map f ts)
 
-
-mkStaticClassEnv :: [HsTypeClass] -> [HsInstance] -> StaticClassEnv
-mkStaticClassEnv tclasses insts = StaticClassEnv tclasses (helper insts)
-  where
-    helper :: [HsInstance] -> M.Map QualifiedName [HsInstance]
-    helper is = M.fromListWith (++)
-              $ [ (tclass_name $ instance_tclass i, [i]) | i <- is ]
-
 constraintContainsVariables :: HsConstraint -> Bool
-constraintContainsVariables = any ((-1/=).largestId) . constraint_params
-
--- Keep undeclared classes nominally distinct. Mapping every unknown class to
--- one sentinel makes unrelated constraints such as @Foo a@ and @Bar a@
--- indistinguishable to the solver.
-unknownTypeClass :: QualifiedName -> HsTypeClass
-unknownTypeClass name = HsTypeClass name [] []
-  
-
-inflateInstances :: [HsInstance] -> [HsInstance]
-inflateInstances = S.toList . closure (S.fromList . superclasses) . S.fromList
-  where
-    superclasses :: HsInstance -> [HsInstance]
-    superclasses (HsInstance iconstrs tclass iparams)
-      | (HsTypeClass _ tparams tconstrs) <- tclass
-      , substs <- IntMap.fromList $ zip tparams iparams
-      = let 
-          g :: HsConstraint -> HsInstance
-          g (HsConstraint ctclass cparams) =
-            HsInstance iconstrs ctclass $ map (snd . applySubsts substs) cparams
-        in map g tconstrs
+constraintContainsVariables =
+  any (not . S.null . freeVars) . constraint_params
 
 splitArrowResultParams :: HsType -> (HsType, [HsType], [TVarId], [HsConstraint])
 splitArrowResultParams t

@@ -16,6 +16,8 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   -- , ConversionMonad
   , parseQualifiedName
   , tyVarTransform
+  , convertConstraint
+  , validateConstraintArity
   , haskellSrcExtsParseMode
   , findInvalidNames
   )
@@ -29,13 +31,13 @@ import Language.Haskell.Exts.Pretty ( prettyPrint )
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import qualified Language.Haskell.Exference.Core.Types as T
-import qualified Language.Haskell.Exference.Core.TypeUtils as TU
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 
 import Data.Maybe ( fromMaybe )
-import Data.List ( find, intercalate, nub )
+import Data.List ( intercalate )
 
 import Control.Monad.Trans.Except
 
@@ -73,7 +75,7 @@ haskellSrcExtsParseMode s = P.ParseMode (s++".hs")
 
 convertTypeNoDecl
   :: Monad m
-  => [T.HsTypeClass]
+  => M.Map T.QualifiedName T.HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
   -> [T.QualifiedName]
   -> Type SrcSpanInfo
@@ -92,7 +94,7 @@ convertTypeNoDecl tcs mn ds t =
 
 convertTypeNoDeclInternal
   :: (MonadMultiState ConvData m)
-  => [T.HsTypeClass]
+  => M.Map T.QualifiedName T.HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo) -- default (for unqualified stuff)
                       -- Nothing uses a broad search for lookups
   -> [T.QualifiedName] -- list of fully qualified data types
@@ -181,21 +183,38 @@ convertQName _ _ (Special _ special@(ExprHole _)) = Left
   $ "unsupported special constructor: " ++ prettyPrint special
 convertQName _ _ (Qual _ mn syntaxName) =
   convertModuleNameChecked mn syntaxName
-convertQName (Just defaultModule) _ (UnQual _ syntaxName) =
-  convertModuleNameChecked defaultModule syntaxName
-convertQName Nothing dataTypes (UnQual _ syntaxName) = do
+convertQName (Just defaultModule) knownNames (UnQual _ syntaxName) = do
+  localName <- convertModuleNameChecked defaultModule syntaxName
+  resolveUnqualifiedName localName knownNames
+convertQName Nothing knownNames (UnQual _ syntaxName) = do
   unqualified <- convertNameChecked syntaxName
-  let candidates = nub
+  resolveUnqualifiedName unqualified knownNames
+
+-- The historical environment modules intentionally omit their imports.  We
+-- can still model the useful part of Haskell name lookup without manufacturing
+-- recursive placeholder declarations: a declaration in the current module
+-- wins, otherwise a unique known occurrence is imported, and multiple matches
+-- are rejected as ambiguous.  When no declaration is known, retaining the
+-- local (or unqualified) spelling preserves diagnostics for genuinely external
+-- names.
+resolveUnqualifiedName
+  :: T.QualifiedName
+  -> [T.QualifiedName]
+  -> Either String T.QualifiedName
+resolveUnqualifiedName fallback knownNames
+  | fallback `elem` candidates = Right fallback
+  | otherwise = case candidates of
+      [] -> Right fallback
+      [candidate] -> Right candidate
+      _ -> Left $ "ambiguous unqualified name " ++ show fallback
+        ++ "; matches " ++ intercalate ", " (map show candidates)
+ where
+  candidates = S.toAscList $ S.fromList
         [ candidate
-        | candidate <- dataTypes
+        | candidate <- knownNames
         , T.qualifiedNameOccurrence candidate
-            == T.qualifiedNameOccurrence unqualified
+            == T.qualifiedNameOccurrence fallback
         ]
-  case candidates of
-    [] -> Right unqualified
-    [candidate] -> Right candidate
-    _ -> Left $ "ambiguous unqualified name " ++ show unqualified
-      ++ "; matches " ++ intercalate ", " (map show candidates)
 
 -- | Source-compatible unchecked facade.  HSE exposes its syntax constructors,
 -- so an arbitrary 'Name' need not contain a valid Haskell occurrence.  New
@@ -247,7 +266,7 @@ parseQualifiedName input = do
 
 convertConstraint
   :: (MonadMultiState ConvData m)
-  => [T.HsTypeClass]
+  => M.Map T.QualifiedName T.HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
   -> [T.QualifiedName]
   -> Asst SrcSpanInfo
@@ -257,15 +276,37 @@ convertConstraint tcs defModuleName ds (TypeA _ classType) = do
     (throwE $ "invalid class constraint: " ++ prettyPrint classType)
     pure
     (splitClassApplication classType)
-  name <- either throwE pure $ convertQName defModuleName ds qname
-  let typeClass = fromMaybe (TU.unknownTypeClass name)
-        $ find ((== name) . T.tclass_name) tcs
-  T.HsConstraint typeClass
-    <$> mapM (convertTypeNoDeclInternal tcs defModuleName ds) types
+  name <- either throwE pure
+    $ convertQName defModuleName (M.keys tcs) qname
+  parameters <- mapM (convertTypeNoDeclInternal tcs defModuleName ds) types
+  either throwE pure $ validateConstraintArity tcs name (length parameters)
+  pure $ T.HsConstraint name parameters
 convertConstraint env defModuleName ds (ParenA _ c)
   = convertConstraint env defModuleName ds c
 convertConstraint _ _ _ c
   = throwE $ "bad constraint: " ++ show c
+
+-- | Reject an application whose class is known but whose number of
+-- parameters disagrees with its declaration.  An unknown class stays
+-- representable: signatures can legitimately mention imported classes whose
+-- declarations were not part of the supplied module set.
+validateConstraintArity
+  :: M.Map T.QualifiedName T.HsTypeClass
+  -> T.QualifiedName
+  -> Int
+  -> Either String ()
+validateConstraintArity classes name actual = case M.lookup name classes of
+  Just typeClass
+    | expected <- length $ T.tclass_params typeClass
+    , expected /= actual -> Left
+        $ "wrong number of parameters for type class "
+        ++ unqualifiedClassName name
+        ++ ": expected " ++ show expected ++ ", got " ++ show actual
+  _ -> Right ()
+ where
+  unqualifiedClassName qualifiedName = fromMaybe (show qualifiedName)
+    $ SharedName.nameSpelling
+    $ T.toSynthesisName qualifiedName
 
 tyVarTransform :: MonadMultiState ConvData m
                => TyVarBind SrcSpanInfo

@@ -45,7 +45,7 @@ import qualified Data.Set as S
 import qualified Data.Vector as V
 import qualified Data.Sequence as Seq
 
-import Data.Maybe ( maybeToList, fromMaybe )
+import Data.Maybe ( maybeToList, fromMaybe, listToMaybe )
 import Control.Monad ( unless, mzero, replicateM, forM, liftM )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, unfoldr, intercalate )
@@ -56,8 +56,6 @@ import Control.Monad.Trans.Class ( lift )
 import Control.Lens
 import Control.Monad.State ( StateT(..), gets, execStateT, runStateT, mapStateT )
 import Control.Monad.State ( MonadState )
-
-import Data.Data ( Data )
 
 import Prelude hiding ( sum )
 
@@ -78,7 +76,7 @@ data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
   , heuristics_unusedVar              :: Penalty
   , heuristics_solutionLength         :: Penalty
   }
-  deriving (Show, Data)
+  deriving (Show)
 
 data ExferenceInput = ExferenceInput
   { input_goalType    :: HsType                 -- ^ try to find a expression
@@ -108,12 +106,13 @@ data ExferenceInput = ExferenceInput
   , input_maxDepth    :: Maybe Penalty          -- ^ optional heuristic-depth cap
   , input_heuristicsConfig :: ExferenceHeuristicsConfig
   }
-  deriving (Show, Data)
+  deriving (Show)
 
 data ExferenceInputError
   = NestedForallInGoal HsType
   | NestedForallInBinding QualifiedName HsType
   | NestedForallInDeconstructor HsType
+  | InvalidClassConstraint ClassEnvError
   | InvalidMaxSteps Int
   | InvalidMaxQueueSize Int
   | InvalidMaxDepth Penalty
@@ -334,7 +333,39 @@ validateExferenceInput input
   | Just deconstructor <- find (containsForall . deconstructorBindingType)
       (input_envDeconsS input) =
       Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
+  | Just classError <- firstClassConstraintError input =
+      Left $ InvalidClassConstraint classError
   | otherwise = Right ()
+
+firstClassConstraintError :: ExferenceInput -> Maybe ClassEnvError
+firstClassConstraintError input = listToMaybe
+  [ classError
+  | Left classError <- queryChecks ++ bindingChecks
+  ]
+ where
+  environment = input_envClasses input
+  queryChecks = map
+    (validateKnownConstraintInEnv environment QueryConstraint)
+    (constraintsInType $ input_goalType input)
+  bindingChecks =
+    [ validateKnownConstraintInEnv environment
+        (BindingConstraint $ functionName binding)
+        constraint
+    | binding <- input_envFuncs input
+    , constraint <- functionConstraints binding
+        ++ constraintsInType (functionBindingType binding)
+    ]
+
+constraintsInType :: HsType -> [HsConstraint]
+constraintsInType TypeVar{} = []
+constraintsInType TypeConstant{} = []
+constraintsInType TypeCons{} = []
+constraintsInType (TypeArrow parameter result) =
+  constraintsInType parameter ++ constraintsInType result
+constraintsInType (TypeApp function parameter) =
+  constraintsInType function ++ constraintsInType parameter
+constraintsInType (TypeForall _ constraints body) =
+  constraints ++ constraintsInType body
 
 isFiniteRating :: Penalty -> Bool
 isFiniteRating = \rating -> let value = penaltyValue rating

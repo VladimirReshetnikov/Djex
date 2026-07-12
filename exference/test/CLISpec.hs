@@ -51,7 +51,7 @@ testInvalidSearch = do
 testVersion :: Assertion
 testVersion = do
   output <- runExference ["--version"]
-  assertContains "version should be reported" "exference version 1.6.0.0" output
+  assertContains "version should be reported" "exference version 1.7.0.0" output
   assertBool "version mode should not parse environment files"
     (not $ "environment warning:" `isInfixOf` output)
 

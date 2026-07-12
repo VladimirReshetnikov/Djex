@@ -1,8 +1,10 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MonadComprehensions #-}
+{-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Language.Haskell.Exference.Core.Types
   ( TVarId
@@ -13,12 +15,25 @@ module Language.Haskell.Exference.Core.Types
   , Substs
   , HsTypeClass (..)
   , HsInstance (..)
-  , HsConstraint (..)
-  , StaticClassEnv (..)
-  , QueryClassEnv ( qClassEnv_env
-                  , qClassEnv_constraints
-                  , qClassEnv_inflatedConstraints
-                  , qClassEnv_varConstraints )
+  , HsConstraint (HsConstraint)
+  , constraint_tclass
+  , constraint_params
+  , toSynthesisConstraint
+  , fromSynthesisConstraint
+  , ConstraintSite (..)
+  , ClassEnvError (..)
+  , StaticClassEnv
+  , sClassEnv_tclasses
+  , sClassEnv_instances
+  , emptyStaticClassEnv
+  , mkStaticClassEnv
+  , validateConstraintInEnv
+  , validateKnownConstraintInEnv
+  , inflateInstances
+  , QueryClassEnv
+  , qClassEnv_env
+  , qClassEnv_constraints
+  , qClassEnv_inflatedConstraints
   , constraintApplySubsts
   , inflateHsConstraints
   , applySubst
@@ -40,24 +55,25 @@ where
 
 
 import Data.Char ( ord, chr, toLower )
+import Data.Foldable (traverse_)
+import Data.Graph (SCC (..), stronglyConnComp)
 import Data.List ( intercalate )
 import Data.Maybe ( fromMaybe )
 import Data.Monoid ( Any(..) )
 import Control.Monad ( liftM2 )
 
 import qualified Data.Set as S
-import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as L
 
 import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 import Language.Haskell.Exference.Core.Name
+import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Control.DeepSeq
 import GHC.Generics
-import Data.Data ( Data )
 import Control.Monad.Trans.MultiState
 
 
@@ -74,7 +90,7 @@ data HsType = TypeVar      {-# UNPACK #-} !TVarId
             | TypeArrow    !HsType !HsType
             | TypeApp      !HsType !HsType
             | TypeForall   [TVarId] [HsConstraint] !HsType
-  deriving (Ord, Eq, Generic, Data)
+  deriving (Ord, Eq, Generic)
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
@@ -87,53 +103,260 @@ data HsTypeClass = HsTypeClass
   , tclass_params :: [TVarId]
   , tclass_constraints :: [HsConstraint]
   }
-  deriving (Show, Generic, Data)
-
--- Class identity is nominal. Besides matching Haskell's class namespace, this
--- keeps equality and superclass closure finite for mutually recursive class
--- declarations; structurally comparing their recursively tied definitions
--- would diverge.
-instance Eq HsTypeClass where
-  left == right = tclass_name left == tclass_name right
-
-instance Ord HsTypeClass where
-  compare left right = compare (tclass_name left) (tclass_name right)
+  deriving (Eq, Ord, Show, Generic)
 
 data HsInstance = HsInstance
   { instance_constraints :: [HsConstraint]
-  , instance_tclass :: HsTypeClass
-  , instance_params :: [HsType]
+  , instance_head :: HsConstraint
   }
-  deriving (Eq, Show, Ord, Generic, Data)
+  deriving (Eq, Show, Ord, Generic)
 
-data HsConstraint = HsConstraint
-  { constraint_tclass :: HsTypeClass
-  , constraint_params :: [HsType]
-  }
-  deriving (Eq, Ord, Generic, Data)
+-- | Exference's compatibility view of the backend-independent constraint
+-- syntax.  Class declarations live exclusively in 'StaticClassEnv'; keeping
+-- only the nominal class name here makes declaration, superclass, and
+-- instance graphs ordinary finite values.
+newtype HsConstraint = HsConstraint_
+  (SharedConstraint.Constraint HsType)
+  deriving (Eq, Ord)
 
+-- | Historical constructor view, now nominal rather than embedding the class
+-- declaration.  Construction through this pattern is safe because every
+-- 'QualifiedName' already satisfies the shared name invariants.
+pattern HsConstraint :: QualifiedName -> [HsType] -> HsConstraint
+pattern HsConstraint className arguments <-
+  (constraintView -> (className, arguments))
+  where
+    HsConstraint className arguments = HsConstraint_
+      $ SharedConstraint.Constraint (toSynthesisName className) arguments
+
+{-# COMPLETE HsConstraint #-}
+
+constraint_tclass :: HsConstraint -> QualifiedName
+constraint_tclass = fst . constraintView
+
+constraint_params :: HsConstraint -> [HsType]
+constraint_params = snd . constraintView
+
+-- | Forget the Exference compatibility wrapper.  This direction is total:
+-- Exference's accepted names form a subset of the shared name domain.
+toSynthesisConstraint
+  :: HsConstraint
+  -> SharedConstraint.Constraint HsType
+toSynthesisConstraint (HsConstraint_ constraint) = constraint
+
+-- | Narrow a shared constraint to Exference's name subset.  In particular,
+-- unboxed tuple constructor names are rejected rather than smuggled through
+-- an opaque wrapper.
+fromSynthesisConstraint
+  :: SharedConstraint.Constraint HsType
+  -> Either QualifiedNameError HsConstraint
+fromSynthesisConstraint (SharedConstraint.Constraint className arguments) = do
+  exferenceName <- fromSynthesisName className
+  return $ HsConstraint exferenceName arguments
+
+constraintView :: HsConstraint -> (QualifiedName, [HsType])
+constraintView (HsConstraint_ (SharedConstraint.Constraint className arguments)) =
+  case fromSynthesisName className of
+    Right exferenceName -> (exferenceName, arguments)
+    -- The private representation can only be populated through the checked
+    -- conversion above or from an already validated QualifiedName.
+    Left _ -> error "invalid shared name in Exference HsConstraint"
+
+-- | Location of a constraint while validating a class environment or public
+-- search input.
+data ConstraintSite
+  = ClassSuperclass QualifiedName
+  | InstanceHead
+  | InstancePrerequisite QualifiedName
+  | QueryConstraint
+  | BindingConstraint QualifiedName
+  deriving (Eq, Ord, Show)
+
+-- | Structural failures that would otherwise make class lookup or
+-- superclass substitution ambiguous or partial.
+data ClassEnvError
+  = InvalidClassName QualifiedName
+  | DuplicateClassDeclaration QualifiedName
+  | DuplicateClassParameter QualifiedName TVarId
+  | NegativeClassParameter QualifiedName TVarId
+  | UndeclaredSuperclassVariables QualifiedName [TVarId]
+  | UnknownConstraintClass ConstraintSite QualifiedName
+  | ConstraintArityMismatch ConstraintSite QualifiedName Int Int
+    -- ^ Site, class name, declared arity, supplied arity.
+  | SuperclassCycle [QualifiedName]
+  deriving (Eq, Ord, Show)
+
+-- Positional fields are deliberate.  Exported record labels would let a
+-- downstream caller update either index and bypass 'mkStaticClassEnv'.
 data StaticClassEnv = StaticClassEnv
-  { sClassEnv_tclasses :: [HsTypeClass]
-  , sClassEnv_instances :: M.Map QualifiedName [HsInstance]
-  }
-  deriving (Show, Generic, Data)
+  !(M.Map QualifiedName HsTypeClass)
+  !(M.Map QualifiedName [HsInstance])
+  deriving (Eq, Show, Generic)
 
+sClassEnv_tclasses :: StaticClassEnv -> M.Map QualifiedName HsTypeClass
+sClassEnv_tclasses (StaticClassEnv classes _) = classes
+
+sClassEnv_instances :: StaticClassEnv -> M.Map QualifiedName [HsInstance]
+sClassEnv_instances (StaticClassEnv _ instances) = instances
+
+-- | The canonical validated empty environment, also used for parser recovery.
+-- Every non-empty environment is built with 'mkStaticClassEnv'.
+emptyStaticClassEnv :: StaticClassEnv
+emptyStaticClassEnv = StaticClassEnv M.empty M.empty
+
+-- | Validate and index a finite class environment.  Instance inflation runs
+-- only after declarations, heads, prerequisites, arities, and the superclass
+-- graph have been checked.
+mkStaticClassEnv
+  :: [HsTypeClass]
+  -> [HsInstance]
+  -> Either ClassEnvError StaticClassEnv
+mkStaticClassEnv tclasses instances = do
+  classTable <- buildClassTable tclasses
+  traverse_ (validateClass classTable) tclasses
+  traverse_ (validateInstance classTable) instances
+  validateSuperclassGraph classTable
+  let declarations = StaticClassEnv classTable M.empty
+      allInstances = inflateInstances declarations instances
+  return $ StaticClassEnv classTable $ indexInstances allInstances
+ where
+  buildClassTable = go M.empty
+    where
+      go table [] = Right table
+      go table (declaration : rest)
+        | not $ isClassName name = Left $ InvalidClassName name
+        | M.member name table = Left $ DuplicateClassDeclaration name
+        | otherwise = go (M.insert name declaration table) rest
+        where
+          name = tclass_name declaration
+
+  isClassName name = case qualifiedNameOccurrence name of
+    SharedName.IdentifierOccurrence SharedName.ConstructorLike _ -> True
+    SharedName.OperatorOccurrence SharedName.ConstructorLike _ -> True
+    _ -> False
+
+  validateClass table declaration = traverse_
+    (validateConstraintInTable table $ ClassSuperclass name)
+    constraints
+    >> validateParameters
+    >> validateSuperclassVariables
+    where
+      name = tclass_name declaration
+      parameters = tclass_params declaration
+      constraints = tclass_constraints declaration
+      validateParameters = case L.find (< 0) parameters of
+        Just invalid -> Left $ NegativeClassParameter name invalid
+        Nothing -> case firstDuplicate parameters of
+          Just duplicate -> Left $ DuplicateClassParameter name duplicate
+          Nothing -> Right ()
+      validateSuperclassVariables = case S.toAscList
+          (constraintVariables constraints S.\\ S.fromList parameters) of
+        [] -> Right ()
+        unbound -> Left $ UndeclaredSuperclassVariables name unbound
+      constraintVariables = foldMap
+        (foldMap freeVars . constraint_params)
+
+  validateInstance table instanceDeclaration = do
+    let headConstraint = instance_head instanceDeclaration
+        headName = constraint_tclass headConstraint
+    validateConstraintInTable table InstanceHead headConstraint
+    traverse_
+      (validateConstraintInTable table $ InstancePrerequisite headName)
+      (instance_constraints instanceDeclaration)
+
+  validateSuperclassGraph table = case
+    [ map tclass_name declarations
+    | CyclicSCC declarations <- stronglyConnComp
+        [ (declaration, name, map constraint_tclass
+            $ tclass_constraints declaration)
+        | (name, declaration) <- M.toAscList table
+        ]
+    ] of
+      cycleNames : _ -> Left $ SuperclassCycle cycleNames
+      [] -> Right ()
+
+  indexInstances = M.fromListWith (++) . map
+    (\instanceDeclaration ->
+      ( constraint_tclass $ instance_head instanceDeclaration
+      , [instanceDeclaration]
+      ))
+
+-- | Strict closed-world validation: the class must be declared and supplied
+-- exactly its declared number of parameters.
+validateConstraintInEnv
+  :: StaticClassEnv
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ClassEnvError ()
+validateConstraintInEnv environment =
+  validateConstraintInTable $ sClassEnv_tclasses environment
+
+-- | Validate the arity of a known class while retaining an unknown class as a
+-- nominal external constraint.  This is Exference's public query/signature
+-- policy when only part of a source environment has been loaded.
+validateKnownConstraintInEnv
+  :: StaticClassEnv
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ClassEnvError ()
+validateKnownConstraintInEnv environment site constraint = case
+  M.lookup (constraint_tclass constraint)
+    (sClassEnv_tclasses environment) of
+      Nothing -> Right ()
+      Just _ -> validateConstraintInEnv environment site constraint
+
+validateConstraintInTable
+  :: M.Map QualifiedName HsTypeClass
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ClassEnvError ()
+validateConstraintInTable table site constraint = case
+  M.lookup name table of
+    Nothing -> Left $ UnknownConstraintClass site name
+    Just declaration
+      | expected /= actual -> Left
+          $ ConstraintArityMismatch site name expected actual
+      | otherwise -> Right ()
+      where
+        expected = length $ tclass_params declaration
+ where
+  name = constraint_tclass constraint
+  actual = length $ constraint_params constraint
+
+firstDuplicate :: Ord a => [a] -> Maybe a
+firstDuplicate = go S.empty
+ where
+  go _ [] = Nothing
+  go seen (value : rest)
+    | value `S.member` seen = Just value
+    | otherwise = go (S.insert value seen) rest
+
+-- This representation is sealed for the same reason: assumed constraints and
+-- their superclass closure must be updated together by 'addQueryClassEnv'.
 data QueryClassEnv = QueryClassEnv
-  { qClassEnv_env :: StaticClassEnv
-  , qClassEnv_constraints :: S.Set HsConstraint
-  , qClassEnv_inflatedConstraints :: S.Set HsConstraint
-  , qClassEnv_varConstraints :: IntMap.IntMap (S.Set HsConstraint)
-  }
+  !StaticClassEnv
+  !(S.Set HsConstraint)
+  !(S.Set HsConstraint)
   deriving (Generic)
 
--- deepseq provides the same Generic-derived default that this package used to
--- obtain from deepseq-generics.  In particular, forcing the current recursive
--- class graph retains its historical semantics until constraints are moved to
--- the planned non-recursive shared representation.
+qClassEnv_env :: QueryClassEnv -> StaticClassEnv
+qClassEnv_env (QueryClassEnv environment _ _) = environment
+
+qClassEnv_constraints :: QueryClassEnv -> S.Set HsConstraint
+qClassEnv_constraints (QueryClassEnv _ constraints _) = constraints
+
+qClassEnv_inflatedConstraints :: QueryClassEnv -> S.Set HsConstraint
+qClassEnv_inflatedConstraints (QueryClassEnv _ _ constraints) = constraints
+
+-- deepseq provides the same Generic-derived defaults that this package used
+-- to obtain from deepseq-generics.  Constraints now contain only shared
+-- nominal class names, so forcing a class environment walks a finite value
+-- rather than a recursively tied declaration graph.
 instance NFData HsType
 instance NFData HsTypeClass
 instance NFData HsInstance
-instance NFData HsConstraint
+instance NFData HsConstraint where
+  rnf = rnf . toSynthesisConstraint
 instance NFData StaticClassEnv
 instance NFData QueryClassEnv
 
@@ -200,60 +423,74 @@ showHsType convMap t = h 0 t ""
 --   readsPrec _ = maybeToList . parseType
 
 instance Show HsConstraint where
-  show (HsConstraint c ps) = unwords $ show (tclass_name c) : map show ps
+  showsPrec precedence =
+    showsPrec precedence . toSynthesisConstraint
 
 showHsConstraint :: TypeVarIndex
                  -> HsConstraint
                  -> String
 showHsConstraint convMap (HsConstraint c ps) =
-  unwords $ show name : tyStrs  
+  unwords $ show c : tyStrs
  where
-  name = tclass_name c
   tyStrs = showHsType convMap <$> ps
   
 
 instance Show QueryClassEnv where
-  show (QueryClassEnv _ cs _ _) = "(QueryClassEnv _ " ++ show cs ++ " _)"
-filterHsConstraintsByVarId :: TVarId
-                           -> S.Set HsConstraint
-                           -> S.Set HsConstraint
-filterHsConstraintsByVarId i = S.filter
-                             $ any (containsVar i) . constraint_params
+  show (QueryClassEnv _ cs _) = "(QueryClassEnv _ " ++ show cs ++ " _)"
 
 containsVar :: TVarId -> HsType -> Bool
 containsVar i = S.member i . freeVars
 
 mkQueryClassEnv :: StaticClassEnv -> [HsConstraint] -> QueryClassEnv
-mkQueryClassEnv sClassEnv constrs = addQueryClassEnv constrs $ QueryClassEnv {
-  qClassEnv_env = sClassEnv,
-  qClassEnv_constraints = S.empty,
-  qClassEnv_inflatedConstraints = S.empty,
-  qClassEnv_varConstraints = IntMap.empty
-}
+mkQueryClassEnv sClassEnv constrs = addQueryClassEnv constrs
+  $ QueryClassEnv sClassEnv S.empty S.empty
 
 addQueryClassEnv :: [HsConstraint] -> QueryClassEnv -> QueryClassEnv
-addQueryClassEnv constrs env = env {
-  qClassEnv_constraints = csSet,
-  qClassEnv_inflatedConstraints = inflated,
-  qClassEnv_varConstraints = helper csSet
-}
+addQueryClassEnv constrs env = QueryClassEnv
+  (qClassEnv_env env) csSet inflated
   where
     csSet = S.fromList constrs `S.union` qClassEnv_constraints env
-    inflated = inflateHsConstraints csSet
-    helper :: S.Set HsConstraint -> IntMap.IntMap (S.Set HsConstraint)
-    helper cs =
-      let ids :: IntSet.IntSet
-          ids = IntSet.fromList . S.toList . foldMap freeVars
-              $ constraint_params =<< S.toList cs
-      in IntMap.fromSet (flip filterHsConstraintsByVarId
-                        inflated) ids
+    inflated = inflateHsConstraints (qClassEnv_env env) csSet
 
-inflateHsConstraints :: S.Set HsConstraint -> S.Set HsConstraint
-inflateHsConstraints = closure (S.fromList . superclasses)
+-- | Add all transitively implied superclasses using declarations from the
+-- explicit environment.  Arity is checked before constructing the
+-- substitution: malformed query constraints never receive a silently
+-- truncated @zip@ substitution.
+inflateHsConstraints
+  :: StaticClassEnv
+  -> S.Set HsConstraint
+  -> S.Set HsConstraint
+inflateHsConstraints environment = closure (S.fromList . superclasses)
   where
     superclasses :: HsConstraint -> [HsConstraint]
-    superclasses (HsConstraint (HsTypeClass _ ids constrs) ps) =
-      map (snd . constraintApplySubsts (IntMap.fromList $ zip ids ps)) constrs
+    superclasses (HsConstraint className arguments) = case
+      M.lookup className (sClassEnv_tclasses environment) of
+        Just (HsTypeClass _ parameters constraints)
+          | length parameters == length arguments ->
+              let substitutions = IntMap.fromList $ zip parameters arguments
+              in map (snd . constraintApplySubsts substitutions) constraints
+        _ -> []
+
+-- | Add instance heads implied by superclass declarations.  Exact arity is
+-- checked before substitution, so no malformed head can be truncated by
+-- @zip@ even if this helper is called independently of 'mkStaticClassEnv'.
+inflateInstances :: StaticClassEnv -> [HsInstance] -> [HsInstance]
+inflateInstances environment =
+  S.toList . closure (S.fromList . superclasses) . S.fromList
+ where
+  superclasses :: HsInstance -> [HsInstance]
+  superclasses (HsInstance prerequisites
+      (HsConstraint className arguments)) = case
+    M.lookup className (sClassEnv_tclasses environment) of
+      Just (HsTypeClass _ parameters constraints)
+        | length parameters == length arguments ->
+            let substitutions = IntMap.fromList $ zip parameters arguments
+            in map
+                (HsInstance prerequisites
+                  . snd
+                  . constraintApplySubsts substitutions)
+                constraints
+      _ -> []
 
 constraintApplySubst :: Subst -> HsConstraint -> HsConstraint
 constraintApplySubst s (HsConstraint c ps) =

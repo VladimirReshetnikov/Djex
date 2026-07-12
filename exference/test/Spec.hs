@@ -72,6 +72,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentFromPath
   , parseRatings
   )
+import Language.Haskell.Exference.ClassEnvFromHaskellSrc (getClassEnv)
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc (convert, convertToFunc)
 import Language.Haskell.Exference.BindingsFromHaskellSrc (getClassMethods)
@@ -86,6 +87,7 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
   , convertQName
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
+import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified CompatibilityImport
 import Paths_exference (getDataFileName)
@@ -96,23 +98,243 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Exference"
   [ testGroup "class environments"
-      [ testCase "superclass closure terminates across cycles" $ do
-          let classA = HsTypeClass (name "A") [0]
-                [HsConstraint classB [TypeVar 0]]
+      [ testCase "class declarations contain only finite name references" $ do
+          let self = HsTypeClass (name "Self") [0]
+                [HsConstraint (name "Self") [TypeVar 0]]
+              classA = HsTypeClass (name "A") [0]
+                [HsConstraint (name "B") [TypeVar 0]]
               classB = HsTypeClass (name "B") [0]
-                [HsConstraint classA [TypeVar 0]]
-              constraints = Set.singleton $ HsConstraint classA [TypeVar 1]
-          Set.map (tclass_name . constraint_tclass)
-            (inflateHsConstraints constraints)
+                [HsConstraint (name "A") [TypeVar 0]]
+              declarations = [self, classA, classB]
+          force declarations @?= declarations
+          assertBool "showing recursive class declarations did not terminate"
+            $ not $ null $ force $ show declarations
+      , testCase "superclass closure follows declarations by name" $ do
+          let classA = HsTypeClass (name "A") [0] []
+              classB = HsTypeClass (name "B") [0]
+                [HsConstraint (name "A") [TypeVar 0]]
+              constraints = Set.singleton
+                $ HsConstraint (name "B") [TypeVar 1]
+          environment <- expectRight $ mkStaticClassEnv [classA, classB] []
+          Set.map constraint_tclass
+            (inflateHsConstraints environment constraints)
             @?= Set.fromList [name "A", name "B"]
-      , testCase "adding constraints retains the existing variable index" $ do
+      , testCase "superclass cycles are rejected explicitly" $ do
+          let classA = HsTypeClass (name "A") [0]
+                [HsConstraint (name "B") [TypeVar 0]]
+              classB = HsTypeClass (name "B") [0]
+                [HsConstraint (name "A") [TypeVar 0]]
+          case mkStaticClassEnv [classA, classB] [] of
+            Left (SuperclassCycle cycleNames) ->
+              Set.fromList cycleNames @?= Set.fromList [name "A", name "B"]
+            result -> fail $ "superclass cycle was not diagnosed: " ++ show result
+      , testCase "self-superclass cycles are rejected explicitly" $ do
+          let self = HsTypeClass (name "Self") [0]
+                [HsConstraint (name "Self") [TypeVar 0]]
+          mkStaticClassEnv [self] []
+            @?= Left (SuperclassCycle [name "Self"])
+      , testCase "shared constraint conversion is lossless" $ do
+          let constraint = HsConstraint (name "C")
+                [TypeApp (TypeCons $ name "Maybe") (TypeVar 0)]
+          fromSynthesisConstraint (toSynthesisConstraint constraint)
+            @?= Right constraint
+      , testCase "shared constraints reject unboxed class names" $ do
+          unboxed <- expectRight $ SharedName.tupleName SharedName.Unboxed 2
+          case fromSynthesisConstraint
+              (SharedConstraint.Constraint unboxed [TypeVar 0]) of
+            Left (UnsupportedSpecialName _) -> pure ()
+            result -> fail $ "unboxed constraint was accepted: " ++ show result
+      , testCase "adding constraints retains existing constraints" $ do
           let cls = HsTypeClass (name "C") [0] []
-              env0 = mkQueryClassEnv (mkStaticClassEnv [cls] [])
-                [HsConstraint cls [TypeVar 1]]
-              env1 = addQueryClassEnv [HsConstraint cls [TypeVar 2]] env0
-          IntMap.keys (qClassEnv_varConstraints env1) @?= [1, 2]
-      , testCase "unknown classes remain nominally distinct" $
-          unknownTypeClass (name "Foo") == unknownTypeClass (name "Bar") @?= False
+          staticEnvironment <- expectRight $ mkStaticClassEnv [cls] []
+          let env0 = mkQueryClassEnv staticEnvironment
+                [HsConstraint (name "C") [TypeVar 1]]
+              env1 = addQueryClassEnv
+                [HsConstraint (name "C") [TypeVar 2]] env0
+          qClassEnv_constraints env1 @?= Set.fromList
+            [ HsConstraint (name "C") [TypeVar 1]
+            , HsConstraint (name "C") [TypeVar 2]
+            ]
+      , testCase "duplicate class names are rejected in either order" $ do
+          let unary = HsTypeClass (name "C") [0] []
+              binary = HsTypeClass (name "C") [0, 1] []
+              expected = Left (DuplicateClassDeclaration $ name "C")
+          mkStaticClassEnv [unary, binary] [] @?= expected
+          mkStaticClassEnv [binary, unary] [] @?= expected
+      , testCase "class declarations require the constructor namespace" $ do
+          let lowercase = HsTypeClass (name "className") [] []
+              tuple = HsTypeClass (TupleCon 2) [] []
+          mkStaticClassEnv [lowercase] []
+            @?= Left (InvalidClassName $ name "className")
+          mkStaticClassEnv [tuple] []
+            @?= Left (InvalidClassName $ TupleCon 2)
+      , testCase "duplicate class parameters are rejected" $ do
+          let malformed = HsTypeClass (name "C") [0, 0] []
+          mkStaticClassEnv [malformed] []
+            @?= Left (DuplicateClassParameter (name "C") 0)
+      , testCase "negative class parameters are rejected" $ do
+          let malformed = HsTypeClass (name "C") [-1] []
+          mkStaticClassEnv [malformed] []
+            @?= Left (NegativeClassParameter (name "C") (-1))
+          assertBool "negative variable ID was mistaken for the ground sentinel"
+            $ constraintContainsVariables
+            $ HsConstraint (name "C") [TypeVar (-1)]
+      , testCase "superclasses cannot mention undeclared parameters" $ do
+          let base = HsTypeClass (name "Base") [0] []
+              malformed = HsTypeClass (name "Derived") [0]
+                [HsConstraint (name "Base") [TypeVar 1]]
+          mkStaticClassEnv [base, malformed] []
+            @?= Left (UndeclaredSuperclassVariables
+              (name "Derived") [1])
+      , testCase "unknown superclasses are rejected nominally" $ do
+          let malformed = HsTypeClass (name "Derived") [0]
+                [HsConstraint (name "Missing") [TypeVar 0]]
+          mkStaticClassEnv [malformed] []
+            @?= Left (UnknownConstraintClass
+              (ClassSuperclass $ name "Derived") (name "Missing"))
+      , testCase "qualified classes with the same occurrence remain distinct" $ do
+          classAName <- expectRight $ mkQualifiedName ["A"] "C"
+          classBName <- expectRight $ mkQualifiedName ["B"] "C"
+          let classA = HsTypeClass classAName [0] []
+              classB = HsTypeClass classBName [0, 1] []
+          environment <- expectRight $ mkStaticClassEnv [classB, classA] []
+          Map.keys (sClassEnv_tclasses environment)
+            @?= [classAName, classBName]
+      , testCase "frontend keeps equally spelled qualified classes distinct" $ do
+          (environment, messages) <- classEnvironmentFromSources
+            [ unlines
+                [ "module A where"
+                , "class C a where"
+                ]
+            , unlines
+                [ "module B where"
+                , "class C a b where"
+                ]
+            ]
+          classAName <- expectRight $ mkQualifiedName ["A"] "C"
+          classBName <- expectRight $ mkQualifiedName ["B"] "C"
+          Map.keys (sClassEnv_tclasses environment)
+            @?= [classAName, classBName]
+          assertBool ("unexpected diagnostics: " ++ show messages)
+            $ not $ any ("duplicate type class" `isInfixOf`) messages
+      , testCase "frontend rejects duplicate classes independently of order" $ do
+          let source firstDeclaration secondDeclaration = unlines
+                [ "module M where"
+                , firstDeclaration
+                , secondDeclaration
+                ]
+              unary = "class C a where"
+              binary = "class C a b where"
+              expected = "duplicate type class: C (M.C)"
+          (forwardEnvironment, forwardMessages) <- classEnvironmentFromSources
+            [source unary binary]
+          (reverseEnvironment, reverseMessages) <- classEnvironmentFromSources
+            [source binary unary]
+          Map.null (sClassEnv_tclasses forwardEnvironment) @?= True
+          Map.null (sClassEnv_tclasses reverseEnvironment) @?= True
+          assertBool ("missing duplicate diagnostic: " ++ show forwardMessages)
+            $ expected `elem` forwardMessages
+          assertBool ("missing duplicate diagnostic: " ++ show reverseMessages)
+            $ expected `elem` reverseMessages
+          forwardMessages @?= reverseMessages
+      , testCase "superclass arity is checked against the class table" $ do
+          let binary = HsTypeClass (name "Binary") [0, 1] []
+              derived = HsTypeClass (name "Derived") [0]
+                [HsConstraint (name "Binary") [TypeVar 0]]
+          mkStaticClassEnv [binary, derived] []
+            @?= Left (ConstraintArityMismatch
+              (ClassSuperclass $ name "Derived") (name "Binary") 2 1)
+      , testCase "frontend diagnoses too few and too many superclass arguments" $ do
+          let expectedTooFew =
+                "wrong number of parameters for type class C: expected 2, got 1"
+              expectedTooMany =
+                "wrong number of parameters for type class C: expected 2, got 3"
+          (_, messages) <- classEnvironmentFromSources
+            [ unlines
+                [ "module M where"
+                , "class C a b where"
+                , "class C a => TooFew a where"
+                , "class C a b a => TooMany a where"
+                ]
+            ]
+          assertBool ("missing too-few diagnostic: " ++ show messages)
+            $ expectedTooFew `elem` messages
+          assertBool ("missing too-many diagnostic: " ++ show messages)
+            $ expectedTooMany `elem` messages
+      , testCase "frontend binds head variables before superclass arguments" $ do
+          (environment, messages) <- classEnvironmentFromSources
+            [ unlines
+                [ "module M where"
+                , "class Pair a b where"
+                , "class Pair b a => Swap a b where"
+                ]
+            ]
+          pairName <- expectRight $ mkQualifiedName ["M"] "Pair"
+          swapName <- expectRight $ mkQualifiedName ["M"] "Swap"
+          assertBool ("unexpected diagnostics: " ++ show messages)
+            $ null messages
+          case Map.lookup swapName (sClassEnv_tclasses environment) of
+            Nothing -> fail "Swap class was not elaborated"
+            Just declaration -> do
+              tclass_params declaration @?= [0, 1]
+              tclass_constraints declaration @?=
+                [HsConstraint pairName [TypeVar 1, TypeVar 0]]
+      , testCase "explicit instance foralls bind every used variable" $ do
+          (_, messages) <- classEnvironmentFromSources
+            [ unlines
+                [ "module M where"
+                , "class C a where"
+                , "instance forall a. C b"
+                ]
+            ]
+          assertBool ("missing explicit-forall diagnostic: " ++ show messages)
+            $ any ("outside its explicit forall" `isInfixOf`) messages
+      , testCase "instance-head arity is checked against the class table" $ do
+          let cls = HsTypeClass (name "C") [0, 1] []
+              tooMany = HsInstance [] $ HsConstraint (name "C")
+                [ TypeCons $ name "Int"
+                , TypeCons $ name "Bool"
+                , TypeCons $ name "Char"
+                ]
+          mkStaticClassEnv [cls] [tooMany]
+            @?= Left (ConstraintArityMismatch
+              InstanceHead (name "C") 2 3)
+      , testCase "unknown instance heads preserve the head site" $ do
+          let instanceDeclaration = HsInstance []
+                $ HsConstraint (name "Missing") []
+          mkStaticClassEnv [] [instanceDeclaration]
+            @?= Left (UnknownConstraintClass InstanceHead (name "Missing"))
+      , testCase "instance-prerequisite arity is checked" $ do
+          let prerequisiteClass = HsTypeClass (name "C") [0, 1] []
+              headClass = HsTypeClass (name "D") [] []
+              instanceDeclaration = HsInstance
+                [HsConstraint (name "C") [TypeCons $ name "Int"]]
+                (HsConstraint (name "D") [])
+          mkStaticClassEnv [prerequisiteClass, headClass]
+              [instanceDeclaration]
+            @?= Left (ConstraintArityMismatch
+              (InstancePrerequisite $ name "D") (name "C") 2 1)
+      , testCase "unknown instance prerequisites preserve the head site" $ do
+          let headClass = HsTypeClass (name "D") [] []
+              instanceDeclaration = HsInstance
+                [HsConstraint (name "Missing") []]
+                (HsConstraint (name "D") [])
+          mkStaticClassEnv [headClass] [instanceDeclaration]
+            @?= Left (UnknownConstraintClass
+              (InstancePrerequisite $ name "D") (name "Missing"))
+      , testCase "instance inflation substitutes nominal superclass heads" $ do
+          let base = HsTypeClass (name "Base") [0] []
+              derived = HsTypeClass (name "Derived") [7]
+                [HsConstraint (name "Base") [TypeVar 7]]
+              integer = TypeCons $ name "Int"
+              sourceInstance = HsInstance []
+                $ HsConstraint (name "Derived") [integer]
+              impliedInstance = HsInstance []
+                $ HsConstraint (name "Base") [integer]
+          environment <- expectRight
+            $ mkStaticClassEnv [base, derived] [sourceInstance]
+          Map.lookup (name "Base") (sClassEnv_instances environment)
+            @?= Just [impliedInstance]
       , testCase "class methods attach to the exactly qualified class" $ do
           classAName <- expectRight $ mkQualifiedName ["A"] "C"
           classBName <- expectRight $ mkQualifiedName ["B"] "C"
@@ -124,18 +346,21 @@ tests = testGroup "Exference"
             , "  method :: a -> a"
             ]
           let methods = runIdentity $ runMultiRWSTNil
-                $ getClassMethods [classB, classA] [] Map.empty [parsedModule]
+                $ getClassMethods
+                    (Map.fromList [(classBName, classB), (classAName, classA)])
+                    [] Map.empty [parsedModule]
           case rights methods of
             [(_, TypeForall _ (constraint : _) _)] ->
-              tclass_name (constraint_tclass constraint) @?= classAName
+              constraint_tclass constraint @?= classAName
             result -> fail $ "unexpected class methods: " ++ show result
       , testCase "cyclic instance prerequisites remain unresolved" $ do
           let cls = HsTypeClass (name "C") [0] []
-              prerequisite = HsConstraint cls [TypeVar 0]
-              cyclicInstance = HsInstance [prerequisite] cls [TypeVar 0]
-              query = HsConstraint cls [TypeCons $ name "Int"]
-              environment = mkQueryClassEnv
-                (mkStaticClassEnv [cls] [cyclicInstance]) []
+              prerequisite = HsConstraint (name "C") [TypeVar 0]
+              query = HsConstraint (name "C") [TypeCons $ name "Int"]
+              cyclicInstance = HsInstance [prerequisite] prerequisite
+          staticEnvironment <- expectRight
+            $ mkStaticClassEnv [cls] [cyclicInstance]
+          let environment = mkQueryClassEnv staticEnvironment []
           isPossible environment [query] @?= Just [query]
           filterUnresolved environment [query] @?= Just [query]
       ]
@@ -170,34 +395,32 @@ tests = testGroup "Exference"
       ]
   , testGroup "type traversal"
       [ testCase "forall substitution protects context binders" $ do
-          let cls = HsTypeClass (name "C") [0, 1] []
-              ty = TypeForall [0]
-                [HsConstraint cls [TypeVar 0, TypeVar 1]]
+          let ty = TypeForall [0]
+                [HsConstraint (name "C") [TypeVar 0, TypeVar 1]]
                 (TypeVar 0)
               replacement = TypeCons (name "Replacement")
               (changed, actual) = applySubsts
                 (IntMap.fromList [(0, replacement), (1, replacement)]) ty
           getAny changed @?= True
           actual @?= TypeForall [0]
-            [HsConstraint cls [TypeVar 0, replacement]]
+            [HsConstraint (name "C") [TypeVar 0, replacement]]
             (TypeVar 0)
       , testCase "free variables include a forall context" $ do
-          let cls = HsTypeClass (name "C") [0] []
-              ty = TypeForall [0]
-                [HsConstraint cls [TypeVar 0, TypeVar 1]]
+          let ty = TypeForall [0]
+                [HsConstraint (name "C") [TypeVar 0, TypeVar 1]]
                 (TypeVar 0)
           freeVars ty @?= Set.singleton 1
       , testCase "largestId includes forall binders and context variables" $ do
-          let cls = HsTypeClass (name "C") [0] []
-              ty = TypeForall [7] [HsConstraint cls [TypeVar 9]] (TypeVar 2)
+          let ty = TypeForall [7]
+                [HsConstraint (name "C") [TypeVar 9]] (TypeVar 2)
           largestId ty @?= 9
       , testCase "quantified type rendering binds its body spelling" $ do
           let names = Map.fromList [("x", 0)]
-              cls = HsTypeClass (name "C") [0] []
           showHsType names (TypeForall [0] [] $ TypeVar 0)
             @?= "forall x . x"
           showHsType names
-            (TypeForall [] [HsConstraint cls [TypeVar 0]] $ TypeVar 0)
+            (TypeForall []
+              [HsConstraint (name "C") [TypeVar 0]] $ TypeVar 0)
             @?= "(C x) => x"
           show (TypeForall [0] [] $ TypeVar 0)
             @?= "forall v0 . v0"
@@ -261,6 +484,44 @@ tests = testGroup "Exference"
           constraintsRelaxedAtStep False 2 2 @?= True
           constraintsRelaxedAtStep False 2 3 @?= False
           constraintsRelaxedAtStep True 2 3 @?= True
+      , testCase "known query constraints require their declared arity" $ do
+          let cls = HsTypeClass (name "C") [0] []
+              malformed = HsConstraint (name "C")
+                [TypeVar 0, TypeVar 1]
+          environment <- expectRight $ mkStaticClassEnv [cls] []
+          validateExferenceInput identityInput
+            { input_goalType = TypeForall [0]
+                [] (TypeForall [1] [malformed] $ TypeVar 0)
+            , input_envClasses = environment
+            }
+            @?= Left (InvalidClassConstraint $ ConstraintArityMismatch
+              QueryConstraint (name "C") 1 2)
+      , testCase "known binding constraints require their declared arity" $ do
+          let cls = HsTypeClass (name "C") [0] []
+              malformed = HsConstraint (name "C") []
+              bindingName = name "f"
+              binding = FunctionBinding (TypeVar 0) bindingName 0
+                [malformed] []
+          environment <- expectRight $ mkStaticClassEnv [cls] []
+          validateExferenceInput identityInput
+            { input_envFuncs = [binding]
+            , input_envClasses = environment
+            }
+            @?= Left (InvalidClassConstraint $ ConstraintArityMismatch
+              (BindingConstraint bindingName) (name "C") 1 0)
+      , testCase "unknown query classes remain nominal external constraints" $
+          validateExferenceInput identityInput
+            { input_goalType = TypeForall [0]
+                [HsConstraint (name "External") [TypeVar 0]]
+                (TypeVar 0)
+            }
+            @?= Right ()
+      , testCase "unknown binding classes remain nominal external constraints" $
+          let binding = FunctionBinding (TypeVar 0) (name "f") 0
+                [HsConstraint (name "External") [TypeVar 0]] []
+          in validateExferenceInput identityInput
+              { input_envFuncs = [binding] }
+              @?= Right ()
       , testCase "nested foralls return a structured input error" $ do
           let polymorphic = TypeForall [0] [] (TypeVar 0)
               goal = TypeArrow polymorphic polymorphic
@@ -311,8 +572,7 @@ tests = testGroup "Exference"
       , testCase "status-aware selectors preserve policy semantics" $ do
           let status index = SearchStatus SearchRunning index 0
               terminal = SearchStatus SearchStepLimitReached 6 0
-              constrained = [HsConstraint
-                (unknownTypeClass $ name "C") []]
+              constrained = [HsConstraint (name "C") []]
               candidate index rating constraints =
                 ( ExpHole index
                 , constraints
@@ -490,6 +750,32 @@ tests = testGroup "Exference"
               assertBool message $ "A.T" `isInfixOf` message
               assertBool message $ "B.T" `isInfixOf` message
             Right result -> fail $ "ambiguous name resolved as " ++ show result
+      , testCase "module lookup prefers a local declaration" $ do
+          local <- expectRight $ mkQualifiedName ["Current"] "C"
+          imported <- expectRight $ mkQualifiedName ["Imported"] "C"
+          let syntaxName = HSE.UnQual HSE.noSrcSpan
+                (HSE.Ident HSE.noSrcSpan "C")
+              currentModule = HSE.ModuleName HSE.noSrcSpan "Current"
+          convertQName (Just currentModule) [imported, local] syntaxName
+            @?= Right local
+      , testCase "module lookup resolves a unique imported occurrence" $ do
+          imported <- expectRight $ mkQualifiedName ["Imported"] "C"
+          let syntaxName = HSE.UnQual HSE.noSrcSpan
+                (HSE.Ident HSE.noSrcSpan "C")
+              currentModule = HSE.ModuleName HSE.noSrcSpan "Current"
+          convertQName (Just currentModule) [imported] syntaxName
+            @?= Right imported
+      , testCase "module lookup diagnoses ambiguous imported occurrences" $ do
+          importedA <- expectRight $ mkQualifiedName ["A"] "C"
+          importedB <- expectRight $ mkQualifiedName ["B"] "C"
+          let syntaxName = HSE.UnQual HSE.noSrcSpan
+                (HSE.Ident HSE.noSrcSpan "C")
+              currentModule = HSE.ModuleName HSE.noSrcSpan "Current"
+          case convertQName (Just currentModule)
+              [importedA, importedB] syntaxName of
+            Left message -> assertBool message
+              $ "ambiguous unqualified name" `isInfixOf` message
+            Right result -> fail $ "ambiguous import resolved as " ++ show result
       , testCase "qualified operators render canonically and round-trip" $ do
           let names =
                 [ QualifiedName [] "."
@@ -544,7 +830,8 @@ tests = testGroup "Exference"
             ratings
       , testCase "the built-in unit value inhabits parsed unit" $ do
           environmentDirectory <- getDataFileName "environment"
-          (bindings, messages) <- loadBindingsAndMessages environmentDirectory
+          (bindings, classEnvironment, messages) <-
+            loadEnvironmentAndMessages environmentDirectory
           let unitBindings = filter ((== TupleCon 0) . functionName) bindings
               applicativeOperator = QualifiedName
                 ["Control", "Applicative"] "<*>"
@@ -567,6 +854,13 @@ tests = testGroup "Exference"
           assertBool "structural rating lookup left an operator unmatched"
             (not $ any ("rating could not be applied: Control.Applicative.(<*>)"
               `isInfixOf`) messages)
+          assertBool ("class environment was discarded: " ++ show messages)
+            (not $ any ("could not construct class environment" `isInfixOf`)
+              messages)
+          assertBool "the shipped class table is empty"
+            (not $ Map.null $ sClassEnv_tclasses classEnvironment)
+          assertBool "the shipped instance index is empty"
+            (not $ Map.null $ sClassEnv_instances classEnvironment)
           (goal, _) <- expectRight $ parseTypePure "()"
           case findOneExpression identityInput
               { input_goalType = goal
@@ -620,9 +914,9 @@ tests = testGroup "Exference"
       , testCase "current HSE parses and elaborates constrained types" $
           case parseTypePure "Eq a => a -> a" of
             Left result -> fail $ show result
-            Right (TypeForall [] [HsConstraint cls [TypeVar 0]]
+            Right (TypeForall [] [HsConstraint className [TypeVar 0]]
                     (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
-              tclass_name cls @?= name "Eq"
+              className @?= name "Eq"
             Right result -> fail $ "unexpected elaboration: " ++ show result
       ]
   , testGroup "Haskell AST conversion"
@@ -682,9 +976,10 @@ tests = testGroup "Exference"
           unqualifiedGlobal <- expectRight $ mkQualifiedName [] "a"
           integer <- expectRight $ mkQualifiedName [] "Int"
           boolean <- expectRight $ mkQualifiedName [] "Bool"
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
           let expression = ExpLambda 1 (TypeVar 10) (ExpName global)
               functions = [FunctionBinding (TypeCons boolean) global 0 [] []]
-              classes = mkQueryClassEnv (mkStaticClassEnv [] []) []
+              classes = mkQueryClassEnv staticClasses []
           checkExpression classes functions []
             (TypeArrow (TypeCons integer) (TypeCons boolean)) [] expression
             @?= Right ()
@@ -736,12 +1031,13 @@ tests = testGroup "Exference"
       ]
   , testGroup "independent expression checking"
       [ testCase "environment-free simplification introduces no globals" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
           let variable = TypeConstant 0
               identity = ExpLambda 1 variable (ExpVar 1 variable)
               composeLike = ExpLambda 1 variable
                 $ ExpApply (ExpName $ name "f")
                 $ ExpApply (ExpName $ name "g") (ExpVar 1 variable)
-              classEnvironment = mkQueryClassEnv (mkStaticClassEnv [] []) []
+              classEnvironment = mkQueryClassEnv staticClasses []
           assertBool "identity simplification introduced a global"
             $ simplifyExpression identity == identity
           assertBool "composition simplification introduced a global"
@@ -750,16 +1046,18 @@ tests = testGroup "Exference"
             (TypeArrow variable variable) [] (simplifyExpression identity)
             @?= Right ()
       , testCase "accepts a typed identity" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
           let variable = TypeVar 0
               identity = ExpLambda 1 variable (ExpVar 1 variable)
-              classEnvironment = mkQueryClassEnv (mkStaticClassEnv [] []) []
+              classEnvironment = mkQueryClassEnv staticClasses []
           checkExpression classEnvironment [] []
             (TypeArrow variable variable) [] identity @?= Right ()
       , testCase "rejects a mismatched variable annotation" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"
               boolean = TypeCons $ name "Bool"
               malformed = ExpLambda 1 integer (ExpVar 1 boolean)
-              classEnvironment = mkQueryClassEnv (mkStaticClassEnv [] []) []
+              classEnvironment = mkQueryClassEnv staticClasses []
           checkExpression classEnvironment [] []
             (TypeArrow integer integer) [] malformed
             @?= Left (TypeMismatch integer boolean)
@@ -824,7 +1122,7 @@ parseTypeWithModePure
 parseTypeWithModePure mode source = runIdentity
   $ runMultiRWSTNil
   $ runExceptT
-  $ parseType [] Nothing [] Map.empty mode source
+  $ parseType Map.empty Nothing [] Map.empty mode source
 
 enableUnboxedTuples :: HSE.ParseMode -> HSE.ParseMode
 enableUnboxedTuples mode = mode
@@ -844,12 +1142,17 @@ expectUnsupportedUnboxed result = case result of
   Left diagnosticResult -> fail $ "incomplete diagnostic: " ++ show diagnosticResult
   Right elaborated -> fail $ "unboxed syntax was accepted as " ++ show elaborated
 
-loadBindingsAndMessages :: FilePath -> IO ([FunctionBinding], [String])
-loadBindingsAndMessages environmentDirectory = runMultiRWSTNil
-  $ withMultiWriterAW
-  $ do
-      (bindings, _, _, _, _) <- environmentFromPath environmentDirectory
-      pure bindings
+loadEnvironmentAndMessages
+  :: FilePath
+  -> IO ([FunctionBinding], StaticClassEnv, [String])
+loadEnvironmentAndMessages environmentDirectory = do
+  ((bindings, classEnvironment), messages) <- runMultiRWSTNil
+    $ withMultiWriterAW
+    $ do
+        (loadedBindings, _, loadedClasses, _, _) <-
+          environmentFromPath environmentDirectory
+        pure (loadedBindings, loadedClasses)
+  pure (bindings, classEnvironment, messages)
 
 identityInput :: ExferenceInput
 identityInput = ExferenceInput
@@ -885,3 +1188,12 @@ expectParsedModule source = case HSE.parseModuleWithMode
     (haskellSrcExtsParseMode "qualified-class-test") source of
   HSE.ParseOk modul -> pure modul
   failure -> fail $ "module did not parse: " ++ show failure
+
+classEnvironmentFromSources :: [String] -> IO (StaticClassEnv, [String])
+classEnvironmentFromSources sources = do
+  modules <- mapM expectParsedModule sources
+  let ((environment, _sourceInstanceCount), messages) = runIdentity
+        $ runMultiRWSTNil
+        $ withMultiWriterAW
+        $ getClassEnv [] Map.empty modules
+  pure (environment, messages)

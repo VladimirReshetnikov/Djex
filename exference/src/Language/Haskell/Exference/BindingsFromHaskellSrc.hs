@@ -27,8 +27,7 @@ import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.Monad ( join )
 import Control.Monad.Trans.Except
-import qualified Data.Map as M
-import Data.List ( find )
+import qualified Data.Map.Strict as M
 import Data.Maybe ( fromMaybe, maybeToList )
 
 import Control.Monad.Trans.MultiRWS
@@ -39,7 +38,7 @@ import Control.Monad.Trans.MultiRWS
 getDecls
   :: (Monad m, Functor m)
   => [QualifiedName]
-  -> [HsTypeClass]
+  -> M.Map QualifiedName HsTypeClass
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> MultiRWST r w s m [Either String HsFunctionDecl]
@@ -53,7 +52,7 @@ getDecls ds tcs tDeclMap modules = fmap (>>= either (return.Left) (map Right))
 
 transformDecl
   :: (Monad m, Functor m)
-  => [HsTypeClass]
+  => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> ModuleName SrcSpanInfo
   -> TypeDeclMap
@@ -67,7 +66,7 @@ transformDecl _ _ _ _ _ = return []
 
 transformDecl'
   :: (MonadMultiState ConvData m, Monad m, Functor m)
-  => [HsTypeClass]
+  => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> ModuleName SrcSpanInfo
   -> TypeDeclMap
@@ -93,7 +92,7 @@ helper mn t syntaxName = (, forallify t)
 
 getDataConss
   :: (Monad m)
-  => [HsTypeClass]
+  => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
@@ -165,7 +164,7 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
 
 getClassMethods
   :: (Monad m, Functor m)
-  => [HsTypeClass]
+  => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
@@ -180,10 +179,10 @@ getClassMethods tcs ds tDeclMap modules = fmap join $ sequence $ do
     let errorMod = (++) ("class method for "++show name++": ")
     case convertModuleNameChecked moduleName name of
       Left conversionError -> return [Left $ errorMod conversionError]
-      Right className -> case find ((== className) . tclass_name) tcs of
+      Right className -> case M.lookup className tcs of
         Nothing -> return [Left $ "unknown type class: " ++ show className]
-        Just cls -> do
-          let cnstrA = HsConstraint cls
+        Just _ -> do
+          let cnstrA = HsConstraint className
                 <$> mapM ((TypeVar <$>) . tyVarTransform) vars
           -- action :: MonadMultiState ConvData m
           --        => m [Either String [HsFunctionDecl]]

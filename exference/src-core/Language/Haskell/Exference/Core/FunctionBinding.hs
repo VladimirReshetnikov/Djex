@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
 
 module Language.Haskell.Exference.Core.FunctionBinding
@@ -10,7 +9,6 @@ module Language.Haskell.Exference.Core.FunctionBinding
 where
 
 import Control.DeepSeq (NFData (..))
-import Data.Data (Data)
 import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.Score
@@ -23,7 +21,7 @@ data FunctionBinding = FunctionBinding
   , functionConstraints :: [HsConstraint]
   , functionParameters :: [HsType]
   }
-  deriving (Data, Eq, Generic, Show)
+  deriving (Eq, Generic, Show)
 
 instance NFData FunctionBinding
 
@@ -31,7 +29,7 @@ data ConstructorBinding = ConstructorBinding
   { constructorName :: QualifiedName
   , constructorFields :: [HsType]
   }
-  deriving (Data, Eq, Generic, Show)
+  deriving (Eq, Generic, Show)
 
 instance NFData ConstructorBinding
 
@@ -40,7 +38,7 @@ data DeconstructorBinding = DeconstructorBinding
   , deconstructorConstructors :: [ConstructorBinding]
   , deconstructorRecursive :: Bool
   }
-  deriving (Data, Eq, Generic, Show)
+  deriving (Eq, Generic, Show)
 
 instance NFData DeconstructorBinding
 
@@ -49,6 +47,6 @@ data EnvDictionary = EnvDictionary
   , environmentDeconstructors :: [DeconstructorBinding]
   , environmentClasses :: StaticClassEnv
   }
-  deriving (Data, Generic, Show)
+  deriving (Generic, Show)
 
 instance NFData EnvDictionary

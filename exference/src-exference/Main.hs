@@ -27,7 +27,7 @@ import qualified Data.List as List
 import Data.Ord ( comparing )
 import Data.Maybe ( listToMaybe, fromMaybe )
 import Control.Monad.Writer.Strict
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
 import Language.Haskell.Exts.Parser ( parseModuleWithMode
@@ -127,16 +127,18 @@ main = do
           putStrLn $ "reading environment from " ++ envDir
         ( (eSignatures
           , eDeconss
-          , sEnv@(StaticClassEnv clss insts)
+          , sEnv
           , validNames
           , tdeclMap )
          ,messages :: [String] ) <- withMultiWriterAW $ environmentFromPath envDir
+        let clss = sClassEnv_tclasses sEnv
+            insts = sClassEnv_instances sEnv
         when (verbosity>0 && not (null messages)) $ lift $
           forM_ messages $ \m -> putStrLn $ "environment warning: " ++ m
         when (PrintEnv `elem` flags) $ lift $ do
           when (verbosity>0) $ putStrLn "[Environment]"
           mapM_ print $ M.elems tdeclMap
-          mapM_ print $ clss
+          mapM_ print $ M.elems clss
           mapM_ print $ [(i,x)| (i,xs) <- M.toList insts, x <- xs]
           mapM_ print $ eSignatures
           mapM_ print $ eDeconss

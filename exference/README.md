@@ -39,7 +39,7 @@ It is explicitly public and depends only on the shared synthesis vocabulary
 plus its search data structures and transformer stack; it does not inherit
 `haskell-src-exts`, filesystem/process libraries, or executable dependencies.
 The unnamed `exference` library contains the `haskell-src-exts` frontend and
-environment loader and re-exports the historical core API for compatibility.
+environment loader and preserves the historical core import paths.
 This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
@@ -50,6 +50,28 @@ and boxed tuples can no longer be confused by rendered spelling.  The legacy
 `QualifiedName(..)` constructor surface remains source-compatible, while new
 code can use checked smart constructors.  Unqualified frontend lookup now
 rejects ambiguous imported type names instead of silently choosing the first.
+
+Class constraints are finite nominal values backed by
+`Language.Haskell.Synthesis.Constraint`; they contain a validated class name
+and arguments, never a recursively embedded declaration. Class declarations
+and instances live in sealed strict maps built by `mkStaticClassEnv`, which
+checks names, duplicate declarations/parameters, superclass variables and
+cycles, referenced classes, and exact arities before superclass inflation.
+Query and binding inputs likewise reject wrong arities for known classes while
+retaining unknown classes as explicit external constraints.
+
+## Exference 1.7 migration
+
+Version 1.7 intentionally breaks the old recursive class representation.
+`HsConstraint` now matches `HsConstraint QualifiedName [HsType]`;
+`HsInstance` stores prerequisites plus an `instance_head`; class collections
+are strict `Map QualifiedName HsTypeClass` values; and `mkStaticClassEnv`
+returns `Either ClassEnvError StaticClassEnv`. `StaticClassEnv` and
+`QueryClassEnv` expose read-only accessors rather than updateable record fields.
+The generic `Data` instances that depended on the recursive representation
+were removed. Imports through `Language.Haskell.Exference` and the former core
+module paths remain available, but callers constructing class values must
+adopt the checked API.
 
 Completed candidates are simplified inside the core and the exact transformed
 tree is independently type-checked before it is returned.  Simplification is

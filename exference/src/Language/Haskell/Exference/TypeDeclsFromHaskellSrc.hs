@@ -41,8 +41,8 @@ import Data.Bifunctor ( bimap, first )
 import Data.Maybe ( maybeToList )
 import Data.List ( intercalate )
 
-import Data.Map ( Map )
-import qualified Data.Map as M
+import Data.Map.Strict ( Map )
+import qualified Data.Map.Strict as M
 import qualified Data.IntMap as IntMap
 
 
@@ -110,7 +110,7 @@ getTypeDecls ds modules = do
     return $ liftM (bimap (("when parsing type declaration "++show name++": ")++) id)
            $ runExceptT
            $ do
-      (ty, tyVarIndex) <- convertTypeNoDecl [] (Just mn) ds rawTy
+      (ty, tyVarIndex) <- convertTypeNoDecl M.empty (Just mn) ds rawTy
       qname <- either throwE pure $ convertModuleNameChecked mn name
       -- the 1000 is arbitrary, but it should not be used anyway.
       -- no new type variables should appear on the left hand side.
@@ -127,7 +127,7 @@ getTypeDecls ds modules = do
 
 convertType :: ( Monad m
                )
-            => [HsTypeClass]
+            => Map QualifiedName HsTypeClass
             -> Maybe (ModuleName SrcSpanInfo)
             -> [QualifiedName]
             -> TypeDeclMap
@@ -140,7 +140,7 @@ convertType tcs mn ds declMap t = do
 
 convertTypeInternal
   :: (MonadMultiState ConvData m)
-  => [HsTypeClass]
+  => Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo) -- default (for unqualified stuff)
                       -- Nothing uses a broad search for lookups
   -> [QualifiedName] -- list of fully qualified data types
@@ -155,7 +155,7 @@ convertTypeInternal tcs defModuleName ds declMap t = do
 
 parseType
   :: (Monad m)
-  => [HsTypeClass]
+  => Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
   -> [QualifiedName]
   -> TypeDeclMap

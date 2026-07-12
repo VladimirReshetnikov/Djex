@@ -44,12 +44,14 @@ checkConstraints variableResult noEvidenceResult environment = solve Set.empty
           bestResult (map (fromInstance $ Set.insert constraint visiting) instances)
             `orElse` noEvidenceResult constraint
       where
-        HsConstraint typeClass parameters = constraint
+        HsConstraint className parameters = constraint
         instances = Map.findWithDefault []
-          (tclass_name typeClass)
+          className
           (sClassEnv_instances $ qClassEnv_env environment)
 
-        fromInstance nextVisiting (HsInstance prerequisites _ instanceParameters) = do
+        fromInstance nextVisiting
+            (HsInstance prerequisites (HsConstraint instanceClass instanceParameters)) = do
+          guard $ className == instanceClass
           guard $ length parameters == length instanceParameters
           substitutions <- unifyRightEqs $ zipWith TypeEq parameters instanceParameters
           solve nextVisiting

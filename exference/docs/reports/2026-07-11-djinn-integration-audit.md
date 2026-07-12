@@ -8,6 +8,21 @@
   `Language.Haskell.Exference.Core.Name`
 - Scope: `djinn/`, `exference/`, and the neutral `synthesis/` foundation
 
+## Implementation update
+
+The findings and reproducers below describe the explicitly named audited
+commits. Subsequent work on the same branch has completed roadmap stages 1–3
+and the shared/Exference portion of stage 4: validated names and diagnostics,
+capture-free checked Exference output, closed symmetric unification and prenex
+handling, truthful search completion, and the shared non-recursive constraint
+representation. Exference 1.7 now uses
+nominal shared constraints, sealed strict class maps, two-pass frontend
+elaboration, exact arity/duplicate/cycle validation, and explicit environment
+lookup for superclass and instance resolution. Stage 4's remaining backend
+task is adapting Djinn's `Context` without changing Djinn's method-resolution
+or kind-checking semantics. The historical snippets remain useful as regression
+rationales even though several no longer type-check against the 1.7 API.
+
 ## Executive summary
 
 Djinn and Exference already have the right high-level integration shape: two
@@ -930,12 +945,14 @@ This stage fixes real bugs without waiting for a common AST.
 
 ### Stage 4: share constraints and normalize class environments
 
-1. Add `Language.Haskell.Synthesis.Constraint`.
-2. Remove recursive `HsTypeClass` values from `HsConstraint` and `HsInstance`.
-3. Validate class arity and exact duplicate declarations.
-4. Migrate superclass inflation and instance solving to explicit environment
-   lookup.
-5. Adapt Djinn `Context` without changing its resolution semantics.
+1. **Complete:** add `Language.Haskell.Synthesis.Constraint`.
+2. **Complete:** remove recursive `HsTypeClass` values from `HsConstraint` and
+   `HsInstance`.
+3. **Complete:** validate class arity, names, variables, cycles, and exact
+   duplicate declarations.
+4. **Complete:** migrate superclass inflation and instance solving to explicit
+   environment lookup.
+5. **Pending:** adapt Djinn `Context` without changing its resolution semantics.
 
 ### Stage 5: share generated code
 

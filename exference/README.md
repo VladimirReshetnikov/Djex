@@ -4,7 +4,7 @@ Exference is a Haskell tool for generating expressions from a type, e.g.
 
 Input: `(Show b) => (a -> b) -> [a] -> [String]`
 
-Output: `\ b -> fmap (\ g -> show (b g))`
+Output: `\b -> fmap (\g -> show (b g))`
 
 [Djinn](https://hackage.haskell.org/package/djinn) is a well known tool that
 does something similar; the main difference is that *Exference* supports a
@@ -75,9 +75,13 @@ adopt the checked API.
 
 Completed candidates are simplified inside the core and the exact transformed
 tree is independently type-checked before it is returned.  Simplification is
-environment-free and never invents globals such as `id` or `(.)`.  Both the
-text and Haskell-AST renderers allocate names by variable identity, avoiding
-binder collisions and globals that will be emitted unqualified.
+environment-free and never invents globals such as `id` or `(.)`.  The typed
+candidate is then erased into `Language.Haskell.Synthesis.Generated`, the same
+scope-safe output tree and renderer used by Djinn.  That shared boundary
+allocates names by variable identity, avoids binder/global capture, and applies
+one qualification policy.  The `haskell-src-exts` converter remains only as a
+compatibility frontend and consumes the shared allocator rather than owning a
+second naming implementation.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the

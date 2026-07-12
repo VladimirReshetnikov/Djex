@@ -44,7 +44,10 @@ import Language.Haskell.Exference.Core
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..)
+  , ExpressionRenderError (..)
+  , renderExpression
   , showExpression
+  , toGeneratedExpression
   )
 import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
@@ -93,6 +96,7 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified CompatibilityImport
 import Paths_exference (getDataFileName)
 
@@ -988,6 +992,29 @@ tests = testGroup "Exference"
                     (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
               className @?= name "Eq"
             Right result -> fail $ "unexpected elaboration: " ++ show result
+      ]
+  , testGroup "shared generated output"
+      [ testCase "typed expressions erase to stable local identities" $ do
+          let variable = TypeVar 0
+              expression = ExpLambda 1 variable
+                $ ExpApply (ExpName $ name "id") (ExpVar 1 variable)
+          toGeneratedExpression expression @?=
+            Generated.Lambda [Generated.Bind 1]
+              (Generated.Apply
+                (Generated.Global $ toSynthesisName $ name "id")
+                (Generated.Local 1))
+      , testCase "scope failures are reported before rendering" $
+          let partial = ExpVar 7 $ TypeVar 0
+          in do
+            renderExpression Generated.Unqualified partial
+              @?= Left (ExpressionScopeError $ Generated.UnboundLocal 7)
+            showExpression partial @?= "g"
+      , testCase "qualification follows the shared policy" $ do
+          global <- expectRight $ mkQualifiedName ["Data", "List"] "map"
+          renderExpression Generated.Unqualified (ExpName global)
+            @?= Right "map"
+          renderExpression Generated.FullyQualified (ExpName global)
+            @?= Right "Data.List.map"
       ]
   , testGroup "Haskell AST conversion"
       [ testCase "lowercase names use Var rather than Con" $

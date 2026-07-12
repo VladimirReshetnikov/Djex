@@ -12,7 +12,6 @@ import Control.Monad.Trans.MultiState
 import Data.Functor.Identity (runIdentity)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
 import Language.Haskell.Exts.Syntax
 
@@ -30,7 +29,7 @@ convert :: Int -> E.Expression -> HsExp
 convert qualification expression = runIdentity
   $ runMultiStateTNil
   $ withMultiStateA
-      (E.allocateVariableNames (emittedIdentifier qualification) Set.empty expression)
+      (allocatedNames qualification [] expression)
   $ gatherLambdas expression []
   where
     gatherLambdas (E.ExpLambda variable ty body) parameters =
@@ -45,8 +44,7 @@ convertToFunc :: Int -> String -> E.Expression -> HsDecl
 convertToFunc qualification functionName expression = runIdentity
   $ runMultiStateTNil
   $ withMultiStateA
-      (E.allocateVariableNames (emittedIdentifier qualification)
-        (Set.singleton functionName) expression)
+      (allocatedNames qualification [functionName] expression)
   $ gatherLambdas expression []
   where
     gatherLambdas (E.ExpLambda variable ty body) parameters =
@@ -145,16 +143,16 @@ renderVariable variable = do
   names <- mGet
   pure $ Map.findWithDefault (T.showVar variable) variable names
 
--- Only ordinary identifiers can collide with local Haskell binders.  Module
--- qualification is discarded at level zero; module-less names remain
--- unqualified at every level.  Operators and constructors occupy different
--- lexical namespaces and need not consume binder spellings.
-emittedIdentifier :: Int -> T.QualifiedName -> Maybe String
-emittedIdentifier qualification name = case T.qualifiedNameOccurrence name of
-  SharedName.IdentifierOccurrence SharedName.VariableLike spelling
-    | qualification == 0 || T.qualifiedNameModule name == Nothing ->
-        Just spelling
-  _ -> Nothing
+allocatedNames :: Int -> [String] -> E.Expression -> Map T.TVarId String
+allocatedNames qualification reserved expression =
+  case E.allocateExpressionNames
+      (E.qualificationFromLevel qualification) reserved expression of
+    Right names -> names
+    -- Type-derived preferences are constructed as legal variable identifiers,
+    -- so failure here denotes an internal invariant violation in the legacy
+    -- pure HSE compatibility API.
+    Left renderError -> error $ "cannot allocate generated local names: "
+      ++ show renderError
 
 namedExpression :: Int -> T.QualifiedName -> HsExp
 namedExpression qualification name

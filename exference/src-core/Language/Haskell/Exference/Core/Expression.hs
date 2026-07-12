@@ -2,9 +2,14 @@
 
 module Language.Haskell.Exference.Core.Expression
   ( Expression (..)
+  , ExpressionRenderError (..)
+  , toGeneratedExpression
+  , renderExpression
+  , qualificationFromLevel
   , showExpression
   , fillExprHole
   , collectVarTypes
+  , allocateExpressionNames
   , allocateVariableNames
   )
 where
@@ -12,9 +17,7 @@ where
 
 
 import Language.Haskell.Exference.Core.Types
-import Data.List ( intercalate )
 import qualified Data.List as L
-import Data.Maybe ( maybeToList )
 import Control.Monad ( forM_ )
 
 import Control.DeepSeq
@@ -26,7 +29,7 @@ import Control.Monad.Trans.MultiRWS
 import Data.Map ( Map )
 import qualified Data.Map as M
 import qualified Data.Set as S
-import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Generated as Generated
 
 
 
@@ -120,31 +123,118 @@ collectVarTypes (ExpCaseMatch se matches) = do
     vars `forM_` uncurry refreshVarTypeBinding
     collectVarTypes me
 
--- | Allocate one stable Haskell binder spelling per variable identity.
---
--- Type-derived names are preferences, not identities: two different IDs can
--- both suggest @t6@, and an emitted global may already use the same spelling.
--- The caller describes which global names will be emitted unqualified under
--- its rendering policy and may reserve additional names (for example, a
--- generated top-level function).  Apostrophes preserve readability while
--- remaining legal identifier continuations.
+data ExpressionRenderError
+  = ExpressionScopeError (Generated.ScopeError TVarId)
+  | ExpressionSyntaxError Generated.RenderError
+  deriving (Eq, Show)
+
+-- | Erase search-only type annotations while retaining stable local identity.
+-- The result is independent of haskell-src-exts and is shared with Djinn's
+-- checked output boundary.
+toGeneratedExpression :: Expression -> Generated.Expression TVarId
+toGeneratedExpression expression = case expression of
+  ExpVar variable _ -> Generated.Local variable
+  ExpName name -> Generated.Global $ toSynthesisName name
+  ExpLambda variable _ body ->
+    Generated.Lambda [Generated.Bind variable]
+      $ toGeneratedExpression body
+  ExpApply function argument -> Generated.Apply
+    (toGeneratedExpression function)
+    (toGeneratedExpression argument)
+  ExpHole variable -> Generated.Hole variable
+  ExpLetMatch constructor variables binding body -> Generated.Let
+    (Generated.Constructor (toSynthesisName constructor)
+      $ map (Generated.Bind . fst) variables)
+    (toGeneratedExpression binding)
+    (toGeneratedExpression body)
+  ExpLet variable _ binding body -> Generated.Let
+    (Generated.Bind variable)
+    (toGeneratedExpression binding)
+    (toGeneratedExpression body)
+  ExpCaseMatch scrutinee alternatives -> Generated.Case
+    (toGeneratedExpression scrutinee)
+    [ ( Generated.Constructor (toSynthesisName constructor)
+          $ map (Generated.Bind . fst) variables
+      , toGeneratedExpression body
+      )
+    | (constructor, variables, body) <- alternatives
+    ]
+
+-- | Allocate names through the common renderer so the HSE compatibility
+-- adapter and the parser-independent text renderer cannot drift apart.
+allocateExpressionNames
+  :: Generated.Qualification
+  -> [String]
+  -> Expression
+  -> Either Generated.RenderError (M.Map TVarId String)
+allocateExpressionNames qualification reserved expression =
+  Generated.allocateLocalNames options $ toGeneratedExpression expression
+ where
+  options = renderOptions qualification reserved expression
+
+-- | Compatibility adapter for callers that describe their own qualification
+-- policy. Allocation itself still belongs exclusively to the shared renderer;
+-- the callback merely contributes emitted globals to its reservation set.
 allocateVariableNames
   :: (QualifiedName -> Maybe String)
   -> S.Set String
   -> Expression
   -> M.Map TVarId String
-allocateVariableNames emittedIdentifier initiallyReserved expression = names
+allocateVariableNames emittedIdentifier reserved expression =
+  case allocateExpressionNames Generated.FullyQualified reservations expression of
+    Right names -> names
+    Left renderError -> error $ "cannot allocate generated local names: "
+      ++ show renderError
  where
-  observations = variableObservations expression
-  variableTypes = L.foldl' recordType M.empty observations
-  reservedGlobals = S.fromList
+  reservations = S.toList $ reserved `S.union` S.fromList
     [ spelling
     | global <- expressionGlobals expression
-    , spelling <- maybeToList $ emittedIdentifier global
+    , Just spelling <- [emittedIdentifier global]
     ]
-  (names, _) = L.foldl' allocate
-    (M.empty, initiallyReserved `S.union` reservedGlobals)
-    $ map fst observations
+
+renderExpression
+  :: Generated.Qualification
+  -> Expression
+  -> Either ExpressionRenderError String
+renderExpression qualification expression = do
+  let generated = toGeneratedExpression expression
+  either (Left . ExpressionScopeError) Right
+    $ Generated.validateExpressionScope generated
+  either (Left . ExpressionSyntaxError) Right
+    $ Generated.renderExpression
+        (renderOptions qualification [] expression) generated
+
+-- | Interpret Exference's historical numeric CLI policy once for every
+-- output frontend.
+qualificationFromLevel :: Int -> Generated.Qualification
+qualificationFromLevel qualification
+  | qualification <= 0 = Generated.Unqualified
+  | qualification == 1 = Generated.QualifyIdentifiers
+  | otherwise = Generated.FullyQualified
+
+-- | Render partial search trees for diagnostics. Search nodes legitimately
+-- contain locals whose binders live in the separate scope forest, so this
+-- compatibility view deliberately skips the closed-expression scope check.
+-- Checked result boundaries must use 'renderExpression'.
+showExpression :: Expression -> String
+showExpression expression = case Generated.renderExpression
+    (renderOptions Generated.Unqualified [] expression)
+    (toGeneratedExpression expression) of
+  Right rendered -> rendered
+  Left renderError -> "<invalid generated expression: "
+    ++ show renderError ++ ">"
+
+renderOptions
+  :: Generated.Qualification
+  -> [String]
+  -> Expression
+  -> Generated.RenderOptions TVarId
+renderOptions qualification reserved expression = Generated.RenderOptions
+  qualification preferred reserved
+ where
+  variableTypes = L.foldl' recordType M.empty $ variableObservations expression
+  preferred variable = maybe (showVar variable) (preferredVarName variable)
+    $ M.lookup variable variableTypes
 
   recordType types (variable, ty) = M.alter update variable types
     where
@@ -152,19 +242,6 @@ allocateVariableNames emittedIdentifier initiallyReserved expression = names
       update (Just TypeVar{}) = Just ty
       update (Just TypeConstant{}) = Just ty
       update existing = existing
-
-  allocate state@(allocated, used) variable
-    | M.member variable allocated = state
-    | otherwise =
-        (M.insert variable chosen allocated, S.insert chosen used)
-    where
-      preferred = maybe (showVar variable) (preferredVarName variable)
-        $ M.lookup variable variableTypes
-      chosen = freshName used preferred
-
-  freshName used candidate
-    | candidate `S.member` used = freshName used $ candidate ++ "'"
-    | otherwise = candidate
 
 variableObservations :: Expression -> [(TVarId, HsType)]
 variableObservations (ExpVar variable ty) = [(variable, ty)]
@@ -186,66 +263,22 @@ variableObservations (ExpCaseMatch scrutinee alternatives) =
     ]
 
 expressionGlobals :: Expression -> [QualifiedName]
-expressionGlobals ExpVar{} = []
-expressionGlobals (ExpName name) = [name]
-expressionGlobals (ExpLambda _ _ body) = expressionGlobals body
-expressionGlobals (ExpApply function argument) =
-  expressionGlobals function ++ expressionGlobals argument
-expressionGlobals ExpHole{} = []
-expressionGlobals (ExpLetMatch constructor _ binding body) =
-  constructor : expressionGlobals binding ++ expressionGlobals body
-expressionGlobals (ExpLet _ _ binding body) =
-  expressionGlobals binding ++ expressionGlobals body
-expressionGlobals (ExpCaseMatch scrutinee alternatives) =
-  expressionGlobals scrutinee
-  ++ concat
-    [ constructor : expressionGlobals body
-    | (constructor, _, body) <- alternatives
-    ]
-
-showExpression :: Expression -> String
-showExpression expression = h 0 expression ""
- where
-  variableNames = allocateVariableNames textualIdentifier S.empty expression
-  variableName variable = M.findWithDefault (showVar variable) variable variableNames
-  textualIdentifier name = case qualifiedNameModule name of
-    Nothing -> SharedName.nameIdentifier $ toSynthesisName name
-    Just _ -> Nothing
-
-  h :: Int -> Expression -> ShowS
-  h _ (ExpVar i _) = showString $ variableName i
-  h _ (ExpName s)  = shows s
-  h d (ExpLambda i _ e1) =
-    showParen (d>0) $ showString ("\\" ++ variableName i ++ " -> ") . h 1 e1
-  h d (ExpApply e1 e2) =
-    showParen (d>1) $ h 2 e1 . showString " " . h 3 e2
-  h _ (ExpHole i) = showString $ "_" ++ showVar i
-  h d (ExpLetMatch n vars bindExp inExp) =
-    showParen (d>2)
-    $ showString ("let ("
-                  ++ show n
-                  ++" "
-                  ++ intercalate " " (map (variableName . fst) vars)
-                  ++ ") = ")
-    . h 0 bindExp . showString " in " . h 0 inExp
-  h d (ExpLet i _ bindExp inExp) =
-    showParen (d>2)
-    $ showString ("let " ++ variableName i ++ " = ")
-    . h 3 bindExp
-    . showString " in "
-    . h 0 inExp
-  h d (ExpCaseMatch bindExp alts) =
-    showParen (d>2)
-    $ showString "case "
-    . h 3 bindExp
-    . showString " of { "
-    . showString (intercalate "; " $ map showAlternative alts)
-    . showString " }"
-    where
-      showAlternative (constructor, variables, body) =
-        show constructor ++ " "
-        ++ intercalate " " (map (variableName . fst) variables)
-        ++ " -> " ++ h 3 body ""
+expressionGlobals expression = case expression of
+  ExpVar{} -> []
+  ExpName name -> [name]
+  ExpLambda _ _ body -> expressionGlobals body
+  ExpApply function argument ->
+    expressionGlobals function ++ expressionGlobals argument
+  ExpHole{} -> []
+  ExpLetMatch constructor _ binding body ->
+    constructor : expressionGlobals binding ++ expressionGlobals body
+  ExpLet _ _ binding body ->
+    expressionGlobals binding ++ expressionGlobals body
+  ExpCaseMatch scrutinee alternatives ->
+    expressionGlobals scrutinee ++ concat
+      [ constructor : expressionGlobals body
+      | (constructor, _, body) <- alternatives
+      ]
 
 -- instance Observable Expression where
 --   observer x = observeOpaque (show x) x

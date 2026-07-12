@@ -11,11 +11,11 @@ where
 
 
 import Language.Haskell.Exference
-import Language.Haskell.Exference.ExpressionToHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.Diagnostic (diagnosticMessage)
 import Language.Haskell.Exference.Core.FunctionBinding
+import qualified Language.Haskell.Exference.Core.Expression as CoreExpression
 import Language.Haskell.Exference.EnvironmentParser
 
 import Language.Haskell.Exference.Core.Types
@@ -36,8 +36,6 @@ import Language.Haskell.Exts.Parser ( parseModuleWithMode
 import Language.Haskell.Exts.Extension ( Language (..)
                                        , Extension (..)
                                        , KnownExtension (..) )
-import Language.Haskell.Exts.Pretty
-
 import Control.Monad.Trans.MultiRWS
 import Control.Monad.Trans.Except
 
@@ -285,7 +283,12 @@ printAllResults qualification tVarIndex = go Nothing False
 printResult :: Int -> TypeVarIndex -> ExferenceOutputElement -> IO ()
 printResult qualification tVarIndex
     (expression, constraints, ExferenceStats steps depth queueSize) = do
-  putStrLn $ prettyPrint $ convert qualification expression
+  rendered <- either
+    (fail . ("cannot render checked search result: " ++) . show)
+    pure
+    $ CoreExpression.renderExpression
+        (CoreExpression.qualificationFromLevel qualification) expression
+  putStrLn rendered
   when (not $ null constraints) $ do
     let constraintStrings = map (showHsConstraint tVarIndex)
           $ S.toList

@@ -102,6 +102,7 @@ import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified CompatibilityImport
 import Paths_exference (getDataFileName)
 
@@ -490,6 +491,23 @@ tests = testGroup "Exference"
               declaration = HsTypeDecl alias [0] (TypeVar 0)
           applyTypeDecls (Map.singleton alias $ Right declaration) (TypeCons alias)
             @?= Left "wrong number of parameters for type declaration Alias"
+      , testCase "shared types round-trip flexible, rigid, tuple, and forall forms" $ do
+          tuple <- expectRight $ mkBoxedTupleName 2
+          let source = TypeForall [0]
+                [HsConstraint (name "C") [TypeVar 0]]
+                $ TypeArrow
+                    (TypeApp
+                      (TypeApp (TypeCons tuple) (TypeVar 0))
+                      (TypeConstant 7))
+                    (TypeApp (TypeCons ListCon) (TypeVar 0))
+          shared <- expectRight $ toSynthesisType source
+          SharedType.validateType shared @?= Right ()
+          fromSynthesisType shared @?= Right source
+      , testCase "shared rigid forall binders are rejected" $ do
+          let malformed = SharedType.ForallType
+                [SharedType.RigidVariable 4] []
+                (SharedType.TypeVariable $ SharedType.RigidVariable 4)
+          fromSynthesisType malformed @?= Left (RigidForallBinder 4)
       ]
   , testGroup "search policy"
       [ testCase "constraint relaxation ends at the configured step" $ do

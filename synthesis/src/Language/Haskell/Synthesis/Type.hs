@@ -65,7 +65,10 @@ instance NFData variable => NFData (TypeError variable)
 canonicalizeType :: Type variable -> Type variable
 canonicalizeType source = case source of
   TypeVariable{} -> source
-  TypeConstructor{} -> source
+  TypeConstructor name
+    | nameSpecial name == Just (TupleConstructor Boxed 0) ->
+        TupleType Boxed []
+    | otherwise -> source
   TypeApplication{} ->
     let (headType, arguments) = applicationSpine source
         canonicalHead = canonicalizeType headType

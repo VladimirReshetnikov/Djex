@@ -7,13 +7,13 @@ import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
 import Djinn.Core (
-    Context, Declaration(..), QueryOutcome(..),
+    Context, Declaration(..), QueryOutcome(..), SynthesisTypeError(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, inhabit,
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
-    mkContext, parseHKind, parseHType, removeDeclaration,
+    fromSynthesisType, mkContext, parseHKind, parseHType, removeDeclaration,
     reportCompletion, reportOutcome, resolveContext, resolveInstanceMethods,
-    standardEnvironment, typeDeclarations)
+    standardEnvironment, toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
@@ -27,6 +27,7 @@ import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 main :: IO ()
 main = defaultMain $ testGroup "Djinn unit tests" $
@@ -37,6 +38,7 @@ tests =
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
+    , ("round-trip shared source types", testSharedTypeAdapter)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
@@ -253,6 +255,27 @@ testCanonicalRendering = do
     assertEqual "kinds should use the syntax accepted by the parser"
         "(* -> *) -> * -> *"
         (show $ KArrow (KArrow KStar KStar) (KArrow KStar KStar))
+
+testSharedTypeAdapter :: IO ()
+testSharedTypeAdapter = do
+    source <- expectRight $ parseHType "(a, [b]) -> Maybe a"
+    shared <- either (fail . show) pure $ toSynthesisType source
+    assertEqual "the shared type satisfies its own invariants"
+        (Right ()) (SharedType.validateType shared)
+    assertEqual "Djinn's source-type subset round-trips losslessly"
+        (Right source) (fromSynthesisType shared)
+    unit <- either (fail . show) pure $ toSynthesisType $ HTCon "()"
+    assertEqual "unit is the structural nullary tuple"
+        (SharedType.TupleType SharedName.Boxed []) unit
+    assertEqual "unit returns to Djinn's canonical constructor form"
+        (Right $ HTCon "()") (fromSynthesisType unit)
+    assertEqual "declaration bodies cannot masquerade as source types"
+        (Left $ DeclarationBodyIsNotSourceType $ HTUnion [])
+        (toSynthesisType $ HTUnion [])
+    assertEqual "explicit foralls remain outside Djinn's supported subset"
+        (Left SynthesisForallUnsupported)
+        (fromSynthesisType $ SharedType.ForallType ["a"] []
+            $ SharedType.TypeVariable "a")
 
 -- Type synonyms are transparent even when they occur below an opaque type
 -- constructor.  The whole opaque application remains one proposition, but

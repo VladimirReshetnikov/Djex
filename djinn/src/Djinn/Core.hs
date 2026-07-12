@@ -15,7 +15,8 @@
 module Djinn.Core (
     -- * Names, types, and kinds
     HSymbol, HType, HKind, kStar, kArrow,
-    parseHType, parseHKind,
+    parseHType, parseHKind, SynthesisTypeError(..),
+    toSynthesisType, fromSynthesisType,
     -- * Declarations
     Constructor, Declaration(..),
     -- * Environments
@@ -48,6 +49,7 @@ import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
+import Djinn.Internal.Type
 
 ------------------------------------------------------------------
 -- Kinds

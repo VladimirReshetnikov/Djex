@@ -11,6 +11,10 @@ module Language.Haskell.Exference.Core.Types
   , module Language.Haskell.Exference.Core.Name
   , HsType (..)
   , HsTypeOffset (..)
+  , SynthesisVariable
+  , SynthesisTypeError (..)
+  , toSynthesisType
+  , fromSynthesisType
   , Subst (..)
   , Substs
   , HsTypeClass (..)
@@ -72,6 +76,7 @@ import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 import Language.Haskell.Exference.Core.Name
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Control.DeepSeq
 import GHC.Generics
@@ -81,6 +86,14 @@ import Control.Monad.Trans.MultiState
 
 
 type TVarId = Int
+type SynthesisVariable = SharedType.Variable TVarId
+
+data SynthesisTypeError
+  = InvalidSynthesisType (SharedType.TypeError SynthesisVariable)
+  | UnsupportedSynthesisName QualifiedNameError
+  | RigidForallBinder TVarId
+  deriving (Eq, Show)
+
 data Subst  = Subst {-# UNPACK #-} !TVarId !HsType
 type Substs = IntMap.IntMap HsType
 
@@ -92,6 +105,86 @@ data HsType = TypeVar      {-# UNPACK #-} !TVarId
             | TypeApp      !HsType !HsType
             | TypeForall   [TVarId] [HsConstraint] !HsType
   deriving (Ord, Eq, Generic)
+
+-- | Erase Exference's search representation into the common source type.
+-- Flexible and rigid IDs remain distinct, and saturated tuple constructors
+-- are canonicalized structurally.
+toSynthesisType
+  :: HsType
+  -> Either SynthesisTypeError (SharedType.Type SynthesisVariable)
+toSynthesisType source = do
+  converted <- convert source
+  let canonical = SharedType.canonicalizeType converted
+  either (Left . InvalidSynthesisType) Right
+    $ SharedType.validateType canonical
+  return canonical
+ where
+  convert typeExpression = case typeExpression of
+    TypeVar variable -> Right $ SharedType.TypeVariable
+      $ SharedType.FlexibleVariable variable
+    TypeConstant variable -> Right $ SharedType.TypeVariable
+      $ SharedType.RigidVariable variable
+    TypeCons name -> Right $ SharedType.TypeConstructor
+      $ toSynthesisName name
+    TypeArrow parameter result -> SharedType.FunctionType
+      <$> convert parameter <*> convert result
+    TypeApp function argument -> SharedType.TypeApplication
+      <$> convert function <*> convert argument
+    TypeForall variables constraints body -> SharedType.ForallType
+      (map SharedType.FlexibleVariable variables)
+      <$> mapM convertConstraint constraints
+      <*> convert body
+
+  convertConstraint (HsConstraint className arguments) =
+    SharedConstraint.Constraint (toSynthesisName className)
+      <$> mapM convert arguments
+
+-- | Narrow a common type back to Exference's typed search vocabulary.
+fromSynthesisType
+  :: SharedType.Type SynthesisVariable
+  -> Either SynthesisTypeError HsType
+fromSynthesisType source = do
+  let canonical = SharedType.canonicalizeType source
+  either (Left . InvalidSynthesisType) Right
+    $ SharedType.validateType canonical
+  convert canonical
+ where
+  convert typeExpression = case typeExpression of
+    SharedType.TypeVariable (SharedType.FlexibleVariable variable) ->
+      Right $ TypeVar variable
+    SharedType.TypeVariable (SharedType.RigidVariable variable) ->
+      Right $ TypeConstant variable
+    SharedType.TypeConstructor name ->
+      TypeCons <$> checkedName name
+    SharedType.TypeApplication function argument -> TypeApp
+      <$> convert function <*> convert argument
+    SharedType.FunctionType parameter result -> TypeArrow
+      <$> convert parameter <*> convert result
+    SharedType.TupleType boxity elements -> do
+      tuple <- either
+        (Left . UnsupportedSynthesisName . InvalidQualifiedName)
+        Right
+        $ SharedName.tupleName boxity $ length elements
+      constructor <- checkedName tuple
+      foldl TypeApp (TypeCons constructor) <$> mapM convert elements
+    SharedType.ForallType variables constraints body -> do
+      binders <- mapM flexibleBinder variables
+      TypeForall binders
+        <$> mapM convertConstraint constraints
+        <*> convert body
+
+  checkedName = either (Left . UnsupportedSynthesisName) Right
+    . fromSynthesisName
+
+  flexibleBinder (SharedType.FlexibleVariable variable) = Right variable
+  flexibleBinder (SharedType.RigidVariable variable) =
+    Left $ RigidForallBinder variable
+
+  convertConstraint (SharedConstraint.Constraint className arguments) = do
+    convertedArguments <- mapM convert arguments
+    either (Left . UnsupportedSynthesisName) Right
+      $ fromSynthesisConstraint
+      $ SharedConstraint.Constraint className convertedArguments
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 

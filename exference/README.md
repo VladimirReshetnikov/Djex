@@ -60,6 +60,12 @@ cycles, referenced classes, and exact arities before superclass inflation.
 Query and binding inputs likewise reject wrong arities for known classes while
 retaining unknown classes as explicit external constraints.
 
+`toSynthesisType` and `fromSynthesisType` adapt Exference's flexible and rigid
+type IDs, applications, arrows, tuples, foralls, and constraints to the shared
+source-type IR. The checked reverse conversion rejects rigid forall binders and
+shared names outside Exference's representable subset rather than weakening
+them during lowering.
+
 ## Exference 1.7 migration
 
 Version 1.7 intentionally breaks the old recursive class representation.

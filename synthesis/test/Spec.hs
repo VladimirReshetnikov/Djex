@@ -51,6 +51,10 @@ typeTests = testGroup "source types"
         SharedType.FunctionType a b
       SharedType.canonicalizeType pair @?=
         SharedType.TupleType Boxed [a, b]
+      SharedType.canonicalizeType
+          (SharedType.TypeConstructor (right $ tupleName Boxed 0)
+            :: SharedType.Type String) @?=
+        SharedType.TupleType Boxed []
   , testCase "forall binders protect bodies and constraints" $ do
       let className = right $ mkIdentifier "C"
           typeExpression = SharedType.ForallType ["a"]

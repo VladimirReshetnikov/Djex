@@ -345,6 +345,7 @@ The same Boolean options can precede file names on the command line, such as
 | `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated `haskell-synthesis` name and operator rules. |
 | `Djinn.Internal.HTypes` | Type parser, logical translation, and proof-term conversion/cleanup. |
+| `Djinn.Internal.Type` | Checked conversion between Djinn source types and the shared source-type IR. |
 | `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
 | `Language.Haskell.Synthesis.Generated` | Shared local/global output tree, scope validation, capture-safe naming, qualification, and Haskell rendering. |
 | `Djinn.Internal.LJTFormula` | Formula and proof-term data types. |
@@ -404,7 +405,10 @@ prerequisites before returning the target's instantiated methods. A query's
 goal and every class argument are likewise kind-checked together, so a free
 type variable has one kind throughout the complete signature. Public query
 budgets must be non-negative; `Nothing` is unlimited and `Just 0` expires at
-the first choice point. The core `Djinn.Internal.*` modules listed above remain
+the first choice point. `toSynthesisType` and `fromSynthesisType` expose the
+lossless ordinary-type subset of `HType`; they explicitly reject declaration
+bodies, shared foralls, and unboxed tuples instead of conflating those layers.
+The core `Djinn.Internal.*` modules listed above remain
 exposed by `djinn-core` for research use, but they provide raw constructors
 that can violate these invariants and carry no stability promise. The
 frontend-only Help and REPL modules are deliberately not exposed.

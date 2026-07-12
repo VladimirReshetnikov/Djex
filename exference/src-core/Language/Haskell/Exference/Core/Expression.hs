@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Language.Haskell.Exference.Core.Expression
   ( Expression (..)
@@ -83,8 +84,7 @@ instance NFData Expression
 --       )
 --     . showString " }"
 
-refreshVarTypeBinding :: forall m
-                       . MonadMultiState (Map TVarId HsType) m
+refreshVarTypeBinding :: MonadMultiState (Map TVarId HsType) m
                       => TVarId
                       -> HsType
                       -> m ()
@@ -96,8 +96,7 @@ refreshVarTypeBinding i ty = do
     Just TypeConstant{} -> mSet $ M.insert i ty m
     _                   -> return ()
 
-collectVarTypes :: forall m
-                 . MonadMultiState (Map TVarId HsType) m
+collectVarTypes :: MonadMultiState (Map TVarId HsType) m
                 => Expression
                 -> m ()
 collectVarTypes (ExpVar i ty)       = refreshVarTypeBinding i ty

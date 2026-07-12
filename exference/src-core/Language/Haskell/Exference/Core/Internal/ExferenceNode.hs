@@ -26,7 +26,6 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   , splitBinding
   , initialScopeId
   , initialScopes
-  , showSearchNode
   -- SearchNode lenses
   , HasGoals (..)
   , HasConstraintGoals (..)
@@ -45,9 +44,6 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   )
 where
 
-import Prelude hiding ((<>))
-
-
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
@@ -58,9 +54,6 @@ import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Vector as V
 import Data.Sequence
-import Data.Foldable ( toList )
-
-import Text.PrettyPrint
 
 import Control.DeepSeq
 import GHC.Generics
@@ -188,64 +181,6 @@ instance NFData VarBinding
 instance NFData VarPBinding
 instance NFData TGoal
 instance NFData SearchNode
-
-showSearchNode :: SearchNode -> String
-showSearchNode
-  (SearchNode sgoals
-              scgoals
-              scopeForest
-              _svarUses
-              _sfuncs
-              _sdeconss
-              qClassEnv
-              sexpression
-              snextVarId
-              smaxTVarId
-              snextNVarId
-              sdepth
-              reason
-              _lastStepBinding
-              ) =
-  let exprStr = showExpression sexpression
-  in show
-    $ text "SearchNode" <+> (
-          (text   "goals      ="
-           <+> brackets (vcat $ punctuate (text ", ") $ map tgoal $ toList sgoals)
-          )
-      $$  (text $ "constrGoals= " ++ show scgoals)
-      $$  (text   "scopes     = "
-           <+> brackets (vcat $ punctuate (text ", ")
-             $ map tScope $ Scope.scopesToAscList scopeForest)
-          )
-      $$  (text $ "classEnv   = " ++ show qClassEnv)
-      $$  (text $ "expression = " ++ exprStr)
-      $$  (text $ "reason     = " ++ reason)
-      $$  (parens $    (text $ "nextVarId="++show snextVarId)
-                   <+> (text $ "maxTVarId="++show smaxTVarId)
-                   <+> (text $ "nextNVarId="++show snextNVarId)
-                   <+> (text $ "depth="++show sdepth))
-    )
- where
-  tgoal :: TGoal -> Doc
-  tgoal goal = tVarType (goalBinding goal)
-            <> text (" in " ++ show (goalScope goal))
-  tScope :: (ScopeId, [VarPBinding], Maybe ScopeId) -> Doc
-  tScope (sid, binds, parent) =
-        text (show sid ++ " ")
-    <+> parens (text $ show $ maybe [] pure parent)
-    <+> text " " <+> brackets (
-                          hcat $ punctuate (text ", ")
-                                           (map tVarPType binds)
-                        )
-  tVarType :: VarBinding -> Doc
-  tVarType (VarBinding i t) = text $ showVar i ++ " :: " ++ show t
-  tVarPType :: VarPBinding -> Doc
-  tVarPType binding = tVarType $ VarBinding (varPVariable binding) type'
-    where
-      body = foldr TypeArrow (varPResult binding) (varPParameters binding)
-      type' = case (varPForallVariables binding, varPConstraints binding) of
-        ([], []) -> body
-        (variables, constraints) -> TypeForall variables constraints body
 
 splitBinding :: VarBinding -> VarPBinding
 splitBinding (VarBinding v t) =

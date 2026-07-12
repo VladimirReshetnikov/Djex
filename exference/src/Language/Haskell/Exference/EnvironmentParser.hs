@@ -1,6 +1,8 @@
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Language.Haskell.Exference.EnvironmentParser
@@ -539,7 +541,7 @@ environmentFromPath p = do
   sequence_ $ do
     Left err <- rResult
     return $ mTell ["could not parse rating file", show err]
-  (rs' :: [(QualifiedName, Penalty)]) <- fmap join $ sequence $ do
+  rs' <- fmap join $ sequence $ do
     (rName, rVal) <- rs
     return $ do
       dIds <- fmap join $ sequence $ do

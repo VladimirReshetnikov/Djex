@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Language.Haskell.Exference.ClassEnvFromHaskellSrc
@@ -76,8 +75,7 @@ getClassEnv dataTypes typeDeclarations modules = do
               (mkStaticClassEnv (Map.elems classes) instances)
 
 getTypeClasses
-  :: forall m r w s m0
-   . (Monad m0, m ~ MultiRWST r w s m0)
+  :: (Monad m0, m ~ MultiRWST r w s m0)
   => [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
@@ -150,8 +148,7 @@ getTypeClasses dataTypes typeDeclarations modules = do
   emptyConversionState = ConvData 0 Map.empty
 
 getInstances
-  :: forall m m0 r w s
-   . (m ~ MultiRWST r w s m0, Monad m0)
+  :: (m ~ MultiRWST r w s m0, Monad m0)
   => Map.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> TypeDeclMap

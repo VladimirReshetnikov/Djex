@@ -7,6 +7,7 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 
 module Language.Haskell.Exference.Core.Internal.Exference

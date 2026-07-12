@@ -1,5 +1,6 @@
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE PatternGuards #-}
 

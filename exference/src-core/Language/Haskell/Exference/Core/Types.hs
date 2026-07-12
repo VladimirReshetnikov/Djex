@@ -1,9 +1,9 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 
 module Language.Haskell.Exference.Core.Types
@@ -671,8 +671,7 @@ preferredVarName i = h
   h (TypeApp t _)      = h t
   h (TypeForall _ _ t) = h t
 
-showTypedVar :: forall m
-              . ( MonadMultiState (M.Map TVarId HsType) m )
+showTypedVar :: MonadMultiState (M.Map TVarId HsType) m
              => TVarId
              -> m String
 showTypedVar i = do

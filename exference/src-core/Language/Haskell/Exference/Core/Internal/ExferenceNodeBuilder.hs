@@ -1,5 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
   ( SearchNodeBuilder

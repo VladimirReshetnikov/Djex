@@ -9,6 +9,7 @@ License:        BSD-3-Clause
 License-File:   LICENSE
 Author:         Lennart Augustsson
 Maintainer:     Vladimir Reshetnikov
+Homepage:       https://github.com/VladimirReshetnikov/Haskell/tree/main/djex/djinn
 Copyright:      2014 Lennart Augustsson
 Category:       source-tools
 Build-type:     Simple
@@ -20,16 +21,19 @@ Extra-Source-Files:
 source-repository head
   type:     git
   location: https://github.com/VladimirReshetnikov/Haskell
-  subdir:   djinn
+  subdir:   djex/djinn
+
+common build-settings
+  Default-Language: Haskell2010
+  Ghc-Options:      -Wall -Wcompat
+  Build-Depends:    base >= 4.19 && < 5
 
 library djinn-core
+  import:           build-settings
   Visibility:       public
-  Default-Language: Haskell2010
   Hs-Source-Dirs:   src
-  Ghc-Options:      -Wall -Wcompat
 
-  Build-Depends:    base >= 4.18 && < 5,
-                    haskell-synthesis >= 0.1.11 && < 0.2,
+  Build-Depends:    haskell-synthesis >= 0.1.11 && < 0.2,
                     transformers >= 0.5 && < 0.7,
                     containers >= 0.6 && < 0.9
 
@@ -50,12 +54,10 @@ library djinn-core
                     Djinn.Internal.Type
 
 library
-  Default-Language: Haskell2010
+  import:           build-settings
   Hs-Source-Dirs:   src-cli
-  Ghc-Options:      -Wall -Wcompat
 
-  Build-Depends:    base >= 4.18 && < 5,
-                    djinn:djinn-core,
+  Build-Depends:    djinn:djinn-core,
                     haskeline >= 0.8 && < 0.9,
                     transformers >= 0.5 && < 0.7
 
@@ -71,62 +73,48 @@ library
   Autogen-Modules:  Paths_djinn
 
 executable djinn
-  Default-Language: Haskell2010
+  import:         build-settings
   Main-Is:        Main.hs
-  Ghc-Options:    -Wall -Wcompat
 
-  Build-Depends:  base >= 4.18 && < 5,
-                  djinn
+  Build-Depends:  djinn
 
   Hs-Source-Dirs: app
 
 test-suite djinn-tests
+  import:           build-settings
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:   test
-  Default-Language: Haskell2010
-  Ghc-Options:      -Wall -Wcompat
-
-  Build-Depends:    base >= 4.18 && < 5,
-                    containers >= 0.6 && < 0.9,
+  Build-Depends:    containers >= 0.6 && < 0.9,
                     djinn:djinn-core,
                     haskell-synthesis >= 0.1.11 && < 0.2,
                     tasty >= 1.4 && < 2,
                     tasty-hunit >= 0.10 && < 1
 
 test-suite djinn-property-tests
+  import:           build-settings
   Type:             exitcode-stdio-1.0
   Main-Is:          PropertySpec.hs
   Hs-Source-Dirs:   test
-  Default-Language: Haskell2010
-  Ghc-Options:      -Wall -Wcompat
-
-  Build-Depends:    base >= 4.18 && < 5,
-                    djinn:djinn-core,
+  Build-Depends:    djinn:djinn-core,
                     tasty >= 1.4 && < 2,
                     tasty-quickcheck >= 0.10 && < 1
 
 benchmark djinn-bench
+  import:           build-settings
   Type:             exitcode-stdio-1.0
   Main-Is:          Bench.hs
   Other-Modules:    Corpus
   Hs-Source-Dirs:   bench
-  Default-Language: Haskell2010
-  Ghc-Options:      -Wall -Wcompat
-
-  Build-Depends:    base >= 4.18 && < 5,
-                    djinn:djinn-core,
-                    tasty-bench >= 0.3 && < 0.5
+  Build-Depends:    djinn:djinn-core,
+                    tasty-bench >= 0.3 && < 0.6
 
 test-suite djinn-cli-tests
+  import:             build-settings
   Type:               exitcode-stdio-1.0
   Main-Is:            CLISpec.hs
   Hs-Source-Dirs:     test
-  Default-Language:   Haskell2010
-  Ghc-Options:        -Wall -Wcompat
-
-  Build-Depends:      base >= 4.18 && < 5,
-                      process >= 1.6 && < 1.7,
+  Build-Depends:      process >= 1.6 && < 1.7,
                       tasty >= 1.4 && < 2,
                       tasty-hunit >= 0.10 && < 1
 

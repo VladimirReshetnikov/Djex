@@ -4,12 +4,12 @@ Version:       1.7.0.0
 Build-Type:    Simple
 license:       BSD-3-Clause
 license-file:  LICENSE
-Maintainer:    Lennart Spitzner <hexagoxel@hexagoxel.de>
+Maintainer:    Vladimir Reshetnikov
 Copyright:     Copyright (C) 2014-2017 Lennart Spitzner
 Author:        Lennart Spitzner
-Homepage:      https://github.com/lspitzner/exference
-Bug-reports:   https://github.com/lspitzner/exference/issues
-Stability:     stable
+Homepage:      https://github.com/VladimirReshetnikov/Haskell/tree/main/djex/exference
+Bug-reports:   https://github.com/VladimirReshetnikov/Haskell/issues
+Stability:     experimental
 Category:      Language
 Synopsis:      Tool to search/generate (haskell) expressions with a given type
 Description:
@@ -24,8 +24,8 @@ Description:
   queries - and those are the interesting ones, really :)
   .
   Exference supports type classes, handles undeclared types well
-  (Foo -> Foo yields id for unknown Foo), does _not_ check kinds,
-  can pattern-match on newtypes, supports RankNTypes.
+  (Foo -> Foo yields id for unknown Foo), validates source and query kinds,
+  can pattern-match on newtypes, and supports RankNTypes.
   .
   Exference reads an environment of function types, data types, type classes
   and instances. The user can add to this environment, but keep in mind that
@@ -36,67 +36,18 @@ Extra-Source-Files:
   docs/reports/*.md
 
 data-files:
-  environment/all.ratings
-  environment/Applicative.hs
-  environment/Arrow.hs
-  environment/Bits.hs
-  environment/Bool.hs
-  environment/Category.hs
-  environment/Char.hs
-  environment/Comonad.hs
-  environment/Complex.hs
-  environment/Cont.hs
-  environment/ControlConcurrentSTM.hs
-  environment/ControlException.hs
-  environment/ControlMonadIOClass.hs
-  environment/ControlMonadST.hs
-  environment/ControlMonadTransClass.hs
-  environment/Data.hs
-  environment/DataFunction.hs
-  environment/DataFunctorConst.hs
-  environment/DataFunctorIdentity.hs
-  environment/Either.hs
-  environment/EitherT.hs
-  environment/Eq.hs
-  environment/Foldable.hs
-  environment/Functor.hs
-  environment/Generics.hs
-  environment/Int.hs
-  environment/Ix.hs
-  environment/List.hs
-  environment/Map.hs
-  environment/Maybe.hs
-  environment/Monad.hs
-  environment/MonadLoops.hs
-  environment/Monoid.hs
-  environment/Ord.hs
-  environment/Prelude.hs
-  environment/Printf.hs
-  environment/Proxy.hs
-  environment/Ratio.hs
-  environment/Read.hs
-  environment/Show.hs
-  environment/State.hs
-  environment/Storable.hs
-  environment/String.hs
-  environment/SystemConsoleGetOpt.hs
-  environment/SystemIO.hs
-  environment/Text.hs
-  environment/TextParserCombinatorsReadP.hs
-  environment/TextParserCombinatorsReadPrec.hs
-  environment/Traversable.hs
-  environment/Typeable.hs
-  environment/Void.hs
-  environment/Word.hs
+  environment/*.hs
+  environment/*.ratings
 
-source-repository head {
+source-repository head
   type: git
-  location: git@github.com:lspitzner/exference.git
-}
+  location: https://github.com/VladimirReshetnikov/Haskell
+  subdir: djex/exference
 
 common build-settings
   default-language: Haskell2010
   ghc-options: -Wall -Wcompat
+  build-depends: base >=4.19 && <5
 
 
 Library exference-core
@@ -130,7 +81,6 @@ Library exference-core
                    TemplateHaskell
   hs-source-dirs: src-core
   Build-Depends:
-    base                 >=4.18 && <5,
     haskell-synthesis    >=0.1.11 && <0.2,
     containers           >=0.6 && <0.9,
     pretty               >=1.1 && <1.2,
@@ -182,7 +132,6 @@ Library
                    TemplateHaskell
   hs-source-dirs: src
   Build-Depends:
-    base                 >=4.18 && <5,
     exference:exference-core,
     haskell-synthesis    >=0.1.11 && <0.2,
     containers           >=0.6 && <0.9,
@@ -197,7 +146,6 @@ Library
 Executable exference
   import: build-settings
   build-depends:
-    base                 >=4.18 && <5,
     exference,
     haskell-synthesis    >=0.1.11 && <0.2,
     containers           >=0.6 && <0.9,
@@ -232,7 +180,6 @@ Test-Suite exference-tests
   autogen-modules: Paths_exference
   hs-source-dirs: test
   build-depends:
-    base                 >=4.18 && <5,
     containers           >=0.6 && <0.9,
     deepseq              >=1.4 && <1.6,
     exference,
@@ -250,7 +197,6 @@ Test-Suite exference-cli-tests
   main-is: CLISpec.hs
   hs-source-dirs: test
   build-depends:
-    base                 >=4.18 && <5,
     process              >=1.6 && <1.7,
     tasty                >=1.4 && <2,
     tasty-hunit          >=0.10 && <1

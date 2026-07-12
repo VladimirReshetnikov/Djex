@@ -3,23 +3,35 @@ Name:          haskell-synthesis
 Version:       0.1.11.0
 Synopsis:      Shared vocabulary for Haskell program synthesis
 Description:
-  Parser-independent names, diagnostics, and (eventually) surface syntax for
-  Haskell synthesis backends such as Djinn and Exference.
+  Parser-independent names, types, declarations, environments, diagnostics,
+  generated syntax, and search results for Haskell synthesis backends such as
+  Djinn and Exference.
 Category:      Language
 License:       BSD-3-Clause
 License-File:  LICENSE
 Author:        Vladimir Reshetnikov and contributors
 Maintainer:    Vladimir Reshetnikov
+Homepage:      https://github.com/VladimirReshetnikov/Haskell/tree/main/djex/synthesis
+Bug-Reports:   https://github.com/VladimirReshetnikov/Haskell/issues
 Build-Type:    Simple
 Stability:     experimental
 
 Extra-Source-Files:
   README.md
 
-Library
+source-repository head
+  type: git
+  location: https://github.com/VladimirReshetnikov/Haskell
+  subdir: djex/synthesis
+
+common build-settings
   Default-Language: Haskell2010
-  Hs-Source-Dirs:   src
   Ghc-Options:      -Wall -Wcompat
+  Build-Depends:    base >= 4.19 && < 5
+
+Library
+  import:           build-settings
+  Hs-Source-Dirs:   src
 
   Exposed-Modules:
     Language.Haskell.Synthesis.Constraint
@@ -28,28 +40,24 @@ Library
     Language.Haskell.Synthesis.Environment
     Language.Haskell.Synthesis.Generated
     Language.Haskell.Synthesis.Kind
-      Language.Haskell.Synthesis.KindInference
-      Language.Haskell.Synthesis.Inventory
-      Language.Haskell.Synthesis.Name
+    Language.Haskell.Synthesis.KindInference
+    Language.Haskell.Synthesis.Inventory
+    Language.Haskell.Synthesis.Name
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Type
 
   Build-Depends:
-    base       >= 4.18 && < 5,
     containers >= 0.6  && < 0.9,
     deepseq    >= 1.4  && < 1.6,
     pretty     >= 1.1  && < 1.2,
     transformers >= 0.5 && < 0.7
 
 Test-Suite synthesis-tests
+  import:           build-settings
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:   test
-  Default-Language: Haskell2010
-  Ghc-Options:      -Wall -Wcompat
-
   Build-Depends:
-    base               >= 4.18 && < 5,
     containers         >= 0.6  && < 0.9,
     deepseq            >= 1.4  && < 1.6,
     haskell-synthesis,

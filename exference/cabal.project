@@ -1,5 +1,4 @@
--- Keep the neutral package in the local plan before Exference starts depending
--- on it, so each migration commit remains buildable from this directory.
+-- Keep the neutral foundation in the backend-local build plan.
 packages:
   .
   ../synthesis

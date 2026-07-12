@@ -130,26 +130,23 @@ main = do
           putStrLn $ "reading environment from " ++ envDir
         (sourceEnvironmentResult, messages :: [String]) <-
           withMultiWriterAW $ environmentFromPath envDir
-        sourceEnvironment <- case sourceEnvironmentResult of
+        checkedEnvironment <- case sourceEnvironmentResult of
           Left failure -> lift $ do
             hPutStrLn stderr $
               "could not load source environment: " ++ show failure
             exitFailure
           Right environment -> pure environment
-        let eSignatures = sourceFunctions sourceEnvironment
+        let sourceEnvironment = checkedSourceProjection checkedEnvironment
+            inventory = checkedSourceInventory checkedEnvironment
+            eSignatures = sourceFunctions sourceEnvironment
             eDeconss = sourceDeconstructors sourceEnvironment
             sEnv = sourceClasses sourceEnvironment
             validNames = sourceTypeNames sourceEnvironment
             tdeclMap = sourceTypeSynonymMap sourceEnvironment
         let clss = sClassEnv_tclasses sEnv
             insts = sClassEnv_instances sEnv
-            inventoryResult = toSynthesisSourceInventory sourceEnvironment
         when (verbosity>0 && not (null messages)) $ lift $
           forM_ messages $ \m -> putStrLn $ "environment warning: " ++ m
-        case inventoryResult of
-          Left failure -> lift $ putStrLn $
-            "could not validate source environment: " ++ show failure
-          Right _ -> pure ()
         when (PrintEnv `elem` flags) $ lift $ do
           when (verbosity>0) $ putStrLn "[Environment]"
           mapM_ print $ sourceTypeSynonyms sourceEnvironment
@@ -157,10 +154,9 @@ main = do
           mapM_ print $ [(i,x)| (i,xs) <- M.toList insts, x <- xs]
           mapM_ print $ eSignatures
           mapM_ print $ eDeconss
-        case (inputs, either (const Nothing) Just inventoryResult) of
-          ([], _) -> return ()
-          (_, Nothing) -> return ()
-          (x:_, Just inventory) -> do
+        case inputs of
+          [] -> return ()
+          x:_ -> do
             when (verbosity>0) $ lift $ putStrLn "[Custom Input]"
             eParsedType <- runExceptT $ parseTypeWithKinds
               (SharedInventory.inventoryKindAssumptions inventory)

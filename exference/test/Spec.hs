@@ -87,6 +87,8 @@ import Language.Haskell.Exference
 import Language.Haskell.Exference.EnvironmentParser
   ( EnvironmentLoadError (..)
   , SourceEnvironment (..)
+  , checkedSourceInventory
+  , checkedSourceProjection
   , compileWithDict
   , environmentFromModuleAndRatings
   , environmentFromPath
@@ -1004,7 +1006,8 @@ tests = testGroup "Exference"
           (sourceEnvironmentResult, messages :: [String]) <-
             runMultiRWSTNil $ withMultiWriterAW
               $ environmentFromModuleAndRatings modulePath modulePath
-          sourceEnvironment <- expectRight sourceEnvironmentResult
+          checkedEnvironment <- expectRight sourceEnvironmentResult
+          let sourceEnvironment = checkedSourceProjection checkedEnvironment
           categoryName <- expectRight
             $ mkQualifiedName ["Control", "Category"] "Category"
           identityName <- expectRight
@@ -1027,7 +1030,8 @@ tests = testGroup "Exference"
           (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
             $ withMultiWriterAW
             $ environmentFromModuleAndRatings modulePath modulePath
-          sourceEnvironment <- expectRight sourceEnvironmentResult
+          checkedEnvironment <- expectRight sourceEnvironmentResult
+          let sourceEnvironment = checkedSourceProjection checkedEnvironment
           shared <- expectRight
             $ toSynthesisSourceEnvironment sourceEnvironment
           stringName <- expectRight
@@ -1071,24 +1075,20 @@ tests = testGroup "Exference"
           environmentDirectory <- getDataFileName "environment"
           (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
             $ withMultiWriterAW $ environmentFromPath environmentDirectory
-          sourceEnvironment <- expectRight sourceEnvironmentResult
-          case toSynthesisSourceInventory sourceEnvironment of
-            Left conversionError -> fail $
-              "shipped environment failed shared validation: "
-                ++ show conversionError
-            Right inventory -> do
-              let shared = SharedInventory.inventoryEnvironment inventory
-              assertBool "shared source inventory lost type declarations"
-                $ not $ Map.null $ SharedEnvironment.typeDeclarationMap shared
-              assertBool "shared source inventory lost values"
-                $ not $ Map.null $ SharedEnvironment.valueSignatureMap shared
-              maybeName <- expectRight
-                $ mkQualifiedName ["Data", "Maybe"] "Maybe"
-              Map.lookup (toSynthesisName maybeName)
-                  (SharedKindInference.typeConstructorKinds
-                    $ SharedInventory.inventoryKindAssumptions inventory) @?=
-                Just (SharedKind.FunctionKind
-                  SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
+          checkedEnvironment <- expectRight sourceEnvironmentResult
+          let inventory = checkedSourceInventory checkedEnvironment
+              shared = SharedInventory.inventoryEnvironment inventory
+          assertBool "shared source inventory lost type declarations"
+            $ not $ Map.null $ SharedEnvironment.typeDeclarationMap shared
+          assertBool "shared source inventory lost values"
+            $ not $ Map.null $ SharedEnvironment.valueSignatureMap shared
+          maybeName <- expectRight
+            $ mkQualifiedName ["Data", "Maybe"] "Maybe"
+          Map.lookup (toSynthesisName maybeName)
+              (SharedKindInference.typeConstructorKinds
+                $ SharedInventory.inventoryKindAssumptions inventory) @?=
+            Just (SharedKind.FunctionKind
+              SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
       , testCase "source environments reject ill-kinded signatures" $ do
           let intName = name "Int"
               badName = name "bad"
@@ -1605,7 +1605,8 @@ loadEnvironmentAndMessages environmentDirectory = do
     $ withMultiWriterAW
     $ do
         environmentResult <- environmentFromPath environmentDirectory
-        environment <- either (lift . fail . show) pure environmentResult
+        checkedEnvironment <- either (lift . fail . show) pure environmentResult
+        let environment = checkedSourceProjection checkedEnvironment
         pure (sourceFunctions environment, sourceClasses environment)
   pure (bindings, classEnvironment, messages)
 

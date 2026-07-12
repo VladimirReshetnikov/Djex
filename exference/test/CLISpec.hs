@@ -20,6 +20,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "invalid class environments fail closed" testInvalidEnvironment
   , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
   , testCase "invalid environment modules fail closed" testInvalidModule
+  , testCase "ill-kinded environments fail before queries" testInvalidKinds
   , testCase "version mode does not load the environment" testVersion
   ]
 
@@ -118,6 +119,25 @@ testInvalidModule = withTemporaryEnvironment $ \environmentDirectory -> do
     "ModuleParseErrors" errors
   assertBool "a failed environment must never enter synthesis"
     (not $ "\\a -> a" `isInfixOf` output)
+
+testInvalidKinds :: Assertion
+testInvalidKinds = withTemporaryEnvironment $ \environmentDirectory -> do
+  writeFile (environmentDirectory ++ "/Broken.hs") $ unlines
+    [ "module Broken where"
+    , "data T = MkT"
+    , "bad :: T T"
+    ]
+  (exitCode, output, errors) <- readProcessWithExitCode "exference"
+    ["--envdir", environmentDirectory, "a -> a"] ""
+  case exitCode of
+    ExitFailure _ -> pure ()
+    ExitSuccess -> fail "ill-kinded environment returned success"
+  assertContains "shared inventory failure belongs on stderr"
+    "InvalidSourceInventory" errors
+  assertContains "the kind failure should remain visible"
+    "KindMismatch" errors
+  assertBool "an unchecked environment must never reach query parsing"
+    (not $ "could not parse input type" `isInfixOf` output)
 
 testVersion :: Assertion
 testVersion = do

@@ -5,6 +5,10 @@
 
 module Language.Haskell.Exference.EnvironmentParser
   ( SourceEnvironment (..)
+  , CheckedSourceEnvironment
+  , checkedSourceProjection
+  , checkedSourceInventory
+  , checkSourceEnvironment
   , EnvironmentLoadError (..)
   , parseModules
   , parseModulesSimple
@@ -81,6 +85,14 @@ data SourceEnvironment function = SourceEnvironment
   }
   deriving (Show)
 
+-- | A backend projection paired with the exact shared inventory that validated
+-- it.  The constructor is private so CLI and library loaders cannot expose a
+-- searchable source environment before structural and kind sealing succeeds.
+data CheckedSourceEnvironment = CheckedSourceEnvironment
+  { checkedSourceProjection :: SourceEnvironment FunctionBinding
+  , checkedSourceInventory :: SynthesisInventory
+  }
+
 -- | Fatal source-loading phases.  Warnings remain in the writer channel, but
 -- a failed class graph cannot produce a searchable recovery environment.
 data EnvironmentLoadError
@@ -90,7 +102,14 @@ data EnvironmentLoadError
   | ClassEnvironmentLoadFailure ClassEnvironmentLoadError
   | BindingDeclarationErrors (NonEmpty String)
   | BuiltInEnvironmentErrors (NonEmpty String)
+  | InvalidSourceInventory SynthesisDeclarationError
   deriving (Eq, Show)
+
+checkSourceEnvironment
+  :: SourceEnvironment FunctionBinding
+  -> Either EnvironmentLoadError CheckedSourceEnvironment
+checkSourceEnvironment environment = CheckedSourceEnvironment environment
+  <$> first InvalidSourceInventory (toSynthesisSourceInventory environment)
 
 -- | Unique-only compatibility index used by the historical type elaborator.
 -- The ordered field remains authoritative so duplicate declarations reach the
@@ -468,7 +487,7 @@ environmentFromModuleAndRatings :: ( ContainsType [String] w
                                 -> String
                                 -> MultiRWST r w s IO
                                     (Either EnvironmentLoadError
-                                      (SourceEnvironment FunctionBinding))
+                                      CheckedSourceEnvironment)
 environmentFromModuleAndRatings modulePath ratingPath = do
   let exts1 = [ TypeOperators
               , ExplicitForAll
@@ -496,7 +515,7 @@ environmentFromModuleAndRatings modulePath ratingPath = do
         (name, fromMaybe 0.0 $ lookup name ratings, bindingType)
       addRatings environment = environment
         { sourceFunctions = map addRating $ sourceFunctions environment }
-  return $ addRatings <$> environmentResult
+  return $ environmentResult >>= checkSourceEnvironment . addRatings
 
 
 environmentFromPath :: ( ContainsType [String] w
@@ -504,7 +523,7 @@ environmentFromPath :: ( ContainsType [String] w
                     => FilePath
                     -> MultiRWST r w s IO
                          (Either EnvironmentLoadError
-                           (SourceEnvironment FunctionBinding))
+                           CheckedSourceEnvironment)
 environmentFromPath p = do
   files <- lift $ getDirectoryContents p
   -- Directory enumeration order is platform-dependent; stable ordering keeps
@@ -546,4 +565,4 @@ environmentFromPath p = do
                 )
       addRatings environment = environment
         { sourceFunctions = map f $ sourceFunctions environment }
-  return $ addRatings <$> environmentResult
+  return $ environmentResult >>= checkSourceEnvironment . addRatings

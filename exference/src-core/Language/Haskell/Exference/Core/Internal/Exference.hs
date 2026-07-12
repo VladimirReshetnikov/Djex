@@ -122,6 +122,9 @@ data ExferenceInputError
   = NestedForallInGoal HsType
   | NestedForallInBinding QualifiedName HsType
   | NestedForallInDeconstructor HsType
+  | DuplicateFunctionNames [QualifiedName]
+  | DuplicateDeconstructorNames [QualifiedName]
+  | DuplicateConstructorNames [QualifiedName]
   | InvalidClassConstraint ClassEnvError
   | InvalidMaxSteps Int
   | InvalidMaxQueueSize Int
@@ -386,6 +389,19 @@ validateExferenceInput input
       Left $ InvalidMaxQueueSize limit
   | Just limit <- input_maxDepth input, not $ isFinitePenalty limit =
       Left $ InvalidMaxDepth limit
+  | duplicates@(_ : _) <- repeatedValues
+      [ name
+      | deconstructor <- input_envDeconsS input
+      , Just name <- [deconstructorTypeName deconstructor]
+      ] = Left $ DuplicateDeconstructorNames duplicates
+  | duplicates@(_ : _) <- repeatedValues
+      [ constructorName constructor
+      | deconstructor <- input_envDeconsS input
+      , constructor <- deconstructorConstructors deconstructor
+      ] = Left $ DuplicateConstructorNames duplicates
+  | duplicates@(_ : _) <- repeatedValues
+      (map functionName $ input_envFuncs input) =
+      Left $ DuplicateFunctionNames duplicates
   | Just (field, invalid) <- find (not . isFinitePenalty . snd)
       (heuristicFields $ input_heuristicsConfig input) =
       Left $ InvalidHeuristic field invalid
@@ -406,6 +422,30 @@ validateExferenceInput input
   | Just classError <- firstClassConstraintError input =
       Left $ InvalidClassConstraint classError
   | otherwise = Right ()
+
+-- Report the complete stable duplicate set.  Search explores every raw
+-- binding while the independent checker historically selected the first one,
+-- so accepting duplicates made both results and penalties list-order
+-- dependent.
+repeatedValues :: Ord value => [value] -> [value]
+repeatedValues values =
+  [ value
+  | (value, count) <- M.toAscList $ M.fromListWith (+)
+      [(value, 1 :: Int) | value <- values]
+  , count > 1
+  ]
+
+-- Deconstructor inputs are applications of one nominal datatype head.  Full
+-- structural validation remains at the shared declaration boundary; this
+-- projection is only for detecting multiple records for the same type before
+-- the search and checker can disagree about which record is authoritative.
+deconstructorTypeName :: DeconstructorBinding -> Maybe QualifiedName
+deconstructorTypeName = typeHead . deconstructorInput
+  where
+    typeHead (TypeForall _ _ body) = typeHead body
+    typeHead (TypeApp function _) = typeHead function
+    typeHead (TypeCons name) = Just name
+    typeHead _ = Nothing
 
 firstClassConstraintError :: ExferenceInput -> Maybe ClassEnvError
 firstClassConstraintError input = listToMaybe

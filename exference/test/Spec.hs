@@ -650,7 +650,47 @@ tests = testGroup "Exference"
             Left (NonImplicitInstanceForall [unused])
       ]
   , testGroup "search policy"
-      [ testCase "constraint relaxation ends at the configured step" $ do
+      [ testCase "duplicate function names are rejected independently of order" $ do
+          let duplicateName = name "f"
+              intBinding = FunctionBinding
+                (TypeCons $ name "Int") duplicateName 0 [] []
+              boolBinding = FunctionBinding
+                (TypeCons $ name "Bool") duplicateName 1 [] []
+              expected = Left $ DuplicateFunctionNames [duplicateName]
+          validateExferenceInput identityInput
+            { input_envFuncs = [intBinding, boolBinding] } @?= expected
+          validateExferenceInput identityInput
+            { input_envFuncs = [boolBinding, intBinding] } @?= expected
+      , testCase "duplicate datatype heads are rejected independently of order" $ do
+          let duplicateName = name "T"
+              firstDeconstructor = DeconstructorBinding
+                (TypeApp (TypeCons duplicateName) $ TypeVar 0)
+                [ConstructorBinding (name "First") [TypeVar 0]] False
+              secondDeconstructor = DeconstructorBinding
+                (TypeApp (TypeCons duplicateName) $ TypeVar 1)
+                [ConstructorBinding (name "Second") [TypeVar 1]] False
+              expected = Left $ DuplicateDeconstructorNames [duplicateName]
+          validateExferenceInput identityInput
+            { input_envDeconsS = [firstDeconstructor, secondDeconstructor] }
+            @?= expected
+          validateExferenceInput identityInput
+            { input_envDeconsS = [secondDeconstructor, firstDeconstructor] }
+            @?= expected
+      , testCase "duplicate constructors are rejected independently of order" $ do
+          let duplicateName = name "Shared"
+              firstDeconstructor = DeconstructorBinding (TypeCons $ name "A")
+                [ConstructorBinding duplicateName []] False
+              secondDeconstructor = DeconstructorBinding
+                (TypeApp (TypeCons $ name "B") $ TypeVar 0)
+                [ConstructorBinding duplicateName [TypeVar 0]] False
+              expected = Left $ DuplicateConstructorNames [duplicateName]
+          validateExferenceInput identityInput
+            { input_envDeconsS = [firstDeconstructor, secondDeconstructor] }
+            @?= expected
+          validateExferenceInput identityInput
+            { input_envDeconsS = [secondDeconstructor, firstDeconstructor] }
+            @?= expected
+      , testCase "constraint relaxation ends at the configured step" $ do
           constraintsRelaxedAtStep False 2 1 @?= True
           constraintsRelaxedAtStep False 2 2 @?= True
           constraintsRelaxedAtStep False 2 3 @?= False

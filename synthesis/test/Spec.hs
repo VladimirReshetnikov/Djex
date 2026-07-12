@@ -5,11 +5,13 @@ import Control.Exception (evaluate)
 import Control.Monad (forM_)
 import Data.Either (isLeft)
 import Data.List (intercalate)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
+import Language.Haskell.Synthesis.Search
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, testCase, (@?=))
 import qualified Test.Tasty.QuickCheck as QC
@@ -21,12 +23,30 @@ tests :: TestTree
 tests = testGroup "haskell-synthesis"
   [ constraintTests
   , generatedTests
+  , searchTests
   , moduleTests
   , ordinaryTests
   , specialTests
   , parserTests
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
+  ]
+
+searchTests :: TestTree
+searchTests = testGroup "search status"
+  [ testCase "finished and truncated completions stay distinct" $ do
+      Completed Finished @?= Completed Finished
+      truncated StepLimitReached @?=
+        Truncated (StepLimitReached :| [])
+  , testCase "truncation retains every independent pruning reason" $ do
+      let completion = Truncated
+            (QueueLimitPruned 7 :| [DepthLimitPruned 2])
+      _ <- evaluate $ force completion
+      completion @?= Truncated
+        (QueueLimitPruned 7 :| [DepthLimitPruned 2])
+  , testCase "batch functor changes candidates only" $
+      fmap (+ 1) (SearchBatch Continuing "stats" [1 :: Int, 2]) @?=
+        SearchBatch Continuing "stats" [2, 3]
   ]
 
 generatedTests :: TestTree

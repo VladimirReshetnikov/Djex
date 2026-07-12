@@ -1,6 +1,6 @@
 Cabal-Version: 3.0
 Name:          haskell-synthesis
-Version:       0.1.2.0
+Version:       0.1.3.0
 Synopsis:      Shared vocabulary for Haskell program synthesis
 Description:
   Parser-independent names, diagnostics, and (eventually) surface syntax for
@@ -26,6 +26,7 @@ Library
     Language.Haskell.Synthesis.Diagnostic
     Language.Haskell.Synthesis.Generated
     Language.Haskell.Synthesis.Name
+    Language.Haskell.Synthesis.Search
 
   Build-Depends:
     base       >= 4.18 && < 5,

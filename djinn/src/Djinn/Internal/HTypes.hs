@@ -11,7 +11,7 @@ module Djinn.Internal.HTypes(
         termToHExpr, termToHClause,
         getBinderVars
     ) where
-import Data.List(union, (\\))
+import Data.List(find, transpose, union, (\\))
 import Data.Maybe(fromMaybe)
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
@@ -636,17 +636,34 @@ hECase e [] = HEApply (HEVar "void") e
 hECase _ [(HPCon "()", e)] = e
 hECase e pes | all (uncurry eqPatExpr) pes = e
 hECase e [(p, HELam ps b)] = HELam ps $ hECase e [(p, b)]
-hECase se alts@((_, HELam ops _):_) | m > 0 = HELam (take m ops) $ hECase se alts'
+hECase se alts@((_, HELam _ _):_) | m > 0 =
+    HELam (map HPVar canonicalNames) $ hECase se alts'
   where m = minimum (map (numBind . snd) alts)
         numBind (HELam ps _) = length (takeWhile isPVar ps)
         numBind _ = 0
         isPVar (HPVar _) = True
         isPVar _ = False
         alts' = [ let (ps1, ps2) = splitAt m ps
-                      sub = zip [v | HPVar v <- ps1] ns
+                      -- A wildcard is not a binder and must never become
+                      -- either side of a variable substitution.
+                      sub = [ (source, target)
+                            | (HPVar source, target) <-
+                                zip ps1 canonicalNames
+                            , source /= "_"
+                            , source /= target
+                            ]
                   in (cps, hELam ps2 $ hESubst sub e)
                   | (cps, HELam ps e) <- alts ]
-        ns = [ n | HPVar n <- take m ops ]
+        -- Commute the common lambda prefix out of the case.  Binder names are
+        -- globally unique here, so any live name in a column is a safe common
+        -- spelling.  Choosing from all branches is essential: taking the
+        -- first branch's @_@ used to rewrite a later live occurrence to a
+        -- typed hole.
+        binderColumns = transpose
+            [ take m ps | (_, HELam ps _) <- alts ]
+        canonicalNames = map canonicalName binderColumns
+        canonicalName patterns = fromMaybe "_" $
+            find (/= "_") [ name | HPVar name <- patterns ]
 -- if all arms are equal and there are at least two alternatives there can be no bound vars
 -- from the patterns
 hECase _ ((_,e):alts@(_:_)) | all (alphaEq e . snd) alts = e

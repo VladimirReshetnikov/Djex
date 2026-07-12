@@ -73,6 +73,8 @@ tests =
     , ("bind unary constructor fields without tuple parentheses",
           testUnaryConstructorPattern)
     , ("preserve residual application after Ccases", testCcasesResidualArguments)
+    , ("hoist mixed wildcard and live case binders safely",
+          testMixedCaseLambdaBinders)
     , ("preserve tuple payloads in unary constructors", testUnaryTuplePayload)
     , ("merge tuple refinements across case branches", testBranchRefinements)
     , ("reconstruct whole constructor payloads", testWholeConstructorPayload)
@@ -744,6 +746,38 @@ testCcasesResidualArguments = do
     assertContains "Ccases should retain its second alternative" "RightC" rendered
     assertWordsSuffix "Ccases residual arguments must not be dropped or reordered"
         ["arg1", "arg2"] rendered
+
+-- Case cleanup commutes a lambda shared by every alternative out of the case.
+-- The first branch below discards that argument while the second uses it.
+-- Choosing the first branch's wildcard as the common name used to substitute
+-- the live occurrence with @_@ and make this valid proof unrenderable.
+testMixedCaseLambdaBinders :: IO ()
+testMixedCaseLambdaBinders = do
+    let choice = Symbol "choice"
+        ignored = Symbol "ignored"
+        used = Symbol "used"
+        argument = Symbol "argument"
+        live = Symbol "live"
+        nothing = ConsDesc "Nothing" 0
+        just = ConsDesc "Just" 1
+        constructors = [nothing, just]
+        term = Lam choice $ applys (Ccases constructors)
+            [ Var choice
+            , Lam ignored $ Lam argument $ Ctuple 0
+            , Lam used $ Lam live $ Apply (Var used) (Var live)
+            ]
+        formula = Disj
+            [ (nothing, true)
+            , (just, atomA :-> true)
+            ] :-> atomA :-> true
+        expected = "minimal a b =\n" ++
+            "  case a of\n" ++
+            "  Nothing -> ()\n" ++
+            "  Just c -> c b"
+    assertRight "the mixed-binder term must independently type-check" $
+        checkProof [] formula term
+    assertRendered "a live branch binder must not become a typed hole"
+        expected "minimal" term
 
 testUnaryTuplePayload :: IO ()
 testUnaryTuplePayload = do

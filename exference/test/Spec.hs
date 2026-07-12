@@ -104,7 +104,8 @@ import Language.Haskell.Exference.ClassEnvFromHaskellSrc
   (ClassEnvironmentLoadError (..), getClassEnv)
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc (convert, convertToFunc)
-import Language.Haskell.Exference.BindingsFromHaskellSrc (getClassMethods)
+import Language.Haskell.Exference.BindingsFromHaskellSrc
+  (getClassMethods, getDataConss)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
@@ -417,6 +418,44 @@ tests = testGroup "Exference"
           isPossible environment [query] @?= Just [query]
           filterUnresolved environment [query] @?= Just [query]
       ]
+  , testGroup "Haskell source bindings"
+      [ testCase "monomorphic deconstructors have no empty forall wrapper" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module Fixture where"
+            , "data Flag = Off | On"
+            ]
+          flag <- expectRight $ mkQualifiedName ["Fixture"] "Flag"
+          let extracted = runIdentity $ runMultiRWSTNil
+                $ getDataConss Map.empty [] Map.empty [parsedModule]
+          case extracted of
+            [Right (_, DeconstructorBinding input _ _)] ->
+              input @?= TypeCons flag
+            result -> fail $ "unexpected datatype bindings: " ++ show result
+      , testCase "constructor forall scopes over fields and polymorphic result" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module Fixture where"
+            , "data Choice a = This a | That"
+            ]
+          choice <- expectRight $ mkQualifiedName ["Fixture"] "Choice"
+          this <- expectRight $ mkQualifiedName ["Fixture"] "This"
+          that <- expectRight $ mkQualifiedName ["Fixture"] "That"
+          let resultType = TypeApp (TypeCons choice) (TypeVar 0)
+              extracted = runIdentity $ runMultiRWSTNil
+                $ getDataConss Map.empty [] Map.empty [parsedModule]
+          case extracted of
+            [Right (constructors, DeconstructorBinding input fields False)] -> do
+              input @?= resultType
+              constructors @?=
+                [ (this, TypeForall [0] []
+                    $ TypeArrow (TypeVar 0) resultType)
+                , (that, TypeForall [0] [] resultType)
+                ]
+              fields @?=
+                [ ConstructorBinding this [TypeVar 0]
+                , ConstructorBinding that []
+                ]
+            result -> fail $ "unexpected datatype bindings: " ++ show result
+      ]
   , testGroup "lexical scopes"
       [ testCase "safe scopes expose innermost bindings before ancestors" $ do
           let root = Scope.initialScopeId
@@ -589,6 +628,46 @@ tests = testGroup "Exference"
                 ] True
           shared <- expectRight $ toSynthesisDataDeclaration declaration
           fromSynthesisDataDeclaration shared @?= Right declaration
+      , testCase "rated data declarations preserve constructor penalties" $ do
+          let input = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
+              nothing = ConstructorBinding (name "Nothing") []
+              just = ConstructorBinding (name "Just") [TypeVar 0]
+              declaration = DeconstructorBinding input [nothing, just] True
+              penalties = Map.fromList
+                [ (constructorName nothing, Penalty 1.5)
+                , (constructorName just, Penalty 2.5)
+                ]
+              functions =
+                [ FunctionBinding input (constructorName nothing)
+                    (Penalty 1.5) [] []
+                , FunctionBinding input (constructorName just)
+                    (Penalty 2.5) [] [TypeVar 0]
+                ]
+          shared <- expectRight
+            $ toSynthesisRatedDataDeclaration penalties declaration
+          case shared of
+            SharedDeclaration.DataTypeDeclaration _ _ _ constructors ->
+              map SharedDeclaration.constructorAnnotation constructors @?=
+                [ SearchPenaltyMetadata $ Penalty 1.5
+                , SearchPenaltyMetadata $ Penalty 2.5
+                ]
+            _ -> fail "rated data adapter returned another declaration shape"
+          fromSynthesisRatedDataDeclaration shared @?=
+            Right (functions, declaration)
+      , testCase "rated data declarations require complete penalties" $ do
+          let missing = name "Just"
+              declaration = DeconstructorBinding
+                (TypeApp (TypeCons $ name "Maybe") (TypeVar 0))
+                [ ConstructorBinding (name "Nothing") []
+                , ConstructorBinding missing [TypeVar 0]
+                ] False
+          toSynthesisRatedDataDeclaration
+              (Map.singleton (name "Nothing") $ Penalty 1)
+              declaration
+            @?= Left (MissingConstructorPenalty missing)
+          shared <- expectRight $ toSynthesisDataDeclaration declaration
+          fromSynthesisRatedDataDeclaration shared @?= Left
+            (MissingSearchPenaltyMetadata $ toSynthesisName $ name "Nothing")
       , testCase "frontend type synonyms use the same declaration IR" $ do
           let declaration = HsTypeDecl (name "Pair") [0, 1]
                 $ TypeApp
@@ -1152,6 +1231,77 @@ tests = testGroup "Exference"
             (InvalidSharedEnvironment
               $ SharedEnvironment.DuplicateTypeDeclaration
               $ toSynthesisName aliasName)
+      , testCase "source inventories require every constructor function" $ do
+          let missing = map name ["Just", "Nothing"]
+              environment = maybeLikeSourceEnvironment
+                { sourceFunctions = filter
+                    ((`notElem` missing) . functionName)
+                    $ sourceFunctions maybeLikeSourceEnvironment
+                }
+          toSynthesisSourceInventory environment @?= Left
+            (MissingConstructorFunctionBindings
+              $ map toSynthesisName missing)
+      , testCase "source inventories reject duplicate constructor functions" $ do
+          let duplicate = map name ["Just", "Nothing"]
+              result = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
+              duplicateBindings =
+                [ FunctionBinding result (name "Just")
+                    (Penalty 2.75) [] [TypeVar 0]
+                , FunctionBinding result (name "Nothing")
+                    (Penalty 1.25) [] []
+                ]
+              environment = maybeLikeSourceEnvironment
+                { sourceFunctions = duplicateBindings
+                    ++ sourceFunctions maybeLikeSourceEnvironment
+                }
+          toSynthesisSourceInventory environment @?= Left
+            (DuplicateConstructorFunctionBindings
+              $ map toSynthesisName duplicate)
+      , testCase "source inventories reject orphan constructor functions" $ do
+          let orphans = map name ["Another", "Orphan"]
+              result = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
+              environment = maybeLikeSourceEnvironment
+                { sourceFunctions =
+                    [ FunctionBinding result orphan (Penalty 4) [] []
+                    | orphan <- orphans
+                    ] ++ sourceFunctions maybeLikeSourceEnvironment
+                }
+          toSynthesisSourceInventory environment @?= Left
+            (OrphanConstructorBindings $ map toSynthesisName orphans)
+      , testCase "source inventories reject mismatched constructor shapes" $ do
+          let mismatched = map name ["Just", "Nothing"]
+              changeShape binding
+                | functionName binding == name "Just" = binding
+                    { functionParameters = [] }
+                | functionName binding == name "Nothing" = binding
+                    { functionParameters = [TypeVar 0] }
+                | otherwise = binding
+              environment = maybeLikeSourceEnvironment
+                { sourceFunctions = map changeShape
+                    $ sourceFunctions maybeLikeSourceEnvironment
+                }
+          toSynthesisSourceInventory environment @?= Left
+            (MismatchedConstructorFunctionBindings
+              $ map toSynthesisName mismatched)
+      , testCase "source inventories retain constructor and value penalties" $ do
+          inventory <- expectRight
+            $ toSynthesisSourceInventory maybeLikeSourceEnvironment
+          let shared = SharedInventory.inventoryEnvironment inventory
+              constructors = SharedEnvironment.dataConstructorMap shared
+              values = SharedEnvironment.valueSignatureMap shared
+              constructorPenalty constructor =
+                SharedDeclaration.constructorAnnotation
+                  <$> Map.lookup (toSynthesisName $ name constructor)
+                    constructors
+              valuePenalty value =
+                SharedDeclaration.valueAnnotation
+                  <$> Map.lookup (toSynthesisName $ name value) values
+          constructorPenalty "Nothing" @?=
+            Just (SearchPenaltyMetadata $ Penalty 1.25)
+          constructorPenalty "Just" @?=
+            Just (SearchPenaltyMetadata $ Penalty 2.75)
+          valuePenalty "defaultMaybe" @?=
+            Just (SearchPenaltyMetadata $ Penalty 3.5)
       , testCase "the shipped source environment seals as one inventory" $ do
           environmentDirectory <- getDataFileName "environment"
           (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
@@ -1170,6 +1320,30 @@ tests = testGroup "Exference"
                 $ SharedInventory.inventoryKindAssumptions inventory) @?=
             Just (SharedKind.FunctionKind
               SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
+      , testCase "built-in constructors retain configured search penalties" $ do
+          environmentDirectory <- getDataFileName "environment"
+          (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
+            $ withMultiWriterAW $ environmentFromPath environmentDirectory
+          checkedEnvironment <- expectRight sourceEnvironmentResult
+          let constructors = SharedEnvironment.dataConstructorMap
+                $ SharedInventory.inventoryEnvironment
+                $ checkedSourceInventory checkedEnvironment
+              constructorPenalty constructor =
+                SharedDeclaration.constructorAnnotation
+                  <$> Map.lookup (toSynthesisName constructor) constructors
+          mapM_ (\(constructor, expectedPenalty) ->
+              constructorPenalty constructor @?=
+                Just (SearchPenaltyMetadata expectedPenalty))
+            [ (ListCon, Penalty 0)
+            , (Cons, Penalty 5)
+            , (TupleCon 0, Penalty 9.9)
+            , (TupleCon 2, Penalty 5)
+            , (TupleCon 3, Penalty 5)
+            , (TupleCon 4, Penalty 4)
+            , (TupleCon 5, Penalty 3)
+            , (TupleCon 6, Penalty 2)
+            , (TupleCon 7, Penalty 0)
+            ]
       , testCase "source environments reject ill-kinded signatures" $ do
           let intName = name "Int"
               badName = name "bad"
@@ -1631,6 +1805,35 @@ tests = testGroup "Exference"
 
 name :: String -> QualifiedName
 name = QualifiedName []
+
+-- A deliberately tiny but complete frontend inventory.  Keeping the
+-- constructor functions beside their structural declarations makes it easy
+-- for the source-boundary tests above to perturb exactly one side of the
+-- required bijection.
+maybeLikeSourceEnvironment :: SourceEnvironment FunctionBinding
+maybeLikeSourceEnvironment = SourceEnvironment
+  { sourceFunctions =
+      [ FunctionBinding maybeType nothingName (Penalty 1.25) [] []
+      , FunctionBinding maybeType justName (Penalty 2.75) [] [TypeVar 0]
+      , FunctionBinding maybeType (name "defaultMaybe")
+          (Penalty 3.5) [] []
+      ]
+  , sourceDeconstructors =
+      [ DeconstructorBinding maybeType
+          [ ConstructorBinding nothingName []
+          , ConstructorBinding justName [TypeVar 0]
+          ]
+          False
+      ]
+  , sourceClasses = emptyStaticClassEnv
+  , sourceTypeNames = [maybeName]
+  , sourceTypeSynonyms = []
+  }
+ where
+  maybeName = name "Maybe"
+  nothingName = name "Nothing"
+  justName = name "Just"
+  maybeType = TypeApp (TypeCons maybeName) (TypeVar 0)
 
 assertUnifierCloses :: HsType -> HsType -> IO ()
 assertUnifierCloses left right = case unify left right of

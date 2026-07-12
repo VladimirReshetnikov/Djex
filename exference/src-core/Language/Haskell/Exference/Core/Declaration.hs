@@ -17,7 +17,10 @@ module Language.Haskell.Exference.Core.Declaration
   , fromSynthesisInstanceDeclaration
   , toSynthesisDataDeclaration
   , fromSynthesisDataDeclaration
+  , toSynthesisRatedDataDeclaration
+  , fromSynthesisRatedDataDeclaration
   , toSynthesisEnvironment
+  , toSynthesisEnvironmentWithConstructorPenalties
   , fromSynthesisEnvironment
   ) where
 
@@ -42,7 +45,7 @@ import Language.Haskell.Exference.Core.Types
 
 data DeclarationMetadata
   = NoDeclarationMetadata
-  | FunctionPenaltyMetadata Penalty
+  | SearchPenaltyMetadata Penalty
   | RecursiveDataMetadata Bool
   deriving (Eq, Show, Generic)
 
@@ -67,7 +70,8 @@ data SynthesisDeclarationError
   | ExpectedInstanceDeclaration
   | ExpectedDataDeclaration
   | ExpectedTypeSynonymDeclaration
-  | MissingFunctionPenaltyMetadata
+  | MissingSearchPenaltyMetadata SharedName.Name
+  | MissingConstructorPenalty QualifiedName
   | MissingRecursiveDataMetadata
   | ExplicitFunctionForallUnsupported [TVarId]
   | NonImplicitInstanceForall [SynthesisVariable]
@@ -81,7 +85,10 @@ data SynthesisDeclarationError
       (SharedEnvironment.EnvironmentError SynthesisVariable)
   | ClassEnvironmentConversionError ClassEnvError
   | UnsupportedCoreEnvironmentDeclaration SharedName.Name
-  | OrphanConstructorBinding SharedName.Name
+  | MissingConstructorFunctionBindings [SharedName.Name]
+  | DuplicateConstructorFunctionBindings [SharedName.Name]
+  | OrphanConstructorBindings [SharedName.Name]
+  | MismatchedConstructorFunctionBindings [SharedName.Name]
   | InvalidSourceEnvironmentKinds
       (SharedKindInference.KindInferenceError SynthesisVariable)
   deriving (Eq, Show)
@@ -92,7 +99,7 @@ toSynthesisFunctionBinding
 toSynthesisFunctionBinding binding = checked $
   SharedDeclaration.ValueDeclaration
     <$> (SharedDeclaration.ValueSignature
-        (FunctionPenaltyMetadata $ functionPenalty binding)
+        (SearchPenaltyMetadata $ functionPenalty binding)
         (toSynthesisName $ functionName binding)
     <$> convertedType (TypeForall [] (functionConstraints binding)
           $ foldr TypeArrow (functionResult binding)
@@ -106,8 +113,9 @@ fromSynthesisFunctionBinding declaration = do
   case declaration of
     SharedDeclaration.ValueDeclaration signature -> do
       penalty <- case SharedDeclaration.valueAnnotation signature of
-        FunctionPenaltyMetadata value -> Right value
-        _ -> Left MissingFunctionPenaltyMetadata
+        SearchPenaltyMetadata value -> Right value
+        _ -> Left $ MissingSearchPenaltyMetadata
+          $ SharedDeclaration.valueName signature
       name <- convertedName $ SharedDeclaration.valueName signature
       functionType <- loweredType $ SharedDeclaration.valueType signature
       let (variables, constraints, body) = case functionType of
@@ -176,13 +184,37 @@ fromSynthesisInstanceDeclaration declaration = do
 toSynthesisDataDeclaration
   :: DeconstructorBinding
   -> Either SynthesisDeclarationError SynthesisDeclaration
-toSynthesisDataDeclaration declaration = do
+toSynthesisDataDeclaration =
+  toSynthesisDataDeclarationWith $ const $ Right NoDeclarationMetadata
+
+-- | Convert a search datatype while retaining each constructor's cost in
+-- the shared constructor annotation.  The map is deliberately keyed by
+-- constructor name: ratings are a backend policy attached to constructors,
+-- while their types continue to come from the checked datatype declaration.
+toSynthesisRatedDataDeclaration
+  :: Map.Map QualifiedName Penalty
+  -> DeconstructorBinding
+  -> Either SynthesisDeclarationError SynthesisDeclaration
+toSynthesisRatedDataDeclaration penalties =
+  toSynthesisDataDeclarationWith $ \constructor ->
+    case Map.lookup (constructorName constructor) penalties of
+      Just penalty -> Right $ SearchPenaltyMetadata penalty
+      Nothing -> Left $ MissingConstructorPenalty
+        $ constructorName constructor
+
+toSynthesisDataDeclarationWith
+  :: (ConstructorBinding
+      -> Either SynthesisDeclarationError DeclarationMetadata)
+  -> DeconstructorBinding
+  -> Either SynthesisDeclarationError SynthesisDeclaration
+toSynthesisDataDeclarationWith constructorMetadata declaration = do
   (name, parameters) <- deconstructorHead $ deconstructorInput declaration
   checked $ SharedDeclaration.DataTypeDeclaration
     (RecursiveDataMetadata $ deconstructorRecursive declaration)
     (toSynthesisName name)
     (map flexibleParameter parameters)
-    <$> mapM convertedConstructor (deconstructorConstructors declaration)
+    <$> mapM (convertedConstructorWith constructorMetadata)
+          (deconstructorConstructors declaration)
 
 fromSynthesisDataDeclaration
   :: SynthesisDeclaration
@@ -202,13 +234,49 @@ fromSynthesisDataDeclaration declaration = do
       Right $ DeconstructorBinding input convertedConstructors recursive
     _ -> Left ExpectedDataDeclaration
 
+-- | Lower a rated shared datatype to the two records consumed by Exference
+-- search.  Constructor functions have the declaration's result, their own
+-- fields as parameters, and no constraints; source frontends must reject
+-- constrained or existential constructors before reaching this core IR.
+fromSynthesisRatedDataDeclaration
+  :: SynthesisDeclaration
+  -> Either SynthesisDeclarationError
+      ([FunctionBinding], DeconstructorBinding)
+fromSynthesisRatedDataDeclaration declaration = do
+  deconstructor <- fromSynthesisDataDeclaration declaration
+  case declaration of
+    SharedDeclaration.DataTypeDeclaration _ _ _ constructors -> do
+      functions <- mapM
+        (loweredRatedConstructor $ deconstructorInput deconstructor)
+        constructors
+      Right (functions, deconstructor)
+    _ -> Left ExpectedDataDeclaration
+
 toSynthesisEnvironment
   :: EnvDictionary
   -> Either SynthesisDeclarationError SynthesisEnvironment
-toSynthesisEnvironment environment = do
+toSynthesisEnvironment =
+  toSynthesisEnvironmentWith toSynthesisDataDeclaration
+
+-- | Seal a complete core environment without discarding constructor search
+-- costs.  Keeping the common declaration assembly here prevents frontends
+-- from maintaining a second class/instance/value conversion path.
+toSynthesisEnvironmentWithConstructorPenalties
+  :: Map.Map QualifiedName Penalty
+  -> EnvDictionary
+  -> Either SynthesisDeclarationError SynthesisEnvironment
+toSynthesisEnvironmentWithConstructorPenalties penalties =
+  toSynthesisEnvironmentWith $ toSynthesisRatedDataDeclaration penalties
+
+toSynthesisEnvironmentWith
+  :: (DeconstructorBinding
+      -> Either SynthesisDeclarationError SynthesisDeclaration)
+  -> EnvDictionary
+  -> Either SynthesisDeclarationError SynthesisEnvironment
+toSynthesisEnvironmentWith convertDataDeclaration environment = do
   declarations <- sequence $
     map toSynthesisFunctionBinding (environmentFunctions environment) ++
-    map toSynthesisDataDeclaration (environmentDeconstructors environment) ++
+    map convertDataDeclaration (environmentDeconstructors environment) ++
     map toSynthesisClassDeclaration
       (Map.elems $ sClassEnv_tclasses $ environmentClasses environment) ++
     map toSynthesisInstanceDeclaration
@@ -323,15 +391,17 @@ plainFlexibleParameter parameter = case
     SharedType.FlexibleVariable variable -> Right variable
     SharedType.RigidVariable variable -> Left $ RigidDataParameter variable
 
-convertedConstructor
-  :: ConstructorBinding
+convertedConstructorWith
+  :: (ConstructorBinding
+      -> Either SynthesisDeclarationError DeclarationMetadata)
+  -> ConstructorBinding
   -> Either SynthesisDeclarationError
       (SharedDeclaration.DataConstructor
         SynthesisVariable DeclarationMetadata)
-convertedConstructor constructor = SharedDeclaration.DataConstructor
-  NoDeclarationMetadata
-  (toSynthesisName $ constructorName constructor)
-  <$> mapM convertedType (constructorFields constructor)
+convertedConstructorWith metadata constructor = SharedDeclaration.DataConstructor
+  <$> metadata constructor
+  <*> pure (toSynthesisName $ constructorName constructor)
+  <*> mapM convertedType (constructorFields constructor)
 
 loweredConstructor
   :: SharedDeclaration.DataConstructor
@@ -340,6 +410,24 @@ loweredConstructor
 loweredConstructor constructor = ConstructorBinding
   <$> convertedName (SharedDeclaration.constructorName constructor)
   <*> mapM loweredType (SharedDeclaration.constructorFields constructor)
+
+loweredRatedConstructor
+  :: HsType
+  -> SharedDeclaration.DataConstructor
+      SynthesisVariable DeclarationMetadata
+  -> Either SynthesisDeclarationError FunctionBinding
+loweredRatedConstructor result constructor = do
+  penalty <- case SharedDeclaration.constructorAnnotation constructor of
+    SearchPenaltyMetadata value -> Right value
+    _ -> Left $ MissingSearchPenaltyMetadata
+      $ SharedDeclaration.constructorName constructor
+  lowered <- loweredConstructor constructor
+  Right $ FunctionBinding
+    result
+    (constructorName lowered)
+    penalty
+    []
+    (constructorFields lowered)
 
 deconstructorHead
   :: HsType

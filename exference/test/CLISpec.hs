@@ -22,6 +22,8 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
   , testCase "invalid environment modules fail closed" testInvalidModule
   , testCase "ill-kinded environments fail before queries" testInvalidKinds
+  , testCase "parsed datatypes participate in pattern matching"
+      testParsedDatatypePatternMatch
   , testCase "version mode does not load the environment" testVersion
   ]
 
@@ -154,6 +156,25 @@ testInvalidKinds = withTemporaryEnvironment $ \environmentDirectory -> do
     "KindMismatch" errors
   assertBool "an unchecked environment must never reach query parsing"
     (not $ "could not parse input type" `isInfixOf` output)
+
+testParsedDatatypePatternMatch :: Assertion
+testParsedDatatypePatternMatch =
+  withTemporaryEnvironment $ \environmentDirectory -> do
+    writeFile (environmentDirectory ++ "/Box.hs") $ unlines
+      [ "module Fixture where"
+      , "data Box a = Box a"
+      ]
+    (exitCode, output, errors) <- readProcessWithExitCode "exference"
+      [ "--envdir", environmentDirectory
+      , "--first"
+      , "Fixture.Box a -> a"
+      ] ""
+    assertEqual ("pattern-match stderr: " ++ errors) ExitSuccess exitCode
+    assertEqual "pattern matching should not write to stderr" "" errors
+    assertContains "the result must eliminate the parsed Box constructor"
+      "Box" output
+    assertBool "the parsed datatype must not be silently omitted"
+      (not $ "no results" `isInfixOf` output)
 
 testVersion :: Assertion
 testVersion = do

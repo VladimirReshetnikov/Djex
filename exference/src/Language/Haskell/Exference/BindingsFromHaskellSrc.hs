@@ -113,7 +113,7 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
     rTypeM = do
       rName <- either throwE pure $ convertModuleNameChecked moduleName name
       ps  <- mapM pTransform params
-      return $ (forallify . foldl TypeApp (TypeCons rName)) ps
+      return $ foldl TypeApp (TypeCons rName) ps
     pTransform :: MonadMultiState ConvData m
                => TyVarBind SrcSpanInfo
                -> ExceptT String m HsType
@@ -147,7 +147,11 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
     convAction = do
       rtype  <- rTypeM
       consDatas <- mapM typeM conss
-      return $ ( [ (n, foldr TypeArrow rtype ts)
+      -- The deconstructor records one use-site instance of the datatype, so
+      -- its parameters must remain free for search-time unification.  Each
+      -- constructor value is polymorphic independently; quantify only after
+      -- assembling its complete field-to-result arrow.
+      return $ ( [ (n, forallify $ foldr TypeArrow rtype ts)
                  | (n, ts) <- consDatas
                  ]
                , DeconstructorBinding

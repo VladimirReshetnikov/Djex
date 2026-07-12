@@ -72,6 +72,7 @@ import qualified Data.Set as S
 import Data.Void (absurd)
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
@@ -127,8 +128,43 @@ readTextFile path = captureIO path
 checkSourceEnvironment
   :: SourceEnvironment FunctionBinding
   -> Either EnvironmentLoadError CheckedSourceEnvironment
-checkSourceEnvironment environment = CheckedSourceEnvironment environment
-  <$> first InvalidSourceInventory (toSynthesisSourceInventory environment)
+checkSourceEnvironment environment = do
+  inventory <- first InvalidSourceInventory
+    $ toSynthesisSourceInventory environment
+  projection <- first InvalidSourceInventory
+    $ normalizeConstructorProjection inventory environment
+  pure $ CheckedSourceEnvironment projection inventory
+
+-- | Rebuild the datatype half of the backend projection from the checked
+-- shared declarations.  Ordinary functions retain source order; constructor
+-- entries are replaced in place so equal-cost search ordering does not change.
+-- This makes the Inventory authoritative for constructor shape and penalty
+-- without prematurely imposing declaration-category order on the whole search
+-- environment.
+normalizeConstructorProjection
+  :: SynthesisInventory
+  -> SourceEnvironment FunctionBinding
+  -> Either SynthesisDeclarationError
+      (SourceEnvironment FunctionBinding)
+normalizeConstructorProjection inventory environment = do
+  converted <- mapM fromSynthesisRatedDataDeclaration
+    [ declaration
+    | declaration@SharedDeclaration.DataTypeDeclaration{} <-
+        SharedEnvironment.environmentDeclarations
+          $ SharedInventory.inventoryEnvironment inventory
+    ]
+  let constructorFunctions = concatMap fst converted
+      functionsByName = M.fromList
+        [ (functionName binding, binding)
+        | binding <- constructorFunctions
+        ]
+      replaceConstructor binding = M.findWithDefault binding
+        (functionName binding) functionsByName
+  pure environment
+    { sourceFunctions = map replaceConstructor
+        $ sourceFunctions environment
+    , sourceDeconstructors = map snd converted
+    }
 
 -- | Unique-only compatibility index used by the historical type elaborator.
 -- The ordered field remains authoritative so duplicate declarations reach the
@@ -154,33 +190,75 @@ toSynthesisSourceInventory
   :: SourceEnvironment FunctionBinding
   -> Either SynthesisDeclarationError SynthesisInventory
 toSynthesisSourceInventory environment = do
-  let constructorNames = S.fromList
-        [ constructorName constructor
+  let constructorDefinitions = M.fromListWith (++)
+        [ ( constructorName constructor
+          , [(deconstructorInput deconstructor,
+              constructorFields constructor)]
+          )
         | deconstructor <- sourceDeconstructors environment
         , constructor <- deconstructorConstructors deconstructor
         ]
+      constructorNames = M.keysSet constructorDefinitions
       isConstructorBinding binding =
         SharedName.nameLexicalClass
           (toSynthesisName $ functionName binding)
           == SharedName.ConstructorLike
-      orphanConstructors =
-        [ binding
+      constructorFunctionGroups = M.fromListWith (++)
+        [ (functionName binding, [binding])
+        | binding <- sourceFunctions environment
+        , functionName binding `S.member` constructorNames
+        ]
+      missingFunctions = S.toAscList
+        $ constructorNames S.\\ M.keysSet constructorFunctionGroups
+      duplicateFunctions =
+        [ name
+        | (name, bindings) <- M.toAscList constructorFunctionGroups
+        , length bindings > 1
+        ]
+      orphanConstructors = S.toAscList $ S.fromList
+        [ functionName binding
         | binding <- sourceFunctions environment
         , isConstructorBinding binding
         , functionName binding `S.notMember` constructorNames
+        ]
+      mismatchedFunctions =
+        [ name
+        | (name, [(result, parameters)]) <-
+            M.toAscList constructorDefinitions
+        , [binding] <- [M.findWithDefault [] name constructorFunctionGroups]
+        , functionResult binding /= result
+            || functionParameters binding /= parameters
+            || not (null $ functionConstraints binding)
+        ]
+      constructorPenalties = M.fromList
+        [ (name, functionPenalty binding)
+        | (name, [binding]) <- M.toAscList constructorFunctionGroups
         ]
       valueBindings =
         [ binding
         | binding <- sourceFunctions environment
         , functionName binding `S.notMember` constructorNames
         ]
-  case orphanConstructors of
-    binding : _ -> Left $ OrphanConstructorBinding
-      $ toSynthesisName $ functionName binding
-    [] -> pure ()
+  if null missingFunctions
+    then pure ()
+    else Left $ MissingConstructorFunctionBindings
+      $ map toSynthesisName missingFunctions
+  if null duplicateFunctions
+    then pure ()
+    else Left $ DuplicateConstructorFunctionBindings
+      $ map toSynthesisName duplicateFunctions
+  if null orphanConstructors
+    then pure ()
+    else Left $ OrphanConstructorBindings
+      $ map toSynthesisName orphanConstructors
+  if null mismatchedFunctions
+    then pure ()
+    else Left $ MismatchedConstructorFunctionBindings
+      $ map toSynthesisName mismatchedFunctions
   synonyms <- mapM toSynthesisTypeDeclaration
     $ sourceTypeSynonyms environment
-  core <- toSynthesisEnvironment $ EnvDictionary
+  core <- toSynthesisEnvironmentWithConstructorPenalties
+    constructorPenalties $ EnvDictionary
     valueBindings
     (sourceDeconstructors environment)
     (sourceClasses environment)

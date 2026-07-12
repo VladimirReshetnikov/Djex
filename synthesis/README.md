@@ -43,6 +43,13 @@ instance constraints must be covered by their declaration binders; value
 signatures and class methods retain Haskell's implicit local quantification.
 The layer does not prescribe backend-specific class or instance resolution.
 
+`Language.Haskell.Synthesis.KindInference` owns the common kind unifier. It
+checks several types in one variable scope, gives class methods independent
+local quantifiers around shared class parameters, validates constraint arity
+and parameter kinds, recognizes intrinsic function/list/tuple constructors,
+and infers acyclic type declarations in dependency order. Public results use
+an uninhabited kind-variable parameter, so an unsolved kind cannot escape.
+
 `Language.Haskell.Synthesis.Environment` seals a declaration inventory and
 builds deterministic type/class, value/method, constructor, and instance-head
 indexes. It rejects cross-declaration namespace collisions and duplicate

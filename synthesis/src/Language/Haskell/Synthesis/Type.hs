@@ -17,6 +17,7 @@ module Language.Haskell.Synthesis.Type
   , canonicalizeType
   , validateType
   , freeVariables
+  , typeConstructors
   ) where
 
 import Control.DeepSeq (NFData)
@@ -153,3 +154,22 @@ freeVariables typeExpression = case typeExpression of
         | constraint <- constraints
         , argument <- constraintArguments constraint
         ])) `Set.difference` Set.fromList variables
+
+-- | Collect nominal constructor references from a type. Structural function
+-- and tuple forms have intrinsic kinds and therefore contribute only the
+-- constructors mentioned by their elements.
+typeConstructors :: Type variable -> Set Name
+typeConstructors typeExpression = case typeExpression of
+  TypeVariable{} -> Set.empty
+  TypeConstructor name -> Set.singleton name
+  TypeApplication function argument ->
+    typeConstructors function `Set.union` typeConstructors argument
+  FunctionType parameter result ->
+    typeConstructors parameter `Set.union` typeConstructors result
+  TupleType _ elements -> Set.unions $ map typeConstructors elements
+  ForallType _ constraints body -> Set.unions
+    (typeConstructors body :
+      [ typeConstructors argument
+      | constraint <- constraints
+      , argument <- constraintArguments constraint
+      ])

@@ -342,13 +342,14 @@ The same Boolean options can precede file names on the command line, such as
 | `Djinn.Internal.Declaration` | Djinn declaration compatibility values and checked shared-IR lowering. |
 | `Djinn` (`src-cli/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
-| `Djinn.Internal.HCheck` | Kind inference and validation for declared Haskell-like types. |
+| `Djinn.Internal.HCheck` | Djinn compatibility adapter over shared kind inference, plus saturated-synonym policy. |
 | `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated `haskell-synthesis` name and operator rules. |
 | `Djinn.Internal.HTypes` | Type parser, logical translation, and proof-term conversion/cleanup. |
 | `Djinn.Internal.Type` | Checked conversion between Djinn source types and the shared source-type IR. |
 | `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
 | `Language.Haskell.Synthesis.Generated` | Shared local/global output tree, scope validation, capture-safe naming, qualification, and Haskell rendering. |
+| `Language.Haskell.Synthesis.KindInference` | Shared kind unification, class-parameter inference, and acyclic declaration dependency ordering. |
 | `Djinn.Internal.LJTFormula` | Formula and proof-term data types. |
 | `Djinn.Internal.LJT` | Dyckhoff-style contraction-free proof search and proof normalization. |
 | `Djinn.Internal.ProofEnv` | Isolation of external proof identities from printable names. |

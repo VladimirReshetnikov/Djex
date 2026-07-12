@@ -6,56 +6,16 @@ module Djinn.Internal.HCheck(
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htInferClassKinds
     ) where
-import Data.List(union, (\\))
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.State.Strict (StateT, evalStateT, get, put)
-import Data.IntMap(IntMap)
-import qualified Data.IntMap as IntMap
-import Data.Graph(stronglyConnComp, SCC(..))
+import Data.Bifunctor (first)
+import qualified Data.Map.Strict as Map
+import Data.Void (absurd)
+
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
+import qualified Language.Haskell.Synthesis.KindInference as SharedInference
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Djinn.Internal.HTypes
-
--- Kind inference uses numbered unification variables (KVar).  The state maps
--- each variable to its solution: Nothing while unconstrained, and possibly a
--- chain of KVars that 'follow' resolves.  'ground' finally defaults any
--- still-unconstrained variable to *, as Haskell98 does.
-type KState = (Int, IntMap (Maybe HKind))
-initState :: KState
-initState = (0, IntMap.empty)
-
-type M a = StateT KState (Either String) a
-
-type KEnv = [(HSymbol, HKind)]
-
--- These constructors are part of the type grammar rather than the mutable
--- synonym environment, so the kind checker must know about them explicitly.
-intrinsicKinds :: KEnv
-intrinsicKinds =
-    [("[]", KArrow KStar KStar),
-     ("->", KArrow KStar (KArrow KStar KStar))]
-
-newKVar :: M HKind
-newKVar = do
-    (i, m) <- get
-    put (i+1, IntMap.insert i Nothing m)
-    return $ KVar i
-
-follow :: HKind -> M HKind
-follow k@(KVar i) = do
-    (_, m) <- get
-    case IntMap.lookup i m of
-        Nothing -> lift $ Left $ "Unknown kind variable: " ++ show i
-        Just Nothing -> return k
-        Just (Just k') -> follow k'
-follow k = return k
-
-addMap :: Int -> HKind -> M ()
-addMap i k = do
-    (n, m) <- get
-    put (n, IntMap.insert i (Just k) m)
-
-clearState :: M ()
-clearState = put initState
+import Djinn.Internal.Type (toSynthesisType)
 
 htCheckType :: [(HSymbol, ([HSymbol], HType, HKind))] -> HType -> Either String ()
 htCheckType its = htCheckTypeKind its KStar
@@ -74,14 +34,13 @@ htCheckTypesKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
                   -> [(HKind, HType)] -> Either String ()
 htCheckTypesKinds its expectedTypes = do
     mapM_ (checkSynonymSaturation its . snd) expectedTypes
-    flip evalStateT initState $ do
-        let vs = foldr union [] [getHTVars t | (_, t) <- expectedTypes]
-        ks <- mapM (const newKVar) vs
-        let env = zip vs ks ++
-                  [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
-        mapM_ (check env) expectedTypes
+    assumptions <- synthesisAssumptions its
+    obligations <- mapM convertObligation expectedTypes
+    first show $ SharedInference.checkTypesKinds assumptions obligations
   where
-    check env (expected, t) = iHKind env t >>= (`unifyK` expected)
+    convertObligation (expected, typeExpression) = (,)
+        <$> toGroundKind expected
+        <*> first show (toSynthesisType typeExpression)
 
 -- Infer the kind of every class parameter from the class's method types,
 -- as Haskell98 does.  Parameters left unconstrained (including every
@@ -93,37 +52,69 @@ htInferClassKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
                   -> Either String [(HSymbol, HKind)]
 htInferClassKinds its params methodTypes = do
     mapM_ (checkSynonymSaturation its) methodTypes
-    flip evalStateT initState $ do
-        paramKinds <- mapM (const newKVar) params
-        let sharedEnv = zip params paramKinds ++
-                        [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
-        mapM_ (inferMethod sharedEnv) methodTypes
-        grounded <- mapM ground paramKinds
-        return $ zip params grounded
-  where
-    inferMethod sharedEnv methodType = do
-        let locals = getHTVars methodType \\ params
-        localKinds <- mapM (const newKVar) locals
-        iHKindStar (zip locals localKinds ++ sharedEnv) methodType
+    assumptions <- synthesisAssumptions its
+    convertedMethods <- mapM (first show . toSynthesisType) methodTypes
+    inferred <- first show $ SharedInference.inferSharedVariableKinds
+        assumptions params convertedMethods
+    return [(parameter, fromGroundKind kind) |
+        (parameter, kind) <- inferred]
 
-htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))] -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
+synthesisAssumptions
+    :: [(HSymbol, ([HSymbol], HType, HKind))]
+    -> Either String SharedInference.KindAssumptions
+synthesisAssumptions definitions = do
+    constructors <- mapM convert definitions
+    return SharedInference.emptyKindAssumptions
+        { SharedInference.typeConstructorKinds = Map.fromList constructors }
+  where
+    convert (sourceName, (_, _, kind)) = (,)
+        <$> first show (SharedName.parseName sourceName)
+        <*> toGroundKind kind
+
+toGroundKind :: HKind -> Either String SharedInference.GroundKind
+toGroundKind kind = case kind of
+    KStar -> Right SharedKind.ProperTypeKind
+    KArrow parameter result -> SharedKind.FunctionKind
+        <$> toGroundKind parameter <*> toGroundKind result
+    KVar variable -> Left $
+        "kind contains an unsolved variable: " ++ show variable
+
+fromGroundKind :: SharedInference.GroundKind -> HKind
+fromGroundKind kind = case kind of
+    SharedKind.ProperTypeKind -> KStar
+    SharedKind.FunctionKind parameter result -> KArrow
+        (fromGroundKind parameter) (fromGroundKind result)
+    SharedKind.KindVariable impossible -> absurd impossible
+
+htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))]
+           -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
 htCheckEnv its = do
     mapM_ (checkSynonymSaturation its . declarationBody) its
-    let graph = [ (n, i, getHTCons t) | n@(i, (_, t, _)) <- its ]
-        order = stronglyConnComp graph
-    case [ c | CyclicSCC c <- order ] of
-        c : _ -> Left $ "Recursive types are not allowed: " ++ unwords [ i | (i, _) <- c ]
-        [] -> flip evalStateT initState $ addKinds
-            where addKinds = do
-                        env <- inferHKinds intrinsicKinds [n | AcyclicSCC n <- order]
-                        let addKind (i, (vs, t, _)) =
-                                case lookup i env of
-                                    Nothing -> lift $ Left $
-                                        "Internal kind inference error for " ++ i
-                                    Just k -> return (i, (vs, t, k))
-                        mapM addKind its
+    declarations <- mapM toKindDeclaration its
+    inferred <- first show $
+        SharedInference.inferAcyclicTypeConstructorKinds declarations
+    mapM (attachKind inferred) its
   where
     declarationBody (_, (_, body, _)) = body
+
+    toKindDeclaration (sourceName, (parameters, body, _)) = do
+        name <- first show $ SharedName.parseName sourceName
+        case body of
+            HTAbstract _ kind -> SharedInference.DeclaredTypeKind name
+                <$> toGroundKind kind
+            HTUnion constructors -> SharedInference.InferredTypeKind
+                name parameters <$> mapM (first show . toSynthesisType)
+                  [field | (_, fields) <- constructors, field <- fields]
+            _ -> SharedInference.InferredTypeKind name parameters . (: [])
+                <$> first show (toSynthesisType body)
+
+    attachKind inferred (sourceName, (parameters, body, _)) = do
+        name <- first show $ SharedName.parseName sourceName
+        case Map.lookup name inferred of
+            Nothing -> Left $
+                "internal kind inference error for " ++ sourceName
+            Just kind -> Right
+                (sourceName, (parameters, body, fromGroundKind kind))
 
 -- Type synonyms are unlike data and abstract constructors: Haskell requires
 -- every occurrence to supply the synonym's complete parameter list.  Kind
@@ -173,92 +164,3 @@ checkSynonymSaturation definitions = checkType
                 "Type synonym " ++ name ++ " expects " ++ show expected ++
                 " argument(s), but got " ++ show supplied
             _ -> Right ()
-
-inferHKinds :: KEnv -> [(HSymbol, ([HSymbol], HType, a))] -> M KEnv
-inferHKinds env [] = return env
-inferHKinds env ((i, (vs, t, _)) : its) = do
-    k <- inferHKind env vs t
-    inferHKinds ((i, k) : env) its
-
-inferHKind :: KEnv -> [HSymbol] -> HType -> M HKind
-inferHKind _ _ (HTAbstract _ k) = return k
-inferHKind env vs t = do
-    clearState
-    ks <- mapM (const newKVar) vs
-    let env' = zip vs ks ++ env
-    -- A Haskell type synonym or data declaration must produce a proper type;
-    -- only an explicit HTAbstract declaration may end in a higher kind.
-    iHKindStar env' t
-    ground $ foldr KArrow KStar ks
-
-iHKind :: KEnv -> HType -> M HKind
-iHKind env (HTApp f a) = do
-    kf <- iHKind env f
-    ka <- iHKind env a
-    r <- newKVar
-    unifyK (KArrow ka r) kf
-    return r
-iHKind env (HTVar v) = lookupHKind "Undefined type variable" env v
-iHKind env (HTCon c) = lookupHKind "Undefined type" env c
-iHKind env (HTTuple ts) = do
-    mapM_ (iHKindStar env) ts
-    return KStar
-iHKind env (HTArrow f a) = do
-    iHKindStar env f
-    iHKindStar env a
-    return KStar
-iHKind env (HTUnion cs) = do
-    mapM_ (\ (_, ts) -> mapM_ (iHKindStar env) ts) cs
-    return KStar
-iHKind _ (HTAbstract _ k) = return k
-
-iHKindStar :: KEnv -> HType -> M ()
-iHKindStar env t = do
-    k <- iHKind env t
-    unifyK k KStar
-
-unifyK :: HKind -> HKind -> M ()
-unifyK k1 k2 = do
-    let unify KStar KStar = return ()
-        unify (KArrow k11 k12) (KArrow k21 k22) = do unifyK k11 k21; unifyK k12 k22
-        unify (KVar i1) (KVar i2) | i1 == i2 = return ()
-        unify (KVar i) k = do occurs i k; addMap i k
-        unify k (KVar i) = do occurs i k; addMap i k
-        unify left right = lift $ Left $
-            "kind mismatch: " ++ show left ++ " vs " ++ show right
-        occurs i k = do
-            k' <- follow k
-            case k' of
-                KStar -> return ()
-                KArrow f a -> occurs i f >> occurs i a
-                KVar i'
-                    | i == i' -> lift $ Left "cyclic kind"
-                    | otherwise -> return ()
-    k1' <- follow k1
-    k2' <- follow k2
-    unify k1' k2'
-
-
-lookupHKind :: String -> KEnv -> HSymbol -> M HKind
-lookupHKind missing env v =
-    case lookup v env of
-    Just k -> return k
-    Nothing -> lift $ Left $ missing ++ " " ++ v
-
-ground :: HKind -> M HKind
-ground k = do
-    k' <- follow k
-    case k' of
-        KStar -> return KStar
-        KArrow k1 k2 -> KArrow <$> ground k1 <*> ground k2
-        -- Unconstrained kind variables default to *, as Haskell98 requires.
-        KVar _ -> return KStar
-
-getHTCons :: HType -> [HSymbol]
-getHTCons (HTApp f a) = getHTCons f `union` getHTCons a
-getHTCons (HTVar _) = []
-getHTCons (HTCon s) = [s]
-getHTCons (HTTuple ts) = foldr union [] (map getHTCons ts)
-getHTCons (HTArrow f a) = getHTCons f `union` getHTCons a
-getHTCons (HTUnion alts) = foldr union [] [ getHTCons t | (_, ts) <- alts, t <- ts ]
-getHTCons (HTAbstract _ _) = []

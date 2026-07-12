@@ -15,6 +15,7 @@ import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
 import qualified Language.Haskell.Synthesis.Kind as Kind
+import qualified Language.Haskell.Synthesis.KindInference as KindInference
 import Language.Haskell.Synthesis.Search
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
@@ -32,6 +33,7 @@ tests = testGroup "haskell-synthesis"
   , generatedTests
   , searchTests
   , typeTests
+  , kindInferenceTests
   , moduleTests
   , ordinaryTests
   , specialTests
@@ -39,6 +41,115 @@ tests = testGroup "haskell-synthesis"
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
   ]
+
+kindInferenceTests :: TestTree
+kindInferenceTests = testGroup "kind inference"
+  [ testCase "infer higher-kinded variables shared across types" $ do
+      let maybeName = right $ mkIdentifier "Maybe"
+          intName = right $ mkIdentifier "Int"
+          assumptions = KindInference.KindAssumptions
+            (Map.fromList
+              [ (maybeName, arrow proper proper)
+              , (intName, proper)
+              ])
+            Map.empty
+          application = SharedType.TypeApplication
+            (SharedType.TypeVariable "f")
+            (SharedType.TypeConstructor intName)
+      KindInference.inferSharedVariableKinds assumptions ["f"]
+          [application] @?=
+        Right [("f", arrow proper proper)]
+  , testCase "share free-variable kinds across obligations" $ do
+      let intName = right $ mkIdentifier "Int"
+          assumptions = KindInference.emptyKindAssumptions
+            { KindInference.typeConstructorKinds =
+                Map.singleton intName proper
+            }
+          variable = SharedType.TypeVariable "f"
+          application = SharedType.TypeApplication variable
+            $ SharedType.TypeConstructor intName
+      KindInference.checkTypesKinds assumptions
+          [(proper, variable), (proper, application)] @?=
+        Left (KindInference.KindMismatch proper $ arrow proper proper)
+  , testCase "use declared class parameter kinds in forall contexts" $ do
+      let functorName = right $ mkIdentifier "Functor"
+          assumptions = KindInference.emptyKindAssumptions
+            { KindInference.classParameterKinds =
+                Map.singleton functorName [arrow proper proper]
+            }
+          quantified = SharedType.ForallType ["f"]
+            [Constraint functorName [SharedType.TypeVariable "f"]]
+            (SharedType.TypeVariable "f")
+      KindInference.checkTypesKinds assumptions
+        [(arrow proper proper, quantified)] @?= Right ()
+  , testCase "diagnose unknown classes and constraint arity" $ do
+      let className = right $ mkIdentifier "C"
+          variable = SharedType.TypeVariable "a"
+          constrained arguments = SharedType.ForallType ["a"]
+            [Constraint className arguments] variable
+      KindInference.checkTypesKinds KindInference.emptyKindAssumptions
+          [(proper, constrained [variable])] @?=
+        Left (KindInference.UnknownClass className)
+      let assumptions = KindInference.emptyKindAssumptions
+            { KindInference.classParameterKinds =
+                Map.singleton className []
+            }
+      KindInference.checkTypesKinds assumptions
+          [(proper, constrained [variable])] @?=
+        Left (KindInference.ClassArityMismatch className 0 1)
+  , testCase "reject infinite kinds and accept intrinsic constructors" $ do
+      let variable = SharedType.TypeVariable "a"
+          selfApplication = SharedType.TypeApplication variable variable
+          listApplication = SharedType.TypeApplication
+            (SharedType.TypeConstructor listName) variable
+      KindInference.checkTypesKinds KindInference.emptyKindAssumptions
+          [(proper, selfApplication)] @?= Left KindInference.InfiniteKind
+      KindInference.checkTypesKinds KindInference.emptyKindAssumptions
+          [(proper, listApplication)] @?= Right ()
+  , testCase "validate source types before kind inference" $ do
+      let malformed = SharedType.TupleType Boxed
+            [SharedType.TypeVariable (0 :: Int)]
+      KindInference.checkTypesKinds KindInference.emptyKindAssumptions
+          [(proper, malformed)] @?= Left
+        (KindInference.InvalidKindInferenceType
+          $ SharedType.InvalidTupleTypeArity Boxed 1)
+  , testCase "infer type constructors in dependency order" $ do
+      let intName = right $ mkIdentifier "Int"
+          fooName = right $ mkIdentifier "Foo"
+          body = SharedType.TypeApplication
+            (SharedType.TypeVariable "f")
+            (SharedType.TypeVariable "a")
+          declarations =
+            [ KindInference.InferredTypeKind fooName ["f", "a"] [body]
+            , KindInference.DeclaredTypeKind intName proper
+            ]
+      KindInference.inferAcyclicTypeConstructorKinds declarations @?=
+        Right (Map.fromList
+          [ (fooName, arrow (arrow proper proper) $ arrow proper proper)
+          , (intName, proper)
+          ])
+  , testCase "reject duplicate, recursive, and unknown type declarations" $ do
+      let aName = right $ mkIdentifier "A"
+          bName = right $ mkIdentifier "B"
+          declared :: Name -> KindInference.TypeKindDeclaration String
+          declared name = KindInference.DeclaredTypeKind name proper
+          refers :: Name -> Name -> KindInference.TypeKindDeclaration String
+          refers name reference = KindInference.InferredTypeKind name []
+            [SharedType.TypeConstructor reference]
+      KindInference.inferAcyclicTypeConstructorKinds
+          [declared aName, declared aName] @?=
+        Left (KindInference.DuplicateTypeConstructor aName)
+      KindInference.inferAcyclicTypeConstructorKinds
+          [refers aName bName, refers bName aName] @?=
+        Left (KindInference.RecursiveTypeDeclarations [aName, bName])
+      KindInference.inferAcyclicTypeConstructorKinds
+          [refers aName bName] @?=
+        Left (KindInference.UnknownTypeConstructor bName)
+  ]
+ where
+  proper :: KindInference.GroundKind
+  proper = Kind.ProperTypeKind
+  arrow = Kind.FunctionKind
 
 environmentTests :: TestTree
 environmentTests = testGroup "environments"

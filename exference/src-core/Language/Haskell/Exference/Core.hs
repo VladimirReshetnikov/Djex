@@ -7,8 +7,12 @@ module Language.Haskell.Exference.Core
   , E.ExferenceInput (..)
   , E.ExferenceOutputElement
   , E.ExferenceChunkElement (..)
+  , E.ExferenceSearchBatch
   , E.SearchCompletion (..)
   , E.SearchStatus (..)
+  , E.SearchStatusError (..)
+  , E.toSearchProgress
+  , E.toSearchBatch
   , E.constraintsRelaxedAtStep
   , E.ExferenceInputError (..)
   , E.validateExferenceInput

@@ -23,12 +23,16 @@ module Language.Haskell.Exference
   , ExferenceHeuristicsConfig (..)
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
+  , ExferenceSearchBatch
   , ExferenceStats (..)
   , ExferenceInputError (..)
   , findExpressionsEither
   , findExpressionsWithStatsEither
   , SearchCompletion (..)
   , SearchStatus (..)
+  , SearchStatusError (..)
+  , toSearchProgress
+  , toSearchBatch
   , Penalty (..)
   , Priority (..)
   )

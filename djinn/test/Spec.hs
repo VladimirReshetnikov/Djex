@@ -12,7 +12,7 @@ import Djinn.Core (
     functionDeclarations, inhabit,
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
     mkContext, parseHKind, parseHType, removeDeclaration,
-    reportOutcome, resolveContext, resolveInstanceMethods,
+    reportCompletion, reportOutcome, resolveContext, resolveInstanceMethods,
     standardEnvironment, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
 import Djinn.Internal.HCheck (
@@ -26,6 +26,7 @@ import Djinn.Internal.ProofEnv
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 main :: IO ()
 main = defaultMain $ testGroup "Djinn unit tests" $
@@ -154,16 +155,23 @@ testCoreFacade = do
         inhabit defaultQueryOptions standardEnvironment [] "swap" swap
     assertEqual "swap is realized with the canonical clause"
         (Realized ["swap (a, b) = (b, a)"]) (reportOutcome swapReport)
+    assertEqual "a completed realization reports finished exploration"
+        SharedSearch.Finished (reportCompletion swapReport)
     peirce <- expectRight $ parseHType "((a -> b) -> a) -> a"
     peirceReport <- expectRight $
         inhabit defaultQueryOptions standardEnvironment [] "peirce" peirce
     assertEqual "Peirce's law is decided unrealizable"
         Unrealizable (reportOutcome peirceReport)
+    assertEqual "logical refutation completed operationally"
+        SharedSearch.Finished (reportCompletion peirceReport)
     starved <- expectRight $ inhabit
         defaultQueryOptions { optionBudget = Just 0 }
         standardEnvironment [] "peirce" peirce
     assertEqual "an expired budget is undecided, not unrealizable"
         Undecided (reportOutcome starved)
+    assertEqual "budget exhaustion retains its operational reason"
+        (SharedSearch.truncated SharedSearch.ChoicePointLimitReached)
+        (reportCompletion starved)
     selfRef <- expectRight $ do
         environment <- declare (Function "token" (HTVar "a"))
             standardEnvironment

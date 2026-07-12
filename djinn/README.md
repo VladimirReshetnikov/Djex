@@ -394,7 +394,11 @@ The essentials: `declare`/`removeDeclaration` grow and shrink an
 `parseHType`/`parseHKind` parse with full-input validation; `inhabit` runs
 the full pipeline — translation, budgeted proof search, independent proof
 checking, and rendering — and reports the formula and first proof term for
-debugging. `resolveContext` instantiates one class context;
+debugging. `reportCompletion` uses the shared operational vocabulary:
+`Finished` means the configured proof exploration completed, while
+`Truncated ChoicePointLimitReached` explains `Undecided`. This status remains
+separate from Djinn's proof-backed `Unrealizable` outcomes. `resolveContext`
+instantiates one class context;
 `resolveInstanceMethods` jointly checks an instance target and all of its
 prerequisites before returning the target's instantiated methods. A query's
 goal and every class argument are likewise kind-checked together, so a free

@@ -15,8 +15,12 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInput (..)
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
+  , ExferenceSearchBatch
   , SearchCompletion (..)
   , SearchStatus (..)
+  , SearchStatusError (..)
+  , toSearchProgress
+  , toSearchBatch
   , constraintsRelaxedAtStep
   , ExferenceInputError (..)
   , validateExferenceInput
@@ -37,6 +41,7 @@ import Language.Haskell.Exference.Core.Internal.Unify
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
+import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import qualified Data.PQueue.Prio.Max as Q
 import qualified Data.Map as M
@@ -52,6 +57,7 @@ import Data.List ( find, partition, unfoldr, intercalate )
 import Data.Functor ( ($>) )
 import Data.Monoid ( Any(..), Endo(..) )
 import Data.Foldable ( sum, asum, traverse_ )
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import Control.Monad.Trans.Class ( lift )
 import Control.Lens
 import Control.Monad.State ( StateT(..), gets, execStateT, runStateT, mapStateT )
@@ -140,11 +146,57 @@ data SearchStatus = SearchStatus
   }
   deriving (Eq, Show)
 
+data SearchStatusError
+  = NegativeQueuePruningCount Int
+  | NegativeDepthPruningCount Int
+  | PrunedWithoutDiscardedNodes
+  deriving (Eq, Show)
+
+-- | Project Exference's compatibility status into the common operational
+-- vocabulary without turning heuristic exhaustion into a logical claim.
+-- Queue and depth pruning remain separately visible even when a later step
+-- limit is what stopped the retained frontier.
+toSearchProgress
+  :: SearchStatus
+  -> Either SearchStatusError SharedSearch.Progress
+toSearchProgress (SearchStatus completion queuePruned depthPruned)
+  | queuePruned < 0 = Left $ NegativeQueuePruningCount queuePruned
+  | depthPruned < 0 = Left $ NegativeDepthPruningCount depthPruned
+  | otherwise = case completion of
+      SearchRunning -> Right SharedSearch.Continuing
+      SearchExhausted -> Right $ SharedSearch.Completed SharedSearch.Finished
+      SearchStepLimitReached -> Right $ SharedSearch.Completed
+        $ SharedSearch.Truncated
+        $ SharedSearch.StepLimitReached :| pruningReasons
+      SearchPruned -> case pruningReasons of
+        reason : remaining -> Right $ SharedSearch.Completed
+          $ SharedSearch.Truncated $ reason :| remaining
+        [] -> Left PrunedWithoutDiscardedNodes
+ where
+  pruningReasons =
+    [ SharedSearch.QueueLimitPruned $ fromIntegral queuePruned
+    | queuePruned > 0
+    ] ++
+    [ SharedSearch.DepthLimitPruned $ fromIntegral depthPruned
+    | depthPruned > 0
+    ]
+
 data ExferenceChunkElement = ExferenceChunkElement
   { chunkStatus :: SearchStatus
   , chunkBindingUsages :: BindingUsages
   , chunkElements :: [ExferenceOutputElement]
   }
+
+type ExferenceSearchBatch =
+  SharedSearch.SearchBatch BindingUsages ExferenceOutputElement
+
+toSearchBatch
+  :: ExferenceChunkElement
+  -> Either SearchStatusError ExferenceSearchBatch
+toSearchBatch chunk = do
+  progress <- toSearchProgress $ chunkStatus chunk
+  return $ SharedSearch.SearchBatch
+    progress (chunkBindingUsages chunk) (chunkElements chunk)
 
 type RatedNodes = Q.MaxPQueue Priority SearchNode
 data FindExpressionsState = FindExpressionsState

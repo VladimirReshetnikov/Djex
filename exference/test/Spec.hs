@@ -17,6 +17,7 @@ import Data.Data
 import Data.Either (rights)
 import Data.Functor.Identity (runIdentity)
 import Data.List (find, isInfixOf)
+import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -36,9 +37,12 @@ import Language.Haskell.Exference.Core
   , ExferenceHeuristicsConfig (..)
   , SearchCompletion (..)
   , SearchStatus (..)
+  , SearchStatusError (..)
   , constraintsRelaxedAtStep
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
+  , toSearchProgress
+  , toSearchBatch
   , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.ConstraintSolver
@@ -97,6 +101,7 @@ import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClas
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as Generated
+import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified CompatibilityImport
 import Paths_exference (getDataFileName)
 
@@ -566,16 +571,29 @@ tests = testGroup "Exference"
       , testCase "step exhaustion is reported explicitly" $ do
           chunk <- onlyChunk $ identityInput {input_maxSteps = 1}
           searchCompletion (chunkStatus chunk) @?= SearchStepLimitReached
+          toSearchProgress (chunkStatus chunk) @?= Right
+            (SharedSearch.Completed $ SharedSearch.truncated
+              SharedSearch.StepLimitReached)
       , testCase "complete failure is distinguished from bounded search" $ do
           chunk <- lastChunk $ identityInput
             {input_goalType = TypeCons $ name "Void"}
           assertBool "an uninhabited atomic goal produced an expression"
             $ null $ chunkElements chunk
           chunkStatus chunk @?= SearchStatus SearchExhausted 0 0
+          toSearchProgress (chunkStatus chunk) @?=
+            Right (SharedSearch.Completed SharedSearch.Finished)
+          case toSearchBatch chunk of
+            Left batchError -> fail $ show batchError
+            Right batch -> assertBool
+              "common batch unexpectedly gained candidates"
+              $ null $ SharedSearch.batchCandidates batch
       , testCase "queue pruning is bounded and reported" $ do
           chunk <- onlyChunk $ identityInput {input_maxQueueSize = Just 0}
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchQueuePruned (chunkStatus chunk) @?= 1
+          toSearchProgress (chunkStatus chunk) @?= Right
+            (SharedSearch.Completed $ SharedSearch.truncated
+              $ SharedSearch.QueueLimitPruned 1)
       , testCase "depth pruning is configured and reported" $ do
           let config = defaultHeuristicsConfig
                 {heuristics_functionGoalTransform = 1}
@@ -585,6 +603,9 @@ tests = testGroup "Exference"
             }
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchDepthPruned (chunkStatus chunk) @?= 1
+          toSearchProgress (chunkStatus chunk) @?= Right
+            (SharedSearch.Completed $ SharedSearch.truncated
+              $ SharedSearch.DepthLimitPruned 1)
       , testCase "status-aware selectors preserve policy semantics" $ do
           let status index = SearchStatus SearchRunning index 0
               terminal = SearchStatus SearchStepLimitReached 6 0
@@ -662,6 +683,15 @@ tests = testGroup "Exference"
           assertEmpty $ selectFirstBestExpressionsLookahead 4 chunks
           assertEmpty $
             selectFirstBestExpressionsLookaheadPreferNoConstraints 4 chunks
+          toSearchProgress pruned @?= Right
+            (SharedSearch.Completed $ SharedSearch.Truncated
+              (SharedSearch.QueueLimitPruned 7 :|
+                [SharedSearch.DepthLimitPruned 2]))
+      , testCase "malformed compatibility statuses are rejected" $ do
+          toSearchProgress (SearchStatus SearchPruned 0 0) @?=
+            Left PrunedWithoutDiscardedNodes
+          toSearchProgress (SearchStatus SearchPruned (-1) 0) @?=
+            Left (NegativeQueuePruningCount (-1))
       , testCase "non-finite heuristic inputs are rejected" $ do
           let config = defaultHeuristicsConfig
                 {heuristics_goalVar = Penalty (0 / 0)}

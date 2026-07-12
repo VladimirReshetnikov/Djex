@@ -37,6 +37,7 @@ import Text.ParserCombinators.ReadP (ReadP, readP_to_S, skipSpaces)
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import Djinn.Internal.Environment
 import Djinn.Internal.HCheck (
@@ -491,6 +492,10 @@ data QueryReport = QueryReport {
     reportFormula :: String,
     -- | The first internal proof term, when one was found.
     reportProof :: Maybe String,
+    -- | Whether the configured proof exploration finished normally or spent
+    -- its choice-point budget. Logical negative evidence remains in
+    -- 'reportOutcome' rather than being conflated with this status.
+    reportCompletion :: SharedSearch.Completion,
     reportOutcome :: QueryOutcome
     }
     deriving (Show)
@@ -559,6 +564,7 @@ inhabit options environment contexts name goal = do
             return QueryReport {
                 reportFormula = show form,
                 reportProof = Nothing,
+                reportCompletion = queryCompletion outcome,
                 reportOutcome = failure
                 }
         p : ps -> do
@@ -590,5 +596,12 @@ inhabit options environment contexts name goal = do
             return QueryReport {
                 reportFormula = show form,
                 reportProof = Just (show p),
+                reportCompletion = queryCompletion outcome,
                 reportOutcome = Realized renderedClauses
                 }
+
+queryCompletion :: SearchOutcome -> SharedSearch.Completion
+queryCompletion outcome
+    | searchExhausted outcome =
+        SharedSearch.truncated SharedSearch.ChoicePointLimitReached
+    | otherwise = SharedSearch.Finished

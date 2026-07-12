@@ -92,6 +92,10 @@ one source-name map for quantifiers, constraints, and body occurrences.
 The status-bearing search API is `findExpressionsWithStatsEither`. It retains
 structured input failures and distinguishes a genuinely exhausted search space
 from a step-limited search and one made incomplete by queue/depth pruning. The
+`toSearchProgress` projection maps those compatibility statuses to
+`Language.Haskell.Synthesis.Search`, retaining simultaneous queue and depth
+pruning reasons and rejecting malformed hand-constructed status values. It
+does not turn heuristic exhaustion into a logical uninhabitability claim. The
 historical list-returning entry points remain compatibility adapters (including
 their “invalid input means no elements” convention). Selection functions are
 also available separately over chunk streams. They return `SearchSelection`,

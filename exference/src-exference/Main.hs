@@ -20,9 +20,11 @@ import Language.Haskell.Exference.EnvironmentParser
 
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import Control.Monad ( when, forM_ )
 import Data.List ( sortBy, intercalate, nub )
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.List as List
 import Data.Ord ( comparing )
 import Data.Maybe ( listToMaybe, fromMaybe )
@@ -301,15 +303,19 @@ printResult qualification tVarIndex
     ++ show queueSize ++ " max pqueue size)"
 
 noResultsMessage :: Maybe SearchStatus -> String
-noResultsMessage status = case searchCompletion <$> status of
-  Just SearchExhausted -> "[no results: search space exhausted]"
-  Just SearchPruned ->
-    "[no results found after pruning; inhabitation is undecided]"
-  Just SearchStepLimitReached ->
-    "[no results found before the step limit; inhabitation is undecided]"
-  Just SearchRunning ->
+noResultsMessage Nothing = "[no search states were produced]"
+noResultsMessage (Just status) = case toSearchProgress status of
+  Right (SharedSearch.Completed SharedSearch.Finished) ->
+    "[no results: search space exhausted]"
+  Right (SharedSearch.Completed (SharedSearch.Truncated reasons))
+    | SharedSearch.StepLimitReached `elem` NonEmpty.toList reasons ->
+        "[no results found before the step limit; inhabitation is undecided]"
+    | otherwise ->
+        "[no results found after pruning; inhabitation is undecided]"
+  Right SharedSearch.Continuing ->
     "[no results in the inspected search prefix; inhabitation is undecided]"
-  Nothing -> "[no search states were produced]"
+  Left statusError ->
+    "[invalid internal search status: " ++ show statusError ++ "]"
 
 lastMaybe :: [a] -> Maybe a
 lastMaybe = List.foldl' (\_ value -> Just value) Nothing

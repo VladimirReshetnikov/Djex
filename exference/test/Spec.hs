@@ -530,6 +530,15 @@ tests = testGroup "Exference"
           shared <- expectRight $ toSynthesisType source
           SharedType.validateType shared @?= Right ()
           fromSynthesisType shared @?= Right source
+      , testCase "shared type conversion rejects malformed class names" $ do
+          let invalidName = name "constraint"
+              source = TypeForall [0]
+                [HsConstraint invalidName [TypeVar 0]]
+                (TypeVar 0)
+          toSynthesisType source @?= Left
+            (InvalidSynthesisType $ SharedType.InvalidTypeConstraint
+              $ SharedConstraint.InvalidConstraintClass
+              $ toSynthesisName invalidName)
       , testCase "shared rigid forall binders are rejected" $ do
           let malformed = SharedType.ForallType
                 [SharedType.RigidVariable 4] []
@@ -678,12 +687,27 @@ tests = testGroup "Exference"
                 (TypeVar 0)
             }
             @?= Right ()
+      , testCase "unknown query class names still use the class namespace" $
+          let invalidName = name "external"
+          in validateExferenceInput identityInput
+              { input_goalType = TypeForall [0]
+                  [HsConstraint invalidName [TypeVar 0]]
+                  (TypeVar 0)
+              }
+              @?= Left (InvalidClassConstraint $ InvalidClassName invalidName)
       , testCase "unknown binding classes remain nominal external constraints" $
           let binding = FunctionBinding (TypeVar 0) (name "f") 0
                 [HsConstraint (name "External") [TypeVar 0]] []
           in validateExferenceInput identityInput
               { input_envFuncs = [binding] }
               @?= Right ()
+      , testCase "unknown binding class names still use the class namespace" $
+          let invalidName = name "external"
+              binding = FunctionBinding (TypeVar 0) (name "f") 0
+                [HsConstraint invalidName [TypeVar 0]] []
+          in validateExferenceInput identityInput
+              { input_envFuncs = [binding] }
+              @?= Left (InvalidClassConstraint $ InvalidClassName invalidName)
       , testCase "nested foralls return a structured input error" $ do
           let polymorphic = TypeForall [0] [] (TypeVar 0)
               goal = TypeArrow polymorphic polymorphic

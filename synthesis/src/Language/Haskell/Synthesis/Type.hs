@@ -56,6 +56,7 @@ data TypeError variable
   = InvalidTypeConstructor Name
   | InvalidTupleTypeArity Boxity Int
   | DuplicateForallVariable variable
+  | InvalidTypeConstraint ConstraintError
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData variable => NFData (TypeError variable)
@@ -119,8 +120,13 @@ validateType source = validate $ canonicalizeType source
         case firstDuplicate variables of
           Just variable -> Left $ DuplicateForallVariable variable
           Nothing -> Right ()
-        mapM_ (mapM_ validate . constraintArguments) constraints
+        mapM_ validateForallConstraint constraints
         validate body
+
+    validateForallConstraint constraint = do
+      either (Left . InvalidTypeConstraint) Right $
+        validateConstraint constraint
+      mapM_ validate $ constraintArguments constraint
 
     validTypeConstructor name =
       nameLexicalClass name == ConstructorLike &&

@@ -115,7 +115,7 @@ validateDeclaration declaration = case declaration of
   ClassDeclaration _ name parameters superclasses methods -> do
     validateClassName name
     validateParameters parameters
-    mapM_ validateConstraint superclasses
+    mapM_ validateDeclarationConstraint superclasses
     validateBoundVariables (UndeclaredSuperclassVariables name) parameters
       [ argument
       | superclass <- superclasses
@@ -125,8 +125,8 @@ validateDeclaration declaration = case declaration of
     mapM_ validateValue methods
   InstanceDeclaration _ variables prerequisites headConstraint -> do
     validateDistinct DuplicateTypeParameter variables
-    mapM_ validateConstraint prerequisites
-    validateConstraint headConstraint
+    mapM_ validateDeclarationConstraint prerequisites
+    validateDeclarationConstraint headConstraint
     let unbound = referencedVariables
           [ argument
           | constraint <- headConstraint : prerequisites
@@ -138,8 +138,9 @@ validateDeclaration declaration = case declaration of
   validateTypeName name = unless (isTypeConstructorName name) $
     Left $ InvalidDeclaredTypeName name
 
-  validateClassName name = unless (isOrdinaryConstructor name) $
-    Left $ InvalidClassName name
+  validateClassName name = case validateConstraintClassName name of
+    Left _ -> Left $ InvalidClassName name
+    Right () -> Right ()
 
   validateParameters parameters = validateDistinct DuplicateTypeParameter
     $ map parameterVariable parameters
@@ -161,7 +162,7 @@ validateDeclaration declaration = case declaration of
 
   referencedVariables = Set.unions . map freeVariables
 
-  validateConstraint constraint = do
+  validateDeclarationConstraint constraint = do
     validateClassName $ constraintClass constraint
     mapM_ validateDeclaredType $ constraintArguments constraint
 
@@ -194,10 +195,6 @@ groundDeclarationKinds declaration = case declaration of
   groundParameter parameter = TypeParameter
     (parameterVariable parameter)
     <$> traverse groundKind (parameterKind parameter)
-
-isOrdinaryConstructor :: Name -> Bool
-isOrdinaryConstructor name =
-  nameLexicalClass name == ConstructorLike && nameSpecial name == Nothing
 
 isTypeConstructorName :: Name -> Bool
 isTypeConstructorName name =

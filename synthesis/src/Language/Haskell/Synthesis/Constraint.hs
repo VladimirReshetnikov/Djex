@@ -11,11 +11,19 @@
 -- backend resolves that name through its own validated environment.
 module Language.Haskell.Synthesis.Constraint
   ( Constraint (..)
+  , ConstraintError (..)
   , constraintArity
+  , validateConstraintClassName
+  , validateConstraint
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Language.Haskell.Synthesis.Name (Name)
+import Language.Haskell.Synthesis.Name
+  ( LexicalClass (ConstructorLike)
+  , Name
+  , nameLexicalClass
+  , nameSpecial
+  )
 
 -- | A class name applied to zero or more type arguments.
 --
@@ -41,7 +49,31 @@ instance NFData ty => NFData (Constraint ty) where
   rnf (Constraint className arguments) =
     rnf className `seq` rnf arguments
 
+-- | Lexically malformed class identity.  Arity and declaration lookup remain
+-- environment concerns, but every backend can agree that a class occupies the
+-- ordinary constructor namespace rather than a value or built-in namespace.
+data ConstraintError
+  = InvalidConstraintClass Name
+  deriving (Eq, Ord, Show)
+
+instance NFData ConstraintError where
+  rnf (InvalidConstraintClass name) = rnf name
+
 -- | Number of supplied class arguments.  Whether that arity is valid belongs
 -- to the declaration environment and may differ for unknown-class policies.
 constraintArity :: Constraint ty -> Int
 constraintArity = length . constraintArguments
+
+-- | Validate a nominal class name without claiming that it is declared.
+-- Qualified constructor identifiers and constructor operators are accepted;
+-- structural names such as tuples, lists, and function arrows are not classes.
+validateConstraintClassName :: Name -> Either ConstraintError ()
+validateConstraintClassName name
+  | nameLexicalClass name == ConstructorLike
+  , nameSpecial name == Nothing = Right ()
+  | otherwise = Left $ InvalidConstraintClass name
+
+-- | Validate the backend-independent part of a constraint.  Type arguments
+-- deliberately stay opaque here and are checked by their owning type layer.
+validateConstraint :: Constraint ty -> Either ConstraintError ()
+validateConstraint = validateConstraintClassName . constraintClass

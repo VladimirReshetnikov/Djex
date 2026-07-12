@@ -1,6 +1,6 @@
 Cabal-Version: 3.0
 Name:          haskell-synthesis
-Version:       0.1.11.0
+Version:       0.1.12.0
 Synopsis:      Shared vocabulary for Haskell program synthesis
 Description:
   Parser-independent names, types, declarations, environments, diagnostics,

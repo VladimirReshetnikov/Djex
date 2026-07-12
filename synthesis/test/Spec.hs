@@ -117,10 +117,20 @@ kindInferenceTests = testGroup "kind inference"
   , testCase "validate source types before kind inference" $ do
       let malformed = SharedType.TupleType Boxed
             [SharedType.TypeVariable (0 :: Int)]
+          invalidClassName = right $ mkIdentifier "constraint"
+          malformedConstraint :: SharedType.Type Int
+          malformedConstraint = SharedType.ForallType [0]
+            [Constraint invalidClassName [SharedType.TypeVariable 0]]
+            (SharedType.TypeVariable 0)
       KindInference.checkTypesKinds KindInference.emptyKindAssumptions
           [(proper, malformed)] @?= Left
         (KindInference.InvalidKindInferenceType
           $ SharedType.InvalidTupleTypeArity Boxed 1)
+      KindInference.checkTypesKinds KindInference.emptyKindAssumptions
+          [(proper, malformedConstraint)] @?= Left
+        (KindInference.InvalidKindInferenceType
+          $ SharedType.InvalidTypeConstraint
+          $ InvalidConstraintClass invalidClassName)
   , testCase "infer type constructors in dependency order" $ do
       let intName = right $ mkIdentifier "Int"
           fooName = right $ mkIdentifier "Foo"
@@ -368,11 +378,25 @@ declarationTests = testGroup "declarations"
             [ Declaration.DataConstructor () typeName []
             , Declaration.DataConstructor () typeName []
             ]
+          invalidConstrainedValue ::
+            Declaration.Declaration String Int ()
+          invalidConstrainedValue = Declaration.ValueDeclaration $
+            Declaration.ValueSignature () valueName $
+              SharedType.ForallType [] [Constraint valueName []] $
+                SharedType.TypeConstructor typeName
+          invalidClass :: Declaration.Declaration String Int ()
+          invalidClass = Declaration.ClassDeclaration
+            () valueName [] [] []
       Declaration.validateDeclaration
           (Declaration.TypeSynonymDeclaration () valueName [] variable)
         @?= Left (Declaration.InvalidDeclaredTypeName valueName)
       Declaration.validateDeclaration duplicateConstructors
         @?= Left (Declaration.DuplicateConstructorName typeName)
+      Declaration.validateDeclaration invalidClass
+        @?= Left (Declaration.InvalidClassName valueName)
+      Declaration.validateDeclaration invalidConstrainedValue @?= Left
+        (Declaration.InvalidDeclarationType $ SharedType.InvalidTypeConstraint
+          $ InvalidConstraintClass valueName)
       Declaration.validateDeclaration
           (Declaration.TypeSynonymDeclaration () typeName
             [ Declaration.TypeParameter "a" Nothing
@@ -452,6 +476,13 @@ typeTests = testGroup "source types"
       SharedType.freeVariables typeExpression @?=
         Set.fromList ["b", "c"]
       SharedType.validateType typeExpression @?= Right ()
+  , testCase "reject malformed forall constraint class names" $ do
+      let invalidName = right $ mkIdentifier "constraint"
+          typeExpression = SharedType.ForallType ["a"]
+            [Constraint invalidName [SharedType.TypeVariable "a"]]
+            (SharedType.TypeVariable "a")
+      SharedType.validateType typeExpression @?= Left
+        (SharedType.InvalidTypeConstraint $ InvalidConstraintClass invalidName)
   , testCase "reject malformed tuples, constructors, and quantifiers" $ do
       let variableName = right $ mkIdentifier "value"
       SharedType.validateType
@@ -622,6 +653,19 @@ constraintTests = testGroup "constraints"
       Constraint classA [()] @?= Constraint classA [()]
       assertBool "different qualified classes compared equal"
         $ Constraint classA [()] /= Constraint classB [()]
+  , testCase "validate the ordinary constructor class namespace" $ do
+      let namespace = right $ mkModuleName "M"
+          ordinary = right $ mkIdentifier "C"
+          qualified = right $ mkQualifiedIdentifier namespace "C"
+          operator = right $ mkOperator ":=>"
+          lowercase = right $ mkIdentifier "c"
+          valueOperator = right $ mkOperator "=="
+          tuple = right $ tupleName Boxed 2
+      mapM_ (\name -> validateConstraint (Constraint name [()]) @?= Right ())
+        [ordinary, qualified, operator]
+      mapM_ (\name -> validateConstraintClassName name @?=
+          Left (InvalidConstraintClass name))
+        [lowercase, valueOperator, tuple]
   , testCase "map, fold, and traverse affect only arguments" $ do
       let equality = right $ mkIdentifier "Eq"
           constraint = Constraint equality [1 :: Int, 2]

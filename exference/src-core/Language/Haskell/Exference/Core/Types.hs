@@ -215,8 +215,9 @@ newtype HsConstraint = HsConstraint_
   deriving (Eq, Ord)
 
 -- | Historical constructor view, now nominal rather than embedding the class
--- declaration.  Construction through this pattern is safe because every
--- 'QualifiedName' already satisfies the shared name invariants.
+-- declaration.  'QualifiedName' guarantees general lexical validity; the
+-- checked type and environment boundaries additionally enforce that the name
+-- occupies the class namespace.
 pattern HsConstraint :: QualifiedName -> [HsType] -> HsConstraint
 pattern HsConstraint className arguments <-
   (constraintView -> (className, arguments))
@@ -328,17 +329,13 @@ mkStaticClassEnv tclasses instances = do
   buildClassTable = go M.empty
     where
       go table [] = Right table
-      go table (declaration : rest)
-        | not $ isClassName name = Left $ InvalidClassName name
-        | M.member name table = Left $ DuplicateClassDeclaration name
-        | otherwise = go (M.insert name declaration table) rest
+      go table (declaration : rest) = do
+        validateClassName name
+        if M.member name table
+          then Left $ DuplicateClassDeclaration name
+          else go (M.insert name declaration table) rest
         where
           name = tclass_name declaration
-
-  isClassName name = case qualifiedNameOccurrence name of
-    SharedName.IdentifierOccurrence SharedName.ConstructorLike _ -> True
-    SharedName.OperatorOccurrence SharedName.ConstructorLike _ -> True
-    _ -> False
 
   validateClass table declaration = traverse_
     (validateConstraintInTable table $ ClassSuperclass name)
@@ -404,29 +401,49 @@ validateKnownConstraintInEnv
   -> ConstraintSite
   -> HsConstraint
   -> Either ClassEnvError ()
-validateKnownConstraintInEnv environment site constraint = case
-  M.lookup (constraint_tclass constraint)
-    (sClassEnv_tclasses environment) of
-      Nothing -> Right ()
-      Just _ -> validateConstraintInEnv environment site constraint
+validateKnownConstraintInEnv environment site constraint = do
+  validateConstraintClass constraint
+  case M.lookup (constraint_tclass constraint)
+      (sClassEnv_tclasses environment) of
+    Nothing -> Right ()
+    Just declaration -> validateConstraintArity site constraint declaration
 
 validateConstraintInTable
   :: M.Map QualifiedName HsTypeClass
   -> ConstraintSite
   -> HsConstraint
   -> Either ClassEnvError ()
-validateConstraintInTable table site constraint = case
-  M.lookup name table of
+validateConstraintInTable table site constraint = do
+  validateConstraintClass constraint
+  case M.lookup name table of
     Nothing -> Left $ UnknownConstraintClass site name
-    Just declaration
-      | expected /= actual -> Left
-          $ ConstraintArityMismatch site name expected actual
-      | otherwise -> Right ()
-      where
-        expected = length $ tclass_params declaration
- where
-  name = constraint_tclass constraint
-  actual = length $ constraint_params constraint
+    Just declaration -> validateConstraintArity site constraint declaration
+  where
+    name = constraint_tclass constraint
+
+validateConstraintArity
+  :: ConstraintSite
+  -> HsConstraint
+  -> HsTypeClass
+  -> Either ClassEnvError ()
+validateConstraintArity site constraint declaration
+  | expected /= actual = Left $
+      ConstraintArityMismatch site name expected actual
+  | otherwise = Right ()
+  where
+    name = constraint_tclass constraint
+    expected = length $ tclass_params declaration
+    actual = length $ constraint_params constraint
+
+validateConstraintClass :: HsConstraint -> Either ClassEnvError ()
+validateConstraintClass constraint =
+  validateClassName $ constraint_tclass constraint
+
+validateClassName :: QualifiedName -> Either ClassEnvError ()
+validateClassName name = case SharedConstraint.validateConstraintClassName
+    (toSynthesisName name) of
+  Left _ -> Left $ InvalidClassName name
+  Right () -> Right ()
 
 firstDuplicate :: Ord a => [a] -> Maybe a
 firstDuplicate = go S.empty

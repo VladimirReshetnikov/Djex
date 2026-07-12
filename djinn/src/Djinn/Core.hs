@@ -40,6 +40,7 @@ import Text.ParserCombinators.ReadP (ReadP, readP_to_S, skipSpaces)
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import Djinn.Internal.Environment
@@ -482,6 +483,10 @@ data QueryReport = QueryReport {
     -- its choice-point budget. Logical negative evidence remains in
     -- 'reportOutcome' rather than being conflated with this status.
     reportCompletion :: SharedSearch.Completion,
+    -- | Scope-checked backend-independent candidates. The rendered
+    -- compatibility strings in 'Realized' are derived from these values.
+    reportGeneratedClauses ::
+        [SharedGenerated.FunctionClause HSymbol],
     reportOutcome :: QueryOutcome
     }
     deriving (Show)
@@ -551,6 +556,7 @@ inhabit options environment contexts name goal = do
                 reportFormula = show form,
                 reportProof = Nothing,
                 reportCompletion = queryCompletion outcome,
+                reportGeneratedClauses = [],
                 reportOutcome = failure
                 }
         p : ps -> do
@@ -577,12 +583,15 @@ inhabit options environment contexts name goal = do
                         map snd $ sortOn fst $ map score rendered
                     else
                         rendered
+            generatedClauses <- labeled "cannot convert generated clause" $
+                mapM toGeneratedClause clauses
             renderedClauses <- labeled "cannot render generated clause" $
-                mapM hPrClause clauses
+                mapM renderGeneratedClause generatedClauses
             return QueryReport {
                 reportFormula = show form,
                 reportProof = Just (show p),
                 reportCompletion = queryCompletion outcome,
+                reportGeneratedClauses = generatedClauses,
                 reportOutcome = Realized renderedClauses
                 }
 

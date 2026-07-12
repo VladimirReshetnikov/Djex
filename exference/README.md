@@ -95,6 +95,9 @@ allocates names by variable identity, avoids binder/global capture, and applies
 one qualification policy.  The `haskell-src-exts` converter remains only as a
 compatibility frontend and consumes the shared allocator rather than owning a
 second naming implementation.
+`toGeneratedSearchBatch` projects status-bearing Exference chunks to the common
+`SearchBatch` envelope with shared generated-expression candidates, while
+retaining typed expressions through the compatibility API.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the

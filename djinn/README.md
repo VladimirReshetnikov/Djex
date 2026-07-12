@@ -412,6 +412,8 @@ bodies, shared foralls, and unboxed tuples instead of conflating those layers.
 `toSynthesisDeclaration` and `fromSynthesisDeclaration` likewise round-trip
 Djinn's synonyms, data/abstract types, classes, and assumptions while rejecting
 shared superclass and instance semantics that Djinn does not implement.
+Successful `QueryReport`s also expose `reportGeneratedClauses`, the validated
+shared AST from which the legacy rendered strings are derived.
 The core `Djinn.Internal.*` modules listed above remain
 exposed by `djinn-core` for research use, but they provide raw constructors
 that can violate these invariants and carry no stability promise. The

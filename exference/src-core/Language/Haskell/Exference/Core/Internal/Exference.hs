@@ -16,11 +16,14 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
   , ExferenceSearchBatch
+  , ExferenceGeneratedOutputElement
+  , ExferenceGeneratedSearchBatch
   , SearchCompletion (..)
   , SearchStatus (..)
   , SearchStatusError (..)
   , toSearchProgress
   , toSearchBatch
+  , toGeneratedSearchBatch
   , constraintsRelaxedAtStep
   , ExferenceInputError (..)
   , validateExferenceInput
@@ -42,6 +45,7 @@ import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 
 import qualified Data.PQueue.Prio.Max as Q
 import qualified Data.Map as M
@@ -190,6 +194,12 @@ data ExferenceChunkElement = ExferenceChunkElement
 type ExferenceSearchBatch =
   SharedSearch.SearchBatch BindingUsages ExferenceOutputElement
 
+type ExferenceGeneratedOutputElement =
+  (SharedGenerated.Expression TVarId, [HsConstraint], ExferenceStats)
+
+type ExferenceGeneratedSearchBatch =
+  SharedSearch.SearchBatch BindingUsages ExferenceGeneratedOutputElement
+
 toSearchBatch
   :: ExferenceChunkElement
   -> Either SearchStatusError ExferenceSearchBatch
@@ -197,6 +207,14 @@ toSearchBatch chunk = do
   progress <- toSearchProgress $ chunkStatus chunk
   return $ SharedSearch.SearchBatch
     progress (chunkBindingUsages chunk) (chunkElements chunk)
+
+toGeneratedSearchBatch
+  :: ExferenceChunkElement
+  -> Either SearchStatusError ExferenceGeneratedSearchBatch
+toGeneratedSearchBatch = fmap (fmap convertCandidate) . toSearchBatch
+  where
+    convertCandidate (expression, constraints, statistics) =
+      (toGeneratedExpression expression, constraints, statistics)
 
 type RatedNodes = Q.MaxPQueue Priority SearchNode
 data FindExpressionsState = FindExpressionsState

@@ -9,6 +9,7 @@ module Djinn.Internal.Generated
   , HPat (..)
   , HExpr (..)
   , hPrClause
+  , renderGeneratedClause
   , toGeneratedClause
   , getBinderVars
   , getBinderVarsHE
@@ -42,8 +43,12 @@ data HExpr
   deriving (Show, Eq)
 
 hPrClause :: HClause -> Either String String
-hPrClause clause = do
-  generated <- toGeneratedClause clause
+hPrClause clause = toGeneratedClause clause >>= renderGeneratedClause
+
+renderGeneratedClause
+  :: Generated.FunctionClause HSymbol
+  -> Either String String
+renderGeneratedClause generated = do
   either (Left . show) Right $
     Generated.validateFunctionClauseScope generated
   either (Left . show) Right $

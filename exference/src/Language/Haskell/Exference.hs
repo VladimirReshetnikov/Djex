@@ -24,6 +24,8 @@ module Language.Haskell.Exference
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
   , ExferenceSearchBatch
+  , ExferenceGeneratedOutputElement
+  , ExferenceGeneratedSearchBatch
   , ExferenceStats (..)
   , ExferenceInputError (..)
   , findExpressionsEither
@@ -33,6 +35,7 @@ module Language.Haskell.Exference
   , SearchStatusError (..)
   , toSearchProgress
   , toSearchBatch
+  , toGeneratedSearchBatch
   , Penalty (..)
   , Priority (..)
   )

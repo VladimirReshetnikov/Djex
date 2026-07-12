@@ -43,6 +43,7 @@ import Language.Haskell.Exference.Core
   , findExpressionsWithStatsEither
   , toSearchProgress
   , toSearchBatch
+  , toGeneratedSearchBatch
   , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.ConstraintSolver
@@ -1126,6 +1127,18 @@ tests = testGroup "Exference"
             @?= Right "map"
           renderExpression Generated.FullyQualified (ExpName global)
             @?= Right "Data.List.map"
+      , testCase "search batches expose the same generated tree" $ do
+          let variable = TypeVar 0
+              expression = ExpLambda 1 variable (ExpVar 1 variable)
+              candidate = (expression, [], ExferenceStats 1 (Penalty 0) 0)
+              chunk = ExferenceChunkElement
+                (SearchStatus SearchExhausted 0 0) Map.empty [candidate]
+          batch <- expectRight $ toGeneratedSearchBatch chunk
+          case SharedSearch.batchCandidates batch of
+            [(generated, [], _)] -> generated @?=
+              Generated.Lambda [Generated.Bind 1] (Generated.Local 1)
+            candidates -> fail $ "unexpected generated batch: "
+              ++ show (length candidates)
       ]
   , testGroup "Haskell AST conversion"
       [ testCase "lowercase names use Var rather than Con" $

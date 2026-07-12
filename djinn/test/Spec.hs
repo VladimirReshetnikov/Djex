@@ -14,7 +14,8 @@ import Djinn.Core (
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
     fromSynthesisDeclaration, fromSynthesisKind, fromSynthesisType,
     mkContext, parseHKind, parseHType, removeDeclaration,
-    reportCompletion, reportOutcome, resolveContext, resolveInstanceMethods,
+    reportCompletion, reportGeneratedClauses, reportOutcome,
+    resolveContext, resolveInstanceMethods,
     standardEnvironment, toSynthesisDeclaration, toSynthesisKind,
     toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
@@ -30,6 +31,7 @@ import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
+import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -164,6 +166,14 @@ testCoreFacade = do
         (Realized ["swap (a, b) = (b, a)"]) (reportOutcome swapReport)
     assertEqual "a completed realization reports finished exploration"
         SharedSearch.Finished (reportCompletion swapReport)
+    case reportGeneratedClauses swapReport of
+        [clause] -> assertEqual
+            "rendered compatibility output derives from the shared clause"
+            (Right "swap (a, b) = (b, a)")
+            (SharedGenerated.renderFunctionClause
+                (SharedGenerated.RenderOptions
+                    SharedGenerated.FullyQualified id []) clause)
+        clauses -> fail $ "unexpected structured swap candidates: " ++ show clauses
     peirce <- expectRight $ parseHType "((a -> b) -> a) -> a"
     peirceReport <- expectRight $
         inhabit defaultQueryOptions standardEnvironment [] "peirce" peirce

@@ -13,7 +13,8 @@ where
 import Language.Haskell.Exference
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-import Language.Haskell.Exference.Diagnostic (diagnosticMessage)
+import Language.Haskell.Exference.Diagnostic
+  (diagnosticMessage, renderDiagnostic)
 import Language.Haskell.Exference.Core.FunctionBinding
 import qualified Language.Haskell.Exference.Core.Expression as CoreExpression
 import Language.Haskell.Exference.EnvironmentParser
@@ -24,12 +25,12 @@ import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 
 import Control.Monad ( when, forM_ )
+import Control.Monad.Trans.Class (lift)
 import Data.List ( sortBy, intercalate, nub )
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.List as List
 import Data.Ord ( comparing )
 import Data.Maybe ( listToMaybe, fromMaybe )
-import Control.Monad.Writer.Strict
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
@@ -136,8 +137,8 @@ main = do
         when (verbosity>0) $ lift $ do
           putStrLn $ "[Environment]"
           putStrLn $ "reading environment from " ++ envDir
-        (sourceEnvironmentResult, messages :: [String]) <-
-          withMultiWriterAW $ environmentFromPath envDir
+        LoadReport sourceEnvironmentResult diagnostics <- lift
+          $ environmentFromPath envDir
         checkedEnvironment <- case sourceEnvironmentResult of
           Left failure -> lift $ do
             hPutStrLn stderr $
@@ -153,8 +154,9 @@ main = do
             tdeclMap = sourceTypeSynonymMap sourceEnvironment
         let clss = sClassEnv_tclasses sEnv
             insts = sClassEnv_instances sEnv
-        when (verbosity>0 && not (null messages)) $ lift $
-          forM_ messages $ \m -> putStrLn $ "environment warning: " ++ m
+        when (verbosity>0 && not (null diagnostics)) $ lift $
+          forM_ diagnostics $ \value -> putStrLn
+            $ "environment " ++ renderDiagnostic value
         when (PrintEnv `elem` flags) $ lift $ do
           when (verbosity>0) $ putStrLn "[Environment]"
           mapM_ print $ sourceTypeSynonyms sourceEnvironment

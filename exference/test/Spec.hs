@@ -28,8 +28,7 @@ import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 import Control.Monad.Trans.Except (runExceptT)
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.MultiRWS (runMultiRWSTNil, withMultiWriterAW)
+import Control.Monad.Trans.MultiRWS (runMultiRWSTNil)
 import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.Pretty as HSE
@@ -89,6 +88,7 @@ import Language.Haskell.Exference
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( EnvironmentLoadError (..)
+  , LoadReport (..)
   , SourceEnvironment (..)
   , checkedSourceInventory
   , checkedSourceProjection
@@ -1086,8 +1086,7 @@ tests = testGroup "Exference"
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/missing-module.hs"
               ratingPath = environmentDirectory ++ "/all.ratings"
-          (result, messages :: [String]) <- runMultiRWSTNil
-            $ withMultiWriterAW
+          (result, messages) <- runLoad
             $ environmentFromModuleAndRatings modulePath ratingPath
           case result of
             Left (ModuleReadErrors (readError :| remainingErrors)) -> do
@@ -1100,8 +1099,7 @@ tests = testGroup "Exference"
       , testCase "missing environment directories produce source-bearing errors" $ do
           environmentDirectory <- getDataFileName "environment"
           let missingDirectory = environmentDirectory ++ "/missing-environment"
-          (result, messages :: [String]) <- runMultiRWSTNil
-            $ withMultiWriterAW
+          (result, messages) <- runLoad
             $ environmentFromPath missingDirectory
           case result of
             Left (EnvironmentDirectoryReadError readError) ->
@@ -1114,20 +1112,23 @@ tests = testGroup "Exference"
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
               ratingPath = environmentDirectory ++ "/missing.ratings"
-          (result, messages :: [String]) <- runMultiRWSTNil
-            $ withMultiWriterAW
-            $ environmentFromModuleAndRatings modulePath ratingPath
+          LoadReport result diagnostics <-
+            environmentFromModuleAndRatings modulePath ratingPath
           checkedEnvironment <- expectRight result
           let bindings = sourceFunctions
                 $ checkedSourceProjection checkedEnvironment
-              warnings = filter (not . isLoaderSummary) messages
+              warnings = filter ((== Warning) . diagnosticSeverity) diagnostics
+              summaries = filter ((== Info) . diagnosticSeverity) diagnostics
           assertBool "missing ratings changed a default function penalty"
             $ all ((== Penalty 0) . functionPenalty) bindings
           case warnings of
-            [warning] -> assertBool
-              ("rating warning lost its source: " ++ show warning)
-              $ ratingPath `isInfixOf` warning
+            [warning] -> do
+              diagnosticSource warning @?= Just ratingPath
+              assertBool ("unexpected rating warning: " ++ show warning)
+                $ "could not parse rating file"
+                    `isInfixOf` diagnosticMessage warning
             _ -> fail $ "expected one rating warning, got " ++ show warnings
+          length summaries @?= 4
       , testCase "duplicate ratings are diagnosed and ignored" $
           withTemporaryFile (unlines
             [ "module Ratings where"
@@ -1136,8 +1137,7 @@ tests = testGroup "Exference"
           withTemporaryFile
             "Ratings.identity 1.0 Ratings.identity 2.0"
             $ \ratingPath -> do
-              (result, messages :: [String]) <- runMultiRWSTNil
-                $ withMultiWriterAW
+              (result, messages) <- runLoad
                 $ environmentFromModuleAndRatings modulePath ratingPath
               environment <- checkedSourceProjection <$> expectRight result
               identityName <- expectRight
@@ -1151,8 +1151,7 @@ tests = testGroup "Exference"
       , testCase "malformed modules fail before loader summaries" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/all.ratings"
-          (result, messages :: [String]) <- runMultiRWSTNil
-            $ withMultiWriterAW
+          (result, messages) <- runLoad
             $ parseModules [(haskellSrcExtsParseMode modulePath, modulePath)]
           case result of
             Left ModuleParseErrors{} -> pure ()
@@ -1163,9 +1162,8 @@ tests = testGroup "Exference"
       , testCase "malformed ratings retain the parsed environment at defaults" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
-          (sourceEnvironmentResult, messages :: [String]) <-
-            runMultiRWSTNil $ withMultiWriterAW
-              $ environmentFromModuleAndRatings modulePath modulePath
+          (sourceEnvironmentResult, messages) <- runLoad
+            $ environmentFromModuleAndRatings modulePath modulePath
           checkedEnvironment <- expectRight sourceEnvironmentResult
           let sourceEnvironment = checkedSourceProjection checkedEnvironment
           categoryName <- expectRight
@@ -1187,8 +1185,7 @@ tests = testGroup "Exference"
       , testCase "frontend source environments retain type synonyms" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/String.hs"
-          (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
-            $ withMultiWriterAW
+          (sourceEnvironmentResult, _) <- runLoad
             $ environmentFromModuleAndRatings modulePath modulePath
           checkedEnvironment <- expectRight sourceEnvironmentResult
           let sourceEnvironment = checkedSourceProjection checkedEnvironment
@@ -1304,8 +1301,8 @@ tests = testGroup "Exference"
             Just (SearchPenaltyMetadata $ Penalty 3.5)
       , testCase "the shipped source environment seals as one inventory" $ do
           environmentDirectory <- getDataFileName "environment"
-          (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
-            $ withMultiWriterAW $ environmentFromPath environmentDirectory
+          (sourceEnvironmentResult, _) <- runLoad
+            $ environmentFromPath environmentDirectory
           checkedEnvironment <- expectRight sourceEnvironmentResult
           let inventory = checkedSourceInventory checkedEnvironment
               shared = SharedInventory.inventoryEnvironment inventory
@@ -1322,8 +1319,8 @@ tests = testGroup "Exference"
               SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
       , testCase "built-in constructors retain configured search penalties" $ do
           environmentDirectory <- getDataFileName "environment"
-          (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
-            $ withMultiWriterAW $ environmentFromPath environmentDirectory
+          (sourceEnvironmentResult, _) <- runLoad
+            $ environmentFromPath environmentDirectory
           checkedEnvironment <- expectRight sourceEnvironmentResult
           let constructors = SharedEnvironment.dataConstructorMap
                 $ SharedInventory.inventoryEnvironment
@@ -1371,8 +1368,7 @@ tests = testGroup "Exference"
             [ "module Warnings where"
             , "external :: Data.External.External"
             ]) $ \modulePath -> do
-              (result, messages :: [String]) <- runMultiRWSTNil
-                $ withMultiWriterAW
+              (result, messages) <- runLoad
                 $ parseModules
                     [(haskellSrcExtsParseMode modulePath, modulePath)]
               _ <- expectRight result
@@ -1387,8 +1383,7 @@ tests = testGroup "Exference"
             [ "module Warnings where"
             , "constrained :: External.Constraint a => a -> a"
             ]) $ \modulePath -> do
-              (result, messages :: [String]) <- runMultiRWSTNil
-                $ withMultiWriterAW
+              (result, messages) <- runLoad
                 $ parseModules
                     [(haskellSrcExtsParseMode modulePath, modulePath)]
               _ <- expectRight result
@@ -1401,8 +1396,7 @@ tests = testGroup "Exference"
           let paths = map ((environmentDirectory ++ "/") ++)
                 ["Eq.hs", "Ord.hs"]
               warning = "unknown type constructor 'Data.Monoid.Last' used in class instances"
-          (result, (messages :: [String])) <- runMultiRWSTNil
-            $ withMultiWriterAW $ parseModules
+          (result, messages) <- runLoad $ parseModules
             [(haskellSrcExtsParseMode path, path) | path <- paths]
           case result of
             Left (ClassEnvironmentLoadFailure _) -> pure ()
@@ -1903,14 +1897,22 @@ loadEnvironmentAndMessages
   :: FilePath
   -> IO ([FunctionBinding], StaticClassEnv, [String])
 loadEnvironmentAndMessages environmentDirectory = do
-  ((bindings, classEnvironment), messages) <- runMultiRWSTNil
-    $ withMultiWriterAW
-    $ do
-        environmentResult <- environmentFromPath environmentDirectory
-        checkedEnvironment <- either (lift . fail . show) pure environmentResult
-        let environment = checkedSourceProjection checkedEnvironment
-        pure (sourceFunctions environment, sourceClasses environment)
-  pure (bindings, classEnvironment, messages)
+  LoadReport environmentResult diagnostics <-
+    environmentFromPath environmentDirectory
+  checkedEnvironment <- expectRight environmentResult
+  let environment = checkedSourceProjection checkedEnvironment
+  pure
+    ( sourceFunctions environment
+    , sourceClasses environment
+    , map diagnosticMessage diagnostics
+    )
+
+runLoad
+  :: IO (LoadReport result)
+  -> IO (Either EnvironmentLoadError result, [String])
+runLoad action = do
+  LoadReport result diagnostics <- action
+  pure (result, map diagnosticMessage diagnostics)
 
 identityInput :: ExferenceInput
 identityInput = ExferenceInput

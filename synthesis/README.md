@@ -63,6 +63,11 @@ indexes. It rejects cross-declaration namespace collisions and duplicate
 instances while preserving qualified-name identity. Dependency, kind, and
 backend resolution policies remain explicit later validation layers.
 
+`Language.Haskell.Synthesis.Inventory` is the frontend handoff that keeps a
+sealed `Environment` together with the kind assumptions inferred from exactly
+the same declarations. Query elaboration can therefore reuse checked kinds
+without rerunning inference or trusting a parallel cache.
+
 Build and test it independently with:
 
 ```text

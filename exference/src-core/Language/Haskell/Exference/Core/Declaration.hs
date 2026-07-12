@@ -7,6 +7,7 @@ module Language.Haskell.Exference.Core.Declaration
   ( DeclarationMetadata (..)
   , SynthesisDeclaration
   , SynthesisEnvironment
+  , SynthesisInventory
   , SynthesisDeclarationError (..)
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
@@ -30,6 +31,7 @@ import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -51,6 +53,9 @@ type SynthesisDeclaration = SharedDeclaration.Declaration
 
 type SynthesisEnvironment = SharedEnvironment.Environment
   SynthesisVariable Void DeclarationMetadata
+
+type SynthesisInventory = SharedInventory.Inventory
+  SynthesisVariable DeclarationMetadata
 
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError

@@ -97,6 +97,9 @@ unconstrained class parameters can generalize to support the shipped modern
 poly-kinded `Typeable` vocabulary. The frontend selects the explicit open
 inventory policy because loading a subset of modules deliberately retains
 external type names after reporting them as warnings.
+`toSynthesisSourceInventory` retains both the sealed environment and those
+inferred assumptions; the older environment-only projection remains available
+for callers that do not yet elaborate queries through the shared frontend.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

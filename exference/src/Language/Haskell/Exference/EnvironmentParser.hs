@@ -10,6 +10,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , environmentFromModuleAndRatings
   , environmentFromPath
   , toSynthesisSourceEnvironment
+  , toSynthesisSourceInventory
   , haskellSrcExtsParseMode
   , compileWithDict
   , parseRatings
@@ -61,6 +62,7 @@ import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 
 -- | The complete checked source inventory produced by the HSE frontend.
 -- Parameterizing only the function representation lets parsing, rating, and
@@ -82,7 +84,17 @@ data SourceEnvironment function = SourceEnvironment
 toSynthesisSourceEnvironment
   :: SourceEnvironment FunctionBinding
   -> Either SynthesisDeclarationError SynthesisEnvironment
-toSynthesisSourceEnvironment environment = do
+toSynthesisSourceEnvironment environment =
+  SharedInventory.inventoryEnvironment
+    <$> toSynthesisSourceInventory environment
+
+-- | Seal and kind-check the frontend inventory while retaining the inferred
+-- assumptions needed to elaborate subsequent queries against the same source
+-- declarations.
+toSynthesisSourceInventory
+  :: SourceEnvironment FunctionBinding
+  -> Either SynthesisDeclarationError SynthesisInventory
+toSynthesisSourceInventory environment = do
   let constructorNames = S.fromList
         [ constructorName constructor
         | deconstructor <- sourceDeconstructors environment
@@ -115,12 +127,13 @@ toSynthesisSourceEnvironment environment = do
     (sourceClasses environment)
   let declarations =
         synonyms ++ SharedEnvironment.environmentDeclarations core
-  shared <- either (Left . InvalidSharedEnvironment) Right
-    $ SharedEnvironment.mkEnvironment declarations
-  _ <- either (Left . InvalidSourceEnvironmentKinds) Right
-    $ SharedKindInference.inferDeclarationKindsWith
-      SharedKindInference.OpenKindInventory declarations
-  pure shared
+  case SharedInventory.mkInventory
+      SharedKindInference.OpenKindInventory declarations of
+    Left (SharedInventory.InvalidInventoryEnvironment failure) ->
+      Left $ InvalidSharedEnvironment failure
+    Left (SharedInventory.InvalidInventoryKinds failure) ->
+      Left $ InvalidSourceEnvironmentKinds failure
+    Right inventory -> Right inventory
 
 
 builtInDeclsM

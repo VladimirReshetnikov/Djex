@@ -91,6 +91,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , parseModules
   , parseRatings
   , toSynthesisSourceEnvironment
+  , toSynthesisSourceInventory
   )
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc (getClassEnv)
 import Language.Haskell.Exference.Diagnostic
@@ -116,6 +117,7 @@ import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified CompatibilityImport
@@ -973,15 +975,23 @@ tests = testGroup "Exference"
           environmentDirectory <- getDataFileName "environment"
           (sourceEnvironment, _ :: [String]) <- runMultiRWSTNil
             $ withMultiWriterAW $ environmentFromPath environmentDirectory
-          case toSynthesisSourceEnvironment sourceEnvironment of
+          case toSynthesisSourceInventory sourceEnvironment of
             Left conversionError -> fail $
               "shipped environment failed shared validation: "
                 ++ show conversionError
-            Right shared -> do
+            Right inventory -> do
+              let shared = SharedInventory.inventoryEnvironment inventory
               assertBool "shared source inventory lost type declarations"
                 $ not $ Map.null $ SharedEnvironment.typeDeclarationMap shared
               assertBool "shared source inventory lost values"
                 $ not $ Map.null $ SharedEnvironment.valueSignatureMap shared
+              maybeName <- expectRight
+                $ mkQualifiedName ["Data", "Maybe"] "Maybe"
+              Map.lookup (toSynthesisName maybeName)
+                  (SharedKindInference.typeConstructorKinds
+                    $ SharedInventory.inventoryKindAssumptions inventory) @?=
+                Just (SharedKind.FunctionKind
+                  SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
       , testCase "source environments reject ill-kinded signatures" $ do
           let intName = name "Int"
               badName = name "bad"

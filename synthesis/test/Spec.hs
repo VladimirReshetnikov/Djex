@@ -17,6 +17,7 @@ import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
 import qualified Language.Haskell.Synthesis.Kind as Kind
 import qualified Language.Haskell.Synthesis.KindInference as KindInference
+import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import Language.Haskell.Synthesis.Search
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
@@ -230,7 +231,24 @@ kindInferenceTests = testGroup "kind inference"
 
 environmentTests :: TestTree
 environmentTests = testGroup "environments"
-  [ testCase "index declarations across shared namespaces" $ do
+  [ testCase "seal structural indexes with their kind assumptions" $ do
+      let typeName = right $ mkIdentifier "T"
+          constructorName = right $ mkIdentifier "MkT"
+          parameter = Declaration.TypeParameter "a" Nothing
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.DataTypeDeclaration () typeName [parameter]
+                [Declaration.DataConstructor () constructorName []]
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.ClosedKindInventory declarations
+      Map.keys (Environment.typeDeclarationMap
+        $ Inventory.inventoryEnvironment inventory) @?= [typeName]
+      KindInference.typeConstructorKinds
+        (Inventory.inventoryKindAssumptions inventory) @?=
+          Map.singleton typeName
+            (Kind.FunctionKind Kind.ProperTypeKind Kind.ProperTypeKind)
+  , testCase "index declarations across shared namespaces" $ do
       let typeName = right $ mkIdentifier "T"
           constructorName = right $ mkIdentifier "MkT"
           valueName = right $ mkIdentifier "makeT"

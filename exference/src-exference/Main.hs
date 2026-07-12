@@ -25,7 +25,6 @@ import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 
 import Control.Monad ( when, forM_ )
-import Control.Monad.Trans.Class (lift)
 import Data.List ( sortBy, intercalate, nub )
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.List as List
@@ -34,7 +33,6 @@ import Data.Maybe ( listToMaybe, fromMaybe )
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 
-import Control.Monad.Trans.MultiRWS
 import Control.Monad.Trans.Except
 
 
@@ -131,16 +129,16 @@ main = do
       putStrLn $ "exference version " ++ showVersion version
   if | [Version] == flags   -> printVersion
      | Help    `elem` flags -> putStrLn fullUsageInfo
-     | otherwise -> runMultiRWSTNil_ $ do
-        when (Version `elem` flags || verbosity>0) $ lift printVersion
+     | otherwise -> do
+        when (Version `elem` flags || verbosity>0) printVersion
         let envDir = fromMaybe defaultEnvPath $ listToMaybe [d | EnvDir d <- flags]
-        when (verbosity>0) $ lift $ do
+        when (verbosity>0) $ do
           putStrLn $ "[Environment]"
           putStrLn $ "reading environment from " ++ envDir
-        LoadReport sourceEnvironmentResult diagnostics <- lift
-          $ environmentFromPath envDir
+        LoadReport sourceEnvironmentResult diagnostics <-
+          environmentFromPath envDir
         checkedEnvironment <- case sourceEnvironmentResult of
-          Left failure -> lift $ do
+          Left failure -> do
             hPutStrLn stderr $
               "could not load source environment: " ++ show failure
             exitFailure
@@ -154,10 +152,10 @@ main = do
             tdeclMap = sourceTypeSynonymMap sourceEnvironment
         let clss = sClassEnv_tclasses sEnv
             insts = sClassEnv_instances sEnv
-        when (verbosity>0 && not (null diagnostics)) $ lift $
+        when (verbosity>0 && not (null diagnostics)) $
           forM_ diagnostics $ \value -> putStrLn
             $ "environment " ++ renderDiagnostic value
-        when (PrintEnv `elem` flags) $ lift $ do
+        when (PrintEnv `elem` flags) $ do
           when (verbosity>0) $ putStrLn "[Environment]"
           mapM_ print $ sourceTypeSynonyms sourceEnvironment
           mapM_ print $ M.elems clss
@@ -167,7 +165,7 @@ main = do
         case inputs of
           [] -> return ()
           x:_ -> do
-            when (verbosity>0) $ lift $ putStrLn "[Custom Input]"
+            when (verbosity>0) $ putStrLn "[Custom Input]"
             eParsedType <- runExceptT $ parseTypeWithKinds
               (SharedInventory.inventoryKindAssumptions inventory)
               (sClassEnv_tclasses sEnv)
@@ -177,13 +175,13 @@ main = do
               (haskellSrcExtsParseMode "inputtype")
               x
             case eParsedType of
-              Left err -> lift $ do
+              Left err -> do
                 putStrLn $ "could not parse input type: " ++ diagnosticMessage err
               Right (parsedType, tVarIndex) -> do
                 let typeStr = showHsType tVarIndex parsedType
-                when (verbosity>0) $ lift $ putStrLn $ "input type parsed as: " ++ typeStr
+                when (verbosity>0) $ putStrLn $ "input type parsed as: " ++ typeStr
                 let unresolvedIdents = findInvalidNames validNames parsedType
-                when (not $ null unresolvedIdents) $ lift $ do
+                when (not $ null unresolvedIdents) $ do
                   putStrLn $ "warning: unresolved idents in input: "
                            ++ intercalate ", " (nub $ show <$> unresolvedIdents)
                   putStrLn $ "(this may be harmless, but no instances will be connected to these.)"
@@ -193,7 +191,7 @@ main = do
                     filteredDeconstructors = filter deconstructorIsSupported eDeconss
                     omitted = length namedBindings - length filteredBindings
                       + length eDeconss - length filteredDeconstructors
-                when (verbosity > 0 && omitted > 0) $ lift $ putStrLn $
+                when (verbosity > 0 && omitted > 0) $ putStrLn $
                   "omitting " ++ show omitted
                     ++ " environment bindings with unsupported nested foralls"
                 let input = ExferenceInput
@@ -213,7 +211,7 @@ main = do
                           else cliHeuristicsConfig
                             { heuristics_solutionLength = 0.0 }
                       }
-                when (verbosity>0) $ lift $ do
+                when (verbosity>0) $ do
                   putStrLn $ "full input:"
                   print input
                 -- The default selector searches with constraints enabled so it
@@ -228,15 +226,15 @@ main = do
                           {input_allowConstraints = True}
                       | otherwise = input
                 case findExpressionsWithStatsEither searchInput of
-                  Left err -> lift $ putStrLn $
+                  Left err -> putStrLn $
                     "invalid search input: " ++ show err
                   Right chunks -> do
                     if
-                      | PrintAll `elem` flags -> lift $ do
+                      | PrintAll `elem` flags -> do
                           when (verbosity>0) $
                             putStrLn "[running complete search ..]"
                           printAllResults qualification tVarIndex chunks
-                      | EnvUsage `elem` flags -> lift $ do
+                      | EnvUsage `elem` flags -> do
                           when (verbosity>0) $
                             putStrLn "[running complete search ..]"
                           let stats = maybe M.empty chunkBindingUsages
@@ -246,7 +244,7 @@ main = do
                                 $ M.toList stats
                           print highest
                       | otherwise -> do
-                          selection <- lift $ if
+                          selection <- if
                             | FirstSol `elem` flags -> do
                                 when (verbosity>0) $
                                   putStrLn "[selecting first expression ..]"
@@ -266,7 +264,7 @@ main = do
                                 pure $
                                   selectFirstBestExpressionsLookaheadPreferNoConstraints
                                     256 chunks
-                          lift $ printSelection qualification tVarIndex
+                          printSelection qualification tVarIndex
                             selection
 printSelection
   :: Int

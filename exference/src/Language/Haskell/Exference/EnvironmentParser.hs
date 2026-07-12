@@ -1,8 +1,6 @@
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 
 module Language.Haskell.Exference.EnvironmentParser
@@ -64,9 +62,7 @@ import Language.Haskell.Exts.Extension ( Language (..)
                                        , KnownExtension (..) )
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
-import Control.Monad.Trans.MultiRWS
 import Control.Monad.Trans.Except (runExceptT, throwE)
-import Data.HList.ContainsType
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
@@ -293,10 +289,8 @@ toSynthesisSourceInventory environment = do
     Right inventory -> Right inventory
 
 
-builtInDeclsM
-  :: Monad m
-  => MultiRWST r w s m (Either QualifiedNameError [HsFunctionDecl])
-builtInDeclsM = pure $ do
+builtInDecls :: Either QualifiedNameError [HsFunctionDecl]
+builtInDecls = do
   consName <- fromSynthesisName SharedName.consName
   listName <- fromSynthesisName SharedName.listName
   unitConstructor <- do
@@ -317,10 +311,8 @@ builtInDeclsM = pure $ do
     pure (tupleName,
       foldr TypeArrow (tupleType tupleName arity) $ typeVariables arity)
 
-builtInDeconstructorsM
-  :: Monad m
-  => MultiRWST r w s m (Either QualifiedNameError [DeconstructorBinding])
-builtInDeconstructorsM = pure $ do
+builtInDeconstructors :: Either QualifiedNameError [DeconstructorBinding]
+builtInDeconstructors = do
   listName <- fromSynthesisName SharedName.listName
   consName <- fromSynthesisName SharedName.consName
   unitName <- mkBoxedTupleName 0
@@ -377,21 +369,15 @@ parseModules
   :: [(ParseMode, FilePath)]
   -> IO (LoadReport (SourceEnvironment HsFunctionDecl))
 parseModules inputs = do
-  (result, diagnostics :: [Diagnostic]) <- runMultiRWSTNil
-    $ withMultiWriterAW
-    $ parseModulesM inputs
+  (result, diagnostics) <- runWriterT $ parseModulesM inputs
   pure $ LoadReport result diagnostics
 
--- The parser and conversion passes still use MultiRWST internally for their
--- independent conversion states.  This implementation detail stops here;
--- public loader entry points above and below expose only IO and LoadReport.
-parseModulesM :: forall m r w s
-               . ( m ~ MultiRWST r w s IO
-                 , ContainsType [Diagnostic] w
-                 )
-              => [(ParseMode, FilePath)]
-              -> m (Either EnvironmentLoadError
-                     (SourceEnvironment HsFunctionDecl))
+type Loader = WriterT [Diagnostic] IO
+
+parseModulesM
+  :: [(ParseMode, FilePath)]
+  -> Loader (Either EnvironmentLoadError
+              (SourceEnvironment HsFunctionDecl))
 parseModulesM inputs = do
   readResults <- lift $ mapM hRead inputs
   case NonEmpty.nonEmpty $ lefts readResults of
@@ -413,8 +399,8 @@ parseModulesM inputs = do
     -- fed into the next extractor as an invented recovery environment.
     parseLoadedModules
       :: [(ParseMode, String)]
-      -> m (Either EnvironmentLoadError
-             (SourceEnvironment HsFunctionDecl))
+      -> Loader (Either EnvironmentLoadError
+                  (SourceEnvironment HsFunctionDecl))
     parseLoadedModules rawTuples = runExceptT $ do
       let parsedModules = map hParse rawTuples
           parseErrors = lefts parsedModules
@@ -456,9 +442,9 @@ parseModulesM inputs = do
         Just errors -> throwE $ BindingDeclarationErrors errors
         Nothing -> pure ()
 
-      builtInDeclarationsResult <- lift builtInDeclsM
-      builtInDeconstructorsResult <- lift builtInDeconstructorsM
-      (builtInDeclarations, builtInDeconstructors) <-
+      let builtInDeclarationsResult = builtInDecls
+          builtInDeconstructorsResult = builtInDeconstructors
+      (builtInDeclarations, builtInDeconstructorValues) <-
         case (builtInDeclarationsResult, builtInDeconstructorsResult) of
           (Right declarationsResult, Right deconstructorsResult) ->
             pure (declarationsResult, deconstructorsResult)
@@ -482,17 +468,17 @@ parseModulesM inputs = do
           instances = sClassEnv_instances classEnvironment
           allValidNames = dataTypes ++ M.keys classes
 
-          warnUnknownTypeConstructors :: String -> [HsType] -> m ()
+          warnUnknownTypeConstructors :: String -> [HsType] -> Loader ()
           warnUnknownTypeConstructors context types = forM_
             (S.toAscList $ S.fromList
               $ concatMap (findInvalidNames allValidNames) types)
-            $ \unknownName -> mTell
+            $ \unknownName -> tell
                 [ warningDiagnostic
                     $ "unknown type constructor '" ++ show unknownName
                     ++ "' used in " ++ context
                 ]
 
-          warnBindingConstraints :: QualifiedName -> HsType -> m ()
+          warnBindingConstraints :: QualifiedName -> HsType -> Loader ()
           warnBindingConstraints bindingName bindingType = forM_
             (S.toAscList $ S.fromList
               [ renderConstraintFailure bindingName constraint failure
@@ -502,7 +488,7 @@ parseModulesM inputs = do
                       (BindingConstraint bindingName) constraint
                   ]
               ])
-            (mTell . (: []) . warningDiagnostic)
+            (tell . (: []) . warningDiagnostic)
 
           renderConstraintFailure
             :: QualifiedName
@@ -544,21 +530,21 @@ parseModulesM inputs = do
           -- The loader has a complete class inventory, unlike public ad-hoc
           -- search input, so binding constraints are checked nominally here.
           warnBindingConstraints bindingName bindingType
-        mTell [infoDiagnostic $ "got " ++ show (length classes) ++ " classes"]
-        mTell [infoDiagnostic $ "and " ++ show instanceCount ++ " instances"]
-        mTell
+        tell [infoDiagnostic $ "got " ++ show (length classes) ++ " classes"]
+        tell [infoDiagnostic $ "and " ++ show instanceCount ++ " instances"]
+        tell
           [ infoDiagnostic
               $ "(-> " ++ show (length $ concat $ M.elems instances)
                 ++ " instances after inflation)"
           ]
-        mTell
+        tell
           [ infoDiagnostic
               $ "and " ++ show (length declarations) ++ " function decls"
           ]
 
       pure SourceEnvironment
         { sourceFunctions = builtInDeclarations ++ declarations
-        , sourceDeconstructors = builtInDeconstructors ++ deconstructors
+        , sourceDeconstructors = builtInDeconstructorValues ++ deconstructors
         , sourceClasses = classEnvironment
         , sourceTypeNames = allValidNames
         , sourceTypeSynonyms = typeDeclarations
@@ -570,7 +556,8 @@ parseModulesM inputs = do
                   -> [QualifiedName]
                   -> TypeDeclMap
                   -> Module SrcSpanInfo
-                  -> m ([HsFunctionDecl], [DeconstructorBinding], [String])
+                  -> Loader
+                       ([HsFunctionDecl], [DeconstructorBinding], [String])
     hExtractBinds cntxt ds tDeclMap modul = do
       eFromData <- getDataConss (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
       eDecls <- (++)
@@ -587,17 +574,13 @@ parseModulesSimple
   :: FilePath
   -> IO (LoadReport (SourceEnvironment RatedHsFunctionDecl))
 parseModulesSimple path = do
-  (result, diagnostics :: [Diagnostic]) <- runMultiRWSTNil
-    $ withMultiWriterAW
-    $ parseModulesSimpleM path
+  (result, diagnostics) <- runWriterT $ parseModulesSimpleM path
   pure $ LoadReport result diagnostics
 
 parseModulesSimpleM
-  :: ContainsType [Diagnostic] w
-  => FilePath
-  -> MultiRWST r w s IO
-       (Either EnvironmentLoadError
-         (SourceEnvironment RatedHsFunctionDecl))
+  :: FilePath
+  -> Loader (Either EnvironmentLoadError
+              (SourceEnvironment RatedHsFunctionDecl))
 parseModulesSimpleM path = fmap helper
                    <$> parseModulesM
                      [(haskellSrcExtsParseMode path, path)]
@@ -680,17 +663,14 @@ environmentFromModuleAndRatings
   -> FilePath
   -> IO (LoadReport CheckedSourceEnvironment)
 environmentFromModuleAndRatings modulePath ratingPath = do
-  (result, diagnostics :: [Diagnostic]) <- runMultiRWSTNil
-    $ withMultiWriterAW
+  (result, diagnostics) <- runWriterT
     $ environmentFromModuleAndRatingsM modulePath ratingPath
   pure $ LoadReport result diagnostics
 
 environmentFromModuleAndRatingsM
-  :: ContainsType [Diagnostic] w
-  => FilePath
+  :: FilePath
   -> FilePath
-  -> MultiRWST r w s IO
-       (Either EnvironmentLoadError CheckedSourceEnvironment)
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
 environmentFromModuleAndRatingsM modulePath ratingPath = do
   let exts1 = [ TypeOperators
               , ExplicitForAll
@@ -714,11 +694,11 @@ environmentFromModuleAndRatingsM modulePath ratingPath = do
       ratingsResult <- lift $ ratingsFromFile ratingPath
       ratings <- case ratingsResult of
         Left failure -> do
-          mTell [ratingFailureDiagnostic failure]
+          tell [ratingFailureDiagnostic failure]
           pure []
         Right parsedRatings -> pure parsedRatings
       let (ratedEnvironment, warnings) = applyRatings ratings environment
-      forM_ warnings $ mTell . (: [])
+      forM_ warnings $ tell . (: [])
       pure $ checkSourceEnvironment ratedEnvironment
 
 
@@ -726,16 +706,12 @@ environmentFromPath
   :: FilePath
   -> IO (LoadReport CheckedSourceEnvironment)
 environmentFromPath path = do
-  (result, diagnostics :: [Diagnostic]) <- runMultiRWSTNil
-    $ withMultiWriterAW
-    $ environmentFromPathM path
+  (result, diagnostics) <- runWriterT $ environmentFromPathM path
   pure $ LoadReport result diagnostics
 
 environmentFromPathM
-  :: ContainsType [Diagnostic] w
-  => FilePath
-  -> MultiRWST r w s IO
-       (Either EnvironmentLoadError CheckedSourceEnvironment)
+  :: FilePath
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
 environmentFromPathM p = do
   directoryResult <- lift $ captureIO p
     $ listDirectory p >>= evaluate . force
@@ -757,9 +733,9 @@ environmentFromPathM p = do
         Right environment -> do
           ratingResults <- lift $ mapM ratingsFromFile ratingPaths
           forM_ (lefts ratingResults)
-            $ mTell . (: []) . ratingFailureDiagnostic
+            $ tell . (: []) . ratingFailureDiagnostic
           let ratings = concat $ rights ratingResults
               (ratedEnvironment, warnings) =
                 applyRatings ratings environment
-          forM_ warnings $ mTell . (: [])
+          forM_ warnings $ tell . (: [])
           pure $ checkSourceEnvironment ratedEnvironment

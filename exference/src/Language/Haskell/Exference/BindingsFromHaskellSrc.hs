@@ -1,6 +1,5 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE MonadComprehensions #-}
 
 module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
@@ -26,22 +25,21 @@ import Language.Haskell.Exference.FunctionDecl
 import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.Monad ( join )
+import Control.Monad.State.Lazy (MonadState, evalStateT)
 import Control.Monad.Trans.Except
 import qualified Data.Map.Strict as M
 import Data.Maybe ( fromMaybe, maybeToList )
-
-import Control.Monad.Trans.MultiRWS
 
 
 
 
 getDecls
-  :: (Monad m, Functor m)
+  :: Monad m
   => [QualifiedName]
   -> M.Map QualifiedName HsTypeClass
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> MultiRWST r w s m [Either String HsFunctionDecl]
+  -> m [Either String HsFunctionDecl]
 getDecls ds tcs tDeclMap modules = fmap (>>= either (return.Left) (map Right))
                                 $ sequence
                                 $ do
@@ -51,13 +49,13 @@ getDecls ds tcs tDeclMap modules = fmap (>>= either (return.Left) (map Right))
   return $ runExceptT $ transformDecl tcs ds mn tDeclMap d
 
 transformDecl
-  :: (Monad m, Functor m)
+  :: Monad m
   => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> ModuleName SrcSpanInfo
   -> TypeDeclMap
   -> Decl SrcSpanInfo
-  -> ExceptT String (MultiRWST r w s m) [HsFunctionDecl]
+  -> ExceptT String m [HsFunctionDecl]
 transformDecl tcs ds mn tDeclMap (TypeSig _loc names qtype)
   = insName qtype $ do
       (ctype, _) <- convertType tcs (Just mn) ds tDeclMap qtype
@@ -65,7 +63,7 @@ transformDecl tcs ds mn tDeclMap (TypeSig _loc names qtype)
 transformDecl _ _ _ _ _ = return []
 
 transformDecl'
-  :: (MonadMultiState ConvData m, Monad m, Functor m)
+  :: MonadState ConvData m
   => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> ModuleName SrcSpanInfo
@@ -78,7 +76,7 @@ transformDecl' tcs ds mn tDeclMap (TypeSig _loc names qtype)
       mapM (either throwE pure . helper mn ctype) names
 transformDecl' _ _ _ _ _ = return []
 
-insName :: (Functor m, Monad m)
+insName :: Monad m
         => Type SrcSpanInfo -> ExceptT String m a -> ExceptT String m a
 insName qtype = withExceptT (\x -> x ++ " in " ++ prettyPrint qtype)
 
@@ -91,30 +89,25 @@ helper mn t syntaxName = (, forallify t)
   <$> convertModuleNameChecked mn syntaxName
 
 getDataConss
-  :: (Monad m)
+  :: Monad m
   => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> MultiRWST
-       r
-       w
-       s
-       m
-       [Either String ([HsFunctionDecl], DeconstructorBinding)]
+  -> m [Either String ([HsFunctionDecl], DeconstructorBinding)]
 getDataConss tcs ds tDeclMap modules = sequence $ do
   modul <- modules
   (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
   DataDecl _ _ context rawHead conss _ <- decls
   let (name, params) = splitDeclHead rawHead
   let
-    rTypeM :: ( MonadMultiState ConvData m )
+    rTypeM :: MonadState ConvData m
            => ExceptT String m HsType
     rTypeM = do
       rName <- either throwE pure $ convertModuleNameChecked moduleName name
       ps  <- mapM pTransform params
       return $ foldl TypeApp (TypeCons rName) ps
-    pTransform :: MonadMultiState ConvData m
+    pTransform :: MonadState ConvData m
                => TyVarBind SrcSpanInfo
                -> ExceptT String m HsType
     pTransform (KindedVar _ _ _) = throwE "kinded type variable"
@@ -123,7 +116,7 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
   --  tTransform (UnBangedTy t) = convertTypeInternal t
   --  tTransform x              = lift $ left $ "unknown Type: " ++ show x
   let
-    typeM :: ( MonadMultiState ConvData m )
+    typeM :: MonadState ConvData m
           => QualConDecl SrcSpanInfo
           -> ExceptT String m (QualifiedName, [HsType])
     typeM (QualConDecl _ cbindings constructorContext conDecl) = do
@@ -142,7 +135,7 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
   let
     addConsMsg = (++) $ show name ++ ": "
   let
-    convAction :: ( MonadMultiState ConvData m )
+    convAction :: MonadState ConvData m
                => ExceptT String m ([HsFunctionDecl], DeconstructorBinding)
     convAction = do
       rtype  <- rTypeM
@@ -162,17 +155,17 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
                )
         -- TODO: actually determine if stuff is recursive or not
   return $ do
-    convResult <- withMultiStateA (ConvData 0 M.empty) $ runExceptT convAction
+    convResult <- evalStateT (runExceptT convAction) (ConvData 0 M.empty)
     return $ either (Left . addConsMsg) Right convResult
     -- TODO: replace this by bimap..
 
 getClassMethods
-  :: (Monad m, Functor m)
+  :: Monad m
   => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> MultiRWST r w s m [Either String HsFunctionDecl]
+  -> m [Either String HsFunctionDecl]
 getClassMethods tcs ds tDeclMap modules = fmap join $ sequence $ do
   modul <- modules
   (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
@@ -188,9 +181,9 @@ getClassMethods tcs ds tDeclMap modules = fmap join $ sequence $ do
         Just _ -> do
           let cnstrA = HsConstraint className
                 <$> mapM ((TypeVar <$>) . tyVarTransform) vars
-          -- action :: MonadMultiState ConvData m
-          --        => m [Either String [HsFunctionDecl]]
-          rEithers <- withMultiStateA (ConvData 0 M.empty) $ do
+          -- Keep the class head and every method in one state scope so each
+          -- class parameter retains the same variable ID throughout.
+          rEithers <- flip evalStateT (ConvData 0 M.empty) $ do
             cnstrE <- runExceptT cnstrA
             case cnstrE of
               Left x -> return [Left x]

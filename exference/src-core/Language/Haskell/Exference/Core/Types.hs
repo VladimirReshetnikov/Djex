@@ -1,5 +1,4 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE PatternGuards #-}
@@ -47,7 +46,6 @@ module Language.Haskell.Exference.Core.Types
   , containsVar
   , showVar
   , preferredVarName
-  , showTypedVar
   , mkQueryClassEnv
   , addQueryClassEnv
   , freeVars
@@ -81,7 +79,6 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Control.DeepSeq
 import GHC.Generics
-import Control.Monad.Trans.MultiState
 
 
 
@@ -670,15 +667,6 @@ preferredVarName i = h
   h TypeArrow{}        = "f" ++ show i
   h (TypeApp t _)      = h t
   h (TypeForall _ _ t) = h t
-
-showTypedVar :: MonadMultiState (M.Map TVarId HsType) m
-             => TVarId
-             -> m String
-showTypedVar i = do
-  m <- mGet
-  -- The ID-only fallback keeps this compatibility helper total when a caller
-  -- did not run the optional 'collectVarTypes' pass first.
-  return $ maybe (showVar i) (preferredVarName i) $ M.lookup i m
 
 applySubst :: Subst -> HsType -> HsType
 applySubst (Subst i t) v@(TypeVar j) = if i==j then t else v

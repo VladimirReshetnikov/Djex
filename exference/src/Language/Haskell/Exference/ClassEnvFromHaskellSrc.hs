@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE TypeOperators #-}
 
 module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   ( ClassEnvironmentLoadError (..)
@@ -8,8 +7,8 @@ module Language.Haskell.Exference.ClassEnvFromHaskellSrc
 where
 
 import Control.Monad (forM, when)
+import Control.Monad.State.Lazy (MonadState, evalStateT, get)
 import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
-import Control.Monad.Trans.MultiRWS
 import Data.Either (lefts, rights)
 import Data.Bifunctor (first)
 import Data.List.NonEmpty (NonEmpty)
@@ -53,8 +52,7 @@ getClassEnv
   => [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> MultiRWST r w s m
-      (Either ClassEnvironmentLoadError (StaticClassEnv, Int))
+  -> m (Either ClassEnvironmentLoadError (StaticClassEnv, Int))
 getClassEnv dataTypes typeDeclarations modules = do
   classResults <- getTypeClasses dataTypes typeDeclarations modules
   case NonEmpty.nonEmpty $ lefts classResults of
@@ -75,7 +73,7 @@ getClassEnv dataTypes typeDeclarations modules = do
               (mkStaticClassEnv (Map.elems classes) instances)
 
 getTypeClasses
-  :: (Monad m0, m ~ MultiRWST r w s m0)
+  :: Monad m
   => [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
@@ -118,9 +116,10 @@ getTypeClasses dataTypes typeDeclarations modules = do
   -- nominal identity and arity information to every superclass conversion in
   -- pass two; no lazy-map fixed point is involved.
   headerResults <- forM uniqueDeclarations $ \rawClass -> do
-    result <- withMultiStateA emptyConversionState $ runExceptT $ do
+    result <- evalStateT (runExceptT $ do
       parameters <- mapM tyVarTransform $ rawClassVariables rawClass
-      pure $ HsTypeClass (rawClassName rawClass) parameters []
+      pure $ HsTypeClass (rawClassName rawClass) parameters [])
+      emptyConversionState
     pure $ (,) rawClass <$> result
   let headerErrors = [Left errorMessage | Left errorMessage <- headerResults]
       successfulHeaders = rights headerResults
@@ -133,7 +132,7 @@ getTypeClasses dataTypes typeDeclarations modules = do
   -- superclass context.  Thus parameter IDs follow declaration order even if
   -- superclasses mention those variables in a different order (or not at all).
   elaborated <- forM successfulHeaders $ \(rawClass, _) ->
-    withMultiStateA emptyConversionState $ runExceptT $ do
+    evalStateT (runExceptT (do
       parameters <- mapM tyVarTransform $ rawClassVariables rawClass
       superclasses <- mapM
         (convertClassConstraint headers
@@ -141,14 +140,15 @@ getTypeClasses dataTypes typeDeclarations modules = do
           dataTypes
           typeDeclarations)
         (contextConstraints $ rawClassContext rawClass)
-      pure $ HsTypeClass (rawClassName rawClass) parameters superclasses
+      pure $ HsTypeClass (rawClassName rawClass) parameters superclasses))
+      emptyConversionState
 
   pure $ invalidNames ++ duplicateErrors ++ headerErrors ++ elaborated
  where
   emptyConversionState = ConvData 0 Map.empty
 
 getInstances
-  :: (m ~ MultiRWST r w s m0, Monad m0)
+  :: Monad m
   => Map.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> TypeDeclMap
@@ -160,7 +160,7 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
   InstDecl _ _ rule _ <- declarations
   (explicitVariables, context, syntaxName, argumentSyntax) <-
     maybeToList $ splitInstRule rule
-  pure $ withMultiStateA (ConvData 0 Map.empty) $ runExceptT $ do
+  pure $ evalStateT (runExceptT $ do
     explicitIds <- case explicitVariables of
       Nothing -> pure Nothing
       Just variables -> do
@@ -186,19 +186,20 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
     case explicitIds of
       Nothing -> pure ()
       Just declaredIds -> do
-        ConvData _ variables <- mGet
+        ConvData _ variables <- get
         let undeclared = Set.fromList (Map.elems variables)
               Set.\\ declaredIds
         when (not $ Set.null undeclared) $ throwE
           $ "instance uses variables outside its explicit forall: "
           ++ show (Set.toAscList undeclared)
-    pure $ HsInstance prerequisites $ HsConstraint className arguments
+    pure $ HsInstance prerequisites $ HsConstraint className arguments)
+    (ConvData 0 Map.empty)
 
 -- | Convert a class application against the complete closed class inventory.
 -- Both superclass edges and instance prerequisites must name a declaration;
 -- ordinary function signatures retain the frontend's open-world policy.
 convertClassConstraint
-  :: MonadMultiState ConvData m
+  :: MonadState ConvData m
   => Map.Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
   -> [QualifiedName]

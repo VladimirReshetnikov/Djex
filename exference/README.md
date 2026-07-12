@@ -69,7 +69,8 @@ them during lowering.
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration
 IR; the HSE frontend uses the same boundary for type synonyms. Function
-penalties and recursive-datatype flags survive as explicit metadata, while
+and constructor search penalties and recursive-datatype flags survive as
+explicit metadata, while
 lossy reverse conversions (such as dropping separately stored class methods)
 are rejected.
 
@@ -80,14 +81,17 @@ rather than derived cache entries. The core-only adapter still rejects
 frontend-only declarations such as type synonyms because its search
 dictionary has no representation for them.
 
-The HSE loader returns a parameterized `SourceEnvironment` record rather than
-an anonymous five-tuple. Parsed functions, deconstructors, classes, datatype
-names, and synonyms therefore remain one named inventory through rating and
-CLI loading. `toSynthesisSourceEnvironment` seals that complete inventory in
-the shared environment IR. Constructor signatures duplicated in Exference's
-search-function list are represented only by their datatype declarations at
-this boundary; list, unit, and tuple constructors have explicit intrinsic
-datatype records, so `(:)` never masquerades as an ordinary value.
+The HSE loader returns `IO (LoadReport CheckedSourceEnvironment)`: fatal phases
+use a typed error, while nonfatal warnings and summaries are structured shared
+diagnostics. Its backend `SourceEnvironment` projection keeps parsed functions,
+deconstructors, classes, datatype names, and synonyms in one named inventory
+through rating and CLI loading. `toSynthesisSourceEnvironment` seals that
+complete inventory in the shared environment IR. Constructor signatures
+duplicated in Exference's search-function list are represented only by their
+datatype declarations at this boundary; list, unit, and tuple constructors
+have explicit intrinsic datatype records, so `(:)` never masquerades as an
+ordinary value. Constructor shape and search penalty are then lowered back
+from that checked inventory rather than trusted from a parallel raw record.
 Class-environment construction likewise rejects repeated instance heads before
 building its lookup index; each shipped primitive instance now has one owning
 module instead of a second shadow declaration in `Data.hs`.
@@ -178,8 +182,9 @@ any / the right solution. Some common current limitations are:
   e.g. `length` or `mapM_`, as they "lose information";
 - Type synonyms are expanded before search; cycles and unsaturated uses are
   rejected with diagnostics;
-- Kinds are not checked, e.g. `Maybe -> Either`
-  (which can be seen as both advantage and disadvantage, see report);
+- Source inventories and queries are kind-checked against the same retained
+  assumptions; an ill-kinded application such as `Maybe Maybe` is rejected
+  before search;
 - The environment is composed by hand currently, and does only include parts
   of base plus a few other selected modules. Its canonical 41-class,
   485-source-instance inventory is checked at load time and pinned by tests.
@@ -202,9 +207,9 @@ any / the right solution. Some common current limitations are:
 ## Other known (technical) issues
 
 - **Memory consumption is large** (even more so when profiling);
-- The executable still owns environment loading. Search execution and result
-  selection now have a reusable boundary, but a common Djinn/Exference session
-  layer still needs to move environment policy below both CLIs.
+- Environment loading, checked inventory sealing, search execution, and result
+  selection now have reusable library boundaries. A common Djinn/Exference
+  session facade still needs to compose them under the Djex name.
 - The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
   records concrete correctness reproducers, shared-IR boundaries, and the
   staged migration order.

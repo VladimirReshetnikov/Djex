@@ -34,10 +34,8 @@ import Language.Haskell.Exts.SrcLoc
   , SrcSpanInfo
   )
 
-import Control.Monad.Trans.MultiRWS
-
+import Control.Monad.State.Lazy (MonadState)
 import Control.Monad.Trans.Except ( runExceptT
-                                  , mapExceptT
                                   , ExceptT(..)
                                   , throwE
                                   )
@@ -159,11 +157,10 @@ applyTypeDecls declarations = go []
   mapConstraint f (HsConstraint typeClass parameters) =
     HsConstraint typeClass <$> mapM f parameters
 
-getTypeDecls :: ( Monad m
-                )
+getTypeDecls :: Monad m
              => [QualifiedName]
              -> [Module SrcSpanInfo]
-             -> MultiRWST r w s m [Either String HsTypeDecl]
+             -> m [Either String HsTypeDecl]
 getTypeDecls ds modules = do
   rawList <- sequence $ do
     modul <- modules
@@ -177,7 +174,8 @@ getTypeDecls ds modules = do
       qname <- either throwE pure $ convertModuleNameChecked mn name
       -- the 1000 is arbitrary, but it should not be used anyway.
       -- no new type variables should appear on the left hand side.
-      vars <- mapExceptT (withMultiStateA (ConvData 1000 tyVarIndex)) $ rawVars `forM` tyVarTransform
+      vars <- runConversionT (ConvData 1000 tyVarIndex)
+        $ rawVars `forM` tyVarTransform
       return $ HsTypeDecl qname vars ty
   let validDeclarations = rights rawList
       declarationMap = M.map Right $ uniqueTypeDeclMap validDeclarations
@@ -187,21 +185,20 @@ getTypeDecls ds modules = do
         <$> applyTypeDecls declarationMap (tdecl_result declaration)
   return $ [ e | e@(Left _) <- rawList ] ++ map resolve validDeclarations
 
-convertType :: ( Monad m
-               )
+convertType :: Monad m
             => Map QualifiedName HsTypeClass
             -> Maybe (ModuleName SrcSpanInfo)
             -> [QualifiedName]
             -> TypeDeclMap
             -> Type SrcSpanInfo
-            -> ExceptT String (MultiRWST r w s m) (HsType, TypeVarIndex)
+            -> ExceptT String m (HsType, TypeVarIndex)
 convertType tcs mn ds declMap t = do
   (ty, index) <- convertTypeNoDecl tcs mn ds t
   ty' <- liftEither $ applyTypeDecls (M.map Right declMap) ty
   return $ (ty', index)
 
 convertTypeInternal
-  :: (MonadMultiState ConvData m)
+  :: MonadState ConvData m
   => Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo) -- default (for unqualified stuff)
                       -- Nothing uses a broad search for lookups
@@ -223,10 +220,7 @@ parseType
   -> TypeDeclMap
   -> P.ParseMode
   -> String
-  -> ExceptT
-       Diagnostic
-       (MultiRWST r w s m)
-       (HsType, TypeVarIndex)
+  -> ExceptT Diagnostic m (HsType, TypeVarIndex)
 parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
   P.ParseFailed location message -> throwE
     $ withSpan (let position = SourcePosition
@@ -257,7 +251,7 @@ parseTypeWithKinds
   -> TypeDeclMap
   -> P.ParseMode
   -> String
-  -> ExceptT Diagnostic (MultiRWST r w s m) (HsType, TypeVarIndex)
+  -> ExceptT Diagnostic m (HsType, TypeVarIndex)
 parseTypeWithKinds assumptions tcs mn ds declarations mode source = do
   result@(typeExpression, _) <-
     parseType tcs mn ds declarations mode source

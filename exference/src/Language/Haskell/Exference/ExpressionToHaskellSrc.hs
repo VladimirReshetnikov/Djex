@@ -1,6 +1,3 @@
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
-
 module Language.Haskell.Exference.ExpressionToHaskellSrc
   ( convert
   , convertToFunc
@@ -8,8 +5,7 @@ module Language.Haskell.Exference.ExpressionToHaskellSrc
 where
 
 import Control.Monad (forM)
-import Control.Monad.Trans.MultiState
-import Data.Functor.Identity (runIdentity)
+import Control.Monad.Reader (Reader, ask, runReader)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
@@ -21,16 +17,14 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HsExp = Exp SrcSpanInfo
 type HsDecl = Decl SrcSpanInfo
-type Conversion = MultiState '[Map T.TVarId String]
+type Conversion = Reader (Map T.TVarId String)
 
 -- Qualification level: 0 emits unqualified names, 1 qualifies ordinary
 -- identifiers but keeps operators infix-friendly, and 2 qualifies everything.
 convert :: Int -> E.Expression -> HsExp
-convert qualification expression = runIdentity
-  $ runMultiStateTNil
-  $ withMultiStateA
-      (allocatedNames qualification [] expression)
-  $ gatherLambdas expression []
+convert qualification expression = runReader
+  (gatherLambdas expression [])
+  (allocatedNames qualification [] expression)
   where
     gatherLambdas (E.ExpLambda variable ty body) parameters =
       gatherLambdas body ((variable, ty) : parameters)
@@ -41,11 +35,9 @@ convert qualification expression = runIdentity
       pure $ Lambda noLoc (map variablePattern names) converted
 
 convertToFunc :: Int -> String -> E.Expression -> HsDecl
-convertToFunc qualification functionName expression = runIdentity
-  $ runMultiStateTNil
-  $ withMultiStateA
-      (allocatedNames qualification [functionName] expression)
-  $ gatherLambdas expression []
+convertToFunc qualification functionName expression = runReader
+  (gatherLambdas expression [])
+  (allocatedNames qualification [functionName] expression)
   where
     gatherLambdas (E.ExpLambda variable ty body) parameters =
       gatherLambdas body ((variable, ty) : parameters)
@@ -140,7 +132,7 @@ convertInternal qualification precedence (E.ExpCaseMatch scrutinee alternatives)
 
 renderVariable :: T.TVarId -> Conversion String
 renderVariable variable = do
-  names <- mGet
+  names <- ask
   pure $ Map.findWithDefault (T.showVar variable) variable names
 
 allocatedNames :: Int -> [String] -> E.Expression -> Map T.TVarId String

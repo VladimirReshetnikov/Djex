@@ -28,7 +28,6 @@ import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 import Control.Monad.Trans.Except (runExceptT)
-import Control.Monad.Trans.MultiRWS (runMultiRWSTNil)
 import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.Pretty as HSE
@@ -399,8 +398,7 @@ tests = testGroup "Exference"
             , "class C a where"
             , "  method :: a -> a"
             ]
-          let methods = runIdentity $ runMultiRWSTNil
-                $ getClassMethods
+          let methods = runIdentity $ getClassMethods
                     (Map.fromList [(classBName, classB), (classAName, classA)])
                     [] Map.empty [parsedModule]
           case rights methods of
@@ -425,7 +423,7 @@ tests = testGroup "Exference"
             , "data Flag = Off | On"
             ]
           flag <- expectRight $ mkQualifiedName ["Fixture"] "Flag"
-          let extracted = runIdentity $ runMultiRWSTNil
+          let extracted = runIdentity
                 $ getDataConss Map.empty [] Map.empty [parsedModule]
           case extracted of
             [Right (_, DeconstructorBinding input _ _)] ->
@@ -440,7 +438,7 @@ tests = testGroup "Exference"
           this <- expectRight $ mkQualifiedName ["Fixture"] "This"
           that <- expectRight $ mkQualifiedName ["Fixture"] "That"
           let resultType = TypeApp (TypeCons choice) (TypeVar 0)
-              extracted = runIdentity $ runMultiRWSTNil
+              extracted = runIdentity
                 $ getDataConss Map.empty [] Map.empty [parsedModule]
           case extracted of
             [Right (constructors, DeconstructorBinding input fields False)] -> do
@@ -1211,8 +1209,7 @@ tests = testGroup "Exference"
             , "type Alias = Int"
             , "type Alias = Bool"
             ]
-          let results = runIdentity $ runMultiRWSTNil $
-                getTypeDecls [] [parsedModule]
+          let results = runIdentity $ getTypeDecls [] [parsedModule]
               synonyms = rights results
           aliasName <- expectRight $ mkQualifiedName ["M"] "Alias"
           map tdecl_name synonyms @?= [aliasName, aliasName]
@@ -1871,7 +1868,6 @@ parseTypeWithModePure
   -> String
   -> Either Diagnostic (HsType, TypeVarIndex)
 parseTypeWithModePure mode source = runIdentity
-  $ runMultiRWSTNil
   $ runExceptT
   $ parseType Map.empty Nothing [] Map.empty mode source
 
@@ -1967,6 +1963,5 @@ classEnvironmentFromSources
   -> IO (Either ClassEnvironmentLoadError StaticClassEnv)
 classEnvironmentFromSources sources = do
   modules <- mapM expectParsedModule sources
-  let result = runIdentity $ runMultiRWSTNil $
-        getClassEnv [] Map.empty modules
+  let result = runIdentity $ getClassEnv [] Map.empty modules
   pure $ fst <$> result

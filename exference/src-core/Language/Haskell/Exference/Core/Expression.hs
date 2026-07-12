@@ -1,5 +1,4 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Language.Haskell.Exference.Core.Expression
   ( Expression (..)
@@ -9,7 +8,6 @@ module Language.Haskell.Exference.Core.Expression
   , qualificationFromLevel
   , showExpression
   , fillExprHole
-  , collectVarTypes
   , allocateExpressionNames
   , allocateVariableNames
   )
@@ -19,15 +17,11 @@ where
 
 import Language.Haskell.Exference.Core.Types
 import qualified Data.List as L
-import Control.Monad ( forM_ )
 
 import Control.DeepSeq
 import GHC.Generics
 
-import Control.Monad.Trans.MultiRWS
-
 -- import Debug.Hood.Observe
-import Data.Map ( Map )
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Language.Haskell.Synthesis.Generated as Generated
@@ -83,44 +77,6 @@ instance NFData Expression
 --          ++ s
 --       )
 --     . showString " }"
-
-refreshVarTypeBinding :: MonadMultiState (Map TVarId HsType) m
-                      => TVarId
-                      -> HsType
-                      -> m ()
-refreshVarTypeBinding i ty = do
-  m <- mGet
-  case M.lookup i m of
-    Nothing             -> mSet $ M.insert i ty m
-    Just TypeVar{}      -> mSet $ M.insert i ty m
-    Just TypeConstant{} -> mSet $ M.insert i ty m
-    _                   -> return ()
-
-collectVarTypes :: MonadMultiState (Map TVarId HsType) m
-                => Expression
-                -> m ()
-collectVarTypes (ExpVar i ty)       = refreshVarTypeBinding i ty
-collectVarTypes ExpName{}           = return ()
-collectVarTypes (ExpLambda i ty se) = do
-  refreshVarTypeBinding i ty
-  collectVarTypes se
-collectVarTypes (ExpApply e1 e2)    = do
-  collectVarTypes e1
-  collectVarTypes e2
-collectVarTypes ExpHole{}           = return ()
-collectVarTypes (ExpLetMatch _ vars e1 e2) = do
-  vars `forM_` uncurry refreshVarTypeBinding
-  collectVarTypes e1
-  collectVarTypes e2
-collectVarTypes (ExpLet i ty e1 e2) = do
-  refreshVarTypeBinding i ty
-  collectVarTypes e1
-  collectVarTypes e2
-collectVarTypes (ExpCaseMatch se matches) = do
-  collectVarTypes se
-  matches `forM_` \(_, vars, me) -> do
-    vars `forM_` uncurry refreshVarTypeBinding
-    collectVarTypes me
 
 data ExpressionRenderError
   = ExpressionScopeError (Generated.ScopeError TVarId)

@@ -5,6 +5,7 @@
 
 module Language.Haskell.Exference.EnvironmentParser
   ( SourceEnvironment (..)
+  , EnvironmentLoadError (..)
   , parseModules
   , parseModulesSimple
   , environmentFromModuleAndRatings
@@ -78,6 +79,12 @@ data SourceEnvironment function = SourceEnvironment
   , sourceTypeSynonyms :: [HsTypeDecl]
   }
   deriving (Show)
+
+-- | Fatal source-loading phases.  Warnings remain in the writer channel, but
+-- a failed class graph cannot produce a searchable recovery environment.
+data EnvironmentLoadError
+  = ClassEnvironmentLoadFailure ClassEnvironmentLoadError
+  deriving (Eq, Show)
 
 -- | Unique-only compatibility index used by the historical type elaborator.
 -- The ordered field remains authoritative so duplicate declarations reach the
@@ -233,7 +240,8 @@ parseModules :: forall m r w s
                 , ContainsType [String] w
                 )
              => [(ParseMode, String)]
-             -> m (SourceEnvironment HsFunctionDecl)
+             -> m (Either EnvironmentLoadError
+                    (SourceEnvironment HsFunctionDecl))
 parseModules l = do
   rawTuples <- lift $ mapM hRead l
   let eParsed = map hParse rawTuples
@@ -257,7 +265,9 @@ parseModules l = do
   lefts typeDeclsE `forM_` (mTell . (:[]))
   let validTypeDecls = rights typeDeclsE
       typeDecls = uniqueTypeDeclMap validTypeDecls
-  (cntxt, n_insts) <- getClassEnv ds typeDecls mods
+  classResult <- getClassEnv ds typeDecls mods
+  let (cntxt, n_insts) = either
+        (const (emptyStaticClassEnv, 0)) id classResult
   let clss = sClassEnv_tclasses cntxt
       insts = sClassEnv_instances cntxt
   -- TODO: try to exfere this stuff
@@ -340,13 +350,16 @@ parseModules l = do
   builtInDeconstructors <- case builtInDeconstructorsResult of
     Left failure -> reportBuiltInFailure "deconstructors" failure >> pure []
     Right deconstructors -> pure deconstructors
-  return SourceEnvironment
-    { sourceFunctions = builtInDecls ++ decls
-    , sourceDeconstructors = builtInDeconstructors ++ deconss
-    , sourceClasses = cntxt
-    , sourceTypeNames = allValidNames
-    , sourceTypeSynonyms = validTypeDecls
-    }
+  let environment = SourceEnvironment
+        { sourceFunctions = builtInDecls ++ decls
+        , sourceDeconstructors = builtInDeconstructors ++ deconss
+        , sourceClasses = cntxt
+        , sourceTypeNames = allValidNames
+        , sourceTypeSynonyms = validTypeDecls
+        }
+  return $ case classResult of
+    Left failure -> Left $ ClassEnvironmentLoadFailure failure
+    Right _ -> Right environment
   where
     hRead :: (ParseMode, String) -> IO (ParseMode, String)
     hRead (mode, s) = (,) mode <$> readFile s
@@ -379,8 +392,9 @@ parseModulesSimple :: ( ContainsType [String] w
                       )
                    => String
                    -> MultiRWST r w s IO
-                        (SourceEnvironment RatedHsFunctionDecl)
-parseModulesSimple s = helper
+                        (Either EnvironmentLoadError
+                          (SourceEnvironment RatedHsFunctionDecl))
+parseModulesSimple s = fmap helper
                    <$> parseModules [(haskellSrcExtsParseMode s, s)]
  where
   addRating (a,b) = (a,0.0,b)
@@ -417,7 +431,8 @@ environmentFromModuleAndRatings :: ( ContainsType [String] w
                                 => String
                                 -> String
                                 -> MultiRWST r w s IO
-                                    (SourceEnvironment FunctionBinding)
+                                    (Either EnvironmentLoadError
+                                      (SourceEnvironment FunctionBinding))
 environmentFromModuleAndRatings modulePath ratingPath = do
   let exts1 = [ TypeOperators
               , ExplicitForAll
@@ -434,7 +449,7 @@ environmentFromModuleAndRatings modulePath ratingPath = do
                        False
                        Nothing
                        False
-  environment <- parseModules [(mode, modulePath)]
+  environmentResult <- parseModules [(mode, modulePath)]
   ratingsResult <- lift $ ratingsFromFile ratingPath
   ratings <- case ratingsResult of
     Left e -> do
@@ -443,22 +458,24 @@ environmentFromModuleAndRatings modulePath ratingPath = do
     Right parsedRatings -> pure parsedRatings
   let addRating (name, bindingType) = declToBinding
         (name, fromMaybe 0.0 $ lookup name ratings, bindingType)
-  return environment
-    { sourceFunctions = map addRating $ sourceFunctions environment }
+      addRatings environment = environment
+        { sourceFunctions = map addRating $ sourceFunctions environment }
+  return $ addRatings <$> environmentResult
 
 
 environmentFromPath :: ( ContainsType [String] w
                        )
                     => FilePath
                     -> MultiRWST r w s IO
-                         (SourceEnvironment FunctionBinding)
+                         (Either EnvironmentLoadError
+                           (SourceEnvironment FunctionBinding))
 environmentFromPath p = do
   files <- lift $ getDirectoryContents p
   -- Directory enumeration order is platform-dependent; stable ordering keeps
   -- diagnostics and duplicate resolution reproducible.
   let modules = ((p ++ "/")++) <$> sort (filter (".hs" `isSuffixOf`) files)
   let ratings = ((p ++ "/")++) <$> sort (filter (".ratings" `isSuffixOf`) files)
-  environment <- parseModules
+  environmentResult <- parseModules
     [ (mode, m)
     | m <- modules
     , let mode = haskellSrcExtsParseMode m]
@@ -471,6 +488,7 @@ environmentFromPath p = do
     (rName, rVal) <- rs
     return $ do
       dIds <- fmap join $ sequence $ do
+        environment <- either (const []) pure environmentResult
         (dName, _) <- sourceFunctions environment
         return $ do
           return $ do
@@ -490,5 +508,6 @@ environmentFromPath p = do
                 , fromMaybe 0.0 (lookup a rs')
                 , b
                 )
-  return environment
-    { sourceFunctions = map f $ sourceFunctions environment }
+      addRatings environment = environment
+        { sourceFunctions = map f $ sourceFunctions environment }
+  return $ addRatings <$> environmentResult

@@ -48,9 +48,11 @@ import MainConfig
 import Paths_exference
 
 import System.Environment ( getArgs )
+import System.Exit (exitFailure)
 import System.Console.GetOpt
 import Data.Version ( showVersion )
-import System.IO ( hSetBuffering, BufferMode(..), stdout, stderr )
+import System.IO
+  ( hPutStrLn, hSetBuffering, BufferMode(..), stdout, stderr )
 
 data Flag = Verbose Int
           | Version
@@ -126,8 +128,14 @@ main = do
         when (verbosity>0) $ lift $ do
           putStrLn $ "[Environment]"
           putStrLn $ "reading environment from " ++ envDir
-        (sourceEnvironment, messages :: [String]) <-
+        (sourceEnvironmentResult, messages :: [String]) <-
           withMultiWriterAW $ environmentFromPath envDir
+        sourceEnvironment <- case sourceEnvironmentResult of
+          Left failure -> lift $ do
+            hPutStrLn stderr $
+              "could not load source environment: " ++ show failure
+            exitFailure
+          Right environment -> pure environment
         let eSignatures = sourceFunctions sourceEnvironment
             eDeconss = sourceDeconstructors sourceEnvironment
             sEnv = sourceClasses sourceEnvironment

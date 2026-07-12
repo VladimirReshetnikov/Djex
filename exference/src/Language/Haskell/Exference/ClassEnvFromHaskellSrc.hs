@@ -3,7 +3,8 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Language.Haskell.Exference.ClassEnvFromHaskellSrc
-  ( getClassEnv
+  ( ClassEnvironmentLoadError (..)
+  , getClassEnv
   )
 where
 
@@ -11,7 +12,9 @@ import Control.Monad (forM, when)
 import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
 import Control.Monad.Trans.MultiRWS
 import Data.Either (lefts, rights)
-import Data.HList.ContainsType (ContainsType)
+import Data.Bifunctor (first)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Maybe (fromMaybe, maybeToList)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -34,39 +37,43 @@ data RawTypeClass = RawTypeClass
   , rawClassContext :: Maybe (Context SrcSpanInfo)
   }
 
+-- | Fatal phases of source class-environment construction.  Returning these
+-- explicitly prevents an observed-but-invalid class or instance from being
+-- erased and later reinterpreted as an unknown external declaration.
+data ClassEnvironmentLoadError
+  = ClassDeclarationErrors (NonEmpty String)
+  | InstanceDeclarationErrors (NonEmpty String)
+  | InvalidClassEnvironment ClassEnvError
+  deriving (Eq, Show)
+
 -- | Return the environment and the number of valid source instances found
--- before superclass inflation.  Diagnostics are accumulated in the writer.
+-- before superclass inflation.  Construction is transactional: no partial or
+-- empty recovery environment is returned for malformed source declarations.
 getClassEnv
-  :: (ContainsType [String] w, Monad m)
+  :: Monad m
   => [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> MultiRWST r w s m (StaticClassEnv, Int)
+  -> MultiRWST r w s m
+      (Either ClassEnvironmentLoadError (StaticClassEnv, Int))
 getClassEnv dataTypes typeDeclarations modules = do
   classResults <- getTypeClasses dataTypes typeDeclarations modules
-  let classErrors = lefts classResults
-  mapM_ (mTell . (: [])) classErrors
-  if not $ null classErrors
-    then pure (emptyStaticClassEnv, 0)
-    else do
+  case NonEmpty.nonEmpty $ lefts classResults of
+    Just classErrors -> pure $ Left $ ClassDeclarationErrors classErrors
+    Nothing -> do
       let classes = Map.fromList
             [ (tclass_name typeClass, typeClass)
             | typeClass <- rights classResults
             ]
       instanceResults <- getInstances classes dataTypes typeDeclarations modules
-      mapM_ (mTell . (: [])) $ lefts instanceResults
-      let instances = rights instanceResults
-          sourceInstanceCount = length instances
-      -- The checked core constructor validates the complete nominal graph and
-      -- performs instance inflation.  If the graph is invalid, returning an
-      -- empty environment and a truthful zero count is safer than exposing a
-      -- partially checked relation.
-      case mkStaticClassEnv (Map.elems classes) instances of
-        Left classEnvError -> do
-          mTell ["could not construct class environment: " ++ show classEnvError]
-          pure (emptyStaticClassEnv, 0)
-        Right classEnvironment ->
-          pure (classEnvironment, sourceInstanceCount)
+      case NonEmpty.nonEmpty $ lefts instanceResults of
+        Just instanceErrors ->
+          pure $ Left $ InstanceDeclarationErrors instanceErrors
+        Nothing -> do
+          let instances = rights instanceResults
+          pure $ (\environment -> (environment, length instances))
+            <$> first InvalidClassEnvironment
+              (mkStaticClassEnv (Map.elems classes) instances)
 
 getTypeClasses
   :: forall m r w s m0

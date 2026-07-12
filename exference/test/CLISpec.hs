@@ -1,7 +1,11 @@
 module Main (main) where
 
+import Control.Exception (bracket)
 import Data.List (isInfixOf)
-import System.Exit (ExitCode (ExitSuccess))
+import System.Directory
+  (createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
+import System.Exit (ExitCode (..))
+import System.IO (hClose, openTempFile)
 import System.Process (readProcessWithExitCode)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
@@ -13,6 +17,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "parse failures are controlled diagnostics" testParseFailure
   , testCase "ill-kinded queries stop before search" testKindFailure
   , testCase "invalid searches never enter reporting modes" testInvalidSearch
+  , testCase "invalid class environments fail closed" testInvalidEnvironment
   , testCase "version mode does not load the environment" testVersion
   ]
 
@@ -58,6 +63,25 @@ testInvalidSearch = do
   assertBool "environment-usage reporting must not evaluate an empty trace"
     (not $ "Prelude.last" `isInfixOf` output)
 
+testInvalidEnvironment :: Assertion
+testInvalidEnvironment = withTemporaryEnvironment $ \environmentDirectory -> do
+  writeFile (environmentDirectory ++ "/Broken.hs") $ unlines
+    [ "module Broken where"
+    , "class C a where"
+    , "class C a b where"
+    ]
+  (exitCode, output, errors) <- readProcessWithExitCode "exference"
+    ["--envdir", environmentDirectory, "a -> a"] ""
+  case exitCode of
+    ExitFailure _ -> pure ()
+    ExitSuccess -> fail "invalid class environment returned success"
+  assertContains "fatal class diagnostics belong on stderr"
+    "could not load source environment:" errors
+  assertContains "the duplicate class should remain visible"
+    "duplicate type class: C (Broken.C)" errors
+  assertBool "a failed environment must never enter synthesis"
+    (not $ "\\a -> a" `isInfixOf` output)
+
 testVersion :: Assertion
 testVersion = do
   output <- runExference ["--version"]
@@ -72,6 +96,15 @@ runExference arguments = do
   assertEqual ("exference stderr: " ++ errors) ExitSuccess exitCode
   assertEqual "exference should not write to stderr" "" errors
   pure output
+
+withTemporaryEnvironment :: (FilePath -> IO a) -> IO a
+withTemporaryEnvironment action = do
+  temporaryRoot <- getTemporaryDirectory
+  (path, handle) <- openTempFile temporaryRoot "exference-environment"
+  hClose handle
+  removeFile path
+  createDirectory path
+  bracket (pure path) removePathForcibly action
 
 assertContains :: String -> String -> String -> Assertion
 assertContains message needle haystack = assertBool

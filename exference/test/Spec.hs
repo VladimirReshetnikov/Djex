@@ -25,6 +25,7 @@ import qualified GHC.Generics as Generic
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.MultiRWS (runMultiRWSTNil, withMultiWriterAW)
 import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
@@ -84,7 +85,8 @@ import Language.Haskell.Exference
   , selectSortNExpressions
   )
 import Language.Haskell.Exference.EnvironmentParser
-  ( SourceEnvironment (..)
+  ( EnvironmentLoadError (..)
+  , SourceEnvironment (..)
   , compileWithDict
   , environmentFromModuleAndRatings
   , environmentFromPath
@@ -93,7 +95,8 @@ import Language.Haskell.Exference.EnvironmentParser
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
   )
-import Language.Haskell.Exference.ClassEnvFromHaskellSrc (getClassEnv)
+import Language.Haskell.Exference.ClassEnvFromHaskellSrc
+  (ClassEnvironmentLoadError (..), getClassEnv)
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc (convert, convertToFunc)
 import Language.Haskell.Exference.BindingsFromHaskellSrc (getClassMethods)
@@ -242,7 +245,7 @@ tests = testGroup "Exference"
           Map.keys (sClassEnv_tclasses environment)
             @?= [classAName, classBName]
       , testCase "frontend keeps equally spelled qualified classes distinct" $ do
-          (environment, messages) <- classEnvironmentFromSources
+          environment <- classEnvironmentFromSources
             [ unlines
                 [ "module A where"
                 , "class C a where"
@@ -252,12 +255,11 @@ tests = testGroup "Exference"
                 , "class C a b where"
                 ]
             ]
+            >>= expectRight
           classAName <- expectRight $ mkQualifiedName ["A"] "C"
           classBName <- expectRight $ mkQualifiedName ["B"] "C"
           Map.keys (sClassEnv_tclasses environment)
             @?= [classAName, classBName]
-          assertBool ("unexpected diagnostics: " ++ show messages)
-            $ not $ any ("duplicate type class" `isInfixOf`) messages
       , testCase "frontend rejects duplicate classes independently of order" $ do
           let source firstDeclaration secondDeclaration = unlines
                 [ "module M where"
@@ -266,18 +268,14 @@ tests = testGroup "Exference"
                 ]
               unary = "class C a where"
               binary = "class C a b where"
-              expected = "duplicate type class: C (M.C)"
-          (forwardEnvironment, forwardMessages) <- classEnvironmentFromSources
+              expected = Left $ ClassDeclarationErrors
+                ("duplicate type class: C (M.C)" :| [])
+          forwardResult <- classEnvironmentFromSources
             [source unary binary]
-          (reverseEnvironment, reverseMessages) <- classEnvironmentFromSources
+          reverseResult <- classEnvironmentFromSources
             [source binary unary]
-          Map.null (sClassEnv_tclasses forwardEnvironment) @?= True
-          Map.null (sClassEnv_tclasses reverseEnvironment) @?= True
-          assertBool ("missing duplicate diagnostic: " ++ show forwardMessages)
-            $ expected `elem` forwardMessages
-          assertBool ("missing duplicate diagnostic: " ++ show reverseMessages)
-            $ expected `elem` reverseMessages
-          forwardMessages @?= reverseMessages
+          forwardResult @?= expected
+          reverseResult @?= expected
       , testCase "superclass arity is checked against the class table" $ do
           let binary = HsTypeClass (name "Binary") [0, 1] []
               derived = HsTypeClass (name "Derived") [0]
@@ -290,7 +288,7 @@ tests = testGroup "Exference"
                 "wrong number of parameters for type class C: expected 2, got 1"
               expectedTooMany =
                 "wrong number of parameters for type class C: expected 2, got 3"
-          (_, messages) <- classEnvironmentFromSources
+          result <- classEnvironmentFromSources
             [ unlines
                 [ "module M where"
                 , "class C a b where"
@@ -298,22 +296,25 @@ tests = testGroup "Exference"
                 , "class C a b a => TooMany a where"
                 ]
             ]
-          assertBool ("missing too-few diagnostic: " ++ show messages)
-            $ expectedTooFew `elem` messages
-          assertBool ("missing too-many diagnostic: " ++ show messages)
-            $ expectedTooMany `elem` messages
+          case result of
+            Left (ClassDeclarationErrors (firstError :| remaining)) -> do
+              let errors = firstError : remaining
+              assertBool ("missing too-few diagnostic: " ++ show errors)
+                $ expectedTooFew `elem` errors
+              assertBool ("missing too-many diagnostic: " ++ show errors)
+                $ expectedTooMany `elem` errors
+            other -> fail $ "malformed superclasses were accepted: " ++ show other
       , testCase "frontend binds head variables before superclass arguments" $ do
-          (environment, messages) <- classEnvironmentFromSources
+          environment <- classEnvironmentFromSources
             [ unlines
                 [ "module M where"
                 , "class Pair a b where"
                 , "class Pair b a => Swap a b where"
                 ]
             ]
+            >>= expectRight
           pairName <- expectRight $ mkQualifiedName ["M"] "Pair"
           swapName <- expectRight $ mkQualifiedName ["M"] "Swap"
-          assertBool ("unexpected diagnostics: " ++ show messages)
-            $ null messages
           case Map.lookup swapName (sClassEnv_tclasses environment) of
             Nothing -> fail "Swap class was not elaborated"
             Just declaration -> do
@@ -321,15 +322,20 @@ tests = testGroup "Exference"
               tclass_constraints declaration @?=
                 [HsConstraint pairName [TypeVar 1, TypeVar 0]]
       , testCase "explicit instance foralls bind every used variable" $ do
-          (_, messages) <- classEnvironmentFromSources
+          result <- classEnvironmentFromSources
             [ unlines
                 [ "module M where"
                 , "class C a where"
                 , "instance forall a. C b"
                 ]
             ]
-          assertBool ("missing explicit-forall diagnostic: " ++ show messages)
-            $ any ("outside its explicit forall" `isInfixOf`) messages
+          case result of
+            Left (InstanceDeclarationErrors (firstError :| remaining)) ->
+              let errors = firstError : remaining
+              in assertBool
+                  ("missing explicit-forall diagnostic: " ++ show errors)
+                  $ any ("outside its explicit forall" `isInfixOf`) errors
+            other -> fail $ "malformed instance was accepted: " ++ show other
       , testCase "instance-head arity is checked against the class table" $ do
           let cls = HsTypeClass (name "C") [0, 1] []
               tooMany = HsInstance [] $ HsConstraint (name "C")
@@ -995,9 +1001,10 @@ tests = testGroup "Exference"
       , testCase "malformed ratings retain the parsed environment at defaults" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
-          (sourceEnvironment, messages :: [String]) <-
+          (sourceEnvironmentResult, messages :: [String]) <-
             runMultiRWSTNil $ withMultiWriterAW
               $ environmentFromModuleAndRatings modulePath modulePath
+          sourceEnvironment <- expectRight sourceEnvironmentResult
           categoryName <- expectRight
             $ mkQualifiedName ["Control", "Category"] "Category"
           identityName <- expectRight
@@ -1017,9 +1024,10 @@ tests = testGroup "Exference"
       , testCase "frontend source environments retain type synonyms" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/String.hs"
-          (sourceEnvironment, _ :: [String]) <- runMultiRWSTNil
+          (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
             $ withMultiWriterAW
             $ environmentFromModuleAndRatings modulePath modulePath
+          sourceEnvironment <- expectRight sourceEnvironmentResult
           shared <- expectRight
             $ toSynthesisSourceEnvironment sourceEnvironment
           stringName <- expectRight
@@ -1061,8 +1069,9 @@ tests = testGroup "Exference"
               $ toSynthesisName aliasName)
       , testCase "the shipped source environment seals as one inventory" $ do
           environmentDirectory <- getDataFileName "environment"
-          (sourceEnvironment, _ :: [String]) <- runMultiRWSTNil
+          (sourceEnvironmentResult, _ :: [String]) <- runMultiRWSTNil
             $ withMultiWriterAW $ environmentFromPath environmentDirectory
+          sourceEnvironment <- expectRight sourceEnvironmentResult
           case toSynthesisSourceInventory sourceEnvironment of
             Left conversionError -> fail $
               "shipped environment failed shared validation: "
@@ -1120,15 +1129,18 @@ tests = testGroup "Exference"
           assertBool ("missing constraint-class diagnostic: " ++ show messages)
             $ "unknown constraint class 'Functor' used in the binding Data.Void.vacuous"
                 `elem` messages
-      , testCase "inflated instances do not duplicate constructor warnings" $ do
+      , testCase "partial class inventories fail before advisory warnings" $ do
           environmentDirectory <- getDataFileName "environment"
           let paths = map ((environmentDirectory ++ "/") ++)
                 ["Eq.hs", "Ord.hs"]
               warning = "unknown type constructor 'Data.Monoid.Last' used in class instances"
-          (_, (messages :: [String])) <- runMultiRWSTNil
+          (result, (messages :: [String])) <- runMultiRWSTNil
             $ withMultiWriterAW $ parseModules
             [(haskellSrcExtsParseMode path, path) | path <- paths]
-          length (filter (== warning) messages) @?= 1
+          case result of
+            Left (ClassEnvironmentLoadFailure _) -> pure ()
+            Right _ -> fail "an incomplete class inventory was accepted"
+          length (filter (== warning) messages) @?= 0
       , testCase "qualified names reject empty path segments" $
           case parseQualifiedName "Data..map" of
             Left _ -> pure ()
@@ -1591,7 +1603,8 @@ loadEnvironmentAndMessages environmentDirectory = do
   ((bindings, classEnvironment), messages) <- runMultiRWSTNil
     $ withMultiWriterAW
     $ do
-        environment <- environmentFromPath environmentDirectory
+        environmentResult <- environmentFromPath environmentDirectory
+        environment <- either (lift . fail . show) pure environmentResult
         pure (sourceFunctions environment, sourceClasses environment)
   pure (bindings, classEnvironment, messages)
 
@@ -1630,11 +1643,11 @@ expectParsedModule source = case HSE.parseModuleWithMode
   HSE.ParseOk modul -> pure modul
   failure -> fail $ "module did not parse: " ++ show failure
 
-classEnvironmentFromSources :: [String] -> IO (StaticClassEnv, [String])
+classEnvironmentFromSources
+  :: [String]
+  -> IO (Either ClassEnvironmentLoadError StaticClassEnv)
 classEnvironmentFromSources sources = do
   modules <- mapM expectParsedModule sources
-  let ((environment, _sourceInstanceCount), messages) = runIdentity
-        $ runMultiRWSTNil
-        $ withMultiWriterAW
-        $ getClassEnv [] Map.empty modules
-  pure (environment, messages)
+  let result = runIdentity $ runMultiRWSTNil $
+        getClassEnv [] Map.empty modules
+  pure $ fst <$> result

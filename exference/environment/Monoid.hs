@@ -8,13 +8,12 @@ class Monoid a where
   mconcat :: [a] -> a
 
 
-instance Monoid Ordering  
+instance Monoid Prelude.Ordering
 instance Monoid ()  
 instance Monoid Any   
 instance Monoid All   
-instance Monoid Event   
 instance Monoid [a]   
-instance Monoid a => Monoid (Maybe a)  
+instance Monoid a => Monoid (Data.Maybe.Maybe a)
 instance Monoid (Last a)  
 instance Monoid (First a)   
 instance Prelude.Num a => Monoid (Product a)  
@@ -24,7 +23,7 @@ instance Monoid a => Monoid (Dual a)
 -- instance Monoid b => Monoid (a -> b)  
 instance (Monoid a, Monoid b) => Monoid (a, b)  
 -- instance Monoid (Proxy * s)   
-instance Monoid a => Monoid (Const a b)   
+instance Monoid a => Monoid (Data.Functor.Const.Const a b)
 -- instance Typeable (* -> Constraint) Monoid  
 instance (Monoid a, Monoid b, Monoid c) => Monoid (a, b, c)   
 instance (Monoid a, Monoid b, Monoid c, Monoid d) => Monoid (a, b, c, d)  

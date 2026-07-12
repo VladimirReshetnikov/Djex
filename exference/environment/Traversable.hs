@@ -10,8 +10,8 @@ class (Data.Functor.Functor t, Data.Foldable.Foldable t) => Traversable t where
 
 instance Traversable []
 instance Traversable Data.Maybe.Maybe
-instance Traversable Identity
+instance Traversable Data.Functor.Identity.Identity
 -- instance Traversable (Data.Either.Either a)  -- cause "unused" problems
 -- instance Traversable ((,) a)     -- cause "unused" problems
 -- instance Traversable (Proxy *)
-instance Traversable (Const m)
+instance Traversable (Data.Functor.Const.Const m)

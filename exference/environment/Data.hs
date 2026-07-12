@@ -60,7 +60,7 @@ instance Data Data.Int.Int16
 instance Data Data.Int.Int32
 instance Data Data.Int.Int64
 instance Data Prelude.Integer
-instance Data Data.Ord.Ordering
+instance Data Prelude.Ordering
 instance Data Data.Word.Word
 instance Data Data.Word.Word8
 instance Data Data.Word.Word16

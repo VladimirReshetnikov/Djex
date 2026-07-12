@@ -2,16 +2,20 @@ module Control.Arrow where
 
 
 
-class Category a => Arrow a where
+class Control.Category.Category a => Arrow a where
   arr :: (b -> c) -> a b c
   first :: a b c -> a (b, d) (c, d)
   second :: a b c -> a (d, b) (d, c)
   (***) :: a b c -> a b' c' -> a (b, b') (c, c')
   (&&&) :: a b c -> a b c' -> a b (c, c')
 
-instance Control.Monad m => Arrow (Kleisli m)
+instance Control.Monad.Monad m => Arrow (Kleisli m)
 
 newtype Kleisli m a b = Kleisli (a -> m b)
+newtype ArrowMonad a b = ArrowMonad (a () b)
+
+class Arrow a => ArrowApply a where
+  app :: a (a b c, b) c
 
 class Arrow a => ArrowZero a where
   zeroArrow :: a b c

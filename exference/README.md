@@ -121,7 +121,10 @@ any / the right solution. Some common current limitations are:
 - Kinds are not checked, e.g. `Maybe -> Either`
   (which can be seen as both advantage and disadvantage, see report);
 - The environment is composed by hand currently, and does only include parts
-  of base plus a few other selected modules. Additions welcome!
+  of base plus a few other selected modules. Its canonical 41-class,
+  485-source-instance inventory is checked at load time and pinned by tests.
+  The [normalization report](docs/reports/2026-07-11-environment-normalization.md)
+  documents its naming and validation rules. Additions welcome!
 - Pattern-matching on multiple-constructor data-types is not supported;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
 

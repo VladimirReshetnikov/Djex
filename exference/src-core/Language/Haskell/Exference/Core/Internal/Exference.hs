@@ -346,26 +346,15 @@ firstClassConstraintError input = listToMaybe
   environment = input_envClasses input
   queryChecks = map
     (validateKnownConstraintInEnv environment QueryConstraint)
-    (constraintsInType $ input_goalType input)
+    (typeConstraints $ input_goalType input)
   bindingChecks =
     [ validateKnownConstraintInEnv environment
         (BindingConstraint $ functionName binding)
         constraint
     | binding <- input_envFuncs input
     , constraint <- functionConstraints binding
-        ++ constraintsInType (functionBindingType binding)
+        ++ typeConstraints (functionBindingType binding)
     ]
-
-constraintsInType :: HsType -> [HsConstraint]
-constraintsInType TypeVar{} = []
-constraintsInType TypeConstant{} = []
-constraintsInType TypeCons{} = []
-constraintsInType (TypeArrow parameter result) =
-  constraintsInType parameter ++ constraintsInType result
-constraintsInType (TypeApp function parameter) =
-  constraintsInType function ++ constraintsInType parameter
-constraintsInType (TypeForall _ constraints body) =
-  constraints ++ constraintsInType body
 
 isFiniteRating :: Penalty -> Bool
 isFiniteRating = \rating -> let value = penaltyValue rating

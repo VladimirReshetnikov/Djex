@@ -185,35 +185,37 @@ convertQName _ _ (Qual _ mn syntaxName) =
   convertModuleNameChecked mn syntaxName
 convertQName (Just defaultModule) knownNames (UnQual _ syntaxName) = do
   localName <- convertModuleNameChecked defaultModule syntaxName
-  resolveUnqualifiedName localName knownNames
+  externalName <- convertNameChecked syntaxName
+  resolveUnqualifiedName localName externalName knownNames
 convertQName Nothing knownNames (UnQual _ syntaxName) = do
   unqualified <- convertNameChecked syntaxName
-  resolveUnqualifiedName unqualified knownNames
+  resolveUnqualifiedName unqualified unqualified knownNames
 
 -- The historical environment modules intentionally omit their imports.  We
 -- can still model the useful part of Haskell name lookup without manufacturing
 -- recursive placeholder declarations: a declaration in the current module
 -- wins, otherwise a unique known occurrence is imported, and multiple matches
--- are rejected as ambiguous.  When no declaration is known, retaining the
--- local (or unqualified) spelling preserves diagnostics for genuinely external
--- names.
+-- are rejected as ambiguous.  When no declaration is known, the unqualified
+-- spelling is retained as one external identity instead of fabricating a
+-- different current-module declaration in every environment file.
 resolveUnqualifiedName
   :: T.QualifiedName
+  -> T.QualifiedName
   -> [T.QualifiedName]
   -> Either String T.QualifiedName
-resolveUnqualifiedName fallback knownNames
-  | fallback `elem` candidates = Right fallback
+resolveUnqualifiedName localName externalName knownNames
+  | localName `elem` candidates = Right localName
   | otherwise = case candidates of
-      [] -> Right fallback
+      [] -> Right externalName
       [candidate] -> Right candidate
-      _ -> Left $ "ambiguous unqualified name " ++ show fallback
+      _ -> Left $ "ambiguous unqualified name " ++ show externalName
         ++ "; matches " ++ intercalate ", " (map show candidates)
  where
   candidates = S.toAscList $ S.fromList
         [ candidate
         | candidate <- knownNames
         , T.qualifiedNameOccurrence candidate
-            == T.qualifiedNameOccurrence fallback
+            == T.qualifiedNameOccurrence externalName
         ]
 
 -- | Source-compatible unchecked facade.  HSE exposes its syntax constructors,

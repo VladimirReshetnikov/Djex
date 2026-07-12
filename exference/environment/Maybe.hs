@@ -13,10 +13,9 @@ maybeToList :: Maybe a -> [a]
 
 instance Control.Monad.Monad Maybe
 instance Data.Functor.Functor Maybe
-instance Control.Monad.MonadFix Maybe
 instance Control.Applicative.Applicative Maybe
 instance Data.Foldable.Foldable Maybe
-instance Data.Traversable.Travesable Maybe
+instance Data.Traversable.Traversable Maybe
 instance GHC.Generics.Generic1 Maybe
 instance Control.Monad.MonadPlus Maybe
 instance Control.Applicative.Alternative Maybe

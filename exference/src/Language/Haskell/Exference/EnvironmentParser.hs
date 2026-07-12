@@ -53,6 +53,7 @@ import Control.Monad.Trans.MultiRWS
 import Data.HList.ContainsType
 
 import qualified Data.Map.Strict as M
+import qualified Data.Set as S
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
@@ -166,25 +167,65 @@ parseModules l = do
   let clssNames = M.keys clss
   let allValidNames = ds ++ clssNames
   let
-    dataToBeChecked :: [(String, HsType)]
-    dataToBeChecked =
-         [ ("the instance data for " ++ show i, t)
-         | insts' <- M.elems insts
-         , i <- insts'
-         , constraint <- instance_head i : instance_constraints i
-         , t <- constraint_params constraint]
-      ++ [ ("the superclass data for " ++ show (tclass_name typeClass), t)
-         | typeClass <- M.elems clss
-         , constraint <- tclass_constraints typeClass
-         , t <- constraint_params constraint]
-      ++ [ ("the binding " ++ show n, t)
-         | (n, t) <- decls]
-  let
-    check :: String -> HsType -> m ()
-    check s t = do
-      findInvalidNames allValidNames t `forM_` \n ->
-        mTell ["unknown binding '"++show n++"' used in " ++ s]
-  dataToBeChecked `forM_` uncurry check
+    warnUnknownTypeConstructors :: String -> [HsType] -> m ()
+    warnUnknownTypeConstructors context types = forM_
+      (S.toAscList $ S.fromList $ concatMap (findInvalidNames allValidNames) types)
+      $ \unknownName -> mTell
+          [ "unknown type constructor '" ++ show unknownName
+            ++ "' used in " ++ context
+          ]
+
+    warnBindingConstraints :: QualifiedName -> HsType -> m ()
+    warnBindingConstraints bindingName bindingType = forM_
+      (S.toAscList $ S.fromList
+        [ renderConstraintFailure bindingName constraint failure
+        | constraint <- typeConstraints bindingType
+        , Left failure <-
+            [validateConstraintInEnv cntxt
+              (BindingConstraint bindingName) constraint]
+        ])
+      (mTell . (: []))
+
+    renderConstraintFailure
+      :: QualifiedName
+      -> HsConstraint
+      -> ClassEnvError
+      -> String
+    renderConstraintFailure bindingName _
+        (UnknownConstraintClass _ className) =
+      "unknown constraint class '" ++ show className
+        ++ "' used in the binding " ++ show bindingName
+    renderConstraintFailure bindingName constraint failure =
+      "invalid class constraint '" ++ show constraint
+        ++ "' used in the binding " ++ show bindingName
+        ++ ": " ++ show failure
+
+    instanceTypes =
+      [ parameter
+      | indexedInstances <- M.elems insts
+      , instanceDeclaration <- indexedInstances
+      , constraint <- instance_head instanceDeclaration
+          : instance_constraints instanceDeclaration
+      , parameter <- constraint_params constraint
+      ]
+
+  -- Instance inflation can place the same source type under several implied
+  -- class heads.  Validate their combined type-constructor set once so an
+  -- external constructor produces one useful warning rather than a cascade.
+  warnUnknownTypeConstructors "class instances" instanceTypes
+  forM_ (M.elems clss) $ \typeClass -> warnUnknownTypeConstructors
+    ("the superclass data for " ++ show (tclass_name typeClass))
+    [ parameter
+    | constraint <- tclass_constraints typeClass
+    , parameter <- constraint_params constraint
+    ]
+  forM_ decls $ \(bindingName, bindingType) -> do
+    warnUnknownTypeConstructors
+      ("the binding " ++ show bindingName) [bindingType]
+    -- Module loading has a complete class inventory and therefore uses the
+    -- strict validator.  Public ad-hoc search input deliberately retains its
+    -- separate open-world policy for unknown external classes.
+    warnBindingConstraints bindingName bindingType
   mTell ["got " ++ show (length clss) ++ " classes"]
   mTell ["and " ++ show (n_insts) ++ " instances"]
   mTell ["(-> " ++ show (length $ concat $ M.elems $ insts) ++ " instances after inflation)"]
@@ -285,7 +326,7 @@ environmentFromModuleAndRatings :: ( ContainsType [String] w
                                     , [QualifiedName]
                                     , TypeDeclMap
                                     )
-environmentFromModuleAndRatings s1 s2 = do
+environmentFromModuleAndRatings modulePath ratingPath = do
   let exts1 = [ TypeOperators
               , ExplicitForAll
               , ExistentialQuantification
@@ -294,26 +335,23 @@ environmentFromModuleAndRatings s1 s2 = do
               , FlexibleContexts
               , MultiParamTypeClasses ]
       exts2 = map EnableExtension exts1
-      mode = ParseMode (s1++".hs")
+      mode = ParseMode modulePath
                        Haskell2010
                        exts2
                        False
                        False
                        Nothing
                        False
-  (decls, deconss, cntxt, ds, tdm) <- parseModules [(mode, s1)]
-  r <- lift $ ratingsFromFile s2
-  case r of
+  (decls, deconss, cntxt, ds, tdm) <- parseModules [(mode, modulePath)]
+  ratingsResult <- lift $ ratingsFromFile ratingPath
+  ratings <- case ratingsResult of
     Left e -> do
-      mTell ["could not parse ratings!", show e]
-      return ([], [], cntxt, [], tdm)
-    Right ratings -> do
-      let f (a,b) = declToBinding
-                  $ ( a
-                    , fromMaybe 0.0 (lookup a ratings)
-                    , b
-                    )
-      return $ (map f decls, deconss, cntxt, ds, tdm)
+      mTell ["could not parse rating file", show e]
+      pure []
+    Right parsedRatings -> pure parsedRatings
+  let addRating (name, bindingType) = declToBinding
+        (name, fromMaybe 0.0 $ lookup name ratings, bindingType)
+  return $ (map addRating decls, deconss, cntxt, ds, tdm)
 
 
 environmentFromPath :: ( ContainsType [String] w

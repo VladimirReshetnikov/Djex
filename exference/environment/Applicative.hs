@@ -16,18 +16,20 @@ liftA2 :: Applicative f => (a1 -> a2 -> r) -> f a1 -> f a2 -> f r
 liftA3 :: Applicative f => (a1 -> a2 -> a3 -> r) -> f a1 -> f a2 -> f a3 -> f r 
 
 instance Data.Monoid.Monoid a => Applicative ((,) a)
-instance Arrow a => Applicative (ArrowMonad a)
-instance Control.Monad.Monad m => Applicative (Control.Monad.WrappedMonad m)
-instance Data.Monoid.Monoid m => Applicative (Const m)
-instance Arrow a => Applicative (WrappedArrow a b)
+instance Arrow a => Applicative (Control.Arrow.ArrowMonad a)
+instance Control.Monad.Monad m => Applicative (Control.Applicative.WrappedMonad m)
+instance Data.Monoid.Monoid m => Applicative (Data.Functor.Const.Const m)
+instance Arrow a => Applicative (Control.Applicative.WrappedArrow a b)
 -- instance Typeable ((* -> *) -> Constraint) Applicative
 
 instance Alternative []
-instance ArrowPlus a => Alternative (ArrowMonad a)
-instance Control.Monad.MonadPlus m => Alternative (WrappedMonad m)
+instance ArrowPlus a => Alternative (Control.Arrow.ArrowMonad a)
+instance Control.Monad.MonadPlus m => Alternative (Control.Applicative.WrappedMonad m)
 -- instance Alternative f => Alternative (Alt * f)
-instance (ArrowZero a, ArrowPlus a) => Alternative (WrappedArrow a b)
+instance (ArrowZero a, ArrowPlus a) => Alternative (Control.Applicative.WrappedArrow a b)
 
+data WrappedMonad m a
+data WrappedArrow a b c
 data ZipList a
 
 instance Data.Functor.Functor ZipList

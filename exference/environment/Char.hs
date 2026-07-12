@@ -15,9 +15,7 @@ instance Text.Show.Show Char
 instance Data.Ix.Ix Char
 instance GHC.Generics.Generic Char
 instance Foreign.Storable.Storable Char
-instance Text.Printf.IsChar Char  
 instance Text.Printf.PrintfArg Char   
-instance Data.String.IsString [Char]
 
 ord :: Char -> Data.Int.Int
 chr :: Data.Int.Int -> Char

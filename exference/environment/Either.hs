@@ -9,13 +9,11 @@ data Either a b = Left a
 -- either :: (a->c) -> (b->c) -> Either a b -> c
 partitionEithers :: [Either a b] -> ([a], [b]) 
 
-instance Bifunctor Either
 instance Control.Monad.Monad (Either e)
 instance Data.Functor.Functor (Either a)
-instance Control.Monad.MonadFix (Either e)
 instance Control.Applicative.Applicative (Either e)
 instance Data.Foldable.Foldable (Either a)
-instance Data.Traversable.Travesable (Either a)
+instance Data.Traversable.Traversable (Either a)
 instance GHC.Generics.Generic1 (Either a)
 instance (Data.Eq.Eq a, Data.Eq.Eq b) => Data.Eq.Eq (Either a b)
 instance (Data.Ord.Ord a, Data.Ord.Ord b) => Data.Ord.Ord (Either a b)

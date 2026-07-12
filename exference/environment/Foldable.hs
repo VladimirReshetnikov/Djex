@@ -14,8 +14,8 @@ asum :: (Foldable t, Control.Applicative.Alternative f)
 
 instance Foldable []
 instance Foldable Data.Maybe.Maybe
-instance Foldable Identity
+instance Foldable Data.Functor.Identity.Identity
 instance Foldable (Data.Either.Either a)
 instance Foldable ((,) a)
 -- instance Foldable (Proxy *)
-instance Foldable (Const m)
+instance Foldable (Data.Functor.Const.Const m)

@@ -46,10 +46,15 @@ data-files:
   environment/Comonad.hs
   environment/Complex.hs
   environment/Cont.hs
+  environment/ControlConcurrentSTM.hs
+  environment/ControlException.hs
   environment/ControlMonadIOClass.hs
+  environment/ControlMonadST.hs
   environment/ControlMonadTransClass.hs
-  environment/DataFunction.hs
   environment/Data.hs
+  environment/DataFunction.hs
+  environment/DataFunctorConst.hs
+  environment/DataFunctorIdentity.hs
   environment/Either.hs
   environment/EitherT.hs
   environment/Eq.hs
@@ -74,8 +79,11 @@ data-files:
   environment/State.hs
   environment/Storable.hs
   environment/String.hs
+  environment/SystemConsoleGetOpt.hs
   environment/SystemIO.hs
   environment/Text.hs
+  environment/TextParserCombinatorsReadP.hs
+  environment/TextParserCombinatorsReadPrec.hs
   environment/Traversable.hs
   environment/Typeable.hs
   environment/Void.hs

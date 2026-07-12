@@ -2,28 +2,26 @@ module Data.Ord where
 
 
 
-data Ordering
-
 class Data.Eq.Eq a => Ord a where
-  compare :: a -> a -> Ordering
+  compare :: a -> a -> Prelude.Ordering
   (<)  :: a -> a -> Data.Bool.Bool
   (>=) :: a -> a -> Data.Bool.Bool
   (>)  :: a -> a -> Data.Bool.Bool
   (<=) :: a -> a -> Data.Bool.Bool
 
-comparing :: Ord a => (b -> a) -> b -> b -> Ordering
+comparing :: Ord a => (b -> a) -> b -> b -> Prelude.Ordering
 
 instance Ord a => Ord [a]
-instance Prelude.Integral a => Ord (Ratio a)
+instance Prelude.Integral a => Ord (Data.Ratio.Ratio a)
 -- instance Ord p => Ord (Par1 p)
 instance Ord a => Ord (Data.Maybe.Maybe a)
-instance Ord a => Ord (Down a)
-instance Ord a => Ord (Last a)
-instance Ord a => Ord (First a)
-instance Ord a => Ord (Product a)
-instance Ord a => Ord (Sum a)
-instance Ord a => Ord (Dual a)
-instance Ord a => Ord (ZipList a)
+instance Ord a => Ord (Data.Ord.Down a)
+instance Ord a => Ord (Data.Monoid.Last a)
+instance Ord a => Ord (Data.Monoid.First a)
+instance Ord a => Ord (Data.Monoid.Product a)
+instance Ord a => Ord (Data.Monoid.Sum a)
+instance Ord a => Ord (Data.Monoid.Dual a)
+instance Ord a => Ord (Control.Applicative.ZipList a)
 instance (Ord a, Ord b) => Ord (Data.Either.Either a b)
 -- instance Ord (f p) => Ord (Rec1 f p)
 instance (Ord a, Ord b) => Ord (a, b)

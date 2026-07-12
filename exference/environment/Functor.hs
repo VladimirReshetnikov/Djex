@@ -7,23 +7,22 @@ class Functor f where
   -- (<$) :: a -> f b -> f a
 
 instance Functor []
-instance Functor IO
+instance Functor System.IO.IO
 instance Functor Data.Maybe.Maybe
-instance Functor ReadP
-instance Functor ReadPrec
-instance Functor STM
-instance Functor Handler
-instance Functor ZipList
-instance Functor ArgDescr
-instance Functor OptDescr
-instance Functor ArgOrder
+instance Functor Text.ParserCombinators.ReadP.ReadP
+instance Functor Text.ParserCombinators.ReadPrec.ReadPrec
+instance Functor Control.Concurrent.STM.STM
+instance Functor Control.Exception.Handler
+instance Functor Control.Applicative.ZipList
+instance Functor System.Console.GetOpt.ArgDescr
+instance Functor System.Console.GetOpt.OptDescr
+instance Functor System.Console.GetOpt.ArgOrder
 -- instance Functor ((->) r)
 instance Functor (Data.Either.Either a)
 instance Functor ((,) a)
-instance Functor (ST s)
+instance Functor (Control.Monad.ST.ST s)
 -- instance Functor (Proxy *)
-instance Arrow a => Functor (ArrowMonad a)
-instance Functor (ST s)
-instance Control.Monad.Monad m => Functor (WrappedMonad m)
-instance Functor (Const m)
-instance Arrow a => Functor (WrappedArrow a b)
+instance Arrow a => Functor (Control.Arrow.ArrowMonad a)
+instance Control.Monad.Monad m => Functor (Control.Applicative.WrappedMonad m)
+instance Functor (Data.Functor.Const.Const m)
+instance Arrow a => Functor (Control.Applicative.WrappedArrow a b)

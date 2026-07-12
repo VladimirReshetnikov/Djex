@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Main (main) where
 
 import Control.DeepSeq (force)
@@ -69,7 +71,9 @@ import Language.Haskell.Exference
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( compileWithDict
+  , environmentFromModuleAndRatings
   , environmentFromPath
+  , parseModules
   , parseRatings
   )
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc (getClassEnv)
@@ -732,6 +736,54 @@ tests = testGroup "Exference"
       , testCase "ratings reject non-finite values" $
           first diagnosticMessage (parseRatings "foo NaN")
             @?= Left "rating for foo must be finite: NaN"
+      , testCase "malformed ratings retain the parsed environment at defaults" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let modulePath = environmentDirectory ++ "/Category.hs"
+          ((bindings, deconstructors, classes, names, _),
+              (messages :: [String])) <-
+            runMultiRWSTNil $ withMultiWriterAW
+              $ environmentFromModuleAndRatings modulePath modulePath
+          categoryName <- expectRight
+            $ mkQualifiedName ["Control", "Category"] "Category"
+          identityName <- expectRight
+            $ mkQualifiedName ["Control", "Category"] "id"
+          assertBool "malformed ratings discarded parsed deconstructors"
+            $ not $ null deconstructors
+          Map.member categoryName (sClassEnv_tclasses classes) @?= True
+          assertBool "malformed ratings discarded parsed class names"
+            $ categoryName `elem` names
+          case find ((== identityName) . functionName) bindings of
+            Nothing -> fail "malformed ratings discarded parsed declarations"
+            Just binding -> functionPenalty binding @?= Penalty 0
+          assertBool ("missing rating diagnostic: " ++ show messages)
+            $ "could not parse rating file" `elem` messages
+      , testCase "loader names unknown type constructors precisely" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let modulePath = environmentDirectory ++ "/Char.hs"
+          (_, (messages :: [String])) <- runMultiRWSTNil $ withMultiWriterAW
+            $ parseModules [(haskellSrcExtsParseMode modulePath, modulePath)]
+          assertBool ("missing type-constructor diagnostic: " ++ show messages)
+            $ "unknown type constructor 'Data.Int.Int' used in the binding Data.Char.ord"
+                `elem` messages
+          assertBool ("legacy diagnostic survived: " ++ show messages)
+            $ not $ any ("unknown binding" `isInfixOf`) messages
+      , testCase "loader validates signature classes against its inventory" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let modulePath = environmentDirectory ++ "/Void.hs"
+          (_, (messages :: [String])) <- runMultiRWSTNil $ withMultiWriterAW
+            $ parseModules [(haskellSrcExtsParseMode modulePath, modulePath)]
+          assertBool ("missing constraint-class diagnostic: " ++ show messages)
+            $ "unknown constraint class 'Functor' used in the binding Data.Void.vacuous"
+                `elem` messages
+      , testCase "inflated instances do not duplicate constructor warnings" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let paths = map ((environmentDirectory ++ "/") ++)
+                ["Eq.hs", "Ord.hs"]
+              warning = "unknown type constructor 'Data.Maybe.Maybe' used in class instances"
+          (_, (messages :: [String])) <- runMultiRWSTNil
+            $ withMultiWriterAW $ parseModules
+            [(haskellSrcExtsParseMode path, path) | path <- paths]
+          length (filter (== warning) messages) @?= 1
       , testCase "qualified names reject empty path segments" $
           case parseQualifiedName "Data..map" of
             Left _ -> pure ()
@@ -765,6 +817,13 @@ tests = testGroup "Exference"
               currentModule = HSE.ModuleName HSE.noSrcSpan "Current"
           convertQName (Just currentModule) [imported] syntaxName
             @?= Right imported
+      , testCase "module lookup preserves an unknown external occurrence" $ do
+          external <- expectRight $ mkQualifiedName [] "C"
+          let syntaxName = HSE.UnQual HSE.noSrcSpan
+                (HSE.Ident HSE.noSrcSpan "C")
+              currentModule = HSE.ModuleName HSE.noSrcSpan "Current"
+          convertQName (Just currentModule) [] syntaxName
+            @?= Right external
       , testCase "module lookup diagnoses ambiguous imported occurrences" $ do
           importedA <- expectRight $ mkQualifiedName ["A"] "C"
           importedB <- expectRight $ mkQualifiedName ["B"] "C"
@@ -861,6 +920,20 @@ tests = testGroup "Exference"
             (not $ Map.null $ sClassEnv_tclasses classEnvironment)
           assertBool "the shipped instance index is empty"
             (not $ Map.null $ sClassEnv_instances classEnvironment)
+          Map.size (sClassEnv_tclasses classEnvironment) @?= 41
+          sum (map length $ Map.elems $ sClassEnv_instances classEnvironment)
+            @?= 535
+          assertBool "unexpected source-instance count"
+            $ "and 485 instances" `elem` messages
+          assertBool "unexpected function-declaration count"
+            $ "and 156 function decls" `elem` messages
+          assertBool ("unexpected shipped-environment diagnostics: "
+              ++ show messages)
+            $ not $ any (\message -> any (`isInfixOf` message)
+                [ "unknown type constructor"
+                , "unknown constraint class"
+                , "rating could not be applied"
+                ]) messages
           (goal, _) <- expectRight $ parseTypePure "()"
           case findOneExpression identityInput
               { input_goalType = goal

@@ -99,10 +99,6 @@ Data.Ord.compare           4.0
 Data.Char.ord              3.0
 Data.Char.chr              3.0
 
-Data.Data.gmapQi           3.0
-
-Control.Comonad.extract    9.0
-
 Data.Text.pack             6.0
 Data.Text.unpack           6.0
 

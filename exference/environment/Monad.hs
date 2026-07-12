@@ -18,19 +18,18 @@ msum :: (Foldable t, MonadPlus m) => t (m a) -> m a
 mfilter :: MonadPlus m => (a -> Data.Bool.Bool) -> m a -> m a 
 zipWithM :: Monad m => (a -> b -> m c) -> [a] -> [b] -> m [c] 
 foldM :: (Foldable t, Monad m) => (b -> a -> m b) -> b -> t a -> m b 
-forever :: Monad m => m () -> m Void
+forever :: Monad m => m () -> m Data.Void.Void
 (>>) :: Monad m => m () -> m b -> m b
 
 instance Monad []
-instance Monad IO
+instance Monad System.IO.IO
 instance Monad Data.Maybe.Maybe
-instance Monad ReadP
-instance Monad ReadPrec
-instance Monad STM
+instance Monad Text.ParserCombinators.ReadP.ReadP
+instance Monad Text.ParserCombinators.ReadPrec.ReadPrec
+instance Monad Control.Concurrent.STM.STM
 -- instance Monad ((->) r)
 instance Monad (Data.Either.Either e)
-instance Monad (ST s)
+instance Monad (Control.Monad.ST.ST s)
 -- instance Monad (Proxy *)
-instance ArrowApply a => Monad (ArrowMonad a)
-instance Monad (ST s)
-instance Monad m => Monad (WrappedMonad m)
+instance ArrowApply a => Monad (Control.Arrow.ArrowMonad a)
+instance Monad m => Monad (Control.Applicative.WrappedMonad m)

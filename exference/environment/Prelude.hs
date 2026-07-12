@@ -14,7 +14,7 @@ class (Text.Show.Show a, Data.Eq.Eq a) => Num a where
   fromInteger :: Integer -> a
 
 class (Num a, Data.Ord.Ord a) => Real a where
-  toRational :: a -> Rational
+  toRational :: a -> Data.Ratio.Rational
 
 class Num a => Fractional a where
   fromRational :: Data.Ratio.Rational -> a
@@ -56,23 +56,19 @@ class Bounded a where
 fromIntegral :: (Integral a, Num b) => a -> b
 realToFrac :: (Real a, Fractional b) => a -> b
 
-instance Integral a => Num (Ratio a)
-instance Num a => Num (Product a)
-instance Num a => Num (Sum a)
-instance RealFloat a => Num (Complex a)
-instance HasResolution a => Num (Fixed a)
+instance Integral a => Num (Data.Ratio.Ratio a)
+instance Num a => Num (Data.Monoid.Product a)
+instance Num a => Num (Data.Monoid.Sum a)
+instance RealFloat a => Num (Data.Complex.Complex a)
 
-instance Integral a => Real (Ratio a)
-instance HasResolution a => Real (Fixed a)
+instance Integral a => Real (Data.Ratio.Ratio a)
 
-instance Integral a => RealFrac (Ratio a)
-instance HasResolution a => RealFrac (Fixed a)
+instance Integral a => RealFrac (Data.Ratio.Ratio a)
 
-instance Integral a => Fractional (Ratio a)
-instance RealFloat a => Fractional (Complex a)
-instance HasResolution a => Fractional (Fixed a)
+instance Integral a => Fractional (Data.Ratio.Ratio a)
+instance RealFloat a => Fractional (Data.Complex.Complex a)
 
-instance RealFloat a => Floating (Complex a)
+instance RealFloat a => Floating (Data.Complex.Complex a)
 
 instance Data.Eq.Eq Float
 instance Floating Float
@@ -116,4 +112,3 @@ instance Text.Read.Read Ordering
 instance Text.Show.Show Ordering
 instance Data.Ix.Ix Ordering
 instance GHC.Generics.Generic Ordering
-instance Data.Monoid.Monoid Ordering

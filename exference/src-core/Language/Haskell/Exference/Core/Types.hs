@@ -46,6 +46,7 @@ module Language.Haskell.Exference.Core.Types
   , mkQueryClassEnv
   , addQueryClassEnv
   , freeVars
+  , typeConstraints
   , showHsConstraint
   , TypeVarIndex
   , showHsType
@@ -580,3 +581,19 @@ freeVars (TypeApp t1 t2)     = S.union (freeVars t1) (freeVars t2)
 freeVars (TypeForall is cs t) = foldr S.delete allVars is
   where
     allVars = freeVars t `S.union` foldMap (foldMap freeVars . constraint_params) cs
+
+-- | Collect every class constraint embedded in a type, including contexts
+-- nested under arrows and applications.  Keeping this traversal in the core
+-- type module lets both public-input validation and source-environment
+-- validation apply their deliberately different unknown-class policies to
+-- exactly the same syntax.
+typeConstraints :: HsType -> [HsConstraint]
+typeConstraints TypeVar{} = []
+typeConstraints TypeConstant{} = []
+typeConstraints TypeCons{} = []
+typeConstraints (TypeArrow parameter result) =
+  typeConstraints parameter ++ typeConstraints result
+typeConstraints (TypeApp function argument) =
+  typeConstraints function ++ typeConstraints argument
+typeConstraints (TypeForall _ constraints body) =
+  constraints ++ typeConstraints body

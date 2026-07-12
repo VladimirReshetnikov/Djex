@@ -95,7 +95,7 @@ legacy `QualifiedName` subset cannot represent.
 
 ## Validation
 
-The deterministic Exference library/frontend suite now contains 98 cases,
+The deterministic Exference library/frontend suite now contains 103 cases,
 including regressions for finite forcing, cycle detection, nominal
 qualification, duplicate order independence, head-variable order, exact
 superclass/head/prerequisite/query/binding arity, explicit instance binders,

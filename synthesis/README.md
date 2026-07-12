@@ -1,14 +1,24 @@
 # Haskell Synthesis
 
 `haskell-synthesis` is the parser- and backend-independent destination for the
-eventual Djinn/Exference library. Its first layers define validated Haskell
-names, structured diagnostics, and non-recursive class constraints
-parameterized over a backend's type representation. Djinn and Exference both
-store query contexts through the shared `Constraint` value and consume the
-validated name vocabulary; Exference additionally uses the shared diagnostic
-facade. Their checked class environments, declaration semantics, resolution
-policies, and search engines remain backend-specific while later common layers
-are extracted behind this tested vocabulary.
+eventual Djinn/Exference library. Its layers define validated Haskell names,
+structured diagnostics, non-recursive class constraints parameterized over a
+backend's type representation, and a scope-aware generated-code tree. Djinn
+and Exference both store query contexts through the shared `Constraint` value
+and consume the validated name vocabulary; Exference additionally uses the
+shared diagnostic facade. Their checked class environments, declaration
+semantics, resolution policies, and search engines remain backend-specific.
+
+`Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
+It separates backend-owned local identities from structural global `Name`s and
+represents lambdas, application, tuples, holes, lets, cases, constructor/tuple
+patterns, as-patterns, and function clauses. Its independent scope checker
+rejects free locals, repeated binders in one pattern, and identity reuse in an
+overlapping scope. The renderer allocates stable Haskell variable spellings
+against globals and caller reservations, supports the three qualification
+policies needed by the existing frontends, and prints symbolic and tuple
+applications in Haskell form. Search/proof terms keep their private types and
+annotations; backends erase them into this tree only after their own checks.
 
 Build and test it independently with:
 

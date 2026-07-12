@@ -4,8 +4,11 @@ import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Control.Monad (forM_)
 import Data.Either (isLeft)
+import Data.List (intercalate)
+import qualified Data.Map.Strict as Map
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
+import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, testCase, (@?=))
@@ -17,6 +20,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "haskell-synthesis"
   [ constraintTests
+  , generatedTests
   , moduleTests
   , ordinaryTests
   , specialTests
@@ -24,6 +28,113 @@ tests = testGroup "haskell-synthesis"
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
   ]
+
+generatedTests :: TestTree
+generatedTests = testGroup "generated syntax"
+  [ testCase "validate lambda, let, and case scopes" $ do
+      let just = right $ mkIdentifier "Just"
+          expression = Lambda [Bind (0 :: Int)] $
+            Let (Bind 1) (Local 0) $
+              Case (Local 1)
+                [(Constructor just [Bind 2], Local 2)]
+      validateExpressionScope expression @?= Right ()
+  , testCase "reject free locals and duplicate pattern binders" $ do
+      validateExpressionScope (Local (0 :: Int)) @?=
+        Left (UnboundLocal 0)
+      validateExpressionScope
+          (Lambda [TuplePattern [Bind (0 :: Int), Bind 0]] $ Local 0)
+        @?= Left (DuplicatePatternBinder 0)
+      validateExpressionScope
+          (Lambda [Bind (0 :: Int)] $ Lambda [Bind 0] $ Local 0)
+        @?= Left (DuplicatePatternBinder 0)
+  , testCase "map, fold, traverse, and force every local occurrence" $ do
+      let expression = Lambda [Bind (1 :: Int)] (Local 1)
+      fmap (+ 10) expression @?= Lambda [Bind 11] (Local 11)
+      sum expression @?= 2
+      traverse (\local -> if local > 0 then Just (show local) else Nothing)
+          expression
+        @?= Just (Lambda [Bind "1"] (Local "1"))
+      _ <- evaluate $ force expression
+      pure ()
+  , testCase "allocate locals against globals and explicit reservations" $ do
+      let namespace = right $ mkModuleName "M"
+          globalA = right $ mkQualifiedIdentifier namespace "a"
+          expression = Lambda [Bind (1 :: Int), Bind 2] $
+            Apply (Local 1) (Global globalA)
+          unqualified = RenderOptions Unqualified (const "a") []
+          qualified = RenderOptions FullyQualified (const "a") []
+          reserved = RenderOptions FullyQualified (const "a") ["a"]
+      allocateLocalNames unqualified expression @?=
+        Right (Map.fromList [(1, "a'"), (2, "a''")])
+      allocateLocalNames qualified expression @?=
+        Right (Map.fromList [(1, "a"), (2, "a'")])
+      allocateLocalNames reserved expression @?=
+        Right (Map.fromList [(1, "a'"), (2, "a''")])
+  , testCase "render lambdas, tuples, and symbolic applications" $ do
+      let plus = right $ mkOperator "+"
+          true = right $ mkIdentifier "True"
+          false = right $ mkIdentifier "False"
+          expression = Lambda [Bind (0 :: Int)] $
+            Apply (Apply (Global plus) (Local 0)) $
+              Tuple [Global true, Global false]
+      renderExpression (defaultRenderOptions (const "x")) expression @?=
+        Right "\\x -> x + (True, False)"
+  , testCase "apply qualification consistently to identifiers and operators" $ do
+      let namespace = right $ mkModuleName "Data.List"
+          mapping = right $ mkQualifiedIdentifier namespace "map"
+          append = right $ mkQualifiedOperator namespace "++"
+          identifiers :: Expression Int
+          identifiers = Apply (Global mapping) (Global mapping)
+          operators :: Expression Int
+          operators = Apply (Apply (Global append) (Global mapping))
+            (Global mapping)
+          options :: Qualification -> RenderOptions Int
+          options qualification = RenderOptions qualification show []
+      renderExpression (options Unqualified) identifiers @?=
+        Right "map map"
+      renderExpression (options QualifyIdentifiers) identifiers @?=
+        Right "Data.List.map Data.List.map"
+      renderExpression (options QualifyIdentifiers) operators @?=
+        Right "Data.List.map ++ Data.List.map"
+      renderExpression (options FullyQualified) operators @?=
+        Right "Data.List.map Data.List.++ Data.List.map"
+  , testCase "render function clauses with scoped case patterns" $ do
+      let select = right $ mkIdentifier "select"
+          just = right $ mkIdentifier "Just"
+          nothing = right $ mkIdentifier "Nothing"
+          clause = FunctionClause select [Bind (0 :: Int)] $
+            Case (Local 0)
+              [ (Constructor just [Bind 1], Local 1)
+              , (Constructor nothing [], Local 0)
+              ]
+          options = RenderOptions FullyQualified (const "select") []
+      validateFunctionClauseScope clause @?= Right ()
+      renderFunctionClause options clause @?=
+        Right (unlinesWithoutFinal
+          [ "select select' ="
+          , "  case select' of"
+          , "  Just select'' -> select''"
+          , "  Nothing -> select'"
+          ])
+  , testCase "render holes and reject malformed surface shapes" $ do
+      let options = defaultRenderOptions (\local -> 't' : show (local :: Int))
+          variableName = right $ mkIdentifier "value"
+      renderExpression options (Hole 3) @?= Right "_t3"
+      renderExpression options (Tuple [Global variableName]) @?=
+        Left (InvalidTupleExpressionArity 1)
+      renderExpression options
+          (Lambda [Constructor variableName []] $ Global variableName)
+        @?= Left (InvalidConstructorPattern variableName)
+      renderExpression options
+          (Lambda [Constructor consName [Bind 0]] $ Local 0)
+        @?= Left (InvalidConstructorPatternArity consName 2 1)
+      renderExpression (defaultRenderOptions $ const "case")
+          (Hole (0 :: Int)) @?=
+        Left (InvalidLocalName "case" $ ReservedIdentifier "case")
+  ]
+
+unlinesWithoutFinal :: [String] -> String
+unlinesWithoutFinal = intercalate "\n"
 
 constraintTests :: TestTree
 constraintTests = testGroup "constraints"

@@ -26,6 +26,14 @@ one truncated by step, choice-point, candidate, queue, or depth limits, and
 supports continuing chunk streams. It deliberately carries no logical
 inhabitation claim: each backend keeps its own evidence and search semantics.
 
+`Language.Haskell.Synthesis.Type` is the common parser-independent source-type
+tree: variables (optionally flexible/rigid), structural names, application,
+functions, boxed or unboxed tuples, and explicit foralls with shared
+constraints. It canonicalizes saturated function and tuple constructors,
+validates lexical/arity/binder invariants, and computes free variables.
+Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
+this AST.
+
 Build and test it independently with:
 
 ```text

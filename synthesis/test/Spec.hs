@@ -7,11 +7,13 @@ import Data.Either (isLeft)
 import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Search
+import qualified Language.Haskell.Synthesis.Type as SharedType
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, testCase, (@?=))
 import qualified Test.Tasty.QuickCheck as QC
@@ -24,12 +26,68 @@ tests = testGroup "haskell-synthesis"
   [ constraintTests
   , generatedTests
   , searchTests
+  , typeTests
   , moduleTests
   , ordinaryTests
   , specialTests
   , parserTests
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
+  ]
+
+typeTests :: TestTree
+typeTests = testGroup "source types"
+  [ testCase "canonicalize saturated function and tuple constructors" $ do
+      let a = SharedType.TypeVariable "a"
+          b = SharedType.TypeVariable "b"
+          arrow = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor functionName) a) b
+          pairName = right $ tupleName Boxed 2
+          pair = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor pairName) a) b
+      SharedType.canonicalizeType arrow @?=
+        SharedType.FunctionType a b
+      SharedType.canonicalizeType pair @?=
+        SharedType.TupleType Boxed [a, b]
+  , testCase "forall binders protect bodies and constraints" $ do
+      let className = right $ mkIdentifier "C"
+          typeExpression = SharedType.ForallType ["a"]
+            [Constraint className
+              [SharedType.TypeVariable "a", SharedType.TypeVariable "b"]]
+            (SharedType.FunctionType
+              (SharedType.TypeVariable "a")
+              (SharedType.TypeVariable "c"))
+      SharedType.freeVariables typeExpression @?=
+        Set.fromList ["b", "c"]
+      SharedType.validateType typeExpression @?= Right ()
+  , testCase "reject malformed tuples, constructors, and quantifiers" $ do
+      let variableName = right $ mkIdentifier "value"
+      SharedType.validateType
+          (SharedType.TupleType Boxed [SharedType.TypeVariable (0 :: Int)])
+        @?= Left (SharedType.InvalidTupleTypeArity Boxed 1)
+      SharedType.validateType
+          (SharedType.TypeConstructor variableName :: SharedType.Type Int)
+        @?= Left (SharedType.InvalidTypeConstructor variableName)
+      SharedType.validateType
+          (SharedType.ForallType [1 :: Int, 1] []
+            $ SharedType.TypeVariable 1)
+        @?= Left (SharedType.DuplicateForallVariable 1)
+  , testCase "map, fold, traverse, and force every variable position" $ do
+      let typeExpression = SharedType.ForallType [1 :: Int] []
+            $ SharedType.FunctionType
+              (SharedType.TypeVariable 1) (SharedType.TypeVariable 2)
+      fmap (+ 10) typeExpression @?= SharedType.ForallType [11] []
+        (SharedType.FunctionType
+          (SharedType.TypeVariable 11) (SharedType.TypeVariable 12))
+      sum typeExpression @?= 4
+      traverse (Just . show) typeExpression @?=
+        Just (SharedType.ForallType ["1"] []
+          (SharedType.FunctionType
+            (SharedType.TypeVariable "1") (SharedType.TypeVariable "2")))
+      _ <- evaluate $ force typeExpression
+      pure ()
   ]
 
 searchTests :: TestTree

@@ -23,15 +23,20 @@ module Djinn.Core (
     declare, removeDeclaration,
     typeDeclarations, functionDeclarations, classDeclarations,
     -- * Queries
-    Context, resolveContext, resolveInstanceMethods,
+    Context, mkContext, resolveContext, resolveInstanceMethods,
     QueryOptions(..), defaultQueryOptions,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
 
 import Control.Monad (foldM, unless)
-import Data.List (intercalate, nub, sortOn)
+import Data.List (intercalate, mapAccumL, nub, sortOn)
 import Data.Ratio ((%))
+import qualified Data.Set as Set
 import Text.ParserCombinators.ReadP (ReadP, readP_to_S, skipSpaces)
+
+import Language.Haskell.Synthesis.Constraint
+    (Constraint(..), constraintArity)
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Djinn.Internal.Environment
 import Djinn.Internal.HCheck (
@@ -281,8 +286,22 @@ requireGroundKind kind =
 ------------------------------------------------------------------
 -- Queries
 
--- | A class constraint: class name and type arguments.
-type Context = (HSymbol, [HType])
+-- | A class constraint represented by the backend-neutral synthesis
+-- vocabulary.  Djinn retains ownership of class lookup, kind checking, and
+-- the interpretation of methods as premises; only the finite nominal syntax
+-- is shared with Exference.
+type Context = Constraint HType
+
+-- | Build a context from Djinn's historical string class name.  Class
+-- declarations are currently unqualified constructor identifiers, so this
+-- bridge deliberately enforces the same namespace before constructing the
+-- shared nominal value.
+mkContext :: HSymbol -> [HType] -> Either String Context
+mkContext className arguments = do
+    requireName "class" isTypeName className
+    case SharedName.parseName className of
+        Left nameError -> Left $ SharedName.renderNameError nameError
+        Right sharedName -> Right $ Constraint sharedName arguments
 
 -- | Look up a class use, requiring exact arity, arguments that fit the
 -- parameters' inferred kinds, and well-kinded instantiated methods.
@@ -307,11 +326,16 @@ resolveInstanceMethods environment prerequisites target = do
 -- joint kind check and substitution.  In particular, every argument and the
 -- query goal must share one scope for their free type variables.
 data ResolvedContext = ResolvedContext {
-    resolvedName :: HSymbol,
-    resolvedArguments :: [HType],
+    resolvedConstraint :: Context,
     resolvedParameters :: [(HSymbol, HKind)],
     resolvedMethods :: [(HSymbol, HType)]
     }
+
+resolvedName :: ResolvedContext -> HSymbol
+resolvedName = SharedName.renderCanonical . constraintClass . resolvedConstraint
+
+resolvedArguments :: ResolvedContext -> [HType]
+resolvedArguments = constraintArguments . resolvedConstraint
 
 resolveContexts :: Environment -> [(String, HKind, HType)] -> [Context]
                 -> Either String [[(HSymbol, HType)]]
@@ -322,20 +346,25 @@ resolveContexts environment additionalTypes contexts = do
     mapM (instantiateContext environment) resolved
 
 lookupContext :: Environment -> Context -> Either String ResolvedContext
-lookupContext environment (name, arguments) =
+lookupContext environment context = do
+    -- Context is a shared, intentionally permissive syntax node.  Reassert
+    -- Djinn's narrower class namespace even when a caller constructs that
+    -- node directly instead of going through mkContext.
+    requireName "class" isTypeName name
     case lookup name (envClasses environment) of
         Nothing -> Left $ "Class not found: " ++ name
         Just (params, methods)
-            | length params == length arguments ->
+            | length params == constraintArity context ->
                 Right ResolvedContext {
-                    resolvedName = name,
-                    resolvedArguments = arguments,
+                    resolvedConstraint = context,
                     resolvedParameters = params,
                     resolvedMethods = methods
                     }
             | otherwise -> Left $
                 "Class " ++ name ++ " expects " ++ show (length params) ++
-                " type argument(s), but got " ++ show (length arguments)
+                " type argument(s), but got " ++ show (constraintArity context)
+  where
+    name = SharedName.renderCanonical $ constraintClass context
 
 argumentObligations :: ResolvedContext -> [(String, HKind, HType)]
 argumentObligations context =
@@ -366,18 +395,61 @@ checkKindObligations definitions obligations =
 instantiateContext :: Environment -> ResolvedContext
                    -> Either String [(HSymbol, HType)]
 instantiateContext environment context = do
-    let instantiated =
+    let parameters = resolvedParameters context
+        arguments = resolvedArguments context
+        instantiated =
             [ (methodName,
-               substHT
-                   (zip (map fst $ resolvedParameters context)
-                        (resolvedArguments context))
-                   methodType)
+               instantiateMethod parameters arguments methodType)
             | (methodName, methodType) <- resolvedMethods context ]
-    either
-        (Left . (("methods of class " ++ resolvedName context ++ ": ") ++))
-        Right $
-        htCheckType (envTypes environment) (HTTuple $ map snd instantiated)
+    -- Each method's non-class variables are implicitly quantified by that
+    -- signature, not shared with identically spelled variables in sibling
+    -- methods.  Checking one synthetic tuple would accidentally reunify them.
+    mapM_ checkMethod instantiated
     return instantiated
+  where
+    checkMethod (methodName, methodType) =
+        case htCheckType (envTypes environment) methodType of
+            Left message -> Left $
+                "method " ++ prHSymbolOp methodName ++ " of class " ++
+                resolvedName context ++ ": " ++ message
+            Right () -> Right ()
+
+-- Class parameters and method-local variables live in different implicit
+-- quantifier scopes.  Before substituting class arguments, alpha-rename only
+-- those locals that occur in an active substitution image.  Renaming every
+-- local would unnecessarily sever Djinn's intentionally shallow matching of
+-- a method-local spelling with the query goal (for example @return@'s @a@).
+instantiateMethod :: [(HSymbol, HKind)] -> [HType] -> HType -> HType
+instantiateMethod parameters arguments methodType =
+    substHT substitution $ substHT renamings methodType
+  where
+    parameterNames = map fst parameters
+    substitution = zip parameterNames arguments
+    methodVariables = getHTVars methodType
+    activeImages =
+        [ argument
+        | (parameter, argument) <- substitution
+        , parameter `elem` methodVariables
+        ]
+    imageVariables = Set.fromList $ concatMap getHTVars activeImages
+    localVariables =
+        filter (`notElem` parameterNames) methodVariables
+    capturedLocals =
+        filter (`Set.member` imageVariables) localVariables
+    initiallyUnavailable = Set.fromList $
+        parameterNames ++ methodVariables ++ concatMap getHTVars arguments
+    (_, renamings) = mapAccumL allocateFresh
+        initiallyUnavailable capturedLocals
+
+    allocateFresh unavailable variable =
+        let fresh = chooseFresh 1
+            chooseFresh primeCount =
+                let candidate = variable ++ replicate primeCount '\''
+                in if Set.member candidate unavailable then
+                       chooseFresh (primeCount + 1)
+                   else
+                       candidate
+        in (Set.insert fresh unavailable, (variable, HTVar fresh))
 
 data QueryOptions = QueryOptions {
     -- | Collect alternative solutions beyond the first.

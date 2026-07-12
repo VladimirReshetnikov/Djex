@@ -7,11 +7,11 @@ import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
 import Djinn.Core (
-    Declaration(..), QueryOutcome(..),
+    Context, Declaration(..), QueryOutcome(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, inhabit,
     kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
-    parseHKind, parseHType, removeDeclaration,
+    mkContext, parseHKind, parseHType, removeDeclaration,
     reportOutcome, resolveContext, resolveInstanceMethods,
     standardEnvironment, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
@@ -23,6 +23,9 @@ import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
+import Language.Haskell.Synthesis.Constraint
+    (Constraint(..), constraintArguments, constraintArity, constraintClass)
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 main :: IO ()
 main = defaultMain $ testGroup "Djinn unit tests" $
@@ -128,6 +131,23 @@ testCoreFacade = do
         (Right $ KArrow (KArrow KStar KStar) KStar)
         (parseHKind "(* -> *) -> *")
 
+    -- Contexts use the shared nominal syntax while Djinn retains lookup and
+    -- kind semantics behind its checked string bridge.
+    let eqContext = context "Eq" [HTVar "a"]
+    assertEqual "a shared context retains its nominal class"
+        "Eq" (show $ constraintClass eqContext)
+    assertEqual "a shared context retains its backend type arguments"
+        [HTVar "a"] (constraintArguments eqContext)
+    assertEqual "a shared context reports its arity" 1
+        (constraintArity eqContext)
+    assertEqual "a shared context has stable Haskell rendering"
+        "Eq a" (show eqContext)
+    assertLeft "a variable cannot name a class context"
+        (mkContext "eq" [HTVar "a"])
+    assertLeft "direct shared contexts still pass Djinn's class-name guard"
+        (resolveContext standardEnvironment $
+            Constraint (sharedName "eq") [HTVar "a"])
+
     -- Queries report honest outcomes.
     swap <- expectRight $ parseHType "(a, b) -> (b, a)"
     swapReport <- expectRight $
@@ -153,25 +173,25 @@ testCoreFacade = do
 
     -- Contexts resolve through inferred kinds.
     assertLeft "a kind-mismatched class argument is rejected"
-        (resolveContext standardEnvironment ("Monad", [HTCon "Bool"]))
+        (resolveContext standardEnvironment $ context "Monad" [HTCon "Bool"])
     assertLeft "one variable cannot have inconsistent kinds across arguments" $ do
         environment <- declare
             (ClassDecl "ApplyToBool" ["f", "unused"]
                 [("applyToBool", HTApp (HTVar "f") (HTCon "Bool"))])
             standardEnvironment
-        resolveContext environment
-            ("ApplyToBool", [HTVar "shared", HTVar "shared"])
+        resolveContext environment $ context "ApplyToBool"
+            [HTVar "shared", HTVar "shared"]
     assertLeft "a context and goal must share kind assignments" $ do
         environment <- declare (ClassDecl "Value" ["a"] [])
             standardEnvironment
         let higherKinded = HTApp (HTVar "f") (HTCon "Bool")
-        inhabit defaultQueryOptions environment [("Value", [HTVar "f"])]
+        inhabit defaultQueryOptions environment [context "Value" [HTVar "f"]]
             "badKinds" (HTArrow higherKinded higherKinded)
     assertLeft "negative public search budgets are rejected" $
         inhabit defaultQueryOptions { optionBudget = Just (-1) }
             standardEnvironment [] "identity" (HTArrow (HTVar "a") (HTVar "a"))
     reflexive <- expectRight $ inhabit defaultQueryOptions
-        standardEnvironment [("Eq", [HTVar "a"])] "reflexive"
+        standardEnvironment [context "Eq" [HTVar "a"]] "reflexive"
         (HTArrow (HTVar "a") (HTCon "Bool"))
     case reportOutcome reflexive of
         Realized (best : _) ->
@@ -181,6 +201,21 @@ testCoreFacade = do
 
 expectRight :: Either String a -> IO a
 expectRight = either fail return
+
+context :: HSymbol -> [HType] -> Context
+context className arguments =
+    case mkContext className arguments of
+        Left message -> error $
+            "invalid context in Djinn regression suite: " ++ message
+        Right result -> result
+
+sharedName :: String -> SharedName.Name
+sharedName source =
+    case SharedName.parseName source of
+        Left nameError -> error $
+            "invalid shared name in Djinn regression suite: " ++
+            SharedName.renderNameError nameError
+        Right result -> result
 
 testPrefixArrowParsing :: IO ()
 testPrefixArrowParsing = do
@@ -297,6 +332,13 @@ testClassParameterKinds = do
     assertLeft "a method type that misuses a parameter is rejected"
         (htInferClassKinds checked ["c"]
             [HTArrow (HTVar "c") (HTApp (HTVar "c") a)])
+    assertEqual "method-local variables have independent kind scopes"
+        (Right [("a", KStar)])
+        (htInferClassKinds checked ["a"]
+            [HTApp (HTVar "f") (HTVar "a"), HTVar "f"])
+    assertLeft "one method still shares repeated occurrences of its local" $
+        htInferClassKinds checked ["a"]
+            [HTTuple [HTApp (HTVar "f") (HTVar "a"), HTVar "f"]]
     assertRight "a proper-type argument fits kind *"
         (htCheckTypeKind checked KStar (HTCon "Bool"))
     assertRight "a variable argument fits any kind"
@@ -651,7 +693,7 @@ testResolveInstanceMethods = do
         withValue <- declare valueClass standardEnvironment
         declare higherClass withValue
 
-    let target = ("Higher", [HTCon "Maybe"])
+    let target = context "Higher" [HTCon "Maybe"]
     assertEqual "joint resolution preserves exact target method substitution"
         (resolveContext environment target)
         (resolveInstanceMethods environment [] target)
@@ -660,8 +702,65 @@ testResolveInstanceMethods = do
         "an instance head and its prerequisites share kind variables"
         "argument f of class Higher" $
         resolveInstanceMethods environment
-            [("Value", [HTVar "f"]), ("Higher", [HTVar "f"])]
-            ("Value", [HTVar "x"])
+            [context "Value" [HTVar "f"], context "Higher" [HTVar "f"]]
+            (context "Value" [HTVar "x"])
+
+    -- A method-local variable with the same spelling as an instance argument
+    -- must not be captured by class-parameter substitution.
+    captureEnvironment <- expectRight $
+        declare (ClassDecl "Capture" ["a"]
+            [("capture", HTApp (HTVar "f") (HTVar "a"))]) environment
+    let capture = context "Capture" [HTVar "f"]
+    assertEqual "context instantiation alpha-renames a captured method local"
+        (Right [("capture", HTApp (HTVar "f'") (HTVar "f"))])
+        (resolveContext captureEnvironment capture)
+    safe <- expectRight $ inhabit defaultQueryOptions captureEnvironment
+        [capture] "safe" (HTArrow (HTVar "x") (HTVar "x"))
+    assertEqual "an unused capture-safe context does not poison a query"
+        (Realized ["safe a = a"]) (reportOutcome safe)
+
+    -- Identical local spellings in different signatures denote different
+    -- implicit quantifiers and can therefore have different kinds.
+    independentEnvironment <- expectRight $
+        declare (ClassDecl "Independent" ["a"]
+            [ ("left", HTApp (HTVar "f") (HTVar "a"))
+            , ("right", HTVar "f")
+            ]) captureEnvironment
+    assertEqual "instantiated sibling methods retain independent local scopes"
+        (Right
+            [ ("left", HTApp (HTVar "f") (HTCon "Bool"))
+            , ("right", HTVar "f")
+            ])
+        (resolveContext independentEnvironment $
+            context "Independent" [HTCon "Bool"])
+
+    -- A colliding image for a parameter absent from this method performs no
+    -- substitution and therefore must not rename a useful shallow local.
+    inactiveEnvironment <- expectRight $
+        declare (ClassDecl "Inactive" ["a", "b"]
+            [("inactive", HTApp (HTVar "f") (HTVar "b"))])
+            independentEnvironment
+    assertEqual "inactive substitution images do not trigger alpha-renaming"
+        (Right [("inactive", HTApp (HTVar "f") (HTCon "Bool"))])
+        (resolveContext inactiveEnvironment $
+            context "Inactive" [HTVar "f", HTCon "Bool"])
+
+    -- Fresh allocation must avoid both existing primes and every name in a
+    -- compound substitution image while renaming multiple locals at once.
+    multiCaptureEnvironment <- expectRight $
+        declare (ClassDecl "MultiCapture" ["a"]
+            [("multiCapture", HTTuple
+                [ HTApp (HTVar "f") (HTVar "a")
+                , HTApp (HTVar "f'") (HTVar "a")
+                ])]) inactiveEnvironment
+    let compoundArgument = HTTuple [HTVar "f", HTVar "f'"]
+    assertEqual "multiple captured locals receive distinct fresh primes"
+        (Right [("multiCapture", HTTuple
+            [ HTApp (HTVar "f''") compoundArgument
+            , HTApp (HTVar "f'''") compoundArgument
+            ])])
+        (resolveContext multiCaptureEnvironment $
+            context "MultiCapture" [compoundArgument])
 
 testSelfReferenceEvidence :: IO ()
 testSelfReferenceEvidence = do

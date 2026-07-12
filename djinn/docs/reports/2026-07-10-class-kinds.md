@@ -6,6 +6,15 @@
   ("the class model is intentionally shallow")
 - Toolchain: GHC 9.12.4, Cabal 3.16.1.0, Windows 11
 
+> **2026-07-11 update.** This report records the first class-kind milestone.
+> Its statements that non-parameter variables share one class-wide scope and
+> that goal/context joint checking remained future work are now historical.
+> The [shared-context and method-scope follow-up](2026-07-11-shared-constraint-contexts.md)
+> gives each method its proper implicit-quantifier scope and makes
+> class-argument substitution capture-avoiding; the intervening
+> [joint-kind-scope work](2026-07-10-joint-kind-scope.md) unified each complete
+> request's goal and context obligations.
+
 ## The defect
 
 Class parameters had no inferred or stored kind, so class arguments were

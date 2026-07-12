@@ -102,7 +102,7 @@ rawType params body = (params, body, KStar)
 
 data Cmd = Help Bool | Quit | Add HSymbol HType | Query HSymbol [Context] HType | Del HSymbol | Load HSymbol | Noop | Env |
            Type (HSymbol, ([HSymbol], HType, HKind)) | Set (State -> State) | Clear | Class RawClassDef |
-           QueryInstance [Context] HSymbol [HType]
+           QueryInstance [Context] Context
 
 pCmd :: ReadP Cmd
 pCmd = do
@@ -172,12 +172,12 @@ runCmd s (Query i ctx g) =
     query True s i ctx g
 runCmd s (Class (name, (params, methods))) =
     updateEnvironment s $ declare $ ClassDecl name params methods
-runCmd s (QueryInstance ctx cls ts) =
-    case resolveInstanceMethods (environment s) ctx (cls, ts) of
+runCmd s (QueryInstance ctx target) =
+    case resolveInstanceMethods (environment s) ctx target of
         Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
         Right methods -> do
             let instanceHeading = "instance " ++ contextPrefix ctx ++
-                    show (foldl HTApp (HTCon cls) ts)
+                    show target
                 prepareMethod method@(name, goal) =
                     case makeQueryReport s name ctx goal of
                         Left message -> Left $
@@ -288,16 +288,21 @@ loadFile s name = do
 
 showClass :: (HSymbol, ([(HSymbol, HKind)], [Method])) -> String
 showClass (c, (as, ms)) =
-    "class " ++ showContext (c, map (HTVar . fst) as) ++ " where " ++
+    "class " ++ show validatedHead ++ " where " ++
         intercalate "; " (map sm ms)
-  where sm (i, t) = prHSymbolOp i ++ " :: " ++ show t
-
-showContext :: Context -> String
-showContext (c, as) = show $ foldl HTApp (HTCon c) as
+  where
+    -- Class declarations have already passed the same name validation in the
+    -- core.  Rebuilding their head through mkContext keeps the CLI renderer on
+    -- the shared nominal representation without introducing another format.
+    validatedHead =
+        case mkContext c (map (HTVar . fst) as) of
+            Right context -> context
+            Left message -> error $ "Djinn.showClass: " ++ message
+    sm (i, t) = prHSymbolOp i ++ " :: " ++ show t
 
 showContexts :: [Context] -> String
 showContexts [] = ""
-showContexts cs = "(" ++ intercalate ", " (map showContext cs) ++ ")"
+showContexts cs = "(" ++ intercalate ", " (map show cs) ++ ")"
 
 evalCmds :: State -> [String] -> IO (Bool, State)
 evalCmds state [] = return (False, state)
@@ -391,26 +396,32 @@ pQueryInstance = do
     schar '?'
     sstring "instance"
     c <- option [] pContext
-    cls <- pHSymbol True
-    ts <- many pHTAtom
+    target <- pConstraint
     optional $ schar ';'
-    return $ QueryInstance c cls ts
+    return $ QueryInstance c target
 
 pContext :: ReadP [Context]
 pContext = do
-    let pCtx = do c <- pHSymbol True; ts <- many pHTAtom; return (c, ts)
     ctx <-
         do
           schar '('
-          ctx <- sepBy1 pCtx (schar ',')
+          ctx <- sepBy1 pConstraint (schar ',')
           schar ')'
           return ctx
        +++
         do
-          ctx <- pCtx
+          ctx <- pConstraint
           return [ctx]
     sstring "=>"
     return ctx
+
+pConstraint :: ReadP Context
+pConstraint = do
+    className <- pHSymbol True
+    arguments <- many pHTAtom
+    case mkContext className arguments of
+        Right context -> return context
+        Left _ -> pfail
 
 pType :: ReadP Cmd
 pType = do

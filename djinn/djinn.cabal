@@ -1,14 +1,14 @@
 Cabal-version:  3.0
 Name:           djinn
-Version:        2025.2.21
+Version:        2026.7.11
 Synopsis:       Generate Haskell code from a type
 Description:    Djinn uses a theorem prover for intuitionistic propositional logic
                 to generate a Haskell expression when given a type.
-Bug-reports:    https://github.com/augustss/djinn/issues
+Bug-reports:    https://github.com/VladimirReshetnikov/Haskell/issues
 License:        BSD-3-Clause
 License-File:   LICENSE
 Author:         Lennart Augustsson
-Maintainer:     Lennart Augustsson
+Maintainer:     Vladimir Reshetnikov
 Copyright:      2014 Lennart Augustsson
 Category:       source-tools
 Build-type:     Simple
@@ -19,7 +19,8 @@ Extra-Source-Files:
 
 source-repository head
   type:     git
-  location: https://github.com/augustss/djinn
+  location: https://github.com/VladimirReshetnikov/Haskell
+  subdir:   djinn
 
 library djinn-core
   Visibility:       public
@@ -86,6 +87,7 @@ test-suite djinn-tests
 
   Build-Depends:    base >= 4.18 && < 5,
                     djinn:djinn-core,
+                    haskell-synthesis >= 0.1.1 && < 0.2,
                     tasty >= 1.4 && < 2,
                     tasty-hunit >= 0.10 && < 1
 

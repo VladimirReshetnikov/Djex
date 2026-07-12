@@ -6,10 +6,11 @@ and uses a terminating proof search for intuitionistic propositional logic to
 construct a proof term. Each candidate is independently type-checked, converted
 through a total error-reporting boundary, simplified, and printed as Haskell.
 
-This directory is a reviewed local import of
+This directory is a reviewed local fork, versioned `2026.7.11`, of
 [`djinn-2025.2.21`](https://hackage.haskell.org/package/djinn-2025.2.21), based on
 the [upstream `augustss/djinn` repository](https://github.com/augustss/djinn).
-The original one-line import note has been expanded here because upstream ships
+The date-version bump records the now-source-breaking checked library facade;
+the original one-line import note has been expanded here because upstream ships
 its user guide inside the executable rather than as a README.
 
 ## Build and run
@@ -168,6 +169,20 @@ This is not Haskell instance resolution. Djinn neither imports the installed
 package environment nor instantiates arbitrary polymorphic methods. Classes and
 methods needed beyond the small initial environment must be declared explicitly.
 
+At the library boundary, `Context` is the shared backend-neutral
+`Constraint HType` value from `haskell-synthesis`, rather than Djinn's former
+raw `(String, [HType])` pair. `mkContext` is the checked bridge for existing
+string-based clients:
+
+```haskell
+a <- parseHType "a"
+eqA <- mkContext "Eq" [a]
+report <- inhabit defaultQueryOptions environment [eqA] "reflexive" goal
+```
+
+Class lookup, kind checking, and the interpretation of methods as search
+premises remain deliberately Djinn-specific.
+
 Class parameter kinds are inferred from the method types when a class is
 declared (defaulting to `*`, so `Monad`'s parameter is `* -> *` while a
 method-less class parameter is `*`), and every context or `?instance`
@@ -181,6 +196,11 @@ Error: argument Bool of class Monad: kind mismatch: * vs * -> *
 Each `?instance` head and all of its prerequisite constraints are checked in
 one kind-variable scope, so a shared variable cannot silently acquire
 different kinds in different parts of the generated instance signature.
+For kind inference and class-argument substitution, method-local variables
+have per-signature scope: identical spellings in sibling methods do not share a
+kind, and instantiating a class parameter alpha-renames a colliding local.
+After resolution, Djinn's intentionally shallow premise model still uses the
+resulting string-named type atoms without fresh polymorphic instantiation.
 Djinn also searches every method before printing the header: an unrealizable
 method produces diagnostics without leaving a partial, non-compiling instance
 block in the output.
@@ -481,7 +501,8 @@ covering deduplication, readability work, and the empty-goal completeness
 fix, [the search-mode and budget work](docs/reports/2026-07-10-search-budget.md)
 with its benchmark-driven engine decisions,
 [the class parameter kind enforcement](docs/reports/2026-07-10-class-kinds.md),
-and [the library API hardening](docs/reports/2026-07-10-library-api.md).
+[the library API hardening](docs/reports/2026-07-10-library-api.md), and
+[the shared constraint and method-scope migration](docs/reports/2026-07-11-shared-constraint-contexts.md).
 
 ## License and provenance
 

@@ -60,6 +60,10 @@ testClassKindEnforcement = do
         , "class Value a where"
         , "class Higher f where use :: f a -> f a"
         , "?instance (Value f, Higher f) => Value x"
+        , "class Capture a where capture :: f a"
+        , "safe ? Capture f => x -> x"
+        , "class Independent a where left :: f a; right :: f"
+        , ":environment"
         , "good ? Empty c => c -> c"
         , "fine ? Monad m => a -> m a"
         , ":quit"
@@ -73,6 +77,14 @@ testClassKindEnforcement = do
     assertBool "an invalid joint instance must not print a declaration header" $
         not $ "instance (Value f, Higher f) => Value x where"
             `isInfixOf` output
+    assertContains "a context argument cannot capture a method-local variable"
+        "safe a = a" output
+    assertBool "capture avoidance must prevent a cyclic kind" $
+        not $ "cyclic kind" `isInfixOf` output
+    assertContains "same-spelled variables remain local to each class method"
+        "class Independent a where left :: f a; right :: f" output
+    assertBool "independent method scopes must not cause a class kind mismatch" $
+        not $ "Error: class Independent:" `isInfixOf` output
     assertContains "a well-kinded phantom context still works"
         "good a = a" output
     assertContains "a higher-kinded context still works"

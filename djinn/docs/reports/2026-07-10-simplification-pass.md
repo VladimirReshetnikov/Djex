@@ -268,10 +268,11 @@ These were noticed but deliberately not changed; none is a soundness issue.
   the parser (list types only arrive fully applied via `[a]`), so the
   non-round-tripping display is reachable only through the raw constructors
   already covered by finding R-10 in the companion report.
-- **O-03 — `checkMethods` kind-checks all method types as one tuple**, so a
-  kind error in a class declaration names no method. `Environment.checkClass`
-  already reports per-method with context; unifying them would change several
-  user-visible message formats and belongs with the R-08 class-model work.
+- **O-03 — fixed later: method scopes were combined as one tuple.**
+  [The shared-context follow-up](2026-07-11-shared-constraint-contexts.md)
+  checks each resolved method separately and gives identically spelled locals
+  in sibling signatures independent kind variables, while class parameters
+  alone retain their shared scope.
 - **O-04 — `Djinn.hs` remains the widest module** (parser, state, validation,
   orchestration, help). The companion report's suggestion of a pure command
   evaluator separated from the IO shell still stands (R-09 would fall out of

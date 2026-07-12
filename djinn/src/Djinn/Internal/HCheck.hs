@@ -85,9 +85,9 @@ htCheckTypesKinds its expectedTypes = do
 
 -- Infer the kind of every class parameter from the class's method types,
 -- as Haskell98 does.  Parameters left unconstrained (including every
--- parameter of a method-less class) default to *.  Non-parameter method
--- variables share one scope across the methods, matching how the stored
--- method types are validated elsewhere.
+-- parameter of a method-less class) default to *.  Only class parameters
+-- share kind variables across methods: every other variable is implicitly
+-- quantified by its individual method signature.
 htInferClassKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
                   -> [HSymbol] -> [HType]
                   -> Either String [(HSymbol, HKind)]
@@ -95,13 +95,16 @@ htInferClassKinds its params methodTypes = do
     mapM_ (checkSynonymSaturation its) methodTypes
     flip evalStateT initState $ do
         paramKinds <- mapM (const newKVar) params
-        let locals = foldr union [] (map getHTVars methodTypes) \\ params
-        localKinds <- mapM (const newKVar) locals
-        let env = zip params paramKinds ++ zip locals localKinds ++
-                  [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
-        mapM_ (iHKindStar env) methodTypes
+        let sharedEnv = zip params paramKinds ++
+                        [(i, k) | (i, (_, _, k)) <- its] ++ intrinsicKinds
+        mapM_ (inferMethod sharedEnv) methodTypes
         grounded <- mapM ground paramKinds
         return $ zip params grounded
+  where
+    inferMethod sharedEnv methodType = do
+        let locals = getHTVars methodType \\ params
+        localKinds <- mapM (const newKVar) locals
+        iHKindStar (zip locals localKinds ++ sharedEnv) methodType
 
 htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))] -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
 htCheckEnv its = do

@@ -9,12 +9,15 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , convertType
   , convertTypeInternal
   , parseType
+  , toSynthesisTypeDeclaration
+  , fromSynthesisTypeDeclaration
   )
 where
 
 
 
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.Diagnostic
@@ -44,6 +47,8 @@ import Data.List ( intercalate )
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as M
 import qualified Data.IntMap as IntMap
+import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
 
@@ -54,6 +59,46 @@ data HsTypeDecl = HsTypeDecl
   } deriving Show -- (Data, Show, Generic, Typeable)
 
 type TypeDeclMap = Map QualifiedName HsTypeDecl
+
+toSynthesisTypeDeclaration
+  :: HsTypeDecl
+  -> Either SynthesisDeclarationError SynthesisDeclaration
+toSynthesisTypeDeclaration declaration = do
+  body <- either (Left . DeclarationTypeConversionError) Right
+    $ toSynthesisType $ tdecl_result declaration
+  let shared = SharedDeclaration.TypeSynonymDeclaration
+        NoDeclarationMetadata
+        (toSynthesisName $ tdecl_name declaration)
+        [ SharedDeclaration.TypeParameter
+            (SharedType.FlexibleVariable parameter) Nothing
+        | parameter <- tdecl_params declaration
+        ]
+        body
+  either (Left . InvalidSharedDeclaration) (const $ Right shared)
+    $ SharedDeclaration.validateDeclaration shared
+
+fromSynthesisTypeDeclaration
+  :: SynthesisDeclaration
+  -> Either SynthesisDeclarationError HsTypeDecl
+fromSynthesisTypeDeclaration declaration = do
+  either (Left . InvalidSharedDeclaration) Right
+    $ SharedDeclaration.validateDeclaration declaration
+  case declaration of
+    SharedDeclaration.TypeSynonymDeclaration _ name parameters body ->
+      HsTypeDecl
+        <$> either (Left . DeclarationNameConversionError) Right
+              (fromSynthesisName name)
+        <*> mapM plainParameter parameters
+        <*> either (Left . DeclarationTypeConversionError) Right
+              (fromSynthesisType body)
+    _ -> Left ExpectedTypeSynonymDeclaration
+ where
+  plainParameter parameter = case SharedDeclaration.parameterKind parameter of
+    Just _ -> Left $ ExplicitParameterKindUnsupported
+      $ SharedDeclaration.parameterVariable parameter
+    Nothing -> case SharedDeclaration.parameterVariable parameter of
+      SharedType.FlexibleVariable variable -> Right variable
+      SharedType.RigidVariable variable -> Left $ RigidDataParameter variable
 
 applyTypeDecls :: Map QualifiedName (Either String HsTypeDecl)
                -> HsType 

@@ -66,6 +66,13 @@ source-type IR. The checked reverse conversion rejects rigid forall binders and
 shared names outside Exference's representable subset rather than weakening
 them during lowering.
 
+`Language.Haskell.Exference.Core.Declaration` converts function bindings,
+classes, instances, and deconstructor/data records to the shared declaration
+IR; the HSE frontend uses the same boundary for type synonyms. Function
+penalties and recursive-datatype flags survive as explicit metadata, while
+lossy reverse conversions (such as dropping separately stored class methods)
+are rejected.
+
 ## Exference 1.7 migration
 
 Version 1.7 intentionally breaks the old recursive class representation.

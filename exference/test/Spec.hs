@@ -46,6 +46,7 @@ import Language.Haskell.Exference.Core
   , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.ConstraintSolver
+import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..)
   , ExpressionRenderError (..)
@@ -55,7 +56,11 @@ import Language.Haskell.Exference.Core.Expression
   )
 import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
-import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
+import Language.Haskell.Exference.Core.FunctionBinding
+  ( ConstructorBinding (..)
+  , DeconstructorBinding (..)
+  , FunctionBinding (..)
+  )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
@@ -90,7 +95,9 @@ import Language.Haskell.Exference.BindingsFromHaskellSrc (getClassMethods)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
+  , fromSynthesisTypeDeclaration
   , parseType
+  , toSynthesisTypeDeclaration
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
   ( haskellSrcExtsParseMode
@@ -101,6 +108,7 @@ import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClas
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as Generated
+import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified CompatibilityImport
@@ -508,6 +516,61 @@ tests = testGroup "Exference"
                 [SharedType.RigidVariable 4] []
                 (SharedType.TypeVariable $ SharedType.RigidVariable 4)
           fromSynthesisType malformed @?= Left (RigidForallBinder 4)
+      ]
+  , testGroup "shared declarations"
+      [ testCase "function bindings preserve penalties and constraints" $ do
+          let constraint = HsConstraint (name "C") [TypeVar 0]
+              binding = FunctionBinding
+                (TypeVar 0) (name "mapOne") (Penalty 2.5)
+                [constraint] [TypeArrow (TypeVar 0) (TypeVar 0)]
+          shared <- expectRight $ toSynthesisFunctionBinding binding
+          fromSynthesisFunctionBinding shared @?= Right binding
+      , testCase "classes and instances round-trip nominally" $ do
+          let constraint = HsConstraint (name "C") [TypeVar 0]
+              classDeclaration = HsTypeClass (name "C") [0] []
+              instanceDeclaration = HsInstance [constraint] constraint
+          sharedClass <- expectRight
+            $ toSynthesisClassDeclaration classDeclaration
+          fromSynthesisClassDeclaration sharedClass @?=
+            Right classDeclaration
+          sharedInstance <- expectRight
+            $ toSynthesisInstanceDeclaration instanceDeclaration
+          fromSynthesisInstanceDeclaration sharedInstance @?=
+            Right instanceDeclaration
+      , testCase "deconstructor records preserve data shape and recursion" $ do
+          let input = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
+              declaration = DeconstructorBinding input
+                [ ConstructorBinding (name "Nothing") []
+                , ConstructorBinding (name "Just") [TypeVar 0]
+                ] True
+          shared <- expectRight $ toSynthesisDataDeclaration declaration
+          fromSynthesisDataDeclaration shared @?= Right declaration
+      , testCase "frontend type synonyms use the same declaration IR" $ do
+          let declaration = HsTypeDecl (name "Pair") [0, 1]
+                $ TypeApp
+                  (TypeApp (TypeCons $ name "Tuple2") (TypeVar 0))
+                  (TypeVar 1)
+          shared <- expectRight $ toSynthesisTypeDeclaration declaration
+          lowered <- expectRight $ fromSynthesisTypeDeclaration shared
+          tdecl_name lowered @?= tdecl_name declaration
+          tdecl_params lowered @?= tdecl_params declaration
+          tdecl_result lowered @?= tdecl_result declaration
+      , testCase "lossy declaration lowerings are rejected" $ do
+          let parameter = SharedDeclaration.TypeParameter
+                (SharedType.FlexibleVariable 0) Nothing
+              method = SharedDeclaration.ValueSignature
+                NoDeclarationMetadata (toSynthesisName $ name "method")
+                (SharedType.TypeVariable $ SharedType.FlexibleVariable 0)
+              sharedClass = SharedDeclaration.ClassDeclaration
+                NoDeclarationMetadata (toSynthesisName $ name "C")
+                [parameter] [] [method]
+          fromSynthesisClassDeclaration sharedClass @?=
+            Left (ClassMethodsUnsupported [toSynthesisName $ name "method"])
+          toSynthesisDataDeclaration
+              (DeconstructorBinding
+                (TypeApp (TypeCons $ name "T") (TypeCons $ name "Int"))
+                [] False)
+            @?= Left (NonVariableDataParameter $ TypeCons $ name "Int")
       ]
   , testGroup "search policy"
       [ testCase "constraint relaxation ends at the configured step" $ do

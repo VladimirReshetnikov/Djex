@@ -18,6 +18,8 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "ill-kinded queries stop before search" testKindFailure
   , testCase "invalid searches never enter reporting modes" testInvalidSearch
   , testCase "invalid class environments fail closed" testInvalidEnvironment
+  , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
+  , testCase "invalid environment modules fail closed" testInvalidModule
   , testCase "version mode does not load the environment" testVersion
   ]
 
@@ -79,6 +81,41 @@ testInvalidEnvironment = withTemporaryEnvironment $ \environmentDirectory -> do
     "could not load source environment:" errors
   assertContains "the duplicate class should remain visible"
     "duplicate type class: C (Broken.C)" errors
+  assertBool "a failed environment must never enter synthesis"
+    (not $ "\\a -> a" `isInfixOf` output)
+
+testInvalidSynonyms :: Assertion
+testInvalidSynonyms = withTemporaryEnvironment $ \environmentDirectory -> do
+  writeFile (environmentDirectory ++ "/Broken.hs") $ unlines
+    [ "module Broken where"
+    , "type A = B"
+    , "type B = A"
+    ]
+  (exitCode, output, errors) <- readProcessWithExitCode "exference"
+    ["--envdir", environmentDirectory, "a -> a"] ""
+  case exitCode of
+    ExitFailure _ -> pure ()
+    ExitSuccess -> fail "cyclic synonym environment returned success"
+  assertContains "fatal synonym diagnostics belong on stderr"
+    "TypeDeclarationErrors" errors
+  assertContains "the synonym cycle should remain visible"
+    "cyclic type synonym" errors
+  assertBool "a failed environment must never enter synthesis"
+    (not $ "\\a -> a" `isInfixOf` output)
+
+testInvalidModule :: Assertion
+testInvalidModule = withTemporaryEnvironment $ \environmentDirectory -> do
+  writeFile (environmentDirectory ++ "/Broken.hs") $ unlines
+    [ "module Broken where"
+    , "broken :: ("
+    ]
+  (exitCode, output, errors) <- readProcessWithExitCode "exference"
+    ["--envdir", environmentDirectory, "a -> a"] ""
+  case exitCode of
+    ExitFailure _ -> pure ()
+    ExitSuccess -> fail "malformed environment module returned success"
+  assertContains "fatal parser diagnostics belong on stderr"
+    "ModuleParseErrors" errors
   assertBool "a failed environment must never enter synthesis"
     (not $ "\\a -> a" `isInfixOf` output)
 

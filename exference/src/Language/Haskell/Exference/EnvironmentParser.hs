@@ -35,9 +35,10 @@ import Language.Haskell.Exference.Diagnostic
 
 import Control.DeepSeq
 
-import Control.Arrow ( (***) )
 import Control.Monad ( forM_, guard, forM, join )
 import Data.List ( sort, find, isSuffixOf )
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import Data.Maybe ( fromMaybe )
 import Data.Either ( lefts, rights )
 import Control.Monad.Writer.Strict
@@ -83,7 +84,12 @@ data SourceEnvironment function = SourceEnvironment
 -- | Fatal source-loading phases.  Warnings remain in the writer channel, but
 -- a failed class graph cannot produce a searchable recovery environment.
 data EnvironmentLoadError
-  = ClassEnvironmentLoadFailure ClassEnvironmentLoadError
+  = ModuleParseErrors (NonEmpty String)
+  | DataTypeNameError String
+  | TypeDeclarationErrors (NonEmpty String)
+  | ClassEnvironmentLoadFailure ClassEnvironmentLoadError
+  | BindingDeclarationErrors (NonEmpty String)
+  | BuiltInEnvironmentErrors (NonEmpty String)
   deriving (Eq, Show)
 
 -- | Unique-only compatibility index used by the historical type elaborator.
@@ -254,15 +260,18 @@ parseModules l = do
     forM_ ds h
   -}
   -- forM_ (rights eParsed) $ \m -> pprintTo 10000 m >>= print
-  mapM_ (mTell . (:[])) $ lefts eParsed
+  let parseErrors = lefts eParsed
+  mapM_ (mTell . (:[])) parseErrors
   let mods = rights eParsed
-  ds <- case getDataTypesChecked mods of
+  (ds, dataTypeErrors) <- case getDataTypesChecked mods of
     Left conversionError -> do
-      mTell ["could not extract data-type names: " ++ conversionError]
-      pure []
-    Right dataTypes -> pure dataTypes
+      let message = "could not extract data-type names: " ++ conversionError
+      mTell [message]
+      pure ([], [message])
+    Right dataTypes -> pure (dataTypes, [])
   typeDeclsE <- getTypeDecls ds mods
-  lefts typeDeclsE `forM_` (mTell . (:[]))
+  let typeDeclarationErrors = lefts typeDeclsE
+  typeDeclarationErrors `forM_` (mTell . (:[]))
   let validTypeDecls = rights typeDeclsE
       typeDecls = uniqueTypeDeclMap validTypeDecls
   classResult <- getClassEnv ds typeDecls mods
@@ -271,9 +280,14 @@ parseModules l = do
   let clss = sClassEnv_tclasses cntxt
       insts = sClassEnv_instances cntxt
   -- TODO: try to exfere this stuff
-  (decls, deconss) <- do
+  (decls, deconss, bindingErrors) <- do
     stuff <- mapM (hExtractBinds cntxt ds typeDecls) mods
-    return $ concat *** concat $ unzip stuff
+    let (bindingLists, deconstructorLists, errorLists) = unzip3 stuff
+    return
+      ( concat bindingLists
+      , concat deconstructorLists
+      , concat errorLists
+      )
   let clssNames = M.keys clss
   let allValidNames = ds ++ clssNames
   let
@@ -344,12 +358,20 @@ parseModules l = do
   builtInDeconstructorsResult <- builtInDeconstructorsM
   let reportBuiltInFailure kind failure =
         mTell ["could not construct built-in " ++ kind ++ ": " ++ show failure]
-  builtInDecls <- case builtInDeclsResult of
-    Left failure -> reportBuiltInFailure "bindings" failure >> pure []
-    Right bindings -> pure bindings
-  builtInDeconstructors <- case builtInDeconstructorsResult of
-    Left failure -> reportBuiltInFailure "deconstructors" failure >> pure []
-    Right deconstructors -> pure deconstructors
+  (builtInDecls, builtInBindingErrors) <- case builtInDeclsResult of
+    Left failure -> do
+      let message = "could not construct built-in bindings: " ++ show failure
+      reportBuiltInFailure "bindings" failure
+      pure ([], [message])
+    Right bindings -> pure (bindings, [])
+  (builtInDeconstructors, builtInDeconstructorErrors) <-
+    case builtInDeconstructorsResult of
+      Left failure -> do
+        let message = "could not construct built-in deconstructors: "
+              ++ show failure
+        reportBuiltInFailure "deconstructors" failure
+        pure ([], [message])
+      Right deconstructors -> pure (deconstructors, [])
   let environment = SourceEnvironment
         { sourceFunctions = builtInDecls ++ decls
         , sourceDeconstructors = builtInDeconstructors ++ deconss
@@ -357,9 +379,22 @@ parseModules l = do
         , sourceTypeNames = allValidNames
         , sourceTypeSynonyms = validTypeDecls
         }
-  return $ case classResult of
-    Left failure -> Left $ ClassEnvironmentLoadFailure failure
-    Right _ -> Right environment
+      loadError = case () of
+        _ | Just errors <- NonEmpty.nonEmpty parseErrors ->
+              Just $ ModuleParseErrors errors
+          | errorMessage : _ <- dataTypeErrors ->
+              Just $ DataTypeNameError errorMessage
+          | Just errors <- NonEmpty.nonEmpty typeDeclarationErrors ->
+              Just $ TypeDeclarationErrors errors
+          | Left failure <- classResult ->
+              Just $ ClassEnvironmentLoadFailure failure
+          | Just errors <- NonEmpty.nonEmpty bindingErrors ->
+              Just $ BindingDeclarationErrors errors
+          | Just errors <- NonEmpty.nonEmpty
+              (builtInBindingErrors ++ builtInDeconstructorErrors) ->
+              Just $ BuiltInEnvironmentErrors errors
+          | otherwise -> Nothing
+  return $ maybe (Right environment) Left loadError
   where
     hRead :: (ParseMode, String) -> IO (ParseMode, String)
     hRead (mode, s) = (,) mode <$> readFile s
@@ -371,18 +406,19 @@ parseModules l = do
                   -> [QualifiedName]
                   -> TypeDeclMap
                   -> Module SrcSpanInfo
-                  -> m ([HsFunctionDecl], [DeconstructorBinding])
+                  -> m ([HsFunctionDecl], [DeconstructorBinding], [String])
     hExtractBinds cntxt ds tDeclMap modul = do
       -- tell $ return $ mname
       eFromData <- getDataConss (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
       eDecls <- (++)
         <$> getDecls ds (sClassEnv_tclasses cntxt) tDeclMap [modul]
         <*> getClassMethods (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
-      mapM_ (mTell . (:[])) $ lefts eFromData ++ lefts eDecls
+      let errors = lefts eFromData ++ lefts eDecls
+      mapM_ (mTell . (:[])) errors
       -- tell $ map show $ rights ebinds
       let (binds1s, deconss) = unzip $ rights eFromData
           binds2 = rights eDecls
-      return $ ( concat binds1s ++ binds2, deconss )
+      return (concat binds1s ++ binds2, deconss, errors)
 
 -- | A simplified version of environmentFromModules where the input
 -- is just one module, parsed with some default ParseMode;

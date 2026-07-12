@@ -1139,6 +1139,7 @@ tests = testGroup "Exference"
             [(haskellSrcExtsParseMode path, path) | path <- paths]
           case result of
             Left (ClassEnvironmentLoadFailure _) -> pure ()
+            Left failure -> fail $ "unexpected load failure: " ++ show failure
             Right _ -> fail "an incomplete class inventory was accepted"
           length (filter (== warning) messages) @?= 0
       , testCase "qualified names reject empty path segments" $

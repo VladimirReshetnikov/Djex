@@ -11,6 +11,7 @@ import qualified Data.Set as Set
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import qualified Language.Haskell.Synthesis.Declaration as Declaration
+import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
 import qualified Language.Haskell.Synthesis.Kind as Kind
@@ -27,6 +28,7 @@ tests :: TestTree
 tests = testGroup "haskell-synthesis"
   [ constraintTests
   , declarationTests
+  , environmentTests
   , generatedTests
   , searchTests
   , typeTests
@@ -36,6 +38,78 @@ tests = testGroup "haskell-synthesis"
   , parserTests
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
+  ]
+
+environmentTests :: TestTree
+environmentTests = testGroup "environments"
+  [ testCase "index declarations across shared namespaces" $ do
+      let typeName = right $ mkIdentifier "T"
+          constructorName = right $ mkIdentifier "MkT"
+          valueName = right $ mkIdentifier "makeT"
+          className = right $ mkIdentifier "C"
+          methodName = right $ mkIdentifier "method"
+          declarations :: [Declaration.Declaration String Int ()]
+          declarations =
+            [ Declaration.DataTypeDeclaration () typeName []
+                [Declaration.DataConstructor () constructorName []]
+            , Declaration.ValueDeclaration
+                $ Declaration.ValueSignature () valueName
+                $ SharedType.TypeConstructor typeName
+            , Declaration.ClassDeclaration () className [] []
+                [Declaration.ValueSignature () methodName
+                  $ SharedType.TypeConstructor typeName]
+            ]
+      let environment = right $ Environment.mkEnvironment declarations
+      Environment.environmentDeclarations environment @?= declarations
+      Map.keys (Environment.typeDeclarationMap environment) @?=
+        [className, typeName]
+      Map.keys (Environment.valueSignatureMap environment) @?=
+        [valueName, methodName]
+      Map.keys (Environment.dataConstructorMap environment) @?=
+        [constructorName]
+  , testCase "reject duplicate type, value, and instance declarations" $ do
+      let typeName = right $ mkIdentifier "T"
+          valueName = right $ mkIdentifier "value"
+          className = right $ mkIdentifier "C"
+          typeDeclaration :: Declaration.Declaration String Int ()
+          typeDeclaration = Declaration.AbstractTypeDeclaration
+            () typeName Kind.ProperTypeKind
+          valueDeclaration :: Declaration.Declaration String Int ()
+          valueDeclaration = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () valueName
+            $ SharedType.TypeConstructor typeName
+          instanceDeclaration :: Declaration.Declaration String Int ()
+          instanceDeclaration = Declaration.InstanceDeclaration
+            () [] [] (Constraint className [])
+      Environment.mkEnvironment [typeDeclaration, typeDeclaration] @?=
+        Left (Environment.DuplicateTypeDeclaration typeName)
+      Environment.mkEnvironment [valueDeclaration, valueDeclaration] @?=
+        Left (Environment.DuplicateValueDeclaration valueName)
+      Environment.mkEnvironment [instanceDeclaration, instanceDeclaration] @?=
+        Left (Environment.DuplicateInstanceDeclaration
+          $ Constraint className [])
+  , testCase "qualified type names remain nominally distinct" $ do
+      let namespaceA = right $ mkModuleName "A"
+          namespaceB = right $ mkModuleName "B"
+          typeA = right $ mkQualifiedIdentifier namespaceA "T"
+          typeB = right $ mkQualifiedIdentifier namespaceB "T"
+          declarations :: [Declaration.Declaration String Int ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration
+                () typeA Kind.ProperTypeKind
+            , Declaration.AbstractTypeDeclaration
+                () typeB Kind.ProperTypeKind
+            ]
+          environment = right $ Environment.mkEnvironment declarations
+      Map.size (Environment.typeDeclarationMap environment) @?= 2
+  , testCase "retain the failing declaration index" $ do
+      let invalidName = right $ mkIdentifier "value"
+          invalid :: Declaration.Declaration String Int ()
+          invalid = Declaration.TypeSynonymDeclaration
+            () invalidName [] $ SharedType.TypeVariable "a"
+      Environment.mkEnvironment [invalid] @?= Left
+        (Environment.InvalidEnvironmentDeclaration 0
+          $ Declaration.InvalidDeclaredTypeName invalidName)
   ]
 
 declarationTests :: TestTree

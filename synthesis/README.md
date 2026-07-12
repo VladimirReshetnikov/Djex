@@ -41,6 +41,12 @@ validator enforces declaration namespaces, distinct parameters/members, and
 the common type invariants without prescribing backend-specific class or
 instance resolution.
 
+`Language.Haskell.Synthesis.Environment` seals a declaration inventory and
+builds deterministic type/class, value/method, constructor, and instance-head
+indexes. It rejects cross-declaration namespace collisions and duplicate
+instances while preserving qualified-name identity. Dependency, kind, and
+backend resolution policies remain explicit later validation layers.
+
 Build and test it independently with:
 
 ```text

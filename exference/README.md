@@ -80,6 +80,11 @@ rather than derived cache entries. Frontend-only declarations such as type
 synonyms remain explicit conversion errors until the search core gains a
 representation for them.
 
+Exference's implicit instance variables become explicit binders at that shared
+boundary. Reverse lowering accepts exactly the free flexible variables of the
+instance context and head, preventing an unused or rigid shared binder from
+silently changing meaning when returned to Exference's implicit form.
+
 ## Exference 1.7 migration
 
 Version 1.7 intentionally breaks the old recursive class representation.

@@ -539,6 +539,10 @@ tests = testGroup "Exference"
             Right classDeclaration
           sharedInstance <- expectRight
             $ toSynthesisInstanceDeclaration instanceDeclaration
+          case sharedInstance of
+            SharedDeclaration.InstanceDeclaration _ variables _ _ ->
+              variables @?= [SharedType.FlexibleVariable 0]
+            _ -> fail "instance adapter returned another declaration shape"
           fromSynthesisInstanceDeclaration sharedInstance @?=
             Right instanceDeclaration
       , testCase "deconstructor records preserve data shape and recursion" $ do
@@ -613,6 +617,13 @@ tests = testGroup "Exference"
                 (TypeApp (TypeCons $ name "T") (TypeCons $ name "Int"))
                 [] False)
             @?= Left (NonVariableDataParameter $ TypeCons $ name "Int")
+          let unused = SharedType.FlexibleVariable 9
+              sharedInstance = SharedDeclaration.InstanceDeclaration
+                NoDeclarationMetadata [unused] []
+                (SharedConstraint.Constraint
+                  (toSynthesisName $ name "C") [])
+          fromSynthesisInstanceDeclaration sharedInstance @?=
+            Left (NonImplicitInstanceForall [unused])
       ]
   , testGroup "search policy"
       [ testCase "constraint relaxation ends at the configured step" $ do

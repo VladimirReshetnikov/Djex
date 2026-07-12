@@ -23,6 +23,7 @@ module Language.Haskell.Exference.Core.Declaration
 import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import GHC.Generics (Generic)
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
@@ -62,7 +63,7 @@ data SynthesisDeclarationError
   | MissingFunctionPenaltyMetadata
   | MissingRecursiveDataMetadata
   | ExplicitFunctionForallUnsupported [TVarId]
-  | ExplicitInstanceForallUnsupported [SynthesisVariable]
+  | NonImplicitInstanceForall [SynthesisVariable]
   | ClassMethodsUnsupported [SharedName.Name]
   | ExplicitParameterKindUnsupported SynthesisVariable
   | InvalidDeconstructorHead HsType
@@ -135,9 +136,16 @@ toSynthesisInstanceDeclaration
   :: HsInstance
   -> Either SynthesisDeclarationError SynthesisDeclaration
 toSynthesisInstanceDeclaration declaration = checked $
-  SharedDeclaration.InstanceDeclaration NoDeclarationMetadata []
-    <$> mapM convertedConstraint (instance_constraints declaration)
-    <*> convertedConstraint (instance_head declaration)
+  do
+    prerequisites <- mapM convertedConstraint
+      $ instance_constraints declaration
+    headConstraint <- convertedConstraint $ instance_head declaration
+    -- HsInstance quantifies these variables implicitly. Materialize that
+    -- binder set before crossing the explicit shared declaration boundary.
+    let variables = Set.toAscList $ constraintVariables
+          $ headConstraint : prerequisites
+    Right $ SharedDeclaration.InstanceDeclaration NoDeclarationMetadata
+      variables prerequisites headConstraint
 
 fromSynthesisInstanceDeclaration
   :: SynthesisDeclaration
@@ -146,10 +154,12 @@ fromSynthesisInstanceDeclaration declaration = do
   validateShared declaration
   case declaration of
     SharedDeclaration.InstanceDeclaration _ variables prerequisites headConstraint
-      | null variables -> HsInstance
+      | Set.fromList variables == constraintVariables
+          (headConstraint : prerequisites)
+      , all isFlexibleVariable variables -> HsInstance
           <$> mapM loweredConstraint prerequisites
           <*> loweredConstraint headConstraint
-      | otherwise -> Left $ ExplicitInstanceForallUnsupported variables
+      | otherwise -> Left $ NonImplicitInstanceForall variables
     _ -> Left ExpectedInstanceDeclaration
 
 toSynthesisDataDeclaration
@@ -255,6 +265,15 @@ loweredType
 loweredType typeExpression = either
   (Left . DeclarationTypeConversionError) Right
   $ fromSynthesisType typeExpression
+
+constraintVariables
+  :: [SharedConstraint.Constraint (SharedType.Type SynthesisVariable)]
+  -> Set.Set SynthesisVariable
+constraintVariables = foldMap (foldMap SharedType.freeVariables)
+
+isFlexibleVariable :: SynthesisVariable -> Bool
+isFlexibleVariable SharedType.FlexibleVariable{} = True
+isFlexibleVariable SharedType.RigidVariable{} = False
 
 convertedName
   :: SharedName.Name

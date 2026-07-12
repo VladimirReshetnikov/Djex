@@ -81,6 +81,10 @@ data DeclarationError typeVariable
   | DuplicateTypeParameter typeVariable
   | DuplicateConstructorName Name
   | DuplicateMethodName Name
+  | UndeclaredSynonymVariables Name [typeVariable]
+  | UndeclaredDataVariables Name [typeVariable]
+  | UndeclaredSuperclassVariables Name [typeVariable]
+  | UndeclaredInstanceVariables Name [typeVariable]
   | InvalidDeclarationType (TypeError typeVariable)
   deriving (Eq, Ord, Show, Generic)
 
@@ -95,23 +99,39 @@ validateDeclaration declaration = case declaration of
     validateTypeName name
     validateParameters parameters
     validateDeclaredType body
+    validateBoundVariables (UndeclaredSynonymVariables name)
+      parameters [body]
   DataTypeDeclaration _ name parameters constructors -> do
     validateTypeName name
     validateParameters parameters
     validateDistinct DuplicateConstructorName $ map constructorName constructors
     mapM_ validateConstructor constructors
+    validateBoundVariables (UndeclaredDataVariables name) parameters
+      $ concatMap constructorFields constructors
   AbstractTypeDeclaration _ name _ -> validateTypeName name
   ValueDeclaration signature -> validateValue signature
   ClassDeclaration _ name parameters superclasses methods -> do
     validateClassName name
     validateParameters parameters
     mapM_ validateConstraint superclasses
+    validateBoundVariables (UndeclaredSuperclassVariables name) parameters
+      [ argument
+      | superclass <- superclasses
+      , argument <- constraintArguments superclass
+      ]
     validateDistinct DuplicateMethodName $ map valueName methods
     mapM_ validateValue methods
   InstanceDeclaration _ variables prerequisites headConstraint -> do
     validateDistinct DuplicateTypeParameter variables
     mapM_ validateConstraint prerequisites
     validateConstraint headConstraint
+    let unbound = referencedVariables
+          [ argument
+          | constraint <- headConstraint : prerequisites
+          , argument <- constraintArguments constraint
+          ] `Set.difference` Set.fromList variables
+    unless (Set.null unbound) $ Left $ UndeclaredInstanceVariables
+      (constraintClass headConstraint) $ Set.toAscList unbound
  where
   validateTypeName name = unless (isTypeConstructorName name) $
     Left $ InvalidDeclaredTypeName name
@@ -131,6 +151,13 @@ validateDeclaration declaration = case declaration of
     unless (isValueName $ valueName signature) $
       Left $ InvalidDeclaredValueName $ valueName signature
     validateDeclaredType $ valueType signature
+
+  validateBoundVariables failure parameters types =
+    let unbound = referencedVariables types `Set.difference`
+          Set.fromList (map parameterVariable parameters)
+    in unless (Set.null unbound) $ Left $ failure $ Set.toAscList unbound
+
+  referencedVariables = Set.unions . map freeVariables
 
   validateConstraint constraint = do
     validateClassName $ constraintClass constraint

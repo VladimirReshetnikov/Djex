@@ -38,8 +38,10 @@ this AST.
 layer: kind variables/arrows, kinded type parameters, synonyms, data and
 constructor declarations, opaque types, values, classes, and instances. The
 validator enforces declaration namespaces, distinct parameters/members, and
-the common type invariants without prescribing backend-specific class or
-instance resolution.
+the common type invariants. Synonym bodies, datatype fields, superclasses, and
+instance constraints must be covered by their declaration binders; value
+signatures and class methods retain Haskell's implicit local quantification.
+The layer does not prescribe backend-specific class or instance resolution.
 
 `Language.Haskell.Synthesis.Environment` seals a declaration inventory and
 builds deterministic type/class, value/method, constructor, and instance-head

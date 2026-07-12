@@ -180,6 +180,30 @@ declarationTests = testGroup "declarations"
       Kind.freeKindVariables kind @?= Set.singleton 1
       fmap (+ 1) kind @?=
         Kind.FunctionKind (Kind.KindVariable 2) Kind.ProperTypeKind
+  , testCase "declaration binders cover every non-implicit variable" $ do
+      let typeName = right $ mkIdentifier "T"
+          constructorName = right $ mkIdentifier "MkT"
+          className = right $ mkIdentifier "C"
+          parameter = Declaration.TypeParameter "a" Nothing
+          unbound = SharedType.TypeVariable "b"
+          superclass = Constraint className [unbound]
+          synonym :: Declaration.Declaration String Int ()
+          synonym = Declaration.TypeSynonymDeclaration () typeName
+            [parameter] unbound
+          datatype = Declaration.DataTypeDeclaration () typeName [parameter]
+            [Declaration.DataConstructor () constructorName [unbound]]
+          classDeclaration = Declaration.ClassDeclaration () className
+            [parameter] [superclass] []
+          instanceDeclaration = Declaration.InstanceDeclaration () ["a"]
+            [] superclass
+      Declaration.validateDeclaration synonym @?= Left
+        (Declaration.UndeclaredSynonymVariables typeName ["b"])
+      Declaration.validateDeclaration datatype @?= Left
+        (Declaration.UndeclaredDataVariables typeName ["b"])
+      Declaration.validateDeclaration classDeclaration @?= Left
+        (Declaration.UndeclaredSuperclassVariables className ["b"])
+      Declaration.validateDeclaration instanceDeclaration @?= Left
+        (Declaration.UndeclaredInstanceVariables className ["b"])
   ]
 
 typeTests :: TestTree

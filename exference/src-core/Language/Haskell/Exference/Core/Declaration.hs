@@ -69,10 +69,12 @@ data SynthesisDeclarationError
   | InvalidDeconstructorHead HsType
   | NonVariableDataParameter HsType
   | RigidDataParameter TVarId
+  | DeconstructorForallMismatch [TVarId] [TVarId]
   | InvalidSharedEnvironment
       (SharedEnvironment.EnvironmentError SynthesisVariable)
   | ClassEnvironmentConversionError ClassEnvError
   | UnsupportedCoreEnvironmentDeclaration SharedName.Name
+  | OrphanConstructorBinding SharedName.Name
   deriving (Eq, Show)
 
 toSynthesisFunctionBinding
@@ -333,12 +335,22 @@ loweredConstructor constructor = ConstructorBinding
 deconstructorHead
   :: HsType
   -> Either SynthesisDeclarationError (QualifiedName, [TVarId])
-deconstructorHead typeExpression =
-  let (headType, arguments) = typeApplicationSpine typeExpression
-  in case headType of
-      TypeCons name -> (name,) <$> mapM typeVariable arguments
-      _ -> Left $ InvalidDeconstructorHead typeExpression
+deconstructorHead typeExpression = do
+  (binders, body) <- stripForalls [] typeExpression
+  let (headType, arguments) = typeApplicationSpine body
+  case headType of
+    TypeCons name -> do
+      parameters <- mapM typeVariable arguments
+      if null binders || Set.fromList binders == Set.fromList parameters
+        then Right (name, parameters)
+        else Left $ DeconstructorForallMismatch binders parameters
+    _ -> Left $ InvalidDeconstructorHead typeExpression
  where
+  stripForalls binders (TypeForall variables [] body) =
+    stripForalls (binders ++ variables) body
+  stripForalls _ TypeForall{} = Left $ InvalidDeconstructorHead typeExpression
+  stripForalls binders body = Right (binders, body)
+
   typeVariable (TypeVar variable) = Right variable
   typeVariable argument = Left $ NonVariableDataParameter argument
 

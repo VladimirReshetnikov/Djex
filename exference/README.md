@@ -76,9 +76,21 @@ are rejected.
 Whole core environments also round-trip through the shared sealed declaration
 inventory. `StaticClassEnv` retains explicit instance declarations separately
 from its superclass-inflated lookup index, so adapters serialize source facts
-rather than derived cache entries. Frontend-only declarations such as type
-synonyms remain explicit conversion errors until the search core gains a
-representation for them.
+rather than derived cache entries. The core-only adapter still rejects
+frontend-only declarations such as type synonyms because its search
+dictionary has no representation for them.
+
+The HSE loader returns a parameterized `SourceEnvironment` record rather than
+an anonymous five-tuple. Parsed functions, deconstructors, classes, datatype
+names, and synonyms therefore remain one named inventory through rating and
+CLI loading. `toSynthesisSourceEnvironment` seals that complete inventory in
+the shared environment IR. Constructor signatures duplicated in Exference's
+search-function list are represented only by their datatype declarations at
+this boundary; list, unit, and tuple constructors have explicit intrinsic
+datatype records, so `(:)` never masquerades as an ordinary value.
+Class-environment construction likewise rejects repeated instance heads before
+building its lookup index; each shipped primitive instance now has one owning
+module instead of a second shadow declaration in `Data.hs`.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

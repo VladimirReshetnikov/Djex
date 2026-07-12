@@ -7,18 +7,12 @@ class Eq a where
   (/=) :: a -> a -> Data.Bool.Bool
 
 instance Eq a => Eq [a]
-instance Eq a => Eq (Data.Ratio.Ratio a)
 -- instance Eq p => Eq (Par1 p)
-instance Eq a => Eq (Data.Maybe.Maybe a)
-instance Eq a => Eq (Data.Ord.Down a)
 instance Eq a => Eq (Data.Monoid.Last a)
 instance Eq a => Eq (Data.Monoid.First a)
 instance Eq a => Eq (Data.Monoid.Product a)
 instance Eq a => Eq (Data.Monoid.Sum a)
 instance Eq a => Eq (Data.Monoid.Dual a)
-instance Eq a => Eq (ZipList a)
-instance Eq a => Eq (Complex a)
-instance (Eq a, Eq b) => Eq (Data.Either.Either a b)
 -- instance Eq (f p) => Eq (Rec1 f p)
 instance (Eq a, Eq b) => Eq (a, b)
 instance Eq c => Eq (K1 i c p)

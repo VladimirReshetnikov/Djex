@@ -9,7 +9,6 @@ class (Data.Functor.Functor t, Data.Foldable.Foldable t) => Traversable t where
   -- sequence :: Control.Monad.Monad m => t (m a) -> m (t a)
 
 instance Traversable []
-instance Traversable Data.Maybe.Maybe
 instance Traversable Data.Functor.Identity.Identity
 -- instance Traversable (Data.Either.Either a)  -- cause "unused" problems
 -- instance Traversable ((,) a)     -- cause "unused" problems

@@ -56,19 +56,8 @@ class Bounded a where
 fromIntegral :: (Integral a, Num b) => a -> b
 realToFrac :: (Real a, Fractional b) => a -> b
 
-instance Integral a => Num (Data.Ratio.Ratio a)
 instance Num a => Num (Data.Monoid.Product a)
 instance Num a => Num (Data.Monoid.Sum a)
-instance RealFloat a => Num (Data.Complex.Complex a)
-
-instance Integral a => Real (Data.Ratio.Ratio a)
-
-instance Integral a => RealFrac (Data.Ratio.Ratio a)
-
-instance Integral a => Fractional (Data.Ratio.Ratio a)
-instance RealFloat a => Fractional (Data.Complex.Complex a)
-
-instance RealFloat a => Floating (Data.Complex.Complex a)
 
 instance Data.Eq.Eq Float
 instance Floating Float

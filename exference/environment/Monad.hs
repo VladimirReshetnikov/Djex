@@ -22,13 +22,10 @@ forever :: Monad m => m () -> m Data.Void.Void
 (>>) :: Monad m => m () -> m b -> m b
 
 instance Monad []
-instance Monad System.IO.IO
-instance Monad Data.Maybe.Maybe
 instance Monad Text.ParserCombinators.ReadP.ReadP
 instance Monad Text.ParserCombinators.ReadPrec.ReadPrec
 instance Monad Control.Concurrent.STM.STM
 -- instance Monad ((->) r)
-instance Monad (Data.Either.Either e)
 instance Monad (Control.Monad.ST.ST s)
 -- instance Monad (Proxy *)
 instance ArrowApply a => Monad (Control.Arrow.ArrowMonad a)

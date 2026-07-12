@@ -13,7 +13,6 @@ instance Monoid ()
 instance Monoid Any   
 instance Monoid All   
 instance Monoid [a]   
-instance Monoid a => Monoid (Data.Maybe.Maybe a)
 instance Monoid (Last a)  
 instance Monoid (First a)   
 instance Prelude.Num a => Monoid (Product a)  

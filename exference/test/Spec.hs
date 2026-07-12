@@ -84,11 +84,13 @@ import Language.Haskell.Exference
   , selectSortNExpressions
   )
 import Language.Haskell.Exference.EnvironmentParser
-  ( compileWithDict
+  ( SourceEnvironment (..)
+  , compileWithDict
   , environmentFromModuleAndRatings
   , environmentFromPath
   , parseModules
   , parseRatings
+  , toSynthesisSourceEnvironment
   )
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc (getClassEnv)
 import Language.Haskell.Exference.Diagnostic
@@ -186,6 +188,15 @@ tests = testGroup "Exference"
               expected = Left (DuplicateClassDeclaration $ name "C")
           mkStaticClassEnv [unary, binary] [] @?= expected
           mkStaticClassEnv [binary, unary] [] @?= expected
+      , testCase "duplicate instance heads are rejected before inflation" $ do
+          let cls = HsTypeClass (name "C") [0] []
+              headConstraint = HsConstraint (name "C")
+                [TypeCons $ name "Int"]
+              firstInstance = HsInstance [] headConstraint
+              secondInstance = HsInstance
+                [HsConstraint (name "C") [TypeVar 0]] headConstraint
+          mkStaticClassEnv [cls] [firstInstance, secondInstance] @?=
+            Left (DuplicateInstanceHeads [headConstraint])
       , testCase "class declarations require the constructor namespace" $ do
           let lowercase = HsTypeClass (name "className") [] []
               tuple = HsTypeClass (TupleCon 2) [] []
@@ -915,8 +926,7 @@ tests = testGroup "Exference"
       , testCase "malformed ratings retain the parsed environment at defaults" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
-          ((bindings, deconstructors, classes, names, _),
-              (messages :: [String])) <-
+          (sourceEnvironment, messages :: [String]) <-
             runMultiRWSTNil $ withMultiWriterAW
               $ environmentFromModuleAndRatings modulePath modulePath
           categoryName <- expectRight
@@ -924,15 +934,52 @@ tests = testGroup "Exference"
           identityName <- expectRight
             $ mkQualifiedName ["Control", "Category"] "id"
           assertBool "malformed ratings discarded parsed deconstructors"
-            $ not $ null deconstructors
-          Map.member categoryName (sClassEnv_tclasses classes) @?= True
+            $ not $ null $ sourceDeconstructors sourceEnvironment
+          Map.member categoryName
+            (sClassEnv_tclasses $ sourceClasses sourceEnvironment) @?= True
           assertBool "malformed ratings discarded parsed class names"
-            $ categoryName `elem` names
-          case find ((== identityName) . functionName) bindings of
+            $ categoryName `elem` sourceTypeNames sourceEnvironment
+          case find ((== identityName) . functionName)
+              (sourceFunctions sourceEnvironment) of
             Nothing -> fail "malformed ratings discarded parsed declarations"
             Just binding -> functionPenalty binding @?= Penalty 0
           assertBool ("missing rating diagnostic: " ++ show messages)
             $ "could not parse rating file" `elem` messages
+      , testCase "frontend source environments retain type synonyms" $ do
+          environmentDirectory <- getDataFileName "environment"
+          let modulePath = environmentDirectory ++ "/String.hs"
+          (sourceEnvironment, _ :: [String]) <- runMultiRWSTNil
+            $ withMultiWriterAW
+            $ environmentFromModuleAndRatings modulePath modulePath
+          shared <- expectRight
+            $ toSynthesisSourceEnvironment sourceEnvironment
+          stringName <- expectRight
+            $ mkQualifiedName ["Data", "String"] "String"
+          case Map.lookup (toSynthesisName stringName)
+              (SharedEnvironment.typeDeclarationMap shared) of
+            Just SharedDeclaration.TypeSynonymDeclaration{} -> pure ()
+            declaration -> fail $
+              "source synonym missing from shared environment: "
+                ++ show declaration
+          Map.member SharedName.listName
+            (SharedEnvironment.typeDeclarationMap shared) @?= True
+          Map.member SharedName.consName
+            (SharedEnvironment.dataConstructorMap shared) @?= True
+          Map.member SharedName.consName
+            (SharedEnvironment.valueSignatureMap shared) @?= False
+      , testCase "the shipped source environment seals as one inventory" $ do
+          environmentDirectory <- getDataFileName "environment"
+          (sourceEnvironment, _ :: [String]) <- runMultiRWSTNil
+            $ withMultiWriterAW $ environmentFromPath environmentDirectory
+          case toSynthesisSourceEnvironment sourceEnvironment of
+            Left conversionError -> fail $
+              "shipped environment failed shared validation: "
+                ++ show conversionError
+            Right shared -> do
+              assertBool "shared source inventory lost type declarations"
+                $ not $ Map.null $ SharedEnvironment.typeDeclarationMap shared
+              assertBool "shared source inventory lost values"
+                $ not $ Map.null $ SharedEnvironment.valueSignatureMap shared
       , testCase "loader names unknown type constructors precisely" $ do
           environmentDirectory <- getDataFileName "environment"
           let modulePath = environmentDirectory ++ "/Char.hs"
@@ -955,7 +1002,7 @@ tests = testGroup "Exference"
           environmentDirectory <- getDataFileName "environment"
           let paths = map ((environmentDirectory ++ "/") ++)
                 ["Eq.hs", "Ord.hs"]
-              warning = "unknown type constructor 'Data.Maybe.Maybe' used in class instances"
+              warning = "unknown type constructor 'Data.Monoid.Last' used in class instances"
           (_, (messages :: [String])) <- runMultiRWSTNil
             $ withMultiWriterAW $ parseModules
             [(haskellSrcExtsParseMode path, path) | path <- paths]
@@ -1094,8 +1141,8 @@ tests = testGroup "Exference"
           sum (map length $ Map.elems $ sClassEnv_instances classEnvironment)
             @?= 535
           messages @?=
-            [ "got 41 classes"
-            , "and 485 instances"
+              [ "got 41 classes"
+              , "and 432 instances"
             , "(-> 535 instances after inflation)"
             , "and 156 function decls"
             ]
@@ -1422,9 +1469,8 @@ loadEnvironmentAndMessages environmentDirectory = do
   ((bindings, classEnvironment), messages) <- runMultiRWSTNil
     $ withMultiWriterAW
     $ do
-        (loadedBindings, _, loadedClasses, _, _) <-
-          environmentFromPath environmentDirectory
-        pure (loadedBindings, loadedClasses)
+        environment <- environmentFromPath environmentDirectory
+        pure (sourceFunctions environment, sourceClasses environment)
   pure (bindings, classEnvironment, messages)
 
 identityInput :: ExferenceInput

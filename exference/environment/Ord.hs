@@ -12,17 +12,12 @@ class Data.Eq.Eq a => Ord a where
 comparing :: Ord a => (b -> a) -> b -> b -> Prelude.Ordering
 
 instance Ord a => Ord [a]
-instance Prelude.Integral a => Ord (Data.Ratio.Ratio a)
 -- instance Ord p => Ord (Par1 p)
-instance Ord a => Ord (Data.Maybe.Maybe a)
-instance Ord a => Ord (Data.Ord.Down a)
 instance Ord a => Ord (Data.Monoid.Last a)
 instance Ord a => Ord (Data.Monoid.First a)
 instance Ord a => Ord (Data.Monoid.Product a)
 instance Ord a => Ord (Data.Monoid.Sum a)
 instance Ord a => Ord (Data.Monoid.Dual a)
-instance Ord a => Ord (Control.Applicative.ZipList a)
-instance (Ord a, Ord b) => Ord (Data.Either.Either a b)
 -- instance Ord (f p) => Ord (Rec1 f p)
 instance (Ord a, Ord b) => Ord (a, b)
 -- instance Ord c => Ord (K1 i c p)

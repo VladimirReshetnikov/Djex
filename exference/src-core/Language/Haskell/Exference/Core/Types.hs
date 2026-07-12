@@ -278,6 +278,7 @@ data ClassEnvError
   | UnknownConstraintClass ConstraintSite QualifiedName
   | ConstraintArityMismatch ConstraintSite QualifiedName Int Int
     -- ^ Site, class name, declared arity, supplied arity.
+  | DuplicateInstanceHeads [HsConstraint]
   | SuperclassCycle [QualifiedName]
   deriving (Eq, Ord, Show)
 
@@ -315,6 +316,9 @@ mkStaticClassEnv
 mkStaticClassEnv tclasses instances = do
   classTable <- buildClassTable tclasses
   traverse_ (validateClass classTable) tclasses
+  case repeatedValues $ map instance_head instances of
+    [] -> Right ()
+    duplicates -> Left $ DuplicateInstanceHeads duplicates
   traverse_ (validateInstance classTable) instances
   validateSuperclassGraph classTable
   let declarations = StaticClassEnv classTable [] M.empty
@@ -431,6 +435,18 @@ firstDuplicate = go S.empty
   go seen (value : rest)
     | value `S.member` seen = Just value
     | otherwise = go (S.insert value seen) rest
+
+-- | Return every repeated value once, in the order its first repetition is
+-- encountered.  Reporting the complete set lets environment maintainers fix
+-- independent duplicate instance declarations in one pass.
+repeatedValues :: Ord a => [a] -> [a]
+repeatedValues = go S.empty S.empty
+ where
+  go _ _ [] = []
+  go seen reported (value : rest)
+    | value `S.member` reported = go seen reported rest
+    | value `S.member` seen = value : go seen (S.insert value reported) rest
+    | otherwise = go (S.insert value seen) reported rest
 
 -- This representation is sealed for the same reason: assumed constraints and
 -- their superclass closure must be updated together by 'addQueryClassEnv'.

@@ -7,18 +7,14 @@ class Functor f where
   -- (<$) :: a -> f b -> f a
 
 instance Functor []
-instance Functor System.IO.IO
-instance Functor Data.Maybe.Maybe
 instance Functor Text.ParserCombinators.ReadP.ReadP
 instance Functor Text.ParserCombinators.ReadPrec.ReadPrec
 instance Functor Control.Concurrent.STM.STM
 instance Functor Control.Exception.Handler
-instance Functor Control.Applicative.ZipList
 instance Functor System.Console.GetOpt.ArgDescr
 instance Functor System.Console.GetOpt.OptDescr
 instance Functor System.Console.GetOpt.ArgOrder
 -- instance Functor ((->) r)
-instance Functor (Data.Either.Either a)
 instance Functor ((,) a)
 instance Functor (Control.Monad.ST.ST s)
 -- instance Functor (Proxy *)

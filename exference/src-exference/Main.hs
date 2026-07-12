@@ -125,12 +125,13 @@ main = do
         when (verbosity>0) $ lift $ do
           putStrLn $ "[Environment]"
           putStrLn $ "reading environment from " ++ envDir
-        ( (eSignatures
-          , eDeconss
-          , sEnv
-          , validNames
-          , tdeclMap )
-         ,messages :: [String] ) <- withMultiWriterAW $ environmentFromPath envDir
+        (sourceEnvironment, messages :: [String]) <-
+          withMultiWriterAW $ environmentFromPath envDir
+        let eSignatures = sourceFunctions sourceEnvironment
+            eDeconss = sourceDeconstructors sourceEnvironment
+            sEnv = sourceClasses sourceEnvironment
+            validNames = sourceTypeNames sourceEnvironment
+            tdeclMap = sourceTypeSynonyms sourceEnvironment
         let clss = sClassEnv_tclasses sEnv
             insts = sClassEnv_instances sEnv
         when (verbosity>0 && not (null messages)) $ lift $

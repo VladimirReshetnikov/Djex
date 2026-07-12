@@ -10,19 +10,14 @@ class Show a where
   showList :: [a] -> ShowS
 
 instance Show a => Show [a]   
-instance (Prelude.Integral a, Show a) => Show (Data.Ratio.Ratio a)   
 -- instance Show p => Show (Par1 p)
-instance Show a => Show (Data.Maybe.Maybe a)
-instance Show a => Show (Data.Ord.Down a)
 instance Show a => Show (Data.Monoid.Last a)
 instance Show a => Show (Data.Monoid.First a)
 instance Show a => Show (Data.Monoid.Product a)
 instance Show a => Show (Data.Monoid.Sum a)
 instance Show a => Show (Data.Monoid.Dual a)
-instance Show a => Show (Control.Applicative.ZipList a)
 -- instance Show a => Show (Complex a)
 -- instance Show (a -> b)
-instance (Show a, Show b) => Show (Data.Either.Either a b)
 -- instance Show (f p) => Show (Rec1 f p)
 instance (Show a, Show b) => Show (a, b)
 -- instance Show c => Show (K1 i c p)

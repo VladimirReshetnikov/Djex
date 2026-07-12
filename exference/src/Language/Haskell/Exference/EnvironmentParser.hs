@@ -4,10 +4,12 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Language.Haskell.Exference.EnvironmentParser
-  ( parseModules
+  ( SourceEnvironment (..)
+  , parseModules
   , parseModulesSimple
   , environmentFromModuleAndRatings
   , environmentFromPath
+  , toSynthesisSourceEnvironment
   , haskellSrcExtsParseMode
   , compileWithDict
   , parseRatings
@@ -22,6 +24,7 @@ import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.Core.FunctionBinding
+import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.FunctionDecl
 
 import Language.Haskell.Exference.Core.Types
@@ -56,6 +59,62 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+
+-- | The complete checked source inventory produced by the HSE frontend.
+-- Parameterizing only the function representation lets parsing, rating, and
+-- core lowering share one shape without repeatedly packing positional tuples
+-- or dropping the declarations needed by later kind validation.
+data SourceEnvironment function = SourceEnvironment
+  { sourceFunctions :: [function]
+  , sourceDeconstructors :: [DeconstructorBinding]
+  , sourceClasses :: StaticClassEnv
+  , sourceTypeNames :: [QualifiedName]
+  , sourceTypeSynonyms :: TypeDeclMap
+  }
+  deriving (Show)
+
+-- | Seal the complete frontend inventory in the common environment IR.
+-- Unlike the search-core 'EnvDictionary' adapter, this boundary retains type
+-- synonyms so later validation does not have to rediscover declarations from
+-- the HSE modules or a parallel tuple field.
+toSynthesisSourceEnvironment
+  :: SourceEnvironment FunctionBinding
+  -> Either SynthesisDeclarationError SynthesisEnvironment
+toSynthesisSourceEnvironment environment = do
+  let constructorNames = S.fromList
+        [ constructorName constructor
+        | deconstructor <- sourceDeconstructors environment
+        , constructor <- deconstructorConstructors deconstructor
+        ]
+      isConstructorBinding binding =
+        SharedName.nameLexicalClass
+          (toSynthesisName $ functionName binding)
+          == SharedName.ConstructorLike
+      orphanConstructors =
+        [ binding
+        | binding <- sourceFunctions environment
+        , isConstructorBinding binding
+        , functionName binding `S.notMember` constructorNames
+        ]
+      valueBindings =
+        [ binding
+        | binding <- sourceFunctions environment
+        , functionName binding `S.notMember` constructorNames
+        ]
+  case orphanConstructors of
+    binding : _ -> Left $ OrphanConstructorBinding
+      $ toSynthesisName $ functionName binding
+    [] -> pure ()
+  synonyms <- mapM toSynthesisTypeDeclaration
+    $ M.elems $ sourceTypeSynonyms environment
+  core <- toSynthesisEnvironment $ EnvDictionary
+    valueBindings
+    (sourceDeconstructors environment)
+    (sourceClasses environment)
+  either (Left . InvalidSharedEnvironment) Right
+    $ SharedEnvironment.mkEnvironment
+    $ synonyms ++ SharedEnvironment.environmentDeclarations core
 
 
 builtInDeclsM
@@ -68,14 +127,15 @@ builtInDeclsM = pure $ do
     unitName <- mkBoxedTupleName 0
     pure (unitName, TypeCons unitName)
   tupleConstructors <- mapM tupleConstructor [2 .. 7]
-  pure $ consType consName listName : unitConstructor : tupleConstructors
+  pure $ listConstructors consName listName
+    ++ (unitConstructor : tupleConstructors)
  where
-  consType consName listName = (consName, TypeArrow
-            (TypeVar 0)
-            (TypeArrow (TypeApp (TypeCons listName)
-                                (TypeVar 0))
-                       (TypeApp (TypeCons listName)
-                                (TypeVar 0))))
+  listConstructors consName listName =
+    [ (listName, listType listName)
+    , (consName, TypeArrow (TypeVar 0)
+        $ TypeArrow (listType listName) (listType listName))
+    ]
+  listType listName = TypeApp (TypeCons listName) (TypeVar 0)
   tupleConstructor arity = do
     tupleName <- mkBoxedTupleName arity
     pure (tupleName,
@@ -84,9 +144,25 @@ builtInDeclsM = pure $ do
 builtInDeconstructorsM
   :: Monad m
   => MultiRWST r w s m (Either QualifiedNameError [DeconstructorBinding])
-builtInDeconstructorsM = pure $ mapM deconstructor [2 .. 7]
+builtInDeconstructorsM = pure $ do
+  listName <- fromSynthesisName SharedName.listName
+  consName <- fromSynthesisName SharedName.consName
+  unitName <- mkBoxedTupleName 0
+  tuples <- mapM tupleDeconstructor [2 .. 7]
+  let listType = TypeApp (TypeCons listName) (TypeVar 0)
+  -- These declarations are not merely pattern-match conveniences: they make
+  -- intrinsic constructor bindings members of the shared constructor
+  -- namespace instead of invalid ordinary values.
+  pure $
+    DeconstructorBinding listType
+      [ ConstructorBinding listName []
+      , ConstructorBinding consName [TypeVar 0, listType]
+      ] True
+    : DeconstructorBinding (TypeCons unitName)
+        [ConstructorBinding unitName []] False
+    : tuples
  where
-  deconstructor arity = do
+  tupleDeconstructor arity = do
     tupleName <- mkBoxedTupleName arity
     pure $ DeconstructorBinding
       (tupleType tupleName arity)
@@ -128,13 +204,7 @@ parseModules :: forall m r w s
                 , ContainsType [String] w
                 )
              => [(ParseMode, String)]
-             -> m
-                  ( [HsFunctionDecl]
-                  , [DeconstructorBinding]
-                  , StaticClassEnv
-                  , [QualifiedName]
-                  , TypeDeclMap
-                  )
+             -> m (SourceEnvironment HsFunctionDecl)
 parseModules l = do
   rawTuples <- lift $ mapM hRead l
   let eParsed = map hParse rawTuples
@@ -240,12 +310,13 @@ parseModules l = do
   builtInDeconstructors <- case builtInDeconstructorsResult of
     Left failure -> reportBuiltInFailure "deconstructors" failure >> pure []
     Right deconstructors -> pure deconstructors
-  return $ ( builtInDecls++decls
-           , builtInDeconstructors++deconss
-           , cntxt
-           , allValidNames
-           , typeDecls
-           )
+  return SourceEnvironment
+    { sourceFunctions = builtInDecls ++ decls
+    , sourceDeconstructors = builtInDeconstructors ++ deconss
+    , sourceClasses = cntxt
+    , sourceTypeNames = allValidNames
+    , sourceTypeSynonyms = typeDecls
+    }
   where
     hRead :: (ParseMode, String) -> IO (ParseMode, String)
     hRead (mode, s) = (,) mode <$> readFile s
@@ -278,17 +349,13 @@ parseModulesSimple :: ( ContainsType [String] w
                       )
                    => String
                    -> MultiRWST r w s IO
-                        ( [RatedHsFunctionDecl]
-                        , [DeconstructorBinding]
-                        , StaticClassEnv
-                        , [QualifiedName]
-                        , TypeDeclMap
-                        )
+                        (SourceEnvironment RatedHsFunctionDecl)
 parseModulesSimple s = helper
                    <$> parseModules [(haskellSrcExtsParseMode s, s)]
  where
   addRating (a,b) = (a,0.0,b)
-  helper (decls, deconss, cntxt, ds, tdm) = (addRating <$> decls, deconss, cntxt, ds, tdm)
+  helper environment = environment
+    { sourceFunctions = addRating <$> sourceFunctions environment }
 
 parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
@@ -320,12 +387,7 @@ environmentFromModuleAndRatings :: ( ContainsType [String] w
                                 => String
                                 -> String
                                 -> MultiRWST r w s IO
-                                    ( [FunctionBinding]
-                                    , [DeconstructorBinding]
-                                    , StaticClassEnv
-                                    , [QualifiedName]
-                                    , TypeDeclMap
-                                    )
+                                    (SourceEnvironment FunctionBinding)
 environmentFromModuleAndRatings modulePath ratingPath = do
   let exts1 = [ TypeOperators
               , ExplicitForAll
@@ -342,7 +404,7 @@ environmentFromModuleAndRatings modulePath ratingPath = do
                        False
                        Nothing
                        False
-  (decls, deconss, cntxt, ds, tdm) <- parseModules [(mode, modulePath)]
+  environment <- parseModules [(mode, modulePath)]
   ratingsResult <- lift $ ratingsFromFile ratingPath
   ratings <- case ratingsResult of
     Left e -> do
@@ -351,26 +413,22 @@ environmentFromModuleAndRatings modulePath ratingPath = do
     Right parsedRatings -> pure parsedRatings
   let addRating (name, bindingType) = declToBinding
         (name, fromMaybe 0.0 $ lookup name ratings, bindingType)
-  return $ (map addRating decls, deconss, cntxt, ds, tdm)
+  return environment
+    { sourceFunctions = map addRating $ sourceFunctions environment }
 
 
 environmentFromPath :: ( ContainsType [String] w
                        )
                     => FilePath
                     -> MultiRWST r w s IO
-                         ( [FunctionBinding]
-                         , [DeconstructorBinding]
-                         , StaticClassEnv
-                         , [QualifiedName]
-                         , TypeDeclMap
-                         )
+                         (SourceEnvironment FunctionBinding)
 environmentFromPath p = do
   files <- lift $ getDirectoryContents p
   -- Directory enumeration order is platform-dependent; stable ordering keeps
   -- diagnostics and duplicate resolution reproducible.
   let modules = ((p ++ "/")++) <$> sort (filter (".hs" `isSuffixOf`) files)
   let ratings = ((p ++ "/")++) <$> sort (filter (".ratings" `isSuffixOf`) files)
-  (decls, deconss, cntxt, dts, tdm) <- parseModules
+  environment <- parseModules
     [ (mode, m)
     | m <- modules
     , let mode = haskellSrcExtsParseMode m]
@@ -383,7 +441,7 @@ environmentFromPath p = do
     (rName, rVal) <- rs
     return $ do
       dIds <- fmap join $ sequence $ do
-        (dName, _) <- decls
+        (dName, _) <- sourceFunctions environment
         return $ do
           return $ do
             guard (rName == dName)
@@ -402,4 +460,5 @@ environmentFromPath p = do
                 , fromMaybe 0.0 (lookup a rs')
                 , b
                 )
-  return $ (map f decls, deconss, cntxt, dts, tdm)
+  return environment
+    { sourceFunctions = map f $ sourceFunctions environment }

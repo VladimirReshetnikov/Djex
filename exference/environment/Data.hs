@@ -50,31 +50,13 @@ class Typeable a => Data a where
   -- gmapMo :: forall m. Control.Monad.MonadPlus m => (forall d. Data d => d -> m d) -> a -> m a
 
 
-instance Data Data.Bool.Bool
-instance Data Data.Char.Char
-instance Data Prelude.Double
-instance Data Prelude.Float
-instance Data Data.Int.Int
-instance Data Data.Int.Int8
-instance Data Data.Int.Int16
-instance Data Data.Int.Int32
-instance Data Data.Int.Int64
-instance Data Prelude.Integer
-instance Data Prelude.Ordering
-instance Data Data.Word.Word
-instance Data Data.Word.Word8
-instance Data Data.Word.Word16
-instance Data Data.Word.Word32
-instance Data Data.Word.Word64
 instance Data ()
 -- instance Data Version
 -- instance Data Natural
 -- instance Data SpecConstrAnnotation
-instance Data Data.Void.Void
 instance Data a => Data [a]
 -- instance (Data a, Prelude.Integral a) => Data (Ratio a)
 -- instance (Data a, Typeable * a) => Data (Ptr a)
-instance Data a => Data (Data.Maybe.Maybe a)
 -- instance (Data a, Typeable * a) => Data (ForeignPtr a)
 -- instance Data a => Data (Complex a)
 -- instance Typeable * a => Data (Fixed a)

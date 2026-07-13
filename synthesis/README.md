@@ -65,9 +65,10 @@ identify an excluded target self-reference, or establish no conclusion.
 `Language.Haskell.Synthesis.Selection` applies backend-neutral presentation
 policies to a lazy list of query-result batches. Callers provide candidate rank
 and admissibility functions; the selector can stop at the first candidate,
-retain every globally best candidate, inspect batches for a bounded local-best
-lookahead, or stream all admissible candidates. Every selection records the
-progress of the last batch it actually inspected, so an empty selection still
+retain every globally best candidate in one strict traversal, inspect batches
+for a bounded local-best lookahead, or stream all admissible candidates. Every
+selection records the progress of the last batch it actually inspected, so an
+empty selection still
 distinguishes exhaustion or truncation from an empty continuing prefix. The
 lookahead budget is measured in whole batches after the first admissible rank;
 a strictly better batch resets it, while empty, inadmissible, equal, and worse

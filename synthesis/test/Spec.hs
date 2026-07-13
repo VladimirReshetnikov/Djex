@@ -1522,8 +1522,10 @@ selectionTests = testGroup "result selection"
   , testCase "best keeps every globally minimal admissible candidate" $ do
       let terminal = Completed $ truncated CandidateLimitReached
           results =
-            [ queryResult Continuing [(3 :: Int, "ignored"), (1, "first")]
-            , queryResult Continuing [(2, "inadmissible"), (1, "second")]
+            [ queryResult Continuing
+                [(3 :: Int, "superseded-first"), (3, "superseded-second")]
+            , queryResult Continuing [(2, "inadmissible"), (1, "first")]
+            , queryResult Continuing [(2, "worse"), (1, "second")]
             , queryResult terminal []
             ]
           selection = selectQueryResults SelectBest fst

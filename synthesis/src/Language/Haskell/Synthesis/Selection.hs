@@ -156,13 +156,20 @@ selectBest
   -> (candidate -> Bool)
   -> [QueryResult metadata candidate]
   -> Selection candidate
-selectBest rank admissible results = Selection
-  { selectionProgress = lastInspectedProgress results
-  , selectionCandidates = reverse $ maybe [] snd best
-  }
+selectBest rank admissible = finish
+  . List.foldl' inspect (Nothing, Nothing)
  where
-  best = List.foldl' (consider rank admissible) Nothing
-    $ concatMap (batchCandidates . resultSearch) results
+  finish (progress, best) = Selection progress
+    $ reverse $ maybe [] snd best
+
+  inspect (_, best) result =
+    let batch = resultSearch result
+        progress = Just $ batchProgress batch
+        nextBest = List.foldl' (consider rank admissible) best
+          $ batchCandidates batch
+    -- 'foldl'' only forces the pair constructor. Force both fields here so
+    -- an empty run of batches cannot leave a chain of deferred accumulators.
+    in progress `seq` nextBest `seq` (progress, nextBest)
 
 selectBestLookahead
   :: Ord rank

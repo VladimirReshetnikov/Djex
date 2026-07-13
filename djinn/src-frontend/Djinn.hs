@@ -400,10 +400,16 @@ formatDjinnResult prType s name ctx goal result =
         Generated.renderFunctionClause (Generated.defaultRenderOptions id) .
         candidateOutput
 
+-- The compatibility CLI promotes the innermost context to its traditional
+-- @Error:@ headline. Remove that entry before rendering the structured body so
+-- every context is still shown exactly once.
 commandDiagnostic :: Diagnostic.Diagnostic -> String
 commandDiagnostic failure = case reverse $ Diagnostic.diagnosticContext failure of
     [] -> Diagnostic.renderDiagnostic failure
-    context : _ -> context ++ "\n  " ++ Diagnostic.renderDiagnostic failure
+    context : reversedOuterContexts ->
+        let strippedFailure = failure
+                { Diagnostic.diagnosticContext = reverse reversedOuterContexts }
+        in context ++ "\n  " ++ Diagnostic.renderDiagnostic strippedFailure
 
 contextPrefix :: [Context] -> String
 contextPrefix [] = ""

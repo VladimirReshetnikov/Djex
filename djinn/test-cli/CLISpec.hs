@@ -28,6 +28,8 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testSearchBudget
     , testCase "class arguments are checked against inferred kinds"
         testClassKindEnforcement
+    , testCase "structured query context is rendered once"
+        testDiagnosticRendering
     , testCase "instance output is atomic across all methods"
         testInstanceOutputAtomic
     , testCase "startup file errors set aggregate exit status"
@@ -160,6 +162,19 @@ testClassKindEnforcement = do
         "good a = a" output
     assertContains "a higher-kinded context still works"
         "fine = return" output
+
+testDiagnosticRendering :: Assertion
+testDiagnosticRendering = do
+    output <- runSession
+        [ "bad ? Bool Bool"
+        , ":quit"
+        ]
+    let context = "goal type Bool Bool: KindMismatch ProperTypeKind " ++
+            "(FunctionKind ProperTypeKind ProperTypeKind)"
+    assertContains "the stable query diagnostic code should remain visible"
+        "[DJEX_DJINN_QUERY]" output
+    assertEqual "the structured renderer should own context presentation"
+        1 (countOccurrences context output)
 
 testSearchBudget :: Assertion
 testSearchBudget = do

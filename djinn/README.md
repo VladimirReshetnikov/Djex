@@ -484,10 +484,12 @@ neutral boundary without exposing its raw representation,
 should replace direct construction or record updates of `DjinnRequest` with a
 neutral `QueryRequest` followed by `mkDjinnRequest`, and use
 `djinnRequestQuery` when they need to inspect that original value. Sealing
-checks Djinn's narrower target and class-name namespaces and caches the lowered
-target, goal, and context arguments exactly once; search-option validation and
-all environment-dependent class and kind checks still occur when the request
-is run. Here
+receives the request's already checked shared `DefinitionName`, checks Djinn's
+narrower class-name namespace, and caches the target spelling, lowered goal,
+and context arguments exactly once. The raw-`Name` parser helper constructs
+that checked target before parsing so target diagnostics retain precedence;
+search-option validation and all environment-dependent class and kind checks
+still occur when the request is run. Here
 `DjinnType` is the shared `Type DjinnTypeVariable` source representation;
 `DjinnTypeVariable` and the generated-binder `DjinnLocal` remain distinct API
 names despite both currently being represented by `String`. Raw `HType` is

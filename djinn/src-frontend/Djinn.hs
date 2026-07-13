@@ -329,11 +329,17 @@ makeDjinnResult s name contexts goal = do
             Diagnostic.Error "DJEX_DJINN_TARGET"
             "cannot convert the parsed Djinn target" (show failure)
         Right value -> Right value
+    checkedTarget <- case Generated.mkDefinitionName target of
+        Left _ -> Left $ Diagnostic.contextualDiagnostic
+            Diagnostic.Error "DJEX_DJINN_TARGET"
+            "Djinn targets must be unqualified value identifiers or operators"
+            (SharedName.renderCanonical target)
+        Right value -> Right value
     sharedGoal <- projectCompatibilityType "goal" goal
     sharedContexts <- traverse
         (traverse $ projectCompatibilityType "context argument") contexts
     request <- mkDjinnRequest QueryRequest {
-        requestTarget = target,
+        requestTarget = checkedTarget,
         requestGoal = sharedGoal,
         requestContexts = sharedContexts,
         requestOptions = queryOptions

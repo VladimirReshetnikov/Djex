@@ -5,6 +5,7 @@ import Language.Haskell.Synthesis.Environment
   ( EnvironmentError
   , mkEnvironment
   )
+import Language.Haskell.Synthesis.Generated (mkDefinitionName)
 import Language.Haskell.Synthesis.Name (mkIdentifier)
 import Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
@@ -28,10 +29,11 @@ main = defaultMain $ testCase
           ExferenceEnvironment)
   session <- expectRight $ mkExferenceSession environment
   target <- expectRight $ mkIdentifier "identity"
+  checkedTarget <- expectRight $ mkDefinitionName target
   let variable = FlexibleVariable 0
       goal = FunctionType (TypeVariable variable) (TypeVariable variable)
   request <- expectRight $ mkExferenceRequest QueryRequest
-    { requestTarget = target
+    { requestTarget = checkedTarget
     , requestGoal = goal
     , requestContexts = []
     , requestOptions = defaultExferenceOptions

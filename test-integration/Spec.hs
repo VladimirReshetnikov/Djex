@@ -221,14 +221,10 @@ tests = testGroup "Djex facade"
         (compatibilityResult, sessionResult) -> fail $
           "invalid-kind paths diverged: " ++ show compatibilityResult
             ++ " versus " ++ show sessionResult
-  , testCase "reject targets outside Djinn's output namespace" $ do
+  , testCase "reject targets outside the shared output namespace" $ do
       qualifier <- expectRight $ mkModuleName "External"
       target <- expectRight $ mkQualifiedIdentifier qualifier "answer"
-      goal <- expectRight $ parseHType "a -> a"
-      query <- sharedDjinnQuery target [] defaultQueryOptions goal
-      case mkDjinnRequest query of
-        Left failure -> diagnosticCode failure @?= Just "DJEX_DJINN_TARGET"
-        Right _ -> fail "Djinn sealed a qualified generated definition"
+      mkDefinitionName target @?= Left (InvalidFunctionName target)
   , testCase "run a checked Exference session through the shared envelope" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
@@ -299,9 +295,10 @@ tests = testGroup "Djex facade"
           neutralEnvironment = inventoryEnvironment
             $ fmap (const ()) $ checkedSourceInventory checked
       neutralSession <- expectRight $ mkExferenceSession neutralEnvironment
+      checkedTarget <- expectRight $ mkDefinitionName target
       let variableType = TypeVariable $ FlexibleVariable 0
       request <- expectRight $ mkExferenceRequest QueryRequest
-        { requestTarget = target
+        { requestTarget = checkedTarget
         , requestGoal = FunctionType variableType variableType
         , requestContexts = []
         , requestOptions = defaultExferenceOptions
@@ -339,8 +336,9 @@ tests = testGroup "Djex facade"
         (mkEnvironment [declaration] :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       session <- expectRight $ mkExferenceSession environment
+      checkedTarget <- expectRight $ mkDefinitionName target
       request <- expectRight $ mkExferenceRequest QueryRequest
-        { requestTarget = target
+        { requestTarget = checkedTarget
         , requestGoal = goal
         , requestContexts = []
         , requestOptions = defaultExferenceOptions
@@ -365,11 +363,12 @@ tests = testGroup "Djex facade"
         target "synonym-query" "Fixture.Identity a -> a"
       _ <- firstExferenceCandidate =<< expectRight
         (runExferenceQuery session parsed)
+      checkedTarget <- expectRight $ mkDefinitionName target
       let sharedGoal = FunctionType
             (TypeApplication (TypeConstructor aliasName) variableType)
             variableType
           sharedQuery = QueryRequest
-            { requestTarget = target
+            { requestTarget = checkedTarget
             , requestGoal = sharedGoal
             , requestContexts = []
             , requestOptions = defaultExferenceOptions
@@ -425,6 +424,7 @@ tests = testGroup "Djex facade"
       preferredName <- expectRight $ parseName "Fixture.preferred"
       ordinaryName <- expectRight $ parseName "Fixture.ordinary"
       target <- expectRight $ mkIdentifier "ratedToken"
+      checkedTarget <- expectRight $ mkDefinitionName target
       let tokenType = TypeConstructor tokenName
           declarations =
             [ AbstractTypeDeclaration () tokenName ProperTypeKind
@@ -444,7 +444,7 @@ tests = testGroup "Djex facade"
             session <- expectRight
               $ mkExferenceSessionWithPolicy policy environment
             request <- expectRight $ mkExferenceRequest QueryRequest
-              { requestTarget = target
+              { requestTarget = checkedTarget
               , requestGoal = tokenType
               , requestContexts = []
               , requestOptions = defaultExferenceOptions
@@ -492,10 +492,11 @@ tests = testGroup "Djex facade"
         [Just "DJEX_EXF_RECURSIVE_OMISSION"]
   , testCase "reject Exference contexts whose variables escape the goal" $ do
       target <- expectRight $ mkIdentifier "constrained"
+      checkedTarget <- expectRight $ mkDefinitionName target
       className <- expectRight $ mkIdentifier "C"
       let variable identifier = TypeVariable $ FlexibleVariable identifier
           query = QueryRequest
-            { requestTarget = target
+            { requestTarget = checkedTarget
             , requestGoal = variable 0
             , requestContexts = [Constraint className [variable 1]]
             , requestOptions = defaultExferenceOptions
@@ -506,13 +507,14 @@ tests = testGroup "Djex facade"
         Right _ -> fail "Exference accepted an out-of-scope context variable"
   , testCase "reject contexts bound only by a nested forall" $ do
       target <- expectRight $ mkIdentifier "nestedConstraint"
+      checkedTarget <- expectRight $ mkDefinitionName target
       className <- expectRight $ mkIdentifier "C"
       let variable identifier = TypeVariable $ FlexibleVariable identifier
           goal = FunctionType (variable 0)
             $ ForallType [FlexibleVariable 1] []
             $ FunctionType (variable 1) (variable 1)
           query = QueryRequest
-            { requestTarget = target
+            { requestTarget = checkedTarget
             , requestGoal = goal
             , requestContexts = [Constraint className [variable 1]]
             , requestOptions = defaultExferenceOptions
@@ -533,6 +535,7 @@ tests = testGroup "Djex facade"
         Right _ -> fail "Exference accepted an invalid qualified target"
   , testCase "scope explicit contexts under every leading forall" $ do
       target <- expectRight $ mkIdentifier "nestedIdentity"
+      checkedTarget <- expectRight $ mkDefinitionName target
       className <- expectRight $ mkIdentifier "C"
       backendClassName <- expectRight $ mkQualifiedName [] "C"
       classEnvironment <- expectRight
@@ -542,7 +545,7 @@ tests = testGroup "Djex facade"
             $ ForallType [FlexibleVariable 1] []
             $ FunctionType (variable 1) (variable 1)
           query = QueryRequest
-            { requestTarget = target
+            { requestTarget = checkedTarget
             , requestGoal = goal
             , requestContexts = [Constraint className [variable 1]]
             , requestOptions = defaultExferenceOptions
@@ -726,11 +729,12 @@ sharedDjinnQuery
   -> HType
   -> IO (QueryRequest DjinnType QueryOptions)
 sharedDjinnQuery target contexts options goal = do
+  checkedTarget <- expectRight $ mkDefinitionName target
   sharedGoal <- expectRight $ toSynthesisType goal
   sharedContexts <- expectRight
     $ traverse (traverse toSynthesisType) contexts
   pure $ QueryRequest
-    { requestTarget = target
+    { requestTarget = checkedTarget
     , requestGoal = sharedGoal
     , requestContexts = sharedContexts
     , requestOptions = options

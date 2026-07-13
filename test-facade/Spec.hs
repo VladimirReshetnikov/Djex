@@ -16,6 +16,9 @@ main = defaultMain $ testGroup "public Djex facade"
         isRight $ parseName "Data.Function.fix"
   , testCase "exports generated-code rendering" $ do
       target <- expectRight $ mkIdentifier "identity"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      definitionName checkedTarget @?= target
+      definitionSpelling checkedTarget @?= "identity"
       renderFunctionClause (defaultRenderOptions id)
           (FunctionClause target [Bind "value"] $ Local "value") @?=
         Right "identity value = value"

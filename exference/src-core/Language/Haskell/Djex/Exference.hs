@@ -109,6 +109,7 @@ import Language.Haskell.Synthesis.Generated
   , RenderError (..)
   , RenderOptions (renderQualification)
   , defaultRenderOptions
+  , definitionName
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
@@ -308,7 +309,9 @@ runExferenceQuery
   -> Either Diagnostic [ExferenceResult]
 runExferenceQuery session request = do
   let query = exferenceRequestQuery request
-      target = requestTarget query
+      -- Exference's private search and the shared output clause still consume
+      -- structural names; request construction has already checked validity.
+      target = definitionName $ requestTarget query
       sharedGoal = requestContextualGoal request
   elaboratedGoal <- either
     (Left . attachRequestSource request . elaborationFailure)

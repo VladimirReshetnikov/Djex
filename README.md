@@ -145,7 +145,13 @@ shared boundary rather than during ordinary field access.
 
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
-the same types or options. Its `QueryResult` constructor is opaque:
+the same types or options. Every `QueryRequest` carries an opaque
+`DefinitionName`, constructed once from a structural `Name`; it guarantees the
+target is an unqualified value identifier or operator other than the wildcard,
+so neither backend can defer or disagree about that shared output invariant.
+Raw-name parser helpers retain their compatibility signatures and perform this
+check before parsing, preserving usage-error precedence. Its `QueryResult`
+constructor is opaque:
 `mkQueryResult` checks that `ValidatedCandidates` accompanies exactly the
 nonempty batches, while `queryResultFromCandidates` derives that evidence for
 ordinary heuristic-search batches. Both checks inspect only the list spine's
@@ -222,7 +228,8 @@ private presentation caches, so they neither affect equality/display nor admit
 an unchecked construction path through the default facade. The core component's
 hidden `Language.Haskell.Djex.Exference.Internal.Request` representation owns
 that metadata. The separately built HSE component reaches only its checked
-constructor and target-name preflight through the deliberately unstable
+constructor and the raw-name-to-`DefinitionName` preflight through the
+deliberately unstable
 `Language.Haskell.Djex.Exference.Internal.Frontend` seam; that seam is not
 re-exported by the default library or the frontend library.
 

@@ -25,7 +25,7 @@ import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint (Constraint)
-import Language.Haskell.Synthesis.Name (Name)
+import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Search
   ( SearchBatch
   , batchCandidates
@@ -35,11 +35,12 @@ import Language.Haskell.Synthesis.Search
 -- options.
 --
 -- Contexts use the same goal-type representation as the requested type.  The
--- target is a validated structural 'Name'; a backend may impose a narrower
--- namespace when lowering the request (for example, an unqualified function
--- name for a generated top-level clause).
+-- target is already checked for the shared generated-definition namespace:
+-- an unqualified variable identifier or operator other than the wildcard.
+-- Backends therefore cannot disagree about target validity after accepting
+-- the same request.
 data QueryRequest ty options = QueryRequest
-  { requestTarget :: Name
+  { requestTarget :: DefinitionName
   , requestGoal :: ty
   , requestContexts :: [Constraint ty]
   , requestOptions :: options

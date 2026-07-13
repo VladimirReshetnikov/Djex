@@ -1621,7 +1621,47 @@ selectionTests = testGroup "result selection"
 
 generatedTests :: TestTree
 generatedTests = testGroup "generated syntax"
-  [ testCase "validate lambda, let, and case scopes" $ do
+  [ testCase "check generated-definition names once" $ do
+      let namespace = right $ mkModuleName "Fixture"
+          identifier = right $ mkIdentifier "result"
+          operator = right $ mkOperator "+"
+          qualifiedIdentifier = right
+            $ mkQualifiedIdentifier namespace "result"
+          qualifiedOperator = right $ mkQualifiedOperator namespace "+"
+          constructorIdentifier = right $ mkIdentifier "Result"
+          constructorOperator = right $ mkOperator ":+"
+          acceptedIdentifier = right $ mkDefinitionName identifier
+          acceptedOperator = right $ mkDefinitionName operator
+          rejected name = mkDefinitionName name @?=
+            Left (InvalidFunctionName name)
+          query :: QueryRequest String ()
+          query = QueryRequest acceptedIdentifier "goal" [] ()
+      definitionName acceptedIdentifier @?= identifier
+      definitionSpelling acceptedIdentifier @?= "result"
+      definitionName acceptedOperator @?= operator
+      definitionSpelling acceptedOperator @?= "+"
+      show acceptedIdentifier @?= show identifier
+      show query @?=
+        "QueryRequest {requestTarget = result, requestGoal = \"goal\", \
+        \requestContexts = [], requestOptions = ()}"
+      validateDefinitionName identifier @?= Right ()
+      validateDefinitionName qualifiedIdentifier @?=
+        Left (InvalidFunctionName qualifiedIdentifier)
+      rejected qualifiedIdentifier
+      rejected qualifiedOperator
+      rejected constructorIdentifier
+      rejected constructorOperator
+      rejected listName
+      rejected consName
+      rejected functionName
+      rejected $ right $ tupleName Boxed 0
+      -- The structural Name API rejects @_@ even before this narrower
+      -- definition boundary, so clients cannot manufacture that case.
+      mkIdentifier "_" @?= Left (ReservedIdentifier "_")
+      _ <- evaluate $ force acceptedIdentifier
+      _ <- evaluate $ force query
+      pure ()
+  , testCase "validate lambda, let, and case scopes" $ do
       let just = right $ mkIdentifier "Just"
           expression = Lambda [Bind (0 :: Int)] $
             Let (Bind 1) (Local 0) $

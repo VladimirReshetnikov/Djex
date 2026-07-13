@@ -29,8 +29,12 @@ public API. Its renderer is deterministic and compiler-shaped, but callers
 remain free to present the structured value themselves.
 
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
-It separates backend-owned local identities from structural global `Name`s and
-represents lambdas, application, tuples, holes, lets, cases, constructor/tuple
+It separates backend-owned local identities from structural global `Name`s,
+and its opaque `DefinitionName` checks the narrower generated top-level value
+namespace exactly once at request construction. Function clauses deliberately
+retain a structural `Name` because independently constructed output is still
+validated by the clause renderer. The module represents lambdas, application,
+tuples, holes, lets, cases, constructor/tuple
 patterns, as-patterns, and function clauses. Its independent scope checker
 rejects free locals, repeated binders in one pattern, and identity reuse in an
 overlapping scope. `functionClauseExpression` recovers the expression denoted
@@ -58,8 +62,8 @@ qualification in `RenderOptions`, and callers receive the shared `RenderError`
 without a backend-specific singleton wrapper.
 
 `Language.Haskell.Synthesis.Query` supplies the generic request/result seam.
-Targets are validated `Name`s and contexts use the backend's goal type, while
-goal types, search options, metadata, and candidates remain parameters. Its
+Targets are checked `DefinitionName`s; contexts use the backend's goal type,
+while goal types, search options, metadata, and candidates remain parameters. Its
 logical evidence is deliberately independent of `Search.Completion`: a backend
 may return checked candidates from a truncated search, prove non-inhabitation,
 identify an excluded target self-reference, or establish no conclusion.

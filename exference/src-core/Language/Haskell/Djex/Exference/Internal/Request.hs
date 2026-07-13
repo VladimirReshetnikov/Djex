@@ -36,7 +36,10 @@ import Language.Haskell.Synthesis.Diagnostic
   , SourceSpan
   , contextualDiagnostic
   )
-import Language.Haskell.Synthesis.Generated (validateDefinitionName)
+import Language.Haskell.Synthesis.Generated
+  ( DefinitionName
+  , mkDefinitionName
+  )
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -121,13 +124,6 @@ validateRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ()
 validateRequest query = do
-  validateExferenceTarget $ requestTarget query
-  validateRequestGoalAndContexts query
-
-validateRequestGoalAndContexts
-  :: QueryRequest ExferenceType ExferenceOptions
-  -> Either Diagnostic ()
-validateRequestGoalAndContexts query = do
   either
     (Left . failureDiagnostic
       "DJEX_EXF_REQUEST"
@@ -183,12 +179,12 @@ contextualGoal query
   insertUnderLeadingForalls goal =
     SharedType.ForallType [] contexts goal
 
--- | Validate the source-level name of an Exference result definition.
+-- | Check the source-level name of an Exference result definition.
 -- Frontends use this before parsing so command-usage errors retain precedence
--- over malformed source text.
-validateExferenceTarget :: Name -> Either Diagnostic ()
-validateExferenceTarget target = case validateDefinitionName target of
-  Right () -> Right ()
+-- over malformed source text, and retain the checked value in the request.
+validateExferenceTarget :: Name -> Either Diagnostic DefinitionName
+validateExferenceTarget target = case mkDefinitionName target of
+  Right checked -> Right checked
   Left failure -> Left $ contextualDiagnostic Error "DJEX_EXF_TARGET"
     "Exference targets must be unqualified value identifiers or operators"
     (show (renderCanonical target, failure))

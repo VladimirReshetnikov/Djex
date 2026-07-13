@@ -10,7 +10,11 @@
 -- small tree, which distinguishes local identities from validated global
 -- 'Name's and gives both backends one scope and printing policy.
 module Language.Haskell.Synthesis.Generated
-  ( Pattern (..)
+  ( DefinitionName
+  , mkDefinitionName
+  , definitionName
+  , definitionSpelling
+  , Pattern (..)
   , Expression (..)
   , FunctionClause (..)
   , Qualification (..)
@@ -33,7 +37,7 @@ module Language.Haskell.Synthesis.Generated
 
 import Prelude hiding ((<>))
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -57,6 +61,35 @@ import Text.PrettyPrint.HughesPJ
   , text
   , vcat
   )
+
+-- | A checked name for a generated top-level value definition.
+--
+-- The constructor is deliberately hidden: every value is unqualified,
+-- variable-like, and distinct from the wildcard spelling @_@.  Keeping this
+-- invariant in the type lets query adapters consume target spelling without
+-- repeating a fallible backend-specific preflight.
+data DefinitionName = DefinitionName !Name !String
+  deriving (Eq, Ord)
+
+-- Preserve the historical presentation of request records.  In particular,
+-- derived 'Show' instances containing a 'DefinitionName' render the wrapped
+-- structural name directly rather than exposing this implementation wrapper.
+instance Show DefinitionName where
+  showsPrec precedence (DefinitionName name _) = showsPrec precedence name
+
+instance NFData DefinitionName where
+  rnf (DefinitionName name spelling) = rnf name `seq` rnf spelling
+
+-- | Recover the structural name at a backend or generated-output boundary.
+definitionName :: DefinitionName -> Name
+definitionName (DefinitionName name _) = name
+
+-- | Recover the definition's unqualified identifier or operator spelling.
+--
+-- The spelling is retained at construction, so this accessor is total rather
+-- than having to recover a 'Maybe' from the wrapped structural name.
+definitionSpelling :: DefinitionName -> String
+definitionSpelling (DefinitionName _ spelling) = spelling
 
 -- | Patterns supported by both Djinn and Exference's generated output.
 -- Constructor application is structural rather than an arbitrary pattern
@@ -417,14 +450,22 @@ validatePatternSyntax pattern = case pattern of
   TuplePattern elements -> mapM_ validatePatternSyntax elements
   As _ nested -> validatePatternSyntax nested
 
--- | Validate a generated top-level value name independently of its body.
--- Both backend sessions use this boundary before starting search.
-validateDefinitionName :: Name -> Either RenderError ()
-validateDefinitionName name
+-- | Construct a checked generated top-level value name.
+mkDefinitionName :: Name -> Either RenderError DefinitionName
+mkDefinitionName name
   | nameModule name == Nothing
   , nameLexicalClass name == VariableLike
-  , nameSpelling name /= Just "_" = Right ()
+  , Just spelling <- nameSpelling name
+  , spelling /= "_" = Right $ DefinitionName name spelling
   | otherwise = Left $ InvalidFunctionName name
+
+-- | Validate a generated top-level value name independently of its body.
+--
+-- Retained for source compatibility with clients that only need validation;
+-- new request boundaries should retain the 'DefinitionName' returned by
+-- 'mkDefinitionName'.
+validateDefinitionName :: Name -> Either RenderError ()
+validateDefinitionName name = () <$ mkDefinitionName name
 
 ppExpression
   :: Ord local

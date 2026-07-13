@@ -126,6 +126,8 @@ testCheckedDjinnAdapter = do
         expectedContexts =
             [Constraint (sharedName "Eq") [SharedType.TypeVariable "a"]]
         parsedQuery = Djex.djinnRequestQuery request
+    SharedGenerated.definitionName (SharedQuery.requestTarget parsedQuery)
+        `assertEqualReversed` target
     SharedQuery.requestGoal parsedQuery `assertEqualReversed` expectedGoal
     SharedQuery.requestContexts parsedQuery `assertEqualReversed`
         expectedContexts
@@ -134,8 +136,10 @@ testCheckedDjinnAdapter = do
 
     -- Programmatic callers cross the same checked boundary as the parser;
     -- the opaque request preserves the shared query losslessly once sealed.
+    checkedTarget <- expectShownRight $
+        SharedGenerated.mkDefinitionName target
     let programmaticQuery = SharedQuery.QueryRequest
-            { SharedQuery.requestTarget = target
+            { SharedQuery.requestTarget = checkedTarget
             , SharedQuery.requestGoal = expectedGoal
             , SharedQuery.requestContexts = expectedContexts
             , SharedQuery.requestOptions = defaultQueryOptions

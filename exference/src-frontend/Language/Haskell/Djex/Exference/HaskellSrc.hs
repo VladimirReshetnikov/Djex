@@ -107,7 +107,7 @@ parseExferenceRequest
 parseExferenceRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
-  Frontend.validateExferenceTarget target
+  checkedTarget <- Frontend.validateExferenceTarget target
   let parsed = runIdentity $ runExceptT $ parseTypeWithKinds
         (inventoryKindAssumptions $ exferenceSessionInventory session)
         (Frontend.sessionClasses session)
@@ -129,7 +129,7 @@ parseExferenceRequest session options target sourceName source = do
     Right
     $ toSynthesisType backendType
   let query = QueryRequest
-        { requestTarget = target
+        { requestTarget = checkedTarget
         , requestGoal = sharedType
         , requestContexts = []
         , requestOptions = options

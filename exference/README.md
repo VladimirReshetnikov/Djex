@@ -84,8 +84,11 @@ that module so one sublibrary can consume another, but neither the default
 `Language.Haskell.Djex` facade nor `exference-frontend` re-exports it. The
 request representation behind it is a hidden module. Stable clients therefore
 see an opaque `ExferenceRequest` with one neutral smart constructor; source
-spans, parsed variable spellings, and early target-name preflight remain
-frontend implementation details.
+spans and parsed variable spellings remain frontend implementation details.
+Its compatibility parser still accepts a raw shared `Name`, but converts it to
+the request's opaque `DefinitionName` before parsing so invalid-target
+diagnostics retain their historical precedence. Programmatic `QueryRequest`s
+cannot carry an unchecked target at all.
 
 Core names are validated, opaque structural wrappers over `djex:synthesis`:
 module segments, ordinary identifiers and operators, list/cons/function

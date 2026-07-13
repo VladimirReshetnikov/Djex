@@ -66,16 +66,17 @@ import Language.Haskell.Synthesis.Diagnostic
   , withSource
   )
 import Language.Haskell.Synthesis.Generated
-  ( FunctionClause
+  ( DefinitionName
+  , FunctionClause
   , Qualification (..)
   , RenderError (..)
   , RenderOptions (renderQualification)
   , defaultRenderOptions
-  , validateDefinitionName
+  , definitionSpelling
+  , mkDefinitionName
   )
 import Language.Haskell.Synthesis.Name
   ( Name
-  , nameSpelling
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
@@ -186,7 +187,7 @@ mkDjinnRequest
   :: QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
 mkDjinnRequest query = do
-  target <- targetSymbol $ requestTarget query
+  let target = definitionSpelling $ requestTarget query
   goal <- lowerRequestType "goal" $ requestGoal query
   contexts <- traverse lowerRequestContext $ requestContexts query
   pure DjinnRequest
@@ -219,7 +220,7 @@ parseDjinnRequest
 parseDjinnRequest _session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
-  _ <- targetSymbol target
+  checkedTarget <- checkDefinitionTarget target
   (rawContexts, rawGoal) <- case Core.parseContextualHType source of
     Right parsed -> Right parsed
     Left failure -> Left $ withSource sourceName
@@ -230,7 +231,7 @@ parseDjinnRequest _session options target sourceName source = do
   contexts <- first (parsedTypeFailure sourceName "context")
     $ traverse (traverse Core.toSynthesisType) rawContexts
   let query = QueryRequest
-        { requestTarget = target
+        { requestTarget = checkedTarget
         , requestGoal = goal
         , requestContexts = contexts
         , requestOptions = options
@@ -349,11 +350,9 @@ queryResultFailure failure = contextualDiagnostic Error
   "DJEX_DJINN_RESULT" "Djinn produced inconsistent logical evidence"
   (show failure)
 
-targetSymbol :: Name -> Either Diagnostic DjinnLocal
-targetSymbol target
-  | Right () <- validateDefinitionName target
-  , Just spelling <- nameSpelling target
-  = Right spelling
-  | otherwise = Left $ contextualDiagnostic Error "DJEX_DJINN_TARGET"
+checkDefinitionTarget :: Name -> Either Diagnostic DefinitionName
+checkDefinitionTarget target = case mkDefinitionName target of
+  Right checked -> Right checked
+  Left _ -> Left $ contextualDiagnostic Error "DJEX_DJINN_TARGET"
       "Djinn targets must be unqualified value identifiers or operators"
       (renderCanonical target)

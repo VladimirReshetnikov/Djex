@@ -43,8 +43,24 @@ source-repository head
 
 common build-settings
   Default-Language: Haskell2010
-  Ghc-Options:      -Wall -Wcompat
+  Ghc-Options:      -Wall -Wcompat -Wunused-packages
   Build-Depends:    base >= 4.19 && < 5
+
+-- Cabal restricts common stanzas to build-information fields, so each test
+-- suite still declares its interface locally.
+common tasty-test
+  import:        build-settings
+  Build-Depends: tasty >= 1.4 && < 2
+
+common tasty-hunit-test
+  import:        tasty-test
+  Build-Depends: tasty-hunit >= 0.10 && < 1
+
+common cli-test
+  import:        tasty-hunit-test
+  Build-Depends:
+    directory >= 1.3 && < 1.4,
+    process   >= 1.6 && < 1.7
 
 -- The stable Djex facade. Backend-neutral metadata and explicit reexports live
 -- here; checked adapters live beside the backends that implement them.
@@ -133,17 +149,14 @@ Library synthesis
     transformers >= 0.5 && < 0.7
 
 Test-Suite djex-tests
-  import:         build-settings
+  import:         tasty-hunit-test
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test
-  Build-Depends:
-    djex,
-    tasty       >= 1.4  && < 2,
-    tasty-hunit >= 0.10 && < 1
+  Build-Depends:  djex
 
 Test-Suite synthesis-tests
-  import:           build-settings
+  import:           tasty-hunit-test
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:   synthesis/test
@@ -151,8 +164,6 @@ Test-Suite synthesis-tests
     containers       >= 0.6  && < 0.9,
     deepseq          >= 1.4  && < 1.6,
     djex:synthesis,
-    tasty            >= 1.4  && < 2,
-    tasty-hunit      >= 0.10 && < 1,
     tasty-quickcheck >= 0.10 && < 1
 
 Library djinn-core
@@ -211,25 +222,22 @@ Executable djinn
   Build-Depends:  djex:djinn-frontend
 
 Test-Suite djinn-tests
-  import:         build-settings
+  import:         tasty-hunit-test
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: djinn/test
   Build-Depends:
     containers >= 0.6 && < 0.9,
     djex:djinn-core,
-    djex:synthesis,
-    tasty       >= 1.4 && < 2,
-    tasty-hunit >= 0.10 && < 1
+    djex:synthesis
 
 Test-Suite djinn-property-tests
-  import:         build-settings
+  import:         tasty-test
   Type:           exitcode-stdio-1.0
   Main-Is:        PropertySpec.hs
   Hs-Source-Dirs: djinn/test
   Build-Depends:
     djex:djinn-core,
-    tasty            >= 1.4  && < 2,
     tasty-quickcheck >= 0.10 && < 1
 
 Benchmark djinn-bench
@@ -243,15 +251,10 @@ Benchmark djinn-bench
     tasty-bench >= 0.3 && < 0.6
 
 Test-Suite djinn-cli-tests
-  import:         build-settings
+  import:         cli-test
   Type:           exitcode-stdio-1.0
   Main-Is:        CLISpec.hs
   Hs-Source-Dirs: djinn/test
-  Build-Depends:
-    directory   >= 1.3  && < 1.4,
-    process     >= 1.6  && < 1.7,
-    tasty       >= 1.4  && < 2,
-    tasty-hunit >= 0.10 && < 1
   Build-Tool-Depends: djex:djinn
 
 Library exference-core
@@ -365,7 +368,7 @@ Executable exference
     -with-rtsopts "-H2G -M4G -N"
 
 Test-Suite exference-tests
-  import:          build-settings
+  import:          tasty-hunit-test
   Type:            exitcode-stdio-1.0
   Main-Is:         Spec.hs
   Hs-Source-Dirs:  exference/test
@@ -382,18 +385,11 @@ Test-Suite exference-tests
     djex:exference-core,
     djex:synthesis,
     haskell-src-exts >= 1.24 && < 1.25,
-    tasty            >= 1.4  && < 2,
-    tasty-hunit      >= 0.10 && < 1,
     transformers     >= 0.5  && < 0.7
 
 Test-Suite exference-cli-tests
-  import:         build-settings
+  import:         cli-test
   Type:           exitcode-stdio-1.0
   Main-Is:        CLISpec.hs
   Hs-Source-Dirs: exference/test
-  Build-Depends:
-    directory   >= 1.3  && < 1.4,
-    process     >= 1.6  && < 1.7,
-    tasty       >= 1.4  && < 2,
-    tasty-hunit >= 0.10 && < 1
   Build-Tool-Depends: djex:exference

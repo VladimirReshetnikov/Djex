@@ -311,26 +311,29 @@ recordBindingUsage node searchState = case nodeLastStepBinding node of
 --   - convert stuff
 --   - consider some special abort conditions
 findEngineChunks :: ExferenceInput -> [EngineChunk]
-findEngineChunks (ExferenceInput rawType
-                                funcs
-                                deconss'
-                                sClassEnv
-                                allowUnused
-                                allowConstraints
-                                allowConstraintsStopStep
-                                multiPM
-                                maxSteps
-                                maxQueueSize
-                                maxDepth
-                                heuristics) =
+findEngineChunks ExferenceInput
+    { input_goalType = rawType
+    , input_envFuncs = funcs
+    , input_envDeconsS = deconss'
+    , input_envClasses = sClassEnv
+    , input_allowUnused = allowUnused
+    , input_allowConstraints = allowConstraints
+    , input_allowConstraintsStopStep = allowConstraintsStopStep
+    , input_multiPM = multiPM
+    , input_maxSteps = maxSteps
+    , input_maxQueueSize = maxQueueSize
+    , input_maxDepth = maxDepth
+    , input_heuristicsConfig = heuristics
+    } =
   unfoldr helper rootFindExpressionState
  where
   rootFindExpressionState = FindExpressionsState
-    0
-    0
-    0
-    M.empty
-    (Q.singleton 0 rootSearchNode)
+    { findSteps = 0
+    , findQueuePruned = 0
+    , findDepthPruned = 0
+    , findBindingUsages = M.empty
+    , findQueue = Q.singleton 0 rootSearchNode
+    }
   t = forallify rawType
   rootSearchNode = SearchNode
     { nodeGoals           = Seq.singleton
@@ -350,13 +353,7 @@ findEngineChunks (ExferenceInput rawType
     , nodeLastStepBinding = Nothing
     }
   transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineChunk
-  transformSolutions potentialSolutions (FindExpressionsState
-      n'
-      totalQueuePruned
-      totalDepthPruned
-      newBindingUsages
-      newNodes
-    ) = EngineChunk
+  transformSolutions potentialSolutions searchState = EngineChunk
       (SearchStatus compatibilityCompletion totalQueuePruned totalDepthPruned)
       progress
       (ExferenceBatchMetadata
@@ -391,6 +388,11 @@ findEngineChunks (ExferenceInput rawType
                 )
       ]
     where
+      n' = findSteps searchState
+      totalQueuePruned = findQueuePruned searchState
+      totalDepthPruned = findDepthPruned searchState
+      newBindingUsages = findBindingUsages searchState
+      newNodes = findQueue searchState
       (compatibilityCompletion, progress)
         | Q.null newNodes
         , Just reasons <- pruningReasons =

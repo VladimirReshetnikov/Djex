@@ -268,9 +268,10 @@ any / the right solution. Some common current limitations are:
 - **Memory consumption is large** (even more so when profiling);
 - Environment loading, checked inventory sealing, search execution, and result
   selection now have reusable library boundaries. `Language.Haskell.Djex`
-  identifies the two backends and re-exports their stable APIs; its next major
-  step is a common session/query API that composes them rather than merely
-  presenting them together.
+  identifies the two backends and re-exports their checked session/query APIs.
+  The remaining integration work is a backend-selecting Djex driver and the
+  eventual retirement of deprecated compatibility entry points, not another
+  parallel query envelope.
 - The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
   records concrete correctness reproducers, shared-IR boundaries, and the
   staged migration order.

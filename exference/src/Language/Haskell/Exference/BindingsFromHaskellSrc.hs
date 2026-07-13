@@ -26,8 +26,12 @@ import Language.Haskell.Exference.HaskellSrcUtils
 import Control.Monad ( join )
 import Control.Monad.Trans.State.Lazy (evalStateT)
 import Control.Monad.Trans.Except
+import Data.Graph ( SCC (..), stronglyConnComp )
 import qualified Data.Map.Strict as M
 import Data.Maybe ( fromMaybe, maybeToList )
+import qualified Data.Set as S
+import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
 
@@ -94,7 +98,8 @@ getDataConss
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m [Either String ([HsFunctionDecl], DeconstructorBinding)]
-getDataConss tcs ds tDeclMap modules = sequence $ do
+getDataConss tcs ds tDeclMap modules =
+  fmap markRecursiveDeconstructors $ sequence $ do
   modul <- modules
   (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
   DataDecl _ _ context rawHead conss _ <- decls
@@ -154,12 +159,53 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
                    | (constructor, fields) <- consDatas]
                    False
                )
-        -- TODO: actually determine if stuff is recursive or not
-  return $ do
-    convResult <- runExceptT
-      $ runConversionT (ConvData 0 M.empty) convAction
-    return $ either (Left . addConsMsg) Right convResult
-    -- TODO: replace this by bimap..
+  return $ fmap (either (Left . addConsMsg) Right)
+    $ runExceptT $ runConversionT (ConvData 0 M.empty) convAction
+
+-- | Annotate recursion only after conversion: failures retain their original
+-- positions and cannot create phantom vertices in the datatype graph.
+markRecursiveDeconstructors
+  :: [Either String ([HsFunctionDecl], DeconstructorBinding)]
+  -> [Either String ([HsFunctionDecl], DeconstructorBinding)]
+markRecursiveDeconstructors converted = map mark converted
+ where
+  successful =
+    [ (toSynthesisName headName, binding)
+    | Right (_, binding) <- converted
+    , Just headName <- [typeConstructorHead $ deconstructorInput binding]
+    ]
+  knownHeads = S.fromList $ map fst successful
+  dependenciesByHead = M.fromListWith S.union
+    [ ( headName
+      , S.intersection knownHeads $ constructorTypeHeads binding
+      )
+    | (headName, binding) <- successful
+    ]
+  graphNodes =
+    [ (headName, headName, S.toList dependencies)
+    | (headName, dependencies) <- M.toList dependenciesByHead
+    ]
+  recursiveHeads = S.fromList
+    [headName | CyclicSCC component <- stronglyConnComp graphNodes
+              , headName <- component]
+
+  mark failed@(Left _) = failed
+  mark (Right (constructors, binding)) = Right
+    ( constructors
+    , binding
+        { deconstructorRecursive = maybe False
+            ((`S.member` recursiveHeads) . toSynthesisName)
+            $ typeConstructorHead $ deconstructorInput binding
+        }
+    )
+
+-- The common traversal includes arrows, applications, forall bodies, and
+-- constraint arguments, so frontend recursion follows the shared type model.
+constructorTypeHeads :: DeconstructorBinding -> S.Set SharedName.Name
+constructorTypeHeads = foldMap
+    (foldMap (SharedType.typeConstructors . toSynthesisTypeStructure)
+      . constructorFields)
+  . deconstructorConstructors
 
 getClassMethods
   :: Monad m

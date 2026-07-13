@@ -125,7 +125,7 @@ import Language.Haskell.Exference.ExpressionToHaskellSrc
   , generatedFunctionClauseToHaskellSrc
   )
 import Language.Haskell.Exference.BindingsFromHaskellSrc
-  (getClassMethods, getDataConss)
+  (getClassMethods, getDataConss, getDataTypesChecked)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
@@ -499,6 +499,38 @@ tests = testGroup "Exference"
                 , ConstructorBinding that []
                 ]
             result -> fail $ "unexpected datatype bindings: " ++ show result
+      , testCase "datatype recursion follows strongly connected components" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module Fixture where"
+            , "data Direct = Direct [Direct]"
+            , "data Tree = Leaf | Branch Forest"
+            , "data Forest = Empty | More Tree Forest"
+            , "data Acyclic = Wrap (LeafData -> LeafData)"
+            , "data LeafData = LeafData"
+            , "data Box = Box"
+            ]
+          dataTypes <- expectRight $ getDataTypesChecked [parsedModule]
+          direct <- expectRight $ mkQualifiedName ["Fixture"] "Direct"
+          tree <- expectRight $ mkQualifiedName ["Fixture"] "Tree"
+          forest <- expectRight $ mkQualifiedName ["Fixture"] "Forest"
+          acyclic <- expectRight $ mkQualifiedName ["Fixture"] "Acyclic"
+          leafData <- expectRight $ mkQualifiedName ["Fixture"] "LeafData"
+          box <- expectRight $ mkQualifiedName ["Fixture"] "Box"
+          let extracted = runIdentity
+                $ getDataConss Map.empty dataTypes Map.empty [parsedModule]
+              headsAndFlags =
+                [ (typeConstructorHead input, recursive)
+                | Right (_, DeconstructorBinding input _ recursive) <- extracted
+                ]
+          length extracted @?= 6
+          headsAndFlags @?=
+            [ (Just direct, True)
+            , (Just tree, True)
+            , (Just forest, True)
+            , (Just acyclic, False)
+            , (Just leafData, False)
+            , (Just box, False)
+            ]
       ]
   , testGroup "lexical scopes"
       [ testCase "safe scopes expose innermost bindings before ancestors" $ do

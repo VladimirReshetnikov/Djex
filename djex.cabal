@@ -84,6 +84,17 @@ common cli-test
   import:        tasty-hunit-test, directory-dep
   Build-Depends: process >= 1.6 && < 1.7
 
+-- Every backend library consumes the neutral synthesis vocabulary and
+-- transformers; both parser-independent cores also use containers. Keep
+-- algorithm- and frontend-specific packages local so this stanza records only
+-- the components' actual dependency intersection.
+common backend-library
+  import:        build-settings, transformers-dep
+  Build-Depends: djex:synthesis
+
+common backend-core
+  import: backend-library, containers-dep
+
 -- The stable Djex facade. Compatibility and research modules remain available
 -- from their explicit named sublibraries instead of leaking into every Djex
 -- client. The adapters expose checked parser-neutral session and query entry
@@ -198,12 +209,9 @@ Test-Suite synthesis-tests
   Build-Depends:    djex:synthesis
 
 Library djinn-core
-  import:           build-settings, containers-dep, transformers-dep
+  import:           backend-core
   Visibility:       public
   Hs-Source-Dirs:   djinn/src-core
-
-  Build-Depends:
-    djex:synthesis
 
   -- Djinn.Core is the stable library API.  The core Djinn.Internal.* modules
   -- expose raw machinery without stability or invariant guarantees.
@@ -225,13 +233,12 @@ Library djinn-core
 -- Compatibility frontend for the historical Djinn library.  Cabal component
 -- names are package-wide, so this cannot share the `djinn` executable's name.
 Library djinn-frontend
-  import:           build-settings, transformers-dep
+  import:           backend-library
   Visibility:       public
   Hs-Source-Dirs:   djinn/src-frontend
 
   Build-Depends:
     djex:djinn-core,
-    djex:synthesis,
     haskeline >= 0.8 && < 0.9
 
   Exposed-Modules:    Djinn
@@ -283,7 +290,7 @@ Test-Suite djinn-cli-tests
   Build-Tool-Depends: djex:djinn
 
 Library exference-core
-  import:         build-settings, containers-dep, deepseq-dep, transformers-dep
+  import:         backend-core, deepseq-dep
   Visibility:     public
   -- Preserve the historical search-core optimization policy across the raw
   -- engine and its parser-neutral stable adapter. HSE frontend and executable
@@ -327,7 +334,6 @@ Library exference-core
     Language.Haskell.Exference.Core.Internal.Exference
 
   Build-Depends:
-    djex:synthesis,
     pqueue >= 1.3.1 && < 1.8
 
 -- This suite deliberately sees only the parser-neutral component. It guards
@@ -345,7 +351,7 @@ Test-Suite exference-core-api-tests
 -- component names are package-wide, so this cannot share the `exference`
 -- executable's name.
 Library exference-frontend
-  import:         build-settings, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep
+  import:         backend-library, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep
   Visibility:     public
   Hs-Source-Dirs: exference/src-frontend
 
@@ -385,7 +391,6 @@ Library exference-frontend
 
   Build-Depends:
     djex:exference-core,
-    djex:synthesis,
     filepath >= 1.4 && < 1.6
 
 Executable exference

@@ -53,11 +53,19 @@ transformDecl
   -> TypeDeclMap
   -> Decl SrcSpanInfo
   -> ExceptT String m [FunctionBinding]
-transformDecl tcs ds mn tDeclMap (TypeSig _loc names qtype)
-  = insName qtype $ do
-      (ctype, _) <- convertType tcs (Just mn) ds tDeclMap qtype
-      mapM (either throwE pure . helper mn ctype) names
-transformDecl _ _ _ _ _ = return []
+transformDecl tcs ds mn tDeclMap declaration = case declaration of
+  TypeSig _ names qtype -> lowerSignature names qtype
+  -- A foreign import introduces an ordinary Haskell binding.  Its calling
+  -- convention and external symbol affect execution, not the type-directed
+  -- search inventory, so it crosses the same checked lowering path as a
+  -- one-name source signature.  A foreign export merely refers to an existing
+  -- binding and deliberately remains outside this extractor.
+  ForImp _ _ _ _ name qtype -> lowerSignature [name] qtype
+  _ -> pure []
+ where
+  lowerSignature names qtype = insName qtype $ do
+    (ctype, _) <- convertType tcs (Just mn) ds tDeclMap qtype
+    mapM (either throwE pure . helper mn ctype) names
 
 insName :: Monad m
         => Type SrcSpanInfo -> ExceptT String m a -> ExceptT String m a

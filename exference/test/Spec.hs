@@ -2275,6 +2275,12 @@ tests = testGroup "Exference"
               , "type role T nominal"
               , RoleAnnotation
               )
+            , ( "pattern-synonym signature"
+              , [HSE.PatternSynonyms]
+              , ["{-# LANGUAGE PatternSynonyms #-}"]
+              , "pattern P :: T"
+              , PatternSynonymSignature
+              )
             , ( "deriving clause"
               , []
               , []
@@ -2282,6 +2288,38 @@ tests = testGroup "Exference"
               , DerivingClause
               )
             ]
+      , testCase "module and declaration vocabulary retain source order" $ do
+          occurrences <- unsupportedFromSourceWith [HSE.PatternSynonyms]
+            $ unlines
+            [ "{-# LANGUAGE PatternSynonyms, TypeFamilies #-}"
+            , "module Ordered (visible) where"
+            , "pattern P :: visible"
+            , "type family F a"
+            ]
+          map unsupportedVocabularyForm occurrences @?=
+            [ ExplicitExportList
+            , PatternSynonymSignature
+            , OpenTypeFamily
+            ]
+          map occurrenceStartLine occurrences @?=
+            [Just 2, Just 3, Just 4]
+      , testCase
+          "explicit exports fail before private declarations reach inventory" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE KindSignatures #-}"
+            , "module Visibility (public) where"
+            , "public, private :: Int"
+            , "type Bad (a :: *) = a"
+            ]) $ \modulePath -> do
+              LoadReport result diagnostics <- parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              occurrences <- expectUnsupportedVocabulary result
+              map unsupportedVocabularyForm occurrences @?=
+                [ExplicitExportList]
+              map occurrenceStartLine occurrences @?= [Just 2]
+              assertBool
+                ("partial inventory summaries escaped: " ++ show diagnostics)
+                $ not $ any (isLoaderSummary . diagnosticMessage) diagnostics
       , testCase "class vocabulary modifiers retain nested source order" $ do
           occurrences <- unsupportedFromSourceWith [HSE.DefaultSignatures]
             $ unlines
@@ -2303,6 +2341,26 @@ tests = testGroup "Exference"
             ]
           map occurrenceStartLine occurrences @?=
             [Just 3, Just 4, Just 5, Just 6, Just 7]
+      , testCase "XML page modules fail with their exact module span" $ do
+          let nativeSpan = HSE.SrcSpan "Page.hs" 1 1 4 8
+              location = HSE.SrcSpanInfo nativeSpan []
+              page = HSE.XmlPage location
+                (HSE.ModuleName location "Page") []
+                (HSE.XName location "html") [] Nothing []
+              occurrences = unsupportedVocabularyOccurrences [page]
+              expectedDiagnostic = Diagnostic
+                { diagnosticSeverity = Error
+                , diagnosticCode = Just "EXF_UNSUPPORTED_VOCABULARY"
+                , diagnosticSource = Just "Page.hs"
+                , diagnosticSpan = Just $ SourceSpan
+                    (SourcePosition 1 1) (SourcePosition 4 8)
+                , diagnosticMessage =
+                    "unsupported source vocabulary: XML page module"
+                , diagnosticContext = []
+                }
+          occurrences @?=
+            [UnsupportedVocabularyOccurrence XmlPageModule
+              expectedDiagnostic]
       , testCase "XML hybrid modules fail with their exact module span" $ do
           let nativeSpan = HSE.SrcSpan "Hybrid.hs" 2 3 8 9
               location = HSE.SrcSpanInfo nativeSpan []
@@ -2393,7 +2451,7 @@ tests = testGroup "Exference"
           map unsupportedVocabularyForm occurrences @?= [OpenTypeFamily]
       , testCase "benign non-vocabulary declarations remain accepted" $
           withTemporaryFile (unlines
-            [ "{-# LANGUAGE ForeignFunctionInterface, InstanceSigs, PatternSynonyms #-}"
+            [ "{-# LANGUAGE InstanceSigs, PatternSynonyms #-}"
             , "module Benign where"
             , "import Data.List"
             , "data T = T"
@@ -2401,9 +2459,7 @@ tests = testGroup "Exference"
             , "default (T)"
             , "ordinary :: a -> a"
             , "ordinary value = value"
-            , "pattern P :: T"
             , "pattern P = T"
-            , "foreign import ccall \"foreign_value\" foreignValue :: T"
             , "class C a where"
             , "  method :: a -> a"
             , "  method value = value"
@@ -2414,13 +2470,40 @@ tests = testGroup "Exference"
             , "{-# SPECIALISE instance C T #-}"
             ]) $ \modulePath -> do
               let mode = enableExtensions
-                    [ HSE.ForeignFunctionInterface
-                    , HSE.InstanceSigs
+                    [ HSE.InstanceSigs
                     , HSE.PatternSynonyms
                     ] $ haskellSrcExtsParseMode modulePath
               LoadReport result _ <- parseModules [(mode, modulePath)]
               _ <- expectRight result
               pure ()
+      , testCase "foreign imports lower through the signature path" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE ForeignFunctionInterface #-}"
+            , "module Foreign where"
+            , "data T = T"
+            , "foreign import ccall \"foreign_value\" foreignValue :: T -> T"
+            , "foreign export ccall \"foreign_exported\" exported :: T -> T"
+            , "exported value = value"
+            ]) $ \modulePath -> do
+              let mode = enableExtensions [HSE.ForeignFunctionInterface]
+                    $ haskellSrcExtsParseMode modulePath
+              LoadReport result _ <- parseModules [(mode, modulePath)]
+              environment <- expectRight result
+              typeName <- expectRight $ mkQualifiedName ["Foreign"] "T"
+              importName <- expectRight
+                $ mkQualifiedName ["Foreign"] "foreignValue"
+              exportName <- expectRight
+                $ mkQualifiedName ["Foreign"] "exported"
+              let bindings = sourceFunctions environment
+              case find ((== importName) . functionName) bindings of
+                Nothing -> fail "foreign import disappeared from the inventory"
+                Just binding -> do
+                  functionParameters binding @?= [TypeCons typeName]
+                  functionResult binding @?= TypeCons typeName
+                  functionConstraints binding @?= []
+                  functionPenalty binding @?= Penalty 0
+              assertBool "foreign export invented a second binding"
+                $ all ((/= exportName) . functionName) bindings
       , testCase "empty datatype contexts cannot bypass binding validation" $
           withTemporaryFile (unlines
             [ "{-# LANGUAGE EmptyDataDecls #-}"

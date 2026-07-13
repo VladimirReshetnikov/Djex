@@ -135,7 +135,8 @@ data LoadReport a = LoadReport
 -- distinction separate from parser failures lets callers report an exact,
 -- stable reason without pretending that accepted syntax was loaded.
 data UnsupportedVocabularyForm
-  = OpenTypeFamily
+  = ExplicitExportList
+  | OpenTypeFamily
   | ClosedTypeFamily
   | DataFamily
   | GadtDeclaration
@@ -153,9 +154,11 @@ data UnsupportedVocabularyForm
   | AssociatedTypeFamily
   | AssociatedTypeDefault
   | DefaultMethodSignature
+  | PatternSynonymSignature
   | AssociatedTypeInstance
   | AssociatedDataInstance
   | AssociatedGadtDataInstance
+  | XmlPageModule
   | XmlHybridModule
   deriving (Eq, Ord, Show)
 
@@ -544,22 +547,35 @@ tupleType tupleName arity = foldl TypeApp (TypeCons tupleName)
 
 -- | Find every declaration whose source-level type/class meaning would be
 -- lost by the current extractor. Value definitions, imports, fixities,
--- default declarations, pattern vocabulary, and benign pragmas deliberately
--- remain outside this scan.
+-- default declarations, untyped pattern bodies, and benign pragmas
+-- deliberately remain outside this scan.
 unsupportedVocabularyOccurrences
   :: [Module SrcSpanInfo]
   -> [UnsupportedVocabularyOccurrence]
 unsupportedVocabularyOccurrences = concatMap unsupportedModule
  where
   unsupportedModule modul = case modul of
-    HSE.Module _ _ _ _ declarations -> concatMap unsupportedDecl declarations
+    HSE.Module _ moduleHead _ _ declarations ->
+      maybe [] unsupportedModuleHead moduleHead
+        ++ concatMap unsupportedDecl declarations
+    -- An XML page is an executable module form, not an ordinary module with
+    -- no declarations.  The declaration extractors deliberately return
+    -- 'Nothing' for it, so accepting it here would manufacture an empty
+    -- source inventory.
+    HSE.XmlPage location _ _ _ _ _ _ ->
+      [unsupportedOccurrence XmlPageModule location]
     -- Hybrid HSP modules do carry ordinary declarations, but the loader's
     -- module/name projection deliberately has no semantics for the XML half.
     -- Reject the boundary once instead of silently discarding all declarations
     -- or emitting a cascade for children we cannot load in context.
     HSE.XmlHybrid location _ _ _ _ _ _ _ _ ->
       [unsupportedOccurrence XmlHybridModule location]
-    HSE.XmlPage{} -> []
+
+  unsupportedModuleHead (HSE.ModuleHead _ _ _ maybeExports) =
+    maybe [] unsupportedExports maybeExports
+
+  unsupportedExports (HSE.ExportSpecList location _) =
+    one ExplicitExportList location
 
   unsupportedDecl declaration = case declaration of
     HSE.TypeFamDecl location _ _ _ ->
@@ -582,6 +598,8 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       one DeclarationSplice location
     HSE.TSpliceDecl location _ ->
       one TypedDeclarationSplice location
+    HSE.PatSynSig location _ _ _ _ _ _ ->
+      one PatternSynonymSignature location
     HSE.RoleAnnotDecl location _ _ ->
       one RoleAnnotation location
     HSE.DataDecl _ _ _ _ _ derivings ->
@@ -617,9 +635,10 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       one AssociatedTypeDefault location
     HSE.ClsDefSig location _ _ ->
       one DefaultMethodSignature location
-    -- Ordinary signatures and value/default bodies remain supported or
-    -- intentionally irrelevant to the source type/class inventory.
-    HSE.ClsDecl{} -> []
+    -- Inspect the wrapped declaration as well: ordinary signatures and value
+    -- bodies remain irrelevant, while a publicly constructed or extension-
+    -- accepted pattern-synonym signature must not bypass the same boundary.
+    HSE.ClsDecl _ wrappedDeclaration -> unsupportedDecl wrappedDeclaration
 
   unsupportedInstanceDecl declaration = case declaration of
     HSE.InsType location _ _ ->
@@ -628,9 +647,10 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       one AssociatedDataInstance location
     HSE.InsGData location _ _ _ _ _ ->
       one AssociatedGadtDataInstance location
-    -- Method signatures, implementations, and benign pragmas do not alter
-    -- the global type/class vocabulary represented by the instance head.
-    HSE.InsDecl{} -> []
+    -- Method signatures, implementations, and benign pragmas still produce
+    -- no occurrences; recurse so unsupported typed pattern vocabulary cannot
+    -- hide inside the generic declaration wrapper.
+    HSE.InsDecl _ wrappedDeclaration -> unsupportedDecl wrappedDeclaration
 
   one form location = [unsupportedOccurrence form location]
 
@@ -655,6 +675,7 @@ unsupportedOccurrence form location = UnsupportedVocabularyOccurrence form
 
 unsupportedVocabularyDescription :: UnsupportedVocabularyForm -> String
 unsupportedVocabularyDescription form = case form of
+  ExplicitExportList -> "explicit module export list"
   OpenTypeFamily -> "open type-family declaration"
   ClosedTypeFamily -> "closed type-family declaration"
   DataFamily -> "data-family declaration"
@@ -673,10 +694,12 @@ unsupportedVocabularyDescription form = case form of
   AssociatedTypeFamily -> "associated type-family declaration"
   AssociatedTypeDefault -> "default associated-type equation"
   DefaultMethodSignature -> "default method signature"
+  PatternSynonymSignature -> "pattern-synonym signature"
   AssociatedTypeInstance -> "associated type-family instance"
   AssociatedDataInstance -> "associated data-family instance"
   AssociatedGadtDataInstance ->
     "GADT-style associated data-family instance"
+  XmlPageModule -> "XML page module"
   XmlHybridModule -> "XML hybrid module"
 
 -- | Load source modules in the supplied order.  The returned diagnostics are

@@ -55,8 +55,8 @@ The filesystem and Cabal-project migration is equally deliberate:
 - the former top-level `synthesis/`, `djinn/`, and `exference/` trees now live
   at `djex/synthesis/`, `djex/djinn/`, and `djex/exference/`;
 - their separate package descriptions and project files have been replaced by
-  `djex/djex.cabal` and `djex/cabal.project`; the repository-root
-  `cabal.project` selects that same package;
+  `djex/djex.cabal`; the repository-root `cabal.project` is the single solver
+  root, and Cabal discovers it by walking to the parent when invoked here;
 - package-generated code must import `Paths_djex` instead of `Paths_djinn` or
   `Paths_exference`; version discovery and installed-data lookup now belong to
   Djex as a whole; and
@@ -64,14 +64,15 @@ The filesystem and Cabal-project migration is equally deliberate:
   `getDataFileName "exference/environment"` from `Paths_djex`, rather than
   assuming either a checkout-relative path or the old package data root.
 
-Both Cabal project files enable tests and benchmarks, so `cabal build all` and
+The root Cabal project enables tests and benchmarks, so `cabal build all` and
 `cabal test all` exercise the same component graph whether invoked at the
-repository root or in `djex/`.
+repository root or in `djex/`, with one solver plan and build cache.
 
 ## Building
 
-The repository root and this directory each contain a Cabal project for the
-same single package. From either location, build and test the complete graph:
+The repository root contains the canonical Cabal project; Cabal discovers that
+parent project when commands start in this directory. From either location,
+build and test the complete graph:
 
 ```console
 cabal build all

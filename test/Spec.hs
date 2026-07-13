@@ -40,6 +40,7 @@ import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Generated
   ( Expression (..)
   , FunctionClause (FunctionClause)
+  , RenderError (GlobalDefinitionCapture)
   , defaultRenderOptions
   , renderFunctionClause
   )
@@ -324,11 +325,14 @@ tests = testGroup "Djex facade"
       target <- expectRight $ mkIdentifier "result"
       backendGlobal <- expectRight
         $ mkQualifiedName ["Fixture"] "result"
+      sharedGlobal <- expectRight $ parseName "Fixture.result"
       raw <- expectRight $ mkExferenceGeneratedCandidate mempty
         (CoreExpression.ExpName backendGlobal) [] (ExferenceStats 1 0 0)
       let candidate = fmap (FunctionClause target []) raw
       renderExferenceCandidateDefinition Unqualified candidate @?=
-        Left (ExferenceUnsafeDefinitionQualification Unqualified target)
+        Left (ExferenceGeneratedRenderError
+          $ GlobalDefinitionCapture target
+              sharedGlobal Unqualified)
       renderExferenceCandidateDefinition FullyQualified candidate @?=
         Right "result = Fixture.result"
   ]

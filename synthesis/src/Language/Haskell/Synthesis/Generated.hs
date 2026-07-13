@@ -132,6 +132,7 @@ data RenderError
   | InvalidConstructorPatternArity Name Int Int
   | EmptyLambda
   | InvalidFunctionName Name
+  | GlobalDefinitionCapture Name Name Qualification
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData RenderError
@@ -302,12 +303,20 @@ renderFunctionClause options clause@(FunctionClause name patterns body) = do
   validateDefinitionName name
   mapM_ validatePatternSyntax patterns
   validateExpressionSyntax body
+  case List.find capturesDefinition $ expressionGlobals body of
+    Just global -> Left $ GlobalDefinitionCapture
+      name global $ renderQualification options
+    Nothing -> Right ()
   names <- allocateClauseLocalNames options clause
   Right $ renderStyle style $ sep
     [ text (renderNamePrefix (renderQualification options) name) <+>
         sep (map (ppPattern options names 10) patterns) <+> text "="
     , nest 2 $ ppExpression options names 0 body
     ]
+ where
+  capturesDefinition global =
+    renderNamePrefix (renderQualification options) global ==
+      renderNamePrefix (renderQualification options) name
 
 validateExpressionSyntax :: Expression local -> Either RenderError ()
 validateExpressionSyntax expression = case expression of

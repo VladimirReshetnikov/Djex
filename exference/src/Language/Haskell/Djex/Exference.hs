@@ -66,6 +66,10 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , FunctionBinding (..)
   )
+import Language.Haskell.Exference.Core.TypeUtils
+  ( containsForall
+  , typeConstructorHead
+  )
 import Language.Haskell.Exference.Core.Types
   ( HsType (..)
   , SynthesisType
@@ -107,8 +111,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , withContext
   )
 import Language.Haskell.Synthesis.Generated
-  ( Expression (..)
-  , FunctionClause (FunctionClause)
+  ( FunctionClause (FunctionClause)
   , Qualification (..)
   , RenderError
   , RenderOptions (renderQualification)
@@ -124,9 +127,6 @@ import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.KindInference (checkTypesKinds)
 import Language.Haskell.Synthesis.Name
   ( Name
-  , nameModule
-  , nameOccurrence
-  , nameOperator
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
@@ -228,7 +228,6 @@ data ExferenceCandidateMetrics = ExferenceCandidateMetrics
 
 data ExferenceCandidateRenderError
   = ExferenceGeneratedRenderError RenderError
-  | ExferenceUnsafeDefinitionQualification Qualification Name
   deriving (Eq, Show)
 
 mkExferenceSession
@@ -341,12 +340,9 @@ renderExferenceCandidateDefinition
   -> ExferenceCandidate
   -> Either ExferenceCandidateRenderError String
 renderExferenceCandidateDefinition qualification candidate
-  | definitionQualificationIsUnsafe qualification clause =
-      Left $ ExferenceUnsafeDefinitionQualification
-        qualification $ case clause of FunctionClause target _ _ -> target
-  | otherwise = first ExferenceGeneratedRenderError
-      $ renderFunctionClause
-          (candidateRenderOptions qualification candidate) clause
+  = first ExferenceGeneratedRenderError
+    $ renderFunctionClause
+        (candidateRenderOptions qualification candidate) clause
  where
   clause = candidateOutput candidate
 
@@ -382,34 +378,6 @@ candidateTypeVariableName candidate variable = Map.findWithDefault fallback
   fallback = case variable of
     FlexibleVariable identifier -> showVar identifier
     RigidVariable identifier -> "C" ++ showVar identifier
-
-definitionQualificationIsUnsafe
-  :: Qualification
-  -> FunctionClause local
-  -> Bool
-definitionQualificationIsUnsafe qualification
-    (FunctionClause target _ body) = any collides $ expressionGlobals body
- where
-  collides global = nameOccurrence global == nameOccurrence target
-    && case qualification of
-      FullyQualified -> nameModule global == Nothing
-      QualifyIdentifiers ->
-        nameModule global == Nothing || nameOperator global /= Nothing
-      Unqualified -> True
-
-expressionGlobals :: Expression local -> [Name]
-expressionGlobals expression = case expression of
-  Local{} -> []
-  Global name -> [name]
-  Lambda _ body -> expressionGlobals body
-  Apply function argument ->
-    expressionGlobals function ++ expressionGlobals argument
-  Tuple elements -> concatMap expressionGlobals elements
-  Hole{} -> []
-  Let _ value body -> expressionGlobals value ++ expressionGlobals body
-  Case scrutinee alternatives ->
-    expressionGlobals scrutinee
-      ++ concatMap (expressionGlobals . snd) alternatives
 
 parseExferenceRequest
   :: ExferenceSession
@@ -605,26 +573,13 @@ deconstructorSupported binding = all (not . containsForall)
   $ deconstructorInput binding
   : concatMap constructorFields (deconstructorConstructors binding)
 
-containsForall :: HsType -> Bool
-containsForall TypeForall{} = True
-containsForall (TypeArrow parameter result) =
-  containsForall parameter || containsForall result
-containsForall (TypeApp function argument) =
-  containsForall function || containsForall argument
-containsForall _ = False
-
 deconstructorOmission :: DeconstructorBinding -> Maybe ExferenceOmission
 deconstructorOmission binding = do
-  name <- typeHead $ deconstructorInput binding
+  name <- typeConstructorHead $ deconstructorInput binding
   pure $ ExferenceOmission
     (toSynthesisName name)
     DataElimination
     UnsupportedNestedForall
- where
-  typeHead (TypeForall _ _ body) = typeHead body
-  typeHead (TypeApp function _) = typeHead function
-  typeHead (TypeCons name) = Just name
-  typeHead _ = Nothing
 
 omissionDiagnostic :: ExferenceOmission -> Diagnostic
 omissionDiagnostic omission = withContext

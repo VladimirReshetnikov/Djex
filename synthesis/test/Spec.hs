@@ -815,6 +815,18 @@ generatedTests = testGroup "generated syntax"
           , "  Just select'' -> select''"
           , "  Nothing -> select'"
           ])
+  , testCase "reject qualification that captures a definition global" $ do
+      let target = right $ mkIdentifier "result"
+          namespace = right $ mkModuleName "Fixture"
+          global = right $ mkQualifiedIdentifier namespace "result"
+          clause = FunctionClause target [] (Global global :: Expression Int)
+          options qualification = RenderOptions qualification show []
+      renderFunctionClause (options Unqualified) clause @?=
+        Left (GlobalDefinitionCapture target global Unqualified)
+      renderFunctionClause (options QualifyIdentifiers) clause @?=
+        Right "result = Fixture.result"
+      renderFunctionClause (options FullyQualified) clause @?=
+        Right "result = Fixture.result"
   , testCase "measure generated expressions structurally" $ do
       let identity = Lambda [Bind (0 :: Int)] $ Local 0
           application = Apply identity identity

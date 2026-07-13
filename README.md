@@ -23,7 +23,7 @@ generated-output infrastructure is progressively consolidated.
   `djinn-frontend` compatibility/REPL sublibrary.
 - `exference/` supplies the public parser-independent `exference-core`
   sublibrary and the `exference-frontend` Haskell-source/environment-loader
-  sublibrary.
+  sublibrary, which also owns the checked Djex/Exference session adapter.
 
 The historical `djinn` and `exference` executable names remain available. The
 package also retains `djex-tests`, `synthesis-tests`, all three Djinn test suites,
@@ -47,6 +47,8 @@ identities. Existing Cabal dependencies migrate as follows:
 New clients can depend on the unnamed `djex` library for the common facade and
 all stable, non-internal backend modules. Build-tool dependencies become
 `djex:djinn` and `djex:exference`; the executable names themselves are unchanged.
+Backend-specific clients may depend directly on `djex:djinn-core` or
+`djex:exference-frontend` without linking the other engine.
 
 ## Building
 

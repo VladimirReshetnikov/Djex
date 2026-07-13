@@ -571,12 +571,7 @@ repeatedValues values =
 -- projection is only for detecting multiple records for the same type before
 -- the search and checker can disagree about which record is authoritative.
 deconstructorTypeName :: DeconstructorBinding -> Maybe QualifiedName
-deconstructorTypeName = typeHead . deconstructorInput
-  where
-    typeHead (TypeForall _ _ body) = typeHead body
-    typeHead (TypeApp function _) = typeHead function
-    typeHead (TypeCons name) = Just name
-    typeHead _ = Nothing
+deconstructorTypeName = typeConstructorHead . deconstructorInput
 
 firstClassConstraintError :: ExferenceInput -> Maybe ClassEnvError
 firstClassConstraintError input = listToMaybe
@@ -708,27 +703,8 @@ deconstructorBindingType binding =
   foldr TypeArrow (deconstructorInput binding)
     $ concatMap constructorFields (deconstructorConstructors binding)
 
-containsNestedForall :: HsType -> Bool
-containsNestedForall ty@TypeForall{} =
-  any constraintContainsForall outerConstraints || containsForall body
-  where
-    (outerConstraints, body) = stripOuterForalls ty
-    stripOuterForalls (TypeForall _ constraints inner) =
-      let (nestedConstraints, result) = stripOuterForalls inner
-      in (constraints ++ nestedConstraints, result)
-    stripOuterForalls other = ([], other)
-containsNestedForall ty = containsForall ty
-
 constraintContainsForall :: HsConstraint -> Bool
 constraintContainsForall = any containsForall . constraint_params
-
-containsForall :: HsType -> Bool
-containsForall TypeForall{} = True
-containsForall (TypeArrow parameter result) =
-  containsForall parameter || containsForall result
-containsForall (TypeApp function parameter) =
-  containsForall function || containsForall parameter
-containsForall _ = False
 
 rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority
 rateNode h s = Priority

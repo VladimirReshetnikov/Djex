@@ -17,6 +17,7 @@ Maintainer:    Vladimir Reshetnikov
 Homepage:      https://github.com/VladimirReshetnikov/Haskell/tree/main/djex
 Bug-Reports:   https://github.com/VladimirReshetnikov/Haskell/issues
 Build-Type:    Simple
+Tested-With:   GHC == 9.12.4
 Stability:     experimental
 Copyright:
   Copyright (c) 2005-2014 Lennart Augustsson
@@ -45,19 +46,19 @@ common build-settings
   Ghc-Options:      -Wall -Wcompat
   Build-Depends:    base >= 4.19 && < 5
 
--- The stable Djex facade. Backend-neutral session and query APIs live here
--- while the historical frontend libraries remain available for migration.
+-- The stable Djex facade. Backend-neutral metadata and explicit reexports live
+-- here; checked adapters live beside the backends that implement them.
 Library
   import:           build-settings
   Hs-Source-Dirs:   src
 
   Exposed-Modules:
     Language.Haskell.Djex
-    Language.Haskell.Djex.Exference
 
   Reexported-Modules:
     Djinn.Core,
     Language.Haskell.Djex.Djinn,
+    Language.Haskell.Djex.Exference,
     Language.Haskell.Exference,
     Language.Haskell.Exference.Diagnostic,
     Language.Haskell.Exference.SimpleDict,
@@ -99,11 +100,9 @@ Library
     Language.Haskell.Synthesis.TypeRender
 
   Build-Depends:
-    containers >= 0.6 && < 0.9,
     djex:synthesis,
     djex:djinn-core,
-    djex:exference-frontend,
-    transformers >= 0.5 && < 0.7
+    djex:exference-frontend
 
 Library synthesis
   import:           build-settings
@@ -258,6 +257,8 @@ Test-Suite djinn-cli-tests
 Library exference-core
   import:         build-settings
   Visibility:     public
+  -- Preserve the historical search-core optimization policy; frontend and
+  -- executable code use the package-wide defaults.
   Ghc-Options:    -fno-spec-constr
   Hs-Source-Dirs: exference/src-core
 
@@ -303,10 +304,10 @@ Library exference-core
 Library exference-frontend
   import:         build-settings
   Visibility:     public
-  Ghc-Options:    -fno-spec-constr
   Hs-Source-Dirs: exference/src
 
   Exposed-Modules:
+    Language.Haskell.Djex.Exference
     Language.Haskell.Exference
     Language.Haskell.Exference.Diagnostic
     Language.Haskell.Exference.SimpleDict
@@ -356,12 +357,12 @@ Executable exference
 
   Build-Depends:
     containers >= 0.6 && < 0.9,
-    djex
+    djex:exference-frontend,
+    djex:synthesis
 
   Ghc-Options:
     -rtsopts
     -threaded
-    -fno-spec-constr
     -with-rtsopts "-H2G -M4G -N"
 
 Test-Suite exference-tests

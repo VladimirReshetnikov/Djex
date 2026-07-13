@@ -42,8 +42,10 @@ plus its search data structures and transformer stack; it does not inherit
 `haskell-src-exts`, filesystem/process libraries, or executable dependencies.
 The public named `exference-frontend` sublibrary contains the
 `haskell-src-exts` frontend and environment loader and preserves the historical
-core import paths. The package's default `djex` library re-exports the stable
-frontend and core modules.
+core import paths. It also exposes `Language.Haskell.Djex.Exference`, so the
+Exference executable and backend-specific clients use the checked session API
+without linking Djinn. The package's default `djex` library re-exports that
+adapter together with the stable frontend and core modules.
 This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
@@ -202,6 +204,17 @@ which folds the last inspected status through the policy without retaining the
 consumed trace. The executable therefore validates and runs search once, then
 says when an empty result is conclusive versus when inhabitation remains
 undecided.
+
+That historical `SearchSelection`/`find*`/`select*` presentation family is now
+deprecated but retains its behavior for source compatibility. New callers
+should construct a checked session and execute requests with
+`Language.Haskell.Djex.Exference.runExferenceQuery`, then use
+`Language.Haskell.Synthesis.Selection.selectQueryResults` (or
+`selectPreferredQueryResults` for the constraint-free preference policy).
+The shared `Selection` result preserves the last inspected progress alongside
+the selected candidates. Compatibility tests suppress deprecation diagnostics
+in their own module only; production targets continue to compile with the full
+warning set.
 
 The `exference` executable is a normal build target again. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been

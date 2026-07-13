@@ -54,7 +54,8 @@ where
 
 
 
-import Language.Haskell.Exference.Core
+import Language.Haskell.Exference.Core hiding ( findExpressions )
+import qualified Language.Haskell.Exference.Core as Core
 
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.Score
@@ -63,6 +64,33 @@ import Data.Maybe ( listToMaybe, maybeToList )
 import Data.List ( sortBy, groupBy, minimumBy )
 import qualified Data.List as List
 import Data.Ord ( comparing )
+
+
+
+-- These list-returning searches and chunk-level presentation folds predate
+-- Djex's checked query envelope. Keep them source compatible, but direct new
+-- callers through the shared session and selection APIs.
+{-# DEPRECATED findExpressions
+  "Use Language.Haskell.Djex.Exference.runExferenceQuery; apply Language.Haskell.Synthesis.Selection.selectQueryResults when selecting results." #-}
+{-# DEPRECATED findOneExpression, findSortNExpressions, findBestNExpressions,
+  findFirstBestExpressions, takeFindSortNExpressions,
+  findFirstExpressionLookahead, findFirstBestExpressionsLookahead
+  "Use Language.Haskell.Djex.Exference.runExferenceQuery with Language.Haskell.Synthesis.Selection.selectQueryResults." #-}
+{-# DEPRECATED findFirstBestExpressionsLookaheadPreferNoConstraints
+  "Use Language.Haskell.Djex.Exference.runExferenceQuery with Language.Haskell.Synthesis.Selection.selectPreferredQueryResults." #-}
+{-# DEPRECATED selectOneExpression, selectSortNExpressions,
+  selectBestNExpressions, selectFirstBestExpressions,
+  selectFirstExpressionLookahead, selectFirstBestExpressionsLookahead
+  "Use Language.Haskell.Synthesis.Selection.selectQueryResults on results from Language.Haskell.Djex.Exference.runExferenceQuery." #-}
+{-# DEPRECATED selectFirstBestExpressionsLookaheadPreferNoConstraints
+  "Use Language.Haskell.Synthesis.Selection.selectPreferredQueryResults on results from Language.Haskell.Djex.Exference.runExferenceQuery." #-}
+
+
+
+-- Preserve the historical re-export as a local binding so its deprecation is
+-- visible specifically through this compatibility module.
+findExpressions :: ExferenceInput -> [ExferenceOutputElement]
+findExpressions = Core.findExpressions
 
 
 
@@ -76,6 +104,13 @@ data SearchSelection result = SearchSelection
   , selectionResult :: result
   }
   deriving (Eq)
+
+{-# DEPRECATED SearchSelection
+  "Use Language.Haskell.Synthesis.Selection.Selection." #-}
+{-# DEPRECATED selectionStatus
+  "Use Language.Haskell.Synthesis.Selection.selectionProgress." #-}
+{-# DEPRECATED selectionResult
+  "Use Language.Haskell.Synthesis.Selection.selectionCandidates." #-}
 
 mapSelection
   :: (first -> second)

@@ -14,6 +14,9 @@ module Language.Haskell.Exference.Core.TypeUtils
   , constraintContainsVariables
   , inflateInstances
   , splitArrowResultParams
+  , containsForall
+  , containsNestedForall
+  , typeConstructorHead
   )
 where
 
@@ -74,3 +77,36 @@ splitArrowResultParams t
   = (rt, pts, vs++fvs, cs++cs')
   | otherwise
   = (t, [], [], [])
+
+-- | Whether a type contains explicit quantification at any depth.
+containsForall :: HsType -> Bool
+containsForall TypeForall{} = True
+containsForall (TypeArrow parameter result) =
+  containsForall parameter || containsForall result
+containsForall (TypeApp function argument) =
+  containsForall function || containsForall argument
+containsForall _ = False
+
+-- | Whether quantification occurs below the complete leading prenex chain or
+-- inside an outer constraint argument.
+containsNestedForall :: HsType -> Bool
+containsNestedForall ty@TypeForall{} =
+  any constraintContainsForall outerConstraints || containsForall body
+  where
+    (outerConstraints, body) = stripOuterForalls ty
+    stripOuterForalls (TypeForall _ constraints inner) =
+      let (nestedConstraints, result) = stripOuterForalls inner
+      in (constraints ++ nestedConstraints, result)
+    stripOuterForalls other = ([], other)
+containsNestedForall ty = containsForall ty
+
+constraintContainsForall :: HsConstraint -> Bool
+constraintContainsForall = any containsForall . constraint_params
+
+-- | Find the nominal head beneath foralls and type applications.
+typeConstructorHead :: HsType -> Maybe QualifiedName
+typeConstructorHead typeExpression = case typeExpression of
+  TypeForall _ _ body -> typeConstructorHead body
+  TypeApp function _ -> typeConstructorHead function
+  TypeCons name -> Just name
+  _ -> Nothing

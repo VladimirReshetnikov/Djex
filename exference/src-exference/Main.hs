@@ -22,7 +22,7 @@ import System.IO
   )
 import Text.Read (readMaybe)
 
-import Language.Haskell.Djex
+import Language.Haskell.Djex.Exference
 import Language.Haskell.Exference.Core.FunctionBinding
   ( FunctionBinding
   , functionName
@@ -42,6 +42,7 @@ import Language.Haskell.Synthesis.Candidate
   ( candidateResidualConstraints )
 import Language.Haskell.Synthesis.Diagnostic (renderDiagnostic)
 import Language.Haskell.Synthesis.Name (Name, mkIdentifier, parseName)
+import Language.Haskell.Synthesis.Query (QueryResult (resultSearch))
 import Language.Haskell.Synthesis.Search
   ( Completion (Finished, Truncated)
   , Progress (Completed, Continuing)

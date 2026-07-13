@@ -1,7 +1,10 @@
 module Main (main) where
 
+import Control.Exception (bracket)
 import Data.List (isInfixOf)
-import System.Exit (ExitCode(ExitSuccess))
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.Exit (ExitCode(ExitFailure, ExitSuccess))
+import System.IO (hClose, hPutStr, openTempFile)
 import System.Process (readProcessWithExitCode)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
@@ -27,7 +30,75 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testClassKindEnforcement
     , testCase "instance output is atomic across all methods"
         testInstanceOutputAtomic
+    , testCase "startup file errors set aggregate exit status"
+        testBatchFailureStatus
+    , testCase "missing startup files fail" testMissingBatchFile
+    , testCase "options after files still configure the session"
+        testOptionsAfterFiles
+    , testCase "unknown startup options fail with usage" testUnknownOption
+    , testCase "logical negative results are successful batch answers"
+        testNegativeBatchResult
     ]
+
+testBatchFailureStatus :: Assertion
+testBatchFailureStatus = withCommandFile (unlines
+    [ "this is not a command"
+    , ":clear"
+    , "identity ? a -> a"
+    ]) $ \path -> do
+        (exitCode, output, errors) <-
+            readProcessWithExitCode "djinn" [path] ""
+        case exitCode of
+            ExitFailure _ -> return ()
+            ExitSuccess -> fail "invalid startup file returned success"
+        assertEqual "batch command errors remain compatibility stdout"
+            "" errors
+        assertContains "the parse error should remain visible"
+            "Cannot parse command" output
+        assertContains "batch processing should continue after the error"
+            "identity a = a" output
+
+testMissingBatchFile :: Assertion
+testMissingBatchFile = do
+    (exitCode, output, _) <- readProcessWithExitCode "djinn"
+        ["__djinn_startup_file_that_does_not_exist__.djinn"] ""
+    case exitCode of
+        ExitFailure _ -> return ()
+        ExitSuccess -> fail "missing startup file returned success"
+    assertContains "missing startup file should be diagnosed"
+        "Error loading" output
+
+testOptionsAfterFiles :: Assertion
+testOptionsAfterFiles = withCommandFile
+    "choice ? a -> a -> a\n" $ \path -> do
+        (exitCode, output, errors) <-
+            readProcessWithExitCode "djinn" [path, "+multi"] ""
+        assertEqual ("djinn batch stderr: " ++ errors) ExitSuccess exitCode
+        assertContains "multi mode should print another realization"
+            "-- or" output
+        assertBool "the option must not be treated as a filename" $
+            not $ "loading file +multi" `isInfixOf` output
+
+testUnknownOption :: Assertion
+testUnknownOption = do
+    (exitCode, _, errors) <-
+        readProcessWithExitCode "djinn" ["-unknown"] ""
+    case exitCode of
+        ExitFailure _ -> return ()
+        ExitSuccess -> fail "unknown startup option returned success"
+    assertContains "unknown option should be named"
+        "Unknown Djinn option: unknown" errors
+    assertContains "unknown option should print usage"
+        "Usage: djinn" errors
+
+testNegativeBatchResult :: Assertion
+testNegativeBatchResult = withCommandFile
+    "peirce ? ((a -> b) -> a) -> a\n" $ \path -> do
+        (exitCode, output, errors) <-
+            readProcessWithExitCode "djinn" [path] ""
+        assertEqual ("djinn batch stderr: " ++ errors) ExitSuccess exitCode
+        assertContains "uninhabitability is a successful logical result"
+            "peirce cannot be realized" output
 
 testInstanceOutputAtomic :: Assertion
 testInstanceOutputAtomic = do
@@ -202,6 +273,16 @@ runSession commands = do
     assertEqual ("djinn stderr: " ++ errors) ExitSuccess exitCode
     assertEqual "djinn should not write to stderr" "" errors
     return output
+
+withCommandFile :: String -> (FilePath -> IO result) -> IO result
+withCommandFile contents action = bracket create removeFile action
+  where
+    create = do
+        temporaryDirectory <- getTemporaryDirectory
+        (path, handle) <- openTempFile temporaryDirectory "djinn-script"
+        hPutStr handle contents
+        hClose handle
+        return path
 
 assertContains :: String -> String -> String -> Assertion
 assertContains message needle haystack =

@@ -109,3 +109,12 @@ repeated inputs are all processed and conflicting presentation modes are
 rejected. Its historical ranking vector remains an explicit compatibility
 profile. `--short` now adds backend-neutral structural expression size to the
 candidate cost instead of being a dead option.
+
+The `djinn` compatibility frontend likewise retains its declaration REPL while
+storing each editable `Environment` together with the exact sealed
+`DjinnSession`. Successful mutations replace that pair transactionally; type
+queries and instance methods consume shared evidence, progress, metadata, and
+`FunctionClause` output through `runDjinnQuery`. Startup-file mode now carries
+aggregate failure status across later commands and `:clear`, accepts settings
+on either side of filenames, and rejects unknown or ambiguous option prefixes;
+interactive recovery remains unchanged.

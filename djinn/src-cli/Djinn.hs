@@ -10,6 +10,7 @@ import Text.ParserCombinators.ReadP
 import Control.Monad(when)
 import System.Exit(exitWith, ExitCode(..))
 import System.Environment(getArgs)
+import System.IO(hPutStrLn, stderr)
 import System.IO.Error(tryIOError)
 
 import Djinn.Core
@@ -17,6 +18,12 @@ import Djinn.Internal.REPL
 import Djinn.Internal.HTypes
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.Help
+import Language.Haskell.Djex.Djinn
+import qualified Language.Haskell.Synthesis.Diagnostic as Diagnostic
+import qualified Language.Haskell.Synthesis.Generated as Generated
+import qualified Language.Haskell.Synthesis.Name as SharedName
+import Language.Haskell.Synthesis.Query
+import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Paths_djex
 
 version :: String
@@ -25,27 +32,58 @@ version = "version " ++ showVersion Paths_djex.version
 main :: IO ()
 main = do
     args <- getArgs
-    let decodeOptions (('-':cs) : as) st = decodeOption cs >>= \f -> decodeOptions as (f False st)
-        decodeOptions (('+':cs) : as) st = decodeOption cs >>= \f -> decodeOptions as (f True  st)
-        decodeOptions as st = return (as, st)
-        decodeOption cs = case [ set | (cmd, _, _, set) <- options, isPrefix cs cmd ] of
-                          [] -> do usage; exitWith (ExitFailure 1)
-                          set : _ -> return set
-    (args', state) <- decodeOptions args startState
-    case args' of
+    (files, state) <- case decodeArguments args of
+        Left message -> do
+            hPutStrLn stderr message
+            usage
+            exitWith $ ExitFailure 1
+        Right result -> return result
+    case files of
         [] -> repl (hsGenRepl state)
-        _ -> loop state args'
-              where loop _ [] = return ()
-                    loop s (a:as) = do
-                        putStrLn $ "-- loading file " ++ a
-                        (q, s') <- loadFile s a
-                        if q then
-                            return ()
-                         else
-                            loop s' as
+        _ -> do
+            finalState <- loadFiles state files
+            when (commandFailed finalState) $
+                exitWith $ ExitFailure 1
+
+decodeArguments :: [String] -> Either String ([FilePath], State)
+decodeArguments = go startState []
+  where
+    go state reversed [] = Right (reverse reversed, state)
+    go state reversed ("--" : remaining) =
+        Right (reverse reversed ++ remaining, state)
+    go state reversed (argument : remaining) = case argument of
+        '-' : name | not (null name) -> applyOption False name
+        '+' : name | not (null name) -> applyOption True name
+        _ -> go state (argument : reversed) remaining
+      where
+        applyOption enabled name = do
+            setter <- decodeOption name
+            go (setter enabled state) reversed remaining
+
+    decodeOption name = case exact of
+        [setter] -> Right setter
+        _ -> case prefixes of
+            [] -> Left $ "Unknown Djinn option: " ++ name
+            [setter] -> Right setter
+            _ -> Left $ "Ambiguous Djinn option: " ++ name ++
+                " (could be " ++ intercalate ", " matchingNames ++ ")"
+      where
+        exact = [setter | (command, _, _, setter) <- options,
+            name == command]
+        prefixes = [setter | (command, _, _, setter) <- options,
+            name `isPrefixOf` command]
+        matchingNames = [command | (command, _, _, _) <- options,
+            name `isPrefixOf` command]
+
+loadFiles :: State -> [FilePath] -> IO State
+loadFiles state [] = return state
+loadFiles state (file : remaining) = do
+    putStrLn $ "-- loading file " ++ file
+    (quit, state') <- loadFile state file
+    if quit then return state' else loadFiles state' remaining
 
 usage :: IO ()
-usage = putStrLn "Usage: djinn [option ...] [file ...]"
+usage = hPutStrLn stderr "Usage: djinn [option ...] [file ...]"
 
 hsGenRepl :: State -> REPL State
 hsGenRepl state = REPL {
@@ -55,24 +93,38 @@ hsGenRepl state = REPL {
     }
 
 data State = State {
+    -- These two fields are committed together by 'installEnvironment'. The
+    -- opaque session must always be the lowering of this exact editable REPL
+    -- environment; otherwise a declaration can print successfully while later
+    -- queries search a stale inventory.
     environment :: Environment,
+    djinnSession :: DjinnSession,
     multi :: Bool,
     sorted :: Bool,
     debug :: Bool,
     cutOff :: Int,
     -- Search-step budget; 0 keeps the search an unlimited decision procedure.
-    budget :: Integer
+    budget :: Integer,
+    commandFailed :: Bool
     }
 
 startState :: State
 startState = State {
     environment = standardEnvironment,
+    djinnSession = standardSession,
     multi = False,
     sorted = True,
     debug = False,
     cutOff = 200,
-    budget = 0
+    budget = 0,
+    commandFailed = False
     }
+
+standardSession :: DjinnSession
+standardSession = case mkDjinnSession standardEnvironment of
+    Right session -> session
+    Left failure -> error $ "invalid standard Djinn environment: " ++
+        Diagnostic.renderDiagnostic failure
 
 
 welcome :: State -> IO (String, State)
@@ -86,7 +138,7 @@ eval s line =
     case filter (null . snd) (readP_to_S pCmd line) of
         [] -> do
             putStrLn "Cannot parse command"
-            return (False, s)
+            return (False, markFailed s)
         (cmd, _) : _ -> runCmd s cmd
 
 exit :: State -> IO ()
@@ -136,15 +188,14 @@ runCmd s Quit =
     return (True, s)
 runCmd s (Load f) = loadFile s f
 runCmd s (Add i t) = updateEnvironment s $ declare (Function i t)
-runCmd _ Clear =
-    return (False, startState)
+runCmd s Clear =
+    return (False, startState { commandFailed = commandFailed s })
 runCmd s (Del i) =
     case removeDeclaration i (environment s) of
         Left message -> do
             putStrLn $ "Error: cannot delete " ++ i ++ ": " ++ message
-            return (False, s)
-        Right environment' ->
-            return (False, s { environment = environment' })
+            return (False, markFailed s)
+        Right environment' -> installEnvironment s environment'
 runCmd s Env = do
     let showType (i, (_, HTAbstract _ kind, _)) =
             "type " ++ i ++ " :: " ++ show kind
@@ -174,29 +225,37 @@ runCmd s (Class (name, (params, methods))) =
     updateEnvironment s $ declare $ ClassDecl name params methods
 runCmd s (QueryInstance ctx target) =
     case resolveInstanceMethods (environment s) ctx target of
-        Left msg -> do putStrLn $ "Error: " ++ msg; return (False, s)
+        Left msg -> do
+            putStrLn $ "Error: " ++ msg
+            return (False, markFailed s)
         Right methods -> do
             let instanceHeading = "instance " ++ contextPrefix ctx ++
                     show target
                 prepareMethod method@(name, goal) =
-                    case makeQueryReport s name ctx goal of
-                        Left message -> Left $
+                    case makeDjinnResult s name ctx goal of
+                        Left failure -> Left $
                             "cannot generate method " ++ prHSymbolOp name ++
+                            ": " ++ Diagnostic.renderDiagnostic failure
+                        Right result -> case formatDjinnResult
+                            False s name ctx goal result of
+                          Left message -> Left $
+                            "cannot render method " ++ prHSymbolOp name ++
                             ": " ++ message
-                        Right report -> Right (method, report)
-                methodRealized (_, report) =
-                    case reportOutcome report of
-                        Realized (_ : _) -> True
-                        _ -> False
-                printMethod ((name, goal), report) = do
-                    putStr "   "
-                    printQueryReport False s name ctx goal report
-                printFailedMethod ((name, goal), report) =
-                    printQueryReport False s name ctx goal report
+                          Right output -> Right (method, result, output)
+                methodRealized (_, result, _) =
+                    resultEvidence result == ValidatedCandidates &&
+                        not (null $ SharedSearch.batchCandidates $
+                            resultSearch result)
+                printMethod (_, _, output) = case output of
+                    [] -> return ()
+                    firstLine : remaining -> do
+                        putStrLn $ "   " ++ firstLine
+                        mapM_ putStrLn remaining
+                printFailedMethod (_, _, output) = mapM_ putStrLn output
             case mapM prepareMethod methods of
                 Left msg -> do
                     putStrLn $ "Error: " ++ msg
-                    return (False, s)
+                    return (False, markFailed s)
                 Right reports -> do
                     let failures = filter (not . methodRealized) reports
                     case failures of
@@ -219,21 +278,51 @@ updateEnvironment s change =
     case change (environment s) of
         Left msg -> do
             putStrLn $ "Error: " ++ msg
-            return (False, s)
-        Right environment' ->
-            return (False, s { environment = environment' })
+            return (False, markFailed s)
+        Right environment' -> installEnvironment s environment'
+
+installEnvironment :: State -> Environment -> IO (Bool, State)
+installEnvironment state environment' = case mkDjinnSession environment' of
+    Left failure -> do
+        putStrLn $ "Error: " ++ Diagnostic.renderDiagnostic failure
+        return (False, markFailed state)
+    Right session -> return (False, state {
+        environment = environment',
+        djinnSession = session
+        })
+
+markFailed :: State -> State
+markFailed state = state { commandFailed = True }
 
 query :: Bool -> State -> String -> [Context] -> HType -> IO (Bool, State)
 query prType s i ctx g = do
-    case makeQueryReport s i ctx g of
-        Left msg -> putStrLn $ "Error: " ++ msg
-        Right report -> printQueryReport prType s i ctx g report
-    return (False, s)
+    case makeDjinnResult s i ctx g of
+        Left failure -> do
+            putStrLn $ "Error: " ++ commandDiagnostic failure
+            return (False, markFailed s)
+        Right result -> case formatDjinnResult prType s i ctx g result of
+            Left message -> do
+                putStrLn $ "Error: " ++ message
+                return (False, markFailed s)
+            Right output -> do
+                mapM_ putStrLn output
+                return (False, s)
 
-makeQueryReport :: State -> String -> [Context] -> HType
-                -> Either String QueryReport
-makeQueryReport s name contexts goal =
-    inhabit queryOptions (environment s) contexts name goal
+makeDjinnResult :: State -> String -> [Context] -> HType
+                -> Either Diagnostic.Diagnostic DjinnResult
+makeDjinnResult s name contexts goal = do
+    target <- case SharedName.parseName name of
+        Left failure -> Left $ Diagnostic.withContext (show failure) $
+            Diagnostic.withCode "DJEX_DJINN_TARGET" $
+            Diagnostic.diagnostic Diagnostic.Error
+                "cannot convert the parsed Djinn target"
+        Right value -> Right value
+    runDjinnQuery (djinnSession s) QueryRequest {
+        requestTarget = target,
+        requestGoal = goal,
+        requestContexts = contexts,
+        requestOptions = queryOptions
+        }
   where queryOptions = QueryOptions {
         optionAlternatives = multi s,
         optionSorted = sorted s,
@@ -241,35 +330,53 @@ makeQueryReport s name contexts goal =
         optionBudget = if budget s > 0 then Just (budget s) else Nothing
         }
 
-printQueryReport :: Bool -> State -> String -> [Context] -> HType
-                 -> QueryReport -> IO ()
-printQueryReport prType s name ctx goal report = do
-    when (debug s) $ putStrLn ("*** " ++ reportFormula report)
-    case reportOutcome report of
-        Undecided ->
-            -- A budgeted search that ran out of steps has not decided
-            -- anything; only a finished search justifies "cannot".
-            putStrLn $ "-- " ++ name ++
-                ": no proof found within budget " ++
-                show (budget s) ++ "; inhabitation is undecided."
-        UnrealizableWithoutSelfReference ->
-            putStrLn $ "-- " ++ name ++ " cannot be safely realized \
-                \without a recursive self-reference."
-        Unrealizable ->
-            putStrLn $ "-- " ++ name ++ " cannot be realized."
-        Realized clauses -> do
-            when (debug s) $
-                mapM_ (putStrLn . ("+++ " ++)) (reportProof report)
-            when prType $ putStrLn $
-                prHSymbolOp name ++ " :: " ++ contextPrefix ctx ++ show goal
-            case clauses of
-                [] -> return ()
-                clause : alternatives -> do
-                    putStrLn clause
-                    when (multi s) $ mapM_
-                        (\ alternative ->
-                            putStrLn "-- or" >> putStrLn alternative)
-                        alternatives
+formatDjinnResult :: Bool -> State -> String -> [Context] -> HType
+                  -> DjinnResult -> Either String [String]
+formatDjinnResult prType s name ctx goal result =
+    fmap (debugFormula ++) $ case resultEvidence result of
+      NoEvidence -> case SharedSearch.batchProgress search of
+          SharedSearch.Completed (SharedSearch.Truncated _) ->
+              negativeResult ["-- " ++ name ++
+                  ": no proof found within budget " ++
+                  show (budget s) ++ "; inhabitation is undecided."]
+          progress -> Left $ "Djinn returned no evidence after " ++ show progress
+      RequiresTargetReference -> negativeResult ["-- " ++ name ++
+          " cannot be safely realized without a recursive self-reference."]
+      ProvedUninhabitable ->
+          negativeResult ["-- " ++ name ++ " cannot be realized."]
+      ValidatedCandidates -> do
+          clauses <- mapM renderClause candidates
+          case clauses of
+            [] -> Left "Djinn returned candidate evidence without a candidate"
+            firstClause : alternatives -> Right $
+                debugProof ++ typeSignature ++ [firstClause] ++
+                concat [["-- or", alternative]
+                    | alternative <- alternatives, multi s]
+  where
+    search = resultSearch result
+    candidates = SharedSearch.batchCandidates search
+    metadata = SharedSearch.batchMetadata search
+    negativeResult output
+      | null candidates = Right output
+      | otherwise = Left "Djinn attached candidates to negative evidence"
+    debugFormula
+      | debug s = ["*** " ++ djinnTranslatedFormula metadata]
+      | otherwise = []
+    debugProof
+      | debug s = maybe [] (\proof -> ["+++ " ++ proof]) $
+          djinnFirstExploredProof metadata
+      | otherwise = []
+    typeSignature
+      | prType = [prHSymbolOp name ++ " :: " ++
+          contextPrefix ctx ++ show goal]
+      | otherwise = []
+    renderClause = either (Left . show) Right .
+        Generated.renderFunctionClause (Generated.defaultRenderOptions id)
+
+commandDiagnostic :: Diagnostic.Diagnostic -> String
+commandDiagnostic failure = case reverse $ Diagnostic.diagnosticContext failure of
+    [] -> Diagnostic.renderDiagnostic failure
+    context : _ -> context ++ "\n  " ++ Diagnostic.renderDiagnostic failure
 
 contextPrefix :: [Context] -> String
 contextPrefix [] = ""
@@ -283,7 +390,7 @@ loadFile s name = do
     case result of
         Left err -> do
             putStrLn $ "Error loading " ++ show name ++ ": " ++ show err
-            return (False, s)
+            return (False, markFailed s)
         Right result' -> return result'
 
 showClass :: (HSymbol, ([(HSymbol, HKind)], [Method])) -> String

@@ -39,6 +39,10 @@ cabal run djinn -- examples.djinn
 
 Each non-comment line in a command file is one REPL command. `--` starts a line
 comment. Files are processed from left to right in the same evolving environment.
+An invalid command or unreadable nested/startup file does not prevent later
+commands from running, but startup-file mode remembers the failure and exits
+nonzero. Interactive sessions retain their historical recover-and-continue
+behavior and exit successfully.
 
 ## Testing
 
@@ -52,7 +56,7 @@ cabal test djinn-tests djinn-property-tests djinn-cli-tests --test-show-details=
 | --- | --- |
 | `djinn-tests` | 39 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
-| `djinn-cli-tests` | Ten subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, and stateful query behavior. |
+| `djinn-cli-tests` | Fifteen subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
 named test. For example:
@@ -338,8 +342,10 @@ For example:
 :set cutoff=20
 ```
 
-The same Boolean options can precede file names on the command line, such as
-`cabal run djinn -- +multi examples.djinn`.
+The same Boolean options may appear before or after file names, such as
+`cabal run djinn -- examples.djinn +multi`. Exact option names win over unique
+prefixes; unknown or ambiguous prefixes fail. A standalone `--` ends option
+scanning when a file name itself begins with `+` or `-`.
 
 ## How the code is organized
 
@@ -347,6 +353,7 @@ The same Boolean options can precede file names on the command line, such as
 | --- | --- |
 | `app/Main.hs` | Thin executable launcher. |
 | `Djinn.Core` | The stable, validated library API (see below). |
+| `Language.Haskell.Djex.Djinn` | Opaque checked session and shared query/evidence/search adapter. |
 | `Djinn.Internal.Declaration` | Djinn declaration compatibility values and checked shared-IR lowering. |
 | `Djinn` (`src-cli/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
@@ -364,13 +371,21 @@ The same Boolean options can precede file names on the command line, such as
 | `Djinn.Internal.ProofCheck` | Independent type checking of generated proof terms. |
 | `Djinn.Internal.Help` | Extended in-program help. |
 
-`Djinn.Core` and the proof, type, environment, and validation modules under
-`src/` form the public named `djinn-core` component. `Djinn`,
+`Djinn.Core`, `Language.Haskell.Djex.Djinn`, and the proof, type, environment,
+and validation modules under `src/` form the public named `djinn-core`
+component. `Djinn`,
 `Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-cli/` in the
 named `djinn-frontend` component; Help and REPL are private implementation
 modules. The executable's `app/` source root contains only its launcher, so
 neither the frontend nor executable can accidentally compile core modules as
 home modules.
+
+The REPL state commits its editable `Environment` together with an opaque
+`DjinnSession`; every declaration or deletion reseals the session before either
+field changes. Queries and instance methods go through `runDjinnQuery`, consume
+shared logical evidence and operational completion independently, and render
+the returned shared `FunctionClause`s. This preserves the declaration language
+while eliminating the frontend's former direct `inhabit`/`QueryReport` path.
 
 ## Using djinn-core as a library
 

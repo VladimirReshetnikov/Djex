@@ -5,8 +5,12 @@ module Language.Haskell.Exference.Core
   , findExpressionsWithStatsEither
   , findGeneratedSearchBatchesEither
   , findGeneratedSearchBatchesWithHintsEither
+  , findGeneratedSearchBatchesInEnvironmentEither
+  , findGeneratedSearchBatchesWithHintsInEnvironmentEither
   , E.ExferenceHeuristicsConfig (..)
   , E.ExferenceInput (..)
+  , E.ExferenceEnvironment
+  , E.ExferenceQuery (..)
   , E.ExferenceOutputElement
   , E.ExferenceChunkElement (..)
   , E.ExferenceBatchMetadata (..)
@@ -29,6 +33,8 @@ module Language.Haskell.Exference.Core
   , E.toGeneratedSearchBatchWithHints
   , E.constraintsRelaxedAtStep
   , E.ExferenceInputError (..)
+  , E.mkExferenceEnvironment
+  , E.validateExferenceQuery
   , E.validateExferenceInput
   , findExpressionsEither
   , Score.Penalty (..)
@@ -86,6 +92,26 @@ findGeneratedSearchBatchesWithHintsEither
 findGeneratedSearchBatchesWithHintsEither typeHints input = do
   E.validateExferenceInput input
   pure $ E.findGeneratedSearchBatches typeHints input
+
+-- | Validate only a new query, then search a reusable sealed environment.
+-- Environment validation happened once at 'E.mkExferenceEnvironment'.
+findGeneratedSearchBatchesInEnvironmentEither
+  :: E.ExferenceEnvironment
+  -> E.ExferenceQuery
+  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
+findGeneratedSearchBatchesInEnvironmentEither =
+  findGeneratedSearchBatchesWithHintsInEnvironmentEither Map.empty
+
+findGeneratedSearchBatchesWithHintsInEnvironmentEither
+  :: C.ExferenceTypeVariableHints
+  -> E.ExferenceEnvironment
+  -> E.ExferenceQuery
+  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
+findGeneratedSearchBatchesWithHintsInEnvironmentEither
+    typeHints environment query = do
+  E.validateExferenceQuery environment query
+  pure $ E.findGeneratedSearchBatchesInEnvironment
+    typeHints environment query
 
 -- Keep validation at the public boundary and run it exactly once. The raw
 -- engine assumes a checked input; list-returning compatibility functions

@@ -31,7 +31,6 @@ import Language.Haskell.Exference.Core.Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.Vector as V
 import Data.Sequence
 
 import Control.DeepSeq
@@ -142,7 +141,7 @@ data SearchNode = SearchNode
   , nodeConstraintGoals :: [HsConstraint]
   , nodeProvidedScopes  :: Scopes
   , nodeVarUses         :: VarUsageMap
-  , nodeFunctions       :: V.Vector FunctionBinding
+  , nodeFunctions       :: [FunctionBinding]
   , nodeDeconstructors  :: [DeconstructorBinding]
   , nodeQueryClassEnv   :: QueryClassEnv
   , nodeExpression      :: Expression

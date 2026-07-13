@@ -7,8 +7,11 @@
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findGeneratedSearchBatches
+  , findGeneratedSearchBatchesInEnvironment
   , ExferenceHeuristicsConfig (..)
   , ExferenceInput (..)
+  , ExferenceEnvironment
+  , ExferenceQuery (..)
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
@@ -25,6 +28,8 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , toGeneratedSearchBatchWithHints
   , constraintsRelaxedAtStep
   , ExferenceInputError (..)
+  , mkExferenceEnvironment
+  , validateExferenceQuery
   , validateExferenceInput
   )
 where
@@ -48,12 +53,12 @@ import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
+import qualified Language.Haskell.Synthesis.Name as SynthesisName
 
 import qualified Data.PQueue.Prio.Max as Q
 import qualified Data.Map as M
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as S
-import qualified Data.Vector as V
 import qualified Data.Sequence as Seq
 
 import Data.Maybe ( maybeToList, fromMaybe, listToMaybe )
@@ -119,6 +124,32 @@ data ExferenceInput = ExferenceInput
   , input_heuristicsConfig :: ExferenceHeuristicsConfig
   }
   deriving (Show)
+
+-- | A finite search environment whose names, types, constraints, ratings, and
+-- generated syntax have been checked once.  The constructor remains private:
+-- removing a binding for one query is safe, but adding or replacing one must
+-- cross 'mkExferenceEnvironment' again.
+newtype ExferenceEnvironment = ExferenceEnvironment EnvDictionary
+
+-- | The query-varying half of an Exference search input.
+--
+-- Exact shared names in 'queryExcludedBindings' are unavailable to both proof
+-- search and the independent result checker.  This lets a frontend prevent a
+-- generated definition from accidentally referring to the binding it shadows
+-- without revalidating the otherwise unchanged environment.
+data ExferenceQuery = ExferenceQuery
+  { queryGoalType :: HsType
+  , queryExcludedBindings :: S.Set SynthesisName.Name
+  , queryAllowUnused :: Bool
+  , queryAllowConstraints :: Bool
+  , queryConstraintDeferralSteps :: Int
+  , queryMultiConstructorPatterns :: Bool
+  , queryMaximumSteps :: Int
+  , queryMaximumQueueSize :: Maybe Int
+  , queryMaximumDepth :: Maybe Penalty
+  , queryHeuristics :: ExferenceHeuristicsConfig
+  }
+  deriving (Eq, Show)
 
 data ExferenceInputError
   = NestedForallInGoal HsType
@@ -309,23 +340,37 @@ recordBindingUsage node searchState = case nodeLastStepBinding node of
 --   - call stateStep repeatedly
 --   - convert stuff
 --   - consider some special abort conditions
-findEngineChunks :: ExferenceInput -> [EngineChunk]
-findEngineChunks ExferenceInput
-    { input_goalType = rawType
-    , input_envFuncs = funcs
-    , input_envDeconsS = deconss'
-    , input_envClasses = sClassEnv
-    , input_allowUnused = allowUnused
-    , input_allowConstraints = allowConstraints
-    , input_allowConstraintsStopStep = allowConstraintsStopStep
-    , input_multiPM = multiPM
-    , input_maxSteps = maxSteps
-    , input_maxQueueSize = maxQueueSize
-    , input_maxDepth = maxDepth
-    , input_heuristicsConfig = heuristics
-    } =
+findEngineChunks
+  :: ExferenceEnvironment
+  -> ExferenceQuery
+  -> [EngineChunk]
+findEngineChunks
+    (ExferenceEnvironment EnvDictionary
+      { environmentFunctions = allFunctions
+      , environmentDeconstructors = deconss'
+      , environmentClasses = sClassEnv
+      })
+    ExferenceQuery
+      { queryGoalType = rawType
+      , queryExcludedBindings = excludedBindings
+      , queryAllowUnused = allowUnused
+      , queryAllowConstraints = allowConstraints
+      , queryConstraintDeferralSteps = allowConstraintsStopStep
+      , queryMultiConstructorPatterns = multiPM
+      , queryMaximumSteps = maxSteps
+      , queryMaximumQueueSize = maxQueueSize
+      , queryMaximumDepth = maxDepth
+      , queryHeuristics = heuristics
+      } =
   unfoldr helper rootFindExpressionState
  where
+  -- Removing an already checked binding cannot invalidate the environment.
+  -- Use the same exact projection for search and independent result checking,
+  -- otherwise a generated definition could regain the binding it shadows.
+  funcs = filter bindingAvailable allFunctions
+  bindingAvailable binding = toSynthesisName (functionName binding)
+    `S.notMember` excludedBindings
+
   rootFindExpressionState = FindExpressionsState
     { findSteps = 0
     , findQueuePruned = 0
@@ -340,7 +385,7 @@ findEngineChunks ExferenceInput
     , nodeConstraintGoals = []
     , nodeProvidedScopes  = initialScopes
     , nodeVarUses         = IntMap.empty
-    , nodeFunctions       = V.fromList funcs -- TODO: lift this further up?
+    , nodeFunctions       = funcs
     , nodeDeconstructors  = deconss'
     , nodeQueryClassEnv   = mkQueryClassEnv sClassEnv []
     , nodeExpression      = ExpHole 0
@@ -483,7 +528,8 @@ findEngineChunks ExferenceInput
 
 -- | Historical status-bearing view of the engine trace.
 findExpressions :: ExferenceInput -> [ExferenceChunkElement]
-findExpressions = map projectCompatibilityChunk . findEngineChunks
+findExpressions input = map projectCompatibilityChunk
+  $ uncurry findEngineChunks $ validatedInputParts input
 
 projectCompatibilityChunk :: EngineChunk -> ExferenceChunkElement
 projectCompatibilityChunk chunk = ExferenceChunkElement
@@ -499,8 +545,17 @@ findGeneratedSearchBatches
   :: ExferenceTypeVariableHints
   -> ExferenceInput
   -> [ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatches typeHints =
-  map (projectGeneratedBatch typeHints) . findEngineChunks
+findGeneratedSearchBatches typeHints input =
+  uncurry (findGeneratedSearchBatchesInEnvironment typeHints)
+    $ validatedInputParts input
+
+findGeneratedSearchBatchesInEnvironment
+  :: ExferenceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> [ExferenceGeneratedSearchBatch]
+findGeneratedSearchBatchesInEnvironment typeHints environment =
+  map (projectGeneratedBatch typeHints) . findEngineChunks environment
 
 projectGeneratedBatch
   :: ExferenceTypeVariableHints
@@ -520,57 +575,235 @@ constraintsRelaxedAtStep allowConstraints stopStep currentStep =
   allowConstraints || currentStep <= stopStep
 
 validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
-validateExferenceInput input
-  | input_maxSteps input <= 0 = Left $ InvalidMaxSteps $ input_maxSteps input
-  | input_allowConstraintsStopStep input < 0 =
+validateExferenceInput input = do
+  -- Keep this order identical to the historical guard chain.  Besides being
+  -- more useful to callers, the first error is part of the compatibility API.
+  validateQueryLimits query
+  validateEnvironmentDuplicates environment
+  validateQueryHeuristics query
+  validateEnvironmentRatingsAndSyntax environment
+  validateQueryForall query
+  validateEnvironmentForalls environment
+  validateConstraintForalls allConstraints
+  validateQueryClassConstraints environment query
+  validateBindingClassConstraints environment
+  validateInputTypes
+    $ [queryGoalType query]
+    ++ environmentTypes environment
+    ++ concatMap (constraint_params . snd) allConstraints
+ where
+  environment = inputEnvironment input
+  query = inputQuery input
+  allConstraints = queryConstraints query
+    ++ environmentConstraints environment
+
+-- | Seal a reusable environment after validating everything independent of a
+-- particular query.  The abstract result can subsequently be paired with many
+-- cheap query validations without repeating these checks.
+mkExferenceEnvironment
+  :: EnvDictionary
+  -> Either ExferenceInputError ExferenceEnvironment
+mkExferenceEnvironment environment = do
+  validateExferenceEnvironment environment
+  pure $ ExferenceEnvironment environment
+
+-- | Validate the varying part of a search against an already sealed class
+-- environment.  Excluding bindings only removes capabilities and therefore
+-- cannot invalidate the environment.
+validateExferenceQuery
+  :: ExferenceEnvironment
+  -> ExferenceQuery
+  -> Either ExferenceInputError ()
+validateExferenceQuery (ExferenceEnvironment environment) query = do
+  validateQueryLimits query
+  validateQueryHeuristics query
+  validateQueryForall query
+  validateConstraintForalls constraints
+  validateQueryClassConstraints environment query
+  validateInputTypes
+    $ queryGoalType query
+    : concatMap (constraint_params . snd) constraints
+ where
+  constraints = queryConstraints query
+
+validateExferenceEnvironment
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateExferenceEnvironment environment = do
+  validateEnvironmentDuplicates environment
+  validateEnvironmentRatingsAndSyntax environment
+  validateEnvironmentForalls environment
+  validateConstraintForalls constraints
+  validateBindingClassConstraints environment
+  validateInputTypes
+    $ environmentTypes environment
+    ++ concatMap (constraint_params . snd) constraints
+ where
+  constraints = environmentConstraints environment
+
+validateQueryLimits
+  :: ExferenceQuery
+  -> Either ExferenceInputError ()
+validateQueryLimits query
+  | queryMaximumSteps query <= 0 =
+      Left $ InvalidMaxSteps $ queryMaximumSteps query
+  | queryConstraintDeferralSteps query < 0 =
       Left $ InvalidConstraintDeferralSteps
-        $ input_allowConstraintsStopStep input
-  | Just limit <- input_maxQueueSize input, limit < 0 =
+        $ queryConstraintDeferralSteps query
+  | Just limit <- queryMaximumQueueSize query, limit < 0 =
       Left $ InvalidMaxQueueSize limit
-  | Just limit <- input_maxDepth input, not $ isFinitePenalty limit =
+  | Just limit <- queryMaximumDepth query, not $ isFinitePenalty limit =
       Left $ InvalidMaxDepth limit
+  | otherwise = Right ()
+
+validateEnvironmentDuplicates
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateEnvironmentDuplicates environment
   | duplicates@(_ : _) <- repeatedValues
       [ name
-      | deconstructor <- input_envDeconsS input
+      | deconstructor <- environmentDeconstructors environment
       , Just name <- [deconstructorTypeName deconstructor]
       ] = Left $ DuplicateDeconstructorNames duplicates
   | duplicates@(_ : _) <- repeatedValues
       [ constructorName constructor
-      | deconstructor <- input_envDeconsS input
+      | deconstructor <- environmentDeconstructors environment
       , constructor <- deconstructorConstructors deconstructor
       ] = Left $ DuplicateConstructorNames duplicates
   | duplicates@(_ : _) <- repeatedValues
-      (map functionName $ input_envFuncs input) =
+      (map functionName $ environmentFunctions environment) =
       Left $ DuplicateFunctionNames duplicates
+  | otherwise = Right ()
+
+validateQueryHeuristics
+  :: ExferenceQuery
+  -> Either ExferenceInputError ()
+validateQueryHeuristics query
   | Just (field, invalid) <- find (not . isFinitePenalty . snd)
-      (heuristicFields $ input_heuristicsConfig input) =
+      (heuristicFields $ queryHeuristics query) =
       Left $ InvalidHeuristic field invalid
+  | otherwise = Right ()
+
+validateEnvironmentRatingsAndSyntax
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateEnvironmentRatingsAndSyntax environment
   -- Historical function ratings are signed: negative values are bonuses.
-  -- Heuristic penalties above remain non-negative, but conflating the two
-  -- policies makes the shipped environment fail validation.
+  -- Query heuristic penalties remain non-negative, but conflating the two
+  -- policies would make the shipped environment fail validation.
   | Just binding <- find (not . isFiniteRating . functionPenalty)
-      (input_envFuncs input) = Left $ InvalidHeuristic
+      (environmentFunctions environment) = Left $ InvalidHeuristic
         (show $ functionName binding) (functionPenalty binding)
-  | Just (binding, syntaxError) <- firstInvalidGeneratedBinding input =
+  | Just (binding, syntaxError) <- firstInvalidGeneratedBinding environment =
       Left $ InvalidGeneratedBinding binding syntaxError
-  | Just (constructor, syntaxError) <- firstInvalidGeneratedConstructor input =
+  | Just (constructor, syntaxError) <-
+      firstInvalidGeneratedConstructor environment =
       Left $ InvalidGeneratedConstructor constructor syntaxError
-  | containsNestedForall $ input_goalType input =
-      Left $ NestedForallInGoal $ input_goalType input
+  | otherwise = Right ()
+
+validateQueryForall
+  :: ExferenceQuery
+  -> Either ExferenceInputError ()
+validateQueryForall query
+  | containsNestedForall $ queryGoalType query =
+      Left $ NestedForallInGoal $ queryGoalType query
+  | otherwise = Right ()
+
+validateEnvironmentForalls
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateEnvironmentForalls environment
   | Just binding <- find (containsForall . functionBindingType)
-      (input_envFuncs input) =
+      (environmentFunctions environment) =
       Left $ NestedForallInBinding (functionName binding) $ functionBindingType binding
   | Just deconstructor <- find (containsForall . deconstructorBindingType)
-      (input_envDeconsS input) =
+      (environmentDeconstructors environment) =
       Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
-  | Just (site, constraint) <- find (constraintContainsForall . snd)
-      (inputConstraints input) =
-      Left $ NestedForallInConstraint site constraint
-  | Just classError <- firstClassConstraintError input =
-      Left $ InvalidClassConstraint classError
-  | Just (typeExpression, typeError) <- firstInvalidInputType input =
-      Left $ InvalidInputType typeExpression typeError
   | otherwise = Right ()
+
+validateConstraintForalls
+  :: [(ConstraintSite, HsConstraint)]
+  -> Either ExferenceInputError ()
+validateConstraintForalls constraints
+  | Just (site, constraint) <- find (constraintContainsForall . snd)
+      constraints =
+      Left $ NestedForallInConstraint site constraint
+  | otherwise = Right ()
+
+validateQueryClassConstraints
+  :: EnvDictionary
+  -> ExferenceQuery
+  -> Either ExferenceInputError ()
+validateQueryClassConstraints environment query =
+  case listToMaybe
+      [ classError
+      | constraint <- typeConstraints $ queryGoalType query
+      , Left classError <-
+          [validateKnownConstraintInEnv classes QueryConstraint constraint]
+      ] of
+    Just classError -> Left $ InvalidClassConstraint classError
+    Nothing -> Right ()
+ where
+  classes = environmentClasses environment
+
+validateBindingClassConstraints
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateBindingClassConstraints environment =
+  case listToMaybe
+      [ classError
+      | binding <- environmentFunctions environment
+      , constraint <- functionConstraints binding
+          ++ typeConstraints (functionBindingType binding)
+      , Left classError <- [validateKnownConstraintInEnv classes
+          (BindingConstraint $ functionName binding)
+          constraint]
+      ] of
+    Just classError -> Left $ InvalidClassConstraint classError
+    Nothing -> Right ()
+ where
+  classes = environmentClasses environment
+
+validateInputTypes
+  :: [HsType]
+  -> Either ExferenceInputError ()
+validateInputTypes types = case listToMaybe
+    [ (typeExpression, typeError)
+    | typeExpression <- types
+    , Left typeError <- [toSynthesisType typeExpression]
+    ] of
+  Just (typeExpression, typeError) ->
+    Left $ InvalidInputType typeExpression typeError
+  Nothing -> Right ()
+
+inputEnvironment :: ExferenceInput -> EnvDictionary
+inputEnvironment input = EnvDictionary
+  { environmentFunctions = input_envFuncs input
+  , environmentDeconstructors = input_envDeconsS input
+  , environmentClasses = input_envClasses input
+  }
+
+inputQuery :: ExferenceInput -> ExferenceQuery
+inputQuery input = ExferenceQuery
+  { queryGoalType = input_goalType input
+  , queryExcludedBindings = S.empty
+  , queryAllowUnused = input_allowUnused input
+  , queryAllowConstraints = input_allowConstraints input
+  , queryConstraintDeferralSteps = input_allowConstraintsStopStep input
+  , queryMultiConstructorPatterns = input_multiPM input
+  , queryMaximumSteps = input_maxSteps input
+  , queryMaximumQueueSize = input_maxQueueSize input
+  , queryMaximumDepth = input_maxDepth input
+  , queryHeuristics = input_heuristicsConfig input
+  }
+
+-- This conversion is internal and deliberately skips validation.  Every
+-- compatibility entry point validates first, just as it did before the split.
+validatedInputParts
+  :: ExferenceInput
+  -> (ExferenceEnvironment, ExferenceQuery)
+validatedInputParts input =
+  (ExferenceEnvironment $ inputEnvironment input, inputQuery input)
 
 -- Report the complete stable duplicate set.  Search explores every raw
 -- binding while the independent checker historically selected the first one,
@@ -591,42 +824,12 @@ repeatedValues values =
 deconstructorTypeName :: DeconstructorBinding -> Maybe QualifiedName
 deconstructorTypeName = typeConstructorHead . deconstructorInput
 
-firstClassConstraintError :: ExferenceInput -> Maybe ClassEnvError
-firstClassConstraintError input = listToMaybe
-  [ classError
-  | Left classError <- queryChecks ++ bindingChecks
-  ]
- where
-  environment = input_envClasses input
-  queryChecks = map
-    (validateKnownConstraintInEnv environment QueryConstraint)
-    (typeConstraints $ input_goalType input)
-  bindingChecks =
-    [ validateKnownConstraintInEnv environment
-        (BindingConstraint $ functionName binding)
-        constraint
-    | binding <- input_envFuncs input
-    , constraint <- functionConstraints binding
-        ++ typeConstraints (functionBindingType binding)
-    ]
-
--- Keep every type accepted by the search core inside the validated shared
--- source vocabulary.  Whole goal/function/deconstructor types cover their
--- recursive structure; standalone constraint arguments need an explicit pass
--- because a FunctionBinding stores its context separately from its arrow.
-firstInvalidInputType :: ExferenceInput -> Maybe (HsType, SynthesisTypeError)
-firstInvalidInputType input = listToMaybe
-  [ (typeExpression, typeError)
-  | typeExpression <- inputTypes input
-  , Left typeError <- [toSynthesisType typeExpression]
-  ]
-
 firstInvalidGeneratedConstructor
-  :: ExferenceInput
+  :: EnvDictionary
   -> Maybe (QualifiedName, SharedGenerated.RenderError)
-firstInvalidGeneratedConstructor input = listToMaybe
+firstInvalidGeneratedConstructor environment = listToMaybe
   [ (name, syntaxError)
-  | deconstructor <- input_envDeconsS input
+  | deconstructor <- environmentDeconstructors environment
   , constructor <- deconstructorConstructors deconstructor
   , let name = constructorName constructor
         generatedPattern = SharedGenerated.Constructor
@@ -639,42 +842,43 @@ firstInvalidGeneratedConstructor input = listToMaybe
   ]
 
 firstInvalidGeneratedBinding
-  :: ExferenceInput
+  :: EnvDictionary
   -> Maybe (QualifiedName, SharedGenerated.RenderError)
-firstInvalidGeneratedBinding input = listToMaybe
+firstInvalidGeneratedBinding environment = listToMaybe
   [ (name, syntaxError)
-  | binding <- input_envFuncs input
+  | binding <- environmentFunctions environment
   , let name = functionName binding
   , Left syntaxError <- [SharedGenerated.validateExpressionSyntax
       $ SharedGenerated.Global $ toSynthesisName name]
   ]
 
-inputTypes :: ExferenceInput -> [HsType]
-inputTypes input =
-  [input_goalType input]
-  ++ map functionBindingType (input_envFuncs input)
-  ++ map deconstructorBindingType (input_envDeconsS input)
-  ++ concatMap (constraint_params . snd) (inputConstraints input)
+environmentTypes :: EnvDictionary -> [HsType]
+environmentTypes environment =
+  map functionBindingType (environmentFunctions environment)
+  ++ map deconstructorBindingType (environmentDeconstructors environment)
+
+queryConstraints :: ExferenceQuery -> [(ConstraintSite, HsConstraint)]
+queryConstraints query =
+  [ (QueryConstraint, constraint)
+  | constraint <- typeConstraints $ queryGoalType query
+  ]
 
 -- Associate every explicit constraint with the site already used by class
 -- validation. StaticClassEnv is opaque, but its public observations let the
 -- search boundary also check superclass and instance argument types rather
 -- than assuming that nominal environment validation implies rank support.
-inputConstraints :: ExferenceInput -> [(ConstraintSite, HsConstraint)]
-inputConstraints input =
-  [ (QueryConstraint, constraint)
-  | constraint <- typeConstraints $ input_goalType input
-  ] ++
+environmentConstraints :: EnvDictionary -> [(ConstraintSite, HsConstraint)]
+environmentConstraints environment =
   [ (BindingConstraint $ functionName binding, constraint)
-  | binding <- input_envFuncs input
+  | binding <- environmentFunctions environment
   , constraint <- functionConstraints binding
   ] ++
   [ (ClassSuperclass $ tclass_name declaration, constraint)
   | declaration <- M.elems
-      $ sClassEnv_tclasses $ input_envClasses input
+      $ sClassEnv_tclasses $ environmentClasses environment
   , constraint <- tclass_constraints declaration
   ] ++ concatMap instanceConstraints
-    (sClassEnv_explicitInstances $ input_envClasses input)
+    (sClassEnv_explicitInstances $ environmentClasses environment)
  where
   instanceConstraints instanceDeclaration =
     (InstanceHead, instance_head instanceDeclaration)
@@ -869,7 +1073,7 @@ stateStep multiPM allowConstrs h = do
     -- try to resolve the goal by looking at functions from the environment.
     byFunctionSimple :: StateT SearchNode [] ()
     byFunctionSimple = do
-      binding <- lift =<< gets (V.toList . nodeFunctions)
+      binding <- lift =<< gets nodeFunctions
       offset <- (+ 1) <$> gets nodeMaxTVarId
       let
         incF     = incVarIds (+offset)

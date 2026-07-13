@@ -1331,22 +1331,48 @@ searchTests = testGroup "search status"
       fmap (+ 1) (SearchBatch Continuing "stats" [1 :: Int, 2]) @?=
         SearchBatch Continuing "stats" [2, 3]
   , testCase "query evidence remains independent of completion" $ do
-      let finishedWithoutEvidence = QueryResult NoEvidence
+      let finishedWithoutEvidence = right $ mkQueryResult NoEvidence
             $ SearchBatch (Completed Finished) "metadata" ([] :: [Int])
-          truncatedWithCandidate = QueryResult ValidatedCandidates
-            $ SearchBatch
-                (Completed $ truncated CandidateLimitReached)
-                "metadata"
-                [1 :: Int]
+          truncatedWithCandidate = queryResultFromCandidates $ SearchBatch
+            (Completed $ truncated CandidateLimitReached)
+            "metadata"
+            [1 :: Int]
+          mappedExpected = queryResultFromCandidates $ SearchBatch
+            (Completed $ truncated CandidateLimitReached)
+            "metadata"
+            [2 :: Int]
       resultEvidence finishedWithoutEvidence @?= NoEvidence
       resultEvidence truncatedWithCandidate @?= ValidatedCandidates
-      fmap (+ 1) truncatedWithCandidate @?= QueryResult ValidatedCandidates
-        (SearchBatch
-          (Completed $ truncated CandidateLimitReached)
-          "metadata"
-          [2])
+      fmap (+ 1) truncatedWithCandidate @?= mappedExpected
       _ <- evaluate $ force truncatedWithCandidate
       pure ()
+  , testCase "check every evidence and candidate-presence combination" $ do
+      let emptyBatch = SearchBatch Continuing "metadata" ([] :: [Int])
+          nonemptyBatch = SearchBatch Continuing "metadata" [1 :: Int]
+          observe result = (resultEvidence result, resultSearch result)
+      forM_ [minBound .. maxBound] $ \evidence -> do
+        fmap observe (mkQueryResult evidence emptyBatch) @?=
+          if evidence == ValidatedCandidates
+            then Left EmptyValidatedCandidates
+            else Right (evidence, emptyBatch)
+        fmap observe (mkQueryResult evidence nonemptyBatch) @?=
+          if evidence == ValidatedCandidates
+            then Right (evidence, nonemptyBatch)
+            else Left $ CandidatesWithoutValidatedEvidence evidence
+  , testCase "checked construction leaves a candidate tail lazy" $ do
+      let batch = SearchBatch Continuing ()
+            (1 : error "mkQueryResult forced the candidate tail")
+          result = right $ mkQueryResult ValidatedCandidates batch
+      resultEvidence result @?= ValidatedCandidates
+      take 1 (batchCandidates $ resultSearch result) @?= [1 :: Int]
+      mkQueryResult NoEvidence batch @?=
+        Left (CandidatesWithoutValidatedEvidence NoEvidence)
+  , testCase "derived construction leaves a candidate tail lazy" $ do
+      let batch = SearchBatch Continuing ()
+            (1 : error "queryResultFromCandidates forced the candidate tail")
+          result = queryResultFromCandidates batch
+      resultEvidence result @?= ValidatedCandidates
+      take 1 (batchCandidates $ resultSearch result) @?= [1 :: Int]
   ]
 
 selectionTests :: TestTree
@@ -1471,7 +1497,7 @@ selectionTests = testGroup "result selection"
         Selection Nothing ([] :: [Int])
   ]
  where
-  queryResult progress candidates = QueryResult NoEvidence
+  queryResult progress candidates = queryResultFromCandidates
     $ SearchBatch progress () candidates
 
 generatedTests :: TestTree

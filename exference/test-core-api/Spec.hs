@@ -8,7 +8,7 @@ import Language.Haskell.Synthesis.Environment
 import Language.Haskell.Synthesis.Name (mkIdentifier)
 import Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
-  , QueryResult (resultSearch)
+  , resultSearch
   )
 import Language.Haskell.Synthesis.Search (batchCandidates)
 import Language.Haskell.Synthesis.Type

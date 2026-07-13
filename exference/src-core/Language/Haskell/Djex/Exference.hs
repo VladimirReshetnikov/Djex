@@ -119,9 +119,10 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
-  ( QueryEvidence (NoEvidence, ValidatedCandidates)
-  , QueryRequest (..)
-  , QueryResult (..)
+  ( QueryRequest (..)
+  , QueryResult
+  , queryResultFromCandidates
+  , resultSearch
   )
 import Language.Haskell.Synthesis.Search
   ( SearchBatch (SearchBatch)
@@ -381,14 +382,10 @@ resultBatch
   :: Name
   -> ExferenceGeneratedSearchBatch
   -> ExferenceResult
-resultBatch target batch = QueryResult evidence $ SearchBatch
+resultBatch target batch = queryResultFromCandidates $ SearchBatch
   (batchProgress batch)
   (projectBatchMetadata $ batchMetadata batch)
   (map (projectCandidate target) $ batchCandidates batch)
- where
-  evidence
-    | null $ batchCandidates batch = NoEvidence
-    | otherwise = ValidatedCandidates
 
 projectBatchMetadata
   :: CoreStats.ExferenceBatchMetadata

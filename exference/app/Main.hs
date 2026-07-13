@@ -44,7 +44,7 @@ import Language.Haskell.Synthesis.Candidate
   ( candidateResidualConstraints )
 import Language.Haskell.Synthesis.Diagnostic (renderDiagnostic)
 import Language.Haskell.Synthesis.Name (Name, mkIdentifier, parseName)
-import Language.Haskell.Synthesis.Query (QueryResult (resultSearch))
+import Language.Haskell.Synthesis.Query (resultSearch)
 import Language.Haskell.Synthesis.Search
   ( Completion (Finished, Truncated)
   , Progress (Completed, Continuing)

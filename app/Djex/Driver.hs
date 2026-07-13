@@ -150,15 +150,13 @@ runExference options = do
   source = commonInput common
 
 presentDjinn :: CommonOptions -> DjinnResult -> IO ExitCode
-presentDjinn options result = case validateDjinnResult evidence candidates of
-  Left message -> internalFailure "DJEX_DJINN_RESULT" message
-  Right () -> case traverse (renderDjinn options) candidates of
-    Left failure -> renderFailure "DJEX_DJINN_RENDER" failure
-    Right rendered -> do
-      printCandidates rendered
-      reportDjinnOutcome evidence progress
-      reportTruncation progress
-      pure ExitSuccess
+presentDjinn options result = case traverse (renderDjinn options) candidates of
+  Left failure -> renderFailure "DJEX_DJINN_RENDER" failure
+  Right rendered -> do
+    printCandidates rendered
+    reportDjinnOutcome evidence progress
+    reportTruncation progress
+    pure ExitSuccess
  where
   evidence = resultEvidence result
   selection = selectQueryResults
@@ -224,17 +222,6 @@ renderExferenceBlock options candidate = do
 printCandidates :: [String] -> IO ()
 printCandidates [] = pure ()
 printCandidates rendered = putStrLn $ intercalate "\n\n-- or\n\n" rendered
-
-validateDjinnResult
-  :: QueryEvidence
-  -> [DjinnCandidate]
-  -> Either String ()
-validateDjinnResult ValidatedCandidates [] =
-  Left "Djinn reported candidate evidence without a selected candidate"
-validateDjinnResult evidence candidates
-  | evidence /= ValidatedCandidates && not (null candidates) =
-      Left "Djinn attached candidates to negative or absent evidence"
-  | otherwise = Right ()
 
 reportDjinnOutcome :: QueryEvidence -> Maybe Progress -> IO ()
 reportDjinnOutcome ValidatedCandidates _ = pure ()

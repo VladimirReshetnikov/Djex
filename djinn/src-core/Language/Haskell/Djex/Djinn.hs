@@ -80,7 +80,9 @@ import Language.Haskell.Synthesis.Name
   )
 import Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
-  , QueryResult (..)
+  , QueryResult
+  , QueryResultInvariantError
+  , mkQueryResult
   )
 import Language.Haskell.Synthesis.Search
   ( Progress (Completed)
@@ -264,7 +266,8 @@ runDjinnQuery (DjinnSession prepared) request = do
         (Completed $ generatedReportCompletion report)
         metadata
         candidates
-  pure $ QueryResult (generatedReportEvidence report) batch
+  first queryResultFailure
+    $ mkQueryResult (generatedReportEvidence report) batch
 
 -- The core currently proves every obligation and therefore emits no residual
 -- constraints. Keep this projection checked nevertheless: it preserves the
@@ -339,6 +342,11 @@ contextLoweringFailure failure = contextualDiagnostic Error
 candidateProjectionFailure :: Core.SynthesisTypeError -> Diagnostic
 candidateProjectionFailure failure = contextualDiagnostic Error
   "DJEX_DJINN_PROJECT" "cannot project a Djinn candidate to shared types"
+  (show failure)
+
+queryResultFailure :: QueryResultInvariantError -> Diagnostic
+queryResultFailure failure = contextualDiagnostic Error
+  "DJEX_DJINN_RESULT" "Djinn produced inconsistent logical evidence"
   (show failure)
 
 targetSymbol :: Name -> Either Diagnostic DjinnLocal

@@ -145,7 +145,12 @@ shared boundary rather than during ordinary field access.
 
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
-the same types or options. `mkDjinnSession` lowers and seals the neutral shared
+the same types or options. Its `QueryResult` constructor is opaque:
+`mkQueryResult` checks that `ValidatedCandidates` accompanies exactly the
+nonempty batches, while `queryResultFromCandidates` derives that evidence for
+ordinary heuristic-search batches. Both checks inspect only the list spine's
+first constructor, so they do not sacrifice lazy candidate tails.
+`mkDjinnSession` lowers and seals the neutral shared
 `DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
 class-kind defaulting; the mutable raw `Djinn.Core.Environment` no longer
 crosses the default facade. Synonyms are expanded for saturation and recursive

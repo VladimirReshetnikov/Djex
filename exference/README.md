@@ -395,6 +395,9 @@ session and execute requests with
 `Language.Haskell.Djex.Exference.runExferenceQuery`, then use
 `Language.Haskell.Synthesis.Selection.selectQueryResults` (or
 `selectPreferredQueryResults` for the constraint-free preference policy).
+Each returned batch uses the shared checked result boundary to derive
+`ValidatedCandidates` exactly when the batch is nonempty; an empty heuristic
+batch records `NoEvidence` without conflating exhaustion with a proof.
 The shared `Selection` result preserves the last inspected progress alongside
 the selected candidates. The executable therefore validates and runs search
 once, then says when an empty result is conclusive versus when inhabitation

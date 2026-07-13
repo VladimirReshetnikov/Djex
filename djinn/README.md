@@ -493,10 +493,12 @@ is run. Here
 names despite both currently being represented by `String`. Raw `HType` is
 used only behind that checked boundary: parsed raw types are projected into
 `DjinnType`, while neutral requests are lowered once as they are sealed.
-Its `QueryResult` carries
-the same shared `Candidate DjinnType` structure as Exference plus Djinn's
+Its checked `QueryResult` carries the same shared `Candidate DjinnType`
+structure as Exference plus Djinn's
 formula/proof metadata; even the currently empty residual constraints no
-longer expose a backend type. The definition/expression renderers consume
+longer expose a backend type. The stable adapter rejects any mismatch between
+the raw report's logical evidence and its candidate payload before either can
+escape. The definition/expression renderers consume
 canonical candidates through the shared rendering pipeline and return
 its `RenderError` directly, without conflating logical evidence with
 operational completion.

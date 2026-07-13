@@ -16,25 +16,44 @@ import Language.Haskell.Djex.Exference
       ( exferenceExcludedBindings
       , exferenceRatingOverrides
       )
+  , defaultExferenceSessionPolicy
   )
-import Language.Haskell.Djex.Exference.Internal.Session
-  ( sealCheckedExferenceSession
-  , sealCheckedExferenceSessionWithPolicy
+import Language.Haskell.Djex.Exference.Internal.Frontend
+  ( sealProjectedExferenceSessionWithPolicy
   )
+import Language.Haskell.Exference.Core.FunctionBinding
+  ( EnvDictionary (EnvDictionary) )
 import Language.Haskell.Exference.EnvironmentParser
-  ( CheckedSourceEnvironment )
+  ( CheckedSourceEnvironment
+  , SourceEnvironment (sourceClasses, sourceDeconstructors)
+  , checkedSourceInventory
+  , checkedSourceProjection
+  , sourceFunctions
+  )
 import Language.Haskell.Synthesis.Diagnostic (Diagnostic)
 
 mkExferenceSession
   :: CheckedSourceEnvironment
   -> Either Diagnostic ExferenceSession
-mkExferenceSession = sealCheckedExferenceSession
+mkExferenceSession = mkExferenceSessionWithPolicy
+  defaultExferenceSessionPolicy
 
 mkExferenceSessionWithPolicy
   :: ExferenceSessionPolicy
   -> CheckedSourceEnvironment
   -> Either Diagnostic ExferenceSession
-mkExferenceSessionWithPolicy policy =
-  sealCheckedExferenceSessionWithPolicy
+mkExferenceSessionWithPolicy policy checked =
+  sealProjectedExferenceSessionWithPolicy
     (exferenceExcludedBindings policy)
     (exferenceRatingOverrides policy)
+    inventory
+    backend
+ where
+  source = checkedSourceProjection checked
+  inventory = fmap (const ()) $ checkedSourceInventory checked
+  -- Preserve the source loader's ratings and declaration order. The neutral
+  -- inventory owns validation and kinds; this dictionary owns search policy.
+  backend = EnvDictionary
+    (sourceFunctions source)
+    (sourceDeconstructors source)
+    (sourceClasses source)

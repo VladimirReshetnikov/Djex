@@ -24,16 +24,14 @@ import Language.Haskell.Djex.Exference
   , ExferenceRequest
   , ExferenceSession
   , ExferenceSessionPolicy
-      ( exferenceExcludedBindings
-      , exferenceRatingOverrides
-      )
   , defaultExferenceSessionPolicy
   , exferenceSessionDiagnostics
   , exferenceSessionInventory
   , mkExferenceRequestWithSourceInfo
   , validateExferenceTarget
   )
-import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
+import qualified Language.Haskell.Djex.Exference.Internal.Frontend as Frontend
+import qualified Language.Haskell.Exference.Session as CompatibilitySession
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.EnvironmentParser
   ( LoadReport (..)
@@ -87,10 +85,8 @@ loadExferenceSessionWithPolicy policy path = do
           $ environmentLoadErrorDiagnostics failure
       , exferenceSessionLoadDiagnostics = sourceDiagnostics
       }
-    Right checked -> case Session.sealCheckedExferenceSessionWithPolicy
-        (exferenceExcludedBindings policy)
-        (exferenceRatingOverrides policy)
-        checked of
+    Right checked -> case
+        CompatibilitySession.mkExferenceSessionWithPolicy policy checked of
       Left failure -> ExferenceSessionLoadReport
         { exferenceSessionLoadResult = Left
             $ NonEmpty.singleton failure
@@ -117,9 +113,9 @@ parseExferenceRequest session options target sourceName source = do
   validateExferenceTarget target
   let parsed = runIdentity $ runExceptT $ parseTypeWithKinds
         (inventoryKindAssumptions $ exferenceSessionInventory session)
-        (Session.sessionClasses session)
+        (Frontend.sessionClasses session)
         Nothing
-        (Session.sessionTypeNames session)
+        (Frontend.sessionTypeNames session)
         Map.empty
         (haskellSrcExtsParseMode sourceName)
         source

@@ -10,8 +10,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , SessionOmissionReason (..)
   , sealNeutralExferenceSession
   , sealNeutralExferenceSessionWithPolicy
-  , sealCheckedExferenceSession
-  , sealCheckedExferenceSessionWithPolicy
+  , sealProjectedExferenceSessionWithPolicy
   , sessionSearchEnvironment
   , sessionTypeSynonyms
   , sessionTypeNames
@@ -59,13 +58,6 @@ import Language.Haskell.Exference.Core.Types
   , fromSynthesisName
   , sClassEnv_tclasses
   , toSynthesisName
-  )
-import Language.Haskell.Exference.EnvironmentParser
-  ( CheckedSourceEnvironment
-  , SourceEnvironment (..)
-  , checkedSourceInventory
-  , checkedSourceProjection
-  , sourceFunctions
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -149,28 +141,18 @@ sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
     $ prepareNeutralSynthesisInventory inventory
   sealPreparedEnvironment exclusions overrides inventory synonyms backend
 
-sealCheckedExferenceSession
-  :: CheckedSourceEnvironment
-  -> Either Diagnostic ExferenceSession
-sealCheckedExferenceSession = sealCheckedExferenceSessionWithPolicy
-  [] Map.empty
-
--- | Adapt the compatibility loader without retaining any of its source
--- projection.  Its already checked inventory supplies kinds and aliases,
--- while its flat backend lists preserve historical rating and equal-cost
--- ordering exactly.
-sealCheckedExferenceSessionWithPolicy
+-- | Seal a checked parser projection without retaining its source-specific
+-- representation. The caller supplies the authoritative neutral inventory
+-- together with the rated backend dictionary whose order controls equal-cost
+-- search. This is the deliberately narrow seam used by source frontends.
+sealProjectedExferenceSessionWithPolicy
   :: [Name]
   -> Map Name Penalty
-  -> CheckedSourceEnvironment
+  -> Inventory SynthesisVariable ()
+  -> EnvDictionary
   -> Either Diagnostic ExferenceSession
-sealCheckedExferenceSessionWithPolicy exclusions overrides checked = do
-  let source = checkedSourceProjection checked
-      inventory = fmap (const ()) $ checkedSourceInventory checked
-      backend = EnvDictionary
-        (sourceFunctions source)
-        (sourceDeconstructors source)
-        (sourceClasses source)
+sealProjectedExferenceSessionWithPolicy
+    exclusions overrides inventory backend = do
   synonyms <- prepareSynonyms inventory
   sealPreparedEnvironment exclusions overrides inventory synonyms backend
 

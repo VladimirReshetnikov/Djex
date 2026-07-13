@@ -342,10 +342,14 @@ testSharedDeclarationAdapter = do
 
 testSharedEnvironmentAdapter :: IO ()
 testSharedEnvironmentAdapter = do
+    withFirstFunction <- expectRight $ declare
+        (Function "firstAssumption" $ HTCon "()") standardEnvironment
+    orderedEnvironment <- expectRight $ declare
+        (Function "secondAssumption" $ HTCon "()") withFirstFunction
     shared <- either (fail . show) pure
-        $ toSynthesisEnvironment standardEnvironment
+        $ toSynthesisEnvironment orderedEnvironment
     inventory <- either (fail . show) pure
-        $ toSynthesisInventory standardEnvironment
+        $ toSynthesisInventory orderedEnvironment
     assertEqual "inventory and compatibility projection disagree"
         (Map.keys $ SharedEnvironment.typeDeclarationMap shared)
         (Map.keys $ SharedEnvironment.typeDeclarationMap
@@ -372,12 +376,15 @@ testSharedEnvironmentAdapter = do
         $ Map.member (sharedName "Eq")
         $ SharedEnvironment.classDeclarationMap shared
     lowered <- either (fail . show) pure $ fromSynthesisEnvironment shared
-    assertEqual "type inventory changed through the shared environment"
-        (sort $ map fst $ typeDeclarations standardEnvironment)
-        (sort $ map fst $ typeDeclarations lowered)
-    assertEqual "class inventory changed through the shared environment"
-        (sort $ map fst $ classDeclarations standardEnvironment)
-        (sort $ map fst $ classDeclarations lowered)
+    assertEqual "type order changed through the shared environment"
+        (map fst $ typeDeclarations orderedEnvironment)
+        (map fst $ typeDeclarations lowered)
+    assertEqual "function order changed through the shared environment"
+        (map fst $ functionDeclarations orderedEnvironment)
+        (map fst $ functionDeclarations lowered)
+    assertEqual "class order changed through the shared environment"
+        (map fst $ classDeclarations orderedEnvironment)
+        (map fst $ classDeclarations lowered)
     let sharedInstance = SharedDeclaration.InstanceDeclaration () ["a"] []
             $ Constraint (sharedName "Eq") [SharedType.TypeVariable "a"]
     instanceEnvironment <- either (fail . show) pure

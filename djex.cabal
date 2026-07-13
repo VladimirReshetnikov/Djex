@@ -51,7 +51,9 @@ Library
   import:           build-settings
   Hs-Source-Dirs:   src
 
-  Exposed-Modules: Language.Haskell.Djex
+  Exposed-Modules:
+    Language.Haskell.Djex
+    Language.Haskell.Djex.Djinn
 
   Reexported-Modules:
     Djinn.Core,
@@ -87,6 +89,7 @@ Library
     Language.Haskell.Synthesis.KindInference,
     Language.Haskell.Synthesis.Inventory,
     Language.Haskell.Synthesis.Name,
+    Language.Haskell.Synthesis.Query,
     Language.Haskell.Synthesis.Search,
     Language.Haskell.Synthesis.Type
 
@@ -110,6 +113,7 @@ Library synthesis
     Language.Haskell.Synthesis.KindInference
     Language.Haskell.Synthesis.Inventory
     Language.Haskell.Synthesis.Name
+    Language.Haskell.Synthesis.Query
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Type
 

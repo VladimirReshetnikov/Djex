@@ -27,6 +27,13 @@ one truncated by step, choice-point, candidate, queue, or depth limits, and
 supports continuing chunk streams. It deliberately carries no logical
 inhabitation claim: each backend keeps its own evidence and search semantics.
 
+`Language.Haskell.Synthesis.Query` supplies the generic request/result seam.
+Targets are validated `Name`s and contexts use the backend's goal type, while
+goal types, search options, metadata, and candidates remain parameters. Its
+logical evidence is deliberately independent of `Search.Completion`: a backend
+may return checked candidates from a truncated search, prove non-inhabitation,
+identify an excluded target self-reference, or establish no conclusion.
+
 `Language.Haskell.Synthesis.Type` is the common parser-independent source-type
 tree: variables (optionally flexible/rigid), structural names, application,
 functions, boxed or unboxed tuples, and explicit foralls with shared

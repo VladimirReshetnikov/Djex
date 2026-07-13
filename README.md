@@ -11,8 +11,10 @@ generated-output infrastructure is progressively consolidated.
 
 - The default `djex` library exposes `Language.Haskell.Djex`, whose backend
   identities and conservative capability metadata provide the neutral entry
-  point. It also re-exports the stable Djinn, Exference, and synthesis APIs so a
-  consumer can depend on one library while the unified session API develops.
+  point. Its first checked session adapter, `Language.Haskell.Djex.Djinn`, runs
+  Djinn through the shared query/evidence/search envelope. The default library
+  also re-exports the stable Djinn, Exference, and synthesis APIs so a consumer
+  can depend on one library while the Exference session adapter develops.
 - `synthesis/` supplies the public named `synthesis` sublibrary: validated
   names, types, kinds, declarations, environments, diagnostics, generated
   output, and operational search status.
@@ -68,3 +70,18 @@ cabal bench djinn-bench
 
 The backend subdirectories are source roots, not independent Cabal projects;
 run package commands from the repository root or from `djex/`.
+
+## Query boundary
+
+`Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
+evidence, and search-batch shape without pretending that both engines accept
+the same types or options. `mkDjinnSession` seals an opaque Djinn environment
+once; `runDjinnQuery` then returns structured generated clauses in one terminal
+batch. Proof-backed `ProvedUninhabitable`, target-reference evidence, and
+budget-limited `NoEvidence` remain distinct from the batch's operational
+`Finished` or `Truncated` completion.
+
+The Exference adapter will return a lazy sequence of the same generic result
+shape. It is intentionally staged after its batch metadata carries cumulative
+queue/depth pruning and nominal binding usage losslessly; candidate selection
+and rendering remain presentation policies outside the session operation.

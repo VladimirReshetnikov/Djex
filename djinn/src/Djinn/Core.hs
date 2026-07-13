@@ -120,8 +120,10 @@ fromSynthesisEnvironment
 fromSynthesisEnvironment shared = do
     declarations <- mapM lower $
         SharedEnvironment.environmentDeclarations shared
-    (rawTypes, functions, rawClasses) <-
-        foldM collect ([], [], []) declarations
+    -- A right fold preserves relative order independently in each category;
+    -- function order is observable in proof search and tie-breaking.
+    let (rawTypes, functions, rawClasses) =
+            foldr collect ([], [], []) declarations
     (types, classes) <- either
         (Left . DjinnEnvironmentValidationError) Right $
         validateEnvironment rawTypes functions rawClasses
@@ -133,23 +135,23 @@ fromSynthesisEnvironment shared = do
   where
     lower = either (Left . SynthesisEnvironmentDeclarationError) Right .
         fromSynthesisDeclaration
-    collect (types, functions, classes) declaration =
+    collect declaration (types, functions, classes) =
         case declaration of
             TypeSynonym name parameters body ->
-                return ((name, (parameters, body, KStar)) : types,
+                ((name, (parameters, body, KStar)) : types,
                     functions, classes)
             DataType name parameters constructors ->
-                return ((name, (parameters, HTUnion constructors, KStar)) : types,
+                ((name, (parameters, HTUnion constructors, KStar)) : types,
                     functions, classes)
             AbstractType name kind ->
-                return ((name, ([], HTAbstract name kind, kind)) : types,
+                ((name, ([], HTAbstract name kind, kind)) : types,
                     functions, classes)
             ClassDecl name parameters methods ->
-                return (types, functions,
+                (types, functions,
                     (name, ([(parameter, KStar) | parameter <- parameters],
                         methods)) : classes)
             Function name functionType ->
-                return (types, (name, functionType) : functions, classes)
+                (types, (name, functionType) : functions, classes)
 
 -- | The environment the interactive Djinn starts with: @()@, @Bool@,
 -- @Either@, @Maybe@, @Void@, @type Not x = x -> Void@, and small @Eq@
@@ -485,9 +487,10 @@ data QueryOptions = QueryOptions {
     -- decision procedure.
     optionBudget :: Maybe Integer
     }
-    deriving (Show)
+    deriving (Eq, Show)
 
--- | One solution, sorted, up to 200 candidates, no budget.
+-- | Prefer the best solution after considering up to 200 candidates, with
+-- no choice-point budget.
 defaultQueryOptions :: QueryOptions
 defaultQueryOptions = QueryOptions {
     optionAlternatives = False,

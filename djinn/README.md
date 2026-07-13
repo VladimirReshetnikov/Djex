@@ -427,6 +427,13 @@ The opaque Djinn `Environment` itself now round-trips through
 stricter kind, dependency, recursion, and method validation transactionally.
 Successful `QueryReport`s also expose `reportGeneratedClauses`, the validated
 shared AST from which the legacy rendered strings are derived.
+The default `djex` library additionally exposes
+`Language.Haskell.Djex.Djinn`: `mkDjinnSession` pairs an `Environment` with the
+exact sealed shared inventory that validated it, and `runDjinnQuery` accepts a
+generic `QueryRequest HType QueryOptions`. Its `QueryResult` contains only the
+structured clauses plus Djinn's formula/proof metadata, and maps the four
+compatibility outcomes to explicit evidence without conflating them with
+operational completion.
 The core `Djinn.Internal.*` modules listed above remain
 exposed by `djinn-core` for research use, but they provide raw constructors
 that can violate these invariants and carry no stability promise. The

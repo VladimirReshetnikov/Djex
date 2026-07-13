@@ -13,7 +13,9 @@
 -- Compatibility CLI modules and modules containing @.Internal.@ are not part
 -- of the stable library surface.
 module Language.Haskell.Djex
-  ( Backend (..)
+  ( module Language.Haskell.Djex.Djinn
+  , module Language.Haskell.Synthesis.Query
+  , Backend (..)
   , Capability (..)
   , BackendInfo (..)
   , backendInfo
@@ -21,10 +23,10 @@ module Language.Haskell.Djex
   ) where
 
 -- Cabal performs the public reexports, but these empty imports also make the
--- facade's three direct package relationships visible to dependency analysis.
-import Djinn.Core ()
+-- remaining direct package relationship visible to dependency analysis.
 import Language.Haskell.Exference ()
-import Language.Haskell.Synthesis.Name ()
+import Language.Haskell.Djex.Djinn
+import Language.Haskell.Synthesis.Query
 
 -- | A search engine shipped by Djex.
 data Backend

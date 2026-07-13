@@ -18,6 +18,7 @@ import Language.Haskell.Synthesis.Name
 import qualified Language.Haskell.Synthesis.Kind as Kind
 import qualified Language.Haskell.Synthesis.KindInference as KindInference
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
+import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
@@ -526,6 +527,23 @@ searchTests = testGroup "search status"
   , testCase "batch functor changes candidates only" $
       fmap (+ 1) (SearchBatch Continuing "stats" [1 :: Int, 2]) @?=
         SearchBatch Continuing "stats" [2, 3]
+  , testCase "query evidence remains independent of completion" $ do
+      let finishedWithoutEvidence = QueryResult NoEvidence
+            $ SearchBatch (Completed Finished) "metadata" ([] :: [Int])
+          truncatedWithCandidate = QueryResult ValidatedCandidates
+            $ SearchBatch
+                (Completed $ truncated CandidateLimitReached)
+                "metadata"
+                [1 :: Int]
+      resultEvidence finishedWithoutEvidence @?= NoEvidence
+      resultEvidence truncatedWithCandidate @?= ValidatedCandidates
+      fmap (+ 1) truncatedWithCandidate @?= QueryResult ValidatedCandidates
+        (SearchBatch
+          (Completed $ truncated CandidateLimitReached)
+          "metadata"
+          [2])
+      _ <- evaluate $ force truncatedWithCandidate
+      pure ()
   ]
 
 generatedTests :: TestTree

@@ -228,18 +228,17 @@ parseHaskellSrcType
   -> String
   -> ExceptT Diagnostic m result
 parseHaskellSrcType convert mode source = case P.parseTypeWithMode mode source of
-  P.ParseFailed location message -> throwE
-    $ withSpan (let position = SourcePosition
-                      (srcLine location) (srcColumn location)
-                in SourceSpan position position)
-    $ withSource (srcFilename location)
-    $ diagnostic message
+  P.ParseFailed location message ->
+    let position = SourcePosition
+          (srcLine location) (srcColumn location)
+    in throwE
+      $ withLocation (srcFilename location) (SourceSpan position position)
+      $ diagnostic message
   P.ParseOk ty -> ExceptT $ first conversionDiagnostic
     <$> runExceptT (convert ty)
   where
     conversionDiagnostic message =
-      withSpan (sourceTextSpan source)
-      $ withSource (P.parseFilename mode)
+      withLocation (P.parseFilename mode) (sourceTextSpan source)
       $ diagnostic message
 
 -- | Parse, lower, and kind-check a query against the assumptions retained by
@@ -276,12 +275,9 @@ parseTypeWithKinds assumptions tcs mn ds declarations mode source = do
         [(SharedKind.ProperTypeKind, shared)]
 
   conversionDiagnostic message =
-    withSpan (sourceTextSpan source)
-    $ withSource (P.parseFilename mode)
+    withLocation (P.parseFilename mode) (sourceTextSpan source)
     $ diagnostic message
 
   kindDiagnostic message =
-    withCode "EXF_KIND"
-    $ withSpan (sourceTextSpan source)
-    $ withSource (P.parseFilename mode)
-    $ diagnostic $ "ill-kinded input type: " ++ message
+    withLocation (P.parseFilename mode) (sourceTextSpan source)
+    $ codedDiagnostic Error "EXF_KIND" $ "ill-kinded input type: " ++ message

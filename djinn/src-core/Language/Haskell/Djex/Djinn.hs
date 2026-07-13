@@ -62,9 +62,7 @@ import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
-  , diagnostic
-  , withCode
-  , withContext
+  , contextualDiagnostic
   , withSource
   )
 import Language.Haskell.Synthesis.Generated
@@ -162,9 +160,8 @@ mkDjinnSession sharedEnvironment = DjinnSession <$>
 environmentFailure
   :: Core.SynthesisEnvironmentError
   -> Diagnostic
-environmentFailure failure = withContext (show failure)
-  $ withCode "DJEX_DJINN_ENV"
-  $ diagnostic Error "cannot lower the shared environment to Djinn"
+environmentFailure failure = contextualDiagnostic Error "DJEX_DJINN_ENV"
+  "cannot lower the shared environment to Djinn" (show failure)
 
 -- | The historical checked Djinn prelude, sealed for facade-only clients.
 -- Advanced clients can convert an editable raw environment with
@@ -223,10 +220,9 @@ parseDjinnRequest _session options target sourceName source = do
   _ <- targetSymbol target
   (rawContexts, rawGoal) <- case Core.parseContextualHType source of
     Right parsed -> Right parsed
-    Left failure -> Left $ withContext failure
-      $ withSource sourceName
-      $ withCode "DJEX_DJINN_PARSE"
-      $ diagnostic Error "cannot parse the Djinn query type"
+    Left failure -> Left $ withSource sourceName
+      $ contextualDiagnostic Error "DJEX_DJINN_PARSE"
+          "cannot parse the Djinn query type" failure
   goal <- first (parsedTypeFailure sourceName "goal")
     $ Core.toSynthesisType rawGoal
   contexts <- first (parsedTypeFailure sourceName "context")
@@ -254,9 +250,8 @@ runDjinnQuery (DjinnSession prepared) request = do
       (djinnRequestCoreContexts request)
       (djinnRequestTargetSymbol request)
       (djinnRequestCoreGoal request) of
-    Left failure -> Left $ withContext failure
-      $ withCode "DJEX_DJINN_QUERY"
-      $ diagnostic Error "Djinn rejected the query"
+    Left failure -> Left $ contextualDiagnostic Error "DJEX_DJINN_QUERY"
+      "Djinn rejected the query" failure
     Right value -> Right value
   candidates <- first candidateProjectionFailure
     $ traverse projectCandidate
@@ -327,33 +322,30 @@ parsedTypeFailure
   -> String
   -> Core.SynthesisTypeError
   -> Diagnostic
-parsedTypeFailure sourceName role failure = withContext
-  (role ++ ": " ++ show failure)
-  $ withSource sourceName
-  $ withCode "DJEX_DJINN_PARSE"
-  $ diagnostic Error "cannot project the parsed Djinn query type"
+parsedTypeFailure sourceName role failure = withSource sourceName
+  $ contextualDiagnostic Error "DJEX_DJINN_PARSE"
+      "cannot project the parsed Djinn query type"
+      (role ++ ": " ++ show failure)
 
 loweringFailure :: String -> Core.SynthesisTypeError -> Diagnostic
-loweringFailure role failure = withContext (role ++ ": " ++ show failure)
-  $ withCode "DJEX_DJINN_LOWER"
-  $ diagnostic Error "cannot lower the shared query to Djinn"
+loweringFailure role failure = contextualDiagnostic Error "DJEX_DJINN_LOWER"
+  "cannot lower the shared query to Djinn" (role ++ ": " ++ show failure)
 
 contextLoweringFailure :: String -> Diagnostic
-contextLoweringFailure failure = withContext ("context: " ++ failure)
-  $ withCode "DJEX_DJINN_LOWER"
-  $ diagnostic Error "cannot lower the shared query to Djinn"
+contextLoweringFailure failure = contextualDiagnostic Error
+  "DJEX_DJINN_LOWER" "cannot lower the shared query to Djinn"
+  ("context: " ++ failure)
 
 candidateProjectionFailure :: Core.SynthesisTypeError -> Diagnostic
-candidateProjectionFailure failure = withContext (show failure)
-  $ withCode "DJEX_DJINN_PROJECT"
-  $ diagnostic Error "cannot project a Djinn candidate to shared types"
+candidateProjectionFailure failure = contextualDiagnostic Error
+  "DJEX_DJINN_PROJECT" "cannot project a Djinn candidate to shared types"
+  (show failure)
 
 targetSymbol :: Name -> Either Diagnostic DjinnLocal
 targetSymbol target
   | Right () <- validateDefinitionName target
   , Just spelling <- nameSpelling target
   = Right spelling
-  | otherwise = Left $ withContext (renderCanonical target)
-      $ withCode "DJEX_DJINN_TARGET"
-      $ diagnostic Error
-          "Djinn targets must be unqualified value identifiers or operators"
+  | otherwise = Left $ contextualDiagnostic Error "DJEX_DJINN_TARGET"
+      "Djinn targets must be unqualified value identifiers or operators"
+      (renderCanonical target)

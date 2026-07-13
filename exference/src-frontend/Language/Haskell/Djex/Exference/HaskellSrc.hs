@@ -45,10 +45,9 @@ import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
   , SourceSpan
-  , diagnostic
+  , contextualDiagnostic
   , sourceTextSpan
   , withCode
-  , withContext
   )
 import Language.Haskell.Synthesis.Inventory
   ( inventoryKindAssumptions )
@@ -144,6 +143,5 @@ parseExferenceRequest session options target sourceName source = do
   mkExferenceRequestWithSourceInfo sourceVariables' sourceLocation query
 
 failureDiagnostic :: Show detail => String -> String -> detail -> Diagnostic
-failureDiagnostic code message detail = withContext (show detail)
-  $ withCode code
-  $ diagnostic Error message
+failureDiagnostic code message detail =
+  contextualDiagnostic Error code message (show detail)

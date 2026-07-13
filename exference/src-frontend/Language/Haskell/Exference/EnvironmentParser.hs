@@ -264,9 +264,8 @@ classEnvironmentLoadErrorDiagnostics failure = case failure of
     structuredDiagnostic code message detail NonEmpty.:| []
 
 structuredDiagnostic :: String -> String -> String -> Diagnostic
-structuredDiagnostic code message detail = withContext detail
-  $ withCode code
-  $ diagnostic message
+structuredDiagnostic code message =
+  contextualDiagnostic Error code message
 
 warningDiagnostic :: String -> Diagnostic
 warningDiagnostic message =
@@ -734,16 +733,15 @@ unsupportedOccurrence
   -> SrcSpanInfo
   -> UnsupportedVocabularyOccurrence
 unsupportedOccurrence form location = UnsupportedVocabularyOccurrence form
-  $ withCode "EXF_UNSUPPORTED_VOCABULARY"
-  $ withSpan (SourceSpan
+  $ withLocation (HSE.srcSpanFilename sourceSpan) (SourceSpan
       (SourcePosition
         (HSE.srcSpanStartLine sourceSpan)
         (HSE.srcSpanStartColumn sourceSpan))
       (SourcePosition
         (HSE.srcSpanEndLine sourceSpan)
         (HSE.srcSpanEndColumn sourceSpan)))
-  $ withSource (HSE.srcSpanFilename sourceSpan)
-  $ diagnostic $ "unsupported source vocabulary: "
+  $ codedDiagnostic Error "EXF_UNSUPPORTED_VOCABULARY"
+      $ "unsupported source vocabulary: "
       ++ unsupportedVocabularyDescription form
  where
   sourceSpan = HSE.srcInfoSpan location

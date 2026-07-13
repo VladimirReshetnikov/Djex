@@ -239,22 +239,20 @@ validateDjinnResult evidence candidates
 reportDjinnOutcome :: QueryEvidence -> Maybe Progress -> IO ()
 reportDjinnOutcome ValidatedCandidates _ = pure ()
 reportDjinnOutcome ProvedUninhabitable _ = emitDiagnostic
-  $ withCode "DJEX_DJINN_UNINHABITABLE"
-  $ diagnostic Info "Djinn proved that the requested type has no inhabitant"
+  $ codedDiagnostic Info "DJEX_DJINN_UNINHABITABLE"
+      "Djinn proved that the requested type has no inhabitant"
 reportDjinnOutcome RequiresTargetReference _ = emitDiagnostic
-  $ withCode "DJEX_DJINN_TARGET_REFERENCE"
-  $ diagnostic Info
+  $ codedDiagnostic Info "DJEX_DJINN_TARGET_REFERENCE"
       "Djinn found no safe inhabitant without referring to the generated target"
 reportDjinnOutcome NoEvidence progress = emitDiagnostic
-  $ withContext (maybe "no search batch" show progress)
-  $ withCode "DJEX_DJINN_UNDECIDED"
-  $ diagnostic Info "Djinn established no inhabitation result"
+  $ contextualDiagnostic Info "DJEX_DJINN_UNDECIDED"
+      "Djinn established no inhabitation result"
+      (maybe "no search batch" show progress)
 
 reportNoExferenceResult :: Maybe Progress -> IO ()
 reportNoExferenceResult progress = emitDiagnostic
-  $ withContext (maybe "no search batch" show progress)
-  $ withCode "DJEX_EXF_NO_RESULT"
-  $ diagnostic Info message
+  $ contextualDiagnostic Info "DJEX_EXF_NO_RESULT" message
+      (maybe "no search batch" show progress)
  where
   message = case progress of
     Just (Completed Finished) ->
@@ -263,9 +261,9 @@ reportNoExferenceResult progress = emitDiagnostic
 
 reportTruncation :: Maybe Progress -> IO ()
 reportTruncation (Just (Completed (Truncated reasons))) = emitDiagnostic
-  $ withContext (intercalate ", " $ map show $ toList reasons)
-  $ withCode "DJEX_SEARCH_TRUNCATED"
-  $ diagnostic Warning "search stopped before exploring all remaining work"
+  $ contextualDiagnostic Warning "DJEX_SEARCH_TRUNCATED"
+      "search stopped before exploring all remaining work"
+      (intercalate ", " $ map show $ toList reasons)
 reportTruncation _ = pure ()
 
 djinnQueryOptions :: DjinnOptions -> QueryOptions
@@ -567,9 +565,8 @@ renderFailure code failure = internalFailure code $ show failure
 internalFailure :: String -> String -> IO ExitCode
 internalFailure code context = do
   emitDiagnostic
-    $ withContext context
-    $ withCode code
-    $ diagnostic Error "cannot present the checked search result"
+    $ contextualDiagnostic Error code
+        "cannot present the checked search result" context
   pure runtimeFailure
 
 emitDiagnostic :: Diagnostic -> IO ()

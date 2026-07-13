@@ -321,10 +321,9 @@ makeDjinnResult :: State -> String -> [Context] -> HType
                 -> Either Diagnostic.Diagnostic DjinnResult
 makeDjinnResult s name contexts goal = do
     target <- case SharedName.parseName name of
-        Left failure -> Left $ Diagnostic.withContext (show failure) $
-            Diagnostic.withCode "DJEX_DJINN_TARGET" $
-            Diagnostic.diagnostic Diagnostic.Error
-                "cannot convert the parsed Djinn target"
+        Left failure -> Left $ Diagnostic.contextualDiagnostic
+            Diagnostic.Error "DJEX_DJINN_TARGET"
+            "cannot convert the parsed Djinn target" (show failure)
         Right value -> Right value
     sharedGoal <- projectCompatibilityType "goal" goal
     sharedContexts <- traverse
@@ -349,11 +348,10 @@ makeDjinnResult s name contexts goal = do
 projectCompatibilityType
     :: String -> HType -> Either Diagnostic.Diagnostic DjinnType
 projectCompatibilityType role source = case toSynthesisType source of
-    Left failure -> Left $ Diagnostic.withContext
-        (role ++ ": " ++ show failure) $
-        Diagnostic.withCode "DJEX_DJINN_QUERY" $
-        Diagnostic.diagnostic Diagnostic.Error
-            "cannot project the parsed Djinn query type"
+    Left failure -> Left $ Diagnostic.contextualDiagnostic
+        Diagnostic.Error "DJEX_DJINN_QUERY"
+        "cannot project the parsed Djinn query type"
+        (role ++ ": " ++ show failure)
     Right shared -> Right shared
 
 formatDjinnResult :: Bool -> State -> String -> [Context] -> HType

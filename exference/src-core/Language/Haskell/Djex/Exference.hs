@@ -93,11 +93,8 @@ import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error, Info, Warning)
   , SourceSpan
-  , diagnostic
-  , withCode
-  , withContext
-  , withSource
-  , withSpan
+  , contextualDiagnostic
+  , withLocation
   )
 import Language.Haskell.Synthesis.Generated
   ( FunctionClause (FunctionClause)
@@ -516,8 +513,8 @@ elaborationFailure failure = case failure of
 attachRequestSource :: ExferenceRequest -> Diagnostic -> Diagnostic
 attachRequestSource request value = case requestSourceLocation request of
   Nothing -> value
-  Just (sourceName, sourceSpan) -> withSpan sourceSpan
-    $ withSource sourceName value
+  Just (sourceName, sourceSpan) ->
+    withLocation sourceName sourceSpan value
 
 optionFailure :: ExferenceInputError -> Bool
 optionFailure failure = case failure of
@@ -598,10 +595,8 @@ searchQuery excludedTarget goal options = ExferenceQuery
   }
 
 omissionDiagnostic :: ExferenceOmission -> Diagnostic
-omissionDiagnostic omission = withContext
+omissionDiagnostic omission = contextualDiagnostic severity code message
   (renderCanonical $ omittedName omission)
-  $ withCode code
-  $ diagnostic severity message
  where
   (severity, code, message) = case omittedReason omission of
     UnsupportedNestedForall ->
@@ -626,6 +621,5 @@ failureDiagnostic
   -> String
   -> detail
   -> Diagnostic
-failureDiagnostic code message detail = withContext (show detail)
-  $ withCode code
-  $ diagnostic Error message
+failureDiagnostic code message detail =
+  contextualDiagnostic Error code message (show detail)

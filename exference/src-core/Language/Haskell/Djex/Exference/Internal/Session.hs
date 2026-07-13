@@ -62,9 +62,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
-  , diagnostic
-  , withCode
-  , withContext
+  , contextualDiagnostic
   )
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -296,20 +294,18 @@ preparationFailure
   => String
   -> detail
   -> Diagnostic
-preparationFailure message detail = withContext (show detail)
-  $ withCode "DJEX_EXF_ENV"
-  $ diagnostic Error message
+preparationFailure message detail = contextualDiagnostic
+  Error "DJEX_EXF_ENV" message (show detail)
 
 policyFailure
   :: Show detail
   => String
   -> detail
   -> Diagnostic
-policyFailure message detail = withContext (show detail)
-  $ withCode "DJEX_EXF_POLICY_RATING"
-  $ diagnostic Error message
+policyFailure message detail = contextualDiagnostic
+  Error "DJEX_EXF_POLICY_RATING" message (show detail)
 
 sessionFailureDiagnostic :: ExferenceInputError -> Diagnostic
-sessionFailureDiagnostic detail = withContext (show detail)
-  $ withCode "DJEX_EXF_ENV"
-  $ diagnostic Error "cannot seal the Exference session environment"
+sessionFailureDiagnostic detail = contextualDiagnostic
+  Error "DJEX_EXF_ENV" "cannot seal the Exference session environment"
+  (show detail)

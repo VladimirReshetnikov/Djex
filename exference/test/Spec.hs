@@ -14,6 +14,7 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Void (Void)
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -71,8 +72,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , functionBindingFromType
   )
 import Language.Haskell.Exference.Core.RigidInstantiation
-  ( RigidInstantiationError (..)
-  , mkRigidInstantiationContext
+  ( mkRigidInstantiationContext
   , planRigidInstantiation
   , rigidInstantiations
   )
@@ -111,12 +111,18 @@ import Language.Haskell.Exference.EnvironmentParser
   , toSynthesisSourceInventory
   )
 import Language.Haskell.Djex.Exference
-  ( ExferenceSessionLoadReport (..)
+  ( ExferenceOmission (..)
+  , ExferenceOmissionReason (..)
+  , ExferenceSessionLoadReport (..)
   , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
+  , exferenceSessionDiagnostics
+  , exferenceSessionOmissions
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
+  , mkExferenceSessionWithPolicy
   )
+import qualified Language.Haskell.Exference.Session as ExferenceSession
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
   ( ClassEnvironmentLoadError (..)
   , ClassMethodDeclaration (..)
@@ -164,6 +170,7 @@ import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 import qualified CompatibilityImport
 import Paths_djex (getDataFileName)
 
@@ -1130,6 +1137,319 @@ tests = testGroup "Exference"
           fromSynthesisInstanceDeclaration sharedInstance @?=
             Left (NonImplicitInstanceForall [unused])
       ]
+  , testGroup "neutral shared environment lowering"
+      [ testCase "fresh variables cover the complete tagged Int domain" $ do
+          let flexible = SharedType.FlexibleVariable
+              rigid = SharedType.RigidVariable
+          freshSynthesisVariable
+              (Set.fromList [flexible maxBound, flexible minBound])
+              (flexible maxBound)
+            @?= Just (flexible 0)
+          freshSynthesisVariable
+              (Set.fromList [rigid 0, rigid 1, rigid maxBound, rigid minBound])
+              (rigid minBound)
+            @?= Just (rigid 2)
+          -- Tags are distinct identity spaces even when the numeric payload
+          -- is equal.
+          freshSynthesisVariable (Set.singleton $ rigid 0) (flexible maxBound)
+            @?= Just (flexible 0)
+      , testCase "ordinary values lower with zero penalty" $ do
+          let variable = neutralVariable (-7)
+              identityName = neutralName "identity"
+              identityType = SharedType.FunctionType
+                (SharedType.TypeVariable variable)
+                (SharedType.TypeVariable variable)
+          environment <- lowerNeutralDeclarations
+            [neutralValue identityName identityType]
+          environmentFunctions environment @?=
+            [ FunctionBinding (TypeVar 0) (name "identity") 0 [] [TypeVar 0]
+            ]
+          environmentDeconstructors environment @?= []
+          sClassEnv_tclasses (environmentClasses environment) @?= Map.empty
+      , testCase "explicit kinds and negative class IDs stay in the inventory" $ do
+          let className = neutralName "Higher"
+              methodName = neutralName "lifted"
+              parameterVariable = neutralVariable minBound
+              parameter = SharedDeclaration.TypeParameter parameterVariable
+                $ Just $ SharedKind.FunctionKind
+                    SharedKind.ProperTypeKind SharedKind.ProperTypeKind
+              integer = SharedType.TypeConstructor $ neutralName "Int"
+              applied = SharedType.TypeApplication
+                (SharedType.TypeVariable parameterVariable) integer
+              method = SharedDeclaration.ValueSignature () methodName
+                $ SharedType.FunctionType applied applied
+              classDeclaration = SharedDeclaration.ClassDeclaration () className
+                [parameter] [] [method]
+              -- The explicit unused binder is legal in the neutral IR but
+              -- absent from Exference's implicit instance representation.
+              unused = neutralVariable (-99)
+              instanceDeclaration = SharedDeclaration.InstanceDeclaration ()
+                [unused] [] $ SharedConstraint.Constraint className
+                  [SharedType.TypeConstructor SharedName.listName]
+          environment <- lowerNeutralDeclarations
+            [classDeclaration, instanceDeclaration]
+          let classes = environmentClasses environment
+              owner = HsConstraint (name "Higher") [TypeVar 0]
+              appliedCore = TypeApp (TypeVar 0) (TypeCons $ name "Int")
+          sClassEnv_tclasses classes @?= Map.singleton (name "Higher")
+            (HsTypeClass (name "Higher") [0] [])
+          environmentFunctions environment @?=
+            [ FunctionBinding appliedCore (name "lifted") 0
+                [owner] [appliedCore]
+            ]
+          sClassEnv_explicitInstances classes @?=
+            [ HsInstance []
+                $ HsConstraint (name "Higher") [TypeCons ListCon]
+            ]
+      , testCase "only complete leading forall chains become implicit" $ do
+          let className = neutralName "C"
+              contextVariable = neutralVariable (-10)
+              nestedVariable = neutralVariable maxBound
+              integer = SharedType.TypeConstructor $ neutralName "Int"
+              cls = SharedDeclaration.ClassDeclaration () className
+                [neutralParameter contextVariable] [] []
+              prenex = SharedType.ForallType [contextVariable]
+                [SharedConstraint.Constraint className
+                  [SharedType.TypeVariable contextVariable]]
+                $ SharedType.FunctionType
+                    (SharedType.TypeVariable contextVariable)
+                    (SharedType.TypeVariable contextVariable)
+              nested = SharedType.FunctionType
+                (SharedType.ForallType [nestedVariable] []
+                  $ SharedType.TypeVariable nestedVariable)
+                integer
+          environment <- lowerNeutralDeclarations
+            [ cls
+            , neutralValue (neutralName "prenex") prenex
+            , neutralValue (neutralName "nested") nested
+            ]
+          environmentFunctions environment @?=
+            [ FunctionBinding (TypeVar 1) (name "prenex") 0
+                [HsConstraint (name "C") [TypeVar 1]] [TypeVar 1]
+            , FunctionBinding (TypeCons $ name "Int") (name "nested") 0 []
+                [TypeForall [0] [] $ TypeVar 0]
+            ]
+      , testCase "implicit forall flattening preserves lexical shadowing" $ do
+          let variable = neutralVariable (-1)
+              classDeclaration className =
+                SharedDeclaration.ClassDeclaration () className
+                  [neutralParameter variable] [] []
+              constraint className = SharedConstraint.Constraint className
+                [SharedType.TypeVariable variable]
+              standalone = SharedType.ForallType [variable]
+                [constraint $ neutralName "Outer"]
+                $ SharedType.ForallType [variable]
+                    [constraint $ neutralName "Inner"]
+                    $ SharedType.FunctionType
+                        (SharedType.TypeVariable variable)
+                        (SharedType.TypeVariable variable)
+              method = SharedDeclaration.ValueSignature ()
+                (neutralName "method")
+                $ SharedType.ForallType [variable] []
+                $ SharedType.FunctionType
+                    (SharedType.TypeVariable variable)
+                    (SharedType.TypeVariable variable)
+              owner = SharedDeclaration.ClassDeclaration ()
+                (neutralName "Owner") [neutralParameter variable] [] [method]
+          environment <- lowerNeutralDeclarations
+            [ classDeclaration $ neutralName "Outer"
+            , classDeclaration $ neutralName "Inner"
+            , neutralValue (neutralName "standalone") standalone
+            , owner
+            ]
+          environmentFunctions environment @?=
+            [ FunctionBinding (TypeVar 2) (name "standalone") 0
+                [ HsConstraint (name "Outer") [TypeVar 1]
+                , HsConstraint (name "Inner") [TypeVar 2]
+                ]
+                [TypeVar 2]
+            , FunctionBinding (TypeVar 1) (name "method") 0
+                [HsConstraint (name "Owner") [TypeVar 0]]
+                [TypeVar 1]
+            ]
+      , testCase "constructors, methods, and instances preserve inventory order" $ do
+          let integer = SharedType.TypeConstructor $ neutralName "Int"
+              boolean = SharedType.TypeConstructor $ neutralName "Bool"
+              dataVariable = neutralVariable (-3)
+              classVariable = neutralVariable (-4)
+              boxName = neutralName "Box"
+              className = neutralName "C"
+              boxDeclaration = SharedDeclaration.DataTypeDeclaration () boxName
+                [neutralParameter dataVariable]
+                [ SharedDeclaration.DataConstructor () (neutralName "Empty") []
+                , SharedDeclaration.DataConstructor () (neutralName "Boxed")
+                    [SharedType.TypeVariable dataVariable]
+                ]
+              classDeclaration = SharedDeclaration.ClassDeclaration () className
+                [neutralParameter classVariable] []
+                [ SharedDeclaration.ValueSignature () (neutralName "methodOne")
+                    $ SharedType.TypeVariable classVariable
+                , SharedDeclaration.ValueSignature () (neutralName "methodTwo")
+                    $ SharedType.TypeVariable classVariable
+                ]
+              instanceFor typeExpression =
+                SharedDeclaration.InstanceDeclaration () [] []
+                  $ SharedConstraint.Constraint className [typeExpression]
+          environment <- lowerNeutralDeclarations
+            [ neutralValue (neutralName "first") integer
+            , boxDeclaration
+            , classDeclaration
+            , instanceFor integer
+            , instanceFor boolean
+            , neutralValue (neutralName "last") boolean
+            ]
+          map functionName (environmentFunctions environment) @?=
+            map name
+              [ "first", "Empty", "Boxed"
+              , "methodOne", "methodTwo", "last"
+              ]
+          assertBool "a neutral binding retained a nonzero penalty"
+            $ all ((== 0) . functionPenalty) $ environmentFunctions environment
+          case environmentDeconstructors environment of
+            [DeconstructorBinding input constructors False] -> do
+              input @?= TypeApp (TypeCons $ name "Box") (TypeVar 0)
+              map constructorName constructors @?=
+                map name ["Empty", "Boxed"]
+            deconstructors -> fail $ "unexpected deconstructors: "
+              ++ show deconstructors
+          sClassEnv_explicitInstances (environmentClasses environment) @?=
+            [ HsInstance [] $ HsConstraint (name "C")
+                [TypeCons $ name "Int"]
+            , HsInstance [] $ HsConstraint (name "C")
+                [TypeCons $ name "Bool"]
+            ]
+      , testCase "alias-expanded direct and mutual recursion is classified" $ do
+          let aliasVariable = neutralVariable 70
+              leftVariable = neutralVariable (-70)
+              rightVariable = neutralVariable maxBound
+              aliasName = neutralName "Alias"
+              leftName = neutralName "LeftRec"
+              rightName = neutralName "RightRec"
+              apply constructor variable = SharedType.TypeApplication
+                (SharedType.TypeConstructor constructor)
+                (SharedType.TypeVariable variable)
+              alias = SharedDeclaration.TypeSynonymDeclaration () aliasName
+                [neutralParameter aliasVariable]
+                $ apply rightName aliasVariable
+              left = SharedDeclaration.DataTypeDeclaration () leftName
+                [neutralParameter leftVariable]
+                [SharedDeclaration.DataConstructor () (neutralName "MkLeft")
+                  [apply aliasName leftVariable]]
+              right = SharedDeclaration.DataTypeDeclaration () rightName
+                [neutralParameter rightVariable]
+                [SharedDeclaration.DataConstructor () (neutralName "MkRight")
+                  [apply leftName rightVariable]]
+              direct = SharedDeclaration.DataTypeDeclaration ()
+                (neutralName "DirectRec") []
+                [SharedDeclaration.DataConstructor () (neutralName "MkDirect")
+                  [SharedType.TypeConstructor $ neutralName "DirectRec"]]
+          environment <- lowerNeutralDeclarations [alias, left, right, direct]
+          map deconstructorRecursive (environmentDeconstructors environment)
+            @?= [True, True, True]
+          map functionName (environmentFunctions environment) @?=
+            map name ["MkLeft", "MkRight", "MkDirect"]
+      , testCase "synonym failures retain their owning declaration" $ do
+          let aliasVariable = neutralVariable 0
+              aliasName = neutralName "Alias"
+              higherName = neutralName "Higher"
+              alias = SharedDeclaration.TypeSynonymDeclaration () aliasName
+                [neutralParameter aliasVariable]
+                $ SharedType.TypeVariable aliasVariable
+              higher = SharedDeclaration.AbstractTypeDeclaration () higherName
+                $ SharedKind.FunctionKind
+                    (SharedKind.FunctionKind SharedKind.ProperTypeKind
+                      SharedKind.ProperTypeKind)
+                    SharedKind.ProperTypeKind
+              malformed = neutralValue (neutralName "bad")
+                $ SharedType.TypeApplication
+                    (SharedType.TypeConstructor higherName)
+                    (SharedType.TypeConstructor aliasName)
+          inventory <- expectRight $ SharedInventory.mkInventory
+            SharedKindInference.OpenKindInventory [alias, higher, malformed]
+          case prepareNeutralSynthesisInventory inventory of
+            Left failure -> failure @?=
+              NeutralSynonymExpansionError 2 (neutralName "bad")
+                (SharedTypeSynonym.UnsaturatedTypeSynonym aliasName 1 0)
+            Right _ -> fail "an unsaturated synonym reached Exference search"
+      ]
+  , testGroup "session rating policy"
+      [ testCase "HSE sessions report built-in recursive list elimination" $
+          withTemporaryFile (unlines
+            [ "module Omissions where"
+            , "identity :: a -> a"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              session <- expectRight
+                $ ExferenceSession.mkExferenceSession checked
+              case exferenceSessionOmissions session of
+                [omission] -> do
+                  omittedName omission @?= SharedName.listName
+                  omittedReason omission @?=
+                    RecursiveDataEliminationUnsupported
+                omissions -> fail $ "unexpected HSE omissions: "
+                  ++ show omissions
+              map diagnosticCode (exferenceSessionDiagnostics session) @?=
+                [Just "DJEX_EXF_RECURSIVE_OMISSION"]
+      , testCase "HSE sessions accept finite signed overrides" $
+          withTemporaryFile (unlines
+            [ "module Ratings where"
+            , "identity :: a -> a"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              identityName <- expectRight
+                $ SharedName.parseName "Ratings.identity"
+              let policy = defaultExferenceSessionPolicy
+                    { exferenceRatingOverrides =
+                        Map.singleton identityName $ Penalty (-3.5)
+                    }
+              _ <- expectRight
+                $ ExferenceSession.mkExferenceSessionWithPolicy policy checked
+              pure ()
+      , testCase "neutral sessions accept finite overrides" $ do
+          let identityName = neutralName "identity"
+              variable = neutralVariable 0
+              variableType = SharedType.TypeVariable variable
+              policy = defaultExferenceSessionPolicy
+                { exferenceRatingOverrides =
+                    Map.singleton identityName $ Penalty 2.25
+                }
+          environment <- expectRight $ SharedEnvironment.mkEnvironment
+            [neutralValue identityName
+              $ SharedType.FunctionType variableType variableType]
+          _ <- expectRight $ mkExferenceSessionWithPolicy policy environment
+          pure ()
+      , testCase "rating overrides reject unavailable names" $ do
+          environment <- expectRight $ SharedEnvironment.mkEnvironment
+            ([] :: [SharedDeclaration.Declaration SynthesisVariable Void ()])
+          let policy = defaultExferenceSessionPolicy
+                { exferenceRatingOverrides = Map.singleton
+                    (neutralName "missing") $ Penalty 1
+                }
+          case mkExferenceSessionWithPolicy policy environment of
+            Left failure -> do
+              diagnosticCode failure @?= Just "DJEX_EXF_POLICY_RATING"
+              assertBool ("unexpected policy failure: " ++ show failure)
+                $ "unavailable bindings" `isInfixOf` diagnosticMessage failure
+            Right _ -> fail "an override for an unavailable binding was accepted"
+      , testCase "rating overrides reject NaN" $ do
+          let identityName = neutralName "identity"
+              variableType = SharedType.TypeVariable $ neutralVariable 0
+              policy = defaultExferenceSessionPolicy
+                { exferenceRatingOverrides = Map.singleton identityName
+                    $ Penalty $ 0 / 0
+                }
+          environment <- expectRight $ SharedEnvironment.mkEnvironment
+            [neutralValue identityName
+              $ SharedType.FunctionType variableType variableType]
+          case mkExferenceSessionWithPolicy policy environment of
+            Left failure -> do
+              diagnosticCode failure @?= Just "DJEX_EXF_POLICY_RATING"
+              assertBool ("unexpected policy failure: " ++ show failure)
+                $ "must be finite" `isInfixOf` diagnosticMessage failure
+            Right _ -> fail "a NaN rating override was accepted"
+      ]
   , testGroup "sealed search environments"
       [ testCase "sealed runners preserve complete legacy traces" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
@@ -1373,7 +1693,7 @@ tests = testGroup "Exference"
           plan <- expectRight $ planRigidInstantiation
             (mkRigidInstantiationContext environment) assumptions goal
           rigidInstantiations plan @?= [(4, 31), (9, 32)]
-      , testCase "rigid exhaustion is query-dependent and option errors win" $ do
+      , testCase "rigid boundary planning uses gaps and option errors win" $ do
           let rigidBinding identifier = FunctionBinding
                 (TypeConstant identifier) (name "boundary") 0 [] []
               maximalInput = identityInput
@@ -1391,13 +1711,15 @@ tests = testGroup "Exference"
               exhaustedQuery = monomorphicQuery
                 {queryGoalType = polymorphic}
               invalidOptions = exhaustedQuery {queryMaximumSteps = 0}
-              exhaustion = RigidIdentifierExhaustion
-                $ RigidIdentifierSupplyExhausted (Just maxBound) 1
           validateExferenceQuery maximalEnvironment monomorphicQuery @?= Right ()
-          validateExferenceQuery maximalEnvironment exhaustedQuery @?=
-            Left exhaustion
+          validateExferenceQuery maximalEnvironment exhaustedQuery @?= Right ()
           validateExferenceQuery maximalEnvironment invalidOptions @?=
             Left (InvalidMaxSteps 0)
+          maximalPlan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext
+              $ legacyInputEnvironment maximalInput)
+            [] polymorphic
+          rigidInstantiations maximalPlan @?= [(0, 0)]
 
           let penultimateInput = identityInput
                 { input_goalType = oneBinder
@@ -1410,10 +1732,15 @@ tests = testGroup "Exference"
           case findOneExpression penultimateInput of
             Just _ -> pure ()
             Nothing -> fail "the final Int rigid identifier was not usable"
-          validateExferenceQuery penultimateEnvironment
-              ((legacyInputQuery penultimateInput) {queryGoalType = twoBinders})
-            @?= Left (RigidIdentifierExhaustion
-              $ RigidIdentifierSupplyExhausted (Just $ maxBound - 1) 2)
+          let twoBinderQuery = (legacyInputQuery penultimateInput)
+                {queryGoalType = twoBinders}
+          validateExferenceQuery penultimateEnvironment twoBinderQuery @?= Right ()
+          penultimatePlan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext
+              $ legacyInputEnvironment penultimateInput)
+            [] twoBinders
+          rigidInstantiations penultimatePlan @?=
+            [(0, maxBound), (1, 0)]
       , testCase "legacy validation preserves compound-error precedence" $ do
           let duplicateName = name "duplicate"
               binding = FunctionBinding (TypeVar 0) duplicateName 0 [] []
@@ -3721,6 +4048,34 @@ tests = testGroup "Exference"
                 @?= Right ()
       ]
   ]
+
+neutralName :: String -> SharedName.Name
+neutralName = toSynthesisName . name
+
+neutralVariable :: Int -> SynthesisVariable
+neutralVariable = SharedType.FlexibleVariable
+
+neutralParameter
+  :: SynthesisVariable
+  -> SharedDeclaration.TypeParameter SynthesisVariable Void
+neutralParameter variable = SharedDeclaration.TypeParameter variable Nothing
+
+neutralValue
+  :: SharedName.Name
+  -> SharedType.Type SynthesisVariable
+  -> SharedDeclaration.Declaration SynthesisVariable Void ()
+neutralValue valueName valueType = SharedDeclaration.ValueDeclaration
+  $ SharedDeclaration.ValueSignature () valueName valueType
+
+lowerNeutralDeclarations
+  :: [SharedDeclaration.Declaration SynthesisVariable Void ()]
+  -> IO EnvDictionary
+lowerNeutralDeclarations declarations = do
+  inventory <- expectRight $ SharedInventory.mkInventory
+    SharedKindInference.OpenKindInventory declarations
+  (_, environment) <- expectRight
+    $ prepareNeutralSynthesisInventory inventory
+  pure environment
 
 name :: String -> QualifiedName
 name = validQualifiedName []

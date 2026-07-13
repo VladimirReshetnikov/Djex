@@ -23,7 +23,7 @@ import System.IO
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex.Exference
-import Language.Haskell.Exference.Session
+import qualified Language.Haskell.Exference.Session as Session
 import Language.Haskell.Exference.Core.FunctionBinding
   ( functionName )
 import Language.Haskell.Exference.Core.Types
@@ -187,7 +187,7 @@ run flags inputs = do
   session <- either
     (fatal . ("could not seal Exference session: " ++) . renderDiagnostic)
     pure
-    $ mkExferenceSessionWithPolicy policy checkedEnvironment
+    $ Session.mkExferenceSessionWithPolicy policy checkedEnvironment
   when (verbosity > 0) $ forM_ (exferenceSessionDiagnostics session) $ \value ->
     putStrLn $ "session " ++ renderDiagnostic value
 

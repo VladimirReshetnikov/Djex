@@ -187,12 +187,16 @@ as `k -> Type`; an unresolved variable below a fixed outer kind shape therefore
 defaults to `Type`, as it did before this class-method migration.
 `toSynthesisSourceInventory` retains both the sealed environment and those
 inferred assumptions; the older environment-only projection remains available
-for compatibility callers. `Language.Haskell.Djex.Exference` seals this checked
-inventory into a reusable session, computes its supported search projection
-once, and reports unsupported rank-N capabilities structurally. The CLI now
-parses requests through that session; a query whose proper-type obligation
-conflicts with retained constructor or class kinds cannot reach heuristic
-search.
+for compatibility callers. `Language.Haskell.Djex.Exference` can now seal the
+same reusable session either from this checked source inventory or directly
+from a parser-independent
+`ExferenceEnvironment = Environment ExferenceTypeVariable Void ()`. Both paths
+prepare the shared neutral inventory and synonym table, seal one core search
+projection, and report unsupported rank-N or recursive-data elimination
+capabilities structurally; the source path preserves its historical ratings
+and equal-cost order. The CLI parses requests through that session; a
+query whose proper-type obligation conflicts with retained constructor or
+class kinds cannot reach heuristic search.
 
 The executable no longer rebuilds an `ExferenceInput`, repeats rank-N filters,
 or consumes legacy tuple chunks. It maps flags to `ExferenceOptions`, calls
@@ -305,12 +309,25 @@ The stable `Language.Haskell.Djex.Exference` adapter projects these core-owned
 records into facade-owned `ExferenceCandidateDetails` and
 `ExferenceBatchMetadata`: local/type-variable hints use the shared variable
 tags, binding usage is keyed by shared `Name`, and the retained
-`ExferenceInventory` has backend ratings erased by a total functor map. The raw
+`ExferenceInventory` has backend ratings erased by a total functor map. Stable
+callers may construct that inventory through `mkExferenceSession` from a
+neutral `ExferenceEnvironment`, or use `loadExferenceSession` for Haskell
+source directories. The raw
 `CheckedSourceEnvironment -> ExferenceSession` bridge lives separately in
-`Language.Haskell.Exference.Session`; ordinary stable callers use
-`loadExferenceSession` and never acquire an HSE parser type. Its expression
-and definition conveniences supply the retained local-name hints to the shared
-candidate renderer and expose the common `RenderError` directly.
+`Language.Haskell.Exference.Session`; no parser type is retained in a sealed
+session. `ExferenceSessionPolicy` supplies exact-name exclusions and finite,
+signed rating overrides while the private search projection is built. Unknown
+override names and non-finite ratings fail explicitly, and overrides preserve
+source/declaration order. The adapter's expression and definition conveniences
+supply the retained local-name hints to the shared candidate renderer and
+expose the common `RenderError` directly.
+
+The session retains the neutral inventory, shared `TypeSynonyms`, core search
+environment, and parser-independent type-name/class indexes only. Parsed
+requests use those indexes for syntax and name resolution; both parsed and
+programmatic goals then pass through the same capture-avoiding shared synonym
+elaborator and its pre/post kind checks before core lowering. The former HSE
+`TypeDeclMap` is therefore a loader concern rather than hidden session state.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the
@@ -385,6 +402,11 @@ any / the right solution. Some common current limitations are:
   documents its naming and validation rules. Additions welcome!
 - Pattern matching on multiple-constructor data types is disabled by default;
   an experimental opt-in is described below;
+- Recursive datatypes remain valid input, but recursive deconstructors are
+  currently omitted from search with a structured
+  `RecursiveDataEliminationUnsupported` warning rather than risking an
+  unsound or divergent elimination projection. This includes the built-in
+  list deconstructor, so HSE-loaded sessions report the limitation explicitly;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
 
 ## Experimental features

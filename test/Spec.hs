@@ -2,6 +2,7 @@ module Main (main) where
 
 import Data.Either (isRight)
 import Data.List (isInfixOf, nub)
+import qualified Data.Map.Strict as Map
 import Djinn.Core
   ( Context
   , Declaration (ClassDecl, DataType, Function)
@@ -258,6 +259,217 @@ tests = testGroup "Djex facade"
           exferenceResultBindingUsages result @?=
             exferenceBatchBindingUsages metadata
         [] -> fail "Exference found no identity candidate"
+  , testCase "keep checked-HSE and neutral Exference sessions equivalent" $ do
+      backendIdentityName <- expectRight
+        $ mkQualifiedName ["Fixture"] "identity"
+      target <- expectRight $ mkIdentifier "adapterIdentity"
+      let identityBinding = FunctionBinding
+            { functionResult = TypeVar 0
+            , functionName = backendIdentityName
+            , functionPenalty = Penalty 0
+            , functionConstraints = []
+            , functionParameters = [TypeVar 0]
+            }
+          source = emptyExferenceSource
+            {sourceBindings = [SourceFunction identityBinding]}
+      checked <- expectRight $ checkSourceEnvironment source
+      hseSession <- expectRight
+        $ ExferenceCompatibility.mkExferenceSession checked
+      let neutralEnvironment :: ExferenceEnvironment
+          neutralEnvironment = inventoryEnvironment
+            $ fmap (const ()) $ checkedSourceInventory checked
+      neutralSession <- expectRight $ mkExferenceSession neutralEnvironment
+      let variableType = TypeVariable $ FlexibleVariable 0
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType variableType variableType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 64}
+        }
+      hseResults <- expectRight $ runExferenceQuery hseSession request
+      neutralResults <- expectRight $ runExferenceQuery neutralSession request
+      hseResults @?= neutralResults
+  , testCase "seal Exference directly from a neutral environment" $ do
+      environment <- expectRight
+        (mkEnvironment [] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      environmentDeclarations
+          (inventoryEnvironment $ exferenceSessionInventory session) @?= []
+      exferenceSessionOmissions session @?= []
+      target <- expectRight $ mkIdentifier "neutralIdentity"
+      request <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions {exferenceMaximumSteps = 32}
+        target "neutral-identity" "a -> a"
+      _ <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      pure ()
+  , testCase "open neutral queries around maxBound rigid variables" $ do
+      boundaryName <- expectRight $ parseName "Fixture.boundary"
+      target <- expectRight $ mkIdentifier "boundaryIdentity"
+      let rigidType = TypeVariable $ RigidVariable maxBound
+          declaration = ValueDeclaration
+            $ ValueSignature () boundaryName rigidType
+          variable = FlexibleVariable 0
+          variableType = TypeVariable variable
+          goal = ForallType [variable] []
+            $ FunctionType variableType variableType
+      environment <- expectRight
+        (mkEnvironment [declaration] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 32}
+        }
+      _ <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      pure ()
+  , testCase "expand neutral Exference synonyms for parsed and shared queries" $ do
+      aliasName <- expectRight $ parseName "Fixture.Identity"
+      target <- expectRight $ mkIdentifier "synonymIdentity"
+      let variable = FlexibleVariable 0
+          variableType = TypeVariable variable
+          aliasDeclaration = TypeSynonymDeclaration () aliasName
+            [TypeParameter variable Nothing] variableType
+      environment <- expectRight
+        (mkEnvironment [aliasDeclaration] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      parsed <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions {exferenceMaximumSteps = 32}
+        target "synonym-query" "Fixture.Identity a -> a"
+      _ <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session parsed)
+      let sharedGoal = FunctionType
+            (TypeApplication (TypeConstructor aliasName) variableType)
+            variableType
+          sharedQuery = QueryRequest
+            { requestTarget = target
+            , requestGoal = sharedGoal
+            , requestContexts = []
+            , requestOptions = defaultExferenceOptions
+                {exferenceMaximumSteps = 32}
+            }
+      shared <- expectRight $ mkExferenceRequest sharedQuery
+      _ <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session shared)
+      pure ()
+  , testCase "retain source locations for deferred synonym failures" $ do
+      aliasName <- expectRight $ parseName "Fixture.Alias"
+      higherName <- expectRight $ parseName "Fixture.Higher"
+      target <- expectRight $ mkIdentifier "partialAlias"
+      let variable = FlexibleVariable 0
+          alias = TypeSynonymDeclaration () aliasName
+            [TypeParameter variable Nothing] $ TypeVariable variable
+          higher = AbstractTypeDeclaration () higherName
+            $ FunctionKind (FunctionKind ProperTypeKind ProperTypeKind)
+                ProperTypeKind
+      environment <- expectRight
+        (mkEnvironment [alias, higher] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions target "partial-alias.djex"
+        "Fixture.Higher Fixture.Alias"
+      case runExferenceQuery session request of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_EXF_SYNONYM"
+          diagnosticSource failure @?= Just "partial-alias.djex"
+          assertBool "deferred synonym failure lost its source range"
+            $ diagnosticSpan failure /= Nothing
+        Right _ -> fail "an unsaturated synonym reached Exference search"
+  , testCase "apply exact exclusions to a neutral Exference session" $ do
+      bindingName <- expectRight $ parseName "Fixture.identity"
+      let variableType = TypeVariable $ FlexibleVariable 0
+          declaration = ValueDeclaration $ ValueSignature () bindingName
+            $ FunctionType variableType variableType
+          policy = defaultExferenceSessionPolicy
+            {exferenceExcludedBindings = [bindingName]}
+      environment <- expectRight
+        (mkEnvironment [declaration] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSessionWithPolicy policy environment
+      case exferenceSessionOmissions session of
+        [omission] -> do
+          omittedName omission @?= bindingName
+          omittedCapability omission @?= BindingIntroduction
+          omittedReason omission @?= ExcludedByPolicy
+        omissions -> fail $ "unexpected policy omissions: " ++ show omissions
+  , testCase "apply neutral rating overrides to candidate penalties" $ do
+      tokenName <- expectRight $ parseName "Fixture.Token"
+      preferredName <- expectRight $ parseName "Fixture.preferred"
+      ordinaryName <- expectRight $ parseName "Fixture.ordinary"
+      target <- expectRight $ mkIdentifier "ratedToken"
+      let tokenType = TypeConstructor tokenName
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () preferredName tokenType
+            , ValueDeclaration $ ValueSignature () ordinaryName tokenType
+            ]
+          ratedPolicy = defaultExferenceSessionPolicy
+            { exferenceRatingOverrides = Map.fromList
+                [ (preferredName, Penalty (-5))
+                , (ordinaryName, Penalty 5)
+                ]
+            }
+          scores policy = do
+            environment <- expectRight
+              (mkEnvironment declarations :: Either
+                (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+            session <- expectRight
+              $ mkExferenceSessionWithPolicy policy environment
+            request <- expectRight $ mkExferenceRequest QueryRequest
+              { requestTarget = target
+              , requestGoal = tokenType
+              , requestContexts = []
+              , requestOptions = defaultExferenceOptions
+                  {exferenceMaximumSteps = 64}
+              }
+            results <- expectRight $ runExferenceQuery session request
+            pure $ Map.fromList
+              [ (globalName, exferenceCandidateComplexity
+                    $ exferenceCandidateMetrics candidate)
+              | result <- results
+              , candidate <- batchCandidates $ resultSearch result
+              , FunctionClause _ [] (Global globalName) <-
+                  [candidateOutput candidate]
+              ]
+      baseline <- scores defaultExferenceSessionPolicy
+      rated <- scores ratedPolicy
+      let scoreOf label bindingName table = case Map.lookup bindingName table of
+            Just score -> pure score
+            Nothing -> fail $ label ++ " candidate was not generated"
+      baselinePreferred <- scoreOf "baseline preferred" preferredName baseline
+      baselineOrdinary <- scoreOf "baseline ordinary" ordinaryName baseline
+      ratedPreferred <- scoreOf "rated preferred" preferredName rated
+      ratedOrdinary <- scoreOf "rated ordinary" ordinaryName rated
+      baselinePreferred @?= baselineOrdinary
+      assertBool "negative override did not reduce the candidate penalty"
+        $ ratedPreferred < baselinePreferred
+      assertBool "positive override did not increase the candidate penalty"
+        $ ratedOrdinary > baselineOrdinary
+  , testCase "report recursive Exference elimination as a session omission" $ do
+      loopName <- expectRight $ parseName "Fixture.Loop"
+      let declaration = DataTypeDeclaration () loopName []
+            [DataConstructor () loopName [TypeConstructor loopName]]
+      environment <- expectRight
+        (mkEnvironment [declaration] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      case exferenceSessionOmissions session of
+        [omission] -> do
+          omittedName omission @?= loopName
+          omittedCapability omission @?= DataElimination
+          omittedReason omission @?=
+            RecursiveDataEliminationUnsupported
+        omissions -> fail $ "unexpected recursive omissions: " ++ show omissions
+      map diagnosticCode (exferenceSessionDiagnostics session) @?=
+        [Just "DJEX_EXF_RECURSIVE_OMISSION"]
   , testCase "reject Exference contexts whose variables escape the goal" $ do
       target <- expectRight $ mkIdentifier "constrained"
       className <- expectRight $ mkIdentifier "C"
@@ -540,6 +752,14 @@ referencesGlobal target expression = case expression of
   Case scrutinee alternatives ->
     referencesGlobal target scrutinee ||
       any (referencesGlobal target . snd) alternatives
+
+firstExferenceCandidate :: [ExferenceResult] -> IO ExferenceCandidate
+firstExferenceCandidate results = case
+    dropWhile (null . batchCandidates . resultSearch) results of
+  result : _ -> case batchCandidates $ resultSearch result of
+    candidate : _ -> pure candidate
+    [] -> fail "Exference reported a nonempty batch without a candidate"
+  [] -> fail "Exference produced no candidate"
 
 expectRight :: Show error => Either error value -> IO value
 expectRight result = case result of

@@ -160,7 +160,7 @@ Library synthesis
     pretty >= 1.1 && < 1.2
 
 Test-Suite djex-tests
-  import:         tasty-hunit-test
+  import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test

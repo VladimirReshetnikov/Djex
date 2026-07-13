@@ -17,11 +17,18 @@ module Language.Haskell.Exference.Core.RigidInstantiation
   ) where
 
 import Control.DeepSeq (NFData)
+import Control.Monad (foldM)
 import qualified Data.Foldable as Foldable
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.FunctionBinding
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  ( IdentifierSupply
+  , allocateFreshNonNegativeIdentifier
+  , reserveIdentifiers
+  , supplyFromIdentifiers
+  )
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils (forallify)
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -37,10 +44,11 @@ data RigidInstantiationError = RigidIdentifierSupplyExhausted
 
 instance NFData RigidInstantiationError
 
--- | The greatest rigid identifier in a sealed environment.  Computing this
--- once keeps repeated session queries independent of environment size.
-newtype RigidInstantiationContext = RigidInstantiationContext
+-- | The rigid namespace of a sealed environment. Retaining the finite set,
+-- rather than only its maximum, lets boundary queries allocate real gaps.
+data RigidInstantiationContext = RigidInstantiationContext
   { maximumEnvironmentRigidIdentifier :: Maybe TVarId
+  , environmentRigidIdentifiers :: IdentifierSupply
   }
   deriving (Eq, Show, Generic)
 
@@ -48,10 +56,12 @@ instance NFData RigidInstantiationContext
 
 -- | Cache the environment-wide rigid maximum used by every later query.
 mkRigidInstantiationContext :: EnvDictionary -> RigidInstantiationContext
-mkRigidInstantiationContext = RigidInstantiationContext
-  . Foldable.foldl' maximumMaybe Nothing
-  . map maximumRigidInType
-  . environmentTypes
+mkRigidInstantiationContext environment = RigidInstantiationContext
+  (Foldable.foldl' maximumMaybe Nothing
+    $ map maximumRigidInType types)
+  (supplyFromIdentifiers $ concatMap rigidIdentifiersInType types)
+ where
+  types = environmentTypes environment
 
 -- | Quantified flexible binder IDs paired with their fresh rigid IDs, in the
 -- exact lexical order in which Exference opens the leading forall chain.
@@ -77,19 +87,32 @@ planRigidInstantiation
   -> Either RigidInstantiationError RigidInstantiationPlan
 planRigidInstantiation context extraConstraints goal
   | null binders = Right $ RigidInstantiationPlan []
-  | lastIdentifier > toInteger (maxBound :: TVarId) =
-      Left $ RigidIdentifierSupplyExhausted maximumRigid binderCount
-  | otherwise = Right $ RigidInstantiationPlan
-      $ zip binders $ map fromInteger [firstIdentifier .. lastIdentifier]
+  | otherwise = case allocateRigidIdentifiers binderCount initialSupply of
+      Nothing -> Left $ RigidIdentifierSupplyExhausted maximumRigid binderCount
+      Just identifiers -> Right $ RigidInstantiationPlan
+        $ zip binders identifiers
  where
   binders = leadingBinders $ forallify goal
   binderCount = length binders
+  queryTypes = goal : concatMap constraint_params extraConstraints
   maximumRigid = Foldable.foldl' maximumMaybe
     (maximumEnvironmentRigidIdentifier context)
     $ map maximumRigidInType
-    $ goal : concatMap constraint_params extraConstraints
-  firstIdentifier = max 0 $ maybe 0 ((+ 1) . toInteger) maximumRigid
-  lastIdentifier = firstIdentifier + toInteger binderCount - 1
+    queryTypes
+  initialSupply = reserveIdentifiers
+    (concatMap rigidIdentifiersInType queryTypes)
+    (environmentRigidIdentifiers context)
+
+allocateRigidIdentifiers
+  :: Int
+  -> IdentifierSupply
+  -> Maybe [TVarId]
+allocateRigidIdentifiers count initialSupply = fmap (reverse . fst)
+  $ foldM allocate ([], initialSupply) $ replicate count ()
+ where
+  allocate (identifiers, supply) _ = do
+    (identifier, nextSupply) <- allocateFreshNonNegativeIdentifier supply
+    pure (identifier : identifiers, nextSupply)
 
 leadingBinders :: HsType -> [TVarId]
 leadingBinders (TypeForall variables _ body) =
@@ -124,12 +147,15 @@ environmentTypes environment =
       : instance_constraints instanceDeclaration
 
 maximumRigidInType :: HsType -> Maybe TVarId
-maximumRigidInType = Foldable.foldl' collect Nothing . toSynthesisTypeStructure
+maximumRigidInType = Foldable.foldl' maximumMaybe Nothing
+  . map Just . rigidIdentifiersInType
+
+rigidIdentifiersInType :: HsType -> [TVarId]
+rigidIdentifiersInType = Foldable.foldr collect [] . toSynthesisTypeStructure
  where
-  collect current variable = case variable of
-    SharedType.FlexibleVariable{} -> current
-    SharedType.RigidVariable identifier -> maximumMaybe current
-      $ Just identifier
+  collect variable identifiers = case variable of
+    SharedType.FlexibleVariable{} -> identifiers
+    SharedType.RigidVariable identifier -> identifier : identifiers
 
 maximumMaybe :: Ord value => Maybe value -> Maybe value -> Maybe value
 maximumMaybe Nothing right = right

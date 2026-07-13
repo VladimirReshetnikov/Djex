@@ -230,13 +230,9 @@ parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
     <$> runExceptT (convertType tcs mn ds tDeclMap ty)
   where
     conversionDiagnostic message =
-      withSpan (SourceSpan (SourcePosition 1 1) (endPosition s))
+      withSpan (sourceTextSpan s)
       $ withSource (P.parseFilename m)
       $ diagnostic message
-
-    endPosition = foldl advance (SourcePosition 1 1)
-    advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
-    advance (SourcePosition line column) _ = SourcePosition line (column + 1)
 
 -- | Parse, lower, and kind-check a query against the assumptions retained by
 -- the source inventory that will supply its search environment.
@@ -262,10 +258,6 @@ parseTypeWithKinds assumptions tcs mn ds declarations mode source = do
  where
   kindDiagnostic message =
     withCode "EXF_KIND"
-    $ withSpan (SourceSpan (SourcePosition 1 1) (endPosition source))
+    $ withSpan (sourceTextSpan source)
     $ withSource (P.parseFilename mode)
     $ diagnostic $ "ill-kinded input type: " ++ message
-
-  endPosition = foldl advance (SourcePosition 1 1)
-  advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
-  advance (SourcePosition line column) _ = SourcePosition line (column + 1)

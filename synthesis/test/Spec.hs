@@ -779,6 +779,31 @@ typeTests = testGroup "source types"
       SharedType.freeVariables typeExpression @?=
         Set.fromList ["b", "c"]
       SharedType.validateType typeExpression @?= Right ()
+  , testCase "scoped renaming stops at shadowing foralls" $ do
+      let className = right $ mkIdentifier "C"
+          source = SharedType.FunctionType
+            (SharedType.TypeVariable "a")
+            $ SharedType.ForallType ["a"]
+                [Constraint className
+                  [ SharedType.TypeVariable "a"
+                  , SharedType.TypeVariable "b"
+                  ]]
+                $ SharedType.FunctionType
+                    (SharedType.TypeVariable "a")
+                    (SharedType.TypeVariable "b")
+          expected = SharedType.FunctionType
+            (SharedType.TypeVariable "outer")
+            $ SharedType.ForallType ["a"]
+                [Constraint className
+                  [ SharedType.TypeVariable "a"
+                  , SharedType.TypeVariable "free"
+                  ]]
+                $ SharedType.FunctionType
+                    (SharedType.TypeVariable "a")
+                    (SharedType.TypeVariable "free")
+      SharedType.renameScopedVariables
+          (Map.fromList [("a", "outer"), ("b", "free")]) source
+        @?= expected
   , testCase "reject malformed forall constraint class names" $ do
       let invalidName = right $ mkIdentifier "constraint"
           typeExpression = SharedType.ForallType ["a"]
@@ -1653,6 +1678,13 @@ diagnosticTests = testGroup "diagnostics"
           value = withCode "" $ withSpan (SourceSpan point point) $
             diagnostic Info "using default search budget"
       renderDiagnostic value @?= "1:1: info: using default search budget"
+  , testCase "complete text spans use one-based half-open positions" $ do
+      sourceTextSpan "" @?=
+        SourceSpan (SourcePosition 1 1) (SourcePosition 1 1)
+      sourceTextSpan "ab\nc" @?=
+        SourceSpan (SourcePosition 1 1) (SourcePosition 2 2)
+      sourceTextSpan "ab\n" @?=
+        SourceSpan (SourcePosition 1 1) (SourcePosition 2 1)
   , testCase "total NFData instances" $ do
       _ <- evaluate (force (right (parseName "Data.List.(++)")))
       _ <- evaluate (force (withContext "query" (diagnostic Error "failure")))

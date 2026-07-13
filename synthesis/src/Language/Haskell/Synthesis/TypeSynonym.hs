@@ -62,6 +62,7 @@ import Language.Haskell.Synthesis.Type
   , TypeError
   , canonicalizeType
   , freeVariables
+  , renameScopedVariables
   , validateType
   )
 import qualified Language.Haskell.Synthesis.Environment as Environment
@@ -348,8 +349,9 @@ substitute fresh substitutions source = case source of
       Map.empty binders
     let renamedBinders = map
           (\binder -> Map.findWithDefault binder binder renaming) binders
-        renamedConstraints = map (renameConstraint renaming) constraints
-        renamedBody = renameScoped renaming body
+        renamedConstraints = map
+          (fmap $ renameScopedVariables renaming) constraints
+        renamedBody = renameScopedVariables renaming body
         withoutFreshBinders = foldr Map.delete relevant renamedBinders
     ForallType renamedBinders
       <$> mapM (substituteConstraint fresh withoutFreshBinders)
@@ -386,39 +388,6 @@ freshenBinder fresh rangeVariables renaming binder
           | otherwise -> pure candidate
       put $ Set.insert replacement reserved
       pure $ Map.insert binder replacement renaming
-
--- Rename occurrences bound by the surrounding forall. A nested forall that
--- binds the same identity shadows it and therefore removes that entry before
--- descending into either its context or body.
-renameScoped
-  :: Ord variable
-  => Map variable variable
-  -> Type variable
-  -> Type variable
-renameScoped renaming source = case source of
-  TypeVariable variable -> TypeVariable
-    $ Map.findWithDefault variable variable renaming
-  TypeConstructor{} -> source
-  TypeApplication function argument -> TypeApplication
-    (renameScoped renaming function) (renameScoped renaming argument)
-  FunctionType parameter result -> FunctionType
-    (renameScoped renaming parameter) (renameScoped renaming result)
-  TupleType boxity elements -> TupleType boxity
-    $ map (renameScoped renaming) elements
-  ForallType binders constraints body ->
-    let visible = foldr Map.delete renaming binders
-    in ForallType binders
-      (map (renameConstraint visible) constraints)
-      (renameScoped visible body)
-
-renameConstraint
-  :: Ord variable
-  => Map variable variable
-  -> Constraint (Type variable)
-  -> Constraint (Type variable)
-renameConstraint renaming constraint = Constraint
-  (constraintClass constraint)
-  $ map (renameScoped renaming) $ constraintArguments constraint
 
 applicationSpine :: Type variable -> (Type variable, [Type variable])
 applicationSpine = collect []

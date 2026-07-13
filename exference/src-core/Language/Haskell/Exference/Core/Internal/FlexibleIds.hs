@@ -1,17 +1,19 @@
 {-# LANGUAGE DeriveGeneric #-}
 
--- | Collision-free allocation for Exference's flexible type-variable IDs.
+-- | Collision-free allocation for Exference's finite type-variable IDs.
 --
 -- Public IDs occupy the complete 'Int' domain.  Freshness must therefore be
--- based on membership, not on unchecked @maximum + 1@ arithmetic.  Search,
--- independent checking, and unifier projection all share this supply so the
--- boundary cases have one implementation and one set of invariants.
+-- based on membership, not on unchecked @maximum + 1@ arithmetic. Flexible
+-- search variables, rigid query skolems, independent checking, and unifier
+-- projection share this supply so boundary cases have one implementation.
 module Language.Haskell.Exference.Core.Internal.FlexibleIds
-  ( FlexibleIdSupply
+  ( IdentifierSupply
+  , FlexibleIdSupply
   , FlexibleRenaming
   , supplyFromIdentifiers
   , reserveIdentifiers
   , allocateFreshIdentifier
+  , allocateFreshNonNegativeIdentifier
   , allocateNamespace
   , allocateCanonicalIdentifiers
   , flexibleIdentifiers
@@ -29,31 +31,34 @@ import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.Types
 
-newtype FlexibleIdSupply = FlexibleIdSupply IntSet.IntSet
+newtype IdentifierSupply = IdentifierSupply IntSet.IntSet
   deriving (Eq, Show, Generic)
 
-instance NFData FlexibleIdSupply where
-  rnf (FlexibleIdSupply identifiers) = rnf $ IntSet.toAscList identifiers
+instance NFData IdentifierSupply where
+  rnf (IdentifierSupply identifiers) = rnf $ IntSet.toAscList identifiers
+
+-- | Compatibility name for the generic supply where it tracks flexible IDs.
+type FlexibleIdSupply = IdentifierSupply
 
 type FlexibleRenaming = IntMap.IntMap TVarId
 
-supplyFromIdentifiers :: Foldable collection => collection TVarId -> FlexibleIdSupply
-supplyFromIdentifiers = FlexibleIdSupply . foldr IntSet.insert IntSet.empty
+supplyFromIdentifiers :: Foldable collection => collection TVarId -> IdentifierSupply
+supplyFromIdentifiers = IdentifierSupply . foldr IntSet.insert IntSet.empty
 
 reserveIdentifiers
   :: Foldable collection
   => collection TVarId
-  -> FlexibleIdSupply
-  -> FlexibleIdSupply
-reserveIdentifiers identifiers (FlexibleIdSupply reserved) = FlexibleIdSupply
+  -> IdentifierSupply
+  -> IdentifierSupply
+reserveIdentifiers identifiers (IdentifierSupply reserved) = IdentifierSupply
   $ foldr IntSet.insert reserved identifiers
 
 -- | Allocate the historical next ID when that is representable.  If the
 -- greatest ID is already 'maxBound', choose a real gap instead of wrapping.
 allocateFreshIdentifier
-  :: FlexibleIdSupply
-  -> Maybe (TVarId, FlexibleIdSupply)
-allocateFreshIdentifier supply@(FlexibleIdSupply reserved) = do
+  :: IdentifierSupply
+  -> Maybe (TVarId, IdentifierSupply)
+allocateFreshIdentifier supply@(IdentifierSupply reserved) = do
   identifier <- if IntSet.null reserved
     then Just 0
     else let greatest = IntSet.findMax reserved
@@ -61,6 +66,31 @@ allocateFreshIdentifier supply@(FlexibleIdSupply reserved) = do
         then Just $ greatest + 1
         else firstGapFrom 0 (dropWhile (< 0) identifiers)
           `orElse` firstGapFrom minBound identifiers
+  guard $ not $ IntSet.member identifier reserved
+  pure (identifier, reserveIdentifiers [identifier] supply)
+ where
+  identifiers = IntSet.toAscList reserved
+
+  orElse (Just result) _ = Just result
+  orElse Nothing fallback = fallback
+
+-- | Allocate above the non-negative portion of the live namespace when that
+-- is representable, matching Exference's historical rigid-skolem spelling.
+-- At 'maxBound', reuse a genuine non-negative gap and then the negative half
+-- instead of reporting exhaustion while almost the whole 'Int' domain is
+-- still available.
+allocateFreshNonNegativeIdentifier
+  :: IdentifierSupply
+  -> Maybe (TVarId, IdentifierSupply)
+allocateFreshNonNegativeIdentifier supply@(IdentifierSupply reserved) = do
+  identifier <- case dropWhile (< 0) identifiers of
+    [] -> Just 0
+    nonNegative ->
+      let greatest = last nonNegative
+      in if greatest < maxBound
+          then Just $ greatest + 1
+          else firstGapFrom 0 nonNegative
+            `orElse` firstGapFrom minBound identifiers
   guard $ not $ IntSet.member identifier reserved
   pure (identifier, reserveIdentifiers [identifier] supply)
  where
@@ -77,7 +107,7 @@ allocateNamespace
   :: [TVarId]
   -> FlexibleIdSupply
   -> Maybe (FlexibleRenaming, FlexibleIdSupply)
-allocateNamespace rawSources supply@(FlexibleIdSupply reserved)
+allocateNamespace rawSources supply@(IdentifierSupply reserved)
   | null sources = Just (IntMap.empty, supply)
   | otherwise = translated `orElse` gapAllocated
  where
@@ -120,7 +150,7 @@ allocateCanonicalIdentifiers rawRequested initialSupply = do
  where
   requested = IntSet.toAscList $ IntSet.fromList rawRequested
 
-  allocate (pairs, resultSupply@(FlexibleIdSupply resultReserved), freshSupply)
+  allocate (pairs, resultSupply@(IdentifierSupply resultReserved), freshSupply)
       identifier
     | IntSet.notMember identifier resultReserved = pure
         ( (identifier, identifier) : pairs

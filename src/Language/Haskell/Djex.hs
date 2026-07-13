@@ -32,6 +32,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.Selection
   , module Language.Haskell.Synthesis.Type
   , module Language.Haskell.Synthesis.TypeRender
+  , module Language.Haskell.Synthesis.TypeSynonym
   , Backend (..)
   , Capability (..)
   , BackendInfo (..)
@@ -56,6 +57,7 @@ import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
 import Language.Haskell.Synthesis.Type
 import Language.Haskell.Synthesis.TypeRender
+import Language.Haskell.Synthesis.TypeSynonym
 
 -- | A search engine shipped by Djex.
 data Backend

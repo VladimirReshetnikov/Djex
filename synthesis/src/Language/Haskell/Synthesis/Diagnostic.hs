@@ -9,6 +9,7 @@ module Language.Haskell.Synthesis.Diagnostic
   , withSource
   , withSpan
   , withContext
+  , sourceTextSpan
   , renderDiagnostic
   ) where
 
@@ -89,6 +90,15 @@ withSpan span' value = value { diagnosticSpan = Just span' }
 withContext :: String -> Diagnostic -> Diagnostic
 withContext context value =
   value { diagnosticContext = diagnosticContext value ++ [context] }
+
+-- | Cover a complete text buffer with a one-based half-open source span.
+-- Newlines reset the ending column to one, matching the parser adapters.
+sourceTextSpan :: String -> SourceSpan
+sourceTextSpan = SourceSpan (SourcePosition 1 1)
+  . foldl advance (SourcePosition 1 1)
+ where
+  advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
+  advance (SourcePosition line column) _ = SourcePosition line (column + 1)
 
 -- | Render in a compiler-style, single-header format.
 --

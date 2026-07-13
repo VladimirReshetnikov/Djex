@@ -5,6 +5,7 @@
 -- validation before returning a lazy sequence of total shared result batches.
 module Language.Haskell.Djex.Exference
   ( ExferenceSession
+  , ExferenceEnvironment
   , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
   , ExferenceOptions (..)
@@ -27,6 +28,8 @@ module Language.Haskell.Djex.Exference
   , RenderError (..)
   , ExferenceResult
   , ExferenceSessionLoadReport (..)
+  , mkExferenceSession
+  , mkExferenceSessionWithPolicy
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
   , exferenceSessionInventory
@@ -51,6 +54,7 @@ import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Void (Void)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core
@@ -64,11 +68,12 @@ import Language.Haskell.Exference.Core
   )
 import qualified Language.Haskell.Exference.Core.Candidate as CoreCandidate
 import qualified Language.Haskell.Exference.Core.ExferenceStats as CoreStats
+import Language.Haskell.Exference.Core.Declaration
+  ( freshSynthesisVariable )
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , TypeVarIndex
   , fromSynthesisType
-  , sClassEnv_tclasses
   , toSynthesisType
   , toSynthesisName
   , showVar
@@ -78,7 +83,6 @@ import Language.Haskell.Djex.Exference.Internal.Session
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Exference.EnvironmentParser
   ( LoadReport (..)
-  , SourceEnvironment (..)
   , environmentFromPath
   , environmentLoadErrorDiagnostics
   , haskellSrcExtsParseMode
@@ -99,9 +103,13 @@ import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error, Info, Warning)
+  , SourceSpan
   , diagnostic
+  , sourceTextSpan
   , withCode
   , withContext
+  , withSource
+  , withSpan
   )
 import Language.Haskell.Synthesis.Generated
   ( FunctionClause (FunctionClause)
@@ -111,13 +119,12 @@ import Language.Haskell.Synthesis.Generated
   , defaultRenderOptions
   , validateDefinitionName
   )
+import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , inventoryKindAssumptions
   )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
-import Language.Haskell.Synthesis.KindInference
-  ( checkTypesKinds )
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -139,6 +146,10 @@ import Language.Haskell.Synthesis.Type
   , Variable (FlexibleVariable, RigidVariable)
   )
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
+import Language.Haskell.Synthesis.TypeSynonym
+  ( TypeElaborationError (..)
+  , elaborateType
+  )
 
 data ExferenceOptions = ExferenceOptions
   { exferenceAllowUnused :: Bool
@@ -171,6 +182,7 @@ data ExferenceOmissionCapability
 
 data ExferenceOmissionReason
   = UnsupportedNestedForall
+  | RecursiveDataEliminationUnsupported
   | ExcludedByPolicy
   deriving (Eq, Ord, Show)
 
@@ -179,12 +191,14 @@ data ExferenceOmissionReason
 -- an unrelated qualified binding whose occurrence also happens to be @fix@.
 data ExferenceSessionPolicy = ExferenceSessionPolicy
   { exferenceExcludedBindings :: [Name]
+  , exferenceRatingOverrides :: Map.Map Name Penalty
   }
   deriving (Eq, Show)
 
 defaultExferenceSessionPolicy :: ExferenceSessionPolicy
 defaultExferenceSessionPolicy = ExferenceSessionPolicy
   { exferenceExcludedBindings = []
+  , exferenceRatingOverrides = Map.empty
   }
 
 data ExferenceOmission = ExferenceOmission
@@ -210,6 +224,7 @@ data ExferenceSessionLoadReport = ExferenceSessionLoadReport
 data ExferenceRequest = ExferenceRequest
   { requestQuery :: QueryRequest ExferenceType ExferenceOptions
   , requestSourceTypeVariables :: TypeVarIndex
+  , requestSourceLocation :: Maybe (FilePath, SourceSpan)
   }
   deriving (Eq, Show)
 
@@ -221,6 +236,11 @@ type ExferenceTypeVariable = SharedType.Variable ExferenceLocal
 
 -- | Exference's checked type surface, expressed entirely in the neutral IR.
 type ExferenceType = Type ExferenceTypeVariable
+
+-- | The parser-independent declaration environment accepted by the stable
+-- Exference adapter. Search ratings are session policy rather than source
+-- semantics, so the neutral declarations carry no backend annotation.
+type ExferenceEnvironment = Environment ExferenceTypeVariable Void ()
 
 -- | The annotation-erased neutral inventory retained by a stable session.
 -- Search ratings remain in the private backend projection, where they belong.
@@ -276,6 +296,26 @@ instance NFData ExferenceBatchMetadata where
     rnf (exferenceBatchQueuePruned metadata) `seq`
     rnf (exferenceBatchDepthPruned metadata)
 
+-- | Kind-check, elaborate, and lower a parser-independent declaration
+-- environment, then seal the resulting reusable Exference session.
+mkExferenceSession
+  :: ExferenceEnvironment
+  -> Either Diagnostic ExferenceSession
+mkExferenceSession = mkExferenceSessionWithPolicy
+  defaultExferenceSessionPolicy
+
+-- | Policy-aware neutral session construction. Exact-name rating overrides
+-- affect only the private search projection; neither declaration order nor
+-- the annotation-free inventory exposed by the session changes.
+mkExferenceSessionWithPolicy
+  :: ExferenceSessionPolicy
+  -> ExferenceEnvironment
+  -> Either Diagnostic ExferenceSession
+mkExferenceSessionWithPolicy policy =
+  Session.sealNeutralExferenceSessionWithPolicy
+    (exferenceExcludedBindings policy)
+    (exferenceRatingOverrides policy)
+
 -- | Load a directory of source modules and ratings, validate its complete
 -- inventory, and seal an Exference session with the default policy.
 loadExferenceSession :: FilePath -> IO ExferenceSessionLoadReport
@@ -297,8 +337,10 @@ loadExferenceSessionWithPolicy policy path = do
           $ environmentLoadErrorDiagnostics failure
       , exferenceSessionLoadDiagnostics = sourceDiagnostics
       }
-    Right checked -> case Session.sealExferenceSessionWithExclusions
-        (exferenceExcludedBindings policy) checked of
+    Right checked -> case Session.sealCheckedExferenceSessionWithPolicy
+        (exferenceExcludedBindings policy)
+        (exferenceRatingOverrides policy)
+        checked of
       Left failure -> ExferenceSessionLoadReport
         { exferenceSessionLoadResult = Left
             $ NonEmpty.singleton failure
@@ -325,7 +367,7 @@ mkExferenceRequest
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequest query = do
   validateRequest query
-  pure $ ExferenceRequest query Map.empty
+  pure $ ExferenceRequest query Map.empty Nothing
 
 exferenceRequestQuery
   :: ExferenceRequest
@@ -402,13 +444,12 @@ parseExferenceRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
   validateTarget target
-  let environment = Session.sessionSource session
-      parsed = runIdentity $ runExceptT $ parseTypeWithKinds
+  let parsed = runIdentity $ runExceptT $ parseTypeWithKinds
         (inventoryKindAssumptions $ Session.exferenceSessionInventory session)
-        (sClassEnv_tclasses $ sourceClasses environment)
+        (Session.sessionClasses session)
         Nothing
-        (sourceTypeNames environment)
-        (Session.sessionTypeDeclarations session)
+        (Session.sessionTypeNames session)
+        Map.empty
         (haskellSrcExtsParseMode sourceName)
         source
   -- The HSE compatibility frontend predates structured diagnostic codes.
@@ -431,6 +472,7 @@ parseExferenceRequest session options target sourceName source = do
         }
   validateRequestGoalAndContexts query
   pure $ ExferenceRequest query sourceVariables
+    $ Just (sourceName, sourceTextSpan source)
 
 runExferenceQuery
   :: ExferenceSession
@@ -440,22 +482,20 @@ runExferenceQuery session request = do
   let query = requestQuery request
       target = requestTarget query
       sharedGoal = contextualGoal query
-  either
-    (Left . failureDiagnostic
-      "DJEX_EXF_KIND"
-      "Exference rejected the query kind"
-    )
+  elaboratedGoal <- either
+    (Left . attachRequestSource request . elaborationFailure)
     Right
-    $ checkTypesKinds
-        (inventoryKindAssumptions $ Session.exferenceSessionInventory session)
-        [(ProperTypeKind, sharedGoal)]
+    $ elaborateType freshSynthesisVariable
+        (Session.sessionTypeSynonyms session)
+        ProperTypeKind
+        sharedGoal
   backendGoal <- either
     (Left . failureDiagnostic
       "DJEX_EXF_LOWER"
       "cannot lower the shared query to Exference"
     )
     Right
-    $ fromSynthesisType sharedGoal
+    $ fromSynthesisType elaboratedGoal
   let input = searchQuery (Just target) backendGoal
         $ requestOptions query
       searchFailure failure = failureDiagnostic
@@ -552,6 +592,29 @@ contextualGoal query
   insertUnderLeadingForalls goal =
     SharedType.ForallType [] contexts goal
 
+elaborationFailure
+  :: TypeElaborationError ExferenceTypeVariable
+  -> Diagnostic
+elaborationFailure failure = case failure of
+  IllKindedType _ _ -> failureDiagnostic
+    "DJEX_EXF_KIND"
+    "Exference rejected the query kind"
+    failure
+  SynonymExpansionFailed _ -> failureDiagnostic
+    "DJEX_EXF_SYNONYM"
+    "Exference could not expand the query's type synonyms"
+    failure
+  InvalidElaborationType _ _ -> failureDiagnostic
+    "DJEX_EXF_QUERY"
+    "Exference rejected the shared query type"
+    failure
+
+attachRequestSource :: ExferenceRequest -> Diagnostic -> Diagnostic
+attachRequestSource request value = case requestSourceLocation request of
+  Nothing -> value
+  Just (sourceName, sourceSpan) -> withSpan sourceSpan
+    $ withSource sourceName value
+
 optionFailure :: ExferenceInputError -> Bool
 optionFailure failure = case failure of
   InvalidMaxSteps{} -> True
@@ -638,6 +701,8 @@ projectOmission omission = ExferenceOmission
       Session.DataElimination -> DataElimination
   , omittedReason = case Session.sessionOmissionReason omission of
       Session.UnsupportedNestedForall -> UnsupportedNestedForall
+      Session.RecursiveDataEliminationUnsupported ->
+        RecursiveDataEliminationUnsupported
       Session.ExcludedByPolicy -> ExcludedByPolicy
   }
 
@@ -652,6 +717,11 @@ omissionDiagnostic omission = withContext
       ( Warning
       , "DJEX_EXF_OMISSION"
       , "Exference omitted a source capability containing a nested forall"
+      )
+    RecursiveDataEliminationUnsupported ->
+      ( Warning
+      , "DJEX_EXF_RECURSIVE_OMISSION"
+      , "Exference omitted recursive datatype elimination"
       )
     ExcludedByPolicy ->
       ( Info

@@ -158,25 +158,41 @@ budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
 
 The one-import `Language.Haskell.Djex` surface reexports the complete neutral
-declaration, environment, inventory, kind-inference, and type-rendering
-vocabulary. `DjinnEnvironment`, `DjinnInventory`, `DjinnTypeVariable`,
-`DjinnLocal`, and `DjinnType` make every Djinn adapter signature nameable
-without depending on a hidden backend alias;
-the historical REPL explicitly converts its editable raw environment at the
-adapter boundary.
+declaration, environment, inventory, kind-inference, synonym-elaboration, and
+type-rendering vocabulary. `DjinnEnvironment`, `DjinnInventory`,
+`DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make every Djinn adapter
+signature nameable without depending on a hidden backend alias; the historical
+REPL explicitly converts its editable raw environment at the adapter boundary.
+Exference now has the same stable construction boundary:
+`ExferenceEnvironment = Environment ExferenceTypeVariable Void ()`, and
+`mkExferenceSession` kind-checks and lowers that parser-independent environment
+directly. Its source loader is an additional frontend, not the definition of
+an Exference session.
 
 `loadExferenceSession` and its policy-aware counterpart compute Exference's
-backend-supported projection once and turn a directory into an opaque session,
-while translating every fatal loader phase into source-preserving `EXF_*`
-diagnostics. Stable callers therefore never handle a parser-specific checked
-environment. The explicitly named `Language.Haskell.Exference.Session` module
-retains `mkExferenceSession` only for the historical CLI and clients that opt
+backend-supported projection once and turn a directory into the same opaque
+session, while translating every fatal loader phase into source-preserving
+`EXF_*` diagnostics. Stable callers therefore never handle a parser-specific
+checked environment. The explicitly named
+`Language.Haskell.Exference.Session` module retains the raw
+`CheckedSourceEnvironment` bridge for the historical CLI and clients that opt
 into the compatibility frontend. The source boundary tags class methods with
 their qualified owner, nests them under the common class declaration for
 validation, and lowers each rated selector exactly once into Exference's flat
-search inventory without changing source order. Unsupported rank-N
-introduction and elimination capabilities remain visible as structured
-omissions and warning diagnostics instead of disappearing per query.
+search inventory without changing source order. A session retains only its
+neutral inventory and synonym table, its checked core search environment, and
+parser-independent type-name and class indexes; neither an HSE source
+environment nor its legacy synonym map survives sealing.
+
+`ExferenceSessionPolicy` applies exact structural-name exclusions and finite,
+signed rating overrides while the private search projection is sealed.
+Overrides neither reorder declarations nor leak into the annotation-erased
+public inventory. Unknown names and non-finite ratings are fatal structured
+diagnostics; exclusion wins when both policies mention the same binding.
+Unsupported rank-N introduction/elimination and recursive-data elimination
+capabilities remain visible as structured omissions and warning diagnostics
+instead of disappearing per query. Omission order follows introduction order
+and then elimination order.
 The Haskell-source loader is likewise fail-closed at its vocabulary boundary:
 after parsing, but before constructing any partial inventory, it reports
 source-ordered `UnsupportedVocabularyOccurrence` values for type/data families,
@@ -191,16 +207,21 @@ Imports, fixities, ordinary value and method bodies, pattern vocabulary,
 default declarations, and operational pragmas remain accepted because they do
 not change the nominal type/class inventory. These forms are explicit current
 limitations rather than syntax that can silently disappear during loading.
-`parseExferenceRequest`
-elaborates a Haskell type against the session's retained names, synonyms,
-classes, and kind assumptions; `runExferenceQuery` validates only the varying
-goal and search policy, then returns a lazy sequence of shared result batches.
-`ExferenceType`, `ExferenceTypeVariable`, `ExferenceLocal`, and
-`ExferenceInventory` make that complete surface nameable in the neutral IR.
-Session construction maps backend ratings out of the already-checked inventory
-without rebuilding its indexes or kind assumptions. Stable candidate details
-and batch metadata likewise expose only shared names, types, metrics, and
-rendering hints; raw core records no longer cross the default facade.
+`parseExferenceRequest` resolves Haskell syntax against the session's retained
+type names, classes, and kind assumptions. It deliberately does not use the
+legacy frontend synonym map. `runExferenceQuery` passes both parsed and
+programmatically constructed goals through the shared capture-avoiding
+`TypeSynonym.elaborateType` operation, including its pre- and post-expansion
+kind checks, before lowering to the core search type. Thus the two request
+paths agree on aliases, cycles, saturation, and kinds. Query execution then
+validates only the varying search policy and returns a lazy sequence of shared
+result batches. `ExferenceEnvironment`, `ExferenceType`,
+`ExferenceTypeVariable`, `ExferenceLocal`, and `ExferenceInventory` make that
+complete surface nameable in the neutral IR. Session construction maps backend
+ratings out of the already-checked inventory without rebuilding its indexes or
+kind assumptions. Stable candidate details and batch metadata likewise expose
+only shared names, types, metrics, and rendering hints; raw core records no
+longer cross the default facade.
 Those batches preserve queue/depth pruning, nominal binding usage, residual
 constraints, statistics, and rendering hints without forcing the remaining
 trace. Each generated expression is wrapped in a target-bearing shared

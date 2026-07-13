@@ -12,11 +12,14 @@ module Language.Haskell.Exference.Session
 
 import Language.Haskell.Djex.Exference
   ( ExferenceSession
-  , ExferenceSessionPolicy (exferenceExcludedBindings)
+  , ExferenceSessionPolicy
+      ( exferenceExcludedBindings
+      , exferenceRatingOverrides
+      )
   )
 import Language.Haskell.Djex.Exference.Internal.Session
-  ( sealExferenceSession
-  , sealExferenceSessionWithExclusions
+  ( sealCheckedExferenceSession
+  , sealCheckedExferenceSessionWithPolicy
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( CheckedSourceEnvironment )
@@ -25,11 +28,13 @@ import Language.Haskell.Synthesis.Diagnostic (Diagnostic)
 mkExferenceSession
   :: CheckedSourceEnvironment
   -> Either Diagnostic ExferenceSession
-mkExferenceSession = sealExferenceSession
+mkExferenceSession = sealCheckedExferenceSession
 
 mkExferenceSessionWithPolicy
   :: ExferenceSessionPolicy
   -> CheckedSourceEnvironment
   -> Either Diagnostic ExferenceSession
-mkExferenceSessionWithPolicy policy = sealExferenceSessionWithExclusions
-  $ exferenceExcludedBindings policy
+mkExferenceSessionWithPolicy policy =
+  sealCheckedExferenceSessionWithPolicy
+    (exferenceExcludedBindings policy)
+    (exferenceRatingOverrides policy)

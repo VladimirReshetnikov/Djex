@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Data.Either (isRight)
+import Data.Void (Void)
 
 import Language.Haskell.Djex
 import Test.Tasty (defaultMain, testGroup)
@@ -36,6 +37,10 @@ main = defaultMain $ testGroup "public Djex facade"
           inventoryProjection
             :: ExferenceSession -> ExferenceInventory
           inventoryProjection = exferenceSessionInventory
+          environmentProjection
+            :: ExferenceEnvironment
+            -> Environment ExferenceTypeVariable Void ()
+          environmentProjection = id
           requestProjection
             :: ExferenceRequest
             -> QueryRequest ExferenceType ExferenceOptions
@@ -48,9 +53,11 @@ main = defaultMain $ testGroup "public Djex facade"
           metadataProjection = batchMetadata . resultSearch
       djinnTypeProjection `seq` djinnRequestProjection `seq`
         djinnCandidateProjection `seq` inventoryProjection `seq`
+        environmentProjection `seq`
         requestProjection `seq` candidateProjection `seq`
         metadataProjection `seq` pure ()
-      loadExferenceSession `seq` pure ()
+      mkExferenceSession `seq` mkExferenceSessionWithPolicy `seq`
+        loadExferenceSession `seq` pure ()
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
             :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment
@@ -60,6 +67,21 @@ main = defaultMain $ testGroup "public Djex facade"
       let inventory :: DjinnInventory
           inventory = djinnSessionInventory session
       environmentDeclarations (inventoryEnvironment inventory) @?= []
+  , testCase "seals Exference from the neutral environment vocabulary" $ do
+      let checkedEnvironment
+            :: Either
+                (EnvironmentError ExferenceTypeVariable)
+                ExferenceEnvironment
+          checkedEnvironment = mkEnvironment []
+      environment <- expectRight checkedEnvironment
+      session <- expectRight $ mkExferenceSession environment
+      let inventory :: ExferenceInventory
+          inventory = exferenceSessionInventory session
+      environmentDeclarations (inventoryEnvironment inventory) @?= []
+      let fresh :: FreshVariable ExferenceTypeVariable
+          fresh _ _ = Nothing
+      assertBool "the facade did not reexport synonym elaboration"
+        $ isRight $ prepareTypeSynonyms fresh inventory
   ]
 
 expectRight :: Show error => Either error value -> IO value

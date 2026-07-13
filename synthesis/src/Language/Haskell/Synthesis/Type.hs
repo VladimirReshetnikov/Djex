@@ -15,6 +15,7 @@ module Language.Haskell.Synthesis.Type
   , Type (..)
   , TypeError (..)
   , canonicalizeType
+  , renameScopedVariables
   , validateType
   , freeVariables
   , typeConstructors
@@ -22,6 +23,7 @@ module Language.Haskell.Synthesis.Type
 
 import Control.DeepSeq (NFData)
 import Control.Monad (unless)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
@@ -99,6 +101,32 @@ rebuildApplication headType arguments = case headType of
     | Just (TupleConstructor boxity arity) <- nameSpecial name
     , arity == length arguments -> TupleType boxity arguments
   _ -> foldl TypeApplication headType arguments
+
+-- | Rename occurrences owned by a surrounding lexical scope. A nested
+-- forall that binds the same nominal identity shadows the supplied renaming
+-- in both its context and body.
+renameScopedVariables
+  :: Ord variable
+  => Map.Map variable variable
+  -> Type variable
+  -> Type variable
+renameScopedVariables renaming source = case source of
+  TypeVariable variable -> TypeVariable
+    $ Map.findWithDefault variable variable renaming
+  TypeConstructor{} -> source
+  TypeApplication function argument -> TypeApplication
+    (renameScopedVariables renaming function)
+    (renameScopedVariables renaming argument)
+  FunctionType parameter result -> FunctionType
+    (renameScopedVariables renaming parameter)
+    (renameScopedVariables renaming result)
+  TupleType boxity elements -> TupleType boxity
+    $ map (renameScopedVariables renaming) elements
+  ForallType binders constraints body ->
+    let visible = foldr Map.delete renaming binders
+    in ForallType binders
+      (map (fmap $ renameScopedVariables visible) constraints)
+      (renameScopedVariables visible body)
 
 validateType :: Ord variable => Type variable -> Either (TypeError variable) ()
 validateType source = validate $ canonicalizeType source

@@ -8,7 +8,10 @@ module Language.Haskell.Exference.Core.Declaration
   , SynthesisDeclaration
   , SynthesisEnvironment
   , SynthesisInventory
+  , NeutralSynthesisInventory
   , SynthesisDeclarationError (..)
+  , freshSynthesisVariable
+  , prepareNeutralSynthesisInventory
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
   , toSynthesisClassDeclaration
@@ -32,6 +35,10 @@ module Language.Haskell.Exference.Core.Declaration
 
 import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
+import Data.Bifunctor (first)
+import Data.Foldable (toList)
+import Data.Graph (SCC (..), stronglyConnComp)
+import Data.List (find)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
@@ -43,6 +50,7 @@ import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Name
@@ -65,6 +73,11 @@ type SynthesisEnvironment = SharedEnvironment.Environment
 
 type SynthesisInventory = SharedInventory.Inventory
   SynthesisVariable DeclarationMetadata
+
+-- | Annotation-free, already checked shared inventory accepted by the core
+-- lowerer. Ratings and recursive-datatype flags are derived while lowering;
+-- they are backend policy, not source declaration syntax.
+type NeutralSynthesisInventory = SharedInventory.Inventory SynthesisVariable ()
 
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError
@@ -106,7 +119,324 @@ data SynthesisDeclarationError
   | MismatchedConstructorFunctionBindings [SharedName.Name]
   | InvalidSourceEnvironmentKinds
       (SharedKindInference.KindInferenceError SynthesisVariable)
+  | NeutralSynonymExpansionError
+      Int -- ^ Zero-based source declaration index.
+      SharedName.Name -- ^ Declaration name or instance class.
+      (SharedTypeSynonym.SynonymExpansionError SynthesisVariable)
+  | NeutralSynonymPreparationError
+      (SharedTypeSynonym.SynonymExpansionError SynthesisVariable)
+  | NeutralVariableNamespaceExhausted SynthesisVariable
   deriving (Eq, Show)
+
+-- | Allocate in Exference's complete finite identifier domain without using
+-- arithmetic on a caller-provided endpoint. The flexible and rigid tags are
+-- independent identity spaces in the shared IR, so preserve the old tag and
+-- search all non-negative IDs before the negative half of 'Int'.
+freshSynthesisVariable
+  :: SharedTypeSynonym.FreshVariable SynthesisVariable
+freshSynthesisVariable reserved old = case old of
+  SharedType.FlexibleVariable _ ->
+    SharedType.FlexibleVariable <$> available SharedType.FlexibleVariable
+  SharedType.RigidVariable _ ->
+    SharedType.RigidVariable <$> available SharedType.RigidVariable
+ where
+  available tag = find ((`Set.notMember` reserved) . tag) fullIntNamespace
+
+-- | Lower an already checked neutral inventory to Exference's search
+-- dictionary. Type aliases and explicit kinds remain authoritative in that
+-- inventory; this projection expands aliases, erases the kinds the core cannot
+-- store, and derives only backend operational metadata. All introduction rules
+-- receive the neutral zero penalty.
+prepareNeutralSynthesisInventory
+  :: NeutralSynthesisInventory
+  -> Either SynthesisDeclarationError
+      (SharedTypeSynonym.TypeSynonyms SynthesisVariable, EnvDictionary)
+prepareNeutralSynthesisInventory inventory = do
+  synonyms <- first NeutralSynonymPreparationError
+    $ SharedTypeSynonym.prepareTypeSynonyms freshSynthesisVariable inventory
+  backend <- lowerNeutralSynthesisEnvironment synonyms
+    $ SharedInventory.inventoryEnvironment inventory
+  pure (synonyms, backend)
+
+-- Keep the alias table and environment private once separated: accepting two
+-- independently prepared public arguments would allow a mismatched table to
+-- turn an alias into a fictitious nominal constructor silently.
+lowerNeutralSynthesisEnvironment
+  :: SharedTypeSynonym.TypeSynonyms SynthesisVariable
+  -> SharedEnvironment.Environment SynthesisVariable Void ()
+  -> Either SynthesisDeclarationError EnvDictionary
+lowerNeutralSynthesisEnvironment synonyms environment = do
+  expanded <- mapM expandOperationalDeclaration
+    $ zip [0 ..] $ SharedEnvironment.environmentDeclarations environment
+  let normalized = map normalizeDeclarationVariables expanded
+      recursiveNames = recursiveDataTypeNames normalized
+  prepared <- mapM (prepareSearchDeclaration recursiveNames) normalized
+  (functions, deconstructors, classes, instances) <- foldM lowerDeclaration
+    ([], [], [], []) [declaration | Just declaration <- prepared]
+  classEnvironment <- either (Left . ClassEnvironmentConversionError) Right
+    $ mkStaticClassEnv (reverse classes) (reverse instances)
+  pure $ EnvDictionary
+    (reverse functions) (reverse deconstructors) classEnvironment
+ where
+  expandOperationalDeclaration (index, declaration) = case declaration of
+    SharedDeclaration.TypeSynonymDeclaration{} -> Right declaration
+    SharedDeclaration.AbstractTypeDeclaration{} -> Right declaration
+    _ -> first
+      (NeutralSynonymExpansionError index $ declarationName declaration)
+      $ SharedTypeSynonym.expandDeclarationTypeSynonyms
+          freshSynthesisVariable synonyms declaration
+
+  lowerDeclaration
+      (functions, deconstructors, classes, instances) declaration =
+    case declaration of
+      SharedDeclaration.ValueDeclaration{} -> do
+        binding <- fromSynthesisFunctionBinding declaration
+        pure (binding : functions, deconstructors, classes, instances)
+      SharedDeclaration.DataTypeDeclaration{} -> do
+        (constructors, deconstructor) <-
+          fromSynthesisRatedDataDeclaration declaration
+        pure
+          ( reverse constructors ++ functions
+          , deconstructor : deconstructors
+          , classes
+          , instances
+          )
+      SharedDeclaration.ClassDeclaration{} -> do
+        (typeClass, methods) <-
+          fromSynthesisClassDeclarationWithMethods declaration
+        pure
+          ( reverse methods ++ functions
+          , deconstructors
+          , typeClass : classes
+          , instances
+          )
+      SharedDeclaration.InstanceDeclaration{} -> do
+        instanceDeclaration <- fromSynthesisInstanceDeclaration declaration
+        pure
+          ( functions
+          , deconstructors
+          , classes
+          , instanceDeclaration : instances
+          )
+      SharedDeclaration.TypeSynonymDeclaration{} -> pure
+        (functions, deconstructors, classes, instances)
+      SharedDeclaration.AbstractTypeDeclaration{} -> pure
+        (functions, deconstructors, classes, instances)
+
+-- Use every 'Int' value exactly once. Beginning at zero preserves the core's
+-- historical non-negative class-parameter invariant; the negative half keeps
+-- the allocator total over the full finite identity domain without overflow.
+fullIntNamespace :: [TVarId]
+fullIntNamespace = [0 .. maxBound] ++ [minBound .. (-1)]
+
+type NeutralSynthesisDeclaration = SharedDeclaration.Declaration
+  SynthesisVariable Void ()
+
+declarationName :: NeutralSynthesisDeclaration -> SharedName.Name
+declarationName declaration = case declaration of
+  SharedDeclaration.TypeSynonymDeclaration _ name _ _ -> name
+  SharedDeclaration.DataTypeDeclaration _ name _ _ -> name
+  SharedDeclaration.AbstractTypeDeclaration _ name _ -> name
+  SharedDeclaration.ValueDeclaration signature ->
+    SharedDeclaration.valueName signature
+  SharedDeclaration.ClassDeclaration _ name _ _ _ -> name
+  SharedDeclaration.InstanceDeclaration _ _ _ headConstraint ->
+    SharedConstraint.constraintClass headConstraint
+
+-- Variable identities are local to a source declaration. Repacking flexible
+-- IDs makes negative class parameters acceptable to the historical core and
+-- gives every method in a class the same coherent owner namespace. Parameters
+-- are visited first, followed by the declaration's remaining source order.
+normalizeDeclarationVariables
+  :: NeutralSynthesisDeclaration
+  -> NeutralSynthesisDeclaration
+normalizeDeclarationVariables declaration = case declaration of
+  SharedDeclaration.TypeSynonymDeclaration annotation name parameters body ->
+    SharedDeclaration.TypeSynonymDeclaration annotation name
+      (map renameParameter parameters) (renameType body)
+  SharedDeclaration.DataTypeDeclaration annotation name parameters constructors ->
+    SharedDeclaration.DataTypeDeclaration annotation name
+      (map renameParameter parameters) (map renameConstructor constructors)
+  SharedDeclaration.AbstractTypeDeclaration{} -> declaration
+  SharedDeclaration.ValueDeclaration signature ->
+    SharedDeclaration.ValueDeclaration $ renameSignature signature
+  SharedDeclaration.ClassDeclaration annotation name parameters
+      superclasses methods -> SharedDeclaration.ClassDeclaration annotation name
+        (map renameParameter parameters)
+        (map renameConstraint superclasses)
+        (map renameSignature methods)
+  SharedDeclaration.InstanceDeclaration annotation variables
+      prerequisites headConstraint -> SharedDeclaration.InstanceDeclaration
+        annotation (map renameVariable variables)
+        (map renameConstraint prerequisites) (renameConstraint headConstraint)
+ where
+  flexibleVariables = orderedDistinct
+    [ variable
+    | variable@SharedType.FlexibleVariable{} <- declarationVariables declaration
+    ]
+  replacements = Map.fromList $ zip flexibleVariables
+    (map SharedType.FlexibleVariable fullIntNamespace)
+
+  renameVariable variable = Map.findWithDefault variable variable replacements
+  renameType = fmap renameVariable
+  renameConstraint = fmap renameType
+  renameParameter parameter = SharedDeclaration.TypeParameter
+    (renameVariable $ SharedDeclaration.parameterVariable parameter)
+    (SharedDeclaration.parameterKind parameter)
+  renameConstructor constructor = SharedDeclaration.DataConstructor
+    (SharedDeclaration.constructorAnnotation constructor)
+    (SharedDeclaration.constructorName constructor)
+    (map renameType $ SharedDeclaration.constructorFields constructor)
+  renameSignature signature = SharedDeclaration.ValueSignature
+    (SharedDeclaration.valueAnnotation signature)
+    (SharedDeclaration.valueName signature)
+    (renameType $ SharedDeclaration.valueType signature)
+
+declarationVariables :: NeutralSynthesisDeclaration -> [SynthesisVariable]
+declarationVariables declaration = case declaration of
+  SharedDeclaration.TypeSynonymDeclaration _ _ parameters body ->
+    parameterVariables parameters ++ toList body
+  SharedDeclaration.DataTypeDeclaration _ _ parameters constructors ->
+    parameterVariables parameters
+      ++ concatMap (concatMap toList . SharedDeclaration.constructorFields)
+          constructors
+  SharedDeclaration.AbstractTypeDeclaration{} -> []
+  SharedDeclaration.ValueDeclaration signature ->
+    toList $ SharedDeclaration.valueType signature
+  SharedDeclaration.ClassDeclaration _ _ parameters superclasses methods ->
+    parameterVariables parameters
+      ++ concatMap constraintTypeVariables superclasses
+      ++ concatMap (toList . SharedDeclaration.valueType) methods
+  SharedDeclaration.InstanceDeclaration _ variables prerequisites headConstraint ->
+    variables ++ concatMap constraintTypeVariables
+      (headConstraint : prerequisites)
+ where
+  parameterVariables = map SharedDeclaration.parameterVariable
+  constraintTypeVariables = concatMap toList
+    . SharedConstraint.constraintArguments
+
+orderedDistinct :: Ord value => [value] -> [value]
+orderedDistinct = go Set.empty
+ where
+  go _ [] = []
+  go seen (value : remaining)
+    | value `Set.member` seen = go seen remaining
+    | otherwise = value : go (Set.insert value seen) remaining
+
+recursiveDataTypeNames
+  :: [NeutralSynthesisDeclaration]
+  -> Set.Set SharedName.Name
+recursiveDataTypeNames declarations = Set.fromList
+  [ name
+  | SharedDeclaration.DataTypeDeclaration _ name _ _ <- declarations
+  , name `Set.member` cyclicNames
+  ]
+ where
+  dataNames = Set.fromList
+    [ name
+    | SharedDeclaration.DataTypeDeclaration _ name _ _ <- declarations
+    ]
+  nodes =
+    [ (name, name, Set.toAscList $ dependencies constructors)
+    | SharedDeclaration.DataTypeDeclaration _ name _ constructors <- declarations
+    ]
+  dependencies constructors = Set.intersection dataNames $ Set.unions
+    [ SharedType.typeConstructors field
+    | constructor <- constructors
+    , field <- SharedDeclaration.constructorFields constructor
+    ]
+  cyclicNames = Set.fromList
+    [ name
+    | component <- stronglyConnComp nodes
+    , CyclicSCC names <- [component]
+    , name <- names
+    ]
+
+prepareSearchDeclaration
+  :: Set.Set SharedName.Name
+  -> NeutralSynthesisDeclaration
+  -> Either SynthesisDeclarationError (Maybe SynthesisDeclaration)
+prepareSearchDeclaration recursiveNames declaration = case declaration of
+  SharedDeclaration.TypeSynonymDeclaration{} -> Right Nothing
+  SharedDeclaration.AbstractTypeDeclaration{} -> Right Nothing
+  SharedDeclaration.ValueDeclaration signature -> do
+    functionType <- implicitizeLeadingForalls Set.empty
+      $ SharedDeclaration.valueType signature
+    pure $ Just $ SharedDeclaration.ValueDeclaration
+      $ SharedDeclaration.ValueSignature (SearchPenaltyMetadata 0)
+          (SharedDeclaration.valueName signature) functionType
+  SharedDeclaration.DataTypeDeclaration _ name parameters constructors ->
+    pure $ Just $ SharedDeclaration.DataTypeDeclaration
+      (RecursiveDataMetadata $ name `Set.member` recursiveNames)
+      name (map eraseParameterKind parameters)
+      [ SharedDeclaration.DataConstructor (SearchPenaltyMetadata 0)
+          (SharedDeclaration.constructorName constructor)
+          (SharedDeclaration.constructorFields constructor)
+      | constructor <- constructors
+      ]
+  SharedDeclaration.ClassDeclaration _ name parameters superclasses methods -> do
+    let ownerVariables = Set.fromList
+          $ map SharedDeclaration.parameterVariable parameters
+    preparedMethods <- mapM (prepareMethod ownerVariables) methods
+    pure $ Just $ SharedDeclaration.ClassDeclaration NoDeclarationMetadata
+      name (map eraseParameterKind parameters) superclasses preparedMethods
+  SharedDeclaration.InstanceDeclaration _ _ prerequisites headConstraint ->
+    pure $ Just $ SharedDeclaration.InstanceDeclaration NoDeclarationMetadata
+      (Set.toAscList $ constraintVariables $ headConstraint : prerequisites)
+      prerequisites headConstraint
+ where
+  eraseParameterKind parameter = SharedDeclaration.TypeParameter
+    (SharedDeclaration.parameterVariable parameter) Nothing
+
+  prepareMethod ownerVariables signature = do
+    methodType <- implicitizeLeadingForalls ownerVariables
+      $ SharedDeclaration.valueType signature
+    pure $ SharedDeclaration.ValueSignature (SearchPenaltyMetadata 0)
+      (SharedDeclaration.valueName signature) methodType
+
+-- Exference quantifies every free flexible binding variable implicitly. Drop
+-- only the complete leading prenex chain and retain its contexts in order;
+-- any forall below a type constructor, arrow, tuple, or constraint remains
+-- visible to the existing rank-N omission/validation boundary.
+implicitizeLeadingForalls
+  :: Set.Set SynthesisVariable
+  -> SharedType.Type SynthesisVariable
+  -> Either SynthesisDeclarationError
+      (SharedType.Type SynthesisVariable)
+implicitizeLeadingForalls outerVariables source =
+  fmap snd $ go initiallyReserved [] source
+ where
+  -- Every erased binder becomes free in Exference's implicit representation.
+  -- Allocate it outside the complete source namespace, not merely outside the
+  -- binders seen so far: otherwise flattening could capture a free variable
+  -- deeper in the type. Class parameters are also outside a method's explicit
+  -- forall and must remain distinct from a shadowing method binder.
+  initiallyReserved = outerVariables `Set.union` Set.fromList (toList source)
+
+  go reserved contexts (SharedType.ForallType binders embedded body) = do
+    mapM_ requireFlexible binders
+    (reserved', renaming) <- foldM freshen
+      (reserved, Map.empty) binders
+    let renamedEmbedded = map
+          (fmap $ SharedType.renameScopedVariables renaming) embedded
+        renamedBody = SharedType.renameScopedVariables renaming body
+    go reserved' (contexts ++ renamedEmbedded) renamedBody
+  go reserved contexts body
+    | null contexts = Right (reserved, body)
+    | otherwise = Right
+        (reserved, SharedType.ForallType [] contexts body)
+
+  freshen (reserved, renaming) binder =
+    case freshSynthesisVariable reserved binder of
+      Nothing -> Left $ NeutralVariableNamespaceExhausted binder
+      Just replacement -> Right
+        ( Set.insert replacement reserved
+        , Map.insert binder replacement renaming
+        )
+
+  requireFlexible SharedType.FlexibleVariable{} = Right ()
+  requireFlexible (SharedType.RigidVariable variable) = Left
+    $ DeclarationTypeConversionError $ RigidForallBinder variable
 
 toSynthesisFunctionBinding
   :: FunctionBinding

@@ -13,6 +13,7 @@ module Language.Haskell.Exference.Diagnostic
   , withSource
   , withSpan
   , withContext
+  , sourceTextSpan
   , renderDiagnostic
   )
 where
@@ -23,6 +24,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , SourcePosition (..)
   , SourceSpan (..)
   , renderDiagnostic
+  , sourceTextSpan
   , withCode
   , withContext
   , withSource

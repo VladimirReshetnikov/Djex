@@ -9,9 +9,12 @@ module Language.Haskell.Exference.Diagnostic
   , SourcePosition (..)
   , SourceSpan (..)
   , diagnostic
+  , codedDiagnostic
+  , contextualDiagnostic
   , withCode
   , withSource
   , withSpan
+  , withLocation
   , withContext
   , sourceTextSpan
   , renderDiagnostic
@@ -23,10 +26,13 @@ import Language.Haskell.Synthesis.Diagnostic
   , Severity (..)
   , SourcePosition (..)
   , SourceSpan (..)
+  , codedDiagnostic
+  , contextualDiagnostic
   , renderDiagnostic
   , sourceTextSpan
   , withCode
   , withContext
+  , withLocation
   , withSource
   , withSpan
   )

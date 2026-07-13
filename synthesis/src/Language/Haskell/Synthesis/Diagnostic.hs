@@ -5,9 +5,12 @@ module Language.Haskell.Synthesis.Diagnostic
   , SourceSpan (..)
   , Diagnostic (..)
   , diagnostic
+  , codedDiagnostic
+  , contextualDiagnostic
   , withCode
   , withSource
   , withSpan
+  , withLocation
   , withContext
   , sourceTextSpan
   , renderDiagnostic
@@ -75,6 +78,15 @@ diagnostic severity message = Diagnostic
   , diagnosticContext = []
   }
 
+-- | Start a diagnostic with a stable machine-readable code.
+codedDiagnostic :: Severity -> String -> String -> Diagnostic
+codedDiagnostic severity code = withCode code . diagnostic severity
+
+-- | Start a coded diagnostic with one explanatory context entry.
+contextualDiagnostic :: Severity -> String -> String -> String -> Diagnostic
+contextualDiagnostic severity code message context =
+  withContext context $ codedDiagnostic severity code message
+
 withCode :: String -> Diagnostic -> Diagnostic
 withCode code value = value { diagnosticCode = Just code }
 
@@ -83,6 +95,10 @@ withSource source value = value { diagnosticSource = Just source }
 
 withSpan :: SourceSpan -> Diagnostic -> Diagnostic
 withSpan span' value = value { diagnosticSpan = Just span' }
+
+-- | Attach a complete source location in one operation.
+withLocation :: FilePath -> SourceSpan -> Diagnostic -> Diagnostic
+withLocation source span' = withSpan span' . withSource source
 
 -- | Add outer-to-inner explanatory context.  Rendering preserves insertion
 -- order so adapters can build a readable trail such as module, declaration,

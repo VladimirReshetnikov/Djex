@@ -1893,6 +1893,23 @@ diagnosticTests = testGroup "diagnostics"
       diagnosticSpan value @?= Nothing
       diagnosticContext value @?= []
       renderDiagnostic value @?= "error: cannot synthesize a term"
+  , testCase "coded contextual diagnostic" $ do
+      let value = contextualDiagnostic Warning "SYN002"
+            "search used a fallback" "while checking Example.answer"
+      diagnosticSeverity value @?= Warning
+      diagnosticCode value @?= Just "SYN002"
+      diagnosticContext value @?= ["while checking Example.answer"]
+      renderDiagnostic value @?=
+        "warning [SYN002]: search used a fallback\n\
+        \  context: while checking Example.answer"
+  , testCase "complete source location" $ do
+      let span' = SourceSpan (SourcePosition 2 3) (SourcePosition 4 5)
+          value = withLocation "Example.hs" span'
+            $ codedDiagnostic Error "SYN003" "cannot lower declaration"
+      diagnosticSource value @?= Just "Example.hs"
+      diagnosticSpan value @?= Just span'
+      renderDiagnostic value @?=
+        "Example.hs:2:3-4:5: error [SYN003]: cannot lower declaration"
   , testCase "code, source, span, and ordered context" $ do
       let span' = SourceSpan (SourcePosition 3 7) (SourcePosition 3 12)
           value =

@@ -898,6 +898,31 @@ synonymTests = testGroup "type synonyms"
       TypeSynonym.expandTypeSynonyms
           (\_ binder -> Just binder) aliases applied @?=
         Left (TypeSynonym.FreshVariableCollision "q" "q")
+  , testCase "raw definitions expand only reachable aliases safely" $ do
+      let captureName = right $ mkIdentifier "Capture"
+          cycleA = right $ mkIdentifier "CycleA"
+          cycleB = right $ mkIdentifier "CycleB"
+          definitions = Map.fromList
+            [ ( captureName
+              , ( ["p"]
+                , SharedType.ForallType ["q"] []
+                  $ SharedType.FunctionType
+                      (SharedType.TypeVariable "p")
+                      (SharedType.TypeVariable "q")
+                )
+              )
+            , (cycleA, ([], SharedType.TypeConstructor cycleB))
+            , (cycleB, ([], SharedType.TypeConstructor cycleA))
+            ]
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor captureName)
+            (SharedType.TypeVariable "q")
+      TypeSynonym.expandTypeSynonymDefinitions
+          freshStringVariable definitions applied @?=
+        Right (SharedType.ForallType ["q'"] []
+          $ SharedType.FunctionType
+              (SharedType.TypeVariable "q")
+              (SharedType.TypeVariable "q'"))
   , testCase "substitute parameters simultaneously" $ do
       let swapName = right $ mkIdentifier "Swap"
           swap = Declaration.TypeSynonymDeclaration () swapName

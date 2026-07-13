@@ -891,6 +891,16 @@ tests = testGroup "Exference"
               declaration = HsTypeDecl alias [0] (TypeVar 0)
           applyTypeDecls (Map.singleton alias $ Right declaration) (TypeCons alias)
             @?= Left "wrong number of parameters for type declaration Alias"
+      , testCase "legacy synonym adaptation avoids forall capture" $ do
+          let alias = name "Capture"
+              typeClass = name "C"
+              declaration = HsTypeDecl alias [0]
+                $ TypeForall [1] [HsConstraint typeClass [TypeVar 0]]
+                $ TypeArrow (TypeVar 0) (TypeVar 1)
+              applied = TypeApp (TypeCons alias) (TypeVar 1)
+          applyTypeDecls (Map.singleton alias $ Right declaration) applied @?=
+            Right (TypeForall [2] [HsConstraint typeClass [TypeVar 1]]
+              $ TypeArrow (TypeVar 1) (TypeVar 2))
       , testCase "shared types round-trip flexible, rigid, tuple, and forall forms" $ do
           tuple <- expectRight $ mkBoxedTupleName 2
           let source = TypeForall [0]

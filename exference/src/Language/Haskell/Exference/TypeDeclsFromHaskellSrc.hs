@@ -43,12 +43,13 @@ import Data.Either ( rights )
 import Data.Bifunctor ( bimap, first )
 import Data.Maybe ( maybeToList )
 import Data.List ( intercalate )
+import qualified Data.List.NonEmpty as NonEmpty
 
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as M
-import qualified Data.IntMap as IntMap
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 
 
@@ -116,43 +117,38 @@ fromSynthesisTypeDeclaration declaration = do
 applyTypeDecls :: Map QualifiedName (Either String HsTypeDecl)
                -> HsType 
                -> Either String HsType
-applyTypeDecls declarations = go []
+applyTypeDecls declarations source = do
+  sharedSource <- first show $ toSynthesisType source
+  expanded <- first renderExpansionError
+    $ SharedTypeSynonym.expandTypeSynonymDefinitions
+        freshSynthesisVariable definitions sharedSource
+  first show $ fromSynthesisType expanded
  where
-  go _ (TypeVar i)      = Right $ TypeVar i
-  go _ (TypeConstant i) = Right $ TypeConstant i
-  go path t@(TypeCons _)  = goApp path [] t
-  go path (TypeArrow t1 t2) = [ TypeArrow t1' t2'
-                         | t1' <- go path t1
-                         , t2' <- go path t2
-                         ]
-  go path (TypeApp l r) = goApp path [r] l
-  go path (TypeForall vars constraints t) = do
-    constraints' <- mapM (mapConstraint $ go path) constraints
-    TypeForall vars constraints' <$> go path t
-  goApp path rs (TypeApp l r) = goApp path (r:rs) l
-  goApp path rs (TypeCons qn) = case M.lookup qn declarations of
-    Nothing -> foldl TypeApp (TypeCons qn) <$> mapM (go path) rs
-    -- The declaration error is reported separately by 'getTypeDecls'. Keep an
-    -- unexpanded use here, but do not lose its already converted arguments.
-    Just (Left _) -> foldl TypeApp (TypeCons qn) <$> mapM (go path) rs
-    Just (Right _) | qn `elem` path -> Left $ "cyclic type synonym: "
-      ++ intercalate " -> " (map show $ reverse path ++ [qn])
-    Just (Right (HsTypeDecl _ vs t))
-                             | i <- length vs
-                             , i <= length rs
-                             -> [ foldl TypeApp expanded pUnchanged
-                                | rs' <- mapM (go path) rs
-                                , let pAffected = take i rs'
-                                , let pUnchanged = drop i rs'
-                                , let substs = IntMap.fromList $ zip vs pAffected
-                                , let substituted = snd $ applySubsts substs t
-                                , expanded <- go (qn : path) substituted
-                                ]
-    _                        -> Left $ "wrong number of parameters for type declaration " ++ show qn
-  goApp path rs l = foldl1 TypeApp <$> mapM (go path) (l:rs)
+  -- Failed declarations are reported separately by 'getTypeDecls'. Excluding
+  -- them here retains their applications as ordinary nominal constructors;
+  -- the shared traversal still expands aliases inside their arguments.
+  definitions = M.fromList
+    [ ( toSynthesisName alias
+      , ( map SharedType.FlexibleVariable parameters
+        , toSynthesisTypeStructure body
+        )
+      )
+    | (alias, Right (HsTypeDecl _ parameters body)) <- M.toAscList declarations
+    ]
 
-  mapConstraint f (HsConstraint typeClass parameters) =
-    HsConstraint typeClass <$> mapM f parameters
+  renderExpansionError failure = case failure of
+    SharedTypeSynonym.IntrinsicTypeSynonym name ->
+      "intrinsic type synonym: " ++ show name
+    SharedTypeSynonym.UnsaturatedTypeSynonym name _ _ ->
+      "wrong number of parameters for type declaration " ++ show name
+    SharedTypeSynonym.RecursiveTypeSynonyms names ->
+      "cyclic type synonym: "
+        ++ intercalate " -> " (map show $ NonEmpty.toList names)
+    SharedTypeSynonym.FreshVariableUnavailable variable ->
+      "cannot freshen type synonym binder " ++ show variable
+    SharedTypeSynonym.FreshVariableCollision old replacement ->
+      "invalid fresh type synonym binder " ++ show replacement
+        ++ " for " ++ show old
 
 getTypeDecls :: Monad m
              => [QualifiedName]

@@ -110,6 +110,10 @@ by Exference's flat search binding is derived from the class parameters,
 checked and removed while nesting, and restored exactly once while lowering.
 The older method-free class conversion still rejects a declaration containing
 methods instead of silently dropping them.
+The legacy `applyTypeDecls` entry point now adapts its finite raw definition
+map to the shared capture-avoiding synonym engine as well. It retains
+reachable-only cycle reporting and invalid-declaration fallback for source
+compatibility, but no longer owns a second substitution implementation.
 
 Method-free core environments round-trip through the shared sealed declaration
 inventory with `fromSynthesisEnvironment`. That legacy reverse adapter rejects

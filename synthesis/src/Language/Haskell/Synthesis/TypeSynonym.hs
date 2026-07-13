@@ -13,6 +13,7 @@ module Language.Haskell.Synthesis.TypeSynonym
   , ElaborationPhase (..)
   , TypeElaborationError (..)
   , prepareTypeSynonyms
+  , expandTypeSynonymDefinitions
   , expandTypeSynonyms
   , elaborateType
   , expandDeclarationTypeSynonyms
@@ -55,6 +56,7 @@ import Language.Haskell.Synthesis.KindInference
   , KindAssumptions
   , KindInferenceError
   , checkTypesKinds
+  , emptyKindAssumptions
   )
 import Language.Haskell.Synthesis.Name (Name, nameSpecial)
 import Language.Haskell.Synthesis.Type
@@ -155,17 +157,45 @@ prepareTypeSynonyms fresh inventory = do
   pure $ TypeSynonyms normalized
     (inventoryKindAssumptions inventory) normalizedVariables
 
--- | Expand every saturated alias occurrence. Overapplication consumes the
--- declared parameters and reapplies remaining arguments in order; partial
--- application is rejected even in a higher-kinded position, matching Haskell
--- type-synonym saturation rules.
+-- | Expand against finite raw definitions while a parser adapter is still
+-- assembling its checked inventory. Only aliases reachable from the source
+-- are inspected, so an independently reported invalid declaration does not
+-- mask conversion of unrelated syntax. Callers that already have an
+-- 'Inventory' should use 'prepareTypeSynonyms' and 'expandTypeSynonyms'.
+expandTypeSynonymDefinitions
+  :: Ord variable
+  => FreshVariable variable
+  -> Map Name ([variable], Type variable)
+  -> Type variable
+  -> Either (SynonymExpansionError variable) (Type variable)
+expandTypeSynonymDefinitions fresh definitions = expandWithTable fresh table
+ where
+  prepared = Map.map (uncurry SynonymDefinition) definitions
+  variables = foldMap definitionVariables prepared
+  -- Parser adapters use this boundary while assembling the inventory whose
+  -- kinds will be checked later. Expansion itself needs definitions and a
+  -- freshness namespace only; the empty assumptions are never consulted.
+  table = TypeSynonyms prepared emptyKindAssumptions variables
+
+-- | Expand every saturated alias occurrence in a checked prepared table.
+-- Overapplication consumes the declared parameters and reapplies remaining
+-- arguments in order; partial application is rejected even in a higher-kinded
+-- position, matching Haskell type-synonym saturation rules.
 expandTypeSynonyms
   :: Ord variable
   => FreshVariable variable
   -> TypeSynonyms variable
   -> Type variable
   -> Either (SynonymExpansionError variable) (Type variable)
-expandTypeSynonyms fresh table source = evalStateT
+expandTypeSynonyms = expandWithTable
+
+expandWithTable
+  :: Ord variable
+  => FreshVariable variable
+  -> TypeSynonyms variable
+  -> Type variable
+  -> Either (SynonymExpansionError variable) (Type variable)
+expandWithTable fresh table source = evalStateT
   (expand fresh table [] $ canonicalizeType source)
   (synonymVariables table `Set.union` typeVariables source)
 

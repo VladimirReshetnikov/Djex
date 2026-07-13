@@ -35,16 +35,16 @@ import Djinn.Core
   , PreparedEnvironment
   , QueryOptions (..)
   , defaultQueryOptions
-  , fromSynthesisEnvironment
   , generatedReportCandidates
   , generatedReportCompletion
   , generatedReportEvidence
   , generatedReportFormula
   , generatedReportProof
   , inhabitGeneratedPrepared
-  , prepareEnvironment
+  , prepareSynthesisEnvironment
   , preparedEnvironmentInventory
   , standardEnvironment
+  , toSynthesisEnvironment
   )
 import qualified Djinn.Core as Core
 import Language.Haskell.Synthesis.Candidate
@@ -132,27 +132,13 @@ type DjinnResult = QueryResult DjinnQueryMetadata DjinnCandidate
 -- | Lower a shared declaration environment through Djinn's stricter lexical,
 -- dependency, and kind checks, then seal it into a reusable session.
 mkDjinnSession :: DjinnEnvironment -> Either Diagnostic DjinnSession
-mkDjinnSession sharedEnvironment = case
-    fromSynthesisEnvironment sharedEnvironment of
-  Left failure -> environmentFailure failure
-  Right environment -> mkDjinnSessionFromCore environment
-
--- The standard prelude and compatibility CLI already own checked raw Djinn
--- environments. Keep that bridge private so facade clients cannot accidentally
--- couple themselves to the mutable backend representation.
-mkDjinnSessionFromCore
-  :: Core.Environment
-  -> Either Diagnostic DjinnSession
-mkDjinnSessionFromCore environment = case prepareEnvironment environment of
-  Left failure -> Left $ withContext (show failure)
-    $ withCode "DJEX_DJINN_ENV"
-    $ diagnostic Error "cannot seal the Djinn session environment"
-  Right prepared -> Right $ DjinnSession prepared
+mkDjinnSession sharedEnvironment = DjinnSession <$>
+  first environmentFailure (prepareSynthesisEnvironment sharedEnvironment)
 
 environmentFailure
   :: Core.SynthesisEnvironmentError
-  -> Either Diagnostic value
-environmentFailure failure = Left $ withContext (show failure)
+  -> Diagnostic
+environmentFailure failure = withContext (show failure)
   $ withCode "DJEX_DJINN_ENV"
   $ diagnostic Error "cannot lower the shared environment to Djinn"
 
@@ -160,7 +146,9 @@ environmentFailure failure = Left $ withContext (show failure)
 -- Advanced clients can convert an editable raw environment with
 -- @Djinn.Core.toSynthesisEnvironment@ before calling 'mkDjinnSession'.
 standardDjinnSession :: Either Diagnostic DjinnSession
-standardDjinnSession = mkDjinnSessionFromCore standardEnvironment
+standardDjinnSession =
+  first environmentFailure (toSynthesisEnvironment standardEnvironment)
+    >>= mkDjinnSession
 
 djinnSessionInventory :: DjinnSession -> DjinnInventory
 djinnSessionInventory (DjinnSession prepared) =

@@ -18,7 +18,9 @@ its user guide inside the executable rather than as a README.
 the same retained structural-and-kind artifact used by Exference sessions.
 Standalone declaration adapters still round-trip historical `KVar` syntax,
 while inventory sealing rejects any unsolved kind rather than allowing it into
-query elaboration.
+query elaboration. Neutral `DjinnEnvironment` sessions keep their original
+sealed declaration order, infer one authoritative Inventory with Haskell 98
+class-kind defaulting, and derive every raw backend kind from that Inventory.
 
 ## Build and run
 
@@ -60,7 +62,7 @@ cabal test djinn-tests djinn-property-tests djinn-cli-tests --test-show-details=
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 39 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 42 focused Tasty/HUnit regressions over parsing, kinds, class signatures, neutral-environment sealing, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Fifteen subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 
@@ -458,8 +460,12 @@ bodies, shared foralls, and unboxed tuples instead of conflating those layers.
 Djinn's synonyms, data/abstract types, classes, and assumptions while rejecting
 shared superclass and instance semantics that Djinn does not implement.
 The opaque Djinn `Environment` itself now round-trips through
-`Language.Haskell.Synthesis.Environment`; reverse lowering reruns Djinn's
-stricter kind, dependency, recursion, and method validation transactionally.
+`Language.Haskell.Synthesis.Environment`; reverse lowering preflights Djinn's
+stricter source subset, grounds and checks the neutral Inventory once, validates
+synonym saturation in every type-bearing declaration position, and classifies
+recursive datatypes only after aliases have been expanded. The resulting raw
+search tables and query-time kind checker are projections of those same cached
+assumptions rather than a second independently inferred environment.
 Successful canonical reports expose `generatedReportCandidates`; every Djinn
 candidate has empty residual constraints and retains the unused-binder fraction
 and binder count used by the historical ranking policy. Compatibility
@@ -470,8 +476,8 @@ The default `djex` library additionally exposes
 `DjinnEnvironment` and pairs the checked Djinn projection with the exact shared
 `DjinnInventory` that validated it. The editable raw `Djinn.Core.Environment`
 therefore remains confined to the compatibility library and REPL;
-`standardDjinnSession` supplies the checked built-in environment without
-exposing its representation,
+`standardDjinnSession` sends the checked built-in environment through that same
+neutral boundary without exposing its raw representation,
 `parseDjinnRequest` shares the REPL's optional class-context grammar, and
 `runDjinnQuery` accepts `QueryRequest DjinnType QueryOptions`, where
 `DjinnType` is the shared `Type DjinnTypeVariable` source representation;
@@ -567,8 +573,10 @@ knowing before editing the source:
   type variables are not freshly instantiated at each use.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract
   constructors may still be used partially in higher-kinded positions.
-- Recursive data types cannot be declared structurally. List types are therefore
-  treated opaquely rather than expanded into `[]` and `(:)`.
+- Genuinely recursive data types cannot be declared structurally. Recursion is
+  classified after synonym expansion, so a phantom alias can erase an apparent
+  surface cycle; list types remain opaque rather than being expanded into `[]`
+  and `(:)`.
 - Empty data types are logically false but retain nominal tags. Identity is used
   only for the same empty type; conversion to another result uses explicit empty
   elimination.

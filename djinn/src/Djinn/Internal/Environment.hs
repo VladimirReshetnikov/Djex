@@ -1,10 +1,11 @@
 --
--- Transactional validation of declarations stored by a frontend, plus the
--- declaration-shape checks shared by the CLI and the library facade.
+-- Transactional validation of editable Djinn declarations, plus the
+-- authoritative lowering from Djex's neutral environment into proof-search
+-- indexes.
 --
 module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
-    PreparedEnvironment, prepareEnvironment,
+    PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
     preparedEnvironmentKindCheck,
     SynthesisEnvironment, SynthesisInventory,
@@ -15,11 +16,17 @@ module Djinn.Internal.Environment (
     checkConstructors
     ) where
 
+import Data.Bifunctor (first)
 import Data.List (nub)
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+import Data.Void (Void, absurd)
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
+import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck
@@ -56,19 +63,19 @@ type SynthesisEnvironment =
 
 type SynthesisInventory = SharedInventory.Inventory HSymbol ()
 
-data ClassKindProjection
-    -- The historical shared-environment round trip lowers through the
-    -- unkinded compatibility 'ClassDecl'. Inventories are one-way checked
-    -- session artifacts and can retain the validated parameter kinds.
-    = OmitInferredClassKinds
-    | RetainInferredClassKinds
-
 data SynthesisEnvironmentError
     = SynthesisEnvironmentDeclarationError SynthesisDeclarationError
     | InvalidSynthesisEnvironment
         (SharedEnvironment.EnvironmentError HSymbol)
     | InvalidSynthesisInventory
         (SharedInventory.InventoryError HSymbol Int)
+    | InvalidSynthesisTypeSynonyms
+        (SharedTypeSynonym.SynonymExpansionError HSymbol)
+    | RecursiveSynthesisDataTypes [SharedName.Name]
+    | MissingSynthesisTypeKind SharedName.Name
+    | MissingSynthesisClassKinds SharedName.Name
+    | SynthesisClassKindArityMismatch SharedName.Name Int Int
+    | UnresolvedSynthesisClassKind SharedName.Name HSymbol
     | DjinnEnvironmentValidationError String
     deriving (Eq, Show)
 
@@ -76,7 +83,7 @@ toSynthesisEnvironment
     :: Environment
     -> Either SynthesisEnvironmentError SynthesisEnvironment
 toSynthesisEnvironment environment = do
-    declarations <- synthesisDeclarations OmitInferredClassKinds environment
+    declarations <- synthesisDeclarations environment
     either (Left . InvalidSynthesisEnvironment) Right $
         SharedEnvironment.mkEnvironment declarations
 
@@ -88,10 +95,11 @@ toSynthesisInventory
     :: Environment
     -> Either SynthesisEnvironmentError SynthesisInventory
 toSynthesisInventory environment = do
-    declarations <- synthesisDeclarations RetainInferredClassKinds environment
+    declarations <- synthesisDeclarations environment
     either (Left . InvalidSynthesisInventory) Right $
-        SharedInventory.mkInventory
-            SharedInference.ClosedKindInventory declarations
+        SharedInventory.mkInventoryWithClassPolicy
+            SharedInference.ClosedKindInventory
+            SharedInference.DefaultClassKinds declarations
 
 -- | Seal all reusable views of an environment in one operation.  Inventory
 -- kind inference is the sole whole-environment kind pass; individual queries,
@@ -101,7 +109,56 @@ prepareEnvironment
     -> Either SynthesisEnvironmentError PreparedEnvironment
 prepareEnvironment environment = do
     inventory <- toSynthesisInventory environment
-    return $ PreparedEnvironment environment inventory $
+    return $ sealPreparedEnvironment environment inventory
+
+-- | Validate a neutral environment once, then derive Djinn's compatibility
+-- projection from the resulting inventory. Conversion is deliberately split
+-- into phases: every declaration first crosses Djinn's lexical/feature
+-- boundary in source order; explicit kinds are then grounded without
+-- rebuilding the environment; finally the shared kind assumptions become the
+-- sole authority for every kind embedded in Djinn's raw representation.
+--
+-- Synonyms stay in the stored raw environment because the proof translation
+-- uses them definitionally. They are nevertheless expanded across every
+-- declaration before sealing, both to enforce Haskell's saturation rule and
+-- to classify recursive datatypes by their actual (alias-free) fields.
+prepareSynthesisEnvironment
+    :: SynthesisEnvironment
+    -> Either SynthesisEnvironmentError PreparedEnvironment
+prepareSynthesisEnvironment sourceEnvironment = do
+    sourceDeclarations <- mapM preflightDeclaration $
+        SharedEnvironment.environmentDeclarations sourceEnvironment
+    groundedEnvironment <- first
+        (InvalidSynthesisInventory .
+            SharedInventory.UngroundedInventoryKind) $
+        SharedEnvironment.groundEnvironmentKinds sourceEnvironment
+    inventory <- first
+        (InvalidSynthesisInventory . promoteVoidInventoryError) $
+        SharedInventory.mkInventoryFromEnvironmentWithClassPolicy
+            SharedInference.ClosedKindInventory
+            SharedInference.DefaultClassKinds groundedEnvironment
+    synonyms <- first InvalidSynthesisTypeSynonyms $
+        SharedTypeSynonym.prepareTypeSynonyms
+            freshDjinnTypeVariable inventory
+    expandedDeclarations <- mapM
+        (first InvalidSynthesisTypeSynonyms .
+            SharedTypeSynonym.expandDeclarationTypeSynonyms
+                freshDjinnTypeVariable synonyms)
+        (SharedEnvironment.environmentDeclarations $
+            SharedInventory.inventoryEnvironment inventory)
+    let recursiveNames = SharedDeclaration.recursiveDataTypeNames
+            expandedDeclarations
+    if Set.null recursiveNames then return () else
+        Left $ RecursiveSynthesisDataTypes $ Set.toAscList recursiveNames
+    environment <- projectSynthesisEnvironment
+        (SharedInventory.inventoryKindAssumptions inventory)
+        sourceDeclarations
+    return $ sealPreparedEnvironment environment inventory
+
+sealPreparedEnvironment
+    :: Environment -> SynthesisInventory -> PreparedEnvironment
+sealPreparedEnvironment environment inventory =
+    PreparedEnvironment environment inventory $
         prepareKindCheckWithAssumptions
             (envTypes environment)
             (SharedInventory.inventoryKindAssumptions inventory)
@@ -116,16 +173,15 @@ preparedEnvironmentKindCheck :: PreparedEnvironment -> PreparedKindCheck
 preparedEnvironmentKindCheck (PreparedEnvironment _ _ kindCheck) = kindCheck
 
 synthesisDeclarations
-    :: ClassKindProjection
-    -> Environment
+    :: Environment
     -> Either SynthesisEnvironmentError [SynthesisDeclaration]
-synthesisDeclarations classKindProjection environment = do
-    ordinary <- mapM convertedDeclaration $
+synthesisDeclarations environment =
+    mapM convertedDeclaration $
         map typeDeclaration (envTypes environment) ++
         [Function name functionType |
-            (name, functionType) <- envFunctions environment]
-    classes <- mapM convertedClass $ envClasses environment
-    return $ ordinary ++ classes
+            (name, functionType) <- envFunctions environment] ++
+        [ClassDecl name (map fst parameters) methods |
+            (name, (parameters, methods)) <- envClasses environment]
   where
     typeDeclaration (name, (parameters, body, kind)) = case body of
         HTUnion constructors -> DataType name parameters constructors
@@ -136,30 +192,121 @@ synthesisDeclarations classKindProjection environment = do
         (Left . SynthesisEnvironmentDeclarationError) Right .
         toSynthesisDeclaration
 
-    -- The compatibility 'ClassDecl' stores only source parameter names, while
-    -- a validated Environment stores their inferred kinds as well. Preserve
-    -- those fixed kinds in the session inventory; otherwise a method-less
-    -- Djinn class would incorrectly become poly-kinded at the shared boundary.
-    convertedClass (name, (parameters, methods)) = do
-        declaration <- convertedDeclaration $
-            ClassDecl name (map fst parameters) methods
-        case declaration of
-            SharedDeclaration.ClassDeclaration
-                    annotation sharedName sharedParameters superclasses
-                    sharedMethods ->
-                return $ SharedDeclaration.ClassDeclaration annotation
-                    sharedName
-                    (case classKindProjection of
-                        RetainInferredClassKinds ->
-                            zipWith retainKind sharedParameters parameters
-                        OmitInferredClassKinds -> sharedParameters)
-                    superclasses sharedMethods
-            _ -> Left $ DjinnEnvironmentValidationError $
-                "internal class conversion did not produce a class: " ++ name
+preflightDeclaration
+    :: SynthesisDeclaration
+    -> Either SynthesisEnvironmentError (SynthesisDeclaration, Declaration)
+preflightDeclaration sharedDeclaration = do
+    rawDeclaration <- first SynthesisEnvironmentDeclarationError $
+        fromSynthesisDeclaration sharedDeclaration
+    return (sharedDeclaration, rawDeclaration)
 
-    retainKind parameter (_, kind) = parameter {
-        SharedDeclaration.parameterKind = Just $ toSynthesisKind kind
+data ProjectedDeclaration
+    = ProjectedType TypeDefinition
+    | ProjectedFunction Axiom
+    | ProjectedClass ClassDefinition
+
+projectSynthesisEnvironment
+    :: SharedInference.KindAssumptions
+    -> [(SynthesisDeclaration, Declaration)]
+    -> Either SynthesisEnvironmentError Environment
+projectSynthesisEnvironment assumptions declarations = do
+    projected <- mapM (projectDeclaration assumptions) declarations
+    let (types, functions, classes) =
+            foldr collect ([], [], []) projected
+    return Environment
+        { envTypes = types
+        , envFunctions = functions
+        , envClasses = classes
         }
+  where
+    collect declaration (types, functions, classes) = case declaration of
+        ProjectedType typeDefinition ->
+            (typeDefinition : types, functions, classes)
+        ProjectedFunction function ->
+            (types, function : functions, classes)
+        ProjectedClass classDefinition ->
+            (types, functions, classDefinition : classes)
+
+projectDeclaration
+    :: SharedInference.KindAssumptions
+    -> (SynthesisDeclaration, Declaration)
+    -> Either SynthesisEnvironmentError ProjectedDeclaration
+projectDeclaration assumptions pair = case pair of
+    (SharedDeclaration.TypeSynonymDeclaration _ sharedName _ _,
+            TypeSynonym name parameters body) -> do
+        kind <- requiredTypeKind assumptions sharedName
+        return $ ProjectedType (name, (parameters, body, kind))
+    (SharedDeclaration.DataTypeDeclaration _ sharedName _ _,
+            DataType name parameters constructors) -> do
+        kind <- requiredTypeKind assumptions sharedName
+        return $ ProjectedType
+            (name, (parameters, HTUnion constructors, kind))
+    (SharedDeclaration.AbstractTypeDeclaration _ sharedName _,
+            AbstractType name _) -> do
+        kind <- requiredTypeKind assumptions sharedName
+        return $ ProjectedType (name, ([], HTAbstract name kind, kind))
+    (SharedDeclaration.ValueDeclaration{},
+            Function name functionType) ->
+        Right $ ProjectedFunction (name, functionType)
+    (SharedDeclaration.ClassDeclaration _ sharedName _ _ _,
+            ClassDecl name parameters methods) -> do
+        kinds <- requiredClassKinds assumptions sharedName parameters
+        return $ ProjectedClass
+            (name, (zip parameters kinds, methods))
+    _ -> Left $ DjinnEnvironmentValidationError $
+        "internal shared declaration projection changed shape"
+
+requiredTypeKind
+    :: SharedInference.KindAssumptions
+    -> SharedName.Name
+    -> Either SynthesisEnvironmentError HKind
+requiredTypeKind assumptions name =
+    maybe (Left $ MissingSynthesisTypeKind name)
+        (Right . groundKindToHKind) $
+        Map.lookup name $ SharedInference.typeConstructorKinds assumptions
+
+requiredClassKinds
+    :: SharedInference.KindAssumptions
+    -> SharedName.Name
+    -> [HSymbol]
+    -> Either SynthesisEnvironmentError [HKind]
+requiredClassKinds assumptions name parameters =
+    case Map.lookup name $ SharedInference.classParameterKinds assumptions of
+        Nothing -> Left $ MissingSynthesisClassKinds name
+        Just kinds
+            | length kinds /= length parameters -> Left $
+                SynthesisClassKindArityMismatch name
+                    (length parameters) (length kinds)
+            | otherwise -> sequence
+                [ maybe (Left $ UnresolvedSynthesisClassKind name parameter)
+                    (Right . groundKindToHKind) kind
+                | (parameter, kind) <- zip parameters kinds
+                ]
+
+groundKindToHKind :: SharedInference.GroundKind -> HKind
+groundKindToHKind = fromSynthesisKind . fmap absurd
+
+freshDjinnTypeVariable
+    :: SharedTypeSynonym.FreshVariable HSymbol
+freshDjinnTypeVariable reserved = Just . choose . (++ "'")
+  where
+    choose candidate
+        | candidate `Set.member` reserved = choose $ candidate ++ "'"
+        | otherwise = candidate
+
+-- The Environment-native constructor cannot encounter an ungrounded kind,
+-- but its error parameter remembers the already-erased input type. Retag the
+-- two inhabited alternatives for the compatibility error vocabulary and
+-- discharge the impossible third one.
+promoteVoidInventoryError
+    :: SharedInventory.InventoryError HSymbol Void
+    -> SharedInventory.InventoryError HSymbol Int
+promoteVoidInventoryError failure = case failure of
+    SharedInventory.InvalidInventoryEnvironment environmentError ->
+        SharedInventory.InvalidInventoryEnvironment environmentError
+    SharedInventory.UngroundedInventoryKind impossible -> absurd impossible
+    SharedInventory.InvalidInventoryKinds kindError ->
+        SharedInventory.InvalidInventoryKinds kindError
 
 -- Rebuild inferred kinds first, then check every declaration that depends
 -- on them.  Class parameter kinds are re-inferred against the rebuilt type

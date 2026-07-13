@@ -66,6 +66,8 @@ tests =
     , ("round-trip shared source types", testSharedTypeAdapter)
     , ("round-trip shared declarations", testSharedDeclarationAdapter)
     , ("round-trip shared environments", testSharedEnvironmentAdapter)
+    , ("prepare neutral Djinn environments authoritatively",
+          testNeutralDjinnPreparation)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
@@ -573,6 +575,158 @@ testSharedEnvironmentAdapter = do
     assertEqual "only canonical data () = () crosses the trusted unit path"
         [ ("()", ([], HTUnion [("()", [])], KStar)) ]
         (typeDeclarations loweredUnit)
+
+-- The stable Djex boundary must preserve the neutral Environment as the
+-- authoritative declaration inventory.  Lowering may organize declarations
+-- into Djinn's three historical lookup tables, but rebuilding the public
+-- inventory from those tables loses global source order and can also change
+-- the meaning of synonym-transparent recursion.
+testNeutralDjinnPreparation :: IO ()
+testNeutralDjinnPreparation = do
+    let proper = SharedKind.ProperTypeKind
+        abstract name kind =
+            SharedDeclaration.AbstractTypeDeclaration ()
+                (sharedName name) kind
+        value name valueType = SharedDeclaration.ValueDeclaration
+            $ SharedDeclaration.ValueSignature () (sharedName name) valueType
+        variable name = SharedType.TypeVariable name
+        constructor name = SharedType.TypeConstructor $ sharedName name
+        apply = SharedType.TypeApplication
+        parameter name = SharedDeclaration.TypeParameter name Nothing
+        dataType name fields = SharedDeclaration.DataTypeDeclaration ()
+            (sharedName name) []
+            [SharedDeclaration.DataConstructor () (sharedName name) fields]
+        methodlessClass = SharedDeclaration.ClassDeclaration ()
+            (sharedName "Marker") [parameter "a"] [] []
+        orderedDeclarations =
+            [ abstract "First" proper
+            , value "firstValue" $ constructor "First"
+            , methodlessClass
+            , abstract "Second" proper
+            , value "secondValue" $ constructor "Second"
+            ]
+
+    orderedEnvironment <- mkNeutralDjinnEnvironment orderedDeclarations
+    orderedSession <- expectShownRight
+        $ Djex.mkDjinnSession orderedEnvironment
+    groundedOrderedEnvironment <- expectShownRight
+        $ SharedEnvironment.groundEnvironmentKinds orderedEnvironment
+    assertEqual "the session inventory changed global declaration order"
+        (SharedEnvironment.environmentDeclarations groundedOrderedEnvironment)
+        (SharedEnvironment.environmentDeclarations
+            $ SharedInventory.inventoryEnvironment
+            $ Djex.djinnSessionInventory orderedSession)
+    assertEqual "a methodless Djinn class did not default its parameter to *"
+        (Just [Just proper])
+        (Map.lookup (sharedName "Marker")
+            $ SharedInference.classParameterKinds
+            $ SharedInventory.inventoryKindAssumptions
+            $ Djex.djinnSessionInventory orderedSession)
+
+    -- Synonym expansion must precede the recursive-datatype policy.  The
+    -- parameter of Phantom is semantically absent, so this datatype is not
+    -- recursive despite the surface occurrence of D in its constructor.
+    let boolDeclaration = abstract "Bool" proper
+        phantomDeclaration = SharedDeclaration.TypeSynonymDeclaration ()
+            (sharedName "Phantom") [parameter "a"] $ constructor "Bool"
+        phantomUse = apply (constructor "Phantom") (constructor "D")
+        phantomDeclarations =
+            [boolDeclaration, phantomDeclaration, dataType "D" [phantomUse]]
+    phantomEnvironment <- mkNeutralDjinnEnvironment phantomDeclarations
+    _ <- expectShownRight $ fromSynthesisEnvironment phantomEnvironment
+    _ <- expectShownRight $ Djex.mkDjinnSession phantomEnvironment
+
+    let identityDeclaration = SharedDeclaration.TypeSynonymDeclaration ()
+            (sharedName "Identity") [parameter "a"] $ variable "a"
+        identityUse name = apply (constructor "Identity") (constructor name)
+        recursiveCases =
+            [ ("direct recursion",
+                [dataType "Direct" [constructor "Direct"]])
+            , ("mutual recursion",
+                [ dataType "Even" [constructor "Odd"]
+                , dataType "Odd" [constructor "Even"]
+                ])
+            , ("recursion exposed by synonym expansion",
+                [ identityDeclaration
+                , dataType "AliasLoop" [identityUse "AliasLoop"]
+                ])
+            ]
+    mapM_ assertRecursiveRejection recursiveCases
+
+    -- Kind inference alone accepts this partially applied synonym: Pair Bool
+    -- has kind * -> *, exactly the argument kind expected by Higher.  Djinn's
+    -- Haskell-compatible boundary must nevertheless reject every supported
+    -- declaration position in which a synonym is not fully saturated.
+    let higherKind = SharedKind.FunctionKind
+            (SharedKind.FunctionKind proper proper) proper
+        pairDeclaration = SharedDeclaration.TypeSynonymDeclaration ()
+            (sharedName "Pair") [parameter "a", parameter "b"]
+            $ SharedType.TupleType SharedName.Boxed
+                [variable "a", variable "b"]
+        partialPair = apply (constructor "Pair") (constructor "Bool")
+        partialUse = apply (constructor "Higher") partialPair
+        saturationBase =
+            [ boolDeclaration
+            , abstract "Higher" higherKind
+            , pairDeclaration
+            ]
+        badSynonym = SharedDeclaration.TypeSynonymDeclaration ()
+            (sharedName "BadSynonym") [] partialUse
+        badData = dataType "BadData" [partialUse]
+        badValue = value "badValue" partialUse
+        badClass = SharedDeclaration.ClassDeclaration ()
+            (sharedName "BadClass") [parameter "a"] []
+            [SharedDeclaration.ValueSignature ()
+                (sharedName "badMethod") partialUse]
+        saturationCases =
+            [ ("a synonym body", badSynonym)
+            , ("a data-constructor field", badData)
+            , ("a value signature", badValue)
+            , ("a class method", badClass)
+            ]
+    saturationEnvironment <- mkNeutralDjinnEnvironment saturationBase
+    _ <- expectShownRight $ Djex.mkDjinnSession saturationEnvironment
+    mapM_ (assertUnsaturatedRejection saturationBase) saturationCases
+  where
+    assertRecursiveRejection (description, declarations) = do
+        environment <- mkNeutralDjinnEnvironment declarations
+        assertDjinnSessionRejected description
+            $ Djex.mkDjinnSession environment
+
+    assertUnsaturatedRejection base (description, declaration) = do
+        environment <- mkNeutralDjinnEnvironment $ base ++ [declaration]
+        case Djex.mkDjinnSession environment of
+            Left failure -> do
+                assertEqual (description ++ " has the environment code")
+                    (Just "DJEX_DJINN_ENV")
+                    (SharedDiagnostic.diagnosticCode failure)
+                let contextText = unwords
+                        $ SharedDiagnostic.diagnosticContext failure
+                assertBool (description ++ " did not report Pair")
+                    $ "Pair" `isInfixOf` contextText
+                assertBool (description ++ " did not report saturation")
+                    $ ("expects 2" `isInfixOf` contextText &&
+                        "got 1" `isInfixOf` contextText) ||
+                      ("UnsaturatedTypeSynonym" `isInfixOf` contextText &&
+                        "1" `isInfixOf` contextText &&
+                        "2" `isInfixOf` contextText)
+            Right _ -> fail $ description ++
+                ": an unsaturated type synonym reached Djinn"
+
+mkNeutralDjinnEnvironment
+    :: [SharedDeclaration.Declaration String Int ()]
+    -> IO Djex.DjinnEnvironment
+mkNeutralDjinnEnvironment = expectShownRight .
+    SharedEnvironment.mkEnvironment
+
+assertDjinnSessionRejected
+    :: String
+    -> Either SharedDiagnostic.Diagnostic Djex.DjinnSession
+    -> IO ()
+assertDjinnSessionRejected description result = case result of
+    Left failure -> assertEqual (description ++ " has the environment code")
+        (Just "DJEX_DJINN_ENV") (SharedDiagnostic.diagnosticCode failure)
+    Right _ -> fail $ description ++ ": a recursive datatype reached Djinn"
 
 -- Type synonyms are transparent even when they occur below an opaque type
 -- constructor.  The whole opaque application remains one proposition, but

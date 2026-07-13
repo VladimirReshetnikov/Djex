@@ -142,9 +142,11 @@ shared boundary rather than during ordinary field access.
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
 the same types or options. `mkDjinnSession` lowers and seals the neutral shared
-`DjinnEnvironment`; the mutable raw `Djinn.Core.Environment` no longer crosses
-the default facade. `standardDjinnSession` supplies the checked built-in
-environment directly, and
+`DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
+class-kind defaulting; the mutable raw `Djinn.Core.Environment` no longer
+crosses the default facade. Synonyms are expanded for saturation and recursive
+datatype validation before the original alias-bearing declarations are lowered
+for proof search. `standardDjinnSession` exercises the same neutral path, and
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
 grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
 point rather than importing an internal parser. Both `DjinnRequest` and

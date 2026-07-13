@@ -25,7 +25,8 @@ module Djinn.Core (
     toSynthesisDeclaration, fromSynthesisDeclaration,
     -- * Environments
     Environment, emptyEnvironment, standardEnvironment,
-    PreparedEnvironment, prepareEnvironment, preparedEnvironmentInventory,
+    PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
+    preparedEnvironmentInventory,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
@@ -54,7 +55,6 @@ import Language.Haskell.Synthesis.Constraint
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
-import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
@@ -139,46 +139,8 @@ emptyEnvironment = Environment [] [] []
 fromSynthesisEnvironment
     :: SynthesisEnvironment
     -> Either SynthesisEnvironmentError Environment
-fromSynthesisEnvironment shared = do
-    -- 'fromSynthesisDeclaration' applies the same role-specific lexical
-    -- predicates as 'declare'.  Its sole exception is the exact structural
-    -- @data () = ()@ declaration installed by 'trustedUnitEnvironment'; any
-    -- other declaration claiming either unit owner is rejected before this
-    -- structural rebuild.
-    declarations <- mapM lower $
-        SharedEnvironment.environmentDeclarations shared
-    -- A right fold preserves relative order independently in each category;
-    -- function order is observable in proof search and tie-breaking.
-    let (rawTypes, functions, rawClasses) =
-            foldr collect ([], [], []) declarations
-    (types, classes) <- either
-        (Left . DjinnEnvironmentValidationError) Right $
-        validateEnvironment rawTypes functions rawClasses
-    return Environment {
-        envTypes = types,
-        envFunctions = functions,
-        envClasses = classes
-        }
-  where
-    lower = either (Left . SynthesisEnvironmentDeclarationError) Right .
-        fromSynthesisDeclaration
-    collect declaration (types, functions, classes) =
-        case declaration of
-            TypeSynonym name parameters body ->
-                ((name, (parameters, body, KStar)) : types,
-                    functions, classes)
-            DataType name parameters constructors ->
-                ((name, (parameters, HTUnion constructors, KStar)) : types,
-                    functions, classes)
-            AbstractType name kind ->
-                ((name, ([], HTAbstract name kind, kind)) : types,
-                    functions, classes)
-            ClassDecl name parameters methods ->
-                (types, functions,
-                    (name, ([(parameter, KStar) | parameter <- parameters],
-                        methods)) : classes)
-            Function name functionType ->
-                (types, (name, functionType) : functions, classes)
+fromSynthesisEnvironment =
+    fmap preparedEnvironmentSource . prepareSynthesisEnvironment
 
 -- | The environment the interactive Djinn starts with: @()@, @Bool@,
 -- @Either@, @Maybe@, @Void@, @type Not x = x -> Void@, and small @Eq@

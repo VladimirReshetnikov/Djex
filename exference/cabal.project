@@ -1,6 +1,0 @@
--- Keep the neutral foundation in the backend-local build plan.
-packages:
-  .
-  ../synthesis
-
-tests: True

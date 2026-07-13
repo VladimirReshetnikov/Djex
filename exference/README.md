@@ -24,27 +24,31 @@ sometimes stopping with "i could not find any solutions".
 
 # Building from source
 
-The library and deterministic test suite build with GHC 9.12.4 and Cabal
-3.16.1.0. Cabal is the maintained build path; the historical Stack file
-targeted LTS 5.18 and dependencies that no longer exist in this tree, so it has
-been removed rather than pretending to provide a second supported toolchain.
+Exference is part of the unified `djex` Cabal package. Its libraries and
+deterministic test suites build with GHC 9.12.4 and Cabal 3.16.1.0. Cabal is the
+maintained build path; the historical Stack file targeted LTS 5.18 and
+dependencies that no longer exist in this tree, so it has been removed rather
+than pretending to provide a second supported toolchain. Run these commands
+from the repository root or `djex/`:
 
-```text
-cabal build all
-cabal test all --test-show-details=direct
+```console
+cabal build djex:lib:exference-core djex:lib:exference-frontend djex:exe:exference
+cabal test exference-tests exference-cli-tests --test-show-details=direct
 ```
 
 `exference-core` is a named, parser-independent library rooted at `src-core/`.
 It is explicitly public and depends only on the shared synthesis vocabulary
 plus its search data structures and transformer stack; it does not inherit
 `haskell-src-exts`, filesystem/process libraries, or executable dependencies.
-The unnamed `exference` library contains the `haskell-src-exts` frontend and
-environment loader and preserves the historical core import paths.
+The public named `exference-frontend` sublibrary contains the
+`haskell-src-exts` frontend and environment loader and preserves the historical
+core import paths. The package's default `djex` library re-exports the stable
+frontend and core modules.
 This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
 
-Core names are validated, structural wrappers over `haskell-synthesis`: module
+Core names are validated, structural wrappers over `djex:synthesis`: module
 segments, ordinary identifiers and operators, list/cons/function constructors,
 and boxed tuples can no longer be confused by rendered spelling.  The legacy
 `QualifiedName(..)` constructor surface remains source-compatible, while new
@@ -165,7 +169,7 @@ search-tree, parallel-mode, and embedded manual-test machinery has been
 removed; deterministic regressions live in `exference-tests` and the separate
 `exference-cli-tests` subprocess suite.
 
-```text
+```console
 cabal run exference -- --first "a -> a"
 ```
 
@@ -208,8 +212,10 @@ any / the right solution. Some common current limitations are:
 
 - **Memory consumption is large** (even more so when profiling);
 - Environment loading, checked inventory sealing, search execution, and result
-  selection now have reusable library boundaries. A common Djinn/Exference
-  session facade still needs to compose them under the Djex name.
+  selection now have reusable library boundaries. `Language.Haskell.Djex`
+  identifies the two backends and re-exports their stable APIs; its next major
+  step is a common session/query API that composes them rather than merely
+  presenting them together.
 - The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
   records concrete correctness reproducers, shared-IR boundaries, and the
   staged migration order.

@@ -1,10 +1,11 @@
 # Haskell Synthesis
 
-`haskell-synthesis` is the parser- and backend-independent destination for the
-eventual Djinn/Exference library. Its layers define validated Haskell names,
-structured diagnostics, non-recursive class constraints parameterized over a
-backend's type representation, a scope-aware generated-code tree, and neutral
-operational search status. Djinn
+The public `synthesis` sublibrary of the `djex` package is the parser- and
+backend-independent foundation for Djinn and Exference. It was formerly the
+standalone `haskell-synthesis` package. Its layers define validated Haskell
+names, structured diagnostics, non-recursive class constraints parameterized
+over a backend's type representation, a scope-aware generated-code tree, and
+neutral operational search status. Djinn
 and Exference both store query contexts through the shared `Constraint` value
 and consume the validated name vocabulary; Exference additionally uses the
 shared diagnostic facade. Their checked class environments, declaration
@@ -70,8 +71,9 @@ without rerunning inference or trusting a parallel cache. Declarations may
 retain a frontend's kind-variable identity while being edited or round-tripped;
 sealing grounds their explicit kinds and reports the first unsolved identity.
 
-Build and test it independently with:
+Build or test just this sublibrary from the repository root or `djex/`:
 
-```text
-cabal test all
+```console
+cabal build djex:lib:synthesis
+cabal test synthesis-tests --test-show-details=direct
 ```

@@ -36,7 +36,7 @@ import qualified Data.Set as S
 import Control.Monad.Trans.Except
 
 
-import Paths_exference
+import Paths_djex
 
 import System.Environment ( getArgs )
 import System.Exit (exitFailure)
@@ -120,7 +120,7 @@ main = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
   argv <- getArgs
-  defaultEnvPath <- getDataFileName "environment"
+  defaultEnvPath <- getDataFileName "exference/environment"
   (flags, inputs) <- mainOpts argv
   let verbosity = sum $ [x | Verbose x <- flags ]
   let qualification = fromMaybe 0 $ listToMaybe [x | Qualification x <- flags]

@@ -28,7 +28,7 @@ main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "haskell-synthesis"
+tests = testGroup "Djex synthesis foundation"
   [ constraintTests
   , declarationTests
   , environmentTests

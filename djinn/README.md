@@ -6,10 +6,11 @@ and uses a terminating proof search for intuitionistic propositional logic to
 construct a proof term. Each candidate is independently type-checked, converted
 through a total error-reporting boundary, simplified, and printed as Haskell.
 
-This directory is a reviewed local fork, versioned `2026.7.11`, of
+This directory contains the Djinn backend of Djex `2026.7.12`, based on a
+reviewed local fork of
 [`djinn-2025.2.21`](https://hackage.haskell.org/package/djinn-2025.2.21), based on
 the [upstream `augustss/djinn` repository](https://github.com/augustss/djinn).
-The date-version bump records the now-source-breaking checked library facade;
+Djex's date version records the now-source-breaking checked library facade;
 the original one-line import note has been expanded here because upstream ships
 its user guide inside the executable rather than as a README.
 
@@ -21,13 +22,12 @@ query elaboration.
 
 ## Build and run
 
-The package is an independent Cabal project and is tested with GHC 9.12.4 and
-Cabal 3.16.1.0:
+Djinn is part of the unified `djex` Cabal package and is tested with GHC 9.12.4
+and Cabal 3.16.1.0. Run these commands from the repository root or `djex/`:
 
 ```console
-cd djinn
-cabal build
-cabal test
+cabal build djex:lib:djinn-core djex:lib:djinn-frontend djex:exe:djinn
+cabal test djinn-tests djinn-property-tests djinn-cli-tests
 cabal run djinn
 ```
 
@@ -45,12 +45,12 @@ comment. Files are processed from left to right in the same evolving environment
 Run the complete test matrix with independently reported test names:
 
 ```console
-cabal test all --test-show-details=direct
+cabal test djinn-tests djinn-property-tests djinn-cli-tests --test-show-details=direct
 ```
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 38 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 39 focused Tasty/HUnit regressions over parsing, kinds, class signatures, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Ten subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, and stateful query behavior. |
 
@@ -62,11 +62,13 @@ cabal test djinn-property-tests --test-show-details=direct
 cabal test djinn-tests --test-options='-p /nominal empty/'
 ```
 
-The proof/search engine lives in the public named `djinn-core` library. The
-package's unnamed `djinn` library is a separate CLI facade that re-exports
-`Djinn.Core`; the executable depends only on that facade. This keeps Haskeline
-out of core consumers while preserving one authoritative core compilation. HPC
-coverage is available for the in-process unit and property suites:
+The proof/search engine lives in the public named `djinn-core` sublibrary. The
+public `djinn-frontend` sublibrary is a separate compatibility/CLI facade that
+re-exports `Djinn.Core`; the executable depends only on that facade. The
+package's default `djex` library re-exports `Djinn.Core` without inheriting the
+REPL. This keeps Haskeline out of core and default-facade consumers while
+preserving one authoritative core compilation. HPC coverage is available for
+the in-process unit and property suites:
 
 ```console
 cabal test djinn-tests djinn-property-tests --enable-coverage
@@ -176,7 +178,7 @@ package environment nor instantiates arbitrary polymorphic methods. Classes and
 methods needed beyond the small initial environment must be declared explicitly.
 
 At the library boundary, `Context` is the shared backend-neutral
-`Constraint HType` value from `haskell-synthesis`, rather than Djinn's former
+`Constraint HType` value from `djex:synthesis`, rather than Djinn's former
 raw `(String, [HType])` pair. `mkContext` is the checked bridge for existing
 string-based clients:
 
@@ -350,7 +352,7 @@ The same Boolean options can precede file names on the command line, such as
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Djinn compatibility adapter over shared kind inference, plus saturated-synonym policy. |
 | `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
-| `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated `haskell-synthesis` name and operator rules. |
+| `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated `djex:synthesis` name and operator rules. |
 | `Djinn.Internal.HTypes` | Type parser, logical translation, and proof-term conversion/cleanup. |
 | `Djinn.Internal.Type` | Checked conversion between Djinn source types and the shared source-type IR. |
 | `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
@@ -365,9 +367,10 @@ The same Boolean options can precede file names on the command line, such as
 `Djinn.Core` and the proof, type, environment, and validation modules under
 `src/` form the public named `djinn-core` component. `Djinn`,
 `Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-cli/` in the
-unnamed `djinn` library; Help and REPL are private implementation modules. The
-executable's `app/` source root contains only its launcher, so neither the
-frontend nor executable can accidentally compile core modules as home modules.
+named `djinn-frontend` component; Help and REPL are private implementation
+modules. The executable's `app/` source root contains only its launcher, so
+neither the frontend nor executable can accidentally compile core modules as
+home modules.
 
 ## Using djinn-core as a library
 

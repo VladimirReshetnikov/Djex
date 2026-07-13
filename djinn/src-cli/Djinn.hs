@@ -17,10 +17,10 @@ import Djinn.Internal.REPL
 import Djinn.Internal.HTypes
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.Help
-import qualified Paths_djinn
+import qualified Paths_djex
 
 version :: String
-version = "version " ++ showVersion Paths_djinn.version
+version = "version " ++ showVersion Paths_djex.version
 
 main :: IO ()
 main = do

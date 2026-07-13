@@ -3,7 +3,7 @@
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.REPL (REPL(..), repl) where
-import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Class (lift)
 import System.Console.Haskeline
 
 data REPL s = REPL {
@@ -19,11 +19,11 @@ repl p = do
         step s = handleInterrupt interrupted $ withInterrupt $ do
             line <- getInputLine prompt
             case line of
-                Nothing -> liftIO (repl_exit p s) >> return Nothing
+                Nothing -> lift (repl_exit p s) >> return Nothing
                 Just input -> do
-                    (quit, s') <- liftIO $ repl_eval p s input
+                    (quit, s') <- lift $ repl_eval p s input
                     if quit then
-                        liftIO (repl_exit p s') >> return Nothing
+                        lift (repl_exit p s') >> return Nothing
                      else
                         return (Just s')
           where interrupted = outputStrLn "Interrupted." >> return (Just s)

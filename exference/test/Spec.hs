@@ -130,7 +130,7 @@ import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified CompatibilityImport
-import Paths_exference (getDataFileName)
+import Paths_djex (getDataFileName)
 
 main :: IO ()
 main = defaultMain tests
@@ -1081,7 +1081,7 @@ tests = testGroup "Exference"
           first diagnosticMessage (parseRatings "foo NaN")
             @?= Left "rating for foo must be finite: NaN"
       , testCase "missing modules produce source-bearing read errors" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/missing-module.hs"
               ratingPath = environmentDirectory ++ "/all.ratings"
           (result, messages) <- runLoad
@@ -1095,7 +1095,7 @@ tests = testGroup "Exference"
           assertBool ("later loader summaries survived: " ++ show messages)
             $ not $ any isLoaderSummary messages
       , testCase "missing environment directories produce source-bearing errors" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           let missingDirectory = environmentDirectory ++ "/missing-environment"
           (result, messages) <- runLoad
             $ environmentFromPath missingDirectory
@@ -1107,7 +1107,7 @@ tests = testGroup "Exference"
           assertBool ("failed directory load emitted messages: " ++ show messages)
             $ null messages
       , testCase "missing ratings retain zero penalties with one warning" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
               ratingPath = environmentDirectory ++ "/missing.ratings"
           LoadReport result diagnostics <-
@@ -1147,7 +1147,7 @@ tests = testGroup "Exference"
               assertBool ("duplicate rating was not diagnosed: " ++ show messages)
                 $ "duplicate rating: Ratings.identity" `elem` messages
       , testCase "malformed modules fail before loader summaries" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/all.ratings"
           (result, messages) <- runLoad
             $ parseModules [(haskellSrcExtsParseMode modulePath, modulePath)]
@@ -1158,7 +1158,7 @@ tests = testGroup "Exference"
           assertBool ("later loader summaries survived: " ++ show messages)
             $ not $ any isLoaderSummary messages
       , testCase "malformed ratings retain the parsed environment at defaults" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
           (sourceEnvironmentResult, messages) <- runLoad
             $ environmentFromModuleAndRatings modulePath modulePath
@@ -1181,7 +1181,7 @@ tests = testGroup "Exference"
           assertBool ("missing rating diagnostic: " ++ show messages)
             $ any ("could not parse rating file" `isInfixOf`) messages
       , testCase "frontend source environments retain type synonyms" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/String.hs"
           (sourceEnvironmentResult, _) <- runLoad
             $ environmentFromModuleAndRatings modulePath modulePath
@@ -1297,7 +1297,7 @@ tests = testGroup "Exference"
           valuePenalty "defaultMaybe" @?=
             Just (SearchPenaltyMetadata $ Penalty 3.5)
       , testCase "the shipped source environment seals as one inventory" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           (sourceEnvironmentResult, _) <- runLoad
             $ environmentFromPath environmentDirectory
           checkedEnvironment <- expectRight sourceEnvironmentResult
@@ -1315,7 +1315,7 @@ tests = testGroup "Exference"
             Just (SharedKind.FunctionKind
               SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
       , testCase "built-in constructors retain configured search penalties" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           (sourceEnvironmentResult, _) <- runLoad
             $ environmentFromPath environmentDirectory
           checkedEnvironment <- expectRight sourceEnvironmentResult
@@ -1389,7 +1389,7 @@ tests = testGroup "Exference"
                 $ "unknown constraint class 'External.Constraint' used in the binding Warnings.constrained"
                     `elem` messages
       , testCase "partial class inventories fail before advisory warnings" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           let paths = map ((environmentDirectory ++ "/") ++)
                 ["Eq.hs", "Ord.hs"]
               warning = "unknown type constructor 'Data.Monoid.Last' used in class instances"
@@ -1497,7 +1497,7 @@ tests = testGroup "Exference"
           compileWithDict ratings [(operator, ty)]
             @?= Right [(operator, Penalty 0.3, ty)]
       , testCase "the shipped rating file parses and every name round-trips" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           contents <- readFile $ environmentDirectory ++ "/all.ratings"
           ratings <- expectRight $ parseRatings contents
           assertBool "the shipped rating file unexpectedly parsed no entries"
@@ -1506,7 +1506,7 @@ tests = testGroup "Exference"
               parseQualifiedName (show qualifiedName) @?= Right qualifiedName)
             ratings
       , testCase "the built-in unit value inhabits parsed unit" $ do
-          environmentDirectory <- getDataFileName "environment"
+          environmentDirectory <- getDataFileName "exference/environment"
           (bindings, classEnvironment, messages) <-
             loadEnvironmentAndMessages environmentDirectory
           let unitBindings = filter ((== TupleCon 0) . functionName) bindings

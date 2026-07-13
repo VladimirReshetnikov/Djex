@@ -112,6 +112,19 @@ Library
     djex:djinn-core,
     djex:exference-frontend
 
+-- The merged one-shot command consumes only the checked public facade. The
+-- historical executables below remain available for their REPL and legacy
+-- compatibility contracts.
+Executable djex
+  import:         build-settings
+  Main-Is:        Main.hs
+  Hs-Source-Dirs: app-djex
+  Other-Modules:
+    Djex.Driver
+    Paths_djex
+  Autogen-Modules: Paths_djex
+  Build-Depends:  djex
+
 Library synthesis
   import:           build-settings, containers-dep, deepseq-dep, transformers-dep
   Visibility:       public
@@ -158,6 +171,13 @@ Test-Suite djex-facade-tests
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-facade
   Build-Depends:  djex
+
+Test-Suite djex-cli-tests
+  import:         cli-test
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Spec.hs
+  Hs-Source-Dirs: test-cli
+  Build-Tool-Depends: djex:djex
 
 Test-Suite synthesis-tests
   import:           tasty-hunit-test, containers-dep, deepseq-dep

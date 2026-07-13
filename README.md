@@ -26,11 +26,11 @@ generated-output infrastructure is progressively consolidated.
   sublibrary and the `exference-frontend` Haskell-source/environment-loader
   sublibrary, which also owns the checked Djex/Exference session adapter.
 
-The historical `djinn` and `exference` executable names remain available. The
-package also retains `djex-tests`, `synthesis-tests`, all three Djinn test suites,
-`exference-tests`, `exference-cli-tests`, and the `djinn-bench` benchmark. This
-preserves differential testing between the mature engines until their common
-frontend can replace the two compatibility surfaces.
+The `djex` executable is the merged one-shot frontend and selects either checked
+backend explicitly. The historical `djinn` and `exference` executable names
+remain available for their REPL and compatibility contracts. The package also
+retains the facade, integration, backend, property, CLI, and benchmark suites;
+this preserves differential testing while the two engines continue converging.
 
 ## Dependency migration
 
@@ -87,6 +87,8 @@ Useful component and compatibility-executable targets include:
 cabal build djex:lib:djex djex:lib:synthesis
 cabal build djex:lib:djinn-core djex:lib:djinn-frontend
 cabal build djex:lib:exference-core djex:lib:exference-frontend
+cabal run exe:djex -- djinn --render expression "a -> a"
+cabal run exe:djex -- exference --select first "a -> a"
 cabal run djinn
 cabal run exference -- --first "a -> a"
 cabal bench djinn-bench
@@ -94,6 +96,30 @@ cabal bench djinn-bench
 
 The backend subdirectories are source roots, not independent Cabal projects;
 run package commands from the repository root or from `djex/`.
+
+## Unified command
+
+Djex never guesses which engine's semantics were intended:
+
+```console
+djex djinn [OPTION...] TYPE
+djex exference [OPTION...] TYPE
+```
+
+Both subcommands share `--target`, `--select first|best|all`,
+`--render definition|expression`, and
+`--qualification none|identifiers|full`. Djinn additionally exposes its
+candidate limit and choice-point budget; Exference exposes its checked source
+environment, constraint/pattern policy, and step, queue, and depth bounds.
+Run `djex <backend> --help` for the exact backend-specific table.
+
+Generated Haskell alone is written to stdout. Loader messages, logical negative
+answers, undecided/truncated status, and structured diagnostics go to stderr.
+Help, version, successful synthesis, proof-backed uninhabitability, and bounded
+no-result searches exit 0; load/parse/search/render failures exit 1; malformed
+command lines exit 2. This keeps a valid negative answer distinct from a broken
+invocation and never mislabels an exhausted Exference heuristic search as a
+proof of uninhabitability.
 
 ## Query boundary
 
@@ -113,7 +139,10 @@ shared boundary rather than during ordinary field access.
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
 the same types or options. `mkDjinnSession` seals an opaque Djinn environment;
-`runDjinnQuery` returns shared candidates containing structured generated
+`standardDjinnSession` supplies the checked built-in environment directly, and
+`parseDjinnRequest` shares the compatibility frontend's optional class-context
+grammar rather than maintaining a second parser. `runDjinnQuery` returns shared
+candidates containing structured generated
 clauses, empty residual constraints, and Djinn's unused-binder ranking details
 in one terminal batch. A proof beyond `optionCutoff` produces
 `Truncated CandidateLimitReached` without forcing the proof-stream suffix.
@@ -122,7 +151,11 @@ budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
 
 `mkExferenceSession` similarly computes the backend-supported projection and
-seals its search environment once. The source boundary tags class methods by
+seals its search environment once. `loadExferenceSession` and its policy-aware
+counterpart turn a directory into that opaque session while translating every
+fatal loader phase into source-preserving `EXF_*` diagnostics, so stable callers
+never handle raw frontend environments. The source boundary tags class methods
+by
 their qualified owner, nests them under the common class declaration for
 validation, and lowers each rated selector exactly once into Exference's flat
 search inventory without changing source order. Unsupported rank-N

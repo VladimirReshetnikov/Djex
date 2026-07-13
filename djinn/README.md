@@ -464,11 +464,13 @@ and binder count used by the historical ranking policy. Compatibility
 candidates alongside the legacy rendered strings.
 The default `djex` library additionally exposes
 `Language.Haskell.Djex.Djinn`: `mkDjinnSession` pairs an `Environment` with the
-exact sealed shared inventory that validated it, and `runDjinnQuery` accepts a
-generic `QueryRequest HType QueryOptions`. Its `QueryResult` carries the same
-shared `Candidate` structure as Exference plus Djinn's formula/proof metadata,
-and consumes canonical evidence without conflating it with operational
-completion.
+exact sealed shared inventory that validated it, `standardDjinnSession` supplies
+the checked built-in environment without exposing its representation,
+`parseDjinnRequest` shares the REPL's optional class-context grammar, and
+`runDjinnQuery` accepts a generic `QueryRequest HType QueryOptions`. Its
+`QueryResult` carries the same shared `Candidate` structure as Exference plus
+Djinn's formula/proof metadata, and its definition/expression renderers consume
+canonical evidence without conflating it with operational completion.
 The core `Djinn.Internal.*` modules listed above remain
 exposed by `djinn-core` for research use, but they provide raw constructors
 that can violate these invariants and carry no stability promise. The

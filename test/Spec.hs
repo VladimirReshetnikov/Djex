@@ -356,7 +356,9 @@ tests = testGroup "Djex facade"
       target <- expectRight $ mkIdentifier "broken"
       case parseExferenceRequest
           session defaultExferenceOptions target "query.hs" "(" of
-        Left failure -> diagnosticSource failure @?= Just "query.hs"
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_EXF_PARSE"
+          diagnosticSource failure @?= Just "query.hs"
         Right _ -> fail "Exference parsed an incomplete input type"
   , testCase "do not turn an Exference environment binding into recursion" $ do
       target <- expectRight $ mkIdentifier "identity"

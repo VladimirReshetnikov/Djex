@@ -455,7 +455,11 @@ parseExferenceRequest session options target sourceName source = do
         (sessionTypeDeclarations session)
         (haskellSrcExtsParseMode sourceName)
         source
-  (backendType, sourceVariables) <- parsed
+  -- The HSE compatibility frontend predates structured diagnostic codes.
+  -- Seal every failure at this stable adapter boundary while preserving its
+  -- exact message, source, and span.
+  (backendType, sourceVariables) <- first
+    (withCode "DJEX_EXF_PARSE") parsed
   sharedType <- either
     (Left . failureDiagnostic
       "DJEX_EXF_PARSE"

@@ -20,6 +20,10 @@ main = defaultMain $ testGroup "public Djex facade"
         Right "identity value = value"
   , testCase "exports checked Exference options" $
       exferenceMaximumSteps defaultExferenceOptions @?= 65536
+  , testCase "exports checked session entry points" $ do
+      assertBool "the standard Djinn session did not seal" $
+        isRight standardDjinnSession
+      loadExferenceSession `seq` pure ()
   ]
 
 expectRight :: Show error => Either error value -> IO value

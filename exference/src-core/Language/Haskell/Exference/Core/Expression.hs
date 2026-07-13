@@ -21,7 +21,6 @@ import qualified Data.List as L
 import Control.DeepSeq
 import GHC.Generics
 
--- import Debug.Hood.Observe
 import qualified Data.Map as M
 import qualified Language.Haskell.Synthesis.Generated as Generated
 
@@ -44,38 +43,6 @@ data Expression = ExpVar TVarId HsType -- a
   deriving (Eq, Generic)
 
 instance NFData Expression
-
--- instance Show Expression where
---   showsPrec _ (ExpVar i) = showString $ showVar i
---   showsPrec d (ExpName s) = showsPrec d s
---   showsPrec d (ExpLambda i e) =
---     showParen (d>0) $ showString ("\\" ++ showVar i ++ " -> ") . showsPrec 1 e
---   showsPrec d (ExpApply e1 e2) =
---     showParen (d>1) $ showsPrec 2 e1 . showString " " . showsPrec 3 e2
---   showsPrec _ (ExpHole i) = showString $ "_" ++ showVar i
---   showsPrec d (ExpLetMatch n vars bindExp inExp) =
---       showParen (d>2)
---     $ showString ("let ("++show n++" "++intercalate " " (map showVar vars) ++ ") = ")
---     . shows bindExp . showString " in " . showsPrec 0 inExp
---   showsPrec d (ExpLet i bindExp inExp) =
---       showParen (d>2)
---     $ showString ("let " ++ showVar i ++ " = ")
---     . showsPrec 3 bindExp
---     . showString " in "
---     . showsPrec 0 inExp
---   showsPrec d (ExpCaseMatch bindExp alts) =
---       showParen (d>2)
---     $ showString ("case ")
---     . showsPrec 3 bindExp
---     . showString " of { "
---     . ( \s -> intercalate "; "
---            (map (\(cons, vars, expr) ->
---               show cons++" "++intercalate " " (map showVar vars)++" -> "
---               ++showsPrec 3 expr "")
---             alts)
---          ++ s
---       )
---     . showString " }"
 
 data ExpressionRenderError
   = ExpressionScopeError (Generated.ScopeError TVarId)
@@ -204,9 +171,6 @@ variableObservations (ExpCaseMatch scrutinee alternatives) =
     [ variables ++ variableObservations body
     | (_, variables, body) <- alternatives
     ]
-
--- instance Observable Expression where
---   observer x = observeOpaque (show x) x
 
 fillExprHole :: TVarId -> Expression -> Expression -> Expression
 fillExprHole vid t orig@(ExpHole j) | vid==j = t

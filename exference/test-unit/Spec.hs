@@ -4335,6 +4335,85 @@ tests = testGroup "Exference"
           checkExpression classEnvironment [] []
             (TypeArrow variable variable) [] (simplifyExpression identity)
             @?= Right ()
+      , testCase "let inlining does not capture a lambda variable" $ do
+          let ty = TypeVar 20
+              expression = ExpLet 0 ty (ExpVar 1 ty)
+                $ ExpLambda 1 ty
+                $ ExpVar 0 ty
+          assertBool "lambda capture changed the expression"
+            $ simplifyExpression expression == expression
+      , testCase "lambda and let shadowing hide outer uses" $ do
+          let ty = TypeVar 20
+              source = ExpName $ name "source"
+              seed = ExpName $ name "seed"
+              lambdaShadow = ExpLet 0 ty source
+                $ ExpLambda 0 ty
+                $ ExpVar 0 ty
+              letShadow = ExpLet 0 ty source
+                $ ExpLet 0 ty seed
+                $ ExpVar 0 ty
+              letRightHandScope = ExpLet 0 ty source
+                $ ExpLet 0 ty (ExpVar 0 ty)
+                $ ExpVar 0 ty
+              letCapture = ExpLet 0 ty (ExpVar 1 ty)
+                $ ExpLet 1 ty seed
+                $ ExpApply (ExpVar 0 ty)
+                $ ExpApply (ExpVar 1 ty) (ExpVar 1 ty)
+          assertBool "shadowed lambda use retained its outer let"
+            $ simplifyExpression lambdaShadow ==
+                ExpLambda 0 ty (ExpVar 0 ty)
+          assertBool "shadowed let use retained its outer binding"
+            $ simplifyExpression letShadow == seed
+          assertBool "let binder incorrectly scoped over its right-hand side"
+            $ simplifyExpression letRightHandScope == source
+          assertBool "inner let captured an inlined free variable"
+            $ simplifyExpression letCapture == letCapture
+      , testCase "let-pattern binders are scope-safe" $ do
+          let ty = TypeVar 20
+              constructor = name "Mk"
+              scrutinee = ExpName $ name "scrutinee"
+              source = ExpName $ name "source"
+              patternShadow = ExpLet 0 ty source
+                $ ExpLetMatch constructor [(0, ty)] scrutinee
+                $ ExpVar 0 ty
+              patternRightHandScope = ExpLet 0 ty source
+                $ ExpLetMatch constructor [(0, ty)] (ExpVar 0 ty)
+                $ ExpVar 0 ty
+              patternCapture = ExpLet 0 ty (ExpVar 1 ty)
+                $ ExpLetMatch constructor [(1, ty)] scrutinee
+                $ ExpVar 0 ty
+          assertBool "pattern shadow retained its outer let"
+            $ simplifyExpression patternShadow ==
+                ExpLetMatch constructor [(0, ty)] scrutinee (ExpVar 0 ty)
+          assertBool "pattern binder incorrectly scoped over its scrutinee"
+            $ simplifyExpression patternRightHandScope ==
+                ExpLetMatch constructor [(0, ty)] source (ExpVar 0 ty)
+          assertBool "pattern binder captured an inlined free variable"
+            $ simplifyExpression patternCapture == patternCapture
+      , testCase "case binders affect only their own alternatives" $ do
+          let ty = TypeVar 20
+              firstConstructor = name "First"
+              secondConstructor = name "Second"
+              scrutinee = ExpName $ name "scrutinee"
+              source = ExpName $ name "source"
+              branchShadow = ExpLet 0 ty source
+                $ ExpCaseMatch scrutinee
+                    [ (firstConstructor, [(0, ty)], ExpVar 0 ty)
+                    , (secondConstructor, [], ExpVar 0 ty)
+                    ]
+              branchCapture = ExpLet 0 ty (ExpVar 1 ty)
+                $ ExpCaseMatch scrutinee
+                    [ (firstConstructor, [(1, ty)], ExpVar 0 ty)
+                    , (secondConstructor, [], ExpName $ name "other")
+                    ]
+              expectedShadow = ExpCaseMatch scrutinee
+                [ (firstConstructor, [(0, ty)], ExpVar 0 ty)
+                , (secondConstructor, [], source)
+                ]
+          assertBool "case binder leaked into another alternative"
+            $ simplifyExpression branchShadow == expectedShadow
+          assertBool "case binder captured an inlined free variable"
+            $ simplifyExpression branchCapture == branchCapture
       , testCase "accepts a typed identity" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let variable = TypeVar 0

@@ -530,7 +530,7 @@ assertDjinnCompatibility label environment session contexts options target goal 
   assertBool (label ++ ": first proof changed") $
     generatedReportProof compatibility == djinnFirstExploredProof metadata
 
-emptyExferenceSource :: SourceEnvironment FunctionBinding
+emptyExferenceSource :: SourceEnvironment
 emptyExferenceSource = SourceEnvironment
   { sourceBindings = []
   , sourceDeconstructors = []

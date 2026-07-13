@@ -24,9 +24,7 @@ import Text.Read (readMaybe)
 
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Exference.Core.FunctionBinding
-  ( FunctionBinding
-  , functionName
-  )
+  ( functionName )
 import Language.Haskell.Exference.Core.Types
   ( sClassEnv_instances
   , sClassEnv_tclasses
@@ -340,7 +338,7 @@ noResultsMessage (Just (Completed (Truncated reasons)))
 noResultsMessage (Just Continuing) =
   "[no results in the inspected search prefix; inhabitation is undecided]"
 
-printEnvironment :: Show function => Int -> SourceEnvironment function -> IO ()
+printEnvironment :: Int -> SourceEnvironment -> IO ()
 printEnvironment verbosity environment = do
   when (verbosity > 0) $ putStrLn "[Environment]"
   mapM_ print $ sourceTypeSynonyms environment
@@ -358,7 +356,7 @@ printEnvironment verbosity environment = do
 -- generated definition target. This compatibility CLI prints only the clause
 -- body, so choose a target outside the loaded source namespace instead of
 -- needlessly making such a binding unavailable to expression search.
-freshTarget :: SourceEnvironment FunctionBinding -> IO Name
+freshTarget :: SourceEnvironment -> IO Name
 freshTarget environment = go (0 :: Int)
  where
   occupied = Set.fromList

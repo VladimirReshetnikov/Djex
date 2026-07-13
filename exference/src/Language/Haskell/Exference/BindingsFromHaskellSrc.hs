@@ -17,7 +17,6 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
-import Language.Haskell.Exference.FunctionDecl
 import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.Monad.Trans.Except
@@ -37,7 +36,7 @@ getDecls
   -> M.Map QualifiedName HsTypeClass
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> m [Either String HsFunctionDecl]
+  -> m [Either String FunctionBinding]
 getDecls ds tcs tDeclMap modules = fmap (>>= either (return.Left) (map Right))
                                 $ sequence
                                 $ do
@@ -53,7 +52,7 @@ transformDecl
   -> ModuleName SrcSpanInfo
   -> TypeDeclMap
   -> Decl SrcSpanInfo
-  -> ExceptT String m [HsFunctionDecl]
+  -> ExceptT String m [FunctionBinding]
 transformDecl tcs ds mn tDeclMap (TypeSig _loc names qtype)
   = insName qtype $ do
       (ctype, _) <- convertType tcs (Just mn) ds tDeclMap qtype
@@ -68,9 +67,10 @@ helper
   :: ModuleName SrcSpanInfo
   -> HsType
   -> Name SrcSpanInfo
-  -> Either String HsFunctionDecl
-helper mn t syntaxName = (, forallify t)
-  <$> convertModuleName mn syntaxName
+  -> Either String FunctionBinding
+helper mn signature syntaxName = do
+  name <- convertModuleName mn syntaxName
+  pure $ functionBindingFromType name 0 $ forallify signature
 
 getDataConss
   :: Monad m
@@ -78,7 +78,7 @@ getDataConss
   -> [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> m [Either String ([HsFunctionDecl], DeconstructorBinding)]
+  -> m [Either String ([FunctionBinding], DeconstructorBinding)]
 getDataConss tcs ds tDeclMap modules =
   fmap markRecursiveDeconstructors $ sequence $ do
   modul <- modules
@@ -123,7 +123,7 @@ getDataConss tcs ds tDeclMap modules =
   let
     convAction
       :: Monad m
-      => ConversionT String m ([HsFunctionDecl], DeconstructorBinding)
+      => ConversionT String m ([FunctionBinding], DeconstructorBinding)
     convAction = do
       rtype  <- rTypeM
       consDatas <- mapM typeM conss
@@ -131,7 +131,8 @@ getDataConss tcs ds tDeclMap modules =
       -- its parameters must remain free for search-time unification.  Each
       -- constructor value is polymorphic independently; quantify only after
       -- assembling its complete field-to-result arrow.
-      return $ ( [ (n, forallify $ foldr TypeArrow rtype ts)
+      return $ ( [ functionBindingFromType n 0
+                    $ forallify $ foldr TypeArrow rtype ts
                  | (n, ts) <- consDatas
                  ]
                , DeconstructorBinding
@@ -146,8 +147,8 @@ getDataConss tcs ds tDeclMap modules =
 -- | Annotate recursion only after conversion: failures retain their original
 -- positions and cannot create phantom vertices in the datatype graph.
 markRecursiveDeconstructors
-  :: [Either String ([HsFunctionDecl], DeconstructorBinding)]
-  -> [Either String ([HsFunctionDecl], DeconstructorBinding)]
+  :: [Either String ([FunctionBinding], DeconstructorBinding)]
+  -> [Either String ([FunctionBinding], DeconstructorBinding)]
 markRecursiveDeconstructors converted = map mark converted
  where
   successful =

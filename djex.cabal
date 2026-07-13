@@ -97,7 +97,6 @@ Library
     Language.Haskell.Exference.BindingsFromHaskellSrc,
     Language.Haskell.Exference.ClassEnvFromHaskellSrc,
     Language.Haskell.Exference.EnvironmentParser,
-    Language.Haskell.Exference.FunctionDecl,
     Language.Haskell.Exference.Core,
     Language.Haskell.Exference.Core.Name,
     Language.Haskell.Exference.Core.Types,
@@ -321,7 +320,6 @@ Library exference-frontend
     Language.Haskell.Exference.BindingsFromHaskellSrc
     Language.Haskell.Exference.ClassEnvFromHaskellSrc
     Language.Haskell.Exference.EnvironmentParser
-    Language.Haskell.Exference.FunctionDecl
 
   Reexported-Modules:
     Language.Haskell.Exference.Core,

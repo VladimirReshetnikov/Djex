@@ -2,7 +2,6 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE DeriveFunctor #-}
 
 module Language.Haskell.Exference.EnvironmentParser
   ( SourceBinding (..)
@@ -36,8 +35,6 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
-import Language.Haskell.Exference.Core.TypeUtils (splitArrowResultParams)
-import Language.Haskell.Exference.FunctionDecl
 
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Diagnostic
@@ -81,22 +78,22 @@ import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 -- historical frontend API. Their compatibility types carry the derived
 -- implicit constraint; duplicating its parameter IDs in the tag would let the
 -- two representations drift.
-data SourceBinding function
-  = SourceFunction function
-  | SourceClassMethod QualifiedName function
-  deriving (Functor, Show)
+data SourceBinding
+  = SourceFunction FunctionBinding
+  | SourceClassMethod QualifiedName FunctionBinding
+  deriving (Show)
 
-sourceBindingFunction :: SourceBinding function -> function
+sourceBindingFunction :: SourceBinding -> FunctionBinding
 sourceBindingFunction binding = case binding of
   SourceFunction function -> function
   SourceClassMethod _ function -> function
 
--- | The complete checked source inventory produced by the HSE frontend.
--- Parameterizing only the function representation lets parsing, rating, and
--- core lowering share one shape without repeatedly packing positional tuples
--- or dropping the declarations needed by later kind validation.
-data SourceEnvironment function = SourceEnvironment
-  { sourceBindings :: [SourceBinding function]
+-- | The complete source inventory produced by the HSE frontend. Signatures
+-- enter the backend's named 'FunctionBinding' shape during extraction, so
+-- rating and checked lowering update one representation rather than carrying
+-- a parallel raw tuple layer.
+data SourceEnvironment = SourceEnvironment
+  { sourceBindings :: [SourceBinding]
   , sourceDeconstructors :: [DeconstructorBinding]
   , sourceClasses :: StaticClassEnv
   , sourceTypeNames :: [QualifiedName]
@@ -107,14 +104,14 @@ data SourceEnvironment function = SourceEnvironment
 -- | Historical flat function view. Ownership remains available through
 -- 'sourceBindings', while search and compatibility clients see every method
 -- exactly once in its original list position.
-sourceFunctions :: SourceEnvironment function -> [function]
+sourceFunctions :: SourceEnvironment -> [FunctionBinding]
 sourceFunctions = map sourceBindingFunction . sourceBindings
 
 -- | A backend projection paired with the exact shared inventory that validated
 -- it.  The constructor is private so CLI and library loaders cannot expose a
 -- searchable source environment before structural and kind sealing succeeds.
 data CheckedSourceEnvironment = CheckedSourceEnvironment
-  { checkedSourceProjection :: SourceEnvironment FunctionBinding
+  { checkedSourceProjection :: SourceEnvironment
   , checkedSourceInventory :: SynthesisInventory
   }
 
@@ -163,7 +160,7 @@ readTextFile path = captureIO path
   $ readFile path >>= evaluate . force
 
 checkSourceEnvironment
-  :: SourceEnvironment FunctionBinding
+  :: SourceEnvironment
   -> Either EnvironmentLoadError CheckedSourceEnvironment
 checkSourceEnvironment environment = do
   inventory <- first InvalidSourceInventory
@@ -179,9 +176,9 @@ checkSourceEnvironment environment = do
 -- without imposing declaration-category order on the search environment.
 normalizeBackendProjection
   :: SynthesisInventory
-  -> SourceEnvironment FunctionBinding
+  -> SourceEnvironment
   -> Either SynthesisDeclarationError
-      (SourceEnvironment FunctionBinding)
+      SourceEnvironment
 normalizeBackendProjection inventory environment = do
   converted <- mapM fromSynthesisRatedDataDeclaration
     [ declaration
@@ -263,7 +260,7 @@ normalizeBackendProjection inventory environment = do
 -- | Unique-only compatibility index used by the historical type elaborator.
 -- The ordered field remains authoritative so duplicate declarations reach the
 -- shared inventory instead of being silently resolved by map insertion order.
-sourceTypeSynonymMap :: SourceEnvironment function -> TypeDeclMap
+sourceTypeSynonymMap :: SourceEnvironment -> TypeDeclMap
 sourceTypeSynonymMap = uniqueTypeDeclMap . sourceTypeSynonyms
 
 -- | Seal the complete frontend inventory in the common environment IR.
@@ -271,7 +268,7 @@ sourceTypeSynonymMap = uniqueTypeDeclMap . sourceTypeSynonyms
 -- synonyms so later validation does not have to rediscover declarations from
 -- the HSE modules or a parallel tuple field.
 toSynthesisSourceEnvironment
-  :: SourceEnvironment FunctionBinding
+  :: SourceEnvironment
   -> Either SynthesisDeclarationError SynthesisEnvironment
 toSynthesisSourceEnvironment environment =
   SharedInventory.inventoryEnvironment
@@ -281,7 +278,7 @@ toSynthesisSourceEnvironment environment =
 -- assumptions needed to elaborate subsequent queries against the same source
 -- declarations.
 toSynthesisSourceInventory
-  :: SourceEnvironment FunctionBinding
+  :: SourceEnvironment
   -> Either SynthesisDeclarationError SynthesisInventory
 toSynthesisSourceInventory environment = do
   let functions = sourceFunctions environment
@@ -374,27 +371,27 @@ toSynthesisSourceInventory environment = do
     Right inventory -> Right inventory
 
 
-builtInDecls :: Either QualifiedNameError [HsFunctionDecl]
-builtInDecls = do
+builtInBindings :: Either QualifiedNameError [FunctionBinding]
+builtInBindings = do
   consName <- fromSynthesisName SharedName.consName
   listName <- fromSynthesisName SharedName.listName
   unitConstructor <- do
     unitName <- mkBoxedTupleName 0
-    pure (unitName, TypeCons unitName)
+    pure $ functionBindingFromType unitName 0 $ TypeCons unitName
   tupleConstructors <- mapM tupleConstructor [2 .. 7]
   pure $ listConstructors consName listName
     ++ (unitConstructor : tupleConstructors)
  where
   listConstructors consName listName =
-    [ (listName, listType listName)
-    , (consName, TypeArrow (TypeVar 0)
-        $ TypeArrow (listType listName) (listType listName))
+    [ functionBindingFromType listName 0 $ listType listName
+    , functionBindingFromType consName 0 $ TypeArrow (TypeVar 0)
+        $ TypeArrow (listType listName) (listType listName)
     ]
   listType listName = TypeApp (TypeCons listName) (TypeVar 0)
   tupleConstructor arity = do
     tupleName <- mkBoxedTupleName arity
-    pure (tupleName,
-      foldr TypeArrow (tupleType tupleName arity) $ typeVariables arity)
+    pure $ functionBindingFromType tupleName 0
+      $ foldr TypeArrow (tupleType tupleName arity) $ typeVariables arity
 
 builtInDeconstructors :: Either QualifiedNameError [DeconstructorBinding]
 builtInDeconstructors = do
@@ -434,7 +431,7 @@ tupleType tupleName arity = foldl TypeApp (TypeCons tupleName)
 -- unknown names are rendered in nominal sort order.
 parseModules
   :: [(ParseMode, FilePath)]
-  -> IO (LoadReport (SourceEnvironment HsFunctionDecl))
+  -> IO (LoadReport SourceEnvironment)
 parseModules inputs = do
   (result, diagnostics) <- runWriterT $ parseModulesM inputs
   pure $ LoadReport result diagnostics
@@ -443,8 +440,7 @@ type Loader = WriterT [Diagnostic] IO
 
 parseModulesM
   :: [(ParseMode, FilePath)]
-  -> Loader (Either EnvironmentLoadError
-              (SourceEnvironment HsFunctionDecl))
+  -> Loader (Either EnvironmentLoadError SourceEnvironment)
 parseModulesM inputs = do
   readResults <- lift $ mapM hRead inputs
   case NonEmpty.nonEmpty $ lefts readResults of
@@ -466,8 +462,7 @@ parseModulesM inputs = do
     -- fed into the next extractor as an invented recovery environment.
     parseLoadedModules
       :: [(ParseMode, String)]
-      -> Loader (Either EnvironmentLoadError
-                  (SourceEnvironment HsFunctionDecl))
+      -> Loader (Either EnvironmentLoadError SourceEnvironment)
     parseLoadedModules rawTuples = runExceptT $ do
       let parsedModules = map hParse rawTuples
           parseErrors = lefts parsedModules
@@ -512,7 +507,7 @@ parseModulesM inputs = do
         Just errors -> throwE $ BindingDeclarationErrors errors
         Nothing -> pure ()
 
-      let builtInDeclarationsResult = builtInDecls
+      let builtInDeclarationsResult = builtInBindings
           builtInDeconstructorsResult = builtInDeconstructors
       (builtInDeclarations, builtInDeconstructorValues) <-
         case (builtInDeclarationsResult, builtInDeconstructorsResult) of
@@ -548,11 +543,14 @@ parseModulesM inputs = do
                     ++ "' used in " ++ context
                 ]
 
-          warnBindingConstraints :: QualifiedName -> HsType -> Loader ()
-          warnBindingConstraints bindingName bindingType = forM_
+          warnBindingConstraints
+            :: QualifiedName
+            -> [HsConstraint]
+            -> Loader ()
+          warnBindingConstraints bindingName constraints = forM_
             (S.toAscList $ S.fromList
               [ renderConstraintFailure bindingName constraint failure
-              | constraint <- typeConstraints bindingType
+              | constraint <- constraints
               , Left failure <-
                   [ validateConstraintInEnv classEnvironment
                       (BindingConstraint bindingName) constraint
@@ -594,13 +592,24 @@ parseModulesM inputs = do
             | constraint <- tclass_constraints typeClass
             , parameter <- constraint_params constraint
             ]
-        forM_ (map sourceBindingFunction declarations)
-            $ \(bindingName, bindingType) -> do
+        forM_ (map sourceBindingFunction declarations) $ \binding -> do
+          let bindingName = functionName binding
+              outerConstraints = functionConstraints binding
+              bindingTypes = functionResult binding
+                : ( functionParameters binding
+                    ++ concatMap constraint_params outerConstraints
+                  )
+              -- The source signature has already been split into a binding,
+              -- but nested foralls can still carry constraints in its result,
+              -- parameters, or the arguments of an outer constraint. Preserve
+              -- the complete recursive coverage of 'typeConstraints'.
+              bindingConstraints = outerConstraints
+                ++ concatMap typeConstraints bindingTypes
           warnUnknownTypeConstructors
-            ("the binding " ++ show bindingName) [bindingType]
+            ("the binding " ++ show bindingName) bindingTypes
           -- The loader has a complete class inventory, unlike public ad-hoc
           -- search input, so binding constraints are checked nominally here.
-          warnBindingConstraints bindingName bindingType
+          warnBindingConstraints bindingName bindingConstraints
         tell [infoDiagnostic $ "got " ++ show (length classes) ++ " classes"]
         tell [infoDiagnostic $ "and " ++ show instanceCount ++ " instances"]
         tell
@@ -629,7 +638,7 @@ parseModulesM inputs = do
                   -> Module SrcSpanInfo
                   -> [Either String ClassMethodDeclaration]
                   -> Loader
-                       ( [SourceBinding HsFunctionDecl]
+                       ( [SourceBinding]
                        , [DeconstructorBinding]
                        , [String]
                        )
@@ -683,19 +692,17 @@ ratingFailureDiagnostic failure = failure
 -- sealing after receiving their neutral defaults.
 applyRatings
   :: [(QualifiedName, Penalty)]
-  -> SourceEnvironment HsFunctionDecl
-  -> (SourceEnvironment FunctionBinding, [Diagnostic])
+  -> SourceEnvironment
+  -> (SourceEnvironment, [Diagnostic])
 applyRatings ratings environment =
   ( environment
-      { sourceBindings = fmap rateDeclaration
-          <$> sourceBindings environment
-      }
+      { sourceBindings = map rateSourceBinding $ sourceBindings environment }
   , lefts ratingResults
   )
  where
   declarationCounts = M.fromListWith (+)
-    [ (name, 1 :: Int)
-    | (name, _) <- sourceFunctions environment
+    [ (functionName binding, 1 :: Int)
+    | binding <- sourceFunctions environment
     ]
   ratingsByName = M.fromListWith (++)
     [ (name, [rating])
@@ -714,10 +721,15 @@ applyRatings ratings environment =
     | otherwise = Left $ warningDiagnostic
         $ "duplicate rating: " ++ show name
 
-  rateDeclaration (name, bindingType) = FunctionBinding
-    result name (M.findWithDefault 0 name effectiveRatings) constraints parameters
-   where
-    (result, parameters, _, constraints) = splitArrowResultParams bindingType
+  rateSourceBinding sourceBinding = case sourceBinding of
+    SourceFunction binding -> SourceFunction $ rateBinding binding
+    SourceClassMethod owner binding ->
+      SourceClassMethod owner $ rateBinding binding
+
+  rateBinding binding = binding
+    { functionPenalty = M.findWithDefault 0
+        (functionName binding) effectiveRatings
+    }
 
 -- | Load and seal one source module with neutral search penalties. This is the
 -- checked convenience counterpart of 'parseModules'; it shares every parsing,
@@ -805,7 +817,7 @@ environmentFromPathM p = do
 
 rateAndCheckEnvironment
   :: [(QualifiedName, Penalty)]
-  -> SourceEnvironment HsFunctionDecl
+  -> SourceEnvironment
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
 rateAndCheckEnvironment ratings environment = do
   let (ratedEnvironment, warnings) = applyRatings ratings environment

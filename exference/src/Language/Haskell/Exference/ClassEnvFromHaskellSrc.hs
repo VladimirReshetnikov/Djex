@@ -20,11 +20,11 @@ import qualified Data.Set as Set
 import Language.Haskell.Exts.Pretty (prettyPrint)
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo)
 import Language.Haskell.Exts.Syntax
+import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils (forallify)
 import Language.Haskell.Exference.Core.Declaration
   (addClassMethodConstraint, classMethodConstraint)
-import Language.Haskell.Exference.FunctionDecl (HsFunctionDecl)
 import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
@@ -46,7 +46,7 @@ data RawTypeClass = RawTypeClass
 -- stores only nominal ownership rather than duplicating its parameter IDs.
 data ClassMethodDeclaration = ClassMethodDeclaration
   { classMethodOwner :: QualifiedName
-  , classMethodFunction :: HsFunctionDecl
+  , classMethodFunction :: FunctionBinding
   }
   deriving (Eq, Show)
 
@@ -247,7 +247,8 @@ elaborateRawClass classes dataTypes typeDeclarations rawClass =
       $ convertModuleName (rawClassModule rawClass) syntaxName
     let methodType = addClassMethodConstraint owner $ forallify converted
     pure $ ClassMethodDeclaration
-      (rawClassName rawClass) (methodName, methodType)
+      (rawClassName rawClass)
+      (functionBindingFromType methodName 0 methodType)
 
 getInstances
   :: Monad m

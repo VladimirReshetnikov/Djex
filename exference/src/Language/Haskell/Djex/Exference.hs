@@ -200,7 +200,7 @@ data ExferenceOmission = ExferenceOmission
   deriving (Eq, Ord, Show)
 
 data ExferenceSession = ExferenceSession
-  { sessionSource :: SourceEnvironment FunctionBinding
+  { sessionSource :: SourceEnvironment
   , sessionSearchEnvironment :: ExferenceEnvironment
   , sessionInventory :: SynthesisInventory
   , sessionTypeDeclarations :: TypeDeclMap

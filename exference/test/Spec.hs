@@ -78,6 +78,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
+  , functionBindingFromType
   )
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( RigidInstantiationError (..)
@@ -468,10 +469,12 @@ tests = testGroup "Exference"
           Map.keys (sClassEnv_tclasses $ loadedStaticClassEnvironment loaded)
             @?= [classAName, classBName]
           case rights methods of
-            [ClassMethodDeclaration owner
-                (_, TypeForall _ (constraint : _) _)] -> do
+            [ClassMethodDeclaration owner binding] -> do
               owner @?= classAName
-              constraint_tclass constraint @?= classAName
+              case functionConstraints binding of
+                constraint : _ ->
+                  constraint_tclass constraint @?= classAName
+                [] -> fail "class method omitted its owner constraint"
             result -> fail $ "unexpected class methods: " ++ show result
       , testCase "cyclic instance prerequisites remain unresolved" $ do
           let cls = HsTypeClass (name "C") [0] []
@@ -490,7 +493,7 @@ tests = testGroup "Exference"
           identityName <- expectRight $ mkQualifiedName ["Main"] "identity"
           let extracted = runIdentity
                 $ getDecls [] Map.empty Map.empty [parsedModule]
-          map (fmap fst) extracted @?= [Right identityName]
+          map (fmap functionName) extracted @?= [Right identityName]
       , testCase "headerless datatype, class, and method declarations survive" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "data Box a = Box a"
@@ -508,7 +511,7 @@ tests = testGroup "Exference"
               methods = concat $ loadedClassMethodsByModule loaded
           loadedSourceInstanceCount loaded @?= 0
           Map.member className (sClassEnv_tclasses classEnvironment) @?= True
-          map (fmap $ fst . classMethodFunction) methods
+          map (fmap $ functionName . classMethodFunction) methods
             @?= [Right methodName]
           let deconstructors = runIdentity
                 $ getDataConss (sClassEnv_tclasses classEnvironment)
@@ -526,7 +529,7 @@ tests = testGroup "Exference"
           identityName <- expectRight $ mkQualifiedName ["Explicit"] "identity"
           let extracted = runIdentity
                 $ getDecls [] Map.empty Map.empty [parsedModule]
-          map (fmap fst) extracted @?= [Right identityName]
+          map (fmap functionName) extracted @?= [Right identityName]
       , testCase "monomorphic deconstructors have no empty forall wrapper" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module Fixture where"
@@ -554,15 +557,30 @@ tests = testGroup "Exference"
             [Right (constructors, DeconstructorBinding input fields False)] -> do
               input @?= resultType
               constructors @?=
-                [ (this, TypeForall [0] []
-                    $ TypeArrow (TypeVar 0) resultType)
-                , (that, TypeForall [0] [] resultType)
+                [ functionBindingFromType this 0
+                    $ TypeForall [0] []
+                    $ TypeArrow (TypeVar 0) resultType
+                , functionBindingFromType that 0
+                    $ TypeForall [0] [] resultType
                 ]
               fields @?=
                 [ ConstructorBinding this [TypeVar 0]
                 , ConstructorBinding that []
                 ]
             result -> fail $ "unexpected datatype bindings: " ++ show result
+      , testCase "function bindings split quantified signatures once" $ do
+          function <- expectRight $ mkQualifiedName ["Fixture"] "function"
+          cls <- expectRight $ mkQualifiedName ["Fixture"] "C"
+          let constraint = HsConstraint cls [TypeVar 7]
+              signature = TypeForall [7] [constraint]
+                $ TypeArrow (TypeVar 7) (TypeCons $ name "Int")
+          functionBindingFromType function (Penalty 2.5) signature @?=
+            FunctionBinding
+              (TypeCons $ name "Int")
+              function
+              (Penalty 2.5)
+              [constraint]
+              [TypeVar 7]
       , testCase "datatype recursion follows strongly connected components" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module Fixture where"
@@ -2154,7 +2172,7 @@ tests = testGroup "Exference"
               synonyms = rights results
           aliasName <- expectRight $ mkQualifiedName ["M"] "Alias"
           map tdecl_name synonyms @?= [aliasName, aliasName]
-          let environment :: SourceEnvironment FunctionBinding
+          let environment :: SourceEnvironment
               environment = SourceEnvironment
                 { sourceBindings = []
                 , sourceDeconstructors = []
@@ -2348,6 +2366,25 @@ tests = testGroup "Exference"
               assertBool
                 ("missing constraint-class diagnostic: " ++ show messages)
                 $ "unknown constraint class 'External.Constraint' used in the binding Warnings.constrained"
+                    `elem` messages
+      , testCase "loader retains constraints nested in constraint arguments" $ do
+          withTemporaryFile (unlines
+            [ "module Warnings where"
+            , "class Outer a"
+            , "nested :: Outer (forall b. External.Constraint b => b) => Int"
+            ]) $ \modulePath -> do
+              let baseMode = haskellSrcExtsParseMode modulePath
+                  rankNMode = baseMode
+                    { HSE.extensions = HSE.EnableExtension HSE.RankNTypes
+                        : HSE.extensions baseMode
+                    }
+              (result, messages) <- runLoad
+                $ parseModules [(rankNMode, modulePath)]
+              _ <- expectRight result
+              assertBool
+                ("missing nested constraint-class diagnostic: "
+                  ++ show messages)
+                $ "unknown constraint class 'External.Constraint' used in the binding Warnings.nested"
                     `elem` messages
       , testCase "partial class inventories fail before advisory warnings" $ do
           environmentDirectory <- getDataFileName "exference/environment"
@@ -3004,7 +3041,7 @@ name = QualifiedName []
 -- constructor functions beside their structural declarations makes it easy
 -- for the source-boundary tests above to perturb exactly one side of the
 -- required bijection.
-maybeLikeSourceEnvironment :: SourceEnvironment FunctionBinding
+maybeLikeSourceEnvironment :: SourceEnvironment
 maybeLikeSourceEnvironment = SourceEnvironment
   { sourceBindings =
       [ SourceFunction

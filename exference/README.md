@@ -125,14 +125,17 @@ diagnostics. Its backend `SourceEnvironment` projection keeps parsed functions,
 deconstructors, classes, datatype names, and synonyms in one named inventory
 through rating and CLI loading. `toSynthesisSourceEnvironment` seals that
 complete inventory in the shared environment IR. Its ordered binding field is
-now `sourceBindings :: [SourceBinding function]`, where `SourceFunction`
-denotes an ordinary value and `SourceClassMethod QualifiedName` records the
-exact owning class. The flat `sourceFunctions` accessor remains available for
-search and compatibility clients, but code constructing or updating the old
-`sourceFunctions` record field must migrate to `sourceBindings` and wrap its
-ordinary entries in `SourceFunction`. A read-only explicit import that formerly
-named only `SourceEnvironment(..)` must now also name the standalone
-`sourceFunctions` accessor; broad module imports remain unaffected.
+now `sourceBindings :: [SourceBinding]`, where `SourceFunction` denotes an
+ordinary `FunctionBinding` and `SourceClassMethod QualifiedName` records the
+exact owning class beside one. Both `SourceBinding` and `SourceEnvironment` are
+monomorphic: HSE signatures cross `functionBindingFromType` once during
+extraction, and rating updates change only `functionPenalty`. The flat
+`sourceFunctions` accessor remains available for search and compatibility
+clients, but code constructing or updating the old `sourceFunctions` record
+field must migrate to `sourceBindings` and wrap its ordinary entries in
+`SourceFunction`. A read-only explicit import that formerly named only
+`SourceEnvironment(..)` must now also name the standalone `sourceFunctions`
+accessor; broad module imports remain unaffected.
 
 The low-level HSE adapters are total at their public boundaries:
 `convertName`, `convertModuleName`, and `getDataTypes` return explicit

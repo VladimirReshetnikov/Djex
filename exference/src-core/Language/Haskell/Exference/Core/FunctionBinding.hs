@@ -5,6 +5,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
+  , functionBindingFromType
   )
 where
 
@@ -13,6 +14,7 @@ import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.TypeUtils (splitArrowResultParams)
 
 data FunctionBinding = FunctionBinding
   { functionResult :: HsType
@@ -24,6 +26,20 @@ data FunctionBinding = FunctionBinding
   deriving (Eq, Generic, Show)
 
 instance NFData FunctionBinding
+
+-- | Lower one fully quantified source signature into the search engine's
+-- flat binding shape. Quantifier IDs are local to the signature; constraints
+-- and arrow parameters remain explicit search inputs, while the caller-owned
+-- penalty is attached without changing the type's structure.
+functionBindingFromType
+  :: QualifiedName
+  -> Penalty
+  -> HsType
+  -> FunctionBinding
+functionBindingFromType name penalty signature = FunctionBinding
+  result name penalty constraints parameters
+ where
+  (result, parameters, _, constraints) = splitArrowResultParams signature
 
 data ConstructorBinding = ConstructorBinding
   { constructorName :: QualifiedName

@@ -1231,6 +1231,74 @@ tests = testGroup "Exference"
                 | (_, _, statistics) <- chunkElements chunk
                 ]
           candidateSteps @?= [3]
+      , testCase "case scrutinees count as one use regardless of constructor count" $ do
+          let bool = TypeCons $ name "Bool"
+              seed = TypeCons $ name "Seed"
+              result = TypeCons $ name "Result"
+              viaCaseName = name "viaCase"
+              viaSeedName = name "viaSeed"
+              trueName = name "true"
+              functions =
+                [ FunctionBinding result viaCaseName (-2) []
+                    [TypeArrow bool bool]
+                , FunctionBinding result viaSeedName 4 [] [seed]
+                , FunctionBinding bool trueName 0 [] []
+                ]
+              boolDeconstructor = DeconstructorBinding bool
+                [ ConstructorBinding (name "False") []
+                , ConstructorBinding (name "True") []
+                ] False
+              runWith penalty = lastChunk $ identityInput
+                { input_goalType = result
+                , input_envFuncs = functions
+                , input_envDeconsS = [boolDeconstructor]
+                , input_multiPM = True
+                , input_maxSteps = 4
+                , input_heuristicsConfig = defaultHeuristicsConfig
+                    {heuristics_tempMultiVarUsePenalty = penalty}
+                }
+          baseline <- runWith 0
+          heavilyWeighted <- runWith 100
+          let baselineUses = Map.lookup trueName
+                $ chunkBindingUsages baseline
+              weightedUses = Map.lookup trueName
+                $ chunkBindingUsages heavilyWeighted
+          -- After the initial forall opening, the case branch competes with
+          -- the Seed branch at step four.
+          -- Reaching `true` calibrates that the case branch won; changing the
+          -- multiple-use penalty must not demote it merely because Bool has
+          -- two constructors.
+          baselineUses @?= Just 1
+          weightedUses @?= baselineUses
+      , testCase "single-constructor patterns retain substituted field types" $ do
+          let integer = TypeCons $ name "Int"
+              boxName = name "Box"
+              genericBox = TypeApp (TypeCons boxName) $ TypeVar 0
+              integerBox = TypeApp (TypeCons boxName) integer
+              deconstructor = DeconstructorBinding genericBox
+                [ConstructorBinding boxName [TypeVar 0]] False
+              input = identityInput
+                { input_goalType = TypeArrow integerBox integer
+                , input_envDeconsS = [deconstructor]
+                }
+          case findOneExpression input of
+            Just
+                ( ExpLambda scrutinee _
+                    (ExpLetMatch constructor [(field, annotation)]
+                      (ExpVar matchedScrutinee _)
+                      (ExpVar returnedField _))
+                , []
+                , _
+                ) -> do
+              constructor @?= boxName
+              matchedScrutinee @?= scrutinee
+              returnedField @?= field
+              annotation @?= integer
+            Nothing -> fail "Box deconstruction produced no expression"
+            Just (expression, constraints, _) -> fail
+              $ "unexpected Box deconstruction result: "
+              ++ showExpression expression
+              ++ " with constraints " ++ show constraints
       , testCase "complete failure is distinguished from bounded search" $ do
           chunk <- lastChunk $ identityInput
             {input_goalType = TypeCons $ name "Void"}

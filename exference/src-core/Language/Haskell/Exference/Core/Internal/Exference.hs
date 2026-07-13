@@ -1267,7 +1267,7 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
                                      vars
                                      newProvTypes
                   expr = ExpLetMatch matchId
-                                     (zip vars matchRs)
+                                     (zip vars newProvTypes)
                                      expVar
                                      (ExpHole vid)
               modify $ \node -> node
@@ -1287,13 +1287,17 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
                                            (HsTypeOffset matchParam offset)
             -- inputType = incF matchParam
             mapFunc2 substs = do -- m
+              -- The case expression evaluates its scrutinee once.  Its
+              -- alternatives do not constitute additional uses of that
+              -- variable; charging one use per constructor biases the queue
+              -- against datatypes merely for having more constructors.
+              builderRecordVarUse v
               mData <- matchers `forM` \matcher -> do -- m
                 let matchId = constructorName matcher
                     matchRs = constructorFields matcher
                 newSid <- builderAddScope sid
                 let resultTypes = map incF matchRs
                 vars <- replicateM (length matchRs) builderAllocVar
-                builderRecordVarUse v
                 newVid <- builderAllocHole
                 let newProvTypes = map (snd . applySubsts substs) resultTypes
                     newBinds = zipWith (\x y -> splitBinding (VarBinding x y)) vars newProvTypes

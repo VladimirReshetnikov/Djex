@@ -830,6 +830,7 @@ generatedTests = testGroup "generated syntax"
               ]
           options = RenderOptions FullyQualified (const "select") []
       validateFunctionClauseScope clause @?= Right ()
+      validateFunctionClauseSyntax FullyQualified clause @?= Right ()
       renderFunctionClause options clause @?=
         Right (unlinesWithoutFinal
           [ "select select' ="
@@ -837,12 +838,29 @@ generatedTests = testGroup "generated syntax"
           , "  Just select'' -> select''"
           , "  Nothing -> select'"
           ])
+  , testCase "validate every function-clause syntax layer" $ do
+      let target = right $ mkIdentifier "target"
+          constructorName = right $ mkIdentifier "Just"
+          variableName = right $ mkIdentifier "value"
+          unit = Tuple [] :: Expression Int
+      validateFunctionClauseSyntax FullyQualified
+          (FunctionClause constructorName [] unit) @?=
+        Left (InvalidFunctionName constructorName)
+      validateFunctionClauseSyntax FullyQualified
+          (FunctionClause target [Constructor variableName []] unit) @?=
+        Left (InvalidConstructorPattern variableName)
+      validateFunctionClauseSyntax FullyQualified
+          (FunctionClause target [] $ Lambda [] unit) @?= Left EmptyLambda
   , testCase "reject qualification that captures a definition global" $ do
       let target = right $ mkIdentifier "result"
           namespace = right $ mkModuleName "Fixture"
           global = right $ mkQualifiedIdentifier namespace "result"
           clause = FunctionClause target [] (Global global :: Expression Int)
           options qualification = RenderOptions qualification show []
+      validateFunctionClauseSyntax Unqualified clause @?=
+        Left (GlobalDefinitionCapture target global Unqualified)
+      validateFunctionClauseSyntax QualifyIdentifiers clause @?= Right ()
+      validateFunctionClauseSyntax FullyQualified clause @?= Right ()
       renderFunctionClause (options Unqualified) clause @?=
         Left (GlobalDefinitionCapture target global Unqualified)
       renderFunctionClause (options QualifyIdentifiers) clause @?=

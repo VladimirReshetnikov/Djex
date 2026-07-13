@@ -116,10 +116,13 @@ import Language.Haskell.Exference.ClassEnvFromHaskellSrc
   (ClassEnvironmentLoadError (..), getClassEnv)
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc
-  ( convert
+  ( HaskellSrcConversionError (..)
+  , convert
   , convertChecked
   , convertToFunc
   , convertToFuncChecked
+  , generatedExpressionToHaskellSrc
+  , generatedFunctionClauseToHaskellSrc
   )
 import Language.Haskell.Exference.BindingsFromHaskellSrc
   (getClassMethods, getDataConss)
@@ -2122,7 +2125,95 @@ tests = testGroup "Exference"
               $ Generated.InvalidGlobalExpression SharedName.functionName)
       ]
   , testGroup "Haskell AST conversion"
-      [ testCase "lowercase names use Var rather than Con" $
+      [ testCase "shared clauses preserve every generated pattern form" $ do
+          definition <- expectRight $ SharedName.mkIdentifier "match"
+          justName <- expectRight $ SharedName.mkIdentifier "Just"
+          let preferred local = case local of
+                0 -> "tuplePart"
+                1 -> "whole"
+                _ -> "part"
+              options = Generated.RenderOptions
+                Generated.Unqualified preferred []
+              clause = Generated.FunctionClause definition
+                [ Generated.Wildcard
+                , Generated.TuplePattern
+                    [Generated.Bind (0 :: Int), Generated.Wildcard]
+                , Generated.As 1
+                    $ Generated.Constructor justName [Generated.Bind 2]
+                ]
+                $ Generated.Tuple
+                    [Generated.Local 0, Generated.Local 1, Generated.Local 2]
+          converted <- expectRight
+            $ generatedFunctionClauseToHaskellSrc options clause
+          case converted of
+            HSE.FunBind _
+                [HSE.Match _ (HSE.Ident _ "match")
+                  [ HSE.PWildCard _
+                  , HSE.PTuple _ HSE.Boxed
+                      [ HSE.PVar _ (HSE.Ident _ "tuplePart")
+                      , HSE.PWildCard _
+                      ]
+                  , HSE.PAsPat _ (HSE.Ident _ "whole")
+                      (HSE.PApp _
+                        (HSE.UnQual _ (HSE.Ident _ "Just"))
+                        [HSE.PVar _ (HSE.Ident _ "part")])
+                  ]
+                  (HSE.UnGuardedRhs _
+                    (HSE.Tuple _ HSE.Boxed [_, _, _])) Nothing] -> pure ()
+            declaration -> fail $ "unexpected generated clause: "
+              ++ show declaration
+      , testCase "shared expressions preserve tuples, lets, and cases" $ do
+          trueName <- expectRight $ SharedName.mkIdentifier "True"
+          falseName <- expectRight $ SharedName.mkIdentifier "False"
+          justName <- expectRight $ SharedName.mkIdentifier "Just"
+          let preferred local = case local of
+                0 -> "left"
+                1 -> "right"
+                _ -> "value"
+              options = Generated.RenderOptions
+                Generated.Unqualified preferred []
+              expression = Generated.Let
+                (Generated.TuplePattern
+                  [Generated.Bind (0 :: Int), Generated.Bind 1])
+                (Generated.Tuple
+                  [Generated.Global trueName, Generated.Global falseName])
+                $ Generated.Let
+                    (Generated.Constructor justName [Generated.Bind 2])
+                    (Generated.Apply
+                      (Generated.Global justName) (Generated.Local 0))
+                    $ Generated.Case (Generated.Local 2)
+                      [ ( Generated.Wildcard
+                        , Generated.Tuple
+                            [Generated.Local 1, Generated.Local 2]
+                        )
+                      ]
+          converted <- expectRight
+            $ generatedExpressionToHaskellSrc options expression
+          case converted of
+            HSE.Let _
+                (HSE.BDecls _
+                  [ HSE.PatBind _
+                      (HSE.PTuple _ HSE.Boxed [_, _])
+                      (HSE.UnGuardedRhs _
+                        (HSE.Tuple _ HSE.Boxed [_, _])) Nothing
+                  , HSE.PatBind _
+                      (HSE.PParen _
+                        (HSE.PApp _
+                          (HSE.UnQual _ (HSE.Ident _ "Just")) [_]))
+                      (HSE.UnGuardedRhs _ (HSE.App _ _ _)) Nothing
+                  ])
+                (HSE.Case _
+                  (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ "value")))
+                  [HSE.Alt _ (HSE.PWildCard _)
+                    (HSE.UnGuardedRhs _
+                      (HSE.Tuple _ HSE.Boxed [_, _])) Nothing]) -> pure ()
+            result -> fail $ "unexpected generated expression: " ++ show result
+      , testCase "shared conversion reports lexical scope failures" $
+          generatedExpressionToHaskellSrc
+              (Generated.defaultRenderOptions show)
+              (Generated.Local (7 :: Int)) @?=
+            Left (HaskellSrcScopeError $ Generated.UnboundLocal 7)
+      , testCase "lowercase names use Var rather than Con" $
           case convert 0 (ExpName $ name "id") of
             HSE.Var{} -> pure ()
             expression -> fail $ "expected Var, got " ++ show expression

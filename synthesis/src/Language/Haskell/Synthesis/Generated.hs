@@ -21,6 +21,7 @@ module Language.Haskell.Synthesis.Generated
   , validateExpressionScope
   , validateFunctionClauseScope
   , validateExpressionSyntax
+  , validateFunctionClauseSyntax
   , validateDefinitionName
   , expressionSize
   , allocateLocalNames
@@ -317,24 +318,13 @@ renderFunctionClause
   -> FunctionClause local
   -> Either RenderError String
 renderFunctionClause options clause@(FunctionClause name patterns body) = do
-  validateDefinitionName name
-  mapM_ validatePatternSyntax patterns
-  validateExpressionSyntax body
-  case List.find capturesDefinition $ expressionGlobals body of
-    Just global -> Left $ GlobalDefinitionCapture
-      name global $ renderQualification options
-    Nothing -> Right ()
+  validateFunctionClauseSyntax (renderQualification options) clause
   names <- allocateClauseLocalNames options clause
   Right $ renderStyle style $ sep
     [ text (renderNamePrefix (renderQualification options) name) <+>
         sep (map (ppPattern options names 10) patterns) <+> text "="
     , nest 2 $ ppExpression options names 0 body
     ]
- where
-  capturesDefinition global =
-    renderNamePrefix (renderQualification options) global ==
-      renderNamePrefix (renderQualification options) name
-
 validateExpressionSyntax :: Expression local -> Either RenderError ()
 validateExpressionSyntax expression = case expression of
   Local{} -> Right ()
@@ -359,6 +349,26 @@ validateExpressionSyntax expression = case expression of
     where
       validateAlternative (pattern, body) =
         validatePatternSyntax pattern >> validateExpressionSyntax body
+
+-- | Validate a top-level clause's generated syntax under the qualification
+-- policy that will be used to emit it.  Definition capture belongs here, not
+-- in a particular text renderer: erasing a global's qualifier can turn a
+-- structurally non-recursive body into an accidental self-reference.
+validateFunctionClauseSyntax
+  :: Qualification
+  -> FunctionClause local
+  -> Either RenderError ()
+validateFunctionClauseSyntax qualification
+    (FunctionClause name patterns body) = do
+  validateDefinitionName name
+  mapM_ validatePatternSyntax patterns
+  validateExpressionSyntax body
+  case List.find capturesDefinition $ expressionGlobals body of
+    Just global -> Left $ GlobalDefinitionCapture name global qualification
+    Nothing -> Right ()
+ where
+  capturesDefinition global =
+    renderNamePrefix qualification global == renderNamePrefix qualification name
 
 -- | Count structural nodes independently of rendered names and qualification.
 -- Search heuristics can prefer smaller terms without making rank depend on

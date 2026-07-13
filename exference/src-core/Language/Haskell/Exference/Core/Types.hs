@@ -62,7 +62,6 @@ where
 import Data.Char ( ord, chr, toLower )
 import Data.Foldable (traverse_)
 import Data.Graph (SCC (..), stronglyConnComp)
-import Data.List ( intercalate )
 import Data.Maybe ( fromMaybe )
 import Data.Monoid ( Any(..) )
 import Control.Monad ( liftM2 )
@@ -77,6 +76,7 @@ import Language.Haskell.Exference.Core.Name
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 
 import Control.DeepSeq
 import GHC.Generics
@@ -509,78 +509,53 @@ instance NFData StaticClassEnv
 instance NFData QueryClassEnv
 
 instance Show HsType where
-  showsPrec _ (TypeVar i) = showString $ showVar i
-  showsPrec _ (TypeConstant i) = showString $ "C" ++ showVar i
-  showsPrec d (TypeCons s) = showsPrec d s
-  showsPrec d (TypeArrow t1 t2) =
-    showParen (d> -2) $ showsPrec (-1) t1 . showString " -> " . showsPrec (-1) t2
-  showsPrec d (TypeApp t1 t2) =
-    showParen (d> -1) $ showsPrec 0 t1 . showString " " . showsPrec 0 t2
-  showsPrec d (TypeForall [] [] t) = showsPrec d t
-  showsPrec d (TypeForall is cs t) =
-    showParen (d>0)
-    $ showString quantifier
-    . showString context
-    . showsPrec (-2) t
-    where
-      quantifier
-        | null is = ""
-        | otherwise = "forall " ++ intercalate ", " (showVar <$> is) ++ " . "
-      context
-        | null cs = ""
-        | otherwise = "(" ++ intercalate ", " (map show cs) ++ ") => "
+  -- Render the total structural projection without validating or
+  -- canonicalizing it: Show is also needed while reporting rejected input.
+  showsPrec precedence source = SharedRender.showsType
+    defaultVariableName precedence $ toSynthesisTypeStructure source
 
 showHsType :: TypeVarIndex -> HsType -> String
-showHsType convMap t = h 0 t ""
- where
-  variableName i = fromMaybe (showVar i)
-    $ fst <$> L.find ((i ==) . snd) (M.toList convMap)
-  constantName i = fromMaybe ("C" ++ showVar i)
-    $ fst <$> L.find ((i ==) . snd) (M.toList convMap)
-  h :: Int -> HsType -> ShowS
-  h _ (TypeVar i) = showString $ variableName i
-  h _ (TypeConstant i) = showString $ constantName i
-  h _ (TypeCons s) = shows s
-  h d (TypeArrow t1 t2) =
-    showParen (d> -2) $ t1Shows . showString " -> " . t2Shows
-    where
-      t1Shows = h (-1) t1
-      t2Shows = h (-1) t2
-  h d (TypeApp t1 t2) =
-    showParen (d> -1) $ t1Shows . showString " " . t2Shows
-    where
-      t1Shows = h 0 t1
-      t2Shows = h 0 t2
-  h d (TypeForall [] [] ty) = h d ty
-  h d (TypeForall is cs ty) =
-    showParen (d>0)
-      $ showString quantifier
-      . showString context
-      . tShows
-    where
-      quantifier
-        | null is = ""
-        | otherwise = "forall " ++ intercalate ", " (map variableName is) ++ " . "
-      context
-        | null cs = ""
-        | otherwise = "(" ++ intercalate ", "
-            (map (showHsConstraint convMap) cs) ++ ") => "
-      tShows = h (-2) ty
+showHsType sourceNames = SharedRender.renderType
+  (sourceVariableName sourceNames) . toSynthesisTypeStructure
 
 -- instance Read HsType where
 --   readsPrec _ = maybeToList . parseType
 
 instance Show HsConstraint where
-  showsPrec precedence =
-    showsPrec precedence . constraintRepresentation
+  showsPrec precedence source = SharedRender.showsConstraint
+    defaultVariableName precedence $ toSynthesisConstraintStructure source
 
 showHsConstraint :: TypeVarIndex
                  -> HsConstraint
                  -> String
-showHsConstraint convMap (HsConstraint c ps) =
-  unwords $ show c : tyStrs
+showHsConstraint sourceNames = SharedRender.renderConstraint
+  (sourceVariableName sourceNames) . toSynthesisConstraintStructure
+
+defaultVariableName :: SynthesisVariable -> String
+defaultVariableName variable = case variable of
+  SharedType.FlexibleVariable identifier -> showVar identifier
+  SharedType.RigidVariable identifier -> "C" ++ showVar identifier
+
+-- The parser index is spelling-to-ID because name lookup is its primary job.
+-- Rendering reverses it once, retaining the lexicographically first spelling
+-- if a caller supplies multiple aliases for one ID (the historical behavior).
+sourceVariableName
+  :: TypeVarIndex
+  -> SynthesisVariable
+  -> String
+sourceVariableName sourceNames = renderVariable
  where
-  tyStrs = showHsType convMap <$> ps
+  preferredNames = IntMap.fromListWith min
+    [ (identifier, spelling)
+    | (spelling, identifier) <- M.toList sourceNames
+    ]
+  renderVariable variable = IntMap.findWithDefault
+    (defaultVariableName variable)
+    (variableIdentifier variable)
+    preferredNames
+  variableIdentifier variable = case variable of
+    SharedType.FlexibleVariable identifier -> identifier
+    SharedType.RigidVariable identifier -> identifier
   
 
 instance Show QueryClassEnv where

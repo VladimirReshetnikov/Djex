@@ -1,11 +1,14 @@
 -- | Compact Haskell-source rendering for shared types and constraints.
 --
 -- Variable spelling remains a caller policy because backends retain different
--- source-name and rigidity information. Names and structural syntax are
--- already validated by the shared AST, so rendering itself is total.
+-- source-name and rigidity information. Names are validated by the shared AST;
+-- rendering remains total for structurally unchecked types as well, so a
+-- validation diagnostic can safely print the input it rejected.
 module Language.Haskell.Synthesis.TypeRender
   ( renderType
   , renderConstraint
+  , showsType
+  , showsConstraint
   ) where
 
 import Data.List (intercalate)
@@ -17,18 +20,36 @@ import Language.Haskell.Synthesis.Name
   )
 import Language.Haskell.Synthesis.Type (Type (..))
 
+-- | Render a complete type in source form.
 renderType :: (variable -> String) -> Type variable -> String
 renderType variableName typeExpression =
   showsType variableName 0 typeExpression ""
 
+-- | Render a complete class constraint in source form.
 renderConstraint
   :: (variable -> String)
   -> Constraint (Type variable)
   -> String
-renderConstraint variableName (Constraint className arguments) =
-  unwords $ renderPrefix className
-    : map (\argument -> showsType variableName 2 argument "") arguments
+renderConstraint variableName constraint =
+  showsConstraint variableName 0 constraint ""
 
+-- | Precedence-aware counterpart of 'renderConstraint' for compositional
+-- renderers and 'Show' instances.
+showsConstraint
+  :: (variable -> String)
+  -> Int
+  -> Constraint (Type variable)
+  -> ShowS
+showsConstraint variableName precedence (Constraint className arguments) =
+  showParen (precedence > 0 && not (null arguments))
+    $ showString (renderPrefix className)
+    . foldr showArgument id arguments
+ where
+  showArgument argument rest = showChar ' '
+    . showsType variableName 2 argument
+    . rest
+
+-- | Render a type at the supplied Haskell precedence.
 showsType
   :: (variable -> String)
   -> Int
@@ -47,6 +68,7 @@ showsType variableName precedence typeExpression = case typeExpression of
     . showsType variableName 0 result
   TupleType boxity elements -> showString $ renderTuple boxity
     [showsType variableName 0 element "" | element <- elements]
+  ForallType [] [] body -> showsType variableName precedence body
   ForallType variables constraints body -> showParen (precedence > 0)
     $ renderBinders variables
     . renderContext constraints

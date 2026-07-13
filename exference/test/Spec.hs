@@ -809,15 +809,45 @@ tests = testGroup "Exference"
                   ++ show failure)
             [minBound, -1]
       , testCase "quantified type rendering binds its body spelling" $ do
-          let names = Map.fromList [("x", 0)]
+          let names = Map.fromList [("x", 0), ("y", 1)]
           showHsType names (TypeForall [0] [] $ TypeVar 0)
-            @?= "forall x . x"
+            @?= "forall x. x"
           showHsType names
             (TypeForall []
               [HsConstraint (name "C") [TypeVar 0]] $ TypeVar 0)
             @?= "(C x) => x"
           show (TypeForall [0] [] $ TypeVar 0)
-            @?= "forall v0 . v0"
+            @?= "forall v0. v0"
+          showsPrec 2 (TypeArrow (TypeVar 0) (TypeVar 1)) ""
+            @?= "(v0 -> a)"
+          showsPrec 2
+              (TypeForall [] [] $ TypeArrow (TypeVar 0) (TypeVar 1)) ""
+            @?= "(v0 -> a)"
+          showsPrec 1 (HsConstraint (name "C") [TypeVar 0]) ""
+            @?= "(C v0)"
+          let twoBinders = TypeForall [0, 1] []
+                $ TypeArrow (TypeVar 0) (TypeVar 1)
+              rendered = showHsType names twoBinders
+          rendered @?= "forall x y. x -> y"
+          case parseTypePure rendered of
+            Right _ -> pure ()
+            Left failure -> fail $ "rendered forall did not parse: "
+              ++ show failure
+          let compoundConstraint = HsConstraint (name "C")
+                [ TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
+                , TypeArrow (TypeVar 0) (TypeVar 1)
+                ]
+          showHsConstraint names compoundConstraint @?=
+            "C (Maybe x) (x -> y)"
+          showHsType (Map.fromList [("z", 0), ("a", 0)]) (TypeVar 0)
+            @?= "a"
+          showHsType Map.empty (TypeConstant 0) @?= "Cv0"
+          pairName <- expectRight $ mkBoxedTupleName 2
+          showHsType Map.empty
+              (TypeApp
+                (TypeApp (TypeCons pairName) (TypeVar 0))
+                (TypeVar 1))
+            @?= "(,) v0 a"
       , testCase "unification rejects nested foralls conservatively" $ do
           let polymorphic = TypeForall [0] [] (TypeVar 0)
           unify polymorphic (TypeVar 1) @?= Nothing

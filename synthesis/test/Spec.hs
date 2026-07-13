@@ -792,6 +792,13 @@ typeTests = testGroup "source types"
         "a -> skolem"
       TypeRender.renderConstraint variableName constraint @?=
         "C a skolem"
+      TypeRender.showsType variableName 2 typeExpression "" @?=
+        "(a -> skolem)"
+      TypeRender.showsConstraint variableName 1 constraint "" @?=
+        "(C a skolem)"
+      TypeRender.showsType variableName 2
+          (SharedType.ForallType [] [] typeExpression) "" @?=
+        "(a -> skolem)"
       TypeRender.renderType variableName
           (SharedType.TupleType Unboxed []) @?= "(# #)"
       TypeRender.renderType variableName

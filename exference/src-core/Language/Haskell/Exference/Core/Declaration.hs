@@ -104,6 +104,13 @@ data SynthesisDeclarationError
   | OrphanClassMethodBindings [QualifiedName]
   | MismatchedClassMethodOwners
       [(QualifiedName, QualifiedName, QualifiedName)]
+  | PreparedBindingNamesMismatch
+      [QualifiedName] -- ^ Ordered source multiset.
+      [QualifiedName] -- ^ Ordered prepared-backend multiset.
+  | PreparedDataTypeNamesMismatch
+      [QualifiedName] -- ^ Ordered source multiset.
+      [QualifiedName] -- ^ Ordered prepared-backend multiset.
+  | PreparedDataMetadataMissing SharedName.Name
   | ExplicitParameterKindUnsupported SynthesisVariable
   | InvalidDeconstructorHead HsType
   | NonVariableDataParameter HsType

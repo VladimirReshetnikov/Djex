@@ -179,7 +179,11 @@ checked environment. The explicitly named
 into the compatibility frontend. The source boundary tags class methods with
 their qualified owner, nests them under the common class declaration for
 validation, and lowers each rated selector exactly once into Exference's flat
-search inventory without changing source order. A session retains only its
+search inventory without changing source order. HSE aliases remain unexpanded
+through common Inventory kind checking; the same neutral lowering used by
+programmatic sessions then expands them capture-safely, normalizes classes and
+instances, and derives cross-module recursion before source ratings/order are
+reapplied. A session retains only its
 neutral inventory and synonym table, its checked core search environment, and
 parser-independent type-name and class indexes; neither an HSE source
 environment nor its legacy synonym map survives sealing.

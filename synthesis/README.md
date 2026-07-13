@@ -121,7 +121,12 @@ such as `Typeable`. Public fixed-kind results use an uninhabited kind-variable
 parameter, so an unsolved monomorphic kind cannot escape.
 Closed inventories reject unknown type and class names; open inventories infer
 one stable kind per external type name and require every occurrence of an
-external class to agree on arity.
+external class to agree on arity. Synonym kinds are frozen after definition
+checking, before operational declarations, so a value or instance cannot make
+an unused phantom parameter higher-kinded. Closed inventories freeze all
+nominal type kinds at that boundary; open inventories deliberately leave
+datatype kinds live so compatibility frontends can represent abstract empty
+datatype stubs whose omitted shape is supplied by later instances.
 
 `Language.Haskell.Synthesis.Environment` seals structurally valid declarations
 and builds deterministic type/class, value/method, constructor, and

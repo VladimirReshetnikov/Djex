@@ -99,8 +99,10 @@ import Language.Haskell.Exference.EnvironmentParser
   , unsupportedVocabularyOccurrences
   , sourceBindingFunction
   , sourceFunctions
+  , sourceTypeSynonymMap
   , checkedSourceInventory
   , checkedSourceProjection
+  , checkSourceEnvironment
   , environmentLoadErrorDiagnostics
   , environmentFromModule
   , environmentFromModuleAndRatings
@@ -145,6 +147,7 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , fromSynthesisTypeDeclaration
   , getTypeDecls
   , parseType
+  , parseTypeWithKinds
   , toSynthesisTypeDeclaration
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
@@ -3151,6 +3154,176 @@ tests = testGroup "Exference"
               tdecl_params flipped @?= [1, 0, 2]
               Set.size (Set.fromList $ tdecl_params flipped) @?= 3
             result -> fail $ "unexpected synonym declarations: " ++ show result
+      , testCase "loader kind-checks phantom alias arguments before erasure" $
+          withTemporaryFile (unlines
+            [ "module PhantomKind where"
+            , "data Higher a = Higher a"
+            , "type Phantom a = Int"
+            , "bad :: Phantom Higher"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              badName <- toSynthesisName <$> expectRight
+                (mkQualifiedName ["PhantomKind"] "bad")
+              case result of
+                Left (InvalidSourceInventory
+                    (InvalidSourceEnvironmentKinds
+                      (SharedKindInference.DeclarationKindError actualName
+                        SharedKindInference.KindMismatch{}))) ->
+                  actualName @?= badName
+                Left failure -> fail $ "unexpected load failure: " ++ show failure
+                Right _ -> fail "a phantom alias erased an ill-kinded argument"
+      , testCase "compatibility queries check kinds before alias expansion" $
+          withTemporaryFile (unlines
+            [ "module QueryKinds where"
+            , "data Higher a = Higher a"
+            , "type Phantom a = Int"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              let projection = checkedSourceProjection checked
+                  inventory = checkedSourceInventory checked
+                  parsed = runIdentity $ runExceptT $ parseTypeWithKinds
+                    (SharedInventory.inventoryKindAssumptions inventory)
+                    (sClassEnv_tclasses $ sourceClasses projection)
+                    Nothing
+                    (sourceTypeNames projection)
+                    (sourceTypeSynonymMap projection)
+                    (haskellSrcExtsParseMode "phantom-query")
+                    "Phantom Higher"
+              case parsed of
+                Left failure -> diagnosticCode failure @?= Just "EXF_KIND"
+                Right value -> fail $ "ill-kinded query was accepted as "
+                  ++ show value
+      , testCase "checked inventory retains aliases while projection expands" $
+          withTemporaryFile (unlines
+            [ "module AliasBoundary where"
+            , "type Phantom a = Int"
+            , "good :: Phantom Int"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              phantomName <- toSynthesisName <$> expectRight
+                (mkQualifiedName ["AliasBoundary"] "Phantom")
+              goodName <- toSynthesisName <$> expectRight
+                (mkQualifiedName ["AliasBoundary"] "good")
+              intName <- expectRight $ SharedName.mkIdentifier "Int"
+              let inventoryEnvironment = SharedInventory.inventoryEnvironment
+                    $ checkedSourceInventory checked
+                  projected = sourceFunctions
+                    $ checkedSourceProjection checked
+              case Map.lookup goodName
+                  $ SharedEnvironment.valueSignatureMap inventoryEnvironment of
+                Just signature -> assertBool
+                  "the checked source signature lost its alias application"
+                  $ phantomName `Set.member`
+                  SharedType.typeConstructors
+                    (SharedDeclaration.valueType signature)
+                Nothing -> fail "the checked inventory lost AliasBoundary.good"
+              case find ((== goodName) . toSynthesisName . functionName)
+                  projected of
+                Just binding -> toSynthesisTypeStructure
+                    (functionResult binding) @?=
+                      SharedType.TypeConstructor intName
+                Nothing -> fail "the backend projection lost AliasBoundary.good"
+      , testCase "post-inventory alias expansion avoids class binder capture" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module MethodCapture where"
+            , "type Ground = forall x. x"
+            , "class C a where"
+            , "  method :: Ground"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              className <- expectRight
+                $ mkQualifiedName ["MethodCapture"] "C"
+              methodName <- expectRight
+                $ mkQualifiedName ["MethodCapture"] "method"
+              case find ((== methodName) . functionName)
+                  $ sourceFunctions $ checkedSourceProjection checked of
+                Just FunctionBinding
+                    { functionResult = TypeVar methodVariable
+                    , functionConstraints =
+                        [HsConstraint owner [TypeVar ownerVariable]]
+                    } -> do
+                      owner @?= className
+                      assertBool "method-local forall captured the class parameter"
+                        $ methodVariable /= ownerVariable
+                Just binding -> fail $ "unexpected method projection: "
+                  ++ show binding
+                Nothing -> fail "the checked projection lost MethodCapture.method"
+      , testCase "checked recursion metadata ignores stale source flags" $ do
+          let recursiveName = name "Recursive"
+              recursiveConstructor = name "MakeRecursive"
+              leafName = name "Leaf"
+              leafConstructor = name "MakeLeaf"
+              recursiveType = TypeCons recursiveName
+              leafType = TypeCons leafName
+              environment = SourceEnvironment
+                { sourceBindings = map SourceFunction
+                    [ FunctionBinding recursiveType recursiveConstructor 0 []
+                        [recursiveType]
+                    , FunctionBinding leafType leafConstructor 0 [] []
+                    ]
+                , sourceDeconstructors =
+                    [ DeconstructorBinding recursiveType
+                        [ConstructorBinding recursiveConstructor [recursiveType]]
+                        False
+                    , DeconstructorBinding leafType
+                        [ConstructorBinding leafConstructor []]
+                        True
+                    ]
+                , sourceClasses = emptyStaticClassEnv
+                , sourceTypeNames = [recursiveName, leafName]
+                , sourceTypeSynonyms = []
+                }
+          checked <- case checkSourceEnvironment environment of
+            Left failure -> fail $ "unexpected sealing failure: " ++ show failure
+            Right value -> pure value
+          map deconstructorRecursive
+            (sourceDeconstructors $ checkedSourceProjection checked) @?=
+              [True, False]
+          let declarations = SharedEnvironment.typeDeclarationMap
+                $ SharedInventory.inventoryEnvironment
+                $ checkedSourceInventory checked
+              recursion nameValue = case Map.lookup
+                  (toSynthesisName nameValue) declarations of
+                Just (SharedDeclaration.DataTypeDeclaration
+                    (RecursiveDataMetadata recursive) _ _ _) -> Just recursive
+                _ -> Nothing
+          map recursion [recursiveName, leafName] @?=
+            [Just True, Just False]
+      , testCase "checked recursion spans source modules" $
+          withTemporaryFile (unlines
+            [ "module MutualA where"
+            , "data A = MakeA B"
+            ]) $ \firstPath ->
+          withTemporaryFile (unlines
+            [ "module MutualB where"
+            , "data B = MakeB A"
+            ]) $ \secondPath -> do
+              LoadReport parsedResult _ <- parseModules
+                [ (haskellSrcExtsParseMode firstPath, firstPath)
+                , (haskellSrcExtsParseMode secondPath, secondPath)
+                ]
+              parsed <- expectRight parsedResult
+              firstName <- expectRight $ mkQualifiedName ["MutualA"] "A"
+              secondName <- expectRight $ mkQualifiedName ["MutualB"] "B"
+              let mutualFlags environment =
+                    [ deconstructorRecursive deconstructor
+                    | deconstructor <- sourceDeconstructors environment
+                    , typeConstructorHead (deconstructorInput deconstructor)
+                        `elem` map Just [firstName, secondName]
+                    ]
+              -- The compatibility extractor still processes module-local
+              -- batches, so this also proves the checked projection no longer
+              -- trusts those preliminary bits.
+              mutualFlags parsed @?= [False, False]
+              checked <- case checkSourceEnvironment parsed of
+                Left failure -> fail $ "unexpected sealing failure: "
+                  ++ show failure
+                Right value -> pure value
+              mutualFlags (checkedSourceProjection checked) @?= [True, True]
       , testCase "duplicate synonyms reach the shared inventory in source order" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module M where"

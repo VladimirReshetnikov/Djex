@@ -173,11 +173,14 @@ getTypeDecls ds modules = do
       return $ HsTypeDecl qname vars ty
   let validDeclarations = rights rawList
       declarationMap = M.map Right $ uniqueTypeDeclMap validDeclarations
-      resolve declaration = HsTypeDecl
-        (tdecl_name declaration)
-        (tdecl_params declaration)
-        <$> applyTypeDecls declarationMap (tdecl_result declaration)
-  return $ [ e | e@(Left _) <- rawList ] ++ map resolve validDeclarations
+      -- Validate every reachable expansion now so the compatibility loader
+      -- retains its historical cycle and saturation diagnostics.  Keep the
+      -- raw declaration, however: the shared Inventory must see applications
+      -- before phantom parameters can erase kind errors, and its backend
+      -- lowering will perform the one authoritative expansion afterwards.
+      validate declaration = applyTypeDecls declarationMap
+        (tdecl_result declaration) >> pure declaration
+  return $ [ e | e@(Left _) <- rawList ] ++ map validate validDeclarations
 
 convertType :: Monad m
             => Map QualifiedName HsTypeClass
@@ -215,7 +218,16 @@ parseType
   -> P.ParseMode
   -> String
   -> ExceptT Diagnostic m (HsType, TypeVarIndex)
-parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
+parseType tcs mn ds tDeclMap mode source = parseHaskellSrcType
+  (convertType tcs mn ds tDeclMap) mode source
+
+parseHaskellSrcType
+  :: Monad m
+  => (Type SrcSpanInfo -> ExceptT String m result)
+  -> P.ParseMode
+  -> String
+  -> ExceptT Diagnostic m result
+parseHaskellSrcType convert mode source = case P.parseTypeWithMode mode source of
   P.ParseFailed location message -> throwE
     $ withSpan (let position = SourcePosition
                       (srcLine location) (srcColumn location)
@@ -223,11 +235,11 @@ parseType tcs mn ds tDeclMap m s = case P.parseTypeWithMode m s of
     $ withSource (srcFilename location)
     $ diagnostic message
   P.ParseOk ty -> ExceptT $ first conversionDiagnostic
-    <$> runExceptT (convertType tcs mn ds tDeclMap ty)
+    <$> runExceptT (convert ty)
   where
     conversionDiagnostic message =
-      withSpan (sourceTextSpan s)
-      $ withSource (P.parseFilename m)
+      withSpan (sourceTextSpan source)
+      $ withSource (P.parseFilename mode)
       $ diagnostic message
 
 -- | Parse, lower, and kind-check a query against the assumptions retained by
@@ -243,15 +255,31 @@ parseTypeWithKinds
   -> String
   -> ExceptT Diagnostic m (HsType, TypeVarIndex)
 parseTypeWithKinds assumptions tcs mn ds declarations mode source = do
-  result@(typeExpression, _) <-
-    parseType tcs mn ds declarations mode source
-  shared <- either (throwE . kindDiagnostic . show) pure
-    $ toSynthesisType typeExpression
-  either (throwE . kindDiagnostic . show) pure
-    $ SharedKindInference.checkTypesKinds assumptions
-      [(SharedKind.ProperTypeKind, shared)]
-  pure result
+  (rawType, variableIndex) <- parseHaskellSrcType
+    (convertTypeNoDecl tcs mn ds) mode source
+  -- Haskell synonym parameters are kind-checked even when their RHS does not
+  -- mention them. Checking the raw application first prevents a phantom
+  -- parameter from erasing an invalid higher-kinded argument.
+  checkKind rawType
+  expanded <- either (throwE . conversionDiagnostic) pure
+    $ applyTypeDecls (M.map Right declarations) rawType
+  -- Expansion is expected to preserve kind, but this defensive obligation
+  -- also guards parser-adapter tables assembled by compatibility callers.
+  checkKind expanded
+  pure (expanded, variableIndex)
  where
+  checkKind typeExpression = do
+    shared <- either (throwE . kindDiagnostic . show) pure
+      $ toSynthesisType typeExpression
+    either (throwE . kindDiagnostic . show) pure
+      $ SharedKindInference.checkTypesKinds assumptions
+        [(SharedKind.ProperTypeKind, shared)]
+
+  conversionDiagnostic message =
+    withSpan (sourceTextSpan source)
+    $ withSource (P.parseFilename mode)
+    $ diagnostic message
+
   kindDiagnostic message =
     withCode "EXF_KIND"
     $ withSpan (sourceTextSpan source)

@@ -61,7 +61,9 @@ The public named `exference-frontend` sublibrary contains the
 core import paths. It also exposes `Language.Haskell.Djex.Exference`, so the
 Exference executable and backend-specific clients use the checked session API
 without linking Djinn. The package's default `djex` library re-exports that
-adapter together with the stable frontend and core modules.
+adapter together with the shared synthesis vocabulary; callers of the raw
+compatibility frontend or search core depend on their explicitly named
+sublibraries.
 Source conversion exposes its concrete `ConversionT` stack, with errors inside
 lazy state so caught failures retain earlier variable allocations.  Together
 with direct reader and strict-writer transformers, this also keeps the frontend
@@ -131,10 +133,14 @@ representation for them.
 
 The HSE loader returns `IO (LoadReport CheckedSourceEnvironment)`: fatal phases
 use a typed error, while nonfatal warnings and summaries are structured shared
-diagnostics. Its backend `SourceEnvironment` projection keeps parsed functions,
-deconstructors, classes, datatype names, and synonyms in one named inventory
-through rating and CLI loading. `toSynthesisSourceEnvironment` seals that
-complete inventory in the shared environment IR. Its ordered binding field is
+diagnostics. Low-level `parseModules` keeps aliases unexpanded in its
+`SourceEnvironment`; `checkSourceEnvironment` first seals and kind-checks that
+source graph, then sends the checked Inventory through the parser-independent
+neutral lowerer. The resulting backend projection is reconciled by name with
+the original binding/deconstructor order and ratings. Thus synonym expansion,
+forall freshness, class/instance normalization, and whole-inventory recursion
+classification have one implementation, while the checked Inventory still
+retains the source aliases needed by later queries. Its ordered binding field is
 now `sourceBindings :: [SourceBinding]`, where `SourceFunction` denotes an
 ordinary `FunctionBinding` and `SourceClassMethod QualifiedName` records the
 exact owning class beside one. Both `SourceBinding` and `SourceEnvironment` are
@@ -176,6 +182,9 @@ and tuple constructors
 have explicit intrinsic datatype records, so `(:)` never masquerades as an
 ordinary value. Constructor shape and search penalty are then lowered back
 from that checked inventory rather than trusted from a parallel raw record.
+Recursive flags are derived after alias expansion across all loaded modules
+and written back into both the checked projection and Inventory; caller-
+supplied or module-local preliminary bits are never authoritative.
 Class-environment construction likewise rejects repeated instance heads before
 building its lookup index; each shipped primitive instance now has one owning
 module instead of a second shadow declaration in `Data.hs`.
@@ -185,6 +194,11 @@ unconstrained class parameters can generalize to support the shipped modern
 poly-kinded `Typeable` vocabulary. The frontend selects the explicit open
 inventory policy because loading a subset of modules deliberately retains
 external type names after reporting them as warnings.
+Synonym kinds are frozen after their defining declarations and before values
+or instances are checked, so an operational use cannot retroactively make an
+unused phantom parameter higher-kinded. Open inventories continue to let empty
+datatype stubs acquire a missing kind shape from instances; the packaged
+environment uses that compatibility rule for abstract base-library types.
 Kind assumptions currently generalize only a wholly unconstrained class
 parameter. The shared IR cannot yet retain a partially polymorphic scheme such
 as `k -> Type`; an unresolved variable below a fixed outer kind shape therefore
@@ -385,8 +399,9 @@ any / the right solution. Some common current limitations are:
   `(a->b) -> [a] -> [b]` where a trivial solution would be `\_ _ -> []`.
   This also means that certain functions are not included in the environment,
   e.g. `length` or `mapM_`, as they "lose information";
-- Type synonyms are expanded before search; cycles and unsaturated uses are
-  rejected with diagnostics;
+- Type synonyms are kind-checked in their unexpanded source applications and
+  expanded only after inventory sealing; cycles, unsaturated uses, and
+  ill-kinded phantom arguments are rejected with diagnostics;
 - Source inventories and queries are kind-checked against the same retained
   assumptions; an ill-kinded application such as `Maybe Maybe` is rejected
   before search;

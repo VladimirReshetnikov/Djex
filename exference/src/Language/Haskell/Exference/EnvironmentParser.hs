@@ -41,6 +41,7 @@ import Language.Haskell.Exference.HaskellSrcUtils
   (contextConstraints, splitDeclHead)
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
+import Language.Haskell.Exference.Core.TypeUtils (typeConstructorHead)
 
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Diagnostic
@@ -288,99 +289,116 @@ checkSourceEnvironment
   :: SourceEnvironment
   -> Either EnvironmentLoadError CheckedSourceEnvironment
 checkSourceEnvironment environment = do
-  inventory <- first InvalidSourceInventory
+  sourceInventory <- first InvalidSourceInventory
     $ toSynthesisSourceInventory environment
   projection <- first InvalidSourceInventory
-    $ normalizeBackendProjection inventory environment
+    $ normalizeBackendProjection sourceInventory environment
+  inventory <- first InvalidSourceInventory
+    $ normalizeInventoryDataMetadata sourceInventory projection
   pure $ CheckedSourceEnvironment projection inventory
 
--- | Rebuild declaration-owned backend bindings from the checked shared
--- declarations. Ordinary functions retain source order; constructor and class
--- method entries are replaced in place so equal-cost search ordering does not
--- change. The Inventory is authoritative for ownership, shape, and penalty
--- without imposing declaration-category order on the search environment.
+-- | Make derived datatype metadata in the public checked Inventory agree with
+-- the post-expansion backend projection.  Rebuilding is intentional: Inventory
+-- is opaque, and changing declaration annotations through a parallel cache
+-- would leave its environment indexes out of sync.
+normalizeInventoryDataMetadata
+  :: SynthesisInventory
+  -> SourceEnvironment
+  -> Either SynthesisDeclarationError SynthesisInventory
+normalizeInventoryDataMetadata inventory projection = do
+  metadata <- M.fromList <$> mapM entry (sourceDeconstructors projection)
+  declarations <- mapM (attach metadata)
+    $ SharedEnvironment.environmentDeclarations
+    $ SharedInventory.inventoryEnvironment inventory
+  sealSynthesisInventory declarations
+ where
+  entry deconstructor = do
+    name <- deconstructorTypeName deconstructor
+    pure
+      ( toSynthesisName name
+      , deconstructorRecursive deconstructor
+      )
+
+  attach metadata declaration = case declaration of
+    SharedDeclaration.DataTypeDeclaration _ name parameters constructors ->
+      case M.lookup name metadata of
+        Nothing -> Left $ PreparedDataMetadataMissing name
+        Just recursive -> Right $ SharedDeclaration.DataTypeDeclaration
+          (RecursiveDataMetadata recursive) name parameters constructors
+    _ -> Right declaration
+
+-- | Lower the checked, alias-preserving inventory exactly once, then reconcile
+-- its backend records with source order and ratings.  The neutral lowerer owns
+-- capture-safe synonym expansion, declaration-local variable normalization,
+-- and global recursive-datatype classification; the HSE projection contributes
+-- only presentation order, method ownership tags, and heuristic penalties.
 normalizeBackendProjection
   :: SynthesisInventory
   -> SourceEnvironment
   -> Either SynthesisDeclarationError
       SourceEnvironment
 normalizeBackendProjection inventory environment = do
-  converted <- mapM fromSynthesisRatedDataDeclaration
-    [ declaration
-    | declaration@SharedDeclaration.DataTypeDeclaration{} <-
-        SharedEnvironment.environmentDeclarations
-        $ SharedInventory.inventoryEnvironment inventory
-    ]
-  convertedClasses <- mapM fromSynthesisClassDeclarationWithMethods
-    [ declaration
-    | declaration@SharedDeclaration.ClassDeclaration{} <-
-        SharedEnvironment.environmentDeclarations
-          $ SharedInventory.inventoryEnvironment inventory
-    ]
-  let constructorFunctions = concatMap fst converted
-      functionsByName = M.fromList
+  (_, backend) <- prepareNeutralSynthesisInventory
+    $ fmap (const ()) inventory
+  let sourceBindingNames = sort
+        $ map (functionName . sourceBindingFunction)
+        $ sourceBindings environment
+      preparedBindingNames = sort
+        $ map functionName $ environmentFunctions backend
+      preparedBindings = M.fromList
         [ (functionName binding, binding)
-        | binding <- constructorFunctions
+        | binding <- environmentFunctions backend
         ]
-      replaceConstructor binding = M.findWithDefault binding
-        (functionName binding) functionsByName
-      inventoryMethodGroups = M.fromListWith (++)
-        [ (functionName binding,
-            [(tclass_name typeClass, binding)])
-        | (typeClass, methods) <- convertedClasses
-        , binding <- methods
-        ]
-      sourceMethodGroups = M.fromListWith (++)
-        [ (functionName binding, [(owner, binding)])
-        | SourceClassMethod owner binding <- sourceBindings environment
-        ]
-      duplicateMethodNames = S.toAscList $ S.fromList
-        [ methodName
-        | (methodName, occurrences) <-
-            M.toAscList inventoryMethodGroups ++ M.toAscList sourceMethodGroups
-        , length occurrences /= 1
-        ]
-      missingMethodNames = S.toAscList
-        $ M.keysSet inventoryMethodGroups S.\\ M.keysSet sourceMethodGroups
-      orphanMethodNames = S.toAscList
-        $ M.keysSet sourceMethodGroups S.\\ M.keysSet inventoryMethodGroups
-      mismatchedMethodOwners =
-        [ (methodName, expectedOwner, actualOwner)
-        | (methodName, [(expectedOwner, _)]) <-
-            M.toAscList inventoryMethodGroups
-        , [(actualOwner, _)] <- [M.findWithDefault [] methodName
-            sourceMethodGroups]
-        , expectedOwner /= actualOwner
-        ]
-      methodsByName = M.mapMaybe onlyOccurrence inventoryMethodGroups
-      onlyOccurrence occurrences = case occurrences of
-        [occurrence] -> Just occurrence
-        _ -> Nothing
-      normalizeBinding sourceBinding = case sourceBinding of
-        SourceFunction binding ->
-          Right $ SourceFunction $ replaceConstructor binding
-        SourceClassMethod _ binding -> case
-            M.lookup (functionName binding) methodsByName of
-          Just (normalizedOwner, normalized) ->
-            Right $ SourceClassMethod normalizedOwner normalized
-          Nothing -> Left $ MissingClassMethodBindings [functionName binding]
-  if null duplicateMethodNames
+      sourceDataNamesResult = mapM deconstructorTypeName
+        $ sourceDeconstructors environment
+      preparedDataNamesResult = mapM deconstructorTypeName
+        $ environmentDeconstructors backend
+  if sourceBindingNames == preparedBindingNames
     then pure ()
-    else Left $ DuplicateClassMethodBindings duplicateMethodNames
-  if null missingMethodNames
+    else Left $ PreparedBindingNamesMismatch
+      sourceBindingNames preparedBindingNames
+  sourceDataNames <- sourceDataNamesResult
+  preparedDataNames <- preparedDataNamesResult
+  if sort sourceDataNames == sort preparedDataNames
     then pure ()
-    else Left $ MissingClassMethodBindings missingMethodNames
-  if null orphanMethodNames
-    then pure ()
-    else Left $ OrphanClassMethodBindings orphanMethodNames
-  if null mismatchedMethodOwners
-    then pure ()
-    else Left $ MismatchedClassMethodOwners mismatchedMethodOwners
-  normalizedBindings <- mapM normalizeBinding $ sourceBindings environment
+    else Left $ PreparedDataTypeNamesMismatch
+      (sort sourceDataNames) (sort preparedDataNames)
+  let preparedDeconstructors = M.fromList
+        $ zip preparedDataNames $ environmentDeconstructors backend
+      replaceBinding tagged = do
+        let source = sourceBindingFunction tagged
+        prepared <- maybe
+          (Left $ PreparedBindingNamesMismatch
+            sourceBindingNames preparedBindingNames)
+          Right
+          $ M.lookup (functionName source) preparedBindings
+        let rated = prepared {functionPenalty = functionPenalty source}
+        pure $ case tagged of
+          SourceFunction _ -> SourceFunction rated
+          SourceClassMethod owner _ -> SourceClassMethod owner rated
+      replaceDeconstructor source = do
+        name <- deconstructorTypeName source
+        maybe
+          (Left $ PreparedDataTypeNamesMismatch
+            (sort sourceDataNames) (sort preparedDataNames))
+          Right
+          $ M.lookup name preparedDeconstructors
+  normalizedBindings <- mapM replaceBinding $ sourceBindings environment
+  normalizedDeconstructors <- mapM replaceDeconstructor
+    $ sourceDeconstructors environment
   pure environment
     { sourceBindings = normalizedBindings
-    , sourceDeconstructors = map snd converted
+    , sourceDeconstructors = normalizedDeconstructors
+    , sourceClasses = environmentClasses backend
     }
+
+deconstructorTypeName
+  :: DeconstructorBinding
+  -> Either SynthesisDeclarationError QualifiedName
+deconstructorTypeName declaration = maybe
+  (Left $ InvalidDeconstructorHead $ deconstructorInput declaration)
+  Right
+  $ typeConstructorHead $ deconstructorInput declaration
 
 -- | Unique-only compatibility index used by the historical type elaborator.
 -- The ordered field remains authoritative so duplicate declarations reach the
@@ -485,6 +503,12 @@ toSynthesisSourceInventory environment = do
     (sourceClasses environment)
   let declarations =
         synonyms ++ SharedEnvironment.environmentDeclarations core
+  sealSynthesisInventory declarations
+
+sealSynthesisInventory
+  :: [SynthesisDeclaration]
+  -> Either SynthesisDeclarationError SynthesisInventory
+sealSynthesisInventory declarations =
   case SharedInventory.mkInventory
       SharedKindInference.OpenKindInventory declarations of
     Left (SharedInventory.InvalidInventoryEnvironment failure) ->
@@ -801,10 +825,14 @@ parseModulesM inputs = do
         Just errors -> throwE $ TypeDeclarationErrors errors
         Nothing -> pure ()
       let typeDeclarations = rights typeDeclarationResults
-          typeDeclarationMap = uniqueTypeDeclMap typeDeclarations
 
+      -- Keep every operational source type unexpanded until the common
+      -- Inventory has checked the original applications.  Passing the empty
+      -- compatibility map still performs all HSE name/shape conversion; the
+      -- checked backend projection expands the retained synonym declarations
+      -- later through 'prepareNeutralSynthesisInventory'.
       classResult <- lift
-        $ loadClassEnvironment dataTypes typeDeclarationMap modules
+        $ loadClassEnvironment dataTypes M.empty modules
       loadedClasses <- either
         (throwE . ClassEnvironmentLoadFailure)
         pure
@@ -814,7 +842,7 @@ parseModulesM inputs = do
           methodsByModule = loadedClassMethodsByModule loadedClasses
 
       extracted <- lift $ zipWithM
-        (hExtractBinds classEnvironment dataTypes typeDeclarationMap)
+        (hExtractBinds classEnvironment dataTypes M.empty)
         modules methodsByModule
       let (bindingLists, deconstructorLists, errorLists) = unzip3 extracted
           declarations = concat bindingLists

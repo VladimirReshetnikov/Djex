@@ -255,6 +255,31 @@ kindInferenceTests = testGroup "kind inference"
         (KindInference.KindAssumptions
           (Map.singleton fixName $ arrow (arrow proper proper) proper)
           (Map.singleton className [Just $ arrow proper proper]))
+  , testCase "operational uses cannot refine phantom parameter kinds" $ do
+      let phantomName = right $ mkIdentifier "Phantom"
+          higherName = right $ mkIdentifier "Higher"
+          makeHigherName = right $ mkIdentifier "MakeHigher"
+          intName = right $ mkIdentifier "Int"
+          badName = right $ mkIdentifier "bad"
+          parameter variable = Declaration.TypeParameter variable Nothing
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration () intName proper
+            , Declaration.TypeSynonymDeclaration () phantomName
+                [parameter "unused"] $ SharedType.TypeConstructor intName
+            , Declaration.DataTypeDeclaration () higherName [parameter "a"]
+                [ Declaration.DataConstructor () makeHigherName
+                    [SharedType.TypeVariable "a"]
+                ]
+            , Declaration.ValueDeclaration
+                $ Declaration.ValueSignature () badName
+                $ SharedType.TypeApplication
+                    (SharedType.TypeConstructor phantomName)
+                    (SharedType.TypeConstructor higherName)
+            ]
+      KindInference.inferDeclarationKinds declarations @?= Left
+        (KindInference.DeclarationKindError badName
+          $ KindInference.KindMismatch proper $ arrow proper proper)
   , testCase "generalize unconstrained classes while propagating known superclasses" $ do
       let intName = right $ mkIdentifier "Int"
           typeableName = right $ mkIdentifier "Typeable"

@@ -178,13 +178,41 @@ inferDeclarationKindsWith policy declarations = do
     generalizedClasses <- stabilizeDefiningClassKinds
       externalClassKinds typeKinds typeParameters classParameters
       classKinds declarations
+    -- Definition-local inference is now complete. A synonym's parameter kind
+    -- must be frozen before operational checking: a later use cannot make a
+    -- phantom parameter higher-kinded and thereby disappear an invalid
+    -- argument during expansion. Closed inventories freeze every nominal
+    -- type. Open inventories deliberately leave datatype kinds live because
+    -- compatibility frontends use empty data declarations as abstract stubs
+    -- whose omitted shape can be supplied by instances. Classes remain
+    -- separately generalized through 'Nothing'.
+    operationalTypeKinds <- freezeOperationalTypeKinds
+      policy declarations typeKinds
     let allClassKinds = generalizedClasses `Map.union` externalClassKinds
-        assumptions = InferenceAssumptions typeKinds allClassKinds
+        assumptions = InferenceAssumptions
+          operationalTypeKinds allClassKinds
     mapM_ (checkOperationalDeclaration assumptions
       typeParameters classParameters) declarations
     KindAssumptions
       <$> traverse ground typeKinds
       <*> traverse (mapM (traverse ground)) allClassKinds
+
+freezeOperationalTypeKinds
+  :: KindInventoryPolicy
+  -> [Declaration variable Void annotation]
+  -> Map Name InferenceKind
+  -> Inference variable (Map Name InferenceKind)
+freezeOperationalTypeKinds policy declarations = Map.traverseWithKey freeze
+ where
+  synonymNames = Set.fromList
+    [ name
+    | TypeSynonymDeclaration _ name _ _ <- declarations
+    ]
+  shouldFreeze name = policy == ClosedKindInventory
+    || name `Set.member` synonymNames
+  freeze name kind
+    | shouldFreeze name = fromGroundKind <$> ground kind
+    | otherwise = pure kind
 
 -- | Infer class kinds without letting one use monomorphize an otherwise
 -- generalized class parameter.  Each round snapshots the kinds currently

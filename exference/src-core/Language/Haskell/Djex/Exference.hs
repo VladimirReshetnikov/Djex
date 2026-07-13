@@ -176,15 +176,24 @@ defaultExferenceSessionPolicy = ExferenceSessionPolicy
   , exferenceRatingOverrides = Map.empty
   }
 
--- Keep the frontend spelling index private: it is meaningful only when paired
--- with the exact parsed goal and must be converted after explicit contexts are
--- merged, because that operation can change Exference's rigid-ID allocation.
+-- Keep the frontend caches private: they are meaningful only when paired with
+-- the exact parsed goal. In particular, the spelling index must be converted
+-- after explicit contexts are merged, because that operation can change
+-- Exference's rigid-ID allocation.
 data ExferenceRequest = ExferenceRequest
   { requestQuery :: QueryRequest ExferenceType ExferenceOptions
   , requestSourceTypeVariables :: Map.Map String ExferenceLocal
   , requestSourceLocation :: Maybe (FilePath, SourceSpan)
   }
-  deriving (Eq, Show)
+
+-- Source spellings and locations are deterministic presentation caches, not
+-- part of the stable request value. This matches Djinn's opaque request: both
+-- backends expose equality and display solely through the neutral query.
+instance Eq ExferenceRequest where
+  left == right = requestQuery left == requestQuery right
+
+instance Show ExferenceRequest where
+  showsPrec precedence = showsPrec precedence . requestQuery
 
 -- | Generated-expression binder identities used by Exference.
 type ExferenceLocal = Int

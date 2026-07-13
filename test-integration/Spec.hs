@@ -260,6 +260,26 @@ tests = testGroup "Djex facade"
           exferenceResultBindingUsages result @?=
             exferenceBatchBindingUsages metadata
         [] -> fail "Exference found no identity candidate"
+  , testCase "hide Exference request provenance from equality and display" $ do
+      target <- expectRight $ mkIdentifier "opaqueRequest"
+      let variable = FlexibleVariable 0
+          variableType = TypeVariable variable
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = FunctionType variableType variableType
+            , requestContexts = []
+            , requestOptions = defaultExferenceOptions
+            }
+          location = Just
+            ( "opaque-request.djex"
+            , SourceSpan (SourcePosition 3 5) (SourcePosition 3 11)
+            )
+      plain <- expectRight $ mkExferenceRequest query
+      sourced <- expectRight $ mkExferenceRequestWithSourceInfo
+        (Map.singleton "sourceVariable" 0) location query
+      plain @?= sourced
+      show plain @?= show sourced
+      show plain @?= show query
   , testCase "keep checked-HSE and neutral Exference sessions equivalent" $ do
       backendIdentityName <- expectRight
         $ mkQualifiedName ["Fixture"] "identity"

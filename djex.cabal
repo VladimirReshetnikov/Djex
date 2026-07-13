@@ -63,7 +63,9 @@ common transformers-dep
 -- suite still declares its interface locally.
 common tasty-test
   import:        build-settings
-  Build-Depends: tasty >= 1.4 && < 2
+  -- 1.4.2 is the first release whose bundled async fallback adapts to the
+  -- monomorphic fork# primop used by GHC 9.12 (tasty commit 4dd33d5c).
+  Build-Depends: tasty >= 1.4.2 && < 2
 
 common tasty-hunit-test
   import:        tasty-test

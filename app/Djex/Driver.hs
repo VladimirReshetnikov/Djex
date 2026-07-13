@@ -28,9 +28,6 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   )
 import Paths_djex (getDataFileName, version)
 
-data CliBackend = Djinn | Exference
-  deriving (Eq, Show)
-
 data RenderMode = RenderDefinition | RenderExpression
   deriving (Eq, Show)
 
@@ -86,12 +83,14 @@ runArguments arguments = case arguments of
   ["-V"] -> do
     putStrLn $ "djex version " ++ showVersion version
     pure ExitSuccess
-  ["djinn", "--help"] -> putStrLn (backendUsage Djinn) >> pure ExitSuccess
-  ["djinn", "-h"] -> putStrLn (backendUsage Djinn) >> pure ExitSuccess
+  ["djinn", "--help"] ->
+    putStrLn (backendUsage DjinnBackend) >> pure ExitSuccess
+  ["djinn", "-h"] ->
+    putStrLn (backendUsage DjinnBackend) >> pure ExitSuccess
   ["exference", "--help"] ->
-    putStrLn (backendUsage Exference) >> pure ExitSuccess
+    putStrLn (backendUsage ExferenceBackend) >> pure ExitSuccess
   ["exference", "-h"] ->
-    putStrLn (backendUsage Exference) >> pure ExitSuccess
+    putStrLn (backendUsage ExferenceBackend) >> pure ExitSuccess
   "djinn" : backendArguments ->
     runParsed (parseDjinnOptions backendArguments) runDjinn
   "exference" : backendArguments ->
@@ -281,7 +280,7 @@ djinnQueryOptions options = defaultQueryOptions
 
 parseDjinnOptions :: [String] -> Either String DjinnOptions
 parseDjinnOptions arguments = do
-  (flags, source) <- parseOptions Djinn arguments
+  (flags, source) <- parseOptions DjinnBackend arguments
   common <- parseCommonOptions flags source
   candidateLimit <- uniqueValue "--candidate-limit" candidateLimitValue
     "200" flags >>= positiveInt "--candidate-limit"
@@ -295,7 +294,7 @@ parseDjinnOptions arguments = do
 
 parseExferenceOptions :: [String] -> Either String ExferenceCliOptions
 parseExferenceOptions arguments = do
-  (flags, source) <- parseOptions Exference arguments
+  (flags, source) <- parseOptions ExferenceBackend arguments
   common <- parseCommonOptions flags source
   environment <- optionalUniqueValue "--environment" environmentValue flags
   allowUnused <- uniqueSwitch "--allow-unused" (== AllowUnusedFlag) flags
@@ -332,9 +331,9 @@ parseExferenceOptions arguments = do
  where
   defaults = defaultExferenceOptions
 
-parseOptions :: CliBackend -> [String] -> Either String ([Flag], String)
-parseOptions cliBackend arguments = case
-    getOpt Permute (optionsFor cliBackend) arguments of
+parseOptions :: Backend -> [String] -> Either String ([Flag], String)
+parseOptions selectedBackend arguments = case
+    getOpt Permute (optionsFor selectedBackend) arguments of
   (flags, [source], []) -> Right (flags, source)
   (_, [], []) -> Left "exactly one input type is required"
   (_, sources, []) -> Left $ "exactly one input type is required, but got "
@@ -472,10 +471,14 @@ environmentValue :: Flag -> Maybe FilePath
 environmentValue (EnvironmentFlag value) = Just value
 environmentValue _ = Nothing
 
-optionsFor :: CliBackend -> [OptDescr Flag]
-optionsFor cliBackend = commonOptions ++ case cliBackend of
-  Djinn -> djinnOptions
-  Exference -> exferenceOptions
+optionsFor :: Backend -> [OptDescr Flag]
+optionsFor selectedBackend =
+  commonOptions ++ backendSpecificOptions selectedBackend
+
+backendSpecificOptions :: Backend -> [OptDescr Flag]
+backendSpecificOptions selectedBackend = case selectedBackend of
+  DjinnBackend -> djinnOptions
+  ExferenceBackend -> exferenceOptions
 
 commonOptions :: [OptDescr Flag]
 commonOptions =
@@ -535,17 +538,19 @@ fullUsage = intercalate "\n"
   , usageInfo "Exference options:" exferenceOptions
   ]
 
-backendUsage :: CliBackend -> String
-backendUsage cliBackend = intercalate "\n"
+backendUsage :: Backend -> String
+backendUsage selectedBackend = intercalate "\n"
   [ "Usage: djex " ++ commandName ++ " [OPTION...] TYPE"
   , ""
   , usageInfo "Common options:" commonOptions
   , usageInfo (backendTitle ++ " options:") backendOptions
   ]
  where
-  (commandName, backendTitle, backendOptions) = case cliBackend of
-    Djinn -> ("djinn", "Djinn", djinnOptions)
-    Exference -> ("exference", "Exference", exferenceOptions)
+  commandName = case selectedBackend of
+    DjinnBackend -> "djinn"
+    ExferenceBackend -> "exference"
+  backendTitle = backendName $ backendInfo selectedBackend
+  backendOptions = backendSpecificOptions selectedBackend
 
 usageFailure :: String -> IO ExitCode
 usageFailure message = do

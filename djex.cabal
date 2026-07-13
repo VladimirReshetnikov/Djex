@@ -77,8 +77,10 @@ common cli-test
     directory >= 1.3 && < 1.4,
     process   >= 1.6 && < 1.7
 
--- The stable Djex facade. Backend-neutral metadata and explicit reexports live
--- here; checked adapters live beside the backends that implement them.
+-- The stable Djex facade. Compatibility and research modules remain available
+-- from their explicit named sublibraries instead of leaking into every Djex
+-- client. The adapters below expose checked standard-session and source-loader
+-- entry points, so neither raw backend is needed here.
 Library
   import:           build-settings
   Hs-Source-Dirs:   src
@@ -87,33 +89,8 @@ Library
     Language.Haskell.Djex
 
   Reexported-Modules:
-    Djinn.Core,
     Language.Haskell.Djex.Djinn,
     Language.Haskell.Djex.Exference,
-    Language.Haskell.Exference,
-    Language.Haskell.Exference.Diagnostic,
-    Language.Haskell.Exference.SimpleDict,
-    Language.Haskell.Exference.ExpressionToHaskellSrc,
-    Language.Haskell.Exference.TypeFromHaskellSrc,
-    Language.Haskell.Exference.TypeDeclsFromHaskellSrc,
-    Language.Haskell.Exference.BindingsFromHaskellSrc,
-    Language.Haskell.Exference.ClassEnvFromHaskellSrc,
-    Language.Haskell.Exference.EnvironmentParser,
-    Language.Haskell.Exference.Core,
-    Language.Haskell.Exference.Core.Name,
-    Language.Haskell.Exference.Core.Types,
-    Language.Haskell.Exference.Core.TypeUtils,
-    Language.Haskell.Exference.Core.RigidInstantiation,
-    Language.Haskell.Exference.Core.ExferenceStats,
-    Language.Haskell.Exference.Core.Candidate,
-    Language.Haskell.Exference.Core.ConstraintSolver,
-    Language.Haskell.Exference.Core.Declaration,
-    Language.Haskell.Exference.Core.Unify,
-    Language.Haskell.Exference.Core.FunctionBinding,
-    Language.Haskell.Exference.Core.Expression,
-    Language.Haskell.Exference.Core.ExpressionCheck,
-    Language.Haskell.Exference.Core.ExpressionSimplify,
-    Language.Haskell.Exference.Core.Score,
     Language.Haskell.Synthesis.Candidate,
     Language.Haskell.Synthesis.Constraint,
     Language.Haskell.Synthesis.Declaration,
@@ -165,6 +142,21 @@ Test-Suite djex-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test
+  -- This integration suite deliberately constructs raw Exference fixtures.
+  -- Facade-only clients do not acquire the research core transitively.
+  Build-Depends:
+    djex,
+    djex:djinn-core,
+    djex:exference-core,
+    djex:exference-frontend
+
+-- Compile and exercise the single-import surface independently of the raw
+-- backend fixture suite above. This catches accidental facade type leaks.
+Test-Suite djex-facade-tests
+  import:         tasty-hunit-test
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Spec.hs
+  Hs-Source-Dirs: test-facade
   Build-Depends:  djex
 
 Test-Suite synthesis-tests

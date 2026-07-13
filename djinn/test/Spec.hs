@@ -35,9 +35,11 @@ import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
+import qualified Language.Haskell.Djex.Djinn as Djex
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.Diagnostic as SharedDiagnostic
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
@@ -45,6 +47,7 @@ import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
+import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -55,6 +58,8 @@ main = defaultMain $ testGroup "Djinn unit tests" $
 tests :: [(String, Assertion)]
 tests =
     [ ("parse prefix function constructor", testPrefixArrowParsing)
+    , ("parse and render through the checked Djinn adapter",
+          testCheckedDjinnAdapter)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
@@ -101,6 +106,65 @@ tests =
     , ("accept only Haskell identifiers and operators", testIdentifiers)
     , ("validate every boundary of the Djinn.Core facade", testCoreFacade)
     ]
+
+testCheckedDjinnAdapter :: IO ()
+testCheckedDjinnAdapter = do
+    session <- expectShownRight Djex.standardDjinnSession
+    target <- expectShownRight $ SharedName.mkIdentifier "identity"
+    request <- expectShownRight $ Djex.parseDjinnRequest
+        session defaultQueryOptions target "identity-query.djinn"
+        "Eq a => a -> a"
+    SharedQuery.requestGoal request `assertEqualReversed`
+        HTArrow (HTVar "a") (HTVar "a")
+    SharedQuery.requestContexts request `assertEqualReversed`
+        [context "Eq" [HTVar "a"]]
+    SharedQuery.requestOptions request `assertEqualReversed`
+        defaultQueryOptions
+
+    result <- expectShownRight $ Djex.runDjinnQuery session request
+    case SharedSearch.batchCandidates $ SharedQuery.resultSearch result of
+        candidate : _ -> do
+            assertEqual "the adapter renders a complete top-level definition"
+                (Right "identity a = a")
+                (Djex.renderDjinnCandidateDefinition
+                    Djex.FullyQualified candidate)
+            assertEqual "expression rendering reconstructs clause lambdas"
+                (Right "\\a -> a")
+                (Djex.renderDjinnCandidateExpression
+                    Djex.FullyQualified candidate)
+        [] -> fail "the checked Djinn adapter found no identity candidate"
+
+    case Djex.parseDjinnRequest session defaultQueryOptions target
+            "malformed-query.djinn" "Eq a => a -> a ;" of
+        Left failure -> do
+            assertEqual "parse failures have a stable diagnostic code"
+                (Just "DJEX_DJINN_PARSE")
+                (SharedDiagnostic.diagnosticCode failure)
+            assertEqual "parse failures retain their caller-supplied source"
+                (Just "malformed-query.djinn")
+                (SharedDiagnostic.diagnosticSource failure)
+        Right _ -> fail "the checked Djinn parser accepted trailing input"
+
+    qualifier <- expectShownRight $ SharedName.mkModuleName "External"
+    invalidTarget <- expectShownRight $
+        SharedName.mkQualifiedIdentifier qualifier "identity"
+    case Djex.parseDjinnRequest session defaultQueryOptions invalidTarget
+            "bad-target.djinn" "(" of
+        Left failure -> do
+            assertEqual "target validation precedes query parsing"
+                (Just "DJEX_DJINN_TARGET")
+                (SharedDiagnostic.diagnosticCode failure)
+            assertEqual "a target error is not mislabeled as a source error"
+                Nothing (SharedDiagnostic.diagnosticSource failure)
+        Right _ -> fail "the checked Djinn parser accepted a qualified target"
+  where
+    -- Keep the visually useful expected value on the right without obscuring
+    -- the field being projected from the opaque request alias.
+    assertEqualReversed actual expected = assertEqual "parsed request field"
+        expected actual
+
+expectShownRight :: Show failure => Either failure value -> IO value
+expectShownRight = either (fail . show) return
 
 -- The library facade must make invalid environments unrepresentable and
 -- report search results honestly.

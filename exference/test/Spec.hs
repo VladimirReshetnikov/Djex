@@ -108,6 +108,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , sourceFunctions
   , checkedSourceInventory
   , checkedSourceProjection
+  , environmentLoadErrorDiagnostics
   , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
@@ -115,6 +116,13 @@ import Language.Haskell.Exference.EnvironmentParser
   , parseRatings
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
+  )
+import Language.Haskell.Djex.Exference
+  ( ExferenceSessionLoadReport (..)
+  , ExferenceSessionPolicy (..)
+  , defaultExferenceSessionPolicy
+  , loadExferenceSession
+  , loadExferenceSessionWithPolicy
   )
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
   ( ClassEnvironmentLoadError (..)
@@ -1966,6 +1974,113 @@ tests = testGroup "Exference"
             Right _ -> fail "a missing environment directory was accepted"
           assertBool ("failed directory load emitted messages: " ++ show messages)
             $ null messages
+      , testCase "existing loader diagnostics retain source structure" $ do
+          let preserved = withSpan
+                (SourceSpan (SourcePosition 3 5) (SourcePosition 3 9))
+                $ withSource "Fixture.hs"
+                $ withCode "EXF_PRESERVED"
+                $ (diagnostic "original diagnostic")
+                    {diagnosticSeverity = Warning}
+              occurrence = UnsupportedVocabularyOccurrence
+                OpenTypeFamily preserved
+              expectedDirectory =
+                withCode "EXF_ENV_DIRECTORY_READ" preserved :| []
+              expectedModule = withCode "EXF_MODULE_READ" preserved :| []
+              expectedUnsupported = preserved :| []
+          environmentLoadErrorDiagnostics
+            (EnvironmentDirectoryReadError preserved) @?= expectedDirectory
+          environmentLoadErrorDiagnostics
+            (ModuleReadErrors $ preserved :| []) @?= expectedModule
+          environmentLoadErrorDiagnostics
+            (UnsupportedSourceVocabulary $ occurrence :| [])
+              @?= expectedUnsupported
+      , testCase "legacy loader phases receive stable structured diagnostics" $ do
+          className <- expectRight $ mkQualifiedName ["Fixture"] "Class"
+          let cases =
+                [ ( ModuleParseErrors $ "parse detail" :| []
+                  , "EXF_MODULE_PARSE"
+                  , "could not parse a Haskell source module"
+                  , "parse detail"
+                  )
+                , ( DataTypeNameError "name detail"
+                  , "EXF_DATA_TYPE_NAME"
+                  , "could not extract source data-type names"
+                  , "name detail"
+                  )
+                , ( TypeDeclarationErrors $ "type detail" :| []
+                  , "EXF_TYPE_DECLARATION"
+                  , "could not load a source type declaration"
+                  , "type detail"
+                  )
+                , ( ClassEnvironmentLoadFailure
+                      $ ClassDeclarationErrors $ "class detail" :| []
+                  , "EXF_CLASS_DECLARATION"
+                  , "could not load a source class declaration"
+                  , "class detail"
+                  )
+                , ( ClassEnvironmentLoadFailure
+                      $ InstanceDeclarationErrors $ "instance detail" :| []
+                  , "EXF_INSTANCE_DECLARATION"
+                  , "could not load a source instance declaration"
+                  , "instance detail"
+                  )
+                , ( ClassEnvironmentLoadFailure
+                      $ InvalidClassEnvironment $ InvalidClassName className
+                  , "EXF_CLASS_ENVIRONMENT"
+                  , "the source class environment failed nominal validation"
+                  , show $ InvalidClassName className
+                  )
+                , ( BindingDeclarationErrors $ "binding detail" :| []
+                  , "EXF_BINDING_DECLARATION"
+                  , "could not load a source binding declaration"
+                  , "binding detail"
+                  )
+                , ( BuiltInEnvironmentErrors $ "built-in detail" :| []
+                  , "EXF_BUILTIN_ENVIRONMENT"
+                  , "could not construct Exference's built-in source environment"
+                  , "built-in detail"
+                  )
+                , ( InvalidSourceInventory ExpectedValueDeclaration
+                  , "EXF_SOURCE_INVENTORY"
+                  , "the source environment failed shared inventory validation"
+                  , show ExpectedValueDeclaration
+                  )
+                ]
+          mapM_ (\(failure, code, message, detail) -> case
+              environmentLoadErrorDiagnostics failure of
+            value :| [] -> do
+              diagnosticSeverity value @?= Error
+              diagnosticCode value @?= Just code
+              diagnosticMessage value @?= message
+              diagnosticContext value @?= [detail]
+            values -> fail $ "unexpected diagnostics: " ++ show values
+            ) cases
+      , testCase "stable session loader hides frontend load failures" $ do
+          environmentDirectory <- getDataFileName "exference/environment"
+          let missingDirectory = environmentDirectory ++ "/missing-session"
+          ExferenceSessionLoadReport result diagnostics <-
+            loadExferenceSession missingDirectory
+          diagnostics @?= []
+          case result of
+            Left (failure :| []) ->
+              ( diagnosticCode failure
+              , diagnosticSource failure
+              ) @?= (Just "EXF_ENV_DIRECTORY_READ", Just missingDirectory)
+            Left failures -> fail $ "unexpected diagnostics: " ++ show failures
+            Right _ -> fail "a missing session environment was accepted"
+      , testCase "policy-aware session loader includes omission diagnostics" $ do
+          environmentDirectory <- getDataFileName "exference/environment"
+          excluded <- expectRight $ SharedName.parseName "Data.Function.fix"
+          let policy = defaultExferenceSessionPolicy
+                {exferenceExcludedBindings = [excluded]}
+          ExferenceSessionLoadReport result diagnostics <-
+            loadExferenceSessionWithPolicy policy environmentDirectory
+          _ <- expectRight result
+          length (filter ((== Info) . diagnosticSeverity) diagnostics)
+            @?= 5
+          assertBool ("missing policy diagnostic: " ++ show diagnostics)
+            $ Just "DJEX_EXF_POLICY_OMISSION"
+                `elem` map diagnosticCode diagnostics
       , testCase "single-module loading seals neutral ratings" $
           withTemporaryFile (unlines
             [ "module Neutral where"

@@ -4,7 +4,8 @@
 --
 module Djinn.Internal.HTypes(
         HKind(..), HType(..), HSymbol,
-        hTypeToFormula, pHSymbol, pHType, pHDataType, pHTAtom, pHKind,
+        hTypeToFormula, pHSymbol, pHType, pHContext, pHConstraint,
+        pHDataType, pHTAtom, pHKind,
         prHSymbolOp, htNot, isHTUnion, getHTVars, substHT,
         HClause, HPat, HExpr(HEVar), hPrClause, renderGeneratedClause,
         toGeneratedClause,
@@ -19,6 +20,8 @@ import Text.ParserCombinators.ReadP
 import Djinn.Internal.Generated
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.LJTFormula
+import Language.Haskell.Synthesis.Constraint (Constraint(..))
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HSymbol = String
 
@@ -89,6 +92,25 @@ pHType :: ReadP HType
 pHType = do
     ts <- sepBy1 pHTypeApp (sstring "->")
     return $ foldr1 HTArrow ts
+
+-- | Parse Djinn's historical optional query context.  Keeping this token-level
+-- parser beside the type grammar lets both the compatibility REPL and the
+-- checked Djex adapter consume precisely the same syntax.
+pHContext :: ReadP [Constraint HType]
+pHContext = do
+    contexts <-
+        pParen (sepBy1 pHConstraint (schar ','))
+        +++ fmap (: []) pHConstraint
+    sstring "=>"
+    return contexts
+
+pHConstraint :: ReadP (Constraint HType)
+pHConstraint = do
+    className <- pHSymbol True
+    arguments <- many pHTAtom
+    case SharedName.parseName className of
+        Right name -> return $ Constraint name arguments
+        Left _ -> pfail
 
 pHDataType :: ReadP HType
 pHDataType = do

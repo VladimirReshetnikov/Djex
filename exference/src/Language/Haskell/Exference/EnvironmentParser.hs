@@ -17,6 +17,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , UnsupportedVocabularyOccurrence (..)
   , unsupportedVocabularyOccurrences
   , EnvironmentLoadError (..)
+  , environmentLoadErrorDiagnostics
   , parseModules
   , environmentFromModule
   , environmentFromModuleAndRatings
@@ -181,6 +182,77 @@ data EnvironmentLoadError
   | BuiltInEnvironmentErrors (NonEmpty String)
   | InvalidSourceInventory SynthesisDeclarationError
   deriving (Eq, Show)
+
+-- | Project every fatal loader phase into the shared diagnostic vocabulary.
+-- Diagnostics that already came from a parser or IO boundary retain their
+-- severity, message, context, and exact source span; only a stable phase code
+-- is attached.  Older extraction phases still report strings, so this adapter
+-- keeps their original detail as structured context.
+environmentLoadErrorDiagnostics
+  :: EnvironmentLoadError
+  -> NonEmpty Diagnostic
+environmentLoadErrorDiagnostics failure = case failure of
+  EnvironmentDirectoryReadError value ->
+    withCode "EXF_ENV_DIRECTORY_READ" value NonEmpty.:| []
+  ModuleReadErrors values -> fmap (withCode "EXF_MODULE_READ") values
+  ModuleParseErrors errors -> diagnostics
+    "EXF_MODULE_PARSE"
+    "could not parse a Haskell source module"
+    errors
+  UnsupportedSourceVocabulary occurrences ->
+    fmap unsupportedVocabularyDiagnostic occurrences
+  DataTypeNameError detail -> oneDiagnostic
+    "EXF_DATA_TYPE_NAME"
+    "could not extract source data-type names"
+    detail
+  TypeDeclarationErrors errors -> diagnostics
+    "EXF_TYPE_DECLARATION"
+    "could not load a source type declaration"
+    errors
+  ClassEnvironmentLoadFailure classFailure ->
+    classEnvironmentLoadErrorDiagnostics classFailure
+  BindingDeclarationErrors errors -> diagnostics
+    "EXF_BINDING_DECLARATION"
+    "could not load a source binding declaration"
+    errors
+  BuiltInEnvironmentErrors errors -> diagnostics
+    "EXF_BUILTIN_ENVIRONMENT"
+    "could not construct Exference's built-in source environment"
+    errors
+  InvalidSourceInventory inventoryFailure -> oneDiagnostic
+    "EXF_SOURCE_INVENTORY"
+    "the source environment failed shared inventory validation"
+    (show inventoryFailure)
+ where
+  diagnostics code message = fmap $ structuredDiagnostic code message
+  oneDiagnostic code message detail =
+    structuredDiagnostic code message detail NonEmpty.:| []
+
+classEnvironmentLoadErrorDiagnostics
+  :: ClassEnvironmentLoadError
+  -> NonEmpty Diagnostic
+classEnvironmentLoadErrorDiagnostics failure = case failure of
+  ClassDeclarationErrors errors -> diagnostics
+    "EXF_CLASS_DECLARATION"
+    "could not load a source class declaration"
+    errors
+  InstanceDeclarationErrors errors -> diagnostics
+    "EXF_INSTANCE_DECLARATION"
+    "could not load a source instance declaration"
+    errors
+  InvalidClassEnvironment classFailure -> oneDiagnostic
+    "EXF_CLASS_ENVIRONMENT"
+    "the source class environment failed nominal validation"
+    (show classFailure)
+ where
+  diagnostics code message = fmap $ structuredDiagnostic code message
+  oneDiagnostic code message detail =
+    structuredDiagnostic code message detail NonEmpty.:| []
+
+structuredDiagnostic :: String -> String -> String -> Diagnostic
+structuredDiagnostic code message detail = withContext detail
+  $ withCode code
+  $ diagnostic message
 
 warningDiagnostic :: String -> Diagnostic
 warningDiagnostic message =

@@ -13,9 +13,10 @@ generated-output infrastructure is progressively consolidated.
   identities and conservative capability metadata provide the neutral entry
   point. `Language.Haskell.Djex.Djinn` and
   `Language.Haskell.Djex.Exference` run both engines through the shared
-  query/evidence/search envelope. The default library also re-exports the
-  stable compatibility and synthesis APIs so a consumer can migrate while
-  depending on one library.
+  query/evidence/search envelope. The default library re-exports the stable
+  synthesis vocabulary and checked adapter APIs needed by ordinary clients;
+  historical and research-oriented backend modules remain available only from
+  their explicit named sublibraries.
 - `synthesis/` supplies the public named `synthesis` sublibrary: validated
   names, types, kinds, declarations, environments, diagnostics, generated
   output, and operational search status.
@@ -44,11 +45,12 @@ identities. Existing Cabal dependencies migrate as follows:
 | `exference:exference-core` | `djex:exference-core` |
 | unnamed `exference` library | `djex:exference-frontend` |
 
-New clients can depend on the unnamed `djex` library for the common facade and
-all stable, non-internal backend modules. Build-tool dependencies become
-`djex:djinn` and `djex:exference`; the executable names themselves are unchanged.
-Backend-specific clients may depend directly on `djex:djinn-core` or
-`djex:exference-frontend` without linking the other engine.
+New clients can depend on the unnamed `djex` library for the checked common
+facade and synthesis vocabulary. Compatibility or low-level clients opt into
+`djex:djinn-core`, `djex:djinn-frontend`, `djex:exference-core`, or
+`djex:exference-frontend` explicitly instead of acquiring those research APIs
+transitively. Build-tool dependencies for the historical commands remain
+`djex:djinn` and `djex:exference`; their executable names are unchanged.
 
 The filesystem and Cabal-project migration is equally deliberate:
 

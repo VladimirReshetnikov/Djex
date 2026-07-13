@@ -2,9 +2,10 @@
 -- Module      : Language.Haskell.Djex
 -- Description : Backend identities and capabilities for Djex.
 --
--- This module is the small backend-neutral entry point. Checked Djinn and
--- Exference session adapters share its query envelope, while lower-level
--- search APIs remain available through their established imports:
+-- This module is the backend-neutral entry point. Checked Djinn and Exference
+-- session adapters share its query envelope and the common types needed to
+-- inspect, select, diagnose, and render their results. Lower-level search APIs
+-- remain available from explicit named sublibrary dependencies:
 --
 -- * "Djinn.Core" is the stable, validated Djinn API.
 -- * "Language.Haskell.Exference" is the Exference frontend API.
@@ -16,7 +17,15 @@
 module Language.Haskell.Djex
   ( module Language.Haskell.Djex.Djinn
   , module Language.Haskell.Djex.Exference
+  , module Language.Haskell.Synthesis.Candidate
+  , module Language.Haskell.Synthesis.Constraint
+  , module Language.Haskell.Synthesis.Diagnostic
+  , module Language.Haskell.Synthesis.Generated
+  , module Language.Haskell.Synthesis.Name
   , module Language.Haskell.Synthesis.Query
+  , module Language.Haskell.Synthesis.Search
+  , module Language.Haskell.Synthesis.Selection
+  , module Language.Haskell.Synthesis.Type
   , Backend (..)
   , Capability (..)
   , BackendInfo (..)
@@ -26,7 +35,15 @@ module Language.Haskell.Djex
 
 import Language.Haskell.Djex.Djinn
 import Language.Haskell.Djex.Exference
+import Language.Haskell.Synthesis.Candidate
+import Language.Haskell.Synthesis.Constraint
+import Language.Haskell.Synthesis.Diagnostic
+import Language.Haskell.Synthesis.Generated
+import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Query
+import Language.Haskell.Synthesis.Search
+import Language.Haskell.Synthesis.Selection
+import Language.Haskell.Synthesis.Type
 
 -- | A search engine shipped by Djex.
 data Backend

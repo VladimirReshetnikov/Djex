@@ -3,13 +3,9 @@ module Main (main) where
 import Data.Either (isRight)
 import Data.List (isInfixOf, nub)
 import Djinn.Core
-  ( Context
-  , Declaration (ClassDecl, DataType, Function)
+  ( Declaration (ClassDecl, DataType, Function)
   , Environment
-  , HType
-  , QueryOptions
   , declare
-  , defaultQueryOptions
   , emptyEnvironment
   , generatedReportCandidates
   , generatedReportCompletion
@@ -18,14 +14,12 @@ import Djinn.Core
   , generatedReportProof
   , inhabitGenerated
   , mkContext
-  , optionAlternatives
-  , optionBudget
-  , optionCutoff
-  , optionSorted
   , parseHType
   , standardEnvironment
   )
-import Language.Haskell.Djex
+-- Raw Exference fixtures below use their historical @functionName@ field;
+-- hide the shared structural-name accessor at this integration-only seam.
+import Language.Haskell.Djex hiding (functionName)
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
 import Language.Haskell.Exference.Core.Candidate
   ( mkExferenceGeneratedCandidate )
@@ -44,45 +38,6 @@ import Language.Haskell.Exference.EnvironmentParser
   , SourceEnvironment (..)
   , checkSourceEnvironment
   , checkedSourceInventory
-  )
-import Language.Haskell.Synthesis.Candidate
-  ( candidateDetails
-  , candidateOutput
-  , candidateResidualConstraints
-  )
-import Language.Haskell.Synthesis.Constraint (Constraint (Constraint))
-import Language.Haskell.Synthesis.Diagnostic
-  ( Severity (Warning)
-  , diagnosticCode
-  , diagnosticContext
-  , diagnosticSeverity
-  , diagnosticSource
-  )
-import Language.Haskell.Synthesis.Generated
-  ( Expression (..)
-  , FunctionClause (FunctionClause)
-  , RenderError (GlobalDefinitionCapture)
-  , defaultRenderOptions
-  , renderFunctionClause
-  )
-import Language.Haskell.Synthesis.Name
-  ( Name
-  , mkIdentifier
-  , mkModuleName
-  , mkQualifiedIdentifier
-  , parseName
-  )
-import Language.Haskell.Synthesis.Search
-  ( Completion (Finished, Truncated)
-  , Progress (Completed, Continuing)
-  , TruncationReason (CandidateLimitReached, ChoicePointLimitReached)
-  , batchCandidates
-  , batchMetadata
-  , batchProgress
-  )
-import Language.Haskell.Synthesis.Type
-  ( Type (ForallType, FunctionType, TypeVariable)
-  , Variable (FlexibleVariable)
   )
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)

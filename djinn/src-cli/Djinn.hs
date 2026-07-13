@@ -485,7 +485,7 @@ pQuery :: ReadP Cmd
 pQuery = do
     i <- pLocalTermName
     schar '?'
-    c <- option [] pContext
+    c <- option [] pHContext
     t <- pHType
     optional $ schar ';'
     return $ Query i c t
@@ -495,7 +495,7 @@ pQuery' = do
     schar '?'
     i <- pLocalTermName
     sstring "::"
-    c <- option [] pContext
+    c <- option [] pHContext
     t <- pHType
     optional $ schar ';'
     return $ Query i c t
@@ -504,33 +504,10 @@ pQueryInstance :: ReadP Cmd
 pQueryInstance = do
     schar '?'
     sstring "instance"
-    c <- option [] pContext
-    target <- pConstraint
+    c <- option [] pHContext
+    target <- pHConstraint
     optional $ schar ';'
     return $ QueryInstance c target
-
-pContext :: ReadP [Context]
-pContext = do
-    ctx <-
-        do
-          schar '('
-          ctx <- sepBy1 pConstraint (schar ',')
-          schar ')'
-          return ctx
-       +++
-        do
-          ctx <- pConstraint
-          return [ctx]
-    sstring "=>"
-    return ctx
-
-pConstraint :: ReadP Context
-pConstraint = do
-    className <- pHSymbol True
-    arguments <- many pHTAtom
-    case mkContext className arguments of
-        Right context -> return context
-        Left _ -> pfail
 
 pType :: ReadP Cmd
 pType = do

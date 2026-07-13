@@ -20,6 +20,9 @@ module Language.Haskell.Djex.Exference
   , ExferenceCandidateMetrics (..)
   , ExferenceCandidateRenderError (..)
   , ExferenceResult
+  , ExferenceSessionLoadReport (..)
+  , loadExferenceSession
+  , loadExferenceSessionWithPolicy
   , mkExferenceSession
   , mkExferenceSessionWithPolicy
   , exferenceSessionInventory
@@ -40,6 +43,8 @@ import Control.Monad.Trans.Except (runExceptT)
 import Data.Bifunctor (first)
 import Data.Functor.Identity (runIdentity)
 import Data.List (partition)
+import Data.List.NonEmpty (NonEmpty)
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
@@ -85,9 +90,12 @@ import Language.Haskell.Exference.Core.Types
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( CheckedSourceEnvironment
+  , LoadReport (..)
   , SourceEnvironment (..)
   , checkedSourceInventory
   , checkedSourceProjection
+  , environmentFromPath
+  , environmentLoadErrorDiagnostics
   , haskellSrcExtsParseMode
   , sourceBindingFunction
   , sourceFunctions
@@ -207,6 +215,16 @@ data ExferenceSession = ExferenceSession
   , sessionOmissions :: [ExferenceOmission]
   }
 
+-- | A fully sealed session or structured fatal diagnostics, paired with all
+-- non-fatal source-loader and backend-projection diagnostics in production
+-- order.  No parser-specific environment or error type crosses this stable
+-- boundary.
+data ExferenceSessionLoadReport = ExferenceSessionLoadReport
+  { exferenceSessionLoadResult
+      :: Either (NonEmpty Diagnostic) ExferenceSession
+  , exferenceSessionLoadDiagnostics :: [Diagnostic]
+  }
+
 -- Keep the frontend spelling index private: it is meaningful only when paired
 -- with the exact parsed goal and must be converted after explicit contexts are
 -- merged, because that operation can change Exference's rigid-ID allocation.
@@ -232,6 +250,39 @@ data ExferenceCandidateMetrics = ExferenceCandidateMetrics
 data ExferenceCandidateRenderError
   = ExferenceGeneratedRenderError RenderError
   deriving (Eq, Show)
+
+-- | Load a directory of source modules and ratings, validate its complete
+-- inventory, and seal an Exference session with the default policy.
+loadExferenceSession :: FilePath -> IO ExferenceSessionLoadReport
+loadExferenceSession = loadExferenceSessionWithPolicy
+  defaultExferenceSessionPolicy
+
+-- | Policy-aware counterpart of 'loadExferenceSession'.  Session omission
+-- diagnostics follow source-loader diagnostics, matching the order in which
+-- the two phases run.
+loadExferenceSessionWithPolicy
+  :: ExferenceSessionPolicy
+  -> FilePath
+  -> IO ExferenceSessionLoadReport
+loadExferenceSessionWithPolicy policy path = do
+  LoadReport sourceResult sourceDiagnostics <- environmentFromPath path
+  pure $ case sourceResult of
+    Left failure -> ExferenceSessionLoadReport
+      { exferenceSessionLoadResult = Left
+          $ environmentLoadErrorDiagnostics failure
+      , exferenceSessionLoadDiagnostics = sourceDiagnostics
+      }
+    Right checked -> case mkExferenceSessionWithPolicy policy checked of
+      Left failure -> ExferenceSessionLoadReport
+        { exferenceSessionLoadResult = Left
+            $ NonEmpty.singleton failure
+        , exferenceSessionLoadDiagnostics = sourceDiagnostics
+        }
+      Right session -> ExferenceSessionLoadReport
+        { exferenceSessionLoadResult = Right session
+        , exferenceSessionLoadDiagnostics = sourceDiagnostics
+            ++ exferenceSessionDiagnostics session
+        }
 
 mkExferenceSession
   :: CheckedSourceEnvironment

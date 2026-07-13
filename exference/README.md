@@ -152,6 +152,10 @@ field must migrate to `sourceBindings` and wrap its ordinary entries in
 `SourceFunction`. A read-only explicit import that formerly named only
 `SourceEnvironment(..)` must now also name the standalone `sourceFunctions`
 accessor; broad module imports remain unaffected.
+The public `sourceTypeNames` field remains as a compatibility lookup cache, not
+as validation authority. `checkSourceEnvironment` rebuilds it from the
+normalized ordinary datatypes, retained synonyms, and checked class table, so
+a sealed projection cannot advertise stale or caller-forged names.
 
 The low-level HSE adapters are total at their public boundaries:
 `convertName`, `convertModuleName`, and `getDataTypes` return explicit

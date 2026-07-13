@@ -107,6 +107,9 @@ data SourceEnvironment = SourceEnvironment
   , sourceDeconstructors :: [DeconstructorBinding]
   , sourceClasses :: StaticClassEnv
   , sourceTypeNames :: [QualifiedName]
+      -- ^ Compatibility lookup cache. Raw callers may populate it, but
+      -- 'checkSourceEnvironment' always rebuilds it from the declarations
+      -- that actually survived validation and backend normalization.
   , sourceTypeSynonyms :: [HsTypeDecl]
   }
   deriving (Show)
@@ -387,11 +390,20 @@ normalizeBackendProjection inventory environment = do
   normalizedBindings <- mapM replaceBinding $ sourceBindings environment
   normalizedDeconstructors <- mapM replaceDeconstructor
     $ sourceDeconstructors environment
+  let ordinaryDataNames = filter ordinaryTypeName sourceDataNames
+      canonicalTypeNames = ordinaryDataNames
+        ++ map tdecl_name (sourceTypeSynonyms environment)
+        ++ M.keys (sClassEnv_tclasses $ environmentClasses backend)
   pure environment
     { sourceBindings = normalizedBindings
     , sourceDeconstructors = normalizedDeconstructors
     , sourceClasses = environmentClasses backend
+    , sourceTypeNames = canonicalTypeNames
     }
+ where
+  ordinaryTypeName name = case SharedName.nameSpecial $ toSynthesisName name of
+    Nothing -> True
+    Just _ -> False
 
 deconstructorTypeName
   :: DeconstructorBinding

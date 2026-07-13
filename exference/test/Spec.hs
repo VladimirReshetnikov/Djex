@@ -3273,6 +3273,26 @@ tests = testGroup "Exference"
                 Left failure -> diagnosticCode failure @?= Just "EXF_KIND"
                 Right value -> fail $ "ill-kinded query was accepted as "
                   ++ show value
+      , testCase "checked projections rebuild their type-name cache" $
+          withTemporaryFile (unlines
+            [ "module TypeNames where"
+            , "data Data = MakeData"
+            , "type Alias = Data"
+            , "class Class a"
+            ]) $ \modulePath -> do
+              LoadReport parsedResult _ <- parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              parsed <- expectRight parsedResult
+              let poisoned = parsed {sourceTypeNames = [name "Bogus"]}
+              checked <- expectRight $ checkSourceEnvironment poisoned
+              dataName <- expectRight
+                $ mkQualifiedName ["TypeNames"] "Data"
+              aliasName <- expectRight
+                $ mkQualifiedName ["TypeNames"] "Alias"
+              className <- expectRight
+                $ mkQualifiedName ["TypeNames"] "Class"
+              sourceTypeNames (checkedSourceProjection checked) @?=
+                [dataName, aliasName, className]
       , testCase "checked inventory retains aliases while projection expands" $
           withTemporaryFile (unlines
             [ "module AliasBoundary where"

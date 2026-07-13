@@ -132,10 +132,8 @@ import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc
   ( HaskellSrcConversionError (..)
-  , convert
-  , convertChecked
-  , convertToFunc
-  , convertToFuncChecked
+  , expressionToHaskellSrc
+  , functionToHaskellSrc
   , generatedExpressionToHaskellSrc
   , generatedFunctionClauseToHaskellSrc
   )
@@ -2816,68 +2814,82 @@ tests = testGroup "Exference"
               (Generated.defaultRenderOptions show)
               (Generated.Local (7 :: Int)) @?=
             Left (HaskellSrcScopeError $ Generated.UnboundLocal 7)
-      , testCase "lowercase names use Var rather than Con" $
-          case convert 0 (ExpName $ name "id") of
+      , testCase "lowercase names use Var rather than Con" $ do
+          converted <- expectRight
+            $ expressionToHaskellSrc 0 (ExpName $ name "id")
+          case converted of
             HSE.Var{} -> pure ()
             expression -> fail $ "expected Var, got " ++ show expression
-      , testCase "uppercase names use Con" $
-          case convert 0 (ExpName $ name "Just") of
+      , testCase "uppercase names use Con" $ do
+          converted <- expectRight
+            $ expressionToHaskellSrc 0 (ExpName $ name "Just")
+          case converted of
             HSE.Con{} -> pure ()
             expression -> fail $ "expected Con, got " ++ show expression
-      , testCase "qualified lowercase names retain Var and qualification" $
-          case convert 2 (ExpName $ QualifiedName ["Data", "List"] "map") of
+      , testCase "qualified lowercase names retain Var and qualification" $ do
+          converted <- expectRight $ expressionToHaskellSrc 2
+            $ ExpName $ QualifiedName ["Data", "List"] "map"
+          case converted of
             HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Data.List")
                 (HSE.Ident _ "map")) -> pure ()
             expression -> fail $ "unexpected qualified value: " ++ show expression
-      , testCase "negative qualification levels are unqualified" $
-          case convert (-1)
-              (ExpName $ QualifiedName ["Data", "List"] "map") of
+      , testCase "negative qualification levels are unqualified" $ do
+          converted <- expectRight $ expressionToHaskellSrc (-1)
+            $ ExpName $ QualifiedName ["Data", "List"] "map"
+          case converted of
             HSE.Var _ (HSE.UnQual _ (HSE.Ident _ "map")) -> pure ()
             expression -> fail $ "unexpected negative-level value: "
               ++ show expression
-      , testCase "qualified operators use Symbol names" $
-          case convert 2 (ExpName
-              $ QualifiedName ["Control", "Applicative"] "<*>") of
+      , testCase "qualified operators use Symbol names" $ do
+          converted <- expectRight $ expressionToHaskellSrc 2
+            $ ExpName $ QualifiedName ["Control", "Applicative"] "<*>"
+          case converted of
             HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Control.Applicative")
                 (HSE.Symbol _ "<*>")) -> pure ()
             expression -> fail $ "unexpected qualified operator: " ++ show expression
-      , testCase "Unicode operators remain symbols with either qualification" $
-          case ( convert 0 (ExpName $ QualifiedName [] "⊕")
-               , convert 2 (ExpName $ QualifiedName ["Math", "Operators"] "⊕")
-               ) of
+      , testCase "Unicode operators remain symbols with either qualification" $ do
+          unqualified <- expectRight $ expressionToHaskellSrc 0
+            $ ExpName $ QualifiedName [] "⊕"
+          qualified <- expectRight $ expressionToHaskellSrc 2
+            $ ExpName $ QualifiedName ["Math", "Operators"] "⊕"
+          case (unqualified, qualified) of
             ( HSE.Var _ (HSE.UnQual _ (HSE.Symbol _ "⊕"))
               , HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Math.Operators")
                   (HSE.Symbol _ "⊕"))
               ) -> pure ()
             expressions -> fail $ "unexpected Unicode operators: "
               ++ show expressions
-      , testCase "symbolic constructors use Symbol in patterns" $
-          let expression = convert 0 $ ExpCaseMatch
-                (ExpVar 0 (TypeCons $ name "T"))
+      , testCase "symbolic constructors use Symbol in patterns" $ do
+          expression <- expectRight $ expressionToHaskellSrc 0
+            $ ExpCaseMatch
+                (ExpName $ name "value")
                 [(name ":+:", [(1, TypeVar 0), (2, TypeVar 1)],
                   ExpVar 1 (TypeVar 0))]
-          in case expression of
-              HSE.Case _ _ [HSE.Alt _
-                  (HSE.PApp _ (HSE.UnQual _ (HSE.Symbol _ ":+:")) [_, _]) _ _] ->
-                case HSE.parseExp (HSE.prettyPrint expression) of
-                  HSE.ParseOk _ -> pure ()
-                  failure -> fail $ "rendered pattern does not parse: " ++ show failure
-              _ -> fail $ "unexpected constructor pattern: " ++ show expression
-      , testCase "constructor applications use constructor operators" $
-          let expression = convert 0
-                $ ExpApply
-                    (ExpApply (ExpName $ name ":+:") (ExpName $ name "Left"))
-                    (ExpName $ name "Right")
-          in case expression of
-              HSE.InfixApp _ _
-                  (HSE.QConOp _ (HSE.UnQual _ (HSE.Symbol _ ":+:"))) _ ->
-                pure ()
-              _ -> fail $ "constructor application used a variable operator: "
-                ++ show expression
+          case expression of
+            HSE.Case _ _ [HSE.Alt _
+                (HSE.PApp _ (HSE.UnQual _ (HSE.Symbol _ ":+:")) [_, _]) _ _] ->
+              case HSE.parseExp (HSE.prettyPrint expression) of
+                HSE.ParseOk _ -> pure ()
+                failure -> fail $ "rendered pattern does not parse: "
+                  ++ show failure
+            _ -> fail $ "unexpected constructor pattern: " ++ show expression
+      , testCase "constructor applications use constructor operators" $ do
+          expression <- expectRight $ expressionToHaskellSrc 0
+            $ ExpApply
+                (ExpApply (ExpName $ name ":+:") (ExpName $ name "Left"))
+                (ExpName $ name "Right")
+          case expression of
+            HSE.InfixApp _ _
+                (HSE.QConOp _ (HSE.UnQual _ (HSE.Symbol _ ":+:"))) _ ->
+              pure ()
+            _ -> fail $ "constructor application used a variable operator: "
+              ++ show expression
       , testCase "symbolic type constructors use a legal binder fallback" $ do
           symbolic <- expectRight $ mkQualifiedName [] ":+:"
-          case convert 0 $ ExpLambda 1 (TypeCons symbolic)
-              (ExpVar 1 $ TypeCons symbolic) of
+          converted <- expectRight $ expressionToHaskellSrc 0
+            $ ExpLambda 1 (TypeCons symbolic)
+            $ ExpVar 1 $ TypeCons symbolic
+          case converted of
             HSE.Lambda _ [HSE.PVar _ (HSE.Ident _ binder)] _ -> do
               binder @?= "a"
               case HSE.parseExp $ "\\" ++ binder ++ " -> " ++ binder of
@@ -2896,13 +2908,15 @@ tests = testGroup "Exference"
           checkExpression classes functions []
             (TypeArrow (TypeCons integer) (TypeCons boolean)) [] expression
             @?= Right ()
-          case convert 0 expression of
+          unqualified <- expectRight $ expressionToHaskellSrc 0 expression
+          case unqualified of
             HSE.Lambda _ [HSE.PVar _ (HSE.Ident _ binder)]
                 (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ occurrence))) -> do
               binder @?= "a'"
               occurrence @?= "a"
             rendered -> fail $ "capturing unqualified render: " ++ show rendered
-          case convert 2 expression of
+          qualified <- expectRight $ expressionToHaskellSrc 2 expression
+          case qualified of
             HSE.Lambda _ [HSE.PVar _ (HSE.Ident _ binder)]
                 (HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ modul)
                   (HSE.Ident _ occurrence))) -> do
@@ -2917,7 +2931,8 @@ tests = testGroup "Exference"
           let expression = ExpLambda 6 (TypeCons typeName)
                 $ ExpLambda 33 (TypeVar 100)
                 $ ExpVar 6 (TypeCons typeName)
-          case convert 0 expression of
+          converted <- expectRight $ expressionToHaskellSrc 0 expression
+          case converted of
             HSE.Lambda _
                 [ HSE.PVar _ (HSE.Ident _ outer)
                 , HSE.PVar _ (HSE.Ident _ inner)
@@ -2931,33 +2946,36 @@ tests = testGroup "Exference"
             rendered -> fail $ "colliding binder render: " ++ show rendered
       , testCase "holes use their collision-free allocated names" $ do
           global <- expectRight $ mkQualifiedName ["M"] "_a"
-          case convert 0 $ ExpApply (ExpName global) (ExpHole 1) of
+          converted <- expectRight $ expressionToHaskellSrc 0
+            $ ExpApply (ExpName global) (ExpHole 1)
+          case converted of
             HSE.App _ _
                 (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ hole))) ->
               hole @?= "_a'"
             rendered -> fail $ "unexpected allocated hole: " ++ show rendered
       , testCase "checked expressions reject free locals" $
-          case convertChecked 0 $ ExpVar 7 $ TypeVar 0 of
+          case expressionToHaskellSrc 0 $ ExpVar 7 $ TypeVar 0 of
             Left failure -> failure @?=
               ExpressionScopeError (Generated.UnboundLocal 7)
             Right rendered -> fail $ "checked conversion accepted a free local: "
               ++ show rendered
       , testCase "function conversion reserves its declaration name" $ do
+          target <- expectRight $ SharedName.mkIdentifier "a"
           let expression = ExpLambda 1 (TypeVar 0) (ExpVar 1 $ TypeVar 0)
-          case convertToFunc 0 "a" expression of
-            HSE.FunBind _
+          case functionToHaskellSrc 0 target expression of
+            Right (HSE.FunBind _
                 [HSE.Match _ (HSE.Ident _ function)
                   [HSE.PVar _ (HSE.Ident _ parameter)]
                   (HSE.UnGuardedRhs _
-                    (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ body)))) Nothing] -> do
+                    (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ body)))) Nothing]) -> do
                 function @?= "a"
                 parameter @?= "a'"
                 body @?= parameter
-            rendered -> fail $ "capturing function render: " ++ show rendered
+            result -> fail $ "capturing function render: " ++ show result
       , testCase "checked functions reject definition capture" $ do
           target <- expectRight $ SharedName.mkIdentifier "a"
           global <- expectRight $ mkQualifiedName ["M"] "a"
-          case convertToFuncChecked 0 target $ ExpName global of
+          case functionToHaskellSrc 0 target $ ExpName global of
             Left failure -> failure @?= ExpressionSyntaxError
               (Generated.GlobalDefinitionCapture target
                 (toSynthesisName global) Generated.Unqualified)
@@ -2966,7 +2984,7 @@ tests = testGroup "Exference"
       , testCase "checked operator definitions use symbolic names" $ do
           target <- expectRight $ SharedName.mkOperator "<+>"
           let expression = ExpLambda 1 (TypeVar 0) $ ExpVar 1 $ TypeVar 0
-          case convertToFuncChecked 0 target expression of
+          case functionToHaskellSrc 0 target expression of
             Right (HSE.FunBind _
                 [HSE.Match _ (HSE.Symbol _ "<+>") [_] _ _]) -> pure ()
             result -> fail $ "unexpected operator definition: " ++ show result

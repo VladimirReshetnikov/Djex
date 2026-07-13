@@ -2,15 +2,14 @@ module Language.Haskell.Exference.ExpressionToHaskellSrc
   ( HaskellSrcConversionError (..)
   , generatedExpressionToHaskellSrc
   , generatedFunctionClauseToHaskellSrc
-  , convert
-  , convertChecked
-  , convertToFunc
-  , convertToFuncChecked
+  , expressionToHaskellSrc
+  , functionToHaskellSrc
   )
 where
 
 import Control.Monad (forM)
-import Control.Monad.Trans.Reader (Reader, ask, runReader)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader (ReaderT, ask, runReaderT)
 import Data.Bifunctor (first)
 import Data.Map (Map)
 import qualified Data.Map as Map
@@ -24,7 +23,8 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HsExp = Exp SrcSpanInfo
 type HsDecl = Decl SrcSpanInfo
-type Conversion local = Reader (Map local String)
+type Conversion local =
+  ReaderT (Map local String) (Either (HaskellSrcConversionError local))
 
 -- | A checked structural conversion can fail either at the shared lexical
 -- scope boundary or while validating/allocating generated Haskell syntax.
@@ -47,7 +47,7 @@ generatedExpressionToHaskellSrc options expression = do
     $ Generated.validateExpressionSyntax expression
   names <- first HaskellSrcSyntaxError
     $ Generated.allocateLocalNames options expression
-  pure $ runReader
+  runReaderT
     (convertRootExpression (Generated.renderQualification options) expression)
     names
 
@@ -67,80 +67,49 @@ generatedFunctionClauseToHaskellSrc options clause = do
         (Generated.renderQualification options) clause
   names <- first HaskellSrcSyntaxError
     $ Generated.allocateClauseLocalNames options clause
-  pure $ runReader
+  runReaderT
     (convertFunctionClause (Generated.renderQualification options) clause)
     names
 
-{-# DEPRECATED convert
-  "Use convertChecked, or consume the shared Generated.Expression directly." #-}
-{-# DEPRECATED convertToFunc
-  "Use convertToFuncChecked, or render the shared Generated.FunctionClause directly." #-}
-
 -- Qualification level: 0 emits unqualified names, 1 qualifies ordinary
 -- identifiers but keeps operators infix-friendly, and 2 qualifies everything.
--- This unchecked compatibility entry point intentionally accepts partial
--- search trees; it only retains the allocator invariant needed to emit names.
-convert :: Int -> E.Expression -> HsExp
-convert qualification expression =
-  convertGeneratedExpressionUnchecked options generated
- where
-  policy = E.qualificationFromLevel qualification
-  options = expressionRenderOptions policy [] expression
-  generated = E.toGeneratedExpression expression
-
--- | Validate the shared generated tree before producing a compatibility HSE
--- expression.  The historical 'convert' remains total for callers that use it
--- to inspect partial search trees.
-convertChecked
+-- | Validate an Exference expression before producing a compatibility HSE
+-- expression. Partial search trees with free locals are rejected explicitly.
+expressionToHaskellSrc
   :: Int
   -> E.Expression
   -> Either E.ExpressionRenderError HsExp
-convertChecked qualification expression = first toExpressionRenderError
+expressionToHaskellSrc qualification expression = first toExpressionRenderError
   $ generatedExpressionToHaskellSrc options
   $ E.toGeneratedExpression expression
  where
   options = expressionRenderOptions
-    (E.qualificationFromLevel qualification) [] expression
+    (E.qualificationFromLevel qualification) expression
 
--- The raw-string legacy API deliberately keeps accepting names that have not
--- crossed the shared definition-name validator.
-convertToFunc :: Int -> String -> E.Expression -> HsDecl
-convertToFunc qualification functionName expression = runReader
-  (convertFunctionParts policy
-    (Ident noLoc functionName) patterns body)
-  names
- where
-  policy = E.qualificationFromLevel qualification
-  options = expressionRenderOptions policy [functionName] expression
-  generated = E.toGeneratedExpression expression
-  names = allocatedNamesOrError options generated
-  (patterns, body) = promoteLeadingLambdas generated
-
--- | Checked top-level compatibility adapter.  Unlike the raw-string legacy
--- entry point, the structural name can report invalid definitions and globals
--- that would become accidental self-references after qualification is erased.
-convertToFuncChecked
+-- | Convert an Exference expression into one checked top-level HSE equation.
+-- Structural names report invalid definitions and globals that qualification
+-- would turn into accidental self-references.
+functionToHaskellSrc
   :: Int
   -> SharedName.Name
   -> E.Expression
   -> Either E.ExpressionRenderError HsDecl
-convertToFuncChecked qualification functionName expression =
+functionToHaskellSrc qualification functionName expression =
   first toExpressionRenderError
     $ generatedFunctionClauseToHaskellSrc options clause
  where
   policy = E.qualificationFromLevel qualification
-  options = expressionRenderOptions policy [] expression
+  options = expressionRenderOptions policy expression
   generated = E.toGeneratedExpression expression
   (patterns, body) = promoteLeadingLambdas generated
   clause = Generated.FunctionClause functionName patterns body
 
 expressionRenderOptions
   :: Generated.Qualification
-  -> [String]
   -> E.Expression
   -> Generated.RenderOptions T.TVarId
-expressionRenderOptions qualification reserved expression =
-  Generated.RenderOptions qualification preferred reserved
+expressionRenderOptions qualification expression =
+  Generated.RenderOptions qualification preferred []
  where
   hints = E.expressionNameHints expression
   preferred variable =
@@ -152,26 +121,6 @@ toExpressionRenderError
 toExpressionRenderError conversionError = case conversionError of
   HaskellSrcScopeError scopeError -> E.ExpressionScopeError scopeError
   HaskellSrcSyntaxError syntaxError -> E.ExpressionSyntaxError syntaxError
-
-convertGeneratedExpressionUnchecked
-  :: Ord local
-  => Generated.RenderOptions local
-  -> Generated.Expression local
-  -> HsExp
-convertGeneratedExpressionUnchecked options expression = runReader
-  (convertRootExpression (Generated.renderQualification options) expression)
-  (allocatedNamesOrError options expression)
-
-allocatedNamesOrError
-  :: Ord local
-  => Generated.RenderOptions local
-  -> Generated.Expression local
-  -> Map local String
-allocatedNamesOrError options expression =
-  case Generated.allocateLocalNames options expression of
-    Right names -> names
-    Left renderError -> error $ "cannot allocate generated local names: "
-      ++ show renderError
 
 -- Only the outermost lambda spine is flattened.  Nested lambdas beneath an
 -- application, let, case, or lambda body retain their explicit HSE nodes.
@@ -201,8 +150,9 @@ convertFunctionClause
   => Generated.Qualification
   -> Generated.FunctionClause local
   -> Conversion local HsDecl
-convertFunctionClause qualification (Generated.FunctionClause name patterns body) =
-  convertFunctionParts qualification (definitionName name) patterns body
+convertFunctionClause qualification (Generated.FunctionClause name patterns body) = do
+  convertedName <- definitionName name
+  convertFunctionParts qualification convertedName patterns body
 
 convertFunctionParts
   :: Ord local
@@ -320,7 +270,8 @@ renderVariable variable = do
   names <- ask
   case Map.lookup variable names of
     Just name -> pure name
-    Nothing -> error "generated local name was not allocated"
+    Nothing -> lift $ Left
+      $ HaskellSrcScopeError $ Generated.UnboundLocal variable
 
 namedExpression :: Generated.Qualification -> SharedName.Name -> HsExp
 namedExpression qualification name
@@ -329,12 +280,14 @@ namedExpression qualification name
  where
   qname = toQName qualification name
 
-definitionName :: SharedName.Name -> Name SrcSpanInfo
+definitionName
+  :: SharedName.Name
+  -> Conversion local (Name SrcSpanInfo)
 definitionName name = case SharedName.nameOccurrence name of
-  SharedName.IdentifierOccurrence _ spelling -> Ident noLoc spelling
-  SharedName.OperatorOccurrence _ spelling -> Symbol noLoc spelling
-  SharedName.SpecialOccurrence{} ->
-    error "validated generated definition has a special name"
+  SharedName.IdentifierOccurrence _ spelling -> pure $ Ident noLoc spelling
+  SharedName.OperatorOccurrence _ spelling -> pure $ Symbol noLoc spelling
+  SharedName.SpecialOccurrence{} -> lift $ Left
+    $ HaskellSrcSyntaxError $ Generated.InvalidFunctionName name
 
 variableExpression :: String -> HsExp
 variableExpression = Var noLoc . UnQual noLoc . Ident noLoc

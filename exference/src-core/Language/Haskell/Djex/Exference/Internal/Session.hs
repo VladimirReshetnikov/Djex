@@ -5,9 +5,9 @@
 -- synonym table, and core dictionary before policy is applied here.
 module Language.Haskell.Djex.Exference.Internal.Session
   ( ExferenceSession
-  , SessionOmission (..)
-  , SessionOmissionCapability (..)
-  , SessionOmissionReason (..)
+  , ExferenceOmission (..)
+  , ExferenceOmissionCapability (..)
+  , ExferenceOmissionReason (..)
   , sealNeutralExferenceSession
   , sealNeutralExferenceSessionWithPolicy
   , sealProjectedExferenceSessionWithPolicy
@@ -86,21 +86,21 @@ import Language.Haskell.Synthesis.TypeSynonym
   , prepareTypeSynonyms
   )
 
-data SessionOmissionCapability
+data ExferenceOmissionCapability
   = BindingIntroduction
   | DataElimination
   deriving (Eq, Ord, Show)
 
-data SessionOmissionReason
+data ExferenceOmissionReason
   = UnsupportedNestedForall
   | RecursiveDataEliminationUnsupported
   | ExcludedByPolicy
   deriving (Eq, Ord, Show)
 
-data SessionOmission = SessionOmission
-  { sessionOmissionName :: Name
-  , sessionOmissionCapability :: SessionOmissionCapability
-  , sessionOmissionReason :: SessionOmissionReason
+data ExferenceOmission = ExferenceOmission
+  { omittedName :: Name
+  , omittedCapability :: ExferenceOmissionCapability
+  , omittedReason :: ExferenceOmissionReason
   }
   deriving (Eq, Ord, Show)
 
@@ -114,7 +114,7 @@ data ExferenceSession = ExferenceSession
   , synonymView :: TypeSynonyms SynthesisVariable
   , typeNameView :: [QualifiedName]
   , classView :: Map QualifiedName HsTypeClass
-  , omissionView :: [SessionOmission]
+  , omissionView :: [ExferenceOmission]
   }
 
 type NeutralEnvironment = Environment SynthesisVariable Void ()
@@ -189,7 +189,7 @@ sealPreparedEnvironment exclusions overrides inventory synonyms backend = do
         , environmentDeconstructors = supportedDeconstructors
         }
       omissions =
-        [ SessionOmission
+        [ ExferenceOmission
             (toSynthesisName $ functionName binding)
             BindingIntroduction
             reason
@@ -264,7 +264,7 @@ exferenceSessionInventory
   -> Inventory SynthesisVariable ()
 exferenceSessionInventory = inventoryView
 
-sessionOmissions :: ExferenceSession -> [SessionOmission]
+sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView
 
 functionSupported :: FunctionBinding -> Bool
@@ -279,10 +279,10 @@ deconstructorSupported binding = not (deconstructorRecursive binding)
       (deconstructorInput binding
         : concatMap constructorFields (deconstructorConstructors binding))
 
-deconstructorOmission :: DeconstructorBinding -> Maybe SessionOmission
+deconstructorOmission :: DeconstructorBinding -> Maybe ExferenceOmission
 deconstructorOmission binding = do
   name <- typeConstructorHead $ deconstructorInput binding
-  pure $ SessionOmission
+  pure $ ExferenceOmission
     (toSynthesisName name)
     DataElimination
     reason

@@ -72,7 +72,11 @@ import Language.Haskell.Exference.Core.Types
   , showVar
   )
 import Language.Haskell.Djex.Exference.Internal.Session
-  ( ExferenceSession )
+  ( ExferenceOmission (..)
+  , ExferenceOmissionCapability (..)
+  , ExferenceOmissionReason (..)
+  , ExferenceSession
+  )
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
 import Language.Haskell.Synthesis.Candidate
@@ -157,17 +161,6 @@ defaultExferenceOptions = ExferenceOptions
   , exferenceHeuristics = defaultHeuristicsConfig
   }
 
-data ExferenceOmissionCapability
-  = BindingIntroduction
-  | DataElimination
-  deriving (Eq, Ord, Show)
-
-data ExferenceOmissionReason
-  = UnsupportedNestedForall
-  | RecursiveDataEliminationUnsupported
-  | ExcludedByPolicy
-  deriving (Eq, Ord, Show)
-
 -- | Environment capabilities disabled before a reusable session is sealed.
 -- Names are structural and exact: excluding @Data.Function.fix@ never hides
 -- an unrelated qualified binding whose occurrence also happens to be @fix@.
@@ -182,13 +175,6 @@ defaultExferenceSessionPolicy = ExferenceSessionPolicy
   { exferenceExcludedBindings = []
   , exferenceRatingOverrides = Map.empty
   }
-
-data ExferenceOmission = ExferenceOmission
-  { omittedName :: Name
-  , omittedCapability :: ExferenceOmissionCapability
-  , omittedReason :: ExferenceOmissionReason
-  }
-  deriving (Eq, Ord, Show)
 
 -- Keep the frontend spelling index private: it is meaningful only when paired
 -- with the exact parsed goal and must be converted after explicit contexts are
@@ -292,7 +278,7 @@ exferenceSessionInventory :: ExferenceSession -> ExferenceInventory
 exferenceSessionInventory = Session.exferenceSessionInventory
 
 exferenceSessionOmissions :: ExferenceSession -> [ExferenceOmission]
-exferenceSessionOmissions = map projectOmission . Session.sessionOmissions
+exferenceSessionOmissions = Session.sessionOmissions
 
 exferenceSessionDiagnostics :: ExferenceSession -> [Diagnostic]
 exferenceSessionDiagnostics = map omissionDiagnostic
@@ -600,19 +586,6 @@ searchQuery excludedTarget goal options = ExferenceQuery
   , queryMaximumQueueSize = exferenceMaximumQueueSize options
   , queryMaximumDepth = exferenceMaximumDepth options
   , queryHeuristics = exferenceHeuristics options
-  }
-
-projectOmission :: Session.SessionOmission -> ExferenceOmission
-projectOmission omission = ExferenceOmission
-  { omittedName = Session.sessionOmissionName omission
-  , omittedCapability = case Session.sessionOmissionCapability omission of
-      Session.BindingIntroduction -> BindingIntroduction
-      Session.DataElimination -> DataElimination
-  , omittedReason = case Session.sessionOmissionReason omission of
-      Session.UnsupportedNestedForall -> UnsupportedNestedForall
-      Session.RecursiveDataEliminationUnsupported ->
-        RecursiveDataEliminationUnsupported
-      Session.ExcludedByPolicy -> ExcludedByPolicy
   }
 
 omissionDiagnostic :: ExferenceOmission -> Diagnostic

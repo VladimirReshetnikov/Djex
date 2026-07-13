@@ -37,6 +37,8 @@ import Language.Haskell.Exference.BindingsFromHaskellSrc
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
+import Language.Haskell.Exference.HaskellSrcUtils
+  (contextConstraints, splitDeclHead)
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
 
@@ -148,6 +150,10 @@ data UnsupportedVocabularyForm
   | TypedDeclarationSplice
   | RoleAnnotation
   | DerivingClause
+  | DataTypeContext
+  | KindedDataBinder
+  | ExistentialConstructor
+  | ConstrainedConstructor
   | FunctionalDependency
   | InstanceOverlapMode
   | AssociatedDataFamily
@@ -602,8 +608,11 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       one PatternSynonymSignature location
     HSE.RoleAnnotDecl location _ _ ->
       one RoleAnnotation location
-    HSE.DataDecl _ _ _ _ _ derivings ->
-      concatMap unsupportedDeriving derivings
+    HSE.DataDecl _ _ context rawHead constructors derivings ->
+      maybe [] (unsupportedContext DataTypeContext) context
+        ++ concatMap unsupportedDataBinder (snd $ splitDeclHead rawHead)
+        ++ concatMap unsupportedConstructor constructors
+        ++ concatMap unsupportedDeriving derivings
     HSE.ClassDecl _ _ _ dependencies declarations ->
       concatMap unsupportedDependency dependencies
         ++ concatMap unsupportedClassDecl (maybe [] id declarations)
@@ -614,6 +623,29 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
 
   unsupportedDeriving (HSE.Deriving location _ _) =
     one DerivingClause location
+
+  -- The common inventory has a place for parameter kinds, but Exference's
+  -- current type-variable index does not. Reject these declarations before
+  -- either projection can observe a differently shaped data constructor.
+  unsupportedDataBinder binder = case binder of
+    HSE.KindedVar location _ _ -> one KindedDataBinder location
+    HSE.UnkindedVar _ _ -> []
+
+  unsupportedConstructor
+      (HSE.QualConDecl location maybeBinders context _) =
+    (case maybeBinders of
+      Just (_ : _) -> one ExistentialConstructor location
+      _ -> [])
+      ++ maybe [] (unsupportedContext ConstrainedConstructor) context
+
+  unsupportedContext form context
+    | null $ contextConstraints $ Just context = []
+    | otherwise = one form $ contextLocation context
+
+  contextLocation context = case context of
+    HSE.CxSingle location _ -> location
+    HSE.CxTuple location _ -> location
+    HSE.CxEmpty location -> location
 
   unsupportedDependency (HSE.FunDep location _ _) =
     one FunctionalDependency location
@@ -688,6 +720,10 @@ unsupportedVocabularyDescription form = case form of
   TypedDeclarationSplice -> "typed Template Haskell declaration splice"
   RoleAnnotation -> "type-role annotation"
   DerivingClause -> "derived class instances"
+  DataTypeContext -> "datatype context"
+  KindedDataBinder -> "explicitly kinded datatype parameter"
+  ExistentialConstructor -> "constructor with existential type variables"
+  ConstrainedConstructor -> "constructor context"
   FunctionalDependency -> "class functional dependency"
   InstanceOverlapMode -> "instance overlap mode"
   AssociatedDataFamily -> "associated data-family declaration"

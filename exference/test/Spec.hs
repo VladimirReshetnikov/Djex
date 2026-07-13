@@ -569,6 +569,119 @@ tests = testGroup "Exference"
                 , ConstructorBinding that []
                 ]
             result -> fail $ "unexpected datatype bindings: " ++ show result
+      , testCase "record constructors flatten fields and emit selectors once" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module Fixture where"
+            , "data Record a"
+            , "  = First { common :: a, pairLeft, pairRight :: (a, a) }"
+            , "  | Second { common :: a }"
+            ]
+          dataTypes <- expectRight $ getDataTypes [parsedModule]
+          record <- expectRight $ mkQualifiedName ["Fixture"] "Record"
+          firstConstructor <- expectRight
+            $ mkQualifiedName ["Fixture"] "First"
+          secondConstructor <- expectRight
+            $ mkQualifiedName ["Fixture"] "Second"
+          common <- expectRight $ mkQualifiedName ["Fixture"] "common"
+          pairLeft <- expectRight $ mkQualifiedName ["Fixture"] "pairLeft"
+          pairRight <- expectRight $ mkQualifiedName ["Fixture"] "pairRight"
+          pair <- expectRight $ mkBoxedTupleName 2
+          let parameter = TypeVar 0
+              recordType = TypeApp (TypeCons record) parameter
+              pairType = TypeApp
+                (TypeApp (TypeCons pair) parameter) parameter
+              extracted = runIdentity
+                $ getDataConss Map.empty dataTypes Map.empty [parsedModule]
+          case extracted of
+            [Right (bindings, DeconstructorBinding input constructors False)] -> do
+              input @?= recordType
+              map functionName bindings @?=
+                [ firstConstructor
+                , secondConstructor
+                , common
+                , pairLeft
+                , pairRight
+                ]
+              length (filter ((== common) . functionName) bindings) @?= 1
+              bindings @?=
+                [ functionBindingFromType firstConstructor 0
+                    $ TypeForall [0] []
+                    $ TypeArrow parameter
+                    $ TypeArrow pairType
+                    $ TypeArrow pairType recordType
+                , functionBindingFromType secondConstructor 0
+                    $ TypeForall [0] []
+                    $ TypeArrow parameter recordType
+                , functionBindingFromType common 0
+                    $ TypeForall [0] []
+                    $ TypeArrow recordType parameter
+                , functionBindingFromType pairLeft 0
+                    $ TypeForall [0] []
+                    $ TypeArrow recordType pairType
+                , functionBindingFromType pairRight 0
+                    $ TypeForall [0] []
+                    $ TypeArrow recordType pairType
+                ]
+              constructors @?=
+                [ ConstructorBinding firstConstructor
+                    [parameter, pairType, pairType]
+                , ConstructorBinding secondConstructor [parameter]
+                ]
+            result -> fail $ "unexpected record bindings: " ++ show result
+      , testCase "infix constructors lower as binary constructors" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module Fixture where"
+            , "data Chain a = a :>: a"
+            ]
+          dataTypes <- expectRight $ getDataTypes [parsedModule]
+          chain <- expectRight $ mkQualifiedName ["Fixture"] "Chain"
+          link <- expectRight $ mkQualifiedName ["Fixture"] ":>:"
+          let parameter = TypeVar 0
+              chainType = TypeApp (TypeCons chain) parameter
+              extracted = runIdentity
+                $ getDataConss Map.empty dataTypes Map.empty [parsedModule]
+          case extracted of
+            [Right ([binding], DeconstructorBinding input constructors False)] -> do
+              input @?= chainType
+              binding @?= functionBindingFromType link 0
+                (TypeForall [0] []
+                  $ TypeArrow parameter
+                  $ TypeArrow parameter chainType)
+              constructors @?=
+                [ConstructorBinding link [parameter, parameter]]
+            result -> fail $ "unexpected infix bindings: " ++ show result
+      , testCase "field strictness and unpack metadata do not change types" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "{-# LANGUAGE BangPatterns #-}"
+            , "module Fixture where"
+            , "data Strict"
+            , "  = Strict ({-# UNPACK #-} !Strict)"
+            , "  | Record { strictField :: (!Strict) }"
+            ]
+          dataTypes <- expectRight $ getDataTypes [parsedModule]
+          strict <- expectRight $ mkQualifiedName ["Fixture"] "Strict"
+          record <- expectRight $ mkQualifiedName ["Fixture"] "Record"
+          strictField <- expectRight
+            $ mkQualifiedName ["Fixture"] "strictField"
+          let strictType = TypeCons strict
+              extracted = runIdentity
+                $ getDataConss Map.empty dataTypes Map.empty [parsedModule]
+          case extracted of
+            [Right (bindings, DeconstructorBinding input constructors True)] -> do
+              input @?= strictType
+              bindings @?=
+                [ functionBindingFromType strict 0
+                    $ TypeArrow strictType strictType
+                , functionBindingFromType record 0
+                    $ TypeArrow strictType strictType
+                , functionBindingFromType strictField 0
+                    $ TypeArrow strictType strictType
+                ]
+              constructors @?=
+                [ ConstructorBinding strict [strictType]
+                , ConstructorBinding record [strictType]
+                ]
+            result -> fail $ "unexpected strict-field bindings: " ++ show result
       , testCase "function bindings split quantified signatures once" $ do
           function <- expectRight $ mkQualifiedName ["Fixture"] "function"
           cls <- expectRight $ mkQualifiedName ["Fixture"] "C"
@@ -2586,7 +2699,57 @@ tests = testGroup "Exference"
                   functionPenalty binding @?= Penalty 0
               assertBool "foreign export invented a second binding"
                 $ all ((/= exportName) . functionName) bindings
-      , testCase "empty datatype contexts cannot bypass binding validation" $
+      , testCase "record selectors receive ratings exactly once" $
+          withTemporaryFile (unlines
+            [ "module Rated where"
+            , "data Rated = Rated { unRated :: Rated }"
+            ]) $ \modulePath ->
+          withTemporaryFile "Rated.unRated 7.25" $ \ratingPath -> do
+            LoadReport result _ <-
+              environmentFromModuleAndRatings modulePath ratingPath
+            environment <- checkedSourceProjection <$> expectRight result
+            selector <- expectRight
+              $ mkQualifiedName ["Rated"] "unRated"
+            ratedType <- expectRight
+              $ mkQualifiedName ["Rated"] "Rated"
+            case filter ((== selector) . functionName)
+                $ sourceFunctions environment of
+              [binding] -> do
+                functionPenalty binding @?= Penalty 7.25
+                functionParameters binding @?= [TypeCons ratedType]
+                functionResult binding @?= TypeCons ratedType
+              bindings -> fail $ "selector was not emitted exactly once: "
+                ++ show bindings
+      , testCase "unsupported datatype shapes retain exact source spans" $ do
+          occurrences <- unsupportedFromSourceWith
+            [ HSE.DatatypeContexts
+            , HSE.ExistentialQuantification
+            , HSE.KindSignatures
+            ] $ unlines
+            [ "{-# LANGUAGE DatatypeContexts, ExistentialQuantification, KindSignatures #-}"
+            , "module UnsupportedData where"
+            , "data Eq a => T (a :: *) ="
+            , "    forall b. C b"
+            , "  | Eq a => D a"
+            ]
+          map unsupportedVocabularyForm occurrences @?=
+            [ DataTypeContext
+            , KindedDataBinder
+            , ExistentialConstructor
+            , ConstrainedConstructor
+            ]
+          map (diagnosticSpan . unsupportedVocabularyDiagnostic) occurrences
+            @?=
+              [ Just $ SourceSpan
+                  (SourcePosition 3 6) (SourcePosition 3 13)
+              , Just $ SourceSpan
+                  (SourcePosition 3 16) (SourcePosition 3 24)
+              , Just $ SourceSpan
+                  (SourcePosition 4 5) (SourcePosition 4 18)
+              , Just $ SourceSpan
+                  (SourcePosition 5 5) (SourcePosition 5 12)
+              ]
+      , testCase "empty contextual datatypes fail during preflight" $
           withTemporaryFile (unlines
             [ "{-# LANGUAGE EmptyDataDecls #-}"
             , "module EmptyContext where"
@@ -2594,13 +2757,10 @@ tests = testGroup "Exference"
             ]) $ \modulePath -> do
               LoadReport result _ <- parseModules
                 [(haskellSrcExtsParseMode modulePath, modulePath)]
-              case result of
-                Left (BindingDeclarationErrors (firstError :| rest)) -> do
-                  assertBool firstError $ "context in data type"
-                    `isInfixOf` firstError
-                  rest @?= []
-                Left failure -> fail $ "unexpected load failure: " ++ show failure
-                Right _ -> fail "empty contextual datatype was accepted"
+              occurrences <- expectUnsupportedVocabulary result
+              map unsupportedVocabularyForm occurrences
+                @?= [DataTypeContext]
+              map occurrenceStartLine occurrences @?= [Just 3]
       , testCase "source LANGUAGE pragmas do not hide unsupported syntax" $
           withTemporaryFile (unlines
             [ "{-# LANGUAGE TypeFamilies #-}"

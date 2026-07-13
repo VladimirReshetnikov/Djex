@@ -19,6 +19,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.HaskellSrcUtils
 
+import Control.Monad (foldM)
 import Control.Monad.Trans.Except
 import Data.Graph ( SCC (..), stronglyConnComp )
 import qualified Data.Map.Strict as M
@@ -28,6 +29,15 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
+
+-- | One constructor after source syntax has been lowered. Record selectors
+-- remain attached long enough to create their ordinary value bindings without
+-- confusing them with constructors in the shared declaration inventory.
+data LoweredConstructor = LoweredConstructor
+  { loweredConstructorName :: QualifiedName
+  , loweredConstructorFields :: [HsType]
+  , loweredRecordSelectors :: [(QualifiedName, HsType)]
+  }
 
 
 getDecls
@@ -80,6 +90,9 @@ helper mn signature syntaxName = do
   name <- convertModuleName mn syntaxName
   pure $ functionBindingFromType name 0 $ forallify signature
 
+-- | Extract each data declaration's value-level constructor bindings followed
+-- by its record selectors, plus the pattern-matching shape. A selector shared
+-- by several constructors appears once at its first source occurrence.
 getDataConss
   :: Monad m
   => M.Map QualifiedName HsTypeClass
@@ -112,17 +125,46 @@ getDataConss tcs ds tDeclMap modules =
     typeM
       :: Monad m
       => QualConDecl SrcSpanInfo
-      -> ConversionT String m (QualifiedName, [HsType])
+      -> ConversionT String m LoweredConstructor
     typeM (QualConDecl _ cbindings constructorContext conDecl) = do
       case (fromMaybe [] cbindings, contextConstraints constructorContext) of
         ([], []) -> pure ()
         _       -> throwE "constraint or existential type for constructor"
-      (cname,tys) <- case conDecl of
-        ConDecl _ c t -> pure (c, t)
-        x           -> throwE $ "unknown ConDecl: " ++ show x
-      convTs <- convertTypeInternal tcs (Just moduleName) ds tDeclMap `mapM` tys
-      qName <- either throwE pure $ convertModuleName moduleName cname
-      return $ (qName, convTs)
+      (syntaxConstructorName, fieldTypes, selectors) <- case conDecl of
+        ConDecl _ occurrenceName types -> do
+          converted <- mapM convertFieldType types
+          pure (occurrenceName, converted, [])
+        InfixConDecl _ left occurrenceName right -> do
+          converted <- mapM convertFieldType [left, right]
+          pure (occurrenceName, converted, [])
+        RecDecl _ occurrenceName fields -> do
+          convertedFields <- mapM convertRecordField fields
+          pure
+            ( occurrenceName
+            , concatMap fst convertedFields
+            , concatMap snd convertedFields
+            )
+      qualifiedConstructor <- either throwE pure
+        $ convertModuleName moduleName syntaxConstructorName
+      pure LoweredConstructor
+        { loweredConstructorName = qualifiedConstructor
+        , loweredConstructorFields = fieldTypes
+        , loweredRecordSelectors = selectors
+        }
+     where
+      -- Strictness and unpacking govern representation and evaluation, not a
+      -- field's source type. Exference's inventory models the latter only.
+      convertFieldType = convertTypeInternal
+        tcs (Just moduleName) ds tDeclMap . eraseFieldAnnotations
+
+      convertRecordField (FieldDecl _ names fieldType) = do
+        convertedType <- convertFieldType fieldType
+        qualifiedSelectors <- mapM
+          (either throwE pure . convertModuleName moduleName) names
+        pure
+          ( replicate (length qualifiedSelectors) convertedType
+          , [(selector, convertedType) | selector <- qualifiedSelectors]
+          )
   let
     addConsMsg = (++) $ show name ++ ": "
   let
@@ -138,22 +180,63 @@ getDataConss tcs ds tDeclMap modules =
         [] -> pure ()
         _  -> throwE "context in data type"
       consDatas <- mapM typeM conss
+      selectors <- deduplicateRecordSelectors
+        $ concatMap loweredRecordSelectors consDatas
       -- The deconstructor records one use-site instance of the datatype, so
       -- its parameters must remain free for search-time unification.  Each
       -- constructor value is polymorphic independently; quantify only after
       -- assembling its complete field-to-result arrow.
-      return $ ( [ functionBindingFromType n 0
-                    $ forallify $ foldr TypeArrow rtype ts
-                 | (n, ts) <- consDatas
+      return $ ( [ functionBindingFromType
+                    (loweredConstructorName constructor) 0
+                    $ forallify
+                    $ foldr TypeArrow rtype
+                    $ loweredConstructorFields constructor
+                 | constructor <- consDatas
                  ]
+                 ++ [ functionBindingFromType selector 0
+                        $ forallify $ TypeArrow rtype fieldType
+                    | (selector, fieldType) <- selectors
+                    ]
                , DeconstructorBinding
                    rtype
-                   [ConstructorBinding constructor fields
-                   | (constructor, fields) <- consDatas]
+                   [ ConstructorBinding
+                       (loweredConstructorName constructor)
+                       (loweredConstructorFields constructor)
+                   | constructor <- consDatas
+                   ]
                    False
                )
   return $ fmap (either (Left . addConsMsg) Right)
     $ runExceptT $ runConversionT (ConvData 0 M.empty) convAction
+
+-- | HSE retains strictness and unpack annotations in the field's 'Type' node.
+-- They are operational metadata, so remove any outer wrappers before the
+-- parser-independent type conversion. Repeating the match also handles
+-- hand-constructed ASTs without relying on the parser's normalization.
+eraseFieldAnnotations :: Type SrcSpanInfo -> Type SrcSpanInfo
+eraseFieldAnnotations (TyBang _ _ _ fieldType) =
+  eraseFieldAnnotations fieldType
+eraseFieldAnnotations (TyParen location fieldType) =
+  TyParen location $ eraseFieldAnnotations fieldType
+eraseFieldAnnotations fieldType = fieldType
+
+-- | A selector shared by several record constructors denotes one top-level
+-- function. Keep its first source occurrence and reject inconsistent types
+-- instead of silently allowing map insertion order to choose a meaning.
+deduplicateRecordSelectors
+  :: Monad m
+  => [(QualifiedName, HsType)]
+  -> ConversionT String m [(QualifiedName, HsType)]
+deduplicateRecordSelectors selectors = reverse . snd <$> foldM step
+  (M.empty, []) selectors
+ where
+  step (seen, ordered) selector@(name, fieldType) = case M.lookup name seen of
+    Nothing -> pure (M.insert name fieldType seen, selector : ordered)
+    Just priorType
+      | priorType == fieldType -> pure (seen, ordered)
+      | otherwise -> throwE
+          $ "record selector " ++ show name
+          ++ " has inconsistent field types"
 
 -- | Annotate recursion only after conversion: failures retain their original
 -- positions and cannot create phantom vertices in the datatype graph.

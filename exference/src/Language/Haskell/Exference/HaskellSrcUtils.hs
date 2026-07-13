@@ -18,6 +18,10 @@ contextConstraints (Just (CxEmpty _)) = []
 moduleNameAndDecls :: Module l -> Maybe (ModuleName l, [Decl l])
 moduleNameAndDecls (Module _ (Just (ModuleHead _ name _ _)) _ _ declarations) =
   Just (name, declarations)
+moduleNameAndDecls (Module location Nothing _ _ declarations) =
+  Just (ModuleName location "Main", declarations)
+-- XML page and hybrid modules have different declaration semantics and are
+-- deliberately outside the ordinary Haskell-module extractor.
 moduleNameAndDecls _ = Nothing
 
 splitClassApplication :: Type l -> Maybe (QName l, [Type l])

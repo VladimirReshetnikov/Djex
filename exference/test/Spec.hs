@@ -132,7 +132,7 @@ import Language.Haskell.Exference.ExpressionToHaskellSrc
   , generatedFunctionClauseToHaskellSrc
   )
 import Language.Haskell.Exference.BindingsFromHaskellSrc
-  (getClassMethods, getDataConss, getDataTypesChecked)
+  (getClassMethods, getDataConss, getDataTypesChecked, getDecls)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
@@ -470,7 +470,50 @@ tests = testGroup "Exference"
           filterUnresolved environment [query] @?= Just [query]
       ]
   , testGroup "Haskell source bindings"
-      [ testCase "monomorphic deconstructors have no empty forall wrapper" $ do
+      [ testCase "headerless signatures belong to the implicit Main module" $ do
+          parsedModule <- expectParsedModule "identity :: a -> a"
+          identityName <- expectRight $ mkQualifiedName ["Main"] "identity"
+          let extracted = runIdentity
+                $ getDecls [] Map.empty Map.empty [parsedModule]
+          map (fmap fst) extracted @?= [Right identityName]
+      , testCase "headerless datatype, class, and method declarations survive" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "data Box a = Box a"
+            , "class C a where"
+            , "  method :: a -> a"
+            ]
+          boxName <- expectRight $ mkQualifiedName ["Main"] "Box"
+          className <- expectRight $ mkQualifiedName ["Main"] "C"
+          methodName <- expectRight $ mkQualifiedName ["Main"] "method"
+          dataTypes <- expectRight $ getDataTypesChecked [parsedModule]
+          dataTypes @?= [boxName]
+          let classResult = runIdentity
+                $ getClassEnv dataTypes Map.empty [parsedModule]
+          (classEnvironment, instanceCount) <- expectRight classResult
+          instanceCount @?= 0
+          Map.member className (sClassEnv_tclasses classEnvironment) @?= True
+          let methods = runIdentity $ getClassMethods
+                (sClassEnv_tclasses classEnvironment)
+                dataTypes Map.empty [parsedModule]
+          map (fmap fst) methods @?= [Right methodName]
+          let deconstructors = runIdentity
+                $ getDataConss (sClassEnv_tclasses classEnvironment)
+                    dataTypes Map.empty [parsedModule]
+          case deconstructors of
+            [Right (_, binding)] ->
+              typeConstructorHead (deconstructorInput binding) @?= Just boxName
+            result -> fail $ "unexpected headerless datatype bindings: "
+              ++ show result
+      , testCase "explicit module headers retain their declared name" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module Explicit where"
+            , "identity :: a -> a"
+            ]
+          identityName <- expectRight $ mkQualifiedName ["Explicit"] "identity"
+          let extracted = runIdentity
+                $ getDecls [] Map.empty Map.empty [parsedModule]
+          map (fmap fst) extracted @?= [Right identityName]
+      , testCase "monomorphic deconstructors have no empty forall wrapper" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module Fixture where"
             , "data Flag = Off | On"

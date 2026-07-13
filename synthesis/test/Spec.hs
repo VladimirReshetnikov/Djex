@@ -209,7 +209,8 @@ kindInferenceTests = testGroup "kind inference"
           makeFixName = right $ mkIdentifier "MakeFix"
           className = right $ mkIdentifier "FunctorLike"
           methodName = right $ mkIdentifier "extract"
-          parameter variable = Declaration.TypeParameter variable Nothing
+          parameter parameterName =
+            Declaration.TypeParameter parameterName Nothing
           application function argument = SharedType.TypeApplication
             function argument
           fixOfF = application (SharedType.TypeConstructor fixName)
@@ -232,6 +233,183 @@ kindInferenceTests = testGroup "kind inference"
         (KindInference.KindAssumptions
           (Map.singleton fixName $ arrow (arrow proper proper) proper)
           (Map.singleton className [Just $ arrow proper proper]))
+  , testCase "generalize unconstrained classes while propagating known superclasses" $ do
+      let intName = right $ mkIdentifier "Int"
+          typeableName = right $ mkIdentifier "Typeable"
+          dataName = right $ mkIdentifier "Data"
+          functorName = right $ mkIdentifier "Functor"
+          derivedName = right $ mkIdentifier "Derived"
+          observeName = right $ mkIdentifier "observe"
+          castName = right $ mkIdentifier "castLike"
+          mapName = right $ mkIdentifier "mapLike"
+          useName = right $ mkIdentifier "useTypeableTwice"
+          parameter parameterName =
+            Declaration.TypeParameter parameterName Nothing
+          variable = SharedType.TypeVariable
+          application = SharedType.TypeApplication
+          function = SharedType.FunctionType
+          constraint className argument = Constraint className [argument]
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration () intName proper
+            -- Deliberately precede Typeable: inference must not depend on
+            -- lexical declaration order when a superclass is poly-kinded.
+            , Declaration.ClassDeclaration () dataName [parameter "a"]
+                [constraint typeableName $ variable "a"]
+                [ Declaration.ValueSignature () observeName
+                    $ function (variable "a")
+                        (SharedType.TypeConstructor intName)
+                , Declaration.ValueSignature () castName
+                    $ SharedType.ForallType []
+                        [constraint typeableName $ variable "f"]
+                    $ function
+                        (application (variable "f")
+                          $ SharedType.TypeConstructor intName)
+                        (variable "a")
+                ]
+            , Declaration.ClassDeclaration () typeableName
+                [parameter "a"] [] []
+            , Declaration.ClassDeclaration () functorName
+                [parameter "f"] []
+                [ Declaration.ValueSignature () mapName
+                    $ function (function (variable "a") $ variable "b")
+                    $ function
+                        (application (variable "f") $ variable "a")
+                        (application (variable "f") $ variable "b")
+                ]
+            , Declaration.ClassDeclaration () derivedName
+                [parameter "f"]
+                [constraint functorName $ variable "f"] []
+            -- Operational signatures run only after class kinds stabilize.
+            -- The generalized parameter must be instantiated independently
+            -- at proper and constructor kinds in the same signature.
+            , Declaration.ValueDeclaration
+                $ Declaration.ValueSignature () useName
+                $ SharedType.ForallType ["a", "f"]
+                    [ constraint typeableName $ variable "a"
+                    , constraint typeableName $ variable "f"
+                    ]
+                $ function
+                    (application (variable "f")
+                      $ SharedType.TypeConstructor intName)
+                    (variable "a")
+            ]
+      KindInference.inferDeclarationKinds declarations @?= Right
+        (KindInference.KindAssumptions
+          (Map.singleton intName proper)
+          (Map.fromList
+            [ (dataName, [Just proper])
+            , (derivedName, [Just $ arrow proper proper])
+            , (functorName, [Just $ arrow proper proper])
+            , (typeableName, [Nothing])
+            ]))
+  , testCase "propagate fixed kinds through a reversed three-link chain" $ do
+      let firstName = right $ mkIdentifier "First"
+          secondName = right $ mkIdentifier "Second"
+          thirdName = right $ mkIdentifier "Third"
+          seedName = right $ mkIdentifier "Seed"
+          mapName = right $ mkIdentifier "mapSeed"
+          parameter = Declaration.TypeParameter "f" Nothing
+          variable = SharedType.TypeVariable
+          application = SharedType.TypeApplication
+          function = SharedType.FunctionType
+          superclass owner = Constraint owner [variable "f"]
+          classDeclaration owner superclasses methods =
+            Declaration.ClassDeclaration () owner [parameter]
+              superclasses methods
+          seedMethod = Declaration.ValueSignature () mapName
+            $ function (function (variable "a") $ variable "b")
+            $ function
+                (application (variable "f") $ variable "a")
+                (application (variable "f") $ variable "b")
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            -- Every dependency follows its declaration. A single snapshot
+            -- pass cannot move Seed's kind all the way back to First.
+            [ classDeclaration firstName [superclass secondName] []
+            , classDeclaration secondName [superclass thirdName] []
+            , classDeclaration thirdName [superclass seedName] []
+            , classDeclaration seedName [] [seedMethod]
+            ]
+          constructorKind = Just $ arrow proper proper
+      KindInference.inferDeclarationKinds declarations @?= Right
+        (KindInference.KindAssumptions Map.empty $ Map.fromList
+          [ (firstName, [constructorKind])
+          , (secondName, [constructorKind])
+          , (thirdName, [constructorKind])
+          , (seedName, [constructorKind])
+          ])
+  , testCase "propagate a seed through a mutual superclass cycle" $ do
+      let aName = right $ mkIdentifier "A"
+          bName = right $ mkIdentifier "B"
+          mapName = right $ mkIdentifier "mapA"
+          parameter = Declaration.TypeParameter "f" Nothing
+          variable = SharedType.TypeVariable
+          application = SharedType.TypeApplication
+          function = SharedType.FunctionType
+          superclass owner = Constraint owner [variable "f"]
+          seedMethod = Declaration.ValueSignature () mapName
+            $ function (function (variable "a") $ variable "b")
+            $ function
+                (application (variable "f") $ variable "a")
+                (application (variable "f") $ variable "b")
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.ClassDeclaration () aName [parameter]
+                [superclass bName] [seedMethod]
+            , Declaration.ClassDeclaration () bName [parameter]
+                [superclass aName] []
+            ]
+          constructorKind = Just $ arrow proper proper
+      KindInference.inferDeclarationKinds declarations @?= Right
+        (KindInference.KindAssumptions Map.empty $ Map.fromList
+          [ (aName, [constructorKind])
+          , (bName, [constructorKind])
+          ])
+  , testCase "leave an unseeded mutual superclass cycle generalized" $ do
+      let aName = right $ mkIdentifier "A"
+          bName = right $ mkIdentifier "B"
+          parameter = Declaration.TypeParameter "a" Nothing
+          variable = SharedType.TypeVariable "a"
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.ClassDeclaration () aName [parameter]
+                [Constraint bName [variable]] []
+            , Declaration.ClassDeclaration () bName [parameter]
+                [Constraint aName [variable]] []
+            ]
+      KindInference.inferDeclarationKinds declarations @?= Right
+        (KindInference.KindAssumptions Map.empty $ Map.fromList
+          [(aName, [Nothing]), (bName, [Nothing])])
+  , testCase "report fixed superclass conflicts at the first declaration" $ do
+      let clashName = right $ mkIdentifier "Clash"
+          properName = right $ mkIdentifier "Proper"
+          higherName = right $ mkIdentifier "Higher"
+          properMethodName = right $ mkIdentifier "properMethod"
+          higherMethodName = right $ mkIdentifier "higherMethod"
+          parameter = Declaration.TypeParameter "f" Nothing
+          variable = SharedType.TypeVariable
+          application = SharedType.TypeApplication
+          function = SharedType.FunctionType
+          superclass owner = Constraint owner [variable "f"]
+          properMethod = Declaration.ValueSignature () properMethodName
+            $ function (variable "f") (variable "f")
+          higherMethod = Declaration.ValueSignature () higherMethodName
+            $ function
+                (application (variable "f") $ variable "a")
+                (variable "a")
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.ClassDeclaration () clashName [parameter]
+                [superclass properName, superclass higherName] []
+            , Declaration.ClassDeclaration () properName [parameter]
+                [] [properMethod]
+            , Declaration.ClassDeclaration () higherName [parameter]
+                [] [higherMethod]
+            ]
+      KindInference.inferDeclarationKinds declarations @?= Left
+        (KindInference.DeclarationKindError clashName
+          $ KindInference.KindMismatch proper $ arrow proper proper)
   , testCase "reject recursive synonyms in a whole inventory" $ do
       let aName = right $ mkIdentifier "A"
           bName = right $ mkIdentifier "B"

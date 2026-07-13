@@ -31,6 +31,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.Maybe (isJust)
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 import GHC.Generics (Generic)
@@ -46,7 +47,9 @@ type GroundKind = Kind Void
 data KindAssumptions = KindAssumptions
   { typeConstructorKinds :: Map Name GroundKind
   -- | 'Nothing' denotes a generalized kind parameter, as used by modern
-  -- poly-kinded classes such as @Typeable@.
+  -- poly-kinded classes such as @Typeable@.  This deliberately records only
+  -- wholly generalized parameters: the current IR cannot express a partial
+  -- scheme such as @k -> Type@ without fixing @k@.
   , classParameterKinds :: Map Name [Maybe GroundKind]
   }
   deriving (Eq, Show, Generic)
@@ -172,11 +175,9 @@ inferDeclarationKindsWith policy declarations = do
     (typeKinds, typeParameters) <-
       allocateTypeDeclarations externalTypeKinds declarations
     (classKinds, classParameters) <- allocateClassDeclarations declarations
-    let preliminary = InferenceAssumptions typeKinds
-          $ (map Just <$> classKinds) `Map.union` externalClassKinds
-    mapM_ (checkDefiningDeclaration preliminary
-      typeParameters classParameters) declarations
-    generalizedClasses <- traverse (mapM generalizeKind) classKinds
+    generalizedClasses <- stabilizeDefiningClassKinds
+      externalClassKinds typeKinds typeParameters classParameters
+      classKinds declarations
     let allClassKinds = generalizedClasses `Map.union` externalClassKinds
         assumptions = InferenceAssumptions typeKinds allClassKinds
     mapM_ (checkOperationalDeclaration assumptions
@@ -184,6 +185,45 @@ inferDeclarationKindsWith policy declarations = do
     KindAssumptions
       <$> traverse ground typeKinds
       <*> traverse (mapM (traverse ground)) allClassKinds
+
+-- | Infer class kinds without letting one use monomorphize an otherwise
+-- generalized class parameter.  Each round snapshots the kinds currently
+-- known from class-local structure. Unresolved parameters are exposed as
+-- polymorphic ('Nothing'), while resolved shapes propagate through
+-- superclass and method-constraint edges on the next round.
+--
+-- The process is monotone: unification can only replace an unresolved class
+-- parameter by a fixed outer shape, so at most one observable transition per
+-- parameter is required. Sharing the underlying inference variables also
+-- propagates refinements beneath an already-known function-kind shape without
+-- another observable map change.
+stabilizeDefiningClassKinds
+  :: Ord variable
+  => Map Name [Maybe InferenceKind]
+  -> Map Name InferenceKind
+  -> Map Name (Map variable InferenceKind)
+  -> Map Name (Map variable InferenceKind)
+  -> Map Name [InferenceKind]
+  -> [Declaration variable Void annotation]
+  -> Inference variable (Map Name [Maybe InferenceKind])
+stabilizeDefiningClassKinds externalClassKinds typeKinds typeParameters
+    classParameters classKinds declarations = go
+ where
+  go = do
+    before <- generalized
+    let assumptions = InferenceAssumptions typeKinds
+          $ before `Map.union` externalClassKinds
+    mapM_ (checkDefiningDeclaration assumptions
+      typeParameters classParameters) declarations
+    after <- generalized
+    -- Only the unresolved-root -> fixed-root transition changes whether a
+    -- class use can constrain its argument. Variables nested in an exposed
+    -- function-kind shape are shared and therefore refine immediately.
+    if fmap (map isJust) after == fmap (map isJust) before
+      then pure after
+      else go
+
+  generalized = traverse (mapM generalizeKind) classKinds
 
 allocateExternalTypeKinds
   :: KindInventoryPolicy

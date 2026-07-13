@@ -163,6 +163,12 @@ data ExferenceInputError
   | NestedForallInDeconstructor HsType
   | NestedForallInConstraint ConstraintSite HsConstraint
   | InvalidInputType HsType SynthesisTypeError
+  | DeconstructorInputWithoutNominalHead HsType
+  | UnsupportedDeconstructorTypeHead QualifiedName
+  | UnboundDeconstructorFieldVariables
+      QualifiedName -- ^ Nominal datatype head.
+      QualifiedName -- ^ Constructor whose fields escape the parameter scope.
+      [TVarId]      -- ^ Escaping flexible IDs, in ascending order.
   | InvalidGeneratedBinding QualifiedName SharedGenerated.RenderError
   | InvalidGeneratedConstructor QualifiedName SharedGenerated.RenderError
   | DuplicateFunctionNames [QualifiedName]
@@ -622,6 +628,7 @@ validateExferenceInput input = do
     $ [queryGoalType query]
     ++ environmentTypes environment
     ++ concatMap (constraint_params . snd) allConstraints
+  validateEnvironmentDeconstructors environment
   validateRigidInstantiation
     (mkRigidInstantiationContext environment) query
  where
@@ -673,6 +680,7 @@ validateExferenceEnvironment environment = do
   validateInputTypes
     $ environmentTypes environment
     ++ concatMap (constraint_params . snd) constraints
+  validateEnvironmentDeconstructors environment
  where
   constraints = environmentConstraints environment
 
@@ -811,6 +819,40 @@ validateInputTypes types = case listToMaybe
     Left $ InvalidInputType typeExpression typeError
   Nothing -> Right ()
 
+-- A deconstructor is an elimination rule for one nominal datatype.  Search
+-- unifies its input with arbitrary goals, so accepting a variable or function
+-- here would manufacture a pattern match for a type that has no such data
+-- constructor.  Constructor fields may mention only the datatype parameters:
+-- fresh flexible IDs would otherwise act like undeclared existential types.
+validateEnvironmentDeconstructors
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateEnvironmentDeconstructors environment =
+  traverse_ validateDeconstructor $ environmentDeconstructors environment
+ where
+  validateDeconstructor deconstructor = do
+    headName <- case typeConstructorHead input of
+      Nothing -> Left $ DeconstructorInputWithoutNominalHead input
+      Just name
+        | SynthesisName.nameSpecial (toSynthesisName name)
+            == Just SynthesisName.FunctionConstructor ->
+              Left $ UnsupportedDeconstructorTypeHead name
+        | otherwise -> Right name
+    traverse_ (validateConstructor headName parameters)
+      $ deconstructorConstructors deconstructor
+   where
+    input = deconstructorInput deconstructor
+    parameters = flexibleIdentifiers input
+
+  validateConstructor headName parameters constructor
+    | IntSet.null unbound = Right ()
+    | otherwise = Left $ UnboundDeconstructorFieldVariables
+        headName (constructorName constructor) $ IntSet.toAscList unbound
+   where
+    unbound = IntSet.unions
+      (map flexibleIdentifiers $ constructorFields constructor)
+      `IntSet.difference` parameters
+
 validateRigidInstantiation
   :: RigidInstantiationContext
   -> ExferenceQuery
@@ -865,10 +907,9 @@ repeatedValues values =
   , count > 1
   ]
 
--- Deconstructor inputs are applications of one nominal datatype head.  Full
--- structural validation remains at the shared declaration boundary; this
--- projection is only for detecting multiple records for the same type before
--- the search and checker can disagree about which record is authoritative.
+-- Duplicate detection deliberately precedes the dedicated deconstructor-shape
+-- validation, preserving the public first-error order while projecting every
+-- input that already exposes a nominal head.
 deconstructorTypeName :: DeconstructorBinding -> Maybe QualifiedName
 deconstructorTypeName = typeConstructorHead . deconstructorInput
 

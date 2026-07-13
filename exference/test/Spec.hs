@@ -1423,6 +1423,68 @@ tests = testGroup "Exference"
           validateExferenceInput identityInput
             { input_envDeconsS = [secondDeconstructor, firstDeconstructor] }
             @?= expected
+      , testCase "headless deconstructors cannot manufacture pattern matches" $ do
+          let datatype = TypeCons $ name "T"
+              boolean = TypeCons $ name "Bool"
+              bogus = DeconstructorBinding (TypeVar 0)
+                [ConstructorBinding (name "Bogus") []] False
+              input = identityInput
+                { input_goalType = TypeArrow datatype boolean
+                , input_envFuncs =
+                    [FunctionBinding boolean (name "True") 0 [] []]
+                , input_envDeconsS = [bogus]
+                , input_maxSteps = 50
+                }
+              expected = DeconstructorInputWithoutNominalHead $ TypeVar 0
+          validateExferenceInput input @?= Left expected
+          case findExpressionsWithStatsEither input of
+            Left actual -> actual @?= expected
+            Right _ -> fail
+              "a headless deconstructor reached pattern-match synthesis"
+      , testCase "the function constructor is not a datatype head" $ do
+          let arrowName = validQualifiedName [] "->"
+              functionType = TypeApp
+                (TypeApp (TypeCons arrowName) $ TypeVar 0)
+                (TypeVar 1)
+              deconstructor = DeconstructorBinding functionType
+                [ConstructorBinding (name "Function") []] False
+          validateExferenceInput identityInput
+            { input_envDeconsS = [deconstructor] }
+            @?= Left (UnsupportedDeconstructorTypeHead arrowName)
+      , testCase "constructor fields cannot introduce datatype variables" $ do
+          let boxName = name "Box"
+              boxType = TypeApp (TypeCons boxName) $ TypeVar 0
+              boxConstructor = name "MkBox"
+              deconstructor = DeconstructorBinding boxType
+                [ConstructorBinding boxConstructor [TypeVar 1]] False
+              expected = UnboundDeconstructorFieldVariables
+                boxName boxConstructor [1]
+              environment = EnvDictionary [] [deconstructor] emptyClassEnv
+          validateExferenceInput identityInput
+            { input_envDeconsS = [deconstructor] } @?= Left expected
+          case mkExferenceEnvironment environment of
+            Left actual -> actual @?= expected
+            Right _ -> fail
+              "an unbound constructor-field variable reached a sealed environment"
+      , testCase "parameterized and recursive deconstructors remain valid" $ do
+          let boxName = name "Box"
+              boxType = TypeApp (TypeCons boxName) $ TypeVar 0
+              box = DeconstructorBinding boxType
+                [ConstructorBinding (name "MkBox") [TypeVar 0]] False
+              treeName = name "Tree"
+              treeType = TypeApp (TypeCons treeName) $ TypeVar 1
+              tree = DeconstructorBinding treeType
+                [ ConstructorBinding (name "Leaf") [TypeVar 1]
+                , ConstructorBinding (name "Branch") [treeType, treeType]
+                ] True
+              deconstructors = [box, tree]
+              environment = EnvDictionary [] deconstructors emptyClassEnv
+          validateExferenceInput identityInput
+            { input_envDeconsS = deconstructors } @?= Right ()
+          case mkExferenceEnvironment environment of
+            Left failure -> fail
+              $ "valid deconstructors failed environment sealing: " ++ show failure
+            Right _ -> pure ()
       , testCase "generated constructor patterns are validated at input" $ do
           let arrowName = validQualifiedName [] "->"
               invalidBinding = FunctionBinding

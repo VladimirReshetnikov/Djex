@@ -63,6 +63,7 @@ import Language.Haskell.Exference.Core.Expression
   , toGeneratedExpression
   )
 import Language.Haskell.Exference.Core.ExpressionCheck
+  hiding (UnsupportedNestedForall)
 import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
@@ -700,6 +701,45 @@ tests = testGroup "Exference"
               (Penalty 2.5)
               [constraint]
               [TypeVar 7]
+      , testCase "function bindings preserve nested forall results" $ do
+          function <- expectRight $ mkQualifiedName ["Fixture"] "rankN"
+          cls <- expectRight $ mkQualifiedName ["Fixture"] "C"
+          let integer = TypeCons $ name "Int"
+              nestedConstraint = HsConstraint cls [TypeVar 2]
+              nested = TypeForall [2] [nestedConstraint]
+                $ TypeArrow (TypeVar 2) (TypeVar 2)
+              signature = TypeArrow integer nested
+              binding = functionBindingFromType function 0 signature
+          binding @?= FunctionBinding nested function 0 [] [integer]
+          case mkExferenceEnvironment
+              $ EnvDictionary [binding] [] emptyStaticClassEnv of
+            Left failure -> failure @?= NestedForallInBinding function signature
+            Right _ -> fail "a rank-N result reached an Exference environment"
+      , testCase "function bindings preserve prenex lexical shadowing" $ do
+          function <- expectRight $ mkQualifiedName ["Fixture"] "shadowed"
+          outer <- expectRight $ mkQualifiedName ["Fixture"] "Outer"
+          inner <- expectRight $ mkQualifiedName ["Fixture"] "Inner"
+          let source = TypeForall [0]
+                [HsConstraint outer [TypeVar 0]]
+                $ TypeForall [0]
+                    [HsConstraint inner [TypeVar 0]]
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+          functionBindingFromType function 0 source @?=
+            FunctionBinding (TypeVar 1) function 0
+              [ HsConstraint outer [TypeVar 0]
+              , HsConstraint inner [TypeVar 1]
+              ]
+              [TypeVar 1]
+      , testCase "malformed forall binder lists remain rejectable" $ do
+          function <- expectRight $ mkQualifiedName ["Fixture"] "duplicate"
+          let malformed = TypeForall [0, 0] [] $ TypeVar 0
+              binding = functionBindingFromType function 0 malformed
+          binding @?= FunctionBinding malformed function 0 [] []
+          case mkExferenceEnvironment
+              $ EnvDictionary [binding] [] emptyStaticClassEnv of
+            Left failure -> failure @?=
+              NestedForallInBinding function malformed
+            Right _ -> fail "a duplicate forall binder list was flattened"
       , testCase "datatype recursion follows strongly connected components" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module Fixture where"
@@ -774,6 +814,37 @@ tests = testGroup "Exference"
           actual @?= TypeForall [0]
             [HsConstraint (name "C") [TypeVar 0, replacement]]
             (TypeVar 0)
+      , testCase "arrow splitting stops before a result forall" $ do
+          let integer = TypeCons $ name "Int"
+              nestedConstraint = HsConstraint (name "C") [TypeVar 2]
+              nested = TypeForall [2] [nestedConstraint]
+                $ TypeArrow (TypeVar 2) (TypeVar 2)
+              source = TypeForall [0] [] $ TypeArrow integer nested
+          splitArrowResultParams source @?=
+            (nested, [integer], [0], [])
+      , testCase "arrow splitting alpha-normalizes prenex shadows" $ do
+          let outer = HsConstraint (name "Outer") [TypeVar 0]
+              inner = HsConstraint (name "Inner") [TypeVar 0]
+              source = TypeForall [0] [outer]
+                $ TypeForall [0] [inner]
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+          splitArrowResultParams source @?=
+            ( TypeVar 1
+            , [TypeVar 1]
+            , [0, 1]
+            , [outer, HsConstraint (name "Inner") [TypeVar 1]]
+            )
+      , testCase "arrow splitting leaves duplicate binder lists explicit" $ do
+          let malformed = TypeForall [0, 0] [] $ TypeVar 0
+          splitArrowResultParams malformed @?= (malformed, [], [], [])
+      , testCase "arrow splitting after substitution exposes result arrows" $ do
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              substituted = snd $ applySubsts
+                (IntMap.singleton 0 $ TypeArrow integer boolean)
+                (TypeVar 0)
+          splitArrowResultParams substituted @?=
+            (boolean, [integer], [], [])
       , testCase "free variables include a forall context" $ do
           let ty = TypeForall [0]
                 [HsConstraint (name "C") [TypeVar 0, TypeVar 1]]
@@ -1461,6 +1532,52 @@ tests = testGroup "Exference"
                   ++ show omissions
               map diagnosticCode (exferenceSessionDiagnostics session) @?=
                 [Just "DJEX_EXF_RECURSIVE_OMISSION"]
+      , testCase "HSE sessions preserve and omit rank-N result bindings" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module RankNResult where"
+            , "class C a"
+            , "rankN :: Int -> (forall b. C b => b -> b)"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              function <- expectRight
+                $ mkQualifiedName ["RankNResult"] "rankN"
+              cls <- expectRight $ mkQualifiedName ["RankNResult"] "C"
+              let projection = checkedSourceProjection checked
+                  integer = TypeCons $ name "Int"
+              nested <- case find ((== function) . functionName)
+                  $ sourceFunctions projection of
+                Just binding -> do
+                  functionParameters binding @?= [integer]
+                  case functionResult binding of
+                    quantified@(TypeForall [binder]
+                        [HsConstraint actualClass [TypeVar constrained]]
+                        (TypeArrow (TypeVar parameter) (TypeVar resultVariable))) -> do
+                      actualClass @?= cls
+                      constrained @?= binder
+                      parameter @?= binder
+                      resultVariable @?= binder
+                      pure quantified
+                    actual -> fail $ "rank-N result was flattened to "
+                      ++ show actual
+                Nothing -> fail "the checked projection lost RankNResult.rankN"
+              let backend = EnvDictionary
+                    (sourceFunctions projection)
+                    (sourceDeconstructors projection)
+                    (sourceClasses projection)
+                  signature = TypeArrow integer nested
+              case mkExferenceEnvironment backend of
+                Left failure -> failure @?=
+                  NestedForallInBinding function signature
+                Right _ -> fail "the core accepted a checked rank-N projection"
+              session <- expectRight
+                $ ExferenceSession.mkExferenceSession checked
+              case find ((== toSynthesisName function) . omittedName)
+                  $ exferenceSessionOmissions session of
+                Just omission -> omittedReason omission @?=
+                  UnsupportedNestedForall
+                Nothing -> fail "the stable session did not report rank-N omission"
       , testCase "HSE sessions accept finite signed overrides" $
           withTemporaryFile (unlines
             [ "module Ratings where"

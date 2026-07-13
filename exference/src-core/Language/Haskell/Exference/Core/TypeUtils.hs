@@ -29,7 +29,10 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
-  (flexibleIdentifiers)
+  ( allocateFreshIdentifier
+  , flexibleIdentifiers
+  , supplyFromIdentifiers
+  )
 import Language.Haskell.Exference.Core.Types
 
 
@@ -94,16 +97,74 @@ constraintContainsVariables :: HsConstraint -> Bool
 constraintContainsVariables =
   any (not . S.null . freeVars) . constraint_params
 
+-- | Alpha-normalize and peel the complete leading prenex chain, then split
+-- consecutive arrows. A forall reached after an arrow remains in the result:
+-- crossing it would flatten a rank-N type and let callers accidentally discard
+-- its binder IDs. Shadowing binders in the leading chain are freshened before
+-- that chain is flattened, so their constraints and body occurrences cannot be
+-- conflated in the implicit-polymorphism representation.
 splitArrowResultParams :: HsType -> (HsType, [HsType], [TVarId], [HsConstraint])
-splitArrowResultParams t
-  | TypeArrow t1 t2 <- t
-  , (rt,pts,fvs,cs) <- splitArrowResultParams t2
-  = (rt, t1:pts, fvs, cs)
-  | TypeForall vs cs t1 <- t
-  , (rt, pts, fvs, cs') <- splitArrowResultParams t1
-  = (rt, pts, vs++fvs, cs++cs')
-  | otherwise
-  = (t, [], [], [])
+splitArrowResultParams source =
+  let (body, variables, constraints) = splitForalls source
+      (result, parameters) = splitArrows body
+  in (result, parameters, variables, constraints)
+ where
+  splitForalls = go IntSet.empty
+    (supplyFromIdentifiers $ IntSet.toAscList $ flexibleIdentifiers source)
+
+  go claimed supply quantified@(TypeForall variables constraints body)
+    -- Duplicate IDs in one binder list are malformed, rather than lexical
+    -- shadowing. Leave that forall visible so checked boundaries reject it.
+    | hasDuplicate variables = (quantified, [], [])
+    | otherwise = case freshenLayer claimed supply variables of
+        -- This requires the entire finite Int domain to be occupied, but keep
+        -- the explicit forall (and therefore fail closed) if it ever occurs.
+        Nothing -> (quantified, [], [])
+        Just (claimed', supply', normalizedVariables, renaming) ->
+          let substitutions = IntMap.map TypeVar renaming
+              normalizedConstraints = map
+                (snd . constraintApplySubsts substitutions) constraints
+              -- 'applySubsts' deletes a nested forall's binders before
+              -- traversing it, preserving lexical re-shadowing.
+              normalizedBody = snd $ applySubsts substitutions body
+              (result, nestedVariables, nestedConstraints) =
+                go claimed' supply' normalizedBody
+          in ( result
+             , normalizedVariables ++ nestedVariables
+             , normalizedConstraints ++ nestedConstraints
+             )
+  go _ _ body = (body, [], [])
+
+  splitArrows (TypeArrow parameter result) =
+    let (finalResult, parameters) = splitArrows result
+    in (finalResult, parameter : parameters)
+  splitArrows result = (result, [])
+
+  -- Once a prenex chain becomes Exference's flat implicit-polymorphism shape,
+  -- every binder must have a distinct identity. Retain ordinary IDs for trace
+  -- stability and freshen only cross-layer lexical shadows. The supply reserves
+  -- the complete source namespace up front, including free and nested variables,
+  -- so erasing a binder cannot capture an unrelated deeper occurrence.
+  freshenLayer claimed supply = freshen claimed supply [] IntMap.empty
+   where
+    freshen claimed' supply' reversed renaming [] = Just
+      (claimed', supply', reverse reversed, renaming)
+    freshen claimed' supply' reversed renaming (variable : remaining)
+      | IntSet.notMember variable claimed' = freshen
+          (IntSet.insert variable claimed') supply'
+          (variable : reversed) renaming remaining
+      | otherwise = do
+          (replacement, nextSupply) <- allocateFreshIdentifier supply'
+          freshen (IntSet.insert replacement claimed') nextSupply
+            (replacement : reversed)
+            (IntMap.insert variable replacement renaming) remaining
+
+  hasDuplicate = check IntSet.empty
+   where
+    check _ [] = False
+    check seen (variable : remaining)
+      | IntSet.member variable seen = True
+      | otherwise = check (IntSet.insert variable seen) remaining
 
 -- | Whether a type contains explicit quantification at any depth.
 containsForall :: HsType -> Bool

@@ -28,9 +28,13 @@ data FunctionBinding = FunctionBinding
 instance NFData FunctionBinding
 
 -- | Lower one fully quantified source signature into the search engine's
--- flat binding shape. Quantifier IDs are local to the signature; constraints
--- and arrow parameters remain explicit search inputs, while the caller-owned
--- penalty is attached without changing the type's structure.
+-- flat binding shape. Only its complete leading prenex chain is opened;
+-- a forall below an arrow remains visible in 'functionResult' for the checked
+-- environment boundary to reject. Quantifier IDs are local to the signature;
+-- cross-layer shadows are alpha-normalized before their binders disappear.
+-- Leading constraints and arrow parameters remain explicit search inputs,
+-- while the caller-owned penalty is attached without changing the remaining
+-- type structure.
 functionBindingFromType
   :: QualifiedName
   -> Penalty

@@ -6,7 +6,10 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   , TGoal (..)
   , Scopes
   , ScopeId
-  , VarPBinding (..)
+  , VarPBinding
+  , varPVariable
+  , varPResult
+  , varPParameters
   , VarBinding (..)
   , VarUsageMap
   , varBindingApplySubsts
@@ -18,6 +21,7 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   , scopeGetAllBindings
   , scopesAddPBinding
   , splitBinding
+  , splitBindingWithParameters
   , initialScopeId
   , initialScopes
   )
@@ -41,15 +45,15 @@ import GHC.Generics
 data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
 
--- | A variable together with the prenex decomposition of its type.  Naming
--- these components prevents the five adjacent lists and types from being
--- silently transposed at search-state boundaries.
+-- | A scoped variable together with the arrow decomposition of its monotype.
+-- Checked query and environment entry points reject nested foralls before a
+-- search node exists; function constraints live in 'nodeConstraintGoals', not
+-- on lexical values. Keeping only these three fields makes that invariant
+-- structural inside the search state.
 data VarPBinding = VarPBinding
   { varPVariable :: !TVarId
   , varPResult :: HsType
   , varPParameters :: [HsType]
-  , varPForallVariables :: [TVarId]
-  , varPConstraints :: [HsConstraint]
   }
   deriving (Generic, Show)
 
@@ -62,22 +66,11 @@ varBindingApplySubsts substs (VarBinding v t) =
   VarBinding v (snd $ applySubsts substs t)
 
 varPBindingApplySubsts :: Substs -> VarPBinding -> VarPBinding
-varPBindingApplySubsts ss binding =
-  let
-    v = varPVariable binding
-    rt = varPResult binding
-    pt = varPParameters binding
-    fvs = varPForallVariables binding
-    cs = varPConstraints binding
-    relevantSS = foldr IntMap.delete ss fvs
-    (newResult, params, newForalls, newCs) = splitArrowResultParams
-                                           $ snd
-                                           $ applySubsts relevantSS rt
-  in
-  VarPBinding v newResult
-    (map (snd . applySubsts relevantSS) pt ++ params)
-    (newForalls ++ fvs)
-    (cs ++ newCs)
+varPBindingApplySubsts substitutions binding =
+  splitBindingWithParameters
+    (map (snd . applySubsts substitutions) $ varPParameters binding)
+    (VarBinding (varPVariable binding)
+      $ snd $ applySubsts substitutions $ varPResult binding)
 
 type ScopeId = Scope.ScopeId
 type Scopes = Scope.Scopes VarPBinding
@@ -167,6 +160,17 @@ instance NFData TGoal
 instance NFData SearchNode
 
 splitBinding :: VarBinding -> VarPBinding
-splitBinding (VarBinding v t) =
-  let (result, parameters, variables, constraints) = splitArrowResultParams t
-  in VarPBinding v result parameters variables constraints
+splitBinding = splitBindingWithParameters []
+
+-- | Split a scoped monotype while retaining parameters already exposed by an
+-- earlier partial application. Substitution can turn the stored result into
+-- another arrow, so every construction path comes through this helper.
+splitBindingWithParameters :: [HsType] -> VarBinding -> VarPBinding
+splitBindingWithParameters previousParameters (VarBinding variable ty)
+  | any containsForall $ ty : previousParameters = error
+      $ "Exference internal scoped binding contains a forall: "
+      ++ show (previousParameters, ty)
+  | otherwise = case splitArrowResultParams ty of
+      (result, parameters, [], []) -> VarPBinding variable result
+        $ previousParameters ++ parameters
+      _ -> error "Exference internal monotype splitter returned quantifiers"

@@ -1140,18 +1140,12 @@ stateStep multiPM allowConstrs h = do
       provided <- lift =<< gets
         (scopeGetAllBindings scopeId . nodeProvidedScopes)
       let
-        provId      = varPVariable provided
-        provT       = varPResult provided
-        provPs      = varPParameters provided
-        forallTypes = varPForallVariables provided
-        constraints = varPConstraints provided
-      renaming <- builderFreshenTVarNamespace forallTypes
-      let
-        provType    = renameFlexibleType renaming provT
-        dependencies = map (renameFlexibleType renaming) provPs
-        provConstrs = S.toList $ S.union
-          (qClassEnv_constraints contxt)
-          (S.fromList $ map (renameFlexibleConstraint renaming) constraints)
+        provId = varPVariable provided
+        provType = varPResult provided
+        dependencies = varPParameters provided
+        -- Scoped values are monotypes. Constraints introduced while partially
+        -- applying an environment function already live on the search node.
+        provConstrs = S.toList $ qClassEnv_constraints contxt
       mapStateT maybeToList $ byGenericUnify
         (Right (provId, foldr TypeArrow provType dependencies))
         provType
@@ -1236,8 +1230,7 @@ stateStep multiPM allowConstrs h = do
             goalType
             var
             newScopeId
-            (let (r, ps, fs, cs) = splitArrowResultParams provided
-              in [VarPBinding vResult r (ds ++ ps) fs cs])
+            [splitBindingWithParameters ds $ VarBinding vResult provided]
           modify $ \node -> node
             { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
 

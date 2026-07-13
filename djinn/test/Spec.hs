@@ -25,6 +25,7 @@ import Djinn.Core (
     toSynthesisKind,
     toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (validateEnvironment)
+import qualified Djinn.Internal.Generated as DjinnGenerated
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htInferClassKinds)
@@ -95,6 +96,7 @@ tests =
           testTrustedUnitDeclaration)
     , ("render shadowing terms without capture", testScopeSafeRendering)
     , ("report malformed proof rendering", testMalformedRendering)
+    , ("validate generated clauses at conversion", testGeneratedClauseBoundary)
     , ("accept only Haskell identifiers and operators", testIdentifiers)
     , ("validate every boundary of the Djinn.Core facade", testCoreFacade)
     ]
@@ -1295,6 +1297,41 @@ testMalformedRendering = do
     assertLeft "case alternatives must be lambdas"
         (termToHExpr $ applys (Ccases [ConsDesc "Only" 1])
             [Var $ Symbol "choice", Var $ Symbol "handler"])
+
+testGeneratedClauseBoundary :: IO ()
+testGeneratedClauseBoundary = do
+    let duplicateTupleBinder = DjinnGenerated.HClause "badTuple"
+            [DjinnGenerated.HPTuple
+                [DjinnGenerated.HPVar "value", DjinnGenerated.HPVar "value"]]
+            (DjinnGenerated.HEVar "value")
+        duplicateAsBinder = DjinnGenerated.HClause "badAs"
+            [DjinnGenerated.HPAt "value" $ DjinnGenerated.HPVar "value"]
+            (DjinnGenerated.HEVar "value")
+    assertLeftContains "tuple patterns cannot bind a local twice"
+        "DuplicatePatternBinder \"value\""
+        (DjinnGenerated.toGeneratedClause duplicateTupleBinder)
+    assertLeftContains "as-patterns cannot bind a local twice"
+        "DuplicatePatternBinder \"value\""
+        (DjinnGenerated.toGeneratedClause duplicateAsBinder)
+
+    goals <- mapM (either fail return . parseHType)
+        ["a -> a", "a -> b -> a"]
+    reports <- mapM
+        (either fail return .
+            inhabitGenerated defaultQueryOptions emptyEnvironment [] "generated")
+        goals
+    let candidates = concatMap generatedReportCandidates reports
+    assertEqual "representative proofs should reach the generated boundary"
+        2 (length candidates)
+    mapM_ validateCandidate candidates
+  where
+    validateCandidate candidate = do
+        let clause = SharedCandidate.candidateOutput candidate
+        assertEqual "generated candidate has valid lexical scope"
+            (Right ()) $ SharedGenerated.validateFunctionClauseScope clause
+        assertEqual "generated candidate has valid renderer-independent syntax"
+            (Right ()) $ SharedGenerated.validateFunctionClauseSyntax
+                SharedGenerated.FullyQualified clause
 
 testIdentifiers :: IO ()
 testIdentifiers = do

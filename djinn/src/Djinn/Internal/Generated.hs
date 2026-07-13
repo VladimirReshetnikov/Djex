@@ -69,8 +69,13 @@ toGeneratedClause (HClause functionName patterns expression) = do
   let bound = Set.fromList $ filter (/= "_") $
         concatMap getBinderVarsHP patterns
   convertedExpression <- convertExpression bound expression
-  return $ Generated.FunctionClause
-    name convertedPatterns convertedExpression
+  let generated = Generated.FunctionClause
+        name convertedPatterns convertedExpression
+  either (Left . show) Right $
+    Generated.validateFunctionClauseScope generated
+  either (Left . show) Right $
+    Generated.validateFunctionClauseSyntax Generated.FullyQualified generated
+  return generated
 
 convertExpression
   :: Set.Set HSymbol

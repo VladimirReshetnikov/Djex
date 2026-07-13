@@ -9,6 +9,7 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
+import Language.Haskell.Synthesis.Candidate
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import qualified Language.Haskell.Synthesis.Declaration as Declaration
@@ -30,7 +31,8 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
-  [ constraintTests
+  [ candidateTests
+  , constraintTests
   , declarationTests
   , environmentTests
   , generatedTests
@@ -43,6 +45,41 @@ tests = testGroup "Djex synthesis foundation"
   , parserTests
   , diagnosticTests
   , localOption (QC.QuickCheckTests 1000) propertyTests
+  ]
+
+candidateTests :: TestTree
+candidateTests = testGroup "candidates"
+  [ testCase "retain output, residual constraints, and backend details" $ do
+      let equality = right $ mkIdentifier "Eq"
+          candidate :: Candidate String [Int] Int
+          candidate = Candidate
+            { candidateOutput = 7
+            , candidateResidualConstraints = [Constraint equality ["a"]]
+            , candidateDetails = [10, 20]
+            }
+      candidateOutput candidate @?= 7
+      candidateResidualConstraints candidate @?=
+        [Constraint equality ["a"]]
+      candidateDetails candidate @?= [10, 20]
+      show candidate @?=
+        "Candidate {candidateOutput = 7, candidateResidualConstraints = \
+        \[Eq \"a\"], candidateDetails = [10,20]}"
+  , testCase "map, fold, and traverse affect only generated output" $ do
+      let equality = right $ mkIdentifier "Eq"
+          candidate :: Candidate String String Int
+          candidate = Candidate 3 [Constraint equality ["a"]] "details"
+          expected output = Candidate output
+            [Constraint equality ["a"]] "details"
+      fmap (+ 4) candidate @?= expected 7
+      sum candidate @?= 3
+      traverse (Just . show) candidate @?= Just (expected "3")
+  , testCase "deep evaluation reaches every candidate component" $ do
+      let equality = right $ mkIdentifier "Eq"
+          candidate :: Candidate [Int] [Int] [Int]
+          candidate = Candidate [1, 2]
+            [Constraint equality [[3, 4]]] [5, 6]
+      _ <- evaluate $ force candidate
+      pure ()
   ]
 
 kindInferenceTests :: TestTree
@@ -637,6 +674,9 @@ generatedTests = testGroup "generated syntax"
       let options = defaultRenderOptions (\local -> 't' : show (local :: Int))
           variableName = right $ mkIdentifier "value"
       renderExpression options (Hole 3) @?= Right "_t3"
+      validateExpressionSyntax
+          (Global functionName :: Expression Int) @?=
+        Left (InvalidGlobalExpression functionName)
       renderExpression options (Tuple [Global variableName]) @?=
         Left (InvalidTupleExpressionArity 1)
       renderExpression options

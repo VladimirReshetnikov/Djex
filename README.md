@@ -83,7 +83,10 @@ budget-limited `NoEvidence` remain distinct from the batch's operational
 
 The Exference adapter will return a lazy sequence of the same generic result
 shape. Its batches now preserve cumulative queue/depth pruning and nominal
-binding usage losslessly, including while a search is still continuing. The
-remaining adapter work is to project residual constraints into the shared type
-vocabulary without forcing the lazy stream. Candidate selection and rendering
-remain presentation policies outside the session operation.
+binding usage losslessly, including while a search is still continuing.
+`findGeneratedSearchBatchesWithHintsEither` validates the finite input once,
+then produces shared candidates with fully shared residual constraints and
+term/type rendering hints without forcing the trace. The remaining adapter
+work is to seal Exference's checked environment and elaborate shared requests
+against it. Candidate selection and rendering remain presentation policies
+outside the session operation.

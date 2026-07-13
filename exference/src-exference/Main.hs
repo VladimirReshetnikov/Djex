@@ -343,7 +343,9 @@ filterBindingsSimple excluded = filter $ \binding ->
 
 bindingIsSupported :: FunctionBinding -> Bool
 bindingIsSupported binding = all (not . containsForall)
-  $ functionResult binding : functionParameters binding
+  $ functionResult binding
+  : functionParameters binding
+  ++ concatMap constraint_params (functionConstraints binding)
 
 deconstructorIsSupported :: DeconstructorBinding -> Bool
 deconstructorIsSupported binding = all (not . containsForall)

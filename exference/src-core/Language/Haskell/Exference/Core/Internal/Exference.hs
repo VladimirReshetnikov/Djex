@@ -12,6 +12,7 @@
 
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
+  , findGeneratedSearchBatches
   , ExferenceHeuristicsConfig (..)
   , ExferenceInput (..)
   , ExferenceOutputElement
@@ -20,12 +21,14 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceSearchBatch
   , ExferenceGeneratedOutputElement
   , ExferenceGeneratedSearchBatch
+  , ExferenceProjectionError (..)
   , SearchCompletion (..)
   , SearchStatus (..)
   , SearchStatusError (..)
   , toSearchProgress
   , toSearchBatch
   , toGeneratedSearchBatch
+  , toGeneratedSearchBatchWithHints
   , constraintsRelaxedAtStep
   , ExferenceInputError (..)
   , validateExferenceInput
@@ -37,6 +40,9 @@ where
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
+import Language.Haskell.Exference.Core.Candidate
+import Language.Haskell.Exference.Core.Internal.Candidate
+  (projectValidatedCandidate)
 import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify
 import Language.Haskell.Exference.Core.Score
@@ -124,6 +130,10 @@ data ExferenceInputError
   = NestedForallInGoal HsType
   | NestedForallInBinding QualifiedName HsType
   | NestedForallInDeconstructor HsType
+  | NestedForallInConstraint ConstraintSite HsConstraint
+  | InvalidInputType HsType SynthesisTypeError
+  | InvalidGeneratedBinding QualifiedName SharedGenerated.RenderError
+  | InvalidGeneratedConstructor QualifiedName SharedGenerated.RenderError
   | DuplicateFunctionNames [QualifiedName]
   | DuplicateDeconstructorNames [QualifiedName]
   | DuplicateConstructorNames [QualifiedName]
@@ -201,35 +211,63 @@ data ExferenceChunkElement = ExferenceChunkElement
   , chunkElements :: [ExferenceOutputElement]
   }
 
+-- Internal chunks carry the shared progress chosen by the engine alongside
+-- the historical status projection.  Modern results therefore never need to
+-- reinterpret a caller-constructible compatibility value.
+data EngineChunk = EngineChunk
+  { engineStatus :: SearchStatus
+  , engineProgress :: SharedSearch.Progress
+  , engineMetadata :: ExferenceBatchMetadata
+  , engineCandidates :: [ExferenceOutputElement]
+  }
+
 type ExferenceSearchBatch =
   SharedSearch.SearchBatch ExferenceBatchMetadata ExferenceOutputElement
 
 type ExferenceGeneratedOutputElement =
-  (SharedGenerated.Expression TVarId, [HsConstraint], ExferenceStats)
+  ExferenceGeneratedCandidate
 
 type ExferenceGeneratedSearchBatch =
   SharedSearch.SearchBatch ExferenceBatchMetadata ExferenceGeneratedOutputElement
+
+data ExferenceProjectionError
+  = InvalidSearchStatus SearchStatusError
+  | InvalidCandidate ExferenceCandidateError
+  deriving (Eq, Show)
 
 toSearchBatch
   :: ExferenceChunkElement
   -> Either SearchStatusError ExferenceSearchBatch
 toSearchBatch chunk = do
   progress <- toSearchProgress $ chunkStatus chunk
-  let status = chunkStatus chunk
-      metadata = ExferenceBatchMetadata
-        (chunkBindingUsages chunk)
-        (fromIntegral $ searchQueuePruned status)
-        (fromIntegral $ searchDepthPruned status)
   return $ SharedSearch.SearchBatch
-    progress metadata (chunkElements chunk)
+    progress (chunkMetadata chunk) (chunkElements chunk)
+
+chunkMetadata :: ExferenceChunkElement -> ExferenceBatchMetadata
+chunkMetadata chunk = ExferenceBatchMetadata
+  (chunkBindingUsages chunk)
+  (fromIntegral $ searchQueuePruned status)
+  (fromIntegral $ searchDepthPruned status)
+ where
+  status = chunkStatus chunk
 
 toGeneratedSearchBatch
   :: ExferenceChunkElement
-  -> Either SearchStatusError ExferenceGeneratedSearchBatch
-toGeneratedSearchBatch = fmap (fmap convertCandidate) . toSearchBatch
+  -> Either ExferenceProjectionError ExferenceGeneratedSearchBatch
+toGeneratedSearchBatch = toGeneratedSearchBatchWithHints M.empty
+
+toGeneratedSearchBatchWithHints
+  :: ExferenceTypeVariableHints
+  -> ExferenceChunkElement
+  -> Either ExferenceProjectionError ExferenceGeneratedSearchBatch
+toGeneratedSearchBatchWithHints typeHints chunk = do
+  batch <- either (Left . InvalidSearchStatus) Right $ toSearchBatch chunk
+  traverse convertCandidate batch
   where
     convertCandidate (candidateExpression, constraints, statistics) =
-      (toGeneratedExpression candidateExpression, constraints, statistics)
+      either (Left . InvalidCandidate) Right
+        $ mkExferenceGeneratedCandidate
+            typeHints candidateExpression constraints statistics
 
 type RatedNodes = Q.MaxPQueue Priority SearchNode
 data FindExpressionsState = FindExpressionsState
@@ -255,9 +293,8 @@ makeFields ''FindExpressionsState
 --   - call stateStep repeatedly
 --   - convert stuff
 --   - consider some special abort conditions
-findExpressions :: ExferenceInput
-                -> [ExferenceChunkElement]
-findExpressions (ExferenceInput rawType
+findEngineChunks :: ExferenceInput -> [EngineChunk]
+findEngineChunks (ExferenceInput rawType
                                 funcs
                                 deconss'
                                 sClassEnv
@@ -295,16 +332,21 @@ findExpressions (ExferenceInput rawType
     , _searchNodeLastStepReason  = ""
     , _searchNodeLastStepBinding = Nothing
     }
-  transformSolutions :: [SearchNode] -> FindExpressionsState -> ExferenceChunkElement
+  transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineChunk
   transformSolutions potentialSolutions (FindExpressionsState
       n'
       totalQueuePruned
       totalDepthPruned
       newBindingUsages
       newNodes
-    ) = ExferenceChunkElement
-      (SearchStatus completion totalQueuePruned totalDepthPruned)
-      newBindingUsages
+    ) = EngineChunk
+      (SearchStatus compatibilityCompletion totalQueuePruned totalDepthPruned)
+      progress
+      (ExferenceBatchMetadata
+        { exferenceBindingUsages = newBindingUsages
+        , exferenceQueuePruned = fromIntegral totalQueuePruned
+        , exferenceDepthPruned = fromIntegral totalDepthPruned
+        })
       [ (e, remainingConstraints, ExferenceStats n' d $ Q.size newNodes)
       | solution <- potentialSolutions
       , let contxt = view queryClassEnv solution
@@ -331,12 +373,32 @@ findExpressions (ExferenceInput rawType
               --   )
       ]
     where
-      completion
+      (compatibilityCompletion, progress)
         | Q.null newNodes
-        , totalQueuePruned > 0 || totalDepthPruned > 0 = SearchPruned
-        | Q.null newNodes = SearchExhausted
-        | n' >= maxSteps = SearchStepLimitReached
-        | otherwise = SearchRunning
+        , Just reasons <- pruningReasons =
+            (SearchPruned, SharedSearch.Completed
+              $ SharedSearch.Truncated reasons)
+        | Q.null newNodes =
+            (SearchExhausted, SharedSearch.Completed SharedSearch.Finished)
+        | n' >= maxSteps =
+            ( SearchStepLimitReached
+            , SharedSearch.Completed $ SharedSearch.Truncated
+                $ SharedSearch.StepLimitReached :| maybe [] nonEmptyReasons
+                    pruningReasons
+            )
+        | otherwise = (SearchRunning, SharedSearch.Continuing)
+      pruningReasons = case
+          (totalQueuePruned > 0, totalDepthPruned > 0) of
+        (True, True) -> Just
+          ( SharedSearch.QueueLimitPruned (fromIntegral totalQueuePruned)
+          :| [SharedSearch.DepthLimitPruned $ fromIntegral totalDepthPruned]
+          )
+        (True, False) -> Just
+          (SharedSearch.QueueLimitPruned (fromIntegral totalQueuePruned) :| [])
+        (False, True) -> Just
+          (SharedSearch.DepthLimitPruned (fromIntegral totalDepthPruned) :| [])
+        (False, False) -> Nothing
+      nonEmptyReasons (reason :| remaining) = reason : remaining
       -- Validate the exact tree returned to callers.  This used to check the
       -- raw search result and let the CLI rewrite it afterwards, so a
       -- simplifier bug could invalidate an already-approved candidate.  The
@@ -351,9 +413,12 @@ findExpressions (ExferenceInput rawType
         firstChecked [] = Nothing
         firstChecked (candidate : remainingCandidates) =
           case checkExpression contxt funcs deconss' t constraints candidate of
-            Right () -> Just candidate
+            Right () -> case SharedGenerated.validateExpressionSyntax
+                $ toGeneratedExpression candidate of
+              Right () -> Just candidate
+              Left _ -> firstChecked remainingCandidates
             Left _ -> firstChecked remainingCandidates
-  helper :: FindExpressionsState -> Maybe (ExferenceChunkElement, FindExpressionsState)
+  helper :: FindExpressionsState -> Maybe (EngineChunk, FindExpressionsState)
   helper state | view n state >= maxSteps = Nothing
   helper state = runStateT (do
     s <- zoom states $ StateT Q.maxView
@@ -397,6 +462,40 @@ findExpressions (ExferenceInput rawType
     queuePruned += queueDiscarded
     gets $ transformSolutions potentialSolutions) state
 
+-- | Historical status-bearing view of the engine trace.
+findExpressions :: ExferenceInput -> [ExferenceChunkElement]
+findExpressions = map projectCompatibilityChunk . findEngineChunks
+
+projectCompatibilityChunk :: EngineChunk -> ExferenceChunkElement
+projectCompatibilityChunk chunk = ExferenceChunkElement
+  (engineStatus chunk)
+  (exferenceBindingUsages $ engineMetadata chunk)
+  (engineCandidates chunk)
+
+-- | Project the validated engine trace lazily.  Candidate conversion is total
+-- here: input validation established the shared type invariants, and search
+-- substitutions preserve them.  The fallible adapter above remains for
+-- caller-constructed compatibility chunks.
+findGeneratedSearchBatches
+  :: ExferenceTypeVariableHints
+  -> ExferenceInput
+  -> [ExferenceGeneratedSearchBatch]
+findGeneratedSearchBatches typeHints =
+  map (projectGeneratedBatch typeHints) . findEngineChunks
+
+projectGeneratedBatch
+  :: ExferenceTypeVariableHints
+  -> EngineChunk
+  -> ExferenceGeneratedSearchBatch
+projectGeneratedBatch typeHints chunk = SharedSearch.SearchBatch
+  (engineProgress chunk)
+  (engineMetadata chunk)
+  (map projectCandidate $ engineCandidates chunk)
+ where
+  projectCandidate (candidateExpression, constraints, statistics) =
+    projectValidatedCandidate
+      typeHints candidateExpression constraints statistics
+
 constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
 constraintsRelaxedAtStep allowConstraints stopStep currentStep =
   allowConstraints || currentStep <= stopStep
@@ -433,6 +532,10 @@ validateExferenceInput input
   | Just binding <- find (not . isFiniteRating . functionPenalty)
       (input_envFuncs input) = Left $ InvalidHeuristic
         (show $ functionName binding) (functionPenalty binding)
+  | Just (binding, syntaxError) <- firstInvalidGeneratedBinding input =
+      Left $ InvalidGeneratedBinding binding syntaxError
+  | Just (constructor, syntaxError) <- firstInvalidGeneratedConstructor input =
+      Left $ InvalidGeneratedConstructor constructor syntaxError
   | containsNestedForall $ input_goalType input =
       Left $ NestedForallInGoal $ input_goalType input
   | Just binding <- find (containsForall . functionBindingType)
@@ -441,8 +544,13 @@ validateExferenceInput input
   | Just deconstructor <- find (containsForall . deconstructorBindingType)
       (input_envDeconsS input) =
       Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
+  | Just (site, constraint) <- find (constraintContainsForall . snd)
+      (inputConstraints input) =
+      Left $ NestedForallInConstraint site constraint
   | Just classError <- firstClassConstraintError input =
       Left $ InvalidClassConstraint classError
+  | Just (typeExpression, typeError) <- firstInvalidInputType input =
+      Left $ InvalidInputType typeExpression typeError
   | otherwise = Right ()
 
 -- Report the complete stable duplicate set.  Search explores every raw
@@ -487,6 +595,80 @@ firstClassConstraintError input = listToMaybe
     , constraint <- functionConstraints binding
         ++ typeConstraints (functionBindingType binding)
     ]
+
+-- Keep every type accepted by the search core inside the validated shared
+-- source vocabulary.  Whole goal/function/deconstructor types cover their
+-- recursive structure; standalone constraint arguments need an explicit pass
+-- because a FunctionBinding stores its context separately from its arrow.
+firstInvalidInputType :: ExferenceInput -> Maybe (HsType, SynthesisTypeError)
+firstInvalidInputType input = listToMaybe
+  [ (typeExpression, typeError)
+  | typeExpression <- inputTypes input
+  , Left typeError <- [toSynthesisType typeExpression]
+  ]
+
+firstInvalidGeneratedConstructor
+  :: ExferenceInput
+  -> Maybe (QualifiedName, SharedGenerated.RenderError)
+firstInvalidGeneratedConstructor input = listToMaybe
+  [ (name, syntaxError)
+  | deconstructor <- input_envDeconsS input
+  , constructor <- deconstructorConstructors deconstructor
+  , let name = constructorName constructor
+        generatedPattern = SharedGenerated.Constructor
+          (toSynthesisName name)
+          (replicate (length $ constructorFields constructor)
+            SharedGenerated.Wildcard)
+        probe = SharedGenerated.Lambda [generatedPattern]
+          $ SharedGenerated.Hole ()
+  , Left syntaxError <- [SharedGenerated.validateExpressionSyntax probe]
+  ]
+
+firstInvalidGeneratedBinding
+  :: ExferenceInput
+  -> Maybe (QualifiedName, SharedGenerated.RenderError)
+firstInvalidGeneratedBinding input = listToMaybe
+  [ (name, syntaxError)
+  | binding <- input_envFuncs input
+  , let name = functionName binding
+  , Left syntaxError <- [SharedGenerated.validateExpressionSyntax
+      $ SharedGenerated.Global $ toSynthesisName name]
+  ]
+
+inputTypes :: ExferenceInput -> [HsType]
+inputTypes input =
+  [input_goalType input]
+  ++ map functionBindingType (input_envFuncs input)
+  ++ map deconstructorBindingType (input_envDeconsS input)
+  ++ concatMap (constraint_params . snd) (inputConstraints input)
+
+-- Associate every explicit constraint with the site already used by class
+-- validation. StaticClassEnv is opaque, but its public observations let the
+-- search boundary also check superclass and instance argument types rather
+-- than assuming that nominal environment validation implies rank support.
+inputConstraints :: ExferenceInput -> [(ConstraintSite, HsConstraint)]
+inputConstraints input =
+  [ (QueryConstraint, constraint)
+  | constraint <- typeConstraints $ input_goalType input
+  ] ++
+  [ (BindingConstraint $ functionName binding, constraint)
+  | binding <- input_envFuncs input
+  , constraint <- functionConstraints binding
+  ] ++
+  [ (ClassSuperclass $ tclass_name declaration, constraint)
+  | declaration <- M.elems
+      $ sClassEnv_tclasses $ input_envClasses input
+  , constraint <- tclass_constraints declaration
+  ] ++ concatMap instanceConstraints
+    (sClassEnv_explicitInstances $ input_envClasses input)
+ where
+  instanceConstraints instanceDeclaration =
+    (InstanceHead, instance_head instanceDeclaration)
+    : [ (InstancePrerequisite headName, prerequisite)
+      | prerequisite <- instance_constraints instanceDeclaration
+      ]
+   where
+    headName = constraint_tclass $ instance_head instanceDeclaration
 
 isFiniteRating :: Penalty -> Bool
 isFiniteRating = \rating -> let value = penaltyValue rating

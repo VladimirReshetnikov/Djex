@@ -37,6 +37,9 @@ import qualified Language.Haskell.Exts.SrcLoc as HSE
 import Language.Haskell.Exference.Core
   ( ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
+  , ExferenceCandidateDetails (..)
+  , ExferenceCandidateError (..)
+  , ExferenceProjectionError (..)
   , ExferenceHeuristicsConfig (..)
   , SearchCompletion (..)
   , SearchStatus (..)
@@ -44,9 +47,12 @@ import Language.Haskell.Exference.Core
   , constraintsRelaxedAtStep
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
+  , findGeneratedSearchBatchesWithHintsEither
   , toSearchProgress
   , toSearchBatch
   , toGeneratedSearchBatch
+  , toGeneratedSearchBatchWithHints
+  , typeVariableHints
   , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.ConstraintSolver
@@ -121,6 +127,7 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
+import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
@@ -176,14 +183,34 @@ tests = testGroup "Exference"
             @?= Left (SuperclassCycle [name "Self"])
       , testCase "shared constraint conversion is lossless" $ do
           let constraint = HsConstraint (name "C")
-                [TypeApp (TypeCons $ name "Maybe") (TypeVar 0)]
-          fromSynthesisConstraint (toSynthesisConstraint constraint)
-            @?= Right constraint
+                [ TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
+                , TypeConstant 1
+                ]
+          shared <- expectRight $ toSynthesisConstraint constraint
+          shared @?= SharedConstraint.Constraint
+            (toSynthesisName $ name "C")
+            [ SharedType.TypeApplication
+                (SharedType.TypeConstructor
+                  $ toSynthesisName $ name "Maybe")
+                (SharedType.TypeVariable
+                  $ SharedType.FlexibleVariable 0)
+            , SharedType.TypeVariable $ SharedType.RigidVariable 1
+            ]
+          fromSynthesisConstraint shared @?= Right constraint
+      , testCase "shared constraint conversion validates class identity" $ do
+          let invalid = HsConstraint (name "notAClass") [TypeVar 0]
+              sharedName = toSynthesisName $ name "notAClass"
+          toSynthesisConstraint invalid @?= Left
+            (InvalidSynthesisConstraint
+              $ SharedConstraint.InvalidConstraintClass sharedName)
       , testCase "shared constraints reject unboxed class names" $ do
           unboxed <- expectRight $ SharedName.tupleName SharedName.Unboxed 2
           case fromSynthesisConstraint
-              (SharedConstraint.Constraint unboxed [TypeVar 0]) of
-            Left (UnsupportedSpecialName _) -> pure ()
+              (SharedConstraint.Constraint unboxed
+                [SharedType.TypeVariable $ SharedType.FlexibleVariable 0]) of
+            Left (InvalidSynthesisConstraint
+                (SharedConstraint.InvalidConstraintClass actual)) ->
+              actual @?= unboxed
             result -> fail $ "unboxed constraint was accepted: " ++ show result
       , testCase "adding constraints retains existing constraints" $ do
           let cls = HsTypeClass (name "C") [0] []
@@ -828,6 +855,35 @@ tests = testGroup "Exference"
           validateExferenceInput identityInput
             { input_envDeconsS = [secondDeconstructor, firstDeconstructor] }
             @?= expected
+      , testCase "generated constructor patterns are validated at input" $ do
+          let arrowName = QualifiedName [] "->"
+              invalidBinding = FunctionBinding
+                (TypeVar 0) arrowName 0 [] []
+          validateExferenceInput identityInput
+            { input_envFuncs = [invalidBinding] } @?= Left
+              (InvalidGeneratedBinding arrowName
+                $ Generated.InvalidGlobalExpression SharedName.functionName)
+
+          let invalidName = name "notAConstructor"
+              invalid = DeconstructorBinding
+                (TypeCons $ name "T")
+                [ConstructorBinding invalidName []]
+                False
+          validateExferenceInput identityInput
+            { input_envDeconsS = [invalid] } @?= Left
+              (InvalidGeneratedConstructor invalidName
+                $ Generated.InvalidConstructorPattern
+                $ toSynthesisName invalidName)
+
+          let malformedCons = DeconstructorBinding
+                (TypeApp (TypeCons ListCon) $ TypeVar 0)
+                [ConstructorBinding Cons [TypeVar 0]]
+                False
+          validateExferenceInput identityInput
+            { input_envDeconsS = [malformedCons] } @?= Left
+              (InvalidGeneratedConstructor Cons
+                $ Generated.InvalidConstructorPatternArity
+                    SharedName.consName 2 1)
       , testCase "constraint relaxation ends at the configured step" $ do
           constraintsRelaxedAtStep False 2 1 @?= True
           constraintsRelaxedAtStep False 2 2 @?= True
@@ -905,6 +961,40 @@ tests = testGroup "Exference"
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Left (NestedForallInGoal constrainedGoal)
+      , testCase "nested foralls are rejected throughout the environment" $ do
+          let polymorphic = TypeForall [1] [] $ TypeVar 1
+              bindingName = name "f"
+              bindingConstraint = HsConstraint (name "External")
+                [polymorphic]
+              constrainedBinding = FunctionBinding
+                (TypeVar 0) bindingName 0 [bindingConstraint] []
+          validateExferenceInput identityInput
+            { input_envFuncs = [constrainedBinding] }
+            @?= Left (NestedForallInConstraint
+              (BindingConstraint bindingName) bindingConstraint)
+
+          let polymorphicBinding = FunctionBinding
+                polymorphic bindingName 0 [] []
+          validateExferenceInput identityInput
+            { input_envFuncs = [polymorphicBinding] }
+            @?= Left (NestedForallInBinding bindingName polymorphic)
+
+          let deconstructor = DeconstructorBinding
+                (TypeCons $ name "Box")
+                [ConstructorBinding (name "Box") [polymorphic]] False
+              deconstructorType = TypeArrow polymorphic
+                (TypeCons $ name "Box")
+          validateExferenceInput identityInput
+            { input_envDeconsS = [deconstructor] }
+            @?= Left (NestedForallInDeconstructor deconstructorType)
+      , testCase "shared type validation covers otherwise-valid prenex input" $ do
+          let duplicate = TypeForall [0, 0] [] $ TypeVar 0
+          validateExferenceInput identityInput
+            { input_goalType = duplicate }
+            @?= Left (InvalidInputType duplicate
+              $ InvalidSynthesisType
+              $ SharedType.DuplicateForallVariable
+              $ SharedType.FlexibleVariable 0)
       , testCase "prenex forall chains are checked through every layer" $ do
           let goal = TypeForall [0] []
                 $ TypeForall [1] []
@@ -1692,17 +1782,119 @@ tests = testGroup "Exference"
           renderExpression Generated.FullyQualified (ExpName global)
             @?= Right "Data.List.map"
       , testCase "search batches expose the same generated tree" $ do
-          let variable = TypeVar 0
+          let intType = TypeCons $ name "Int"
+              variable = TypeVar 0
               expression = ExpLambda 1 variable (ExpVar 1 variable)
-              candidate = (expression, [], ExferenceStats 1 (Penalty 0) 0)
+              residual = HsConstraint (name "Eq") [intType]
+              statistics = ExferenceStats 1 (Penalty 0) 0
+              candidate = (expression, [residual], statistics)
               chunk = ExferenceChunkElement
                 (SearchStatus SearchExhausted 0 0) Map.empty [candidate]
-          batch <- expectRight $ toGeneratedSearchBatch chunk
+              goal = TypeForall [0] [] variable
+              hints = typeVariableHints goal $ Map.singleton "source" 0
+          batch <- expectRight $ toGeneratedSearchBatchWithHints hints chunk
           case SharedSearch.batchCandidates batch of
-            [(generated, [], _)] -> generated @?=
-              Generated.Lambda [Generated.Bind 1] (Generated.Local 1)
+            [generatedCandidate] -> do
+              SharedCandidate.candidateOutput generatedCandidate @?=
+                Generated.Lambda [Generated.Bind 1] (Generated.Local 1)
+              SharedCandidate.candidateResidualConstraints generatedCandidate
+                @?= [SharedConstraint.Constraint
+                  (toSynthesisName $ name "Eq")
+                  [SharedType.TypeConstructor $ toSynthesisName $ name "Int"]]
+              let details = SharedCandidate.candidateDetails generatedCandidate
+              exferenceCandidateStats details @?= statistics
+              exferenceLocalNameHints details @?= Map.singleton 1 "a"
+              exferenceTypeVariableHints details @?= Map.fromList
+                [ (SharedType.FlexibleVariable 0, "source")
+                , (SharedType.RigidVariable 0, "source")
+                ]
             candidates -> fail $ "unexpected generated batch: "
               ++ show (length candidates)
+      , testCase "validated generated search stays lazy and total" $ do
+          let hints = typeVariableHints (input_goalType identityInput)
+                $ Map.singleton "a" 0
+          batches <- expectRight
+            $ findGeneratedSearchBatchesWithHintsEither hints identityInput
+          assertBool "generated search produced no first batch"
+            $ not $ null $ take 1 batches
+          let candidates = concatMap SharedSearch.batchCandidates batches
+          assertBool "generated identity search produced no candidate"
+            $ not $ null candidates
+          case candidates of
+            generatedCandidate : _ -> do
+              let details = SharedCandidate.candidateDetails generatedCandidate
+              Map.lookup (SharedType.RigidVariable 0)
+                (exferenceTypeVariableHints details) @?= Just "a"
+            [] -> fail "generated identity search produced no candidate"
+          case reverse batches of
+            terminal : _ -> SharedSearch.batchProgress terminal @?=
+              SharedSearch.Completed SharedSearch.Finished
+            [] -> fail "generated identity search produced no terminal batch"
+      , testCase "type hints follow every leading forall layer" $ do
+          let goal = TypeForall [4] []
+                $ TypeForall [9] []
+                $ TypeArrow (TypeVar 4) (TypeVar 9)
+              hints = typeVariableHints goal $ Map.fromList
+                [("inner", 9), ("outer", 4)]
+          hints @?= Map.fromList
+            [ (SharedType.FlexibleVariable 4, "outer")
+            , (SharedType.FlexibleVariable 9, "inner")
+            , (SharedType.RigidVariable 0, "outer")
+            , (SharedType.RigidVariable 1, "inner")
+            ]
+      , testCase "compatibility chunks check generated candidates" $ do
+          let invalidClass = name "notAClass"
+              chunk = ExferenceChunkElement
+                (SearchStatus SearchExhausted 0 0)
+                Map.empty
+                [ ( ExpName $ name "value"
+                  , [HsConstraint invalidClass [TypeVar 0]]
+                  , ExferenceStats 1 (Penalty 0) 0
+                  )
+                ]
+          toGeneratedSearchBatch chunk @?= Left
+            (InvalidCandidate
+              $ InvalidCandidateType
+              $ InvalidSynthesisConstraint
+              $ SharedConstraint.InvalidConstraintClass
+              $ toSynthesisName invalidClass)
+      , testCase "compatibility candidates reject unbound locals and holes" $ do
+          let chunk expression = ExferenceChunkElement
+                (SearchStatus SearchExhausted 0 0)
+                Map.empty
+                [(expression, [], ExferenceStats 1 (Penalty 0) 0)]
+          toGeneratedSearchBatch (chunk $ ExpVar 7 $ TypeVar 0) @?=
+            Left (InvalidCandidate
+              $ InvalidCandidateScope
+              $ Generated.UnboundLocal 7)
+          toGeneratedSearchBatch (chunk $ ExpHole 8) @?=
+            Left (InvalidCandidate $ IncompleteCandidate (8 :| []))
+      , testCase "compatibility candidates reject malformed syntax" $ do
+          let invalidName = name "notAConstructor"
+              expression = ExpLetMatch invalidName []
+                (ExpName $ name "value")
+                (ExpName $ name "value")
+              chunk = ExferenceChunkElement
+                (SearchStatus SearchExhausted 0 0)
+                Map.empty
+                [(expression, [], ExferenceStats 1 (Penalty 0) 0)]
+          toGeneratedSearchBatch chunk @?= Left
+            (InvalidCandidate
+              $ InvalidCandidateSyntax
+              $ Generated.InvalidConstructorPattern
+              $ toSynthesisName invalidName)
+          let arrowName = QualifiedName [] "->"
+              arrowChunk = ExferenceChunkElement
+                (SearchStatus SearchExhausted 0 0)
+                Map.empty
+                [( ExpName arrowName
+                 , []
+                 , ExferenceStats 1 (Penalty 0) 0
+                 )]
+          toGeneratedSearchBatch arrowChunk @?= Left
+            (InvalidCandidate
+              $ InvalidCandidateSyntax
+              $ Generated.InvalidGlobalExpression SharedName.functionName)
       ]
   , testGroup "Haskell AST conversion"
       [ testCase "lowercase names use Var rather than Con" $

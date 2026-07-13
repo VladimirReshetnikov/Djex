@@ -20,6 +20,7 @@ module Language.Haskell.Synthesis.Generated
   , ScopeError (..)
   , validateExpressionScope
   , validateFunctionClauseScope
+  , validateExpressionSyntax
   , allocateLocalNames
   , allocateClauseLocalNames
   , renderExpression
@@ -122,6 +123,7 @@ defaultRenderOptions preference = RenderOptions
 data RenderError
   = InvalidLocalName String NameError
   | LocalNameIsWildcard
+  | InvalidGlobalExpression Name
   | InvalidTupleExpressionArity Int
   | InvalidTuplePatternArity Int
   | InvalidConstructorPattern Name
@@ -308,7 +310,10 @@ renderFunctionClause options clause@(FunctionClause name patterns body) = do
 validateExpressionSyntax :: Expression local -> Either RenderError ()
 validateExpressionSyntax expression = case expression of
   Local{} -> Right ()
-  Global{} -> Right ()
+  Global name
+    | Just FunctionConstructor <- nameSpecial name ->
+        Left $ InvalidGlobalExpression name
+    | otherwise -> Right ()
   Lambda [] _ -> Left EmptyLambda
   Lambda patterns body ->
     mapM_ validatePatternSyntax patterns >> validateExpressionSyntax body

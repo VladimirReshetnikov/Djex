@@ -72,6 +72,7 @@ Library
     Language.Haskell.Exference.Core.Types,
     Language.Haskell.Exference.Core.TypeUtils,
     Language.Haskell.Exference.Core.ExferenceStats,
+    Language.Haskell.Exference.Core.Candidate,
     Language.Haskell.Exference.Core.ConstraintSolver,
     Language.Haskell.Exference.Core.Declaration,
     Language.Haskell.Exference.Core.Unify,
@@ -80,6 +81,7 @@ Library
     Language.Haskell.Exference.Core.ExpressionCheck,
     Language.Haskell.Exference.Core.ExpressionSimplify,
     Language.Haskell.Exference.Core.Score,
+    Language.Haskell.Synthesis.Candidate,
     Language.Haskell.Synthesis.Constraint,
     Language.Haskell.Synthesis.Declaration,
     Language.Haskell.Synthesis.Diagnostic,
@@ -104,6 +106,7 @@ Library synthesis
   Hs-Source-Dirs:   synthesis/src
 
   Exposed-Modules:
+    Language.Haskell.Synthesis.Candidate
     Language.Haskell.Synthesis.Constraint
     Language.Haskell.Synthesis.Declaration
     Language.Haskell.Synthesis.Diagnostic
@@ -254,6 +257,7 @@ Library exference-core
     Language.Haskell.Exference.Core.Types
     Language.Haskell.Exference.Core.TypeUtils
     Language.Haskell.Exference.Core.ExferenceStats
+    Language.Haskell.Exference.Core.Candidate
     Language.Haskell.Exference.Core.ConstraintSolver
     Language.Haskell.Exference.Core.Declaration
     Language.Haskell.Exference.Core.Unify
@@ -267,6 +271,7 @@ Library exference-core
   Other-Modules:
     Language.Haskell.Exference.Core.Internal.Unify
     Language.Haskell.Exference.Core.Internal.ConstraintSolver
+    Language.Haskell.Exference.Core.Internal.Candidate
     Language.Haskell.Exference.Core.Internal.Closure
     Language.Haskell.Exference.Core.Internal.ExferenceNode
     Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
@@ -309,6 +314,7 @@ Library exference-frontend
     Language.Haskell.Exference.Core.Types,
     Language.Haskell.Exference.Core.TypeUtils,
     Language.Haskell.Exference.Core.ExferenceStats,
+    Language.Haskell.Exference.Core.Candidate,
     Language.Haskell.Exference.Core.ConstraintSolver,
     Language.Haskell.Exference.Core.Declaration,
     Language.Haskell.Exference.Core.Unify,

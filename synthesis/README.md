@@ -27,6 +27,12 @@ one truncated by step, choice-point, candidate, queue, or depth limits, and
 supports continuing chunk streams. It deliberately carries no logical
 inhabitation claim: each backend keeps its own evidence and search semantics.
 
+`Language.Haskell.Synthesis.Candidate` is the corresponding neutral candidate
+envelope. It keeps generated output together with shared residual constraints
+and backend-owned details such as proof or heuristic statistics. Mapping and
+traversal affect only the output, so adapters can add a target-bearing clause
+without rebuilding or weakening the attached obligations and metadata.
+
 `Language.Haskell.Synthesis.Query` supplies the generic request/result seam.
 Targets are validated `Name`s and contexts use the backend's goal type, while
 goal types, search options, metadata, and candidates remain parameters. Its

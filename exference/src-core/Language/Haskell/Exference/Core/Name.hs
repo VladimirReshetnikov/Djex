@@ -48,7 +48,9 @@ newtype QualifiedName = QualifiedName_ Shared.Name
 data QualifiedNameError
   = InvalidQualifiedName Shared.NameError
   | UnsupportedSpecialName Shared.SpecialName
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance NFData QualifiedNameError
 
 -- | Historical ordinary-name view.  The payload of an operator is bare in
 -- the view even when the legacy builder was given parenthesized syntax.

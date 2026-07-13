@@ -4,6 +4,7 @@ module Language.Haskell.Exference.Core.Expression
   ( Expression (..)
   , ExpressionRenderError (..)
   , toGeneratedExpression
+  , expressionNameHints
   , renderExpression
   , qualificationFromLevel
   , showExpression
@@ -187,9 +188,18 @@ renderOptions
 renderOptions qualification reserved expression = Generated.RenderOptions
   qualification preferred reserved
  where
+  hints = expressionNameHints expression
+  preferred variable = M.findWithDefault (showVar variable) variable
+    hints
+
+-- | Preserve the type-derived spelling preferences that would otherwise be
+-- erased at the shared generated-expression boundary.  These remain hints:
+-- the common allocator still resolves collisions with other locals, globals,
+-- and caller-reserved names.
+expressionNameHints :: Expression -> M.Map TVarId String
+expressionNameHints expression = M.mapWithKey preferredVarName variableTypes
+ where
   variableTypes = L.foldl' recordType M.empty $ variableObservations expression
-  preferred variable = maybe (showVar variable) (preferredVarName variable)
-    $ M.lookup variable variableTypes
 
   recordType types (variable, ty) = M.alter update variable types
     where

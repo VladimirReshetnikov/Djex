@@ -68,7 +68,9 @@ retaining unknown classes as explicit external constraints.
 type IDs, applications, arrows, tuples, foralls, and constraints to the shared
 source-type IR. The checked reverse conversion rejects rigid forall binders and
 shared names outside Exference's representable subset rather than weakening
-them during lowering.
+them during lowering. `toSynthesisConstraint` now converts argument types all
+the way to that IR and validates the class namespace; the former shallow
+wrapper projection is no longer exposed under a misleading conversion name.
 
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration
@@ -139,13 +141,27 @@ allocates names by variable identity, avoids binder/global capture, and applies
 one qualification policy.  The `haskell-src-exts` converter remains only as a
 compatibility frontend and consumes the shared allocator rather than owning a
 second naming implementation.
-`toGeneratedSearchBatch` projects status-bearing Exference chunks to the common
-`SearchBatch` envelope with shared generated-expression candidates, while
-retaining typed expressions through the compatibility API. Each projected
-batch carries `ExferenceBatchMetadata`: binding-use counts keyed by nominal
-`QualifiedName`, plus cumulative queue- and depth-pruning counts. Keeping the
-counts in metadata makes partial progress observable even though shared
-`Progress` records pruning reasons only when a search terminates.
+`findGeneratedSearchBatchesEither` is the core-only shared result API;
+`findGeneratedSearchBatchesWithHintsEither` additionally accepts source-name
+hints from a frontend. They validate the finite input eagerly and then project
+the engine trace lazily—candidate conversion never traverses the whole search.
+Every result is a shared `Candidate` containing a generated expression, fully
+shared residual constraints, and `ExferenceCandidateDetails`. The details
+retain search statistics and both term-local and tagged flexible/rigid type
+name hints, so erasing backend annotations does not degrade later rendering.
+Each demanded candidate is fully detached from its typed search tree; private
+engine chunks supply shared progress directly, with compatibility chunks as a
+sibling projection rather than the modern API reinterpreting legacy status.
+
+`toGeneratedSearchBatch` remains the checked adapter for caller-constructed
+status-bearing compatibility chunks. It rejects malformed generated syntax,
+invalid scope, unfinished holes, malformed constraints, and contradictory
+status, while typed expressions stay available through the historical API.
+Each shared batch carries
+`ExferenceBatchMetadata`: binding-use counts keyed by nominal `QualifiedName`,
+plus cumulative queue- and depth-pruning counts. Keeping the counts in metadata
+makes partial progress observable even though shared `Progress` records pruning
+reasons only when a search terminates.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the
@@ -157,7 +173,10 @@ The status-bearing search API is `findExpressionsWithStatsEither`. It retains
 structured input failures and distinguishes a genuinely exhausted search space
 from a step-limited search and one made incomplete by queue/depth pruning. The
 validator also rejects negative step counts for delayed constraint solving,
-rather than accepting a setting whose threshold can never be reached. The
+rather than accepting a setting whose threshold can never be reached. It checks
+every goal, binding, deconstructor, and explicit constraint argument through
+the shared type vocabulary, including rank-N occurrences in function contexts
+that the historical filter overlooked. The
 `toSearchProgress` projection maps those compatibility statuses to
 `Language.Haskell.Synthesis.Search`, retaining simultaneous queue and depth
 pruning reasons and rejecting malformed hand-constructed status values. It

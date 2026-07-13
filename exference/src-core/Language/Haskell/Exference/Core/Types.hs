@@ -11,7 +11,9 @@ module Language.Haskell.Exference.Core.Types
   , HsType (..)
   , HsTypeOffset (..)
   , SynthesisVariable
+  , SynthesisType
   , SynthesisTypeError (..)
+  , toSynthesisTypeStructure
   , toSynthesisType
   , fromSynthesisType
   , Subst (..)
@@ -21,6 +23,7 @@ module Language.Haskell.Exference.Core.Types
   , HsConstraint (HsConstraint)
   , constraint_tclass
   , constraint_params
+  , toSynthesisConstraintStructure
   , toSynthesisConstraint
   , fromSynthesisConstraint
   , ConstraintSite (..)
@@ -85,12 +88,16 @@ import GHC.Generics
 
 type TVarId = Int
 type SynthesisVariable = SharedType.Variable TVarId
+type SynthesisType = SharedType.Type SynthesisVariable
 
 data SynthesisTypeError
   = InvalidSynthesisType (SharedType.TypeError SynthesisVariable)
+  | InvalidSynthesisConstraint SharedConstraint.ConstraintError
   | UnsupportedSynthesisName QualifiedNameError
   | RigidForallBinder TVarId
-  deriving (Eq, Show)
+  deriving (Eq, Show, Generic)
+
+instance NFData SynthesisTypeError
 
 data Subst  = Subst {-# UNPACK #-} !TVarId !HsType
 type Substs = IntMap.IntMap HsType
@@ -104,42 +111,42 @@ data HsType = TypeVar      {-# UNPACK #-} !TVarId
             | TypeForall   [TVarId] [HsConstraint] !HsType
   deriving (Ord, Eq, Generic)
 
--- | Erase Exference's search representation into the common source type.
+-- | Structurally project Exference's search representation into the common
+-- source type without claiming that binders or constraints are valid.  This
+-- total traversal is useful inside the checked search engine; public inputs
+-- should normally cross the validating 'toSynthesisType' boundary instead.
+toSynthesisTypeStructure :: HsType -> SynthesisType
+toSynthesisTypeStructure typeExpression = case typeExpression of
+  TypeVar variable -> SharedType.TypeVariable
+    $ SharedType.FlexibleVariable variable
+  TypeConstant variable -> SharedType.TypeVariable
+    $ SharedType.RigidVariable variable
+  TypeCons name -> SharedType.TypeConstructor $ toSynthesisName name
+  TypeArrow parameter result -> SharedType.FunctionType
+    (toSynthesisTypeStructure parameter)
+    (toSynthesisTypeStructure result)
+  TypeApp function argument -> SharedType.TypeApplication
+    (toSynthesisTypeStructure function)
+    (toSynthesisTypeStructure argument)
+  TypeForall variables constraints body -> SharedType.ForallType
+    (map SharedType.FlexibleVariable variables)
+    (map toSynthesisConstraintStructure constraints)
+    (toSynthesisTypeStructure body)
+
+-- | Convert and validate an Exference type at the shared source boundary.
 -- Flexible and rigid IDs remain distinct, and saturated tuple constructors
 -- are canonicalized structurally.
-toSynthesisType
-  :: HsType
-  -> Either SynthesisTypeError (SharedType.Type SynthesisVariable)
+toSynthesisType :: HsType -> Either SynthesisTypeError SynthesisType
 toSynthesisType source = do
-  converted <- convert source
-  let canonical = SharedType.canonicalizeType converted
+  let canonical = SharedType.canonicalizeType
+        $ toSynthesisTypeStructure source
   either (Left . InvalidSynthesisType) Right
     $ SharedType.validateType canonical
   return canonical
- where
-  convert typeExpression = case typeExpression of
-    TypeVar variable -> Right $ SharedType.TypeVariable
-      $ SharedType.FlexibleVariable variable
-    TypeConstant variable -> Right $ SharedType.TypeVariable
-      $ SharedType.RigidVariable variable
-    TypeCons name -> Right $ SharedType.TypeConstructor
-      $ toSynthesisName name
-    TypeArrow parameter result -> SharedType.FunctionType
-      <$> convert parameter <*> convert result
-    TypeApp function argument -> SharedType.TypeApplication
-      <$> convert function <*> convert argument
-    TypeForall variables constraints body -> SharedType.ForallType
-      (map SharedType.FlexibleVariable variables)
-      <$> mapM convertConstraint constraints
-      <*> convert body
-
-  convertConstraint (HsConstraint className arguments) =
-    SharedConstraint.Constraint (toSynthesisName className)
-      <$> mapM convert arguments
 
 -- | Narrow a common type back to Exference's typed search vocabulary.
 fromSynthesisType
-  :: SharedType.Type SynthesisVariable
+  :: SynthesisType
   -> Either SynthesisTypeError HsType
 fromSynthesisType source = do
   let canonical = SharedType.canonicalizeType source
@@ -181,7 +188,7 @@ fromSynthesisType source = do
   convertConstraint (SharedConstraint.Constraint className arguments) = do
     convertedArguments <- mapM convert arguments
     either (Left . UnsupportedSynthesisName) Right
-      $ fromSynthesisConstraint
+      $ fromSynthesisConstraintRepresentation
       $ SharedConstraint.Constraint className convertedArguments
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
@@ -230,20 +237,51 @@ constraint_tclass = fst . constraintView
 constraint_params :: HsConstraint -> [HsType]
 constraint_params = snd . constraintView
 
--- | Forget the Exference compatibility wrapper.  This direction is total:
--- Exference's accepted names form a subset of the shared name domain.
+-- | The nominal shared representation stored by the compatibility wrapper.
+-- Its type arguments remain in Exference's internal vocabulary, so this is a
+-- private implementation detail rather than the public shared conversion.
+constraintRepresentation :: HsConstraint -> SharedConstraint.Constraint HsType
+constraintRepresentation (HsConstraint_ constraint) = constraint
+
+-- | Project the whole constraint, including every type argument, into shared
+-- syntax without validation.  The checked engine uses this only after input
+-- validation has established the invariants preserved by search.
+toSynthesisConstraintStructure
+  :: HsConstraint
+  -> SharedConstraint.Constraint SynthesisType
+toSynthesisConstraintStructure =
+  fmap toSynthesisTypeStructure . constraintRepresentation
+
+-- | Convert a constraint completely to shared syntax and validate both its
+-- nominal class identity and all type arguments.
 toSynthesisConstraint
   :: HsConstraint
-  -> SharedConstraint.Constraint HsType
-toSynthesisConstraint (HsConstraint_ constraint) = constraint
+  -> Either SynthesisTypeError
+       (SharedConstraint.Constraint SynthesisType)
+toSynthesisConstraint constraint = do
+  converted <- traverse toSynthesisType $ constraintRepresentation constraint
+  either (Left . InvalidSynthesisConstraint) Right
+    $ SharedConstraint.validateConstraint converted
+  return converted
 
--- | Narrow a shared constraint to Exference's name subset.  In particular,
+-- | Narrow a fully shared constraint back to Exference.  In particular,
 -- unboxed tuple constructor names are rejected rather than smuggled through
 -- an opaque wrapper.
 fromSynthesisConstraint
+  :: SharedConstraint.Constraint SynthesisType
+  -> Either SynthesisTypeError HsConstraint
+fromSynthesisConstraint constraint = do
+  either (Left . InvalidSynthesisConstraint) Right
+    $ SharedConstraint.validateConstraint constraint
+  converted <- traverse fromSynthesisType constraint
+  either (Left . UnsupportedSynthesisName) Right
+    $ fromSynthesisConstraintRepresentation converted
+
+fromSynthesisConstraintRepresentation
   :: SharedConstraint.Constraint HsType
   -> Either QualifiedNameError HsConstraint
-fromSynthesisConstraint (SharedConstraint.Constraint className arguments) = do
+fromSynthesisConstraintRepresentation
+    (SharedConstraint.Constraint className arguments) = do
   exferenceName <- fromSynthesisName className
   return $ HsConstraint exferenceName arguments
 
@@ -487,7 +525,7 @@ instance NFData HsType
 instance NFData HsTypeClass
 instance NFData HsInstance
 instance NFData HsConstraint where
-  rnf = rnf . toSynthesisConstraint
+  rnf = rnf . constraintRepresentation
 instance NFData StaticClassEnv
 instance NFData QueryClassEnv
 
@@ -555,7 +593,7 @@ showHsType convMap t = h 0 t ""
 
 instance Show HsConstraint where
   showsPrec precedence =
-    showsPrec precedence . toSynthesisConstraint
+    showsPrec precedence . constraintRepresentation
 
 showHsConstraint :: TypeVarIndex
                  -> HsConstraint

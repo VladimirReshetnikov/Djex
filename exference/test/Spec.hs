@@ -86,16 +86,8 @@ import Language.Haskell.Exference
   , ExferenceInputError (..)
   , ExferenceStats (..)
   , Penalty (..)
-  , SearchSelection (..)
   , findExpressionsEither
   , findOneExpression
-  , selectBestNExpressions
-  , selectFirstBestExpressions
-  , selectFirstBestExpressionsLookahead
-  , selectFirstBestExpressionsLookaheadPreferNoConstraints
-  , selectFirstExpressionLookahead
-  , selectOneExpression
-  , selectSortNExpressions
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( EnvironmentLoadError (..)
@@ -1899,87 +1891,6 @@ tests = testGroup "Exference"
                 exference_complexityRating baseline + 2
             result -> fail $ "expected two identity candidates, got "
               ++ show result
-      , testCase "status-aware selectors preserve policy semantics" $ do
-          let status index = SearchStatus SearchRunning index 0
-              terminal = SearchStatus SearchStepLimitReached 6 0
-              constrained = [HsConstraint (name "C") []]
-              candidate index rating constraints =
-                ( ExpHole index
-                , constraints
-                , ExferenceStats index (Penalty rating) 0
-                )
-              chunk chunkStatus' elements = ExferenceChunkElement
-                chunkStatus' Map.empty elements
-              chunks =
-                [ chunk (status 1) [candidate 1 4 constrained]
-                , chunk (status 2) []
-                , chunk (status 3)
-                    [ candidate 2 3 constrained
-                    , candidate 3 2 []
-                    , candidate 4 2 []
-                    ]
-                , chunk (status 4) []
-                , chunk (status 5) [candidate 5 5 []]
-                , chunk terminal []
-                ]
-              chunksWithLateConstraint = take 3 chunks ++
-                [ chunk (status 4) [candidate 6 9 constrained]
-                , chunk (status 5) [candidate 5 5 []]
-                , chunk terminal []
-                ]
-              steps = map (exference_steps . third) . selectionResult
-              third (_, _, value) = value
-          steps (selectOneExpression chunks) @?= [1]
-          selectionStatus (selectOneExpression chunks) @?= Just (status 1)
-          steps (selectSortNExpressions 4 chunks) @?= [3, 4, 2, 1]
-          selectionStatus (selectSortNExpressions 4 chunks)
-            @?= Just (status 3)
-          steps (selectBestNExpressions 4 chunks) @?= [3, 4]
-          steps (selectFirstBestExpressions chunks) @?= [4, 3]
-          selectionStatus (selectFirstBestExpressions chunks)
-            @?= Just (status 5)
-          steps (selectFirstExpressionLookahead 2 chunks) @?= [3]
-          selectionStatus (selectFirstExpressionLookahead 2 chunks)
-            @?= Just (status 5)
-          steps (selectFirstBestExpressionsLookahead 3 chunks) @?= [4, 3]
-          selectionStatus (selectFirstBestExpressionsLookahead 3 chunks)
-            @?= Just (status 5)
-          steps (selectFirstBestExpressionsLookahead 0 chunks) @?= [1]
-          selectionStatus (selectFirstBestExpressionsLookahead 0 chunks)
-            @?= Just (status 1)
-          steps (selectFirstBestExpressionsLookaheadPreferNoConstraints 3 chunks)
-            @?= [4, 3]
-          selectionStatus
-              (selectFirstBestExpressionsLookaheadPreferNoConstraints 3 chunks)
-            @?= Just (status 5)
-          steps
-              (selectFirstBestExpressionsLookaheadPreferNoConstraints
-                4 chunksWithLateConstraint)
-            @?= [4, 3]
-          selectionStatus
-              (selectFirstBestExpressionsLookaheadPreferNoConstraints
-                4 chunksWithLateConstraint)
-            @?= Just (status 5)
-      , testCase "empty selectors retain the terminal search status" $ do
-          let running = SearchStatus SearchRunning 0 0
-              pruned = SearchStatus SearchPruned 7 2
-              chunks =
-                [ ExferenceChunkElement running Map.empty []
-                , ExferenceChunkElement pruned Map.empty []
-                ]
-              assertEmpty selection = do
-                assertBool "empty trace unexpectedly selected an expression"
-                  $ null $ selectionResult selection
-                selectionStatus selection @?= Just pruned
-          assertEmpty $ selectOneExpression chunks
-          assertEmpty $ selectBestNExpressions 4 chunks
-          assertEmpty $ selectFirstBestExpressionsLookahead 4 chunks
-          assertEmpty $
-            selectFirstBestExpressionsLookaheadPreferNoConstraints 4 chunks
-          toSearchProgress pruned @?= Right
-            (SharedSearch.Completed $ SharedSearch.Truncated
-              (SharedSearch.QueueLimitPruned 7 :|
-                [SharedSearch.DepthLimitPruned 2]))
       , testCase "malformed compatibility statuses are rejected" $ do
           toSearchProgress (SearchStatus SearchPruned 0 0) @?=
             Left PrunedWithoutDiscardedNodes

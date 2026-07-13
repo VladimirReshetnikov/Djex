@@ -260,26 +260,25 @@ tests = testGroup "Djex facade"
           exferenceResultBindingUsages result @?=
             exferenceBatchBindingUsages metadata
         [] -> fail "Exference found no identity candidate"
-  , testCase "hide Exference request provenance from equality and display" $ do
+  , testCase "hide Exference provenance while retaining source spellings" $ do
+      environment <- expectRight
+        (mkEnvironment [] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
       target <- expectRight $ mkIdentifier "opaqueRequest"
-      let variable = FlexibleVariable 0
-          variableType = TypeVariable variable
-          query = QueryRequest
-            { requestTarget = target
-            , requestGoal = FunctionType variableType variableType
-            , requestContexts = []
-            , requestOptions = defaultExferenceOptions
-            }
-          location = Just
-            ( "opaque-request.djex"
-            , SourceSpan (SourcePosition 3 5) (SourcePosition 3 11)
-            )
+      sourced <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions {exferenceMaximumSteps = 32}
+        target "opaque-request.djex" "sourceVariable -> sourceVariable"
+      let query = exferenceRequestQuery sourced
       plain <- expectRight $ mkExferenceRequest query
-      sourced <- expectRight $ mkExferenceRequestWithSourceInfo
-        (Map.singleton "sourceVariable" 0) location query
       plain @?= sourced
       show plain @?= show sourced
       show plain @?= show query
+      candidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session sourced)
+      assertBool "the internal source cache did not reach rendering hints"
+        $ "sourceVariable" `elem` Map.elems
+            (exferenceCandidateTypeVariableNames $ candidateDetails candidate)
   , testCase "keep checked-HSE and neutral Exference sessions equivalent" $ do
       backendIdentityName <- expectRight
         $ mkQualifiedName ["Fixture"] "identity"

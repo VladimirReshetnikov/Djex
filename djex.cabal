@@ -315,6 +315,7 @@ Library exference-core
     Language.Haskell.Exference.Core.Internal.Scope
 
   Other-Modules:
+    Language.Haskell.Djex.Exference.Internal.Request
     Language.Haskell.Djex.Exference.Internal.Session
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Unify

@@ -27,8 +27,6 @@ import Language.Haskell.Djex.Exference
   , defaultExferenceSessionPolicy
   , exferenceSessionDiagnostics
   , exferenceSessionInventory
-  , mkExferenceRequestWithSourceInfo
-  , validateExferenceTarget
   )
 import qualified Language.Haskell.Djex.Exference.Internal.Frontend as Frontend
 import qualified Language.Haskell.Exference.Session as CompatibilitySession
@@ -109,7 +107,7 @@ parseExferenceRequest
 parseExferenceRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
-  validateExferenceTarget target
+  Frontend.validateExferenceTarget target
   let parsed = runIdentity $ runExceptT $ parseTypeWithKinds
         (inventoryKindAssumptions $ exferenceSessionInventory session)
         (Frontend.sessionClasses session)
@@ -140,7 +138,8 @@ parseExferenceRequest session options target sourceName source = do
       sourceVariables' = sourceVariables
       sourceLocation :: Maybe (FilePath, SourceSpan)
       sourceLocation = Just (sourceName, sourceTextSpan source)
-  mkExferenceRequestWithSourceInfo sourceVariables' sourceLocation query
+  Frontend.mkExferenceRequestWithSourceInfo
+    sourceVariables' sourceLocation query
 
 failureDiagnostic :: Show detail => String -> String -> detail -> Diagnostic
 failureDiagnostic code message detail =

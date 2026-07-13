@@ -73,6 +73,15 @@ This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
 
+The source component crosses into core through the deliberately unstable
+`Language.Haskell.Djex.Exference.Internal.Frontend` seam. Cabal must expose
+that module so one sublibrary can consume another, but neither the default
+`Language.Haskell.Djex` facade nor `exference-frontend` re-exports it. The
+request representation behind it is a hidden module. Stable clients therefore
+see an opaque `ExferenceRequest` with one neutral smart constructor; source
+spans, parsed variable spellings, and early target-name preflight remain
+frontend implementation details.
+
 Core names are validated, opaque structural wrappers over `djex:synthesis`:
 module segments, ordinary identifiers and operators, list/cons/function
 constructors, and boxed tuples can no longer be confused by rendered spelling.

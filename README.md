@@ -209,6 +209,18 @@ Unsupported rank-N introduction/elimination and recursive-data elimination
 capabilities remain visible as structured omissions and warning diagnostics
 instead of disappearing per query. Omission order follows introduction order
 and then elimination order.
+
+`ExferenceRequest` is opaque in the same operational sense as `DjinnRequest`:
+the stable adapter exposes only `mkExferenceRequest` and
+`exferenceRequestQuery`. Source locations and parsed variable spellings are
+private presentation caches, so they neither affect equality/display nor admit
+an unchecked construction path through the default facade. The core component's
+hidden `Language.Haskell.Djex.Exference.Internal.Request` representation owns
+that metadata. The separately built HSE component reaches only its checked
+constructor and target-name preflight through the deliberately unstable
+`Language.Haskell.Djex.Exference.Internal.Frontend` seam; that seam is not
+re-exported by the default library or the frontend library.
+
 The Haskell-source loader is likewise fail-closed at its vocabulary boundary:
 after parsing, but before constructing any partial inventory, it reports
 source-ordered `UnsupportedVocabularyOccurrence` values for type/data families,

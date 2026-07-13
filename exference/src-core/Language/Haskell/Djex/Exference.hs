@@ -35,8 +35,6 @@ module Language.Haskell.Djex.Exference
   , exferenceSessionOmissions
   , exferenceSessionDiagnostics
   , mkExferenceRequest
-  , mkExferenceRequestWithSourceInfo
-  , validateExferenceTarget
   , exferenceRequestQuery
   , runExferenceQuery
   , exferenceCandidateMetrics
@@ -78,7 +76,19 @@ import Language.Haskell.Djex.Exference.Internal.Session
   , ExferenceSession
   )
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
-import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
+import Language.Haskell.Djex.Exference.Internal.Request
+  ( ExferenceLocal
+  , ExferenceOptions (..)
+  , ExferenceRequest
+  , ExferenceType
+  , ExferenceTypeVariable
+  , defaultExferenceOptions
+  , exferenceRequestQuery
+  , mkExferenceRequest
+  , requestContextualGoal
+  , requestSourceLocation
+  , requestSourceTypeVariables
+  )
 import Language.Haskell.Synthesis.Candidate
   ( Candidate (Candidate)
   , candidateDetails
@@ -87,12 +97,9 @@ import Language.Haskell.Synthesis.Candidate
   , renderCandidateDefinition
   , renderCandidateExpression
   )
-import Language.Haskell.Synthesis.Constraint
-  ( constraintArguments )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error, Info, Warning)
-  , SourceSpan
   , contextualDiagnostic
   , withLocation
   )
@@ -102,7 +109,6 @@ import Language.Haskell.Synthesis.Generated
   , RenderError (..)
   , RenderOptions (renderQualification)
   , defaultRenderOptions
-  , validateDefinitionName
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
@@ -123,40 +129,14 @@ import Language.Haskell.Synthesis.Search
   , batchMetadata
   , batchProgress
   )
-import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type
-  ( Type
-  , Variable (FlexibleVariable, RigidVariable)
+  ( Variable (FlexibleVariable, RigidVariable)
   )
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 import Language.Haskell.Synthesis.TypeSynonym
   ( TypeElaborationError (..)
   , elaborateType
   )
-
-data ExferenceOptions = ExferenceOptions
-  { exferenceAllowUnused :: Bool
-  , exferenceAllowResidualConstraints :: Bool
-  , exferenceConstraintDeferralSteps :: Int
-  , exferenceMultiConstructorPatterns :: Bool
-  , exferenceMaximumSteps :: Int
-  , exferenceMaximumQueueSize :: Maybe Int
-  , exferenceMaximumDepth :: Maybe Penalty
-  , exferenceHeuristics :: ExferenceHeuristicsConfig
-  }
-  deriving (Eq, Show)
-
-defaultExferenceOptions :: ExferenceOptions
-defaultExferenceOptions = ExferenceOptions
-  { exferenceAllowUnused = False
-  , exferenceAllowResidualConstraints = False
-  , exferenceConstraintDeferralSteps = 8192
-  , exferenceMultiConstructorPatterns = False
-  , exferenceMaximumSteps = 65536
-  , exferenceMaximumQueueSize = Just 8192
-  , exferenceMaximumDepth = Nothing
-  , exferenceHeuristics = defaultHeuristicsConfig
-  }
 
 -- | Environment capabilities disabled before a reusable session is sealed.
 -- Names are structural and exact: excluding @Data.Function.fix@ never hides
@@ -172,34 +152,6 @@ defaultExferenceSessionPolicy = ExferenceSessionPolicy
   { exferenceExcludedBindings = []
   , exferenceRatingOverrides = Map.empty
   }
-
--- Keep the frontend caches private: they are meaningful only when paired with
--- the exact parsed goal. In particular, the spelling index must be converted
--- after explicit contexts are merged, because that operation can change
--- Exference's rigid-ID allocation.
-data ExferenceRequest = ExferenceRequest
-  { requestQuery :: QueryRequest ExferenceType ExferenceOptions
-  , requestSourceTypeVariables :: Map.Map String ExferenceLocal
-  , requestSourceLocation :: Maybe (FilePath, SourceSpan)
-  }
-
--- Source spellings and locations are deterministic presentation caches, not
--- part of the stable request value. This matches Djinn's opaque request: both
--- backends expose equality and display solely through the neutral query.
-instance Eq ExferenceRequest where
-  left == right = requestQuery left == requestQuery right
-
-instance Show ExferenceRequest where
-  showsPrec precedence = showsPrec precedence . requestQuery
-
--- | Generated-expression binder identities used by Exference.
-type ExferenceLocal = Int
-
--- | Shared flexible/rigid source-type variables used by Exference.
-type ExferenceTypeVariable = SharedType.Variable ExferenceLocal
-
--- | Exference's checked type surface, expressed entirely in the neutral IR.
-type ExferenceType = Type ExferenceTypeVariable
 
 -- | The parser-independent declaration environment accepted by the stable
 -- Exference adapter. Search ratings are session policy rather than source
@@ -290,29 +242,6 @@ exferenceSessionDiagnostics :: ExferenceSession -> [Diagnostic]
 exferenceSessionDiagnostics = map omissionDiagnostic
   . exferenceSessionOmissions
 
-mkExferenceRequest
-  :: QueryRequest ExferenceType ExferenceOptions
-  -> Either Diagnostic ExferenceRequest
-mkExferenceRequest = mkExferenceRequestWithSourceInfo Map.empty Nothing
-
--- | Construct a request while retaining source-frontend metadata used for
--- stable variable spelling and diagnostics. Parser-neutral clients should use
--- 'mkExferenceRequest'; source frontends can preserve their richer boundary
--- information without exposing parser-specific types to the search core.
-mkExferenceRequestWithSourceInfo
-  :: Map.Map String ExferenceLocal
-  -> Maybe (FilePath, SourceSpan)
-  -> QueryRequest ExferenceType ExferenceOptions
-  -> Either Diagnostic ExferenceRequest
-mkExferenceRequestWithSourceInfo sourceVariables sourceLocation query = do
-  validateRequest query
-  pure $ ExferenceRequest query sourceVariables sourceLocation
-
-exferenceRequestQuery
-  :: ExferenceRequest
-  -> QueryRequest ExferenceType ExferenceOptions
-exferenceRequestQuery = requestQuery
-
 exferenceCandidateMetrics
   :: ExferenceCandidate
   -> ExferenceCandidateMetrics
@@ -377,9 +306,9 @@ runExferenceQuery
   -> ExferenceRequest
   -> Either Diagnostic [ExferenceResult]
 runExferenceQuery session request = do
-  let query = requestQuery request
+  let query = exferenceRequestQuery request
       target = requestTarget query
-      sharedGoal = contextualGoal query
+      sharedGoal = requestContextualGoal request
   elaboratedGoal <- either
     (Left . attachRequestSource request . elaborationFailure)
     Right
@@ -415,83 +344,6 @@ runExferenceQuery session request = do
     $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
         hints (Session.sessionSearchEnvironment session) input
   pure $ map (resultBatch target) batches
-
-validateRequest
-  :: QueryRequest ExferenceType ExferenceOptions
-  -> Either Diagnostic ()
-validateRequest query = do
-  validateExferenceTarget $ requestTarget query
-  validateRequestGoalAndContexts query
-
-validateRequestGoalAndContexts
-  :: QueryRequest ExferenceType ExferenceOptions
-  -> Either Diagnostic ()
-validateRequestGoalAndContexts query = do
-  either
-    (Left . failureDiagnostic
-      "DJEX_EXF_REQUEST"
-      "invalid shared Exference request"
-    )
-    Right
-    $ SharedType.validateType $ contextualGoal query
-  let goalVariables = inScopeContextVariables $ requestGoal query
-      contextVariables = Set.unions
-        [ SharedType.freeVariables argument
-        | constraint <- requestContexts query
-        , argument <- constraintArguments constraint
-        ]
-      extraneous = Set.toAscList $ contextVariables Set.\\ goalVariables
-  case extraneous of
-    [] -> Right ()
-    _ -> Left $ failureDiagnostic
-      "DJEX_EXF_REQUEST"
-      "explicit Exference contexts contain variables not in scope"
-      extraneous
-
--- Explicit contexts are inserted beneath only the leading prenex chain.
--- Free goal variables remain usable there, as do binders from that chain;
--- a binder below an arrow, tuple, or application is not in context scope.
-inScopeContextVariables
-  :: ExferenceType
-  -> Set.Set ExferenceTypeVariable
-inScopeContextVariables goal = SharedType.freeVariables goal
-  `Set.union` leadingForallVariables goal
- where
-  leadingForallVariables (SharedType.ForallType variables _ body) =
-    Set.fromList variables `Set.union` leadingForallVariables body
-  leadingForallVariables _ = Set.empty
-
--- | Validate the source-level name of an Exference result definition.
--- Frontends may call this before parsing to give command-usage errors stable
--- precedence over malformed source text.
-validateExferenceTarget :: Name -> Either Diagnostic ()
-validateExferenceTarget target = case validateDefinitionName target of
-  Right () -> Right ()
-  Left failure -> Left $ failureDiagnostic
-    "DJEX_EXF_TARGET"
-    "Exference targets must be unqualified value identifiers or operators"
-    (renderCanonical target, failure)
-
-contextualGoal
-  :: QueryRequest ExferenceType options
-  -> ExferenceType
-contextualGoal query
-  | null contexts = requestGoal query
-  | otherwise = insertUnderLeadingForalls $ requestGoal query
- where
-  contexts = requestContexts query
-
-  -- Explicit contexts are scoped by the complete leading quantifier chain.
-  -- Attaching them to only the first forall makes a variable bound by a later
-  -- leading forall free in the outer context, then binds the same identity a
-  -- second time below it.
-  insertUnderLeadingForalls (SharedType.ForallType variables embedded body)
-    | SharedType.ForallType{} <- body = SharedType.ForallType
-        variables embedded $ insertUnderLeadingForalls body
-    | otherwise = SharedType.ForallType
-        variables (contexts ++ embedded) body
-  insertUnderLeadingForalls goal =
-    SharedType.ForallType [] contexts goal
 
 elaborationFailure
   :: TypeElaborationError ExferenceTypeVariable

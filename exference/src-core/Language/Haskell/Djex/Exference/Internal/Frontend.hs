@@ -7,8 +7,14 @@ module Language.Haskell.Djex.Exference.Internal.Frontend
   ( sealProjectedExferenceSessionWithPolicy
   , sessionTypeNames
   , sessionClasses
+  , mkExferenceRequestWithSourceInfo
+  , validateExferenceTarget
   ) where
 
+import Language.Haskell.Djex.Exference.Internal.Request
+  ( mkExferenceRequestWithSourceInfo
+  , validateExferenceTarget
+  )
 import Language.Haskell.Djex.Exference.Internal.Session
   ( sealProjectedExferenceSessionWithPolicy
   , sessionClasses

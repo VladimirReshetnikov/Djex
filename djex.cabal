@@ -112,6 +112,7 @@ Library
     Language.Haskell.Synthesis.Search,
     Language.Haskell.Synthesis.Selection,
     Language.Haskell.Synthesis.Type,
+    Language.Haskell.Synthesis.TypeSynonym,
     Language.Haskell.Synthesis.TypeRender
 
   Build-Depends:
@@ -152,6 +153,7 @@ Library synthesis
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection
     Language.Haskell.Synthesis.Type
+    Language.Haskell.Synthesis.TypeSynonym
     Language.Haskell.Synthesis.TypeRender
 
   Build-Depends:

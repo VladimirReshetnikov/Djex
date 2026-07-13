@@ -87,6 +87,14 @@ Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
 this AST; those belong to the declaration layer instead of being encoded as
 special type nodes.
 
+`Language.Haskell.Synthesis.TypeSynonym` prepares aliases from the exact
+checked `Inventory` and expands them with simultaneous, capture-avoiding
+substitution. It rejects partial applications and cycles, preserves legal
+overapplication, and kind-checks both before and after expansion so a phantom
+parameter cannot erase an invalid argument. Backends provide only a fresh
+variable allocator for their identity domain; synonym and declaration
+semantics stay parser-independent.
+
 `Language.Haskell.Synthesis.TypeRender` renders that shared structure back to
 compact Haskell source while leaving tagged variable spellings to the caller.
 This preserves frontend distinctions such as flexible and rigid variables

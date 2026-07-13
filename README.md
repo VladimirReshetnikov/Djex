@@ -213,6 +213,9 @@ provides first, global-best, streaming-all, batch-lookahead, and preferred-tier
 lookahead policies over either backend's result envelope. `TypeRender` prints
 shared types and constraints from tagged variable-name hints without collapsing
 flexible and rigid identities.
+`TypeSynonym` prepares aliases from the retained neutral inventory and owns
+capture-avoiding, saturation-checked expansion plus the pre/post kind checks
+that both backend adapters can now share.
 
 The `exference` compatibility executable is a thin consumer of this boundary:
 it loads and seals one session, parses every requested type through

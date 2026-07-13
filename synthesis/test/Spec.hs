@@ -25,6 +25,7 @@ import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
 import qualified Language.Haskell.Synthesis.TypeRender as TypeRender
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, testCase, (@?=))
 import qualified Test.Tasty.QuickCheck as QC
@@ -42,6 +43,7 @@ tests = testGroup "Djex synthesis foundation"
   , searchTests
   , selectionTests
   , typeTests
+  , synonymTests
   , kindInferenceTests
   , moduleTests
   , ordinaryTests
@@ -822,6 +824,234 @@ typeTests = testGroup "source types"
       _ <- evaluate $ force typeExpression
       pure ()
   ]
+
+synonymTests :: TestTree
+synonymTests = testGroup "type synonyms"
+  [ testCase "expand saturated and overapplied aliases" $ do
+      let identityName = right $ mkIdentifier "Identity"
+          maybeName = right $ mkIdentifier "Maybe"
+          intName = right $ mkIdentifier "Int"
+          declarations =
+            [ Declaration.TypeSynonymDeclaration () identityName
+                [Declaration.TypeParameter "a" Nothing]
+                $ SharedType.TypeVariable "a"
+            , Declaration.AbstractTypeDeclaration () maybeName
+                $ Kind.FunctionKind synonymProper synonymProper
+            , Declaration.AbstractTypeDeclaration () intName synonymProper
+            ]
+          aliases = preparedSynonyms declarations
+          overapplied = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor identityName)
+              (SharedType.TypeConstructor maybeName))
+            (SharedType.TypeConstructor intName)
+      TypeSynonym.expandTypeSynonyms freshStringVariable aliases
+          overapplied @?=
+        Right (SharedType.TypeApplication
+          (SharedType.TypeConstructor maybeName)
+          (SharedType.TypeConstructor intName))
+      TypeSynonym.expandTypeSynonyms freshStringVariable aliases
+          (SharedType.TypeConstructor identityName) @?=
+        Left (TypeSynonym.UnsaturatedTypeSynonym identityName 1 0)
+  , testCase "freshen forall binders before parameter substitution" $ do
+      let captureName = right $ mkIdentifier "Capture"
+          capture = Declaration.TypeSynonymDeclaration () captureName
+            [Declaration.TypeParameter "p" Nothing]
+            $ SharedType.ForallType ["q"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "p")
+                (SharedType.TypeVariable "q")
+          aliases = preparedSynonyms [capture]
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor captureName)
+            (SharedType.TypeVariable "q")
+      TypeSynonym.expandTypeSynonyms freshStringVariable aliases applied @?=
+        Right (SharedType.ForallType ["q'"] []
+          $ SharedType.FunctionType
+              (SharedType.TypeVariable "q")
+              (SharedType.TypeVariable "q'"))
+      TypeSynonym.expandTypeSynonyms
+          (\_ binder -> Just binder) aliases applied @?=
+        Left (TypeSynonym.FreshVariableCollision "q" "q")
+  , testCase "substitute parameters simultaneously" $ do
+      let swapName = right $ mkIdentifier "Swap"
+          swap = Declaration.TypeSynonymDeclaration () swapName
+            [ Declaration.TypeParameter "a" Nothing
+            , Declaration.TypeParameter "b" Nothing
+            ]
+            $ SharedType.TupleType Boxed
+                [ SharedType.TypeVariable "a"
+                , SharedType.TypeVariable "b"
+                ]
+          aliases = preparedSynonyms [swap]
+          applied = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor swapName)
+              (SharedType.TypeVariable "b"))
+            (SharedType.TypeVariable "a")
+      TypeSynonym.expandTypeSynonyms freshStringVariable aliases applied @?=
+        Right (SharedType.TupleType Boxed
+          [SharedType.TypeVariable "b", SharedType.TypeVariable "a"])
+  , testCase "avoid capture in forall constraints and nested scopes" $ do
+      let captureName = right $ mkIdentifier "NestedCapture"
+          className = right $ mkIdentifier "C"
+          capture = Declaration.TypeSynonymDeclaration () captureName
+            [Declaration.TypeParameter "p" Nothing]
+            $ SharedType.ForallType ["q"]
+                [Constraint className [SharedType.TypeVariable "p"]]
+            $ SharedType.TupleType Boxed
+                [ SharedType.FunctionType
+                    (SharedType.TypeVariable "p")
+                    (SharedType.TypeVariable "q")
+                , SharedType.ForallType ["q"] []
+                    $ SharedType.FunctionType
+                        (SharedType.TypeVariable "p")
+                        (SharedType.TypeVariable "q")
+                ]
+          typeClass = Declaration.ClassDeclaration () className
+            [Declaration.TypeParameter "c" Nothing] [] []
+          aliases = preparedSynonyms [typeClass, capture]
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor captureName)
+            (SharedType.TypeVariable "q")
+      TypeSynonym.expandTypeSynonyms freshStringVariable aliases applied @?=
+        Right (SharedType.ForallType ["q'"]
+          [Constraint className [SharedType.TypeVariable "q"]]
+          $ SharedType.TupleType Boxed
+              [ SharedType.FunctionType
+                  (SharedType.TypeVariable "q")
+                  (SharedType.TypeVariable "q'")
+              , SharedType.ForallType ["q''"] []
+                  $ SharedType.FunctionType
+                      (SharedType.TypeVariable "q")
+                      (SharedType.TypeVariable "q''")
+              ])
+  , testCase "do not freshen binders for irrelevant substitutions" $ do
+      let constantName = right $ mkIdentifier "Constant"
+          intName = right $ mkIdentifier "Int"
+          constant = Declaration.TypeSynonymDeclaration () constantName
+            [Declaration.TypeParameter "p" Nothing]
+            $ SharedType.ForallType ["q"] []
+            $ SharedType.TypeConstructor intName
+          aliases = preparedSynonyms
+            [ constant
+            , Declaration.AbstractTypeDeclaration () intName synonymProper
+            ]
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor constantName)
+            (SharedType.TypeVariable "q")
+      TypeSynonym.expandTypeSynonyms
+          (\_ _ -> Nothing) aliases applied @?=
+        Right (SharedType.ForallType ["q"] []
+          $ SharedType.TypeConstructor intName)
+  , testCase "kind-check phantom arguments before expansion" $ do
+      let phantomName = right $ mkIdentifier "Phantom"
+          intName = right $ mkIdentifier "Int"
+          boolName = right $ mkIdentifier "Bool"
+          higherKind = Kind.FunctionKind synonymProper synonymProper
+          declarations =
+            [ Declaration.TypeSynonymDeclaration () phantomName
+                [Declaration.TypeParameter "f" $ Just higherKind]
+                $ SharedType.TypeConstructor intName
+            , Declaration.AbstractTypeDeclaration () intName synonymProper
+            , Declaration.AbstractTypeDeclaration () boolName synonymProper
+            ]
+          aliases = preparedSynonyms declarations
+          malformed = SharedType.TypeApplication
+            (SharedType.TypeConstructor phantomName)
+            (SharedType.TypeConstructor boolName)
+      case TypeSynonym.elaborateType freshStringVariable aliases
+          synonymProper malformed of
+        Left (TypeSynonym.IllKindedType TypeSynonym.BeforeExpansion _) ->
+          pure ()
+        result -> fail $ "phantom argument escaped pre-expansion checking: "
+          ++ show result
+  , testCase "reject an unused definition containing a partial alias" $ do
+      let identityName = right $ mkIdentifier "Identity"
+          higherName = right $ mkIdentifier "Higher"
+          badName = right $ mkIdentifier "Bad"
+          higherKind = Kind.FunctionKind synonymProper synonymProper
+          declarations =
+            [ Declaration.TypeSynonymDeclaration () identityName
+                [Declaration.TypeParameter "a" Nothing]
+                $ SharedType.TypeVariable "a"
+            , Declaration.AbstractTypeDeclaration () higherName
+                $ Kind.FunctionKind higherKind synonymProper
+            , Declaration.TypeSynonymDeclaration () badName []
+                $ SharedType.TypeApplication
+                    (SharedType.TypeConstructor higherName)
+                    (SharedType.TypeConstructor identityName)
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory declarations
+      TypeSynonym.prepareTypeSynonyms freshStringVariable inventory @?=
+        Left (TypeSynonym.UnsaturatedTypeSynonym identityName 1 0)
+  , testCase "reject aliases that compete with intrinsic constructors" $ do
+      let declaration :: Declaration.Declaration String Void ()
+          declaration = Declaration.TypeSynonymDeclaration () functionName
+            [ Declaration.TypeParameter "a" Nothing
+            , Declaration.TypeParameter "b" Nothing
+            ]
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "a")
+                (SharedType.TypeVariable "b")
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory [declaration]
+      TypeSynonym.prepareTypeSynonyms freshStringVariable inventory @?=
+        Left (TypeSynonym.IntrinsicTypeSynonym functionName)
+  , testCase "expand exact qualified aliases throughout declarations" $ do
+      let moduleA = right $ mkModuleName "A"
+          moduleB = right $ mkModuleName "B"
+          aliasA = right $ mkQualifiedIdentifier moduleA "T"
+          aliasB = right $ mkQualifiedIdentifier moduleB "T"
+          intName = right $ mkIdentifier "Int"
+          boolName = right $ mkIdentifier "Bool"
+          valueName = right $ mkIdentifier "convert"
+          declarations =
+            [ Declaration.TypeSynonymDeclaration () aliasA []
+                $ SharedType.TypeConstructor intName
+            , Declaration.TypeSynonymDeclaration () aliasB []
+                $ SharedType.TypeConstructor boolName
+            , Declaration.AbstractTypeDeclaration () intName synonymProper
+            , Declaration.AbstractTypeDeclaration () boolName synonymProper
+            ]
+          aliases = preparedSynonyms declarations
+          valueDeclaration
+            :: Declaration.Declaration String Void ()
+          valueDeclaration = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () valueName
+            $ SharedType.FunctionType
+                (SharedType.TypeConstructor aliasA)
+                (SharedType.TypeConstructor aliasB)
+      TypeSynonym.expandDeclarationTypeSynonyms freshStringVariable aliases
+          valueDeclaration @?=
+        Right (Declaration.ValueDeclaration
+          $ Declaration.ValueSignature () valueName
+          $ SharedType.FunctionType
+              (SharedType.TypeConstructor intName)
+              (SharedType.TypeConstructor boolName))
+  ]
+
+preparedSynonyms
+  :: [Declaration.Declaration String Void ()]
+  -> TypeSynonym.TypeSynonyms String
+preparedSynonyms declarations = right
+  $ TypeSynonym.prepareTypeSynonyms freshStringVariable
+  $ right
+  $ Inventory.mkInventory KindInference.OpenKindInventory declarations
+
+freshStringVariable
+  :: Set.Set String
+  -> String
+  -> Maybe String
+freshStringVariable reserved = Just . choose . (++ "'")
+ where
+  choose candidate
+    | candidate `Set.member` reserved = choose $ candidate ++ "'"
+    | otherwise = candidate
+
+synonymProper :: KindInference.GroundKind
+synonymProper = Kind.ProperTypeKind
 
 searchTests :: TestTree
 searchTests = testGroup "search status"

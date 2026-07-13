@@ -422,7 +422,7 @@ redant more antes atomImps nestImps atoms goal =
     redant1 antecedent@(A p f) pending g
         -- Prefer the direct identity between the same nominal empty type.
         -- Exploring elimination as an alternative would cause result scoring
-        -- to print the less useful @void@ instead.
+        -- to print the less useful explicit empty case instead.
         | f == g && isNominalEmpty f = return p
         | f /= g = reduceAntecedent antecedent pending g
         | more = return p `mplus` reduceAntecedent antecedent pending g
@@ -457,7 +457,7 @@ redant more antes atomImps nestImps atoms goal =
       where
         proveAlternative (v, (_, f)) = redant1 (A (Var v) f) pending g
     -- Empty datatypes have no constructors.  Preserve their nominal identity
-    -- for equality, but eliminate any one of them explicitly with @void@.
+    -- for equality, but eliminate any one of them explicitly with an empty case.
     reduceAntecedent (A p (Empty _)) _ _ =
         return $ Apply (Ccases []) p
     reduceAntecedent (A p (a :-> b)) pending g =

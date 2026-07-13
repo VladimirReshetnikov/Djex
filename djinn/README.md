@@ -64,7 +64,7 @@ cabal test djinn-tests djinn-property-tests djinn-cli-tests --test-show-details=
 | --- | --- |
 | `djinn-tests` | 43 focused Tasty/HUnit regressions over parsing, kinds, class signatures, neutral-environment sealing, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
-| `djinn-cli-tests` | Fifteen subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
+| `djinn-cli-tests` | Sixteen subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
 named test. For example:
@@ -272,7 +272,7 @@ middle is provable; the law itself is not:
 ```text
 Djinn> f ? Not (Not (Either x (Not x)))
 f :: Not (Not (Either x (Not x)))
-f a = void (a (Right (\ b -> a (Left b))))
+f a = case a (Right (\b -> a (Left b))) of {}
 
 Djinn> g ? Either x (Not x)
 -- g cannot be realized.
@@ -593,9 +593,9 @@ knowing before editing the source:
 - The simplifier assumes total semantics. Reordering or eliminating pattern
   matches need not preserve Haskell's behavior in the presence of bottoms or
   `seq`.
-- Empty-type elimination is printed as `void value`. Generated code using it
-  needs an appropriate eliminator, for example one backed by an empty case or
-  `Data.Void.absurd`.
+- Empty-type elimination is printed structurally as `case value of {}`. This
+  avoids an implicit helper name that could capture or be captured by a user
+  declaration; generated code using it requires GHC's `EmptyCase` extension.
 - Proof search is a decision procedure, but the search space and the number of
   inhabitants can grow rapidly. Keep `cutoff` modest when requesting multiple
   or sorted solutions, and consider `:set budget=N` as a safety net for

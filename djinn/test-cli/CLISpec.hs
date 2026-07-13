@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (bracket)
-import Data.List (isInfixOf)
+import Data.List (intercalate, isInfixOf)
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode(ExitFailure, ExitSuccess))
 import System.IO (hClose, hPutStr, openTempFile)
@@ -109,6 +109,13 @@ testInstanceOutputAtomic = do
         , "?instance Partial Bool"
         , "class Total a where keep :: z -> z"
         , "?instance Total Bool"
+        , ":set +multi"
+        , "class Choice a where choose :: x -> x -> x"
+        , "?instance Choice Bool"
+        , ":set -multi"
+        , ":set +debug"
+        , "class Structured a where swapEither :: Either x y -> Either y x"
+        , "?instance Structured Bool"
         , ":quit"
         ]
     assertContains "the unrealizable method is diagnosed"
@@ -123,6 +130,22 @@ testInstanceOutputAtomic = do
         "instance Total Bool where" output
     assertContains "a complete instance still gets its method body"
         "keep a = a" output
+    assertContains "multi mode still emits the complete instance"
+        "instance Choice Bool where" output
+    assertEqual "an instance selects exactly one method realization"
+        1 (countOccurrences "\n   choose " output)
+    assertBool "query alternatives must not become overlapping method equations" $
+        not $ "-- or" `isInfixOf` output
+    assertBool "debug metadata must not split an instance layout block" $
+        not $ any (`isInfixOf` output) ["***", "+++"]
+    assertContains "every physical line of a generated method stays indented"
+        (intercalate "\n"
+            [ "instance Structured Bool where"
+            , "   swapEither a ="
+            , "     case a of"
+            , "     Left b -> Right b"
+            , "     Right c -> Left c"
+            ]) output
 
 testClassKindEnforcement :: Assertion
 testClassKindEnforcement = do
@@ -227,7 +250,7 @@ testNominalEmptyTypes = do
     assertContains "same-type conversion should be identity"
         "same a = a" output
     assertContains "cross-type conversion should eliminate the empty input"
-        "cast = void" output
+        "cast a = case a of {}" output
 
 testMutationRollback :: Assertion
 testMutationRollback = do

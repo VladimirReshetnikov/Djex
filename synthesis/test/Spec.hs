@@ -1572,6 +1572,15 @@ generatedTests = testGroup "generated syntax"
               Tuple [Global true, Global false]
       renderExpression (defaultRenderOptions (const "x")) expression @?=
         Right "\\x -> x + (True, False)"
+  , testCase "render an empty case with explicit braces" $ do
+      let eliminate = right $ mkIdentifier "eliminate"
+          clause = FunctionClause eliminate [Bind (0 :: Int)] $
+            Case (Local 0) []
+          options = defaultRenderOptions $ const "emptyValue"
+      validateFunctionClauseScope clause @?= Right ()
+      validateFunctionClauseSyntax FullyQualified clause @?= Right ()
+      renderFunctionClause options clause @?=
+        Right "eliminate emptyValue = case emptyValue of {}"
   , testCase "apply qualification consistently to identifiers and operators" $ do
       let namespace = right $ mkModuleName "Data.List"
           mapping = right $ mkQualifiedIdentifier namespace "map"

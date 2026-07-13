@@ -279,8 +279,7 @@ termToHExpr term = do
     (expression, _) <- conv [] renamedTerm
     let simplified = niceNames $ etaReduce $ remUnusedVars $
             fixSillyAt $ remUnusedVars expression
-        allowed = Set.insert "void" $
-            Set.fromList $ map unSymbol $ freeVars term
+        allowed = Set.fromList $ map unSymbol $ freeVars term
         escaped = freeHExpr Set.empty simplified `Set.difference` allowed
     if Set.null escaped
         then return simplified
@@ -514,8 +513,8 @@ replaceVariable target replacement = replace
 
 -- Lexical free-variable analysis for the post-conversion safety check.  The
 -- renderer may simplify or eliminate binders, but it must never invent a free
--- name that was not a free proof assumption (apart from its explicit @void@
--- eliminator dependency).
+-- name that was not a free proof assumption.  Empty elimination remains a
+-- structural empty case, so it does not smuggle in a magic global dependency.
 freeHExpr :: Set.Set HSymbol -> HExpr -> Set.Set HSymbol
 freeHExpr bound expression =
     case expression of
@@ -654,7 +653,7 @@ hELam ps (HELam ps' e) = HELam (ps ++ ps') e
 hELam ps e = HELam ps e
 
 hECase :: HExpr -> [(HPat, HExpr)] -> HExpr
-hECase e [] = HEApply (HEVar "void") e
+hECase e [] = HECase e []
 hECase _ [(HPCon "()", e)] = e
 hECase e pes | all (uncurry eqPatExpr) pes = e
 hECase e [(p, HELam ps b)] = HELam ps $ hECase e [(p, b)]

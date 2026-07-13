@@ -232,26 +232,30 @@ runCmd s (QueryInstance ctx target) =
         Right methods -> do
             let instanceHeading = "instance " ++ contextPrefix ctx ++
                     show target
+                -- An instance needs one coherent body per method.  Ordinary
+                -- query alternatives would become overlapping equations, and
+                -- debug lines would split the layout block, so neither
+                -- presentation option applies inside an instance declaration.
+                methodPresentation = s { multi = False, debug = False }
                 prepareMethod method@(name, goal) =
-                    case makeDjinnResult s name ctx goal of
+                    case makeDjinnResult methodPresentation name ctx goal of
                         Left failure -> Left $
                             "cannot generate method " ++ prHSymbolOp name ++
                             ": " ++ Diagnostic.renderDiagnostic failure
                         Right result -> case formatDjinnResult
-                            False s name ctx goal result of
+                            False methodPresentation name ctx goal result of
                           Left message -> Left $
                             "cannot render method " ++ prHSymbolOp name ++
                             ": " ++ message
                           Right output -> Right (method, result, output)
                 methodRealized (_, result, _) =
-                    resultEvidence result == ValidatedCandidates &&
-                        not (null $ SharedSearch.batchCandidates $
-                            resultSearch result)
-                printMethod (_, _, output) = case output of
-                    [] -> return ()
-                    firstLine : remaining -> do
-                        putStrLn $ "   " ++ firstLine
-                        mapM_ putStrLn remaining
+                    resultEvidence result == ValidatedCandidates
+                -- The shared renderer may return a multi-line case expression
+                -- as one string.  Prefix every physical line, not merely the
+                -- first list element, to keep the complete method in the
+                -- instance's layout block.
+                printMethod (_, _, output) =
+                    mapM_ (putStrLn . ("   " ++)) $ concatMap lines output
                 printFailedMethod (_, _, output) = mapM_ putStrLn output
             case mapM prepareMethod methods of
                 Left msg -> do
@@ -360,29 +364,28 @@ formatDjinnResult prType s name ctx goal result =
     fmap (debugFormula ++) $ case resultEvidence result of
       NoEvidence -> case SharedSearch.batchProgress search of
           SharedSearch.Completed (SharedSearch.Truncated _) ->
-              negativeResult ["-- " ++ name ++
+              Right ["-- " ++ name ++
                   ": no proof found within budget " ++
                   show (budget s) ++ "; inhabitation is undecided."]
           progress -> Left $ "Djinn returned no evidence after " ++ show progress
-      RequiresTargetReference -> negativeResult ["-- " ++ name ++
+      RequiresTargetReference -> Right ["-- " ++ name ++
           " cannot be safely realized without a recursive self-reference."]
       ProvedUninhabitable ->
-          negativeResult ["-- " ++ name ++ " cannot be realized."]
+          Right ["-- " ++ name ++ " cannot be realized."]
       ValidatedCandidates -> do
-          clauses <- mapM renderClause candidates
+          clauses <- mapM renderClause selectedCandidates
           case clauses of
             [] -> Left "Djinn returned candidate evidence without a candidate"
             firstClause : alternatives -> Right $
                 debugProof ++ typeSignature ++ [firstClause] ++
-                concat [["-- or", alternative]
-                    | alternative <- alternatives, multi s]
+                concat [["-- or", alternative] | alternative <- alternatives]
   where
     search = resultSearch result
     candidates = SharedSearch.batchCandidates search
+    selectedCandidates
+      | multi s = candidates
+      | otherwise = take 1 candidates
     metadata = SharedSearch.batchMetadata search
-    negativeResult output
-      | null candidates = Right output
-      | otherwise = Left "Djinn attached candidates to negative evidence"
     debugFormula
       | debug s = ["*** " ++ djinnTranslatedFormula metadata]
       | otherwise = []

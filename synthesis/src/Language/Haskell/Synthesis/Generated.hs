@@ -452,6 +452,8 @@ ppExpression options names precedence expression = case expression of
           <+> ppExpression options names 0 binding
       , text "in" <+> ppExpression options names 0 body
       ]
+  Case scrutinee [] -> parenthesize (precedence > 0) $
+    text "case" <+> ppExpression options names 0 scrutinee <+> text "of {}"
   Case scrutinee alternatives -> parenthesize (precedence > 0) $
     (text "case" <+> ppExpression options names 0 scrutinee <+> text "of")
       $$ vcat (map ppAlternative alternatives)

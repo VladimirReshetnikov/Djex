@@ -1023,8 +1023,8 @@ testEmptyGoalContradiction = do
             assertEqual "empty elimination must consume its premise" binder used
             assertRight "the structural-to-nominal proof must check" $
                 checkProof [] structuralToNominal proof
-            assertRendered "structural false should render with void"
-                "eliminate = void" "eliminate" proof
+            assertRendered "structural false should render as an empty case"
+                "eliminate a = case a of {}" "eliminate" proof
         proofs -> fail $ "expected one structural empty eliminator, got " ++
             show proofs
 
@@ -1569,12 +1569,30 @@ testNominalEmptyTypes = do
             assertEqual "the explicit empty elimination should type-check"
                 (Right ()) (checkProof [] cast proof)
             rendered <- renderTerm "cast" proof
-            assertContains "empty elimination should render via void"
-                "void" rendered
+            assertEqual "empty elimination should remain structural"
+                "cast a = case a of {}" rendered
         proofs -> fail $ "expected one explicit empty elimination, got " ++
             show proofs
     assertLeft "a direct identity cast between empty types must be rejected"
         (checkProof [] cast $ Lam (Symbol "x") (Var $ Symbol "x"))
+
+    -- Empty elimination used to become a magic free variable named @void@.
+    -- That made @void@ unusable as a target and silently captured an unrelated
+    -- assumption with the same spelling.  A structural empty case has neither
+    -- collision.
+    let emptyGoal = HTArrow (HTCon "Void") (HTVar "a")
+    voidTarget <- expectRight $ inhabit defaultQueryOptions
+        standardEnvironment [] "void" emptyGoal
+    assertEqual "void remains a legal generated definition name"
+        (Realized ["void a = case a of {}"])
+        (reportOutcome voidTarget)
+    collidingEnvironment <- expectRight $
+        declare (Function "void" $ HTCon "Bool") standardEnvironment
+    collisionSafe <- expectRight $ inhabit defaultQueryOptions
+        collidingEnvironment [] "eliminate" emptyGoal
+    assertEqual "an unrelated void assumption cannot capture empty elimination"
+        (Realized ["eliminate a = case a of {}"])
+        (reportOutcome collisionSafe)
 
 testEnvironmentValidation :: IO ()
 testEnvironmentValidation = do

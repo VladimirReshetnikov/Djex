@@ -202,15 +202,15 @@ verboseHelp = "\
 \\n\
 \  Since Djinn handles propositional calculus it also knows about the\n\
 \absurd proposition, corresponding to the empty set.  This set is\n\
-\sometimes called Void in Haskell, and Djinn assumes an elimination\n\
-\rule for the Void type:\n\
-\   void :: Void -> a\n\
+\sometimes called Void in Haskell.  Djinn emits its elimination rule as\n\
+\an empty case; generated code using it requires the EmptyCase extension:\n\
+\   eliminate value = case value of {}\n\
 \  Using Void is of little use for programming, but can be interesting\n\
 \for theorem proving.  Example, the double negation of the law of\n\
 \excluded middle:\n\
 \   Djinn> f ? Not (Not (Either x (Not x)))\n\
 \   f :: Not (Not (Either x (Not x)))\n\
-\   f a = void (a (Right (\\ b -> a (Left b))))\n\
+\   f a = case a (Right (\\b -> a (Left b))) of {}\n\
 \  The Not type has the definition 'type Not x = x -> Void'.  The\n\
 \regular version of the law of excluded middle cannot be proven, of\n\
 \course.\n\

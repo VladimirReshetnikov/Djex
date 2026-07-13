@@ -8,9 +8,10 @@ module Djinn.Internal.HIdentifier (
     isVarId, isConId, isQualifiedVarId, isQualifiedConId,
     isVarOperator, renderVarName,
     stripLineComments,
-    schar, sstring, pParen
+    schar, sstring, skeyword, pParen
     ) where
 
+import Data.Char (isAlpha)
 import Data.Maybe (isJust)
 import Language.Haskell.Synthesis.Name (
     LexicalClass(..), Name,
@@ -26,6 +27,20 @@ schar c = skipSpaces >> char c >> return ()
 
 sstring :: String -> ReadP ()
 sstring s = skipSpaces >> string s >> return ()
+
+-- Match an alphabetic keyword as a complete token.  'sstring' deliberately
+-- remains boundary-free for punctuation such as @::@ and @->@; declaration
+-- parsers use this stricter helper so @typeFoo@ cannot mean @type Foo@.
+skeyword :: String -> ReadP ()
+skeyword keyword
+    | null keyword || not (all isAlpha keyword) = pfail
+    | otherwise = do
+        skipSpaces
+        _ <- string keyword
+        remaining <- look
+        case remaining of
+            next : _ | isIdentifierCharacter next -> pfail
+            _ -> return ()
 
 pParen :: ReadP a -> ReadP a
 pParen p = do

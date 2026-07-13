@@ -108,6 +108,7 @@ tests =
     , ("render shadowing terms without capture", testScopeSafeRendering)
     , ("report malformed proof rendering", testMalformedRendering)
     , ("validate generated clauses at conversion", testGeneratedClauseBoundary)
+    , ("respect declaration keyword token boundaries", testKeywordTokens)
     , ("accept only Haskell identifiers and operators", testIdentifiers)
     , ("validate every boundary of the Djinn.Core facade", testCoreFacade)
     ]
@@ -1799,6 +1800,33 @@ testGeneratedClauseBoundary = do
             (Right ()) $ SharedGenerated.validateFunctionClauseSyntax
                 SharedGenerated.FullyQualified clause
 
+testKeywordTokens :: IO ()
+testKeywordTokens = do
+    mapM_ rejectGluedKeyword
+        [ ("type", "Foo")
+        , ("data", "Bar")
+        , ("class", "Quux")
+        , ("where", "identity")
+        , ("instance", "Quux")
+        ]
+    assertParses "white space terminates an alphabetic keyword"
+        (skeyword "type" >> pConId) "type Foo"
+    assertParses "punctuation terminates an alphabetic keyword"
+        (skeyword "instance" >> pParen pHConstraint)
+        "instance(Eq a)"
+    assertParses "a stripped line comment terminates a keyword"
+        (skeyword "where") (stripLineComments "where-- trailing\n")
+    assertDoesNotParse "the keyword helper is not for symbolic tokens"
+        (skeyword "::") "::"
+    assertParses "ordinary symbolic tokens retain boundary-free matching"
+        (sstring "::") "::"
+  where
+    rejectGluedKeyword (keyword, suffix) =
+        assertDoesNotParse
+            (keyword ++ " must not consume the prefix of " ++
+                keyword ++ suffix)
+            (skeyword keyword) (keyword ++ suffix)
+
 testIdentifiers :: IO ()
 testIdentifiers = do
     assertParses "leading underscores are valid variable identifiers"
@@ -1925,11 +1953,11 @@ renderTerm name term =
             return
             (hPrClause clause)
 
-assertParses :: String -> ReadP String -> String -> IO ()
+assertParses :: String -> ReadP a -> String -> IO ()
 assertParses message parser input =
     assertBool message $ not $ null $ parseFully parser input
 
-assertDoesNotParse :: String -> ReadP String -> String -> IO ()
+assertDoesNotParse :: String -> ReadP a -> String -> IO ()
 assertDoesNotParse message parser input =
     assertBool message $ null $ parseFully parser input
 

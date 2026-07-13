@@ -24,6 +24,8 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testFileErrorRecovery
     , testCase "invalid settings and names are controlled parse errors"
         testParseErrors
+    , testCase "declaration keywords require lexical token boundaries"
+        testKeywordBoundaries
     , testCase "an expired search budget reports an undecided result"
         testSearchBudget
     , testCase "class arguments are checked against inferred kinds"
@@ -303,6 +305,46 @@ testParseErrors = do
         ]
     assertEqual "all three invalid commands should be rejected"
         3 (countOccurrences "Cannot parse command" output)
+
+testKeywordBoundaries :: Assertion
+testKeywordBoundaries = do
+    output <- runSession
+        [ "typeFoo"
+        , "dataBar"
+        , "classQuux a where identity :: a -> a"
+        , "class Quux a whereidentity :: a -> a"
+        , "?instanceQuux"
+        , "type Identity a = a"
+        , "data Token = Token"
+        , "class Empty a where"
+        , "?instance(Empty Bool) => Empty Bool"
+        , "recover ? Identity Token -> Token"
+        , ":e"
+        , ":q"
+        ]
+    assertEqual "every glued declaration keyword should be rejected"
+        5 (countOccurrences "Cannot parse command" output)
+    assertContains "parsing should recover for a later valid query"
+        "recover a = a" output
+    assertContains "punctuation remains a valid instance-keyword boundary"
+        "instance (Empty Bool) => Empty Bool where" output
+    assertContains "command-prefix abbreviations remain supported"
+        "data Token = Token" output
+    assertContains "the abbreviated quit command should still run"
+        "Bye." output
+
+    withCommandFile (unlines
+        [ "class CommentBoundary a where-- trailing comment"
+        , "?instance CommentBoundary Bool"
+        ]) $ \path -> do
+            (exitCode, commentOutput, errors) <-
+                readProcessWithExitCode "djinn" [path] ""
+            assertEqual ("djinn batch stderr: " ++ errors)
+                ExitSuccess exitCode
+            assertEqual "djinn should not write comment-boundary errors"
+                "" errors
+            assertContains "a line comment is a valid keyword boundary"
+                "instance CommentBoundary Bool where" commentOutput
 
 runSession :: [String] -> IO String
 runSession commands = do

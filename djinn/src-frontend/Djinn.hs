@@ -535,7 +535,7 @@ pQuery' = do
 pQueryInstance :: ReadP Cmd
 pQueryInstance = do
     schar '?'
-    sstring "instance"
+    skeyword "instance"
     c <- option [] pHContext
     target <- pHConstraint
     optional $ schar ';'
@@ -543,7 +543,7 @@ pQueryInstance = do
 
 pType :: ReadP Cmd
 pType = do
-    sstring "type"
+    skeyword "type"
     syn <- pHSymbol True
     do args <- many (pHSymbol False)
        schar '='
@@ -557,7 +557,7 @@ pType = do
 
 pData :: ReadP Cmd
 pData = do
-    sstring "data"
+    skeyword "data"
     syn <- pHSymbol True
     args <- many (pHSymbol False)
     do schar '='
@@ -571,10 +571,10 @@ pData = do
 
 pClass :: ReadP Cmd
 pClass = do
-    sstring "class"
+    skeyword "class"
     cls <- pHSymbol True
     args <- many (pHSymbol False)
-    sstring "where"
+    skeyword "where"
     mets <- sepBy pMethod (schar ';')
     return $ Class (cls, (args, mets))
 

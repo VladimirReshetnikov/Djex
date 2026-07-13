@@ -23,6 +23,7 @@ module Language.Haskell.Synthesis.Generated
   , validateExpressionSyntax
   , validateFunctionClauseSyntax
   , validateDefinitionName
+  , functionClauseExpression
   , expressionSize
   , allocateLocalNames
   , allocateClauseLocalNames
@@ -96,6 +97,17 @@ data FunctionClause local = FunctionClause
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData local => NFData (FunctionClause local)
+
+-- | Recover the expression denoted by a top-level function equation.
+--
+-- Clause patterns are binders for the body, so expression-oriented consumers
+-- must retain them as a leading lambda.  A patternless value equation already
+-- denotes its body directly; in particular, this helper never manufactures
+-- the syntactically invalid @Lambda [] body@ shape.
+functionClauseExpression :: FunctionClause local -> Expression local
+functionClauseExpression (FunctionClause _ [] body) = body
+functionClauseExpression (FunctionClause _ patterns body) =
+  Lambda patterns body
 
 -- | How module qualifiers are emitted.
 --

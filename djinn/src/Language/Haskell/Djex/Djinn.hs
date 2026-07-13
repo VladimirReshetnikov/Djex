@@ -67,12 +67,11 @@ import Language.Haskell.Synthesis.Diagnostic
   , withSource
   )
 import Language.Haskell.Synthesis.Generated
-  ( Expression (Lambda)
-  , FunctionClause (clauseBody, clausePatterns)
-  , Qualification (..)
+  ( Qualification (..)
   , RenderError
   , RenderOptions (renderQualification)
   , defaultRenderOptions
+  , functionClauseExpression
   , renderExpression
   , renderFunctionClause
   , validateDefinitionName
@@ -195,12 +194,9 @@ renderDjinnCandidateExpression
   -> Either DjinnCandidateRenderError String
 renderDjinnCandidateExpression qualification candidate = first
   DjinnGeneratedRenderError
-  $ renderExpression (candidateRenderOptions qualification) expression
- where
-  clause = candidateOutput candidate
-  expression = case clausePatterns clause of
-    [] -> clauseBody clause
-    patterns -> Lambda patterns $ clauseBody clause
+  $ renderExpression (candidateRenderOptions qualification)
+  $ functionClauseExpression
+  $ candidateOutput candidate
 
 renderDjinnCandidateDefinition
   :: Qualification

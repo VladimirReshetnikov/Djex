@@ -453,6 +453,16 @@ tests = testGroup "Djex facade"
               sharedGlobal Unqualified)
       renderExferenceCandidateDefinition FullyQualified candidate @?=
         Right "result = Fixture.result"
+  , testCase "preserve Exference clause binders in expression rendering" $ do
+      target <- expectRight $ mkIdentifier "result"
+      backendGlobal <- expectRight
+        $ mkQualifiedName ["Fixture"] "value"
+      raw <- expectRight $ mkExferenceGeneratedCandidate mempty
+        (CoreExpression.ExpName backendGlobal) [] (ExferenceStats 1 0 0)
+      let patternedCandidate = fmap
+            (FunctionClause target [Wildcard]) raw
+      renderExferenceCandidateExpression FullyQualified patternedCandidate @?=
+        Right "\\_ -> Fixture.value"
   ]
 
 assertDjinnCompatibility

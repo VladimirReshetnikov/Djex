@@ -1016,6 +1016,14 @@ generatedTests = testGroup "generated syntax"
           , "  Just select'' -> select''"
           , "  Nothing -> select'"
           ])
+  , testCase "recover clause expressions without discarding binders" $ do
+      let target = right $ mkIdentifier "target"
+          body = Local (0 :: Int)
+          valueClause = FunctionClause target [] body
+          functionClause = FunctionClause target [Bind 0, Wildcard] body
+      functionClauseExpression valueClause @?= body
+      functionClauseExpression functionClause @?=
+        Lambda [Bind 0, Wildcard] body
   , testCase "validate every function-clause syntax layer" $ do
       let target = right $ mkIdentifier "target"
           constructorName = right $ mkIdentifier "Just"

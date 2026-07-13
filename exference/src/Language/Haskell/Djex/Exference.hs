@@ -126,8 +126,8 @@ import Language.Haskell.Synthesis.Generated
   , Qualification (..)
   , RenderError
   , RenderOptions (renderQualification)
-  , clauseBody
   , defaultRenderOptions
+  , functionClauseExpression
   , renderExpression
   , renderFunctionClause
   , validateDefinitionName
@@ -388,7 +388,7 @@ renderExferenceCandidateExpression
 renderExferenceCandidateExpression qualification candidate = first
   ExferenceGeneratedRenderError
   $ renderExpression (candidateRenderOptions qualification candidate)
-  $ clauseBody
+  $ functionClauseExpression
   $ candidateOutput candidate
 
 renderExferenceCandidateDefinition

@@ -24,11 +24,14 @@ It separates backend-owned local identities from structural global `Name`s and
 represents lambdas, application, tuples, holes, lets, cases, constructor/tuple
 patterns, as-patterns, and function clauses. Its independent scope checker
 rejects free locals, repeated binders in one pattern, and identity reuse in an
-overlapping scope. The renderer allocates stable Haskell variable spellings
-against globals and caller reservations, supports the three qualification
-policies needed by the existing frontends, and prints symbolic and tuple
-applications in Haskell form. Search/proof terms keep their private types and
-annotations; backends erase them into this tree only after their own checks.
+overlapping scope. `functionClauseExpression` recovers the expression denoted
+by a clause, retaining its argument patterns as a leading lambda while leaving
+a patternless value body unchanged. The renderer allocates stable Haskell
+variable spellings against globals and caller reservations, supports the three
+qualification policies needed by the existing frontends, and prints symbolic
+and tuple applications in Haskell form. Search/proof terms keep their private
+types and annotations; backends erase them into this tree only after their own
+checks.
 
 `Language.Haskell.Synthesis.Search` distinguishes a finished exploration from
 one truncated by step, choice-point, candidate, queue, or depth limits, and

@@ -329,12 +329,13 @@ makeDjinnResult s name contexts goal = do
     sharedGoal <- projectCompatibilityType "goal" goal
     sharedContexts <- traverse
         (traverse $ projectCompatibilityType "context argument") contexts
-    runDjinnQuery (djinnSession s) QueryRequest {
+    request <- mkDjinnRequest QueryRequest {
         requestTarget = target,
         requestGoal = sharedGoal,
         requestContexts = sharedContexts,
         requestOptions = queryOptions
         }
+    runDjinnQuery (djinnSession s) request
   where queryOptions = QueryOptions {
         optionAlternatives = multi s,
         optionSorted = sorted s,

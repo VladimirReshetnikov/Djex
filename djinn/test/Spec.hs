@@ -119,16 +119,33 @@ testCheckedDjinnAdapter = do
     request <- expectShownRight $ Djex.parseDjinnRequest
         session defaultQueryOptions target "identity-query.djinn"
         "Eq a => a -> a"
-    SharedQuery.requestGoal request `assertEqualReversed`
-        SharedType.FunctionType
+    let expectedGoal = SharedType.FunctionType
             (SharedType.TypeVariable "a")
             (SharedType.TypeVariable "a")
-    SharedQuery.requestContexts request `assertEqualReversed`
-        [Constraint (sharedName "Eq") [SharedType.TypeVariable "a"]]
-    SharedQuery.requestOptions request `assertEqualReversed`
+        expectedContexts =
+            [Constraint (sharedName "Eq") [SharedType.TypeVariable "a"]]
+        parsedQuery = Djex.djinnRequestQuery request
+    SharedQuery.requestGoal parsedQuery `assertEqualReversed` expectedGoal
+    SharedQuery.requestContexts parsedQuery `assertEqualReversed`
+        expectedContexts
+    SharedQuery.requestOptions parsedQuery `assertEqualReversed`
         defaultQueryOptions
 
-    result <- expectShownRight $ Djex.runDjinnQuery session request
+    -- Programmatic callers cross the same checked boundary as the parser;
+    -- the opaque request preserves the shared query losslessly once sealed.
+    let programmaticQuery = SharedQuery.QueryRequest
+            { SharedQuery.requestTarget = target
+            , SharedQuery.requestGoal = expectedGoal
+            , SharedQuery.requestContexts = expectedContexts
+            , SharedQuery.requestOptions = defaultQueryOptions
+            }
+    programmaticRequest <- expectShownRight $
+        Djex.mkDjinnRequest programmaticQuery
+    assertEqual "programmatic request round-trip"
+        programmaticQuery (Djex.djinnRequestQuery programmaticRequest)
+
+    result <- expectShownRight $
+        Djex.runDjinnQuery session programmaticRequest
     case SharedSearch.batchCandidates $ SharedQuery.resultSearch result of
         candidate : _ -> do
             assertEqual "Djinn candidates expose shared residual types"
@@ -156,16 +173,28 @@ testCheckedDjinnAdapter = do
 
     let unsupportedGoal = SharedType.TupleType SharedName.Unboxed
             [SharedType.TypeVariable "a"]
-        unsupportedRequest = request
+        unsupportedQuery = programmaticQuery
             { SharedQuery.requestGoal = unsupportedGoal }
-    case Djex.runDjinnQuery session unsupportedRequest of
+    case Djex.mkDjinnRequest unsupportedQuery of
         Left failure -> assertEqual
-            "unsupported shared types fail at the checked lowering boundary"
+            "unsupported shared types fail while sealing the request"
             (Just "DJEX_DJINN_LOWER")
             (SharedDiagnostic.diagnosticCode failure)
-        Right _ -> fail "the checked Djinn adapter accepted an unboxed tuple"
+        Right _ -> fail "the Djinn request constructor accepted an unboxed tuple"
 
     qualifier <- expectShownRight $ SharedName.mkModuleName "External"
+    invalidClass <- expectShownRight $
+        SharedName.mkQualifiedIdentifier qualifier "Eq"
+    let invalidClassQuery = programmaticQuery
+            { SharedQuery.requestContexts =
+                [Constraint invalidClass [SharedType.TypeVariable "a"]] }
+    case Djex.mkDjinnRequest invalidClassQuery of
+        Left failure -> assertEqual
+            "qualified classes fail while sealing the request"
+            (Just "DJEX_DJINN_LOWER")
+            (SharedDiagnostic.diagnosticCode failure)
+        Right _ -> fail "the Djinn request constructor accepted a qualified class"
+
     invalidTarget <- expectShownRight $
         SharedName.mkQualifiedIdentifier qualifier "identity"
     case Djex.parseDjinnRequest session defaultQueryOptions invalidTarget
@@ -179,7 +208,7 @@ testCheckedDjinnAdapter = do
         Right _ -> fail "the checked Djinn parser accepted a qualified target"
   where
     -- Keep the visually useful expected value on the right without obscuring
-    -- the field being projected from the opaque request alias.
+    -- the field projected through the opaque request boundary.
     assertEqualReversed actual expected = assertEqual "parsed request field"
         expected actual
 

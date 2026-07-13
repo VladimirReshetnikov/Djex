@@ -151,8 +151,10 @@ for proof search. `standardDjinnSession` exercises the same neutral path, and
 grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
 point rather than importing an internal parser. Both `DjinnRequest` and
 `DjinnCandidate` expose `DjinnType = Type DjinnTypeVariable`; that shared type
-is lowered to raw `HType` only inside `runDjinnQuery`. Parsed raw types travel
-in the opposite direction and are checked into the shared IR. The query
+is checked and lowered once by `mkDjinnRequest`, which seals the neutral query
+and its raw projection behind an opaque request exactly as Exference does.
+Parsed raw types travel in the opposite direction and are checked into the
+shared IR; `djinnRequestQuery` recovers the stable source view. The query
 returns shared candidates containing
 structured generated
 clauses, empty residual constraints, and Djinn's unused-binder ranking details

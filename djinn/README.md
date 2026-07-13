@@ -479,12 +479,20 @@ therefore remains confined to the compatibility library and REPL;
 `standardDjinnSession` sends the checked built-in environment through that same
 neutral boundary without exposing its raw representation,
 `parseDjinnRequest` shares the REPL's optional class-context grammar, and
-`runDjinnQuery` accepts `QueryRequest DjinnType QueryOptions`, where
+`mkDjinnRequest` seals a `QueryRequest DjinnType QueryOptions` into the opaque
+`DjinnRequest` consumed by `runDjinnQuery`. Existing programmatic clients
+should replace direct construction or record updates of `DjinnRequest` with a
+neutral `QueryRequest` followed by `mkDjinnRequest`, and use
+`djinnRequestQuery` when they need to inspect that original value. Sealing
+checks Djinn's narrower target and class-name namespaces and caches the lowered
+target, goal, and context arguments exactly once; search-option validation and
+all environment-dependent class and kind checks still occur when the request
+is run. Here
 `DjinnType` is the shared `Type DjinnTypeVariable` source representation;
 `DjinnTypeVariable` and the generated-binder `DjinnLocal` remain distinct API
 names despite both currently being represented by `String`. Raw `HType` is
-used only behind that checked session boundary: parsed raw types are projected
-into `DjinnType`, while queries lower `DjinnType` back to the proof engine.
+used only behind that checked boundary: parsed raw types are projected into
+`DjinnType`, while neutral requests are lowered once as they are sealed.
 Its `QueryResult` carries
 the same shared `Candidate DjinnType` structure as Exference plus Djinn's
 formula/proof metadata; even the currently empty residual constraints no

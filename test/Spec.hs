@@ -200,7 +200,7 @@ tests = testGroup "Djex facade"
            ) of
         (Left compatibilityFailure, Left sessionFailure) -> do
           assertBool "prepared path skipped Djinn synonym saturation" $
-            "Type synonym Not expects 1 argument(s), but got 0"
+            "Type synonym Not expects at least 1 argument(s), but got 0"
               `isInfixOf` compatibilityFailure
           diagnosticContext sessionFailure @?= [compatibilityFailure]
         (compatibilityResult, sessionResult) -> fail $
@@ -222,14 +222,13 @@ tests = testGroup "Djex facade"
           "invalid-kind paths diverged: " ++ show compatibilityResult
             ++ " versus " ++ show sessionResult
   , testCase "reject targets outside Djinn's output namespace" $ do
-      session <- sealDjinnEnvironment standardEnvironment
       qualifier <- expectRight $ mkModuleName "External"
       target <- expectRight $ mkQualifiedIdentifier qualifier "answer"
       goal <- expectRight $ parseHType "a -> a"
-      request <- sharedDjinnRequest target [] defaultQueryOptions goal
-      case runDjinnQuery session request of
+      query <- sharedDjinnQuery target [] defaultQueryOptions goal
+      case mkDjinnRequest query of
         Left failure -> diagnosticCode failure @?= Just "DJEX_DJINN_TARGET"
-        Right _ -> fail "Djinn accepted a qualified generated definition"
+        Right _ -> fail "Djinn sealed a qualified generated definition"
   , testCase "run a checked Exference session through the shared envelope" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
@@ -697,11 +696,21 @@ sharedDjinnRequest
   -> QueryOptions
   -> HType
   -> IO DjinnRequest
-sharedDjinnRequest target contexts options goal = do
+sharedDjinnRequest target contexts options goal =
+  expectRight . mkDjinnRequest =<<
+    sharedDjinnQuery target contexts options goal
+
+sharedDjinnQuery
+  :: Name
+  -> [Context]
+  -> QueryOptions
+  -> HType
+  -> IO (QueryRequest DjinnType QueryOptions)
+sharedDjinnQuery target contexts options goal = do
   sharedGoal <- expectRight $ toSynthesisType goal
   sharedContexts <- expectRight
     $ traverse (traverse toSynthesisType) contexts
-  pure QueryRequest
+  pure $ QueryRequest
     { requestTarget = target
     , requestGoal = sharedGoal
     , requestContexts = sharedContexts

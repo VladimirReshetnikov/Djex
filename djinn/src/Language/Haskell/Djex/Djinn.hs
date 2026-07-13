@@ -22,6 +22,8 @@ module Language.Haskell.Djex.Djinn
   , mkDjinnSession
   , standardDjinnSession
   , djinnSessionInventory
+  , mkDjinnRequest
+  , djinnRequestQuery
   , parseDjinnRequest
   , runDjinnQuery
   , renderDjinnCandidateExpression
@@ -51,6 +53,11 @@ import Language.Haskell.Synthesis.Candidate
   ( Candidate (..)
   , renderCandidateDefinition
   , renderCandidateExpression
+  )
+import Language.Haskell.Synthesis.Constraint
+  ( Constraint
+  , constraintArguments
+  , constraintClass
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -103,8 +110,8 @@ type DjinnTypeVariable = String
 type DjinnLocal = String
 
 -- | Source types accepted and returned by the stable Djinn adapter.
--- They are lowered to backend-specific proof types only inside
--- 'runDjinnQuery'.
+-- They are lowered to backend-specific proof types only while sealing a
+-- 'DjinnRequest'.
 type DjinnType = Type DjinnTypeVariable
 
 -- | A validated Djinn environment paired with its exact shared inventory.
@@ -119,7 +126,24 @@ data DjinnQueryMetadata = DjinnQueryMetadata
   }
   deriving (Eq, Show)
 
-type DjinnRequest = QueryRequest DjinnType QueryOptions
+-- | A checked query whose neutral spelling and backend projection cannot
+-- drift apart.  The constructor and cached raw values stay private; callers
+-- can inspect the original neutral query with 'djinnRequestQuery'.
+data DjinnRequest = DjinnRequest
+  { requestQuery :: QueryRequest DjinnType QueryOptions
+  , djinnRequestTargetSymbol :: Core.HSymbol
+  , djinnRequestCoreGoal :: Core.HType
+  , djinnRequestCoreContexts :: [Core.Context]
+  }
+
+-- The cached projection is a deterministic implementation detail. Equality
+-- and display therefore expose only the stable neutral request, just as the
+-- constructor itself does.
+instance Eq DjinnRequest where
+  left == right = requestQuery left == requestQuery right
+
+instance Show DjinnRequest where
+  showsPrec precedence = showsPrec precedence . requestQuery
 
 -- Spell out the shared candidate shape here instead of re-exporting Djinn's
 -- identical alias, whose historical @HSymbol@ name is intentionally private
@@ -154,6 +178,32 @@ djinnSessionInventory :: DjinnSession -> DjinnInventory
 djinnSessionInventory (DjinnSession prepared) =
   preparedEnvironmentInventory prepared
 
+-- | Check and lower the session-independent portion of a neutral Djinn
+-- query.  Target spelling, the goal, and context arguments are converted
+-- exactly once and retained behind the opaque request boundary.  Search
+-- options and all environment-dependent kind/class checks deliberately remain
+-- the responsibility of 'runDjinnQuery'.
+mkDjinnRequest
+  :: QueryRequest DjinnType QueryOptions
+  -> Either Diagnostic DjinnRequest
+mkDjinnRequest query = do
+  target <- targetSymbol $ requestTarget query
+  goal <- lowerRequestType "goal" $ requestGoal query
+  contexts <- traverse lowerRequestContext $ requestContexts query
+  pure DjinnRequest
+    { requestQuery = query
+    , djinnRequestTargetSymbol = target
+    , djinnRequestCoreGoal = goal
+    , djinnRequestCoreContexts = contexts
+    }
+
+-- | Recover the exact neutral query from which this checked request was
+-- sealed.  Modifications must be passed back through 'mkDjinnRequest'.
+djinnRequestQuery
+  :: DjinnRequest
+  -> QueryRequest DjinnType QueryOptions
+djinnRequestQuery = requestQuery
+
 -- | Parse the type portion of a Djinn query.  The accepted context grammar is
 -- exactly the historical one: either one constraint or a comma-separated
 -- parenthesized list, followed by @=>@ and the goal.  The session argument
@@ -181,12 +231,13 @@ parseDjinnRequest _session options target sourceName source = do
     $ Core.toSynthesisType rawGoal
   contexts <- first (parsedTypeFailure sourceName "context")
     $ traverse (traverse Core.toSynthesisType) rawContexts
-  pure QueryRequest
-    { requestTarget = target
-    , requestGoal = goal
-    , requestContexts = contexts
-    , requestOptions = options
-    }
+  let query = QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = contexts
+        , requestOptions = options
+        }
+  mkDjinnRequest query
 
 -- | Run one complete configured Djinn search and project it into a single
 -- terminal shared batch.  Logical evidence stays independent of operational
@@ -197,17 +248,12 @@ runDjinnQuery
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQuery (DjinnSession prepared) request = do
-  target <- targetSymbol $ requestTarget request
-  goal <- lowerRequestType "goal" $ requestGoal request
-  contexts <- first (loweringFailure "context")
-    $ traverse (traverse Core.fromSynthesisType)
-    $ requestContexts request
   report <- case inhabitGeneratedPrepared
-      (requestOptions request)
+      (requestOptions $ djinnRequestQuery request)
       prepared
-      contexts
-      target
-      goal of
+      (djinnRequestCoreContexts request)
+      (djinnRequestTargetSymbol request)
+      (djinnRequestCoreGoal request) of
     Left failure -> Left $ withContext failure
       $ withCode "DJEX_DJINN_QUERY"
       $ diagnostic Error "Djinn rejected the query"
@@ -262,6 +308,20 @@ lowerRequestType :: String -> DjinnType -> Either Diagnostic Core.HType
 lowerRequestType role = first (loweringFailure role)
   . Core.fromSynthesisType
 
+-- Constraint is intentionally a more permissive neutral node than Djinn's
+-- historical grammar.  Rebuild it with the core smart constructor so a
+-- qualified or otherwise non-Djinn class name cannot cross the sealed
+-- request boundary even when a caller constructed the shared node directly.
+lowerRequestContext
+  :: Constraint DjinnType
+  -> Either Diagnostic Core.Context
+lowerRequestContext context = do
+  arguments <- traverse (lowerRequestType "context")
+    $ constraintArguments context
+  first contextLoweringFailure $ Core.mkContext
+    (renderCanonical $ constraintClass context)
+    arguments
+
 parsedTypeFailure
   :: FilePath
   -> String
@@ -275,6 +335,11 @@ parsedTypeFailure sourceName role failure = withContext
 
 loweringFailure :: String -> Core.SynthesisTypeError -> Diagnostic
 loweringFailure role failure = withContext (role ++ ": " ++ show failure)
+  $ withCode "DJEX_DJINN_LOWER"
+  $ diagnostic Error "cannot lower the shared query to Djinn"
+
+contextLoweringFailure :: String -> Diagnostic
+contextLoweringFailure failure = withContext ("context: " ++ failure)
   $ withCode "DJEX_DJINN_LOWER"
   $ diagnostic Error "cannot lower the shared query to Djinn"
 

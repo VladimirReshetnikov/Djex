@@ -121,8 +121,11 @@ and infers legacy acyclic declaration lists in dependency order. Its
 whole-inventory operation additionally admits recursive datatype groups,
 rejects recursive synonym expansion, checks values and instances, and
 generalizes otherwise unconstrained class parameters for poly-kinded classes
-such as `Typeable`. Public fixed-kind results use an uninhabited kind-variable
-parameter, so an unsolved monomorphic kind cannot escape.
+such as `Typeable`. A Haskell 98 compatibility frontend can instead request
+that declared class parameters be defaulted to `Type`; both policies freeze
+residual variables beneath an already-known higher-kinded shape before values
+and instances are checked. Public fixed-kind results use an uninhabited
+kind-variable parameter, so an unsolved monomorphic kind cannot escape.
 Closed inventories reject unknown type and class names; open inventories infer
 one stable kind per external type name and require every occurrence of an
 external class to agree on arity. Synonym kinds are frozen after definition
@@ -144,6 +147,9 @@ the same declarations. Query elaboration can therefore reuse checked kinds
 without rerunning inference or trusting a parallel cache. Declarations may
 retain a frontend's kind-variable identity while being edited or round-tripped;
 sealing grounds their explicit kinds and reports the first unsolved identity.
+Frontends that already own a sealed `Environment` can construct an inventory
+from it directly, avoiding a redundant validation/indexing pass over the
+source environment.
 This is the boundary checked sessions retain; engine-specific dictionaries are
 derived projections of it, not competing sources of truth.
 

@@ -9,6 +9,7 @@ module Language.Haskell.Synthesis.KindInference
   ( GroundKind
   , KindAssumptions (..)
   , KindInventoryPolicy (..)
+  , ClassKindPolicy (..)
   , TypeKindDeclaration (..)
   , KindInferenceError (..)
   , emptyKindAssumptions
@@ -17,6 +18,7 @@ module Language.Haskell.Synthesis.KindInference
   , inferAcyclicTypeConstructorKinds
   , inferDeclarationKinds
   , inferDeclarationKindsWith
+  , inferDeclarationKindsWithClassPolicy
   ) where
 
 import Control.Monad (foldM, unless, zipWithM_)
@@ -60,6 +62,16 @@ emptyKindAssumptions = KindAssumptions Map.empty Map.empty
 data KindInventoryPolicy
   = ClosedKindInventory
   | OpenKindInventory
+  deriving (Eq, Ord, Show, Generic)
+
+-- | How declared class parameters are finalized after class-local and
+-- superclass inference stabilizes. Both policies freeze residual variables
+-- beneath a known kind shape. Modern source inventories may retain a wholly
+-- generalized parameter; Haskell 98-style frontends default it to @Type@
+-- before operational value and instance declarations are checked.
+data ClassKindPolicy
+  = GeneralizeClassKinds
+  | DefaultClassKinds
   deriving (Eq, Ord, Show, Generic)
 
 -- | A declaration reduced to the information needed for kind inference.
@@ -151,8 +163,9 @@ inferSharedVariableKinds assumptions sharedVariables types = do
 -- synonym expansion remain invalid.
 --
 -- The kind-variable parameter is 'Void' because every fixed kind produced by
--- this operation is ground. Generalized class parameters remain explicit as
--- 'Nothing'. Frontends with explicit kind syntax must resolve it before
+-- this operation is ground. A selected finalization policy may retain
+-- generalized class parameters as 'Nothing' or default them to @Type@.
+-- Frontends with explicit kind syntax must resolve it before
 -- crossing this boundary; frontends without such syntax use 'Nothing' on
 -- their 'TypeParameter's.
 inferDeclarationKinds
@@ -166,7 +179,17 @@ inferDeclarationKindsWith
   => KindInventoryPolicy
   -> [Declaration variable Void annotation]
   -> Either (KindInferenceError variable) KindAssumptions
-inferDeclarationKindsWith policy declarations = do
+inferDeclarationKindsWith policy =
+  inferDeclarationKindsWithClassPolicy policy GeneralizeClassKinds
+
+inferDeclarationKindsWithClassPolicy
+  :: Ord variable
+  => KindInventoryPolicy
+  -> ClassKindPolicy
+  -> [Declaration variable Void annotation]
+  -> Either (KindInferenceError variable) KindAssumptions
+inferDeclarationKindsWithClassPolicy
+    policy classKindPolicy declarations = do
   mapM_ validateDeclarationTypes declarations
   rejectRecursiveSynonyms declarations
   externalClassKinds <- collectExternalClassKinds policy declarations
@@ -178,6 +201,16 @@ inferDeclarationKindsWith policy declarations = do
     generalizedClasses <- stabilizeDefiningClassKinds
       externalClassKinds typeKinds typeParameters classParameters
       classKinds declarations
+    finalizedClasses <- finalizeClassKinds
+      classKindPolicy classKinds generalizedClasses
+    -- Stabilization deliberately ignores obligations for a wholly
+    -- generalized class parameter. Finalization can turn that parameter into
+    -- a concrete @Type@ obligation, so check definitions once more against
+    -- the kinds that values and instances will actually observe.
+    let definingAssumptions = InferenceAssumptions typeKinds
+          $ finalizedClasses `Map.union` externalClassKinds
+    mapM_ (checkDefiningDeclaration definingAssumptions
+      typeParameters classParameters) declarations
     -- Definition-local inference is now complete. A synonym's parameter kind
     -- must be frozen before operational checking: a later use cannot make a
     -- phantom parameter higher-kinded and thereby disappear an invalid
@@ -185,10 +218,10 @@ inferDeclarationKindsWith policy declarations = do
     -- type. Open inventories deliberately leave datatype kinds live because
     -- compatibility frontends use empty data declarations as abstract stubs
     -- whose omitted shape can be supplied by instances. Classes remain
-    -- separately generalized through 'Nothing'.
+    -- finalized separately according to 'ClassKindPolicy'.
     operationalTypeKinds <- freezeOperationalTypeKinds
       policy declarations typeKinds
-    let allClassKinds = generalizedClasses `Map.union` externalClassKinds
+    let allClassKinds = finalizedClasses `Map.union` externalClassKinds
         assumptions = InferenceAssumptions
           operationalTypeKinds allClassKinds
     mapM_ (checkOperationalDeclaration assumptions
@@ -196,6 +229,28 @@ inferDeclarationKindsWith policy declarations = do
     KindAssumptions
       <$> traverse ground typeKinds
       <*> traverse (mapM (traverse ground)) allClassKinds
+
+finalizeClassKinds
+  :: ClassKindPolicy
+  -> Map Name [InferenceKind]
+  -> Map Name [Maybe InferenceKind]
+  -> Inference variable (Map Name [Maybe InferenceKind])
+finalizeClassKinds policy allocated stabilized = case policy of
+  -- A fixed outer shape can still contain unresolved variables. Freeze those
+  -- residuals now so an operational use cannot specialize a class kind after
+  -- definition checking has finished; wholly unresolved roots stay general.
+  GeneralizeClassKinds -> traverse (mapM (traverse freeze)) stabilized
+  -- Haskell 98-style frontends default even wholly unresolved parameters.
+  -- Work from the allocated kinds because 'stabilized' intentionally erased
+  -- the inference variable behind each 'Nothing'.
+  DefaultClassKinds -> traverse (mapM (fmap Just . freeze)) allocated
+ where
+  freeze kind = do
+    fixed <- fromGroundKind <$> ground kind
+    -- Bind the declaration-owned variable as well as returning an immutable
+    -- copy. Class methods and superclass constraints share that variable.
+    unify kind fixed
+    pure fixed
 
 freezeOperationalTypeKinds
   :: KindInventoryPolicy

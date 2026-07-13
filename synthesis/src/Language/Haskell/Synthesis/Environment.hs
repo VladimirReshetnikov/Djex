@@ -10,6 +10,7 @@ module Language.Haskell.Synthesis.Environment
   ( Environment
   , EnvironmentError (..)
   , mkEnvironment
+  , groundEnvironmentKinds
   , environmentDeclarations
   , typeDeclarationMap
   , valueSignatureMap
@@ -24,6 +25,7 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Void (Void)
 import GHC.Generics (Generic)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
@@ -67,6 +69,33 @@ mkEnvironment
       (Environment typeVariable kindVariable annotation)
 mkEnvironment declarations = foldM insert emptyEnvironment
   $ zip [0 ..] declarations
+
+-- | Ground every explicit kind while preserving the environment's validated
+-- declaration order and indexes. The source-ordered declaration pass fixes
+-- which unsolved kind is reported first; after it succeeds, grounding the
+-- declaration-valued indexes is total because they contain the same sealed
+-- declarations. No namespace validation or reindexing is repeated.
+groundEnvironmentKinds
+  :: Environment typeVariable kindVariable annotation
+  -> Either kindVariable (Environment typeVariable Void annotation)
+groundEnvironmentKinds environment = do
+  declarations <- mapM groundDeclarationKinds
+    $ environmentDeclarations environment
+  groundedTypes <- traverse groundDeclarationKinds
+    $ typeDeclarationsByName environment
+  groundedClasses <- traverse groundDeclarationKinds
+    $ classesByName environment
+  groundedInstances <- traverse groundDeclarationKinds
+    $ instancesByHead environment
+  pure Environment
+    { reversedDeclarations = reverse declarations
+    , typeDeclarationsByName = groundedTypes
+    , valuesByName = valuesByName environment
+    , constructorsByName = constructorsByName environment
+    , classesByName = groundedClasses
+    , instancesByHead = groundedInstances
+    , occupiedValueNames = occupiedValueNames environment
+    }
 
 emptyEnvironment :: Environment typeVariable kindVariable annotation
 emptyEnvironment = Environment [] Map.empty Map.empty Map.empty

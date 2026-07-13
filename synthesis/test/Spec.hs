@@ -428,6 +428,109 @@ kindInferenceTests = testGroup "kind inference"
       KindInference.inferDeclarationKinds declarations @?= Right
         (KindInference.KindAssumptions Map.empty $ Map.fromList
           [(aName, [Nothing]), (bName, [Nothing])])
+  , testCase "select generalized or Haskell 98 defaulted class kinds" $ do
+      let markerName = right $ mkIdentifier "Marker"
+          parameter = Declaration.TypeParameter "a" Nothing
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [Declaration.ClassDeclaration () markerName [parameter] [] []]
+      KindInference.inferDeclarationKindsWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.GeneralizeClassKinds declarations @?= Right
+        (KindInference.KindAssumptions Map.empty
+          $ Map.singleton markerName [Nothing])
+      KindInference.inferDeclarationKindsWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.DefaultClassKinds declarations @?= Right
+        (KindInference.KindAssumptions Map.empty
+          $ Map.singleton markerName [Just proper])
+  , testCase "default class kinds before checking instances" $ do
+      let higherName = right $ mkIdentifier "Higher"
+          markerName = right $ mkIdentifier "Marker"
+          parameter = Declaration.TypeParameter "a" Nothing
+          higherKind = arrow proper proper
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration () higherName higherKind
+            , Declaration.ClassDeclaration () markerName [parameter] [] []
+            , Declaration.InstanceDeclaration () [] []
+                $ Constraint markerName
+                    [SharedType.TypeConstructor higherName]
+            ]
+      KindInference.inferDeclarationKindsWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.DefaultClassKinds declarations @?= Left
+        (KindInference.DeclarationKindError markerName
+          $ KindInference.KindMismatch higherKind proper)
+  , testCase "recheck defining superclasses after class kind defaulting" $ do
+      let higherName = right $ mkIdentifier "Higher"
+          markerName = right $ mkIdentifier "Marker"
+          derivedName = right $ mkIdentifier "Derived"
+          parameter = Declaration.TypeParameter "a" Nothing
+          higherKind = arrow proper proper
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration () higherName higherKind
+            , Declaration.ClassDeclaration () markerName [parameter] [] []
+            -- Marker is generalized during the defining fixpoint, so this
+            -- edge becomes invalid only after Haskell 98 defaulting.
+            , Declaration.ClassDeclaration () derivedName []
+                [Constraint markerName
+                  [SharedType.TypeConstructor higherName]] []
+            ]
+      KindInference.inferDeclarationKindsWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.DefaultClassKinds declarations @?= Left
+        (KindInference.DeclarationKindError derivedName
+          $ KindInference.KindMismatch higherKind proper)
+  , testCase "freeze residual variables below fixed class kinds" $ do
+      let unitName = right $ mkIdentifier "Unit"
+          higherName = right $ mkIdentifier "Higher"
+          appliedName = right $ mkIdentifier "Applied"
+          applyName = right $ mkIdentifier "apply"
+          parameter = Declaration.TypeParameter "f" Nothing
+          variable = SharedType.TypeVariable
+          higherKind = arrow (arrow proper proper) proper
+          methodType = SharedType.FunctionType
+            (SharedType.TypeApplication (variable "f") $ variable "a")
+            (SharedType.TypeConstructor unitName)
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration () unitName proper
+            , Declaration.AbstractTypeDeclaration () higherName higherKind
+            -- The method fixes only the outer shape f :: k -> Type. Since the
+            -- shared IR has no partial kind schemes, k must freeze to Type
+            -- before an instance can specialize it.
+            , Declaration.ClassDeclaration () appliedName [parameter] []
+                [Declaration.ValueSignature () applyName methodType]
+            , Declaration.InstanceDeclaration () [] []
+                $ Constraint appliedName
+                    [SharedType.TypeConstructor higherName]
+            ]
+      KindInference.inferDeclarationKindsWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.GeneralizeClassKinds declarations @?= Left
+        (KindInference.DeclarationKindError appliedName
+          $ KindInference.KindMismatch (arrow proper proper) proper)
+  , testCase "default an unseeded mutual superclass cycle" $ do
+      let aName = right $ mkIdentifier "A"
+          bName = right $ mkIdentifier "B"
+          parameter = Declaration.TypeParameter "a" Nothing
+          variable = SharedType.TypeVariable "a"
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.ClassDeclaration () aName [parameter]
+                [Constraint bName [variable]] []
+            , Declaration.ClassDeclaration () bName [parameter]
+                [Constraint aName [variable]] []
+            ]
+      KindInference.inferDeclarationKindsWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.DefaultClassKinds declarations @?= Right
+        (KindInference.KindAssumptions Map.empty $ Map.fromList
+          [ (aName, [Just proper])
+          , (bName, [Just proper])
+          ])
   , testCase "report fixed superclass conflicts at the first declaration" $ do
       let clashName = right $ mkIdentifier "Clash"
           properName = right $ mkIdentifier "Proper"
@@ -524,6 +627,42 @@ environmentTests = testGroup "environments"
         (Inventory.inventoryKindAssumptions inventory) @?=
           Map.singleton typeName
             (Kind.FunctionKind Kind.ProperTypeKind Kind.ProperTypeKind)
+  , testCase "thread class kind finalization through inventories" $ do
+      let markerName = right $ mkIdentifier "Marker"
+          declaration :: Declaration.Declaration String Void ()
+          declaration = Declaration.ClassDeclaration () markerName
+            [Declaration.TypeParameter "a" Nothing] [] []
+          generalized = right $ Inventory.mkInventory
+            KindInference.ClosedKindInventory [declaration]
+          defaulted = right $ Inventory.mkInventoryWithClassPolicy
+            KindInference.ClosedKindInventory
+            KindInference.DefaultClassKinds [declaration]
+          classKinds = KindInference.classParameterKinds
+            . Inventory.inventoryKindAssumptions
+      classKinds generalized @?= Map.singleton markerName [Nothing]
+      classKinds defaulted @?=
+        Map.singleton markerName [Just Kind.ProperTypeKind]
+  , testCase "construct equivalent inventories from lists and environments" $ do
+      let intName = right $ mkIdentifier "Int"
+          markerName = right $ mkIdentifier "Marker"
+          declarations :: [Declaration.Declaration String Void ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration () intName
+                Kind.ProperTypeKind
+            , Declaration.ClassDeclaration () markerName
+                [Declaration.TypeParameter "a" Nothing] [] []
+            ]
+          environment = right $ Environment.mkEnvironment declarations
+      Inventory.mkInventory KindInference.ClosedKindInventory declarations @?=
+        Inventory.mkInventoryFromEnvironmentWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.GeneralizeClassKinds environment
+      Inventory.mkInventoryWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.DefaultClassKinds declarations @?=
+        Inventory.mkInventoryFromEnvironmentWithClassPolicy
+          KindInference.ClosedKindInventory
+          KindInference.DefaultClassKinds environment
   , testCase "erase inventory annotations without rebuilding its indexes" $ do
       let typeName = right $ mkIdentifier "T"
           constructorName = right $ mkIdentifier "MkT"
@@ -551,8 +690,23 @@ environmentTests = testGroup "environments"
             [Declaration.AbstractTypeDeclaration () typeName
               $ Kind.FunctionKind (Kind.KindVariable "k")
                   Kind.ProperTypeKind]
+          environment = right $ Environment.mkEnvironment declarations
+          expected = Left $ Inventory.UngroundedInventoryKind "k"
       Inventory.mkInventory KindInference.ClosedKindInventory declarations @?=
-        Left (Inventory.UngroundedInventoryKind "k")
+        expected
+      Environment.groundEnvironmentKinds environment @?= Left "k"
+  , testCase "report structural errors before unsolved declaration kinds" $ do
+      let typeName = right $ mkIdentifier "T"
+          declarations :: [Declaration.Declaration String String ()]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration () typeName
+                $ Kind.KindVariable "k"
+            , Declaration.AbstractTypeDeclaration () typeName
+                Kind.ProperTypeKind
+            ]
+      Inventory.mkInventory KindInference.ClosedKindInventory declarations @?=
+        Left (Inventory.InvalidInventoryEnvironment
+          $ Environment.DuplicateTypeDeclaration typeName)
   , testCase "index declarations across shared namespaces" $ do
       let typeName = right $ mkIdentifier "T"
           constructorName = right $ mkIdentifier "MkT"

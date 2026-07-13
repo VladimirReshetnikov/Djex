@@ -107,6 +107,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
+  , maximumBuiltInTupleArity
   , parseModules
   , parseRatings
   , toSynthesisSourceEnvironment
@@ -2649,6 +2650,39 @@ tests = testGroup "Exference"
                 Nothing -> fail "neutral module lost its identity declaration"
               length (filter ((== Info) . diagnosticSeverity) diagnostics)
                 @?= 4
+      , testCase
+          "built-in constructor functions are the ordered deconstructor projection" $
+          withTemporaryFile "module BuiltIns where\n" $ \modulePath -> do
+            LoadReport result _ <- environmentFromModule modulePath
+            checked <- expectRight result
+            let projection = checkedSourceProjection checked
+                expected =
+                  [ FunctionBinding
+                      { functionResult = deconstructorInput deconstructor
+                      , functionName = constructorName constructor
+                      , functionPenalty = 0
+                      , functionConstraints = []
+                      , functionParameters = constructorFields constructor
+                      }
+                  | deconstructor <- sourceDeconstructors projection
+                  , constructor <- deconstructorConstructors deconstructor
+                  ]
+            sourceFunctions projection @?= expected
+      , testCase "default tuple capability has an explicit operational cap" $
+          withTemporaryFile "module BuiltIns where\n" $ \modulePath -> do
+            LoadReport result _ <- environmentFromModule modulePath
+            checked <- expectRight result
+            let projection = checkedSourceProjection checked
+                tupleNames = map validTupleName
+                  [2 .. maximumBuiltInTupleArity]
+            map functionName (sourceFunctions projection) @?=
+              [ListCon, Cons, validTupleName 0] ++ tupleNames
+            map (typeConstructorHead . deconstructorInput)
+                (sourceDeconstructors projection) @?=
+              map Just ([ListCon, validTupleName 0] ++ tupleNames)
+            assertBool "tuple arity above the operational cap was materialized"
+              $ validTupleName (maximumBuiltInTupleArity + 1)
+                  `notElem` map functionName (sourceFunctions projection)
       , testCase "missing ratings retain zero penalties with one warning" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
@@ -3725,6 +3759,7 @@ tests = testGroup "Exference"
             , (validTupleName 4, Penalty 4.0)
             , (validTupleName 5, Penalty 3.0)
             , (validTupleName 6, Penalty 2.0)
+            , (validTupleName 7, Penalty 0)
             ]
           assertBool "the shipped class table is empty"
             (not $ Map.null $ sClassEnv_tclasses classEnvironment)
@@ -3759,6 +3794,13 @@ tests = testGroup "Exference"
                   $ ("arity " ++ show arity) `isInfixOf` message
                 Right result -> fail $ "invalid tuple was accepted as " ++ show result)
             [-1, 0, 1]
+      , testCase "tuple names retain the larger shared representational limit" $ do
+          mkBoxedTupleName SharedName.maximumTupleArity @?=
+            Right (validTupleName SharedName.maximumTupleArity)
+          case mkBoxedTupleName (SharedName.maximumTupleArity + 1) of
+            Left _ -> pure ()
+            Right result -> fail $ "over-limit tuple was accepted as "
+              ++ show result
       , testCase "unboxed special constructors are rejected explicitly" $ do
           let constructors =
                 [ HSE.TupleCon HSE.noSrcSpan HSE.Unboxed 2

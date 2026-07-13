@@ -27,6 +27,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , sourceTypeSynonymMap
   , haskellSrcExtsParseMode
   , parseRatings
+  , maximumBuiltInTupleArity
   )
 where
 
@@ -520,34 +521,40 @@ sealSynthesisInventory declarations =
     Right inventory -> Right inventory
 
 
-builtInBindings :: Either QualifiedNameError [FunctionBinding]
-builtInBindings = do
-  consName <- fromSynthesisName SharedName.consName
-  listName <- fromSynthesisName SharedName.listName
-  unitConstructor <- do
-    unitName <- mkBoxedTupleName 0
-    pure $ functionBindingFromType unitName 0 $ TypeCons unitName
-  tupleConstructors <- mapM tupleConstructor [2 .. 7]
-  pure $ listConstructors consName listName
-    ++ (unitConstructor : tupleConstructors)
+-- | Largest boxed tuple constructor materialized in Exference's default
+-- search inventory. This is an operational cap, not the shared
+-- representational limit: eagerly adding higher arities creates a
+-- partial-application branch for each tuple at every non-arrow search goal.
+maximumBuiltInTupleArity :: Int
+maximumBuiltInTupleArity = 7
+
+-- Constructor functions are the flat search projection of the authoritative
+-- datatype records. Defining them here once prevents introduction and
+-- elimination capabilities from drifting in shape, multiplicity, or order.
+builtInConstructorEnvironment
+  :: Either QualifiedNameError
+       ([FunctionBinding], [DeconstructorBinding])
+builtInConstructorEnvironment = do
+  deconstructors <- builtInDeconstructors
+  pure (concatMap constructorFunctions deconstructors, deconstructors)
  where
-  listConstructors consName listName =
-    [ functionBindingFromType listName 0 $ listType listName
-    , functionBindingFromType consName 0 $ TypeArrow (TypeVar 0)
-        $ TypeArrow (listType listName) (listType listName)
+  constructorFunctions deconstructor =
+    [ FunctionBinding
+        { functionResult = deconstructorInput deconstructor
+        , functionName = constructorName constructor
+        , functionPenalty = 0
+        , functionConstraints = []
+        , functionParameters = constructorFields constructor
+        }
+    | constructor <- deconstructorConstructors deconstructor
     ]
-  listType listName = TypeApp (TypeCons listName) (TypeVar 0)
-  tupleConstructor arity = do
-    tupleName <- mkBoxedTupleName arity
-    pure $ functionBindingFromType tupleName 0
-      $ foldr TypeArrow (tupleType tupleName arity) $ typeVariables arity
 
 builtInDeconstructors :: Either QualifiedNameError [DeconstructorBinding]
 builtInDeconstructors = do
   listName <- fromSynthesisName SharedName.listName
   consName <- fromSynthesisName SharedName.consName
   unitName <- mkBoxedTupleName 0
-  tuples <- mapM tupleDeconstructor [2 .. 7]
+  tuples <- mapM tupleDeconstructor [2 .. maximumBuiltInTupleArity]
   let listType = TypeApp (TypeCons listName) (TypeVar 0)
   -- These declarations are not merely pattern-match conveniences: they make
   -- intrinsic constructor bindings members of the shared constructor
@@ -852,27 +859,13 @@ parseModulesM inputs = do
         Just errors -> throwE $ BindingDeclarationErrors errors
         Nothing -> pure ()
 
-      let builtInDeclarationsResult = builtInBindings
-          builtInDeconstructorsResult = builtInDeconstructors
       (builtInDeclarations, builtInDeconstructorValues) <-
-        case (builtInDeclarationsResult, builtInDeconstructorsResult) of
-          (Right declarationsResult, Right deconstructorsResult) ->
-            pure (declarationsResult, deconstructorsResult)
-          (Left declarationFailure, Right _) ->
-            failBuiltIns
-              $ ("could not construct built-in bindings: "
-                  ++ show declarationFailure) NonEmpty.:| []
-          (Right _, Left deconstructorFailure) ->
-            failBuiltIns
-              $ ("could not construct built-in deconstructors: "
-                  ++ show deconstructorFailure) NonEmpty.:| []
-          (Left declarationFailure, Left deconstructorFailure) ->
-            failBuiltIns
-              $ ("could not construct built-in bindings: "
-                  ++ show declarationFailure) NonEmpty.:|
-                [ "could not construct built-in deconstructors: "
-                    ++ show deconstructorFailure
-                ]
+        either
+          (failBuiltIns . NonEmpty.singleton
+            . ("could not construct the built-in constructor environment: " ++)
+            . show)
+          pure
+          builtInConstructorEnvironment
 
       let classes = sClassEnv_tclasses classEnvironment
           instances = sClassEnv_instances classEnvironment

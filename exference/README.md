@@ -182,6 +182,12 @@ and tuple constructors
 have explicit intrinsic datatype records, so `(:)` never masquerades as an
 ordinary value. Constructor shape and search penalty are then lowered back
 from that checked inventory rather than trusted from a parallel raw record.
+The default source environment derives its flat constructor functions from
+those same ordered datatype records. Shared names and types represent boxed
+tuples through arity 64, while the eager Exference search inventory deliberately
+materializes only arities 2 through 7: higher eager constructors would add a
+partial-application branch to every non-arrow goal. This operational cap is
+exported as `maximumBuiltInTupleArity` rather than repeated as a magic number.
 Recursive flags are derived after alias expansion across all loaded modules
 and written back into both the checked projection and Inventory; caller-
 supplied or module-local preliminary bits are never authoritative.

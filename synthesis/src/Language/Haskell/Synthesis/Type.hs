@@ -68,8 +68,8 @@ canonicalizeType :: Type variable -> Type variable
 canonicalizeType source = case source of
   TypeVariable{} -> source
   TypeConstructor name
-    | nameSpecial name == Just (TupleConstructor Boxed 0) ->
-        TupleType Boxed []
+    | Just (TupleConstructor boxity 0) <- nameSpecial name ->
+        TupleType boxity []
     | otherwise -> source
   TypeApplication{} ->
     let (headType, arguments) = applicationSpine source
@@ -133,8 +133,11 @@ validateType source = validate $ canonicalizeType source
         nameSpecial name /= Just ConsConstructor
 
 validTupleArity :: Boxity -> Int -> Bool
-validTupleArity Boxed arity = arity == 0 || arity >= 2
-validTupleArity Unboxed arity = arity >= 1
+validTupleArity Boxed arity = withinBounds arity && arity /= 1
+validTupleArity Unboxed arity = withinBounds arity
+
+withinBounds :: Int -> Bool
+withinBounds arity = arity >= 0 && arity <= maximumTupleArity
 
 firstDuplicate :: Ord value => [value] -> Maybe value
 firstDuplicate = go Set.empty

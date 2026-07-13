@@ -12,6 +12,7 @@ module Language.Haskell.Synthesis.Name
   , Occurrence (..)
   , SpecialName (..)
   , NameError (..)
+  , maximumTupleArity
   , mkModuleName
   , mkModuleNameSegments
   , moduleNameSegments
@@ -67,8 +68,9 @@ data LexicalClass = VariableLike | ConstructorLike
 --
 -- A tuple arity becomes a valid 'Name' only through 'specialName' or
 -- 'tupleName'.  Boxed tuples admit arity zero and arities of at least two.
--- GHC's unboxed tuple syntax instead admits arities of at least one:
--- @\(# #\)@ is the singleton constructor, not an unboxed unit constructor.
+-- Unboxed tuple constructors follow the same arities: @\(# #\)@ is the
+-- zero-field @Unit#@ constructor, while unary unboxed tuple /values/ use
+-- @\(# value #\)@ and the distinct @MkSolo#@ constructor.
 data SpecialName
   = ListConstructor
   | ConsConstructor
@@ -111,6 +113,12 @@ data NameError
   | NameHasNoInfixForm SpecialName
   | InvalidNameSyntax String
   deriving (Eq, Ord)
+
+-- | Maximum tuple constructor/type arity supported by the target GHC.
+-- Keeping the bound at the validated name edge also prevents a tiny malformed
+-- value from requesting an effectively unbounded comma string when rendered.
+maximumTupleArity :: Int
+maximumTupleArity = 64
 
 instance Show ModuleName where
   show = renderModuleName
@@ -302,8 +310,8 @@ parseTuple "()" = Just (tupleName Boxed 0)
 parseTuple token
   | hasUnboxedDelimiters token =
       let middle = take (length token - 4) (drop 2 token)
-      in if all isSpace middle
-           then Just (tupleName Unboxed 1)
+      in if not (null middle) && all isSpace middle
+           then Just (tupleName Unboxed 0)
            else if not (null middle) && all (== ',') middle
              then Just (tupleName Unboxed (length middle + 1))
              else Nothing
@@ -443,11 +451,16 @@ renderSpecialPrefix ListConstructor = "[]"
 renderSpecialPrefix ConsConstructor = "(:)"
 renderSpecialPrefix FunctionConstructor = "(->)"
 renderSpecialPrefix (TupleConstructor Boxed 0) = "()"
-renderSpecialPrefix (TupleConstructor Boxed arity) =
-  "(" ++ replicate (arity - 1) ',' ++ ")"
-renderSpecialPrefix (TupleConstructor Unboxed 1) = "(# #)"
-renderSpecialPrefix (TupleConstructor Unboxed arity) =
-  "(#" ++ replicate (arity - 1) ',' ++ "#)"
+renderSpecialPrefix (TupleConstructor Boxed arity)
+  | validTupleArity Boxed arity =
+      "(" ++ replicate (arity - 1) ',' ++ ")"
+renderSpecialPrefix (TupleConstructor Unboxed 0) = "(# #)"
+renderSpecialPrefix (TupleConstructor Unboxed arity)
+  | validTupleArity Unboxed arity =
+      "(#" ++ replicate (arity - 1) ',' ++ "#)"
+renderSpecialPrefix (TupleConstructor boxity arity) =
+  "<invalid " ++ boxityDescription boxity
+    ++ " tuple constructor arity " ++ show arity ++ ">"
 
 renderNameError :: NameError -> String
 renderNameError EmptyName = "name is empty"
@@ -475,8 +488,8 @@ boxityDescription Boxed = "boxed"
 boxityDescription Unboxed = "unboxed"
 
 tupleArityExpectation :: Boxity -> String
-tupleArityExpectation Boxed = "expected zero or at least two"
-tupleArityExpectation Unboxed = "expected at least one"
+tupleArityExpectation _ = "expected zero or 2 through "
+  ++ show maximumTupleArity
 
 validateIdentifier :: String -> Either NameError LexicalClass
 validateIdentifier "" = Left EmptyName
@@ -532,8 +545,8 @@ isOperatorCharacter character =
     character `notElem` "(),;[]`{}_\"'")
 
 validTupleArity :: Boxity -> Int -> Bool
-validTupleArity Boxed arity = arity == 0 || arity >= 2
-validTupleArity Unboxed arity = arity >= 1
+validTupleArity _ arity = arity == 0
+  || arity >= 2 && arity <= maximumTupleArity
 
 wrappedBy :: Char -> Char -> String -> Bool
 wrappedBy opening closing (first : rest@(_ : _)) =

@@ -65,4 +65,5 @@ showsType variableName precedence typeExpression = case typeExpression of
 
 renderTuple :: Boxity -> [String] -> String
 renderTuple Boxed elements = "(" ++ intercalate ", " elements ++ ")"
+renderTuple Unboxed [] = "(# #)"
 renderTuple Unboxed elements = "(# " ++ intercalate ", " elements ++ " #)"

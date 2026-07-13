@@ -12,6 +12,13 @@ also share the diagnostic, query, candidate, inventory, and generated-output
 boundaries described below. Backend class resolution and search semantics
 remain deliberately independent.
 
+`Language.Haskell.Synthesis.Name` represents built-in tuple constructors only
+at GHC's supported arities (zero or 2 through 64). In particular, `(# #)` is
+the zero-field unboxed `Unit#` constructor; unary unboxed tuple values remain a
+valid structural `Type`, but use `MkSolo#` rather than a comma-spelled tuple
+constructor. The finite constructor ceiling also keeps every public name and
+error renderer bounded even when handed an adversarial `SpecialName` payload.
+
 `Language.Haskell.Synthesis.Diagnostic` is the parser-independent reporting
 boundary used by both sessions. It carries severity, an optional stable code,
 source file and half-open span, and an ordered context trail; parser adapters

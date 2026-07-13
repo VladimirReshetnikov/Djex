@@ -683,6 +683,11 @@ typeTests = testGroup "source types"
         "a -> skolem"
       TypeRender.renderConstraint variableName constraint @?=
         "C a skolem"
+      TypeRender.renderType variableName
+          (SharedType.TupleType Unboxed []) @?= "(# #)"
+      TypeRender.renderType variableName
+          (SharedType.TupleType Unboxed
+            [SharedType.TypeVariable flexible]) @?= "(# a #)"
   , testCase "canonicalize saturated function and tuple constructors" $ do
       let a = SharedType.TypeVariable "a"
           b = SharedType.TypeVariable "b"
@@ -701,6 +706,10 @@ typeTests = testGroup "source types"
           (SharedType.TypeConstructor (right $ tupleName Boxed 0)
             :: SharedType.Type String) @?=
         SharedType.TupleType Boxed []
+      SharedType.canonicalizeType
+          (SharedType.TypeConstructor (right $ tupleName Unboxed 0)
+            :: SharedType.Type String) @?=
+        SharedType.TupleType Unboxed []
   , testCase "forall binders protect bodies and constraints" $ do
       let className = right $ mkIdentifier "C"
           typeExpression = SharedType.ForallType ["a"]
@@ -724,6 +733,17 @@ typeTests = testGroup "source types"
       SharedType.validateType
           (SharedType.TupleType Boxed [SharedType.TypeVariable (0 :: Int)])
         @?= Left (SharedType.InvalidTupleTypeArity Boxed 1)
+      SharedType.validateType
+          (SharedType.TupleType Unboxed [] :: SharedType.Type Int) @?= Right ()
+      SharedType.validateType
+          (SharedType.TupleType Unboxed
+            [SharedType.TypeVariable (0 :: Int)]) @?= Right ()
+      SharedType.validateType
+          (SharedType.TupleType Unboxed
+            $ replicate (maximumTupleArity + 1)
+            $ SharedType.TypeVariable (0 :: Int)) @?=
+        Left (SharedType.InvalidTupleTypeArity Unboxed
+          $ maximumTupleArity + 1)
       SharedType.validateType
           (SharedType.TypeConstructor variableName :: SharedType.Type Int)
         @?= Left (SharedType.InvalidTypeConstructor variableName)
@@ -1257,17 +1277,17 @@ specialTests = testGroup "special names"
       assertTuple Boxed 3 "(,,)"
       assertTuple Boxed 8 "(,,,,,,,)"
   , testCase "all representative unboxed tuples" $ do
-      assertTuple Unboxed 1 "(# #)"
+      assertTuple Unboxed 0 "(# #)"
       assertTuple Unboxed 2 "(#,#)"
       assertTuple Unboxed 3 "(#,,#)"
       assertTuple Unboxed 8 "(#,,,,,,,#)"
   , testCase "reject invalid boxed arities" $
-      forM_ [-3, -1, 1] $ \arity -> do
+      forM_ [-3, -1, 1, maximumTupleArity + 1, maxBound] $ \arity -> do
         tupleName Boxed arity @?= Left (InvalidTupleArity Boxed arity)
         specialName (TupleConstructor Boxed arity) @?=
           Left (InvalidTupleArity Boxed arity)
   , testCase "reject invalid unboxed arities" $
-      forM_ [-3, -1, 0] $ \arity -> do
+      forM_ [-3, -1, 1, maximumTupleArity + 1, maxBound] $ \arity -> do
         tupleName Unboxed arity @?= Left (InvalidTupleArity Unboxed arity)
         specialName (TupleConstructor Unboxed arity) @?=
           Left (InvalidTupleArity Unboxed arity)
@@ -1298,8 +1318,9 @@ parserTests = testGroup "parser"
       parseName "->" @?= Right functionName
       parseName "()" @?= tupleName Boxed 0
       parseName "(,)" @?= tupleName Boxed 2
-      parseName "(# #)" @?= tupleName Unboxed 1
+      parseName "(# #)" @?= tupleName Unboxed 0
       parseName "(#,#)" @?= tupleName Unboxed 2
+      parseName "(##)" @?= mkOperator "##"
   , testCase "ignore outer and contextual whitespace" $ do
       parseName "  Data.List.map\n" @?= parseName "Data.List.map"
       parseName "( <*> )" @?= mkOperator "<*>"
@@ -1350,6 +1371,15 @@ diagnosticTests = testGroup "diagnostics"
       _ <- evaluate (force (right (parseName "Data.List.(++)")))
       _ <- evaluate (force (withContext "query" (diagnostic Error "failure")))
       return ()
+  , testCase "malformed public tuple errors render in bounded space" $ do
+      renderNameError (NameHasNoInfixForm
+          $ TupleConstructor Boxed minBound) @?=
+        "name <invalid boxed tuple constructor arity "
+          ++ show (minBound :: Int) ++ "> has no infix form"
+      renderNameError (NameHasNoInfixForm
+          $ TupleConstructor Unboxed maxBound) @?=
+        "name <invalid unboxed tuple constructor arity "
+          ++ show (maxBound :: Int) ++ "> has no infix form"
   ]
 
 propertyTests :: TestTree
@@ -1464,7 +1494,7 @@ genTuple Boxed = do
   arity <- QC.frequency [(1, return 0), (4, QC.chooseInt (2, 16))]
   return (right (tupleName Boxed arity))
 genTuple Unboxed = do
-  arity <- QC.chooseInt (1, 16)
+  arity <- QC.frequency [(1, return 0), (4, QC.chooseInt (2, 16))]
   return (right (tupleName Unboxed arity))
 
 genModule :: QC.Gen ModuleName

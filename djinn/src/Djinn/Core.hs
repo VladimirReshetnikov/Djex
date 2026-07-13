@@ -1,8 +1,9 @@
 -- |
 -- The stable, validated interface to the Djinn core.
 --
--- Build an 'Environment' from declarations, then ask 'inhabit' for a
--- Haskell expression of a given type.  Every entry point validates its
+-- Build an 'Environment' from declarations, then ask 'inhabitGenerated' for
+-- checked shared candidates of a given type; 'inhabit' is the rendered-string
+-- compatibility adapter.  Every entry point validates its
 -- input — names must be lexically valid, declarations are kind-checked
 -- transactionally, class arguments must fit their parameters' inferred
 -- kinds — so the proof machinery only ever sees well-formed data.  The
@@ -32,6 +33,8 @@ module Djinn.Core (
     -- * Queries
     Context, mkContext, resolveContext, resolveInstanceMethods,
     QueryOptions(..), defaultQueryOptions,
+    DjinnCandidateDetails(..), DjinnCandidate,
+    GeneratedQueryReport(..), inhabitGenerated,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
 
@@ -43,9 +46,11 @@ import Text.ParserCombinators.ReadP (ReadP, readP_to_S, skipSpaces)
 
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
+import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import Djinn.Internal.Environment
@@ -481,7 +486,8 @@ data QueryOptions = QueryOptions {
     -- | Rank solutions by the fraction of unused binders, then binder
     -- count; implies collecting alternatives.
     optionSorted :: Bool,
-    -- | Maximum number of candidate proofs considered (positive).
+    -- | Maximum number of candidate proofs considered (positive). Observing
+    -- one more proof reports 'SharedSearch.CandidateLimitReached'.
     optionCutoff :: Int,
     -- | Choice-point budget; 'Nothing' keeps the search a complete
     -- decision procedure.
@@ -498,6 +504,34 @@ defaultQueryOptions = QueryOptions {
     optionCutoff = 200,
     optionBudget = Nothing
     }
+
+-- | Ranking information retained with every checked Djinn candidate.
+--
+-- The historical compatibility API orders alternatives by the fraction of
+-- unused binders and then by total binder count.  Keeping both inputs here
+-- makes that backend-specific judgement inspectable without coupling the
+-- shared candidate boundary to Djinn's policy.
+data DjinnCandidateDetails = DjinnCandidateDetails {
+    djinnUnusedBinderFraction :: Rational,
+    djinnBinderCount :: Int
+    }
+    deriving (Eq, Ord, Show)
+
+-- | A checked Djinn result in the backend-neutral candidate envelope.
+-- Djinn proves closed obligations, so its residual-constraint list is empty.
+type DjinnCandidate =
+    SharedCandidate.Candidate HType DjinnCandidateDetails
+        (SharedGenerated.FunctionClause HSymbol)
+
+-- | Canonical structured result of one Djinn proof search.
+data GeneratedQueryReport = GeneratedQueryReport {
+    generatedReportFormula :: String,
+    generatedReportProof :: Maybe String,
+    generatedReportCompletion :: SharedSearch.Completion,
+    generatedReportCandidates :: [DjinnCandidate],
+    generatedReportEvidence :: SharedQuery.QueryEvidence
+    }
+    deriving (Eq, Show)
 
 data QueryOutcome
     -- | Rendered Haskell clauses, best candidate first, de-duplicated.
@@ -516,9 +550,9 @@ data QueryReport = QueryReport {
     reportFormula :: String,
     -- | The first internal proof term, when one was found.
     reportProof :: Maybe String,
-    -- | Whether the configured proof exploration finished normally or spent
-    -- its choice-point budget. Logical negative evidence remains in
-    -- 'reportOutcome' rather than being conflated with this status.
+    -- | Whether the configured proof exploration finished normally or stopped
+    -- at its choice-point or candidate bound. Logical negative evidence
+    -- remains in 'reportOutcome' rather than being conflated with this status.
     reportCompletion :: SharedSearch.Completion,
     -- | Scope-checked backend-independent candidates. The rendered
     -- compatibility strings in 'Realized' are derived from these values.
@@ -528,7 +562,7 @@ data QueryReport = QueryReport {
     }
     deriving (Show)
 
--- | Search for total Haskell realizations of a type.
+-- | Compatibility search that renders every canonical result as Haskell.
 --
 -- The target name is the defined identifier in the rendered clauses; a
 -- same-named function assumption is excluded from the search rather than
@@ -539,6 +573,36 @@ data QueryReport = QueryReport {
 inhabit :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
         -> Either String QueryReport
 inhabit options environment contexts name goal = do
+    generated <- inhabitGenerated options environment contexts name goal
+    -- Rendering belongs only to this compatibility layer.  Canonical callers
+    -- retain the scope-checked clause and choose their own presentation policy.
+    renderedClauses <- labeled "cannot render generated clause" $
+        mapM (renderGeneratedClause . SharedCandidate.candidateOutput) $
+            generatedReportCandidates generated
+    return QueryReport {
+        reportFormula = generatedReportFormula generated,
+        reportProof = generatedReportProof generated,
+        reportCompletion = generatedReportCompletion generated,
+        reportGeneratedClauses =
+            map SharedCandidate.candidateOutput $
+                generatedReportCandidates generated,
+        reportOutcome = evidenceOutcome
+            (generatedReportEvidence generated) renderedClauses
+        }
+  where
+    labeled what = either (Left . ((what ++ ": ") ++)) Right
+
+-- | Search for checked structured candidates without committing to a
+-- rendering policy.
+--
+-- At most @optionCutoff + 1@ proofs are observed.  The extra observation is
+-- solely a truncation witness: when present, neither the remaining proof
+-- stream nor 'searchExhausted' is forced.  When absent, reaching the end of
+-- the prefix has already established whether proof search finished or spent
+-- its choice-point budget.
+inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
+                 -> Either String GeneratedQueryReport
+inhabitGenerated options environment contexts name goal = do
     requireName "target" isMethodName name
     unless (optionCutoff options > 0) $
         Left "optionCutoff must be positive"
@@ -589,15 +653,20 @@ inhabit options environment contexts name goal = do
                                 checkProof diagnosticEnv form diagnosticProof
                             return UnrealizableWithoutSelfReference
                         [] -> return Unrealizable
-            return QueryReport {
-                reportFormula = show form,
-                reportProof = Nothing,
-                reportCompletion = queryCompletion outcome,
-                reportGeneratedClauses = [],
-                reportOutcome = failure
+            return GeneratedQueryReport {
+                generatedReportFormula = show form,
+                generatedReportProof = Nothing,
+                generatedReportCompletion = queryCompletion outcome,
+                generatedReportCandidates = [],
+                generatedReportEvidence = outcomeEvidence failure
                 }
-        p : ps -> do
-            let internalProofs = p : take (optionCutoff options - 1) ps
+        proofs@(p : _) -> do
+            -- Bound the raw proof stream before checking, conversion, ranking,
+            -- or de-duplication.  In particular, duplicate printed clauses
+            -- still consume the documented proof-candidate cutoff.
+            let (internalProofs, overflow) =
+                    splitAt (optionCutoff options) proofs
+                candidateLimitReached = not $ null overflow
             -- Every candidate must check against the requested formula
             -- before display names are restored and it is rendered.
             labeled "generated an invalid proof" $
@@ -605,32 +674,62 @@ inhabit options environment contexts name goal = do
             rendered <- labeled "cannot render generated proof" $
                 mapM (termToHClause name . restoreProofTerm proofEnv)
                     internalProofs
-            -- Rank a clause by the fraction of its binders that are
-            -- unused, then by the total binder count: solutions that use
-            -- more of their arguments are usually the intended ones.
-            let score clause =
-                    let bvs = getBinderVars clause
-                        r | null bvs = (0, 0)
-                          | otherwise =
-                              ( length (filter (== "_") bvs) % length bvs
-                              , length bvs )
-                    in (r, clause)
+            -- Preserve the historical stable ratio-then-count ordering over
+            -- raw clauses.  De-duplication intentionally follows sorting.
+            let scored clause = (candidateDetails clause, clause)
                 clauses = nub $
                     if optionSorted options then
-                        map snd $ sortOn fst $ map score rendered
+                        map snd $ sortOn fst $ map scored rendered
                     else
                         rendered
             generatedClauses <- labeled "cannot convert generated clause" $
                 mapM toGeneratedClause clauses
-            renderedClauses <- labeled "cannot render generated clause" $
-                mapM renderGeneratedClause generatedClauses
-            return QueryReport {
-                reportFormula = show form,
-                reportProof = Just (show p),
-                reportCompletion = queryCompletion outcome,
-                reportGeneratedClauses = generatedClauses,
-                reportOutcome = Realized renderedClauses
+            let candidates = zipWith makeCandidate clauses generatedClauses
+                completion
+                    | candidateLimitReached = SharedSearch.truncated
+                        SharedSearch.CandidateLimitReached
+                    | otherwise = queryCompletion outcome
+            return GeneratedQueryReport {
+                generatedReportFormula = show form,
+                generatedReportProof = Just (show p),
+                generatedReportCompletion = completion,
+                generatedReportCandidates = candidates,
+                generatedReportEvidence = SharedQuery.ValidatedCandidates
                 }
+
+candidateDetails :: HClause -> DjinnCandidateDetails
+candidateDetails clause
+    | null binders = DjinnCandidateDetails 0 0
+    | otherwise = DjinnCandidateDetails
+        (fromIntegral (length (filter (== "_") binders)) %
+            fromIntegral (length binders))
+        (length binders)
+  where
+    binders = getBinderVars clause
+
+makeCandidate
+    :: HClause
+    -> SharedGenerated.FunctionClause HSymbol
+    -> DjinnCandidate
+makeCandidate clause generated = SharedCandidate.Candidate {
+    SharedCandidate.candidateOutput = generated,
+    SharedCandidate.candidateResidualConstraints = [],
+    SharedCandidate.candidateDetails = candidateDetails clause
+    }
+
+outcomeEvidence :: QueryOutcome -> SharedQuery.QueryEvidence
+outcomeEvidence outcome = case outcome of
+    Realized{} -> SharedQuery.ValidatedCandidates
+    Unrealizable -> SharedQuery.ProvedUninhabitable
+    UnrealizableWithoutSelfReference -> SharedQuery.RequiresTargetReference
+    Undecided -> SharedQuery.NoEvidence
+
+evidenceOutcome :: SharedQuery.QueryEvidence -> [String] -> QueryOutcome
+evidenceOutcome evidence rendered = case evidence of
+    SharedQuery.ValidatedCandidates -> Realized rendered
+    SharedQuery.ProvedUninhabitable -> Unrealizable
+    SharedQuery.RequiresTargetReference -> UnrealizableWithoutSelfReference
+    SharedQuery.NoEvidence -> Undecided
 
 queryCompletion :: SearchOutcome -> SharedSearch.Completion
 queryCompletion outcome

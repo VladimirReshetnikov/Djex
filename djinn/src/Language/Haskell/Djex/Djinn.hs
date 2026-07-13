@@ -6,6 +6,8 @@
 -- lowest-common-denominator configuration would obscure.
 module Language.Haskell.Djex.Djinn
   ( DjinnSession
+  , DjinnCandidate
+  , DjinnCandidateDetails (..)
   , DjinnQueryMetadata (..)
   , DjinnRequest
   , DjinnResult
@@ -15,18 +17,19 @@ module Language.Haskell.Djex.Djinn
   ) where
 
 import Djinn.Core
-  ( Environment
+  ( DjinnCandidate
+  , DjinnCandidateDetails (..)
+  , Environment
   , HSymbol
   , HType
   , QueryOptions
-  , QueryOutcome (..)
   , SynthesisInventory
-  , inhabit
-  , reportCompletion
-  , reportFormula
-  , reportGeneratedClauses
-  , reportOutcome
-  , reportProof
+  , generatedReportCandidates
+  , generatedReportCompletion
+  , generatedReportEvidence
+  , generatedReportFormula
+  , generatedReportProof
+  , inhabitGenerated
   , toSynthesisInventory
   )
 import Language.Haskell.Synthesis.Diagnostic
@@ -36,18 +39,14 @@ import Language.Haskell.Synthesis.Diagnostic
   , withCode
   , withContext
   )
-import Language.Haskell.Synthesis.Generated
-  ( FunctionClause
-  , validateDefinitionName
-  )
+import Language.Haskell.Synthesis.Generated (validateDefinitionName)
 import Language.Haskell.Synthesis.Name
   ( Name
   , nameSpelling
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
-  ( QueryEvidence (..)
-  , QueryRequest (..)
+  ( QueryRequest (..)
   , QueryResult (..)
   )
 import Language.Haskell.Synthesis.Search
@@ -69,8 +68,7 @@ data DjinnQueryMetadata = DjinnQueryMetadata
 
 type DjinnRequest = QueryRequest HType QueryOptions
 
-type DjinnResult =
-  QueryResult DjinnQueryMetadata (FunctionClause HSymbol)
+type DjinnResult = QueryResult DjinnQueryMetadata DjinnCandidate
 
 -- | Seal an already checked Djinn environment into a reusable session.
 mkDjinnSession :: Environment -> Either Diagnostic DjinnSession
@@ -93,7 +91,7 @@ runDjinnQuery
   -> Either Diagnostic DjinnResult
 runDjinnQuery (DjinnSession environment _) request = do
   target <- targetSymbol $ requestTarget request
-  report <- case inhabit
+  report <- case inhabitGenerated
       (requestOptions request)
       environment
       (requestContexts request)
@@ -104,21 +102,14 @@ runDjinnQuery (DjinnSession environment _) request = do
       $ diagnostic Error "Djinn rejected the query"
     Right value -> Right value
   let metadata = DjinnQueryMetadata
-        { djinnTranslatedFormula = reportFormula report
-        , djinnFirstExploredProof = reportProof report
+        { djinnTranslatedFormula = generatedReportFormula report
+        , djinnFirstExploredProof = generatedReportProof report
         }
       batch = SearchBatch
-        (Completed $ reportCompletion report)
+        (Completed $ generatedReportCompletion report)
         metadata
-        (reportGeneratedClauses report)
-  pure $ QueryResult (queryEvidence $ reportOutcome report) batch
-
-queryEvidence :: QueryOutcome -> QueryEvidence
-queryEvidence outcome = case outcome of
-  Realized{} -> ValidatedCandidates
-  Unrealizable -> ProvedUninhabitable
-  UnrealizableWithoutSelfReference -> RequiresTargetReference
-  Undecided -> NoEvidence
+        (generatedReportCandidates report)
+  pure $ QueryResult (generatedReportEvidence report) batch
 
 targetSymbol :: Name -> Either Diagnostic HSymbol
 targetSymbol target

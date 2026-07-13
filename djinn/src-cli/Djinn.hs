@@ -19,6 +19,7 @@ import Djinn.Internal.HTypes
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.Help
 import Language.Haskell.Djex.Djinn
+import Language.Haskell.Synthesis.Candidate (candidateOutput)
 import qualified Language.Haskell.Synthesis.Diagnostic as Diagnostic
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
@@ -371,7 +372,8 @@ formatDjinnResult prType s name ctx goal result =
           contextPrefix ctx ++ show goal]
       | otherwise = []
     renderClause = either (Left . show) Right .
-        Generated.renderFunctionClause (Generated.defaultRenderOptions id)
+        Generated.renderFunctionClause (Generated.defaultRenderOptions id) .
+        candidateOutput
 
 commandDiagnostic :: Diagnostic.Diagnostic -> String
 commandDiagnostic failure = case reverse $ Diagnostic.diagnosticContext failure of

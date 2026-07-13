@@ -3,10 +3,14 @@ module Main (main) where
 import Data.Either (isRight)
 import Data.List (nub)
 import Djinn.Core
-  ( Declaration (Function)
+  ( Declaration (DataType, Function)
   , declare
   , defaultQueryOptions
+  , emptyEnvironment
+  , optionAlternatives
   , optionBudget
+  , optionCutoff
+  , optionSorted
   , parseHType
   , standardEnvironment
   )
@@ -29,7 +33,11 @@ import Language.Haskell.Exference.EnvironmentParser
   , checkSourceEnvironment
   , checkedSourceInventory
   )
-import Language.Haskell.Synthesis.Candidate (candidateOutput)
+import Language.Haskell.Synthesis.Candidate
+  ( candidateDetails
+  , candidateOutput
+  , candidateResidualConstraints
+  )
 import Language.Haskell.Synthesis.Constraint (Constraint (Constraint))
 import Language.Haskell.Synthesis.Diagnostic
   ( Severity (Warning)
@@ -54,7 +62,7 @@ import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Search
   ( Completion (Finished, Truncated)
   , Progress (Completed)
-  , TruncationReason (ChoicePointLimitReached)
+  , TruncationReason (CandidateLimitReached, ChoicePointLimitReached)
   , batchCandidates
   , batchMetadata
   , batchProgress
@@ -111,10 +119,41 @@ tests = testGroup "Djex facade"
           Just _ -> True
           Nothing -> False
       case batchCandidates $ resultSearch result of
-        candidate : _ ->
-          renderFunctionClause (defaultRenderOptions id) candidate @?=
+        candidate : _ -> do
+          candidateResidualConstraints candidate @?= []
+          djinnUnusedBinderFraction (candidateDetails candidate) @?= 0
+          djinnBinderCount (candidateDetails candidate) @?= 2
+          renderFunctionClause
+              (defaultRenderOptions id) (candidateOutput candidate) @?=
             Right "swap (a, b) = (b, a)"
         [] -> fail "Djinn reported candidate evidence without a candidate"
+  , testCase "preserve Djinn candidate-limit truncation" $ do
+      first <- expectRight $ parseHType "a"
+      second <- expectRight $ parseHType "b"
+      goal <- expectRight $ parseHType "T a b -> (a, b)"
+      environment <- expectRight $ declare
+        (DataType "T" ["a", "b"] [("C", [first, second])])
+        emptyEnvironment
+      session <- expectRight $ mkDjinnSession environment
+      target <- expectRight $ mkIdentifier "pair"
+      result <- expectRight $ runDjinnQuery session QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+            { optionAlternatives = True
+            , optionSorted = False
+            , optionCutoff = 1
+            }
+        }
+      resultEvidence result @?= ValidatedCandidates
+      length (batchCandidates $ resultSearch result) @?= 1
+      case batchProgress $ resultSearch result of
+        Completed (Truncated reasons) ->
+          assertBool "candidate-limit truncation reason was lost" $
+            CandidateLimitReached `elem` reasons
+        completion -> fail $ "expected candidate truncation, got "
+          ++ show completion
   , testCase "keep Djinn evidence independent of search completion" $ do
       session <- expectRight $ mkDjinnSession standardEnvironment
       target <- expectRight $ mkIdentifier "peirce"

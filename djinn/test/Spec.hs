@@ -8,12 +8,13 @@ import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
 import Djinn.Core (
-    Context, Declaration(..), QueryOutcome(..),
+    Context, Declaration(..), DjinnCandidateDetails(..), QueryOutcome(..),
     SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
     SynthesisTypeError(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
-    functionDeclarations, inhabit,
-    kArrow, kStar, optionAlternatives, optionBudget, optionSorted,
+    functionDeclarations, generatedReportCandidates,
+    generatedReportCompletion, inhabit, inhabitGenerated,
+    kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
     fromSynthesisKind, fromSynthesisType,
     mkContext, parseHKind, parseHType, removeDeclaration,
@@ -34,6 +35,7 @@ import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
+import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
@@ -856,6 +858,38 @@ testWholeConstructorPayload = do
             optionAlternatives = True,
             optionSorted = False
             }
+        oneCandidate = options {optionCutoff = 1}
+        allCandidates = options {optionCutoff = 2}
+    limited <- either fail return $
+        inhabitGenerated oneCandidate environment [] "f" goal
+    assertEqual "the first canonical candidate survives the cutoff"
+        1 (length $ generatedReportCandidates limited)
+    assertEqual "stopping before another proof is a candidate truncation"
+        (SharedSearch.truncated SharedSearch.CandidateLimitReached)
+        (generatedReportCompletion limited)
+    complete <- either fail return $
+        inhabitGenerated allCandidates environment [] "f" goal
+    assertEqual "exhausting both proofs completes the canonical search"
+        SharedSearch.Finished (generatedReportCompletion complete)
+    maximumCutoff <- either fail return $ inhabitGenerated
+        options {optionCutoff = maxBound} environment [] "f" goal
+    assertEqual "the largest valid cutoff does not overflow its witness bound"
+        SharedSearch.Finished (generatedReportCompletion maximumCutoff)
+    case generatedReportCandidates complete of
+        [candidate] -> do
+            assertEqual "equivalent proofs are de-duplicated canonically"
+                (Right expected) $ SharedGenerated.renderFunctionClause
+                    (SharedGenerated.defaultRenderOptions id)
+                    (SharedCandidate.candidateOutput candidate)
+            assertEqual "Djinn discharges every candidate constraint"
+                [] $ SharedCandidate.candidateResidualConstraints candidate
+            let details = SharedCandidate.candidateDetails candidate
+            assertEqual "the candidate uses every generated binder"
+                0 $ djinnUnusedBinderFraction details
+            assertEqual "ranking accounts for argument and case binders"
+                3 $ djinnBinderCount details
+        candidates -> fail $ "expected one canonical candidate, got " ++
+            show (length candidates)
     report <- either fail return $
         inhabit options environment [] "f" goal
     assertEqual "the public boundary should de-duplicate equivalent clauses"

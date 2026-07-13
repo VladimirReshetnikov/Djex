@@ -384,8 +384,9 @@ The REPL state commits its editable `Environment` together with an opaque
 `DjinnSession`; every declaration or deletion reseals the session before either
 field changes. Queries and instance methods go through `runDjinnQuery`, consume
 shared logical evidence and operational completion independently, and render
-the returned shared `FunctionClause`s. This preserves the declaration language
-while eliminating the frontend's former direct `inhabit`/`QueryReport` path.
+the `FunctionClause` output of returned shared `Candidate`s. This preserves the
+declaration language while eliminating the frontend's former direct
+`inhabit`/`QueryReport` path.
 
 ## Using djinn-core as a library
 
@@ -418,13 +419,18 @@ demo = do
 
 The essentials: `declare`/`removeDeclaration` grow and shrink an
 `Environment` (starting from `emptyEnvironment` or `standardEnvironment`);
-`parseHType`/`parseHKind` parse with full-input validation; `inhabit` runs
-the full pipeline — translation, budgeted proof search, independent proof
-checking, and rendering — and reports the formula and first proof term for
-debugging. `reportCompletion` uses the shared operational vocabulary:
+`parseHType`/`parseHKind` parse with full-input validation;
+`inhabitGenerated` runs translation, budgeted proof search, independent proof
+checking, and shared-candidate construction without choosing a renderer.
+The historical `inhabit` entry point is its explicit rendered-string
+compatibility wrapper. Both report the formula and first proof term for
+debugging. Their completion uses the shared operational vocabulary:
 `Finished` means the configured proof exploration completed, while
-`Truncated ChoicePointLimitReached` explains `Undecided`. This status remains
-separate from Djinn's proof-backed `Unrealizable` outcomes. `resolveContext`
+`Truncated ChoicePointLimitReached` explains `Undecided`, and
+`Truncated CandidateLimitReached` says that another proof was observed beyond
+`optionCutoff`. The latter inspects only that one overflow witness instead of
+forcing the remaining proof stream. This status remains separate from Djinn's
+proof-backed `Unrealizable` outcomes. `resolveContext`
 instantiates one class context;
 `resolveInstanceMethods` jointly checks an instance target and all of its
 prerequisites before returning the target's instantiated methods. A query's
@@ -440,15 +446,18 @@ shared superclass and instance semantics that Djinn does not implement.
 The opaque Djinn `Environment` itself now round-trips through
 `Language.Haskell.Synthesis.Environment`; reverse lowering reruns Djinn's
 stricter kind, dependency, recursion, and method validation transactionally.
-Successful `QueryReport`s also expose `reportGeneratedClauses`, the validated
-shared AST from which the legacy rendered strings are derived.
+Successful canonical reports expose `generatedReportCandidates`; every Djinn
+candidate has empty residual constraints and retains the unused-binder fraction
+and binder count used by the historical ranking policy. Compatibility
+`QueryReport`s still expose `reportGeneratedClauses`, derived from those
+candidates alongside the legacy rendered strings.
 The default `djex` library additionally exposes
 `Language.Haskell.Djex.Djinn`: `mkDjinnSession` pairs an `Environment` with the
 exact sealed shared inventory that validated it, and `runDjinnQuery` accepts a
-generic `QueryRequest HType QueryOptions`. Its `QueryResult` contains only the
-structured clauses plus Djinn's formula/proof metadata, and maps the four
-compatibility outcomes to explicit evidence without conflating them with
-operational completion.
+generic `QueryRequest HType QueryOptions`. Its `QueryResult` carries the same
+shared `Candidate` structure as Exference plus Djinn's formula/proof metadata,
+and consumes canonical evidence without conflating it with operational
+completion.
 The core `Djinn.Internal.*` modules listed above remain
 exposed by `djinn-core` for research use, but they provide raw constructors
 that can violate these invariants and carry no stability promise. The
@@ -459,7 +468,7 @@ The central pipeline is:
 ```text
 command -> HType -> kind check -> Formula -> LJT proof search
         -> proof-term normalization -> independent proof check
-        -> Haskell AST cleanup -> shared Generated scope check/renderer
+        -> Haskell AST cleanup -> shared Candidate + Generated scope check/renderer
         -> printed clause
 ```
 

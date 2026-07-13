@@ -79,7 +79,10 @@ run package commands from the repository root or from `djex/`.
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
 the same types or options. `mkDjinnSession` seals an opaque Djinn environment;
-`runDjinnQuery` returns structured generated clauses in one terminal batch.
+`runDjinnQuery` returns shared candidates containing structured generated
+clauses, empty residual constraints, and Djinn's unused-binder ranking details
+in one terminal batch. A proof beyond `optionCutoff` produces
+`Truncated CandidateLimitReached` without forcing the proof-stream suffix.
 Proof-backed `ProvedUninhabitable`, target-reference evidence, and
 budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.

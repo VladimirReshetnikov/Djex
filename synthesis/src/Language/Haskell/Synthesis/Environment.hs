@@ -21,6 +21,7 @@ module Language.Haskell.Synthesis.Environment
 
 import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
+import Control.Monad.Trans.State.Strict (State, evalState, get, put)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
@@ -45,6 +46,8 @@ data Environment typeVariable kindVariable annotation = Environment
   , instancesByHead ::
       Map (Constraint (Type typeVariable))
         (Declaration typeVariable kindVariable annotation)
+  , canonicalInstanceHeads ::
+      Set (Constraint (Type (CanonicalInstanceVariable typeVariable)))
   , occupiedValueNames :: Set Name
   }
   deriving (Eq, Show, Functor, Generic)
@@ -61,6 +64,25 @@ data EnvironmentError typeVariable
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData typeVariable => NFData (EnvironmentError typeVariable)
+
+-- | Private alpha-normal form for variables in an instance head.  Bound
+-- variables are identified by lexical scope and first occurrence within that
+-- scope; genuinely free variables retain their source identity.  Source names
+-- remain untouched everywhere else, including the public instance index and
+-- duplicate diagnostics.
+data CanonicalInstanceVariable typeVariable
+  = CanonicalBoundVariable !Int !Int
+  | CanonicalFreeVariable typeVariable
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData typeVariable =>
+    NFData (CanonicalInstanceVariable typeVariable)
+
+data CanonicalizationState typeVariable = CanonicalizationState
+  { canonicalVariableSlots :: Map (Int, typeVariable) Int
+  , nextCanonicalSlotByScope :: Map Int Int
+  , nextCanonicalScope :: !Int
+  }
 
 mkEnvironment
   :: Ord typeVariable
@@ -94,12 +116,13 @@ groundEnvironmentKinds environment = do
     , constructorsByName = constructorsByName environment
     , classesByName = groundedClasses
     , instancesByHead = groundedInstances
+    , canonicalInstanceHeads = canonicalInstanceHeads environment
     , occupiedValueNames = occupiedValueNames environment
     }
 
 emptyEnvironment :: Environment typeVariable kindVariable annotation
 emptyEnvironment = Environment [] Map.empty Map.empty Map.empty
-  Map.empty Map.empty Set.empty
+  Map.empty Map.empty Set.empty Set.empty
 
 insert
   :: Ord typeVariable
@@ -124,8 +147,8 @@ insert environment (index, declaration) = do
             $ classesByName withType
         }
       foldM (flip insertValue) withClass methods
-    InstanceDeclaration _ _ _ headConstraint ->
-      insertInstance headConstraint declaration environment
+    InstanceDeclaration _ variables _ headConstraint ->
+      insertInstance variables headConstraint declaration environment
   Right indexed
     { reversedDeclarations = declaration : reversedDeclarations indexed }
 
@@ -178,18 +201,108 @@ reserveValueName name environment
 
 insertInstance
   :: Ord typeVariable
-  => Constraint (Type typeVariable)
+  => [typeVariable]
+  -> Constraint (Type typeVariable)
   -> Declaration typeVariable kindVariable annotation
   -> Environment typeVariable kindVariable annotation
   -> Either (EnvironmentError typeVariable)
       (Environment typeVariable kindVariable annotation)
-insertInstance headConstraint declaration environment
-  | Map.member headConstraint $ instancesByHead environment =
+insertInstance variables headConstraint declaration environment
+  | canonicalHead `Set.member` canonicalInstanceHeads environment =
       Left $ DuplicateInstanceDeclaration headConstraint
   | otherwise = Right environment
       { instancesByHead = Map.insert headConstraint declaration
           $ instancesByHead environment
+      , canonicalInstanceHeads = Set.insert canonicalHead
+          $ canonicalInstanceHeads environment
       }
+ where
+  canonicalHead = canonicalizeInstanceHead variables headConstraint
+
+canonicalizeInstanceHead
+  :: Ord typeVariable
+  => [typeVariable]
+  -> Constraint (Type typeVariable)
+  -> Constraint (Type (CanonicalInstanceVariable typeVariable))
+canonicalizeInstanceHead variables headConstraint =
+  evalState (canonicalizeInstanceConstraint bindings headConstraint) initialState
+ where
+  -- Instance binders form an implicit outer scope. Their declaration order is
+  -- not semantically significant, so slots are allocated when the head first
+  -- mentions each variable rather than from the binder list.
+  bindings = Map.fromList [(variable, 0) | variable <- variables]
+  initialState = CanonicalizationState Map.empty Map.empty 1
+
+canonicalizeInstanceConstraint
+  :: Ord typeVariable
+  => Map typeVariable Int
+  -> Constraint (Type typeVariable)
+  -> State (CanonicalizationState typeVariable)
+      (Constraint (Type (CanonicalInstanceVariable typeVariable)))
+canonicalizeInstanceConstraint bindings constraint = Constraint
+  (constraintClass constraint)
+  <$> mapM (canonicalizeInstanceType bindings) (constraintArguments constraint)
+
+canonicalizeInstanceType
+  :: Ord typeVariable
+  => Map typeVariable Int
+  -> Type typeVariable
+  -> State (CanonicalizationState typeVariable)
+      (Type (CanonicalInstanceVariable typeVariable))
+canonicalizeInstanceType bindings source = case source of
+  TypeVariable variable -> TypeVariable
+    <$> canonicalizeVariable bindings variable
+  TypeConstructor name -> pure $ TypeConstructor name
+  TypeApplication function argument -> TypeApplication
+    <$> canonicalizeInstanceType bindings function
+    <*> canonicalizeInstanceType bindings argument
+  FunctionType parameter result -> FunctionType
+    <$> canonicalizeInstanceType bindings parameter
+    <*> canonicalizeInstanceType bindings result
+  TupleType boxity elements -> TupleType boxity
+    <$> mapM (canonicalizeInstanceType bindings) elements
+  ForallType variables constraints body -> do
+    scope <- allocateCanonicalScope
+    let nestedBindings = Map.fromList
+          [(variable, scope) | variable <- variables] `Map.union` bindings
+    canonicalConstraints <- mapM
+      (canonicalizeInstanceConstraint nestedBindings) constraints
+    canonicalBody <- canonicalizeInstanceType nestedBindings body
+    pure $ ForallType
+      [ CanonicalBoundVariable scope slot
+      | (slot, _) <- zip [0 ..] variables
+      ] canonicalConstraints canonicalBody
+
+canonicalizeVariable
+  :: Ord typeVariable
+  => Map typeVariable Int
+  -> typeVariable
+  -> State (CanonicalizationState typeVariable)
+      (CanonicalInstanceVariable typeVariable)
+canonicalizeVariable bindings variable = case Map.lookup variable bindings of
+  Nothing -> pure $ CanonicalFreeVariable variable
+  Just scope -> do
+    state <- get
+    case Map.lookup (scope, variable) $ canonicalVariableSlots state of
+      Just slot -> pure $ CanonicalBoundVariable scope slot
+      Nothing -> do
+        let slot = Map.findWithDefault 0 scope
+              $ nextCanonicalSlotByScope state
+        put state
+          { canonicalVariableSlots = Map.insert (scope, variable) slot
+              $ canonicalVariableSlots state
+          , nextCanonicalSlotByScope = Map.insert scope (slot + 1)
+              $ nextCanonicalSlotByScope state
+          }
+        pure $ CanonicalBoundVariable scope slot
+
+allocateCanonicalScope
+  :: State (CanonicalizationState typeVariable) Int
+allocateCanonicalScope = do
+  state <- get
+  let scope = nextCanonicalScope state
+  put state { nextCanonicalScope = scope + 1 }
+  pure scope
 
 environmentDeclarations
   :: Environment typeVariable kindVariable annotation

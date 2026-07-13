@@ -753,6 +753,98 @@ environmentTests = testGroup "environments"
       Environment.mkEnvironment [instanceDeclaration, instanceDeclaration] @?=
         Left (Environment.DuplicateInstanceDeclaration
           $ Constraint className [])
+  , testCase "reject alpha-equivalent instance heads with source diagnostics" $ do
+      let className = right $ mkIdentifier "C"
+          firstHead = Constraint className
+            [SharedType.TypeVariable "a"]
+          renamedHead = Constraint className
+            [SharedType.TypeVariable "renamed"]
+          first = environmentInstance className ["a"]
+            $ constraintArguments firstHead
+          renamed = environmentInstance className ["renamed"]
+            $ constraintArguments renamedHead
+          environment = right $ Environment.mkEnvironment [first]
+      Map.keys (Environment.instanceDeclarationMap environment) @?= [firstHead]
+      Environment.mkEnvironment [first, renamed] @?=
+        Left (Environment.DuplicateInstanceDeclaration renamedHead)
+      _ <- evaluate $ force environment
+      pure ()
+  , testCase "ignore instance binder spelling and declaration order" $ do
+      let className = right $ mkIdentifier "PairClass"
+          variable = SharedType.TypeVariable
+          first = environmentInstance className ["a", "b"]
+            [variable "a", variable "b"]
+          reorderedHead = Constraint className
+            [variable "x", variable "y"]
+          reordered = environmentInstance className ["y", "x"]
+            $ constraintArguments reorderedHead
+      Environment.mkEnvironment [first, reordered] @?=
+        Left (Environment.DuplicateInstanceDeclaration reorderedHead)
+  , testCase "canonicalize nested forall binders by scope and occurrence" $ do
+      let className = right $ mkIdentifier "Nested"
+          innerClassName = right $ mkIdentifier "Inner"
+          variable = SharedType.TypeVariable
+          firstType = SharedType.ForallType ["innerA", "innerB"]
+            [Constraint innerClassName [variable "innerB"]]
+            $ SharedType.TupleType Boxed
+                [variable "innerA", variable "outer", variable "innerB"]
+          renamedType = SharedType.ForallType ["right", "left"]
+            [Constraint innerClassName [variable "right"]]
+            $ SharedType.TupleType Boxed
+                [variable "left", variable "renamedOuter", variable "right"]
+          first = environmentInstance className ["outer"] [firstType]
+          renamedHead = Constraint className [renamedType]
+          renamed = environmentInstance className ["renamedOuter"] [renamedType]
+      Environment.mkEnvironment [first, renamed] @?=
+        Left (Environment.DuplicateInstanceDeclaration renamedHead)
+  , testCase "respect nested forall shadowing" $ do
+      let className = right $ mkIdentifier "Scoped"
+          variable = SharedType.TypeVariable
+          shadowingType outer inner = SharedType.FunctionType
+            (variable outer)
+            (SharedType.ForallType [inner] [] $ variable inner)
+          alphaRenamed = environmentInstance className ["outer"]
+            [shadowingType "outer" "inner"]
+          sourceShadowing = environmentInstance className ["a"]
+            [shadowingType "a" "a"]
+          capturesOuter = environmentInstance className ["x"]
+            [ SharedType.FunctionType (variable "x")
+                (SharedType.ForallType ["inner"] [] $ variable "x")
+            ]
+      Environment.mkEnvironment [sourceShadowing, alphaRenamed] @?=
+        Left (Environment.DuplicateInstanceDeclaration
+          $ Constraint className [shadowingType "outer" "inner"])
+      Map.size (Environment.instanceDeclarationMap $ right
+          $ Environment.mkEnvironment [sourceShadowing, capturesOuter]) @?= 2
+  , testCase "preserve sharing and qualified identity in instance heads" $ do
+      let namespaceA = right $ mkModuleName "A"
+          namespaceB = right $ mkModuleName "B"
+          classA = right $ mkQualifiedIdentifier namespaceA "C"
+          classB = right $ mkQualifiedIdentifier namespaceB "C"
+          typeA = right $ mkQualifiedIdentifier namespaceA "T"
+          typeB = right $ mkQualifiedIdentifier namespaceB "T"
+          variable = SharedType.TypeVariable
+          repeated = environmentInstance classA ["a"]
+            [variable "a", variable "a"]
+          distinct = environmentInstance classA ["x", "y"]
+            [variable "x", variable "y"]
+          qualified = environmentInstance classB ["z"] [variable "z"]
+          constructedA = environmentInstance classA []
+            [SharedType.TypeConstructor typeA]
+          constructedB = environmentInstance classA []
+            [SharedType.TypeConstructor typeB]
+          environment = right
+            $ Environment.mkEnvironment
+                [repeated, distinct, qualified, constructedA, constructedB]
+      Map.size (Environment.instanceDeclarationMap environment) @?= 5
+  , testCase "report invalid declarations before alpha duplicates" $ do
+      let className = right $ mkIdentifier "C"
+          variable = SharedType.TypeVariable "a"
+          first = environmentInstance className ["a"] [variable]
+          invalid = environmentInstance className ["a", "a"] [variable]
+      Environment.mkEnvironment [first, invalid] @?= Left
+        (Environment.InvalidEnvironmentDeclaration 1
+          $ Declaration.DuplicateTypeParameter "a")
   , testCase "qualified type names remain nominally distinct" $ do
       let namespaceA = right $ mkModuleName "A"
           namespaceB = right $ mkModuleName "B"
@@ -784,6 +876,15 @@ environmentTests = testGroup "environments"
         (Environment.InvalidEnvironmentDeclaration 0
           $ Declaration.InvalidDeclaredTypeName invalidName)
   ]
+ where
+  environmentInstance
+    :: Name
+    -> [String]
+    -> [SharedType.Type String]
+    -> Declaration.Declaration String Int ()
+  environmentInstance className variables arguments =
+    Declaration.InstanceDeclaration () variables []
+      $ Constraint className arguments
 
 declarationTests :: TestTree
 declarationTests = testGroup "declarations"

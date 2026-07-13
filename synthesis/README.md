@@ -138,8 +138,10 @@ datatype stubs whose omitted shape is supplied by later instances.
 `Language.Haskell.Synthesis.Environment` seals structurally valid declarations
 and builds deterministic type/class, value/method, constructor, and
 instance-head indexes. It rejects cross-declaration namespace collisions and
-duplicate instances while preserving qualified-name identity. It does not
-pretend that an index is also a kind proof or a backend's resolution policy.
+duplicate instances modulo alpha-renaming of declaration and nested `forall`
+binders, while preserving the original source heads in its public index and
+diagnostics and preserving qualified-name identity. It does not pretend that
+an index is also a kind proof or a backend's resolution policy.
 
 `Language.Haskell.Synthesis.Inventory` is the frontend handoff that keeps a
 sealed `Environment` together with the kind assumptions inferred from exactly

@@ -1,6 +1,7 @@
 module Language.Haskell.Exference.Core.ExpressionCheck
   ( ExpressionCheckError (..)
   , checkExpression
+  , checkExpressionWithRigidInstantiation
   )
 where
 
@@ -13,6 +14,7 @@ import qualified Data.Set as Set
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
+import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
 
@@ -27,6 +29,8 @@ data ExpressionCheckError
   | UnsupportedNestedForall HsType
   | RefutableConstraints [HsConstraint]
   | ConstraintMismatch [HsConstraint] [HsConstraint]
+  | RigidInstantiationFailure RigidInstantiationError
+  | RigidInstantiationPlanMismatch [TVarId] [TVarId]
   deriving (Eq, Show)
 
 data CheckState = CheckState
@@ -50,7 +54,32 @@ checkExpression
   -> Expression
   -> Either ExpressionCheckError ()
 checkExpression classEnvironment functions deconstructors goal expected expression = do
-  let checkedGoal = instantiateGoal goal
+  plan <- either (Left . RigidInstantiationFailure) Right
+    $ planRigidInstantiation
+        (mkRigidInstantiationContext $ EnvDictionary
+          functions deconstructors $ qClassEnv_env classEnvironment)
+        (Set.toList $ qClassEnv_constraints classEnvironment)
+        goal
+  checkExpressionWithRigidInstantiation plan classEnvironment functions
+    deconstructors goal expected expression
+
+-- | Check using the same precomputed forall-opening plan as live search.
+-- Generated annotations, residual constraints, and the query assumptions in
+-- the live 'QueryClassEnv' may already contain this plan's rigid variables, so
+-- none of them may be mistaken for pre-existing input when checking a result.
+checkExpressionWithRigidInstantiation
+  :: RigidInstantiationPlan
+  -> QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> [HsConstraint]
+  -> Expression
+  -> Either ExpressionCheckError ()
+checkExpressionWithRigidInstantiation plan classEnvironment functions
+    deconstructors goal expected expression = do
+  checkedGoal <- instantiateGoal plan goal
+  let
       initialState = CheckState
         { checkNextVariable = 1 + maximum (largestId checkedGoal : expressionTypeIds expression)
         , checkSubstitutions = IntMap.empty
@@ -203,20 +232,34 @@ zonk ty = do
   let (_, applied) = applySubsts substitutions ty
   if applied == ty then pure ty else zonk applied
 
-instantiateGoal :: HsType -> HsType
-instantiateGoal = instantiateFrom 0
+instantiateGoal
+  :: RigidInstantiationPlan
+  -> HsType
+  -> Either ExpressionCheckError HsType
+instantiateGoal plan goal
+  | plannedBinders /= actualBinders = Left
+      $ RigidInstantiationPlanMismatch plannedBinders actualBinders
+  | otherwise = Right $ instantiateFrom instantiations quantifiedGoal
  where
+  instantiations = rigidInstantiations plan
+  plannedBinders = map fst instantiations
+  quantifiedGoal = forallify goal
+  actualBinders = collectBinders quantifiedGoal
+
   -- Validation permits a chain of prenex quantifiers.  Search consumes one
-  -- layer per step and allocates rigid IDs monotonically, so the independent
-  -- checker must mirror that policy rather than stripping only the first
-  -- layer and rejecting the second as rank-N.
-  instantiateFrom nextConstant (TypeForall variables _ body) =
-    let constants = map TypeConstant
-          [nextConstant .. nextConstant + length variables - 1]
-        substitutions = IntMap.fromList $ zip variables constants
+  -- layer per step, so consume the same ordered segment for each layer.  A
+  -- single IntMap for the whole chain would collapse legal shadowed IDs.
+  instantiateFrom remaining (TypeForall variables _ body) =
+    let (current, rest) = splitAt (length variables) remaining
+        substitutions = IntMap.fromList
+          [(variable, TypeConstant rigid) | (variable, rigid) <- current]
         instantiatedBody = snd $ applySubsts substitutions body
-    in instantiateFrom (nextConstant + length variables) instantiatedBody
-  instantiateFrom _ goal = goal
+    in instantiateFrom rest instantiatedBody
+  instantiateFrom _ instantiated = instantiated
+
+  collectBinders (TypeForall variables _ body) =
+    variables ++ collectBinders body
+  collectBinders _ = []
 
 expressionTypeIds :: Expression -> [TVarId]
 expressionTypeIds (ExpVar _ ty) = [largestId ty]

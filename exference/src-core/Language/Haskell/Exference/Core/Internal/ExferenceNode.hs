@@ -147,7 +147,10 @@ data SearchNode = SearchNode
   , nodeExpression      :: Expression
   , nodeNextVarId       :: {-# UNPACK #-} !TVarId
   , nodeMaxTVarId       :: {-# UNPACK #-} !TVarId
-  , nodeNextNVarId      :: {-# UNPACK #-} !TVarId -- id used when resolving rankN-types
+    -- The exact forall-binder/skolem plan is finite and prevalidated. Keeping
+    -- the remaining pairs avoids both counter overflow and disagreement with
+    -- the independent checker when nested leading foralls shadow an ID.
+  , nodeRigidInstantiations :: [(TVarId, TVarId)]
   , nodeDepth           :: {-# UNPACK #-} !Penalty
   , nodeLastStepReason  :: String
   , nodeLastStepBinding :: Maybe QualifiedName

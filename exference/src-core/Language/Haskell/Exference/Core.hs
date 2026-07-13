@@ -23,6 +23,7 @@ module Language.Haskell.Exference.Core
   , C.ExferenceGeneratedCandidate
   , C.mkExferenceGeneratedCandidate
   , C.typeVariableHints
+  , E.typeVariableHintsInEnvironment
   , E.ExferenceProjectionError (..)
   , E.SearchCompletion (..)
   , E.SearchStatus (..)

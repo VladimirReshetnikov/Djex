@@ -58,6 +58,7 @@ import Language.Haskell.Exference.Core
   , toGeneratedSearchBatch
   , toGeneratedSearchBatchWithHints
   , typeVariableHints
+  , typeVariableHintsInEnvironment
   , validateExferenceQuery
   , validateExferenceInput
   )
@@ -77,6 +78,12 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
+  )
+import Language.Haskell.Exference.Core.RigidInstantiation
+  ( RigidInstantiationError (..)
+  , mkRigidInstantiationContext
+  , planRigidInstantiation
+  , rigidInstantiations
   )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.TypeUtils
@@ -949,6 +956,122 @@ tests = testGroup "Exference"
             $ all (Map.notMember excludedName) usages
           assertBool "retained homonym disappeared from binding metadata"
             $ any (Map.member retainedName) usages
+      , testCase "pre-existing rigid bindings cannot impersonate query skolems" $ do
+          let bindingName = name "rigidValue"
+              binding = FunctionBinding
+                (TypeConstant 0) bindingName 0 [] []
+              goal = TypeForall [1] [] $ TypeVar 1
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = [binding]
+                }
+              expression = ExpName bindingName
+              classes = mkQueryClassEnv emptyClassEnv []
+          validateExferenceInput input @?= Right ()
+          case findOneExpression input of
+            Nothing -> pure ()
+            Just _ -> fail "a pre-existing rigid value escaped its identity"
+          checkExpression classes [binding] [] goal [] expression @?=
+            Left (TypeMismatch (TypeConstant 0) (TypeConstant 1))
+      , testCase "sealed plans align C8 across search checker and hints" $ do
+          let seedName = name "rigidSeed"
+              seed = FunctionBinding (TypeConstant 7) seedName 0 [] []
+              goal = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = [seed]
+                }
+              query = legacyInputQuery input
+              sourceNames = Map.singleton "source" 0
+              identity = ExpLambda 1 (TypeConstant 8)
+                $ ExpVar 1 $ TypeConstant 8
+          environment <- expectRight $ sealLegacyEnvironment input
+          hints <- expectRight $ typeVariableHintsInEnvironment
+            environment query sourceNames
+          Map.lookup (SharedType.RigidVariable 8) hints @?= Just "source"
+          Map.lookup (SharedType.RigidVariable 0) hints @?= Nothing
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [seed] []
+            goal [] identity @?= Right ()
+          batches <- expectRight
+            $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
+                hints environment query
+          let candidates = concatMap SharedSearch.batchCandidates batches
+          assertBool "C8 identity was filtered by live checking"
+            $ not $ null candidates
+          case candidates of
+            candidate : _ -> Map.lookup (SharedType.RigidVariable 8)
+                (exferenceTypeVariableHints
+                  $ SharedCandidate.candidateDetails candidate)
+              @?= Just "source"
+            [] -> fail "C8 search produced no candidate"
+      , testCase "rigid planning handles negatives and leading forall chains" $ do
+          let seed = FunctionBinding (TypeConstant (-3))
+                (name "negativeSeed") 0 [] []
+              environment = EnvDictionary [seed] [] emptyClassEnv
+              goal = TypeForall [4] []
+                $ TypeForall [9] []
+                $ TypeArrow (TypeVar 9) (TypeVar 9)
+          plan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext environment) [] goal
+          rigidInstantiations plan @?= [(4, 0), (9, 1)]
+      , testCase "rigid planning traverses signatures contexts and data fields" $ do
+          let constrained = FunctionBinding (TypeVar 0) (name "constrained") 0
+                [HsConstraint (name "External") [TypeConstant 12]] []
+              deconstructor = DeconstructorBinding
+                (TypeCons $ name "Box")
+                [ConstructorBinding (name "Box") [TypeConstant 20]] False
+              environment = EnvDictionary
+                [constrained] [deconstructor] emptyClassEnv
+              goal = TypeForall [4]
+                [HsConstraint (name "Goal") [TypeConstant 15]]
+                $ TypeForall [9] [] $ TypeVar 9
+              assumptions =
+                [HsConstraint (name "Assumption") [TypeConstant 30]]
+          plan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext environment) assumptions goal
+          rigidInstantiations plan @?= [(4, 31), (9, 32)]
+      , testCase "rigid exhaustion is query-dependent and option errors win" $ do
+          let rigidBinding identifier = FunctionBinding
+                (TypeConstant identifier) (name "boundary") 0 [] []
+              maximalInput = identityInput
+                { input_goalType = TypeConstant maxBound
+                , input_envFuncs = [rigidBinding maxBound]
+                }
+              polymorphic = TypeForall [0] [] $ TypeVar 0
+              oneBinder = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              twoBinders = TypeForall [0, 1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+          maximalEnvironment <- expectRight
+            $ sealLegacyEnvironment maximalInput
+          let monomorphicQuery = legacyInputQuery maximalInput
+              exhaustedQuery = monomorphicQuery
+                {queryGoalType = polymorphic}
+              invalidOptions = exhaustedQuery {queryMaximumSteps = 0}
+              exhaustion = RigidIdentifierExhaustion
+                $ RigidIdentifierSupplyExhausted (Just maxBound) 1
+          validateExferenceQuery maximalEnvironment monomorphicQuery @?= Right ()
+          validateExferenceQuery maximalEnvironment exhaustedQuery @?=
+            Left exhaustion
+          validateExferenceQuery maximalEnvironment invalidOptions @?=
+            Left (InvalidMaxSteps 0)
+
+          let penultimateInput = identityInput
+                { input_goalType = oneBinder
+                , input_envFuncs = [rigidBinding (maxBound - 1)]
+                }
+          penultimateEnvironment <- expectRight
+            $ sealLegacyEnvironment penultimateInput
+          validateExferenceQuery penultimateEnvironment
+            (legacyInputQuery penultimateInput) @?= Right ()
+          case findOneExpression penultimateInput of
+            Just _ -> pure ()
+            Nothing -> fail "the final Int rigid identifier was not usable"
+          validateExferenceQuery penultimateEnvironment
+              ((legacyInputQuery penultimateInput) {queryGoalType = twoBinders})
+            @?= Left (RigidIdentifierExhaustion
+              $ RigidIdentifierSupplyExhausted (Just $ maxBound - 1) 2)
       , testCase "legacy validation preserves compound-error precedence" $ do
           let duplicateName = name "duplicate"
               binding = FunctionBinding (TypeVar 0) duplicateName 0 [] []

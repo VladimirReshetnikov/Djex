@@ -54,7 +54,7 @@ import Language.Haskell.Exference.Core
   , Penalty (..)
   , findGeneratedSearchBatchesWithHintsInEnvironmentEither
   , mkExferenceEnvironment
-  , typeVariableHints
+  , typeVariableHintsInEnvironment
   )
 import Language.Haskell.Exference.Core.Declaration (SynthesisInventory)
 import Language.Haskell.Exference.Core.ExferenceStats
@@ -442,20 +442,23 @@ runExferenceQuery session request = do
     )
     Right
     $ fromSynthesisType sharedGoal
-  let hints = typeVariableHints backendGoal
-        $ requestSourceTypeVariables request
-      input = searchQuery (Just target) backendGoal
+  let input = searchQuery (Just target) backendGoal
         $ requestOptions query
+      searchFailure failure = failureDiagnostic
+        (if optionFailure failure
+          then "DJEX_EXF_OPTIONS"
+          else "DJEX_EXF_QUERY")
+        (if optionFailure failure
+          then "invalid Exference search options"
+          else "Exference rejected the query")
+        failure
+  hints <- either (Left . searchFailure) Right
+    $ typeVariableHintsInEnvironment
+        (sessionSearchEnvironment session)
+        input
+        (requestSourceTypeVariables request)
   batches <- either
-    (\failure -> Left $ failureDiagnostic
-      (if optionFailure failure
-        then "DJEX_EXF_OPTIONS"
-        else "DJEX_EXF_QUERY")
-      (if optionFailure failure
-        then "invalid Exference search options"
-        else "Exference rejected the query")
-      failure
-    )
+    (Left . searchFailure)
     Right
     $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
         hints (sessionSearchEnvironment session) input

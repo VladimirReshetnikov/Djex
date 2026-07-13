@@ -31,6 +31,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , mkExferenceEnvironment
   , validateExferenceQuery
   , validateExferenceInput
+  , typeVariableHintsInEnvironment
   )
 where
 
@@ -41,12 +42,13 @@ import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.Candidate
 import Language.Haskell.Exference.Core.Internal.Candidate
-  (projectValidatedCandidate)
+  (projectValidatedCandidate, typeVariableHintsWithPlan)
 import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
+import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.Internal.Unify
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
@@ -129,7 +131,9 @@ data ExferenceInput = ExferenceInput
 -- generated syntax have been checked once.  The constructor remains private:
 -- removing a binding for one query is safe, but adding or replacing one must
 -- cross 'mkExferenceEnvironment' again.
-newtype ExferenceEnvironment = ExferenceEnvironment EnvDictionary
+data ExferenceEnvironment = ExferenceEnvironment
+  !EnvDictionary
+  !RigidInstantiationContext
 
 -- | The query-varying half of an Exference search input.
 --
@@ -168,6 +172,7 @@ data ExferenceInputError
   | InvalidMaxQueueSize Int
   | InvalidMaxDepth Penalty
   | InvalidHeuristic String Penalty
+  | RigidIdentifierExhaustion RigidInstantiationError
   deriving (Eq, Show)
 
 type ExferenceOutputElement = (Expression, [HsConstraint], ExferenceStats)
@@ -349,7 +354,7 @@ findEngineChunks
       { environmentFunctions = allFunctions
       , environmentDeconstructors = deconss'
       , environmentClasses = sClassEnv
-      })
+      } rigidContext)
     ExferenceQuery
       { queryGoalType = rawType
       , queryExcludedBindings = excludedBindings
@@ -379,6 +384,13 @@ findEngineChunks
     , findQueue = Q.singleton 0 rootSearchNode
     }
   t = forallify rawType
+  -- Query validation constructed this same finite plan before exposing the
+  -- lazy trace. Recomputing only the goal-sized suffix from the cached
+  -- environment maximum is cheap and keeps the raw engine total thereafter.
+  rigidPlan = case planRigidInstantiation rigidContext [] rawType of
+    Right plan -> plan
+    Left failure -> error $ "validated rigid-instantiation invariant violated: "
+      ++ show failure
   rootSearchNode = SearchNode
     { nodeGoals           = Seq.singleton
         (TGoal (VarBinding 0 t) initialScopeId)
@@ -391,7 +403,7 @@ findEngineChunks
     , nodeExpression      = ExpHole 0
     , nodeNextVarId       = 1 -- TODO: change to 0?
     , nodeMaxTVarId       = largestId t
-    , nodeNextNVarId      = 0
+    , nodeRigidInstantiations = rigidInstantiations rigidPlan
     , nodeDepth           = 0.0
     , nodeLastStepReason  = ""
     , nodeLastStepBinding = Nothing
@@ -476,7 +488,8 @@ findEngineChunks
           | otherwise = [simplified, rawExpression]
         firstChecked [] = Nothing
         firstChecked (candidate : remainingCandidates) =
-          case checkExpression contxt funcs deconss' t constraints candidate of
+          case checkExpressionWithRigidInstantiation
+              rigidPlan contxt funcs deconss' t constraints candidate of
             Right () -> case SharedGenerated.validateExpressionSyntax
                 $ toGeneratedExpression candidate of
               Right () -> Just candidate
@@ -557,6 +570,21 @@ findGeneratedSearchBatchesInEnvironment
 findGeneratedSearchBatchesInEnvironment typeHints environment =
   map (projectGeneratedBatch typeHints) . findEngineChunks environment
 
+-- | Propagate frontend spellings through the exact rigid-variable plan of a
+-- checked query. Validation happens first so this helper preserves the same
+-- first-error precedence as the search entry point.
+typeVariableHintsInEnvironment
+  :: ExferenceEnvironment
+  -> ExferenceQuery
+  -> TypeVarIndex
+  -> Either ExferenceInputError ExferenceTypeVariableHints
+typeVariableHintsInEnvironment environment@(ExferenceEnvironment _ context)
+    query sourceNames = do
+  validateExferenceQuery environment query
+  plan <- either (Left . RigidIdentifierExhaustion) Right
+    $ planRigidInstantiation context [] $ queryGoalType query
+  pure $ typeVariableHintsWithPlan plan sourceNames
+
 projectGeneratedBatch
   :: ExferenceTypeVariableHints
   -> EngineChunk
@@ -591,6 +619,8 @@ validateExferenceInput input = do
     $ [queryGoalType query]
     ++ environmentTypes environment
     ++ concatMap (constraint_params . snd) allConstraints
+  validateRigidInstantiation
+    (mkRigidInstantiationContext environment) query
  where
   environment = inputEnvironment input
   query = inputQuery input
@@ -606,6 +636,7 @@ mkExferenceEnvironment
 mkExferenceEnvironment environment = do
   validateExferenceEnvironment environment
   pure $ ExferenceEnvironment environment
+    $ mkRigidInstantiationContext environment
 
 -- | Validate the varying part of a search against an already sealed class
 -- environment.  Excluding bindings only removes capabilities and therefore
@@ -614,7 +645,7 @@ validateExferenceQuery
   :: ExferenceEnvironment
   -> ExferenceQuery
   -> Either ExferenceInputError ()
-validateExferenceQuery (ExferenceEnvironment environment) query = do
+validateExferenceQuery (ExferenceEnvironment environment rigidContext) query = do
   validateQueryLimits query
   validateQueryHeuristics query
   validateQueryForall query
@@ -623,6 +654,7 @@ validateExferenceQuery (ExferenceEnvironment environment) query = do
   validateInputTypes
     $ queryGoalType query
     : concatMap (constraint_params . snd) constraints
+  validateRigidInstantiation rigidContext query
  where
   constraints = queryConstraints query
 
@@ -776,6 +808,15 @@ validateInputTypes types = case listToMaybe
     Left $ InvalidInputType typeExpression typeError
   Nothing -> Right ()
 
+validateRigidInstantiation
+  :: RigidInstantiationContext
+  -> ExferenceQuery
+  -> Either ExferenceInputError ()
+validateRigidInstantiation context query = either
+  (Left . RigidIdentifierExhaustion)
+  (const $ Right ())
+  $ planRigidInstantiation context [] $ queryGoalType query
+
 inputEnvironment :: ExferenceInput -> EnvDictionary
 inputEnvironment input = EnvDictionary
   { environmentFunctions = input_envFuncs input
@@ -803,7 +844,11 @@ validatedInputParts
   :: ExferenceInput
   -> (ExferenceEnvironment, ExferenceQuery)
 validatedInputParts input =
-  (ExferenceEnvironment $ inputEnvironment input, inputQuery input)
+  ( ExferenceEnvironment environment $ mkRigidInstantiationContext environment
+  , inputQuery input
+  )
+ where
+  environment = inputEnvironment input
 
 -- Report the complete stable duplicate set.  Search explores every raw
 -- binding while the independent checker historically selected the first one,
@@ -1022,14 +1067,21 @@ stateStep multiPM allowConstrs h = do
       -> HsType
       -> StateT SearchNode m ()
     forallStep vs cs t = do
-      dataIds <- mapM (const builderAllocNVar) vs
+      instantiations <- state $ \node ->
+        let (current, remaining) = splitAt (length vs)
+              $ nodeRigidInstantiations node
+        in if map fst current == vs
+          then (current, node {nodeRigidInstantiations = remaining})
+          else error $ "rigid-instantiation plan disagrees with forall layer: "
+            ++ show vs ++ " /= " ++ show (map fst current)
       modify $ \node -> node
         { nodeDepth = nodeDepth node + heuristics_functionGoalTransform h
           -- TODO: consider a distinct forall-opening heuristic.
         , nodeLastStepBinding = Nothing
         }
       builderSetReason "forall-type goal transformation"
-      let substs = IntMap.fromList $ zip vs $ TypeConstant <$> dataIds
+      let substs = IntMap.fromList
+            [(binder, TypeConstant rigid) | (binder, rigid) <- instantiations]
       modify $ \node -> node
         { nodeGoals = TGoal
             (VarBinding var $ snd $ applySubsts substs t) scopeId

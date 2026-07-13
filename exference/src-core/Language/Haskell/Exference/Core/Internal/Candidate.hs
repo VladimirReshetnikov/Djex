@@ -8,6 +8,7 @@ module Language.Haskell.Exference.Core.Internal.Candidate
   , mkExferenceGeneratedCandidate
   , projectValidatedCandidate
   , typeVariableHints
+  , typeVariableHintsWithPlan
   ) where
 
 import Control.DeepSeq (NFData, force)
@@ -17,18 +18,25 @@ import GHC.Generics (Generic)
 
 import qualified Language.Haskell.Exference.Core.Expression as Exference
 import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats)
+import Language.Haskell.Exference.Core.FunctionBinding (EnvDictionary (..))
+import Language.Haskell.Exference.Core.RigidInstantiation
+  ( RigidInstantiationPlan
+  , mkRigidInstantiationContext
+  , planRigidInstantiation
+  , rigidInstantiations
+  )
 import Language.Haskell.Exference.Core.Types
   ( HsConstraint
-  , HsType (TypeForall)
+  , HsType
   , SynthesisType
   , SynthesisTypeError
   , SynthesisVariable
   , TVarId
   , TypeVarIndex
+  , emptyStaticClassEnv
   , toSynthesisConstraint
   , toSynthesisConstraintStructure
   )
-import Language.Haskell.Exference.Core.TypeUtils (forallify)
 import Language.Haskell.Synthesis.Candidate (Candidate (..))
 import Language.Haskell.Synthesis.Constraint (Constraint)
 import qualified Language.Haskell.Synthesis.Generated as Generated
@@ -133,25 +141,42 @@ candidateHoles expression = case expression of
     candidateHoles scrutinee
       ++ concatMap (candidateHoles . snd) alternatives
 
--- | Invert a frontend source-name index and propagate outer query-binder names
--- to the rigid constants introduced by Exference's initial forall step.  The
--- tagged shared keys keep flexible and rigid ID spaces distinct even when
--- their integers coincide.
+-- | Environment-free compatibility helper.  Core and Djex session searches
+-- use the checked environment-aware helper exported from @Core@, because an
+-- existing rigid variable in an environment changes the allocation plan.
+--
+-- If the finite identifier space is exhausted there can be no valid search;
+-- retaining only flexible source hints keeps this convenience function total.
 typeVariableHints :: HsType -> TypeVarIndex -> ExferenceTypeVariableHints
-typeVariableHints goal sourceNames = flexibleHints `Map.union` rigidHints
+typeVariableHints goal sourceNames = either
+  (const $ flexibleTypeVariableHints sourceNames)
+  (`typeVariableHintsWithPlan` sourceNames)
+  $ planRigidInstantiation
+      (mkRigidInstantiationContext
+        $ EnvDictionary [] [] emptyStaticClassEnv) [] goal
+
+-- | Apply source spellings to the exact rigid-instantiation plan consumed by
+-- search and independent checking.
+typeVariableHintsWithPlan
+  :: RigidInstantiationPlan
+  -> TypeVarIndex
+  -> ExferenceTypeVariableHints
+typeVariableHintsWithPlan plan sourceNames =
+  flexibleHints `Map.union` rigidHints
  where
-  flexibleHints = foldr insertFlexible Map.empty $ Map.toAscList sourceNames
-  insertFlexible (sourceName, variable) = Map.insert
-    (SharedType.FlexibleVariable variable) sourceName
+  flexibleHints = flexibleTypeVariableHints sourceNames
 
   rigidHints = Map.fromList
     [ (SharedType.RigidVariable rigid, sourceName)
-    | (rigid, flexible) <- zip [0 ..] outerBinders
+    | (flexible, rigid) <- rigidInstantiations plan
     , Just sourceName <- [Map.lookup
         (SharedType.FlexibleVariable flexible) flexibleHints]
     ]
 
-  outerBinders = collectBinders $ forallify goal
-  collectBinders (TypeForall variables _ body) =
-    variables ++ collectBinders body
-  collectBinders _ = []
+flexibleTypeVariableHints
+  :: TypeVarIndex
+  -> ExferenceTypeVariableHints
+flexibleTypeVariableHints = foldr insertFlexible Map.empty . Map.toAscList
+ where
+  insertFlexible (sourceName, variable) = Map.insert
+    (SharedType.FlexibleVariable variable) sourceName

@@ -89,6 +89,7 @@ Library
     Language.Haskell.Exference.Core.Name,
     Language.Haskell.Exference.Core.Types,
     Language.Haskell.Exference.Core.TypeUtils,
+    Language.Haskell.Exference.Core.RigidInstantiation,
     Language.Haskell.Exference.Core.ExferenceStats,
     Language.Haskell.Exference.Core.Candidate,
     Language.Haskell.Exference.Core.ConstraintSolver,
@@ -270,6 +271,7 @@ Library exference-core
     Language.Haskell.Exference.Core.Name
     Language.Haskell.Exference.Core.Types
     Language.Haskell.Exference.Core.TypeUtils
+    Language.Haskell.Exference.Core.RigidInstantiation
     Language.Haskell.Exference.Core.ExferenceStats
     Language.Haskell.Exference.Core.Candidate
     Language.Haskell.Exference.Core.ConstraintSolver
@@ -324,6 +326,7 @@ Library exference-frontend
     Language.Haskell.Exference.Core.Name,
     Language.Haskell.Exference.Core.Types,
     Language.Haskell.Exference.Core.TypeUtils,
+    Language.Haskell.Exference.Core.RigidInstantiation,
     Language.Haskell.Exference.Core.ExferenceStats,
     Language.Haskell.Exference.Core.Candidate,
     Language.Haskell.Exference.Core.ConstraintSolver,

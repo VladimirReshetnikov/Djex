@@ -6,7 +6,6 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
   , builderApplySubst
   , builderAllocVar
   , builderAllocHole
-  , builderAllocNVar
   , builderRecordVarUse
   , builderRaiseMaxTVarId
   )
@@ -40,13 +39,6 @@ builderAllocHole :: Monad m => StateT SearchNode m TVarId
 builderAllocHole = state $ \node ->
   let vid = nodeNextVarId node
   in (vid, node { nodeNextVarId = vid + 1 })
-
--- Allocate the fresh rigid identifier used while opening a rank-N type.
--- As with expression holes, allocation returns the pre-increment value.
-builderAllocNVar :: Monad m => StateT SearchNode m TVarId
-builderAllocNVar = state $ \node ->
-  let vid = nodeNextNVarId node
-  in (vid, node { nodeNextNVarId = vid + 1 })
 
 -- Allocate a variable whose usage must be tracked by the search heuristic.
 builderAllocVar :: Monad m => StateT SearchNode m TVarId

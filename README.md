@@ -59,6 +59,10 @@ The filesystem and Cabal-project migration is equally deliberate:
 
 - the former top-level `synthesis/`, `djinn/`, and `exference/` trees now live
   at `djex/synthesis/`, `djex/djinn/`, and `djex/exference/`;
+- both backend trees follow the same live layout: `src-core/`,
+  `src-frontend/`, `app/`, and one explicit directory per test suite. The
+  package root similarly uses `src/`, `app/`, `test-integration/`,
+  `test-facade/`, and `test-cli/`;
 - their separate package descriptions and project files have been replaced by
   `djex/djex.cabal`; the repository-root `cabal.project` is the single solver
   root, and Cabal discovers it by walking to the parent when invoked here;

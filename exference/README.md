@@ -56,9 +56,10 @@ It uses `transformers` directly: expression checking has strict state, while
 the branching search deliberately retains lazy `StateT`.  Its hidden search
 state uses ordinary record selectors and explicit updates, keeping the engine
 independent of `mtl`, generated optics, and Template Haskell.
-The public named `exference-frontend` sublibrary contains the
-`haskell-src-exts` frontend and environment loader and preserves the historical
-core import paths through Cabal reexports. The stable
+The public named `exference-frontend` sublibrary is rooted at `src-frontend/`;
+it contains the `haskell-src-exts` frontend and environment loader and
+preserves the historical core import paths through Cabal reexports. The
+compatibility executable has its own thin `app/` root. The stable
 `Language.Haskell.Djex.Exference` adapter now lives in `exference-core`; the
 frontend adds `Language.Haskell.Djex.Exference.HaskellSrc` for directory loading
 and Haskell type parsing. The package's default `djex` library re-exports the

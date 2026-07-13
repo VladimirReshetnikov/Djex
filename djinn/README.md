@@ -363,7 +363,7 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn.Core` | The stable, validated library API (see below). |
 | `Language.Haskell.Djex.Djinn` | Opaque checked session and shared query/evidence/search adapter. |
 | `Djinn.Internal.Declaration` | Djinn declaration compatibility values and checked shared-IR lowering. |
-| `Djinn` (`src-cli/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
+| `Djinn` (`src-frontend/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Djinn compatibility adapter over shared kind inference, plus saturated-synonym policy. |
 | `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
@@ -380,9 +380,9 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn.Internal.Help` | Extended in-program help. |
 
 `Djinn.Core`, `Language.Haskell.Djex.Djinn`, and the proof, type, environment,
-and validation modules under `src/` form the public named `djinn-core`
+and validation modules under `src-core/` form the public named `djinn-core`
 component. `Djinn`,
-`Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-cli/` in the
+`Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-frontend/` in the
 named `djinn-frontend` component; Help and REPL are private implementation
 modules. The executable's `app/` source root contains only its launcher, so
 neither the frontend nor executable can accidentally compile core modules as

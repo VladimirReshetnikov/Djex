@@ -126,7 +126,7 @@ Library
 Executable djex
   import:         build-settings
   Main-Is:        Main.hs
-  Hs-Source-Dirs: app-djex
+  Hs-Source-Dirs: app
   Other-Modules:
     Djex.Driver
     Paths_djex
@@ -165,7 +165,7 @@ Test-Suite djex-tests
   import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
-  Hs-Source-Dirs: test
+  Hs-Source-Dirs: test-integration
   -- This integration suite deliberately constructs raw Exference fixtures.
   -- Facade-only clients do not acquire the research core transitively.
   Build-Depends:
@@ -200,7 +200,7 @@ Test-Suite synthesis-tests
 Library djinn-core
   import:           build-settings, containers-dep, transformers-dep
   Visibility:       public
-  Hs-Source-Dirs:   djinn/src
+  Hs-Source-Dirs:   djinn/src-core
 
   Build-Depends:
     djex:synthesis
@@ -227,7 +227,7 @@ Library djinn-core
 Library djinn-frontend
   import:           build-settings, transformers-dep
   Visibility:       public
-  Hs-Source-Dirs:   djinn/src-cli
+  Hs-Source-Dirs:   djinn/src-frontend
 
   Build-Depends:
     djex:djinn-core,
@@ -253,7 +253,7 @@ Test-Suite djinn-tests
   import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
-  Hs-Source-Dirs: djinn/test
+  Hs-Source-Dirs: djinn/test-unit
   Build-Depends:
     djex:djinn-core,
     djex:synthesis
@@ -262,7 +262,7 @@ Test-Suite djinn-property-tests
   import:         tasty-test, tasty-quickcheck-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        PropertySpec.hs
-  Hs-Source-Dirs: djinn/test
+  Hs-Source-Dirs: djinn/test-property
   Build-Depends:  djex:djinn-core
 
 Benchmark djinn-bench
@@ -279,7 +279,7 @@ Test-Suite djinn-cli-tests
   import:         cli-test
   Type:           exitcode-stdio-1.0
   Main-Is:        CLISpec.hs
-  Hs-Source-Dirs: djinn/test
+  Hs-Source-Dirs: djinn/test-cli
   Build-Tool-Depends: djex:djinn
 
 Library exference-core
@@ -346,7 +346,7 @@ Test-Suite exference-core-api-tests
 Library exference-frontend
   import:         build-settings, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep
   Visibility:     public
-  Hs-Source-Dirs: exference/src
+  Hs-Source-Dirs: exference/src-frontend
 
   Exposed-Modules:
     Language.Haskell.Djex.Exference.HaskellSrc
@@ -390,7 +390,7 @@ Library exference-frontend
 Executable exference
   import:         build-settings, containers-dep
   Main-Is:        Main.hs
-  Hs-Source-Dirs: exference/src-exference
+  Hs-Source-Dirs: exference/app
   Other-Modules:  Paths_djex
   Autogen-Modules: Paths_djex
 
@@ -407,7 +407,7 @@ Test-Suite exference-tests
   import:          tasty-hunit-test, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep
   Type:            exitcode-stdio-1.0
   Main-Is:         Spec.hs
-  Hs-Source-Dirs:  exference/test
+  Hs-Source-Dirs:  exference/test-unit
   Other-Modules:
     Paths_djex
     CompatibilityImport
@@ -422,5 +422,5 @@ Test-Suite exference-cli-tests
   import:         cli-test
   Type:           exitcode-stdio-1.0
   Main-Is:        CLISpec.hs
-  Hs-Source-Dirs: exference/test
+  Hs-Source-Dirs: exference/test-cli
   Build-Tool-Depends: djex:exference

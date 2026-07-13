@@ -1607,6 +1607,19 @@ testEnvironmentValidation = do
         axiom = ("given", HTCon "Base")
         classDefinition =
             ("UsesBase", ([], [("useBase", HTCon "Base")]))
+        invalidTypes =
+            [ ("Alias", (["a"], HTVar "a", KStar))
+            , ("Broken", ([], HTCon "Alias", KStar))
+            ]
+        invalidAxioms =
+            [ ("first", HTCon "MissingFirst")
+            , ("second", HTCon "MissingSecond")
+            ]
+        invalidClass =
+            ("BrokenClass",
+                ([], [ ("firstMethod", HTCon "MissingFirst")
+                     , ("secondMethod", HTCon "MissingSecond")
+                     ]))
     assertLeft "deletion must reject a dependent synonym"
         (validateEnvironment withoutBase [] [])
     assertLeft "replacement must reject a newly unsaturated dependency"
@@ -1619,6 +1632,18 @@ testEnvironmentValidation = do
         (validateEnvironment
             [("Other", ([], HTUnion [("Other", [])], KStar))]
             [] [])
+    -- Batch preparation must not change the transactional validation order:
+    -- types precede values, values precede classes, and methods retain source
+    -- order within their class.
+    assertLeftContains "type errors still precede dependent declarations"
+        "type environment: Type synonym Alias"
+        (validateEnvironment invalidTypes invalidAxioms [invalidClass])
+    assertLeftContains "axioms still precede classes in source order"
+        "axiom first:"
+        (validateEnvironment [] invalidAxioms [invalidClass])
+    assertLeftContains "class methods still retain source order"
+        "method firstMethod of class BrokenClass:"
+        (validateEnvironment [] [] [invalidClass])
 
 testPrintedValueNamespace :: IO ()
 testPrintedValueNamespace = do

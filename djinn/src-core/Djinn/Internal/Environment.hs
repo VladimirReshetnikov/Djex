@@ -31,9 +31,9 @@ import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck
     ( PreparedKindCheck
-    , htCheckEnv
-    , htCheckType
-    , htInferClassKinds
+    , htCheckTypePrepared
+    , htInferClassKindsPrepared
+    , prepareKindEnvironment
     , prepareKindCheckWithAssumptions
     )
 import Djinn.Internal.HTypes
@@ -318,9 +318,10 @@ validateEnvironment ::
     Either String ([TypeDefinition], [ClassDefinition])
 validateEnvironment definitions axioms classes = do
     checkValueNamespace axioms classes
-    checked <- withContext "type environment" $ htCheckEnv definitions
-    mapM_ (checkAxiom checked) axioms
-    refreshed <- mapM (checkClass checked) classes
+    (checked, prepared) <- withContext "type environment" $
+        prepareKindEnvironment definitions
+    mapM_ (checkAxiom prepared) axioms
+    refreshed <- mapM (checkClass prepared) classes
     return (checked, refreshed)
 
 -- Function assumptions and class selectors are both printed as term-level
@@ -358,22 +359,24 @@ checkValueNamespace axioms classes = do
     checkMethodsAcrossClasses ((owner, (_, methods)) : rest) =
         checkMethodNames owner methods rest >> checkMethodsAcrossClasses rest
 
-checkAxiom :: [TypeDefinition] -> Axiom -> Either String ()
-checkAxiom definitions (name, axiomType) =
-    withContext ("axiom " ++ name) $ htCheckType definitions axiomType
+checkAxiom :: PreparedKindCheck -> Axiom -> Either String ()
+checkAxiom prepared (name, axiomType) =
+    withContext ("axiom " ++ name) $
+        htCheckTypePrepared prepared axiomType
 
-checkClass :: [TypeDefinition] -> ClassDefinition
+checkClass :: PreparedKindCheck -> ClassDefinition
            -> Either String ClassDefinition
-checkClass definitions (className, (params, methods)) = do
+checkClass prepared (className, (params, methods)) = do
     mapM_ checkMethod methods
     kinds <- withContext ("class " ++ className) $
-        htInferClassKinds definitions (map fst params) (map snd methods)
+        htInferClassKindsPrepared prepared
+            (map fst params) (map snd methods)
     return (className, (kinds, methods))
   where
     checkMethod (methodName, methodType) =
         withContext
             ("method " ++ methodName ++ " of class " ++ className) $
-            htCheckType definitions methodType
+            htCheckTypePrepared prepared methodType
 
 withContext :: String -> Either String a -> Either String a
 withContext description result =

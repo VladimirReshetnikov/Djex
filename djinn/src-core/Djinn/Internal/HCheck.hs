@@ -3,7 +3,8 @@
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.HCheck(
-    PreparedKindCheck, prepareKindCheck, prepareKindCheckWithAssumptions,
+    PreparedKindCheck, prepareKindEnvironment,
+    prepareKindCheckWithAssumptions,
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htCheckTypePrepared, htCheckTypeKindPrepared,
     htCheckTypesKindsPrepared,
@@ -144,12 +145,31 @@ fromGroundKind kind = case kind of
 
 htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))]
            -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
-htCheckEnv its = do
-    mapM_ (checkSynonymSaturation its . declarationBody) its
+htCheckEnv = fmap fst . prepareKindEnvironment
+
+-- | Infer a complete type environment and retain the immutable information
+-- needed to check every dependent declaration.  The inferred constructor
+-- map is already exactly the assumptions a later check would reconstruct;
+-- returning it here also lets the whole validation batch share one synonym
+-- arity table.
+prepareKindEnvironment
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> Either String
+        ( [(HSymbol, ([HSymbol], HType, HKind))]
+        , PreparedKindCheck
+        )
+prepareKindEnvironment its = do
+    let preparedSynonymArities = synonymArities its
+    mapM_ (checkSynonymSaturationWith preparedSynonymArities .
+        declarationBody) its
     declarations <- mapM toKindDeclaration its
     inferred <- first show $
         SharedInference.inferAcyclicTypeConstructorKinds declarations
-    mapM (attachKind inferred) its
+    checked <- mapM (attachKind inferred) its
+    let assumptions = SharedInference.emptyKindAssumptions
+            { SharedInference.typeConstructorKinds = inferred }
+    return
+        (checked, PreparedKindCheck preparedSynonymArities assumptions)
   where
     declarationBody (_, (_, body, _)) = body
 
@@ -180,11 +200,6 @@ htCheckEnv its = do
 -- Djinn's Haskell 98 subset every synonym result has kind @Type@, so they are
 -- rejected there as an ill-kinded application rather than misreported as an
 -- unsaturated synonym.
-checkSynonymSaturation :: [(HSymbol, ([HSymbol], HType, a))]
-                       -> HType -> Either String ()
-checkSynonymSaturation definitions =
-    checkSynonymSaturationWith (synonymArities definitions)
-
 synonymArities :: [(HSymbol, ([HSymbol], HType, a))] -> [(HSymbol, Int)]
 synonymArities definitions =
     [(name, length parameters)

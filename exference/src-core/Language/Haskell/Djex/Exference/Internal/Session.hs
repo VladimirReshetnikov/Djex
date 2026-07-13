@@ -25,7 +25,7 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
-import Data.Void (Void, absurd)
+import Data.Void (Void)
 
 import Language.Haskell.Exference.Core
   ( ExferenceInputError
@@ -70,12 +70,13 @@ import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
-  , InventoryError (..)
   , inventoryEnvironment
-  , mkInventory
+  , mkInventoryFromEnvironmentWithClassPolicy
   )
 import Language.Haskell.Synthesis.KindInference
-  ( KindInventoryPolicy (OpenKindInventory) )
+  ( ClassKindPolicy (GeneralizeClassKinds)
+  , KindInventoryPolicy (OpenKindInventory)
+  )
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -130,12 +131,10 @@ sealNeutralExferenceSessionWithPolicy
   -> NeutralEnvironment
   -> Either Diagnostic ExferenceSession
 sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
-  inventory <- case mkInventory OpenKindInventory
-      $ SharedEnvironment.environmentDeclarations environment of
-    Left (UngroundedInventoryKind impossible) -> absurd impossible
-    Left failure -> Left $ preparationFailure
-      "cannot validate the neutral Exference inventory" failure
-    Right value -> Right value
+  inventory <- first
+    (preparationFailure "cannot validate the neutral Exference inventory")
+    $ mkInventoryFromEnvironmentWithClassPolicy
+        OpenKindInventory GeneralizeClassKinds environment
   (synonyms, backend) <- first
     (preparationFailure "cannot prepare the neutral Exference environment")
     $ prepareNeutralSynthesisInventory inventory

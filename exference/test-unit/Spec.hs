@@ -868,6 +868,16 @@ tests = testGroup "Exference"
               left = pair (TypeVar 1) (TypeVar 2)
               right = pair (maybeType $ TypeVar 2) integer
           assertUnifierCloses left right
+      , testCase "shared unification rejects a recursive scoped variable" $ do
+          let variable = TypeVar 0
+              recursive = TypeApp (TypeCons $ name "F") variable
+          -- The ordinary symmetric unifier deliberately gives its two inputs
+          -- independent namespaces, so the equal spelling is not a cycle.
+          assertBool "disjoint namespaces unexpectedly shared variable 0"
+            $ case unifyDisjoint variable recursive of
+                Just _ -> True
+                Nothing -> False
+          unifyShared variable recursive @?= Nothing
       , testCase "symmetric unification allocates across the Int boundary" $ do
           let apply constructor arguments = foldl TypeApp
                 (TypeCons $ name constructor) arguments
@@ -906,6 +916,7 @@ tests = testGroup "Exference"
               types = atoms ++ [pair left right | left <- atoms, right <- atoms]
               pairs = [(left, right) | left <- types, right <- types]
           mapM_ (uncurry assertUnifierCloses) pairs
+          mapM_ (uncurry assertSharedUnifierCloses) pairs
           mapM_ (uncurry $ assertOffsetUnifierCloses 20) pairs
       , testCase "failed synonym expansion preserves arguments" $ do
           let alias = name "Alias"
@@ -2225,6 +2236,38 @@ tests = testGroup "Exference"
             Right batch -> assertBool
               "common batch unexpectedly gained candidates"
               $ null $ SharedSearch.batchCandidates batch
+      , testCase "recursive scoped unification does not consume the step budget" $ do
+          let variable = TypeVar 0
+              applied constructor argument =
+                TypeApp (TypeCons $ name constructor) argument
+              provider = TypeArrow
+                (applied "G" variable)
+                (applied "H" $ applied "F" variable)
+              scopedGoal = applied "H" variable
+              result = TypeCons $ name "R"
+              outer = FunctionBinding result (name "outer") 0 []
+                [TypeArrow provider scopedGoal]
+              heuristics = defaultHeuristicsConfig
+                { heuristics_stepProvidedGood = 0
+                , heuristics_stepProvidedBad = 1
+                , heuristics_stepEnvGood = 0
+                , heuristics_stepEnvBad = 1
+                }
+              input = identityInput
+                { input_goalType = result
+                , input_envFuncs = [outer]
+                , input_maxSteps = 4
+                , input_maxDepth = Just 0
+                , input_heuristicsConfig = heuristics
+                }
+          chunk <- lastChunk input
+          assertBool "cyclic scoped application produced a candidate"
+            $ null $ chunkElements chunk
+          -- Both legal partial applications exceed the depth cap.  Treating
+          -- the scoped provider as an independent namespace would instead
+          -- misclassify @H a ~ H (F a)@ as a cheap direct match and leave a
+          -- checker-doomed node queued at the step limit.
+          chunkStatus chunk @?= SearchStatus SearchPruned 0 2
       , testCase "continuing batches retain cumulative pruning metadata" $ do
           let binding = name "usedBinding"
               chunk = ExferenceChunkElement
@@ -4424,6 +4467,19 @@ assertUnifierCloses left right = case unify left right of
         ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
         ++ " from " ++ show leftSubstitutions
         ++ " and " ++ show rightSubstitutions
+      )
+      (leftResult == rightResult)
+
+assertSharedUnifierCloses :: HsType -> HsType -> IO ()
+assertSharedUnifierCloses left right = case unifyShared left right of
+  Nothing -> pure ()
+  Just substitutions -> do
+    let leftResult = snd $ applySubsts substitutions left
+        rightResult = snd $ applySubsts substitutions right
+    assertBool
+      ( "unclosed shared substitution for " ++ show left ++ " ~ " ++ show right
+        ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
+        ++ " from " ++ show substitutions
       )
       (leftResult == rightResult)
 

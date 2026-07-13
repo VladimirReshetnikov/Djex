@@ -1,6 +1,8 @@
 module Language.Haskell.Exference.Core.Unify
   ( TypeEq (..)
   , unify
+  , unifyDisjoint
+  , unifyShared
   , unifyOffset
   , unifyRight
   , unifyRightEqs

@@ -1,8 +1,7 @@
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE MonadComprehensions #-}
-
 module Language.Haskell.Exference.Core.Internal.Unify
   ( unify
+  , unifyDisjoint
+  , unifyShared
   , unifyOffset
   , unifyRight
   , unifyRightEqs
@@ -20,8 +19,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
--- import Debug.Hood.Observe
-
 
 
 data TypeEq = TypeEq !HsType
@@ -37,23 +34,57 @@ occursIn i (TypeArrow t1 t2)   = occursIn i t1 || occursIn i t2
 occursIn i (TypeApp t1 t2)     = occursIn i t1 || occursIn i t2
 occursIn i (TypeForall js _ t) = (i `notElem` js) && occursIn i t
 
--- unification of types.
--- returns two substitutions: one for variables in the first type,
--- one for variables in the second. In the symmetric case,
--- substituting the right-hand (second) type will be preferred.
+-- | Backward-compatible name for 'unifyDisjoint'.
+{-# INLINE unify #-}
+unify :: HsType -> HsType -> Maybe (Substs, Substs)
+unify = unifyDisjoint
+
+-- | Unify types whose flexible identifiers belong to independent namespaces.
+-- Returns one substitution per input. In the symmetric case, substituting the
+-- right-hand (second) type will be preferred.
 -- examples:
 -- unify v C -> ([v=>C], [])
 -- unify C v -> ([], [v=>C])
 -- unify v w -> ([], [w=>v])
-{-# INLINE unify #-}
-unify :: HsType -> HsType -> Maybe (Substs, Substs)
-unify left right = unifyTagged left right id
+{-# INLINE unifyDisjoint #-}
+unifyDisjoint :: HsType -> HsType -> Maybe (Substs, Substs)
+unifyDisjoint left right = unifyTagged left right id
+
+
+-- | Unify types whose flexible identifiers already belong to one shared
+-- namespace.  Equal identifiers on the two sides denote the same metavariable,
+-- so the occurs check spans both inputs.  Use 'unifyDisjoint' instead when each
+-- input has an independent namespace and therefore needs its own substitution.
+{-# INLINE unifyShared #-}
+unifyShared :: HsType -> HsType -> Maybe Substs
+unifyShared left right = do
+  -- Reusing one tag constructor is intentional: it makes a variable with the
+  -- same identifier literally the same solver variable on both sides.
+  taggedLeft <- tagType LeftVariable left
+  taggedRight <- tagType LeftVariable right
+  substitutions <- solveTagged [(taggedLeft, taggedRight)] Map.empty
+  pure $ IntMap.fromList $ mapMaybe (project substitutions) variables
+ where
+  variables = Set.toAscList $ Set.union (freeVars left) (freeVars right)
+  project substitutions variable =
+    let resolved = untagTagged taggedIdentifier
+          $ zonkTagged substitutions
+          $ TaggedVar
+          $ LeftVariable variable
+    in if resolved == TypeVar variable
+       then Nothing
+       else Just (variable, resolved)
+  -- 'RightVariable' cannot be produced by this entry point, but keeping the
+  -- projection total makes that solver invariant local and explicit.
+  taggedIdentifier tagged = case tagged of
+    LeftVariable variable -> variable
+    RightVariable variable -> variable
 
 
 {-# INLINE unifyOffset #-}                   -- left, rightOffset
 unifyOffset :: HsType -> HsTypeOffset -> Maybe (Substs, Substs)
 unifyOffset left (HsTypeOffset right offset) =
-  checkedOffsetType offset right >>= unify left
+  checkedOffsetType offset right >>= unifyDisjoint left
 
 -- Symmetric unification needs tagged variables internally.  The old pair of
 -- untagged substitution maps lost which namespace a range belonged to; a
@@ -189,18 +220,15 @@ projectTagged left right rightKey substitutions = do
         (rightKey variable) rightCanonical
       project side key variable =
         let externalKey = key variable
-            resolved = untag $ zonkTagged substitutions
+            resolved = untagTagged externalIdentifier
+              $ zonkTagged substitutions
               $ TaggedVar $ side variable
         in if resolved == TypeVar externalKey
            then Nothing
            else Just (externalKey, resolved)
-      untag ty = case ty of
-        TaggedVar (LeftVariable variable) -> TypeVar variable
-        TaggedVar (RightVariable variable) -> TypeVar $ canonicalRight variable
-        TaggedConstant constant -> TypeConstant constant
-        TaggedConstructor constructor -> TypeCons constructor
-        TaggedArrow parameter result -> TypeArrow (untag parameter) (untag result)
-        TaggedApplication function argument -> TypeApp (untag function) (untag argument)
+      externalIdentifier tagged = case tagged of
+        LeftVariable variable -> variable
+        RightVariable variable -> canonicalRight variable
   pure
     ( IntMap.fromList $ mapMaybe (project LeftVariable id) leftVariables
     , IntMap.fromList $ mapMaybe (project RightVariable rightKey) rightVariables
@@ -208,6 +236,18 @@ projectTagged left right rightKey substitutions = do
  where
   leftVariables = Set.toAscList $ freeVars left
   rightVariables = Set.toAscList $ freeVars right
+
+untagTagged :: (TaggedVariable -> TVarId) -> TaggedType -> HsType
+untagTagged variableIdentifier ty = case ty of
+  TaggedVar variable -> TypeVar $ variableIdentifier variable
+  TaggedConstant constant -> TypeConstant constant
+  TaggedConstructor constructor -> TypeCons constructor
+  TaggedArrow parameter result -> TypeArrow
+    (untagTagged variableIdentifier parameter)
+    (untagTagged variableIdentifier result)
+  TaggedApplication function argument -> TypeApp
+    (untagTagged variableIdentifier function)
+    (untagTagged variableIdentifier argument)
 
 allocateRightVariables
   :: Set.Set TVarId
@@ -268,34 +308,3 @@ uniStepRight (TypeEq (TypeCons s1) (TypeCons s2)) | s1==s2 = Just (Right [])
 uniStepRight (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
 uniStepRight (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
 uniStepRight _ = Nothing
-
-
-
---unifyDist :: HsType -> HsType -> Maybe Substs
---unifyDist t1 t2 = unify t1 $ distinctify t1 t2
-
--- tries to unify two types, under the assumption that one is supposed
--- to serve as the parameter (at some levels) to the other one (when at
--- least one is a function, that is.)
--- either is BROKEN, or does something other than i expected.
--- not used (or needed) anyway, so.. deletion candidate.
-{-
-inflateUnify :: HsType -> HsType -> [HsType]
-inflateUnify t1 t2 =
-  let d1 = arrowDepth t1
-      d2 = arrowDepth t2
-  in if d1 > d2
-    then f t1 $ inflateTo d1 t2
-    else f t2 $ inflateTo d2 t1
-  where
-    inflateTo :: Int -> HsType -> [HsType]
-    inflateTo n t = map (createArrow t (map TypeVar [1000..998+n])) [0..n-1]
-    createArrow t varIds i =
-      let (l,r) = splitAt i varIds
-          types = l++[t]++r
-      in foldr1 TypeArrow types
-    f :: HsType -> [HsType] -> [HsType]
-    f ft1 ft2s = catMaybes [g ft1 (distinctify ft1 ft2) | ft2 <- ft2s]
-    g :: HsType -> HsType -> Maybe HsType
-    g gt1 gt2 = fmap (\subst -> reduceIds $ applySubsts subst gt1) (unify gt1 gt2)
--}

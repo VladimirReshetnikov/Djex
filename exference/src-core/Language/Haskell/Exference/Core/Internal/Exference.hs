@@ -1159,7 +1159,11 @@ stateStep multiPM allowConstrs h = do
         dependencies
         (heuristics_stepProvidedGood h)
         (heuristics_stepProvidedBad h)
-        (unify goalType provType)
+        -- Scoped bindings and the goal already inhabit the search node's
+        -- shared flexible-variable namespace; only the binding's quantified
+        -- variables were freshened above.  A disjoint-namespace unifier
+        -- would incorrectly accept a recursive equation such as @a ~ F a@.
+        ((\substs -> (substs, substs)) <$> unifyShared goalType provType)
 
     -- try to resolve the goal by looking at functions from the environment.
     byFunctionSimple :: StateT SearchNode [] ()
@@ -1180,7 +1184,7 @@ stateStep multiPM allowConstrs h = do
         (map rename $ functionParameters binding)
         (addScore (heuristics_stepEnvGood h) $ functionPenalty binding)
         (addScore (heuristics_stepEnvBad h) $ functionPenalty binding)
-        (unify goalType provType)
+        (unifyDisjoint goalType provType)
 
     -- on code for byProvided and byFunctionSimple
     byGenericUnify :: Either QualifiedName (TVarId, HsType)

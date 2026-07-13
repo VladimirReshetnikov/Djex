@@ -56,6 +56,11 @@ It uses `transformers` directly: expression checking has strict state, while
 the branching search deliberately retains lazy `StateT`.  Its hidden search
 state uses ordinary record selectors and explicit updates, keeping the engine
 independent of `mtl`, generated optics, and Template Haskell.
+`Language.Haskell.Exference.Core.Unify` names its two flexible-variable
+contracts explicitly: `unifyDisjoint` returns separate substitutions for
+independent input namespaces, while `unifyShared` applies one occurs-checked
+substitution to a common namespace. The historical `unify` name remains a
+compatibility alias for `unifyDisjoint`.
 The public named `exference-frontend` sublibrary is rooted at `src-frontend/`;
 it contains the `haskell-src-exts` frontend and environment loader and
 preserves the historical core import paths through Cabal reexports. The

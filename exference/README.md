@@ -40,6 +40,9 @@ cabal test exference-tests exference-cli-tests --test-show-details=direct
 It is explicitly public and depends only on the shared synthesis vocabulary
 plus its search data structures and transformer stack; it does not inherit
 `haskell-src-exts`, filesystem/process libraries, or executable dependencies.
+Its hidden search state uses ordinary record selectors and explicit lazy-state
+updates, keeping the engine independent of generated optics and Template
+Haskell.
 The public named `exference-frontend` sublibrary contains the
 `haskell-src-exts` frontend and environment loader and preserves the historical
 core import paths. It also exposes `Language.Haskell.Djex.Exference`, so the

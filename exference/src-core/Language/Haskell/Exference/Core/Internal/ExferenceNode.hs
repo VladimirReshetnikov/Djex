@@ -1,10 +1,4 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleInstances #-}
 
 
 module Language.Haskell.Exference.Core.Internal.ExferenceNode
@@ -26,21 +20,6 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   , splitBinding
   , initialScopeId
   , initialScopes
-  -- SearchNode lenses
-  , HasGoals (..)
-  , HasConstraintGoals (..)
-  , HasProvidedScopes (..)
-  , HasVarUses (..)
-  , HasFunctions (..)
-  , HasDeconss (..)
-  , HasQueryClassEnv (..)
-  , HasExpression (..)
-  , HasNextVarId (..)
-  , HasMaxTVarId (..)
-  , HasNextNVarId (..)
-  , HasDepth (..)
-  , HasLastStepReason (..)
-  , HasLastStepBinding (..)
   )
 where
 
@@ -57,7 +36,6 @@ import Data.Sequence
 
 import Control.DeepSeq
 import GHC.Generics
-import Control.Lens.TH ( makeFields )
 
 data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
@@ -160,20 +138,20 @@ mkGoals :: ScopeId
 mkGoals sid = map (`TGoal` sid)
 
 data SearchNode = SearchNode
-  { _searchNodeGoals           :: Seq TGoal
-  , _searchNodeConstraintGoals :: [HsConstraint]
-  , _searchNodeProvidedScopes  :: Scopes
-  , _searchNodeVarUses         :: VarUsageMap
-  , _searchNodeFunctions       :: V.Vector FunctionBinding
-  , _searchNodeDeconss         :: [DeconstructorBinding]
-  , _searchNodeQueryClassEnv   :: QueryClassEnv
-  , _searchNodeExpression      :: Expression
-  , _searchNodeNextVarId       :: {-# UNPACK #-} !TVarId
-  , _searchNodeMaxTVarId       :: {-# UNPACK #-} !TVarId
-  , _searchNodeNextNVarId      :: {-# UNPACK #-} !TVarId -- id used when resolving rankN-types
-  , _searchNodeDepth           :: {-# UNPACK #-} !Penalty
-  , _searchNodeLastStepReason  :: String
-  , _searchNodeLastStepBinding :: Maybe QualifiedName
+  { nodeGoals           :: Seq TGoal
+  , nodeConstraintGoals :: [HsConstraint]
+  , nodeProvidedScopes  :: Scopes
+  , nodeVarUses         :: VarUsageMap
+  , nodeFunctions       :: V.Vector FunctionBinding
+  , nodeDeconstructors  :: [DeconstructorBinding]
+  , nodeQueryClassEnv   :: QueryClassEnv
+  , nodeExpression      :: Expression
+  , nodeNextVarId       :: {-# UNPACK #-} !TVarId
+  , nodeMaxTVarId       :: {-# UNPACK #-} !TVarId
+  , nodeNextNVarId      :: {-# UNPACK #-} !TVarId -- id used when resolving rankN-types
+  , nodeDepth           :: {-# UNPACK #-} !Penalty
+  , nodeLastStepReason  :: String
+  , nodeLastStepBinding :: Maybe QualifiedName
   }
   deriving Generic
 
@@ -186,5 +164,3 @@ splitBinding :: VarBinding -> VarPBinding
 splitBinding (VarBinding v t) =
   let (result, parameters, variables, constraints) = splitArrowResultParams t
   in VarPBinding v result parameters variables constraints
-
-makeFields ''SearchNode

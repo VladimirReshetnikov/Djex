@@ -1,69 +1,96 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
-  ( SearchNodeBuilder
-  , modifyNodeBy
-  , builderSetReason
+  ( builderSetReason
   , builderAppendReason
   , builderGetTVarOffset
   , builderAddScope
   , builderApplySubst
   , builderAllocVar
+  , builderAllocHole
+  , builderAllocNVar
+  , builderRecordVarUse
+  , builderRaiseMaxTVarId
   )
 where
 
-
-
-import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
+import Language.Haskell.Exference.Core.Types
 
-import Control.Monad.State ( State
-                           , execState
-                           )
-import Control.Monad.State.Lazy ( MonadState )
-import Control.Monad ( liftM )
-
-import Control.Lens
-
-
-
-type SearchNodeBuilder a = State SearchNode a
-
-modifyNodeBy :: SearchNode -> SearchNodeBuilder () -> SearchNode
-modifyNodeBy = flip execState
+import Control.Monad.State.Lazy ( MonadState, gets, modify, state )
+import qualified Data.IntMap.Strict as IntMap
 
 -- Record why the node was produced. This feeds diagnostics and usage reports;
 -- search ancestry is deliberately not retained in production nodes.
 builderSetReason :: MonadState SearchNode m => String -> m ()
-builderSetReason r = lastStepReason .= r
+builderSetReason reason =
+  modify $ \node -> node { nodeLastStepReason = reason }
 
 builderAppendReason :: MonadState SearchNode m => String -> m ()
-builderAppendReason r = do
-  lastStepReason %= (++ (", " ++ r))
+builderAppendReason reason =
+  modify $ \node -> node
+    { nodeLastStepReason = nodeLastStepReason node ++ ", " ++ reason }
 
 builderGetTVarOffset :: MonadState SearchNode m => m TVarId
-builderGetTVarOffset = liftM (+1) $ use maxTVarId
- -- TODO: is (+1) really necessary? it was in pre-transformation code,
- --       but i cannot find good reason now.. test?
+builderGetTVarOffset = (+ 1) <$> gets nodeMaxTVarId
+-- TODO: is (+1) really necessary? It was in the pre-transformation code,
+-- but there is no documented reason for it yet.
 
+-- Allocate an expression hole without treating it as a variable introduced
+-- into scope. The returned identifier is the value before the increment.
+builderAllocHole :: MonadState SearchNode m => m TVarId
+builderAllocHole = state $ \node ->
+  let vid = nodeNextVarId node
+  in (vid, node { nodeNextVarId = vid + 1 })
+
+-- Allocate the fresh rigid identifier used while opening a rank-N type.
+-- As with expression holes, allocation returns the pre-increment value.
+builderAllocNVar :: MonadState SearchNode m => m TVarId
+builderAllocNVar = state $ \node ->
+  let vid = nodeNextNVarId node
+  in (vid, node { nodeNextNVarId = vid + 1 })
+
+-- Allocate a variable whose usage must be tracked by the search heuristic.
 builderAllocVar :: MonadState SearchNode m => m TVarId
-builderAllocVar = do
-  vid <- use nextVarId
-  varUses . at vid ?= 0
-  nextVarId <<+= 1
+builderAllocVar = state $ \node ->
+  let vid = nodeNextVarId node
+  in
+  ( vid
+  , node
+      { nodeNextVarId = vid + 1
+      , nodeVarUses = IntMap.insert vid 0 (nodeVarUses node)
+      }
+  )
 
--- take the current scope, add new scope, return new id
+builderRecordVarUse :: MonadState SearchNode m => TVarId -> m ()
+builderRecordVarUse vid = do
+  usage <- gets (IntMap.lookup vid . nodeVarUses)
+  case usage of
+    Nothing -> error
+      ("Exference internal variable-use invariant violated: untracked variable "
+        ++ showVar vid)
+    Just usageCount -> modify $ \node -> node
+      { nodeVarUses = IntMap.insert vid (usageCount + 1) (nodeVarUses node) }
+
+builderRaiseMaxTVarId :: MonadState SearchNode m => TVarId -> m ()
+builderRaiseMaxTVarId candidate =
+  modify $ \node -> node
+    { nodeMaxTVarId = max candidate (nodeMaxTVarId node) }
+
+-- Take the current scope, add a child scope, and return its identifier.
 builderAddScope :: MonadState SearchNode m => ScopeId -> m ScopeId
 builderAddScope parentId = do
-  (newId, newScopes) <- uses providedScopes $ addScope parentId
-  providedScopes .= newScopes
-  return newId
+  scopes <- gets nodeProvidedScopes
+  let (newId, newScopes) = addScope parentId scopes
+  modify $ \node -> node { nodeProvidedScopes = newScopes }
+  pure newId
 
--- apply substs in goals and scopes
--- not contraintGoals, because that's handled by caller
+-- Apply substitutions to goals and scopes. Constraint goals are handled by
+-- the caller because their admissibility depends on the search branch.
 builderApplySubst :: MonadState SearchNode m => Substs -> m ()
-builderApplySubst substs = do
-  goals . mapped %= goalApplySubst substs
-  providedScopes %= scopesApplySubsts substs
+builderApplySubst substs =
+  modify $ \node -> node
+    { nodeGoals = fmap (goalApplySubst substs) (nodeGoals node)
+    , nodeProvidedScopes = scopesApplySubsts substs
+        (nodeProvidedScopes node)
+    }

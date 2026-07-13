@@ -1016,6 +1016,13 @@ tests = testGroup "Exference"
           toSearchProgress (chunkStatus chunk) @?= Right
             (SharedSearch.Completed $ SharedSearch.truncated
               SharedSearch.StepLimitReached)
+      , testCase "candidate statistics count completed search steps" $ do
+          chunk <- lastChunk identityInput
+          let candidateSteps =
+                [ exference_steps statistics
+                | (_, _, statistics) <- chunkElements chunk
+                ]
+          candidateSteps @?= [3]
       , testCase "complete failure is distinguished from bounded search" $ do
           chunk <- lastChunk $ identityInput
             {input_goalType = TypeCons $ name "Void"}

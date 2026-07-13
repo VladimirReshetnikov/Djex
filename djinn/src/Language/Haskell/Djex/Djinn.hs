@@ -22,6 +22,7 @@ import Djinn.Core
   , Environment
   , HSymbol
   , HType
+  , PreparedEnvironment
   , QueryOptions
   , SynthesisInventory
   , generatedReportCandidates
@@ -29,8 +30,9 @@ import Djinn.Core
   , generatedReportEvidence
   , generatedReportFormula
   , generatedReportProof
-  , inhabitGenerated
-  , toSynthesisInventory
+  , inhabitGeneratedPrepared
+  , prepareEnvironment
+  , preparedEnvironmentInventory
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -56,7 +58,7 @@ import Language.Haskell.Synthesis.Search
 
 -- | A validated Djinn environment paired with its exact shared inventory.
 -- The constructor is private so the two views cannot drift apart.
-data DjinnSession = DjinnSession Environment SynthesisInventory
+newtype DjinnSession = DjinnSession PreparedEnvironment
 
 -- | Djinn-specific explanatory data that does not belong in the common
 -- operational search status.
@@ -72,14 +74,15 @@ type DjinnResult = QueryResult DjinnQueryMetadata DjinnCandidate
 
 -- | Seal an already checked Djinn environment into a reusable session.
 mkDjinnSession :: Environment -> Either Diagnostic DjinnSession
-mkDjinnSession environment = case toSynthesisInventory environment of
+mkDjinnSession environment = case prepareEnvironment environment of
   Left failure -> Left $ withContext (show failure)
     $ withCode "DJEX_DJINN_ENV"
     $ diagnostic Error "cannot seal the Djinn session environment"
-  Right inventory -> Right $ DjinnSession environment inventory
+  Right prepared -> Right $ DjinnSession prepared
 
 djinnSessionInventory :: DjinnSession -> SynthesisInventory
-djinnSessionInventory (DjinnSession _ inventory) = inventory
+djinnSessionInventory (DjinnSession prepared) =
+  preparedEnvironmentInventory prepared
 
 -- | Run one complete configured Djinn search and project it into a single
 -- terminal shared batch.  Logical evidence stays independent of operational
@@ -89,11 +92,11 @@ runDjinnQuery
   :: DjinnSession
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
-runDjinnQuery (DjinnSession environment _) request = do
+runDjinnQuery (DjinnSession prepared) request = do
   target <- targetSymbol $ requestTarget request
-  report <- case inhabitGenerated
+  report <- case inhabitGeneratedPrepared
       (requestOptions request)
-      environment
+      prepared
       (requestContexts request)
       target
       (requestGoal request) of

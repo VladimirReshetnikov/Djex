@@ -1,12 +1,23 @@
 module Main (main) where
 
 import Data.Either (isRight)
-import Data.List (nub)
+import Data.List (isInfixOf, nub)
 import Djinn.Core
-  ( Declaration (DataType, Function)
+  ( Context
+  , Declaration (ClassDecl, DataType, Function)
+  , Environment
+  , HType
+  , QueryOptions
   , declare
   , defaultQueryOptions
   , emptyEnvironment
+  , generatedReportCandidates
+  , generatedReportCompletion
+  , generatedReportEvidence
+  , generatedReportFormula
+  , generatedReportProof
+  , inhabitGenerated
+  , mkContext
   , optionAlternatives
   , optionBudget
   , optionCutoff
@@ -42,6 +53,7 @@ import Language.Haskell.Synthesis.Constraint (Constraint (Constraint))
 import Language.Haskell.Synthesis.Diagnostic
   ( Severity (Warning)
   , diagnosticCode
+  , diagnosticContext
   , diagnosticSeverity
   , diagnosticSource
   )
@@ -61,7 +73,7 @@ import Language.Haskell.Synthesis.Name
   )
 import Language.Haskell.Synthesis.Search
   ( Completion (Finished, Truncated)
-  , Progress (Completed)
+  , Progress (Completed, Continuing)
   , TruncationReason (CandidateLimitReached, ChoicePointLimitReached)
   , batchCandidates
   , batchMetadata
@@ -192,6 +204,87 @@ tests = testGroup "Djex facade"
         }
       resultEvidence result @?= RequiresTargetReference
       batchCandidates (resultSearch result) @?= []
+  , testCase "reuse sealed Djinn kinds without changing query semantics" $ do
+      standardSession <- expectRight $ mkDjinnSession standardEnvironment
+
+      ordinary <- expectRight $ parseHType "(a, b) -> (b, a)"
+      assertDjinnCompatibility "ordinary goal" standardEnvironment
+        standardSession [] defaultQueryOptions "swapPrepared" ordinary
+
+      monadArgument <- expectRight $ parseHType "m"
+      monadContext <- expectRight $ mkContext "Monad" [monadArgument]
+      constrained <- expectRight $ parseHType "a -> m a"
+      assertDjinnCompatibility "explicit class context" standardEnvironment
+        standardSession [monadContext] defaultQueryOptions
+        "returnPrepared" constrained
+
+      refutation <- expectRight $ parseHType "((a -> b) -> a) -> a"
+      assertDjinnCompatibility "completed refutation" standardEnvironment
+        standardSession [] defaultQueryOptions "peircePrepared" refutation
+      assertDjinnCompatibility "budget completion and evidence"
+        standardEnvironment standardSession []
+        (defaultQueryOptions { optionBudget = Just 0 })
+        "peircePrepared" refutation
+
+      captureMethod <- expectRight $ parseHType "f a"
+      captureEnvironment <- expectRight $ declare
+        (ClassDecl "CapturePrepared" ["a"]
+          [("capturePrepared", captureMethod)]) standardEnvironment
+      captureSession <- expectRight $ mkDjinnSession captureEnvironment
+      captureArgument <- expectRight $ parseHType "f"
+      captureContext <- expectRight $
+        mkContext "CapturePrepared" [captureArgument]
+      captureGoal <- expectRight $ parseHType "x -> x"
+      assertDjinnCompatibility "capture-safe instantiated method"
+        captureEnvironment captureSession [captureContext]
+        defaultQueryOptions "captureSafePrepared" captureGoal
+
+      higherMethod <- expectRight $ parseHType "f a -> f a"
+      higherEnvironment <- expectRight $ declare
+        (ClassDecl "HigherPrepared" ["f"]
+          [("higherPrepared", higherMethod)]) standardEnvironment
+      higherSession <- expectRight $ mkDjinnSession higherEnvironment
+      unsaturatedSynonym <- expectRight $ parseHType "Not"
+      higherContext <- expectRight $
+        mkContext "HigherPrepared" [unsaturatedSynonym]
+      higherTarget <- expectRight $ mkIdentifier "higherGoalPrepared"
+      let higherRequest = QueryRequest
+            { requestTarget = higherTarget
+            , requestGoal = captureGoal
+            , requestContexts = [higherContext]
+            , requestOptions = defaultQueryOptions
+            }
+      case ( inhabitGenerated defaultQueryOptions higherEnvironment
+               [higherContext] "higherGoalPrepared" captureGoal
+           , runDjinnQuery higherSession higherRequest
+           ) of
+        (Left compatibilityFailure, Left sessionFailure) -> do
+          assertBool "prepared path skipped Djinn synonym saturation" $
+            "Type synonym Not expects 1 argument(s), but got 0"
+              `isInfixOf` compatibilityFailure
+          diagnosticContext sessionFailure @?= [compatibilityFailure]
+        (compatibilityResult, sessionResult) -> fail $
+          "synonym-saturation paths diverged: " ++ show compatibilityResult
+            ++ " versus " ++ show sessionResult
+
+      invalidKind <- expectRight $ parseHType "Maybe"
+      invalidTarget <- expectRight $ mkIdentifier "invalidPrepared"
+      let invalidRequest = QueryRequest
+            { requestTarget = invalidTarget
+            , requestGoal = invalidKind
+            , requestContexts = []
+            , requestOptions = defaultQueryOptions
+            }
+      case ( inhabitGenerated defaultQueryOptions standardEnvironment []
+               "invalidPrepared" invalidKind
+           , runDjinnQuery standardSession invalidRequest
+           ) of
+        (Left compatibilityFailure, Left sessionFailure) -> do
+          diagnosticCode sessionFailure @?= Just "DJEX_DJINN_QUERY"
+          diagnosticContext sessionFailure @?= [compatibilityFailure]
+        (compatibilityResult, sessionResult) -> fail $
+          "invalid-kind paths diverged: " ++ show compatibilityResult
+            ++ " versus " ++ show sessionResult
   , testCase "reject targets outside Djinn's output namespace" $ do
       session <- expectRight $ mkDjinnSession standardEnvironment
       qualifier <- expectRight $ mkModuleName "External"
@@ -402,6 +495,38 @@ tests = testGroup "Djex facade"
       renderExferenceCandidateDefinition FullyQualified candidate @?=
         Right "result = Fixture.result"
   ]
+
+assertDjinnCompatibility
+  :: String
+  -> Environment
+  -> DjinnSession
+  -> [Context]
+  -> QueryOptions
+  -> String
+  -> HType
+  -> IO ()
+assertDjinnCompatibility label environment session contexts options target goal = do
+  targetName <- expectRight $ mkIdentifier target
+  compatibility <- expectRight $ inhabitGenerated
+    options environment contexts target goal
+  shared <- expectRight $ runDjinnQuery session QueryRequest
+    { requestTarget = targetName
+    , requestGoal = goal
+    , requestContexts = contexts
+    , requestOptions = options
+    }
+  generatedReportEvidence compatibility @?= resultEvidence shared
+  case batchProgress $ resultSearch shared of
+    Completed completion ->
+      generatedReportCompletion compatibility @?= completion
+    Continuing -> fail $ label ++ ": Djinn returned a nonterminal batch"
+  generatedReportCandidates compatibility @?=
+    batchCandidates (resultSearch shared)
+  let metadata = batchMetadata $ resultSearch shared
+  assertBool (label ++ ": translated formula changed") $
+    generatedReportFormula compatibility == djinnTranslatedFormula metadata
+  assertBool (label ++ ": first proof changed") $
+    generatedReportProof compatibility == djinnFirstExploredProof metadata
 
 emptyExferenceSource :: SourceEnvironment FunctionBinding
 emptyExferenceSource = SourceEnvironment

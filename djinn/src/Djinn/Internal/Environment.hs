@@ -4,6 +4,9 @@
 --
 module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
+    PreparedEnvironment, prepareEnvironment,
+    preparedEnvironmentSource, preparedEnvironmentInventory,
+    preparedEnvironmentKindCheck,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
@@ -19,7 +22,13 @@ import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 
 import Djinn.Internal.Declaration
-import Djinn.Internal.HCheck (htCheckEnv, htCheckType, htInferClassKinds)
+import Djinn.Internal.HCheck
+    ( PreparedKindCheck
+    , htCheckEnv
+    , htCheckType
+    , htInferClassKinds
+    , prepareKindCheckWithAssumptions
+    )
 import Djinn.Internal.HTypes
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
@@ -32,6 +41,15 @@ data Environment = Environment {
     envClasses :: [ClassDefinition]
     }
     deriving (Eq, Show)
+
+-- | A source environment sealed together with the exact shared inventory and
+-- query-time kind-check state derived from it.  The constructor is private:
+-- cached assumptions therefore cannot drift away from the declarations whose
+-- synonym rules and proof-search lowering they accompany.
+data PreparedEnvironment = PreparedEnvironment
+    Environment
+    SynthesisInventory
+    PreparedKindCheck
 
 type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
@@ -74,6 +92,28 @@ toSynthesisInventory environment = do
     either (Left . InvalidSynthesisInventory) Right $
         SharedInventory.mkInventory
             SharedInference.ClosedKindInventory declarations
+
+-- | Seal all reusable views of an environment in one operation.  Inventory
+-- kind inference is the sole whole-environment kind pass; individual queries,
+-- context arguments, and instantiated methods consume the cached result.
+prepareEnvironment
+    :: Environment
+    -> Either SynthesisEnvironmentError PreparedEnvironment
+prepareEnvironment environment = do
+    inventory <- toSynthesisInventory environment
+    return $ PreparedEnvironment environment inventory $
+        prepareKindCheckWithAssumptions
+            (envTypes environment)
+            (SharedInventory.inventoryKindAssumptions inventory)
+
+preparedEnvironmentSource :: PreparedEnvironment -> Environment
+preparedEnvironmentSource (PreparedEnvironment environment _ _) = environment
+
+preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
+preparedEnvironmentInventory (PreparedEnvironment _ inventory _) = inventory
+
+preparedEnvironmentKindCheck :: PreparedEnvironment -> PreparedKindCheck
+preparedEnvironmentKindCheck (PreparedEnvironment _ _ kindCheck) = kindCheck
 
 synthesisDeclarations
     :: ClassKindProjection

@@ -3,8 +3,11 @@
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.HCheck(
+    PreparedKindCheck, prepareKindCheck, prepareKindCheckWithAssumptions,
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
-    htInferClassKinds
+    htCheckTypePrepared, htCheckTypeKindPrepared,
+    htCheckTypesKindsPrepared,
+    htInferClassKinds, htInferClassKindsPrepared
     ) where
 import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
@@ -17,8 +20,40 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import Djinn.Internal.HTypes
 import Djinn.Internal.Type (toSynthesisType)
 
+-- | The immutable part of Djinn's query-time kind checker.  It deliberately
+-- retains only synonym arities and the already-ground shared assumptions, not
+-- the source declarations from which assumptions could accidentally be
+-- recomputed for every obligation or class method.
+data PreparedKindCheck = PreparedKindCheck
+    [(HSymbol, Int)]
+    SharedInference.KindAssumptions
+
+-- | Prepare a compatibility kind-checking scope from Djinn declarations.
+-- Whole-environment assumption conversion happens exactly once here.
+prepareKindCheck
+    :: [(HSymbol, ([HSymbol], HType, HKind))]
+    -> Either String PreparedKindCheck
+prepareKindCheck definitions = do
+    assumptions <- synthesisAssumptions definitions
+    return $ prepareKindCheckWithAssumptions definitions assumptions
+
+-- | Pair declarations with assumptions already inferred from their exact
+-- shared inventory.  This is an internal trusted constructor: callers must
+-- obtain the assumptions while sealing the same declarations.  Keeping the
+-- 'PreparedKindCheck' constructor private prevents later query code from
+-- assembling or changing such a pair.
+prepareKindCheckWithAssumptions
+    :: [(HSymbol, ([HSymbol], HType, HKind))]
+    -> SharedInference.KindAssumptions
+    -> PreparedKindCheck
+prepareKindCheckWithAssumptions definitions =
+    PreparedKindCheck (synonymArities definitions)
+
 htCheckType :: [(HSymbol, ([HSymbol], HType, HKind))] -> HType -> Either String ()
 htCheckType its = htCheckTypeKind its KStar
+
+htCheckTypePrepared :: PreparedKindCheck -> HType -> Either String ()
+htCheckTypePrepared prepared = htCheckTypeKindPrepared prepared KStar
 
 -- Check that a type is well-kinded and has the given (ground) kind.  Free
 -- type variables receive fresh kinds, so a variable argument fits any
@@ -27,14 +62,27 @@ htCheckTypeKind :: [(HSymbol, ([HSymbol], HType, HKind))]
                 -> HKind -> HType -> Either String ()
 htCheckTypeKind its expected t = htCheckTypesKinds its [(expected, t)]
 
+htCheckTypeKindPrepared :: PreparedKindCheck
+                        -> HKind -> HType -> Either String ()
+htCheckTypeKindPrepared prepared expected t =
+    htCheckTypesKindsPrepared prepared [(expected, t)]
+
 -- Check several types in one kind-inference scope.  This matters whenever
 -- free variables are shared between types: checking each type separately
 -- could incorrectly assign the same variable a different kind each time.
 htCheckTypesKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
                   -> [(HKind, HType)] -> Either String ()
 htCheckTypesKinds its expectedTypes = do
-    mapM_ (checkSynonymSaturation its . snd) expectedTypes
-    assumptions <- synthesisAssumptions its
+    prepared <- prepareKindCheck its
+    htCheckTypesKindsPrepared prepared expectedTypes
+
+htCheckTypesKindsPrepared :: PreparedKindCheck
+                          -> [(HKind, HType)] -> Either String ()
+htCheckTypesKindsPrepared
+        (PreparedKindCheck preparedSynonymArities assumptions)
+        expectedTypes = do
+    mapM_ (checkSynonymSaturationWith preparedSynonymArities . snd)
+        expectedTypes
     obligations <- mapM convertObligation expectedTypes
     first show $ SharedInference.checkTypesKinds assumptions obligations
   where
@@ -51,8 +99,16 @@ htInferClassKinds :: [(HSymbol, ([HSymbol], HType, HKind))]
                   -> [HSymbol] -> [HType]
                   -> Either String [(HSymbol, HKind)]
 htInferClassKinds its params methodTypes = do
-    mapM_ (checkSynonymSaturation its) methodTypes
-    assumptions <- synthesisAssumptions its
+    prepared <- prepareKindCheck its
+    htInferClassKindsPrepared prepared params methodTypes
+
+htInferClassKindsPrepared :: PreparedKindCheck
+                          -> [HSymbol] -> [HType]
+                          -> Either String [(HSymbol, HKind)]
+htInferClassKindsPrepared
+        (PreparedKindCheck preparedSynonymArities assumptions)
+        params methodTypes = do
+    mapM_ (checkSynonymSaturationWith preparedSynonymArities) methodTypes
     convertedMethods <- mapM (first show . toSynthesisType) methodTypes
     inferred <- first show $ SharedInference.inferSharedVariableKinds
         assumptions params convertedMethods
@@ -122,17 +178,22 @@ htCheckEnv its = do
 -- higher-kinded position, so validate saturation from the declaration shape.
 checkSynonymSaturation :: [(HSymbol, ([HSymbol], HType, a))]
                        -> HType -> Either String ()
-checkSynonymSaturation definitions = checkType
-  where
-    synonymArities =
-        [(name, length parameters)
-        | (name, (parameters, body, _)) <- definitions
-        , isSynonymBody body]
+checkSynonymSaturation definitions =
+    checkSynonymSaturationWith (synonymArities definitions)
 
+synonymArities :: [(HSymbol, ([HSymbol], HType, a))] -> [(HSymbol, Int)]
+synonymArities definitions =
+    [(name, length parameters)
+    | (name, (parameters, body, _)) <- definitions
+    , isSynonymBody body]
+  where
     isSynonymBody (HTUnion _) = False
     isSynonymBody (HTAbstract _ _) = False
     isSynonymBody _ = True
 
+checkSynonymSaturationWith :: [(HSymbol, Int)] -> HType -> Either String ()
+checkSynonymSaturationWith arities = checkType
+  where
     checkType application@(HTApp _ _) = do
         let (headType, arguments) = splitApplication application
         checkHead headType (length arguments)
@@ -159,7 +220,7 @@ checkSynonymSaturation definitions = checkType
     checkHead _ _ = Right ()
 
     checkName name supplied =
-        case lookup name synonymArities of
+        case lookup name arities of
             Just expected | supplied /= expected -> Left $
                 "Type synonym " ++ name ++ " expects " ++ show expected ++
                 " argument(s), but got " ++ show supplied

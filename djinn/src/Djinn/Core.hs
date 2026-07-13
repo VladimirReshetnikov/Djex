@@ -25,6 +25,7 @@ module Djinn.Core (
     toSynthesisDeclaration, fromSynthesisDeclaration,
     -- * Environments
     Environment, emptyEnvironment, standardEnvironment,
+    PreparedEnvironment, prepareEnvironment, preparedEnvironmentInventory,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
@@ -33,13 +34,15 @@ module Djinn.Core (
     typeDeclarations, functionDeclarations, classDeclarations,
     -- * Queries
     Context, mkContext, resolveContext, resolveInstanceMethods,
+    resolvePreparedContext, resolvePreparedInstanceMethods,
     QueryOptions(..), defaultQueryOptions,
     DjinnCandidateDetails(..), DjinnCandidate,
-    GeneratedQueryReport(..), inhabitGenerated,
+    GeneratedQueryReport(..), inhabitGenerated, inhabitGeneratedPrepared,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
 
 import Control.Monad (foldM, unless)
+import Data.Bifunctor (first)
 import Data.List (intercalate, mapAccumL, nub, sortOn)
 import Data.Ratio ((%))
 import qualified Data.Set as Set
@@ -57,7 +60,9 @@ import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck (
-    htCheckType, htCheckTypeKind, htCheckTypesKinds)
+    PreparedKindCheck,
+    htCheckTypePrepared, htCheckTypeKindPrepared,
+    htCheckTypesKindsPrepared)
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
@@ -332,8 +337,17 @@ mkContext className arguments = do
 -- parameters' inferred kinds, and well-kinded instantiated methods.
 -- Returns each method at its instantiated type.
 resolveContext :: Environment -> Context -> Either String [(HSymbol, HType)]
-resolveContext environment context =
-    concat <$> resolveContexts environment [] [context]
+resolveContext environment context = do
+    prepared <- prepareCompatibilityEnvironment environment
+    resolvePreparedContext prepared context
+
+-- | Resolve one context against an already sealed environment.  Unlike the
+-- historical wrapper, this path performs no whole-environment kind
+-- conversion and is therefore suitable for repeated session queries.
+resolvePreparedContext
+    :: PreparedEnvironment -> Context -> Either String [(HSymbol, HType)]
+resolvePreparedContext prepared context =
+    concat <$> resolveContexts prepared [] [context]
 
 -- | Resolve the methods of an instance target while checking the target and
 -- all prerequisite contexts in one kind-variable scope.  The returned methods
@@ -342,10 +356,21 @@ resolveContext environment context =
 resolveInstanceMethods :: Environment -> [Context] -> Context
                        -> Either String [(HSymbol, HType)]
 resolveInstanceMethods environment prerequisites target = do
-    resolved <- resolveContexts environment [] (target : prerequisites)
+    prepared <- prepareCompatibilityEnvironment environment
+    resolvePreparedInstanceMethods prepared prerequisites target
+
+-- | Prepared counterpart of 'resolveInstanceMethods'.
+resolvePreparedInstanceMethods :: PreparedEnvironment -> [Context] -> Context
+                               -> Either String [(HSymbol, HType)]
+resolvePreparedInstanceMethods prepared prerequisites target = do
+    resolved <- resolveContexts prepared [] (target : prerequisites)
     case resolved of
         targetMethods : _ -> Right targetMethods
         [] -> Left "internal error: instance target was not resolved"
+
+prepareCompatibilityEnvironment
+    :: Environment -> Either String PreparedEnvironment
+prepareCompatibilityEnvironment = first show . prepareEnvironment
 
 -- The intermediate record keeps lookup/arity validation separate from the
 -- joint kind check and substitution.  In particular, every argument and the
@@ -362,13 +387,15 @@ resolvedName = SharedName.renderCanonical . constraintClass . resolvedConstraint
 resolvedArguments :: ResolvedContext -> [HType]
 resolvedArguments = constraintArguments . resolvedConstraint
 
-resolveContexts :: Environment -> [(String, HKind, HType)] -> [Context]
+resolveContexts :: PreparedEnvironment -> [(String, HKind, HType)] -> [Context]
                 -> Either String [[(HSymbol, HType)]]
-resolveContexts environment additionalTypes contexts = do
+resolveContexts prepared additionalTypes contexts = do
     resolved <- mapM (lookupContext environment) contexts
-    checkKindObligations (envTypes environment) $
+    checkKindObligations (preparedEnvironmentKindCheck prepared) $
         additionalTypes ++ concatMap argumentObligations resolved
-    mapM (instantiateContext environment) resolved
+    mapM (instantiateContext prepared) resolved
+  where
+    environment = preparedEnvironmentSource prepared
 
 lookupContext :: Environment -> Context -> Either String ResolvedContext
 lookupContext environment context = do
@@ -401,25 +428,26 @@ argumentObligations context =
 -- Retain the precise historical diagnostic when one type is independently
 -- ill-kinded.  If every component works alone, report the actual problem:
 -- inconsistent kinds assigned to a free variable shared by components.
-checkKindObligations :: [TypeDefinition] -> [(String, HKind, HType)]
+checkKindObligations :: PreparedKindCheck -> [(String, HKind, HType)]
                      -> Either String ()
-checkKindObligations definitions obligations =
-    case htCheckTypesKinds definitions
+checkKindObligations prepared obligations =
+    case htCheckTypesKindsPrepared prepared
             [(kind, t) | (_, kind, t) <- obligations] of
         Right () -> Right ()
         Left jointError ->
             case [(label, message)
                     | (label, kind, t) <- obligations
-                    , Left message <- [htCheckTypeKind definitions kind t]] of
+                    , Left message <-
+                        [htCheckTypeKindPrepared prepared kind t]] of
                 (label, message) : _ -> Left $ label ++ ": " ++ message
                 [] -> Left $
                     "inconsistent kinds across " ++
                     intercalate ", " [label | (label, _, _) <- obligations] ++
                     ": " ++ jointError
 
-instantiateContext :: Environment -> ResolvedContext
+instantiateContext :: PreparedEnvironment -> ResolvedContext
                    -> Either String [(HSymbol, HType)]
-instantiateContext environment context = do
+instantiateContext prepared context = do
     let parameters = resolvedParameters context
         arguments = resolvedArguments context
         instantiated =
@@ -433,7 +461,8 @@ instantiateContext environment context = do
     return instantiated
   where
     checkMethod (methodName, methodType) =
-        case htCheckType (envTypes environment) methodType of
+        case htCheckTypePrepared
+                (preparedEnvironmentKindCheck prepared) methodType of
             Left message -> Left $
                 "method " ++ prHSymbolOp methodName ++ " of class " ++
                 resolvedName context ++ ": " ++ message
@@ -599,13 +628,34 @@ inhabit options environment contexts name goal = do
 inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
                  -> Either String GeneratedQueryReport
 inhabitGenerated options environment contexts name goal = do
+    validateGeneratedQueryInput options name
+    prepared <- prepareCompatibilityEnvironment environment
+    inhabitGeneratedPreparedChecked options prepared contexts name goal
+
+-- | Search using a sealed environment.  All context, goal, and instantiated
+-- method obligations share the cached assumptions prepared with the session;
+-- this function never reconstructs them from 'envTypes'.
+inhabitGeneratedPrepared
+    :: QueryOptions -> PreparedEnvironment -> [Context] -> HSymbol -> HType
+    -> Either String GeneratedQueryReport
+inhabitGeneratedPrepared options prepared contexts name goal = do
+    validateGeneratedQueryInput options name
+    inhabitGeneratedPreparedChecked options prepared contexts name goal
+
+validateGeneratedQueryInput :: QueryOptions -> HSymbol -> Either String ()
+validateGeneratedQueryInput options name = do
     requireName "target" (isDjinnDeclarationName MethodOwner) name
     unless (optionCutoff options > 0) $
         Left "optionCutoff must be positive"
     case optionBudget options of
         Just n | n < 0 -> Left "optionBudget must be non-negative"
         _ -> Right ()
-    contextMethods <- resolveContexts environment
+
+inhabitGeneratedPreparedChecked
+    :: QueryOptions -> PreparedEnvironment -> [Context] -> HSymbol -> HType
+    -> Either String GeneratedQueryReport
+inhabitGeneratedPreparedChecked options prepared contexts name goal = do
+    contextMethods <- resolveContexts prepared
         [("goal type " ++ show goal, KStar, goal)] contexts
     let types = envTypes environment
         form = hTypeToFormula types goal
@@ -692,6 +742,8 @@ inhabitGenerated options environment contexts name goal = do
                 generatedReportCandidates = candidates,
                 generatedReportEvidence = SharedQuery.ValidatedCandidates
                 }
+  where
+    environment = preparedEnvironmentSource prepared
 
 candidateDetails :: HClause -> DjinnCandidateDetails
 candidateDetails clause

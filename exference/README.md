@@ -13,16 +13,19 @@ comes at a cost, however: *Exference* makes no promise regarding termination.
 Where *Djinn* tells you "there are no solutions", exference will keep trying,
 sometimes stopping with "i could not find any solutions".
 
-# Links
+## References and environment
 
-- **Documentation: [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf)** describes the implementation and properties;
-- exferenceBot on freenode IRC #exference
-    - play around without installing exference locally
-    - reacts to `:exf` prefix, i.e. `:exf "Monad m => m (m a) -> m a"`
-    - `/msg exferenceBot help`
-    - uses the environment (i.e. known functions+typeclasses) at https://github.com/lspitzner/exference/tree/master/environment
+- **Documentation:** [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf)
+  describes the original implementation and its properties.
+- The executable loads Djex's [packaged local environment](environment/) of
+  functions, classes, instances, and ratings by default. Installed builds find
+  it through Cabal rather than depending on a source checkout.
+- Historical Exference releases advertised `exferenceBot` on Freenode's
+  `#exference` channel. That bot is not a maintained interface to this tree;
+  use the local executable for reproducible behavior against the packaged
+  environment.
 
-# Building from source
+## Building from source
 
 Exference is part of the unified `djex` Cabal package. Its libraries and
 deterministic test suites build with GHC 9.12.4 and Cabal 3.16.1.0. Cabal is the
@@ -35,6 +38,15 @@ from the repository root or `djex/`:
 cabal build djex:lib:exference-core djex:lib:exference-frontend djex:exe:exference
 cabal test exference-tests exference-cli-tests --test-show-details=direct
 ```
+
+The former top-level `exference/` package is now the `djex/exference/` source
+tree and has no independent package or project file. Package-generated code
+imports `Paths_djex` (not `Paths_exference`), and the default environment is
+located with `getDataFileName "exference/environment"`. See the current
+[Djex architecture and complete package migration guide](../README.md). The
+[2026-07-10 code review](docs/reports/2026-07-10-code-review.md) remains useful
+as a historical compatibility audit, but its proposed merge boundary predates
+the unified Djex package.
 
 `exference-core` is a named, parser-independent library rooted at `src-core/`.
 It is explicitly public and depends only on the shared synthesis vocabulary
@@ -156,6 +168,42 @@ were removed. Imports through `Language.Haskell.Exference` and the former core
 module paths remain available, but callers constructing class values must
 adopt the checked API.
 
+### Reusable core search inputs
+
+New core clients should split the old all-in-one `ExferenceInput` at its actual
+lifetime boundary. Construct an `EnvDictionary`, pass it once to
+`mkExferenceEnvironment`, and retain the resulting abstract
+`ExferenceEnvironment`. For each search, construct an `ExferenceQuery` and call
+`findGeneratedSearchBatchesInEnvironmentEither` (or its `WithHints` variant).
+The first operation validates environment names, generated syntax, ratings,
+types, and class constraints once; the second validates only the goal,
+constraints, limits, and heuristics that vary per query.
+
+The compatibility field labels map to the reusable API as follows:
+
+| `ExferenceInput` field | Reusable field |
+| --- | --- |
+| `input_envFuncs` | `EnvDictionary.environmentFunctions` |
+| `input_envDeconsS` | `EnvDictionary.environmentDeconstructors` |
+| `input_envClasses` | `EnvDictionary.environmentClasses` |
+| `input_goalType` | `ExferenceQuery.queryGoalType` |
+| no former field | `ExferenceQuery.queryExcludedBindings` |
+| `input_allowUnused` | `ExferenceQuery.queryAllowUnused` |
+| `input_allowConstraints` | `ExferenceQuery.queryAllowConstraints` |
+| `input_allowConstraintsStopStep` | `ExferenceQuery.queryConstraintDeferralSteps` |
+| `input_multiPM` | `ExferenceQuery.queryMultiConstructorPatterns` |
+| `input_maxSteps` | `ExferenceQuery.queryMaximumSteps` |
+| `input_maxQueueSize` | `ExferenceQuery.queryMaximumQueueSize` |
+| `input_maxDepth` | `ExferenceQuery.queryMaximumDepth` |
+| `input_heuristicsConfig` | `ExferenceQuery.queryHeuristics` |
+
+`queryExcludedBindings` is a set of shared structural names, not rendered
+spellings. Exclusion is exact: hiding `Data.Function.fix` does not hide an
+unqualified `fix` or another module's homonym. The same reduced environment is
+used by heuristic search and the independent candidate checker, and excluded
+names do not leak into binding-use metadata. Legacy `ExferenceInput` entry
+points remain compatibility adapters and behave as if this set were empty.
+
 Completed candidates are simplified inside the core and the exact transformed
 tree is independently type-checked before it is returned.  Simplification is
 environment-free and never invents globals such as `id` or `(.)`.  The typed
@@ -240,7 +288,7 @@ removed; deterministic regressions live in `exference-tests` and the separate
 cabal run exference -- --first "a -> a"
 ```
 
-# Usage notes
+## Usage notes
 
 There are certain types of queries where *Exference* will not be able to find
 any / the right solution. Some common current limitations are:
@@ -257,19 +305,21 @@ any / the right solution. Some common current limitations are:
   assumptions; an ill-kinded application such as `Maybe Maybe` is rejected
   before search;
 - The environment is composed by hand currently, and does only include parts
-  of base plus a few other selected modules. Its canonical 41-class,
-  485-source-instance inventory is checked at load time and pinned by tests.
+  of base plus a few other selected modules. Its canonical inventory of 41
+  classes and 432 source instances is checked at load time and expands to 535
+  lookup instances after superclass inflation; all counts are pinned by tests.
   The [normalization report](docs/reports/2026-07-11-environment-normalization.md)
   documents its naming and validation rules. Additions welcome!
-- Pattern-matching on multiple-constructor data-types is not supported;
+- Pattern matching on multiple-constructor data types is disabled by default;
+  an experimental opt-in is described below;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
 
 ## Experimental features
 
 - Pattern-matching on multi-constructor data types can be enabled via
-  `-c --patternMatchMC`, but reduces performance significantly for any
-  non-trivial queries. Core algorithm needs re-write to optimize stuff
-  sufficiently I fear.
+  `-c` / `--patternMatchMC`, but can reduce performance significantly for
+  non-trivial queries. It is intentionally not part of the default search
+  policy while that branch of the core algorithm remains expensive.
 - Chains of outer (prenex) `forall`s are supported. Rank-N positions are
   rejected conservatively; the historical implementation erased some nested
   quantifiers during unification, which was not a sound implementation of
@@ -309,7 +359,3 @@ and avoid adding functions that
   the respective part of the algorithm.
 * *Exference* was used at least once to implement some typed hole in its own
   source code.
-
-## IRC
-
-`#exference`

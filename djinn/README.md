@@ -31,6 +31,12 @@ cabal test djinn-tests djinn-property-tests djinn-cli-tests
 cabal run djinn
 ```
 
+The former top-level `djinn/` package is now the `djex/djinn/` source tree and
+has no independent package or project file. Library dependencies migrate to
+`djex:djinn-core` or `djex:djinn-frontend`; package-generated code imports
+`Paths_djex` rather than `Paths_djinn`. The complete component and filesystem
+migration is documented in the [Djex guide](../README.md).
+
 Djinn can also execute one or more command files non-interactively:
 
 ```console
@@ -393,12 +399,14 @@ declaration language while eliminating the frontend's former direct
 `Djinn.Core` is the supported programmatic interface. It keeps invalid data
 unrepresentable: environments are opaque and only constructible through
 validating operations, every declaration is name-checked, kind-checked, and
-revalidated transactionally, and query outcomes distinguish honest answers:
+revalidated transactionally, and its primary query API returns checked shared
+candidates while keeping logical evidence separate from search completion:
 
 ```haskell
 import Djinn.Core
+import Language.Haskell.Synthesis.Query (QueryEvidence(..))
 
-demo :: Either String [String]
+demo :: Either String [DjinnCandidate]
 demo = do
     first  <- parseHType "Input -> Middle"
     second <- parseHType "Middle -> Output"
@@ -409,13 +417,16 @@ demo = do
        >>= declare (AbstractType "Output" kStar)
        >>= declare (Function "first" first)
        >>= declare (Function "second" second)
-    report <- inhabit defaultQueryOptions env [] "pipeline" goal
-    case reportOutcome report of
-        Realized clauses -> Right clauses      -- best candidate first
-        Unrealizable -> Left "no total inhabitant exists"
-        UnrealizableWithoutSelfReference -> Left "only via recursion"
-        Undecided -> Left "the search budget expired"
+    report <- inhabitGenerated defaultQueryOptions env [] "pipeline" goal
+    case generatedReportEvidence report of
+        ValidatedCandidates -> Right (generatedReportCandidates report)
+        ProvedUninhabitable -> Left "no total inhabitant exists"
+        RequiresTargetReference -> Left "only via recursion"
+        NoEvidence -> Left "the search limit established no conclusion"
 ```
+
+With named-library dependencies, this example uses both `djex:djinn-core` and
+`djex:synthesis`; the unnamed `djex` library re-exports both module surfaces.
 
 The essentials: `declare`/`removeDeclaration` grow and shrink an
 `Environment` (starting from `emptyEnvironment` or `standardEnvironment`);

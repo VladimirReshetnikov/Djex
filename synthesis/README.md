@@ -7,9 +7,17 @@ names, structured diagnostics, non-recursive class constraints parameterized
 over a backend's type representation, a scope-aware generated-code tree, and
 neutral operational search status. Djinn
 and Exference both store query contexts through the shared `Constraint` value
-and consume the validated name vocabulary; Exference additionally uses the
-shared diagnostic facade. Their checked class environments, declaration
-semantics, resolution policies, and search engines remain backend-specific.
+and consume the validated name vocabulary. Their checked Djex session adapters
+also share the diagnostic, query, candidate, inventory, and generated-output
+boundaries described below. Backend class resolution and search semantics
+remain deliberately independent.
+
+`Language.Haskell.Synthesis.Diagnostic` is the parser-independent reporting
+boundary used by both sessions. It carries severity, an optional stable code,
+source file and half-open span, and an ordered context trail; parser adapters
+decide how native locations map into that neutral representation. Its renderer
+is deterministic and compiler-shaped, but callers remain free to present the
+structured value themselves.
 
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s and
@@ -62,7 +70,8 @@ functions, boxed or unboxed tuples, and explicit foralls with shared
 constraints. It canonicalizes saturated function and tuple constructors,
 validates lexical/arity/binder invariants, and computes free variables.
 Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
-this AST.
+this AST; those belong to the declaration layer instead of being encoded as
+special type nodes.
 
 `Language.Haskell.Synthesis.TypeRender` renders that shared structure back to
 compact Haskell source while leaving tagged variable spellings to the caller.
@@ -92,11 +101,11 @@ Closed inventories reject unknown type and class names; open inventories infer
 one stable kind per external type name and require every occurrence of an
 external class to agree on arity.
 
-`Language.Haskell.Synthesis.Environment` seals a declaration inventory and
-builds deterministic type/class, value/method, constructor, and instance-head
-indexes. It rejects cross-declaration namespace collisions and duplicate
-instances while preserving qualified-name identity. Dependency, kind, and
-backend resolution policies remain explicit later validation layers.
+`Language.Haskell.Synthesis.Environment` seals structurally valid declarations
+and builds deterministic type/class, value/method, constructor, and
+instance-head indexes. It rejects cross-declaration namespace collisions and
+duplicate instances while preserving qualified-name identity. It does not
+pretend that an index is also a kind proof or a backend's resolution policy.
 
 `Language.Haskell.Synthesis.Inventory` is the frontend handoff that keeps a
 sealed `Environment` together with the kind assumptions inferred from exactly
@@ -104,6 +113,8 @@ the same declarations. Query elaboration can therefore reuse checked kinds
 without rerunning inference or trusting a parallel cache. Declarations may
 retain a frontend's kind-variable identity while being edited or round-tripped;
 sealing grounds their explicit kinds and reports the first unsolved identity.
+This is the boundary checked sessions retain; engine-specific dictionaries are
+derived projections of it, not competing sources of truth.
 
 Build or test just this sublibrary from the repository root or `djex/`:
 

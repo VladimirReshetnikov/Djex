@@ -186,7 +186,7 @@ data UnsupportedVocabularyOccurrence = UnsupportedVocabularyOccurrence
 data EnvironmentLoadError
   = EnvironmentDirectoryReadError Diagnostic
   | ModuleReadErrors (NonEmpty Diagnostic)
-  | ModuleParseErrors (NonEmpty String)
+  | ModuleParseErrors (NonEmpty Diagnostic)
   | UnsupportedSourceVocabulary
       (NonEmpty UnsupportedVocabularyOccurrence)
   | DataTypeNameError String
@@ -209,10 +209,7 @@ environmentLoadErrorDiagnostics failure = case failure of
   EnvironmentDirectoryReadError value ->
     withCode "EXF_ENV_DIRECTORY_READ" value NonEmpty.:| []
   ModuleReadErrors values -> fmap (withCode "EXF_MODULE_READ") values
-  ModuleParseErrors errors -> diagnostics
-    "EXF_MODULE_PARSE"
-    "could not parse a Haskell source module"
-    errors
+  ModuleParseErrors values -> fmap (withCode "EXF_MODULE_PARSE") values
   UnsupportedSourceVocabulary occurrences ->
     fmap unsupportedVocabularyDiagnostic occurrences
   DataTypeNameError detail -> oneDiagnostic
@@ -805,10 +802,23 @@ parseModulesM inputs = do
       -> IO (Either Diagnostic (ParseMode, String))
     hRead (mode, path) = fmap ((,) mode) <$> readTextFile path
 
-    hParse :: (ParseMode, String) -> Either String (Module SrcSpanInfo)
+    hParse :: (ParseMode, String) -> Either Diagnostic (Module SrcSpanInfo)
     hParse (mode, content) = case parseModuleWithMode mode content of
-      f@(ParseFailed _ _) -> Left $ show f
-      ParseOk modul       -> Right modul
+      ParseFailed location detail -> Left $ moduleParseDiagnostic location detail
+      ParseOk modul -> Right modul
+
+    moduleParseDiagnostic :: HSE.SrcLoc -> String -> Diagnostic
+    moduleParseDiagnostic location detail =
+      let position = SourcePosition
+            (HSE.srcLine location) (HSE.srcColumn location)
+      in withLocation
+          (HSE.srcFilename location)
+          (SourceSpan position position)
+        $ contextualDiagnostic
+            Error
+            "EXF_MODULE_PARSE"
+            "could not parse a Haskell source module"
+            detail
 
     -- Each phase observes only a successful predecessor.  Errors are still
     -- aggregated within one phase, but an invalid partial inventory is never

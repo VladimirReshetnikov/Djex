@@ -148,8 +148,10 @@ representation for them.
 
 The HSE loader returns `IO (LoadReport CheckedSourceEnvironment)`: fatal phases
 use a typed error, while nonfatal warnings and summaries are structured shared
-diagnostics. Low-level `parseModules` keeps aliases unexpanded in its
-`SourceEnvironment`; `checkSourceEnvironment` first seals and kind-checks that
+diagnostics. Fatal module parse diagnostics retain HSE's exact source filename
+and point location under the stable `EXF_MODULE_PARSE` code, with the native
+parser detail preserved as context. Low-level `parseModules` keeps aliases
+unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` first seals and kind-checks that
 source graph, then sends the checked Inventory through the parser-independent
 neutral lowerer. The resulting backend projection is reconciled by name with
 the original binding/deconstructor order and ratings. Thus synonym expansion,

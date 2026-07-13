@@ -2583,23 +2583,21 @@ tests = testGroup "Exference"
               expectedDirectory =
                 withCode "EXF_ENV_DIRECTORY_READ" preserved :| []
               expectedModule = withCode "EXF_MODULE_READ" preserved :| []
+              expectedParse = withCode "EXF_MODULE_PARSE" preserved :| []
               expectedUnsupported = preserved :| []
           environmentLoadErrorDiagnostics
             (EnvironmentDirectoryReadError preserved) @?= expectedDirectory
           environmentLoadErrorDiagnostics
             (ModuleReadErrors $ preserved :| []) @?= expectedModule
           environmentLoadErrorDiagnostics
+            (ModuleParseErrors $ preserved :| []) @?= expectedParse
+          environmentLoadErrorDiagnostics
             (UnsupportedSourceVocabulary $ occurrence :| [])
               @?= expectedUnsupported
-      , testCase "legacy loader phases receive stable structured diagnostics" $ do
+      , testCase "legacy string loader phases receive structured diagnostics" $ do
           className <- expectRight $ mkQualifiedName ["Fixture"] "Class"
           let cases =
-                [ ( ModuleParseErrors $ "parse detail" :| []
-                  , "EXF_MODULE_PARSE"
-                  , "could not parse a Haskell source module"
-                  , "parse detail"
-                  )
-                , ( DataTypeNameError "name detail"
+                [ ( DataTypeNameError "name detail"
                   , "EXF_DATA_TYPE_NAME"
                   , "could not extract source data-type names"
                   , "name detail"
@@ -2777,6 +2775,46 @@ tests = testGroup "Exference"
             Right _ -> fail "a malformed module was accepted"
           assertBool ("later loader summaries survived: " ++ show messages)
             $ not $ any isLoaderSummary messages
+      , testCase "module parse diagnostics retain locations and input order" $
+          withTemporaryFile (unlines
+            [ "module FirstBroken where"
+            , "first ::"
+            ]) $ \firstPath ->
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE TypeFamilies #-}"
+            , "module UnsupportedBetween where"
+            , "type family F a"
+            ]) $ \unsupportedPath ->
+          withTemporaryFile (unlines
+            [ "module SecondBroken where"
+            , ""
+            , "second ="
+            ]) $ \secondPath -> do
+            LoadReport result diagnostics <- parseModules
+              [ (haskellSrcExtsParseMode firstPath, firstPath)
+              , (haskellSrcExtsParseMode unsupportedPath, unsupportedPath)
+              , (haskellSrcExtsParseMode secondPath, secondPath)
+              ]
+            assertBool ("parse failure emitted loader diagnostics: "
+                ++ show diagnostics)
+              $ null diagnostics
+            case result of
+              Left failure@(ModuleParseErrors values) -> do
+                let expected path line = withLocation path
+                      (SourceSpan
+                        (SourcePosition line 1)
+                        (SourcePosition line 1))
+                      $ contextualDiagnostic
+                          Error
+                          "EXF_MODULE_PARSE"
+                          "could not parse a Haskell source module"
+                          "Parse error: ;"
+                    expectedValues =
+                      expected firstPath 3 :| [expected secondPath 4]
+                values @?= expectedValues
+                environmentLoadErrorDiagnostics failure @?= expectedValues
+              Left failure -> fail $ "unexpected load failure: " ++ show failure
+              Right _ -> fail "malformed modules were accepted"
       , testCase "unsupported top-level vocabulary fails explicitly" $
           mapM_ (\(label, extensions, pragmas, declaration, expectedForm) -> do
               occurrences <- unsupportedFromSourceWith extensions $ unlines

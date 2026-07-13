@@ -111,6 +111,9 @@ import Language.Haskell.Exference.EnvironmentParser
   , LoadReport (..)
   , SourceBinding (..)
   , SourceEnvironment (..)
+  , UnsupportedVocabularyForm (..)
+  , UnsupportedVocabularyOccurrence (..)
+  , unsupportedVocabularyOccurrences
   , sourceBindingFunction
   , sourceFunctions
   , checkedSourceInventory
@@ -2028,6 +2031,243 @@ tests = testGroup "Exference"
             Right _ -> fail "a malformed module was accepted"
           assertBool ("later loader summaries survived: " ++ show messages)
             $ not $ any isLoaderSummary messages
+      , testCase "unsupported top-level vocabulary fails explicitly" $
+          mapM_ (\(label, extensions, pragmas, declaration, expectedForm) -> do
+              occurrences <- unsupportedFromSourceWith extensions $ unlines
+                $ pragmas ++ ["module Unsupported where", declaration]
+              assertEqual label [expectedForm]
+                $ map unsupportedVocabularyForm occurrences)
+            [ ( "open type family"
+              , []
+              , ["{-# LANGUAGE TypeFamilies #-}"]
+              , "type family F a"
+              , OpenTypeFamily
+              )
+            , ( "closed type family"
+              , []
+              , ["{-# LANGUAGE TypeFamilies #-}"]
+              , "type family F a where F Int = Bool"
+              , ClosedTypeFamily
+              )
+            , ( "data family"
+              , []
+              , ["{-# LANGUAGE TypeFamilies #-}"]
+              , "data family D a"
+              , DataFamily
+              )
+            , ( "GADT"
+              , [HSE.GADTs]
+              , ["{-# LANGUAGE GADTs #-}"]
+              , "data G a where G :: a -> G a"
+              , GadtDeclaration
+              )
+            , ( "type family instance"
+              , []
+              , ["{-# LANGUAGE TypeFamilies #-}"]
+              , "type instance F Int = Bool"
+              , TypeFamilyInstance
+              )
+            , ( "data family instance"
+              , []
+              , ["{-# LANGUAGE TypeFamilies #-}"]
+              , "data instance D Int = DInt"
+              , DataFamilyInstance
+              )
+            , ( "GADT data family instance"
+              , [HSE.GADTs]
+              , ["{-# LANGUAGE GADTs, TypeFamilies #-}"]
+              , "data instance D Int where DInt :: D Int"
+              , GadtDataFamilyInstance
+              )
+            , ( "standalone deriving"
+              , [HSE.StandaloneDeriving]
+              , ["{-# LANGUAGE StandaloneDeriving #-}"]
+              , "deriving instance Eq T"
+              , StandaloneDeriving
+              )
+            , ( "declaration splice"
+              , [HSE.TemplateHaskell]
+              , ["{-# LANGUAGE TemplateHaskell #-}"]
+              , "$(pure [])"
+              , DeclarationSplice
+              )
+            , ( "role annotation"
+              , [HSE.RoleAnnotations]
+              , ["{-# LANGUAGE RoleAnnotations #-}"]
+              , "type role T nominal"
+              , RoleAnnotation
+              )
+            , ( "deriving clause"
+              , []
+              , []
+              , "data T = T deriving (Eq)"
+              , DerivingClause
+              )
+            ]
+      , testCase "class vocabulary modifiers retain nested source order" $ do
+          occurrences <- unsupportedFromSourceWith [HSE.DefaultSignatures]
+            $ unlines
+            [ "{-# LANGUAGE DefaultSignatures, FunctionalDependencies, TypeFamilies #-}"
+            , "module UnsupportedClass where"
+            , "class C a b | a -> b where"
+            , "  data D a"
+            , "  type F a"
+            , "  type F a = a"
+            , "  default method :: a -> a"
+            , "  method :: a -> a"
+            ]
+          map unsupportedVocabularyForm occurrences @?=
+            [ FunctionalDependency
+            , AssociatedDataFamily
+            , AssociatedTypeFamily
+            , AssociatedTypeDefault
+            , DefaultMethodSignature
+            ]
+          map occurrenceStartLine occurrences @?=
+            [Just 3, Just 4, Just 5, Just 6, Just 7]
+      , testCase "XML hybrid modules fail with their exact module span" $ do
+          let nativeSpan = HSE.SrcSpan "Hybrid.hs" 2 3 8 9
+              location = HSE.SrcSpanInfo nativeSpan []
+              hybrid = HSE.XmlHybrid location Nothing [] [] []
+                (HSE.XName location "page") [] Nothing []
+              occurrences = unsupportedVocabularyOccurrences [hybrid]
+              expectedDiagnostic = Diagnostic
+                { diagnosticSeverity = Error
+                , diagnosticCode = Just "EXF_UNSUPPORTED_VOCABULARY"
+                , diagnosticSource = Just "Hybrid.hs"
+                , diagnosticSpan = Just $ SourceSpan
+                    (SourcePosition 2 3) (SourcePosition 8 9)
+                , diagnosticMessage =
+                    "unsupported source vocabulary: XML hybrid module"
+                , diagnosticContext = []
+                }
+          occurrences @?=
+            [UnsupportedVocabularyOccurrence XmlHybridModule
+              expectedDiagnostic]
+      , testCase "typed declaration splices are covered at the HSE boundary" $ do
+          let nativeSpan = HSE.SrcSpan "TypedSplice.hs" 4 2 4 16
+              location = HSE.SrcSpanInfo nativeSpan []
+              expression = HSE.Var location $ HSE.UnQual location
+                $ HSE.Ident location "declarations"
+              modul = HSE.Module location Nothing [] []
+                [HSE.TSpliceDecl location expression]
+          map unsupportedVocabularyForm
+              (unsupportedVocabularyOccurrences [modul]) @?=
+            [TypedDeclarationSplice]
+      , testCase "instance vocabulary modifiers retain nested source order" $ do
+          occurrences <- unsupportedFromSourceWith [HSE.GADTs] $ unlines
+            [ "{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies #-}"
+            , "module UnsupportedInstance where"
+            , "instance {-# OVERLAPPABLE #-} C Int where"
+            , "  type F Int = Bool"
+            , "  data D Int = DInt"
+            , "  data D Bool where DBool :: D Bool"
+            ]
+          map unsupportedVocabularyForm occurrences @?=
+            [ InstanceOverlapMode
+            , AssociatedTypeInstance
+            , AssociatedDataInstance
+            , AssociatedGadtDataInstance
+            ]
+          map occurrenceStartLine occurrences @?=
+            [Just 3, Just 4, Just 5, Just 6]
+      , testCase "unsupported occurrences aggregate in module order" $
+          withTemporaryFile (unlines
+            [ "module FirstUnsupported where"
+            , "data T = T deriving (Eq)"
+            ]) $ \firstPath ->
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE TypeFamilies #-}"
+            , "module SecondUnsupported where"
+            , "type family F a"
+            ]) $ \secondPath -> do
+              LoadReport result _ <- parseModules
+                [ (haskellSrcExtsParseMode firstPath, firstPath)
+                , (haskellSrcExtsParseMode secondPath, secondPath)
+                ]
+              occurrences <- expectUnsupportedVocabulary result
+              map unsupportedVocabularyForm occurrences @?=
+                [DerivingClause, OpenTypeFamily]
+              map (diagnosticSource . unsupportedVocabularyDiagnostic)
+                occurrences @?= [Just firstPath, Just secondPath]
+      , testCase "module parse errors precede unsupported vocabulary" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE TypeFamilies #-}"
+            , "module Unsupported where"
+            , "type family F a"
+            ]) $ \unsupportedPath ->
+          withTemporaryFile "module Broken where value ::" $ \brokenPath -> do
+            LoadReport result _ <- parseModules
+              [ (haskellSrcExtsParseMode unsupportedPath, unsupportedPath)
+              , (haskellSrcExtsParseMode brokenPath, brokenPath)
+              ]
+            case result of
+              Left ModuleParseErrors{} -> pure ()
+              Left failure -> fail $ "unexpected load failure: " ++ show failure
+              Right _ -> fail "parse failure lost precedence"
+      , testCase "unsupported vocabulary precedes declaration conversion" $ do
+          occurrences <- unsupportedFromSource $ unlines
+            [ "{-# LANGUAGE KindSignatures, TypeFamilies #-}"
+            , "module UnsupportedBeforeConversion where"
+            , "type family F a"
+            , "type Bad (a :: *) = a"
+            ]
+          map unsupportedVocabularyForm occurrences @?= [OpenTypeFamily]
+      , testCase "benign non-vocabulary declarations remain accepted" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE ForeignFunctionInterface, InstanceSigs, PatternSynonyms #-}"
+            , "module Benign where"
+            , "import Data.List"
+            , "data T = T"
+            , "infixr 5 <+>"
+            , "default (T)"
+            , "ordinary :: a -> a"
+            , "ordinary value = value"
+            , "pattern P :: T"
+            , "pattern P = T"
+            , "foreign import ccall \"foreign_value\" foreignValue :: T"
+            , "class C a where"
+            , "  method :: a -> a"
+            , "  method value = value"
+            , "  {-# MINIMAL method #-}"
+            , "instance C T where"
+            , "  method :: T -> T"
+            , "  method value = value"
+            , "{-# SPECIALISE instance C T #-}"
+            ]) $ \modulePath -> do
+              let mode = enableExtensions
+                    [ HSE.ForeignFunctionInterface
+                    , HSE.InstanceSigs
+                    , HSE.PatternSynonyms
+                    ] $ haskellSrcExtsParseMode modulePath
+              LoadReport result _ <- parseModules [(mode, modulePath)]
+              _ <- expectRight result
+              pure ()
+      , testCase "empty datatype contexts cannot bypass binding validation" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE EmptyDataDecls #-}"
+            , "module EmptyContext where"
+            , "data Eq a => Empty a"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              case result of
+                Left (BindingDeclarationErrors (firstError :| rest)) -> do
+                  assertBool firstError $ "context in data type"
+                    `isInfixOf` firstError
+                  rest @?= []
+                Left failure -> fail $ "unexpected load failure: " ++ show failure
+                Right _ -> fail "empty contextual datatype was accepted"
+      , testCase "source LANGUAGE pragmas do not hide unsupported syntax" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE TypeFamilies #-}"
+            , "module FirstUnsupported where"
+            , "type family F a"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              occurrences <- expectUnsupportedVocabulary result
+              map unsupportedVocabularyForm occurrences @?= [OpenTypeFamily]
       , testCase "malformed ratings retain the parsed environment at defaults" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
@@ -3169,6 +3409,61 @@ runLoad
 runLoad action = do
   LoadReport result diagnostics <- action
   pure (result, map diagnosticMessage diagnostics)
+
+unsupportedFromSource :: String -> IO [UnsupportedVocabularyOccurrence]
+unsupportedFromSource = unsupportedFromSourceWith []
+
+unsupportedFromSourceWith
+  :: [HSE.KnownExtension]
+  -> String
+  -> IO [UnsupportedVocabularyOccurrence]
+unsupportedFromSourceWith extraExtensions source =
+  withTemporaryFile source $ \modulePath -> do
+    LoadReport result _ <- parseModules
+      [ ( enableExtensions extraExtensions
+            $ haskellSrcExtsParseMode modulePath
+        , modulePath
+        )
+      ]
+    occurrences <- expectUnsupportedVocabulary result
+    mapM_ (assertStructured modulePath) occurrences
+    pure occurrences
+ where
+  assertStructured modulePath occurrence = do
+    let value = unsupportedVocabularyDiagnostic occurrence
+    diagnosticSeverity value @?= Error
+    diagnosticCode value @?= Just "EXF_UNSUPPORTED_VOCABULARY"
+    diagnosticSource value @?= Just modulePath
+    assertBool ("missing diagnostic span: " ++ show value)
+      $ case diagnosticSpan value of
+          Just (SourceSpan start end) ->
+            sourceLine start > 0
+              && sourceColumn start > 0
+              && end >= start
+          Nothing -> False
+
+expectUnsupportedVocabulary
+  :: Either EnvironmentLoadError result
+  -> IO [UnsupportedVocabularyOccurrence]
+expectUnsupportedVocabulary result = case result of
+  Left (UnsupportedSourceVocabulary (firstOccurrence :| remaining)) ->
+    pure $ firstOccurrence : remaining
+  Left failure -> fail $ "unexpected load failure: " ++ show failure
+  Right _ -> fail "unsupported source vocabulary was accepted"
+
+occurrenceStartLine :: UnsupportedVocabularyOccurrence -> Maybe Int
+occurrenceStartLine occurrence =
+  sourceLine . sourceStart
+    <$> diagnosticSpan (unsupportedVocabularyDiagnostic occurrence)
+
+enableExtensions
+  :: [HSE.KnownExtension]
+  -> HSE.ParseMode
+  -> HSE.ParseMode
+enableExtensions requested mode = mode
+  { HSE.extensions = map HSE.EnableExtension requested
+      ++ HSE.extensions mode
+  }
 
 legacyInputEnvironment :: ExferenceInput -> EnvDictionary
 legacyInputEnvironment input = EnvDictionary

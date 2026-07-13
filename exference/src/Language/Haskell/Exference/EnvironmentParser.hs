@@ -13,6 +13,9 @@ module Language.Haskell.Exference.EnvironmentParser
   , checkedSourceInventory
   , checkSourceEnvironment
   , LoadReport (..)
+  , UnsupportedVocabularyForm (..)
+  , UnsupportedVocabularyOccurrence (..)
+  , unsupportedVocabularyOccurrences
   , EnvironmentLoadError (..)
   , parseModules
   , environmentFromModule
@@ -54,12 +57,14 @@ import Data.Bifunctor ( first )
 import System.FilePath ( (</>) )
 import System.IO.Error ( tryIOError )
 
-import Language.Haskell.Exts.Syntax ( Module(..) )
+import Language.Haskell.Exts.Syntax ( Module )
+import qualified Language.Haskell.Exts.Syntax as HSE
 import Language.Haskell.Exts.Parser ( parseModuleWithMode
                                     , ParseResult (..)
                                     , ParseMode
                                     )
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
+import qualified Language.Haskell.Exts.SrcLoc as HSE
 
 import Control.Monad.Trans.Except (runExceptT, throwE)
 
@@ -124,12 +129,51 @@ data LoadReport a = LoadReport
   , loadDiagnostics :: [Diagnostic]
   }
 
+-- | Haskell source constructs whose type, class, or instance meaning cannot
+-- yet be represented by Exference's nominal source inventory. Keeping this
+-- distinction separate from parser failures lets callers report an exact,
+-- stable reason without pretending that accepted syntax was loaded.
+data UnsupportedVocabularyForm
+  = OpenTypeFamily
+  | ClosedTypeFamily
+  | DataFamily
+  | GadtDeclaration
+  | TypeFamilyInstance
+  | DataFamilyInstance
+  | GadtDataFamilyInstance
+  | StandaloneDeriving
+  | DeclarationSplice
+  | TypedDeclarationSplice
+  | RoleAnnotation
+  | DerivingClause
+  | FunctionalDependency
+  | InstanceOverlapMode
+  | AssociatedDataFamily
+  | AssociatedTypeFamily
+  | AssociatedTypeDefault
+  | DefaultMethodSignature
+  | AssociatedTypeInstance
+  | AssociatedDataInstance
+  | AssociatedGadtDataInstance
+  | XmlHybridModule
+  deriving (Eq, Ord, Show)
+
+-- | One rejected source occurrence paired with a precise shared diagnostic.
+-- Occurrences retain module and source order in 'EnvironmentLoadError'.
+data UnsupportedVocabularyOccurrence = UnsupportedVocabularyOccurrence
+  { unsupportedVocabularyForm :: UnsupportedVocabularyForm
+  , unsupportedVocabularyDiagnostic :: Diagnostic
+  }
+  deriving (Eq, Show)
+
 -- | Fatal source-loading phases.  Warnings remain in the load report, but
 -- a failed class graph cannot produce a searchable recovery environment.
 data EnvironmentLoadError
   = EnvironmentDirectoryReadError Diagnostic
   | ModuleReadErrors (NonEmpty Diagnostic)
   | ModuleParseErrors (NonEmpty String)
+  | UnsupportedSourceVocabulary
+      (NonEmpty UnsupportedVocabularyOccurrence)
   | DataTypeNameError String
   | TypeDeclarationErrors (NonEmpty String)
   | ClassEnvironmentLoadFailure ClassEnvironmentLoadError
@@ -426,6 +470,143 @@ tupleType :: QualifiedName -> Int -> HsType
 tupleType tupleName arity = foldl TypeApp (TypeCons tupleName)
   $ typeVariables arity
 
+-- | Find every declaration whose source-level type/class meaning would be
+-- lost by the current extractor. Value definitions, imports, fixities,
+-- default declarations, pattern vocabulary, and benign pragmas deliberately
+-- remain outside this scan.
+unsupportedVocabularyOccurrences
+  :: [Module SrcSpanInfo]
+  -> [UnsupportedVocabularyOccurrence]
+unsupportedVocabularyOccurrences = concatMap unsupportedModule
+ where
+  unsupportedModule modul = case modul of
+    HSE.Module _ _ _ _ declarations -> concatMap unsupportedDecl declarations
+    -- Hybrid HSP modules do carry ordinary declarations, but the loader's
+    -- module/name projection deliberately has no semantics for the XML half.
+    -- Reject the boundary once instead of silently discarding all declarations
+    -- or emitting a cascade for children we cannot load in context.
+    HSE.XmlHybrid location _ _ _ _ _ _ _ _ ->
+      [unsupportedOccurrence XmlHybridModule location]
+    HSE.XmlPage{} -> []
+
+  unsupportedDecl declaration = case declaration of
+    HSE.TypeFamDecl location _ _ _ ->
+      one OpenTypeFamily location
+    HSE.ClosedTypeFamDecl location _ _ _ _ ->
+      one ClosedTypeFamily location
+    HSE.DataFamDecl location _ _ _ ->
+      one DataFamily location
+    HSE.GDataDecl location _ _ _ _ _ _ ->
+      one GadtDeclaration location
+    HSE.TypeInsDecl location _ _ ->
+      one TypeFamilyInstance location
+    HSE.DataInsDecl location _ _ _ _ ->
+      one DataFamilyInstance location
+    HSE.GDataInsDecl location _ _ _ _ _ ->
+      one GadtDataFamilyInstance location
+    HSE.DerivDecl location _ _ _ ->
+      one StandaloneDeriving location
+    HSE.SpliceDecl location _ ->
+      one DeclarationSplice location
+    HSE.TSpliceDecl location _ ->
+      one TypedDeclarationSplice location
+    HSE.RoleAnnotDecl location _ _ ->
+      one RoleAnnotation location
+    HSE.DataDecl _ _ _ _ _ derivings ->
+      concatMap unsupportedDeriving derivings
+    HSE.ClassDecl _ _ _ dependencies declarations ->
+      concatMap unsupportedDependency dependencies
+        ++ concatMap unsupportedClassDecl (maybe [] id declarations)
+    HSE.InstDecl _ overlap _ declarations ->
+      maybe [] unsupportedOverlap overlap
+        ++ concatMap unsupportedInstanceDecl (maybe [] id declarations)
+    _ -> []
+
+  unsupportedDeriving (HSE.Deriving location _ _) =
+    one DerivingClause location
+
+  unsupportedDependency (HSE.FunDep location _ _) =
+    one FunctionalDependency location
+
+  unsupportedOverlap overlap = case overlap of
+    HSE.NoOverlap location -> one InstanceOverlapMode location
+    HSE.Overlap location -> one InstanceOverlapMode location
+    HSE.Overlapping location -> one InstanceOverlapMode location
+    HSE.Overlaps location -> one InstanceOverlapMode location
+    HSE.Overlappable location -> one InstanceOverlapMode location
+    HSE.Incoherent location -> one InstanceOverlapMode location
+
+  unsupportedClassDecl declaration = case declaration of
+    HSE.ClsDataFam location _ _ _ ->
+      one AssociatedDataFamily location
+    HSE.ClsTyFam location _ _ _ ->
+      one AssociatedTypeFamily location
+    HSE.ClsTyDef location _ ->
+      one AssociatedTypeDefault location
+    HSE.ClsDefSig location _ _ ->
+      one DefaultMethodSignature location
+    -- Ordinary signatures and value/default bodies remain supported or
+    -- intentionally irrelevant to the source type/class inventory.
+    HSE.ClsDecl{} -> []
+
+  unsupportedInstanceDecl declaration = case declaration of
+    HSE.InsType location _ _ ->
+      one AssociatedTypeInstance location
+    HSE.InsData location _ _ _ _ ->
+      one AssociatedDataInstance location
+    HSE.InsGData location _ _ _ _ _ ->
+      one AssociatedGadtDataInstance location
+    -- Method signatures, implementations, and benign pragmas do not alter
+    -- the global type/class vocabulary represented by the instance head.
+    HSE.InsDecl{} -> []
+
+  one form location = [unsupportedOccurrence form location]
+
+unsupportedOccurrence
+  :: UnsupportedVocabularyForm
+  -> SrcSpanInfo
+  -> UnsupportedVocabularyOccurrence
+unsupportedOccurrence form location = UnsupportedVocabularyOccurrence form
+  $ withCode "EXF_UNSUPPORTED_VOCABULARY"
+  $ withSpan (SourceSpan
+      (SourcePosition
+        (HSE.srcSpanStartLine sourceSpan)
+        (HSE.srcSpanStartColumn sourceSpan))
+      (SourcePosition
+        (HSE.srcSpanEndLine sourceSpan)
+        (HSE.srcSpanEndColumn sourceSpan)))
+  $ withSource (HSE.srcSpanFilename sourceSpan)
+  $ diagnostic $ "unsupported source vocabulary: "
+      ++ unsupportedVocabularyDescription form
+ where
+  sourceSpan = HSE.srcInfoSpan location
+
+unsupportedVocabularyDescription :: UnsupportedVocabularyForm -> String
+unsupportedVocabularyDescription form = case form of
+  OpenTypeFamily -> "open type-family declaration"
+  ClosedTypeFamily -> "closed type-family declaration"
+  DataFamily -> "data-family declaration"
+  GadtDeclaration -> "GADT-style data declaration"
+  TypeFamilyInstance -> "type-family instance"
+  DataFamilyInstance -> "data-family instance"
+  GadtDataFamilyInstance -> "GADT-style data-family instance"
+  StandaloneDeriving -> "standalone deriving declaration"
+  DeclarationSplice -> "Template Haskell declaration splice"
+  TypedDeclarationSplice -> "typed Template Haskell declaration splice"
+  RoleAnnotation -> "type-role annotation"
+  DerivingClause -> "derived class instances"
+  FunctionalDependency -> "class functional dependency"
+  InstanceOverlapMode -> "instance overlap mode"
+  AssociatedDataFamily -> "associated data-family declaration"
+  AssociatedTypeFamily -> "associated type-family declaration"
+  AssociatedTypeDefault -> "default associated-type equation"
+  DefaultMethodSignature -> "default method signature"
+  AssociatedTypeInstance -> "associated type-family instance"
+  AssociatedDataInstance -> "associated data-family instance"
+  AssociatedGadtDataInstance ->
+    "GADT-style associated data-family instance"
+  XmlHybridModule -> "XML hybrid module"
+
 -- | Load source modules in the supplied order.  The returned diagnostics are
 -- deterministic: messages within a module retain source order, while sets of
 -- unknown names are rendered in nominal sort order.
@@ -470,6 +651,11 @@ parseModulesM inputs = do
         Just errors -> throwE $ ModuleParseErrors errors
         Nothing -> pure ()
       let modules = rights parsedModules
+
+      case NonEmpty.nonEmpty $ unsupportedVocabularyOccurrences modules of
+        Just occurrences ->
+          throwE $ UnsupportedSourceVocabulary occurrences
+        Nothing -> pure ()
 
       dataTypes <- case getDataTypes modules of
         Left conversionError ->

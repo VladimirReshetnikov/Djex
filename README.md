@@ -113,6 +113,17 @@ validation, and lowers each rated selector exactly once into Exference's flat
 search inventory without changing source order. Unsupported rank-N
 introduction and elimination capabilities remain visible as structured
 omissions and warning diagnostics instead of disappearing per query.
+The Haskell-source loader is likewise fail-closed at its vocabulary boundary:
+after parsing, but before constructing any partial inventory, it reports
+source-ordered `UnsupportedVocabularyOccurrence` values for type/data families,
+GADTs, derived or overlapping instances, functional dependencies, associated
+families and defaults, declaration splices, role annotations, and XML hybrid
+modules. Each occurrence carries the stable
+`EXF_UNSUPPORTED_VOCABULARY` diagnostic code and its exact source span.
+Imports, fixities, ordinary value and method bodies, pattern vocabulary,
+default declarations, and operational pragmas remain accepted because they do
+not change the nominal type/class inventory. These forms are explicit current
+limitations rather than syntax that can silently disappear during loading.
 `parseExferenceRequest`
 elaborates a Haskell type against the session's retained names, synonyms,
 classes, and kind assumptions; `runExferenceQuery` validates only the varying

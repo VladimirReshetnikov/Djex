@@ -106,9 +106,6 @@ getDataConss tcs ds tDeclMap modules =
       => QualConDecl SrcSpanInfo
       -> ConversionT String m (QualifiedName, [HsType])
     typeM (QualConDecl _ cbindings constructorContext conDecl) = do
-      case contextConstraints context of
-        [] -> pure ()
-        _  -> throwE "context in data type"
       case (fromMaybe [] cbindings, contextConstraints constructorContext) of
         ([], []) -> pure ()
         _       -> throwE "constraint or existential type for constructor"
@@ -126,6 +123,12 @@ getDataConss tcs ds tDeclMap modules =
       => ConversionT String m ([FunctionBinding], DeconstructorBinding)
     convAction = do
       rtype  <- rTypeM
+      -- A datatype context belongs to the declaration, not to each
+      -- constructor. Checking it outside 'mapM typeM' also rejects contextual
+      -- empty datatypes instead of accepting them vacuously.
+      case contextConstraints context of
+        [] -> pure ()
+        _  -> throwE "context in data type"
       consDatas <- mapM typeM conss
       -- The deconstructor records one use-site instance of the datatype, so
       -- its parameters must remain free for search-time unification.  Each

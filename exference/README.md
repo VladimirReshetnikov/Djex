@@ -357,6 +357,12 @@ any / the right solution. Some common current limitations are:
 - Source inventories and queries are kind-checked against the same retained
   assumptions; an ill-kinded application such as `Maybe Maybe` is rejected
   before search;
+- The source loader currently represents ordinary datatypes, type synonyms,
+  classes, instances, and value/method signatures. Type/data families, GADTs,
+  derived or overlapping instances, functional dependencies, associated
+  families/defaults, declaration splices, and role annotations fail before
+  inventory construction as source-spanned `EXF_UNSUPPORTED_VOCABULARY`
+  diagnostics; they are never silently omitted;
 - The environment is composed by hand currently, and does only include parts
   of base plus a few other selected modules. Its canonical inventory of 41
   classes and 432 source instances is checked at load time and expands to 535

@@ -134,8 +134,22 @@ ordinary entries in `SourceFunction`. A read-only explicit import that formerly
 named only `SourceEnvironment(..)` must now also name the standalone
 `sourceFunctions` accessor; broad module imports remain unaffected.
 
+The low-level HSE adapters are total at their public boundaries:
+`convertName`, `convertModuleName`, and `getDataTypes` return explicit
+conversion failures even for malformed caller-constructed syntax trees. The
+former unchecked aliases and parallel `*Checked` names have been folded into
+those single ordinary APIs. Source ratings likewise have one canonical
+application pass; the obsolete first-match dictionary compiler and unsealed
+single-module tuple loader are no longer separate behaviors. Callers that need
+one neutral module can use `environmentFromModule`, which runs the same loader
+and inventory sealing as the rated and directory entry points.
+
 Class heads, superclasses, instances, and method bodies are elaborated from one
-collected class inventory. A method's compatibility type carries the implicit
+collected class inventory. `loadClassEnvironment` returns one named
+`LoadedClassEnvironment` containing the validated static graph, the explicit
+source-instance count, and ownership-bearing methods grouped in input-module
+order; no method-free projection traverses the class bodies again. A method's
+compatibility type carries the implicit
 owner constraint, while its `SourceClassMethod` tag carries only the qualified
 owner name, avoiding a second copy of the class parameter IDs. Inventory
 sealing checks that tag and leading constraint against the owning class, nests

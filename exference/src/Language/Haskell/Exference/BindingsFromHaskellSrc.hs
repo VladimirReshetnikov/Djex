@@ -2,11 +2,8 @@
 
 module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
-  , declToBinding
   , getDataConss
-  , getClassMethods
   , getDataTypes
-  , getDataTypesChecked
   )
 where
 
@@ -22,10 +19,6 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.FunctionDecl
 import Language.Haskell.Exference.HaskellSrcUtils
-import Language.Haskell.Exference.ClassEnvFromHaskellSrc
-  ( ClassMethodDeclaration (classMethodFunction)
-  , getClassMethodsForEnvironment
-  )
 
 import Control.Monad.Trans.Except
 import Data.Graph ( SCC (..), stronglyConnComp )
@@ -77,7 +70,7 @@ helper
   -> Name SrcSpanInfo
   -> Either String HsFunctionDecl
 helper mn t syntaxName = (, forallify t)
-  <$> convertModuleNameChecked mn syntaxName
+  <$> convertModuleName mn syntaxName
 
 getDataConss
   :: Monad m
@@ -95,7 +88,7 @@ getDataConss tcs ds tDeclMap modules =
   let
     rTypeM :: Monad m => ConversionT String m HsType
     rTypeM = do
-      rName <- either throwE pure $ convertModuleNameChecked moduleName name
+      rName <- either throwE pure $ convertModuleName moduleName name
       ps  <- mapM pTransform params
       return $ foldl TypeApp (TypeCons rName) ps
     pTransform
@@ -123,7 +116,7 @@ getDataConss tcs ds tDeclMap modules =
         ConDecl _ c t -> pure (c, t)
         x           -> throwE $ "unknown ConDecl: " ++ show x
       convTs <- convertTypeInternal tcs (Just moduleName) ds tDeclMap `mapM` tys
-      qName <- either throwE pure $ convertModuleNameChecked moduleName cname
+      qName <- either throwE pure $ convertModuleName moduleName cname
       return $ (qName, convTs)
   let
     addConsMsg = (++) $ show name ++ ": "
@@ -195,24 +188,13 @@ constructorTypeHeads = foldMap
       . constructorFields)
   . deconstructorConstructors
 
-getClassMethods
-  :: Monad m
-  => M.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
-  -> TypeDeclMap
-  -> [Module SrcSpanInfo]
-  -> m [Either String HsFunctionDecl]
-getClassMethods tcs ds tDeclMap modules =
-  map (fmap classMethodFunction) . concat
-    <$> getClassMethodsForEnvironment tcs ds tDeclMap modules
-
--- | Checked extraction used by Exference itself.  Keeping construction
--- failures explicit matters because HSE syntax constructors are public and can
--- carry malformed module or occurrence spellings.
-getDataTypesChecked
+-- | Total extraction used by Exference itself. Keeping construction failures
+-- explicit matters because HSE syntax constructors are public and can carry
+-- malformed module or occurrence spellings.
+getDataTypes
   :: [Module SrcSpanInfo]
   -> Either String [QualifiedName]
-getDataTypesChecked modules = mapM (uncurry convertModuleNameChecked) $ d1 ++ d2
+getDataTypes modules = mapM (uncurry convertModuleName) $ d1 ++ d2
  where
   d1 = do
     modul <- modules
@@ -226,10 +208,3 @@ getDataTypesChecked modules = mapM (uncurry convertModuleNameChecked) $ d1 ++ d2
     TypeDecl _ rawHead _ <- decls
     let (name, _) = splitDeclHead rawHead
     return (moduleName, name)
-
--- | Historical unchecked facade.  New code should use
--- 'getDataTypesChecked'; malformed hand-built HSE nodes cannot be represented
--- by the validated core name type.
-getDataTypes :: [Module SrcSpanInfo] -> [QualifiedName]
-getDataTypes = either (error . ("invalid data-type name: " ++)) id
-  . getDataTypesChecked

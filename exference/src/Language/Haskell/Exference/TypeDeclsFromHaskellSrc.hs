@@ -168,10 +168,11 @@ getTypeDecls ds modules = do
            $ runExceptT
            $ do
       (ty, tyVarIndex) <- convertTypeNoDecl M.empty (Just mn) ds rawTy
-      qname <- either throwE pure $ convertModuleNameChecked mn name
-      -- the 1000 is arbitrary, but it should not be used anyway.
-      -- no new type variables should appear on the left hand side.
-      vars <- runConversionT (ConvData 1000 tyVarIndex)
+      qname <- either throwE pure $ convertModuleName mn name
+      -- RHS conversion allocates a dense zero-based namespace. Begin after it
+      -- so legal phantom parameters receive fresh adjacent IDs rather than an
+      -- arbitrary sentinel that can eventually collide with a large RHS.
+      vars <- runConversionT (ConvData (M.size tyVarIndex) tyVarIndex)
         $ rawVars `forM` tyVarTransform
       return $ HsTypeDecl qname vars ty
   let validDeclarations = rights rawList

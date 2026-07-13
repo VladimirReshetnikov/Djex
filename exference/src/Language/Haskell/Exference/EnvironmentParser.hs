@@ -16,14 +16,13 @@ module Language.Haskell.Exference.EnvironmentParser
   , LoadReport (..)
   , EnvironmentLoadError (..)
   , parseModules
-  , parseModulesSimple
+  , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
   , sourceTypeSynonymMap
   , haskellSrcExtsParseMode
-  , compileWithDict
   , parseRatings
   )
 where
@@ -37,6 +36,7 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
+import Language.Haskell.Exference.Core.TypeUtils (splitArrowResultParams)
 import Language.Haskell.Exference.FunctionDecl
 
 import Language.Haskell.Exference.Core.Types
@@ -44,8 +44,8 @@ import Language.Haskell.Exference.Diagnostic
 
 import Control.DeepSeq
 
-import Control.Monad ( forM_, forM, zipWithM )
-import Data.List ( sort, find, isSuffixOf )
+import Control.Monad ( forM_, zipWithM )
+import Data.List ( sort, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
@@ -60,11 +60,8 @@ import System.IO.Error ( tryIOError )
 import Language.Haskell.Exts.Syntax ( Module(..) )
 import Language.Haskell.Exts.Parser ( parseModuleWithMode
                                     , ParseResult (..)
-                                    , ParseMode (..)
+                                    , ParseMode
                                     )
-import Language.Haskell.Exts.Extension ( Language (..)
-                                       , Extension (..)
-                                       , KnownExtension (..) )
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import Control.Monad.Trans.Except (runExceptT, throwE)
@@ -432,24 +429,6 @@ tupleType :: QualifiedName -> Int -> HsType
 tupleType tupleName arity = foldl TypeApp (TypeCons tupleName)
   $ typeVariables arity
 
--- | Takes a list of bindings, and a dictionary of desired
--- functions and their rating, and compiles a list of
--- RatedFunctionBindings.
---
--- If a function in the dictionary is not in the list of bindings,
--- Left is returned with the corresponding name.
---
--- Otherwise, the result is Right.
-compileWithDict :: [(QualifiedName, Penalty)]
-                -> [HsFunctionDecl]
-                -> Either String [RatedHsFunctionDecl]
-                -- function_not_found or all bindings
-compileWithDict ratings binds =
-  ratings `forM` \(name, rating) ->
-    case find ((name==).fst) binds of
-      Nothing    -> Left $ show name
-      Just (_,t) -> Right (name, rating, t)
-
 -- | Load source modules in the supplied order.  The returned diagnostics are
 -- deterministic: messages within a module retain source order, while sets of
 -- unknown names are rendered in nominal sort order.
@@ -497,7 +476,7 @@ parseModulesM inputs = do
         Nothing -> pure ()
       let modules = rights parsedModules
 
-      dataTypes <- case getDataTypesChecked modules of
+      dataTypes <- case getDataTypes modules of
         Left conversionError ->
           let message =
                 "could not extract data-type names: " ++ conversionError
@@ -513,11 +492,14 @@ parseModulesM inputs = do
           typeDeclarationMap = uniqueTypeDeclMap typeDeclarations
 
       classResult <- lift
-        $ getClassEnvWithMethods dataTypes typeDeclarationMap modules
-      (classEnvironment, instanceCount, methodsByModule) <- either
+        $ loadClassEnvironment dataTypes typeDeclarationMap modules
+      loadedClasses <- either
         (throwE . ClassEnvironmentLoadFailure)
         pure
         classResult
+      let classEnvironment = loadedStaticClassEnvironment loadedClasses
+          instanceCount = loadedSourceInstanceCount loadedClasses
+          methodsByModule = loadedClassMethodsByModule loadedClasses
 
       extracted <- lift $ zipWithM
         (hExtractBinds classEnvironment dataTypes typeDeclarationMap)
@@ -667,27 +649,6 @@ parseModulesM inputs = do
         , errors
         )
 
--- | Load one module with the default parse mode and assign every declaration
--- a neutral rating.
-parseModulesSimple
-  :: FilePath
-  -> IO (LoadReport (SourceEnvironment RatedHsFunctionDecl))
-parseModulesSimple path = do
-  (result, diagnostics) <- runWriterT $ parseModulesSimpleM path
-  pure $ LoadReport result diagnostics
-
-parseModulesSimpleM
-  :: FilePath
-  -> Loader (Either EnvironmentLoadError
-              (SourceEnvironment RatedHsFunctionDecl))
-parseModulesSimpleM path = fmap helper
-                   <$> parseModulesM
-                     [(haskellSrcExtsParseMode path, path)]
- where
-  addRating (a,b) = (a,0.0,b)
-  helper environment = environment
-    { sourceBindings = fmap addRating <$> sourceBindings environment }
-
 parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
   where
@@ -753,9 +714,31 @@ applyRatings ratings environment =
     | otherwise = Left $ warningDiagnostic
         $ "duplicate rating: " ++ show name
 
-  rateDeclaration (name, bindingType) = declToBinding
-    (name, M.findWithDefault 0 name effectiveRatings, bindingType)
+  rateDeclaration (name, bindingType) = FunctionBinding
+    result name (M.findWithDefault 0 name effectiveRatings) constraints parameters
+   where
+    (result, parameters, _, constraints) = splitArrowResultParams bindingType
 
+-- | Load and seal one source module with neutral search penalties. This is the
+-- checked convenience counterpart of 'parseModules'; it shares every parsing,
+-- declaration, rating, and inventory-validation phase with the file loaders.
+environmentFromModule
+  :: FilePath
+  -> IO (LoadReport CheckedSourceEnvironment)
+environmentFromModule modulePath = do
+  (result, diagnostics) <- runWriterT
+    $ environmentFromModuleM modulePath
+  pure $ LoadReport result diagnostics
+
+environmentFromModuleM
+  :: FilePath
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
+environmentFromModuleM modulePath = do
+  environmentResult <- parseModulesM
+    [(haskellSrcExtsParseMode modulePath, modulePath)]
+  case environmentResult of
+    Left failure -> pure $ Left failure
+    Right environment -> rateAndCheckEnvironment [] environment
 
 environmentFromModuleAndRatings
   :: FilePath
@@ -771,22 +754,8 @@ environmentFromModuleAndRatingsM
   -> FilePath
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
 environmentFromModuleAndRatingsM modulePath ratingPath = do
-  let exts1 = [ TypeOperators
-              , ExplicitForAll
-              , ExistentialQuantification
-              , TypeFamilies
-              , FunctionalDependencies
-              , FlexibleContexts
-              , MultiParamTypeClasses ]
-      exts2 = map EnableExtension exts1
-      mode = ParseMode modulePath
-                       Haskell2010
-                       exts2
-                       False
-                       False
-                       Nothing
-                       False
-  environmentResult <- parseModulesM [(mode, modulePath)]
+  environmentResult <- parseModulesM
+    [(haskellSrcExtsParseMode modulePath, modulePath)]
   case environmentResult of
     Left failure -> pure $ Left failure
     Right environment -> do
@@ -796,9 +765,7 @@ environmentFromModuleAndRatingsM modulePath ratingPath = do
           tell [ratingFailureDiagnostic failure]
           pure []
         Right parsedRatings -> pure parsedRatings
-      let (ratedEnvironment, warnings) = applyRatings ratings environment
-      forM_ warnings $ tell . (: [])
-      pure $ checkSourceEnvironment ratedEnvironment
+      rateAndCheckEnvironment ratings environment
 
 
 environmentFromPath
@@ -834,7 +801,13 @@ environmentFromPathM p = do
           forM_ (lefts ratingResults)
             $ tell . (: []) . ratingFailureDiagnostic
           let ratings = concat $ rights ratingResults
-              (ratedEnvironment, warnings) =
-                applyRatings ratings environment
-          forM_ warnings $ tell . (: [])
-          pure $ checkSourceEnvironment ratedEnvironment
+          rateAndCheckEnvironment ratings environment
+
+rateAndCheckEnvironment
+  :: [(QualifiedName, Penalty)]
+  -> SourceEnvironment HsFunctionDecl
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
+rateAndCheckEnvironment ratings environment = do
+  let (ratedEnvironment, warnings) = applyRatings ratings environment
+  tell warnings
+  pure $ checkSourceEnvironment ratedEnvironment

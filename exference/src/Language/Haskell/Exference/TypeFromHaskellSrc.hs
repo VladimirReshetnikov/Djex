@@ -9,10 +9,8 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
   , convertName
-  , convertNameChecked
   , convertQName
   , convertModuleName
-  , convertModuleNameChecked
   , getVar
   -- , ConversionMonad
   , parseQualifiedName
@@ -220,13 +218,13 @@ convertQName _ _ (Special _ special@(UnboxedSingleCon _)) = Left
 convertQName _ _ (Special _ special@(ExprHole _)) = Left
   $ "unsupported special constructor: " ++ prettyPrint special
 convertQName _ _ (Qual _ mn syntaxName) =
-  convertModuleNameChecked mn syntaxName
+  convertModuleName mn syntaxName
 convertQName (Just defaultModule) knownNames (UnQual _ syntaxName) = do
-  localName <- convertModuleNameChecked defaultModule syntaxName
-  externalName <- convertNameChecked syntaxName
+  localName <- convertModuleName defaultModule syntaxName
+  externalName <- convertName syntaxName
   resolveUnqualifiedName localName externalName knownNames
 convertQName Nothing knownNames (UnQual _ syntaxName) = do
-  unqualified <- convertNameChecked syntaxName
+  unqualified <- convertName syntaxName
   resolveUnqualifiedName unqualified unqualified knownNames
 
 -- The historical environment modules intentionally omit their imports.  We
@@ -256,32 +254,22 @@ resolveUnqualifiedName localName externalName knownNames
             == T.qualifiedNameOccurrence externalName
         ]
 
--- | Source-compatible unchecked facade.  HSE exposes its syntax constructors,
--- so an arbitrary 'Name' need not contain a valid Haskell occurrence.  New
--- code should use 'convertNameChecked'; Exference's own call sites do so.
-convertName :: Name SrcSpanInfo -> T.QualifiedName
-convertName = either (error . ("invalid Haskell name: " ++)) id
-  . convertNameChecked
-
-convertNameChecked :: Name SrcSpanInfo -> Either String T.QualifiedName
-convertNameChecked (Ident _ spelling) = qualifiedNameResult
+-- | Convert an HSE occurrence without trusting its publicly constructible
+-- payload. Parsed names are valid, while malformed hand-built syntax remains
+-- an ordinary conversion failure rather than an exception.
+convertName :: Name SrcSpanInfo -> Either String T.QualifiedName
+convertName (Ident _ spelling) = qualifiedNameResult
   $ T.mkQualifiedName [] spelling
-convertNameChecked (Symbol _ spelling) = qualifiedNameResult
+convertName (Symbol _ spelling) = qualifiedNameResult
   $ T.mkQualifiedName [] spelling
 
--- | Source-compatible unchecked facade.  Prefer
--- 'convertModuleNameChecked' for syntax not known to have come from a parser.
-convertModuleName :: ModuleName SrcSpanInfo -> Name SrcSpanInfo -> T.QualifiedName
-convertModuleName moduleName syntaxName = either
-  (error . ("invalid qualified Haskell name: " ++))
-  id
-  (convertModuleNameChecked moduleName syntaxName)
-
-convertModuleNameChecked
+-- | Qualify an occurrence after validating both the HSE module payload and
+-- the occurrence. This is total even for caller-constructed syntax trees.
+convertModuleName
   :: ModuleName SrcSpanInfo
   -> Name SrcSpanInfo
   -> Either String T.QualifiedName
-convertModuleNameChecked (ModuleName _ moduleSource) syntaxName = do
+convertModuleName (ModuleName _ moduleSource) syntaxName = do
   qualifier <- either (Left . SharedName.renderNameError) Right
     $ SharedName.mkModuleName moduleSource
   let modules = SharedName.moduleNameSegments qualifier

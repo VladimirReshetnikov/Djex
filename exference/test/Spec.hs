@@ -114,7 +114,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , sourceFunctions
   , checkedSourceInventory
   , checkedSourceProjection
-  , compileWithDict
+  , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
   , parseModules
@@ -123,7 +123,11 @@ import Language.Haskell.Exference.EnvironmentParser
   , toSynthesisSourceInventory
   )
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
-  (ClassEnvironmentLoadError (..), getClassEnv)
+  ( ClassEnvironmentLoadError (..)
+  , ClassMethodDeclaration (..)
+  , LoadedClassEnvironment (..)
+  , loadClassEnvironment
+  )
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.ExpressionToHaskellSrc
   ( HaskellSrcConversionError (..)
@@ -135,7 +139,7 @@ import Language.Haskell.Exference.ExpressionToHaskellSrc
   , generatedFunctionClauseToHaskellSrc
   )
 import Language.Haskell.Exference.BindingsFromHaskellSrc
-  (getClassMethods, getDataConss, getDataTypesChecked, getDecls)
+  (getDataConss, getDataTypes, getDecls)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
@@ -150,6 +154,8 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
   , getVar
   , haskellSrcExtsParseMode
   , parseQualifiedName
+  , convertName
+  , convertModuleName
   , convertQName
   , runConversionTWithState
   )
@@ -447,18 +453,24 @@ tests = testGroup "Exference"
       , testCase "class methods attach to the exactly qualified class" $ do
           classAName <- expectRight $ mkQualifiedName ["A"] "C"
           classBName <- expectRight $ mkQualifiedName ["B"] "C"
-          let classA = HsTypeClass classAName [0] []
-              classB = HsTypeClass classBName [0] []
-          parsedModule <- expectParsedModule $ unlines
+          moduleA <- expectParsedModule $ unlines
             [ "module A where"
             , "class C a where"
             , "  method :: a -> a"
             ]
-          let methods = runIdentity $ getClassMethods
-                    (Map.fromList [(classBName, classB), (classAName, classA)])
-                    [] Map.empty [parsedModule]
+          moduleB <- expectParsedModule $ unlines
+            [ "module B where"
+            , "class C a"
+            ]
+          loaded <- expectRight $ runIdentity
+            $ loadClassEnvironment [] Map.empty [moduleA, moduleB]
+          let methods = concat $ loadedClassMethodsByModule loaded
+          Map.keys (sClassEnv_tclasses $ loadedStaticClassEnvironment loaded)
+            @?= [classAName, classBName]
           case rights methods of
-            [(_, TypeForall _ (constraint : _) _)] ->
+            [ClassMethodDeclaration owner
+                (_, TypeForall _ (constraint : _) _)] -> do
+              owner @?= classAName
               constraint_tclass constraint @?= classAName
             result -> fail $ "unexpected class methods: " ++ show result
       , testCase "cyclic instance prerequisites remain unresolved" $ do
@@ -488,17 +500,16 @@ tests = testGroup "Exference"
           boxName <- expectRight $ mkQualifiedName ["Main"] "Box"
           className <- expectRight $ mkQualifiedName ["Main"] "C"
           methodName <- expectRight $ mkQualifiedName ["Main"] "method"
-          dataTypes <- expectRight $ getDataTypesChecked [parsedModule]
+          dataTypes <- expectRight $ getDataTypes [parsedModule]
           dataTypes @?= [boxName]
-          let classResult = runIdentity
-                $ getClassEnv dataTypes Map.empty [parsedModule]
-          (classEnvironment, instanceCount) <- expectRight classResult
-          instanceCount @?= 0
+          loaded <- expectRight $ runIdentity
+            $ loadClassEnvironment dataTypes Map.empty [parsedModule]
+          let classEnvironment = loadedStaticClassEnvironment loaded
+              methods = concat $ loadedClassMethodsByModule loaded
+          loadedSourceInstanceCount loaded @?= 0
           Map.member className (sClassEnv_tclasses classEnvironment) @?= True
-          let methods = runIdentity $ getClassMethods
-                (sClassEnv_tclasses classEnvironment)
-                dataTypes Map.empty [parsedModule]
-          map (fmap fst) methods @?= [Right methodName]
+          map (fmap $ fst . classMethodFunction) methods
+            @?= [Right methodName]
           let deconstructors = runIdentity
                 $ getDataConss (sClassEnv_tclasses classEnvironment)
                     dataTypes Map.empty [parsedModule]
@@ -562,7 +573,7 @@ tests = testGroup "Exference"
             , "data LeafData = LeafData"
             , "data Box = Box"
             ]
-          dataTypes <- expectRight $ getDataTypesChecked [parsedModule]
+          dataTypes <- expectRight $ getDataTypes [parsedModule]
           direct <- expectRight $ mkQualifiedName ["Fixture"] "Direct"
           tree <- expectRight $ mkQualifiedName ["Fixture"] "Tree"
           forest <- expectRight $ mkQualifiedName ["Fixture"] "Forest"
@@ -1889,6 +1900,17 @@ tests = testGroup "Exference"
           case result of
             Left failure -> failure @?= "expected failure"
             Right _ -> fail "failed conversion exposed a successful final state"
+      , testCase "HSE name conversion is total for hand-built syntax" $ do
+          let malformedOccurrence = HSE.Ident HSE.noSrcSpan ""
+              malformedModule = HSE.ModuleName HSE.noSrcSpan "Data..Broken"
+              assertConversionFailure label conversion = case conversion of
+                Left _ -> pure ()
+                Right value -> fail $ label ++ " accepted " ++ show value
+          assertConversionFailure "empty occurrence"
+            $ convertName malformedOccurrence
+          assertConversionFailure "malformed module"
+            $ convertModuleName malformedModule
+                (HSE.Ident HSE.noSrcSpan "value")
       , testCase "ratings reject a missing value" $
           first diagnosticMessage (parseRatings "foo") @?= Left
             "rating file ends with a name but no numeric rating"
@@ -1924,6 +1946,21 @@ tests = testGroup "Exference"
             Right _ -> fail "a missing environment directory was accepted"
           assertBool ("failed directory load emitted messages: " ++ show messages)
             $ null messages
+      , testCase "single-module loading seals neutral ratings" $
+          withTemporaryFile (unlines
+            [ "module Neutral where"
+            , "identity :: a -> a"
+            ]) $ \modulePath -> do
+              LoadReport result diagnostics <- environmentFromModule modulePath
+              checked <- expectRight result
+              identityName <- expectRight
+                $ mkQualifiedName ["Neutral"] "identity"
+              case find ((== identityName) . functionName)
+                  (sourceFunctions $ checkedSourceProjection checked) of
+                Just binding -> functionPenalty binding @?= Penalty 0
+                Nothing -> fail "neutral module lost its identity declaration"
+              length (filter ((== Info) . diagnosticSeverity) diagnostics)
+                @?= 4
       , testCase "missing ratings retain zero penalties with one warning" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/Category.hs"
@@ -2091,6 +2128,22 @@ tests = testGroup "Exference"
                   (toSynthesisName methodName)
                   (SharedEnvironment.valueSignatureMap shared)) @?=
                 Just (SearchPenaltyMetadata $ Penalty 2.5)
+      , testCase "type-synonym phantom parameters use adjacent fresh IDs" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module Synonyms where"
+            , "type Phantom a = Int"
+            , "type Flip a b c = Either b a"
+            ]
+          let declarations = rights
+                $ runIdentity $ getTypeDecls [] [parsedModule]
+          case declarations of
+            [phantom, flipped] -> do
+              tdecl_params phantom @?= [0]
+              -- RHS occurrence order allocates b then a; the unused c follows
+              -- their dense namespace instead of jumping to a sentinel.
+              tdecl_params flipped @?= [1, 0, 2]
+              Set.size (Set.fromList $ tdecl_params flipped) @?= 3
+            result -> fail $ "unexpected synonym declarations: " ++ show result
       , testCase "duplicate synonyms reach the shared inventory in source order" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module M where"
@@ -2397,13 +2450,6 @@ tests = testGroup "Exference"
             , TupleCon 3
             , QualifiedName [] "->"
             ]
-      , testCase "operator ratings apply by structural name equality" $ do
-          let operator = QualifiedName ["Control", "Applicative"] "<*>"
-              ty = TypeArrow (TypeVar 0) (TypeVar 0)
-          ratings <- expectRight
-            $ parseRatings "Control.Applicative.(<*>) 0.3"
-          compileWithDict ratings [(operator, ty)]
-            @?= Right [(operator, Penalty 0.3, ty)]
       , testCase "the shipped rating file parses and every name round-trips" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           contents <- readFile $ environmentDirectory ++ "/all.ratings"
@@ -3148,5 +3194,5 @@ classEnvironmentFromSources
   -> IO (Either ClassEnvironmentLoadError StaticClassEnv)
 classEnvironmentFromSources sources = do
   modules <- mapM expectParsedModule sources
-  let result = runIdentity $ getClassEnv [] Map.empty modules
-  pure $ fst <$> result
+  let result = runIdentity $ loadClassEnvironment [] Map.empty modules
+  pure $ loadedStaticClassEnvironment <$> result

@@ -1,9 +1,8 @@
 module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   ( ClassEnvironmentLoadError (..)
   , ClassMethodDeclaration (..)
-  , getClassEnv
-  , getClassEnvWithMethods
-  , getClassMethodsForEnvironment
+  , LoadedClassEnvironment (..)
+  , loadClassEnvironment
   )
 where
 
@@ -60,30 +59,29 @@ data ClassEnvironmentLoadError
   | InvalidClassEnvironment ClassEnvError
   deriving (Eq, Show)
 
--- | Return the environment and the number of valid source instances found
--- before superclass inflation.  Construction is transactional: no partial or
--- empty recovery environment is returned for malformed source declarations.
-getClassEnv
-  :: Monad m
-  => [QualifiedName]
-  -> TypeDeclMap
-  -> [Module SrcSpanInfo]
-  -> m (Either ClassEnvironmentLoadError (StaticClassEnv, Int))
-getClassEnv dataTypes typeDeclarations modules = fmap
-  (fmap $ \(environment, count, _) -> (environment, count))
-  $ getClassEnvWithMethods dataTypes typeDeclarations modules
+-- | The complete result of one transactional class-declaration pass. Source
+-- instance count deliberately precedes superclass inflation, and method
+-- groups align one-for-one with the input modules so the outer loader can
+-- retain declaration and diagnostic order.
+data LoadedClassEnvironment = LoadedClassEnvironment
+  { loadedStaticClassEnvironment :: StaticClassEnv
+  , loadedSourceInstanceCount :: Int
+  , loadedClassMethodsByModule
+      :: [[Either String ClassMethodDeclaration]]
+  }
+  deriving (Eq, Show)
 
 -- | Build the nominal class graph and elaborate each class body from the same
 -- collected declarations.  Method results remain grouped by input module so
 -- the loader can preserve its historical per-module binding/error order.
-getClassEnvWithMethods
+loadClassEnvironment
   :: Monad m
   => [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m (Either ClassEnvironmentLoadError
-      (StaticClassEnv, Int, [[Either String ClassMethodDeclaration]]))
-getClassEnvWithMethods dataTypes typeDeclarations modules = do
+      LoadedClassEnvironment)
+loadClassEnvironment dataTypes typeDeclarations modules = do
   (classResults, rawClassesByModule) <-
     getTypeClasses dataTypes typeDeclarations modules
   case NonEmpty.nonEmpty $ lefts classResults of
@@ -105,7 +103,11 @@ getClassEnvWithMethods dataTypes typeDeclarations modules = do
             Right environment -> do
               methods <- getClassMethodsFromRaw classes dataTypes
                 typeDeclarations rawClassesByModule
-              pure $ Right (environment, length instances, methods)
+              pure $ Right LoadedClassEnvironment
+                { loadedStaticClassEnvironment = environment
+                , loadedSourceInstanceCount = length instances
+                , loadedClassMethodsByModule = methods
+                }
 
 getTypeClasses
   :: Monad m
@@ -172,7 +174,7 @@ rawTypeClasses modul = do
   (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
   ClassDecl _ context rawHead _ maybeClassDecls <- declarations
   let (syntaxName, variables) = splitDeclHead rawHead
-  pure $ case convertModuleNameChecked moduleName syntaxName of
+  pure $ case convertModuleName moduleName syntaxName of
     Left conversionError ->
       Left $ "invalid type-class name: " ++ conversionError
     Right checkedName -> Right RawTypeClass
@@ -182,20 +184,6 @@ rawTypeClasses modul = do
       , rawClassContext = context
       , rawClassDeclarations = fromMaybe [] maybeClassDecls
       }
-
--- | Compatibility extraction over an already validated nominal class table.
--- The production loader receives these results directly from
--- 'getClassEnvWithMethods', avoiding a second class-body traversal.
-getClassMethodsForEnvironment
-  :: Monad m
-  => Map.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
-  -> TypeDeclMap
-  -> [Module SrcSpanInfo]
-  -> m [[Either String ClassMethodDeclaration]]
-getClassMethodsForEnvironment classes dataTypes typeDeclarations =
-  getClassMethodsFromRaw classes dataTypes typeDeclarations
-    . map rawTypeClasses
 
 getClassMethodsFromRaw
   :: Monad m
@@ -256,7 +244,7 @@ elaborateRawClass classes dataTypes typeDeclarations rawClass =
 
   convertedMethod owner converted syntaxName = do
     methodName <- either throwE pure
-      $ convertModuleNameChecked (rawClassModule rawClass) syntaxName
+      $ convertModuleName (rawClassModule rawClass) syntaxName
     let methodType = addClassMethodConstraint owner $ forallify converted
     pure $ ClassMethodDeclaration
       (rawClassName rawClass) (methodName, methodType)

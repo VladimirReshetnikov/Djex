@@ -2057,7 +2057,7 @@ diagnosticTests = testGroup "diagnostics"
         "warning [SYN002]: search used a fallback\n\
         \  context: while checking Example.answer"
   , testCase "complete source location" $ do
-      let span' = SourceSpan (SourcePosition 2 3) (SourcePosition 4 5)
+      let span' = validSourceSpan 2 3 4 5
           value = withLocation "Example.hs" span'
             $ codedDiagnostic Error "SYN003" "cannot lower declaration"
       diagnosticSource value @?= Just "Example.hs"
@@ -2065,7 +2065,7 @@ diagnosticTests = testGroup "diagnostics"
       renderDiagnostic value @?=
         "Example.hs:2:3-4:5: error [SYN003]: cannot lower declaration"
   , testCase "code, source, span, and ordered context" $ do
-      let span' = SourceSpan (SourcePosition 3 7) (SourcePosition 3 12)
+      let span' = validSourceSpan 3 7 3 12
           value =
             withContext "while checking query a -> a" $
             withContext "in module Example" $
@@ -2078,21 +2078,31 @@ diagnosticTests = testGroup "diagnostics"
         \  context: in module Example\n\
         \  context: while checking query a -> a"
   , testCase "multiline span without source" $ do
-      let span' = SourceSpan (SourcePosition 4 2) (SourcePosition 6 9)
+      let span' = validSourceSpan 4 2 6 9
       renderDiagnostic (withSpan span' (diagnostic Warning "ambiguous name"))
         @?= "4:2-6:9: warning: ambiguous name"
   , testCase "point span and empty code" $ do
-      let point = SourcePosition 1 1
-          value = withCode "" $ withSpan (SourceSpan point point) $
+      let point = validSourcePosition 1 1
+          value = withCode "" $ withSpan (right $ mkSourceSpan point point) $
             diagnostic Info "using default search budget"
       renderDiagnostic value @?= "1:1: info: using default search budget"
+  , testCase "reject invalid positions and reversed spans" $ do
+      mkSourcePosition 0 7 @?= Left (NonPositiveSourceLine 0)
+      mkSourcePosition 3 (-1) @?= Left (NonPositiveSourceColumn (-1))
+      let start = validSourcePosition 4 2
+          end = validSourcePosition 3 9
+      mkSourceSpan start end @?=
+        Left (SourceSpanEndBeforeStart start end)
+      let point = right $ mkSourceSpan start start
+      sourceStart point @?= start
+      sourceEnd point @?= start
   , testCase "complete text spans use one-based half-open positions" $ do
       sourceTextSpan "" @?=
-        SourceSpan (SourcePosition 1 1) (SourcePosition 1 1)
+        validSourceSpan 1 1 1 1
       sourceTextSpan "ab\nc" @?=
-        SourceSpan (SourcePosition 1 1) (SourcePosition 2 2)
+        validSourceSpan 1 1 2 2
       sourceTextSpan "ab\n" @?=
-        SourceSpan (SourcePosition 1 1) (SourcePosition 2 1)
+        validSourceSpan 1 1 2 1
   , testCase "total NFData instances" $ do
       _ <- evaluate (force (right (parseName "Data.List.(++)")))
       _ <- evaluate (force (withContext "query" (diagnostic Error "failure")))
@@ -2239,6 +2249,15 @@ sealedEnvironment
   => [Declaration.Declaration variable Void annotation]
   -> Environment.Environment variable Void annotation
 sealedEnvironment = right . Environment.mkEnvironment
+
+validSourcePosition :: Int -> Int -> SourcePosition
+validSourcePosition line column = right $ mkSourcePosition line column
+
+validSourceSpan :: Int -> Int -> Int -> Int -> SourceSpan
+validSourceSpan startLine startColumn endLine endColumn = right $ do
+  start <- mkSourcePosition startLine startColumn
+  end <- mkSourcePosition endLine endColumn
+  mkSourceSpan start end
 
 backticked :: String -> String
 backticked source = [toEnum 96] ++ source ++ [toEnum 96]

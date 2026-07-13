@@ -150,7 +150,10 @@ The HSE loader returns `IO (LoadReport CheckedSourceEnvironment)`: fatal phases
 use a typed error, while nonfatal warnings and summaries are structured shared
 diagnostics. Fatal module parse diagnostics retain HSE's exact source filename
 and point location under the stable `EXF_MODULE_PARSE` code, with the native
-parser detail preserved as context. Low-level `parseModules` keeps aliases
+parser detail preserved as context. HSE locations cross the shared checked
+one-based, half-open span boundary explicitly; a malformed native location
+retains its source and becomes diagnostic context rather than causing a crash
+or forging an invalid span. Low-level `parseModules` keeps aliases
 unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` first seals and kind-checks that
 source graph, then sends the checked Inventory through the parser-independent
 neutral lowerer. The resulting backend projection is reconciled by name with

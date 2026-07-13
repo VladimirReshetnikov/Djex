@@ -29,9 +29,7 @@ import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import Language.Haskell.Exts.Syntax hiding (TypeApp)
 import qualified Language.Haskell.Exts.Parser as P
 import Language.Haskell.Exts.SrcLoc
-  ( SrcLoc (..)
-  , SrcSpanInfo
-  )
+  ( SrcSpanInfo )
 
 import Control.Monad.Trans.Except ( runExceptT
                                   , ExceptT(..)
@@ -229,10 +227,8 @@ parseHaskellSrcType
   -> ExceptT Diagnostic m result
 parseHaskellSrcType convert mode source = case P.parseTypeWithMode mode source of
   P.ParseFailed location message ->
-    let position = SourcePosition
-          (srcLine location) (srcColumn location)
-    in throwE
-      $ withLocation (srcFilename location) (SourceSpan position position)
+    throwE
+      $ withHaskellSrcLocation location
       $ diagnostic message
   P.ParseOk ty -> ExceptT $ first conversionDiagnostic
     <$> runExceptT (convert ty)

@@ -4,10 +4,15 @@ module Language.Haskell.Exference.HaskellSrcUtils
   , splitClassApplication
   , splitDeclHead
   , splitInstRule
+  , withHaskellSrcLocation
+  , withHaskellSrcSpan
   )
 where
 
+import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exts.Syntax
+import Language.Haskell.Exts.SrcLoc (SrcLoc, SrcSpan)
+import qualified Language.Haskell.Exts.SrcLoc as HSE
 
 contextConstraints :: Maybe (Context l) -> [Asst l]
 contextConstraints Nothing = []
@@ -55,3 +60,52 @@ splitInstHead = go []
     go arguments (IHParen _ inner) = go arguments inner
     go arguments (IHCon _ name) = Just (name, arguments)
     go arguments (IHInfix _ argument name) = Just (name, argument : arguments)
+
+-- | Attach an HSE point location after validating its one-based coordinates.
+withHaskellSrcLocation :: SrcLoc -> Diagnostic -> Diagnostic
+withHaskellSrcLocation location = withHaskellSrcCoordinates
+  (HSE.srcFilename location)
+  (HSE.srcLine location)
+  (HSE.srcColumn location)
+  (HSE.srcLine location)
+  (HSE.srcColumn location)
+
+-- | Attach an HSE half-open span after validating its coordinates and order.
+withHaskellSrcSpan :: SrcSpan -> Diagnostic -> Diagnostic
+withHaskellSrcSpan span' = withHaskellSrcCoordinates
+  (HSE.srcSpanFilename span')
+  (HSE.srcSpanStartLine span')
+  (HSE.srcSpanStartColumn span')
+  (HSE.srcSpanEndLine span')
+  (HSE.srcSpanEndColumn span')
+
+-- HSE promises positive, ordered coordinates. If a constructed or future
+-- parser value violates that contract, preserve a valid start as a point
+-- location when possible and record the adapter failure as structured
+-- context. An invalid start still retains its source filename.
+withHaskellSrcCoordinates
+  :: FilePath
+  -> Int
+  -> Int
+  -> Int
+  -> Int
+  -> Diagnostic
+  -> Diagnostic
+withHaskellSrcCoordinates source startLine startColumn endLine endColumn value =
+  case nativeSpan of
+    Right span' -> withLocation source span' value
+    Left failure ->
+      withContext ("haskell-src-exts supplied an invalid source location: "
+        ++ show failure)
+      $ fallbackLocation
+ where
+  nativeSpan = do
+    start <- mkSourcePosition startLine startColumn
+    end <- mkSourcePosition endLine endColumn
+    mkSourceSpan start end
+
+  fallbackLocation = case do
+      start <- mkSourcePosition startLine startColumn
+      mkSourceSpan start start of
+    Right point -> withLocation source point value
+    Left _ -> withSource source value

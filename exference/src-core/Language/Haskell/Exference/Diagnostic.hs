@@ -6,8 +6,15 @@
 module Language.Haskell.Exference.Diagnostic
   ( Diagnostic (..)
   , Severity (..)
-  , SourcePosition (..)
-  , SourceSpan (..)
+  , SourcePosition
+  , sourceLine
+  , sourceColumn
+  , SourceSpan
+  , sourceStart
+  , sourceEnd
+  , SourceLocationError (..)
+  , mkSourcePosition
+  , mkSourceSpan
   , diagnostic
   , codedDiagnostic
   , contextualDiagnostic
@@ -24,8 +31,15 @@ where
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic (..)
   , Severity (..)
-  , SourcePosition (..)
-  , SourceSpan (..)
+  , SourcePosition
+  , sourceLine
+  , sourceColumn
+  , SourceSpan
+  , sourceStart
+  , sourceEnd
+  , SourceLocationError (..)
+  , mkSourcePosition
+  , mkSourceSpan
   , codedDiagnostic
   , contextualDiagnostic
   , renderDiagnostic

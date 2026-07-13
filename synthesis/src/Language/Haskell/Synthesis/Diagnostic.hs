@@ -1,8 +1,15 @@
 -- | Parser-independent structured diagnostics and deterministic rendering.
 module Language.Haskell.Synthesis.Diagnostic
   ( Severity (..)
-  , SourcePosition (..)
-  , SourceSpan (..)
+  , SourcePosition
+  , sourceLine
+  , sourceColumn
+  , SourceSpan
+  , sourceStart
+  , sourceEnd
+  , SourceLocationError (..)
+  , mkSourcePosition
+  , mkSourceSpan
   , Diagnostic (..)
   , diagnostic
   , codedDiagnostic
@@ -18,24 +25,59 @@ module Language.Haskell.Synthesis.Diagnostic
 
 import Control.DeepSeq (NFData (rnf))
 import Data.List (intercalate)
+import qualified Data.List as List
 
 data Severity = Error | Warning | Info
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | A one-based line and column in a source file or input buffer.
-data SourcePosition = SourcePosition
-  { sourceLine :: !Int
-  , sourceColumn :: !Int
-  }
-  deriving (Eq, Ord, Show)
+data SourcePosition = SourcePosition !Int !Int
+  deriving (Eq, Ord)
 
 -- | A half-open source range.  The representation is deliberately neutral;
 -- parser adapters decide how their native locations map into it.
-data SourceSpan = SourceSpan
-  { sourceStart :: !SourcePosition
-  , sourceEnd :: !SourcePosition
-  }
+data SourceSpan = SourceSpan !SourcePosition !SourcePosition
+  deriving (Eq, Ord)
+
+-- | Why a source position or span could not be represented. Positions are
+-- one-based, and a half-open span cannot finish before it starts.
+data SourceLocationError
+  = NonPositiveSourceLine !Int
+  | NonPositiveSourceColumn !Int
+  | SourceSpanEndBeforeStart !SourcePosition !SourcePosition
   deriving (Eq, Ord, Show)
+
+-- Ordinary functions, rather than exported record labels, keep record-update
+-- syntax from bypassing the smart constructors.
+sourceLine :: SourcePosition -> Int
+sourceLine (SourcePosition line _) = line
+
+sourceColumn :: SourcePosition -> Int
+sourceColumn (SourcePosition _ column) = column
+
+sourceStart :: SourceSpan -> SourcePosition
+sourceStart (SourceSpan start _) = start
+
+sourceEnd :: SourceSpan -> SourcePosition
+sourceEnd (SourceSpan _ end) = end
+
+instance Show SourcePosition where
+  showsPrec precedence (SourcePosition line column) =
+    showParen (precedence > 10)
+      $ showString "SourcePosition {sourceLine = "
+      . shows line
+      . showString ", sourceColumn = "
+      . shows column
+      . showString "}"
+
+instance Show SourceSpan where
+  showsPrec precedence (SourceSpan start end) =
+    showParen (precedence > 10)
+      $ showString "SourceSpan {sourceStart = "
+      . shows start
+      . showString ", sourceEnd = "
+      . shows end
+      . showString "}"
 
 data Diagnostic = Diagnostic
   { diagnosticSeverity :: !Severity
@@ -58,6 +100,11 @@ instance NFData SourcePosition where
 instance NFData SourceSpan where
   rnf (SourceSpan start end) = rnf start `seq` rnf end
 
+instance NFData SourceLocationError where
+  rnf (NonPositiveSourceLine line) = rnf line
+  rnf (NonPositiveSourceColumn column) = rnf column
+  rnf (SourceSpanEndBeforeStart start end) = rnf start `seq` rnf end
+
 instance NFData Diagnostic where
   rnf value =
     rnf (diagnosticSeverity value) `seq`
@@ -66,6 +113,23 @@ instance NFData Diagnostic where
     rnf (diagnosticSpan value) `seq`
     rnf (diagnosticMessage value) `seq`
     rnf (diagnosticContext value)
+
+-- | Construct a one-based source position.
+mkSourcePosition :: Int -> Int -> Either SourceLocationError SourcePosition
+mkSourcePosition line column
+  | line <= 0 = Left $ NonPositiveSourceLine line
+  | column <= 0 = Left $ NonPositiveSourceColumn column
+  | otherwise = Right $ SourcePosition line column
+
+-- | Construct a half-open source span whose end is not before its start.
+-- Equal endpoints represent a point location.
+mkSourceSpan
+  :: SourcePosition
+  -> SourcePosition
+  -> Either SourceLocationError SourceSpan
+mkSourceSpan start end
+  | end < start = Left $ SourceSpanEndBeforeStart start end
+  | otherwise = Right $ SourceSpan start end
 
 -- | Start a diagnostic without optional code, source, span, or context.
 diagnostic :: Severity -> String -> Diagnostic
@@ -111,10 +175,17 @@ withContext context value =
 -- Newlines reset the ending column to one, matching the parser adapters.
 sourceTextSpan :: String -> SourceSpan
 sourceTextSpan = SourceSpan (SourcePosition 1 1)
-  . foldl advance (SourcePosition 1 1)
+  . List.foldl' advance (SourcePosition 1 1)
  where
-  advance (SourcePosition line _) '\n' = SourcePosition (line + 1) 1
-  advance (SourcePosition line column) _ = SourcePosition line (column + 1)
+  -- Saturation is observable only for buffers too large to materialize, but
+  -- it keeps this total constructor inside the positive-coordinate invariant
+  -- even at the bounds of 'Int'.
+  advance (SourcePosition line _) '\n' = SourcePosition (increment line) 1
+  advance (SourcePosition line column) _ =
+    SourcePosition line $ increment column
+  increment value
+    | value == maxBound = maxBound
+    | otherwise = value + 1
 
 -- | Render in a compiler-style, single-header format.
 --

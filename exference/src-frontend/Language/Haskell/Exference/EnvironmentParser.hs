@@ -39,7 +39,11 @@ import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
-  (contextConstraints, splitDeclHead)
+  ( contextConstraints
+  , splitDeclHead
+  , withHaskellSrcLocation
+  , withHaskellSrcSpan
+  )
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.TypeUtils (typeConstructorHead)
@@ -730,13 +734,7 @@ unsupportedOccurrence
   -> SrcSpanInfo
   -> UnsupportedVocabularyOccurrence
 unsupportedOccurrence form location = UnsupportedVocabularyOccurrence form
-  $ withLocation (HSE.srcSpanFilename sourceSpan) (SourceSpan
-      (SourcePosition
-        (HSE.srcSpanStartLine sourceSpan)
-        (HSE.srcSpanStartColumn sourceSpan))
-      (SourcePosition
-        (HSE.srcSpanEndLine sourceSpan)
-        (HSE.srcSpanEndColumn sourceSpan)))
+  $ withHaskellSrcSpan sourceSpan
   $ codedDiagnostic Error "EXF_UNSUPPORTED_VOCABULARY"
       $ "unsupported source vocabulary: "
       ++ unsupportedVocabularyDescription form
@@ -809,11 +807,7 @@ parseModulesM inputs = do
 
     moduleParseDiagnostic :: HSE.SrcLoc -> String -> Diagnostic
     moduleParseDiagnostic location detail =
-      let position = SourcePosition
-            (HSE.srcLine location) (HSE.srcColumn location)
-      in withLocation
-          (HSE.srcFilename location)
-          (SourceSpan position position)
+      withHaskellSrcLocation location
         $ contextualDiagnostic
             Error
             "EXF_MODULE_PARSE"

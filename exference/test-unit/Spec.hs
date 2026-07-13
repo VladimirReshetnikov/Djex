@@ -2573,7 +2573,7 @@ tests = testGroup "Exference"
             $ null messages
       , testCase "existing loader diagnostics retain source structure" $ do
           let preserved = withSpan
-                (SourceSpan (SourcePosition 3 5) (SourcePosition 3 9))
+                (validSourceSpan 3 5 3 9)
                 $ withSource "Fixture.hs"
                 $ withCode "EXF_PRESERVED"
                 $ (diagnostic "original diagnostic")
@@ -2801,9 +2801,7 @@ tests = testGroup "Exference"
             case result of
               Left failure@(ModuleParseErrors values) -> do
                 let expected path line = withLocation path
-                      (SourceSpan
-                        (SourcePosition line 1)
-                        (SourcePosition line 1))
+                      (validSourceSpan line 1 line 1)
                       $ contextualDiagnostic
                           Error
                           "EXF_MODULE_PARSE"
@@ -2958,8 +2956,7 @@ tests = testGroup "Exference"
                 { diagnosticSeverity = Error
                 , diagnosticCode = Just "EXF_UNSUPPORTED_VOCABULARY"
                 , diagnosticSource = Just "Page.hs"
-                , diagnosticSpan = Just $ SourceSpan
-                    (SourcePosition 1 1) (SourcePosition 4 8)
+                , diagnosticSpan = Just $ validSourceSpan 1 1 4 8
                 , diagnosticMessage =
                     "unsupported source vocabulary: XML page module"
                 , diagnosticContext = []
@@ -2977,8 +2974,7 @@ tests = testGroup "Exference"
                 { diagnosticSeverity = Error
                 , diagnosticCode = Just "EXF_UNSUPPORTED_VOCABULARY"
                 , diagnosticSource = Just "Hybrid.hs"
-                , diagnosticSpan = Just $ SourceSpan
-                    (SourcePosition 2 3) (SourcePosition 8 9)
+                , diagnosticSpan = Just $ validSourceSpan 2 3 8 9
                 , diagnosticMessage =
                     "unsupported source vocabulary: XML hybrid module"
                 , diagnosticContext = []
@@ -2986,6 +2982,36 @@ tests = testGroup "Exference"
           occurrences @?=
             [UnsupportedVocabularyOccurrence XmlHybridModule
               expectedDiagnostic]
+      , testCase "invalid native spans remain structured diagnostics" $ do
+          let pageAt nativeSpan =
+                let location = HSE.SrcSpanInfo nativeSpan []
+                in HSE.XmlPage location
+                (HSE.ModuleName location "Page") []
+                (HSE.XName location "html") [] Nothing []
+          case unsupportedVocabularyOccurrences
+              [pageAt $ HSE.SrcSpan "InvalidSpan.hs" 0 3 2 1] of
+            [occurrence] -> do
+              let value = unsupportedVocabularyDiagnostic occurrence
+              diagnosticSource value @?= Just "InvalidSpan.hs"
+              diagnosticSpan value @?= Nothing
+              diagnosticContext value @?=
+                [ "haskell-src-exts supplied an invalid source location: "
+                    ++ "NonPositiveSourceLine 0"
+                ]
+            occurrences -> fail $ "expected one occurrence, got "
+              ++ show occurrences
+          case unsupportedVocabularyOccurrences
+              [pageAt $ HSE.SrcSpan "InvalidEnd.hs" 4 7 4 0] of
+            [occurrence] -> do
+              let value = unsupportedVocabularyDiagnostic occurrence
+              diagnosticSource value @?= Just "InvalidEnd.hs"
+              diagnosticSpan value @?= Just (validSourceSpan 4 7 4 7)
+              diagnosticContext value @?=
+                [ "haskell-src-exts supplied an invalid source location: "
+                    ++ "NonPositiveSourceColumn 0"
+                ]
+            occurrences -> fail $ "expected one occurrence, got "
+              ++ show occurrences
       , testCase "typed declaration splices are covered at the HSE boundary" $ do
           let nativeSpan = HSE.SrcSpan "TypedSplice.hs" 4 2 4 16
               location = HSE.SrcSpanInfo nativeSpan []
@@ -3151,14 +3177,10 @@ tests = testGroup "Exference"
             ]
           map (diagnosticSpan . unsupportedVocabularyDiagnostic) occurrences
             @?=
-              [ Just $ SourceSpan
-                  (SourcePosition 3 6) (SourcePosition 3 13)
-              , Just $ SourceSpan
-                  (SourcePosition 3 16) (SourcePosition 3 24)
-              , Just $ SourceSpan
-                  (SourcePosition 4 5) (SourcePosition 4 18)
-              , Just $ SourceSpan
-                  (SourcePosition 5 5) (SourcePosition 5 12)
+              [ Just $ validSourceSpan 3 6 3 13
+              , Just $ validSourceSpan 3 16 3 24
+              , Just $ validSourceSpan 4 5 4 18
+              , Just $ validSourceSpan 5 5 5 12
               ]
       , testCase "empty contextual datatypes fail during preflight" $
           withTemporaryFile (unlines
@@ -3920,9 +3942,10 @@ tests = testGroup "Exference"
             Left Diagnostic
                 { diagnosticSeverity = Error
                 , diagnosticSource = Just "test.hs"
-                , diagnosticSpan = Just
-                    (SourceSpan (SourcePosition line column) _)
-                } -> (line > 0 && column > 0) @?= True
+                , diagnosticSpan = Just span'
+                } ->
+                  let start = sourceStart span'
+                  in (sourceLine start > 0 && sourceColumn start > 0) @?= True
             Left result -> fail $ "incomplete diagnostic: " ++ show result
             Right result -> fail $ "malformed type was accepted: " ++ show result
       , testCase "diagnostics use the shared code and context model" $
@@ -4694,13 +4717,19 @@ unsupportedFromSourceWith extraExtensions source =
     diagnosticSeverity value @?= Error
     diagnosticCode value @?= Just "EXF_UNSUPPORTED_VOCABULARY"
     diagnosticSource value @?= Just modulePath
-    assertBool ("missing diagnostic span: " ++ show value)
+    assertBool ("invalid diagnostic location fallback: " ++ show value)
       $ case diagnosticSpan value of
-          Just (SourceSpan start end) ->
-            sourceLine start > 0
+          Just span' ->
+            let start = sourceStart span'
+                end = sourceEnd span'
+            in sourceLine start > 0
               && sourceColumn start > 0
               && end >= start
-          Nothing -> False
+          Nothing -> case diagnosticContext value of
+            [context] ->
+              "haskell-src-exts supplied an invalid source location: "
+                `isPrefixOf` context
+            _ -> False
 
 expectUnsupportedVocabulary
   :: Either EnvironmentLoadError result
@@ -4772,6 +4801,13 @@ lastChunk input = case findExpressionsWithStats input of
 
 expectRight :: Show problem => Either problem result -> IO result
 expectRight = either (fail . show) pure
+
+validSourceSpan :: Int -> Int -> Int -> Int -> SourceSpan
+validSourceSpan startLine startColumn endLine endColumn =
+  either (error . show) id $ do
+    start <- mkSourcePosition startLine startColumn
+    end <- mkSourcePosition endLine endColumn
+    mkSourceSpan start end
 
 assertNameRejected
   :: Either QualifiedNameError QualifiedName

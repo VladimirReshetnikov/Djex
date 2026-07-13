@@ -22,9 +22,11 @@ error renderer bounded even when handed an adversarial `SpecialName` payload.
 `Language.Haskell.Synthesis.Diagnostic` is the parser-independent reporting
 boundary used by both sessions. It carries severity, an optional stable code,
 source file and half-open span, and an ordered context trail; parser adapters
-decide how native locations map into that neutral representation. Its renderer
-is deterministic and compiler-shaped, but callers remain free to present the
-structured value themselves.
+decide how native locations map into that neutral representation. Source
+positions and spans are opaque and checked by smart constructors, so the
+documented one-based, ordered half-open range cannot be forged through the
+public API. Its renderer is deterministic and compiler-shaped, but callers
+remain free to present the structured value themselves.
 
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s and

@@ -251,7 +251,8 @@ kindInferenceTests = testGroup "kind inference"
                         (SharedType.TypeVariable "a")
                 ]
             ]
-      KindInference.inferDeclarationKinds declarations @?= Right
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions
           (Map.singleton fixName $ arrow (arrow proper proper) proper)
           (Map.singleton className [Just $ arrow proper proper]))
@@ -277,7 +278,8 @@ kindInferenceTests = testGroup "kind inference"
                     (SharedType.TypeConstructor phantomName)
                     (SharedType.TypeConstructor higherName)
             ]
-      KindInference.inferDeclarationKinds declarations @?= Left
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?= Left
         (KindInference.DeclarationKindError badName
           $ KindInference.KindMismatch proper $ arrow proper proper)
   , testCase "generalize unconstrained classes while propagating known superclasses" $ do
@@ -341,7 +343,8 @@ kindInferenceTests = testGroup "kind inference"
                       $ SharedType.TypeConstructor intName)
                     (variable "a")
             ]
-      KindInference.inferDeclarationKinds declarations @?= Right
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions
           (Map.singleton intName proper)
           (Map.fromList
@@ -379,7 +382,8 @@ kindInferenceTests = testGroup "kind inference"
             , classDeclaration seedName [] [seedMethod]
             ]
           constructorKind = Just $ arrow proper proper
-      KindInference.inferDeclarationKinds declarations @?= Right
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions Map.empty $ Map.fromList
           [ (firstName, [constructorKind])
           , (secondName, [constructorKind])
@@ -408,7 +412,8 @@ kindInferenceTests = testGroup "kind inference"
                 [superclass aName] []
             ]
           constructorKind = Just $ arrow proper proper
-      KindInference.inferDeclarationKinds declarations @?= Right
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions Map.empty $ Map.fromList
           [ (aName, [constructorKind])
           , (bName, [constructorKind])
@@ -425,7 +430,8 @@ kindInferenceTests = testGroup "kind inference"
             , Declaration.ClassDeclaration () bName [parameter]
                 [Constraint aName [variable]] []
             ]
-      KindInference.inferDeclarationKinds declarations @?= Right
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions Map.empty $ Map.fromList
           [(aName, [Nothing]), (bName, [Nothing])])
   , testCase "select generalized or Haskell 98 defaulted class kinds" $ do
@@ -436,12 +442,14 @@ kindInferenceTests = testGroup "kind inference"
             [Declaration.ClassDeclaration () markerName [parameter] [] []]
       KindInference.inferDeclarationKindsWithClassPolicy
           KindInference.ClosedKindInventory
-          KindInference.GeneralizeClassKinds declarations @?= Right
+          KindInference.GeneralizeClassKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions Map.empty
           $ Map.singleton markerName [Nothing])
       KindInference.inferDeclarationKindsWithClassPolicy
           KindInference.ClosedKindInventory
-          KindInference.DefaultClassKinds declarations @?= Right
+          KindInference.DefaultClassKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions Map.empty
           $ Map.singleton markerName [Just proper])
   , testCase "default class kinds before checking instances" $ do
@@ -459,7 +467,8 @@ kindInferenceTests = testGroup "kind inference"
             ]
       KindInference.inferDeclarationKindsWithClassPolicy
           KindInference.ClosedKindInventory
-          KindInference.DefaultClassKinds declarations @?= Left
+          KindInference.DefaultClassKinds
+          (sealedEnvironment declarations) @?= Left
         (KindInference.DeclarationKindError markerName
           $ KindInference.KindMismatch higherKind proper)
   , testCase "recheck defining superclasses after class kind defaulting" $ do
@@ -480,7 +489,8 @@ kindInferenceTests = testGroup "kind inference"
             ]
       KindInference.inferDeclarationKindsWithClassPolicy
           KindInference.ClosedKindInventory
-          KindInference.DefaultClassKinds declarations @?= Left
+          KindInference.DefaultClassKinds
+          (sealedEnvironment declarations) @?= Left
         (KindInference.DeclarationKindError derivedName
           $ KindInference.KindMismatch higherKind proper)
   , testCase "freeze residual variables below fixed class kinds" $ do
@@ -509,7 +519,8 @@ kindInferenceTests = testGroup "kind inference"
             ]
       KindInference.inferDeclarationKindsWithClassPolicy
           KindInference.ClosedKindInventory
-          KindInference.GeneralizeClassKinds declarations @?= Left
+          KindInference.GeneralizeClassKinds
+          (sealedEnvironment declarations) @?= Left
         (KindInference.DeclarationKindError appliedName
           $ KindInference.KindMismatch (arrow proper proper) proper)
   , testCase "default an unseeded mutual superclass cycle" $ do
@@ -526,7 +537,8 @@ kindInferenceTests = testGroup "kind inference"
             ]
       KindInference.inferDeclarationKindsWithClassPolicy
           KindInference.ClosedKindInventory
-          KindInference.DefaultClassKinds declarations @?= Right
+          KindInference.DefaultClassKinds
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions Map.empty $ Map.fromList
           [ (aName, [Just proper])
           , (bName, [Just proper])
@@ -557,7 +569,8 @@ kindInferenceTests = testGroup "kind inference"
             , Declaration.ClassDeclaration () higherName [parameter]
                 [] [higherMethod]
             ]
-      KindInference.inferDeclarationKinds declarations @?= Left
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?= Left
         (KindInference.DeclarationKindError clashName
           $ KindInference.KindMismatch proper $ arrow proper proper)
   , testCase "reject recursive synonyms in a whole inventory" $ do
@@ -567,7 +580,8 @@ kindInferenceTests = testGroup "kind inference"
             () name [] $ SharedType.TypeConstructor reference
           declarations :: [Declaration.Declaration String Void ()]
           declarations = [synonym aName bName, synonym bName aName]
-      KindInference.inferDeclarationKinds declarations @?=
+      KindInference.inferDeclarationKinds
+          (sealedEnvironment declarations) @?=
         Left (KindInference.RecursiveTypeDeclarations [aName, bName])
   , testCase "infer external names in an open inventory" $ do
       let externalType = right $ mkIdentifier "External"
@@ -580,7 +594,8 @@ kindInferenceTests = testGroup "kind inference"
           declarations = [Declaration.ValueDeclaration
             $ Declaration.ValueSignature () valueName signature]
       KindInference.inferDeclarationKindsWith
-          KindInference.OpenKindInventory declarations @?= Right
+          KindInference.OpenKindInventory
+          (sealedEnvironment declarations) @?= Right
         (KindInference.KindAssumptions
           (Map.singleton externalType proper)
           (Map.singleton externalClass [Nothing]))
@@ -600,7 +615,8 @@ kindInferenceTests = testGroup "kind inference"
             , declaration "second" [variable "a", variable "b"]
             ]
       KindInference.inferDeclarationKindsWith
-          KindInference.OpenKindInventory declarations @?=
+          KindInference.OpenKindInventory
+          (sealedEnvironment declarations) @?=
         Left (KindInference.ClassArityMismatch externalClass 1 2)
   ]
  where
@@ -2215,6 +2231,12 @@ genModule = do
 right :: Show error => Either error value -> value
 right (Right value) = value
 right (Left problem) = error (show problem)
+
+sealedEnvironment
+  :: (Ord variable, Show variable)
+  => [Declaration.Declaration variable Void annotation]
+  -> Environment.Environment variable Void annotation
+sealedEnvironment = right . Environment.mkEnvironment
 
 backticked :: String -> String
 backticked source = [toEnum 96] ++ source ++ [toEnum 96]

@@ -40,6 +40,8 @@ import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
+import Language.Haskell.Synthesis.Environment (Environment)
+import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.Kind
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Type
@@ -162,6 +164,13 @@ inferSharedVariableKinds assumptions sharedVariables types = do
 -- allocated up front for joint kind inference, but cycles consisting only of
 -- synonym expansion remain invalid.
 --
+-- Accepting an opaque 'Environment' makes structural declaration validity and
+-- namespace uniqueness preconditions of this operation rather than a second,
+-- subtly different validation path. Use
+-- 'Language.Haskell.Synthesis.Environment.mkEnvironment' before crossing this
+-- boundary; 'Language.Haskell.Synthesis.Inventory' combines both steps when a
+-- declaration-list constructor is more convenient.
+--
 -- The kind-variable parameter is 'Void' because every fixed kind produced by
 -- this operation is ground. A selected finalization policy may retain
 -- generalized class parameters as 'Nothing' or default them to @Type@.
@@ -170,14 +179,14 @@ inferSharedVariableKinds assumptions sharedVariables types = do
 -- their 'TypeParameter's.
 inferDeclarationKinds
   :: Ord variable
-  => [Declaration variable Void annotation]
+  => Environment variable Void annotation
   -> Either (KindInferenceError variable) KindAssumptions
 inferDeclarationKinds = inferDeclarationKindsWith ClosedKindInventory
 
 inferDeclarationKindsWith
   :: Ord variable
   => KindInventoryPolicy
-  -> [Declaration variable Void annotation]
+  -> Environment variable Void annotation
   -> Either (KindInferenceError variable) KindAssumptions
 inferDeclarationKindsWith policy =
   inferDeclarationKindsWithClassPolicy policy GeneralizeClassKinds
@@ -186,11 +195,11 @@ inferDeclarationKindsWithClassPolicy
   :: Ord variable
   => KindInventoryPolicy
   -> ClassKindPolicy
-  -> [Declaration variable Void annotation]
+  -> Environment variable Void annotation
   -> Either (KindInferenceError variable) KindAssumptions
 inferDeclarationKindsWithClassPolicy
-    policy classKindPolicy declarations = do
-  mapM_ validateDeclarationTypes declarations
+    policy classKindPolicy environment = do
+  let declarations = Environment.environmentDeclarations environment
   rejectRecursiveSynonyms declarations
   externalClassKinds <- collectExternalClassKinds policy declarations
   flip evalStateT initialState $ do
@@ -442,13 +451,6 @@ declarationContext declaration = case declaration of
   ValueDeclaration signature -> valueName signature
   ClassDeclaration _ name _ _ _ -> name
   InstanceDeclaration _ _ _ headConstraint -> constraintClass headConstraint
-
-validateDeclarationTypes
-  :: Ord variable
-  => Declaration variable Void annotation
-  -> Either (KindInferenceError variable) ()
-validateDeclarationTypes declaration = mapM_ validateInferenceType
-  $ declarationTypes declaration
 
 declarationTypes
   :: Declaration variable kindVariable annotation

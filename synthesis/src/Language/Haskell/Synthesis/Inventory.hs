@@ -90,6 +90,5 @@ inferInventory
       (Inventory typeVariable annotation)
 inferInventory policy classKindPolicy environment = do
   assumptions <- inferDeclarationKindsWithClassPolicy
-    policy classKindPolicy
-    $ Environment.environmentDeclarations environment
+    policy classKindPolicy environment
   pure $ Inventory environment assumptions

@@ -117,9 +117,12 @@ adapters attach their own recursion metadata from that one nominal result.
 checks several types in one variable scope, gives class methods independent
 local quantifiers around shared class parameters, validates constraint arity
 and parameter kinds, recognizes intrinsic function/list/tuple constructors,
-and infers legacy acyclic declaration lists in dependency order. Its
-whole-inventory operation additionally admits recursive datatype groups,
-rejects recursive synonym expansion, checks values and instances, and
+and infers legacy reduced acyclic type-constructor graphs in dependency order.
+Its whole-inventory operations accept only an opaque, structurally validated
+`Environment`: callers cannot bypass declaration and namespace validation with
+a raw declaration list. Kind inference unwraps that exact sealed environment
+internally, admits recursive datatype groups, rejects recursive synonym
+expansion, checks values and instances, and
 generalizes otherwise unconstrained class parameters for poly-kinded classes
 such as `Typeable`. A Haskell 98 compatibility frontend can instead request
 that declared class parameters be defaulted to `Type`; both policies freeze

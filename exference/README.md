@@ -165,10 +165,14 @@ allocates names by variable identity, avoids binder/global capture, and applies
 one qualification policy.  The `haskell-src-exts` converter remains only as a
 compatibility frontend and consumes the shared allocator rather than owning a
 second naming implementation.
-`findGeneratedSearchBatchesEither` is the core-only shared result API;
+`findGeneratedSearchBatchesEither` is the one-shot core-only shared result API;
 `findGeneratedSearchBatchesWithHintsEither` additionally accepts source-name
-hints from a frontend. They validate the finite input eagerly and then project
-the engine trace lazily—candidate conversion never traverses the whole search.
+hints from a frontend. Repeated callers can instead seal an abstract
+`ExferenceEnvironment` once, pair it with varying `ExferenceQuery` values, and
+use the corresponding `InEnvironmentEither` entry points. Environment and
+query validation are therefore paid at their natural boundaries, while all
+entry points still project the engine trace lazily—candidate conversion never
+traverses the whole search.
 Every result is a shared `Candidate` containing a generated expression, fully
 shared residual constraints, and `ExferenceCandidateDetails`. The details
 retain search statistics and both term-local and tagged flexible/rigid type

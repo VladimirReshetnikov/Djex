@@ -46,14 +46,15 @@ import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core
   ( ExferenceCandidateDetails (..)
+  , ExferenceEnvironment
   , ExferenceGeneratedSearchBatch
   , ExferenceHeuristicsConfig (..)
-  , ExferenceInput (..)
   , ExferenceInputError (..)
+  , ExferenceQuery (..)
   , Penalty (..)
-  , findGeneratedSearchBatchesWithHintsEither
+  , findGeneratedSearchBatchesWithHintsInEnvironmentEither
+  , mkExferenceEnvironment
   , typeVariableHints
-  , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.Declaration (SynthesisInventory)
 import Language.Haskell.Exference.Core.ExferenceStats
@@ -63,6 +64,7 @@ import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
+  , EnvDictionary (..)
   , FunctionBinding (..)
   )
 import Language.Haskell.Exference.Core.TypeUtils
@@ -70,7 +72,7 @@ import Language.Haskell.Exference.Core.TypeUtils
   , typeConstructorHead
   )
 import Language.Haskell.Exference.Core.Types
-  ( HsType (..)
+  ( HsType
   , SynthesisType
   , TVarId
   , TypeVarIndex
@@ -197,6 +199,7 @@ data ExferenceOmission = ExferenceOmission
 
 data ExferenceSession = ExferenceSession
   { sessionSource :: SourceEnvironment FunctionBinding
+  , sessionSearchEnvironment :: ExferenceEnvironment
   , sessionInventory :: SynthesisInventory
   , sessionTypeDeclarations :: TypeDeclMap
   , sessionOmissions :: [ExferenceOmission]
@@ -265,20 +268,22 @@ mkExferenceSessionWithPolicy policy checked = do
             then [ExcludedByPolicy]
             else [UnsupportedNestedForall | not $ functionSupported binding]
         ] ++ mapMaybe deconstructorOmission omittedDeconstructors
-      value = ExferenceSession
-        { sessionSource = supportedSource
-        , sessionInventory = checkedSourceInventory checked
-        , sessionTypeDeclarations = sourceTypeSynonymMap source
-        , sessionOmissions = omissions
-        }
-      probeOptions = defaultExferenceOptions {exferenceMaximumSteps = 1}
-  case validateExferenceInput
-      $ searchInput value Nothing (TypeVar 0) probeOptions of
-    Left failure -> Left $ failureDiagnostic
+  searchEnvironment <- first
+    (failureDiagnostic
       "DJEX_EXF_ENV"
       "cannot seal the Exference session environment"
-      failure
-    Right () -> Right value
+    )
+    $ mkExferenceEnvironment $ EnvDictionary
+        (sourceFunctions supportedSource)
+        (sourceDeconstructors supportedSource)
+        (sourceClasses supportedSource)
+  pure ExferenceSession
+    { sessionSource = supportedSource
+    , sessionSearchEnvironment = searchEnvironment
+    , sessionInventory = checkedSourceInventory checked
+    , sessionTypeDeclarations = sourceTypeSynonymMap source
+    , sessionOmissions = omissions
+    }
 
 exferenceSessionInventory :: ExferenceSession -> SynthesisInventory
 exferenceSessionInventory = sessionInventory
@@ -439,7 +444,7 @@ runExferenceQuery session request = do
     $ fromSynthesisType sharedGoal
   let hints = typeVariableHints backendGoal
         $ requestSourceTypeVariables request
-      input = searchInput session (Just target) backendGoal
+      input = searchQuery (Just target) backendGoal
         $ requestOptions query
   batches <- either
     (\failure -> Left $ failureDiagnostic
@@ -452,7 +457,8 @@ runExferenceQuery session request = do
       failure
     )
     Right
-    $ findGeneratedSearchBatchesWithHintsEither hints input
+    $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
+        hints (sessionSearchEnvironment session) input
   pure $ map (resultBatch target) batches
 
 validateRequest
@@ -549,35 +555,23 @@ resultBatch target batch = QueryResult evidence
     | null $ batchCandidates batch = NoEvidence
     | otherwise = ValidatedCandidates
 
-searchInput
-  :: ExferenceSession
-  -> Maybe Name
+searchQuery
+  :: Maybe Name
   -> HsType
   -> ExferenceOptions
-  -> ExferenceInput
-searchInput session excludedTarget goal options = ExferenceInput
-  { input_goalType = goal
-  , input_envFuncs = filter targetIsAvailable $ sourceFunctions source
-  , input_envDeconsS = sourceDeconstructors source
-  , input_envClasses = sourceClasses source
-  , input_allowUnused = exferenceAllowUnused options
-  , input_allowConstraints = exferenceAllowResidualConstraints options
-  , input_allowConstraintsStopStep = exferenceConstraintDeferralSteps options
-  , input_multiPM = exferenceMultiConstructorPatterns options
-  , input_maxSteps = exferenceMaximumSteps options
-  , input_maxQueueSize = exferenceMaximumQueueSize options
-  , input_maxDepth = exferenceMaximumDepth options
-  , input_heuristicsConfig = exferenceHeuristics options
+  -> ExferenceQuery
+searchQuery excludedTarget goal options = ExferenceQuery
+  { queryGoalType = goal
+  , queryExcludedBindings = maybe Set.empty Set.singleton excludedTarget
+  , queryAllowUnused = exferenceAllowUnused options
+  , queryAllowConstraints = exferenceAllowResidualConstraints options
+  , queryConstraintDeferralSteps = exferenceConstraintDeferralSteps options
+  , queryMultiConstructorPatterns = exferenceMultiConstructorPatterns options
+  , queryMaximumSteps = exferenceMaximumSteps options
+  , queryMaximumQueueSize = exferenceMaximumQueueSize options
+  , queryMaximumDepth = exferenceMaximumDepth options
+  , queryHeuristics = exferenceHeuristics options
   }
- where
-  source = sessionSource session
-  -- An unqualified source binding equal to the generated definition would
-  -- change meaning after wrapping the expression in a target-bearing clause:
-  -- @target = target@ is recursion, not a reference to the old environment.
-  -- Qualified homonyms remain distinct structural names and are safe.
-  targetIsAvailable binding = case excludedTarget of
-    Nothing -> True
-    Just target -> toSynthesisName (functionName binding) /= target
 
 functionSupported :: FunctionBinding -> Bool
 functionSupported binding = all (not . containsForall)

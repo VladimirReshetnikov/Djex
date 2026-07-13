@@ -27,7 +27,7 @@ import qualified GHC.Generics as Generic
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit ((@?=), assertBool, testCase)
+import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
 import Control.Monad.Trans.Except (catchE, runExceptT, throwE)
 import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
@@ -40,6 +40,8 @@ import Language.Haskell.Exference.Core
   , ExferenceBatchMetadata (..)
   , ExferenceCandidateDetails (..)
   , ExferenceCandidateError (..)
+  , ExferenceEnvironment
+  , ExferenceQuery (..)
   , ExferenceProjectionError (..)
   , ExferenceHeuristicsConfig (..)
   , SearchCompletion (..)
@@ -49,11 +51,14 @@ import Language.Haskell.Exference.Core
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
   , findGeneratedSearchBatchesWithHintsEither
+  , findGeneratedSearchBatchesWithHintsInEnvironmentEither
+  , mkExferenceEnvironment
   , toSearchProgress
   , toSearchBatch
   , toGeneratedSearchBatch
   , toGeneratedSearchBatchWithHints
   , typeVariableHints
+  , validateExferenceQuery
   , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.ConstraintSolver
@@ -770,6 +775,165 @@ tests = testGroup "Exference"
                   (toSynthesisName $ name "C") [])
           fromSynthesisInstanceDeclaration sharedInstance @?=
             Left (NonImplicitInstanceForall [unused])
+      ]
+  , testGroup "sealed search environments"
+      [ testCase "sealed runners preserve complete legacy traces" $ do
+          environment <- expectRight $ sealLegacyEnvironment identityInput
+          let variable = TypeVar 0
+              residualGoal = TypeForall [0]
+                [HsConstraint (name "External") [variable]]
+                $ TypeArrow variable variable
+              residualInput = identityInput
+                { input_goalType = residualGoal
+                , input_allowConstraints = True
+                }
+              depthConfig = defaultHeuristicsConfig
+                {heuristics_functionGoalTransform = 1}
+              variants =
+                [ ("identity", identityInput)
+                , ("residual constraint", residualInput)
+                , ("step limit", identityInput {input_maxSteps = 1})
+                , ("queue pruning",
+                    identityInput {input_maxQueueSize = Just 0})
+                , ("depth pruning", identityInput
+                    { input_maxDepth = Just 0
+                    , input_heuristicsConfig = depthConfig
+                    })
+                ]
+          mapM_ (\(label, input) -> do
+              let hints = typeVariableHints (input_goalType input)
+                    $ Map.singleton "a" 0
+              legacy <- expectRight
+                $ findGeneratedSearchBatchesWithHintsEither hints input
+              sealed <- expectRight
+                $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
+                    hints environment (legacyInputQuery input)
+              assertEqual (label ++ " trace") legacy sealed)
+            variants
+      , testCase "query options validate against one sealed environment" $ do
+          environment <- expectRight $ sealLegacyEnvironment identityInput
+          let query = legacyInputQuery identityInput
+              invalidHeuristics = defaultHeuristicsConfig
+                {heuristics_goalVar = -1}
+              polymorphic = TypeForall [1] [] $ TypeVar 1
+              nestedGoal = TypeArrow polymorphic polymorphic
+              invalidQueries =
+                [ ( "maximum steps"
+                  , query {queryMaximumSteps = 0}
+                  , Left $ InvalidMaxSteps 0
+                  )
+                , ( "constraint deferral"
+                  , query {queryConstraintDeferralSteps = -1}
+                  , Left $ InvalidConstraintDeferralSteps (-1)
+                  )
+                , ( "queue size"
+                  , query {queryMaximumQueueSize = Just (-1)}
+                  , Left $ InvalidMaxQueueSize (-1)
+                  )
+                , ( "search depth"
+                  , query {queryMaximumDepth = Just (-1)}
+                  , Left $ InvalidMaxDepth (-1)
+                  )
+                , ( "heuristics"
+                  , query {queryHeuristics = invalidHeuristics}
+                  , Left $ InvalidHeuristic "goalVar" (-1)
+                  )
+                , ( "nested forall"
+                  , query {queryGoalType = nestedGoal}
+                  , Left $ NestedForallInGoal nestedGoal
+                  )
+                ]
+          mapM_ (\(label, invalidQuery, expected) ->
+              assertEqual label expected
+                $ validateExferenceQuery environment invalidQuery)
+            invalidQueries
+      , testCase "sealing owns environment-only validation" $ do
+          let duplicateName = name "duplicate"
+              duplicate = FunctionBinding
+                (TypeVar 0) duplicateName 0 [] []
+              duplicateEnvironment = legacyInputEnvironment identityInput
+                {input_envFuncs = [duplicate, duplicate]}
+          case mkExferenceEnvironment duplicateEnvironment of
+            Left failure -> failure @?=
+              DuplicateFunctionNames [duplicateName]
+            Right _ -> fail "duplicate functions reached a sealed environment"
+
+          let bindingName = name "constrained"
+              polymorphic = TypeForall [1] [] $ TypeVar 1
+              constraint = HsConstraint (name "External") [polymorphic]
+              constrained = FunctionBinding
+                (TypeVar 0) bindingName 0 [constraint] []
+              constrainedEnvironment = legacyInputEnvironment identityInput
+                {input_envFuncs = [constrained]}
+          case mkExferenceEnvironment constrainedEnvironment of
+            Left failure -> failure @?= NestedForallInConstraint
+              (BindingConstraint bindingName) constraint
+            Right _ -> fail "rank-N constraint reached a sealed environment"
+      , testCase "target exclusion is exact and absent from metadata" $ do
+          let excludedName = name "answer"
+          retainedName <- expectRight
+            $ mkQualifiedName ["Other"] "answer"
+          let resultType = TypeCons $ name "Bool"
+              binding bindingName = FunctionBinding
+                { functionResult = resultType
+                , functionName = bindingName
+                , functionPenalty = 0
+                , functionConstraints = []
+                , functionParameters = []
+                }
+              input = identityInput
+                { input_goalType = resultType
+                , input_envFuncs =
+                    [binding excludedName, binding retainedName]
+                }
+          environment <- expectRight $ sealLegacyEnvironment input
+          batches <- expectRight
+            $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
+                Map.empty environment
+                ((legacyInputQuery input)
+                  { queryExcludedBindings = Set.singleton
+                      $ toSynthesisName excludedName
+                  })
+          let outputs =
+                [ SharedCandidate.candidateOutput candidate
+                | batch <- batches
+                , candidate <- SharedSearch.batchCandidates batch
+                ]
+              usages = map
+                (exferenceBindingUsages . SharedSearch.batchMetadata)
+                batches
+          assertBool "qualified homonym was not retained" $ not $ null outputs
+          assertBool "excluded target reached a generated candidate"
+            $ all (== Generated.Global (toSynthesisName retainedName)) outputs
+          assertBool "excluded target reached binding-usage metadata"
+            $ all (Map.notMember excludedName) usages
+          assertBool "retained homonym disappeared from binding metadata"
+            $ any (Map.member retainedName) usages
+      , testCase "legacy validation preserves compound-error precedence" $ do
+          let duplicateName = name "duplicate"
+              binding = FunctionBinding (TypeVar 0) duplicateName 0 [] []
+              polymorphic = TypeForall [1] [] $ TypeVar 1
+              nestedGoal = TypeArrow polymorphic polymorphic
+              invalidHeuristics = defaultHeuristicsConfig
+                {heuristics_goalVar = -1}
+              compound = identityInput
+                { input_goalType = nestedGoal
+                , input_envFuncs = [binding, binding]
+                , input_maxSteps = 0
+                , input_heuristicsConfig = invalidHeuristics
+                }
+          validateExferenceInput compound @?= Left (InvalidMaxSteps 0)
+          validateExferenceInput compound {input_maxSteps = 20} @?=
+            Left (DuplicateFunctionNames [duplicateName])
+          validateExferenceInput compound
+              { input_envFuncs = [binding]
+              , input_maxSteps = 20
+              } @?= Left (InvalidHeuristic "goalVar" (-1))
+          validateExferenceInput compound
+              { input_envFuncs = [binding]
+              , input_maxSteps = 20
+              , input_heuristicsConfig = defaultHeuristicsConfig
+              } @?= Left (NestedForallInGoal nestedGoal)
       ]
   , testGroup "search policy"
       [ testCase "duplicate function names are rejected independently of order" $ do
@@ -2227,6 +2391,32 @@ runLoad
 runLoad action = do
   LoadReport result diagnostics <- action
   pure (result, map diagnosticMessage diagnostics)
+
+legacyInputEnvironment :: ExferenceInput -> EnvDictionary
+legacyInputEnvironment input = EnvDictionary
+  { environmentFunctions = input_envFuncs input
+  , environmentDeconstructors = input_envDeconsS input
+  , environmentClasses = input_envClasses input
+  }
+
+legacyInputQuery :: ExferenceInput -> ExferenceQuery
+legacyInputQuery input = ExferenceQuery
+  { queryGoalType = input_goalType input
+  , queryExcludedBindings = Set.empty
+  , queryAllowUnused = input_allowUnused input
+  , queryAllowConstraints = input_allowConstraints input
+  , queryConstraintDeferralSteps = input_allowConstraintsStopStep input
+  , queryMultiConstructorPatterns = input_multiPM input
+  , queryMaximumSteps = input_maxSteps input
+  , queryMaximumQueueSize = input_maxQueueSize input
+  , queryMaximumDepth = input_maxDepth input
+  , queryHeuristics = input_heuristicsConfig input
+  }
+
+sealLegacyEnvironment
+  :: ExferenceInput
+  -> Either ExferenceInputError ExferenceEnvironment
+sealLegacyEnvironment = mkExferenceEnvironment . legacyInputEnvironment
 
 identityInput :: ExferenceInput
 identityInput = ExferenceInput

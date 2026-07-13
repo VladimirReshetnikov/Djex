@@ -87,14 +87,14 @@ Proof-backed `ProvedUninhabitable`, target-reference evidence, and
 budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
 
-`mkExferenceSession` similarly seals a checked source environment and computes
-its backend-supported projection once. Unsupported rank-N introduction and
+`mkExferenceSession` similarly computes the backend-supported projection and
+seals its search environment once. Unsupported rank-N introduction and
 elimination capabilities remain visible as structured omissions and warning
 diagnostics instead of disappearing per query. `parseExferenceRequest`
 elaborates a Haskell type against the session's retained names, synonyms,
-classes, and kind assumptions; `runExferenceQuery` validates the finite input
-eagerly and then returns a lazy sequence of shared result batches. Those
-batches preserve queue/depth pruning, nominal binding usage, residual
+classes, and kind assumptions; `runExferenceQuery` validates only the varying
+goal and search policy, then returns a lazy sequence of shared result batches.
+Those batches preserve queue/depth pruning, nominal binding usage, residual
 constraints, statistics, and rendering hints without forcing the remaining
 trace. Each generated expression is wrapped in a target-bearing shared
 `FunctionClause`. Candidate selection and rendering remain presentation

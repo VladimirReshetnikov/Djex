@@ -77,8 +77,9 @@ findExpressionsWithStatsEither
 findExpressionsWithStatsEither = runSearch
 
 -- | Validate the finite input eagerly, then expose the generated batch trace
--- lazily.  The empty hint map gives deterministic fallback names to core-only
--- callers; frontends should use 'findGeneratedSearchBatchesWithHintsEither'.
+-- lazily.  The empty hint map gives deterministic fallback names to one-shot
+-- core callers; reusable frontends should seal an environment and use the
+-- corresponding @InEnvironmentEither@ entry point below.
 findGeneratedSearchBatchesEither
   :: E.ExferenceInput
   -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]

@@ -1,4 +1,7 @@
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveTraversable #-}
 
 -- | Parser-independent source declarations shared by synthesis frontends.
 -- Backend caches, ratings, proof premises, and instance-solving indexes are
@@ -37,7 +40,7 @@ data DataConstructor typeVariable annotation = DataConstructor
   , constructorName :: Name
   , constructorFields :: [Type typeVariable]
   }
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance (NFData typeVariable, NFData annotation) =>
     NFData (DataConstructor typeVariable annotation)
@@ -47,7 +50,7 @@ data ValueSignature typeVariable annotation = ValueSignature
   , valueName :: Name
   , valueType :: Type typeVariable
   }
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance (NFData typeVariable, NFData annotation) =>
     NFData (ValueSignature typeVariable annotation)
@@ -69,7 +72,7 @@ data Declaration typeVariable kindVariable annotation
       annotation [typeVariable]
       [Constraint (Type typeVariable)]
       (Constraint (Type typeVariable))
-  deriving (Eq, Ord, Show, Generic)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance
     (NFData typeVariable, NFData kindVariable, NFData annotation) =>

@@ -4,6 +4,7 @@ import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Control.Monad (forM_)
 import Data.Either (isLeft)
+import Data.Foldable (toList)
 import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
@@ -477,6 +478,26 @@ environmentTests = testGroup "environments"
         (Inventory.inventoryKindAssumptions inventory) @?=
           Map.singleton typeName
             (Kind.FunctionKind Kind.ProperTypeKind Kind.ProperTypeKind)
+  , testCase "erase inventory annotations without rebuilding its indexes" $ do
+      let typeName = right $ mkIdentifier "T"
+          constructorName = right $ mkIdentifier "MkT"
+          declarations :: [Declaration.Declaration String Void Int]
+          declarations =
+            [ Declaration.DataTypeDeclaration 1 typeName []
+                [Declaration.DataConstructor 2 constructorName []]
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.ClosedKindInventory declarations
+          erased = fmap (const ()) inventory
+          expected = map (fmap $ const ()) declarations
+      Environment.environmentDeclarations
+          (Inventory.inventoryEnvironment erased) @?= expected
+      Map.keys (Environment.typeDeclarationMap
+          $ Inventory.inventoryEnvironment erased) @?= [typeName]
+      Map.keys (Environment.dataConstructorMap
+          $ Inventory.inventoryEnvironment erased) @?= [constructorName]
+      Inventory.inventoryKindAssumptions erased @?=
+        Inventory.inventoryKindAssumptions inventory
   , testCase "inventories retain the first unsolved declaration kind" $ do
       let typeName = right $ mkIdentifier "T"
           declarations :: [Declaration.Declaration String String ()]
@@ -632,6 +653,22 @@ declarationTests = testGroup "declarations"
       Declaration.validateDeclaration declaration @?= Right ()
       _ <- evaluate $ force declaration
       pure ()
+  , testCase "map and traverse backend annotations at every declaration site" $ do
+      let typeName = right $ mkIdentifier "T"
+          firstName = right $ mkIdentifier "First"
+          secondName = right $ mkIdentifier "Second"
+          declaration :: Declaration.Declaration String Int Int
+          declaration = Declaration.DataTypeDeclaration 1 typeName []
+            [ Declaration.DataConstructor 2 firstName []
+            , Declaration.DataConstructor 3 secondName []
+            ]
+          expected = Declaration.DataTypeDeclaration 11 typeName []
+            [ Declaration.DataConstructor 12 firstName []
+            , Declaration.DataConstructor 13 secondName []
+            ]
+      fmap (+ 10) declaration @?= expected
+      toList declaration @?= [1, 2, 3]
+      traverse (Just . (+ 10)) declaration @?= Just expected
   , testCase "kind variables traverse and report free identities" $ do
       let kind = Kind.FunctionKind (Kind.KindVariable (1 :: Int))
             Kind.ProperTypeKind

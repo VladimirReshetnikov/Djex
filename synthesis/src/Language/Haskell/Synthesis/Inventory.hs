@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 
 -- | One structurally and kind-checked source inventory.
@@ -27,7 +28,7 @@ data Inventory typeVariable annotation = Inventory
       Environment typeVariable Void annotation
   , inventoryKindAssumptions :: KindAssumptions
   }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Functor, Generic)
 
 data InventoryError typeVariable kindVariable
   = InvalidInventoryEnvironment (EnvironmentError typeVariable)

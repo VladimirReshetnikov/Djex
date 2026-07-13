@@ -21,12 +21,8 @@ import qualified Djinn.Core as DjinnCore (Environment)
 -- Raw Exference fixtures below use their historical @functionName@ field;
 -- hide the shared structural-name accessor at this integration-only seam.
 import Language.Haskell.Djex hiding (functionName)
+import qualified Language.Haskell.Exference.Session as ExferenceCompatibility
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
-import Language.Haskell.Exference.Core.Candidate
-  ( mkExferenceGeneratedCandidate )
-import Language.Haskell.Exference.Core.ExferenceStats
-  ( ExferenceStats (ExferenceStats) )
-import qualified Language.Haskell.Exference.Core.Expression as CoreExpression
 import Language.Haskell.Exference.Core.Name (mkQualifiedName)
 import Language.Haskell.Exference.Core.Types
   ( HsType (TypeForall, TypeVar)
@@ -257,8 +253,14 @@ tests = testGroup "Djex facade"
         Right _ -> fail "Djinn accepted a qualified generated definition"
   , testCase "run a checked Exference session through the shared envelope" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
-      session <- expectRight $ mkExferenceSession checked
-      exferenceSessionInventory session @?= checkedSourceInventory checked
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
+      environmentDeclarations
+          (inventoryEnvironment $ exferenceSessionInventory session) @?=
+        map (fmap $ const ())
+          (environmentDeclarations
+            $ inventoryEnvironment $ checkedSourceInventory checked)
+      inventoryKindAssumptions (exferenceSessionInventory session) @?=
+        inventoryKindAssumptions (checkedSourceInventory checked)
       exferenceSessionOmissions session @?= []
       exferenceSessionDiagnostics session @?= []
       target <- expectRight $ mkIdentifier "identity"
@@ -273,7 +275,12 @@ tests = testGroup "Djex facade"
               FunctionClause actualTarget patterns _ -> do
                 actualTarget @?= target
                 patterns @?= []
+                exferenceCandidateMetrics candidate @?=
+                  exferenceCandidateStatistics (candidateDetails candidate)
             [] -> fail "Exference reported candidate evidence without a candidate"
+          let metadata = batchMetadata $ resultSearch result
+          exferenceResultBindingUsages result @?=
+            exferenceBatchBindingUsages metadata
         [] -> fail "Exference found no identity candidate"
   , testCase "reject Exference contexts whose variables escape the goal" $ do
       target <- expectRight $ mkIdentifier "constrained"
@@ -308,7 +315,7 @@ tests = testGroup "Djex facade"
         Right _ -> fail "Exference accepted a context beneath a nested forall"
   , testCase "validate Exference targets before parsing source" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
-      session <- expectRight $ mkExferenceSession checked
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       qualifier <- expectRight $ mkModuleName "External"
       target <- expectRight $ mkQualifiedIdentifier qualifier "answer"
       case parseExferenceRequest session defaultExferenceOptions
@@ -335,14 +342,14 @@ tests = testGroup "Djex facade"
             }
           source = emptyExferenceSource {sourceClasses = classEnvironment}
       checked <- expectRight $ checkSourceEnvironment source
-      session <- expectRight $ mkExferenceSession checked
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       request <- expectRight $ mkExferenceRequest query
       results <- expectRight $ runExferenceQuery session request
       assertBool "scoped nested-forall context produced no identity"
         $ any (not . null . batchCandidates . resultSearch) results
   , testCase "classify malformed Exference options independently" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
-      session <- expectRight $ mkExferenceSession checked
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       target <- expectRight $ mkIdentifier "identity"
       request <- expectRight $ parseExferenceRequest session
         defaultExferenceOptions {exferenceMaximumSteps = 0}
@@ -353,7 +360,7 @@ tests = testGroup "Djex facade"
         Right _ -> fail "Exference accepted a zero search-step limit"
   , testCase "preserve an Exference query filename extension" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
-      session <- expectRight $ mkExferenceSession checked
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       target <- expectRight $ mkIdentifier "broken"
       case parseExferenceRequest
           session defaultExferenceOptions target "query.hs" "(" of
@@ -376,7 +383,7 @@ tests = testGroup "Djex facade"
           options = defaultExferenceOptions
             {exferenceMaximumSteps = 32}
       checked <- expectRight $ checkSourceEnvironment source
-      session <- expectRight $ mkExferenceSession checked
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       request <- expectRight $ parseExferenceRequest
         session options target "recursive-target" "a -> a"
       results <- expectRight $ runExferenceQuery session request
@@ -401,8 +408,12 @@ tests = testGroup "Djex facade"
           source = emptyExferenceSource
             {sourceBindings = [SourceFunction rankN]}
       checked <- expectRight $ checkSourceEnvironment source
-      session <- expectRight $ mkExferenceSession checked
-      exferenceSessionInventory session @?= checkedSourceInventory checked
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
+      environmentDeclarations
+          (inventoryEnvironment $ exferenceSessionInventory session) @?=
+        map (fmap $ const ())
+          (environmentDeclarations
+            $ inventoryEnvironment $ checkedSourceInventory checked)
       case exferenceSessionOmissions session of
         [omission] -> do
           omittedCapability omission @?= BindingIntroduction
@@ -432,7 +443,8 @@ tests = testGroup "Djex facade"
           policy = defaultExferenceSessionPolicy
             {exferenceExcludedBindings = [blockedName]}
       checked <- expectRight $ checkSourceEnvironment source
-      session <- expectRight $ mkExferenceSessionWithPolicy policy checked
+      session <- expectRight $
+        ExferenceCompatibility.mkExferenceSessionWithPolicy policy checked
       case exferenceSessionOmissions session of
         [omission] -> do
           omittedName omission @?= blockedName
@@ -442,12 +454,10 @@ tests = testGroup "Djex facade"
         [Just "DJEX_EXF_POLICY_OMISSION"]
   , testCase "reject definition qualification that creates self-reference" $ do
       target <- expectRight $ mkIdentifier "result"
-      backendGlobal <- expectRight
-        $ mkQualifiedName ["Fixture"] "result"
       sharedGlobal <- expectRight $ parseName "Fixture.result"
-      raw <- expectRight $ mkExferenceGeneratedCandidate mempty
-        (CoreExpression.ExpName backendGlobal) [] (ExferenceStats 1 0 0)
-      let candidate = fmap (FunctionClause target []) raw
+      let candidate = Candidate
+            (FunctionClause target [] $ Global sharedGlobal)
+            [] emptyExferenceCandidateDetails
       renderExferenceCandidateDefinition Unqualified candidate @?=
         Left (ExferenceGeneratedRenderError
           $ GlobalDefinitionCapture target
@@ -456,12 +466,10 @@ tests = testGroup "Djex facade"
         Right "result = Fixture.result"
   , testCase "preserve Exference clause binders in expression rendering" $ do
       target <- expectRight $ mkIdentifier "result"
-      backendGlobal <- expectRight
-        $ mkQualifiedName ["Fixture"] "value"
-      raw <- expectRight $ mkExferenceGeneratedCandidate mempty
-        (CoreExpression.ExpName backendGlobal) [] (ExferenceStats 1 0 0)
-      let patternedCandidate = fmap
-            (FunctionClause target [Wildcard]) raw
+      sharedGlobal <- expectRight $ parseName "Fixture.value"
+      let patternedCandidate = Candidate
+            (FunctionClause target [Wildcard] $ Global sharedGlobal)
+            [] emptyExferenceCandidateDetails
       renderExferenceCandidateExpression FullyQualified patternedCandidate @?=
         Right "\\_ -> Fixture.value"
   ]
@@ -502,6 +510,13 @@ sealDjinnEnvironment :: DjinnCore.Environment -> IO DjinnSession
 sealDjinnEnvironment environment = do
   shared <- expectRight $ toSynthesisEnvironment environment
   expectRight $ mkDjinnSession shared
+
+emptyExferenceCandidateDetails :: ExferenceCandidateDetails
+emptyExferenceCandidateDetails = ExferenceCandidateDetails
+  { exferenceCandidateStatistics = ExferenceCandidateMetrics 0 0 0
+  , exferenceCandidateLocalNames = mempty
+  , exferenceCandidateTypeVariableNames = mempty
+  }
 
 emptyExferenceSource :: SourceEnvironment
 emptyExferenceSource = SourceEnvironment

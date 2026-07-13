@@ -16,15 +16,19 @@ module Language.Haskell.Djex.Exference
   , ExferenceOmissionCapability (..)
   , ExferenceOmissionReason (..)
   , ExferenceRequest
+  , ExferenceLocal
+  , ExferenceTypeVariable
+  , ExferenceType
+  , ExferenceInventory
   , ExferenceCandidate
+  , ExferenceCandidateDetails (..)
   , ExferenceCandidateMetrics (..)
+  , ExferenceBatchMetadata (..)
   , ExferenceCandidateRenderError (..)
   , ExferenceResult
   , ExferenceSessionLoadReport (..)
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
-  , mkExferenceSession
-  , mkExferenceSessionWithPolicy
   , exferenceSessionInventory
   , exferenceSessionOmissions
   , exferenceSessionDiagnostics
@@ -39,75 +43,51 @@ module Language.Haskell.Djex.Exference
   , renderExferenceResidualConstraints
   ) where
 
+import Control.DeepSeq (NFData (rnf))
 import Control.Monad.Trans.Except (runExceptT)
 import Data.Bifunctor (first)
 import Data.Functor.Identity (runIdentity)
-import Data.List (partition)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
-import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core
-  ( ExferenceCandidateDetails (..)
-  , ExferenceEnvironment
-  , ExferenceGeneratedSearchBatch
+  ( ExferenceGeneratedSearchBatch
   , ExferenceHeuristicsConfig (..)
   , ExferenceInputError (..)
   , ExferenceQuery (..)
   , Penalty (..)
   , findGeneratedSearchBatchesWithHintsInEnvironmentEither
-  , mkExferenceEnvironment
   , typeVariableHintsInEnvironment
   )
-import Language.Haskell.Exference.Core.Declaration (SynthesisInventory)
-import Language.Haskell.Exference.Core.ExferenceStats
-  ( ExferenceBatchMetadata (..)
-  , ExferenceStats (..)
-  )
-import Language.Haskell.Exference.Core.FunctionBinding
-  ( ConstructorBinding (..)
-  , DeconstructorBinding (..)
-  , EnvDictionary (..)
-  , FunctionBinding (..)
-  )
-import Language.Haskell.Exference.Core.TypeUtils
-  ( containsForall
-  , typeConstructorHead
-  )
+import qualified Language.Haskell.Exference.Core.Candidate as CoreCandidate
+import qualified Language.Haskell.Exference.Core.ExferenceStats as CoreStats
 import Language.Haskell.Exference.Core.Types
   ( HsType
-  , SynthesisType
-  , TVarId
   , TypeVarIndex
-  , constraint_params
   , fromSynthesisType
   , sClassEnv_tclasses
   , toSynthesisType
   , toSynthesisName
   , showVar
   )
+import Language.Haskell.Djex.Exference.Internal.Session
+  ( ExferenceSession )
+import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Exference.EnvironmentParser
-  ( CheckedSourceEnvironment
-  , LoadReport (..)
+  ( LoadReport (..)
   , SourceEnvironment (..)
-  , checkedSourceInventory
-  , checkedSourceProjection
   , environmentFromPath
   , environmentLoadErrorDiagnostics
   , haskellSrcExtsParseMode
-  , sourceBindingFunction
-  , sourceFunctions
-  , sourceTypeSynonymMap
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-  ( TypeDeclMap
-  , parseTypeWithKinds
-  )
+  ( parseTypeWithKinds )
 import Language.Haskell.Synthesis.Candidate
-  ( Candidate
+  ( Candidate (Candidate)
   , candidateDetails
   , candidateOutput
   , candidateResidualConstraints
@@ -133,9 +113,12 @@ import Language.Haskell.Synthesis.Generated
   , validateDefinitionName
   )
 import Language.Haskell.Synthesis.Inventory
-  ( inventoryKindAssumptions )
+  ( Inventory
+  , inventoryKindAssumptions
+  )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
-import Language.Haskell.Synthesis.KindInference (checkTypesKinds)
+import Language.Haskell.Synthesis.KindInference
+  ( checkTypesKinds )
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -146,12 +129,16 @@ import Language.Haskell.Synthesis.Query
   , QueryResult (..)
   )
 import Language.Haskell.Synthesis.Search
-  ( batchCandidates
+  ( SearchBatch (SearchBatch)
+  , batchCandidates
   , batchMetadata
+  , batchProgress
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type
-  ( Variable (FlexibleVariable, RigidVariable) )
+  ( Type
+  , Variable (FlexibleVariable, RigidVariable)
+  )
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 
 data ExferenceOptions = ExferenceOptions
@@ -183,7 +170,8 @@ data ExferenceOmissionCapability
   | DataElimination
   deriving (Eq, Ord, Show)
 
-data ExferenceOmissionReason = UnsupportedNestedForall
+data ExferenceOmissionReason
+  = UnsupportedNestedForall
   | ExcludedByPolicy
   deriving (Eq, Ord, Show)
 
@@ -207,14 +195,6 @@ data ExferenceOmission = ExferenceOmission
   }
   deriving (Eq, Ord, Show)
 
-data ExferenceSession = ExferenceSession
-  { sessionSource :: SourceEnvironment
-  , sessionSearchEnvironment :: ExferenceEnvironment
-  , sessionInventory :: SynthesisInventory
-  , sessionTypeDeclarations :: TypeDeclMap
-  , sessionOmissions :: [ExferenceOmission]
-  }
-
 -- | A fully sealed session or structured fatal diagnostics, paired with all
 -- non-fatal source-loader and backend-projection diagnostics in production
 -- order.  No parser-specific environment or error type crosses this stable
@@ -229,13 +209,27 @@ data ExferenceSessionLoadReport = ExferenceSessionLoadReport
 -- with the exact parsed goal and must be converted after explicit contexts are
 -- merged, because that operation can change Exference's rigid-ID allocation.
 data ExferenceRequest = ExferenceRequest
-  { requestQuery :: QueryRequest SynthesisType ExferenceOptions
+  { requestQuery :: QueryRequest ExferenceType ExferenceOptions
   , requestSourceTypeVariables :: TypeVarIndex
   }
   deriving (Eq, Show)
 
+-- | Generated-expression binder identities used by Exference.
+type ExferenceLocal = Int
+
+-- | Shared flexible/rigid source-type variables used by Exference.
+type ExferenceTypeVariable = SharedType.Variable ExferenceLocal
+
+-- | Exference's checked type surface, expressed entirely in the neutral IR.
+type ExferenceType = Type ExferenceTypeVariable
+
+-- | The annotation-erased neutral inventory retained by a stable session.
+-- Search ratings remain in the private backend projection, where they belong.
+type ExferenceInventory = Inventory ExferenceTypeVariable ()
+
 type ExferenceCandidate =
-  Candidate SynthesisType ExferenceCandidateDetails (FunctionClause TVarId)
+  Candidate ExferenceType ExferenceCandidateDetails
+    (FunctionClause ExferenceLocal)
 
 type ExferenceResult =
   QueryResult ExferenceBatchMetadata ExferenceCandidate
@@ -246,6 +240,42 @@ data ExferenceCandidateMetrics = ExferenceCandidateMetrics
   , exferenceCandidateFinalQueueSize :: Int
   }
   deriving (Eq, Show)
+
+instance NFData ExferenceCandidateMetrics where
+  rnf metrics =
+    rnf (exferenceCandidateSteps metrics) `seq`
+    rnf (exferenceCandidateComplexity metrics) `seq`
+    rnf (exferenceCandidateFinalQueueSize metrics)
+
+-- | Stable rendering hints and metrics attached to one checked candidate.
+-- These are presentation data only; changing them cannot alter search output.
+data ExferenceCandidateDetails = ExferenceCandidateDetails
+  { exferenceCandidateStatistics :: ExferenceCandidateMetrics
+  , exferenceCandidateLocalNames :: Map.Map ExferenceLocal String
+  , exferenceCandidateTypeVariableNames ::
+      Map.Map ExferenceTypeVariable String
+  }
+  deriving (Eq, Show)
+
+instance NFData ExferenceCandidateDetails where
+  rnf details =
+    rnf (exferenceCandidateStatistics details) `seq`
+    rnf (exferenceCandidateLocalNames details) `seq`
+    rnf (exferenceCandidateTypeVariableNames details)
+
+-- | Stable operational metadata for one Exference result batch.
+data ExferenceBatchMetadata = ExferenceBatchMetadata
+  { exferenceBatchBindingUsages :: Map.Map Name Int
+  , exferenceBatchQueuePruned :: Natural
+  , exferenceBatchDepthPruned :: Natural
+  }
+  deriving (Eq, Show)
+
+instance NFData ExferenceBatchMetadata where
+  rnf metadata =
+    rnf (exferenceBatchBindingUsages metadata) `seq`
+    rnf (exferenceBatchQueuePruned metadata) `seq`
+    rnf (exferenceBatchDepthPruned metadata)
 
 data ExferenceCandidateRenderError
   = ExferenceGeneratedRenderError RenderError
@@ -272,7 +302,8 @@ loadExferenceSessionWithPolicy policy path = do
           $ environmentLoadErrorDiagnostics failure
       , exferenceSessionLoadDiagnostics = sourceDiagnostics
       }
-    Right checked -> case mkExferenceSessionWithPolicy policy checked of
+    Right checked -> case Session.sealExferenceSessionWithExclusions
+        (exferenceExcludedBindings policy) checked of
       Left failure -> ExferenceSessionLoadReport
         { exferenceSessionLoadResult = Left
             $ NonEmpty.singleton failure
@@ -284,72 +315,18 @@ loadExferenceSessionWithPolicy policy path = do
             ++ exferenceSessionDiagnostics session
         }
 
-mkExferenceSession
-  :: CheckedSourceEnvironment
-  -> Either Diagnostic ExferenceSession
-mkExferenceSession = mkExferenceSessionWithPolicy
-  defaultExferenceSessionPolicy
-
-mkExferenceSessionWithPolicy
-  :: ExferenceSessionPolicy
-  -> CheckedSourceEnvironment
-  -> Either Diagnostic ExferenceSession
-mkExferenceSessionWithPolicy policy checked = do
-  let source = checkedSourceProjection checked
-      excludedBindings = Set.fromList $ exferenceExcludedBindings policy
-      functionExcluded binding = Set.member
-        (toSynthesisName $ functionName binding) excludedBindings
-      supportedBindings =
-        [ sourceBinding
-        | sourceBinding <- sourceBindings source
-        , let binding = sourceBindingFunction sourceBinding
-        , not $ functionExcluded binding
-        , functionSupported binding
-        ]
-      (supportedDeconstructors, omittedDeconstructors) =
-        partition deconstructorSupported $ sourceDeconstructors source
-      supportedSource = source
-        { sourceBindings = supportedBindings
-        , sourceDeconstructors = supportedDeconstructors
-        }
-      omissions =
-        [ ExferenceOmission
-            (toSynthesisName $ functionName binding)
-            BindingIntroduction
-            reason
-        | binding <- sourceFunctions source
-        , reason <- if functionExcluded binding
-            then [ExcludedByPolicy]
-            else [UnsupportedNestedForall | not $ functionSupported binding]
-        ] ++ mapMaybe deconstructorOmission omittedDeconstructors
-  searchEnvironment <- first
-    (failureDiagnostic
-      "DJEX_EXF_ENV"
-      "cannot seal the Exference session environment"
-    )
-    $ mkExferenceEnvironment $ EnvDictionary
-        (sourceFunctions supportedSource)
-        (sourceDeconstructors supportedSource)
-        (sourceClasses supportedSource)
-  pure ExferenceSession
-    { sessionSource = supportedSource
-    , sessionSearchEnvironment = searchEnvironment
-    , sessionInventory = checkedSourceInventory checked
-    , sessionTypeDeclarations = sourceTypeSynonymMap source
-    , sessionOmissions = omissions
-    }
-
-exferenceSessionInventory :: ExferenceSession -> SynthesisInventory
-exferenceSessionInventory = sessionInventory
+exferenceSessionInventory :: ExferenceSession -> ExferenceInventory
+exferenceSessionInventory = Session.exferenceSessionInventory
 
 exferenceSessionOmissions :: ExferenceSession -> [ExferenceOmission]
-exferenceSessionOmissions = sessionOmissions
+exferenceSessionOmissions = map projectOmission . Session.sessionOmissions
 
 exferenceSessionDiagnostics :: ExferenceSession -> [Diagnostic]
-exferenceSessionDiagnostics = map omissionDiagnostic . sessionOmissions
+exferenceSessionDiagnostics = map omissionDiagnostic
+  . exferenceSessionOmissions
 
 mkExferenceRequest
-  :: QueryRequest SynthesisType ExferenceOptions
+  :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequest query = do
   validateRequest query
@@ -357,29 +334,18 @@ mkExferenceRequest query = do
 
 exferenceRequestQuery
   :: ExferenceRequest
-  -> QueryRequest SynthesisType ExferenceOptions
+  -> QueryRequest ExferenceType ExferenceOptions
 exferenceRequestQuery = requestQuery
 
 exferenceCandidateMetrics
   :: ExferenceCandidate
   -> ExferenceCandidateMetrics
-exferenceCandidateMetrics candidate = ExferenceCandidateMetrics
-  { exferenceCandidateSteps = exference_steps statistics
-  , exferenceCandidateComplexity = exference_complexityRating statistics
-  , exferenceCandidateFinalQueueSize = exference_finalSize statistics
-  }
- where
-  statistics = exferenceCandidateStats $ candidateDetails candidate
+exferenceCandidateMetrics = exferenceCandidateStatistics . candidateDetails
 
 -- | Cumulative nominal source-binding usage at this result batch.
 exferenceResultBindingUsages :: ExferenceResult -> Map.Map Name Int
-exferenceResultBindingUsages result = Map.fromList
-  [ (toSynthesisName backendName, count)
-  | (backendName, count) <- Map.toList
-      $ exferenceBindingUsages
-      $ batchMetadata
-      $ resultSearch result
-  ]
+exferenceResultBindingUsages = exferenceBatchBindingUsages
+  . batchMetadata . resultSearch
 
 renderExferenceCandidateExpression
   :: Qualification
@@ -416,20 +382,20 @@ renderExferenceResidualConstraints candidate =
 candidateRenderOptions
   :: Qualification
   -> ExferenceCandidate
-  -> RenderOptions TVarId
+  -> RenderOptions ExferenceLocal
 candidateRenderOptions qualification candidate =
   (defaultRenderOptions preferred)
     {renderQualification = qualification}
  where
-  hints = exferenceLocalNameHints $ candidateDetails candidate
+  hints = exferenceCandidateLocalNames $ candidateDetails candidate
   preferred local = Map.findWithDefault (showVar local) local hints
 
 candidateTypeVariableName
   :: ExferenceCandidate
-  -> SharedType.Variable TVarId
+  -> ExferenceTypeVariable
   -> String
 candidateTypeVariableName candidate variable = Map.findWithDefault fallback
-  variable $ exferenceTypeVariableHints $ candidateDetails candidate
+  variable $ exferenceCandidateTypeVariableNames $ candidateDetails candidate
  where
   fallback = case variable of
     FlexibleVariable identifier -> showVar identifier
@@ -446,13 +412,13 @@ parseExferenceRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
   validateTarget target
-  let environment = sessionSource session
+  let environment = Session.sessionSource session
       parsed = runIdentity $ runExceptT $ parseTypeWithKinds
-        (inventoryKindAssumptions $ sessionInventory session)
+        (inventoryKindAssumptions $ Session.exferenceSessionInventory session)
         (sClassEnv_tclasses $ sourceClasses environment)
         Nothing
         (sourceTypeNames environment)
-        (sessionTypeDeclarations session)
+        (Session.sessionTypeDeclarations session)
         (haskellSrcExtsParseMode sourceName)
         source
   -- The HSE compatibility frontend predates structured diagnostic codes.
@@ -491,7 +457,7 @@ runExferenceQuery session request = do
     )
     Right
     $ checkTypesKinds
-        (inventoryKindAssumptions $ sessionInventory session)
+        (inventoryKindAssumptions $ Session.exferenceSessionInventory session)
         [(ProperTypeKind, sharedGoal)]
   backendGoal <- either
     (Left . failureDiagnostic
@@ -512,25 +478,25 @@ runExferenceQuery session request = do
         failure
   hints <- either (Left . searchFailure) Right
     $ typeVariableHintsInEnvironment
-        (sessionSearchEnvironment session)
+        (Session.sessionSearchEnvironment session)
         input
         (requestSourceTypeVariables request)
   batches <- either
     (Left . searchFailure)
     Right
     $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
-        hints (sessionSearchEnvironment session) input
+        hints (Session.sessionSearchEnvironment session) input
   pure $ map (resultBatch target) batches
 
 validateRequest
-  :: QueryRequest SynthesisType ExferenceOptions
+  :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ()
 validateRequest query = do
   validateTarget $ requestTarget query
   validateRequestGoalAndContexts query
 
 validateRequestGoalAndContexts
-  :: QueryRequest SynthesisType ExferenceOptions
+  :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ()
 validateRequestGoalAndContexts query = do
   either
@@ -558,8 +524,8 @@ validateRequestGoalAndContexts query = do
 -- Free goal variables remain usable there, as do binders from that chain;
 -- a binder below an arrow, tuple, or application is not in context scope.
 inScopeContextVariables
-  :: SynthesisType
-  -> Set.Set (SharedType.Variable TVarId)
+  :: ExferenceType
+  -> Set.Set ExferenceTypeVariable
 inScopeContextVariables goal = SharedType.freeVariables goal
   `Set.union` leadingForallVariables goal
  where
@@ -576,8 +542,8 @@ validateTarget target = case validateDefinitionName target of
     (renderCanonical target, failure)
 
 contextualGoal
-  :: QueryRequest SynthesisType options
-  -> SynthesisType
+  :: QueryRequest ExferenceType options
+  -> ExferenceType
 contextualGoal query
   | null contexts = requestGoal query
   | otherwise = insertUnderLeadingForalls $ requestGoal query
@@ -609,12 +575,52 @@ resultBatch
   :: Name
   -> ExferenceGeneratedSearchBatch
   -> ExferenceResult
-resultBatch target batch = QueryResult evidence
-  $ fmap (fmap $ FunctionClause target []) batch
+resultBatch target batch = QueryResult evidence $ SearchBatch
+  (batchProgress batch)
+  (projectBatchMetadata $ batchMetadata batch)
+  (map (projectCandidate target) $ batchCandidates batch)
  where
   evidence
     | null $ batchCandidates batch = NoEvidence
     | otherwise = ValidatedCandidates
+
+projectBatchMetadata
+  :: CoreStats.ExferenceBatchMetadata
+  -> ExferenceBatchMetadata
+projectBatchMetadata metadata = ExferenceBatchMetadata
+  { exferenceBatchBindingUsages = Map.fromList
+      [ (toSynthesisName backendName, count)
+      | (backendName, count) <- Map.toList
+          $ CoreStats.exferenceBindingUsages metadata
+      ]
+  , exferenceBatchQueuePruned = CoreStats.exferenceQueuePruned metadata
+  , exferenceBatchDepthPruned = CoreStats.exferenceDepthPruned metadata
+  }
+
+projectCandidate
+  :: Name
+  -> CoreCandidate.ExferenceGeneratedCandidate
+  -> ExferenceCandidate
+projectCandidate target candidate = Candidate
+  { candidateOutput = FunctionClause target [] $ candidateOutput candidate
+  , candidateResidualConstraints = candidateResidualConstraints candidate
+  , candidateDetails = ExferenceCandidateDetails
+      { exferenceCandidateStatistics = ExferenceCandidateMetrics
+          { exferenceCandidateSteps = CoreStats.exference_steps statistics
+          , exferenceCandidateComplexity =
+              CoreStats.exference_complexityRating statistics
+          , exferenceCandidateFinalQueueSize =
+              CoreStats.exference_finalSize statistics
+          }
+      , exferenceCandidateLocalNames =
+          CoreCandidate.exferenceLocalNameHints details
+      , exferenceCandidateTypeVariableNames =
+          CoreCandidate.exferenceTypeVariableHints details
+      }
+  }
+ where
+  details = candidateDetails candidate
+  statistics = CoreCandidate.exferenceCandidateStats details
 
 searchQuery
   :: Maybe Name
@@ -634,24 +640,16 @@ searchQuery excludedTarget goal options = ExferenceQuery
   , queryHeuristics = exferenceHeuristics options
   }
 
-functionSupported :: FunctionBinding -> Bool
-functionSupported binding = all (not . containsForall)
-  $ functionResult binding
-  : functionParameters binding
-  ++ concatMap constraint_params (functionConstraints binding)
-
-deconstructorSupported :: DeconstructorBinding -> Bool
-deconstructorSupported binding = all (not . containsForall)
-  $ deconstructorInput binding
-  : concatMap constructorFields (deconstructorConstructors binding)
-
-deconstructorOmission :: DeconstructorBinding -> Maybe ExferenceOmission
-deconstructorOmission binding = do
-  name <- typeConstructorHead $ deconstructorInput binding
-  pure $ ExferenceOmission
-    (toSynthesisName name)
-    DataElimination
-    UnsupportedNestedForall
+projectOmission :: Session.SessionOmission -> ExferenceOmission
+projectOmission omission = ExferenceOmission
+  { omittedName = Session.sessionOmissionName omission
+  , omittedCapability = case Session.sessionOmissionCapability omission of
+      Session.BindingIntroduction -> BindingIntroduction
+      Session.DataElimination -> DataElimination
+  , omittedReason = case Session.sessionOmissionReason omission of
+      Session.UnsupportedNestedForall -> UnsupportedNestedForall
+      Session.ExcludedByPolicy -> ExcludedByPolicy
+  }
 
 omissionDiagnostic :: ExferenceOmission -> Diagnostic
 omissionDiagnostic omission = withContext

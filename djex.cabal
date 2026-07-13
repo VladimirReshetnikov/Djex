@@ -334,6 +334,7 @@ Library exference-frontend
     Language.Haskell.Exference.BindingsFromHaskellSrc
     Language.Haskell.Exference.ClassEnvFromHaskellSrc
     Language.Haskell.Exference.EnvironmentParser
+    Language.Haskell.Exference.Session
 
   Reexported-Modules:
     Language.Haskell.Exference.Core,
@@ -352,7 +353,9 @@ Library exference-frontend
     Language.Haskell.Exference.Core.FunctionBinding,
     Language.Haskell.Exference.Core.Score
 
-  Other-Modules: Language.Haskell.Exference.HaskellSrcUtils
+  Other-Modules:
+    Language.Haskell.Djex.Exference.Internal.Session
+    Language.Haskell.Exference.HaskellSrcUtils
 
   Build-Depends:
     djex:exference-core,

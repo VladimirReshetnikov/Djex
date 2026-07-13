@@ -23,6 +23,21 @@ main = defaultMain $ testGroup "public Djex facade"
   , testCase "exports checked session entry points" $ do
       assertBool "the standard Djinn session did not seal" $
         isRight standardDjinnSession
+      let inventoryProjection
+            :: ExferenceSession -> ExferenceInventory
+          inventoryProjection = exferenceSessionInventory
+          requestProjection
+            :: ExferenceRequest
+            -> QueryRequest ExferenceType ExferenceOptions
+          requestProjection = exferenceRequestQuery
+          candidateProjection
+            :: ExferenceCandidate -> ExferenceCandidateDetails
+          candidateProjection = candidateDetails
+          metadataProjection
+            :: ExferenceResult -> ExferenceBatchMetadata
+          metadataProjection = batchMetadata . resultSearch
+      inventoryProjection `seq` requestProjection `seq`
+        candidateProjection `seq` metadataProjection `seq` pure ()
       loadExferenceSession `seq` pure ()
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment

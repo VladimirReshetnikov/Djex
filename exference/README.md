@@ -301,6 +301,15 @@ plus cumulative queue- and depth-pruning counts. Keeping the counts in metadata
 makes partial progress observable even though shared `Progress` records pruning
 reasons only when a search terminates.
 
+The stable `Language.Haskell.Djex.Exference` adapter projects these core-owned
+records into facade-owned `ExferenceCandidateDetails` and
+`ExferenceBatchMetadata`: local/type-variable hints use the shared variable
+tags, binding usage is keyed by shared `Name`, and the retained
+`ExferenceInventory` has backend ratings erased by a total functor map. The raw
+`CheckedSourceEnvironment -> ExferenceSession` bridge lives separately in
+`Language.Haskell.Exference.Session`; ordinary stable callers use
+`loadExferenceSession` and never acquire an HSE parser type.
+
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the
 two inputs reuse numeric IDs.  The independent checker consumes every prenex
@@ -363,12 +372,14 @@ any / the right solution. Some common current limitations are:
 - Source inventories and queries are kind-checked against the same retained
   assumptions; an ill-kinded application such as `Maybe Maybe` is rejected
   before search;
-- The source loader currently represents ordinary datatypes, type synonyms,
-  classes, instances, and value/method signatures. Type/data families, GADTs,
-  derived or overlapping instances, functional dependencies, associated
-  families/defaults, declaration splices, and role annotations fail before
-  inventory construction as source-spanned `EXF_UNSUPPORTED_VOCABULARY`
-  diagnostics; they are never silently omitted;
+- The source loader represents ordinary positional, infix, and record
+  datatypes (including strict/unpacked fields and rated selectors), type
+  synonyms, classes, instances, and value/method signatures. Type/data
+  families, GADTs, datatype contexts, kinded parameters, existential or
+  constrained constructors, derived or overlapping instances, functional
+  dependencies, associated families/defaults, declaration splices, and role
+  annotations fail before inventory construction as source-spanned
+  `EXF_UNSUPPORTED_VOCABULARY` diagnostics; they are never silently omitted;
 - The environment is composed by hand currently, and does only include parts
   of base plus a few other selected modules. Its canonical inventory of 41
   classes and 432 source instances is checked at load time and expands to 535

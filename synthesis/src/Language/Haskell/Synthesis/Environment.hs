@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 
 -- | Opaque, structurally validated source-declaration environment.
@@ -44,7 +45,7 @@ data Environment typeVariable kindVariable annotation = Environment
         (Declaration typeVariable kindVariable annotation)
   , occupiedValueNames :: Set Name
   }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show, Functor, Generic)
 
 instance
     (NFData typeVariable, NFData kindVariable, NFData annotation) =>

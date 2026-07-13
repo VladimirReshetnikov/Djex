@@ -159,12 +159,13 @@ Djinn adapter signature nameable without depending on a hidden backend alias;
 the historical REPL explicitly converts its editable raw environment at the
 adapter boundary.
 
-`mkExferenceSession` similarly computes the backend-supported projection and
-seals its search environment once. `loadExferenceSession` and its policy-aware
-counterpart turn a directory into that opaque session while translating every
-fatal loader phase into source-preserving `EXF_*` diagnostics, so stable callers
-never handle raw frontend environments. The source boundary tags class methods
-by
+`loadExferenceSession` and its policy-aware counterpart compute Exference's
+backend-supported projection once and turn a directory into an opaque session,
+while translating every fatal loader phase into source-preserving `EXF_*`
+diagnostics. Stable callers therefore never handle a parser-specific checked
+environment. The explicitly named `Language.Haskell.Exference.Session` module
+retains `mkExferenceSession` only for the historical CLI and clients that opt
+into the compatibility frontend. The source boundary tags class methods with
 their qualified owner, nests them under the common class declaration for
 validation, and lowers each rated selector exactly once into Exference's flat
 search inventory without changing source order. Unsupported rank-N
@@ -173,10 +174,13 @@ omissions and warning diagnostics instead of disappearing per query.
 The Haskell-source loader is likewise fail-closed at its vocabulary boundary:
 after parsing, but before constructing any partial inventory, it reports
 source-ordered `UnsupportedVocabularyOccurrence` values for type/data families,
-GADTs, derived or overlapping instances, functional dependencies, associated
-families and defaults, declaration splices, role annotations, and XML hybrid
-modules. Each occurrence carries the stable
+GADTs, datatype contexts, explicitly kinded parameters, existential or
+constrained constructors, derived or overlapping instances, functional
+dependencies, associated families and defaults, declaration splices, role
+annotations, and XML hybrid modules. Each occurrence carries the stable
 `EXF_UNSUPPORTED_VOCABULARY` diagnostic code and its exact source span.
+Ordinary positional, infix, record, strict, and unpacked datatype fields are
+lowered explicitly; record selectors become rated value bindings exactly once.
 Imports, fixities, ordinary value and method bodies, pattern vocabulary,
 default declarations, and operational pragmas remain accepted because they do
 not change the nominal type/class inventory. These forms are explicit current
@@ -185,6 +189,12 @@ limitations rather than syntax that can silently disappear during loading.
 elaborates a Haskell type against the session's retained names, synonyms,
 classes, and kind assumptions; `runExferenceQuery` validates only the varying
 goal and search policy, then returns a lazy sequence of shared result batches.
+`ExferenceType`, `ExferenceTypeVariable`, `ExferenceLocal`, and
+`ExferenceInventory` make that complete surface nameable in the neutral IR.
+Session construction maps backend ratings out of the already-checked inventory
+without rebuilding its indexes or kind assumptions. Stable candidate details
+and batch metadata likewise expose only shared names, types, metrics, and
+rendering hints; raw core records no longer cross the default facade.
 Those batches preserve queue/depth pruning, nominal binding usage, residual
 constraints, statistics, and rendering hints without forcing the remaining
 trace. Each generated expression is wrapped in a target-bearing shared

@@ -95,6 +95,19 @@ run package commands from the repository root or from `djex/`.
 
 ## Query boundary
 
+Exference core names are an opaque, validated subset of the shared synthesis
+name domain. The compatibility import `QualifiedName(..)` still bundles the
+four historical pattern views, but the input-bearing `QualifiedName` and
+`TupleCon` patterns are intentionally match-only: construct ordinary names and
+boxed tuples with `mkQualifiedName` and `mkBoxedTupleName`, which can report
+invalid spelling, qualification, or tuple arity. `ListCon` and `Cons` remain
+total constants. Representation reflection through `Data` or `Generic` is no
+longer part of this compatibility surface, so it cannot manufacture names
+outside Exference's supported subset. Exference constraints likewise store a
+strict narrowed nominal name and their argument list directly; complete checked
+conversion to and from `Language.Haskell.Synthesis.Constraint` happens at the
+shared boundary rather than during ordinary field access.
+
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
 the same types or options. `mkDjinnSession` seals an opaque Djinn environment;

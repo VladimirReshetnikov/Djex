@@ -6,10 +6,9 @@
 --
 -- The representation is deliberately opaque.  Older clients may continue to
 -- import @QualifiedName(..)@ and use the four historical constructors through
--- the bundled pattern synonyms, while new code should use the checked smart
--- constructors below.  In particular, the legacy builders report invalid
--- input with 'error' because a bidirectional pattern synonym cannot return an
--- 'Either'; Exference itself never uses those builders.
+-- the bundled pattern synonyms when inspecting values. Ordinary names and
+-- tuples are match-only because their input-bearing builders cannot report
+-- validation failures; construct them with the checked functions below.
 module Language.Haskell.Exference.Core.Name
   ( QualifiedName (QualifiedName, ListCon, TupleCon, Cons)
   , QualifiedNameError (..)
@@ -24,15 +23,6 @@ module Language.Haskell.Exference.Core.Name
 where
 
 import Control.DeepSeq (NFData (rnf))
-import Data.Data
-  ( Constr
-  , Data (..)
-  , DataType
-  , Fixity (Prefix)
-  , constrIndex
-  , mkConstr
-  , mkDataType
-  )
 import GHC.Generics (Generic)
 import qualified Language.Haskell.Synthesis.Name as Shared
 
@@ -41,7 +31,7 @@ import qualified Language.Haskell.Synthesis.Name as Shared
 -- Exference has no representation for unboxed tuples, so this wrapper is a
 -- proper subset of the shared 'Shared.Name' domain.
 newtype QualifiedName = QualifiedName_ Shared.Name
-  deriving (Eq, Ord, Generic)
+  deriving (Eq, Ord)
 
 -- | A checked conversion failed either because the spelling was not a valid
 -- Haskell name or because it denotes syntax that Exference cannot represent.
@@ -57,8 +47,6 @@ instance NFData QualifiedNameError
 -- The function constructor retains its old @QualifiedName [] "->"@ view.
 pattern QualifiedName :: [String] -> String -> QualifiedName
 pattern QualifiedName modules spelling <- (ordinaryNameView -> Just (modules, spelling))
-  where
-    QualifiedName modules spelling = legacyQualifiedName modules spelling
 
 -- | Historical structural list-constructor view.
 pattern ListCon :: QualifiedName
@@ -66,12 +54,11 @@ pattern ListCon <- (specialNameView -> Just Shared.ListConstructor)
   where
     ListCon = QualifiedName_ Shared.listName
 
--- | Historical boxed-tuple view.  Invalid arities fail in the legacy builder;
--- use 'mkBoxedTupleName' when the arity is not statically known.
+-- | Historical boxed-tuple view. Construction is intentionally unavailable
+-- through this pattern because invalid arities require structured rejection;
+-- use 'mkBoxedTupleName' for values.
 pattern TupleCon :: Int -> QualifiedName
 pattern TupleCon arity <- (specialNameView -> Just (Shared.TupleConstructor Shared.Boxed arity))
-  where
-    TupleCon arity = legacyBoxedTupleName arity
 
 -- | Historical structural list-cons view.
 pattern Cons :: QualifiedName
@@ -171,47 +158,6 @@ instance Show QualifiedName where
 instance NFData QualifiedName where
   rnf = rnf . toSynthesisName
 
--- Preserve the old four-constructor reflection surface.  'Data' cannot encode
--- checked construction, so 'gunfold' necessarily uses the compatibility
--- builders; malformed generic input fails rather than creating an invalid
--- shared name.  Ordinary observation ('toConstr', 'gfoldl', 'gmapQ', ...) is
--- total and retains the historical constructor names and fields.
-instance Data QualifiedName where
-  gfoldl apply seed name = case ordinaryNameView name of
-    Just (modules, spelling) ->
-      seed legacyQualifiedName `apply` modules `apply` spelling
-    Nothing -> case specialNameView name of
-      Just Shared.ListConstructor -> seed ListCon
-      Just (Shared.TupleConstructor Shared.Boxed arity) ->
-        seed legacyBoxedTupleName `apply` arity
-      Just Shared.ConsConstructor -> seed Cons
-      -- The function constructor deliberately has the legacy ordinary view.
-      Just Shared.FunctionConstructor ->
-        seed legacyQualifiedName `apply` ([] :: [String]) `apply` ("->" :: String)
-      Just (Shared.TupleConstructor Shared.Unboxed _) ->
-        error "Exference QualifiedName contains an unboxed tuple"
-      Nothing -> error "Exference QualifiedName has no legacy Data view"
-
-  gunfold apply seed constructor = case constrIndex constructor of
-    1 -> apply $ apply $ seed legacyQualifiedName
-    2 -> seed ListCon
-    3 -> apply $ seed legacyBoxedTupleName
-    4 -> seed Cons
-    index -> error $ "invalid QualifiedName constructor index " ++ show index
-
-  toConstr name = case ordinaryNameView name of
-    Just _ -> qualifiedNameConstr
-    Nothing -> case specialNameView name of
-      Just Shared.ListConstructor -> listConConstr
-      Just (Shared.TupleConstructor Shared.Boxed _) -> tupleConConstr
-      Just Shared.ConsConstructor -> consConstr
-      Just Shared.FunctionConstructor -> qualifiedNameConstr
-      Just (Shared.TupleConstructor Shared.Unboxed _) ->
-        error "Exference QualifiedName contains an unboxed tuple"
-      Nothing -> error "Exference QualifiedName has no legacy Data constructor"
-
-  dataTypeOf _ = qualifiedNameDataType
-
 ordinaryNameView :: QualifiedName -> Maybe ([String], String)
 ordinaryNameView name = case qualifiedNameOccurrence name of
   Shared.IdentifierOccurrence _ spelling ->
@@ -227,36 +173,5 @@ specialNameView = Shared.nameSpecial . toSynthesisName
 moduleSegments :: QualifiedName -> [String]
 moduleSegments = maybe [] Shared.moduleNameSegments . qualifiedNameModule
 
-legacyQualifiedName :: [String] -> String -> QualifiedName
-legacyQualifiedName modules spelling = either
-  (error . ("invalid legacy QualifiedName: " ++) . show)
-  id
-  (mkQualifiedName modules spelling)
-
-legacyBoxedTupleName :: Int -> QualifiedName
-legacyBoxedTupleName arity = either
-  (error . ("invalid legacy TupleCon: " ++) . show)
-  id
-  (mkBoxedTupleName arity)
-
 mapLeft :: (left -> other) -> Either left right -> Either other right
 mapLeft transform = either (Left . transform) Right
-
-qualifiedNameDataType :: DataType
-qualifiedNameDataType = dataType
-  where
-    dataType = mkDataType
-      -- Keep the reflection identity of the original declaration, which
-      -- lived in Core.Types before this representation was extracted.
-      "Language.Haskell.Exference.Core.Types.QualifiedName"
-      [ qualifiedNameConstr
-      , listConConstr
-      , tupleConConstr
-      , consConstr
-      ]
-
-qualifiedNameConstr, listConConstr, tupleConConstr, consConstr :: Constr
-qualifiedNameConstr = mkConstr qualifiedNameDataType "QualifiedName" [] Prefix
-listConConstr = mkConstr qualifiedNameDataType "ListCon" [] Prefix
-tupleConConstr = mkConstr qualifiedNameDataType "TupleCon" [] Prefix
-consConstr = mkConstr qualifiedNameDataType "Cons" [] Prefix

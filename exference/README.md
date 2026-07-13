@@ -70,17 +70,23 @@ This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
 
-Core names are validated, structural wrappers over `djex:synthesis`: module
-segments, ordinary identifiers and operators, list/cons/function constructors,
-and boxed tuples can no longer be confused by rendered spelling.  The legacy
-`QualifiedName(..)` constructor surface remains source-compatible, while new
-code can use checked smart constructors.  Unqualified frontend lookup now
-rejects ambiguous imported type names instead of silently choosing the first.
+Core names are validated, opaque structural wrappers over `djex:synthesis`:
+module segments, ordinary identifiers and operators, list/cons/function
+constructors, and boxed tuples can no longer be confused by rendered spelling.
+The compatibility import `QualifiedName(..)` retains exhaustive match views,
+but its input-bearing `QualifiedName` and `TupleCon` patterns are match-only;
+construct them with `mkQualifiedName` and `mkBoxedTupleName` so invalid source
+text or tuple arity is reported explicitly. The total `ListCon` and `Cons`
+constants remain constructible. `Data` and `Generic` representation reflection
+is deliberately absent. Unqualified frontend lookup now rejects ambiguous
+imported type names instead of silently choosing the first.
 
-Class constraints are finite nominal values backed by
-`Language.Haskell.Synthesis.Constraint`; they contain a validated class name
-and arguments, never a recursively embedded declaration. Class declarations
-and instances live in sealed strict maps built by `mkStaticClassEnv`, which
+Class constraints are finite nominal values that store the narrowed name and
+argument list directly, never a recursively embedded declaration or a partial
+shared-wrapper view. Checked conversion to and from
+`Language.Haskell.Synthesis.Constraint` happens at the common boundary. Class
+declarations and instances live in sealed strict maps built by
+`mkStaticClassEnv`, which
 checks names, duplicate declarations/parameters, superclass variables and
 cycles, referenced classes, and exact arities before superclass inflation.
 Query and binding inputs likewise reject wrong arities for known classes while

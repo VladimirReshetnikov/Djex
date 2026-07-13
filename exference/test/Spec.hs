@@ -7,15 +7,6 @@ import Control.DeepSeq (force)
 import Control.Exception (bracket)
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
-import Data.Data
-  ( dataTypeConstrs
-  , dataTypeName
-  , dataTypeOf
-  , fromConstr
-  , gmapQ
-  , showConstr
-  , toConstr
-  )
 import Data.Either (rights)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.List (find, isInfixOf, isPrefixOf)
@@ -23,7 +14,6 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import qualified GHC.Generics as Generic
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -276,11 +266,12 @@ tests = testGroup "Exference"
             Left (DuplicateInstanceHeads [headConstraint])
       , testCase "class declarations require the constructor namespace" $ do
           let lowercase = HsTypeClass (name "className") [] []
-              tuple = HsTypeClass (TupleCon 2) [] []
+              tupleName = validTupleName 2
+              tuple = HsTypeClass tupleName [] []
           mkStaticClassEnv [lowercase] []
             @?= Left (InvalidClassName $ name "className")
           mkStaticClassEnv [tuple] []
-            @?= Left (InvalidClassName $ TupleCon 2)
+            @?= Left (InvalidClassName tupleName)
       , testCase "duplicate class parameters are rejected" $ do
           let malformed = HsTypeClass (name "C") [0, 0] []
           mkStaticClassEnv [malformed] []
@@ -1425,7 +1416,7 @@ tests = testGroup "Exference"
             { input_envDeconsS = [secondDeconstructor, firstDeconstructor] }
             @?= expected
       , testCase "generated constructor patterns are validated at input" $ do
-          let arrowName = QualifiedName [] "->"
+          let arrowName = validQualifiedName [] "->"
               invalidBinding = FunctionBinding
                 (TypeVar 0) arrowName 0 [] []
           validateExferenceInput identityInput
@@ -1842,9 +1833,12 @@ tests = testGroup "Exference"
             Right _ -> pure ()
       ]
   , testGroup "validated names"
-      [ testCase "legacy bundled constructors remain import-compatible" $
-          map show CompatibilityImport.legacyConstructorValues
-            @?= ["id", "[]", "()", "(:)"]
+      [ testCase "legacy bundled patterns remain match-compatible" $ do
+          ordinary <- expectRight $ mkQualifiedName [] "id"
+          unit <- expectRight $ mkBoxedTupleName 0
+          map CompatibilityImport.legacyConstructorView
+            [ordinary, ListCon, unit, Cons]
+            @?= ["ordinary:id", "list", "tuple:0", "cons"]
       , testCase "checked ordinary construction canonicalizes operators" $ do
           operator <- expectRight
             $ mkQualifiedName ["Control", "Applicative"] "(<*>)"
@@ -1852,7 +1846,7 @@ tests = testGroup "Exference"
           qualifiedNameOperator operator @?= Just "<*>"
           function <- expectRight $ mkQualifiedName [] "->"
           qualifiedNameOperator function @?= Just "->"
-          function @?= QualifiedName [] "->"
+          function @?= validQualifiedName [] "->"
       , testCase "checked ordinary construction rejects contextual syntax" $
           mapM_ (assertNameRejected . uncurry mkQualifiedName)
             [ ([], " map")
@@ -1871,28 +1865,35 @@ tests = testGroup "Exference"
           mapM_ (\qualifiedName ->
               fromSynthesisName (toSynthesisName qualifiedName)
                 @?= Right qualifiedName)
-            [operator, tuple, ListCon, Cons, QualifiedName [] "->"]
-      , testCase "Eq, Ord, Show, Generic, and NFData observe one value" $ do
+            [operator, tuple, ListCon, Cons, validQualifiedName [] "->"]
+      , testCase "Eq, Ord, Show, and NFData observe one value" $ do
           value <- expectRight $ mkQualifiedName ["Data", "List"] "map"
           value @?= value
           compare value value @?= EQ
           show value @?= "Data.List.map"
-          Generic.to (Generic.from value) @?= value
           force value @?= value
-      , testCase "Data retains the historical four-constructor view" $ do
-          ordinary <- expectRight $ mkQualifiedName ["Data", "List"] "map"
-          tuple <- expectRight $ mkBoxedTupleName 3
-          map (showConstr . toConstr) [ordinary, ListCon, tuple, Cons]
-            @?= ["QualifiedName", "ListCon", "TupleCon", "Cons"]
-          map (length . gmapQ (const ())) [ordinary, ListCon, tuple, Cons]
-            @?= [2, 0, 1, 0]
-          map showConstr (dataTypeConstrs $ dataTypeOf ordinary)
-            @?= ["QualifiedName", "ListCon", "TupleCon", "Cons"]
-          dataTypeName (dataTypeOf ordinary)
-            @?= "Language.Haskell.Exference.Core.Types.QualifiedName"
-          let constructors = dataTypeConstrs $ dataTypeOf ordinary
-          (fromConstr (constructors !! 1) :: QualifiedName) @?= ListCon
-          (fromConstr (constructors !! 3) :: QualifiedName) @?= Cons
+      , testCase "checked name builders reject invalid source values" $ do
+          mapM_ (assertNameRejected . uncurry mkQualifiedName)
+            [ ([], "")
+            , ([], "case")
+            , (["bad"], "x")
+            ]
+          mapM_ (assertNameRejected . mkBoxedTupleName) [-1, 1]
+      , testCase "constraint access is structural and conversion stays total" $ do
+          className <- expectRight $ mkQualifiedName ["Fixture"] "Class"
+          let arguments = [TypeVar 2, TypeCons ListCon]
+              constraint = HsConstraint className arguments
+          constraint_tclass constraint @?= className
+          constraint_params constraint @?= arguments
+          shared <- expectRight $ toSynthesisConstraint constraint
+          fromSynthesisConstraint shared @?= Right constraint
+          environment <- expectRight $ mkStaticClassEnv
+            [HsTypeClass className [0, 1] []] []
+          validateExferenceInput identityInput
+            { input_goalType = TypeForall [2] [constraint] (TypeVar 2)
+            , input_envClasses = environment
+            }
+            @?= Right ()
       ]
   , testGroup "parsing and diagnostics"
       [ testCase "caught conversions retain failed-branch allocations" $ do
@@ -2547,13 +2548,13 @@ tests = testGroup "Exference"
                 Just (SearchPenaltyMetadata expectedPenalty))
             [ (ListCon, Penalty 0)
             , (Cons, Penalty 5)
-            , (TupleCon 0, Penalty 9.9)
-            , (TupleCon 2, Penalty 5)
-            , (TupleCon 3, Penalty 5)
-            , (TupleCon 4, Penalty 4)
-            , (TupleCon 5, Penalty 3)
-            , (TupleCon 6, Penalty 2)
-            , (TupleCon 7, Penalty 0)
+            , (validTupleName 0, Penalty 9.9)
+            , (validTupleName 2, Penalty 5)
+            , (validTupleName 3, Penalty 5)
+            , (validTupleName 4, Penalty 4)
+            , (validTupleName 5, Penalty 3)
+            , (validTupleName 6, Penalty 2)
+            , (validTupleName 7, Penalty 0)
             ]
       , testCase "source environments reject ill-kinded signatures" $ do
           let intName = name "Int"
@@ -2644,7 +2645,7 @@ tests = testGroup "Exference"
             Right result -> fail $ "malformed name was accepted: " ++ show result
       , testCase "qualified operators retain module and spelling" $
           parseQualifiedName "Control.Applicative.(<*>)"
-            @?= Right (QualifiedName ["Control", "Applicative"] "<*>")
+            @?= Right (validQualifiedName ["Control", "Applicative"] "<*>")
       , testCase "broad unqualified lookup diagnoses ambiguity" $ do
           typeA <- expectRight $ mkQualifiedName ["A"] "T"
           typeB <- expectRight $ mkQualifiedName ["B"] "T"
@@ -2691,19 +2692,19 @@ tests = testGroup "Exference"
             Right result -> fail $ "ambiguous import resolved as " ++ show result
       , testCase "qualified operators render canonically and round-trip" $ do
           let names =
-                [ QualifiedName [] "."
-                , QualifiedName ["Control", "Applicative"] "<*>"
-                , QualifiedName ["Control", "Monad"] ">>="
-                , QualifiedName [] "⊕"
-                , QualifiedName ["Math", "Operators"] "⊕"
-                , QualifiedName [] "->"
+                [ validQualifiedName [] "."
+                , validQualifiedName ["Control", "Applicative"] "<*>"
+                , validQualifiedName ["Control", "Monad"] ">>="
+                , validQualifiedName [] "⊕"
+                , validQualifiedName ["Math", "Operators"] "⊕"
+                , validQualifiedName [] "->"
                 , ListCon
-                , TupleCon 0
+                , validTupleName 0
                 , Cons
-                ] ++ map TupleCon [2 .. 7]
-          show (QualifiedName ["Control", "Applicative"] "<*>")
+                ] ++ map validTupleName [2 .. 7]
+          show (validQualifiedName ["Control", "Applicative"] "<*>")
             @?= "Control.Applicative.(<*>)"
-          show (QualifiedName ["Math", "Operators"] "⊕")
+          show (validQualifiedName ["Math", "Operators"] "⊕")
             @?= "Math.Operators.(⊕)"
           mapM_ (\qualifiedName ->
               parseQualifiedName (show qualifiedName) @?= Right qualifiedName)
@@ -2719,11 +2720,11 @@ tests = testGroup "Exference"
                 ]
           fmap (map fst) (parseRatings source) @?= Right
             [ ListCon
-            , TupleCon 0
+            , validTupleName 0
             , Cons
-            , TupleCon 2
-            , TupleCon 3
-            , QualifiedName [] "->"
+            , validTupleName 2
+            , validTupleName 3
+            , validQualifiedName [] "->"
             ]
       , testCase "the shipped rating file parses and every name round-trips" $ do
           environmentDirectory <- getDataFileName "exference/environment"
@@ -2738,8 +2739,8 @@ tests = testGroup "Exference"
           environmentDirectory <- getDataFileName "exference/environment"
           (bindings, classEnvironment, messages) <-
             loadEnvironmentAndMessages environmentDirectory
-          let unitBindings = filter ((== TupleCon 0) . functionName) bindings
-              applicativeOperator = QualifiedName
+          let unitBindings = filter ((== validTupleName 0) . functionName) bindings
+              applicativeOperator = validQualifiedName
                 ["Control", "Applicative"] "<*>"
           case find ((== applicativeOperator) . functionName) bindings of
             Nothing -> fail "the shipped Applicative operator was not loaded"
@@ -2749,13 +2750,13 @@ tests = testGroup "Exference"
                 Nothing -> fail $ "built-in constructor was not loaded: "
                   ++ show constructor
                 Just binding -> functionPenalty binding @?= expectedPenalty)
-            [ (TupleCon 0, Penalty 9.9)
+            [ (validTupleName 0, Penalty 9.9)
             , (Cons, Penalty 5.0)
-            , (TupleCon 2, Penalty 5.0)
-            , (TupleCon 3, Penalty 5.0)
-            , (TupleCon 4, Penalty 4.0)
-            , (TupleCon 5, Penalty 3.0)
-            , (TupleCon 6, Penalty 2.0)
+            , (validTupleName 2, Penalty 5.0)
+            , (validTupleName 3, Penalty 5.0)
+            , (validTupleName 4, Penalty 4.0)
+            , (validTupleName 5, Penalty 3.0)
+            , (validTupleName 6, Penalty 2.0)
             ]
           assertBool "the shipped class table is empty"
             (not $ Map.null $ sClassEnv_tclasses classEnvironment)
@@ -2952,7 +2953,7 @@ tests = testGroup "Exference"
               $ InvalidCandidateSyntax
               $ Generated.InvalidConstructorPattern
               $ toSynthesisName invalidName)
-          let arrowName = QualifiedName [] "->"
+          let arrowName = validQualifiedName [] "->"
               arrowChunk = ExferenceChunkElement
                 (SearchStatus SearchExhausted 0 0)
                 Map.empty
@@ -3068,30 +3069,30 @@ tests = testGroup "Exference"
             expression -> fail $ "expected Con, got " ++ show expression
       , testCase "qualified lowercase names retain Var and qualification" $ do
           converted <- expectRight $ expressionToHaskellSrc 2
-            $ ExpName $ QualifiedName ["Data", "List"] "map"
+            $ ExpName $ validQualifiedName ["Data", "List"] "map"
           case converted of
             HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Data.List")
                 (HSE.Ident _ "map")) -> pure ()
             expression -> fail $ "unexpected qualified value: " ++ show expression
       , testCase "negative qualification levels are unqualified" $ do
           converted <- expectRight $ expressionToHaskellSrc (-1)
-            $ ExpName $ QualifiedName ["Data", "List"] "map"
+            $ ExpName $ validQualifiedName ["Data", "List"] "map"
           case converted of
             HSE.Var _ (HSE.UnQual _ (HSE.Ident _ "map")) -> pure ()
             expression -> fail $ "unexpected negative-level value: "
               ++ show expression
       , testCase "qualified operators use Symbol names" $ do
           converted <- expectRight $ expressionToHaskellSrc 2
-            $ ExpName $ QualifiedName ["Control", "Applicative"] "<*>"
+            $ ExpName $ validQualifiedName ["Control", "Applicative"] "<*>"
           case converted of
             HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Control.Applicative")
                 (HSE.Symbol _ "<*>")) -> pure ()
             expression -> fail $ "unexpected qualified operator: " ++ show expression
       , testCase "Unicode operators remain symbols with either qualification" $ do
           unqualified <- expectRight $ expressionToHaskellSrc 0
-            $ ExpName $ QualifiedName [] "⊕"
+            $ ExpName $ validQualifiedName [] "⊕"
           qualified <- expectRight $ expressionToHaskellSrc 2
-            $ ExpName $ QualifiedName ["Math", "Operators"] "⊕"
+            $ ExpName $ validQualifiedName ["Math", "Operators"] "⊕"
           case (unqualified, qualified) of
             ( HSE.Var _ (HSE.UnQual _ (HSE.Symbol _ "⊕"))
               , HSE.Var _ (HSE.Qual _ (HSE.ModuleName _ "Math.Operators")
@@ -3293,7 +3294,19 @@ tests = testGroup "Exference"
   ]
 
 name :: String -> QualifiedName
-name = QualifiedName []
+name = validQualifiedName []
+
+-- Static test fixtures fail loudly if malformed while exercising the same
+-- checked constructors that production callers use.
+validQualifiedName :: [String] -> String -> QualifiedName
+validQualifiedName modules spelling =
+  either (error . ("invalid static qualified name: " ++) . show) id
+    $ mkQualifiedName modules spelling
+
+validTupleName :: Int -> QualifiedName
+validTupleName arity =
+  either (error . ("invalid static tuple name: " ++) . show) id
+    $ mkBoxedTupleName arity
 
 -- A deliberately tiny but complete frontend inventory.  Keeping the
 -- constructor functions beside their structural declarations makes it easy

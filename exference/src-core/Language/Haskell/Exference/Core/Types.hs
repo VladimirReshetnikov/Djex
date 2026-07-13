@@ -2,8 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE ViewPatterns #-}
 
 module Language.Haskell.Exference.Core.Types
   ( TVarId
@@ -210,38 +208,27 @@ data HsInstance = HsInstance
   }
   deriving (Eq, Show, Ord, Generic)
 
--- | Exference's compatibility view of the backend-independent constraint
--- syntax.  Class declarations live exclusively in 'StaticClassEnv'; keeping
--- only the nominal class name here makes declaration, superclass, and
--- instance graphs ordinary finite values.
-newtype HsConstraint = HsConstraint_
-  (SharedConstraint.Constraint HsType)
+-- | A finite nominal class constraint. Class declarations live exclusively in
+-- 'StaticClassEnv'; storing the already narrowed name directly makes ordinary
+-- access independent of the shared conversion boundary.
+data HsConstraint = HsConstraint !QualifiedName [HsType]
   deriving (Eq, Ord)
 
--- | Historical constructor view, now nominal rather than embedding the class
--- declaration.  'QualifiedName' guarantees general lexical validity; the
+-- 'QualifiedName' guarantees general lexical validity; the
 -- checked type and environment boundaries additionally enforce that the name
 -- occupies the class namespace.
-pattern HsConstraint :: QualifiedName -> [HsType] -> HsConstraint
-pattern HsConstraint className arguments <-
-  (constraintView -> (className, arguments))
-  where
-    HsConstraint className arguments = HsConstraint_
-      $ SharedConstraint.Constraint (toSynthesisName className) arguments
-
-{-# COMPLETE HsConstraint #-}
-
 constraint_tclass :: HsConstraint -> QualifiedName
-constraint_tclass = fst . constraintView
+constraint_tclass (HsConstraint className _) = className
 
 constraint_params :: HsConstraint -> [HsType]
-constraint_params = snd . constraintView
+constraint_params (HsConstraint _ arguments) = arguments
 
--- | The nominal shared representation stored by the compatibility wrapper.
--- Its type arguments remain in Exference's internal vocabulary, so this is a
--- private implementation detail rather than the public shared conversion.
+-- | A nominal shared view of the direct Exference representation. Its type
+-- arguments remain in Exference's internal vocabulary, so this is a private
+-- implementation detail rather than the public shared conversion.
 constraintRepresentation :: HsConstraint -> SharedConstraint.Constraint HsType
-constraintRepresentation (HsConstraint_ constraint) = constraint
+constraintRepresentation (HsConstraint className arguments) =
+  SharedConstraint.Constraint (toSynthesisName className) arguments
 
 -- | Project the whole constraint, including every type argument, into shared
 -- syntax without validation.  The checked engine uses this only after input
@@ -284,14 +271,6 @@ fromSynthesisConstraintRepresentation
     (SharedConstraint.Constraint className arguments) = do
   exferenceName <- fromSynthesisName className
   return $ HsConstraint exferenceName arguments
-
-constraintView :: HsConstraint -> (QualifiedName, [HsType])
-constraintView (HsConstraint_ (SharedConstraint.Constraint className arguments)) =
-  case fromSynthesisName className of
-    Right exferenceName -> (exferenceName, arguments)
-    -- The private representation can only be populated through the checked
-    -- conversion above or from an already validated QualifiedName.
-    Left _ -> error "invalid shared name in Exference HsConstraint"
 
 -- | Location of a constraint while validating a class environment or public
 -- search input.

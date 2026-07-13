@@ -12,6 +12,7 @@ module Language.Haskell.Exference.Core.Declaration
   , SynthesisDeclarationError (..)
   , freshSynthesisVariable
   , prepareNeutralSynthesisInventory
+  , deriveRecursiveDataMetadata
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
   , toSynthesisClassDeclaration
@@ -37,7 +38,6 @@ import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
 import Data.Foldable (toList)
-import Data.Graph (SCC (..), stronglyConnComp)
 import Data.List (find)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -176,7 +176,7 @@ lowerNeutralSynthesisEnvironment synonyms environment = do
   expanded <- mapM expandOperationalDeclaration
     $ zip [0 ..] $ SharedEnvironment.environmentDeclarations environment
   let normalized = map normalizeDeclarationVariables expanded
-      recursiveNames = recursiveDataTypeNames normalized
+      recursiveNames = SharedDeclaration.recursiveDataTypeNames normalized
   prepared <- mapM (prepareSearchDeclaration recursiveNames) normalized
   (functions, deconstructors, classes, instances) <- foldM lowerDeclaration
     ([], [], [], []) [declaration | Just declaration <- prepared]
@@ -329,35 +329,6 @@ orderedDistinct = go Set.empty
   go seen (value : remaining)
     | value `Set.member` seen = go seen remaining
     | otherwise = value : go (Set.insert value seen) remaining
-
-recursiveDataTypeNames
-  :: [NeutralSynthesisDeclaration]
-  -> Set.Set SharedName.Name
-recursiveDataTypeNames declarations = Set.fromList
-  [ name
-  | SharedDeclaration.DataTypeDeclaration _ name _ _ <- declarations
-  , name `Set.member` cyclicNames
-  ]
- where
-  dataNames = Set.fromList
-    [ name
-    | SharedDeclaration.DataTypeDeclaration _ name _ _ <- declarations
-    ]
-  nodes =
-    [ (name, name, Set.toAscList $ dependencies constructors)
-    | SharedDeclaration.DataTypeDeclaration _ name _ constructors <- declarations
-    ]
-  dependencies constructors = Set.intersection dataNames $ Set.unions
-    [ SharedType.typeConstructors field
-    | constructor <- constructors
-    , field <- SharedDeclaration.constructorFields constructor
-    ]
-  cyclicNames = Set.fromList
-    [ name
-    | component <- stronglyConnComp nodes
-    , CyclicSCC names <- [component]
-    , name <- names
-    ]
 
 prepareSearchDeclaration
   :: Set.Set SharedName.Name
@@ -651,6 +622,37 @@ fromSynthesisDataDeclaration declaration = do
             $ map TypeVar variables
       Right $ DeconstructorBinding input convertedConstructors recursive
     _ -> Left ExpectedDataDeclaration
+
+-- | Derive every recursion flag from the complete alias-free datatype set.
+-- Incoming flags are ignored. Malformed heads are left nonrecursive here and
+-- remain explicit errors at the checked environment boundary; this structural
+-- pass never lets one bad compatibility record create a graph vertex.
+deriveRecursiveDataMetadata
+  :: [DeconstructorBinding]
+  -> [DeconstructorBinding]
+deriveRecursiveDataMetadata declarations = map attach declarations
+ where
+  recursiveNames = SharedDeclaration.recursiveDataTypeNames
+    sharedDeclarations
+  sharedDeclarations
+    :: [SharedDeclaration.Declaration SynthesisVariable Void ()]
+  sharedDeclarations =
+    [ SharedDeclaration.DataTypeDeclaration ()
+        (toSynthesisName name) []
+        [ SharedDeclaration.DataConstructor ()
+            (toSynthesisName $ constructorName constructor)
+            (map toSynthesisTypeStructure $ constructorFields constructor)
+        | constructor <- deconstructorConstructors declaration
+        ]
+    | declaration <- declarations
+    , Right (name, _) <- [deconstructorHead $ deconstructorInput declaration]
+    ]
+  attach declaration = declaration
+    { deconstructorRecursive = case deconstructorHead
+        (deconstructorInput declaration) of
+        Left _ -> False
+        Right (name, _) -> toSynthesisName name `Set.member` recursiveNames
+    }
 
 -- | Lower a rated shared datatype to the two records consumed by Exference
 -- search.  Constructor functions have the declaration's result, their own

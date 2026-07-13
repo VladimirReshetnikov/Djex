@@ -13,11 +13,14 @@ module Language.Haskell.Synthesis.Declaration
   , Declaration (..)
   , DeclarationError (..)
   , validateDeclaration
+  , recursiveDataTypeNames
   , groundDeclarationKinds
   ) where
 
 import Control.DeepSeq (NFData)
 import Control.Monad (unless)
+import Data.Graph (SCC (..), stronglyConnComp)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
@@ -171,6 +174,36 @@ validateDeclaration declaration = case declaration of
 
   validateDeclaredType = either (Left . InvalidDeclarationType) Right
     . validateType
+
+-- | Return every datatype in a recursive strongly connected component.
+-- Constructor fields must already have type synonyms expanded: classifying
+-- raw aliases can both hide real edges and invent edges through phantom
+-- parameters. Duplicate datatype heads are merged deterministically so this
+-- structural query remains total; 'Language.Haskell.Synthesis.Environment'
+-- is the separate boundary that rejects such duplicates.
+recursiveDataTypeNames
+  :: [Declaration typeVariable kindVariable annotation]
+  -> Set.Set Name
+recursiveDataTypeNames declarations = Set.fromList
+  [ name
+  | CyclicSCC names <- stronglyConnComp nodes
+  , name <- names
+  ]
+ where
+  constructorsByName = Map.fromListWith (++)
+    [ (name, constructors)
+    | DataTypeDeclaration _ name _ constructors <- declarations
+    ]
+  dataNames = Map.keysSet constructorsByName
+  nodes =
+    [ (name, name, Set.toAscList $ dependencies constructors)
+    | (name, constructors) <- Map.toAscList constructorsByName
+    ]
+  dependencies constructors = Set.intersection dataNames $ Set.unions
+    [ typeConstructors field
+    | constructor <- constructors
+    , field <- constructorFields constructor
+    ]
 
 -- | Ground every explicit declaration kind without changing source-type
 -- variables, annotations, or declaration shape.

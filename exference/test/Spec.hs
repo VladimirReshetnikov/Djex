@@ -1333,17 +1333,24 @@ tests = testGroup "Exference"
             ]
       , testCase "alias-expanded direct and mutual recursion is classified" $ do
           let aliasVariable = neutralVariable 70
+              phantomVariable = neutralVariable 71
               leftVariable = neutralVariable (-70)
               rightVariable = neutralVariable maxBound
               aliasName = neutralName "Alias"
+              phantomName = neutralName "Phantom"
+              intName = neutralName "Int"
               leftName = neutralName "LeftRec"
               rightName = neutralName "RightRec"
+              erasedName = neutralName "ErasedRec"
               apply constructor variable = SharedType.TypeApplication
                 (SharedType.TypeConstructor constructor)
                 (SharedType.TypeVariable variable)
               alias = SharedDeclaration.TypeSynonymDeclaration () aliasName
                 [neutralParameter aliasVariable]
                 $ apply rightName aliasVariable
+              phantom = SharedDeclaration.TypeSynonymDeclaration () phantomName
+                [neutralParameter phantomVariable]
+                $ SharedType.TypeConstructor intName
               left = SharedDeclaration.DataTypeDeclaration () leftName
                 [neutralParameter leftVariable]
                 [SharedDeclaration.DataConstructor () (neutralName "MkLeft")
@@ -1356,11 +1363,17 @@ tests = testGroup "Exference"
                 (neutralName "DirectRec") []
                 [SharedDeclaration.DataConstructor () (neutralName "MkDirect")
                   [SharedType.TypeConstructor $ neutralName "DirectRec"]]
-          environment <- lowerNeutralDeclarations [alias, left, right, direct]
+              erased = SharedDeclaration.DataTypeDeclaration () erasedName []
+                [SharedDeclaration.DataConstructor () (neutralName "MkErased")
+                  [SharedType.TypeApplication
+                    (SharedType.TypeConstructor phantomName)
+                    (SharedType.TypeConstructor erasedName)]]
+          environment <- lowerNeutralDeclarations
+            [alias, phantom, left, right, direct, erased]
           map deconstructorRecursive (environmentDeconstructors environment)
-            @?= [True, True, True]
+            @?= [True, True, True, False]
           map functionName (environmentFunctions environment) @?=
-            map name ["MkLeft", "MkRight", "MkDirect"]
+            map name ["MkLeft", "MkRight", "MkDirect", "MkErased"]
       , testCase "synonym failures retain their owning declaration" $ do
           let aliasVariable = neutralVariable 0
               aliasName = neutralName "Alias"

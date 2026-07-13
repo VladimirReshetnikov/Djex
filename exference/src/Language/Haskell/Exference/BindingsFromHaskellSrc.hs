@@ -15,18 +15,16 @@ import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
+import Language.Haskell.Exference.Core.Declaration
+  (deriveRecursiveDataMetadata)
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.Monad (foldM)
 import Control.Monad.Trans.Except
-import Data.Graph ( SCC (..), stronglyConnComp )
 import qualified Data.Map.Strict as M
 import Data.Maybe ( fromMaybe, maybeToList )
-import qualified Data.Set as S
-import qualified Language.Haskell.Synthesis.Name as SharedName
-import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
 
@@ -245,43 +243,23 @@ markRecursiveDeconstructors
   -> [Either String ([FunctionBinding], DeconstructorBinding)]
 markRecursiveDeconstructors converted = map mark converted
  where
-  successful =
-    [ (toSynthesisName headName, binding)
-    | Right (_, binding) <- converted
+  classified = deriveRecursiveDataMetadata
+    [binding | Right (_, binding) <- converted]
+  recursiveByHead = M.fromList
+    [ (headName, deconstructorRecursive binding)
+    | binding <- classified
     , Just headName <- [typeConstructorHead $ deconstructorInput binding]
     ]
-  knownHeads = S.fromList $ map fst successful
-  dependenciesByHead = M.fromListWith S.union
-    [ ( headName
-      , S.intersection knownHeads $ constructorTypeHeads binding
-      )
-    | (headName, binding) <- successful
-    ]
-  graphNodes =
-    [ (headName, headName, S.toList dependencies)
-    | (headName, dependencies) <- M.toList dependenciesByHead
-    ]
-  recursiveHeads = S.fromList
-    [headName | CyclicSCC component <- stronglyConnComp graphNodes
-              , headName <- component]
 
   mark failed@(Left _) = failed
   mark (Right (constructors, binding)) = Right
     ( constructors
     , binding
         { deconstructorRecursive = maybe False
-            ((`S.member` recursiveHeads) . toSynthesisName)
+            (\headName -> M.findWithDefault False headName recursiveByHead)
             $ typeConstructorHead $ deconstructorInput binding
         }
     )
-
--- The common traversal includes arrows, applications, forall bodies, and
--- constraint arguments, so frontend recursion follows the shared type model.
-constructorTypeHeads :: DeconstructorBinding -> S.Set SharedName.Name
-constructorTypeHeads = foldMap
-    (foldMap (SharedType.typeConstructors . toSynthesisTypeStructure)
-      . constructorFields)
-  . deconstructorConstructors
 
 -- | Total extraction used by Exference itself. Keeping construction failures
 -- explicit matters because HSE syntax constructors are public and can carry

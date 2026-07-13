@@ -108,6 +108,10 @@ the common type invariants. Synonym bodies, datatype fields, superclasses, and
 instance constraints must be covered by their declaration binders; value
 signatures and class methods retain Haskell's implicit local quantification.
 The layer does not prescribe backend-specific class or instance resolution.
+Its `recursiveDataTypeNames` query is the common whole-declaration SCC
+classifier. Callers invoke it only after synonym expansion; otherwise phantom
+aliases can invent edges and alias-mediated recursion can hide them. Backend
+adapters attach their own recursion metadata from that one nominal result.
 
 `Language.Haskell.Synthesis.KindInference` owns the common kind unifier. It
 checks several types in one variable scope, gives class methods independent

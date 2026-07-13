@@ -745,6 +745,32 @@ declarationTests = testGroup "declarations"
         (Declaration.UndeclaredSuperclassVariables className ["b"])
       Declaration.validateDeclaration instanceDeclaration @?= Left
         (Declaration.UndeclaredInstanceVariables className ["b"])
+  , testCase "classify recursive datatype components structurally" $ do
+      let directName = right $ mkIdentifier "Direct"
+          leftName = right $ mkIdentifier "LeftRec"
+          rightName = right $ mkIdentifier "RightRec"
+          acyclicName = right $ mkIdentifier "Acyclic"
+          duplicateName = right $ mkIdentifier "Duplicate"
+          externalName = right $ mkIdentifier "External"
+          constructorName = right $ mkIdentifier "Make"
+          datatype name references = Declaration.DataTypeDeclaration
+            () name []
+            [ Declaration.DataConstructor () constructorName
+                (map SharedType.TypeConstructor references)
+            ]
+          declarations :: [Declaration.Declaration String Int ()]
+          declarations =
+            [ datatype directName [directName]
+            , datatype leftName [rightName]
+            , datatype rightName [leftName]
+            , datatype acyclicName [externalName]
+            -- The structural classifier stays deterministic even before the
+            -- Environment boundary rejects this duplicate head.
+            , datatype duplicateName []
+            , datatype duplicateName [duplicateName]
+            ]
+      Declaration.recursiveDataTypeNames declarations @?=
+        Set.fromList [directName, leftName, rightName, duplicateName]
   ]
 
 typeTests :: TestTree

@@ -19,13 +19,19 @@ module Language.Haskell.Djex
   , module Language.Haskell.Djex.Exference
   , module Language.Haskell.Synthesis.Candidate
   , module Language.Haskell.Synthesis.Constraint
+  , module Language.Haskell.Synthesis.Declaration
   , module Language.Haskell.Synthesis.Diagnostic
+  , module Language.Haskell.Synthesis.Environment
   , module Language.Haskell.Synthesis.Generated
+  , module Language.Haskell.Synthesis.Inventory
+  , module Language.Haskell.Synthesis.Kind
+  , module Language.Haskell.Synthesis.KindInference
   , module Language.Haskell.Synthesis.Name
   , module Language.Haskell.Synthesis.Query
   , module Language.Haskell.Synthesis.Search
   , module Language.Haskell.Synthesis.Selection
   , module Language.Haskell.Synthesis.Type
+  , module Language.Haskell.Synthesis.TypeRender
   , Backend (..)
   , Capability (..)
   , BackendInfo (..)
@@ -37,13 +43,19 @@ import Language.Haskell.Djex.Djinn
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Synthesis.Candidate
 import Language.Haskell.Synthesis.Constraint
+import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Diagnostic
+import Language.Haskell.Synthesis.Environment
 import Language.Haskell.Synthesis.Generated
+import Language.Haskell.Synthesis.Inventory
+import Language.Haskell.Synthesis.Kind
+import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
 import Language.Haskell.Synthesis.Type
+import Language.Haskell.Synthesis.TypeRender
 
 -- | A search engine shipped by Djex.
 data Backend

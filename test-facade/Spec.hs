@@ -24,6 +24,15 @@ main = defaultMain $ testGroup "public Djex facade"
       assertBool "the standard Djinn session did not seal" $
         isRight standardDjinnSession
       loadExferenceSession `seq` pure ()
+  , testCase "seals Djinn from the neutral environment vocabulary" $ do
+      let checkedEnvironment
+            :: Either (EnvironmentError DjinnLocal) DjinnEnvironment
+          checkedEnvironment = mkEnvironment []
+      environment <- expectRight checkedEnvironment
+      session <- expectRight $ mkDjinnSession environment
+      let inventory :: DjinnInventory
+          inventory = djinnSessionInventory session
+      environmentDeclarations (inventoryEnvironment inventory) @?= []
   ]
 
 expectRight :: Show error => Either error value -> IO value

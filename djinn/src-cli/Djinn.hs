@@ -122,10 +122,10 @@ startState = State {
     }
 
 standardSession :: DjinnSession
-standardSession = case mkDjinnSession standardEnvironment of
+standardSession = case sealCompatibilityEnvironment standardEnvironment of
     Right session -> session
     Left failure -> error $ "invalid standard Djinn environment: " ++
-        Diagnostic.renderDiagnostic failure
+        failure
 
 
 welcome :: State -> IO (String, State)
@@ -283,14 +283,22 @@ updateEnvironment s change =
         Right environment' -> installEnvironment s environment'
 
 installEnvironment :: State -> Environment -> IO (Bool, State)
-installEnvironment state environment' = case mkDjinnSession environment' of
+installEnvironment state environment' = case
+    sealCompatibilityEnvironment environment' of
     Left failure -> do
-        putStrLn $ "Error: " ++ Diagnostic.renderDiagnostic failure
+        putStrLn $ "Error: " ++ failure
         return (False, markFailed state)
     Right session -> return (False, state {
         environment = environment',
         djinnSession = session
         })
+
+-- Raw declarations remain convenient for the historical REPL, while the
+-- reusable Djex session boundary consumes only the shared structural view.
+sealCompatibilityEnvironment :: Environment -> Either String DjinnSession
+sealCompatibilityEnvironment environment' = do
+    shared <- either (Left . show) Right $ toSynthesisEnvironment environment'
+    either (Left . Diagnostic.renderDiagnostic) Right $ mkDjinnSession shared
 
 markFailed :: State -> State
 markFailed state = state { commandFailed = True }

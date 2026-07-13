@@ -138,8 +138,10 @@ shared boundary rather than during ordinary field access.
 
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
-the same types or options. `mkDjinnSession` seals an opaque Djinn environment;
-`standardDjinnSession` supplies the checked built-in environment directly, and
+the same types or options. `mkDjinnSession` lowers and seals the neutral shared
+`DjinnEnvironment`; the mutable raw `Djinn.Core.Environment` no longer crosses
+the default facade. `standardDjinnSession` supplies the checked built-in
+environment directly, and
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
 grammar rather than maintaining a second parser. `runDjinnQuery` returns shared
 candidates containing structured generated
@@ -149,6 +151,13 @@ in one terminal batch. A proof beyond `optionCutoff` produces
 Proof-backed `ProvedUninhabitable`, target-reference evidence, and
 budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
+
+The one-import `Language.Haskell.Djex` surface reexports the complete neutral
+declaration, environment, inventory, kind-inference, and type-rendering
+vocabulary. `DjinnEnvironment`, `DjinnInventory`, and `DjinnLocal` make every
+Djinn adapter signature nameable without depending on a hidden backend alias;
+the historical REPL explicitly converts its editable raw environment at the
+adapter boundary.
 
 `mkExferenceSession` similarly computes the backend-supported projection and
 seals its search environment once. `loadExferenceSession` and its policy-aware

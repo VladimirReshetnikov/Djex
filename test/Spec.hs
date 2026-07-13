@@ -4,7 +4,6 @@ import Data.Either (isRight)
 import Data.List (isInfixOf, nub)
 import Djinn.Core
   ( Declaration (ClassDecl, DataType, Function)
-  , Environment
   , declare
   , emptyEnvironment
   , generatedReportCandidates
@@ -16,7 +15,9 @@ import Djinn.Core
   , mkContext
   , parseHType
   , standardEnvironment
+  , toSynthesisEnvironment
   )
+import qualified Djinn.Core as DjinnCore (Environment)
 -- Raw Exference fixtures below use their historical @functionName@ field;
 -- hide the shared structural-name accessor at this integration-only seam.
 import Language.Haskell.Djex hiding (functionName)
@@ -69,7 +70,7 @@ tests = testGroup "Djex facade"
         isRight $ mkQualifiedName [] "id"
       assertBool "synthesis API was not reexported" $ isRight $ parseName "id"
   , testCase "run a checked Djinn session through the shared envelope" $ do
-      session <- expectRight $ mkDjinnSession standardEnvironment
+      session <- sealDjinnEnvironment standardEnvironment
       target <- expectRight $ mkIdentifier "swap"
       goal <- expectRight $ parseHType "(a, b) -> (b, a)"
       result <- expectRight $ runDjinnQuery session QueryRequest
@@ -102,7 +103,7 @@ tests = testGroup "Djex facade"
       environment <- expectRight $ declare
         (DataType "T" ["a", "b"] [("C", [first, second])])
         emptyEnvironment
-      session <- expectRight $ mkDjinnSession environment
+      session <- sealDjinnEnvironment environment
       target <- expectRight $ mkIdentifier "pair"
       result <- expectRight $ runDjinnQuery session QueryRequest
         { requestTarget = target
@@ -123,7 +124,7 @@ tests = testGroup "Djex facade"
         completion -> fail $ "expected candidate truncation, got "
           ++ show completion
   , testCase "keep Djinn evidence independent of search completion" $ do
-      session <- expectRight $ mkDjinnSession standardEnvironment
+      session <- sealDjinnEnvironment standardEnvironment
       target <- expectRight $ mkIdentifier "peirce"
       goal <- expectRight $ parseHType "((a -> b) -> a) -> a"
       refutation <- expectRight $ runDjinnQuery session QueryRequest
@@ -150,7 +151,7 @@ tests = testGroup "Djex facade"
       variable <- expectRight $ parseHType "a"
       environment <- expectRight $
         declare (Function "token" variable) standardEnvironment
-      session <- expectRight $ mkDjinnSession environment
+      session <- sealDjinnEnvironment environment
       target <- expectRight $ mkIdentifier "token"
       result <- expectRight $ runDjinnQuery session QueryRequest
         { requestTarget = target
@@ -161,7 +162,7 @@ tests = testGroup "Djex facade"
       resultEvidence result @?= RequiresTargetReference
       batchCandidates (resultSearch result) @?= []
   , testCase "reuse sealed Djinn kinds without changing query semantics" $ do
-      standardSession <- expectRight $ mkDjinnSession standardEnvironment
+      standardSession <- sealDjinnEnvironment standardEnvironment
 
       ordinary <- expectRight $ parseHType "(a, b) -> (b, a)"
       assertDjinnCompatibility "ordinary goal" standardEnvironment
@@ -186,7 +187,7 @@ tests = testGroup "Djex facade"
       captureEnvironment <- expectRight $ declare
         (ClassDecl "CapturePrepared" ["a"]
           [("capturePrepared", captureMethod)]) standardEnvironment
-      captureSession <- expectRight $ mkDjinnSession captureEnvironment
+      captureSession <- sealDjinnEnvironment captureEnvironment
       captureArgument <- expectRight $ parseHType "f"
       captureContext <- expectRight $
         mkContext "CapturePrepared" [captureArgument]
@@ -199,7 +200,7 @@ tests = testGroup "Djex facade"
       higherEnvironment <- expectRight $ declare
         (ClassDecl "HigherPrepared" ["f"]
           [("higherPrepared", higherMethod)]) standardEnvironment
-      higherSession <- expectRight $ mkDjinnSession higherEnvironment
+      higherSession <- sealDjinnEnvironment higherEnvironment
       unsaturatedSynonym <- expectRight $ parseHType "Not"
       higherContext <- expectRight $
         mkContext "HigherPrepared" [unsaturatedSynonym]
@@ -242,7 +243,7 @@ tests = testGroup "Djex facade"
           "invalid-kind paths diverged: " ++ show compatibilityResult
             ++ " versus " ++ show sessionResult
   , testCase "reject targets outside Djinn's output namespace" $ do
-      session <- expectRight $ mkDjinnSession standardEnvironment
+      session <- sealDjinnEnvironment standardEnvironment
       qualifier <- expectRight $ mkModuleName "External"
       target <- expectRight $ mkQualifiedIdentifier qualifier "answer"
       goal <- expectRight $ parseHType "a -> a"
@@ -467,7 +468,7 @@ tests = testGroup "Djex facade"
 
 assertDjinnCompatibility
   :: String
-  -> Environment
+  -> DjinnCore.Environment
   -> DjinnSession
   -> [Context]
   -> QueryOptions
@@ -496,6 +497,11 @@ assertDjinnCompatibility label environment session contexts options target goal 
     generatedReportFormula compatibility == djinnTranslatedFormula metadata
   assertBool (label ++ ": first proof changed") $
     generatedReportProof compatibility == djinnFirstExploredProof metadata
+
+sealDjinnEnvironment :: DjinnCore.Environment -> IO DjinnSession
+sealDjinnEnvironment environment = do
+  shared <- expectRight $ toSynthesisEnvironment environment
+  expectRight $ mkDjinnSession shared
 
 emptyExferenceSource :: SourceEnvironment
 emptyExferenceSource = SourceEnvironment

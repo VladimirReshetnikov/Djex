@@ -6,6 +6,9 @@
 -- lowest-common-denominator configuration would obscure.
 module Language.Haskell.Djex.Djinn
   ( DjinnSession
+  , DjinnEnvironment
+  , DjinnInventory
+  , DjinnLocal
   , HType
   , Context
   , QueryOptions (..)
@@ -37,15 +40,12 @@ import Text.ParserCombinators.ReadP
 
 import Djinn.Core
   ( Context
-  , DjinnCandidate
   , DjinnCandidateDetails (..)
-  , Environment
-  , HSymbol
   , HType
   , PreparedEnvironment
   , QueryOptions (..)
-  , SynthesisInventory
   , defaultQueryOptions
+  , fromSynthesisEnvironment
   , generatedReportCandidates
   , generatedReportCompletion
   , generatedReportEvidence
@@ -56,8 +56,12 @@ import Djinn.Core
   , preparedEnvironmentInventory
   , standardEnvironment
   )
+import qualified Djinn.Core as Core
 import Djinn.Internal.HTypes (pHContext, pHType)
-import Language.Haskell.Synthesis.Candidate (candidateOutput)
+import Language.Haskell.Synthesis.Candidate
+  ( Candidate
+  , candidateOutput
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
@@ -67,7 +71,8 @@ import Language.Haskell.Synthesis.Diagnostic
   , withSource
   )
 import Language.Haskell.Synthesis.Generated
-  ( Qualification (..)
+  ( FunctionClause
+  , Qualification (..)
   , RenderError
   , RenderOptions (renderQualification)
   , defaultRenderOptions
@@ -89,6 +94,19 @@ import Language.Haskell.Synthesis.Search
   ( Progress (Completed)
   , SearchBatch (SearchBatch)
   )
+import Language.Haskell.Synthesis.Environment (Environment)
+import Language.Haskell.Synthesis.Inventory (Inventory)
+
+-- | The neutral declaration environment accepted by the Djinn adapter.
+-- Djinn currently uses textual source variables and integer kind variables;
+-- neither choice leaks its mutable compatibility environment through Djex.
+type DjinnEnvironment = Environment DjinnLocal Int ()
+
+-- | The checked neutral inventory sealed into a Djinn session.
+type DjinnInventory = Inventory DjinnLocal ()
+
+-- | Djinn's generated-expression binder identity.
+type DjinnLocal = String
 
 -- | A validated Djinn environment paired with its exact shared inventory.
 -- The constructor is private so the two views cannot drift apart.
@@ -104,27 +122,52 @@ data DjinnQueryMetadata = DjinnQueryMetadata
 
 type DjinnRequest = QueryRequest HType QueryOptions
 
+-- Spell out the shared candidate shape here instead of re-exporting Djinn's
+-- identical alias, whose historical @HSymbol@ name is intentionally private
+-- to the raw compatibility API.
+type DjinnCandidate =
+  Candidate HType DjinnCandidateDetails (FunctionClause DjinnLocal)
+
 type DjinnResult = QueryResult DjinnQueryMetadata DjinnCandidate
 
 data DjinnCandidateRenderError
   = DjinnGeneratedRenderError RenderError
   deriving (Eq, Show)
 
--- | Seal an already checked Djinn environment into a reusable session.
-mkDjinnSession :: Environment -> Either Diagnostic DjinnSession
-mkDjinnSession environment = case prepareEnvironment environment of
+-- | Lower a shared declaration environment through Djinn's stricter lexical,
+-- dependency, and kind checks, then seal it into a reusable session.
+mkDjinnSession :: DjinnEnvironment -> Either Diagnostic DjinnSession
+mkDjinnSession sharedEnvironment = case
+    fromSynthesisEnvironment sharedEnvironment of
+  Left failure -> environmentFailure failure
+  Right environment -> mkDjinnSessionFromCore environment
+
+-- The standard prelude and compatibility CLI already own checked raw Djinn
+-- environments. Keep that bridge private so facade clients cannot accidentally
+-- couple themselves to the mutable backend representation.
+mkDjinnSessionFromCore
+  :: Core.Environment
+  -> Either Diagnostic DjinnSession
+mkDjinnSessionFromCore environment = case prepareEnvironment environment of
   Left failure -> Left $ withContext (show failure)
     $ withCode "DJEX_DJINN_ENV"
     $ diagnostic Error "cannot seal the Djinn session environment"
   Right prepared -> Right $ DjinnSession prepared
 
--- | The historical checked Djinn prelude, sealed for facade-only clients.
--- Advanced clients can still build an editable 'Environment' through
--- "Djinn.Core" and pass it to 'mkDjinnSession'.
-standardDjinnSession :: Either Diagnostic DjinnSession
-standardDjinnSession = mkDjinnSession standardEnvironment
+environmentFailure
+  :: Core.SynthesisEnvironmentError
+  -> Either Diagnostic value
+environmentFailure failure = Left $ withContext (show failure)
+  $ withCode "DJEX_DJINN_ENV"
+  $ diagnostic Error "cannot lower the shared environment to Djinn"
 
-djinnSessionInventory :: DjinnSession -> SynthesisInventory
+-- | The historical checked Djinn prelude, sealed for facade-only clients.
+-- Advanced clients can convert an editable raw environment with
+-- @Djinn.Core.toSynthesisEnvironment@ before calling 'mkDjinnSession'.
+standardDjinnSession :: Either Diagnostic DjinnSession
+standardDjinnSession = mkDjinnSessionFromCore standardEnvironment
+
+djinnSessionInventory :: DjinnSession -> DjinnInventory
 djinnSessionInventory (DjinnSession prepared) =
   preparedEnvironmentInventory prepared
 
@@ -207,7 +250,7 @@ renderDjinnCandidateDefinition qualification = first
   . renderFunctionClause (candidateRenderOptions qualification)
   . candidateOutput
 
-candidateRenderOptions :: Qualification -> RenderOptions HSymbol
+candidateRenderOptions :: Qualification -> RenderOptions DjinnLocal
 candidateRenderOptions qualification =
   (defaultRenderOptions id) {renderQualification = qualification}
 
@@ -225,7 +268,7 @@ parseContextualType source = case
     eof
     pure (contexts, goal)
 
-targetSymbol :: Name -> Either Diagnostic HSymbol
+targetSymbol :: Name -> Either Diagnostic DjinnLocal
 targetSymbol target
   | Right () <- validateDefinitionName target
   , Just spelling <- nameSpelling target

@@ -463,9 +463,12 @@ and binder count used by the historical ranking policy. Compatibility
 `QueryReport`s still expose `reportGeneratedClauses`, derived from those
 candidates alongside the legacy rendered strings.
 The default `djex` library additionally exposes
-`Language.Haskell.Djex.Djinn`: `mkDjinnSession` pairs an `Environment` with the
-exact sealed shared inventory that validated it, `standardDjinnSession` supplies
-the checked built-in environment without exposing its representation,
+`Language.Haskell.Djex.Djinn`: `mkDjinnSession` lowers a neutral
+`DjinnEnvironment` and pairs the checked Djinn projection with the exact shared
+`DjinnInventory` that validated it. The editable raw `Djinn.Core.Environment`
+therefore remains confined to the compatibility library and REPL;
+`standardDjinnSession` supplies the checked built-in environment without
+exposing its representation,
 `parseDjinnRequest` shares the REPL's optional class-context grammar, and
 `runDjinnQuery` accepts a generic `QueryRequest HType QueryOptions`. Its
 `QueryResult` carries the same shared `Candidate` structure as Exference plus

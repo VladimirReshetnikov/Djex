@@ -47,6 +47,10 @@ testIdentity = do
   -- The environment-free simplifier deliberately keeps the checked lambda
   -- instead of assuming that an unqualified Prelude.id is available.
   assertContains "identity should be synthesized" "\\a -> a" output
+  assertContains "candidate metrics should describe the emitted queue state"
+    "(depth 0.42000000000000004, 3 steps, 145 final queue size)" output
+  assertBool "a final queue size must not be reported as a historical maximum"
+    (not $ "max pqueue size" `isInfixOf` output)
   assertBool "the adapter's internal clause target must stay hidden"
     (not $ "_djexResult" `isInfixOf` output)
   assertBool "a valid query must not be rejected during input validation"
@@ -94,7 +98,7 @@ testRepeatedInputs = do
   output <- runExference
     ["--first", "--input", "a -> a", "a -> a"]
   assertEqual "both query results should be printed"
-    2 $ countOccurrences "max pqueue size" output
+    2 $ countOccurrences "final queue size" output
 
 testConflictingModes :: Assertion
 testConflictingModes = do

@@ -323,11 +323,13 @@ printCandidate qualification candidate = do
     $ "but only with additional constraints: "
     ++ intercalate ", " constraints
   let metrics = exferenceCandidateMetrics candidate
+  -- The core snapshots the remaining queue when it emits this candidate; it
+  -- does not retain a high-water mark for the priority queue.
   putStrLn $ replicate 40 ' '
     ++ "(depth " ++ show (exferenceCandidateComplexity metrics)
     ++ ", " ++ show (exferenceCandidateSteps metrics) ++ " steps, "
     ++ show (exferenceCandidateFinalQueueSize metrics)
-    ++ " max pqueue size)"
+    ++ " final queue size)"
 
 noResultsMessage :: Maybe Progress -> String
 noResultsMessage Nothing = "[no search states were produced]"

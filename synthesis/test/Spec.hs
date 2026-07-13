@@ -769,6 +769,28 @@ generatedTests = testGroup "generated syntax"
         Right (Map.fromList [(1, "a"), (2, "a'")])
       allocateLocalNames reserved expression @?=
         Right (Map.fromList [(1, "a'"), (2, "a''")])
+  , testCase "allocate emitted hole spellings without collisions" $ do
+      let globalUnderscoreA = right $ mkIdentifier "_a"
+          options reservations =
+            RenderOptions Unqualified id reservations
+          globalCollision :: Expression String
+          globalCollision = Apply (Hole "a") (Global globalUnderscoreA)
+          mixedLocals :: Expression String
+          mixedLocals = Tuple [Local "a", Local "_a", Hole "a"]
+          unaffected :: Expression String
+          unaffected = Tuple [Local "a", Local "_a"]
+      allocateLocalNames (options []) globalCollision @?=
+        Right (Map.fromList [("a", "a'")])
+      renderExpression (options []) globalCollision @?= Right "_a' _a"
+      allocateLocalNames (options ["_a"]) (Hole "a") @?=
+        Right (Map.fromList [("a", "a'")])
+      renderExpression (options ["_a"]) (Hole "a") @?= Right "_a'"
+      allocateLocalNames (options []) mixedLocals @?=
+        Right (Map.fromList [("a", "a"), ("_a", "_a'")])
+      renderExpression (options []) mixedLocals @?=
+        Right "(a, _a', _a)"
+      allocateLocalNames (options []) unaffected @?=
+        Right (Map.fromList [("a", "a"), ("_a", "_a")])
   , testCase "render lambdas, tuples, and symbolic applications" $ do
       let plus = right $ mkOperator "+"
           true = right $ mkIdentifier "True"

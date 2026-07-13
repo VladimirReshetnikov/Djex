@@ -164,7 +164,10 @@ scope-safe output tree and renderer used by Djinn.  That shared boundary
 allocates names by variable identity, avoids binder/global capture, and applies
 one qualification policy.  The `haskell-src-exts` converter remains only as a
 compatibility frontend and consumes the shared allocator rather than owning a
-second naming implementation.
+second naming implementation. Its historical total `convert` and
+`convertToFunc` functions are deprecated in favor of checked variants that
+reject free locals, malformed syntax, invalid definition names, and globals
+that qualification would turn into accidental recursion.
 `findGeneratedSearchBatchesEither` is the one-shot core-only shared result API;
 `findGeneratedSearchBatchesWithHintsEither` additionally accepts source-name
 hints from a frontend. Repeated callers can instead seal an abstract

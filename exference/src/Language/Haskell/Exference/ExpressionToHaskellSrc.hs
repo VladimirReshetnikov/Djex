@@ -1,11 +1,14 @@
 module Language.Haskell.Exference.ExpressionToHaskellSrc
   ( convert
+  , convertChecked
   , convertToFunc
+  , convertToFuncChecked
   )
 where
 
 import Control.Monad (forM)
 import Control.Monad.Trans.Reader (Reader, ask, runReader)
+import Data.Bifunctor (first)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
@@ -13,11 +16,17 @@ import Language.Haskell.Exts.Syntax
 
 import qualified Language.Haskell.Exference.Core.Expression as E
 import qualified Language.Haskell.Exference.Core.Types as T
+import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HsExp = Exp SrcSpanInfo
 type HsDecl = Decl SrcSpanInfo
 type Conversion = Reader (Map T.TVarId String)
+
+{-# DEPRECATED convert
+  "Use convertChecked, or consume the shared Generated.Expression directly." #-}
+{-# DEPRECATED convertToFunc
+  "Use convertToFuncChecked, or render the shared Generated.FunctionClause directly." #-}
 
 -- Qualification level: 0 emits unqualified names, 1 qualifies ordinary
 -- identifiers but keeps operators infix-friendly, and 2 qualifies everything.
@@ -34,10 +43,37 @@ convert qualification expression = runReader
       names <- mapM (renderVariable . fst) (reverse parameters)
       pure $ Lambda noLoc (map variablePattern names) converted
 
+-- | Validate the shared generated tree before producing a compatibility HSE
+-- expression.  The historical 'convert' remains total for callers that use it
+-- to inspect partial search trees.
+convertChecked
+  :: Int
+  -> E.Expression
+  -> Either E.ExpressionRenderError HsExp
+convertChecked qualification expression = do
+  let generated = E.toGeneratedExpression expression
+      policy = E.qualificationFromLevel qualification
+  first E.ExpressionScopeError
+    $ Generated.validateExpressionScope generated
+  first E.ExpressionSyntaxError
+    $ Generated.validateExpressionSyntax generated
+  _ <- first E.ExpressionSyntaxError
+    $ E.allocateExpressionNames policy [] expression
+  pure $ convert qualification expression
+
 convertToFunc :: Int -> String -> E.Expression -> HsDecl
-convertToFunc qualification functionName expression = runReader
+convertToFunc qualification functionName = convertToFuncWithName
+  qualification (Ident noLoc functionName) functionName
+
+convertToFuncWithName
+  :: Int
+  -> Name SrcSpanInfo
+  -> String
+  -> E.Expression
+  -> HsDecl
+convertToFuncWithName qualification functionName reservedName expression = runReader
   (gatherLambdas expression [])
-  (allocatedNames qualification [functionName] expression)
+  (allocatedNames qualification [reservedName] expression)
   where
     gatherLambdas (E.ExpLambda variable ty body) parameters =
       gatherLambdas body ((variable, ty) : parameters)
@@ -45,8 +81,37 @@ convertToFunc qualification functionName expression = runReader
       converted <- convertExp qualification body
       names <- mapM (renderVariable . fst) (reverse parameters)
       pure $ FunBind noLoc
-        [Match noLoc (Ident noLoc functionName) (map variablePattern names)
+        [Match noLoc functionName (map variablePattern names)
           (UnGuardedRhs noLoc converted) Nothing]
+
+-- | Checked top-level compatibility adapter.  Unlike the raw-string legacy
+-- entry point, the structural name can report invalid definitions and globals
+-- that would become accidental self-references after qualification is erased.
+convertToFuncChecked
+  :: Int
+  -> SharedName.Name
+  -> E.Expression
+  -> Either E.ExpressionRenderError HsDecl
+convertToFuncChecked qualification functionName expression = do
+  let generated = E.toGeneratedExpression expression
+      policy = E.qualificationFromLevel qualification
+      hints = E.expressionNameHints expression
+      options = Generated.RenderOptions policy preferred []
+      clause = Generated.FunctionClause functionName [] generated
+      preferred variable = Map.findWithDefault (T.showVar variable) variable hints
+  first E.ExpressionScopeError
+    $ Generated.validateFunctionClauseScope clause
+  _ <- first E.ExpressionSyntaxError
+    $ Generated.renderFunctionClause options clause
+  case SharedName.nameOccurrence functionName of
+    SharedName.IdentifierOccurrence _ spelling -> pure
+      $ convertToFuncWithName qualification
+          (Ident noLoc spelling) spelling expression
+    SharedName.OperatorOccurrence _ spelling -> pure
+      $ convertToFuncWithName qualification
+          (Symbol noLoc spelling) spelling expression
+    SharedName.SpecialOccurrence{} -> Left $ E.ExpressionSyntaxError
+      $ Generated.InvalidFunctionName functionName
 
 convertExp :: Int -> E.Expression -> Conversion HsExp
 convertExp qualification = convertInternal qualification 0
@@ -96,10 +161,11 @@ convertInternal qualification precedence (E.ExpApply function parameter) =
       convertedRight <- convertInternal qualification 2 right
       pure $ parenthesize (precedence >= 2)
         $ InfixApp noLoc convertedLeft
-            (QVarOp noLoc $ toQName qualification name)
+            ((if isConstructor name then QConOp else QVarOp)
+              noLoc $ toQName qualification name)
             convertedRight
 convertInternal _ _ (E.ExpHole variable) =
-  pure $ variableExpression ('_' : T.showVar variable)
+  variableExpression . ('_' :) <$> renderVariable variable
 convertInternal qualification precedence (E.ExpLet variable _ binding body) = do
   convertedBinding <- convertInternal qualification 0 binding
   name <- renderVariable variable
@@ -185,7 +251,7 @@ toQName qualification qualifiedName = case T.qualifiedNameOccurrence qualifiedNa
     qualify syntaxName = case T.qualifiedNameModule qualifiedName of
       Nothing -> UnQual noLoc syntaxName
       Just namespace ->
-        if qualification == 0
+        if qualification <= 0
           || (qualification == 1 && isOperatorName syntaxName)
         then UnQual noLoc syntaxName
         else Qual noLoc

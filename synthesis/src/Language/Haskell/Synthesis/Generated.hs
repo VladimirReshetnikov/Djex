@@ -220,14 +220,18 @@ distinctPatternBinders patterns = collect Set.empty [] $ concatMap binders patte
 
 -- | Allocate stable, distinct Haskell spellings for every local identity.
 -- Global identifiers emitted without qualification and explicit caller
--- reservations participate in the same collision set.
+-- reservations participate in the same collision set.  A local rendered as a
+-- 'Hole' owns both its base spelling and the emitted underscore-prefixed one.
 allocateLocalNames
   :: Ord local
   => RenderOptions local
   -> Expression local
   -> Either RenderError (Map local String)
 allocateLocalNames options expression =
-  allocate options (expressionLocals expression) (expressionGlobals expression)
+  allocate options
+    (expressionLocals expression)
+    (Set.fromList $ expressionHoleLocals expression)
+    (expressionGlobals expression)
 
 allocateClauseLocalNames
   :: Ord local
@@ -237,15 +241,18 @@ allocateClauseLocalNames
 allocateClauseLocalNames options (FunctionClause name patterns body) =
   allocate options
     (concatMap patternLocals patterns ++ expressionLocals body)
+    (Set.fromList $ expressionHoleLocals body)
     (name : concatMap patternGlobals patterns ++ expressionGlobals body)
 
 allocate
   :: Ord local
   => RenderOptions local
   -> [local]
+  -> Set local
   -> [Name]
   -> Either RenderError (Map local String)
-allocate options locals globals = fmap fst $ List.foldl' allocateOne initial locals
+allocate options locals holeLocals globals =
+  fmap fst $ List.foldl' allocateOne initial locals
   where
     initial = Right
       ( Map.empty
@@ -264,10 +271,11 @@ allocate options locals globals = fmap fst $ List.foldl' allocateOne initial loc
         Just _ -> Right (allocated, used)
         Nothing -> do
           preferred <- validateLocalName $ localNamePreference options local
-          let chosen = freshName used preferred
+          let hasHole = local `Set.member` holeLocals
+              chosen = freshName used hasHole preferred
           Right
             ( Map.insert local chosen allocated
-            , Set.insert chosen used
+            , used `Set.union` Set.fromList (localSpellings hasHole chosen)
             )
 
 validateLocalName :: String -> Either RenderError String
@@ -279,10 +287,19 @@ validateLocalName spelling = case mkIdentifier spelling of
     | otherwise -> Left $ InvalidLocalName spelling
         (InvalidIdentifier spelling)
 
-freshName :: Set String -> String -> String
-freshName used candidate
-  | candidate `Set.member` used = freshName used $ candidate ++ "'"
+freshName :: Set String -> Bool -> String -> String
+freshName used hasHole candidate
+  | any (`Set.member` used) (localSpellings hasHole candidate) =
+      freshName used hasHole $ candidate ++ "'"
   | otherwise = candidate
+
+-- The base spelling participates even when every occurrence is a hole: it is
+-- the stable identity allocated to that local and must remain distinct from
+-- ordinary locals.  Hole syntax contributes one additional emitted spelling.
+localSpellings :: Bool -> String -> [String]
+localSpellings hasHole spelling
+  | hasHole = [spelling, '_' : spelling]
+  | otherwise = [spelling]
 
 renderExpression
   :: Ord local
@@ -588,6 +605,25 @@ expressionLocals expression = case expression of
       [ patternLocals pattern ++ expressionLocals body
       | (pattern, body) <- alternatives
       ]
+
+-- Collect hole identities independently of allocation order.  A local may be
+-- encountered first as an ordinary binder/use and only later as a hole; its
+-- first occurrence still wins, but the spelling chosen there must reserve the
+-- later underscore-prefixed form as well.
+expressionHoleLocals :: Expression local -> [local]
+expressionHoleLocals expression = case expression of
+  Local{} -> []
+  Global{} -> []
+  Lambda _ body -> expressionHoleLocals body
+  Apply function argument ->
+    expressionHoleLocals function ++ expressionHoleLocals argument
+  Tuple elements -> concatMap expressionHoleLocals elements
+  Hole local -> [local]
+  Let _ binding body ->
+    expressionHoleLocals binding ++ expressionHoleLocals body
+  Case scrutinee alternatives ->
+    expressionHoleLocals scrutinee ++ concat
+      [ expressionHoleLocals body | (_, body) <- alternatives ]
 
 expressionGlobals :: Expression local -> [Name]
 expressionGlobals expression = case expression of

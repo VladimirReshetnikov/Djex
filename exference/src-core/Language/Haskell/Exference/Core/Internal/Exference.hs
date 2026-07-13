@@ -368,9 +368,10 @@ findEngineChunks (ExferenceInput rawType
               + ( heuristics_unusedVar heuristics
                 * fromIntegral unusedVarCount
                 )
-              -- + ( heuristics_solutionLength heuristics
-              --   * fromIntegral (length $ show e)<
-              --   )
+              + ( heuristics_solutionLength heuristics
+                * fromIntegral (SharedGenerated.expressionSize
+                    $ toGeneratedExpression e)
+                )
       ]
     where
       (compatibilityCompletion, progress)

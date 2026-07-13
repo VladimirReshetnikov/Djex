@@ -109,10 +109,24 @@ inventory policy because loading a subset of modules deliberately retains
 external type names after reporting them as warnings.
 `toSynthesisSourceInventory` retains both the sealed environment and those
 inferred assumptions; the older environment-only projection remains available
-for callers that do not yet elaborate queries through the shared frontend.
-The CLI keeps this inventory for the lifetime of its session and
-`parseTypeWithKinds` rejects a query whose proper-type obligation conflicts
-with the retained constructor or class kinds before heuristic search begins.
+for compatibility callers. `Language.Haskell.Djex.Exference` seals this checked
+inventory into a reusable session, computes its supported search projection
+once, and reports unsupported rank-N capabilities structurally. The CLI now
+parses requests through that session; a query whose proper-type obligation
+conflicts with retained constructor or class kinds cannot reach heuristic
+search.
+
+The executable no longer rebuilds an `ExferenceInput`, repeats rank-N filters,
+or consumes legacy tuple chunks. It maps flags to `ExferenceOptions`, calls
+`runExferenceQuery`, applies the backend-neutral shared selection policies, and
+renders the resulting shared candidates. Its default recursion denylist uses
+exact names (`Data.Function.fix`, `Control.Monad.forever`, and
+`Control.Monad.Loops.iterateM_`), so a same-spelled binding in another module
+remains searchable. Multiple input types run in order; conflicting selection
+or qualification flags fail explicitly; parse, kind, and search failures use
+stderr and nonzero status. The historical heuristic vector remains named in
+the CLI, and `--short` now ranks by structural generated-expression size rather
+than rendered identifier length.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

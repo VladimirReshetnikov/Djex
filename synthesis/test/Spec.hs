@@ -21,6 +21,8 @@ import qualified Language.Haskell.Synthesis.KindInference as KindInference
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
+import Language.Haskell.Synthesis.Selection
+import qualified Language.Haskell.Synthesis.TypeRender as TypeRender
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, testCase, (@?=))
@@ -37,6 +39,7 @@ tests = testGroup "Djex synthesis foundation"
   , environmentTests
   , generatedTests
   , searchTests
+  , selectionTests
   , typeTests
   , kindInferenceTests
   , moduleTests
@@ -485,7 +488,24 @@ declarationTests = testGroup "declarations"
 
 typeTests :: TestTree
 typeTests = testGroup "source types"
-  [ testCase "canonicalize saturated function and tuple constructors" $ do
+  [ testCase "render tagged variables without conflating their identities" $ do
+      let className = right $ mkIdentifier "C"
+          flexible = Left (0 :: Int)
+          rigid = Right (0 :: Int)
+          variableName variable = case variable of
+            Left _ -> "a"
+            Right _ -> "skolem"
+          typeExpression = SharedType.FunctionType
+            (SharedType.TypeVariable flexible)
+            (SharedType.TypeVariable rigid)
+          constraint = Constraint className
+            [SharedType.TypeVariable flexible,
+             SharedType.TypeVariable rigid]
+      TypeRender.renderType variableName typeExpression @?=
+        "a -> skolem"
+      TypeRender.renderConstraint variableName constraint @?=
+        "C a skolem"
+  , testCase "canonicalize saturated function and tuple constructors" $ do
       let a = SharedType.TypeVariable "a"
           b = SharedType.TypeVariable "b"
           arrow = SharedType.TypeApplication
@@ -583,6 +603,131 @@ searchTests = testGroup "search status"
       pure ()
   ]
 
+selectionTests :: TestTree
+selectionTests = testGroup "result selection"
+  [ testCase "first skips inadmissible candidates and leaves the suffix lazy" $ do
+      let results =
+            [ queryResult Continuing [2 :: Int, 3]
+            , error "SelectFirst forced the uninspected result suffix"
+            ]
+          selection = selectQueryResults SelectFirst
+            (\_ -> error "SelectFirst evaluated its unused rank function" :: Int)
+            odd results
+      selection @?= Selection (Just Continuing) [3]
+  , testCase "all preserves order and streams without forcing final progress" $ do
+      let streaming = selectQueryResults SelectAll
+            (\_ -> error "SelectAll evaluated its unused rank function" :: Int)
+            odd
+            [ queryResult Continuing [1 :: Int, 2, 3]
+            , error "SelectAll forced the result suffix while streaming"
+            ]
+      take 2 (selectionCandidates streaming) @?= [1, 3]
+
+      let terminal = Completed $ truncated StepLimitReached
+          complete = selectQueryResults SelectAll id odd
+            [ queryResult Continuing [1 :: Int, 2]
+            , queryResult Continuing [3, 4]
+            , queryResult terminal []
+            ]
+      complete @?= Selection (Just terminal) [1, 3]
+  , testCase "best keeps every globally minimal admissible candidate" $ do
+      let terminal = Completed $ truncated CandidateLimitReached
+          results =
+            [ queryResult Continuing [(3 :: Int, "ignored"), (1, "first")]
+            , queryResult Continuing [(2, "inadmissible"), (1, "second")]
+            , queryResult terminal []
+            ]
+          selection = selectQueryResults SelectBest fst
+            ((/= "inadmissible") . snd) results
+      selection @?= Selection (Just terminal)
+        [(1, "first"), (1, "second")]
+  , testCase "lookahead resets on improvement and counts later batches" $ do
+      let terminal = Completed Finished
+          results =
+            [ queryResult Continuing
+                [(8 :: Int, "worse"), (5, "old-first"), (5, "old-second")]
+            , queryResult Continuing [(6, "no improvement")]
+            , queryResult Continuing [(4, "new-first"), (4, "new-second")]
+            , queryResult Continuing [(4, "equal"), (9, "worse again")]
+            , queryResult terminal []
+            , error "lookahead inspected a batch beyond its exhausted budget"
+            ]
+          selection = selectQueryResults (SelectBestLookahead 2)
+            fst (const True) results
+      selection @?= Selection (Just terminal)
+        [(4, "new-first"), (4, "new-second"), (4, "equal")]
+  , testCase "non-positive lookahead stops at the first admissible batch" $ do
+      let selection = selectQueryResults (SelectBestLookahead 0) id odd
+            [ queryResult Continuing [2 :: Int]
+            , queryResult (Completed Finished) [5, 3, 3]
+            , error "zero lookahead forced a later batch"
+            ]
+      selection @?= Selection (Just $ Completed Finished) [3, 3]
+  , testCase "preferred lookahead discards fallback and counts batches" $ do
+      let fallback = False
+          preferred = True
+          terminal = Completed $ truncated StepLimitReached
+          results =
+            [ queryResult Continuing
+                [(0 :: Int, fallback, "better-ranked fallback")]
+            , queryResult Continuing [(10, preferred, "initial preferred")]
+            -- Several worse candidates still spend only one batch unit, so
+            -- the improvement in the next batch remains visible.
+            , queryResult Continuing
+                [ (11, preferred, "worse one")
+                , (12, preferred, "worse two")
+                , (-1, fallback, "fallback after preferred")
+                ]
+            , queryResult Continuing [(9, preferred, "improved")]
+            , queryResult Continuing [(9, preferred, "equal")]
+            , queryResult terminal
+                [(20, preferred, "worse three"), (30, preferred, "worse four")]
+            , error "preferred lookahead inspected beyond its batch budget"
+            ]
+          selection = selectPreferredQueryResults 2
+            (\(rank, _, _) -> rank)
+            (const True)
+            (\(_, isPreferred, _) -> isPreferred)
+            results
+      selection @?= Selection (Just terminal)
+        [(9, preferred, "improved"), (9, preferred, "equal")]
+  , testCase "preferred lookahead returns best fallback when none appears" $ do
+      let terminal = Completed Finished
+          results =
+            [ queryResult Continuing
+                [(3 :: Int, "older-worse"), (1, "first-best")]
+            , queryResult Continuing
+                [(1, "second-best"), (0, "inadmissible")]
+            , queryResult terminal []
+            ]
+          selection = selectPreferredQueryResults 2 fst
+            ((/= "inadmissible") . snd)
+            (const False)
+            results
+      selection @?= Selection (Just terminal)
+        [(1, "first-best"), (1, "second-best")]
+  , testCase "empty selections retain the last inspected progress" $ do
+      let terminal = Completed Finished
+          results =
+            [ queryResult Continuing [2 :: Int]
+            , queryResult terminal []
+            ]
+          modes =
+            [ SelectFirst
+            , SelectBest
+            , SelectBestLookahead 1
+            , SelectAll
+            ]
+      forM_ modes $ \mode ->
+        selectQueryResults mode id odd results @?=
+          Selection (Just terminal) []
+      selectQueryResults SelectBest id odd [] @?=
+        Selection Nothing ([] :: [Int])
+  ]
+ where
+  queryResult progress candidates = QueryResult NoEvidence
+    $ SearchBatch progress () candidates
+
 generatedTests :: TestTree
 generatedTests = testGroup "generated syntax"
   [ testCase "validate lambda, let, and case scopes" $ do
@@ -670,6 +815,12 @@ generatedTests = testGroup "generated syntax"
           , "  Just select'' -> select''"
           , "  Nothing -> select'"
           ])
+  , testCase "measure generated expressions structurally" $ do
+      let identity = Lambda [Bind (0 :: Int)] $ Local 0
+          application = Apply identity identity
+      expressionSize (Local (0 :: Int)) @?= 1
+      expressionSize identity @?= 2
+      expressionSize application @?= 5
   , testCase "render holes and reject malformed surface shapes" $ do
       let options = defaultRenderOptions (\local -> 't' : show (local :: Int))
           variableName = right $ mkIdentifier "value"

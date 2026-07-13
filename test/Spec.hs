@@ -12,8 +12,12 @@ import Djinn.Core
   )
 import Language.Haskell.Djex
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
+import Language.Haskell.Exference.Core.Candidate
+  ( mkExferenceGeneratedCandidate )
+import Language.Haskell.Exference.Core.ExferenceStats
+  ( ExferenceStats (ExferenceStats) )
+import qualified Language.Haskell.Exference.Core.Expression as CoreExpression
 import Language.Haskell.Exference.Core.Name (mkQualifiedName)
-import Language.Haskell.Exference.Core.Score (Penalty (Penalty))
 import Language.Haskell.Exference.Core.Types
   ( HsType (TypeForall, TypeVar)
   , HsTypeClass (HsTypeClass)
@@ -288,6 +292,45 @@ tests = testGroup "Djex facade"
         [Just "DJEX_EXF_OMISSION"]
       map diagnosticSeverity (exferenceSessionDiagnostics session) @?=
         [Warning]
+  , testCase "exclude Exference bindings by exact structural policy name" $ do
+      blockedBackendName <- expectRight
+        $ mkQualifiedName ["Data", "Function"] "fix"
+      retainedBackendName <- expectRight
+        $ mkQualifiedName ["Fixture"] "fix"
+      blockedName <- expectRight $ parseName "Data.Function.fix"
+      let binding name = FunctionBinding
+            { functionResult = TypeVar 0
+            , functionName = name
+            , functionPenalty = Penalty 0
+            , functionConstraints = []
+            , functionParameters = [TypeVar 0]
+            }
+          source = emptyExferenceSource
+            { sourceFunctions =
+                [binding blockedBackendName, binding retainedBackendName]
+            }
+          policy = defaultExferenceSessionPolicy
+            {exferenceExcludedBindings = [blockedName]}
+      checked <- expectRight $ checkSourceEnvironment source
+      session <- expectRight $ mkExferenceSessionWithPolicy policy checked
+      case exferenceSessionOmissions session of
+        [omission] -> do
+          omittedName omission @?= blockedName
+          omittedReason omission @?= ExcludedByPolicy
+        omissions -> fail $ "expected one policy omission, got " ++ show omissions
+      map diagnosticCode (exferenceSessionDiagnostics session) @?=
+        [Just "DJEX_EXF_POLICY_OMISSION"]
+  , testCase "reject definition qualification that creates self-reference" $ do
+      target <- expectRight $ mkIdentifier "result"
+      backendGlobal <- expectRight
+        $ mkQualifiedName ["Fixture"] "result"
+      raw <- expectRight $ mkExferenceGeneratedCandidate mempty
+        (CoreExpression.ExpName backendGlobal) [] (ExferenceStats 1 0 0)
+      let candidate = fmap (FunctionClause target []) raw
+      renderExferenceCandidateDefinition Unqualified candidate @?=
+        Left (ExferenceUnsafeDefinitionQualification Unqualified target)
+      renderExferenceCandidateDefinition FullyQualified candidate @?=
+        Right "result = Fixture.result"
   ]
 
 emptyExferenceSource :: SourceEnvironment FunctionBinding

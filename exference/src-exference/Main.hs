@@ -1,361 +1,410 @@
 {-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE PatternGuards #-}
 
-module Main
-  ( main
-  )
-where
+module Main (main) where
 
-
-
-import Language.Haskell.Exference
-import Language.Haskell.Exference.TypeFromHaskellSrc
-import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-import Language.Haskell.Exference.Diagnostic
-  (diagnosticMessage, renderDiagnostic)
-import Language.Haskell.Exference.Core.FunctionBinding
-import qualified Language.Haskell.Exference.Core.Expression as CoreExpression
-import Language.Haskell.Exference.EnvironmentParser
-
-import Language.Haskell.Exference.Core.Types
-import qualified Language.Haskell.Synthesis.Name as SharedName
-import qualified Language.Haskell.Synthesis.Search as SharedSearch
-import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
-
-import Control.Monad ( when, forM_ )
-import Data.List ( sortBy, intercalate, nub )
-import qualified Data.List.NonEmpty as NonEmpty
+import Control.Monad (forM_, unless, when)
+import Data.List (intercalate, sortBy)
 import qualified Data.List as List
-import Data.Ord ( comparing )
-import Data.Maybe ( listToMaybe, fromMaybe )
-import qualified Data.Map.Strict as M
-import qualified Data.Set as S
-
-import Control.Monad.Trans.Except
-
-
-import Paths_djex
-
-import System.Environment ( getArgs )
-import System.Exit (exitFailure)
+import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.Map.Strict as Map
+import Data.Ord (comparing)
+import qualified Data.Set as Set
+import Data.Version (showVersion)
 import System.Console.GetOpt
-import Data.Version ( showVersion )
+import System.Environment (getArgs)
+import System.Exit (exitFailure)
 import System.IO
-  ( hPutStrLn, hSetBuffering, BufferMode(..), stdout, stderr )
+  ( BufferMode (LineBuffering)
+  , hPutStrLn
+  , hSetBuffering
+  , stderr
+  , stdout
+  )
+import Text.Read (readMaybe)
 
-data Flag = Verbose Int
-          | Version
-          | Help
-          | PrintEnv
-          | EnvDir String
-          | Input String
-          | PrintAll
-          | EnvUsage -- TODO: option to specify dictionary to use
-          | Shortest
-          | FirstSol
-          | Best
-          | Unused
-          | PatternMatchMC
-          | Qualification Int
-          | Constraints
-          | AllowFix
-  deriving (Show, Eq)
+import Language.Haskell.Djex
+import Language.Haskell.Exference.Core.FunctionBinding
+  ( FunctionBinding
+  , functionName
+  )
+import Language.Haskell.Exference.Core.Types
+  ( sClassEnv_instances
+  , sClassEnv_tclasses
+  , toSynthesisName
+  )
+import Language.Haskell.Exference.EnvironmentParser
+  ( LoadReport (..)
+  , SourceEnvironment (..)
+  , checkedSourceProjection
+  , environmentFromPath
+  )
+import Language.Haskell.Synthesis.Candidate
+  ( candidateResidualConstraints )
+import Language.Haskell.Synthesis.Diagnostic (renderDiagnostic)
+import Language.Haskell.Synthesis.Name (Name, mkIdentifier, parseName)
+import Language.Haskell.Synthesis.Search
+  ( Completion (Finished, Truncated)
+  , Progress (Completed, Continuing)
+  , TruncationReason (StepLimitReached)
+  , batchCandidates
+  , batchProgress
+  )
+import Language.Haskell.Synthesis.Selection
+  ( Selection (..)
+  , SelectionMode (..)
+  , selectPreferredQueryResults
+  , selectQueryResults
+  )
 
+import Paths_djex (getDataFileName, version)
+
+data Flag
+  = Verbose (Maybe String)
+  | Version
+  | Help
+  | PrintEnv
+  | EnvDir FilePath
+  | Input String
+  | PrintAll
+  | EnvUsage
+  | Shortest
+  | FirstSol
+  | Best
+  | Unused
+  | PatternMatchMC
+  | QualificationLevel Int
+  | Constraints
+  | AllowFix
+  deriving (Eq, Show)
+
+-- This is the historical command-line ranking profile. It intentionally
+-- remains distinct from the library default until differential benchmarks
+-- justify changing established CLI search order.
 cliHeuristicsConfig :: ExferenceHeuristicsConfig
 cliHeuristicsConfig = ExferenceHeuristicsConfig
-  { heuristics_goalVar                = 0.8
-  , heuristics_goalCons               = 0.7
-  , heuristics_goalArrow              = 4.3
-  , heuristics_goalApp                = 1.9
-  , heuristics_stepProvidedGood       = 0.22
-  , heuristics_stepProvidedBad        = 5.0
-  , heuristics_stepEnvGood            = 6.0
-  , heuristics_stepEnvBad             = 22.0
-  , heuristics_tempUnusedVarPenalty   = 1.1
+  { heuristics_goalVar = 0.8
+  , heuristics_goalCons = 0.7
+  , heuristics_goalArrow = 4.3
+  , heuristics_goalApp = 1.9
+  , heuristics_stepProvidedGood = 0.22
+  , heuristics_stepProvidedBad = 5.0
+  , heuristics_stepEnvGood = 6.0
+  , heuristics_stepEnvBad = 22.0
+  , heuristics_tempUnusedVarPenalty = 1.1
   , heuristics_tempMultiVarUsePenalty = 6.7
-  , heuristics_functionGoalTransform  = 0.1
-  , heuristics_unusedVar              = 20.0
-  , heuristics_solutionLength         = 0.0153
+  , heuristics_functionGoalTransform = 0.1
+  , heuristics_unusedVar = 20.0
+  , heuristics_solutionLength = 0.0153
   }
 
 options :: [OptDescr Flag]
 options =
-  [ Option []    ["version"]     (NoArg Version)       ""
-  , Option []    ["help"]        (NoArg Help)          "prints basic program info"
-  , Option ['p'] ["printenv"]    (NoArg PrintEnv)      "print the environment to be used for queries"
-  , Option ['e'] ["envdir"]      (ReqArg EnvDir "PATH") "path to environment directory"
-  , Option ['v'] ["verbose"]     (OptArg (Verbose . maybe 1 read) "INT") "verbosity"
-  , Option ['i'] ["input"]       (ReqArg Input "HSTYPE") "the type for which to generate an expression"
-  , Option ['a'] ["all"]         (NoArg PrintAll)      "print all solutions (up to search step limit)"
-  , Option []    ["envUsage"]    (NoArg EnvUsage)      "print a list of functions that got inserted at some point (regardless if successful or not), and how often"
-  , Option ['o'] ["short"]       (NoArg Shortest)      "prefer shorter solutions"
-  , Option ['f'] ["first"]       (NoArg FirstSol)      "stop after finding the first solution"
-  , Option []    ["fix"]         (NoArg AllowFix)      "allow the `fix` function in the environment"
-  , Option ['b'] ["best"]        (NoArg Best)          "calculate all solutions, and print the best one"
-  , Option ['u'] ["allowUnused"] (NoArg Unused)        "allow unused input variables"
-  , Option ['c'] ["patternMatchMC"] (NoArg PatternMatchMC) "pattern match on multi-constructor data types (might lead to hang-ups at the moment)"
-  , Option ['q'] ["fullqualification"] (NoArg $ Qualification 2) "fully qualify the identifiers in the output"
-  , Option []    ["somequalification"] (NoArg $ Qualification 1) "fully qualify non-operator-identifiers in the output"
-  , Option ['w'] ["allowConstraints"] (NoArg Constraints) "allow additional (unproven) constraints in solutions"
+  [ Option [] ["version"] (NoArg Version) "print version and exit"
+  , Option [] ["help"] (NoArg Help) "print basic program information"
+  , Option ['p'] ["printenv"] (NoArg PrintEnv)
+      "print the environment used for queries"
+  , Option ['e'] ["envdir"] (ReqArg EnvDir "PATH")
+      "path to the environment directory"
+  , Option ['v'] ["verbose"] (OptArg Verbose "INT") "verbosity"
+  , Option ['i'] ["input"] (ReqArg Input "HSTYPE")
+      "a type for which to generate an expression (repeatable)"
+  , Option ['a'] ["all"] (NoArg PrintAll)
+      "print all solutions up to the search step limit"
+  , Option [] ["envUsage"] (NoArg EnvUsage)
+      "print the most-used source bindings after a complete search"
+  , Option ['o'] ["short"] (NoArg Shortest)
+      "prefer shorter solutions"
+  , Option ['f'] ["first"] (NoArg FirstSol)
+      "stop after the first solution"
+  , Option [] ["fix"] (NoArg AllowFix)
+      "allow known nonterminating recursion helpers"
+  , Option ['b'] ["best"] (NoArg Best)
+      "inspect the complete search and print every globally best solution"
+  , Option ['u'] ["allowUnused"] (NoArg Unused)
+      "allow unused input variables"
+  , Option ['c'] ["patternMatchMC"] (NoArg PatternMatchMC)
+      "pattern match on multi-constructor datatypes"
+  , Option ['q'] ["fullqualification"]
+      (NoArg $ QualificationLevel 2)
+      "fully qualify identifiers and operators in output"
+  , Option [] ["somequalification"]
+      (NoArg $ QualificationLevel 1)
+      "qualify non-operator identifiers in output"
+  , Option ['w'] ["allowConstraints"] (NoArg Constraints)
+      "allow additional unresolved constraints in solutions"
   ]
 
-mainOpts :: [String] -> IO ([Flag], [String])
-mainOpts argv =
-  case getOpt Permute options argv of
-    (o, n, []  )  | inputs <- [x | (Input x) <- o] ++ n
-                  -> if null o && null inputs
-                    then return ([Help], inputs)
-                    else return (o, inputs)
-    (_,  _, errs) -> ioError (userError (concat errs ++ fullUsageInfo))
-
 fullUsageInfo :: String
-fullUsageInfo = usageInfo header options
-  where
-    header = "Usage: exference [OPTION...]"
+fullUsageInfo = usageInfo "Usage: exference [OPTION...] [HSTYPE...]" options
+
+mainOpts :: [String] -> Either String ([Flag], [String])
+mainOpts arguments = case getOpt (ReturnInOrder Input) options arguments of
+  (flags, [], [])
+    | null flags -> Right ([Help], [])
+    | otherwise -> Right
+        (flags, [source | Input source <- flags])
+  (_, _, errors) -> Left $ concat errors ++ fullUsageInfo
 
 main :: IO ()
 main = do
   hSetBuffering stdout LineBuffering
   hSetBuffering stderr LineBuffering
-  argv <- getArgs
-  defaultEnvPath <- getDataFileName "exference/environment"
-  (flags, inputs) <- mainOpts argv
-  let verbosity = sum $ [x | Verbose x <- flags ]
-  let qualification = fromMaybe 0 $ listToMaybe [x | Qualification x <- flags]
-  let
-    printVersion = do
-      putStrLn $ "exference version " ++ showVersion version
-  if | [Version] == flags   -> printVersion
-     | Help    `elem` flags -> putStrLn fullUsageInfo
-     | otherwise -> do
-        when (Version `elem` flags || verbosity>0) printVersion
-        let envDir = fromMaybe defaultEnvPath $ listToMaybe [d | EnvDir d <- flags]
-        when (verbosity>0) $ do
-          putStrLn $ "[Environment]"
-          putStrLn $ "reading environment from " ++ envDir
-        LoadReport sourceEnvironmentResult diagnostics <-
-          environmentFromPath envDir
-        checkedEnvironment <- case sourceEnvironmentResult of
-          Left failure -> do
-            hPutStrLn stderr $
-              "could not load source environment: " ++ show failure
-            exitFailure
-          Right environment -> pure environment
-        let sourceEnvironment = checkedSourceProjection checkedEnvironment
-            inventory = checkedSourceInventory checkedEnvironment
-            eSignatures = sourceFunctions sourceEnvironment
-            eDeconss = sourceDeconstructors sourceEnvironment
-            sEnv = sourceClasses sourceEnvironment
-            validNames = sourceTypeNames sourceEnvironment
-            tdeclMap = sourceTypeSynonymMap sourceEnvironment
-        let clss = sClassEnv_tclasses sEnv
-            insts = sClassEnv_instances sEnv
-        when (verbosity>0 && not (null diagnostics)) $
-          forM_ diagnostics $ \value -> putStrLn
-            $ "environment " ++ renderDiagnostic value
-        when (PrintEnv `elem` flags) $ do
-          when (verbosity>0) $ putStrLn "[Environment]"
-          mapM_ print $ sourceTypeSynonyms sourceEnvironment
-          mapM_ print $ M.elems clss
-          mapM_ print $ [(i,x)| (i,xs) <- M.toList insts, x <- xs]
-          mapM_ print $ eSignatures
-          mapM_ print $ eDeconss
-        case inputs of
-          [] -> return ()
-          x:_ -> do
-            when (verbosity>0) $ putStrLn "[Custom Input]"
-            eParsedType <- runExceptT $ parseTypeWithKinds
-              (SharedInventory.inventoryKindAssumptions inventory)
-              (sClassEnv_tclasses sEnv)
-              Nothing
-              validNames
-              tdeclMap
-              (haskellSrcExtsParseMode "inputtype")
-              x
-            case eParsedType of
-              Left err -> do
-                putStrLn $ "could not parse input type: " ++ diagnosticMessage err
-              Right (parsedType, tVarIndex) -> do
-                let typeStr = showHsType tVarIndex parsedType
-                when (verbosity>0) $ putStrLn $ "input type parsed as: " ++ typeStr
-                let unresolvedIdents = findInvalidNames validNames parsedType
-                when (not $ null unresolvedIdents) $ do
-                  putStrLn $ "warning: unresolved idents in input: "
-                           ++ intercalate ", " (nub $ show <$> unresolvedIdents)
-                  putStrLn $ "(this may be harmless, but no instances will be connected to these.)"
-                let hidden = if AllowFix `elem` flags then [] else ["fix", "forever", "iterateM_"]
-                let namedBindings = filterBindingsSimple hidden eSignatures
-                    filteredBindings = filter bindingIsSupported namedBindings
-                    filteredDeconstructors = filter deconstructorIsSupported eDeconss
-                    omitted = length namedBindings - length filteredBindings
-                      + length eDeconss - length filteredDeconstructors
-                when (verbosity > 0 && omitted > 0) $ putStrLn $
-                  "omitting " ++ show omitted
-                    ++ " environment bindings with unsupported nested foralls"
-                let input = ExferenceInput
-                      { input_goalType = parsedType
-                      , input_envFuncs = filteredBindings
-                      , input_envDeconsS = filteredDeconstructors
-                      , input_envClasses = sEnv
-                      , input_allowUnused = Unused `elem` flags
-                      , input_allowConstraints = Constraints `elem` flags
-                      , input_allowConstraintsStopStep = 8192
-                      , input_multiPM = PatternMatchMC `elem` flags
-                      , input_maxSteps = 65536
-                      , input_maxQueueSize = Just 8192
-                      , input_maxDepth = Nothing
-                      , input_heuristicsConfig = if Shortest `elem` flags
-                          then cliHeuristicsConfig
-                          else cliHeuristicsConfig
-                            { heuristics_solutionLength = 0.0 }
-                      }
-                when (verbosity>0) $ do
-                  putStrLn $ "full input:"
-                  print input
-                -- The default selector searches with constraints enabled so it
-                -- can use them as a fallback, then prefers constraint-free
-                -- answers.  Every presentation mode consumes the same lazy
-                -- chunk trace while retaining validation and completion
-                -- information that the historical list adapters discarded.
-                let preferNoConstraints = not $ any (`elem` flags)
-                      [PrintAll, EnvUsage, FirstSol, Best, Constraints]
-                    searchInput
-                      | preferNoConstraints = input
-                          {input_allowConstraints = True}
-                      | otherwise = input
-                case findExpressionsWithStatsEither searchInput of
-                  Left err -> putStrLn $
-                    "invalid search input: " ++ show err
-                  Right chunks -> do
-                    if
-                      | PrintAll `elem` flags -> do
-                          when (verbosity>0) $
-                            putStrLn "[running complete search ..]"
-                          printAllResults qualification tVarIndex chunks
-                      | EnvUsage `elem` flags -> do
-                          when (verbosity>0) $
-                            putStrLn "[running complete search ..]"
-                          let stats = maybe M.empty chunkBindingUsages
-                                $ lastMaybe chunks
-                              highest = take 8
-                                $ sortBy (flip $ comparing snd)
-                                $ M.toList stats
-                          -- Keep the historical list-of-string-pairs format;
-                          -- the search core now stores nominal names instead.
-                          print [(show binding, count)
-                                | (binding, count) <- highest]
-                      | otherwise -> do
-                          selection <- if
-                            | FirstSol `elem` flags -> do
-                                when (verbosity>0) $
-                                  putStrLn "[selecting first expression ..]"
-                                pure $ selectOneExpression chunks
-                            | Best `elem` flags -> do
-                                when (verbosity>0) $
-                                  putStrLn "[selecting best expressions ..]"
-                                pure $ selectBestNExpressions 999 chunks
-                            | Constraints `elem` flags -> do
-                                when (verbosity>0) $ putStrLn
-                                  "[selecting with constrained lookahead ..]"
-                                pure $ selectFirstBestExpressionsLookahead
-                                  256 chunks
-                            | otherwise -> do
-                                when (verbosity>0) $ putStrLn
-                                  "[selecting with constraint-free preference ..]"
-                                pure $
-                                  selectFirstBestExpressionsLookaheadPreferNoConstraints
-                                    256 chunks
-                          printSelection qualification tVarIndex
-                            selection
-printSelection
-  :: Int
-  -> TypeVarIndex
-  -> SearchSelection [ExferenceOutputElement]
-  -> IO ()
-printSelection _ _ (SearchSelection status []) =
-  putStrLn $ noResultsMessage status
-printSelection qualification tVarIndex (SearchSelection _ results) =
-  mapM_ (printResult qualification tVarIndex) results
+  arguments <- getArgs
+  (flags, inputs) <- either usageFailure pure $ mainOpts arguments
+  if
+    | Version `elem` flags ->
+        putStrLn $ "exference version " ++ showVersion version
+    | Help `elem` flags -> putStrLn fullUsageInfo
+    | otherwise -> run flags inputs
 
-printAllResults
-  :: Int
-  -> TypeVarIndex
-  -> [ExferenceChunkElement]
-  -> IO ()
-printAllResults qualification tVarIndex = go Nothing False
- where
-  go status foundAny [] = when (not foundAny) $
-    putStrLn $ noResultsMessage status
-  go _ foundAny (chunk : chunks) = case chunkElements chunk of
-    [] -> go (Just $ chunkStatus chunk) foundAny chunks
-    results -> do
-      mapM_ (printResult qualification tVarIndex) results
-      go (Just $ chunkStatus chunk) True chunks
+run :: [Flag] -> [String] -> IO ()
+run flags inputs = do
+  verbosity <- either usageFailure pure $ parseVerbosity flags
+  validateFlagCombinations flags inputs
+  defaultEnvironmentPath <- getDataFileName "exference/environment"
+  let environmentPath = case [path | EnvDir path <- flags] of
+        [] -> defaultEnvironmentPath
+        path : _ -> path
+  when (verbosity > 0) $ do
+    putStrLn $ "exference version " ++ showVersion version
+    putStrLn "[Environment]"
+    putStrLn $ "reading environment from " ++ environmentPath
+  LoadReport environmentResult loaderDiagnostics <-
+    environmentFromPath environmentPath
+  checkedEnvironment <- case environmentResult of
+    Left failure -> fatal $ "could not load source environment: " ++ show failure
+    Right value -> pure value
+  when (verbosity > 0) $ forM_ loaderDiagnostics $ \value ->
+    putStrLn $ "environment " ++ renderDiagnostic value
+  let sourceEnvironment = checkedSourceProjection checkedEnvironment
 
-printResult :: Int -> TypeVarIndex -> ExferenceOutputElement -> IO ()
-printResult qualification tVarIndex
-    (expression, constraints, ExferenceStats steps depth queueSize) = do
-  rendered <- either
-    (fail . ("cannot render checked search result: " ++) . show)
+  excluded <- if AllowFix `elem` flags
+    then pure []
+    else mapM checkedName recursionHelpers
+  let policy = defaultExferenceSessionPolicy
+        {exferenceExcludedBindings = excluded}
+  session <- either
+    (fatal . ("could not seal Exference session: " ++) . renderDiagnostic)
     pure
-    $ CoreExpression.renderExpression
-        (CoreExpression.qualificationFromLevel qualification) expression
+    $ mkExferenceSessionWithPolicy policy checkedEnvironment
+  when (verbosity > 0) $ forM_ (exferenceSessionDiagnostics session) $ \value ->
+    putStrLn $ "session " ++ renderDiagnostic value
+
+  when (PrintEnv `elem` flags) $
+    printEnvironment verbosity sourceEnvironment
+  target <- freshTarget sourceEnvironment
+  forM_ inputs $ runQuery verbosity flags session target
+ where
+  recursionHelpers =
+    [ "Data.Function.fix"
+    , "Control.Monad.forever"
+    , "Control.Monad.Loops.iterateM_"
+    ]
+  checkedName source = either
+    (fatal . (("invalid built-in exclusion " ++ show source ++ ": ") ++) . show)
+    pure
+    $ parseName source
+
+runQuery
+  :: Int
+  -> [Flag]
+  -> ExferenceSession
+  -> Name
+  -> String
+  -> IO ()
+runQuery verbosity flags session target source = do
+  when (verbosity > 0) $ do
+    putStrLn "[Custom Input]"
+    putStrLn $ "input type: " ++ source
+  let queryOptions = optionsFor flags
+      searchOptions
+        | prefersConstraintFreeFallback flags = queryOptions
+            {exferenceAllowResidualConstraints = True}
+        | otherwise = queryOptions
+  request <- case parseExferenceRequest
+      session searchOptions target "inputtype.hs" source of
+    Left failure -> fatal
+      $ "could not parse input type: " ++ renderDiagnostic failure
+    Right value -> pure value
+  when (verbosity > 0) $ do
+    putStrLn "full shared request:"
+    print $ exferenceRequestQuery request
+  results <- case runExferenceQuery session request of
+    Left failure -> fatal $ "invalid search input: " ++ renderDiagnostic failure
+    Right value -> pure value
+  presentResults verbosity flags results
+
+optionsFor :: [Flag] -> ExferenceOptions
+optionsFor flags = defaultExferenceOptions
+  { exferenceAllowUnused = Unused `elem` flags
+  , exferenceAllowResidualConstraints = Constraints `elem` flags
+  , exferenceMultiConstructorPatterns = PatternMatchMC `elem` flags
+  , exferenceHeuristics = if Shortest `elem` flags
+      then cliHeuristicsConfig
+      else cliHeuristicsConfig {heuristics_solutionLength = 0}
+  }
+
+prefersConstraintFreeFallback :: [Flag] -> Bool
+prefersConstraintFreeFallback flags = not $ any (`elem` flags)
+  [PrintAll, EnvUsage, FirstSol, Best, Constraints]
+
+presentResults :: Int -> [Flag] -> [ExferenceResult] -> IO ()
+presentResults verbosity flags results = if
+  | PrintAll `elem` flags -> do
+      when (verbosity > 0) $ putStrLn "[running complete search ..]"
+      printAllResults qualification results
+  | EnvUsage `elem` flags -> do
+      when (verbosity > 0) $ putStrLn "[running complete search ..]"
+      let usages = maybe Map.empty exferenceResultBindingUsages
+            $ lastMaybe results
+          highest = take 8 $ sortBy (flip $ comparing snd)
+            $ Map.toList usages
+      print [(show binding, count) | (binding, count) <- highest]
+  | otherwise -> do
+      when (verbosity > 0) $ putStrLn
+        $ "[selecting " ++ selectionDescription flags ++ " ..]"
+      let selection
+            | FirstSol `elem` flags =
+                selectQueryResults SelectFirst rank (const True) results
+            | Best `elem` flags =
+                selectQueryResults SelectBest rank (const True) results
+            | Constraints `elem` flags = selectQueryResults
+                (SelectBestLookahead 256) rank (const True) results
+            | otherwise = selectPreferredQueryResults
+                256 rank (const True)
+                (null . candidateResidualConstraints) results
+      printSelection qualification selection
+ where
+  qualification = qualificationFor flags
+  rank = exferenceCandidateComplexity . exferenceCandidateMetrics
+selectionDescription :: [Flag] -> String
+selectionDescription flags
+  | FirstSol `elem` flags = "first expression"
+  | Best `elem` flags = "globally best expressions"
+  | Constraints `elem` flags = "constrained lookahead"
+  | otherwise = "constraint-free preference"
+
+qualificationFor :: [Flag] -> Qualification
+qualificationFor flags = case [level | QualificationLevel level <- flags] of
+  [] -> Unqualified
+  1 : _ -> QualifyIdentifiers
+  _ : _ -> FullyQualified
+
+printSelection :: Qualification -> Selection ExferenceCandidate -> IO ()
+printSelection _ (Selection progress []) =
+  putStrLn $ noResultsMessage progress
+printSelection qualification (Selection _ candidates) =
+  mapM_ (printCandidate qualification) candidates
+
+printAllResults :: Qualification -> [ExferenceResult] -> IO ()
+printAllResults qualification = go Nothing False
+ where
+  go progress foundAny [] = unless foundAny $
+    putStrLn $ noResultsMessage progress
+  go _ foundAny (result : results) = do
+    let batch = resultSearch result
+        candidates = batchCandidates batch
+    mapM_ (printCandidate qualification) candidates
+    go (Just $ batchProgress batch)
+      (foundAny || not (null candidates)) results
+
+printCandidate :: Qualification -> ExferenceCandidate -> IO ()
+printCandidate qualification candidate = do
+  rendered <- either
+    (fatal . ("cannot render checked search result: " ++) . show)
+    pure
+    $ renderExferenceCandidateExpression qualification candidate
   putStrLn rendered
-  when (not $ null constraints) $ do
-    let constraintStrings = map (showHsConstraint tVarIndex)
-          $ S.toList
-          $ S.fromList constraints
-    putStrLn $ "but only with additional constraints: "
-      ++ intercalate ", " constraintStrings
+  let constraints = renderExferenceResidualConstraints candidate
+  unless (null constraints) $ putStrLn
+    $ "but only with additional constraints: "
+    ++ intercalate ", " constraints
+  let metrics = exferenceCandidateMetrics candidate
   putStrLn $ replicate 40 ' '
-    ++ "(depth " ++ show depth
-    ++ ", " ++ show steps ++ " steps, "
-    ++ show queueSize ++ " max pqueue size)"
+    ++ "(depth " ++ show (exferenceCandidateComplexity metrics)
+    ++ ", " ++ show (exferenceCandidateSteps metrics) ++ " steps, "
+    ++ show (exferenceCandidateFinalQueueSize metrics)
+    ++ " max pqueue size)"
 
-noResultsMessage :: Maybe SearchStatus -> String
+noResultsMessage :: Maybe Progress -> String
 noResultsMessage Nothing = "[no search states were produced]"
-noResultsMessage (Just status) = case toSearchProgress status of
-  Right (SharedSearch.Completed SharedSearch.Finished) ->
-    "[no results: search space exhausted]"
-  Right (SharedSearch.Completed (SharedSearch.Truncated reasons))
-    | SharedSearch.StepLimitReached `elem` NonEmpty.toList reasons ->
-        "[no results found before the step limit; inhabitation is undecided]"
-    | otherwise ->
-        "[no results found after pruning; inhabitation is undecided]"
-  Right SharedSearch.Continuing ->
-    "[no results in the inspected search prefix; inhabitation is undecided]"
-  Left statusError ->
-    "[invalid internal search status: " ++ show statusError ++ "]"
+noResultsMessage (Just (Completed Finished)) =
+  "[no results: search space exhausted]"
+noResultsMessage (Just (Completed (Truncated reasons)))
+  | StepLimitReached `elem` NonEmpty.toList reasons =
+      "[no results found before the step limit; inhabitation is undecided]"
+  | otherwise =
+      "[no results found after pruning; inhabitation is undecided]"
+noResultsMessage (Just Continuing) =
+  "[no results in the inspected search prefix; inhabitation is undecided]"
 
-lastMaybe :: [a] -> Maybe a
+printEnvironment :: Show function => Int -> SourceEnvironment function -> IO ()
+printEnvironment verbosity environment = do
+  when (verbosity > 0) $ putStrLn "[Environment]"
+  mapM_ print $ sourceTypeSynonyms environment
+  mapM_ print $ Map.elems classes
+  mapM_ print
+    [(name, instanceValue) | (name, values) <- Map.toList instances,
+      instanceValue <- values]
+  mapM_ print $ sourceFunctions environment
+  mapM_ print $ sourceDeconstructors environment
+ where
+  classes = sClassEnv_tclasses $ sourceClasses environment
+  instances = sClassEnv_instances $ sourceClasses environment
+
+-- The shared session correctly excludes an environment binding equal to its
+-- generated definition target. This compatibility CLI prints only the clause
+-- body, so choose a target outside the loaded source namespace instead of
+-- needlessly making such a binding unavailable to expression search.
+freshTarget :: SourceEnvironment FunctionBinding -> IO Name
+freshTarget environment = go (0 :: Int)
+ where
+  occupied = Set.fromList
+    [toSynthesisName $ functionName binding
+    | binding <- sourceFunctions environment]
+  go suffix = do
+    let spelling = "_djexResult" ++ if suffix == 0 then "" else show suffix
+    candidate <- either
+      (fatal . ("invalid generated result target: " ++) . show)
+      pure
+      $ mkIdentifier spelling
+    if Set.member candidate occupied
+      then go $ suffix + 1
+      else pure candidate
+
+parseVerbosity :: [Flag] -> Either String Int
+parseVerbosity flags = sum <$> mapM parseValue
+  [value | Verbose value <- flags]
+ where
+  parseValue Nothing = Right 1
+  parseValue (Just source) = case readMaybe source of
+    Just value | value >= 0 -> Right value
+    _ -> Left $ "invalid verbosity " ++ show source ++ "\n" ++ fullUsageInfo
+
+validateFlagCombinations :: [Flag] -> [String] -> IO ()
+validateFlagCombinations flags inputs = do
+  requireAtMostOne "selection mode"
+    [ flag
+    | flag <- [PrintAll, EnvUsage, FirstSol, Best]
+    , flag `elem` flags
+    ]
+  requireAtMostOne "qualification mode"
+    [flag | flag@QualificationLevel{} <- flags]
+  requireAtMostOne "environment directory"
+    [flag | flag@EnvDir{} <- flags]
+  when (null inputs && any (`elem` flags)
+      [PrintAll, EnvUsage, FirstSol, Best, Constraints]) $
+    usageFailure "a search or selection option requires an input type"
+ where
+  requireAtMostOne description selected = when (length selected > 1) $
+    usageFailure $ "conflicting " ++ description ++ " options: "
+      ++ intercalate ", " (map show selected)
+
+lastMaybe :: [value] -> Maybe value
 lastMaybe = List.foldl' (\_ value -> Just value) Nothing
 
-filterBindingsSimple :: [String] -> [FunctionBinding] -> [FunctionBinding]
-filterBindingsSimple excluded = filter $ \binding ->
-  case qualifiedNameOccurrence $ functionName binding of
-    SharedName.IdentifierOccurrence _ spelling -> spelling `notElem` excluded
-    SharedName.OperatorOccurrence _ spelling -> spelling `notElem` excluded
-    SharedName.SpecialOccurrence SharedName.FunctionConstructor ->
-      "->" `notElem` excluded
-    SharedName.SpecialOccurrence _ -> True
+usageFailure :: String -> IO value
+usageFailure message = fatal $ message ++ "\n" ++ fullUsageInfo
 
-bindingIsSupported :: FunctionBinding -> Bool
-bindingIsSupported binding = all (not . containsForall)
-  $ functionResult binding
-  : functionParameters binding
-  ++ concatMap constraint_params (functionConstraints binding)
-
-deconstructorIsSupported :: DeconstructorBinding -> Bool
-deconstructorIsSupported binding = all (not . containsForall)
-  $ deconstructorInput binding
-  : concatMap constructorFields (deconstructorConstructors binding)
-
-containsForall :: HsType -> Bool
-containsForall TypeForall{} = True
-containsForall (TypeArrow parameter result) =
-  containsForall parameter || containsForall result
-containsForall (TypeApp function argument) =
-  containsForall function || containsForall argument
-containsForall _ = False
+fatal :: String -> IO value
+fatal message = hPutStrLn stderr message >> exitFailure

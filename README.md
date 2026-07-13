@@ -93,4 +93,19 @@ batches preserve queue/depth pruning, nominal binding usage, residual
 constraints, statistics, and rendering hints without forcing the remaining
 trace. Each generated expression is wrapped in a target-bearing shared
 `FunctionClause`. Candidate selection and rendering remain presentation
-policies outside both session operations.
+policies outside both session operations. The shared `Selection` module now
+provides first, global-best, streaming-all, batch-lookahead, and preferred-tier
+lookahead policies over either backend's result envelope. `TypeRender` prints
+shared types and constraints from tagged variable-name hints without collapsing
+flexible and rigid identities.
+
+The `exference` compatibility executable is a thin consumer of this boundary:
+it loads and seals one session, parses every requested type through
+`parseExferenceRequest`, selects shared candidates, and renders their generated
+expression bodies. Exact nominal session policy replaces its former
+occurrence-text filtering of recursion helpers. Parse, kind, option, and search
+failures are structured diagnostics on stderr with failure exit status;
+repeated inputs are all processed and conflicting presentation modes are
+rejected. Its historical ranking vector remains an explicit compatibility
+profile. `--short` now adds backend-neutral structural expression size to the
+candidate cost instead of being a dead option.

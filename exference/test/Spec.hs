@@ -1060,6 +1060,26 @@ tests = testGroup "Exference"
           toSearchProgress (chunkStatus chunk) @?= Right
             (SharedSearch.Completed $ SharedSearch.truncated
               $ SharedSearch.DepthLimitPruned 1)
+      , testCase "solution length contributes structural candidate cost" $ do
+          let firstStatistics input = take 1
+                [ statistics
+                | chunk <- findExpressionsWithStats input
+                , (_, _, statistics) <- chunkElements chunk
+                ]
+              withoutLength = defaultHeuristicsConfig
+                {heuristics_solutionLength = 0}
+              withLength = defaultHeuristicsConfig
+                {heuristics_solutionLength = 1}
+          case ( firstStatistics identityInput
+                    {input_heuristicsConfig = withoutLength}
+               , firstStatistics identityInput
+                    {input_heuristicsConfig = withLength}
+               ) of
+            ([baseline], [weighted]) ->
+              exference_complexityRating weighted @?=
+                exference_complexityRating baseline + 2
+            result -> fail $ "expected two identity candidates, got "
+              ++ show result
       , testCase "status-aware selectors preserve policy semantics" $ do
           let status index = SearchStatus SearchRunning index 0
               terminal = SearchStatus SearchStepLimitReached 6 0

@@ -22,6 +22,7 @@ module Language.Haskell.Synthesis.Generated
   , validateFunctionClauseScope
   , validateExpressionSyntax
   , validateDefinitionName
+  , expressionSize
   , allocateLocalNames
   , allocateClauseLocalNames
   , renderExpression
@@ -332,6 +333,21 @@ validateExpressionSyntax expression = case expression of
     where
       validateAlternative (pattern, body) =
         validatePatternSyntax pattern >> validateExpressionSyntax body
+
+-- | Count structural nodes independently of rendered names and qualification.
+-- Search heuristics can prefer smaller terms without making rank depend on
+-- presentation policy or identifier length.
+expressionSize :: Expression local -> Int
+expressionSize expression = 1 + case expression of
+  Local{} -> 0
+  Global{} -> 0
+  Lambda _ body -> expressionSize body
+  Apply function argument -> expressionSize function + expressionSize argument
+  Tuple elements -> sum $ map expressionSize elements
+  Hole{} -> 0
+  Let _ value body -> expressionSize value + expressionSize body
+  Case scrutinee alternatives -> expressionSize scrutinee
+    + sum [expressionSize body | (_, body) <- alternatives]
 
 validatePatternSyntax :: Pattern local -> Either RenderError ()
 validatePatternSyntax pattern = case pattern of

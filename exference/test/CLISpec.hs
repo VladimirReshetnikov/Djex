@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.Exception (bracket)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isPrefixOf)
 import System.Directory
   (createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Exit (ExitCode (..))
@@ -17,6 +17,10 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "parse failures are controlled diagnostics" testParseFailure
   , testCase "ill-kinded queries stop before search" testKindFailure
   , testCase "invalid searches never enter reporting modes" testInvalidSearch
+  , testCase "invalid verbosity is a controlled usage error" testInvalidVerbosity
+  , testCase "repeated inputs are all searched" testRepeatedInputs
+  , testCase "conflicting selection modes are rejected" testConflictingModes
+  , testCase "short mode contributes structural expression cost" testShortMode
   , testCase "missing environment directories fail closed" testMissingEnvironment
   , testCase "invalid class environments fail closed" testInvalidEnvironment
   , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
@@ -43,31 +47,69 @@ testIdentity = do
   -- The environment-free simplifier deliberately keeps the checked lambda
   -- instead of assuming that an unqualified Prelude.id is available.
   assertContains "identity should be synthesized" "\\a -> a" output
+  assertBool "the adapter's internal clause target must stay hidden"
+    (not $ "_djexResult" `isInfixOf` output)
   assertBool "a valid query must not be rejected during input validation"
     (not $ "invalid search input" `isInfixOf` output)
 
 testParseFailure :: Assertion
 testParseFailure = do
-  output <- runExference ["--first", "("]
+  (output, errors) <- runExferenceFailure ["--first", "("]
   assertContains "invalid types should carry a controlled diagnostic"
-    "could not parse input type:" output
+    "could not parse input type:" errors
+  assertEqual "parse failure stdout" "" output
 
 testKindFailure :: Assertion
 testKindFailure = do
-  output <- runExference
+  (output, errors) <- runExferenceFailure
     ["--first", "Data.Maybe.Maybe Data.Maybe.Maybe"]
   assertContains "ill-kinded input should carry a controlled diagnostic"
-    "ill-kinded input type:" output
+    "ill-kinded input type:" errors
   assertBool "ill-kinded input must not enter search"
     (not $ "[selecting" `isInfixOf` output)
 
 testInvalidSearch :: Assertion
 testInvalidSearch = do
-  output <- runExference ["--envUsage", "(forall a. a) -> Int"]
+  (output, errors) <- runExferenceFailure
+    ["--envUsage", "(forall a. a) -> Int"]
   assertContains "rank-N input should fail at the checked search boundary"
-    "invalid search input: NestedForallInGoal" output
+    "NestedForallInGoal" errors
   assertBool "environment-usage reporting must not evaluate an empty trace"
     (not $ "Prelude.last" `isInfixOf` output)
+
+testInvalidVerbosity :: Assertion
+testInvalidVerbosity = do
+  (output, errors) <- runExferenceFailure
+    ["--verbose=wat", "a -> a"]
+  assertEqual "invalid verbosity stdout" "" output
+  assertContains "invalid verbosity should identify its value"
+    "invalid verbosity \"wat\"" errors
+  assertBool "invalid verbosity must not expose partial read"
+    (not $ "Prelude.read" `isInfixOf` errors)
+  assertBool "invalid verbosity must not expose a call stack"
+    (not $ "CallStack" `isInfixOf` errors)
+
+testRepeatedInputs :: Assertion
+testRepeatedInputs = do
+  output <- runExference
+    ["--first", "--input", "a -> a", "a -> a"]
+  assertEqual "both query results should be printed"
+    2 $ countOccurrences "max pqueue size" output
+
+testConflictingModes :: Assertion
+testConflictingModes = do
+  (output, errors) <- runExferenceFailure
+    ["--first", "--best", "a -> a"]
+  assertEqual "conflicting mode stdout" "" output
+  assertContains "conflicting modes should be explicit"
+    "conflicting selection mode options" errors
+
+testShortMode :: Assertion
+testShortMode = do
+  ordinary <- runExference ["--first", "a -> a"]
+  short <- runExference ["--first", "--short", "a -> a"]
+  assertBool "short mode should change structural candidate cost"
+    (ordinary /= short)
 
 testMissingEnvironment :: Assertion
 testMissingEnvironment = withMissingTemporaryEnvironment $ \environmentDirectory -> do
@@ -190,6 +232,25 @@ runExference arguments = do
   assertEqual ("exference stderr: " ++ errors) ExitSuccess exitCode
   assertEqual "exference should not write to stderr" "" errors
   pure output
+
+runExferenceFailure :: [String] -> IO (String, String)
+runExferenceFailure arguments = do
+  (exitCode, output, errors) <-
+    readProcessWithExitCode "exference" arguments ""
+  case exitCode of
+    ExitFailure _ -> pure ()
+    ExitSuccess -> fail "invalid exference invocation returned success"
+  pure (output, errors)
+
+countOccurrences :: String -> String -> Int
+countOccurrences needle source
+  | null needle = 0
+  | otherwise = go source
+ where
+  go remaining
+    | needle `isPrefixOf` remaining = 1 + go (drop (length needle) remaining)
+    | _ : rest <- remaining = go rest
+    | otherwise = 0
 
 withTemporaryEnvironment :: (FilePath -> IO a) -> IO a
 withTemporaryEnvironment action = do

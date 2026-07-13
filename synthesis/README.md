@@ -40,6 +40,22 @@ logical evidence is deliberately independent of `Search.Completion`: a backend
 may return checked candidates from a truncated search, prove non-inhabitation,
 identify an excluded target self-reference, or establish no conclusion.
 
+`Language.Haskell.Synthesis.Selection` applies backend-neutral presentation
+policies to a lazy list of query-result batches. Callers provide candidate rank
+and admissibility functions; the selector can stop at the first candidate,
+retain every globally best candidate, inspect batches for a bounded local-best
+lookahead, or stream all admissible candidates. Every selection records the
+progress of the last batch it actually inspected, so an empty selection still
+distinguishes exhaustion or truncation from an empty continuing prefix. The
+lookahead budget is measured in whole batches after the first admissible rank;
+a strictly better batch resets it, while empty, inadmissible, equal, and worse
+batches consume one unit. A companion single-pass selector supports two-tier
+preference: it retains globally best fallback candidates until the first
+preferred candidate appears, then discards the fallback regardless of rank and
+applies the same batch-counted lookahead only to the preferred tier. This lets
+frontends prefer candidates without residual obligations without retaining and
+rescanning a lazy search trace.
+
 `Language.Haskell.Synthesis.Type` is the common parser-independent source-type
 tree: variables (optionally flexible/rigid), structural names, application,
 functions, boxed or unboxed tuples, and explicit foralls with shared
@@ -47,6 +63,11 @@ constraints. It canonicalizes saturated function and tuple constructors,
 validates lexical/arity/binder invariants, and computes free variables.
 Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
 this AST.
+
+`Language.Haskell.Synthesis.TypeRender` renders that shared structure back to
+compact Haskell source while leaving tagged variable spellings to the caller.
+This preserves frontend distinctions such as flexible and rigid variables
+that happen to reuse one numeric backend identity.
 
 `Language.Haskell.Synthesis.Kind` and `.Declaration` provide the next source
 layer: kind variables/arrows, kinded type parameters, synonyms, data and

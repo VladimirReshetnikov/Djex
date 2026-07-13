@@ -5,15 +5,23 @@
 -- validation before returning a lazy sequence of total shared result batches.
 module Language.Haskell.Djex.Exference
   ( ExferenceSession
+  , ExferenceSessionPolicy (..)
+  , defaultExferenceSessionPolicy
   , ExferenceOptions (..)
   , defaultExferenceOptions
+  , ExferenceHeuristicsConfig (..)
+  , Penalty (..)
+  , Qualification (..)
   , ExferenceOmission (..)
   , ExferenceOmissionCapability (..)
   , ExferenceOmissionReason (..)
   , ExferenceRequest
   , ExferenceCandidate
+  , ExferenceCandidateMetrics (..)
+  , ExferenceCandidateRenderError (..)
   , ExferenceResult
   , mkExferenceSession
+  , mkExferenceSessionWithPolicy
   , exferenceSessionInventory
   , exferenceSessionOmissions
   , exferenceSessionDiagnostics
@@ -21,9 +29,15 @@ module Language.Haskell.Djex.Exference
   , exferenceRequestQuery
   , parseExferenceRequest
   , runExferenceQuery
+  , exferenceCandidateMetrics
+  , exferenceResultBindingUsages
+  , renderExferenceCandidateExpression
+  , renderExferenceCandidateDefinition
+  , renderExferenceResidualConstraints
   ) where
 
 import Control.Monad.Trans.Except (runExceptT)
+import Data.Bifunctor (first)
 import Data.Foldable (toList)
 import Data.Functor.Identity (runIdentity)
 import Data.List (partition)
@@ -32,18 +46,21 @@ import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core
-  ( ExferenceBatchMetadata
-  , ExferenceCandidateDetails
+  ( ExferenceCandidateDetails (..)
   , ExferenceGeneratedSearchBatch
-  , ExferenceHeuristicsConfig
+  , ExferenceHeuristicsConfig (..)
   , ExferenceInput (..)
   , ExferenceInputError (..)
-  , Penalty
+  , Penalty (..)
   , findGeneratedSearchBatchesWithHintsEither
   , typeVariableHints
   , validateExferenceInput
   )
 import Language.Haskell.Exference.Core.Declaration (SynthesisInventory)
+import Language.Haskell.Exference.Core.ExferenceStats
+  ( ExferenceBatchMetadata (..)
+  , ExferenceStats (..)
+  )
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
@@ -59,6 +76,7 @@ import Language.Haskell.Exference.Core.Types
   , sClassEnv_tclasses
   , toSynthesisType
   , toSynthesisName
+  , showVar
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( CheckedSourceEnvironment
@@ -73,32 +91,57 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( TypeDeclMap
   , parseTypeWithKinds
   )
-import Language.Haskell.Synthesis.Candidate (Candidate)
+import Language.Haskell.Synthesis.Candidate
+  ( Candidate
+  , candidateDetails
+  , candidateOutput
+  , candidateResidualConstraints
+  )
 import Language.Haskell.Synthesis.Constraint
   ( constraintArguments )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , Severity (Error, Warning)
+  , Severity (Error, Info, Warning)
   , diagnostic
   , withCode
   , withContext
   )
 import Language.Haskell.Synthesis.Generated
-  ( FunctionClause (FunctionClause)
+  ( Expression (..)
+  , FunctionClause (FunctionClause)
+  , Qualification (..)
+  , RenderError
+  , RenderOptions (renderQualification)
+  , clauseBody
+  , defaultRenderOptions
+  , renderExpression
+  , renderFunctionClause
   , validateDefinitionName
   )
 import Language.Haskell.Synthesis.Inventory
   ( inventoryKindAssumptions )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.KindInference (checkTypesKinds)
-import Language.Haskell.Synthesis.Name (Name, renderCanonical)
+import Language.Haskell.Synthesis.Name
+  ( Name
+  , nameModule
+  , nameOccurrence
+  , nameOperator
+  , renderCanonical
+  )
 import Language.Haskell.Synthesis.Query
   ( QueryEvidence (NoEvidence, ValidatedCandidates)
   , QueryRequest (..)
-  , QueryResult (QueryResult)
+  , QueryResult (..)
   )
-import Language.Haskell.Synthesis.Search (batchCandidates)
+import Language.Haskell.Synthesis.Search
+  ( batchCandidates
+  , batchMetadata
+  )
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import Language.Haskell.Synthesis.Type
+  ( Variable (FlexibleVariable, RigidVariable) )
+import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 
 data ExferenceOptions = ExferenceOptions
   { exferenceAllowUnused :: Bool
@@ -130,7 +173,21 @@ data ExferenceOmissionCapability
   deriving (Eq, Ord, Show)
 
 data ExferenceOmissionReason = UnsupportedNestedForall
+  | ExcludedByPolicy
   deriving (Eq, Ord, Show)
+
+-- | Environment capabilities disabled before a reusable session is sealed.
+-- Names are structural and exact: excluding @Data.Function.fix@ never hides
+-- an unrelated qualified binding whose occurrence also happens to be @fix@.
+data ExferenceSessionPolicy = ExferenceSessionPolicy
+  { exferenceExcludedBindings :: [Name]
+  }
+  deriving (Eq, Show)
+
+defaultExferenceSessionPolicy :: ExferenceSessionPolicy
+defaultExferenceSessionPolicy = ExferenceSessionPolicy
+  { exferenceExcludedBindings = []
+  }
 
 data ExferenceOmission = ExferenceOmission
   { omittedName :: Name
@@ -162,13 +219,39 @@ type ExferenceCandidate =
 type ExferenceResult =
   QueryResult ExferenceBatchMetadata ExferenceCandidate
 
+data ExferenceCandidateMetrics = ExferenceCandidateMetrics
+  { exferenceCandidateSteps :: Int
+  , exferenceCandidateComplexity :: Penalty
+  , exferenceCandidateFinalQueueSize :: Int
+  }
+  deriving (Eq, Show)
+
+data ExferenceCandidateRenderError
+  = ExferenceGeneratedRenderError RenderError
+  | ExferenceUnsafeDefinitionQualification Qualification Name
+  deriving (Eq, Show)
+
 mkExferenceSession
   :: CheckedSourceEnvironment
   -> Either Diagnostic ExferenceSession
-mkExferenceSession checked = do
+mkExferenceSession = mkExferenceSessionWithPolicy
+  defaultExferenceSessionPolicy
+
+mkExferenceSessionWithPolicy
+  :: ExferenceSessionPolicy
+  -> CheckedSourceEnvironment
+  -> Either Diagnostic ExferenceSession
+mkExferenceSessionWithPolicy policy checked = do
   let source = checkedSourceProjection checked
-      (supportedFunctions, omittedFunctions) = partition functionSupported
-        $ sourceFunctions source
+      excludedBindings = Set.fromList $ exferenceExcludedBindings policy
+      functionExcluded binding = Set.member
+        (toSynthesisName $ functionName binding) excludedBindings
+      supportedFunctions =
+        [ binding
+        | binding <- sourceFunctions source
+        , not $ functionExcluded binding
+        , functionSupported binding
+        ]
       (supportedDeconstructors, omittedDeconstructors) =
         partition deconstructorSupported $ sourceDeconstructors source
       supportedSource = source
@@ -179,8 +262,11 @@ mkExferenceSession checked = do
         [ ExferenceOmission
             (toSynthesisName $ functionName binding)
             BindingIntroduction
-            UnsupportedNestedForall
-        | binding <- omittedFunctions
+            reason
+        | binding <- sourceFunctions source
+        , reason <- if functionExcluded binding
+            then [ExcludedByPolicy]
+            else [UnsupportedNestedForall | not $ functionSupported binding]
         ] ++ mapMaybe deconstructorOmission omittedDeconstructors
       value = ExferenceSession
         { sessionSource = supportedSource
@@ -218,6 +304,112 @@ exferenceRequestQuery
   :: ExferenceRequest
   -> QueryRequest SynthesisType ExferenceOptions
 exferenceRequestQuery = requestQuery
+
+exferenceCandidateMetrics
+  :: ExferenceCandidate
+  -> ExferenceCandidateMetrics
+exferenceCandidateMetrics candidate = ExferenceCandidateMetrics
+  { exferenceCandidateSteps = exference_steps statistics
+  , exferenceCandidateComplexity = exference_complexityRating statistics
+  , exferenceCandidateFinalQueueSize = exference_finalSize statistics
+  }
+ where
+  statistics = exferenceCandidateStats $ candidateDetails candidate
+
+-- | Cumulative nominal source-binding usage at this result batch.
+exferenceResultBindingUsages :: ExferenceResult -> Map.Map Name Int
+exferenceResultBindingUsages result = Map.fromList
+  [ (toSynthesisName backendName, count)
+  | (backendName, count) <- Map.toList
+      $ exferenceBindingUsages
+      $ batchMetadata
+      $ resultSearch result
+  ]
+
+renderExferenceCandidateExpression
+  :: Qualification
+  -> ExferenceCandidate
+  -> Either ExferenceCandidateRenderError String
+renderExferenceCandidateExpression qualification candidate = first
+  ExferenceGeneratedRenderError
+  $ renderExpression (candidateRenderOptions qualification candidate)
+  $ clauseBody
+  $ candidateOutput candidate
+
+renderExferenceCandidateDefinition
+  :: Qualification
+  -> ExferenceCandidate
+  -> Either ExferenceCandidateRenderError String
+renderExferenceCandidateDefinition qualification candidate
+  | definitionQualificationIsUnsafe qualification clause =
+      Left $ ExferenceUnsafeDefinitionQualification
+        qualification $ case clause of FunctionClause target _ _ -> target
+  | otherwise = first ExferenceGeneratedRenderError
+      $ renderFunctionClause
+          (candidateRenderOptions qualification candidate) clause
+ where
+  clause = candidateOutput candidate
+
+renderExferenceResidualConstraints
+  :: ExferenceCandidate
+  -> [String]
+renderExferenceResidualConstraints candidate =
+  map (SharedRender.renderConstraint variableName)
+  $ Set.toAscList
+  $ Set.fromList
+  $ candidateResidualConstraints candidate
+ where
+  variableName = candidateTypeVariableName candidate
+
+candidateRenderOptions
+  :: Qualification
+  -> ExferenceCandidate
+  -> RenderOptions TVarId
+candidateRenderOptions qualification candidate =
+  (defaultRenderOptions preferred)
+    {renderQualification = qualification}
+ where
+  hints = exferenceLocalNameHints $ candidateDetails candidate
+  preferred local = Map.findWithDefault (showVar local) local hints
+
+candidateTypeVariableName
+  :: ExferenceCandidate
+  -> SharedType.Variable TVarId
+  -> String
+candidateTypeVariableName candidate variable = Map.findWithDefault fallback
+  variable $ exferenceTypeVariableHints $ candidateDetails candidate
+ where
+  fallback = case variable of
+    FlexibleVariable identifier -> showVar identifier
+    RigidVariable identifier -> "C" ++ showVar identifier
+
+definitionQualificationIsUnsafe
+  :: Qualification
+  -> FunctionClause local
+  -> Bool
+definitionQualificationIsUnsafe qualification
+    (FunctionClause target _ body) = any collides $ expressionGlobals body
+ where
+  collides global = nameOccurrence global == nameOccurrence target
+    && case qualification of
+      FullyQualified -> nameModule global == Nothing
+      QualifyIdentifiers ->
+        nameModule global == Nothing || nameOperator global /= Nothing
+      Unqualified -> True
+
+expressionGlobals :: Expression local -> [Name]
+expressionGlobals expression = case expression of
+  Local{} -> []
+  Global name -> [name]
+  Lambda _ body -> expressionGlobals body
+  Apply function argument ->
+    expressionGlobals function ++ expressionGlobals argument
+  Tuple elements -> concatMap expressionGlobals elements
+  Hole{} -> []
+  Let _ value body -> expressionGlobals value ++ expressionGlobals body
+  Case scrutinee alternatives ->
+    expressionGlobals scrutinee
+      ++ concatMap (expressionGlobals . snd) alternatives
 
 parseExferenceRequest
   :: ExferenceSession
@@ -437,9 +629,20 @@ deconstructorOmission binding = do
 omissionDiagnostic :: ExferenceOmission -> Diagnostic
 omissionDiagnostic omission = withContext
   (renderCanonical $ omittedName omission)
-  $ withCode "DJEX_EXF_OMISSION"
-  $ diagnostic Warning
-      "Exference omitted a source capability containing a nested forall"
+  $ withCode code
+  $ diagnostic severity message
+ where
+  (severity, code, message) = case omittedReason omission of
+    UnsupportedNestedForall ->
+      ( Warning
+      , "DJEX_EXF_OMISSION"
+      , "Exference omitted a source capability containing a nested forall"
+      )
+    ExcludedByPolicy ->
+      ( Info
+      , "DJEX_EXF_POLICY_OMISSION"
+      , "Exference omitted a source binding disabled by session policy"
+      )
 
 failureDiagnostic
   :: Show detail

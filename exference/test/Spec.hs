@@ -76,6 +76,7 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   , planRigidInstantiation
   , rigidInstantiations
   )
+import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
@@ -1888,6 +1889,87 @@ tests = testGroup "Exference"
               isNaN value @?= True
             Left other -> fail $ "unexpected validation error: " ++ show other
             Right _ -> fail "non-finite heuristic was accepted"
+      , testCase "finite score operations saturate without changing ordinary order" $ do
+          let maximumFinite = 1.7976931348623157e308
+              maximumScore = Penalty maximumFinite
+              minimumScore = Penalty $ negate maximumFinite
+              nanPenalty = Penalty $ 0 / 0
+              nanPriority = Score.Priority $ 0 / 0
+              saturatedUpper = Score.addScore maximumScore maximumScore
+              saturatedLower = Score.addScore minimumScore minimumScore
+              saturatedPriority = Score.addPriority
+                (Score.Priority maximumFinite) (Score.Priority maximumFinite)
+          Score.addScore (Penalty 1.25) (Penalty 2.5)
+            @?= Penalty 3.75
+          Score.addScore (Penalty (-3.5)) (Penalty 1)
+            @?= Penalty (-2.5)
+          compare (Penalty (-3.5)) (Penalty 2) @?= LT
+          compare (Score.Priority (-3.5)) (Score.Priority 2) @?= LT
+          penaltyValue saturatedUpper @?= maximumFinite
+          penaltyValue saturatedLower @?= negate maximumFinite
+          Score.priorityValue saturatedPriority @?= maximumFinite
+          assertBool "saturating score addition produced a non-finite value"
+            $ Score.isFiniteScore saturatedUpper
+              && Score.isFiniteScore saturatedLower
+          assertBool "saturating priority addition produced a non-finite key"
+            $ Score.isFinitePriority saturatedPriority
+          -- Public numeric expressions stay raw until validation rather than
+          -- silently turning a malformed option into an accepted maximum.
+          case (0 / 0 :: Penalty) of
+            Penalty value -> assertBool "raw score arithmetic hid NaN"
+              $ isNaN value
+          nanPenalty == nanPenalty @?= True
+          compare nanPenalty nanPenalty @?= EQ
+          nanPriority == nanPriority @?= True
+          compare nanPriority nanPriority @?= EQ
+          let normalizedPriority = Score.normalizePriority nanPriority
+          assertBool "normalizing a queue NaN did not produce a finite key"
+            $ Score.isFinitePriority normalizedPriority
+          assertBool "a normalized queue NaN did not sink"
+            $ normalizedPriority < 0
+      , testCase "maximum finite depth costs saturate candidate metrics" $ do
+          let maximumFinite = 1.7976931348623157e308
+              input = identityInput
+                { input_heuristicsConfig = defaultHeuristicsConfig
+                    { heuristics_functionGoalTransform =
+                        Penalty maximumFinite
+                    }
+                }
+          validateExferenceInput input @?= Right ()
+          chunks <- expectRight $ findExpressionsWithStatsEither input
+          case [ exference_complexityRating statistics
+               | chunk <- chunks
+               , (_, _, statistics) <- chunkElements chunk
+               ] of
+            rating : _ -> do
+              Score.isFiniteScore rating @?= True
+              penaltyValue rating @?= maximumFinite
+            [] -> fail "extreme finite identity search produced no candidate"
+      , testCase "opposing extreme finite scores cannot produce NaN" $ do
+          let maximumFinite = 1.7976931348623157e308
+              argument = TypeCons $ name "Argument"
+              result = TypeCons $ name "Result"
+              preferred = Penalty $ negate maximumFinite
+              outer = FunctionBinding result (name "outer") preferred
+                [] [argument]
+              inner = FunctionBinding argument (name "inner") preferred
+                [] []
+              input = identityInput
+                { input_goalType = result
+                , input_envFuncs = [outer, inner]
+                , input_heuristicsConfig = defaultHeuristicsConfig
+                    {heuristics_solutionLength = Penalty maximumFinite}
+                }
+          validateExferenceInput input @?= Right ()
+          chunks <- expectRight $ findExpressionsWithStatsEither input
+          case [ exference_complexityRating statistics
+               | chunk <- chunks
+               , (_, _, statistics) <- chunkElements chunk
+               ] of
+            rating : _ -> assertBool
+              ("extreme finite inputs produced " ++ show rating)
+              $ Score.isFiniteScore rating
+            [] -> fail "extreme signed-rating search produced no candidate"
       , testCase "signed finite function ratings are accepted" $ do
           let variable = TypeVar 0
               binding = FunctionBinding
@@ -3188,6 +3270,22 @@ tests = testGroup "Exference"
               $ InvalidSynthesisConstraint
               $ SharedConstraint.InvalidConstraintClass
               $ toSynthesisName invalidClass)
+      , testCase "compatibility candidates reject non-finite metrics" $ do
+          let invalid = Penalty $ 0 / 0
+              chunk = ExferenceChunkElement
+                (SearchStatus SearchExhausted 0 0)
+                Map.empty
+                [ ( ExpName $ name "value"
+                  , []
+                  , ExferenceStats 1 invalid 0
+                  )
+                ]
+          case toGeneratedSearchBatch chunk of
+            Left (InvalidCandidate
+                (InvalidCandidateComplexity (Penalty actual))) ->
+              assertBool "candidate error did not preserve NaN" $ isNaN actual
+            Left failure -> fail $ "unexpected candidate failure: " ++ show failure
+            Right _ -> fail "a non-finite candidate metric was accepted"
       , testCase "compatibility candidates reject unbound locals and holes" $ do
           let chunk expression = ExferenceChunkElement
                 (SearchStatus SearchExhausted 0 0)

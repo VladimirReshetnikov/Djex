@@ -17,7 +17,7 @@ import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 
 import qualified Language.Haskell.Exference.Core.Expression as Exference
-import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats)
+import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
 import Language.Haskell.Exference.Core.FunctionBinding (EnvDictionary (..))
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( RigidInstantiationPlan
@@ -37,6 +37,8 @@ import Language.Haskell.Exference.Core.Types
   , toSynthesisConstraint
   , toSynthesisConstraintStructure
   )
+import Language.Haskell.Exference.Core.Score
+  (Penalty, isFiniteScore, normalizePenalty)
 import Language.Haskell.Synthesis.Candidate (Candidate (..))
 import Language.Haskell.Synthesis.Constraint (Constraint)
 import qualified Language.Haskell.Synthesis.Generated as Generated
@@ -63,6 +65,7 @@ data ExferenceCandidateError
   | InvalidCandidateScope (Generated.ScopeError TVarId)
   | IncompleteCandidate (NonEmpty TVarId)
   | InvalidCandidateType SynthesisTypeError
+  | InvalidCandidateComplexity Penalty
   deriving (Eq, Show, Generic)
 
 instance NFData ExferenceCandidateError
@@ -91,6 +94,10 @@ mkExferenceGeneratedCandidate typeNames expression constraints statistics = do
     [] -> pure ()
   sharedConstraints <- either (Left . InvalidCandidateType) Right
     $ traverse toSynthesisConstraint constraints
+  case exference_complexityRating statistics of
+    complexity
+      | isFiniteScore complexity -> pure ()
+      | otherwise -> Left $ InvalidCandidateComplexity complexity
   pure $ detachCandidate
     typeNames expression generated sharedConstraints statistics
 
@@ -122,6 +129,9 @@ detachCandidate
 detachCandidate typeNames expression generated constraints statistics = force
   $ Candidate generated constraints ExferenceCandidateDetails
       { exferenceCandidateStats = statistics
+          { exference_complexityRating = normalizePenalty
+              $ exference_complexityRating statistics
+          }
       , exferenceLocalNameHints = Exference.expressionNameHints expression
       , exferenceTypeVariableHints = typeNames
       }

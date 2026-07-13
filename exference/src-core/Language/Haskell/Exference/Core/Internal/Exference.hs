@@ -70,17 +70,13 @@ import Control.Monad ( mzero, replicateM, forM, liftM )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, unfoldr )
 import Data.Monoid ( Any(..) )
-import Data.Foldable ( sum, asum, traverse_ )
+import Data.Foldable ( asum, traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Control.Monad.Trans.Class ( lift )
 import Control.Monad.Trans.State.Lazy
   ( StateT(..), gets, modify, state
   , execStateT, runStateT, mapStateT
   )
-
-import Prelude hiding ( sum )
-
-
 
 data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
   { heuristics_goalVar                :: Penalty
@@ -443,14 +439,14 @@ findEngineChunks
       , rawExpression <- [nodeExpression solution]
       , e <- maybeToList $ checkedSimplification
           contxt remainingConstraints rawExpression
-      , let d = nodeDepth solution
-              + ( heuristics_unusedVar heuristics
-                * fromIntegral unusedVarCount
-                )
-              + ( heuristics_solutionLength heuristics
-                * fromIntegral (SharedGenerated.expressionSize
-                    $ toGeneratedExpression e)
-                )
+      , let d = normalizePenalty $ sumScores
+              [ nodeDepth solution
+              , multiplyScore (heuristics_unusedVar heuristics)
+                  $ fromIntegral unusedVarCount
+              , multiplyScore (heuristics_solutionLength heuristics)
+                  $ fromIntegral (SharedGenerated.expressionSize
+                      $ toGeneratedExpression e)
+              ]
       ]
     where
       n' = findSteps searchState
@@ -524,7 +520,9 @@ findEngineChunks
       (potentialSolutions, futures) = partition
         (Seq.null . nodeGoals) withinDepth
       ratedNew =
-        [ ( rateNode heuristics newS + Priority (4.5*f (fromIntegral n'))
+        [ ( normalizePriority $ addPriority
+              (rateNode heuristics newS)
+              (Priority $ 4.5 * f (fromIntegral n'))
           , newS)
         | newS <- futures
         , let f :: Double -> Double
@@ -734,7 +732,7 @@ validateEnvironmentRatingsAndSyntax environment
   -- Historical function ratings are signed: negative values are bonuses.
   -- Query heuristic penalties remain non-negative, but conflating the two
   -- policies would make the shipped environment fail validation.
-  | Just binding <- find (not . isFiniteRating . functionPenalty)
+  | Just binding <- find (not . isFiniteScore . functionPenalty)
       (environmentFunctions environment) = Left $ InvalidHeuristic
         (show $ functionName binding) (functionPenalty binding)
   | Just (binding, syntaxError) <- firstInvalidGeneratedBinding environment =
@@ -977,10 +975,6 @@ environmentConstraints environment =
    where
     headName = constraint_tclass $ instance_head instanceDeclaration
 
-isFiniteRating :: Penalty -> Bool
-isFiniteRating = \rating -> let value = penaltyValue rating
-  in not (isNaN value || isInfinite value)
-
 limitQueue :: Maybe Int -> RatedNodes -> (RatedNodes, Int)
 limitQueue Nothing queue = (queue, 0)
 limitQueue (Just maximumSize) queue =
@@ -1018,13 +1012,13 @@ constraintContainsForall :: HsConstraint -> Bool
 constraintContainsForall = any containsForall . constraint_params
 
 rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority
-rateNode h s = Priority
-  $ negate (penaltyValue (rateGoals h $ nodeGoals s)
-            + penaltyValue (nodeDepth s))
-  + priorityValue (rateUsage h s)
+rateNode h s = priorityFromPenalty
+  $ addScore
+      (negateScore $ addScore (rateGoals h $ nodeGoals s) $ nodeDepth s)
+      (rateUsage h s)
 
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
-rateGoals h = sum . fmap rateGoal
+rateGoals h = sumScores . fmap rateGoal
   where
     rateGoal (TGoal (VarBinding _ t) _) = tComplexity t
     -- TODO: actually measure performance with different values,
@@ -1032,17 +1026,19 @@ rateGoals h = sum . fmap rateGoal
     tComplexity (TypeVar _)         = heuristics_goalVar h
     tComplexity (TypeConstant _)    = heuristics_goalCons h -- TODO different heuristic?
     tComplexity (TypeCons _)        = heuristics_goalCons h
-    tComplexity (TypeArrow t1 t2)   = heuristics_goalArrow h + tComplexity t1 + tComplexity t2
-    tComplexity (TypeApp   t1 t2)   = heuristics_goalApp h   + tComplexity t1 + tComplexity t2
+    tComplexity (TypeArrow t1 t2)   = sumScores
+      [heuristics_goalArrow h, tComplexity t1, tComplexity t2]
+    tComplexity (TypeApp   t1 t2)   = sumScores
+      [heuristics_goalApp h, tComplexity t1, tComplexity t2]
     tComplexity (TypeForall _ _ t1) = tComplexity t1
 
-rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Priority
-rateUsage h = Priority . sum . map f . IntMap.elems . nodeVarUses where
-  f :: Int -> Double
-  f 0 = negate $ penaltyValue $ heuristics_tempUnusedVarPenalty h
+rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Penalty
+rateUsage h = sumScores . map f . IntMap.elems . nodeVarUses where
+  f :: Int -> Penalty
+  f 0 = negateScore $ heuristics_tempUnusedVarPenalty h
   f 1 = 0
-  f k = negate $ fromIntegral (k-1)
-    * penaltyValue (heuristics_tempMultiVarUsePenalty h)
+  f k = negateScore $ multiplyScore
+    (fromIntegral $ k-1) (heuristics_tempMultiVarUsePenalty h)
 
 getUnusedVarCount :: SearchNode -> Int
 getUnusedVarCount = length . filter (== 0) . IntMap.elems . nodeVarUses
@@ -1088,7 +1084,8 @@ stateStep multiPM allowConstrs h = do
                 (foldl (\e (VarBinding v ty) -> ExpLambda v ty e)
                   (ExpHole nextId) ts)
                 (nodeExpression node)
-            , nodeDepth = nodeDepth node + heuristics_functionGoalTransform h
+            , nodeDepth = addScore (nodeDepth node)
+                $ heuristics_functionGoalTransform h
             , nodeLastStepBinding = Nothing
             }
           -- for each parameter introduced in the lambda-expression above,
@@ -1118,7 +1115,8 @@ stateStep multiPM allowConstrs h = do
           else error $ "rigid-instantiation plan disagrees with forall layer: "
             ++ show vs ++ " /= " ++ show (map fst current)
       modify $ \node -> node
-        { nodeDepth = nodeDepth node + heuristics_functionGoalTransform h
+        { nodeDepth = addScore (nodeDepth node)
+            $ heuristics_functionGoalTransform h
           -- TODO: consider a distinct forall-opening heuristic.
         , nodeLastStepBinding = Nothing
         }
@@ -1180,8 +1178,8 @@ stateStep multiPM allowConstrs h = do
         provType
         (map (renameFlexibleConstraint renaming) $ functionConstraints binding)
         (map rename $ functionParameters binding)
-        (heuristics_stepEnvGood h + functionPenalty binding)
-        (heuristics_stepEnvBad h + functionPenalty binding)
+        (addScore (heuristics_stepEnvGood h) $ functionPenalty binding)
+        (addScore (heuristics_stepEnvBad h) $ functionPenalty binding)
         (unify goalType provType)
 
     -- on code for byProvided and byFunctionSimple
@@ -1225,7 +1223,7 @@ stateStep multiPM allowConstrs h = do
           newScopeId <- builderAddScope scopeId
           modify $ \node -> node
             { nodeConstraintGoals = nodeConstraintGoals node <> provConstrs
-            , nodeDepth = nodeDepth node + depthModNoMatch
+            , nodeDepth = addScore (nodeDepth node) depthModNoMatch
             , nodeLastStepBinding = applierName
             }
           traverse_ (builderRecordVarUse . fst) applierVariable
@@ -1269,7 +1267,7 @@ stateStep multiPM allowConstrs h = do
               (foldl ExpApply coreExp (map ExpHole vars))
               (nodeExpression node)
           , nodeConstraintGoals = newConstraints
-          , nodeDepth = nodeDepth node + depthModMatch
+          , nodeDepth = addScore (nodeDepth node) depthModMatch
           , nodeLastStepBinding = applierName
           }
         traverse_ (builderRecordVarUse . fst) applierVariable

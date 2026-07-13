@@ -5,7 +5,8 @@ module Language.Haskell.Exference.Core.ExpressionCheck
 where
 
 import Control.Monad (foldM, unless, when)
-import Control.Monad.State.Strict
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (StateT, gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 

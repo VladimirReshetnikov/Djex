@@ -10,7 +10,6 @@ module Language.Haskell.Exference.Core.Expression
   , showExpression
   , fillExprHole
   , allocateExpressionNames
-  , allocateVariableNames
   )
 where
 
@@ -24,7 +23,6 @@ import GHC.Generics
 
 -- import Debug.Hood.Observe
 import qualified Data.Map as M
-import qualified Data.Set as S
 import qualified Language.Haskell.Synthesis.Generated as Generated
 
 
@@ -128,26 +126,6 @@ allocateExpressionNames qualification reserved expression =
  where
   options = renderOptions qualification reserved expression
 
--- | Compatibility adapter for callers that describe their own qualification
--- policy. Allocation itself still belongs exclusively to the shared renderer;
--- the callback merely contributes emitted globals to its reservation set.
-allocateVariableNames
-  :: (QualifiedName -> Maybe String)
-  -> S.Set String
-  -> Expression
-  -> M.Map TVarId String
-allocateVariableNames emittedIdentifier reserved expression =
-  case allocateExpressionNames Generated.FullyQualified reservations expression of
-    Right names -> names
-    Left renderError -> error $ "cannot allocate generated local names: "
-      ++ show renderError
- where
-  reservations = S.toList $ reserved `S.union` S.fromList
-    [ spelling
-    | global <- expressionGlobals expression
-    , Just spelling <- [emittedIdentifier global]
-    ]
-
 renderExpression
   :: Generated.Qualification
   -> Expression
@@ -226,24 +204,6 @@ variableObservations (ExpCaseMatch scrutinee alternatives) =
     [ variables ++ variableObservations body
     | (_, variables, body) <- alternatives
     ]
-
-expressionGlobals :: Expression -> [QualifiedName]
-expressionGlobals expression = case expression of
-  ExpVar{} -> []
-  ExpName name -> [name]
-  ExpLambda _ _ body -> expressionGlobals body
-  ExpApply function argument ->
-    expressionGlobals function ++ expressionGlobals argument
-  ExpHole{} -> []
-  ExpLetMatch constructor _ binding body ->
-    constructor : expressionGlobals binding ++ expressionGlobals body
-  ExpLet _ _ binding body ->
-    expressionGlobals binding ++ expressionGlobals body
-  ExpCaseMatch scrutinee alternatives ->
-    expressionGlobals scrutinee ++ concat
-      [ constructor : expressionGlobals body
-      | (constructor, _, body) <- alternatives
-      ]
 
 -- instance Observable Expression where
 --   observer x = observeOpaque (show x) x

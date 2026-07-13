@@ -2,7 +2,6 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 
 module Language.Haskell.Exference.Core.Internal.Exference
@@ -65,8 +64,8 @@ import Data.Monoid ( Any(..) )
 import Data.Foldable ( sum, asum, traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Control.Monad.Trans.Class ( lift )
-import Control.Monad.State.Lazy
-  ( MonadState, StateT(..), gets, modify, state
+import Control.Monad.Trans.State.Lazy
+  ( StateT(..), gets, modify, state
   , execStateT, runStateT, mapStateT
   )
 
@@ -777,7 +776,11 @@ stateStep multiPM allowConstrs h = do
 
   let
     -- if type is TypeArrow, transform to lambda expression.
-    arrowStep :: MonadState SearchNode m => HsType -> [VarBinding] -> m ()
+    arrowStep
+      :: Monad m
+      => HsType
+      -> [VarBinding]
+      -> StateT SearchNode m ()
     arrowStep g ts
       -- descend until no more TypeArrows, accumulating what is seen.
       | TypeArrow t1 t2 <- g = do
@@ -808,7 +811,12 @@ stateStep multiPM allowConstrs h = do
 
     -- if type is TypeForall, fix the forall-variables, i.e. invent a fresh
     -- set of constants that replace the relevant forall-variables.
-    forallStep :: MonadState SearchNode m => [TVarId] -> [HsConstraint] -> HsType -> m ()
+    forallStep
+      :: Monad m
+      => [TVarId]
+      -> [HsConstraint]
+      -> HsType
+      -> StateT SearchNode m ()
     forallStep vs cs t = do
       dataIds <- mapM (const builderAllocNVar) vs
       modify $ \node -> node
@@ -997,14 +1005,14 @@ stateStep multiPM allowConstrs h = do
 -- TGoals are duplicated when the pattern-matching involves more than one case,
 -- as the goals for different cases are distinct because their scopes are
 -- modified when new bindings are added by the pattern-matching.
-addScopePatternMatch :: MonadState SearchNode m
+addScopePatternMatch :: Monad m
                      => Bool -- should p-m on anything but newtypes?
                      -> HsType -- the current goal (should be returned in one
                                --  form or another)
                      -> Int    -- goal id (hole id)
                      -> ScopeId -- scope for this goal
                      -> [VarPBinding]
-                     -> m [TGoal]
+                     -> StateT SearchNode m [TGoal]
 addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
   [] -> return [TGoal (VarBinding vid goalType) sid]
   (b : bindingRest) -> do
@@ -1029,7 +1037,10 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
         | otherwise -> fromMaybe defaultHandleRest . asum . map mapFunc
             =<< gets nodeDeconstructors
          where
-          mapFunc :: MonadState SearchNode m => DeconstructorBinding -> Maybe (m [TGoal])
+          mapFunc
+            :: Monad m
+            => DeconstructorBinding
+            -> Maybe (StateT SearchNode m [TGoal])
           mapFunc (DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] False) = let
             resultTypes = map incF matchRs

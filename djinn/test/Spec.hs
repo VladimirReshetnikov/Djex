@@ -8,7 +8,8 @@ import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
 import Text.Read (readMaybe)
 
 import Djinn.Core (
-    Context, Declaration(..), DjinnCandidateDetails(..), QueryOutcome(..),
+    Context, Declaration(..), DjinnCandidateDetails(..),
+    DjinnDeclarationNameRole(..), QueryOutcome(..),
     SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
     SynthesisTypeError(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
@@ -307,6 +308,22 @@ testSharedTypeAdapter = do
         (Left SynthesisForallUnsupported)
         (fromSynthesisType $ SharedType.ForallType ["a"] []
             $ SharedType.TypeVariable "a")
+    assertEqual "constructor-like strings cannot become Djinn type variables"
+        (Left $ InvalidDjinnTypeVariable "A")
+        (fromSynthesisType $ SharedType.TypeVariable "A")
+    assertEqual "reserved strings cannot leave Djinn as type variables"
+        (Left $ InvalidDjinnTypeVariable "case")
+        (toSynthesisType $ HTVar "case")
+    assertEqual "qualified strings cannot become Djinn type variables"
+        (Left $ InvalidDjinnTypeVariable "M.a")
+        (fromSynthesisType $ SharedType.TypeVariable "M.a")
+    let typeOperator = sharedName "(:+:)"
+    assertEqual "shared type operators cannot enter Djinn's prefix-only parser"
+        (Left $ UnsupportedDjinnTypeConstructorName typeOperator)
+        (fromSynthesisType $ SharedType.TypeConstructor typeOperator)
+    assertEqual "raw Djinn type operators cannot cross the shared boundary"
+        (Left $ UnsupportedDjinnTypeConstructorName typeOperator)
+        (toSynthesisType $ HTCon "(:+:)")
 
 testSharedDeclarationAdapter :: IO ()
 testSharedDeclarationAdapter = do
@@ -332,9 +349,55 @@ testSharedDeclarationAdapter = do
         (Left ClassSuperclassesUnsupported)
         (fromSynthesisDeclaration sharedClass)
     assertEqual "shared validation catches a function in the type namespace"
-        (Left $ InvalidSharedDeclaration
-            $ SharedDeclaration.InvalidDeclaredValueName $ sharedName "T")
+        (Left $ UnsupportedDjinnDeclarationName FunctionOwner
+            $ sharedName "T")
         (toSynthesisDeclaration $ Function "T" $ HTCon "()")
+    let unitType = SharedType.TupleType SharedName.Boxed []
+        unkinded variable = SharedDeclaration.TypeParameter variable Nothing
+        signature name = SharedDeclaration.ValueSignature ()
+            (sharedName name) unitType
+        sharedType name parameters =
+            SharedDeclaration.TypeSynonymDeclaration () (sharedName name)
+                parameters unitType
+        sharedData name constructor =
+            SharedDeclaration.DataTypeDeclaration () (sharedName name) []
+                [SharedDeclaration.DataConstructor ()
+                    (sharedName constructor) []]
+        roleCheckedClass name methods = SharedDeclaration.ClassDeclaration ()
+            (sharedName name) [] [] methods
+    assertEqual "unused uppercase parameters still obey Djinn's VarId grammar"
+        (Left $ DeclarationTypeConversionError
+            $ InvalidDjinnTypeVariable "A")
+        (fromSynthesisDeclaration $ sharedType "Phantom" [unkinded "A"])
+    assertEqual "type owners remain local ConIds"
+        (Left $ UnsupportedDjinnDeclarationName TypeOwner
+            $ sharedName "M.Alias")
+        (fromSynthesisDeclaration $ sharedType "M.Alias" [])
+    assertEqual "symbolic type owners remain outside Djinn's declaration syntax"
+        (Left $ UnsupportedDjinnDeclarationName TypeOwner
+            $ sharedName "(:+:)")
+        (fromSynthesisDeclaration $
+            SharedDeclaration.AbstractTypeDeclaration ()
+                (sharedName "(:+:)") SharedKind.ProperTypeKind)
+    assertEqual "data constructors remain local ConIds"
+        (Left $ UnsupportedDjinnDeclarationName DataConstructorOwner
+            $ sharedName "M.Box")
+        (fromSynthesisDeclaration $ sharedData "Box" "M.Box")
+    assertEqual "class owners remain local ConIds"
+        (Left $ UnsupportedDjinnDeclarationName ClassOwner
+            $ sharedName "M.Marker")
+        (fromSynthesisDeclaration $ roleCheckedClass "M.Marker" [])
+    assertEqual "method owners remain unqualified value names"
+        (Left $ UnsupportedDjinnDeclarationName MethodOwner
+            $ sharedName "M.marker")
+        (fromSynthesisDeclaration $
+            roleCheckedClass "Marker" [signature "M.marker"])
+    assertEqual "type operators are rejected inside declaration signatures"
+        (Left $ DeclarationTypeConversionError
+            $ UnsupportedDjinnTypeConstructorName $ sharedName "(:+:)")
+        (fromSynthesisDeclaration $ SharedDeclaration.ValueDeclaration
+            $ SharedDeclaration.ValueSignature () (sharedName "value")
+            $ SharedType.TypeConstructor $ sharedName "(:+:)")
   where
     assertRoundTrip declaration = do
         shared <- either (fail . show) pure
@@ -397,6 +460,33 @@ testSharedEnvironmentAdapter = do
         (Left $ SynthesisEnvironmentDeclarationError
             InstanceDeclarationUnsupported)
         (fromSynthesisEnvironment instanceEnvironment)
+    let unitName = sharedName "()"
+        unitType = SharedType.TupleType SharedName.Boxed []
+        forgedUnitAlias = SharedDeclaration.TypeSynonymDeclaration ()
+            unitName [] unitType
+        stolenUnitConstructor = SharedDeclaration.DataTypeDeclaration ()
+            (sharedName "CounterfeitUnit") []
+            [SharedDeclaration.DataConstructor () unitName []]
+        canonicalUnit = SharedDeclaration.DataTypeDeclaration () unitName []
+            [SharedDeclaration.DataConstructor () unitName []]
+        rejectsForgedUnit description declaration = do
+            forged <- either (fail . show) pure
+                $ SharedEnvironment.mkEnvironment [declaration]
+            assertEqual description
+                (Left $ SynthesisEnvironmentDeclarationError
+                    NonCanonicalUnitDeclaration)
+                (fromSynthesisEnvironment forged)
+    rejectsForgedUnit "a synonym cannot own structural unit"
+        forgedUnitAlias
+    rejectsForgedUnit "another datatype cannot own the unit constructor"
+        stolenUnitConstructor
+    canonicalUnitEnvironment <- either (fail . show) pure
+        $ SharedEnvironment.mkEnvironment [canonicalUnit]
+    loweredUnit <- either (fail . show) pure
+        $ fromSynthesisEnvironment canonicalUnitEnvironment
+    assertEqual "only canonical data () = () crosses the trusted unit path"
+        [ ("()", ([], HTUnion [("()", [])], KStar)) ]
+        (typeDeclarations loweredUnit)
 
 -- Type synonyms are transparent even when they occur below an opaque type
 -- constructor.  The whole opaque application remains one proposition, but

@@ -20,6 +20,7 @@ module Djinn.Core (
     toSynthesisType, fromSynthesisType,
     -- * Declarations
     Constructor, Declaration(..), SynthesisDeclaration,
+    DjinnDeclarationNameRole(..),
     SynthesisDeclarationError(..), toSynthesisKind, fromSynthesisKind,
     toSynthesisDeclaration, fromSynthesisDeclaration,
     -- * Environments
@@ -57,8 +58,6 @@ import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck (
     htCheckType, htCheckTypeKind, htCheckTypesKinds)
-import Djinn.Internal.HIdentifier (
-    isConId, isQualifiedVarId, isVarId, isVarOperator)
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
@@ -123,6 +122,11 @@ fromSynthesisEnvironment
     :: SynthesisEnvironment
     -> Either SynthesisEnvironmentError Environment
 fromSynthesisEnvironment shared = do
+    -- 'fromSynthesisDeclaration' applies the same role-specific lexical
+    -- predicates as 'declare'.  Its sole exception is the exact structural
+    -- @data () = ()@ declaration installed by 'trustedUnitEnvironment'; any
+    -- other declaration claiming either unit owner is rejected before this
+    -- structural rebuild.
     declarations <- mapM lower $
         SharedEnvironment.environmentDeclarations shared
     -- A right fold preserves relative order independently in each category;
@@ -209,16 +213,19 @@ declare declaration environment =
         TypeSynonym name params body ->
             declareType name params body
         DataType name params constructors -> do
-            mapM_ (requireName "data constructor" isTypeName . fst)
+            mapM_ (requireName "data constructor"
+                (isDjinnDeclarationName DataConstructorOwner) . fst)
                 constructors
             declareType name params (HTUnion constructors)
         AbstractType name kind -> do
             requireGroundKind kind
             declareType name [] (HTAbstract name kind)
         ClassDecl name params methods -> do
-            requireName "class" isTypeName name
-            mapM_ (requireName "class parameter" isVarId) params
-            mapM_ (requireName "method" isMethodName . fst) methods
+            requireName "class"
+                (isDjinnDeclarationName ClassOwner) name
+            mapM_ (requireName "class parameter" isDjinnTypeVariable) params
+            mapM_ (requireName "method"
+                (isDjinnDeclarationName MethodOwner) . fst) methods
             requireUnusedName "type" name (envTypes environment)
             requireDistinct "class parameter" params
             requireDistinct "method" (map fst methods)
@@ -235,7 +242,8 @@ declare declaration environment =
                 envClasses = classes
                 }
         Function name declaredType -> do
-            requireName "function" isFunctionName name
+            requireName "function"
+                (isDjinnDeclarationName FunctionOwner) name
             let functions = replace name (name, declaredType)
                     (envFunctions environment)
             (types, classes) <- validateEnvironment
@@ -247,8 +255,9 @@ declare declaration environment =
                 }
   where
     declareType name params body = do
-        requireName "type constructor" isTypeName name
-        mapM_ (requireName "type parameter" isVarId) params
+        requireName "type constructor"
+            (isDjinnDeclarationName TypeOwner) name
+        mapM_ (requireName "type parameter" isDjinnTypeVariable) params
         requireUnusedName "class" name (envClasses environment)
         requireDistinct "type parameter" params
         checkConstructors name body (envTypes environment)
@@ -292,19 +301,6 @@ requireName what valid name
     | valid name = Right ()
     | otherwise = Left $ show name ++ " is not a valid " ++ what ++ " name"
 
--- The unit spelling belongs to the type grammar, but is not a Haskell ConId.
--- Its one legitimate declaration is installed by 'trustedUnitEnvironment';
--- accepting it here would also admit arbitrary synonyms, classes, or owners
--- for the @()@ constructor through the public API.
-isTypeName :: HSymbol -> Bool
-isTypeName = isConId
-
-isMethodName :: HSymbol -> Bool
-isMethodName name = isVarId name || isVarOperator name
-
-isFunctionName :: HSymbol -> Bool
-isFunctionName name = isQualifiedVarId name || isVarOperator name
-
 requireGroundKind :: HKind -> Either String ()
 requireGroundKind KStar = Right ()
 requireGroundKind (KArrow argument result) =
@@ -327,7 +323,7 @@ type Context = Constraint HType
 -- shared nominal value.
 mkContext :: HSymbol -> [HType] -> Either String Context
 mkContext className arguments = do
-    requireName "class" isTypeName className
+    requireName "class" (isDjinnDeclarationName ClassOwner) className
     case SharedName.parseName className of
         Left nameError -> Left $ SharedName.renderNameError nameError
         Right sharedName -> Right $ Constraint sharedName arguments
@@ -379,7 +375,7 @@ lookupContext environment context = do
     -- Context is a shared, intentionally permissive syntax node.  Reassert
     -- Djinn's narrower class namespace even when a caller constructs that
     -- node directly instead of going through mkContext.
-    requireName "class" isTypeName name
+    requireName "class" (isDjinnDeclarationName ClassOwner) name
     case lookup name (envClasses environment) of
         Nothing -> Left $ "Class not found: " ++ name
         Just (params, methods)
@@ -603,7 +599,7 @@ inhabit options environment contexts name goal = do
 inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
                  -> Either String GeneratedQueryReport
 inhabitGenerated options environment contexts name goal = do
-    requireName "target" isMethodName name
+    requireName "target" (isDjinnDeclarationName MethodOwner) name
     unless (optionCutoff options > 0) $
         Left "optionCutoff must be positive"
     case optionBudget options of

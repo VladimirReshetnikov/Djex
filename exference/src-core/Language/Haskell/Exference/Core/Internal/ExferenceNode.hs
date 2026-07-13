@@ -173,7 +173,7 @@ data SearchNode = SearchNode
   , _searchNodeNextNVarId      :: {-# UNPACK #-} !TVarId -- id used when resolving rankN-types
   , _searchNodeDepth           :: {-# UNPACK #-} !Penalty
   , _searchNodeLastStepReason  :: String
-  , _searchNodeLastStepBinding :: Maybe String
+  , _searchNodeLastStepBinding :: Maybe QualifiedName
   }
   deriving Generic
 

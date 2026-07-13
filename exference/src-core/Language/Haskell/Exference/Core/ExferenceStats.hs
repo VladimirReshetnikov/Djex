@@ -1,16 +1,40 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module Language.Haskell.Exference.Core.ExferenceStats
   ( ExferenceStats (..)
   , BindingUsages
+  , ExferenceBatchMetadata (..)
   )
 where
 
-import Data.Map.Strict as M
+import Control.DeepSeq (NFData)
+import qualified Data.Map.Strict as M
+import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
+import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Score
-type BindingUsages = M.Map String Int
+
+-- | Cumulative environment-use counts, keyed by nominal binding identity.
+-- Rendering belongs at presentation boundaries, not in the search core.
+type BindingUsages = M.Map QualifiedName Int
+
+-- | Lossless operational metadata for one Exference search batch.  Pruning
+-- counts remain visible on continuing batches, where shared 'Progress' has no
+-- terminal truncation reasons yet.
+data ExferenceBatchMetadata = ExferenceBatchMetadata
+  { exferenceBindingUsages :: BindingUsages
+  , exferenceQueuePruned :: Natural
+  , exferenceDepthPruned :: Natural
+  }
+  deriving (Eq, Show, Generic)
+
+instance NFData ExferenceBatchMetadata
 
 data ExferenceStats = ExferenceStats
   { exference_steps :: Int
   , exference_complexityRating :: Penalty
   , exference_finalSize :: Int
   }
-  deriving (Show, Eq)
+  deriving (Eq, Show, Generic)
+
+instance NFData ExferenceStats

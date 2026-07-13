@@ -16,6 +16,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInput (..)
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
+  , ExferenceBatchMetadata (..)
   , ExferenceSearchBatch
   , ExferenceGeneratedOutputElement
   , ExferenceGeneratedSearchBatch
@@ -128,6 +129,7 @@ data ExferenceInputError
   | DuplicateConstructorNames [QualifiedName]
   | InvalidClassConstraint ClassEnvError
   | InvalidMaxSteps Int
+  | InvalidConstraintDeferralSteps Int
   | InvalidMaxQueueSize Int
   | InvalidMaxDepth Penalty
   | InvalidHeuristic String Penalty
@@ -157,6 +159,7 @@ data SearchStatus = SearchStatus
 data SearchStatusError
   = NegativeQueuePruningCount Int
   | NegativeDepthPruningCount Int
+  | ExhaustedWithDiscardedNodes Int Int
   | PrunedWithoutDiscardedNodes
   deriving (Eq, Show)
 
@@ -172,7 +175,10 @@ toSearchProgress (SearchStatus completion queuePruned depthPruned)
   | depthPruned < 0 = Left $ NegativeDepthPruningCount depthPruned
   | otherwise = case completion of
       SearchRunning -> Right SharedSearch.Continuing
-      SearchExhausted -> Right $ SharedSearch.Completed SharedSearch.Finished
+      SearchExhausted
+        | queuePruned > 0 || depthPruned > 0 ->
+            Left $ ExhaustedWithDiscardedNodes queuePruned depthPruned
+        | otherwise -> Right $ SharedSearch.Completed SharedSearch.Finished
       SearchStepLimitReached -> Right $ SharedSearch.Completed
         $ SharedSearch.Truncated
         $ SharedSearch.StepLimitReached :| pruningReasons
@@ -196,21 +202,26 @@ data ExferenceChunkElement = ExferenceChunkElement
   }
 
 type ExferenceSearchBatch =
-  SharedSearch.SearchBatch BindingUsages ExferenceOutputElement
+  SharedSearch.SearchBatch ExferenceBatchMetadata ExferenceOutputElement
 
 type ExferenceGeneratedOutputElement =
   (SharedGenerated.Expression TVarId, [HsConstraint], ExferenceStats)
 
 type ExferenceGeneratedSearchBatch =
-  SharedSearch.SearchBatch BindingUsages ExferenceGeneratedOutputElement
+  SharedSearch.SearchBatch ExferenceBatchMetadata ExferenceGeneratedOutputElement
 
 toSearchBatch
   :: ExferenceChunkElement
   -> Either SearchStatusError ExferenceSearchBatch
 toSearchBatch chunk = do
   progress <- toSearchProgress $ chunkStatus chunk
+  let status = chunkStatus chunk
+      metadata = ExferenceBatchMetadata
+        (chunkBindingUsages chunk)
+        (fromIntegral $ searchQueuePruned status)
+        (fromIntegral $ searchDepthPruned status)
   return $ SharedSearch.SearchBatch
-    progress (chunkBindingUsages chunk) (chunkElements chunk)
+    progress metadata (chunkElements chunk)
 
 toGeneratedSearchBatch
   :: ExferenceChunkElement
@@ -370,7 +381,14 @@ findExpressions (ExferenceInput rawType
                                  in 1 + 2*k**3 - 3*k**2
         ]
       depthAllowed node = maybe True (view depth node <=) maxDepth
-    bindingUsages . maybe ignored at (view lastStepBinding s) . non 0 += 1
+    -- Account for generated branches rather than only nodes eventually popped
+    -- from the queue.  This includes applications that immediately solve the
+    -- current goal and branches discarded by the configured bounds.
+    traverse_ (\newNode ->
+      bindingUsages
+        . maybe ignored at (view lastStepBinding newNode)
+        . non 0
+        += 1) rNodes
     depthPruned += length tooDeep
     queued <- use states
     let combined = Q.union queued (Q.fromList ratedNew)
@@ -386,6 +404,9 @@ constraintsRelaxedAtStep allowConstraints stopStep currentStep =
 validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
 validateExferenceInput input
   | input_maxSteps input <= 0 = Left $ InvalidMaxSteps $ input_maxSteps input
+  | input_allowConstraintsStopStep input < 0 =
+      Left $ InvalidConstraintDeferralSteps
+        $ input_allowConstraintsStopStep input
   | Just limit <- input_maxQueueSize input, limit < 0 =
       Left $ InvalidMaxQueueSize limit
   | Just limit <- input_maxDepth input, not $ isFinitePenalty limit =
@@ -704,6 +725,7 @@ stateStep multiPM allowConstrs h = do
           depth += depthModNoMatch
           builderSetReason $ "randomly trying to apply function "
                             ++ showExpression coreExp
+          lastStepBinding .= applierl
           additionalGoals <- addScopePatternMatch
             multiPM
             goalType
@@ -751,7 +773,7 @@ stateStep multiPM allowConstrs h = do
                                           ++ ") are provable"
         builderSetReason $ reasonPart ++ ", because " ++ substsTxt
                           ++ " and because " ++ provableTxt
-        lastStepBinding .= fmap show applierl
+        lastStepBinding .= applierl
 
   case goalType of
     TypeArrow _ _ -> arrowStep goalType []

@@ -82,6 +82,8 @@ budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
 
 The Exference adapter will return a lazy sequence of the same generic result
-shape. It is intentionally staged after its batch metadata carries cumulative
-queue/depth pruning and nominal binding usage losslessly; candidate selection
-and rendering remain presentation policies outside the session operation.
+shape. Its batches now preserve cumulative queue/depth pruning and nominal
+binding usage losslessly, including while a search is still continuing. The
+remaining adapter work is to project residual constraints into the shared type
+vocabulary without forcing the lazy stream. Candidate selection and rendering
+remain presentation policies outside the session operation.

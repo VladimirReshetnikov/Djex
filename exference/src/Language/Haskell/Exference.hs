@@ -23,6 +23,7 @@ module Language.Haskell.Exference
   , ExferenceHeuristicsConfig (..)
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
+  , ExferenceBatchMetadata (..)
   , ExferenceSearchBatch
   , ExferenceGeneratedOutputElement
   , ExferenceGeneratedSearchBatch

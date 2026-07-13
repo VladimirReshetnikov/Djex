@@ -7,6 +7,7 @@ module Language.Haskell.Exference.Core
   , E.ExferenceInput (..)
   , E.ExferenceOutputElement
   , E.ExferenceChunkElement (..)
+  , E.ExferenceBatchMetadata (..)
   , E.ExferenceSearchBatch
   , E.ExferenceGeneratedOutputElement
   , E.ExferenceGeneratedSearchBatch

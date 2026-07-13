@@ -242,7 +242,10 @@ main = do
                               highest = take 8
                                 $ sortBy (flip $ comparing snd)
                                 $ M.toList stats
-                          print highest
+                          -- Keep the historical list-of-string-pairs format;
+                          -- the search core now stores nominal names instead.
+                          print [(show binding, count)
+                                | (binding, count) <- highest]
                       | otherwise -> do
                           selection <- if
                             | FirstSol `elem` flags -> do

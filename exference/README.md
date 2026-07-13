@@ -141,7 +141,11 @@ compatibility frontend and consumes the shared allocator rather than owning a
 second naming implementation.
 `toGeneratedSearchBatch` projects status-bearing Exference chunks to the common
 `SearchBatch` envelope with shared generated-expression candidates, while
-retaining typed expressions through the compatibility API.
+retaining typed expressions through the compatibility API. Each projected
+batch carries `ExferenceBatchMetadata`: binding-use counts keyed by nominal
+`QualifiedName`, plus cumulative queue- and depth-pruning counts. Keeping the
+counts in metadata makes partial progress observable even though shared
+`Progress` records pruning reasons only when a search terminates.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the
@@ -152,6 +156,8 @@ one source-name map for quantifiers, constraints, and body occurrences.
 The status-bearing search API is `findExpressionsWithStatsEither`. It retains
 structured input failures and distinguishes a genuinely exhausted search space
 from a step-limited search and one made incomplete by queue/depth pruning. The
+validator also rejects negative step counts for delayed constraint solving,
+rather than accepting a setting whose threshold can never be reached. The
 `toSearchProgress` projection maps those compatibility statuses to
 `Language.Haskell.Synthesis.Search`, retaining simultaneous queue and depth
 pruning reasons and rejecting malformed hand-constructed status values. It

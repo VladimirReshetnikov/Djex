@@ -36,6 +36,7 @@ import qualified Language.Haskell.Exts.SrcLoc as HSE
 
 import Language.Haskell.Exference.Core
   ( ExferenceChunkElement (..)
+  , ExferenceBatchMetadata (..)
   , ExferenceHeuristicsConfig (..)
   , SearchCompletion (..)
   , SearchStatus (..)
@@ -750,6 +751,54 @@ tests = testGroup "Exference"
             { input_envFuncs = [intBinding, boolBinding] } @?= expected
           validateExferenceInput identityInput
             { input_envFuncs = [boolBinding, intBinding] } @?= expected
+      , testCase "binding usage retains nominal identities" $ do
+          firstName <- expectRight $ mkQualifiedName ["First"] "choose"
+          secondName <- expectRight $ mkQualifiedName ["Second"] "choose"
+          let intType = TypeCons $ name "Int"
+              boolType = TypeCons $ name "Bool"
+              choose bindingName = FunctionBinding
+                { functionResult = boolType
+                , functionName = bindingName
+                , functionPenalty = 0
+                , functionConstraints = []
+                , functionParameters = [intType]
+                }
+              seed = FunctionBinding
+                { functionResult = intType
+                , functionName = name "seed"
+                , functionPenalty = 0
+                , functionConstraints = []
+                , functionParameters = []
+                }
+          terminal <- lastChunk $ identityInput
+            { input_goalType = boolType
+            , input_envFuncs = [choose firstName, choose secondName, seed]
+            , input_maxSteps = 100
+            }
+          let usages = chunkBindingUsages terminal
+          assertBool "first qualified binding disappeared from usage metadata"
+            $ Map.member firstName usages
+          assertBool "second qualified binding disappeared from usage metadata"
+            $ Map.member secondName usages
+          assertBool "terminal binding application was not counted"
+            $ Map.member (name "seed") usages
+      , testCase "partial binding applications are counted when generated" $ do
+          let bridgeName = name "bridge"
+              bridge = FunctionBinding
+                { functionResult = TypeCons $ name "Bool"
+                , functionName = bridgeName
+                , functionPenalty = 0
+                , functionConstraints = []
+                , functionParameters = [TypeCons $ name "Int"]
+                }
+          chunk <- lastChunk $ identityInput
+            { input_goalType = TypeCons $ name "String"
+            , input_envFuncs = [bridge]
+            -- The first step introduces the outer forall wrapper; the second
+            -- generates the speculative partial application.
+            , input_maxSteps = 2
+            }
+          Map.lookup bridgeName (chunkBindingUsages chunk) @?= Just 1
       , testCase "duplicate datatype heads are rejected independently of order" $ do
           let duplicateName = name "T"
               firstDeconstructor = DeconstructorBinding
@@ -889,6 +938,19 @@ tests = testGroup "Exference"
             Right batch -> assertBool
               "common batch unexpectedly gained candidates"
               $ null $ SharedSearch.batchCandidates batch
+      , testCase "continuing batches retain cumulative pruning metadata" $ do
+          let binding = name "usedBinding"
+              chunk = ExferenceChunkElement
+                (SearchStatus SearchRunning 3 2)
+                (Map.singleton binding 4)
+                []
+          batch <- expectRight $ toSearchBatch chunk
+          SharedSearch.batchProgress batch @?= SharedSearch.Continuing
+          SharedSearch.batchMetadata batch @?= ExferenceBatchMetadata
+            { exferenceBindingUsages = Map.singleton binding 4
+            , exferenceQueuePruned = 3
+            , exferenceDepthPruned = 2
+            }
       , testCase "queue pruning is bounded and reported" $ do
           chunk <- onlyChunk $ identityInput {input_maxQueueSize = Just 0}
           searchCompletion (chunkStatus chunk) @?= SearchPruned
@@ -992,8 +1054,16 @@ tests = testGroup "Exference"
       , testCase "malformed compatibility statuses are rejected" $ do
           toSearchProgress (SearchStatus SearchPruned 0 0) @?=
             Left PrunedWithoutDiscardedNodes
+          toSearchProgress (SearchStatus SearchExhausted 1 0) @?=
+            Left (ExhaustedWithDiscardedNodes 1 0)
+          toSearchProgress (SearchStatus SearchExhausted 0 1) @?=
+            Left (ExhaustedWithDiscardedNodes 0 1)
           toSearchProgress (SearchStatus SearchPruned (-1) 0) @?=
             Left (NegativeQueuePruningCount (-1))
+      , testCase "negative constraint-deferral steps are rejected" $
+          validateExferenceInput identityInput
+            { input_allowConstraintsStopStep = -1 } @?=
+              Left (InvalidConstraintDeferralSteps (-1))
       , testCase "non-finite heuristic inputs are rejected" $ do
           let config = defaultHeuristicsConfig
                 {heuristics_goalVar = Penalty (0 / 0)}

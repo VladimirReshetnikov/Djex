@@ -2,9 +2,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DeriveFunctor #-}
 
 module Language.Haskell.Exference.EnvironmentParser
-  ( SourceEnvironment (..)
+  ( SourceBinding (..)
+  , sourceBindingFunction
+  , SourceEnvironment (..)
+  , sourceFunctions
   , CheckedSourceEnvironment
   , checkedSourceProjection
   , checkedSourceInventory
@@ -40,7 +44,7 @@ import Language.Haskell.Exference.Diagnostic
 
 import Control.DeepSeq
 
-import Control.Monad ( forM_, forM )
+import Control.Monad ( forM_, forM, zipWithM )
 import Data.List ( sort, find, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
@@ -75,18 +79,39 @@ import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 
+-- | One ordered source binding. Class methods retain their exactly qualified
+-- owning class while exposing the same flat function projection as the
+-- historical frontend API. Their compatibility types carry the derived
+-- implicit constraint; duplicating its parameter IDs in the tag would let the
+-- two representations drift.
+data SourceBinding function
+  = SourceFunction function
+  | SourceClassMethod QualifiedName function
+  deriving (Functor, Show)
+
+sourceBindingFunction :: SourceBinding function -> function
+sourceBindingFunction binding = case binding of
+  SourceFunction function -> function
+  SourceClassMethod _ function -> function
+
 -- | The complete checked source inventory produced by the HSE frontend.
 -- Parameterizing only the function representation lets parsing, rating, and
 -- core lowering share one shape without repeatedly packing positional tuples
 -- or dropping the declarations needed by later kind validation.
 data SourceEnvironment function = SourceEnvironment
-  { sourceFunctions :: [function]
+  { sourceBindings :: [SourceBinding function]
   , sourceDeconstructors :: [DeconstructorBinding]
   , sourceClasses :: StaticClassEnv
   , sourceTypeNames :: [QualifiedName]
   , sourceTypeSynonyms :: [HsTypeDecl]
   }
   deriving (Show)
+
+-- | Historical flat function view. Ownership remains available through
+-- 'sourceBindings', while search and compatibility clients see every method
+-- exactly once in its original list position.
+sourceFunctions :: SourceEnvironment function -> [function]
+sourceFunctions = map sourceBindingFunction . sourceBindings
 
 -- | A backend projection paired with the exact shared inventory that validated
 -- it.  The constructor is private so CLI and library loaders cannot expose a
@@ -147,24 +172,29 @@ checkSourceEnvironment environment = do
   inventory <- first InvalidSourceInventory
     $ toSynthesisSourceInventory environment
   projection <- first InvalidSourceInventory
-    $ normalizeConstructorProjection inventory environment
+    $ normalizeBackendProjection inventory environment
   pure $ CheckedSourceEnvironment projection inventory
 
--- | Rebuild the datatype half of the backend projection from the checked
--- shared declarations.  Ordinary functions retain source order; constructor
--- entries are replaced in place so equal-cost search ordering does not change.
--- This makes the Inventory authoritative for constructor shape and penalty
--- without prematurely imposing declaration-category order on the whole search
--- environment.
-normalizeConstructorProjection
+-- | Rebuild declaration-owned backend bindings from the checked shared
+-- declarations. Ordinary functions retain source order; constructor and class
+-- method entries are replaced in place so equal-cost search ordering does not
+-- change. The Inventory is authoritative for ownership, shape, and penalty
+-- without imposing declaration-category order on the search environment.
+normalizeBackendProjection
   :: SynthesisInventory
   -> SourceEnvironment FunctionBinding
   -> Either SynthesisDeclarationError
       (SourceEnvironment FunctionBinding)
-normalizeConstructorProjection inventory environment = do
+normalizeBackendProjection inventory environment = do
   converted <- mapM fromSynthesisRatedDataDeclaration
     [ declaration
     | declaration@SharedDeclaration.DataTypeDeclaration{} <-
+        SharedEnvironment.environmentDeclarations
+        $ SharedInventory.inventoryEnvironment inventory
+    ]
+  convertedClasses <- mapM fromSynthesisClassDeclarationWithMethods
+    [ declaration
+    | declaration@SharedDeclaration.ClassDeclaration{} <-
         SharedEnvironment.environmentDeclarations
           $ SharedInventory.inventoryEnvironment inventory
     ]
@@ -175,9 +205,61 @@ normalizeConstructorProjection inventory environment = do
         ]
       replaceConstructor binding = M.findWithDefault binding
         (functionName binding) functionsByName
+      inventoryMethodGroups = M.fromListWith (++)
+        [ (functionName binding,
+            [(tclass_name typeClass, binding)])
+        | (typeClass, methods) <- convertedClasses
+        , binding <- methods
+        ]
+      sourceMethodGroups = M.fromListWith (++)
+        [ (functionName binding, [(owner, binding)])
+        | SourceClassMethod owner binding <- sourceBindings environment
+        ]
+      duplicateMethodNames = S.toAscList $ S.fromList
+        [ methodName
+        | (methodName, occurrences) <-
+            M.toAscList inventoryMethodGroups ++ M.toAscList sourceMethodGroups
+        , length occurrences /= 1
+        ]
+      missingMethodNames = S.toAscList
+        $ M.keysSet inventoryMethodGroups S.\\ M.keysSet sourceMethodGroups
+      orphanMethodNames = S.toAscList
+        $ M.keysSet sourceMethodGroups S.\\ M.keysSet inventoryMethodGroups
+      mismatchedMethodOwners =
+        [ (methodName, expectedOwner, actualOwner)
+        | (methodName, [(expectedOwner, _)]) <-
+            M.toAscList inventoryMethodGroups
+        , [(actualOwner, _)] <- [M.findWithDefault [] methodName
+            sourceMethodGroups]
+        , expectedOwner /= actualOwner
+        ]
+      methodsByName = M.mapMaybe onlyOccurrence inventoryMethodGroups
+      onlyOccurrence occurrences = case occurrences of
+        [occurrence] -> Just occurrence
+        _ -> Nothing
+      normalizeBinding sourceBinding = case sourceBinding of
+        SourceFunction binding ->
+          Right $ SourceFunction $ replaceConstructor binding
+        SourceClassMethod _ binding -> case
+            M.lookup (functionName binding) methodsByName of
+          Just (normalizedOwner, normalized) ->
+            Right $ SourceClassMethod normalizedOwner normalized
+          Nothing -> Left $ MissingClassMethodBindings [functionName binding]
+  if null duplicateMethodNames
+    then pure ()
+    else Left $ DuplicateClassMethodBindings duplicateMethodNames
+  if null missingMethodNames
+    then pure ()
+    else Left $ MissingClassMethodBindings missingMethodNames
+  if null orphanMethodNames
+    then pure ()
+    else Left $ OrphanClassMethodBindings orphanMethodNames
+  if null mismatchedMethodOwners
+    then pure ()
+    else Left $ MismatchedClassMethodOwners mismatchedMethodOwners
+  normalizedBindings <- mapM normalizeBinding $ sourceBindings environment
   pure environment
-    { sourceFunctions = map replaceConstructor
-        $ sourceFunctions environment
+    { sourceBindings = normalizedBindings
     , sourceDeconstructors = map snd converted
     }
 
@@ -205,7 +287,8 @@ toSynthesisSourceInventory
   :: SourceEnvironment FunctionBinding
   -> Either SynthesisDeclarationError SynthesisInventory
 toSynthesisSourceInventory environment = do
-  let constructorDefinitions = M.fromListWith (++)
+  let functions = sourceFunctions environment
+      constructorDefinitions = M.fromListWith (++)
         [ ( constructorName constructor
           , [(deconstructorInput deconstructor,
               constructorFields constructor)]
@@ -220,7 +303,7 @@ toSynthesisSourceInventory environment = do
           == SharedName.ConstructorLike
       constructorFunctionGroups = M.fromListWith (++)
         [ (functionName binding, [binding])
-        | binding <- sourceFunctions environment
+        | binding <- functions
         , functionName binding `S.member` constructorNames
         ]
       missingFunctions = S.toAscList
@@ -232,7 +315,7 @@ toSynthesisSourceInventory environment = do
         ]
       orphanConstructors = S.toAscList $ S.fromList
         [ functionName binding
-        | binding <- sourceFunctions environment
+        | binding <- functions
         , isConstructorBinding binding
         , functionName binding `S.notMember` constructorNames
         ]
@@ -251,8 +334,12 @@ toSynthesisSourceInventory environment = do
         ]
       valueBindings =
         [ binding
-        | binding <- sourceFunctions environment
+        | SourceFunction binding <- sourceBindings environment
         , functionName binding `S.notMember` constructorNames
+        ]
+      classMethods = M.fromListWith (flip (++))
+        [ (owner, [binding])
+        | SourceClassMethod owner binding <- sourceBindings environment
         ]
   if null missingFunctions
     then pure ()
@@ -272,8 +359,8 @@ toSynthesisSourceInventory environment = do
       $ map toSynthesisName mismatchedFunctions
   synonyms <- mapM toSynthesisTypeDeclaration
     $ sourceTypeSynonyms environment
-  core <- toSynthesisEnvironmentWithConstructorPenalties
-    constructorPenalties $ EnvDictionary
+  core <- toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
+    constructorPenalties classMethods $ EnvDictionary
     valueBindings
     (sourceDeconstructors environment)
     (sourceClasses environment)
@@ -426,15 +513,15 @@ parseModulesM inputs = do
           typeDeclarationMap = uniqueTypeDeclMap typeDeclarations
 
       classResult <- lift
-        $ getClassEnv dataTypes typeDeclarationMap modules
-      (classEnvironment, instanceCount) <- either
+        $ getClassEnvWithMethods dataTypes typeDeclarationMap modules
+      (classEnvironment, instanceCount, methodsByModule) <- either
         (throwE . ClassEnvironmentLoadFailure)
         pure
         classResult
 
-      extracted <- lift $ mapM
+      extracted <- lift $ zipWithM
         (hExtractBinds classEnvironment dataTypes typeDeclarationMap)
-        modules
+        modules methodsByModule
       let (bindingLists, deconstructorLists, errorLists) = unzip3 extracted
           declarations = concat bindingLists
           deconstructors = concat deconstructorLists
@@ -525,7 +612,8 @@ parseModulesM inputs = do
             | constraint <- tclass_constraints typeClass
             , parameter <- constraint_params constraint
             ]
-        forM_ declarations $ \(bindingName, bindingType) -> do
+        forM_ (map sourceBindingFunction declarations)
+            $ \(bindingName, bindingType) -> do
           warnUnknownTypeConstructors
             ("the binding " ++ show bindingName) [bindingType]
           -- The loader has a complete class inventory, unlike public ad-hoc
@@ -544,7 +632,7 @@ parseModulesM inputs = do
           ]
 
       pure SourceEnvironment
-        { sourceFunctions = builtInDeclarations ++ declarations
+        { sourceBindings = map SourceFunction builtInDeclarations ++ declarations
         , sourceDeconstructors = builtInDeconstructorValues ++ deconstructors
         , sourceClasses = classEnvironment
         , sourceTypeNames = allValidNames
@@ -557,17 +645,27 @@ parseModulesM inputs = do
                   -> [QualifiedName]
                   -> TypeDeclMap
                   -> Module SrcSpanInfo
+                  -> [Either String ClassMethodDeclaration]
                   -> Loader
-                       ([HsFunctionDecl], [DeconstructorBinding], [String])
-    hExtractBinds cntxt ds tDeclMap modul = do
+                       ( [SourceBinding HsFunctionDecl]
+                       , [DeconstructorBinding]
+                       , [String]
+                       )
+    hExtractBinds cntxt ds tDeclMap modul methodResults = do
       eFromData <- getDataConss (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
-      eDecls <- (++)
-        <$> getDecls ds (sClassEnv_tclasses cntxt) tDeclMap [modul]
-        <*> getClassMethods (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
-      let errors = lefts eFromData ++ lefts eDecls
+      eDecls <- getDecls ds (sClassEnv_tclasses cntxt) tDeclMap [modul]
+      let errors = lefts eFromData ++ lefts eDecls ++ lefts methodResults
       let (binds1s, deconss) = unzip $ rights eFromData
           binds2 = rights eDecls
-      return (concat binds1s ++ binds2, deconss, errors)
+          methods =
+            [ SourceClassMethod owner binding
+            | ClassMethodDeclaration owner binding <- rights methodResults
+            ]
+      return
+        ( map SourceFunction (concat binds1s ++ binds2) ++ methods
+        , deconss
+        , errors
+        )
 
 -- | Load one module with the default parse mode and assign every declaration
 -- a neutral rating.
@@ -588,7 +686,7 @@ parseModulesSimpleM path = fmap helper
  where
   addRating (a,b) = (a,0.0,b)
   helper environment = environment
-    { sourceFunctions = addRating <$> sourceFunctions environment }
+    { sourceBindings = fmap addRating <$> sourceBindings environment }
 
 parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
@@ -628,8 +726,8 @@ applyRatings
   -> (SourceEnvironment FunctionBinding, [Diagnostic])
 applyRatings ratings environment =
   ( environment
-      { sourceFunctions = map rateDeclaration
-          $ sourceFunctions environment
+      { sourceBindings = fmap rateDeclaration
+          <$> sourceBindings environment
       }
   , lefts ratingResults
   )

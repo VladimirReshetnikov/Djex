@@ -108,7 +108,10 @@ import Language.Haskell.Exference
 import Language.Haskell.Exference.EnvironmentParser
   ( EnvironmentLoadError (..)
   , LoadReport (..)
+  , SourceBinding (..)
   , SourceEnvironment (..)
+  , sourceBindingFunction
+  , sourceFunctions
   , checkedSourceInventory
   , checkedSourceProjection
   , compileWithDict
@@ -632,6 +635,32 @@ tests = testGroup "Exference"
           let ty = TypeForall [7]
                 [HsConstraint (name "C") [TypeVar 9]] (TypeVar 2)
           largestId ty @?= 9
+          maximumFlexibleId ty @?= Just 9
+          let negativeOnly =
+                TypeArrow (TypeVar (-5)) $ TypeCons $ name "Ground"
+          maximumFlexibleId negativeOnly @?= Just (-5)
+          largestId negativeOnly @?= -5
+          maximumFlexibleId (TypeCons $ name "Ground") @?= Nothing
+      , testCase "the full Int domain is a valid flexible-ID domain" $ do
+          let identifiers = [minBound, -1, maxBound]
+          mapM_ (\identifier -> validateExferenceInput identityInput
+              {input_goalType = TypeVar identifier} @?= Right ()) identifiers
+          mapM_ (\identifier -> do
+              let rendered = showVar identifier
+              assertBool ("illegal negative variable rendering: " ++ rendered)
+                $ case rendered of
+                    initialCharacter : remaining ->
+                      initialCharacter >= 'a' && initialCharacter <= 'z'
+                      && all (\character ->
+                        character >= 'a' && character <= 'z'
+                        || character >= '0' && character <= '9'
+                        || character == '_') remaining
+                    [] -> False
+              case parseTypePure rendered of
+                Right _ -> pure ()
+                Left failure -> fail $ "rendered variable did not parse: "
+                  ++ show failure)
+            [minBound, -1]
       , testCase "quantified type rendering binds its body spelling" $ do
           let names = Map.fromList [("x", 0)]
           showHsType names (TypeForall [0] [] $ TypeVar 0)
@@ -661,6 +690,31 @@ tests = testGroup "Exference"
               left = pair (TypeVar 1) (TypeVar 2)
               right = pair (maybeType $ TypeVar 2) integer
           assertUnifierCloses left right
+      , testCase "symmetric unification allocates across the Int boundary" $ do
+          let apply constructor arguments = foldl TypeApp
+                (TypeCons $ name constructor) arguments
+              left = apply "Triple"
+                [TypeVar 0, TypeVar maxBound, TypeVar minBound]
+              right = apply "Triple"
+                [ apply "F" [TypeVar maxBound]
+                , TypeCons $ name "A"
+                , TypeCons $ name "B"
+                ]
+          case unify left right of
+            Nothing -> fail "boundary unification unexpectedly failed"
+            Just (leftSubstitutions, _) -> do
+              assertUnifierCloses left right
+              case IntMap.lookup 0 leftSubstitutions of
+                Just (TypeApp (TypeCons constructor) (TypeVar allocated)) -> do
+                  constructor @?= name "F"
+                  assertBool "right variable captured a left boundary ID"
+                    $ allocated `notElem` [0, minBound, maxBound]
+                replacement -> fail $ "unexpected boundary substitution: "
+                  ++ show replacement
+      , testCase "offset unifiers reject arithmetic overflow" $ do
+          let overflowing = HsTypeOffset (TypeVar 1) maxBound
+          unifyOffset (TypeVar 0) overflowing @?= Nothing
+          unifyRightOffset (TypeVar 0) overflowing @?= Nothing
       , testCase "bounded symmetric unifiers satisfy their result contract" $ do
           let atoms =
                 [ TypeVar 0
@@ -746,6 +800,39 @@ tests = testGroup "Exference"
             _ -> fail "instance adapter returned another declaration shape"
           fromSynthesisInstanceDeclaration sharedInstance @?=
             Right instanceDeclaration
+      , testCase "class methods preserve owner, type, and penalty exactly" $ do
+          let className = name "C"
+              methodName = name "method"
+              classDeclaration = HsTypeClass className [7] []
+              ownerConstraint = classMethodConstraint classDeclaration
+              method = FunctionBinding
+                (TypeVar 7) methodName (Penalty 2.5)
+                [ownerConstraint] [TypeVar 7]
+          shared <- expectRight $ toSynthesisClassDeclarationWithMethods
+            classDeclaration [method]
+          case shared of
+            SharedDeclaration.ClassDeclaration _ _ _ _ [signature] -> do
+              SharedDeclaration.valueName signature @?=
+                toSynthesisName methodName
+              SharedDeclaration.valueAnnotation signature @?=
+                SearchPenaltyMetadata (Penalty 2.5)
+            _ -> fail "class-method adapter returned another declaration shape"
+          fromSynthesisClassDeclarationWithMethods shared @?=
+            Right (classDeclaration, [method])
+      , testCase "class method constraint failures report both sides" $ do
+          let className = name "C"
+              methodName = name "method"
+              classDeclaration = HsTypeClass className [0] []
+              expected = classMethodConstraint classDeclaration
+              actual = HsConstraint className [TypeCons $ name "Int"]
+              binding constraints = FunctionBinding
+                (TypeVar 0) methodName (Penalty 1) constraints [TypeVar 0]
+          toSynthesisClassDeclarationWithMethods classDeclaration
+              [binding [actual]] @?= Left
+            (MismatchedClassMethodConstraint methodName expected actual)
+          toSynthesisClassDeclarationWithMethods classDeclaration
+              [binding []] @?= Left
+            (MissingClassMethodConstraint methodName)
       , testCase "deconstructor records preserve data shape and recursion" $ do
           let input = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
               declaration = DeconstructorBinding input
@@ -831,6 +918,48 @@ tests = testGroup "Exference"
             @?= Map.singleton (name "C") cls
           sClassEnv_explicitInstances (environmentClasses lowered)
             @?= [instanceDeclaration]
+      , testCase "rich core environments round-trip nested method ownership" $ do
+          let className = name "C"
+              classDeclaration = HsTypeClass className [0] []
+              ownerConstraint = classMethodConstraint classDeclaration
+              ordinary = FunctionBinding
+                (TypeCons $ name "Int") (name "ordinary")
+                (Penalty 1.5) [] []
+              method = FunctionBinding
+                (TypeVar 0) (name "method") (Penalty 2.5)
+                [ownerConstraint] [TypeVar 0]
+              secondMethod = FunctionBinding
+                (TypeVar 0) (name "secondMethod") (Penalty 3.5)
+                [ownerConstraint] []
+          classes <- expectRight $ mkStaticClassEnv [classDeclaration] []
+          shared <- expectRight
+            $ toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
+                Map.empty
+                (Map.singleton className [method, secondMethod])
+                (EnvDictionary [ordinary] [] classes)
+          Set.fromList (Map.keys $ SharedEnvironment.valueSignatureMap shared)
+            @?= Set.fromList (map (toSynthesisName . functionName)
+              [method, secondMethod, ordinary])
+          case Map.lookup (toSynthesisName className)
+              (SharedEnvironment.classDeclarationMap shared) of
+            Just (SharedDeclaration.ClassDeclaration _ _ _ _ methods) ->
+              map SharedDeclaration.valueName methods @?=
+                map (toSynthesisName . functionName) [method, secondMethod]
+            declaration -> fail $ "nested class missing: " ++ show declaration
+          case fromSynthesisEnvironment shared of
+            Left failure -> failure @?= ClassMethodsUnsupported
+              (map (toSynthesisName . functionName) [method, secondMethod])
+            Right _ -> fail "legacy lowering erased class-method ownership"
+          (lowered, loweredMethods) <- expectRight
+            $ fromSynthesisEnvironmentWithClassMethods shared
+          environmentFunctions lowered @?= [ordinary]
+          sClassEnv_tclasses (environmentClasses lowered) @?=
+            Map.singleton className classDeclaration
+          loweredMethods @?= Map.singleton className [method, secondMethod]
+          raised <- expectRight
+            $ toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
+                Map.empty loweredMethods lowered
+          raised @?= shared
       , testCase "core lowering rejects frontend-only declarations" $ do
           let synonymName = toSynthesisName $ name "Alias"
               synonym = SharedDeclaration.TypeSynonymDeclaration
@@ -1058,6 +1187,41 @@ tests = testGroup "Exference"
           plan <- expectRight $ planRigidInstantiation
             (mkRigidInstantiationContext environment) [] goal
           rigidInstantiations plan @?= [(4, 0), (9, 1)]
+      , testCase "search freshens negative and boundary namespaces" $ do
+          let applied constructor argument = TypeApp
+                (TypeCons $ name constructor) argument
+              resultType = TypeCons $ name "R"
+              sType = TypeCons $ name "S"
+              tType = TypeCons $ name "T"
+              fName = name "f"
+              hName = name "h"
+              xName = name "x"
+              f = FunctionBinding resultType fName 0 []
+                [applied "A" $ TypeVar 0]
+              x = FunctionBinding tType xName 0 [] []
+              expected = ExpApply (ExpName fName)
+                $ ExpApply (ExpName hName) (ExpName xName)
+              input goal hVariable = ExferenceInput
+                goal
+                [ f
+                , FunctionBinding (applied "A" sType) hName 0 []
+                    [TypeVar hVariable]
+                , x
+                ]
+                [] emptyClassEnv
+                False False 0 False 200 Nothing Nothing
+                defaultHeuristicsConfig
+              cases =
+                [ ("negative", input resultType (-1))
+                , ( "maxBound"
+                  , input (TypeForall [maxBound] [] resultType) 0
+                  )
+                ]
+          mapM_ (\(label, searchInput) -> do
+              expressions <- expectRight $ findExpressionsEither searchInput
+              assertBool (label ++ " allocator lost f (h x)")
+                $ expected `elem` map (\(expression, _, _) -> expression) expressions)
+            cases
       , testCase "rigid planning traverses signatures contexts and data fields" $ do
           let constrained = FunctionBinding (TypeVar 0) (name "constrained") 0
                 [HsConstraint (name "External") [TypeConstant 12]] []
@@ -1857,6 +2021,76 @@ tests = testGroup "Exference"
             (SharedEnvironment.dataConstructorMap shared) @?= True
           Map.member SharedName.consName
             (SharedEnvironment.valueSignatureMap shared) @?= False
+      , testCase "frontend inventories nest each rated class method once" $
+          withTemporaryFile (unlines
+            [ "module Owned where"
+            , "class Prerequisite a"
+            , "class C a where"
+            , "  method :: Prerequisite a => a -> a"
+            , "ordinary :: a -> a"
+            ]) $ \modulePath ->
+          withTemporaryFile
+            "Owned.method 2.5 Owned.ordinary 1.5"
+            $ \ratingPath -> do
+              LoadReport result _ <-
+                environmentFromModuleAndRatings modulePath ratingPath
+              checked <- expectRight result
+              className <- expectRight $ mkQualifiedName ["Owned"] "C"
+              prerequisiteName <- expectRight
+                $ mkQualifiedName ["Owned"] "Prerequisite"
+              methodName <- expectRight
+                $ mkQualifiedName ["Owned"] "method"
+              ordinaryName <- expectRight
+                $ mkQualifiedName ["Owned"] "ordinary"
+              let projection = checkedSourceProjection checked
+                  inventory = checkedSourceInventory checked
+                  shared = SharedInventory.inventoryEnvironment inventory
+                  methodEntries =
+                    [ (owner, binding)
+                    | SourceClassMethod owner binding <-
+                        sourceBindings projection
+                    , functionName binding == methodName
+                    ]
+              parameter <- case Map.lookup className
+                  (sClassEnv_tclasses $ sourceClasses projection) of
+                Just declaration -> case tclass_params declaration of
+                  [classParameter] -> pure classParameter
+                  parameters -> fail $ "unexpected class parameters: "
+                    ++ show parameters
+                Nothing -> fail "method owner class was not elaborated"
+              case methodEntries of
+                [(owner, binding)] -> do
+                  owner @?= className
+                  functionPenalty binding @?= Penalty 2.5
+                  functionConstraints binding @?=
+                    [ HsConstraint className [TypeVar parameter]
+                    , HsConstraint prerequisiteName [TypeVar parameter]
+                    ]
+                entries -> fail $ "unexpected method projection: " ++ show entries
+              length (filter ((== methodName) . functionName)
+                $ sourceFunctions projection) @?= 1
+              case find ((== ordinaryName) . functionName . sourceBindingFunction)
+                  (sourceBindings projection) of
+                Just (SourceFunction _) -> pure ()
+                entry -> fail $ "ordinary binding acquired class ownership: "
+                  ++ show entry
+              case Map.lookup (toSynthesisName className)
+                  (SharedEnvironment.classDeclarationMap shared) of
+                Just (SharedDeclaration.ClassDeclaration _ _ _ _ [method]) -> do
+                  SharedDeclaration.valueName method @?=
+                    toSynthesisName methodName
+                  SharedDeclaration.valueAnnotation method @?=
+                    SearchPenaltyMetadata (Penalty 2.5)
+                  loweredMethod <- expectRight $ fromSynthesisFunctionBinding
+                    $ SharedDeclaration.ValueDeclaration method
+                  functionConstraints loweredMethod @?=
+                    [HsConstraint prerequisiteName [TypeVar parameter]]
+                declaration -> fail $ "shared class lost its method: "
+                  ++ show declaration
+              (SharedDeclaration.valueAnnotation <$> Map.lookup
+                  (toSynthesisName methodName)
+                  (SharedEnvironment.valueSignatureMap shared)) @?=
+                Just (SearchPenaltyMetadata $ Penalty 2.5)
       , testCase "duplicate synonyms reach the shared inventory in source order" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module M where"
@@ -1869,7 +2103,7 @@ tests = testGroup "Exference"
           map tdecl_name synonyms @?= [aliasName, aliasName]
           let environment :: SourceEnvironment FunctionBinding
               environment = SourceEnvironment
-                { sourceFunctions = []
+                { sourceBindings = []
                 , sourceDeconstructors = []
                 , sourceClasses = emptyStaticClassEnv
                 , sourceTypeNames = [aliasName]
@@ -1882,7 +2116,7 @@ tests = testGroup "Exference"
       , testCase "source inventories require every constructor function" $ do
           let missing = map name ["Just", "Nothing"]
               environment = maybeLikeSourceEnvironment
-                { sourceFunctions = filter
+                { sourceBindings = map SourceFunction $ filter
                     ((`notElem` missing) . functionName)
                     $ sourceFunctions maybeLikeSourceEnvironment
                 }
@@ -1899,17 +2133,37 @@ tests = testGroup "Exference"
                     (Penalty 1.25) [] []
                 ]
               environment = maybeLikeSourceEnvironment
-                { sourceFunctions = duplicateBindings
-                    ++ sourceFunctions maybeLikeSourceEnvironment
+                { sourceBindings = map SourceFunction
+                    $ duplicateBindings ++ sourceFunctions maybeLikeSourceEnvironment
                 }
           toSynthesisSourceInventory environment @?= Left
             (DuplicateConstructorFunctionBindings
               $ map toSynthesisName duplicate)
+      , testCase "duplicate tagged methods reach shared validation" $ do
+          let className = name "C"
+              methodName = name "method"
+              classDeclaration = HsTypeClass className [0] []
+              method = FunctionBinding
+                (TypeVar 0) methodName (Penalty 2.5)
+                [classMethodConstraint classDeclaration] [TypeVar 0]
+          classes <- expectRight $ mkStaticClassEnv [classDeclaration] []
+          let methodBinding = SourceClassMethod className method
+              environment = SourceEnvironment
+                { sourceBindings = [methodBinding, methodBinding]
+                , sourceDeconstructors = []
+                , sourceClasses = classes
+                , sourceTypeNames = [className]
+                , sourceTypeSynonyms = []
+                }
+          toSynthesisSourceInventory environment @?= Left
+            (InvalidSharedDeclaration
+              $ SharedDeclaration.DuplicateMethodName
+              $ toSynthesisName methodName)
       , testCase "source inventories reject orphan constructor functions" $ do
           let orphans = map name ["Another", "Orphan"]
               result = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
               environment = maybeLikeSourceEnvironment
-                { sourceFunctions =
+                { sourceBindings = map SourceFunction $
                     [ FunctionBinding result orphan (Penalty 4) [] []
                     | orphan <- orphans
                     ] ++ sourceFunctions maybeLikeSourceEnvironment
@@ -1925,7 +2179,7 @@ tests = testGroup "Exference"
                     { functionParameters = [TypeVar 0] }
                 | otherwise = binding
               environment = maybeLikeSourceEnvironment
-                { sourceFunctions = map changeShape
+                { sourceBindings = map SourceFunction $ map changeShape
                     $ sourceFunctions maybeLikeSourceEnvironment
                 }
           toSynthesisSourceInventory environment @?= Left
@@ -1996,8 +2250,8 @@ tests = testGroup "Exference"
           let intName = name "Int"
               badName = name "bad"
               environment = SourceEnvironment
-                { sourceFunctions =
-                    [ FunctionBinding
+                { sourceBindings =
+                    [ SourceFunction $ FunctionBinding
                         (TypeApp (TypeCons intName) (TypeCons intName))
                         badName (Penalty 0) [] []
                     ]
@@ -2657,6 +2911,19 @@ tests = testGroup "Exference"
               classEnvironment = mkQueryClassEnv staticClasses []
           checkExpression classEnvironment [] []
             (TypeArrow variable variable) [] identity @?= Right ()
+      , testCase "fresh variables do not wrap onto boundary annotations" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let firstType = TypeConstant 0
+              secondType = TypeConstant 1
+              goal = TypeArrow firstType
+                $ TypeArrow (TypeArrow firstType secondType) secondType
+              application = ExpApply
+                (ExpVar 2 $ TypeVar maxBound)
+                (ExpVar 1 $ TypeVar minBound)
+              expression = ExpLambda 1 (TypeVar minBound)
+                $ ExpLambda 2 (TypeVar maxBound) application
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            goal [] expression @?= Right ()
       , testCase "rejects a mismatched variable annotation" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"
@@ -2693,10 +2960,12 @@ name = QualifiedName []
 -- required bijection.
 maybeLikeSourceEnvironment :: SourceEnvironment FunctionBinding
 maybeLikeSourceEnvironment = SourceEnvironment
-  { sourceFunctions =
-      [ FunctionBinding maybeType nothingName (Penalty 1.25) [] []
-      , FunctionBinding maybeType justName (Penalty 2.75) [] [TypeVar 0]
-      , FunctionBinding maybeType (name "defaultMaybe")
+  { sourceBindings =
+      [ SourceFunction
+          $ FunctionBinding maybeType nothingName (Penalty 1.25) [] []
+      , SourceFunction
+          $ FunctionBinding maybeType justName (Penalty 2.75) [] [TypeVar 0]
+      , SourceFunction $ FunctionBinding maybeType (name "defaultMaybe")
           (Penalty 3.5) [] []
       ]
   , sourceDeconstructors =

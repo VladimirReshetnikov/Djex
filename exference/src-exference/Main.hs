@@ -37,6 +37,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , SourceEnvironment (..)
   , checkedSourceProjection
   , environmentFromPath
+  , sourceFunctions
   )
 import Language.Haskell.Synthesis.Candidate
   ( candidateResidualConstraints )

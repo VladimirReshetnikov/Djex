@@ -89,6 +89,8 @@ import Language.Haskell.Exference.EnvironmentParser
   , checkedSourceInventory
   , checkedSourceProjection
   , haskellSrcExtsParseMode
+  , sourceBindingFunction
+  , sourceFunctions
   , sourceTypeSynonymMap
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
@@ -246,16 +248,17 @@ mkExferenceSessionWithPolicy policy checked = do
       excludedBindings = Set.fromList $ exferenceExcludedBindings policy
       functionExcluded binding = Set.member
         (toSynthesisName $ functionName binding) excludedBindings
-      supportedFunctions =
-        [ binding
-        | binding <- sourceFunctions source
+      supportedBindings =
+        [ sourceBinding
+        | sourceBinding <- sourceBindings source
+        , let binding = sourceBindingFunction sourceBinding
         , not $ functionExcluded binding
         , functionSupported binding
         ]
       (supportedDeconstructors, omittedDeconstructors) =
         partition deconstructorSupported $ sourceDeconstructors source
       supportedSource = source
-        { sourceFunctions = supportedFunctions
+        { sourceBindings = supportedBindings
         , sourceDeconstructors = supportedDeconstructors
         }
       omissions =

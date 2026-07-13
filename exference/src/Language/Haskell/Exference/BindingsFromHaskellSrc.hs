@@ -22,9 +22,11 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.FunctionDecl
 import Language.Haskell.Exference.HaskellSrcUtils
+import Language.Haskell.Exference.ClassEnvFromHaskellSrc
+  ( ClassMethodDeclaration (classMethodFunction)
+  , getClassMethodsForEnvironment
+  )
 
-import Control.Monad ( join )
-import Control.Monad.Trans.State.Lazy (evalStateT)
 import Control.Monad.Trans.Except
 import Data.Graph ( SCC (..), stronglyConnComp )
 import qualified Data.Map.Strict as M
@@ -64,20 +66,6 @@ transformDecl tcs ds mn tDeclMap (TypeSig _loc names qtype)
       (ctype, _) <- convertType tcs (Just mn) ds tDeclMap qtype
       mapM (either throwE pure . helper mn ctype) names
 transformDecl _ _ _ _ _ = return []
-
-transformDecl'
-  :: Monad m
-  => M.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
-  -> ModuleName SrcSpanInfo
-  -> TypeDeclMap
-  -> Decl SrcSpanInfo
-  -> ConversionT String m [HsFunctionDecl]
-transformDecl' tcs ds mn tDeclMap (TypeSig _loc names qtype)
-  = insName qtype $ do
-      ctype <- convertTypeInternal tcs (Just mn) ds tDeclMap qtype
-      mapM (either throwE pure . helper mn ctype) names
-transformDecl' _ _ _ _ _ = return []
 
 insName :: Monad m
         => Type SrcSpanInfo -> ExceptT String m a -> ExceptT String m a
@@ -214,43 +202,9 @@ getClassMethods
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m [Either String HsFunctionDecl]
-getClassMethods tcs ds tDeclMap modules = fmap join $ sequence $ do
-  modul <- modules
-  (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
-  ClassDecl _ _ rawHead _ maybeClassDecls <- decls
-  let (name, vars) = splitDeclHead rawHead
-  let cdecls = fromMaybe [] maybeClassDecls
-  return $ do
-    let errorMod = (++) ("class method for "++show name++": ")
-    case convertModuleNameChecked moduleName name of
-      Left conversionError -> return [Left $ errorMod conversionError]
-      Right className -> case M.lookup className tcs of
-        Nothing -> return [Left $ "unknown type class: " ++ show className]
-        Just _ -> do
-          let cnstrA = HsConstraint className
-                <$> mapM ((TypeVar <$>) . tyVarTransform) vars
-          -- Keep the class head and every method in one state scope so each
-          -- class parameter retains the same variable ID throughout.
-          rEithers <- flip evalStateT (ConvData 0 M.empty) $ do
-            cnstrE <- runExceptT cnstrA
-            case cnstrE of
-              Left x -> return [Left x]
-              Right cnstr ->
-                mapM ( runExceptT
-                     . fmap (map (addConstraint cnstr))
-                     . transformDecl' tcs ds moduleName tDeclMap)
-                  $ [ d | ClsDecl _ d <- cdecls ]
-          let _ = rEithers :: [Either String [HsFunctionDecl]]
-          return $ concatMap (either (return . Left . errorMod) (map Right))
-                 $ rEithers
-  where
-    addConstraint :: HsConstraint -> HsFunctionDecl -> HsFunctionDecl
-    addConstraint c (name, ty) = case forallify ty of
-      TypeForall variables constraints body ->
-        (name, TypeForall variables (c : constraints) body)
-      -- 'forallify' always produces 'TypeForall'; retaining a total fallback
-      -- makes this boundary robust if its normalization policy later changes.
-      body -> (name, TypeForall [] [c] body)
+getClassMethods tcs ds tDeclMap modules =
+  map (fmap classMethodFunction) . concat
+    <$> getClassMethodsForEnvironment tcs ds tDeclMap modules
 
 -- | Checked extraction used by Exference itself.  Keeping construction
 -- failures explicit matters because HSE syntax constructors are public and can

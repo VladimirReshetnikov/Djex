@@ -12,7 +12,11 @@ module Language.Haskell.Exference.Core.Declaration
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
   , toSynthesisClassDeclaration
+  , toSynthesisClassDeclarationWithMethods
   , fromSynthesisClassDeclaration
+  , fromSynthesisClassDeclarationWithMethods
+  , classMethodConstraint
+  , addClassMethodConstraint
   , toSynthesisInstanceDeclaration
   , fromSynthesisInstanceDeclaration
   , toSynthesisDataDeclaration
@@ -21,7 +25,9 @@ module Language.Haskell.Exference.Core.Declaration
   , fromSynthesisRatedDataDeclaration
   , toSynthesisEnvironment
   , toSynthesisEnvironmentWithConstructorPenalties
+  , toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
   , fromSynthesisEnvironment
+  , fromSynthesisEnvironmentWithClassMethods
   ) where
 
 import Control.DeepSeq (NFData)
@@ -76,6 +82,15 @@ data SynthesisDeclarationError
   | ExplicitFunctionForallUnsupported [TVarId]
   | NonImplicitInstanceForall [SynthesisVariable]
   | ClassMethodsUnsupported [SharedName.Name]
+  | MissingClassMethodConstraint QualifiedName
+  | MismatchedClassMethodConstraint
+      QualifiedName HsConstraint HsConstraint
+  | UnknownClassMethodOwner QualifiedName
+  | MissingClassMethodBindings [QualifiedName]
+  | DuplicateClassMethodBindings [QualifiedName]
+  | OrphanClassMethodBindings [QualifiedName]
+  | MismatchedClassMethodOwners
+      [(QualifiedName, QualifiedName, QualifiedName)]
   | ExplicitParameterKindUnsupported SynthesisVariable
   | InvalidDeconstructorHead HsType
   | NonVariableDataParameter HsType
@@ -97,13 +112,19 @@ toSynthesisFunctionBinding
   :: FunctionBinding
   -> Either SynthesisDeclarationError SynthesisDeclaration
 toSynthesisFunctionBinding binding = checked $
-  SharedDeclaration.ValueDeclaration
-    <$> (SharedDeclaration.ValueSignature
-        (SearchPenaltyMetadata $ functionPenalty binding)
-        (toSynthesisName $ functionName binding)
-    <$> convertedType (TypeForall [] (functionConstraints binding)
-          $ foldr TypeArrow (functionResult binding)
-          $ functionParameters binding))
+  SharedDeclaration.ValueDeclaration <$> valueSignature binding
+
+valueSignature
+  :: FunctionBinding
+  -> Either SynthesisDeclarationError
+      (SharedDeclaration.ValueSignature
+        SynthesisVariable DeclarationMetadata)
+valueSignature binding = SharedDeclaration.ValueSignature
+  (SearchPenaltyMetadata $ functionPenalty binding)
+  (toSynthesisName $ functionName binding)
+  <$> convertedType (TypeForall [] (functionConstraints binding)
+        $ foldr TypeArrow (functionResult binding)
+        $ functionParameters binding)
 
 fromSynthesisFunctionBinding
   :: SynthesisDeclaration
@@ -130,12 +151,34 @@ fromSynthesisFunctionBinding declaration = do
 toSynthesisClassDeclaration
   :: HsTypeClass
   -> Either SynthesisDeclarationError SynthesisDeclaration
-toSynthesisClassDeclaration declaration = checked $
+toSynthesisClassDeclaration declaration =
+  toSynthesisClassDeclarationWithMethods declaration []
+
+-- | Preserve class ownership in the shared declaration while accepting the
+-- flat binding shape consumed by Exference search. The environment adapter
+-- has already selected the owning class by qualified name; this boundary
+-- derives, checks, and removes the one leading owner constraint, preventing
+-- ordinary constrained functions from being mistaken for class selectors.
+toSynthesisClassDeclarationWithMethods
+  :: HsTypeClass
+  -> [FunctionBinding]
+  -> Either SynthesisDeclarationError SynthesisDeclaration
+toSynthesisClassDeclarationWithMethods declaration methods = checked $
   SharedDeclaration.ClassDeclaration NoDeclarationMetadata
     (toSynthesisName $ tclass_name declaration)
     (map flexibleParameter $ tclass_params declaration)
     <$> mapM convertedConstraint (tclass_constraints declaration)
-    <*> pure []
+    <*> mapM convertedMethod methods
+ where
+  expectedConstraint = classMethodConstraint declaration
+
+  convertedMethod binding = case functionConstraints binding of
+    actual : remaining
+      | actual == expectedConstraint -> valueSignature
+          (binding { functionConstraints = remaining })
+      | otherwise -> Left $ MismatchedClassMethodConstraint
+          (functionName binding) expectedConstraint actual
+    _ -> Left $ MissingClassMethodConstraint $ functionName binding
 
 fromSynthesisClassDeclaration
   :: SynthesisDeclaration
@@ -150,6 +193,44 @@ fromSynthesisClassDeclaration declaration = do
       | otherwise -> Left $ ClassMethodsUnsupported
           $ map SharedDeclaration.valueName methods
     _ -> Left ExpectedClassDeclaration
+
+-- | Lower a shared class and all its owned method signatures to Exference's
+-- method-free class graph plus the flat bindings required by search.  The
+-- owner constraint is derived here, rather than stored redundantly in the
+-- shared method type.
+fromSynthesisClassDeclarationWithMethods
+  :: SynthesisDeclaration
+  -> Either SynthesisDeclarationError (HsTypeClass, [FunctionBinding])
+fromSynthesisClassDeclarationWithMethods declaration = do
+  validateShared declaration
+  case declaration of
+    SharedDeclaration.ClassDeclaration _ name parameters superclasses methods -> do
+      typeClass <- HsTypeClass <$> convertedName name
+        <*> mapM plainFlexibleParameter parameters
+        <*> mapM loweredConstraint superclasses
+      bindings <- mapM (lowerMethod $ classMethodConstraint typeClass) methods
+      Right (typeClass, bindings)
+    _ -> Left ExpectedClassDeclaration
+ where
+  lowerMethod owner signature = do
+    binding <- fromSynthesisFunctionBinding
+      $ SharedDeclaration.ValueDeclaration signature
+    Right binding
+      { functionConstraints = owner : functionConstraints binding }
+
+-- | The implicit selector constraint for a class declaration.  Class and
+-- method elaboration share the declaration's parameter IDs, so this value is
+-- also the exact ownership witness carried by the frontend's tagged binding.
+classMethodConstraint :: HsTypeClass -> HsConstraint
+classMethodConstraint declaration = HsConstraint
+  (tclass_name declaration) (map TypeVar $ tclass_params declaration)
+
+-- | Add one implicit class-method constraint to a prenex source type.
+addClassMethodConstraint :: HsConstraint -> HsType -> HsType
+addClassMethodConstraint constraint typeExpression = case typeExpression of
+  TypeForall variables constraints body ->
+    TypeForall variables (constraint : constraints) body
+  body -> TypeForall [] [constraint] body
 
 toSynthesisInstanceDeclaration
   :: HsInstance
@@ -256,7 +337,7 @@ toSynthesisEnvironment
   :: EnvDictionary
   -> Either SynthesisDeclarationError SynthesisEnvironment
 toSynthesisEnvironment =
-  toSynthesisEnvironmentWith toSynthesisDataDeclaration
+  toSynthesisEnvironmentWith toSynthesisDataDeclaration Map.empty
 
 -- | Seal a complete core environment without discarding constructor search
 -- costs.  Keeping the common declaration assembly here prevents frontends
@@ -266,19 +347,41 @@ toSynthesisEnvironmentWithConstructorPenalties
   -> EnvDictionary
   -> Either SynthesisDeclarationError SynthesisEnvironment
 toSynthesisEnvironmentWithConstructorPenalties penalties =
-  toSynthesisEnvironmentWith $ toSynthesisRatedDataDeclaration penalties
+  toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
+    penalties Map.empty
+
+-- | Seal the frontend projection while nesting tagged class methods under
+-- their owning shared declarations.  The backend dictionary intentionally
+-- contains only ordinary values here; selectors are lowered back to flat
+-- bindings after the shared inventory has validated them.
+toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
+  :: Map.Map QualifiedName Penalty
+  -> Map.Map QualifiedName [FunctionBinding]
+  -> EnvDictionary
+  -> Either SynthesisDeclarationError SynthesisEnvironment
+toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
+    penalties methods =
+  toSynthesisEnvironmentWith
+    (toSynthesisRatedDataDeclaration penalties) methods
 
 toSynthesisEnvironmentWith
   :: (DeconstructorBinding
       -> Either SynthesisDeclarationError SynthesisDeclaration)
+  -> Map.Map QualifiedName [FunctionBinding]
   -> EnvDictionary
   -> Either SynthesisDeclarationError SynthesisEnvironment
-toSynthesisEnvironmentWith convertDataDeclaration environment = do
+toSynthesisEnvironmentWith convertDataDeclaration methods environment = do
+  let classes = sClassEnv_tclasses $ environmentClasses environment
+  case Set.toAscList $ Map.keysSet methods `Set.difference` Map.keysSet classes of
+    owner : _ -> Left $ UnknownClassMethodOwner owner
+    [] -> pure ()
   declarations <- sequence $
     map toSynthesisFunctionBinding (environmentFunctions environment) ++
     map convertDataDeclaration (environmentDeconstructors environment) ++
-    map toSynthesisClassDeclaration
-      (Map.elems $ sClassEnv_tclasses $ environmentClasses environment) ++
+    [ toSynthesisClassDeclarationWithMethods declaration
+        $ Map.findWithDefault [] (tclass_name declaration) methods
+    | declaration <- Map.elems classes
+    ] ++
     map toSynthesisInstanceDeclaration
       (sClassEnv_explicitInstances $ environmentClasses environment)
   either (Left . InvalidSharedEnvironment) Right
@@ -287,30 +390,68 @@ toSynthesisEnvironmentWith convertDataDeclaration environment = do
 fromSynthesisEnvironment
   :: SynthesisEnvironment
   -> Either SynthesisDeclarationError EnvDictionary
-fromSynthesisEnvironment environment = do
-  (functions, deconstructors, classes, instances) <- foldM collect
-    ([], [], [], []) $ SharedEnvironment.environmentDeclarations environment
+fromSynthesisEnvironment = fmap fst . lowerSynthesisEnvironment
+  (fmap (, []) . fromSynthesisClassDeclaration)
+
+-- | Lower an environment while retaining class-method ownership explicitly.
+-- Ordinary values remain in the backend dictionary; methods are grouped by
+-- their exact owning class and remain in declaration order.  Callers that do
+-- not have somewhere to retain the second component must use the legacy
+-- 'fromSynthesisEnvironment', which rejects method-bearing classes.
+fromSynthesisEnvironmentWithClassMethods
+  :: SynthesisEnvironment
+  -> Either SynthesisDeclarationError
+      (EnvDictionary, Map.Map QualifiedName [FunctionBinding])
+fromSynthesisEnvironmentWithClassMethods =
+  lowerSynthesisEnvironment fromSynthesisClassDeclarationWithMethods
+
+lowerSynthesisEnvironment
+  :: (SynthesisDeclaration
+      -> Either SynthesisDeclarationError (HsTypeClass, [FunctionBinding]))
+  -> SynthesisEnvironment
+  -> Either SynthesisDeclarationError
+      (EnvDictionary, Map.Map QualifiedName [FunctionBinding])
+lowerSynthesisEnvironment convertClass environment = do
+  (functions, deconstructors, classes, instances, methods) <- foldM collect
+    ([], [], [], [], Map.empty)
+    $ SharedEnvironment.environmentDeclarations environment
   classEnvironment <- either (Left . ClassEnvironmentConversionError) Right
     $ mkStaticClassEnv (reverse classes) (reverse instances)
-  Right $ EnvDictionary
-    (reverse functions) (reverse deconstructors) classEnvironment
+  Right
+    ( EnvDictionary
+        (reverse functions) (reverse deconstructors) classEnvironment
+    , methods
+    )
  where
-  collect (functions, deconstructors, classes, instances) declaration =
+  collect (functions, deconstructors, classes, instances, methods)
+      declaration =
     case declaration of
       SharedDeclaration.ValueDeclaration{} -> do
         binding <- fromSynthesisFunctionBinding declaration
-        Right (binding : functions, deconstructors, classes, instances)
+        Right
+          ( binding : functions, deconstructors, classes, instances, methods)
       SharedDeclaration.DataTypeDeclaration{} -> do
         deconstructor <- fromSynthesisDataDeclaration declaration
-        Right (functions, deconstructor : deconstructors, classes, instances)
+        Right
+          ( functions, deconstructor : deconstructors, classes, instances
+          , methods
+          )
       SharedDeclaration.ClassDeclaration{} -> do
-        classDeclaration <- fromSynthesisClassDeclaration declaration
-        Right (functions, deconstructors,
-          classDeclaration : classes, instances)
+        (classDeclaration, classMethods) <- convertClass declaration
+        let retainedMethods
+              | null classMethods = methods
+              | otherwise = Map.insert
+                  (tclass_name classDeclaration) classMethods methods
+        Right
+          ( functions, deconstructors, classDeclaration : classes, instances
+          , retainedMethods
+          )
       SharedDeclaration.InstanceDeclaration{} -> do
         instanceDeclaration <- fromSynthesisInstanceDeclaration declaration
-        Right (functions, deconstructors, classes,
-          instanceDeclaration : instances)
+        Right
+          ( functions, deconstructors, classes
+          , instanceDeclaration : instances, methods
+          )
       SharedDeclaration.TypeSynonymDeclaration _ name _ _ ->
         Left $ UnsupportedCoreEnvironmentDeclaration name
       SharedDeclaration.AbstractTypeDeclaration _ name _ ->

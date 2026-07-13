@@ -107,9 +107,13 @@ budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
 
 `mkExferenceSession` similarly computes the backend-supported projection and
-seals its search environment once. Unsupported rank-N introduction and
-elimination capabilities remain visible as structured omissions and warning
-diagnostics instead of disappearing per query. `parseExferenceRequest`
+seals its search environment once. The source boundary tags class methods by
+their qualified owner, nests them under the common class declaration for
+validation, and lowers each rated selector exactly once into Exference's flat
+search inventory without changing source order. Unsupported rank-N
+introduction and elimination capabilities remain visible as structured
+omissions and warning diagnostics instead of disappearing per query.
+`parseExferenceRequest`
 elaborates a Haskell type against the session's retained names, synonyms,
 classes, and kind assumptions; `runExferenceQuery` validates only the varying
 goal and search policy, then returns a lazy sequence of shared result batches.

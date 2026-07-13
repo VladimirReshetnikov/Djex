@@ -98,25 +98,54 @@ wrapper projection is no longer exposed under a misleading conversion name.
 classes, instances, and deconstructor/data records to the shared declaration
 IR; the HSE frontend uses the same boundary for type synonyms. Function
 and constructor search penalties and recursive-datatype flags survive as
-explicit metadata, while
-lossy reverse conversions (such as dropping separately stored class methods)
-are rejected.
+explicit metadata. Class methods are nested under their shared class
+declaration with their rating intact; the implicit owner constraint required
+by Exference's flat search binding is derived from the class parameters,
+checked and removed while nesting, and restored exactly once while lowering.
+The older method-free class conversion still rejects a declaration containing
+methods instead of silently dropping them.
 
-Whole core environments also round-trip through the shared sealed declaration
-inventory. `StaticClassEnv` retains explicit instance declarations separately
-from its superclass-inflated lookup index, so adapters serialize source facts
-rather than derived cache entries. The core-only adapter still rejects
-frontend-only declarations such as type synonyms because its search
-dictionary has no representation for them.
+Method-free core environments round-trip through the shared sealed declaration
+inventory with `fromSynthesisEnvironment`. That legacy reverse adapter rejects
+a method-bearing class because `EnvDictionary` has no ownership field and
+flattening a selector into `environmentFunctions` would silently change its
+meaning. Ownership-aware callers instead use
+`fromSynthesisEnvironmentWithClassMethods`, which returns the ordinary
+`EnvDictionary` together with a `Map QualifiedName [FunctionBinding]` accepted
+by `toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods`.
+`StaticClassEnv` retains explicit instance declarations separately from its
+superclass-inflated lookup index, so adapters serialize source facts rather
+than derived cache entries. The core-only adapters still reject frontend-only
+declarations such as type synonyms because the search dictionary has no
+representation for them.
 
 The HSE loader returns `IO (LoadReport CheckedSourceEnvironment)`: fatal phases
 use a typed error, while nonfatal warnings and summaries are structured shared
 diagnostics. Its backend `SourceEnvironment` projection keeps parsed functions,
 deconstructors, classes, datatype names, and synonyms in one named inventory
 through rating and CLI loading. `toSynthesisSourceEnvironment` seals that
-complete inventory in the shared environment IR. Constructor signatures
-duplicated in Exference's search-function list are represented only by their
-datatype declarations at this boundary; list, unit, and tuple constructors
+complete inventory in the shared environment IR. Its ordered binding field is
+now `sourceBindings :: [SourceBinding function]`, where `SourceFunction`
+denotes an ordinary value and `SourceClassMethod QualifiedName` records the
+exact owning class. The flat `sourceFunctions` accessor remains available for
+search and compatibility clients, but code constructing or updating the old
+`sourceFunctions` record field must migrate to `sourceBindings` and wrap its
+ordinary entries in `SourceFunction`. A read-only explicit import that formerly
+named only `SourceEnvironment(..)` must now also name the standalone
+`sourceFunctions` accessor; broad module imports remain unaffected.
+
+Class heads, superclasses, instances, and method bodies are elaborated from one
+collected class inventory. A method's compatibility type carries the implicit
+owner constraint, while its `SourceClassMethod` tag carries only the qualified
+owner name, avoiding a second copy of the class parameter IDs. Inventory
+sealing checks that tag and leading constraint against the owning class, nests
+the signature, and indexes the method once in the common value namespace. The
+checked backend projection then lowers the method back into its original list
+position, preserving rating and equal-cost search order.
+
+Constructor signatures duplicated in Exference's search-function list are
+represented only by their datatype declarations at this boundary; list, unit,
+and tuple constructors
 have explicit intrinsic datatype records, so `(:)` never masquerades as an
 ordinary value. Constructor shape and search penalty are then lowered back
 from that checked inventory rather than trusted from a parallel raw record.
@@ -129,6 +158,10 @@ unconstrained class parameters can generalize to support the shipped modern
 poly-kinded `Typeable` vocabulary. The frontend selects the explicit open
 inventory policy because loading a subset of modules deliberately retains
 external type names after reporting them as warnings.
+Kind assumptions currently generalize only a wholly unconstrained class
+parameter. The shared IR cannot yet retain a partially polymorphic scheme such
+as `k -> Type`; an unresolved variable below a fixed outer kind shape therefore
+defaults to `Type`, as it did before this class-method migration.
 `toSynthesisSourceInventory` retains both the sealed environment and those
 inferred assumptions; the older environment-only projection remains available
 for compatibility callers. `Language.Haskell.Djex.Exference` seals this checked

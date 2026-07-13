@@ -40,7 +40,8 @@ import Language.Haskell.Exference.Core.Types
   , mkStaticClassEnv
   )
 import Language.Haskell.Exference.EnvironmentParser
-  ( SourceEnvironment (..)
+  ( SourceBinding (SourceFunction)
+  , SourceEnvironment (..)
   , checkSourceEnvironment
   , checkedSourceInventory
   )
@@ -413,7 +414,7 @@ tests = testGroup "Djex facade"
             , functionParameters = [TypeVar 0]
             }
           source = emptyExferenceSource
-            {sourceFunctions = [identityBinding]}
+            {sourceBindings = [SourceFunction identityBinding]}
           options = defaultExferenceOptions
             {exferenceMaximumSteps = 32}
       checked <- expectRight $ checkSourceEnvironment source
@@ -439,7 +440,8 @@ tests = testGroup "Djex facade"
             , functionParameters =
                 [TypeForall [1] [] $ TypeVar 1]
             }
-          source = emptyExferenceSource {sourceFunctions = [rankN]}
+          source = emptyExferenceSource
+            {sourceBindings = [SourceFunction rankN]}
       checked <- expectRight $ checkSourceEnvironment source
       session <- expectRight $ mkExferenceSession checked
       exferenceSessionInventory session @?= checkedSourceInventory checked
@@ -466,7 +468,7 @@ tests = testGroup "Djex facade"
             , functionParameters = [TypeVar 0]
             }
           source = emptyExferenceSource
-            { sourceFunctions =
+            { sourceBindings = map SourceFunction
                 [binding blockedBackendName, binding retainedBackendName]
             }
           policy = defaultExferenceSessionPolicy
@@ -530,7 +532,7 @@ assertDjinnCompatibility label environment session contexts options target goal 
 
 emptyExferenceSource :: SourceEnvironment FunctionBinding
 emptyExferenceSource = SourceEnvironment
-  { sourceFunctions = []
+  { sourceBindings = []
   , sourceDeconstructors = []
   , sourceClasses = emptyStaticClassEnv
   , sourceTypeNames = []

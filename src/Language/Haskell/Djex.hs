@@ -8,8 +8,10 @@
 -- remain available from explicit named sublibrary dependencies:
 --
 -- * "Djinn.Core" is the stable, validated Djinn API.
--- * "Language.Haskell.Exference" is the Exference frontend API.
--- * "Language.Haskell.Exference.Core" is its parser-independent search API.
+-- * "Language.Haskell.Djex.Exference" is the checked, parser-neutral adapter.
+-- * "Language.Haskell.Exference.Core" is the lower-level search API.
+-- * @Language.Haskell.Djex.Exference.HaskellSrc@ is the optional source-loader
+--   and type-parser boundary from the @exference-frontend@ component.
 -- * @Language.Haskell.Synthesis.*@ modules hold the shared neutral vocabulary.
 --
 -- Compatibility CLI modules and modules containing @.Internal.@ are not part

@@ -1,7 +1,7 @@
 -- | Compatibility construction of Djex sessions from the HSE frontend's
 -- parser-specific checked environment.
 --
--- New applications should normally use 'loadExferenceSession' from
+-- New applications should normally use @loadExferenceSession@ from
 -- "Language.Haskell.Djex.Exference.HaskellSrc".
 -- This explicit bridge exists for the historical CLI, programmatic frontend
 -- fixtures, and migrations that already own a 'CheckedSourceEnvironment'.

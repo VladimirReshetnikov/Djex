@@ -58,12 +58,12 @@ state uses ordinary record selectors and explicit updates, keeping the engine
 independent of `mtl`, generated optics, and Template Haskell.
 The public named `exference-frontend` sublibrary contains the
 `haskell-src-exts` frontend and environment loader and preserves the historical
-core import paths. It also exposes `Language.Haskell.Djex.Exference`, so the
-Exference executable and backend-specific clients use the checked session API
-without linking Djinn. The package's default `djex` library re-exports that
-adapter together with the shared synthesis vocabulary; callers of the raw
-compatibility frontend or search core depend on their explicitly named
-sublibraries.
+core import paths through Cabal reexports. The stable
+`Language.Haskell.Djex.Exference` adapter now lives in `exference-core`; the
+frontend adds `Language.Haskell.Djex.Exference.HaskellSrc` for directory loading
+and Haskell type parsing. The package's default `djex` library re-exports the
+neutral adapter together with the shared synthesis vocabulary without acquiring
+HSE or filesystem dependencies.
 Source conversion exposes its concrete `ConversionT` stack, with errors inside
 lazy state so caught failures retain earlier variable allocations.  Together
 with direct reader and strict-writer transformers, this also keeps the frontend
@@ -329,8 +329,9 @@ records into facade-owned `ExferenceCandidateDetails` and
 tags, binding usage is keyed by shared `Name`, and the retained
 `ExferenceInventory` has backend ratings erased by a total functor map. Stable
 callers may construct that inventory through `mkExferenceSession` from a
-neutral `ExferenceEnvironment`, or use `loadExferenceSession` for Haskell
-source directories. The raw
+neutral `ExferenceEnvironment`. Source clients additionally import
+`Language.Haskell.Djex.Exference.HaskellSrc` and use `loadExferenceSession` for
+Haskell source directories. The raw
 `CheckedSourceEnvironment -> ExferenceSession` bridge lives separately in
 `Language.Haskell.Exference.Session`; no parser type is retained in a sealed
 session. `ExferenceSessionPolicy` supplies exact-name exclusions and finite,

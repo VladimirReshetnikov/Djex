@@ -23,8 +23,8 @@ generated-output infrastructure is progressively consolidated.
 - `djinn/` supplies the public `djinn-core` proof-search sublibrary and the
   `djinn-frontend` compatibility/REPL sublibrary.
 - `exference/` supplies the public parser-independent `exference-core`
-  sublibrary and the `exference-frontend` Haskell-source/environment-loader
-  sublibrary, which also owns the checked Djex/Exference session adapter.
+  sublibrary, including the checked Djex/Exference session adapter, and the
+  `exference-frontend` Haskell-source/environment-loader sublibrary.
 
 The `djex` executable is the merged one-shot frontend and selects either checked
 backend explicitly. The historical `djinn` and `exference` executable names
@@ -51,6 +51,9 @@ facade and synthesis vocabulary. Compatibility or low-level clients opt into
 `djex:exference-frontend` explicitly instead of acquiring those research APIs
 transitively. Build-tool dependencies for the historical commands remain
 `djex:djinn` and `djex:exference`; their executable names are unchanged.
+The default library and `djex:exference-core` have no transitive
+`haskell-src-exts`, `directory`, or `filepath` dependency. Source clients add
+`djex:exference-frontend` explicitly.
 
 The filesystem and Cabal-project migration is equally deliberate:
 
@@ -169,7 +172,8 @@ Exference now has the same stable construction boundary:
 directly. Its source loader is an additional frontend, not the definition of
 an Exference session.
 
-`loadExferenceSession` and its policy-aware counterpart compute Exference's
+`Language.Haskell.Djex.Exference.HaskellSrc.loadExferenceSession` and its
+policy-aware counterpart compute Exference's
 backend-supported projection once and turn a directory into the same opaque
 session, while translating every fatal loader phase into source-preserving
 `EXF_*` diagnostics. Stable callers therefore never handle a parser-specific
@@ -211,7 +215,8 @@ Imports, fixities, ordinary value and method bodies, pattern vocabulary,
 default declarations, and operational pragmas remain accepted because they do
 not change the nominal type/class inventory. These forms are explicit current
 limitations rather than syntax that can silently disappear during loading.
-`parseExferenceRequest` resolves Haskell syntax against the session's retained
+`Language.Haskell.Djex.Exference.HaskellSrc.parseExferenceRequest` resolves
+Haskell syntax against the session's retained
 type names, classes, and kind assumptions. It deliberately does not use the
 legacy frontend synonym map. `runExferenceQuery` passes both parsed and
 programmatically constructed goals through the shared capture-avoiding
@@ -226,6 +231,20 @@ ratings out of the already-checked inventory without rebuilding its indexes or
 kind assumptions. Stable candidate details and batch metadata likewise expose
 only shared names, types, metrics, and rendering hints; raw core records no
 longer cross the default facade.
+
+Programmatic clients need only the neutral adapter:
+
+```haskell
+import Language.Haskell.Djex.Exference
+```
+
+Clients that load directories or parse Haskell type text add the frontend
+component and its explicit source boundary:
+
+```haskell
+import Language.Haskell.Djex.Exference
+import Language.Haskell.Djex.Exference.HaskellSrc
+```
 Those batches preserve queue/depth pruning, nominal binding usage, residual
 constraints, statistics, and rendering hints without forcing the remaining
 trace. Each generated expression is wrapped in a target-bearing shared

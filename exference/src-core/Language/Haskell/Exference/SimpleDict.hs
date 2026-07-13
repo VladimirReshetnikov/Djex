@@ -1,3 +1,4 @@
+-- | Parser-neutral defaults for Exference's historical API.
 module Language.Haskell.Exference.SimpleDict
   ( emptyClassEnv
   , defaultHeuristicsConfig

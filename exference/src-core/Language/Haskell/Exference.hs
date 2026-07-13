@@ -1,3 +1,4 @@
+-- | Parser-neutral compatibility facade over the Exference search core.
 module Language.Haskell.Exference
   ( findExpressions
   , findOneExpression

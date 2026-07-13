@@ -3,6 +3,8 @@
 -- Session construction seals the source inventory and computes Exference's
 -- supported search projection once. Query execution performs every fallible
 -- validation before returning a lazy sequence of total shared result batches.
+-- This module is parser-neutral; Haskell source loading lives in the explicit
+-- @exference-frontend@ component.
 module Language.Haskell.Djex.Exference
   ( ExferenceSession
   , ExferenceEnvironment

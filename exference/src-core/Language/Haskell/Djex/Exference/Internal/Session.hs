@@ -1,4 +1,4 @@
--- | Private ownership of the checked Exference session invariant.
+-- | Private ownership of the parser-neutral Exference session invariant.
 --
 -- A session retains only parser-independent state.  The HSE compatibility
 -- bridge and the neutral Djex constructor both prepare the same inventory,

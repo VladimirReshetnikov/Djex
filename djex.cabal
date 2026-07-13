@@ -86,8 +86,8 @@ common cli-test
 
 -- The stable Djex facade. Compatibility and research modules remain available
 -- from their explicit named sublibraries instead of leaking into every Djex
--- client. The adapters below expose checked standard-session and source-loader
--- entry points, so neither raw backend is needed here.
+-- client. The adapters expose checked parser-neutral session and query entry
+-- points; source loading remains an explicit frontend dependency.
 Library
   import:           build-settings
   Hs-Source-Dirs:   src
@@ -118,7 +118,7 @@ Library
   Build-Depends:
     djex:synthesis,
     djex:djinn-core,
-    djex:exference-frontend
+    djex:exference-core
 
 -- The merged one-shot command consumes only the checked public facade. The
 -- historical executables below remain available for their REPL and legacy
@@ -285,12 +285,18 @@ Test-Suite djinn-cli-tests
 Library exference-core
   import:         build-settings, containers-dep, deepseq-dep, transformers-dep
   Visibility:     public
-  -- Preserve the historical search-core optimization policy; frontend and
-  -- executable code use the package-wide defaults.
+  -- Preserve the historical search-core optimization policy across the raw
+  -- engine and its parser-neutral stable adapter. HSE frontend and executable
+  -- code use the package-wide defaults.
   Ghc-Options:    -fno-spec-constr
   Hs-Source-Dirs: exference/src-core
 
   Exposed-Modules:
+    Language.Haskell.Djex.Exference
+    Language.Haskell.Djex.Exference.Internal.Frontend
+    Language.Haskell.Exference
+    Language.Haskell.Exference.Diagnostic
+    Language.Haskell.Exference.SimpleDict
     Language.Haskell.Exference.Core
     Language.Haskell.Exference.Core.Name
     Language.Haskell.Exference.Core.Types
@@ -309,6 +315,7 @@ Library exference-core
     Language.Haskell.Exference.Core.Internal.Scope
 
   Other-Modules:
+    Language.Haskell.Djex.Exference.Internal.Session
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Unify
     Language.Haskell.Exference.Core.Internal.ConstraintSolver
@@ -322,6 +329,17 @@ Library exference-core
     djex:synthesis,
     pqueue >= 1.3.1 && < 1.8
 
+-- This suite deliberately sees only the parser-neutral component. It guards
+-- the stable adapter against accidental HSE or filesystem dependencies.
+Test-Suite exference-core-api-tests
+  import:         tasty-hunit-test
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Spec.hs
+  Hs-Source-Dirs: exference/test-core-api
+  Build-Depends:
+    djex:exference-core,
+    djex:synthesis
+
 -- Compatibility frontend for the historical Exference library.  Cabal
 -- component names are package-wide, so this cannot share the `exference`
 -- executable's name.
@@ -331,12 +349,7 @@ Library exference-frontend
   Hs-Source-Dirs: exference/src
 
   Exposed-Modules:
-    Language.Haskell.Djex.Exference
     Language.Haskell.Djex.Exference.HaskellSrc
-    Language.Haskell.Djex.Exference.Internal.Frontend
-    Language.Haskell.Exference
-    Language.Haskell.Exference.Diagnostic
-    Language.Haskell.Exference.SimpleDict
     Language.Haskell.Exference.ExpressionToHaskellSrc
     Language.Haskell.Exference.TypeFromHaskellSrc
     Language.Haskell.Exference.TypeDeclsFromHaskellSrc
@@ -346,6 +359,10 @@ Library exference-frontend
     Language.Haskell.Exference.Session
 
   Reexported-Modules:
+    Language.Haskell.Djex.Exference,
+    Language.Haskell.Exference,
+    Language.Haskell.Exference.Diagnostic,
+    Language.Haskell.Exference.SimpleDict,
     Language.Haskell.Exference.Core,
     Language.Haskell.Exference.Core.Name,
     Language.Haskell.Exference.Core.Types,
@@ -363,7 +380,6 @@ Library exference-frontend
     Language.Haskell.Exference.Core.Score
 
   Other-Modules:
-    Language.Haskell.Djex.Exference.Internal.Session
     Language.Haskell.Exference.HaskellSrcUtils
 
   Build-Depends:

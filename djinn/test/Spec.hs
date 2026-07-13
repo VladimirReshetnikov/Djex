@@ -69,6 +69,8 @@ tests =
     , ("prepare neutral Djinn environments authoritatively",
           testNeutralDjinnPreparation)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
+    , ("separate synonym saturation from kind errors",
+          testSynonymSaturationBoundary)
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
     , ("reject a higher-kinded synonym body", testHigherKindedSynonymBody)
@@ -727,6 +729,93 @@ assertDjinnSessionRejected description result = case result of
     Left failure -> assertEqual (description ++ " has the environment code")
         (Just "DJEX_DJINN_ENV") (SharedDiagnostic.diagnosticCode failure)
     Right _ -> fail $ description ++ ": a recursive datatype reached Djinn"
+
+-- Saturation and kind checking own different failures. A partial synonym can
+-- be kind-compatible in a higher-kinded position, so the explicit arity guard
+-- must reject it. An extra argument, however, is not an arity shortage; in
+-- Djinn's proper-result synonym subset it proceeds to the shared kind checker
+-- and is rejected there. Keep both the raw compatibility path and the stable
+-- neutral-session path on that same diagnostic boundary.
+testSynonymSaturationBoundary :: IO ()
+testSynonymSaturationBoundary = do
+    let applyDefinition =
+            ("Apply", (["f"], HTVar "f", ()))
+        maybeLikeDefinition =
+            ("MaybeLike", ([],
+                HTAbstract "MaybeLike" (KArrow KStar KStar), ()))
+        intDefinition =
+            ("Int2", ([], HTAbstract "Int2" KStar, ()))
+        definitions =
+            [applyDefinition, maybeLikeDefinition, intDefinition]
+        apply = HTCon "Apply"
+        maybeLike = HTCon "MaybeLike"
+        intType = HTCon "Int2"
+        maybeInt = HTApp maybeLike intType
+        overapplied = HTApp (HTApp apply maybeLike) intType
+    checked <- expectShownRight $ htCheckEnv definitions
+    assertRawKindFailure "raw overapplication"
+        $ htCheckType checked $ HTArrow overapplied maybeInt
+    assertRawSaturationFailure "raw partial application"
+        $ htCheckType checked $ HTArrow apply apply
+
+    let proper = SharedKind.ProperTypeKind
+        parameter = SharedDeclaration.TypeParameter "f" Nothing
+        sharedApply = SharedDeclaration.TypeSynonymDeclaration ()
+            (sharedName "Apply") [parameter] $ SharedType.TypeVariable "f"
+        sharedMaybeLike = SharedDeclaration.AbstractTypeDeclaration ()
+            (sharedName "MaybeLike")
+            (SharedKind.FunctionKind proper proper)
+        sharedInt = SharedDeclaration.AbstractTypeDeclaration ()
+            (sharedName "Int2") proper
+    environment <- mkNeutralDjinnEnvironment
+        [sharedApply, sharedMaybeLike, sharedInt]
+    session <- expectShownRight $ Djex.mkDjinnSession environment
+    target <- expectShownRight $ SharedName.mkIdentifier "witness"
+    assertStableKindFailure session target
+        "Apply MaybeLike Int2 -> MaybeLike Int2"
+    assertStableSaturationFailure session target "Apply -> Apply"
+  where
+    assertRawKindFailure description result = case result of
+        Left message -> do
+            assertBool (description ++ " was mislabeled as unsaturated")
+                $ "expects at least" `notElemText` message
+            assertBool (description ++ " did not reach kind inference")
+                $ "KindMismatch" `isInfixOf` message
+        Right () -> fail $ description ++ " was accepted"
+
+    assertRawSaturationFailure description result = case result of
+        Left message -> assertBool
+            (description ++ " lost its saturation diagnostic")
+            $ "expects at least 1 argument(s), but got 0" `isInfixOf` message
+        Right () -> fail $ description ++ " was accepted"
+
+    assertStableKindFailure session target source = do
+        request <- expectShownRight $ Djex.parseDjinnRequest
+            session defaultQueryOptions target "overapplied.djinn" source
+        case Djex.runDjinnQuery session request of
+            Left failure -> do
+                assertEqual "stable overapplication has the query code"
+                    (Just "DJEX_DJINN_QUERY")
+                    (SharedDiagnostic.diagnosticCode failure)
+                let message = unwords
+                        $ SharedDiagnostic.diagnosticContext failure
+                assertBool "stable overapplication was mislabeled as unsaturated"
+                    $ "expects at least" `notElemText` message
+                assertBool "stable overapplication did not reach kind inference"
+                    $ "KindMismatch" `isInfixOf` message
+            Right _ -> fail "stable overapplication was accepted"
+
+    assertStableSaturationFailure session target source = do
+        request <- expectShownRight $ Djex.parseDjinnRequest
+            session defaultQueryOptions target "partial.djinn" source
+        case Djex.runDjinnQuery session request of
+            Left failure -> assertBool
+                "stable partial application lost its saturation diagnostic"
+                $ "expects at least 1 argument(s), but got 0" `isInfixOf`
+                    unwords (SharedDiagnostic.diagnosticContext failure)
+            Right _ -> fail "stable partial application was accepted"
+
+    needle `notElemText` haystack = not $ needle `isInfixOf` haystack
 
 -- Type synonyms are transparent even when they occur below an opaque type
 -- constructor.  The whole opaque application remains one proposition, but

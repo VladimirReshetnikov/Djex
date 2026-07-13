@@ -173,9 +173,13 @@ htCheckEnv its = do
                 (sourceName, (parameters, body, fromGroundKind kind))
 
 -- Type synonyms are unlike data and abstract constructors: Haskell requires
--- every occurrence to supply the synonym's complete parameter list.  Kind
--- checking alone cannot detect a partial use when it appears in a compatible
--- higher-kinded position, so validate saturation from the declaration shape.
+-- every occurrence to supply at least the synonym's complete parameter list.
+-- Kind checking alone cannot detect a partial use when it appears in a
+-- compatible higher-kinded position, so validate minimum saturation from the
+-- declaration shape. Excess arguments remain the kind checker's concern; in
+-- Djinn's Haskell 98 subset every synonym result has kind @Type@, so they are
+-- rejected there as an ill-kinded application rather than misreported as an
+-- unsaturated synonym.
 checkSynonymSaturation :: [(HSymbol, ([HSymbol], HType, a))]
                        -> HType -> Either String ()
 checkSynonymSaturation definitions =
@@ -221,7 +225,7 @@ checkSynonymSaturationWith arities = checkType
 
     checkName name supplied =
         case lookup name arities of
-            Just expected | supplied /= expected -> Left $
-                "Type synonym " ++ name ++ " expects " ++ show expected ++
-                " argument(s), but got " ++ show supplied
+            Just expected | supplied < expected -> Left $
+                "Type synonym " ++ name ++ " expects at least " ++
+                show expected ++ " argument(s), but got " ++ show supplied
             _ -> Right ()

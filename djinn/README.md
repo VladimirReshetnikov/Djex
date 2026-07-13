@@ -62,7 +62,7 @@ cabal test djinn-tests djinn-property-tests djinn-cli-tests --test-show-details=
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 42 focused Tasty/HUnit regressions over parsing, kinds, class signatures, neutral-environment sealing, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 43 focused Tasty/HUnit regressions over parsing, kinds, class signatures, neutral-environment sealing, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-cli-tests` | Fifteen subprocess scenarios against the packaged executable, including EOF, diagnostics, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 

@@ -239,6 +239,33 @@ tests = testGroup "Djex facade"
         Left failure ->
           diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
         Right _ -> fail "Exference accepted an out-of-scope context variable"
+  , testCase "reject contexts bound only by a nested forall" $ do
+      target <- expectRight $ mkIdentifier "nestedConstraint"
+      className <- expectRight $ mkIdentifier "C"
+      let variable identifier = TypeVariable $ FlexibleVariable identifier
+          goal = FunctionType (variable 0)
+            $ ForallType [FlexibleVariable 1] []
+            $ FunctionType (variable 1) (variable 1)
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = goal
+            , requestContexts = [Constraint className [variable 1]]
+            , requestOptions = defaultExferenceOptions
+            }
+      case mkExferenceRequest query of
+        Left failure ->
+          diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
+        Right _ -> fail "Exference accepted a context beneath a nested forall"
+  , testCase "validate Exference targets before parsing source" $ do
+      checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
+      session <- expectRight $ mkExferenceSession checked
+      qualifier <- expectRight $ mkModuleName "External"
+      target <- expectRight $ mkQualifiedIdentifier qualifier "answer"
+      case parseExferenceRequest session defaultExferenceOptions
+          target "query" "(" of
+        Left failure ->
+          diagnosticCode failure @?= Just "DJEX_EXF_TARGET"
+        Right _ -> fail "Exference accepted an invalid qualified target"
   , testCase "scope explicit contexts under every leading forall" $ do
       target <- expectRight $ mkIdentifier "nestedIdentity"
       className <- expectRight $ mkIdentifier "C"

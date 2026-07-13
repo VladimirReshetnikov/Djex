@@ -38,7 +38,6 @@ module Language.Haskell.Djex.Exference
 
 import Control.Monad.Trans.Except (runExceptT)
 import Data.Bifunctor (first)
-import Data.Foldable (toList)
 import Data.Functor.Identity (runIdentity)
 import Data.List (partition)
 import qualified Data.Map.Strict as Map
@@ -201,7 +200,6 @@ data ExferenceSession = ExferenceSession
   , sessionInventory :: SynthesisInventory
   , sessionTypeDeclarations :: TypeDeclMap
   , sessionOmissions :: [ExferenceOmission]
-  , sessionDiagnostics :: [Diagnostic]
   }
 
 -- Keep the frontend spelling index private: it is meaningful only when paired
@@ -272,7 +270,6 @@ mkExferenceSessionWithPolicy policy checked = do
         , sessionInventory = checkedSourceInventory checked
         , sessionTypeDeclarations = sourceTypeSynonymMap source
         , sessionOmissions = omissions
-        , sessionDiagnostics = map omissionDiagnostic omissions
         }
       probeOptions = defaultExferenceOptions {exferenceMaximumSteps = 1}
   case validateExferenceInput
@@ -290,7 +287,7 @@ exferenceSessionOmissions :: ExferenceSession -> [ExferenceOmission]
 exferenceSessionOmissions = sessionOmissions
 
 exferenceSessionDiagnostics :: ExferenceSession -> [Diagnostic]
-exferenceSessionDiagnostics = sessionDiagnostics
+exferenceSessionDiagnostics = map omissionDiagnostic . sessionOmissions
 
 mkExferenceRequest
   :: QueryRequest SynthesisType ExferenceOptions
@@ -387,6 +384,8 @@ parseExferenceRequest
   -> String
   -> Either Diagnostic ExferenceRequest
 parseExferenceRequest session options target sourceName source = do
+  -- Preserve command-boundary precedence: an invalid output name is a usage
+  -- error even when the source text is also malformed.
   validateTarget target
   let environment = sessionSource session
       parsed = runIdentity $ runExceptT $ parseTypeWithKinds
@@ -411,7 +410,7 @@ parseExferenceRequest session options target sourceName source = do
         , requestContexts = []
         , requestOptions = options
         }
-  validateRequest query
+  validateRequestGoalAndContexts query
   pure $ ExferenceRequest query sourceVariables
 
 runExferenceQuery
@@ -422,7 +421,6 @@ runExferenceQuery session request = do
   let query = requestQuery request
       target = requestTarget query
       sharedGoal = contextualGoal query
-  validateRequest query
   either
     (Left . failureDiagnostic
       "DJEX_EXF_KIND"
@@ -462,6 +460,12 @@ validateRequest
   -> Either Diagnostic ()
 validateRequest query = do
   validateTarget $ requestTarget query
+  validateRequestGoalAndContexts query
+
+validateRequestGoalAndContexts
+  :: QueryRequest SynthesisType ExferenceOptions
+  -> Either Diagnostic ()
+validateRequestGoalAndContexts query = do
   either
     (Left . failureDiagnostic
       "DJEX_EXF_REQUEST"
@@ -469,7 +473,7 @@ validateRequest query = do
     )
     Right
     $ SharedType.validateType $ contextualGoal query
-  let goalVariables = Set.fromList $ toList $ requestGoal query
+  let goalVariables = inScopeContextVariables $ requestGoal query
       contextVariables = Set.unions
         [ SharedType.freeVariables argument
         | constraint <- requestContexts query
@@ -480,8 +484,21 @@ validateRequest query = do
     [] -> Right ()
     _ -> Left $ failureDiagnostic
       "DJEX_EXF_REQUEST"
-      "explicit Exference contexts contain variables absent from the goal"
+      "explicit Exference contexts contain variables not in scope"
       extraneous
+
+-- Explicit contexts are inserted beneath only the leading prenex chain.
+-- Free goal variables remain usable there, as do binders from that chain;
+-- a binder below an arrow, tuple, or application is not in context scope.
+inScopeContextVariables
+  :: SynthesisType
+  -> Set.Set (SharedType.Variable TVarId)
+inScopeContextVariables goal = SharedType.freeVariables goal
+  `Set.union` leadingForallVariables goal
+ where
+  leadingForallVariables (SharedType.ForallType variables _ body) =
+    Set.fromList variables `Set.union` leadingForallVariables body
+  leadingForallVariables _ = Set.empty
 
 validateTarget :: Name -> Either Diagnostic ()
 validateTarget target = case validateDefinitionName target of

@@ -49,6 +49,7 @@ import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.RigidInstantiation
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Internal.Unify
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
@@ -60,11 +61,12 @@ import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Data.PQueue.Prio.Max as Q
 import qualified Data.Map as M
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 
 import Data.Maybe ( maybeToList, fromMaybe, listToMaybe )
-import Control.Monad ( unless, mzero, replicateM, forM, liftM )
+import Control.Monad ( mzero, replicateM, forM, liftM )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, unfoldr )
 import Data.Monoid ( Any(..) )
@@ -403,7 +405,8 @@ findEngineChunks
     , nodeExpression      = ExpHole 0
       -- The root goal and expression already own hole 0.
     , nodeNextVarId       = 1
-    , nodeMaxTVarId       = largestId t
+    , nodeFlexibleIds     = supplyFromIdentifiers
+        $ IntSet.toAscList $ flexibleIdentifiers t
     , nodeRigidInstantiations = rigidInstantiations rigidPlan
     , nodeDepth           = 0.0
     , nodeLastStepBinding = Nothing
@@ -1097,24 +1100,24 @@ stateStep multiPM allowConstrs h = do
     byProvided = do
       provided <- lift =<< gets
         (scopeGetAllBindings scopeId . nodeProvidedScopes)
-      offset <- builderGetTVarOffset
       let
         provId      = varPVariable provided
         provT       = varPResult provided
         provPs      = varPParameters provided
         forallTypes = varPForallVariables provided
         constraints = varPConstraints provided
-        incF        = incVarIds (+offset)
-        ss          = IntMap.fromList $ zip forallTypes (incF . TypeVar <$> forallTypes)
-        provType    = snd $ applySubsts ss provT
+      renaming <- builderFreshenTVarNamespace forallTypes
+      let
+        provType    = renameFlexibleType renaming provT
+        dependencies = map (renameFlexibleType renaming) provPs
         provConstrs = S.toList $ S.union
           (qClassEnv_constraints contxt)
-          (S.fromList (snd . constraintApplySubsts ss <$> constraints))
+          (S.fromList $ map (renameFlexibleConstraint renaming) constraints)
       mapStateT maybeToList $ byGenericUnify
-        (Right (provId, foldr TypeArrow provT provPs))
+        (Right (provId, foldr TypeArrow provType dependencies))
         provType
         provConstrs
-        (snd . applySubsts ss <$> provPs)
+        dependencies
         (heuristics_stepProvidedGood h)
         (heuristics_stepProvidedBad h)
         (unify goalType provType)
@@ -1123,19 +1126,22 @@ stateStep multiPM allowConstrs h = do
     byFunctionSimple :: StateT SearchNode [] ()
     byFunctionSimple = do
       binding <- lift =<< gets nodeFunctions
-      offset <- builderGetTVarOffset
+      renaming <- builderFreshenTVarNamespace $ IntSet.toAscList $ IntSet.unions
+        $ flexibleIdentifiers (functionResult binding)
+        : ( map flexibleIdentifiers (functionParameters binding)
+          ++ map constraintFlexibleIdentifiers (functionConstraints binding)
+          )
       let
-        incF     = incVarIds (+offset)
-        provType = incF $ functionResult binding
+        rename = renameFlexibleType renaming
+        provType = rename $ functionResult binding
       mapStateT maybeToList $ byGenericUnify
         (Left $ functionName binding)
         provType
-        (map (constraintMapTypes incF) $ functionConstraints binding)
-        (map incF $ functionParameters binding)
+        (map (renameFlexibleConstraint renaming) $ functionConstraints binding)
+        (map rename $ functionParameters binding)
         (heuristics_stepEnvGood h + functionPenalty binding)
         (heuristics_stepEnvBad h + functionPenalty binding)
-        (unifyOffset goalType
-          $ HsTypeOffset (functionResult binding) offset)
+        (unify goalType provType)
 
     -- on code for byProvided and byFunctionSimple
     byGenericUnify :: Either QualifiedName (TVarId, HsType)
@@ -1182,7 +1188,6 @@ stateStep multiPM allowConstrs h = do
             , nodeLastStepBinding = applierName
             }
           traverse_ (builderRecordVarUse . fst) applierVariable
-          builderRaiseMaxTVarId $ maximum $ map largestId dependencies
           additionalGoals <- addScopePatternMatch
             multiPM
             goalType
@@ -1227,8 +1232,6 @@ stateStep multiPM allowConstrs h = do
           , nodeLastStepBinding = applierName
           }
         traverse_ (builderRecordVarUse . fst) applierVariable
-        builderRaiseMaxTVarId $ maximum
-          $ largestSubstsId goalSS : map largestId dependencies
 
   case goalType of
     TypeArrow _ _ -> arrowStep goalType []
@@ -1258,8 +1261,6 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
     let v = varPVariable b
         vtResult = varPResult b
         vtParams = varPParameters b
-    offset <- builderGetTVarOffset
-    let incF = incVarIds (+offset)
     let expVar = ExpVar v (foldr TypeArrow vtResult vtParams)
     modify $ \node -> node
       { nodeProvidedScopes = scopesAddPBinding sid b
@@ -1273,20 +1274,24 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
         error $ "addScopePatternMatch: TypeForall (RankNTypes not yet implemented)" -- todo when we do RankNTypes
                 ++ show vtResult
       _ | not $ null vtParams -> defaultHandleRest
-        | otherwise -> fromMaybe defaultHandleRest . asum . map mapFunc
-            =<< gets nodeDeconstructors
+        | otherwise -> do
+            supply <- gets nodeFlexibleIds
+            fromMaybe defaultHandleRest . asum . map (mapFunc supply)
+              =<< gets nodeDeconstructors
          where
           mapFunc
             :: Monad m
-            => DeconstructorBinding
+            => FlexibleIdSupply
+            -> DeconstructorBinding
             -> Maybe (StateT SearchNode m [TGoal])
-          mapFunc (DeconstructorBinding matchParam
+          mapFunc supply deconstructor@(DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] False) = let
-            resultTypes = map incF matchRs
-            unifyResult = unifyRightOffset vtResult
-                                           (HsTypeOffset matchParam offset)
-            -- inputType = incF matchParam
+            (renaming, nextSupply) = freshenDeconstructor supply deconstructor
+            resultTypes = map (renameFlexibleType renaming) matchRs
+            unifyResult = unifyRight vtResult
+              $ renameFlexibleType renaming matchParam
             mapFunc1 substs = do -- m
+              modify $ \node -> node {nodeFlexibleIds = nextSupply}
               vars <- replicateM (length matchRs) builderAllocVar
               builderRecordVarUse v
               let newProvTypes = map (snd . applySubsts substs) resultTypes
@@ -1300,20 +1305,20 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
               modify $ \node -> node
                 { nodeExpression = fillExprHole vid expr
                     $ nodeExpression node }
-              unless (null matchRs) $
-                builderRaiseMaxTVarId $ maximum $ map largestId newProvTypes
               addScopePatternMatch multiPM
                                    goalType
                                    vid
                                    sid
                                    (reverse newBinds ++ bindingRest)
             in liftM mapFunc1 unifyResult
-          mapFunc (DeconstructorBinding matchParam matchers@(_ : _) False)
+          mapFunc supply deconstructor@(DeconstructorBinding matchParam
+              matchers@(_ : _) False)
             | multiPM = let
-            unifyResult = unifyRightOffset vtResult
-                                           (HsTypeOffset matchParam offset)
-            -- inputType = incF matchParam
+            (renaming, nextSupply) = freshenDeconstructor supply deconstructor
+            unifyResult = unifyRight vtResult
+              $ renameFlexibleType renaming matchParam
             mapFunc2 substs = do -- m
+              modify $ \node -> node {nodeFlexibleIds = nextSupply}
               -- The case expression evaluates its scrutinee once.  Its
               -- alternatives do not constitute additional uses of that
               -- variable; charging one use per constructor biases the queue
@@ -1323,13 +1328,11 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
                 let matchId = constructorName matcher
                     matchRs = constructorFields matcher
                 newSid <- builderAddScope sid
-                let resultTypes = map incF matchRs
+                let resultTypes = map (renameFlexibleType renaming) matchRs
                 vars <- replicateM (length matchRs) builderAllocVar
                 newVid <- builderAllocHole
                 let newProvTypes = map (snd . applySubsts substs) resultTypes
                     newBinds = zipWith (\x y -> splitBinding (VarBinding x y)) vars newProvTypes
-                unless (null matchRs) $
-                  builderRaiseMaxTVarId $ maximum $ map largestId newProvTypes
                 return ( (matchId, zip vars newProvTypes, ExpHole newVid)
                        , (newVid, reverse newBinds, newSid) )
               modify $ \node -> node
@@ -1339,6 +1342,20 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
               liftM concat $ map snd mData `forM` \(newVid, newBinds, newSid) ->
                 addScopePatternMatch multiPM goalType newVid newSid (newBinds++bindingRest)
             in liftM mapFunc2 unifyResult
-          mapFunc _ = Nothing -- TODO: decons for recursive data types
+          mapFunc _ _ = Nothing -- TODO: decons for recursive data types
+
+          freshenDeconstructor supply deconstructor = case allocateNamespace
+              (IntSet.toAscList $ deconstructorFlexibleIdentifiers deconstructor)
+              supply of
+            Just result -> result
+            Nothing -> error
+              "Exference exhausted the finite flexible-variable identifier supply"
+
+          deconstructorFlexibleIdentifiers deconstructor = IntSet.unions
+            $ flexibleIdentifiers (deconstructorInput deconstructor)
+            : [ flexibleIdentifiers field
+              | constructor <- deconstructorConstructors deconstructor
+              , field <- constructorFields constructor
+              ]
   -- where
   --  (<&>) = flip (<$>)

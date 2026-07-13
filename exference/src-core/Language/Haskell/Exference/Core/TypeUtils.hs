@@ -2,6 +2,8 @@
 
 module Language.Haskell.Exference.Core.TypeUtils
   ( incVarIds
+  , maximumFlexibleId
+  , maximumSubstitutionFlexibleId
   , largestId
   , largestSubstsId
   , forallify -- unused atm
@@ -24,7 +26,10 @@ where
 
 import qualified Data.Set as S
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  (flexibleIdentifiers)
 import Language.Haskell.Exference.Core.Types
 
 
@@ -48,17 +53,39 @@ incVarIds f (TypeForall is cs t) = TypeForall
     g (HsConstraint cls params) = HsConstraint cls (incVarIds f <$> params)
 incVarIds _ t = t
 
-largestId :: HsType -> TVarId
-largestId (TypeVar i)       = i
-largestId (TypeConstant _)  = -1
-largestId (TypeCons _)      = -1
-largestId (TypeArrow t1 t2) = largestId t1 `max` largestId t2
-largestId (TypeApp t1 t2)   = largestId t1 `max` largestId t2
-largestId (TypeForall ids cs t) = maximum
-  (largestId t : ids ++ [ largestId p | c <- cs, p <- constraint_params c ])
+-- | The actual greatest flexible ID, including forall binders and context
+-- arguments.  'Nothing' represents a ground type without stealing an 'Int'
+-- value from the public identity domain.
+maximumFlexibleId :: HsType -> Maybe TVarId
+maximumFlexibleId typeExpression
+  | IntSet.null identifiers = Nothing
+  | otherwise = Just $ IntSet.findMax identifiers
+ where
+  identifiers = flexibleIdentifiers typeExpression
 
+-- | The greatest flexible ID occurring in a substitution range.
+maximumSubstitutionFlexibleId :: Substs -> Maybe TVarId
+maximumSubstitutionFlexibleId = IntMap.foldl' combine Nothing
+ where
+  combine current typeExpression = case
+      (current, maximumFlexibleId typeExpression) of
+    (Nothing, result) -> result
+    (result, Nothing) -> result
+    (Just left, Just right) -> Just $ max left right
+
+-- | Compatibility projection for callers that historically used @-1@ as a
+-- ground sentinel.  It now returns the true maximum when variables exist,
+-- including a negative-only domain; use 'maximumFlexibleId' to distinguish a
+-- ground type from a real @TypeVar (-1)@.
+largestId :: HsType -> TVarId
+largestId = maybe (-1) id . maximumFlexibleId
+{-# DEPRECATED largestId "Use maximumFlexibleId; every Int is a valid TVarId." #-}
+
+-- | Compatibility projection retaining the historical empty-map sentinel.
 largestSubstsId :: Substs -> TVarId
-largestSubstsId = IntMap.foldl' (\a b -> a `max` largestId b) 0
+largestSubstsId = maybe 0 id . maximumSubstitutionFlexibleId
+{-# DEPRECATED largestSubstsId
+  "Use maximumSubstitutionFlexibleId; every Int is a valid TVarId." #-}
 
 constraintMapTypes :: (HsType -> HsType) -> HsConstraint -> HsConstraint
 constraintMapTypes f (HsConstraint a ts) = HsConstraint a (map f ts)

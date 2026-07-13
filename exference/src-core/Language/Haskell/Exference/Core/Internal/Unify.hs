@@ -14,6 +14,7 @@ where
 
 
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Data.Maybe (mapMaybe)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
@@ -52,7 +53,7 @@ unify left right = unifyTagged left right id
 {-# INLINE unifyOffset #-}                   -- left, rightOffset
 unifyOffset :: HsType -> HsTypeOffset -> Maybe (Substs, Substs)
 unifyOffset left (HsTypeOffset right offset) =
-  unifyTagged left right (+ offset)
+  checkedOffsetType offset right >>= unify left
 
 -- Symmetric unification needs tagged variables internally.  The old pair of
 -- untagged substitution maps lost which namespace a range belonged to; a
@@ -84,7 +85,7 @@ unifyTagged left right rightKey = do
   taggedLeft <- tagType LeftVariable left
   taggedRight <- tagType RightVariable right
   substitutions <- solveTagged [(taggedLeft, taggedRight)] Map.empty
-  pure $ projectTagged left right rightKey substitutions
+  projectTagged left right rightKey substitutions
 
 tagType :: (TVarId -> TaggedVariable) -> HsType -> Maybe TaggedType
 tagType side ty = case ty of
@@ -179,49 +180,42 @@ projectTagged
   -> HsType
   -> (TVarId -> TVarId)
   -> TaggedSubstitutions
-  -> (Substs, Substs)
-projectTagged left right rightKey substitutions =
-  ( IntMap.fromList $ mapMaybe (project LeftVariable id) leftVariables
-  , IntMap.fromList $ mapMaybe (project RightVariable rightKey) rightVariables
-  )
+  -> Maybe (Substs, Substs)
+projectTagged left right rightKey substitutions = do
+  rightCanonical <- allocateRightVariables
+    (Set.fromList leftVariables) (map rightKey rightVariables)
+  let
+      canonicalRight variable = IntMap.findWithDefault (rightKey variable)
+        (rightKey variable) rightCanonical
+      project side key variable =
+        let externalKey = key variable
+            resolved = untag $ zonkTagged substitutions
+              $ TaggedVar $ side variable
+        in if resolved == TypeVar externalKey
+           then Nothing
+           else Just (externalKey, resolved)
+      untag ty = case ty of
+        TaggedVar (LeftVariable variable) -> TypeVar variable
+        TaggedVar (RightVariable variable) -> TypeVar $ canonicalRight variable
+        TaggedConstant constant -> TypeConstant constant
+        TaggedConstructor constructor -> TypeCons constructor
+        TaggedArrow parameter result -> TypeArrow (untag parameter) (untag result)
+        TaggedApplication function argument -> TypeApp (untag function) (untag argument)
+  pure
+    ( IntMap.fromList $ mapMaybe (project LeftVariable id) leftVariables
+    , IntMap.fromList $ mapMaybe (project RightVariable rightKey) rightVariables
+    )
  where
   leftVariables = Set.toAscList $ freeVars left
   rightVariables = Set.toAscList $ freeVars right
-  rightCanonical = allocateRightVariables
-    (Set.fromList leftVariables) (map rightKey rightVariables)
-  canonicalRight variable = IntMap.findWithDefault (rightKey variable)
-    (rightKey variable) rightCanonical
 
-  project side key variable =
-    let externalKey = key variable
-        resolved = untag $ zonkTagged substitutions
-          $ TaggedVar $ side variable
-    in if resolved == TypeVar externalKey
-       then Nothing
-       else Just (externalKey, resolved)
-
-  untag ty = case ty of
-    TaggedVar (LeftVariable variable) -> TypeVar variable
-    TaggedVar (RightVariable variable) -> TypeVar $ canonicalRight variable
-    TaggedConstant constant -> TypeConstant constant
-    TaggedConstructor constructor -> TypeCons constructor
-    TaggedArrow parameter result -> TypeArrow (untag parameter) (untag result)
-    TaggedApplication function argument -> TypeApp (untag function) (untag argument)
-
-allocateRightVariables :: Set.Set TVarId -> [TVarId] -> IntMap.IntMap TVarId
-allocateRightVariables leftVariables rightVariables = assignments
- where
-  firstFresh = 1 + maximum (0 : Set.toList leftVariables ++ rightVariables)
-  (_, _, assignments) = foldl allocate
-    (leftVariables, firstFresh, IntMap.empty) rightVariables
-  allocate (used, nextFresh, result) requested
-    | requested `Set.member` used =
-        ( Set.insert nextFresh used
-        , nextFresh + 1
-        , IntMap.insert requested nextFresh result
-        )
-    | otherwise =
-        (Set.insert requested used, nextFresh, IntMap.insert requested requested result)
+allocateRightVariables
+  :: Set.Set TVarId
+  -> [TVarId]
+  -> Maybe (IntMap.IntMap TVarId)
+allocateRightVariables leftVariables rightVariables = fst
+  <$> allocateCanonicalIdentifiers rightVariables
+        (supplyFromIdentifiers leftVariables)
 
 -- treats the variables in the first parameter as constants, and returns
 -- the variable bindings for the second parameter that unify both types.
@@ -248,30 +242,17 @@ unifyRightEqs teqs = unify' $ UniState1 teqs IntMap.empty
 -- the variable bindings for the second parameter that unify both types.
 {-# INLINE unifyRightOffset #-}
 unifyRightOffset :: HsType -> HsTypeOffset -> Maybe Substs
-unifyRightOffset ut1 (HsTypeOffset ut2 offset) = unify' $ UniState1 [TypeEq ut1 ut2] IntMap.empty
-  where
-    unify' :: UniState1 -> Maybe Substs
-    unify' (UniState1 [] x) = Just x
-    unify' (UniState1 (x:xr) ss) = uniStep x >>= (
-      \r -> unify' $ case r of
-        Left (substInternal, Subst substExtI substExtT) -> UniState1
-          [ TypeEq a (applySubst substInternal b) | TypeEq a b <- xr]
-          (IntMap.insert substExtI substExtT ss)
-        Right eqs -> UniState1 (eqs++xr) ss
-      )
-    uniStep :: TypeEq -> Maybe (Either (Subst, Subst) [TypeEq])
-    uniStep (TypeEq TypeForall{} _) = Nothing
-    uniStep (TypeEq _ TypeForall{}) = Nothing
-    uniStep (TypeEq (TypeVar i1) (TypeVar i2)) | i1==offset+i2 = Just (Right [])
-    uniStep (TypeEq (t1) (TypeVar i2)) = if occursIn (i2+offset) t1
-      then Nothing
-      else Just $ Left (Subst i2 t1, Subst (i2+offset) t1)
-    uniStep (TypeEq (TypeVar _) _) = Nothing
-    uniStep (TypeEq (TypeConstant i1) (TypeConstant i2)) | i1==i2 = Just (Right [])
-    uniStep (TypeEq (TypeCons s1) (TypeCons s2)) | s1==s2 = Just (Right [])
-    uniStep (TypeEq (TypeArrow t1 t2) (TypeArrow t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
-    uniStep (TypeEq (TypeApp t1 t2) (TypeApp t3 t4)) = Just (Right [TypeEq t1 t3, TypeEq t2 t4])
-    uniStep _ = Nothing
+unifyRightOffset left (HsTypeOffset right offset) =
+  checkedOffsetType offset right >>= unifyRight left
+
+checkedOffsetType :: TVarId -> HsType -> Maybe HsType
+checkedOffsetType offset typeExpression = do
+  pairs <- mapM shifted $ Set.toAscList $ freeVars typeExpression
+  pure $ renameFlexibleType (IntMap.fromList pairs) typeExpression
+ where
+  shifted identifier = do
+    result <- checkedAddIdentifier identifier offset
+    pure (identifier, result)
 
 
 uniStepRight :: TypeEq -> Maybe (Either Subst [TypeEq])

@@ -683,8 +683,10 @@ constraintApplySubsts ss c
 
 showVar :: TVarId -> String
 showVar 0 = "v0"
-showVar i | i<27      = [chr (ord 'a' + i - 1)]
-          | otherwise = "t"++show (i-27)
+showVar i
+  | i < 0 = "vn" ++ show (negate $ toInteger i)
+  | i < 27 = [chr (ord 'a' + i - 1)]
+  | otherwise = "t" ++ show (i - 27)
 
 -- | Suggest a readable binder spelling from its type.  This is only a
 -- preference: a renderer must still allocate a fresh name because distinct
@@ -692,17 +694,20 @@ showVar i | i<27      = [chr (ord 'a' + i - 1)]
 preferredVarName :: TVarId -> HsType -> String
 preferredVarName i = h
  where
+  suffix
+    | i < 0 = "n" ++ show (negate $ toInteger i)
+    | otherwise = show i
   h TypeVar{}          = showVar i
   h TypeConstant{}     = showVar i
   h (TypeCons qName) = case qualifiedNameOccurrence qName of
-    SharedName.IdentifierOccurrence _ (c : _) -> toLower c : show i
+    SharedName.IdentifierOccurrence _ (c : _) -> toLower c : suffix
     SharedName.IdentifierOccurrence _ [] -> showVar i
     -- A symbolic type constructor has no identifier stem from which to form a
     -- legal term binder.  Falling back avoids historical names such as @:1@.
     SharedName.OperatorOccurrence _ _ -> showVar i
     SharedName.SpecialOccurrence SharedName.ListConstructor -> showVar i ++ "s"
     SharedName.SpecialOccurrence _ -> showVar i
-  h TypeArrow{}        = "f" ++ show i
+  h TypeArrow{}        = "f" ++ suffix
   h (TypeApp t _)      = h t
   h (TypeForall _ _ t) = h t
 

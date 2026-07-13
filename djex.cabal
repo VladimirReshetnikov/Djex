@@ -16,7 +16,6 @@ Author:        Vladimir Reshetnikov, Lennart Augustsson, Lennart Spitzner, and c
 Maintainer:    Vladimir Reshetnikov
 Homepage:      https://github.com/VladimirReshetnikov/Haskell/tree/main/djex
 Bug-Reports:   https://github.com/VladimirReshetnikov/Haskell/issues
-Build-Type:    Simple
 Tested-With:   GHC == 9.12.4
 Stability:     experimental
 Copyright:
@@ -31,6 +30,9 @@ Extra-Source-Files:
   djinn/docs/reports/*.md
   exference/README.md
   exference/docs/reports/*.md
+  exference/docs/hcar/*.tex
+  exference/exference.pdf
+  exference/notes.txt
 
 Data-Files:
   exference/environment/*.hs
@@ -45,6 +47,17 @@ common build-settings
   Default-Language: Haskell2010
   Ghc-Options:      -Wall -Wcompat -Wunused-packages
   Build-Depends:    base >= 4.19 && < 5
+
+-- Keep the most widely shared dependency bounds in one place without making
+-- components depend on packages they do not import.
+common containers-dep
+  Build-Depends: containers >= 0.6 && < 0.9
+
+common deepseq-dep
+  Build-Depends: deepseq >= 1.4 && < 1.6
+
+common transformers-dep
+  Build-Depends: transformers >= 0.5 && < 0.7
 
 -- Cabal restricts common stanzas to build-information fields, so each test
 -- suite still declares its interface locally.
@@ -122,7 +135,7 @@ Library
     djex:exference-frontend
 
 Library synthesis
-  import:           build-settings
+  import:           build-settings, containers-dep, deepseq-dep, transformers-dep
   Visibility:       public
   Hs-Source-Dirs:   synthesis/src
 
@@ -144,10 +157,7 @@ Library synthesis
     Language.Haskell.Synthesis.TypeRender
 
   Build-Depends:
-    containers   >= 0.6 && < 0.9,
-    deepseq      >= 1.4 && < 1.6,
-    pretty       >= 1.1 && < 1.2,
-    transformers >= 0.5 && < 0.7
+    pretty >= 1.1 && < 1.2
 
 Test-Suite djex-tests
   import:         tasty-hunit-test
@@ -157,25 +167,21 @@ Test-Suite djex-tests
   Build-Depends:  djex
 
 Test-Suite synthesis-tests
-  import:           tasty-hunit-test
+  import:           tasty-hunit-test, containers-dep, deepseq-dep
   Type:             exitcode-stdio-1.0
   Main-Is:          Spec.hs
   Hs-Source-Dirs:   synthesis/test
   Build-Depends:
-    containers       >= 0.6  && < 0.9,
-    deepseq          >= 1.4  && < 1.6,
     djex:synthesis,
     tasty-quickcheck >= 0.10 && < 1
 
 Library djinn-core
-  import:           build-settings
+  import:           build-settings, containers-dep, transformers-dep
   Visibility:       public
   Hs-Source-Dirs:   djinn/src
 
   Build-Depends:
-    djex:synthesis,
-    transformers >= 0.5 && < 0.7,
-    containers   >= 0.6 && < 0.9
+    djex:synthesis
 
   -- Djinn.Core is the stable library API.  The core Djinn.Internal.* modules
   -- expose raw machinery without stability or invariant guarantees.
@@ -197,15 +203,14 @@ Library djinn-core
 -- Compatibility frontend for the historical Djinn library.  Cabal component
 -- names are package-wide, so this cannot share the `djinn` executable's name.
 Library djinn-frontend
-  import:           build-settings
+  import:           build-settings, transformers-dep
   Visibility:       public
   Hs-Source-Dirs:   djinn/src-cli
 
   Build-Depends:
     djex:djinn-core,
     djex:synthesis,
-    haskeline    >= 0.8 && < 0.9,
-    transformers >= 0.5 && < 0.7
+    haskeline >= 0.8 && < 0.9
 
   Exposed-Modules:    Djinn
   Reexported-Modules: Djinn.Core
@@ -223,12 +228,11 @@ Executable djinn
   Build-Depends:  djex:djinn-frontend
 
 Test-Suite djinn-tests
-  import:         tasty-hunit-test
+  import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: djinn/test
   Build-Depends:
-    containers >= 0.6 && < 0.9,
     djex:djinn-core,
     djex:synthesis
 
@@ -259,7 +263,7 @@ Test-Suite djinn-cli-tests
   Build-Tool-Depends: djex:djinn
 
 Library exference-core
-  import:         build-settings
+  import:         build-settings, containers-dep, deepseq-dep, transformers-dep
   Visibility:     public
   -- Preserve the historical search-core optimization policy; frontend and
   -- executable code use the package-wide defaults.
@@ -285,6 +289,7 @@ Library exference-core
     Language.Haskell.Exference.Core.Internal.Scope
 
   Other-Modules:
+    Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Unify
     Language.Haskell.Exference.Core.Internal.ConstraintSolver
     Language.Haskell.Exference.Core.Internal.Candidate
@@ -295,16 +300,13 @@ Library exference-core
 
   Build-Depends:
     djex:synthesis,
-    containers   >= 0.6   && < 0.9,
-    deepseq      >= 1.4   && < 1.6,
-    pqueue       >= 1.3.1 && < 1.8,
-    transformers >= 0.5   && < 0.7
+    pqueue >= 1.3.1 && < 1.8
 
 -- Compatibility frontend for the historical Exference library.  Cabal
 -- component names are package-wide, so this cannot share the `exference`
 -- executable's name.
 Library exference-frontend
-  import:         build-settings
+  import:         build-settings, containers-dep, deepseq-dep, transformers-dep
   Visibility:     public
   Hs-Source-Dirs: exference/src
 
@@ -343,22 +345,18 @@ Library exference-frontend
   Build-Depends:
     djex:exference-core,
     djex:synthesis,
-    containers       >= 0.6  && < 0.9,
-    deepseq          >= 1.4  && < 1.6,
-    transformers     >= 0.5  && < 0.7,
     haskell-src-exts >= 1.24 && < 1.25,
     directory        >= 1.3  && < 1.4,
     filepath         >= 1.4  && < 1.6
 
 Executable exference
-  import:         build-settings
+  import:         build-settings, containers-dep
   Main-Is:        Main.hs
   Hs-Source-Dirs: exference/src-exference
   Other-Modules:  Paths_djex
   Autogen-Modules: Paths_djex
 
   Build-Depends:
-    containers >= 0.6 && < 0.9,
     djex:exference-frontend,
     djex:synthesis
 
@@ -368,7 +366,7 @@ Executable exference
     -with-rtsopts "-H2G -M4G -N"
 
 Test-Suite exference-tests
-  import:          tasty-hunit-test
+  import:          tasty-hunit-test, containers-dep, deepseq-dep, transformers-dep
   Type:            exitcode-stdio-1.0
   Main-Is:         Spec.hs
   Hs-Source-Dirs:  exference/test
@@ -378,14 +376,11 @@ Test-Suite exference-tests
   Autogen-Modules: Paths_djex
 
   Build-Depends:
-    containers       >= 0.6  && < 0.9,
-    deepseq          >= 1.4  && < 1.6,
     directory        >= 1.3  && < 1.4,
     djex:exference-frontend,
     djex:exference-core,
     djex:synthesis,
-    haskell-src-exts >= 1.24 && < 1.25,
-    transformers     >= 0.5  && < 0.7
+    haskell-src-exts >= 1.24 && < 1.25
 
 Test-Suite exference-cli-tests
   import:         cli-test

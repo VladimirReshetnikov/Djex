@@ -9,11 +9,13 @@ import Control.Monad (foldM, unless, when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT, gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
@@ -31,10 +33,11 @@ data ExpressionCheckError
   | ConstraintMismatch [HsConstraint] [HsConstraint]
   | RigidInstantiationFailure RigidInstantiationError
   | RigidInstantiationPlanMismatch [TVarId] [TVarId]
+  | FlexibleIdentifierSupplyExhausted
   deriving (Eq, Show)
 
 data CheckState = CheckState
-  { checkNextVariable :: !TVarId
+  { checkFlexibleIds :: !FlexibleIdSupply
   , checkSubstitutions :: !Substs
   , checkConstraints :: [HsConstraint]
   }
@@ -81,7 +84,10 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
   checkedGoal <- instantiateGoal plan goal
   let
       initialState = CheckState
-        { checkNextVariable = 1 + maximum (largestId checkedGoal : expressionTypeIds expression)
+        { checkFlexibleIds = supplyFromIdentifiers $ IntSet.toAscList
+            $ IntSet.union
+                (flexibleIdentifiers checkedGoal)
+                (expressionFlexibleIdentifiers expression)
         , checkSubstitutions = IntMap.empty
         , checkConstraints = []
         }
@@ -185,9 +191,12 @@ throwCheck = lift . Left
 
 freshTypeVariable :: Check HsType
 freshTypeVariable = do
-  variable <- gets checkNextVariable
-  modify' $ \current -> current {checkNextVariable = variable + 1}
-  pure $ TypeVar variable
+  supply <- gets checkFlexibleIds
+  case allocateFreshIdentifier supply of
+    Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
+    Just (variable, nextSupply) -> do
+      modify' $ \current -> current {checkFlexibleIds = nextSupply}
+      pure $ TypeVar variable
 
 freshenTypes :: [HsType] -> [HsConstraint] -> Check ([HsType], [HsConstraint])
 freshenTypes types constraints = do
@@ -261,20 +270,29 @@ instantiateGoal plan goal
     variables ++ collectBinders body
   collectBinders _ = []
 
-expressionTypeIds :: Expression -> [TVarId]
-expressionTypeIds (ExpVar _ ty) = [largestId ty]
-expressionTypeIds ExpName{} = []
-expressionTypeIds (ExpLambda _ ty body) = largestId ty : expressionTypeIds body
-expressionTypeIds (ExpApply function argument) =
-  expressionTypeIds function ++ expressionTypeIds argument
-expressionTypeIds ExpHole{} = []
-expressionTypeIds (ExpLetMatch _ variables binding body) =
-  map (largestId . snd) variables ++ expressionTypeIds binding ++ expressionTypeIds body
-expressionTypeIds (ExpLet _ ty binding body) =
-  largestId ty : expressionTypeIds binding ++ expressionTypeIds body
-expressionTypeIds (ExpCaseMatch scrutinee alternatives) =
-  expressionTypeIds scrutinee
-  ++ [ identifier
-     | (_, variables, body) <- alternatives
-     , identifier <- map (largestId . snd) variables ++ expressionTypeIds body
-     ]
+expressionFlexibleIdentifiers :: Expression -> IntSet.IntSet
+expressionFlexibleIdentifiers expression = case expression of
+  ExpVar _ ty -> flexibleIdentifiers ty
+  ExpName{} -> IntSet.empty
+  ExpLambda _ ty body -> flexibleIdentifiers ty
+    `IntSet.union` expressionFlexibleIdentifiers body
+  ExpApply function argument -> expressionFlexibleIdentifiers function
+    `IntSet.union` expressionFlexibleIdentifiers argument
+  ExpHole{} -> IntSet.empty
+  ExpLetMatch _ variables binding body -> IntSet.unions
+    $ map (flexibleIdentifiers . snd) variables
+    ++ [ expressionFlexibleIdentifiers binding
+       , expressionFlexibleIdentifiers body
+       ]
+  ExpLet _ ty binding body -> IntSet.unions
+    [ flexibleIdentifiers ty
+    , expressionFlexibleIdentifiers binding
+    , expressionFlexibleIdentifiers body
+    ]
+  ExpCaseMatch scrutinee alternatives -> IntSet.unions
+    $ expressionFlexibleIdentifiers scrutinee
+    : [ IntSet.unions
+          $ map (flexibleIdentifiers . snd) variables
+          ++ [expressionFlexibleIdentifiers body]
+      | (_, variables, body) <- alternatives
+      ]

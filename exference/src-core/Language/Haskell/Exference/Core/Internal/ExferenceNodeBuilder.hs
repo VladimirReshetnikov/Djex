@@ -1,25 +1,19 @@
 module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
-  ( builderGetTVarOffset
-  , builderAddScope
+  ( builderAddScope
   , builderApplySubst
   , builderAllocVar
   , builderAllocHole
+  , builderFreshenTVarNamespace
   , builderRecordVarUse
-  , builderRaiseMaxTVarId
   )
 where
 
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Types
 
 import Control.Monad.Trans.State.Lazy (StateT, gets, modify, state)
 import qualified Data.IntMap.Strict as IntMap
-
--- Flexible variables are shifted as a block.  Since their source identifiers
--- start at zero, one more than the greatest live identifier is the smallest
--- offset that keeps every shifted identifier collision-free.
-builderGetTVarOffset :: Monad m => StateT SearchNode m TVarId
-builderGetTVarOffset = (+ 1) <$> gets nodeMaxTVarId
 
 -- Allocate an expression hole without treating it as a variable introduced
 -- into scope. The returned identifier is the value before the increment.
@@ -50,10 +44,18 @@ builderRecordVarUse vid = do
     Just usageCount -> modify $ \node -> node
       { nodeVarUses = IntMap.insert vid (usageCount + 1) (nodeVarUses node) }
 
-builderRaiseMaxTVarId :: Monad m => TVarId -> StateT SearchNode m ()
-builderRaiseMaxTVarId candidate =
-  modify $ \node -> node
-    { nodeMaxTVarId = max candidate (nodeMaxTVarId node) }
+-- | Allocate one injective spelling for every ID in a source polymorphic
+-- namespace and reserve the complete namespace in this search branch.
+builderFreshenTVarNamespace
+  :: Monad m
+  => [TVarId]
+  -> StateT SearchNode m FlexibleRenaming
+builderFreshenTVarNamespace identifiers = state $ \node ->
+  case allocateNamespace identifiers $ nodeFlexibleIds node of
+    Just (renaming, supply) ->
+      (renaming, node {nodeFlexibleIds = supply})
+    Nothing -> error
+      "Exference exhausted the finite flexible-variable identifier supply"
 
 -- Take the current scope, add a child scope, and return its identifier.
 builderAddScope :: Monad m => ScopeId -> StateT SearchNode m ScopeId

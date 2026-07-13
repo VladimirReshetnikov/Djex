@@ -28,6 +28,8 @@ import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Score
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  (FlexibleIdSupply)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
@@ -146,7 +148,10 @@ data SearchNode = SearchNode
   , nodeQueryClassEnv   :: QueryClassEnv
   , nodeExpression      :: Expression
   , nodeNextVarId       :: {-# UNPACK #-} !TVarId
-  , nodeMaxTVarId       :: {-# UNPACK #-} !TVarId
+    -- Every source namespace allocated in this branch remains reserved.  This
+    -- makes freshness independent of whether later substitutions erase all
+    -- visible occurrences of an earlier instantiation.
+  , nodeFlexibleIds     :: !FlexibleIdSupply
     -- The exact forall-binder/skolem plan is finite and prevalidated. Keeping
     -- the remaining pairs avoids both counter overflow and disagreement with
     -- the independent checker when nested leading foralls shadow an ID.

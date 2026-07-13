@@ -27,17 +27,15 @@ module Language.Haskell.Djex.Exference
   , ExferenceBatchMetadata (..)
   , RenderError (..)
   , ExferenceResult
-  , ExferenceSessionLoadReport (..)
   , mkExferenceSession
   , mkExferenceSessionWithPolicy
-  , loadExferenceSession
-  , loadExferenceSessionWithPolicy
   , exferenceSessionInventory
   , exferenceSessionOmissions
   , exferenceSessionDiagnostics
   , mkExferenceRequest
+  , mkExferenceRequestWithSourceInfo
+  , validateExferenceTarget
   , exferenceRequestQuery
-  , parseExferenceRequest
   , runExferenceQuery
   , exferenceCandidateMetrics
   , exferenceResultBindingUsages
@@ -47,11 +45,6 @@ module Language.Haskell.Djex.Exference
   ) where
 
 import Control.DeepSeq (NFData (rnf))
-import Control.Monad.Trans.Except (runExceptT)
-import Data.Bifunctor (first)
-import Data.Functor.Identity (runIdentity)
-import Data.List.NonEmpty (NonEmpty)
-import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
@@ -72,24 +65,14 @@ import Language.Haskell.Exference.Core.Declaration
   ( freshSynthesisVariable )
 import Language.Haskell.Exference.Core.Types
   ( HsType
-  , TypeVarIndex
   , fromSynthesisType
-  , toSynthesisType
   , toSynthesisName
   , showVar
   )
 import Language.Haskell.Djex.Exference.Internal.Session
   ( ExferenceSession )
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
-import Language.Haskell.Exference.EnvironmentParser
-  ( LoadReport (..)
-  , environmentFromPath
-  , environmentLoadErrorDiagnostics
-  , haskellSrcExtsParseMode
-  )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
-import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-  ( parseTypeWithKinds )
 import Language.Haskell.Synthesis.Candidate
   ( Candidate (Candidate)
   , candidateDetails
@@ -105,7 +88,6 @@ import Language.Haskell.Synthesis.Diagnostic
   , Severity (Error, Info, Warning)
   , SourceSpan
   , diagnostic
-  , sourceTextSpan
   , withCode
   , withContext
   , withSource
@@ -121,9 +103,7 @@ import Language.Haskell.Synthesis.Generated
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
-  ( Inventory
-  , inventoryKindAssumptions
-  )
+  ( Inventory )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.Name
   ( Name
@@ -208,22 +188,12 @@ data ExferenceOmission = ExferenceOmission
   }
   deriving (Eq, Ord, Show)
 
--- | A fully sealed session or structured fatal diagnostics, paired with all
--- non-fatal source-loader and backend-projection diagnostics in production
--- order.  No parser-specific environment or error type crosses this stable
--- boundary.
-data ExferenceSessionLoadReport = ExferenceSessionLoadReport
-  { exferenceSessionLoadResult
-      :: Either (NonEmpty Diagnostic) ExferenceSession
-  , exferenceSessionLoadDiagnostics :: [Diagnostic]
-  }
-
 -- Keep the frontend spelling index private: it is meaningful only when paired
 -- with the exact parsed goal and must be converted after explicit contexts are
 -- merged, because that operation can change Exference's rigid-ID allocation.
 data ExferenceRequest = ExferenceRequest
   { requestQuery :: QueryRequest ExferenceType ExferenceOptions
-  , requestSourceTypeVariables :: TypeVarIndex
+  , requestSourceTypeVariables :: Map.Map String ExferenceLocal
   , requestSourceLocation :: Maybe (FilePath, SourceSpan)
   }
   deriving (Eq, Show)
@@ -316,42 +286,6 @@ mkExferenceSessionWithPolicy policy =
     (exferenceExcludedBindings policy)
     (exferenceRatingOverrides policy)
 
--- | Load a directory of source modules and ratings, validate its complete
--- inventory, and seal an Exference session with the default policy.
-loadExferenceSession :: FilePath -> IO ExferenceSessionLoadReport
-loadExferenceSession = loadExferenceSessionWithPolicy
-  defaultExferenceSessionPolicy
-
--- | Policy-aware counterpart of 'loadExferenceSession'.  Session omission
--- diagnostics follow source-loader diagnostics, matching the order in which
--- the two phases run.
-loadExferenceSessionWithPolicy
-  :: ExferenceSessionPolicy
-  -> FilePath
-  -> IO ExferenceSessionLoadReport
-loadExferenceSessionWithPolicy policy path = do
-  LoadReport sourceResult sourceDiagnostics <- environmentFromPath path
-  pure $ case sourceResult of
-    Left failure -> ExferenceSessionLoadReport
-      { exferenceSessionLoadResult = Left
-          $ environmentLoadErrorDiagnostics failure
-      , exferenceSessionLoadDiagnostics = sourceDiagnostics
-      }
-    Right checked -> case Session.sealCheckedExferenceSessionWithPolicy
-        (exferenceExcludedBindings policy)
-        (exferenceRatingOverrides policy)
-        checked of
-      Left failure -> ExferenceSessionLoadReport
-        { exferenceSessionLoadResult = Left
-            $ NonEmpty.singleton failure
-        , exferenceSessionLoadDiagnostics = sourceDiagnostics
-        }
-      Right session -> ExferenceSessionLoadReport
-        { exferenceSessionLoadResult = Right session
-        , exferenceSessionLoadDiagnostics = sourceDiagnostics
-            ++ exferenceSessionDiagnostics session
-        }
-
 exferenceSessionInventory :: ExferenceSession -> ExferenceInventory
 exferenceSessionInventory = Session.exferenceSessionInventory
 
@@ -365,9 +299,20 @@ exferenceSessionDiagnostics = map omissionDiagnostic
 mkExferenceRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
-mkExferenceRequest query = do
+mkExferenceRequest = mkExferenceRequestWithSourceInfo Map.empty Nothing
+
+-- | Construct a request while retaining source-frontend metadata used for
+-- stable variable spelling and diagnostics. Parser-neutral clients should use
+-- 'mkExferenceRequest'; source frontends can preserve their richer boundary
+-- information without exposing parser-specific types to the search core.
+mkExferenceRequestWithSourceInfo
+  :: Map.Map String ExferenceLocal
+  -> Maybe (FilePath, SourceSpan)
+  -> QueryRequest ExferenceType ExferenceOptions
+  -> Either Diagnostic ExferenceRequest
+mkExferenceRequestWithSourceInfo sourceVariables sourceLocation query = do
   validateRequest query
-  pure $ ExferenceRequest query Map.empty Nothing
+  pure $ ExferenceRequest query sourceVariables sourceLocation
 
 exferenceRequestQuery
   :: ExferenceRequest
@@ -433,47 +378,6 @@ candidateTypeVariableName candidate variable = Map.findWithDefault fallback
     FlexibleVariable identifier -> showVar identifier
     RigidVariable identifier -> "C" ++ showVar identifier
 
-parseExferenceRequest
-  :: ExferenceSession
-  -> ExferenceOptions
-  -> Name
-  -> FilePath
-  -> String
-  -> Either Diagnostic ExferenceRequest
-parseExferenceRequest session options target sourceName source = do
-  -- Preserve command-boundary precedence: an invalid output name is a usage
-  -- error even when the source text is also malformed.
-  validateTarget target
-  let parsed = runIdentity $ runExceptT $ parseTypeWithKinds
-        (inventoryKindAssumptions $ Session.exferenceSessionInventory session)
-        (Session.sessionClasses session)
-        Nothing
-        (Session.sessionTypeNames session)
-        Map.empty
-        (haskellSrcExtsParseMode sourceName)
-        source
-  -- The HSE compatibility frontend predates structured diagnostic codes.
-  -- Seal every failure at this stable adapter boundary while preserving its
-  -- exact message, source, and span.
-  (backendType, sourceVariables) <- first
-    (withCode "DJEX_EXF_PARSE") parsed
-  sharedType <- either
-    (Left . failureDiagnostic
-      "DJEX_EXF_PARSE"
-      "cannot project the parsed Exference type"
-    )
-    Right
-    $ toSynthesisType backendType
-  let query = QueryRequest
-        { requestTarget = target
-        , requestGoal = sharedType
-        , requestContexts = []
-        , requestOptions = options
-        }
-  validateRequestGoalAndContexts query
-  pure $ ExferenceRequest query sourceVariables
-    $ Just (sourceName, sourceTextSpan source)
-
 runExferenceQuery
   :: ExferenceSession
   -> ExferenceRequest
@@ -522,7 +426,7 @@ validateRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ()
 validateRequest query = do
-  validateTarget $ requestTarget query
+  validateExferenceTarget $ requestTarget query
   validateRequestGoalAndContexts query
 
 validateRequestGoalAndContexts
@@ -563,8 +467,11 @@ inScopeContextVariables goal = SharedType.freeVariables goal
     Set.fromList variables `Set.union` leadingForallVariables body
   leadingForallVariables _ = Set.empty
 
-validateTarget :: Name -> Either Diagnostic ()
-validateTarget target = case validateDefinitionName target of
+-- | Validate the source-level name of an Exference result definition.
+-- Frontends may call this before parsing to give command-usage errors stable
+-- precedence over malformed source text.
+validateExferenceTarget :: Name -> Either Diagnostic ()
+validateExferenceTarget target = case validateDefinitionName target of
   Right () -> Right ()
   Left failure -> Left $ failureDiagnostic
     "DJEX_EXF_TARGET"

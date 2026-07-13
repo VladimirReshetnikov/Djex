@@ -23,6 +23,8 @@ import System.IO
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex.Exference
+import Language.Haskell.Djex.Exference.HaskellSrc
+  ( parseExferenceRequest )
 import qualified Language.Haskell.Exference.Session as Session
 import Language.Haskell.Exference.Core.FunctionBinding
   ( functionName )

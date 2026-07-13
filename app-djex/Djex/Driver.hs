@@ -21,6 +21,11 @@ import System.IO (hPutStrLn, stderr)
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
+import Language.Haskell.Djex.Exference.HaskellSrc
+  ( ExferenceSessionLoadReport (..)
+  , loadExferenceSession
+  , parseExferenceRequest
+  )
 import Paths_djex (getDataFileName, version)
 
 data CliBackend = Djinn | Exference

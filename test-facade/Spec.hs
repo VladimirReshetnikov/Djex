@@ -56,8 +56,7 @@ main = defaultMain $ testGroup "public Djex facade"
         environmentProjection `seq`
         requestProjection `seq` candidateProjection `seq`
         metadataProjection `seq` pure ()
-      mkExferenceSession `seq` mkExferenceSessionWithPolicy `seq`
-        loadExferenceSession `seq` pure ()
+      mkExferenceSession `seq` mkExferenceSessionWithPolicy `seq` pure ()
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
             :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment

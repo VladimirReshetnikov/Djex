@@ -131,7 +131,9 @@ Executable djex
     Djex.Driver
     Paths_djex
   Autogen-Modules: Paths_djex
-  Build-Depends:  djex
+  Build-Depends:
+    djex,
+    djex:exference-frontend
 
 Library synthesis
   import:           build-settings, containers-dep, deepseq-dep, transformers-dep
@@ -330,6 +332,7 @@ Library exference-frontend
 
   Exposed-Modules:
     Language.Haskell.Djex.Exference
+    Language.Haskell.Djex.Exference.HaskellSrc
     Language.Haskell.Exference
     Language.Haskell.Exference.Diagnostic
     Language.Haskell.Exference.SimpleDict

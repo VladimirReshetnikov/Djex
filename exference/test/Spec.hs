@@ -115,14 +115,16 @@ import Language.Haskell.Exference.EnvironmentParser
 import Language.Haskell.Djex.Exference
   ( ExferenceOmission (..)
   , ExferenceOmissionReason (..)
-  , ExferenceSessionLoadReport (..)
   , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
   , exferenceSessionDiagnostics
   , exferenceSessionOmissions
+  , mkExferenceSessionWithPolicy
+  )
+import Language.Haskell.Djex.Exference.HaskellSrc
+  ( ExferenceSessionLoadReport (..)
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
-  , mkExferenceSessionWithPolicy
   )
 import qualified Language.Haskell.Exference.Session as ExferenceSession
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc

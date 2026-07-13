@@ -2,7 +2,7 @@
 -- parser-specific checked environment.
 --
 -- New applications should normally use 'loadExferenceSession' from
--- "Language.Haskell.Djex.Exference".
+-- "Language.Haskell.Djex.Exference.HaskellSrc".
 -- This explicit bridge exists for the historical CLI, programmatic frontend
 -- fixtures, and migrations that already own a 'CheckedSourceEnvironment'.
 module Language.Haskell.Exference.Session

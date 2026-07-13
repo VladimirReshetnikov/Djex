@@ -25,6 +25,8 @@ import qualified Djinn.Core as DjinnCore (DjinnCandidate, Environment)
 -- Raw Exference fixtures below use their historical @functionName@ field;
 -- hide the shared structural-name accessor at this integration-only seam.
 import Language.Haskell.Djex hiding (functionName)
+import Language.Haskell.Djex.Exference.HaskellSrc
+  ( parseExferenceRequest )
 import qualified Language.Haskell.Exference.Session as ExferenceCompatibility
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
 import Language.Haskell.Exference.Core.Name (mkQualifiedName)

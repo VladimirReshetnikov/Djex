@@ -5,7 +5,7 @@ module Language.Haskell.Exference.ExpressionToHaskellSrc
 where
 
 import Control.Monad (forM)
-import Control.Monad.Reader (Reader, ask, runReader)
+import Control.Monad.Trans.Reader (Reader, ask, runReader)
 import Data.Map (Map)
 import qualified Data.Map as Map
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)

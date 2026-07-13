@@ -50,6 +50,10 @@ core import paths. It also exposes `Language.Haskell.Djex.Exference`, so the
 Exference executable and backend-specific clients use the checked session API
 without linking Djinn. The package's default `djex` library re-exports that
 adapter together with the stable frontend and core modules.
+Source conversion exposes its concrete `ConversionT` stack, with errors inside
+lazy state so caught failures retain earlier variable allocations.  Together
+with direct reader and strict-writer transformers, this also keeps the frontend
+independent of `mtl`.
 This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.

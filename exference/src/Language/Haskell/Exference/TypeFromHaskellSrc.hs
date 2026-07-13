@@ -1,9 +1,9 @@
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
 
 module Language.Haskell.Exference.TypeFromHaskellSrc
   ( ConvData(..)
+  , ConversionT
   , runConversionT
   , runConversionTWithState
   , convertTypeNoDecl
@@ -41,9 +41,9 @@ import Data.Maybe ( fromMaybe )
 import Data.List ( intercalate )
 import System.FilePath ( (<.>), takeExtension )
 
-import Control.Monad.State.Lazy
-  ( MonadState
-  , StateT
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Lazy
+  ( StateT
   , evalStateT
   , get
   , put
@@ -63,6 +63,12 @@ import Language.Haskell.Exts.Extension ( Language (..)
 
 data ConvData = ConvData Int T.TypeVarIndex
 
+-- | A source-conversion action with one private type-variable inventory.
+-- Keeping errors inside the state transformer means a caught failure retains
+-- allocations made before it failed; several historical conversion passes
+-- rely on that behavior when they recover and continue in the same scope.
+type ConversionT error m result = ExceptT error (StateT ConvData m) result
+
 -- | Run one isolated source-conversion scope, discarding its private variable
 -- inventory.  Keeping 'ExceptT' inside 'StateT' preserves the historical
 -- behavior: a caught conversion failure does not roll back allocations made
@@ -70,7 +76,7 @@ data ConvData = ConvData Int T.TypeVarIndex
 runConversionT
   :: Monad m
   => ConvData
-  -> ExceptT error (StateT ConvData m) result
+  -> ConversionT error m result
   -> ExceptT error m result
 runConversionT initial action = ExceptT
   $ evalStateT (runExceptT action) initial
@@ -81,7 +87,7 @@ runConversionT initial action = ExceptT
 runConversionTWithState
   :: Monad m
   => ConvData
-  -> ExceptT error (StateT ConvData m) result
+  -> ConversionT error m result
   -> ExceptT error m (result, ConvData)
 runConversionTWithState initial action = ExceptT $ do
   (result, finalState) <- runStateT (runExceptT action) initial
@@ -125,14 +131,14 @@ convertTypeNoDecl tcs mn ds t = do
   pure (converted, index)
 
 convertTypeNoDeclInternal
-  :: MonadState ConvData m
+  :: Monad m
   => M.Map T.QualifiedName T.HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo) -- default (for unqualified stuff)
                       -- Nothing uses a broad search for lookups
   -> [T.QualifiedName] -- list of fully qualified data types
                                          -- (to keep things unique)
   -> Type SrcSpanInfo
-  -> ExceptT String m T.HsType
+  -> ConversionT String m T.HsType
 convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
  where
   helper (TyFun _ a b)      = T.TypeArrow
@@ -174,13 +180,13 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
       <*> helper t
   helper x                = throwE $ "unknown type element: " ++ show x -- TODO
 
-getVar :: MonadState ConvData m => Name SrcSpanInfo -> m Int
+getVar :: Monad m => Name SrcSpanInfo -> ConversionT error m Int
 getVar n = do
-  ConvData next m <- get
+  ConvData next variables <- lift get
   let key = prettyPrint n
-  case M.lookup key m of
+  case M.lookup key variables of
     Nothing -> do
-      put $ ConvData (next+1) (M.insert key next m)
+      lift $ put $ ConvData (next+1) (M.insert key next variables)
       return next
     Just i ->
       return i
@@ -299,12 +305,12 @@ parseQualifiedName input = do
       $ "invalid qualified name " ++ show input ++ ": " ++ message
 
 convertConstraint
-  :: MonadState ConvData m
+  :: Monad m
   => M.Map T.QualifiedName T.HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
   -> [T.QualifiedName]
   -> Asst SrcSpanInfo
-  -> ExceptT String m T.HsConstraint
+  -> ConversionT String m T.HsConstraint
 convertConstraint tcs defModuleName ds (TypeA _ classType) = do
   (qname, types) <- maybe
     (throwE $ "invalid class constraint: " ++ prettyPrint classType)
@@ -342,9 +348,9 @@ validateConstraintArity classes name actual = case M.lookup name classes of
     $ SharedName.nameSpelling
     $ T.toSynthesisName qualifiedName
 
-tyVarTransform :: MonadState ConvData m
+tyVarTransform :: Monad m
                => TyVarBind SrcSpanInfo
-               -> ExceptT String m T.TVarId
+               -> ConversionT String m T.TVarId
 tyVarTransform (KindedVar _ _ _) = throwE "kinded type variable"
 tyVarTransform (UnkindedVar _ n) = getVar n
 

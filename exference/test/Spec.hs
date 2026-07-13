@@ -17,7 +17,7 @@ import Data.Data
   , toConstr
   )
 import Data.Either (rights)
-import Data.Functor.Identity (runIdentity)
+import Data.Functor.Identity (Identity, runIdentity)
 import Data.List (find, isInfixOf, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.IntMap.Strict as IntMap
@@ -28,7 +28,7 @@ import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
-import Control.Monad.Trans.Except (runExceptT)
+import Control.Monad.Trans.Except (catchE, runExceptT, throwE)
 import qualified Language.Haskell.Exts.Syntax as HSE
 import qualified Language.Haskell.Exts.Parser as HSE
 import qualified Language.Haskell.Exts.Pretty as HSE
@@ -122,9 +122,13 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , toSynthesisTypeDeclaration
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
-  ( haskellSrcExtsParseMode
+  ( ConvData (..)
+  , ConversionT
+  , getVar
+  , haskellSrcExtsParseMode
   , parseQualifiedName
   , convertQName
+  , runConversionTWithState
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
@@ -1259,7 +1263,31 @@ tests = testGroup "Exference"
           (fromConstr (constructors !! 3) :: QualifiedName) @?= Cons
       ]
   , testGroup "parsing and diagnostics"
-      [ testCase "ratings reject a missing value" $
+      [ testCase "caught conversions retain failed-branch allocations" $ do
+          let syntaxName spelling = HSE.Ident HSE.noSrcSpan spelling
+              action :: ConversionT String Identity Int
+              action = catchE
+                (getVar (syntaxName "failed") >> throwE "expected failure")
+                (const $ getVar $ syntaxName "recovered")
+              result = runIdentity $ runExceptT
+                $ runConversionTWithState (ConvData 0 Map.empty) action
+          case result of
+            Right (recoveredId, ConvData nextId variables) -> do
+              recoveredId @?= 1
+              nextId @?= 2
+              variables @?= Map.fromList [("failed", 0), ("recovered", 1)]
+            Left failure -> fail $ "conversion did not recover: " ++ failure
+      , testCase "failed conversion runners hide their final state" $ do
+          let action :: ConversionT String Identity ()
+              action = do
+                _ <- getVar $ HSE.Ident HSE.noSrcSpan "allocated"
+                throwE "expected failure"
+              result = runIdentity $ runExceptT
+                $ runConversionTWithState (ConvData 0 Map.empty) action
+          case result of
+            Left failure -> failure @?= "expected failure"
+            Right _ -> fail "failed conversion exposed a successful final state"
+      , testCase "ratings reject a missing value" $
           first diagnosticMessage (parseRatings "foo") @?= Left
             "rating file ends with a name but no numeric rating"
       , testCase "ratings reject a malformed number" $

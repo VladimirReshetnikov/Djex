@@ -1,6 +1,5 @@
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
@@ -34,12 +33,10 @@ import Language.Haskell.Exts.SrcLoc
   , SrcSpanInfo
   )
 
-import Control.Monad.State.Lazy (MonadState)
 import Control.Monad.Trans.Except ( runExceptT
                                   , ExceptT(..)
                                   , throwE
                                   )
-import Control.Monad.Except ( liftEither )
 
 import Control.Monad ( forM, liftM )
 import Data.Either ( rights )
@@ -194,11 +191,11 @@ convertType :: Monad m
             -> ExceptT String m (HsType, TypeVarIndex)
 convertType tcs mn ds declMap t = do
   (ty, index) <- convertTypeNoDecl tcs mn ds t
-  ty' <- liftEither $ applyTypeDecls (M.map Right declMap) ty
+  ty' <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
   return $ (ty', index)
 
 convertTypeInternal
-  :: MonadState ConvData m
+  :: Monad m
   => Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo) -- default (for unqualified stuff)
                       -- Nothing uses a broad search for lookups
@@ -206,10 +203,10 @@ convertTypeInternal
                                          -- (to keep things unique)
   -> TypeDeclMap
   -> Type SrcSpanInfo
-  -> ExceptT String m HsType
+  -> ConversionT String m HsType
 convertTypeInternal tcs defModuleName ds declMap t = do
   ty <- convertTypeNoDeclInternal tcs defModuleName ds t
-  ty' <- liftEither $ applyTypeDecls (M.map Right declMap) ty
+  ty' <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
   return $ ty'
 
 parseType

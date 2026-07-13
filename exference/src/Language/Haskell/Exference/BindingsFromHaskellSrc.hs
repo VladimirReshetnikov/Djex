@@ -1,5 +1,4 @@
 {-# LANGUAGE TupleSections #-}
-{-# LANGUAGE FlexibleContexts #-}
 
 module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
@@ -25,7 +24,7 @@ import Language.Haskell.Exference.FunctionDecl
 import Language.Haskell.Exference.HaskellSrcUtils
 
 import Control.Monad ( join )
-import Control.Monad.State.Lazy (MonadState, evalStateT)
+import Control.Monad.Trans.State.Lazy (evalStateT)
 import Control.Monad.Trans.Except
 import qualified Data.Map.Strict as M
 import Data.Maybe ( fromMaybe, maybeToList )
@@ -63,13 +62,13 @@ transformDecl tcs ds mn tDeclMap (TypeSig _loc names qtype)
 transformDecl _ _ _ _ _ = return []
 
 transformDecl'
-  :: MonadState ConvData m
+  :: Monad m
   => M.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> ModuleName SrcSpanInfo
   -> TypeDeclMap
   -> Decl SrcSpanInfo
-  -> ExceptT String m [HsFunctionDecl]
+  -> ConversionT String m [HsFunctionDecl]
 transformDecl' tcs ds mn tDeclMap (TypeSig _loc names qtype)
   = insName qtype $ do
       ctype <- convertTypeInternal tcs (Just mn) ds tDeclMap qtype
@@ -101,24 +100,25 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
   DataDecl _ _ context rawHead conss _ <- decls
   let (name, params) = splitDeclHead rawHead
   let
-    rTypeM :: MonadState ConvData m
-           => ExceptT String m HsType
+    rTypeM :: Monad m => ConversionT String m HsType
     rTypeM = do
       rName <- either throwE pure $ convertModuleNameChecked moduleName name
       ps  <- mapM pTransform params
       return $ foldl TypeApp (TypeCons rName) ps
-    pTransform :: MonadState ConvData m
-               => TyVarBind SrcSpanInfo
-               -> ExceptT String m HsType
+    pTransform
+      :: Monad m
+      => TyVarBind SrcSpanInfo
+      -> ConversionT String m HsType
     pTransform (KindedVar _ _ _) = throwE "kinded type variable"
     pTransform (UnkindedVar _ n) = TypeVar <$> getVar n
   --let
   --  tTransform (UnBangedTy t) = convertTypeInternal t
   --  tTransform x              = lift $ left $ "unknown Type: " ++ show x
   let
-    typeM :: MonadState ConvData m
-          => QualConDecl SrcSpanInfo
-          -> ExceptT String m (QualifiedName, [HsType])
+    typeM
+      :: Monad m
+      => QualConDecl SrcSpanInfo
+      -> ConversionT String m (QualifiedName, [HsType])
     typeM (QualConDecl _ cbindings constructorContext conDecl) = do
       case contextConstraints context of
         [] -> pure ()
@@ -135,8 +135,9 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
   let
     addConsMsg = (++) $ show name ++ ": "
   let
-    convAction :: MonadState ConvData m
-               => ExceptT String m ([HsFunctionDecl], DeconstructorBinding)
+    convAction
+      :: Monad m
+      => ConversionT String m ([HsFunctionDecl], DeconstructorBinding)
     convAction = do
       rtype  <- rTypeM
       consDatas <- mapM typeM conss
@@ -155,7 +156,8 @@ getDataConss tcs ds tDeclMap modules = sequence $ do
                )
         -- TODO: actually determine if stuff is recursive or not
   return $ do
-    convResult <- evalStateT (runExceptT convAction) (ConvData 0 M.empty)
+    convResult <- runExceptT
+      $ runConversionT (ConvData 0 M.empty) convAction
     return $ either (Left . addConsMsg) Right convResult
     -- TODO: replace this by bimap..
 

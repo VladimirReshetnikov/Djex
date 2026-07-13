@@ -45,7 +45,8 @@ import Data.List ( sort, find, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
-import Control.Monad.Writer.Strict
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Writer.Strict (WriterT, runWriterT, tell)
 import System.Directory ( listDirectory )
 import Control.Exception ( evaluate )
 import Data.Bifunctor ( first )

@@ -1,5 +1,3 @@
-{-# LANGUAGE FlexibleContexts #-}
-
 module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   ( ClassEnvironmentLoadError (..)
   , getClassEnv
@@ -7,8 +5,9 @@ module Language.Haskell.Exference.ClassEnvFromHaskellSrc
 where
 
 import Control.Monad (forM, when)
-import Control.Monad.State.Lazy (MonadState, evalStateT, get)
-import Control.Monad.Trans.Except (ExceptT, runExceptT, throwE)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Lazy (get)
+import Control.Monad.Trans.Except (runExceptT, throwE)
 import Data.Either (lefts, rights)
 import Data.Bifunctor (first)
 import Data.List.NonEmpty (NonEmpty)
@@ -116,10 +115,9 @@ getTypeClasses dataTypes typeDeclarations modules = do
   -- nominal identity and arity information to every superclass conversion in
   -- pass two; no lazy-map fixed point is involved.
   headerResults <- forM uniqueDeclarations $ \rawClass -> do
-    result <- evalStateT (runExceptT $ do
+    result <- runExceptT $ runConversionT emptyConversionState $ do
       parameters <- mapM tyVarTransform $ rawClassVariables rawClass
-      pure $ HsTypeClass (rawClassName rawClass) parameters [])
-      emptyConversionState
+      pure $ HsTypeClass (rawClassName rawClass) parameters []
     pure $ (,) rawClass <$> result
   let headerErrors = [Left errorMessage | Left errorMessage <- headerResults]
       successfulHeaders = rights headerResults
@@ -132,7 +130,7 @@ getTypeClasses dataTypes typeDeclarations modules = do
   -- superclass context.  Thus parameter IDs follow declaration order even if
   -- superclasses mention those variables in a different order (or not at all).
   elaborated <- forM successfulHeaders $ \(rawClass, _) ->
-    evalStateT (runExceptT (do
+    runExceptT $ runConversionT emptyConversionState $ do
       parameters <- mapM tyVarTransform $ rawClassVariables rawClass
       superclasses <- mapM
         (convertClassConstraint headers
@@ -140,8 +138,7 @@ getTypeClasses dataTypes typeDeclarations modules = do
           dataTypes
           typeDeclarations)
         (contextConstraints $ rawClassContext rawClass)
-      pure $ HsTypeClass (rawClassName rawClass) parameters superclasses))
-      emptyConversionState
+      pure $ HsTypeClass (rawClassName rawClass) parameters superclasses
 
   pure $ invalidNames ++ duplicateErrors ++ headerErrors ++ elaborated
  where
@@ -160,7 +157,7 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
   InstDecl _ _ rule _ <- declarations
   (explicitVariables, context, syntaxName, argumentSyntax) <-
     maybeToList $ splitInstRule rule
-  pure $ evalStateT (runExceptT $ do
+  pure $ runExceptT $ runConversionT (ConvData 0 Map.empty) $ do
     explicitIds <- case explicitVariables of
       Nothing -> pure Nothing
       Just variables -> do
@@ -186,26 +183,25 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
     case explicitIds of
       Nothing -> pure ()
       Just declaredIds -> do
-        ConvData _ variables <- get
+        ConvData _ variables <- lift get
         let undeclared = Set.fromList (Map.elems variables)
               Set.\\ declaredIds
         when (not $ Set.null undeclared) $ throwE
           $ "instance uses variables outside its explicit forall: "
           ++ show (Set.toAscList undeclared)
-    pure $ HsInstance prerequisites $ HsConstraint className arguments)
-    (ConvData 0 Map.empty)
+    pure $ HsInstance prerequisites $ HsConstraint className arguments
 
 -- | Convert a class application against the complete closed class inventory.
 -- Both superclass edges and instance prerequisites must name a declaration;
 -- ordinary function signatures retain the frontend's open-world policy.
 convertClassConstraint
-  :: MonadState ConvData m
+  :: Monad m
   => Map.Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
   -> [QualifiedName]
   -> TypeDeclMap
   -> Asst SrcSpanInfo
-  -> ExceptT String m HsConstraint
+  -> ConversionT String m HsConstraint
 convertClassConstraint classes defaultModule dataTypes
     typeDeclarations (TypeA _ classType) = do
   (syntaxName, argumentSyntax) <- maybe

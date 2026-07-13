@@ -24,7 +24,7 @@ module Language.Haskell.Djex.Exference
   , ExferenceCandidateDetails (..)
   , ExferenceCandidateMetrics (..)
   , ExferenceBatchMetadata (..)
-  , ExferenceCandidateRenderError (..)
+  , RenderError (..)
   , ExferenceResult
   , ExferenceSessionLoadReport (..)
   , loadExferenceSession
@@ -91,6 +91,8 @@ import Language.Haskell.Synthesis.Candidate
   , candidateDetails
   , candidateOutput
   , candidateResidualConstraints
+  , renderCandidateDefinition
+  , renderCandidateExpression
   )
 import Language.Haskell.Synthesis.Constraint
   ( constraintArguments )
@@ -104,12 +106,9 @@ import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Generated
   ( FunctionClause (FunctionClause)
   , Qualification (..)
-  , RenderError
+  , RenderError (..)
   , RenderOptions (renderQualification)
   , defaultRenderOptions
-  , functionClauseExpression
-  , renderExpression
-  , renderFunctionClause
   , validateDefinitionName
   )
 import Language.Haskell.Synthesis.Inventory
@@ -277,10 +276,6 @@ instance NFData ExferenceBatchMetadata where
     rnf (exferenceBatchQueuePruned metadata) `seq`
     rnf (exferenceBatchDepthPruned metadata)
 
-data ExferenceCandidateRenderError
-  = ExferenceGeneratedRenderError RenderError
-  deriving (Eq, Show)
-
 -- | Load a directory of source modules and ratings, validate its complete
 -- inventory, and seal an Exference session with the default policy.
 loadExferenceSession :: FilePath -> IO ExferenceSessionLoadReport
@@ -350,23 +345,18 @@ exferenceResultBindingUsages = exferenceBatchBindingUsages
 renderExferenceCandidateExpression
   :: Qualification
   -> ExferenceCandidate
-  -> Either ExferenceCandidateRenderError String
-renderExferenceCandidateExpression qualification candidate = first
-  ExferenceGeneratedRenderError
-  $ renderExpression (candidateRenderOptions qualification candidate)
-  $ functionClauseExpression
-  $ candidateOutput candidate
+  -> Either RenderError String
+renderExferenceCandidateExpression qualification candidate =
+  renderCandidateExpression
+    (candidateRenderOptions qualification candidate) candidate
 
 renderExferenceCandidateDefinition
   :: Qualification
   -> ExferenceCandidate
-  -> Either ExferenceCandidateRenderError String
-renderExferenceCandidateDefinition qualification candidate
-  = first ExferenceGeneratedRenderError
-    $ renderFunctionClause
-        (candidateRenderOptions qualification candidate) clause
- where
-  clause = candidateOutput candidate
+  -> Either RenderError String
+renderExferenceCandidateDefinition qualification candidate =
+  renderCandidateDefinition
+    (candidateRenderOptions qualification candidate) candidate
 
 renderExferenceResidualConstraints
   :: ExferenceCandidate

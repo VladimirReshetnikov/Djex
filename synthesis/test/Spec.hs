@@ -84,6 +84,25 @@ candidateTests = testGroup "candidates"
             [Constraint equality [[3, 4]]] [5, 6]
       _ <- evaluate $ force candidate
       pure ()
+  , testCase "render a clause candidate as an expression or definition" $ do
+      let identity = right $ mkIdentifier "identity"
+          candidate :: Candidate String () (FunctionClause Int)
+          candidate = Candidate
+            (FunctionClause identity [Bind 0] $ Local 0) [] ()
+          options = defaultRenderOptions $ \local -> "a" ++ show local
+      renderCandidateExpression options candidate @?= Right "\\a0 -> a0"
+      renderCandidateDefinition options candidate @?=
+        Right "identity a0 = a0"
+  , testCase "return shared syntax errors from candidate rendering" $ do
+      let target = right $ mkIdentifier "result"
+          global = right $ parseName "Fixture.result"
+          candidate :: Candidate String () (FunctionClause Int)
+          candidate = Candidate
+            (FunctionClause target [] $ Global global) [] ()
+          options = (defaultRenderOptions $ const "a")
+            { renderQualification = Unqualified }
+      renderCandidateDefinition options candidate @?=
+        Left (GlobalDefinitionCapture target global Unqualified)
   ]
 
 kindInferenceTests :: TestTree

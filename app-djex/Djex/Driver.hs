@@ -186,7 +186,7 @@ presentExference options results = case traverse
 renderDjinn
   :: CommonOptions
   -> DjinnCandidate
-  -> Either DjinnCandidateRenderError String
+  -> Either RenderError String
 renderDjinn options = case commonRenderMode options of
   RenderDefinition -> renderDjinnCandidateDefinition qualification
   RenderExpression -> renderDjinnCandidateExpression qualification
@@ -196,7 +196,7 @@ renderDjinn options = case commonRenderMode options of
 renderExference
   :: CommonOptions
   -> ExferenceCandidate
-  -> Either ExferenceCandidateRenderError String
+  -> Either RenderError String
 renderExference options = case commonRenderMode options of
   RenderDefinition -> renderExferenceCandidateDefinition qualification
   RenderExpression -> renderExferenceCandidateExpression qualification
@@ -209,7 +209,7 @@ renderExference options = case commonRenderMode options of
 renderExferenceBlock
   :: CommonOptions
   -> ExferenceCandidate
-  -> Either ExferenceCandidateRenderError String
+  -> Either RenderError String
 renderExferenceBlock options candidate = do
   rendered <- renderExference options candidate
   let constraints = renderExferenceResidualConstraints candidate

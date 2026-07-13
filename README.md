@@ -143,8 +143,13 @@ the same types or options. `mkDjinnSession` lowers and seals the neutral shared
 the default facade. `standardDjinnSession` supplies the checked built-in
 environment directly, and
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
-grammar rather than maintaining a second parser. `runDjinnQuery` returns shared
-candidates containing structured generated
+grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
+point rather than importing an internal parser. Both `DjinnRequest` and
+`DjinnCandidate` expose `DjinnType = Type DjinnTypeVariable`; that shared type
+is lowered to raw `HType` only inside `runDjinnQuery`. Parsed raw types travel
+in the opposite direction and are checked into the shared IR. The query
+returns shared candidates containing
+structured generated
 clauses, empty residual constraints, and Djinn's unused-binder ranking details
 in one terminal batch. A proof beyond `optionCutoff` produces
 `Truncated CandidateLimitReached` without forcing the proof-stream suffix.
@@ -154,8 +159,9 @@ budget-limited `NoEvidence` remain distinct from the batch's operational
 
 The one-import `Language.Haskell.Djex` surface reexports the complete neutral
 declaration, environment, inventory, kind-inference, and type-rendering
-vocabulary. `DjinnEnvironment`, `DjinnInventory`, and `DjinnLocal` make every
-Djinn adapter signature nameable without depending on a hidden backend alias;
+vocabulary. `DjinnEnvironment`, `DjinnInventory`, `DjinnTypeVariable`,
+`DjinnLocal`, and `DjinnType` make every Djinn adapter signature nameable
+without depending on a hidden backend alias;
 the historical REPL explicitly converts its editable raw environment at the
 adapter boundary.
 
@@ -198,8 +204,11 @@ rendering hints; raw core records no longer cross the default facade.
 Those batches preserve queue/depth pruning, nominal binding usage, residual
 constraints, statistics, and rendering hints without forcing the remaining
 trace. Each generated expression is wrapped in a target-bearing shared
-`FunctionClause`. Candidate selection and rendering remain presentation
-policies outside both session operations. The shared `Selection` module now
+`FunctionClause`. The shared candidate expression/definition renderers own the
+common clause projection and return `RenderError` directly; each backend
+adapter contributes only its local-name hints and qualification options.
+Candidate selection and rendering remain presentation policies outside both
+session operations. The shared `Selection` module now
 provides first, global-best, streaming-all, batch-lookahead, and preferred-tier
 lookahead policies over either backend's result envelope. `TypeRender` prints
 shared types and constraints from tagged variable-name hints without collapsing

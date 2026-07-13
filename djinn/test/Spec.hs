@@ -18,7 +18,8 @@ import Djinn.Core (
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
     fromSynthesisKind, fromSynthesisType,
-    mkContext, parseHKind, parseHType, removeDeclaration,
+    mkContext, parseContextualHType, parseHKind, parseHType,
+    removeDeclaration,
     reportCompletion, reportGeneratedClauses, reportOutcome,
     resolveContext, resolveInstanceMethods,
     standardEnvironment, toSynthesisDeclaration, toSynthesisEnvironment,
@@ -115,15 +116,19 @@ testCheckedDjinnAdapter = do
         session defaultQueryOptions target "identity-query.djinn"
         "Eq a => a -> a"
     SharedQuery.requestGoal request `assertEqualReversed`
-        HTArrow (HTVar "a") (HTVar "a")
+        SharedType.FunctionType
+            (SharedType.TypeVariable "a")
+            (SharedType.TypeVariable "a")
     SharedQuery.requestContexts request `assertEqualReversed`
-        [context "Eq" [HTVar "a"]]
+        [Constraint (sharedName "Eq") [SharedType.TypeVariable "a"]]
     SharedQuery.requestOptions request `assertEqualReversed`
         defaultQueryOptions
 
     result <- expectShownRight $ Djex.runDjinnQuery session request
     case SharedSearch.batchCandidates $ SharedQuery.resultSearch result of
         candidate : _ -> do
+            assertEqual "Djinn candidates expose shared residual types"
+                [] (SharedCandidate.candidateResidualConstraints candidate)
             assertEqual "the adapter renders a complete top-level definition"
                 (Right "identity a = a")
                 (Djex.renderDjinnCandidateDefinition
@@ -144,6 +149,17 @@ testCheckedDjinnAdapter = do
                 (Just "malformed-query.djinn")
                 (SharedDiagnostic.diagnosticSource failure)
         Right _ -> fail "the checked Djinn parser accepted trailing input"
+
+    let unsupportedGoal = SharedType.TupleType SharedName.Unboxed
+            [SharedType.TypeVariable "a"]
+        unsupportedRequest = request
+            { SharedQuery.requestGoal = unsupportedGoal }
+    case Djex.runDjinnQuery session unsupportedRequest of
+        Left failure -> assertEqual
+            "unsupported shared types fail at the checked lowering boundary"
+            (Just "DJEX_DJINN_LOWER")
+            (SharedDiagnostic.diagnosticCode failure)
+        Right _ -> fail "the checked Djinn adapter accepted an unboxed tuple"
 
     qualifier <- expectShownRight $ SharedName.mkModuleName "External"
     invalidTarget <- expectShownRight $
@@ -218,6 +234,12 @@ testCoreFacade = do
     assertEqual "parseHType parses ordinary types"
         (Right $ HTArrow (HTVar "a") (HTVar "a")) (parseHType "a -> a")
     assertLeft "trailing garbage is a parse error" (parseHType "a -> a ->")
+    assertEqual "contextual parsing shares the complete compatibility grammar"
+        (Right ([context "Eq" [HTVar "a"]],
+            HTArrow (HTVar "a") (HTVar "a")))
+        (parseContextualHType "Eq a => a -> a")
+    assertLeft "contextual parsing rejects trailing input"
+        (parseContextualHType "Eq a => a -> a ;")
     assertEqual "parseHKind parses higher kinds"
         (Right $ KArrow (KArrow KStar KStar) KStar)
         (parseHKind "(* -> *) -> *")

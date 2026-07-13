@@ -23,7 +23,17 @@ main = defaultMain $ testGroup "public Djex facade"
   , testCase "exports checked session entry points" $ do
       assertBool "the standard Djinn session did not seal" $
         isRight standardDjinnSession
-      let inventoryProjection
+      let djinnTypeProjection :: DjinnType -> Type DjinnTypeVariable
+          djinnTypeProjection = id
+          djinnRequestProjection
+            :: DjinnRequest -> QueryRequest DjinnType QueryOptions
+          djinnRequestProjection = id
+          djinnCandidateProjection
+            :: DjinnCandidate
+            -> Candidate DjinnType DjinnCandidateDetails
+                (FunctionClause DjinnLocal)
+          djinnCandidateProjection = id
+          inventoryProjection
             :: ExferenceSession -> ExferenceInventory
           inventoryProjection = exferenceSessionInventory
           requestProjection
@@ -36,12 +46,14 @@ main = defaultMain $ testGroup "public Djex facade"
           metadataProjection
             :: ExferenceResult -> ExferenceBatchMetadata
           metadataProjection = batchMetadata . resultSearch
-      inventoryProjection `seq` requestProjection `seq`
-        candidateProjection `seq` metadataProjection `seq` pure ()
+      djinnTypeProjection `seq` djinnRequestProjection `seq`
+        djinnCandidateProjection `seq` inventoryProjection `seq`
+        requestProjection `seq` candidateProjection `seq`
+        metadataProjection `seq` pure ()
       loadExferenceSession `seq` pure ()
   , testCase "seals Djinn from the neutral environment vocabulary" $ do
       let checkedEnvironment
-            :: Either (EnvironmentError DjinnLocal) DjinnEnvironment
+            :: Either (EnvironmentError DjinnTypeVariable) DjinnEnvironment
           checkedEnvironment = mkEnvironment []
       environment <- expectRight checkedEnvironment
       session <- expectRight $ mkDjinnSession environment

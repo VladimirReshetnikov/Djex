@@ -326,10 +326,13 @@ makeDjinnResult s name contexts goal = do
             Diagnostic.diagnostic Diagnostic.Error
                 "cannot convert the parsed Djinn target"
         Right value -> Right value
+    sharedGoal <- projectCompatibilityType "goal" goal
+    sharedContexts <- traverse
+        (traverse $ projectCompatibilityType "context argument") contexts
     runDjinnQuery (djinnSession s) QueryRequest {
         requestTarget = target,
-        requestGoal = goal,
-        requestContexts = contexts,
+        requestGoal = sharedGoal,
+        requestContexts = sharedContexts,
         requestOptions = queryOptions
         }
   where queryOptions = QueryOptions {
@@ -338,6 +341,19 @@ makeDjinnResult s name contexts goal = do
         optionCutoff = cutOff s,
         optionBudget = if budget s > 0 then Just (budget s) else Nothing
         }
+
+-- REPL parsers still produce the historical raw types. Their grammar lies in
+-- the lossless shared subset, but keep the bridge checked so future grammar
+-- extensions cannot smuggle a declaration-only node into the stable session.
+projectCompatibilityType
+    :: String -> HType -> Either Diagnostic.Diagnostic DjinnType
+projectCompatibilityType role source = case toSynthesisType source of
+    Left failure -> Left $ Diagnostic.withContext
+        (role ++ ": " ++ show failure) $
+        Diagnostic.withCode "DJEX_DJINN_QUERY" $
+        Diagnostic.diagnostic Diagnostic.Error
+            "cannot project the parsed Djinn query type"
+    Right shared -> Right shared
 
 formatDjinnResult :: Bool -> State -> String -> [Context] -> HType
                   -> DjinnResult -> Either String [String]

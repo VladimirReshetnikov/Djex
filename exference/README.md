@@ -308,7 +308,9 @@ tags, binding usage is keyed by shared `Name`, and the retained
 `ExferenceInventory` has backend ratings erased by a total functor map. The raw
 `CheckedSourceEnvironment -> ExferenceSession` bridge lives separately in
 `Language.Haskell.Exference.Session`; ordinary stable callers use
-`loadExferenceSession` and never acquire an HSE parser type.
+`loadExferenceSession` and never acquire an HSE parser type. Its expression
+and definition conveniences supply the retained local-name hints to the shared
+candidate renderer and expose the common `RenderError` directly.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the
@@ -329,23 +331,18 @@ that the historical filter overlooked. The
 pruning reasons and rejecting malformed hand-constructed status values. It
 does not turn heuristic exhaustion into a logical uninhabitability claim. The
 historical list-returning entry points remain compatibility adapters (including
-their “invalid input means no elements” convention). Selection functions are
-also available separately over chunk streams. They return `SearchSelection`,
-which folds the last inspected status through the policy without retaining the
-consumed trace. The executable therefore validates and runs search once, then
-says when an empty result is conclusive versus when inhabitation remains
-undecided.
-
-That historical `SearchSelection`/`find*`/`select*` presentation family is now
-deprecated but retains its behavior for source compatibility. New callers
-should construct a checked session and execute requests with
+their “invalid input means no elements” convention): `findExpressions` exposes
+the raw result stream, and `findOneExpression` is simply its first element. The
+duplicated historical `SearchSelection` and rating/lookahead `find*`/`select*`
+presentation family has been retired. Callers should construct a checked
+session and execute requests with
 `Language.Haskell.Djex.Exference.runExferenceQuery`, then use
 `Language.Haskell.Synthesis.Selection.selectQueryResults` (or
 `selectPreferredQueryResults` for the constraint-free preference policy).
 The shared `Selection` result preserves the last inspected progress alongside
-the selected candidates. Compatibility tests suppress deprecation diagnostics
-in their own module only; production targets continue to compile with the full
-warning set.
+the selected candidates. The executable therefore validates and runs search
+once, then says when an empty result is conclusive versus when inhabitation
+remains undecided.
 
 The `exference` executable is a normal build target again. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been

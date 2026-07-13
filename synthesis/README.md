@@ -50,6 +50,10 @@ envelope. It keeps generated output together with shared residual constraints
 and backend-owned details such as proof or heuristic statistics. Mapping and
 traversal affect only the output, so adapters can add a target-bearing clause
 without rebuilding or weakening the attached obligations and metadata.
+`renderCandidateExpression` and `renderCandidateDefinition` are the common
+clause-to-text pipeline: adapters provide only their local-name hints and
+qualification in `RenderOptions`, and callers receive the shared `RenderError`
+without a backend-specific singleton wrapper.
 
 `Language.Haskell.Synthesis.Query` supplies the generic request/result seam.
 Targets are validated `Name`s and contexts use the backend's goal type, while

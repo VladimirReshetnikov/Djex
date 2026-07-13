@@ -1,22 +1,21 @@
 -- | Checked Djinn sessions behind Djex's backend-neutral query envelope.
 --
 -- A session seals the exact Djinn environment once and retains the shared
--- inventory that justified it.  Queries still use Djinn's own type and option
--- vocabulary: those values carry proof-search semantics that a premature
--- lowest-common-denominator configuration would obscure.
+-- inventory that justified it. Queries use the shared source-type vocabulary
+-- while retaining Djinn's proof-search options and backend-specific evidence.
 module Language.Haskell.Djex.Djinn
   ( DjinnSession
   , DjinnEnvironment
   , DjinnInventory
+  , DjinnTypeVariable
   , DjinnLocal
-  , HType
-  , Context
+  , DjinnType
   , QueryOptions (..)
   , defaultQueryOptions
   , DjinnCandidate
   , DjinnCandidateDetails (..)
   , Qualification (..)
-  , DjinnCandidateRenderError (..)
+  , RenderError (..)
   , DjinnQueryMetadata (..)
   , DjinnRequest
   , DjinnResult
@@ -30,18 +29,9 @@ module Language.Haskell.Djex.Djinn
   ) where
 
 import Data.Bifunctor (first)
-import Text.ParserCombinators.ReadP
-  ( ReadP
-  , eof
-  , option
-  , readP_to_S
-  , skipSpaces
-  )
 
 import Djinn.Core
-  ( Context
-  , DjinnCandidateDetails (..)
-  , HType
+  ( DjinnCandidateDetails (..)
   , PreparedEnvironment
   , QueryOptions (..)
   , defaultQueryOptions
@@ -57,10 +47,10 @@ import Djinn.Core
   , standardEnvironment
   )
 import qualified Djinn.Core as Core
-import Djinn.Internal.HTypes (pHContext, pHType)
 import Language.Haskell.Synthesis.Candidate
-  ( Candidate
-  , candidateOutput
+  ( Candidate (..)
+  , renderCandidateDefinition
+  , renderCandidateExpression
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -73,12 +63,9 @@ import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Generated
   ( FunctionClause
   , Qualification (..)
-  , RenderError
+  , RenderError (..)
   , RenderOptions (renderQualification)
   , defaultRenderOptions
-  , functionClauseExpression
-  , renderExpression
-  , renderFunctionClause
   , validateDefinitionName
   )
 import Language.Haskell.Synthesis.Name
@@ -96,17 +83,29 @@ import Language.Haskell.Synthesis.Search
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory (Inventory)
+import Language.Haskell.Synthesis.Type (Type)
 
 -- | The neutral declaration environment accepted by the Djinn adapter.
 -- Djinn currently uses textual source variables and integer kind variables;
 -- neither choice leaks its mutable compatibility environment through Djex.
-type DjinnEnvironment = Environment DjinnLocal Int ()
+type DjinnEnvironment = Environment DjinnTypeVariable Int ()
 
 -- | The checked neutral inventory sealed into a Djinn session.
-type DjinnInventory = Inventory DjinnLocal ()
+type DjinnInventory = Inventory DjinnTypeVariable ()
+
+-- | Djinn's source-level type-variable identity.
+--
+-- It currently shares the same representation as generated binders, but the
+-- distinct alias keeps those unrelated namespaces separate in the public API.
+type DjinnTypeVariable = String
 
 -- | Djinn's generated-expression binder identity.
 type DjinnLocal = String
+
+-- | Source types accepted and returned by the stable Djinn adapter.
+-- They are lowered to backend-specific proof types only inside
+-- 'runDjinnQuery'.
+type DjinnType = Type DjinnTypeVariable
 
 -- | A validated Djinn environment paired with its exact shared inventory.
 -- The constructor is private so the two views cannot drift apart.
@@ -120,19 +119,15 @@ data DjinnQueryMetadata = DjinnQueryMetadata
   }
   deriving (Eq, Show)
 
-type DjinnRequest = QueryRequest HType QueryOptions
+type DjinnRequest = QueryRequest DjinnType QueryOptions
 
 -- Spell out the shared candidate shape here instead of re-exporting Djinn's
 -- identical alias, whose historical @HSymbol@ name is intentionally private
 -- to the raw compatibility API.
 type DjinnCandidate =
-  Candidate HType DjinnCandidateDetails (FunctionClause DjinnLocal)
+  Candidate DjinnType DjinnCandidateDetails (FunctionClause DjinnLocal)
 
 type DjinnResult = QueryResult DjinnQueryMetadata DjinnCandidate
-
-data DjinnCandidateRenderError
-  = DjinnGeneratedRenderError RenderError
-  deriving (Eq, Show)
 
 -- | Lower a shared declaration environment through Djinn's stricter lexical,
 -- dependency, and kind checks, then seal it into a reusable session.
@@ -188,12 +183,16 @@ parseDjinnRequest _session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
   _ <- targetSymbol target
-  (contexts, goal) <- case parseContextualType source of
+  (rawContexts, rawGoal) <- case Core.parseContextualHType source of
     Right parsed -> Right parsed
     Left failure -> Left $ withContext failure
       $ withSource sourceName
       $ withCode "DJEX_DJINN_PARSE"
       $ diagnostic Error "cannot parse the Djinn query type"
+  goal <- first (parsedTypeFailure sourceName "goal")
+    $ Core.toSynthesisType rawGoal
+  contexts <- first (parsedTypeFailure sourceName "context")
+    $ traverse (traverse Core.toSynthesisType) rawContexts
   pure QueryRequest
     { requestTarget = target
     , requestGoal = goal
@@ -211,16 +210,23 @@ runDjinnQuery
   -> Either Diagnostic DjinnResult
 runDjinnQuery (DjinnSession prepared) request = do
   target <- targetSymbol $ requestTarget request
+  goal <- lowerRequestType "goal" $ requestGoal request
+  contexts <- first (loweringFailure "context")
+    $ traverse (traverse Core.fromSynthesisType)
+    $ requestContexts request
   report <- case inhabitGeneratedPrepared
       (requestOptions request)
       prepared
-      (requestContexts request)
+      contexts
       target
-      (requestGoal request) of
+      goal of
     Left failure -> Left $ withContext failure
       $ withCode "DJEX_DJINN_QUERY"
       $ diagnostic Error "Djinn rejected the query"
     Right value -> Right value
+  candidates <- first candidateProjectionFailure
+    $ traverse projectCandidate
+    $ generatedReportCandidates report
   let metadata = DjinnQueryMetadata
         { djinnTranslatedFormula = generatedReportFormula report
         , djinnFirstExploredProof = generatedReportProof report
@@ -228,45 +234,66 @@ runDjinnQuery (DjinnSession prepared) request = do
       batch = SearchBatch
         (Completed $ generatedReportCompletion report)
         metadata
-        (generatedReportCandidates report)
+        candidates
   pure $ QueryResult (generatedReportEvidence report) batch
+
+-- The core currently proves every obligation and therefore emits no residual
+-- constraints. Keep this projection checked nevertheless: it preserves the
+-- stable candidate type if the backend later starts returning obligations.
+projectCandidate
+  :: Core.DjinnCandidate
+  -> Either Core.SynthesisTypeError DjinnCandidate
+projectCandidate candidate = do
+  residualConstraints <- traverse (traverse Core.toSynthesisType)
+    $ candidateResidualConstraints candidate
+  pure Candidate
+    { candidateOutput = candidateOutput candidate
+    , candidateResidualConstraints = residualConstraints
+    , candidateDetails = candidateDetails candidate
+    }
 
 renderDjinnCandidateExpression
   :: Qualification
   -> DjinnCandidate
-  -> Either DjinnCandidateRenderError String
-renderDjinnCandidateExpression qualification candidate = first
-  DjinnGeneratedRenderError
-  $ renderExpression (candidateRenderOptions qualification)
-  $ functionClauseExpression
-  $ candidateOutput candidate
+  -> Either RenderError String
+renderDjinnCandidateExpression qualification =
+  renderCandidateExpression $ candidateRenderOptions qualification
 
 renderDjinnCandidateDefinition
   :: Qualification
   -> DjinnCandidate
-  -> Either DjinnCandidateRenderError String
-renderDjinnCandidateDefinition qualification = first
-  DjinnGeneratedRenderError
-  . renderFunctionClause (candidateRenderOptions qualification)
-  . candidateOutput
+  -> Either RenderError String
+renderDjinnCandidateDefinition qualification =
+  renderCandidateDefinition $ candidateRenderOptions qualification
 
 candidateRenderOptions :: Qualification -> RenderOptions DjinnLocal
 candidateRenderOptions qualification =
   (defaultRenderOptions id) {renderQualification = qualification}
 
-parseContextualType :: String -> Either String ([Context], HType)
-parseContextualType source = case
-    [parsed | (parsed, "") <- readP_to_S parser source] of
-  parsed : _ -> Right parsed
-  [] -> Left $ "cannot parse contextual type: " ++ show source
- where
-  parser :: ReadP ([Context], HType)
-  parser = do
-    contexts <- option [] pHContext
-    goal <- pHType
-    skipSpaces
-    eof
-    pure (contexts, goal)
+lowerRequestType :: String -> DjinnType -> Either Diagnostic Core.HType
+lowerRequestType role = first (loweringFailure role)
+  . Core.fromSynthesisType
+
+parsedTypeFailure
+  :: FilePath
+  -> String
+  -> Core.SynthesisTypeError
+  -> Diagnostic
+parsedTypeFailure sourceName role failure = withContext
+  (role ++ ": " ++ show failure)
+  $ withSource sourceName
+  $ withCode "DJEX_DJINN_PARSE"
+  $ diagnostic Error "cannot project the parsed Djinn query type"
+
+loweringFailure :: String -> Core.SynthesisTypeError -> Diagnostic
+loweringFailure role failure = withContext (role ++ ": " ++ show failure)
+  $ withCode "DJEX_DJINN_LOWER"
+  $ diagnostic Error "cannot lower the shared query to Djinn"
+
+candidateProjectionFailure :: Core.SynthesisTypeError -> Diagnostic
+candidateProjectionFailure failure = withContext (show failure)
+  $ withCode "DJEX_DJINN_PROJECT"
+  $ diagnostic Error "cannot project a Djinn candidate to shared types"
 
 targetSymbol :: Name -> Either Diagnostic DjinnLocal
 targetSymbol target

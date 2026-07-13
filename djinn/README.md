@@ -426,11 +426,14 @@ demo = do
 ```
 
 With named-library dependencies, this example uses both `djex:djinn-core` and
-`djex:synthesis`; the unnamed `djex` library re-exports both module surfaces.
+`djex:synthesis`; the unnamed `djex` library instead exposes their checked
+adapter and neutral vocabulary without re-exporting the raw core.
 
 The essentials: `declare`/`removeDeclaration` grow and shrink an
 `Environment` (starting from `emptyEnvironment` or `standardEnvironment`);
-`parseHType`/`parseHKind` parse with full-input validation;
+`parseHType`/`parseContextualHType`/`parseHKind` parse with full-input
+validation; the contextual entry point owns the REPL's optional constraint
+grammar so checked clients need not import its internal `ReadP` parser.
 `inhabitGenerated` runs translation, budgeted proof search, independent proof
 checking, and shared-candidate construction without choosing a renderer.
 The historical `inhabit` entry point is its explicit rendered-string
@@ -470,10 +473,19 @@ therefore remains confined to the compatibility library and REPL;
 `standardDjinnSession` supplies the checked built-in environment without
 exposing its representation,
 `parseDjinnRequest` shares the REPL's optional class-context grammar, and
-`runDjinnQuery` accepts a generic `QueryRequest HType QueryOptions`. Its
-`QueryResult` carries the same shared `Candidate` structure as Exference plus
-Djinn's formula/proof metadata, and its definition/expression renderers consume
-canonical evidence without conflating it with operational completion.
+`runDjinnQuery` accepts `QueryRequest DjinnType QueryOptions`, where
+`DjinnType` is the shared `Type DjinnTypeVariable` source representation;
+`DjinnTypeVariable` and the generated-binder `DjinnLocal` remain distinct API
+names despite both currently being represented by `String`. Raw `HType` is
+used only behind that checked session boundary: parsed raw types are projected
+into `DjinnType`, while queries lower `DjinnType` back to the proof engine.
+Its `QueryResult` carries
+the same shared `Candidate DjinnType` structure as Exference plus Djinn's
+formula/proof metadata; even the currently empty residual constraints no
+longer expose a backend type. The definition/expression renderers consume
+canonical candidates through the shared rendering pipeline and return
+its `RenderError` directly, without conflating logical evidence with
+operational completion.
 The core `Djinn.Internal.*` modules listed above remain
 exposed by `djinn-core` for research use, but they provide raw constructors
 that can violate these invariants and carry no stability promise. The

@@ -16,7 +16,7 @@
 module Djinn.Core (
     -- * Names, types, and kinds
     HSymbol, HType, HKind, kStar, kArrow,
-    parseHType, parseHKind, SynthesisTypeError(..),
+    parseHType, parseContextualHType, parseHKind, SynthesisTypeError(..),
     toSynthesisType, fromSynthesisType,
     -- * Declarations
     Constructor, Declaration(..), SynthesisDeclaration,
@@ -46,7 +46,8 @@ import Data.Bifunctor (first)
 import Data.List (intercalate, mapAccumL, nub, sortOn)
 import Data.Ratio ((%))
 import qualified Data.Set as Set
-import Text.ParserCombinators.ReadP (ReadP, readP_to_S, skipSpaces)
+import Text.ParserCombinators.ReadP
+    (ReadP, option, readP_to_S, skipSpaces)
 
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
@@ -84,6 +85,18 @@ kArrow = KArrow
 -- input to be consumed.
 parseHType :: String -> Either String HType
 parseHType = parseWith pHType "type"
+
+-- | Parse the complete type portion of a historical Djinn query, including
+-- its optional class context.  Keeping full-consumption handling here lets
+-- checked adapters reuse the compatibility grammar without importing raw
+-- parser combinators or an internal parser module.
+parseContextualHType :: String -> Either String ([Context], HType)
+parseContextualHType = parseWith parser "contextual type"
+  where
+    parser = do
+        contexts <- option [] pHContext
+        goal <- pHType
+        return (contexts, goal)
 
 -- | Parse a kind, e.g. @\"(* -> *) -> *\"@.
 parseHKind :: String -> Either String HKind

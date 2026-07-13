@@ -11,10 +11,11 @@ generated-output infrastructure is progressively consolidated.
 
 - The default `djex` library exposes `Language.Haskell.Djex`, whose backend
   identities and conservative capability metadata provide the neutral entry
-  point. Its first checked session adapter, `Language.Haskell.Djex.Djinn`, runs
-  Djinn through the shared query/evidence/search envelope. The default library
-  also re-exports the stable Djinn, Exference, and synthesis APIs so a consumer
-  can depend on one library while the Exference session adapter develops.
+  point. `Language.Haskell.Djex.Djinn` and
+  `Language.Haskell.Djex.Exference` run both engines through the shared
+  query/evidence/search envelope. The default library also re-exports the
+  stable compatibility and synthesis APIs so a consumer can migrate while
+  depending on one library.
 - `synthesis/` supplies the public named `synthesis` sublibrary: validated
   names, types, kinds, declarations, environments, diagnostics, generated
   output, and operational search status.
@@ -28,7 +29,7 @@ The historical `djinn` and `exference` executable names remain available. The
 package also retains `djex-tests`, `synthesis-tests`, all three Djinn test suites,
 `exference-tests`, `exference-cli-tests`, and the `djinn-bench` benchmark. This
 preserves differential testing between the mature engines until their common
-session and frontend can replace the two compatibility surfaces.
+frontend can replace the two compatibility surfaces.
 
 ## Dependency migration
 
@@ -75,18 +76,21 @@ run package commands from the repository root or from `djex/`.
 
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
-the same types or options. `mkDjinnSession` seals an opaque Djinn environment
-once; `runDjinnQuery` then returns structured generated clauses in one terminal
-batch. Proof-backed `ProvedUninhabitable`, target-reference evidence, and
+the same types or options. `mkDjinnSession` seals an opaque Djinn environment;
+`runDjinnQuery` returns structured generated clauses in one terminal batch.
+Proof-backed `ProvedUninhabitable`, target-reference evidence, and
 budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
 
-The Exference adapter will return a lazy sequence of the same generic result
-shape. Its batches now preserve cumulative queue/depth pruning and nominal
-binding usage losslessly, including while a search is still continuing.
-`findGeneratedSearchBatchesWithHintsEither` validates the finite input once,
-then produces shared candidates with fully shared residual constraints and
-term/type rendering hints without forcing the trace. The remaining adapter
-work is to seal Exference's checked environment and elaborate shared requests
-against it. Candidate selection and rendering remain presentation policies
-outside the session operation.
+`mkExferenceSession` similarly seals a checked source environment and computes
+its backend-supported projection once. Unsupported rank-N introduction and
+elimination capabilities remain visible as structured omissions and warning
+diagnostics instead of disappearing per query. `parseExferenceRequest`
+elaborates a Haskell type against the session's retained names, synonyms,
+classes, and kind assumptions; `runExferenceQuery` validates the finite input
+eagerly and then returns a lazy sequence of shared result batches. Those
+batches preserve queue/depth pruning, nominal binding usage, residual
+constraints, statistics, and rendering hints without forcing the remaining
+trace. Each generated expression is wrapped in a target-bearing shared
+`FunctionClause`. Candidate selection and rendering remain presentation
+policies outside both session operations.

@@ -39,6 +39,7 @@ import qualified Data.Set as S
 
 import Data.Maybe ( fromMaybe )
 import Data.List ( intercalate )
+import System.FilePath ( (<.>), takeExtension )
 
 import Control.Monad.State.Lazy
   ( MonadState
@@ -87,7 +88,7 @@ runConversionTWithState initial action = ExceptT $ do
   pure $ fmap (\value -> (value, finalState)) result
 
 haskellSrcExtsParseMode :: String -> P.ParseMode
-haskellSrcExtsParseMode s = P.ParseMode (s++".hs")
+haskellSrcExtsParseMode sourceName = P.ParseMode parseSourceName
                                       Haskell2010
                                       exts2
                                       False
@@ -95,6 +96,12 @@ haskellSrcExtsParseMode s = P.ParseMode (s++".hs")
                                       Nothing
                                       False
   where
+    -- Historical callers supplied extensionless labels, while module loading
+    -- supplies actual paths. Appending only when there is no extension keeps
+    -- both forms readable and avoids diagnostics such as @Prelude.hs.hs@.
+    parseSourceName
+      | null $ takeExtension sourceName = sourceName <.> "hs"
+      | otherwise = sourceName
     exts1 = [ TypeOperators
             , ExplicitForAll
             , ExistentialQuantification

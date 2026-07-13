@@ -21,6 +21,7 @@ module Language.Haskell.Synthesis.Generated
   , validateExpressionScope
   , validateFunctionClauseScope
   , validateExpressionSyntax
+  , validateDefinitionName
   , allocateLocalNames
   , allocateClauseLocalNames
   , renderExpression
@@ -297,7 +298,7 @@ renderFunctionClause
   -> FunctionClause local
   -> Either RenderError String
 renderFunctionClause options clause@(FunctionClause name patterns body) = do
-  validateFunctionName name
+  validateDefinitionName name
   mapM_ validatePatternSyntax patterns
   validateExpressionSyntax body
   names <- allocateClauseLocalNames options clause
@@ -352,8 +353,10 @@ validatePatternSyntax pattern = case pattern of
   TuplePattern elements -> mapM_ validatePatternSyntax elements
   As _ nested -> validatePatternSyntax nested
 
-validateFunctionName :: Name -> Either RenderError ()
-validateFunctionName name
+-- | Validate a generated top-level value name independently of its body.
+-- Both backend sessions use this boundary before starting search.
+validateDefinitionName :: Name -> Either RenderError ()
+validateDefinitionName name
   | nameModule name == Nothing
   , nameLexicalClass name == VariableLike
   , nameSpelling name /= Just "_" = Right ()

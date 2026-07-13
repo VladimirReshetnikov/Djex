@@ -45,8 +45,8 @@ common build-settings
   Ghc-Options:      -Wall -Wcompat
   Build-Depends:    base >= 4.19 && < 5
 
--- The future stable Djex facade.  Backend-neutral session and query APIs will
--- move here as the compatibility libraries converge.
+-- The stable Djex facade. Backend-neutral session and query APIs live here
+-- while the historical frontend libraries remain available for migration.
 Library
   import:           build-settings
   Hs-Source-Dirs:   src
@@ -54,6 +54,7 @@ Library
   Exposed-Modules:
     Language.Haskell.Djex
     Language.Haskell.Djex.Djinn
+    Language.Haskell.Djex.Exference
 
   Reexported-Modules:
     Djinn.Core,
@@ -96,9 +97,11 @@ Library
     Language.Haskell.Synthesis.Type
 
   Build-Depends:
+    containers >= 0.6 && < 0.9,
     djex:synthesis,
     djex:djinn-core,
-    djex:exference-frontend
+    djex:exference-frontend,
+    transformers >= 0.5 && < 0.7
 
 Library synthesis
   import:           build-settings

@@ -36,13 +36,12 @@ import Language.Haskell.Synthesis.Diagnostic
   , withCode
   , withContext
   )
-import Language.Haskell.Synthesis.Generated (FunctionClause)
+import Language.Haskell.Synthesis.Generated
+  ( FunctionClause
+  , validateDefinitionName
+  )
 import Language.Haskell.Synthesis.Name
-  ( LexicalClass (VariableLike)
-  , Name
-  , nameLexicalClass
-  , nameModule
-  , nameSpecial
+  ( Name
   , nameSpelling
   , renderCanonical
   )
@@ -123,11 +122,9 @@ queryEvidence outcome = case outcome of
 
 targetSymbol :: Name -> Either Diagnostic HSymbol
 targetSymbol target
-  | nameModule target == Nothing
-  , nameLexicalClass target == VariableLike
-  , nameSpecial target == Nothing
+  | Right () <- validateDefinitionName target
   , Just spelling <- nameSpelling target
-  , spelling /= "_" = Right spelling
+  = Right spelling
   | otherwise = Left $ withContext (renderCanonical target)
       $ withCode "DJEX_DJINN_TARGET"
       $ diagnostic Error

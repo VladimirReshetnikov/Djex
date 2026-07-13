@@ -2,8 +2,9 @@
 -- Module      : Language.Haskell.Djex
 -- Description : Backend identities and capabilities for Djex.
 --
--- This module is the small backend-neutral entry point.  Search APIs remain
--- available through their established imports while the engines converge:
+-- This module is the small backend-neutral entry point. Checked Djinn and
+-- Exference session adapters share its query envelope, while lower-level
+-- search APIs remain available through their established imports:
 --
 -- * "Djinn.Core" is the stable, validated Djinn API.
 -- * "Language.Haskell.Exference" is the Exference frontend API.
@@ -14,6 +15,7 @@
 -- of the stable library surface.
 module Language.Haskell.Djex
   ( module Language.Haskell.Djex.Djinn
+  , module Language.Haskell.Djex.Exference
   , module Language.Haskell.Synthesis.Query
   , Backend (..)
   , Capability (..)
@@ -22,10 +24,8 @@ module Language.Haskell.Djex
   , availableBackends
   ) where
 
--- Cabal performs the public reexports, but these empty imports also make the
--- remaining direct package relationship visible to dependency analysis.
-import Language.Haskell.Exference ()
 import Language.Haskell.Djex.Djinn
+import Language.Haskell.Djex.Exference
 import Language.Haskell.Synthesis.Query
 
 -- | A search engine shipped by Djex.

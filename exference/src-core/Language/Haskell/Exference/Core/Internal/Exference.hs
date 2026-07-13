@@ -94,7 +94,7 @@ data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
   , heuristics_unusedVar              :: Penalty
   , heuristics_solutionLength         :: Penalty
   }
-  deriving (Show)
+  deriving (Eq, Show)
 
 data ExferenceInput = ExferenceInput
   { input_goalType    :: HsType                 -- ^ try to find a expression

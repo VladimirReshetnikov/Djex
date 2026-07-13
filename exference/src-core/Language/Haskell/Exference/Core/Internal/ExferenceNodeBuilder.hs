@@ -1,7 +1,5 @@
 module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
-  ( builderSetReason
-  , builderAppendReason
-  , builderGetTVarOffset
+  ( builderGetTVarOffset
   , builderAddScope
   , builderApplySubst
   , builderAllocVar
@@ -17,21 +15,11 @@ import Language.Haskell.Exference.Core.Types
 import Control.Monad.Trans.State.Lazy (StateT, gets, modify, state)
 import qualified Data.IntMap.Strict as IntMap
 
--- Record why the node was produced. This feeds diagnostics and usage reports;
--- search ancestry is deliberately not retained in production nodes.
-builderSetReason :: Monad m => String -> StateT SearchNode m ()
-builderSetReason reason =
-  modify $ \node -> node { nodeLastStepReason = reason }
-
-builderAppendReason :: Monad m => String -> StateT SearchNode m ()
-builderAppendReason reason =
-  modify $ \node -> node
-    { nodeLastStepReason = nodeLastStepReason node ++ ", " ++ reason }
-
+-- Flexible variables are shifted as a block.  Since their source identifiers
+-- start at zero, one more than the greatest live identifier is the smallest
+-- offset that keeps every shifted identifier collision-free.
 builderGetTVarOffset :: Monad m => StateT SearchNode m TVarId
 builderGetTVarOffset = (+ 1) <$> gets nodeMaxTVarId
--- TODO: is (+1) really necessary? It was in the pre-transformation code,
--- but there is no documented reason for it yet.
 
 -- Allocate an expression hole without treating it as a variable introduced
 -- into scope. The returned identifier is the value before the increment.

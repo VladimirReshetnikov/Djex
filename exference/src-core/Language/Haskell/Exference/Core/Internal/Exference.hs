@@ -66,7 +66,7 @@ import qualified Data.Sequence as Seq
 import Data.Maybe ( maybeToList, fromMaybe, listToMaybe )
 import Control.Monad ( unless, mzero, replicateM, forM, liftM )
 import Control.Applicative ( (<|>) )
-import Data.List ( find, partition, unfoldr, intercalate )
+import Data.List ( find, partition, unfoldr )
 import Data.Monoid ( Any(..) )
 import Data.Foldable ( sum, asum, traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
@@ -401,11 +401,11 @@ findEngineChunks
     , nodeDeconstructors  = deconss'
     , nodeQueryClassEnv   = mkQueryClassEnv sClassEnv []
     , nodeExpression      = ExpHole 0
-    , nodeNextVarId       = 1 -- TODO: change to 0?
+      -- The root goal and expression already own hole 0.
+    , nodeNextVarId       = 1
     , nodeMaxTVarId       = largestId t
     , nodeRigidInstantiations = rigidInstantiations rigidPlan
     , nodeDepth           = 0.0
-    , nodeLastStepReason  = ""
     , nodeLastStepBinding = Nothing
     }
   transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineChunk
@@ -1047,7 +1047,6 @@ stateStep multiPM allowConstrs h = do
             , nodeDepth = nodeDepth node + heuristics_functionGoalTransform h
             , nodeLastStepBinding = Nothing
             }
-          builderSetReason "function goal transform"
           -- for each parameter introduced in the lambda-expression above,
           -- it may be possible to pattern-match. and pattern-matching
           -- may cause duplication of the goals (e.g. for the different cases
@@ -1079,7 +1078,6 @@ stateStep multiPM allowConstrs h = do
           -- TODO: consider a distinct forall-opening heuristic.
         , nodeLastStepBinding = Nothing
         }
-      builderSetReason "forall-type goal transformation"
       let substs = IntMap.fromList
             [(binder, TypeConstant rigid) | (binder, rigid) <- instantiations]
       modify $ \node -> node
@@ -1099,7 +1097,7 @@ stateStep multiPM allowConstrs h = do
     byProvided = do
       provided <- lift =<< gets
         (scopeGetAllBindings scopeId . nodeProvidedScopes)
-      offset <- (+ 1) <$> gets nodeMaxTVarId
+      offset <- builderGetTVarOffset
       let
         provId      = varPVariable provided
         provT       = varPResult provided
@@ -1119,14 +1117,13 @@ stateStep multiPM allowConstrs h = do
         (snd . applySubsts ss <$> provPs)
         (heuristics_stepProvidedGood h)
         (heuristics_stepProvidedBad h)
-        ("inserting given value " ++ show provId ++ "::" ++ show provT)
         (unify goalType provType)
 
     -- try to resolve the goal by looking at functions from the environment.
     byFunctionSimple :: StateT SearchNode [] ()
     byFunctionSimple = do
       binding <- lift =<< gets nodeFunctions
-      offset <- (+ 1) <$> gets nodeMaxTVarId
+      offset <- builderGetTVarOffset
       let
         incF     = incVarIds (+offset)
         provType = incF $ functionResult binding
@@ -1137,7 +1134,6 @@ stateStep multiPM allowConstrs h = do
         (map incF $ functionParameters binding)
         (heuristics_stepEnvGood h + functionPenalty binding)
         (heuristics_stepEnvBad h + functionPenalty binding)
-        ("applying function " ++ show (functionName binding))
         (unifyOffset goalType
           $ HsTypeOffset (functionResult binding) offset)
 
@@ -1148,7 +1144,6 @@ stateStep multiPM allowConstrs h = do
                    -> [HsType]
                    -> Penalty
                    -> Penalty
-                   -> String
                    -> Maybe (Substs, Substs)
                    -> StateT SearchNode Maybe ()
     byGenericUnify applier
@@ -1157,7 +1152,6 @@ stateStep multiPM allowConstrs h = do
                    dependencies
                    depthModMatch
                    depthModNoMatch
-                   reasonPart
       = maybe noUnify $ uncurry byUnified
      where
       (applierName, applierVariable) = case applier of
@@ -1189,8 +1183,6 @@ stateStep multiPM allowConstrs h = do
             }
           traverse_ (builderRecordVarUse . fst) applierVariable
           builderRaiseMaxTVarId $ maximum $ map largestId dependencies
-          builderSetReason $ "randomly trying to apply function "
-                            ++ showExpression coreExp
           additionalGoals <- addScopePatternMatch
             multiPM
             goalType
@@ -1237,15 +1229,6 @@ stateStep multiPM allowConstrs h = do
         traverse_ (builderRecordVarUse . fst) applierVariable
         builderRaiseMaxTVarId $ maximum
           $ largestSubstsId goalSS : map largestId dependencies
-        let substsTxt   = show (IntMap.union goalSS provSS)
-                          ++ " unifies "
-                          ++ show goalType
-                          ++ " and "
-                          ++ show provided
-        let provableTxt = "constraints (" ++ show (constrs1++constrs2)
-                                          ++ ") are provable"
-        builderSetReason $ reasonPart ++ ", because " ++ substsTxt
-                          ++ " and because " ++ provableTxt
 
   case goalType of
     TypeArrow _ _ -> arrowStep goalType []
@@ -1306,14 +1289,6 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
             mapFunc1 substs = do -- m
               vars <- replicateM (length matchRs) builderAllocVar
               builderRecordVarUse v
-              builderAppendReason $ "pattern matching on " ++ showVar v
-                ++ "\n" ++ intercalate "\n" 
-                  [ show bindings
-                  , show offset
-                  , show (matchParam, matchId, matchRs)
-                  , show (vtResult, matchParam, offset)
-                  , show unifyResult
-                  ]
               let newProvTypes = map (snd . applySubsts substs) resultTypes
                   newBinds = zipWith (\x y -> splitBinding (VarBinding x y))
                                      vars
@@ -1357,7 +1332,6 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
                   builderRaiseMaxTVarId $ maximum $ map largestId newProvTypes
                 return ( (matchId, zip vars newProvTypes, ExpHole newVid)
                        , (newVid, reverse newBinds, newSid) )
-              builderAppendReason $ "pattern matching on " ++ showVar v
               modify $ \node -> node
                 { nodeExpression = fillExprHole vid
                     (ExpCaseMatch expVar $ map fst mData)

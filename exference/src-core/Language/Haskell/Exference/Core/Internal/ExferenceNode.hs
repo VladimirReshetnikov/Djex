@@ -152,7 +152,6 @@ data SearchNode = SearchNode
     -- the independent checker when nested leading foralls shadow an ID.
   , nodeRigidInstantiations :: [(TVarId, TVarId)]
   , nodeDepth           :: {-# UNPACK #-} !Penalty
-  , nodeLastStepReason  :: String
   , nodeLastStepBinding :: Maybe QualifiedName
   }
   deriving Generic

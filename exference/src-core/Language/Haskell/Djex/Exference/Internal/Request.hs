@@ -44,7 +44,10 @@ import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
   )
-import Language.Haskell.Synthesis.Query (QueryRequest (..))
+import Language.Haskell.Synthesis.Query
+  ( QueryRequest (..)
+  , requestContextualType
+  )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type (Type)
 
@@ -118,7 +121,7 @@ mkExferenceRequestWithSourceInfo sourceVariables sourceLocation query = do
   pure $ ExferenceRequest query sourceVariables sourceLocation
 
 requestContextualGoal :: ExferenceRequest -> ExferenceType
-requestContextualGoal = contextualGoal . exferenceRequestQuery
+requestContextualGoal = requestContextualType . exferenceRequestQuery
 
 validateRequest
   :: QueryRequest ExferenceType ExferenceOptions
@@ -130,7 +133,7 @@ validateRequest query = do
       "invalid shared Exference request"
     )
     Right
-    $ SharedType.validateType $ contextualGoal query
+    $ SharedType.validateType $ requestContextualType query
   let goalVariables = inScopeContextVariables $ requestGoal query
       contextVariables = Set.unions
         [ SharedType.freeVariables argument
@@ -157,27 +160,6 @@ inScopeContextVariables goal = SharedType.freeVariables goal
   leadingForallVariables (SharedType.ForallType variables _ body) =
     Set.fromList variables `Set.union` leadingForallVariables body
   leadingForallVariables _ = Set.empty
-
-contextualGoal
-  :: QueryRequest ExferenceType options
-  -> ExferenceType
-contextualGoal query
-  | null contexts = requestGoal query
-  | otherwise = insertUnderLeadingForalls $ requestGoal query
- where
-  contexts = requestContexts query
-
-  -- Explicit contexts are scoped by the complete leading quantifier chain.
-  -- Attaching them to only the first forall makes a variable bound by a later
-  -- leading forall free in the outer context, then binds the same identity a
-  -- second time below it.
-  insertUnderLeadingForalls (SharedType.ForallType variables embedded body)
-    | SharedType.ForallType{} <- body = SharedType.ForallType
-        variables embedded $ insertUnderLeadingForalls body
-    | otherwise = SharedType.ForallType
-        variables (contexts ++ embedded) body
-  insertUnderLeadingForalls goal =
-    SharedType.ForallType [] contexts goal
 
 -- | Check the source-level name of an Exference result definition.
 -- Frontends use this before parsing so command-usage errors retain precedence

@@ -40,6 +40,7 @@ tests = testGroup "Djex synthesis foundation"
   , declarationTests
   , environmentTests
   , generatedTests
+  , queryTests
   , searchTests
   , selectionTests
   , typeTests
@@ -108,6 +109,53 @@ candidateTests = testGroup "candidates"
       renderCandidateDefinition options candidate @?=
         Left (GlobalDefinitionCapture target global Unqualified)
   ]
+
+queryTests :: TestTree
+queryTests = testGroup "queries"
+  [ testCase "leave a context-free shared goal unchanged" $ do
+      let goal = variable "a"
+      requestContextualType (request goal []) @?= goal
+  , testCase "quantify contexts around an unquantified goal" $ do
+      let goal = SharedType.FunctionType (variable "a") (variable "b")
+          contexts = [constraint "Eq" "a"]
+      requestContextualType (request goal contexts) @?=
+        SharedType.ForallType [] contexts goal
+  , testCase "prepend contexts at one leading forall" $ do
+      let embedded = constraint "Embedded" "a"
+          explicit = constraint "Requested" "a"
+          body = variable "a"
+          goal = SharedType.ForallType ["a"] [embedded] body
+      requestContextualType (request goal [explicit]) @?=
+        SharedType.ForallType ["a"] [explicit, embedded] body
+  , testCase "insert contexts beneath every leading forall" $ do
+      let outer = constraint "Outer" "a"
+          inner = constraint "Inner" "b"
+          explicit = constraint "Requested" "a"
+          goal = SharedType.ForallType ["a"] [outer]
+            $ SharedType.ForallType ["b"] [inner]
+            $ SharedType.FunctionType (variable "a") (variable "b")
+      requestContextualType (request goal [explicit]) @?=
+        SharedType.ForallType ["a"] [outer]
+          (SharedType.ForallType ["b"] [explicit, inner]
+            $ SharedType.FunctionType (variable "a") (variable "b"))
+  , testCase "do not cross a non-leading type boundary" $ do
+      let nested = SharedType.ForallType ["b"] [] $ variable "b"
+          goal = SharedType.FunctionType (variable "a") nested
+          explicit = constraint "Requested" "a"
+      requestContextualType (request goal [explicit]) @?=
+        SharedType.ForallType [] [explicit] goal
+  ]
+ where
+  request goal contexts = QueryRequest
+    { requestTarget = right $ mkDefinitionName $ right $ mkIdentifier "result"
+    , requestGoal = goal
+    , requestContexts = contexts
+    , requestOptions = ()
+    }
+  variable = SharedType.TypeVariable
+  constraint classSpelling variableSpelling = Constraint
+    (right $ mkIdentifier classSpelling)
+    [variable variableSpelling]
 
 kindInferenceTests :: TestTree
 kindInferenceTests = testGroup "kind inference"

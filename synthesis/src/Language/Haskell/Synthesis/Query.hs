@@ -12,6 +12,7 @@
 -- participate in a common session API.
 module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
+  , requestContextualType
   , QueryEvidence (..)
   , QueryResult
   , resultEvidence
@@ -30,6 +31,7 @@ import Language.Haskell.Synthesis.Search
   ( SearchBatch
   , batchCandidates
   )
+import Language.Haskell.Synthesis.Type (Type (ForallType))
 
 -- | One synthesis request, parameterized by a backend's goal type and search
 -- options.
@@ -38,7 +40,8 @@ import Language.Haskell.Synthesis.Search
 -- target is already checked for the shared generated-definition namespace:
 -- an unqualified variable identifier or operator other than the wildcard.
 -- Backends therefore cannot disagree about target validity after accepting
--- the same request.
+-- the same request. For shared 'Type' goals, 'requestContextualType' defines
+-- the structural scope of the separate context list.
 data QueryRequest ty options = QueryRequest
   { requestTarget :: DefinitionName
   , requestGoal :: ty
@@ -49,6 +52,30 @@ data QueryRequest ty options = QueryRequest
 
 instance (NFData ty, NFData options) =>
     NFData (QueryRequest ty options)
+
+-- | Combine a shared source-type goal with its explicit request contexts.
+--
+-- Contexts belong beneath the complete leading quantifier chain: each
+-- leading binder is in scope for them, whereas a quantifier below an arrow,
+-- tuple, or application is not. Existing contexts retain their lexical
+-- level and follow the explicit request contexts at the insertion point.
+-- A context-free request returns its goal unchanged. This operation is purely
+-- structural: adapters remain responsible for validating whether every
+-- context variable is admissible for their backend.
+requestContextualType
+  :: QueryRequest (Type variable) options
+  -> Type variable
+requestContextualType request
+  | null contexts = requestGoal request
+  | otherwise = insertUnderLeadingForalls $ requestGoal request
+ where
+  contexts = requestContexts request
+
+  insertUnderLeadingForalls (ForallType variables embedded body)
+    | ForallType{} <- body = ForallType variables embedded
+        $ insertUnderLeadingForalls body
+    | otherwise = ForallType variables (contexts ++ embedded) body
+  insertUnderLeadingForalls goal = ForallType [] contexts goal
 
 -- | Logical evidence established by a backend, kept separate from operational
 -- search completion in the accompanying 'SearchBatch'.

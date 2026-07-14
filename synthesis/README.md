@@ -64,7 +64,9 @@ without a backend-specific singleton wrapper.
 
 `Language.Haskell.Synthesis.Query` supplies the generic request/result seam.
 Targets are checked `DefinitionName`s; contexts use the backend's goal type,
-while goal types, search options, metadata, and candidates remain parameters. Its
+while goal types, search options, metadata, and candidates remain parameters.
+For shared `Type` goals, explicit contexts are inserted beneath the complete
+leading `forall` chain without crossing a non-leading type boundary. Its
 logical evidence is deliberately independent of `Search.Completion`: a backend
 may return checked candidates from a truncated search, prove non-inhabitation,
 identify an excluded target self-reference, or establish no conclusion.

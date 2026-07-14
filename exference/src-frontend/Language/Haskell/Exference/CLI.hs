@@ -24,7 +24,7 @@ import Text.Read (readMaybe)
 
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( parseExferenceRequest )
+  ( parseExferenceRequestWithCheckedTarget )
 import qualified Language.Haskell.Exference.Session as Session
 import Language.Haskell.Exference.Core.FunctionBinding
   ( functionName )
@@ -43,7 +43,11 @@ import Language.Haskell.Exference.EnvironmentParser
 import Language.Haskell.Synthesis.Candidate
   ( candidateResidualConstraints )
 import Language.Haskell.Synthesis.Diagnostic (renderDiagnostic)
-import Language.Haskell.Synthesis.Name (Name, mkIdentifier, parseName)
+import Language.Haskell.Synthesis.Generated
+  ( DefinitionName
+  , mkDefinitionName
+  )
+import Language.Haskell.Synthesis.Name (mkIdentifier, parseName)
 import Language.Haskell.Synthesis.Query (resultSearch)
 import Language.Haskell.Synthesis.Search
   ( ObservedProgress (..)
@@ -213,7 +217,7 @@ runQuery
   :: Int
   -> [Flag]
   -> ExferenceSession
-  -> Name
+  -> DefinitionName
   -> String
   -> IO ()
 runQuery verbosity flags session target source = do
@@ -225,7 +229,7 @@ runQuery verbosity flags session target source = do
         | prefersConstraintFreeFallback flags = queryOptions
             {exferenceAllowResidualConstraints = True}
         | otherwise = queryOptions
-  request <- case parseExferenceRequest
+  request <- case parseExferenceRequestWithCheckedTarget
       session searchOptions target "inputtype.hs" source of
     Left failure -> fatal
       $ "could not parse input type: " ++ renderDiagnostic failure
@@ -362,7 +366,7 @@ printEnvironment verbosity environment = do
 -- generated definition target. This compatibility CLI prints only the clause
 -- body, so choose a target outside the loaded source namespace instead of
 -- needlessly making such a binding unavailable to expression search.
-freshTarget :: SourceEnvironment -> IO Name
+freshTarget :: SourceEnvironment -> IO DefinitionName
 freshTarget environment = go (0 :: Int)
  where
   occupied = Set.fromList
@@ -376,7 +380,10 @@ freshTarget environment = go (0 :: Int)
       $ mkIdentifier spelling
     if Set.member candidate occupied
       then go $ suffix + 1
-      else pure candidate
+      else either
+        (fatal . ("invalid generated result target: " ++) . show)
+        pure
+        $ mkDefinitionName candidate
 
 parseVerbosity :: [Flag] -> Either String Int
 parseVerbosity flags = do

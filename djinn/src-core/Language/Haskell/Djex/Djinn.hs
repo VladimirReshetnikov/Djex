@@ -26,6 +26,7 @@ module Language.Haskell.Djex.Djinn
   , mkDjinnRequest
   , djinnRequestQuery
   , parseDjinnRequest
+  , parseDjinnRequestWithCheckedTarget
   , runDjinnQuery
   , renderDjinnCandidateExpression
   , renderDjinnCandidateDefinition
@@ -221,10 +222,25 @@ parseDjinnRequest
   -> FilePath
   -> String
   -> Either Diagnostic DjinnRequest
-parseDjinnRequest _session options target sourceName source = do
+parseDjinnRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
   checkedTarget <- checkDefinitionTarget target
+  parseDjinnRequestWithCheckedTarget
+    session options checkedTarget sourceName source
+
+-- | Parse a Djinn query for a target already checked at an outer command
+-- boundary. This avoids repeating target validation while retaining the same
+-- source parser and opaque request construction as 'parseDjinnRequest'.
+parseDjinnRequestWithCheckedTarget
+  :: DjinnSession
+  -> QueryOptions
+  -> DefinitionName
+  -> FilePath
+  -> String
+  -> Either Diagnostic DjinnRequest
+parseDjinnRequestWithCheckedTarget _session options checkedTarget
+    sourceName source = do
   (rawContexts, rawGoal) <- case Core.parseContextualHType source of
     Right parsed -> Right parsed
     Left failure -> Left $ withSource sourceName

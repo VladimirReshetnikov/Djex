@@ -92,6 +92,9 @@ testOptionErrors = do
     ["djinn", "--target", "Data.result", "a -> a"]
     "invalid --target"
   assertUsageFailure
+    ["exference", "--target", "Data.result", "("]
+    "invalid --target"
+  assertUsageFailure
     ["exference", "--max-depth", "NaN", "a -> a"]
     "--max-depth must be a finite non-negative number"
   assertUsageFailure

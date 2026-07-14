@@ -24,7 +24,7 @@ import Language.Haskell.Djex
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , loadExferenceSession
-  , parseExferenceRequest
+  , parseExferenceRequestWithCheckedTarget
   )
 import Paths_djex (getDataFileName, version)
 
@@ -49,7 +49,7 @@ data Flag
   deriving (Eq, Show)
 
 data CommonOptions = CommonOptions
-  { commonTarget :: Name
+  { commonTarget :: DefinitionName
   , commonSelection :: SelectionMode
   , commonRenderMode :: RenderMode
   , commonQualification :: Qualification
@@ -105,7 +105,7 @@ runParsed parsed action = either usageFailure action parsed
 runDjinn :: DjinnOptions -> IO ExitCode
 runDjinn options = case standardDjinnSession of
   Left failure -> diagnosticFailure failure
-  Right session -> case parseDjinnRequest
+  Right session -> case parseDjinnRequestWithCheckedTarget
       session
       (djinnQueryOptions options)
       (commonTarget common)
@@ -135,7 +135,7 @@ runExference options = do
     Left failures -> do
       mapM_ emitDiagnostic $ toList failures
       pure runtimeFailure
-    Right session -> case parseExferenceRequest
+    Right session -> case parseExferenceRequestWithCheckedTarget
         session
         (exferenceSearchOptions options)
         (commonTarget common)
@@ -345,12 +345,12 @@ parseCommonOptions flags source = do
     , commonInput = source
     }
 
-checkedTarget :: String -> Either String Name
+checkedTarget :: String -> Either String DefinitionName
 checkedTarget source = case parseName source of
   Left failure -> Left $ "invalid --target: " ++ renderNameError failure
-  Right target -> case validateDefinitionName target of
+  Right target -> case mkDefinitionName target of
     Left failure -> Left $ "invalid --target: " ++ show failure
-    Right () -> Right target
+    Right checked -> Right checked
 
 selectionMode :: String -> Either String SelectionMode
 selectionMode source = case source of

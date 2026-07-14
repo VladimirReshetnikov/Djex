@@ -9,6 +9,7 @@ module Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
   , parseExferenceRequest
+  , parseExferenceRequestWithCheckedTarget
   ) where
 
 import Control.Monad.Trans.Except (runExceptT)
@@ -47,6 +48,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , sourceTextSpan
   , withCode
   )
+import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Inventory
   ( inventoryKindAssumptions )
 import Language.Haskell.Synthesis.Name (Name)
@@ -108,6 +110,21 @@ parseExferenceRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
   checkedTarget <- Frontend.validateExferenceTarget target
+  parseExferenceRequestWithCheckedTarget
+    session options checkedTarget sourceName source
+
+-- | Parse a Haskell source type for a target already checked at an outer
+-- command boundary. The hidden 'DefinitionName' constructor makes repeating
+-- the backend-specific target preflight unnecessary.
+parseExferenceRequestWithCheckedTarget
+  :: ExferenceSession
+  -> ExferenceOptions
+  -> DefinitionName
+  -> FilePath
+  -> String
+  -> Either Diagnostic ExferenceRequest
+parseExferenceRequestWithCheckedTarget session options checkedTarget
+    sourceName source = do
   let parsed = runIdentity $ runExceptT $ parseTypeWithKinds
         (inventoryKindAssumptions $ exferenceSessionInventory session)
         (Frontend.sessionClasses session)

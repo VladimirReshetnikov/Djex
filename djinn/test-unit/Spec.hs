@@ -146,6 +146,11 @@ testCheckedDjinnAdapter = do
     -- the opaque request preserves the shared query losslessly once sealed.
     checkedTarget <- expectShownRight $
         SharedGenerated.mkDefinitionName target
+    checkedRequest <- expectShownRight $ Djex.parseDjinnRequestWithCheckedTarget
+        session defaultQueryOptions checkedTarget "identity-query.djinn"
+        "Eq a => a -> a"
+    assertEqual "raw and checked-target Djinn parsers agree"
+        request checkedRequest
     let programmaticQuery = SharedQuery.QueryRequest
             { SharedQuery.requestTarget = checkedTarget
             , SharedQuery.requestGoal = expectedGoal
@@ -173,7 +178,8 @@ testCheckedDjinnAdapter = do
                     Djex.FullyQualified candidate)
         [] -> fail "the checked Djinn adapter found no identity candidate"
 
-    case Djex.parseDjinnRequest session defaultQueryOptions target
+    case Djex.parseDjinnRequestWithCheckedTarget
+            session defaultQueryOptions checkedTarget
             "malformed-query.djinn" "Eq a => a -> a ;" of
         Left failure -> do
             assertEqual "parse failures have a stable diagnostic code"

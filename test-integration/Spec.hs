@@ -26,7 +26,9 @@ import qualified Djinn.Core as DjinnCore (DjinnCandidate, Environment)
 -- hide the shared structural-name accessor at this integration-only seam.
 import Language.Haskell.Djex hiding (functionName)
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( parseExferenceRequest )
+  ( parseExferenceRequest
+  , parseExferenceRequestWithCheckedTarget
+  )
 import qualified Language.Haskell.Exference.Session as ExferenceCompatibility
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
 import Language.Haskell.Exference.Core.Name (mkQualifiedName)
@@ -547,6 +549,22 @@ tests = testGroup "Djex facade"
         Left failure ->
           diagnosticCode failure @?= Just "DJEX_EXF_TARGET"
         Right _ -> fail "Exference accepted an invalid qualified target"
+  , testCase "reuse checked Exference targets and retain parse provenance" $ do
+      checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
+      target <- expectRight $ mkIdentifier "answer"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      rawRequest <- expectRight $ parseExferenceRequest
+        session defaultExferenceOptions target "query.hs" "a -> a"
+      checkedRequest <- expectRight $ parseExferenceRequestWithCheckedTarget
+        session defaultExferenceOptions checkedTarget "query.hs" "a -> a"
+      rawRequest @?= checkedRequest
+      case parseExferenceRequestWithCheckedTarget session
+          defaultExferenceOptions checkedTarget "checked-query.hs" "(" of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_EXF_PARSE"
+          diagnosticSource failure @?= Just "checked-query.hs"
+        Right _ -> fail "Exference parsed an incomplete checked-target query"
   , testCase "scope explicit contexts under every leading forall" $ do
       target <- expectRight $ mkIdentifier "nestedIdentity"
       checkedTarget <- expectRight $ mkDefinitionName target

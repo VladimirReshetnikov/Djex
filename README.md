@@ -42,14 +42,16 @@ over five named sublibraries. The current duplication audit and the ordered
 path from those components to a genuinely shared implementation are recorded
 in [the 2026-07-14 remaining-convergence audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
 That report captures the starting point for the current work; its Priority 1
-native-vocabulary migration is now complete. Exference's `HsType` is an alias
-for the shared `Type (Variable Int)`, with compatibility patterns over the
-native tree and one canonical structural representation for saturated
-functions and tuples. The next convergence priority is removing the duplicate
-backend result envelopes so each engine constructs the stable `QueryResult`
-payload directly. Package boundaries should be erased only after those result
-models and the competing environment authorities have converged; an earlier
-manifest-only collapse would still discard useful dependency checks.
+native-vocabulary and Priority 2 result-envelope migrations are now complete.
+Exference's `HsType` is an alias for the shared `Type (Variable Int)`, with
+compatibility patterns over the native tree and one canonical structural
+representation for saturated functions and tuples. Both engines now construct
+their stable `QueryResult` payloads in the core: Djinn preserves its richer
+logical evidence, while Exference derives evidence from each lazy candidate
+batch after one checked query preparation. The next convergence priority is
+making the shared inventories authoritative. Package boundaries should be
+erased only after the competing environment authorities have converged; an
+earlier manifest-only collapse would still discard useful dependency checks.
 
 ## Dependency migration
 
@@ -335,9 +337,10 @@ result batches. `ExferenceEnvironment`, `ExferenceType`,
 `ExferenceTypeVariable`, `ExferenceLocal`, and `ExferenceInventory` make that
 complete surface nameable in the neutral IR. Session construction maps backend
 ratings out of the already-checked inventory without rebuilding its indexes or
-kind assumptions. Stable candidate details and batch metadata likewise expose
-only shared names, types, metrics, and rendering hints; raw core records no
-longer cross the default facade.
+kind assumptions. Stable candidate details and batch metadata are zero-copy
+public views of the exact core-owned values, so the default facade exposes
+shared names, types, metrics, and rendering hints without maintaining a second
+set of records.
 
 Programmatic clients need only the neutral adapter:
 

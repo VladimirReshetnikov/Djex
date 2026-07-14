@@ -12,8 +12,9 @@ work already present on the `codex/unify-djinn-and-exference` branch.
 
 The existing work is substantial, but the original merger objective is not
 complete. Search algorithms may remain backend-specific; duplicate language
-IRs, result envelopes, general-purpose environments, and public component
-identities should not.
+IRs targeted by Priority 1 and the competing result authorities have now been
+removed, while general-purpose environments and public component identities
+remain duplicated.
 
 ## Evidence from the current tree
 
@@ -45,7 +46,7 @@ external dependency union would be `base`, `containers`, `deepseq`, `directory`,
 `filepath`, `haskeline`, `haskell-src-exts`, `pqueue`, `pretty`, and
 `transformers`. Doing that now, however, would broaden every client's
 dependency closure and erase the isolation tests without removing the
-result-envelope and environment-authority duplication described below.
+environment-authority duplication described below.
 
 ## Priority 1: make the shared vocabulary native to Exference
 
@@ -100,14 +101,16 @@ capture-avoiding forall substitution, tuple canonicalization, residual
 constraint order, unknown-class policy, type-variable rendering hints, and
 lazy batch tails. It additionally pins malformed native-value rejection,
 higher-kinded tuple/function unification, exact historical tuple ranking, and
-both supported compiler graphs. Priority 2 is therefore the active frontier.
+both supported compiler graphs. Priority 2 subsequently removed the remaining
+result authority beneath the shared envelope.
 
 ## Priority 2: remove duplicate result envelopes
 
-Both engines still have an older result model immediately below the shared
-one.
+**Completed on 2026-07-14.** Both cores now construct their stable
+`QueryResult` payloads directly; neither checked adapter owns a second result
+authority.
 
-**Djinn progress on 2026-07-14:** the proof core now constructs
+The Djinn proof core constructs
 `QueryResult DjinnQueryMetadata DjinnCandidate` directly, retaining the exact
 checked `DefinitionName` in every candidate. The checked adapter returns that
 same value without a metadata, completion, evidence, or candidate rebuild.
@@ -116,17 +119,32 @@ compatibility projections only; they no longer own the canonical search
 result. Structured invariant failures also remain distinct from ordinary
 query rejection.
 
-Exference retains `SearchCompletion`, `SearchStatus`, `ExferenceChunkElement`,
-and conversion functions leading to shared `Progress` and `SearchBatch`.
-Candidate statistics and batch metadata also have core and stable-adapter
-records copied field by field by `resultBatch`, `projectBatchMetadata`, and
-`projectCandidate`.
+The Exference core's `findQueryResultsInEnvironmentEither` excludes the exact
+checked target, validates and prepares the query once, derives rendering hints
+from the retained plan, and lazily attaches that target to every generated
+`FunctionClause`. `runExferenceQuery` returns those results directly. Candidate
+statistics, candidate details, and batch metadata each retain one core-owned
+record; the stable polished names are zero-cost type aliases and bidirectional
+record-pattern views, not records copied field by field.
 
-After the native-type migration, both cores should produce their stable
-`QueryResult` payloads directly. Compatibility functions can render or classify
-that value at the outermost API edge. Tests must pin the distinction between
-logical evidence and operational truncation, exact `Natural` accounting,
-target-name preservation, candidate validation, and non-forcing of lazy tails.
+`SearchCompletion`, `SearchStatus`, `ExferenceChunkElement`, and the checked
+status-to-progress conversions remain only at Exference's historical API edge.
+The canonical path projects private engine chunks straight into the common
+search and query envelopes, so retaining those source-compatible types does
+not retain a competing modern result model. Explicit imports of the stable
+record views migrate from `T(..)` to `T`, `pattern T`, and the used field
+selectors under `PatternSynonyms`; their pattern fields cannot be used by GHC
+record-update syntax, so updates match and reconstruct instead. This
+experimental representation migration also adopts the core records' derived
+`Show`, `Typeable`, generic, and ABI identities; dependants must recompile and
+must not treat the former derived `Show` text as a stable serialization.
+
+Regression coverage pins direct core/adapter equality, exact operator targets,
+target exclusion without excluding qualified homonyms, candidate-derived
+logical evidence, simultaneous operational truncation reasons, exact
+`Natural` accounting, and lazy batch and candidate tails. Priority 3 is now the
+active convergence frontier; completing Priority 2 does not merge the two
+backend-specific search algorithms.
 
 ## Priority 3: make shared inventories authoritative
 
@@ -151,7 +169,7 @@ rollback.
 
 ## Packaging end state
 
-Only after the remaining duplicated result/environment authorities are removed
+Only after the remaining duplicated environment authorities are removed
 should the named core and foundation sublibraries be folded into the unnamed
 `djex` library. Compatibility frontends may be folded in at the same time if a
 single dependency closure is the desired final contract, or retained briefly
@@ -174,7 +192,8 @@ Every migration milestone should retain the current release-style gates:
 - a clean tracked tree with the milestone commit pushed before the next
   representation is removed.
 
-The immediate next implementation milestone is Priority 2: remove the backend
-result envelopes beneath `QueryResult` and have both cores construct their
-stable payloads directly, while preserving logical evidence, operational
-truncation, exact counts, target names, and lazy search tails.
+The immediate next implementation milestone is Priority 3: make each retained
+shared inventory the semantic authority and reduce backend environments to
+private derived search indexes, while preserving source diagnostic precedence,
+transactional Djinn edits, Exference source order and ratings, kind assumptions,
+class-method ownership, and session policy behavior.

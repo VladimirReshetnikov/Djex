@@ -3,6 +3,7 @@ module Main (main) where
 import Data.Either (isRight)
 import Data.Void (Void)
 
+import ExferencePatternImports (patternViewsRoundTrip)
 import Language.Haskell.Djex
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
@@ -27,6 +28,8 @@ main = defaultMain $ testGroup "public Djex facade"
         Right "identity value = value"
   , testCase "exports checked Exference options" $
       exferenceMaximumSteps defaultExferenceOptions @?= 65536
+  , testCase "exports explicit Exference record-pattern views" $
+      patternViewsRoundTrip @?= True
   , testCase "exports checked session entry points" $ do
       assertBool "the standard Djinn session did not seal" $
         isRight standardDjinnSession

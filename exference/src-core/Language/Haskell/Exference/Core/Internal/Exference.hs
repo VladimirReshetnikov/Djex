@@ -8,6 +8,9 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , findExpressionsWithAllocators
   , findGeneratedSearchBatches
   , findGeneratedSearchBatchesWithAllocators
+  , findQueryResultsInEnvironmentEither
+  , findQueryResultsWithAllocators
+  , attachQueryTarget
   , prepareExferenceInput
   , prepareExferenceQuery
   , ExferenceHeuristicsConfig (..)
@@ -20,6 +23,8 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceSearchBatch
   , ExferenceGeneratedOutputElement
   , ExferenceGeneratedSearchBatch
+  , ExferenceCandidate
+  , ExferenceResult
   , ExferenceProjectionError (..)
   , SearchCompletion (..)
   , SearchStatus (..)
@@ -67,6 +72,8 @@ import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
+import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import qualified Data.PQueue.Prio.Max as Q
@@ -333,12 +340,11 @@ data ExferenceChunkElement = ExferenceChunkElement
   , chunkElements :: [ExferenceOutputElement]
   }
 
--- Internal chunks carry the shared progress chosen by the engine alongside
--- the historical status projection.  Modern results therefore never need to
--- reinterpret a caller-constructible compatibility value.
+-- Internal chunks retain only the lossless shared progress and exact natural
+-- metadata chosen by the engine. The historical machine-sized status is a
+-- presentation projection and therefore cannot become a second authority.
 data EngineChunk = EngineChunk
-  { engineStatus :: SearchStatus
-  , engineProgress :: SharedSearch.Progress
+  { engineProgress :: SharedSearch.Progress
   , engineMetadata :: ExferenceBatchMetadata
   , engineCandidates :: [ExferenceOutputElement]
   }
@@ -351,6 +357,19 @@ type ExferenceGeneratedOutputElement =
 
 type ExferenceGeneratedSearchBatch =
   SharedSearch.SearchBatch ExferenceBatchMetadata ExferenceGeneratedOutputElement
+
+-- | The stable Exference payload: the checked expression is attached to the
+-- exact definition name supplied by the caller, while residual constraints
+-- and backend details stay in the shared candidate envelope.
+type ExferenceCandidate =
+  SharedCandidate.Candidate
+    SynthesisType
+    ExferenceCandidateDetails
+    (SharedGenerated.FunctionClause TVarId)
+
+-- | One Exference engine chunk in the backend-neutral query envelope.
+type ExferenceResult =
+  SharedQuery.QueryResult ExferenceBatchMetadata ExferenceCandidate
 
 data ExferenceProjectionError
   = InvalidSearchStatus SearchStatusError
@@ -509,9 +528,6 @@ findEngineChunksWith allocators
     }
   transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineChunk
   transformSolutions potentialSolutions searchState = EngineChunk
-      (SearchStatus compatibilityCompletion
-        (saturatingNaturalToInt totalQueuePruned)
-        (saturatingNaturalToInt totalDepthPruned))
       progress
       (ExferenceBatchMetadata
         { exferenceBindingUsages = newBindingUsages
@@ -556,27 +572,17 @@ findEngineChunksWith allocators
       identifierSpaceExhausted = findIdentifierSpaceExhausted searchState
       newBindingUsages = findBindingUsages searchState
       newNodes = findQueue searchState
-      (compatibilityCompletion, progress)
+      progress
         | Q.null newNodes
         , reason : remaining <- truncationReasons =
-            ( identifierCompletion SearchPruned
-            , SharedSearch.Completed $ SharedSearch.Truncated
-                $ reason :| remaining
-            )
+            SharedSearch.Completed $ SharedSearch.Truncated
+              $ reason :| remaining
         | Q.null newNodes =
-            (SearchExhausted, SharedSearch.Completed SharedSearch.Finished)
+            SharedSearch.Completed SharedSearch.Finished
         | n' >= maxSteps =
-            ( identifierCompletion SearchStepLimitReached
-            , SharedSearch.Completed $ SharedSearch.Truncated
-                $ SharedSearch.StepLimitReached :| truncationReasons
-            )
-        | otherwise = (SearchRunning, SharedSearch.Continuing)
-      -- The compatibility enum has one primary completion cause. Prefer the
-      -- novel identifier limit so it can never project as conclusive; the
-      -- private shared progress above still retains a simultaneous step limit.
-      identifierCompletion fallback
-        | identifierSpaceExhausted = SearchIdentifierSpaceExhausted
-        | otherwise = fallback
+            SharedSearch.Completed $ SharedSearch.Truncated
+              $ SharedSearch.StepLimitReached :| truncationReasons
+        | otherwise = SharedSearch.Continuing
       truncationReasons =
         [ SharedSearch.IdentifierSpaceExhausted
         | identifierSpaceExhausted
@@ -672,10 +678,25 @@ findExpressionsWithAllocators allocators' =
 
 projectCompatibilityChunk :: EngineChunk -> ExferenceChunkElement
 projectCompatibilityChunk chunk = ExferenceChunkElement
-  (engineStatus chunk)
+  compatibilityStatus
   (projectCompatibilityBindingUsages
-    $ exferenceBindingUsages $ engineMetadata chunk)
+    $ exferenceBindingUsages metadata)
   (engineCandidates chunk)
+ where
+  metadata = engineMetadata chunk
+  compatibilityStatus = SearchStatus
+    compatibilityCompletion
+    (saturatingNaturalToInt $ exferenceQueuePruned metadata)
+    (saturatingNaturalToInt $ exferenceDepthPruned metadata)
+  compatibilityCompletion = case engineProgress chunk of
+    SharedSearch.Continuing -> SearchRunning
+    SharedSearch.Completed SharedSearch.Finished -> SearchExhausted
+    SharedSearch.Completed (SharedSearch.Truncated reasons)
+      | SharedSearch.IdentifierSpaceExhausted `elem` reasons ->
+          SearchIdentifierSpaceExhausted
+      | SharedSearch.StepLimitReached `elem` reasons ->
+          SearchStepLimitReached
+      | otherwise -> SearchPruned
 
 -- | Project exact engine totals into the historical chunk API without
 -- allowing a large count to wrap into a misleading non-positive value.
@@ -703,6 +724,65 @@ findGeneratedSearchBatchesWithAllocators
   -> [ExferenceGeneratedSearchBatch]
 findGeneratedSearchBatchesWithAllocators allocators' typeHints =
   map (projectGeneratedBatch typeHints) . findEngineChunksWith allocators'
+
+-- | Validate one query against a sealed environment, then expose its result
+-- trace lazily in the common query envelope.  The exact target is excluded
+-- before validation so search and the independent candidate checker see the
+-- same environment.  The retained rigid-variable plan supplies rendering
+-- hints without preparing the query a second time.
+findQueryResultsInEnvironmentEither
+  :: SharedGenerated.DefinitionName
+  -> TypeVarIndex
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> Either ExferenceInputError [ExferenceResult]
+findQueryResultsInEnvironmentEither =
+  findQueryResultsWithAllocators defaultSearchAllocators
+
+-- The allocator-parametric form is an internal test seam for exercising
+-- finite identifier exhaustion.  Keeping preparation here guarantees that
+-- production and those tests share the exact one-validation result path.
+findQueryResultsWithAllocators
+  :: SearchAllocators
+  -> SharedGenerated.DefinitionName
+  -> TypeVarIndex
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> Either ExferenceInputError [ExferenceResult]
+findQueryResultsWithAllocators allocators' target sourceNames environment query = do
+  checked@(CheckedExferenceQuery _ _ rigidPlan) <-
+    prepareExferenceQuery environment queryWithTargetExcluded
+  let typeHints = typeVariableHintsWithPlan rigidPlan sourceNames
+  pure $ map (projectQueryResult target typeHints)
+    $ findEngineChunksWith allocators' checked
+ where
+  queryWithTargetExcluded = query
+    { queryExcludedBindings = S.insert
+        (SharedGenerated.definitionName target)
+        (queryExcludedBindings query)
+    }
+
+-- Keep this projection lazy in both the chunk and candidate dimensions.  The
+-- shared smart constructor observes only whether the candidate list is empty,
+-- so it neither invents logical evidence nor evaluates the candidate tail.
+projectQueryResult
+  :: SharedGenerated.DefinitionName
+  -> ExferenceTypeVariableHints
+  -> EngineChunk
+  -> ExferenceResult
+projectQueryResult target typeHints =
+  attachQueryTarget target . projectGeneratedBatch typeHints
+
+-- Attach the already checked request target without traversing the candidate
+-- list. Keeping this boundary separate makes its non-forcing contract directly
+-- testable without exposing private engine chunks.
+attachQueryTarget
+  :: SharedGenerated.DefinitionName
+  -> ExferenceGeneratedSearchBatch
+  -> ExferenceResult
+attachQueryTarget target =
+  SharedQuery.queryResultFromCandidates
+    . fmap (fmap $ SharedGenerated.FunctionClause target [])
 
 -- | Propagate frontend spellings through the exact rigid-variable plan of a
 -- checked query. Validation happens first so this helper preserves the same

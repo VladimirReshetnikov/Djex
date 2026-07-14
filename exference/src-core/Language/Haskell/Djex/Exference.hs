@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 -- | Checked Exference sessions behind Djex's shared query envelope.
 --
 -- Session construction seals the source inventory and computes Exference's
@@ -24,9 +26,21 @@ module Language.Haskell.Djex.Exference
   , ExferenceType
   , ExferenceInventory
   , ExferenceCandidate
-  , ExferenceCandidateDetails (..)
-  , ExferenceCandidateMetrics (..)
-  , ExferenceBatchMetadata (..)
+  , ExferenceCandidateDetails
+  , pattern ExferenceCandidateDetails
+  , exferenceCandidateStatistics
+  , exferenceCandidateLocalNames
+  , exferenceCandidateTypeVariableNames
+  , ExferenceCandidateMetrics
+  , pattern ExferenceCandidateMetrics
+  , exferenceCandidateSteps
+  , exferenceCandidateComplexity
+  , exferenceCandidateFinalQueueSize
+  , ExferenceBatchMetadata
+  , pattern ExferenceBatchMetadata
+  , exferenceBatchBindingUsages
+  , exferenceBatchQueuePruned
+  , exferenceBatchDepthPruned
   , RenderError (..)
   , ExferenceResult
   , mkExferenceSession
@@ -44,21 +58,18 @@ module Language.Haskell.Djex.Exference
   , renderExferenceResidualConstraints
   ) where
 
-import Control.DeepSeq (NFData (rnf))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core
-  ( ExferenceGeneratedSearchBatch
-  , ExferenceHeuristicsConfig (..)
+  ( ExferenceHeuristicsConfig (..)
   , ExferenceInputError (..)
   , ExferenceQuery (..)
   , Penalty (..)
-  , findGeneratedSearchBatchesWithHintsInEnvironmentEither
-  , typeVariableHintsInEnvironment
   )
+import qualified Language.Haskell.Exference.Core as Core
 import qualified Language.Haskell.Exference.Core.Candidate as CoreCandidate
 import qualified Language.Haskell.Exference.Core.ExferenceStats as CoreStats
 import Language.Haskell.Exference.Core.Declaration
@@ -89,9 +100,7 @@ import Language.Haskell.Djex.Exference.Internal.Request
   , requestSourceTypeVariables
   )
 import Language.Haskell.Synthesis.Candidate
-  ( Candidate (Candidate)
-  , candidateDetails
-  , candidateOutput
+  ( candidateDetails
   , candidateResidualConstraints
   , renderCandidateDefinition
   , renderCandidateExpression
@@ -104,12 +113,9 @@ import Language.Haskell.Synthesis.Diagnostic
   , withOptionalLocation
   )
 import Language.Haskell.Synthesis.Generated
-  ( DefinitionName
-  , FunctionClause (FunctionClause)
-  , Qualification (..)
+  ( Qualification (..)
   , RenderError (..)
   , RenderOptions
-  , definitionName
   , renderOptionsWithLocalNameHints
   )
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -122,15 +128,10 @@ import Language.Haskell.Synthesis.Name
   )
 import Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
-  , QueryResult
-  , queryResultFromCandidates
   , resultSearch
   )
 import Language.Haskell.Synthesis.Search
-  ( SearchBatch (SearchBatch)
-  , batchCandidates
-  , batchMetadata
-  , batchProgress
+  ( batchMetadata
   )
 import Language.Haskell.Synthesis.Type
   ( Variable (FlexibleVariable, RigidVariable)
@@ -165,56 +166,71 @@ type ExferenceEnvironment = Environment ExferenceTypeVariable Void ()
 -- Search ratings remain in the private backend projection, where they belong.
 type ExferenceInventory = Inventory ExferenceTypeVariable ()
 
-type ExferenceCandidate =
-  Candidate ExferenceType ExferenceCandidateDetails
-    (FunctionClause ExferenceLocal)
+-- | The result payload is owned by the search core.  This stable module only
+-- supplies compatibility spellings for its historical public selectors.
+type ExferenceCandidate = Core.ExferenceCandidate
 
-type ExferenceResult =
-  QueryResult ExferenceBatchMetadata ExferenceCandidate
+type ExferenceResult = Core.ExferenceResult
 
-data ExferenceCandidateMetrics = ExferenceCandidateMetrics
-  { exferenceCandidateSteps :: Int
-  , exferenceCandidateComplexity :: Penalty
-  , exferenceCandidateFinalQueueSize :: Int
-  }
-  deriving (Eq, Show)
+type ExferenceCandidateMetrics = CoreStats.ExferenceStats
 
-instance NFData ExferenceCandidateMetrics where
-  rnf metrics =
-    rnf (exferenceCandidateSteps metrics) `seq`
-    rnf (exferenceCandidateComplexity metrics) `seq`
-    rnf (exferenceCandidateFinalQueueSize metrics)
+pattern ExferenceCandidateMetrics
+  :: Int -> Penalty -> Int -> ExferenceCandidateMetrics
+pattern ExferenceCandidateMetrics
+  { exferenceCandidateSteps
+  , exferenceCandidateComplexity
+  , exferenceCandidateFinalQueueSize
+  } = CoreStats.ExferenceStats
+    { CoreStats.exference_steps = exferenceCandidateSteps
+    , CoreStats.exference_complexityRating = exferenceCandidateComplexity
+    , CoreStats.exference_finalSize = exferenceCandidateFinalQueueSize
+    }
+
+{-# COMPLETE ExferenceCandidateMetrics #-}
 
 -- | Stable rendering hints and metrics attached to one checked candidate.
--- These are presentation data only; changing them cannot alter search output.
-data ExferenceCandidateDetails = ExferenceCandidateDetails
-  { exferenceCandidateStatistics :: ExferenceCandidateMetrics
-  , exferenceCandidateLocalNames :: Map.Map ExferenceLocal String
-  , exferenceCandidateTypeVariableNames ::
-      Map.Map ExferenceTypeVariable String
-  }
-  deriving (Eq, Show)
+-- These names are a zero-cost view of the core-owned details record.
+type ExferenceCandidateDetails = CoreCandidate.ExferenceCandidateDetails
 
-instance NFData ExferenceCandidateDetails where
-  rnf details =
-    rnf (exferenceCandidateStatistics details) `seq`
-    rnf (exferenceCandidateLocalNames details) `seq`
-    rnf (exferenceCandidateTypeVariableNames details)
+pattern ExferenceCandidateDetails
+  :: ExferenceCandidateMetrics
+  -> Map.Map ExferenceLocal String
+  -> Map.Map ExferenceTypeVariable String
+  -> ExferenceCandidateDetails
+pattern ExferenceCandidateDetails
+  { exferenceCandidateStatistics
+  , exferenceCandidateLocalNames
+  , exferenceCandidateTypeVariableNames
+  } = CoreCandidate.ExferenceCandidateDetails
+    { CoreCandidate.exferenceCandidateStats = exferenceCandidateStatistics
+    , CoreCandidate.exferenceLocalNameHints = exferenceCandidateLocalNames
+    , CoreCandidate.exferenceTypeVariableHints =
+        exferenceCandidateTypeVariableNames
+    }
+
+{-# COMPLETE ExferenceCandidateDetails #-}
 
 -- | Stable, lossless operational metadata for one Exference result batch.
--- Binding counts are exact non-negative totals, just like pruning counts.
-data ExferenceBatchMetadata = ExferenceBatchMetadata
-  { exferenceBatchBindingUsages :: Map.Map Name Natural
-  , exferenceBatchQueuePruned :: Natural
-  , exferenceBatchDepthPruned :: Natural
-  }
-  deriving (Eq, Show)
+-- Binding counts are exact non-negative totals, just like pruning counts.  The
+-- pattern keeps the stable vocabulary without copying the core-owned record.
+type ExferenceBatchMetadata = CoreStats.ExferenceBatchMetadata
 
-instance NFData ExferenceBatchMetadata where
-  rnf metadata =
-    rnf (exferenceBatchBindingUsages metadata) `seq`
-    rnf (exferenceBatchQueuePruned metadata) `seq`
-    rnf (exferenceBatchDepthPruned metadata)
+pattern ExferenceBatchMetadata
+  :: Map.Map Name Natural
+  -> Natural
+  -> Natural
+  -> ExferenceBatchMetadata
+pattern ExferenceBatchMetadata
+  { exferenceBatchBindingUsages
+  , exferenceBatchQueuePruned
+  , exferenceBatchDepthPruned
+  } = CoreStats.ExferenceBatchMetadata
+    { CoreStats.exferenceBindingUsages = exferenceBatchBindingUsages
+    , CoreStats.exferenceQueuePruned = exferenceBatchQueuePruned
+    , CoreStats.exferenceDepthPruned = exferenceBatchDepthPruned
+    }
+
+{-# COMPLETE ExferenceBatchMetadata #-}
 
 -- | Kind-check, elaborate, and lower a parser-independent declaration
 -- environment, then seal the resulting reusable Exference session.
@@ -328,9 +344,9 @@ runExferenceQuery session request = do
     )
     Right
     $ fromSynthesisType elaboratedGoal
-  -- Only Exference's private exclusion set needs the raw structural name.
-  -- Result projection retains the exact checked target from the request.
-  let input = searchQuery (Just $ definitionName target) backendGoal
+  -- The direct result boundary owns exact target exclusion and result naming,
+  -- so query validation and rigid-instantiation planning happen only once.
+  let input = searchQuery backendGoal
         $ requestOptions query
       searchFailure failure = requestDiagnostic $ shownErrorDiagnostic
         (if optionFailure failure
@@ -340,17 +356,14 @@ runExferenceQuery session request = do
           then "invalid Exference search options"
           else "Exference rejected the query")
         failure
-  hints <- either (Left . searchFailure) Right
-    $ typeVariableHintsInEnvironment
-        (Session.sessionSearchEnvironment session)
-        input
-        (requestSourceTypeVariables request)
-  batches <- either
+  either
     (Left . searchFailure)
     Right
-    $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
-        hints (Session.sessionSearchEnvironment session) input
-  pure $ map (resultBatch target) batches
+    $ Core.findQueryResultsInEnvironmentEither
+        target
+        (requestSourceTypeVariables request)
+        (Session.sessionSearchEnvironment session)
+        input
 
 elaborationFailure
   :: TypeElaborationError ExferenceTypeVariable
@@ -378,57 +391,13 @@ optionFailure failure = case failure of
   InvalidHeuristic{} -> True
   _ -> False
 
-resultBatch
-  :: DefinitionName
-  -> ExferenceGeneratedSearchBatch
-  -> ExferenceResult
-resultBatch target batch = queryResultFromCandidates $ SearchBatch
-  (batchProgress batch)
-  (projectBatchMetadata $ batchMetadata batch)
-  (map (projectCandidate target) $ batchCandidates batch)
-
-projectBatchMetadata
-  :: CoreStats.ExferenceBatchMetadata
-  -> ExferenceBatchMetadata
-projectBatchMetadata metadata = ExferenceBatchMetadata
-  { exferenceBatchBindingUsages = CoreStats.exferenceBindingUsages metadata
-  , exferenceBatchQueuePruned = CoreStats.exferenceQueuePruned metadata
-  , exferenceBatchDepthPruned = CoreStats.exferenceDepthPruned metadata
-  }
-
-projectCandidate
-  :: DefinitionName
-  -> CoreCandidate.ExferenceGeneratedCandidate
-  -> ExferenceCandidate
-projectCandidate target candidate = Candidate
-  { candidateOutput = FunctionClause target [] $ candidateOutput candidate
-  , candidateResidualConstraints = candidateResidualConstraints candidate
-  , candidateDetails = ExferenceCandidateDetails
-      { exferenceCandidateStatistics = ExferenceCandidateMetrics
-          { exferenceCandidateSteps = CoreStats.exference_steps statistics
-          , exferenceCandidateComplexity =
-              CoreStats.exference_complexityRating statistics
-          , exferenceCandidateFinalQueueSize =
-              CoreStats.exference_finalSize statistics
-          }
-      , exferenceCandidateLocalNames =
-          CoreCandidate.exferenceLocalNameHints details
-      , exferenceCandidateTypeVariableNames =
-          CoreCandidate.exferenceTypeVariableHints details
-      }
-  }
- where
-  details = candidateDetails candidate
-  statistics = CoreCandidate.exferenceCandidateStats details
-
 searchQuery
-  :: Maybe Name
-  -> HsType
+  :: HsType
   -> ExferenceOptions
   -> ExferenceQuery
-searchQuery excludedTarget goal options = ExferenceQuery
+searchQuery goal options = ExferenceQuery
   { queryGoalType = goal
-  , queryExcludedBindings = maybe Set.empty Set.singleton excludedTarget
+  , queryExcludedBindings = mempty
   , queryAllowUnused = exferenceAllowUnused options
   , queryAllowConstraints = exferenceAllowResidualConstraints options
   , queryConstraintDeferralSteps = exferenceConstraintDeferralSteps options

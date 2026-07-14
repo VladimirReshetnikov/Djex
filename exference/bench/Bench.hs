@@ -14,13 +14,13 @@ import Test.Tasty.Bench (Benchmark, bench, defaultMain, whnf)
 
 import Corpus
 import Language.Haskell.Exference.Core
-  ( ExferenceGeneratedSearchBatch
+  ( ExferenceCandidate
   , ExferenceQuery (..)
-  , findGeneratedSearchBatchesInEnvironmentEither
+  , ExferenceResult
+  , findQueryResultsInEnvironmentEither
   )
 import Language.Haskell.Exference.Core.Candidate
   ( ExferenceCandidateDetails (..)
-  , ExferenceGeneratedCandidate
   )
 import Language.Haskell.Exference.Core.ExferenceStats
   ( ExferenceBatchMetadata (..)
@@ -28,6 +28,8 @@ import Language.Haskell.Exference.Core.ExferenceStats
   )
 import qualified Language.Haskell.Synthesis.Candidate as Candidate
 import qualified Language.Haskell.Synthesis.Generated as Generated
+import qualified Language.Haskell.Synthesis.Name as Name
+import qualified Language.Haskell.Synthesis.Query as Query
 import qualified Language.Haskell.Synthesis.Search as Search
 
 main :: IO ()
@@ -43,43 +45,52 @@ benchmarkEntry entry = bench (entryName entry)
 {-# NOINLINE runEntry #-}
 runEntry :: Entry -> ExferenceQuery -> Int
 runEntry entry query = case
-    findGeneratedSearchBatchesInEnvironmentEither
-      (entryEnvironment entry) query of
+    findQueryResultsInEnvironmentEither
+      benchmarkTarget mempty (entryEnvironment entry) query of
   Left failure -> error $ entryName entry ++ ": search failed: " ++ show failure
-  Right batches -> case entryDemand entry of
-    FirstCandidate -> candidateDigest $ firstCandidate label batches
-    CandidatePrefix count -> prefixDigest label count batches
+  Right results -> case entryDemand entry of
+    FirstCandidate -> candidateDigest $ firstCandidate label results
+    CandidatePrefix count -> prefixDigest label count results
     FirstCaseCandidate ->
-      let candidate = firstCandidate label batches
-          output = Candidate.candidateOutput candidate
-      in if containsCase output
+      let candidate = firstCandidate label results
+          body = Generated.clauseBody $ Candidate.candidateOutput candidate
+      in if containsCase body
           then candidateDigest candidate
           else error $ label ++ ": first candidate did not contain a case"
     FirstConstraintFreeCandidate ->
-      let candidate = firstCandidate label batches
+      let candidate = firstCandidate label results
       in if null $ Candidate.candidateResidualConstraints candidate
           then candidateDigest candidate
           else error $ label ++ ": ground instance left a residual constraint"
     BoundedNoCandidates -> boundedNoCandidateDigest
-      label (queryMaximumSteps query) batches
+      label (queryMaximumSteps query) results
  where
   label = entryName entry
 
+-- This checked name is intentionally absent from every benchmark environment;
+-- the canonical result path still excludes it before validating each query.
+benchmarkTarget :: Generated.DefinitionName
+benchmarkTarget = case Name.mkIdentifier "djexBenchmarkTarget" of
+  Left failure -> error $ "invalid benchmark target identifier: " ++ show failure
+  Right name -> case Generated.mkDefinitionName name of
+    Left failure -> error $ "invalid benchmark definition name: " ++ show failure
+    Right target -> target
+
 firstCandidate
   :: String
-  -> [ExferenceGeneratedSearchBatch]
-  -> ExferenceGeneratedCandidate
-firstCandidate label batches = case
-    concatMap Search.batchCandidates batches of
+  -> [ExferenceResult]
+  -> ExferenceCandidate
+firstCandidate label results = case
+    concatMap (Search.batchCandidates . Query.resultSearch) results of
   candidate : _ -> candidate
   [] -> error $ label ++ ": expected a candidate"
 
 prefixDigest
   :: String
   -> Int
-  -> [ExferenceGeneratedSearchBatch]
+  -> [ExferenceResult]
   -> Int
-prefixDigest label requested batches
+prefixDigest label requested results
   | requested <= 0 = error $ label ++ ": non-positive candidate prefix"
   | found /= requested = error $ label ++ ": expected " ++ show requested
       ++ " candidates, found " ++ show found
@@ -87,12 +98,14 @@ prefixDigest label requested batches
       (\total candidate -> total + candidateDigest candidate)
       0 selected
  where
-  selected = take requested $ concatMap Search.batchCandidates batches
+  selected = take requested
+    $ concatMap (Search.batchCandidates . Query.resultSearch) results
   found = length selected
 
-candidateDigest :: ExferenceGeneratedCandidate -> Int
+candidateDigest :: ExferenceCandidate -> Int
 candidateDigest candidate =
-  Generated.expressionSize (Candidate.candidateOutput candidate)
+  Generated.expressionSize
+      (Generated.clauseBody $ Candidate.candidateOutput candidate)
   + length (Candidate.candidateResidualConstraints candidate)
   + exference_steps
       (exferenceCandidateStats $ Candidate.candidateDetails candidate)
@@ -100,7 +113,7 @@ candidateDigest candidate =
 boundedNoCandidateDigest
   :: String
   -> Int
-  -> [ExferenceGeneratedSearchBatch]
+  -> [ExferenceResult]
   -> Int
 boundedNoCandidateDigest label expectedSteps = go 0 0 Nothing 0
  where
@@ -109,7 +122,7 @@ boundedNoCandidateDigest label expectedSteps = go 0 0 Nothing 0
     -> Int
     -> Maybe Search.Progress
     -> Natural
-    -> [ExferenceGeneratedSearchBatch]
+    -> [ExferenceResult]
     -> Int
   go !count !checksum latestProgress latestQueuePruned []
     | count /= expectedSteps = error $ label ++ ": expected "
@@ -121,7 +134,7 @@ boundedNoCandidateDigest label expectedSteps = go 0 0 Nothing 0
         checksum + count + fromIntegral latestQueuePruned
     | otherwise = error $ label
         ++ ": terminal progress lost its step/queue truncation"
-  go !count !checksum _ _ (batch : batches)
+  go !count !checksum _ _ (result : results)
     | not $ null $ Search.batchCandidates batch = error $ label
         ++ ": negative fixture unexpectedly produced a candidate"
     | otherwise = go
@@ -129,9 +142,13 @@ boundedNoCandidateDigest label expectedSteps = go 0 0 Nothing 0
         (checksum + batchDigest batch)
         (Just $ Search.batchProgress batch)
         (exferenceQueuePruned $ Search.batchMetadata batch)
-        batches
+        results
+   where
+    batch = Query.resultSearch result
 
-batchDigest :: ExferenceGeneratedSearchBatch -> Int
+batchDigest
+  :: Search.SearchBatch ExferenceBatchMetadata ExferenceCandidate
+  -> Int
 batchDigest batch =
   progressDigest (Search.batchProgress batch)
   + fromIntegral (exferenceQueuePruned metadata)

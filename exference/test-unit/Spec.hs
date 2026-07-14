@@ -30,7 +30,6 @@ import qualified Language.Haskell.Exts.SrcLoc as HSE
 import Language.Haskell.Exference.Core
   ( ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
-  , ExferenceGeneratedSearchBatch
   , ExferenceCandidateDetails (..)
   , ExferenceCandidateError (..)
   , ExferenceEnvironment
@@ -45,6 +44,7 @@ import Language.Haskell.Exference.Core
   , findExpressionsWithStatsEither
   , findGeneratedSearchBatchesWithHintsEither
   , findGeneratedSearchBatchesWithHintsInEnvironmentEither
+  , findQueryResultsInEnvironmentEither
   , mkExferenceEnvironment
   , toSearchProgress
   , toSearchBatch
@@ -84,10 +84,11 @@ import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
+  , attachQueryTargetForTesting
   , compatibilityBindingUsageCounts
   , compatibilityPruningCount
   , findExpressionsWithIdentifierCapacitiesEither
-  , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
+  , findQueryResultsWithIdentifierCapacitiesEither
   , mergePriorityQueueAtCapacity
   , pruningReasonsFromNaturalTotals
   , typeComplexityForTesting
@@ -189,6 +190,7 @@ import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as Generated
+import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
@@ -2215,6 +2217,8 @@ tests = testGroup "Exference"
             Right _ -> fail "rank-N constraint reached a sealed environment"
       , testCase "target exclusion is exact and absent from metadata" $ do
           let excludedName = name "answer"
+          targetName <- expectRight $ SharedName.mkIdentifier "answer"
+          target <- expectRight $ Generated.mkDefinitionName targetName
           retainedName <- expectRight
             $ mkQualifiedName ["Other"] "answer"
           let resultType = TypeCons $ name "Bool"
@@ -2231,13 +2235,10 @@ tests = testGroup "Exference"
                     [binding excludedName, binding retainedName]
                 }
           environment <- expectRight $ sealLegacyEnvironment input
-          batches <- expectRight
-            $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
-                Map.empty environment
-                ((legacyInputQuery input)
-                  { queryExcludedBindings = Set.singleton
-                      $ toSynthesisName excludedName
-                  })
+          results <- expectRight
+            $ findQueryResultsInEnvironmentEither
+                target Map.empty environment (legacyInputQuery input)
+          let batches = map SharedQuery.resultSearch results
           let outputs =
                 [ SharedCandidate.candidateOutput candidate
                 | batch <- batches
@@ -2248,7 +2249,21 @@ tests = testGroup "Exference"
                 batches
           assertBool "qualified homonym was not retained" $ not $ null outputs
           assertBool "excluded target reached a generated candidate"
-            $ all (== Generated.Global (toSynthesisName retainedName)) outputs
+            $ all
+                (\clause ->
+                  Generated.clauseName clause == target
+                    && Generated.clauseBody clause
+                      == Generated.Global (toSynthesisName retainedName))
+                outputs
+          assertBool "candidate evidence was not derived from the payload"
+            $ all
+                ((== SharedQuery.ValidatedCandidates)
+                  . SharedQuery.resultEvidence)
+                [ result
+                | result <- results
+                , not $ null $ SharedSearch.batchCandidates
+                    $ SharedQuery.resultSearch result
+                ]
           assertBool "excluded target reached binding-usage metadata"
             $ all (Map.notMember excludedName) usages
           assertBool "retained homonym disappeared from binding metadata"
@@ -2813,10 +2828,26 @@ tests = testGroup "Exference"
             SearchIdentifierSpaceExhausted
           assertBool "a viable sibling was suppressed by identifier exhaustion"
             $ not $ null $ chunkElements chunk
-          batch <- lastCapacityBatch capacities input
+          targetName <- expectRight $ SharedName.mkIdentifier "generated"
+          target <- expectRight $ Generated.mkDefinitionName targetName
+          environment <- expectRight $ sealLegacyEnvironment input
+          results <- expectRight
+            $ findQueryResultsWithIdentifierCapacitiesEither
+                capacities target Map.empty environment (legacyInputQuery input)
+          result <- case results of
+            [] -> fail "expected at least one capacity-limited query result"
+            firstResult : remaining ->
+              pure $ lastElement firstResult remaining
+          let batch = SharedQuery.resultSearch result
+          SharedQuery.resultEvidence result @?=
+            SharedQuery.ValidatedCandidates
           SharedSearch.batchProgress batch @?= SharedSearch.Completed
             (SharedSearch.Truncated
               $ SharedSearch.IdentifierSpaceExhausted :| [])
+          assertBool "the direct result lost its checked target"
+            $ all ((== target) . Generated.clauseName
+                . SharedCandidate.candidateOutput)
+            $ SharedSearch.batchCandidates batch
       , testCase "deconstructor namespace exhaustion retains fallback work" $ do
           let integer = TypeCons $ name "Int"
               box argument = TypeApp (TypeCons $ name "Box") argument
@@ -2861,7 +2892,18 @@ tests = testGroup "Exference"
           chunk <- lastCapacityChunk capacities input
           searchCompletion (chunkStatus chunk) @?=
             SearchIdentifierSpaceExhausted
-          batch <- lastCapacityBatch capacities input
+          targetName <- expectRight $ SharedName.mkIdentifier "generated"
+          target <- expectRight $ Generated.mkDefinitionName targetName
+          environment <- expectRight $ sealLegacyEnvironment input
+          results <- expectRight
+            $ findQueryResultsWithIdentifierCapacitiesEither
+                capacities target Map.empty environment (legacyInputQuery input)
+          result <- case results of
+            [] -> fail "expected at least one capacity-limited query result"
+            firstResult : remaining ->
+              pure $ lastElement firstResult remaining
+          let batch = SharedQuery.resultSearch result
+          SharedQuery.resultEvidence result @?= SharedQuery.NoEvidence
           SharedSearch.batchProgress batch @?= SharedSearch.Completed
             (SharedSearch.Truncated
               $ SharedSearch.StepLimitReached
@@ -5006,6 +5048,34 @@ tests = testGroup "Exference"
             terminal : _ -> SharedSearch.batchProgress terminal @?=
               SharedSearch.Completed SharedSearch.Finished
             [] -> fail "generated identity search produced no terminal batch"
+      , testCase "target attachment leaves candidate heads and tails lazy" $ do
+          targetName <- expectRight $ SharedName.mkOperator "<~>"
+          target <- expectRight $ Generated.mkDefinitionName targetName
+          let metadata = ExferenceBatchMetadata Map.empty 0 0
+              poisoned = SharedSearch.SearchBatch
+                SharedSearch.Continuing metadata
+                ( error "target attachment forced the candidate head"
+                : error "target attachment forced the candidate tail"
+                )
+              poisonedResult = attachQueryTargetForTesting target poisoned
+          SharedQuery.resultEvidence poisonedResult @?=
+            SharedQuery.ValidatedCandidates
+          SharedSearch.batchProgress (SharedQuery.resultSearch poisonedResult)
+            @?= SharedSearch.Continuing
+
+          let details = ExferenceCandidateDetails
+                (ExferenceStats 1 0 0) Map.empty Map.empty
+              candidate = SharedCandidate.Candidate
+                (Generated.Local 1) [] details
+              batch = SharedSearch.SearchBatch
+                SharedSearch.Continuing metadata
+                (candidate : error "target attachment forced the mapped tail")
+              result = attachQueryTargetForTesting target batch
+          case take 1 $ SharedSearch.batchCandidates
+              $ SharedQuery.resultSearch result of
+            [attached] -> SharedCandidate.candidateOutput attached @?=
+              Generated.FunctionClause target [] (Generated.Local 1)
+            _ -> fail "target attachment lost the first candidate"
       , testCase "type hints follow every leading forall layer" $ do
           let goal = TypeForall [4] []
                 $ TypeForall [9] []
@@ -5885,17 +5955,6 @@ lastCapacityChunk capacities input = do
   case chunks of
     [] -> fail "expected at least one capacity-limited search chunk"
     chunk : remaining -> pure $ lastElement chunk remaining
-
-lastCapacityBatch
-  :: IdentifierCapacities
-  -> ExferenceInput
-  -> IO ExferenceGeneratedSearchBatch
-lastCapacityBatch capacities input = do
-  batches <- expectRight
-    $ findGeneratedSearchBatchesWithIdentifierCapacitiesEither capacities input
-  case batches of
-    [] -> fail "expected at least one capacity-limited search batch"
-    batch : remaining -> pure $ lastElement batch remaining
 
 lastElement :: value -> [value] -> value
 lastElement latest [] = latest

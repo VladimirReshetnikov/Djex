@@ -390,21 +390,31 @@ constructing a clause; shared clauses already carry an opaque checked
 `DefinitionName`. Every entry point reports free locals, malformed syntax, and
 globals that qualification would turn into accidental recursion instead of
 exposing an unchecked rendering path.
-`findGeneratedSearchBatchesEither` is the one-shot core-only shared result API;
-`findGeneratedSearchBatchesWithHintsEither` additionally accepts source-name
-hints from a frontend. Repeated callers can instead seal an abstract
-`ExferenceEnvironment` once, pair it with varying `ExferenceQuery` values, and
-use the corresponding `InEnvironmentEither` entry points. Environment and
-query validation are therefore paid at their natural boundaries, while all
-entry points still project the engine trace lazily—candidate conversion never
-traverses the whole search.
-Every result is a shared `Candidate` containing a generated expression, fully
-shared residual constraints, and `ExferenceCandidateDetails`. The details
-retain search statistics and both term-local and tagged flexible/rigid type
-name hints, so erasing backend annotations does not degrade later rendering.
-Each demanded candidate is fully detached from its typed search tree; private
-engine chunks supply shared progress directly, with compatibility chunks as a
-sibling projection rather than the modern API reinterpreting legacy status.
+
+`findQueryResultsInEnvironmentEither` is the canonical core result API.
+Repeated callers seal an abstract `ExferenceEnvironment` once, then supply its
+varying `ExferenceQuery`, exact checked `DefinitionName`, and source type-name
+hints. The core inserts that exact target into the excluded-binding set before
+checking the query, prepares and validates the query once, and derives its
+rendering hints from that same retained rigid-instantiation plan. The target
+then becomes the name of every generated `FunctionClause`; it is never
+round-tripped through source text. `runExferenceQuery` elaborates the stable
+request and returns those core-built `QueryResult`s directly rather than
+rebuilding their progress, evidence, metadata, or candidates in the adapter.
+
+The older `findGeneratedSearchBatchesEither` and
+`findGeneratedSearchBatchesWithHintsEither` entry points remain core
+compatibility conveniences for callers that do not need the checked target or
+logical-evidence envelope. All paths still project the engine trace lazily:
+candidate conversion never traverses the whole search. Every canonical result
+contains a shared `Candidate` whose output is the exact-target
+`FunctionClause`, together with fully shared residual constraints and
+`ExferenceCandidateDetails`. The details retain search statistics and both
+term-local and tagged flexible/rigid type-name hints, so erasing backend
+annotations does not degrade later rendering. Each demanded candidate is fully
+detached from its typed search tree; private engine chunks supply shared
+progress directly, with compatibility chunks as a sibling projection rather
+than the modern API reinterpreting legacy status.
 
 `toGeneratedSearchBatch` remains the checked adapter for caller-constructed
 status-bearing compatibility chunks. It rejects malformed generated syntax,
@@ -420,13 +430,52 @@ status-bearing chunks retain their `Int` binding counts: engine totals saturate
 at that compatibility boundary, while caller-constructed negative counts are
 rejected before the chunk can enter the modern batch API.
 
-The stable `Language.Haskell.Djex.Exference` adapter projects these core-owned
-records into facade-owned `ExferenceCandidateDetails` and
-`ExferenceBatchMetadata`: local/type-variable hints use the shared variable
-tags, exact `Natural` binding usage is keyed by shared `Name`, and the retained
-`ExferenceInventory` has backend ratings erased by a total functor map. Stable
-callers may construct that inventory through `mkExferenceSession` from a
-neutral `ExferenceEnvironment`. Source clients additionally import
+Candidate metrics, candidate details, and batch metadata now each have one
+core-owned record and one storage representation. The polished stable names
+`ExferenceCandidateMetrics`, `ExferenceCandidateDetails`, and
+`ExferenceBatchMetadata` are type aliases with bidirectional record-pattern
+views over those records; no adapter copies their fields. Local/type-variable
+hints use the shared variable tags, exact `Natural` binding usage is keyed by
+shared `Name`, and the retained `ExferenceInventory` has backend ratings erased
+by a total functor map.
+
+Because those three stable names are aliases rather than new data types, an
+explicit compatibility import must replace `T(..)` with the type, pattern, and
+any selectors it uses, and must enable `PatternSynonyms`. For example:
+
+```haskell
+{-# LANGUAGE PatternSynonyms #-}
+
+import Language.Haskell.Djex.Exference
+  ( ExferenceCandidateDetails
+  , pattern ExferenceCandidateDetails
+  , exferenceCandidateStatistics
+  , exferenceCandidateLocalNames
+  , exferenceCandidateTypeVariableNames
+  )
+```
+
+Use the same form for `ExferenceCandidateMetrics`, importing
+`pattern ExferenceCandidateMetrics`, `exferenceCandidateSteps`,
+`exferenceCandidateComplexity`, and `exferenceCandidateFinalQueueSize`.
+`ExferenceBatchMetadata` similarly requires `pattern ExferenceBatchMetadata`,
+`exferenceBatchBindingUsages`, `exferenceBatchQueuePruned`, and
+`exferenceBatchDepthPruned`. Broad module imports need no change. The stable
+pattern fields work for selection, matching, and construction, but GHC
+record-update syntax does not update through a pattern synonym; match and
+reconstruct the value when a stable field must change.
+
+This representation migration is intentionally source- and ABI-visible for
+the experimental package. Derived `Show` now uses the canonical core
+constructor and field spellings, and `Typeable` identity, generic
+representation, and data-constructor symbols are those of the core-owned
+record. Recompile dependants rather than mixing artifacts across this change;
+code that needs the polished presentation vocabulary should format through the
+stable selectors instead of depending on derived `Show` text.
+
+Stable callers may construct the retained inventory through
+`mkExferenceSession` from a neutral `ExferenceEnvironment`. Source clients
+additionally import
 `Language.Haskell.Djex.Exference.HaskellSrc` and use `loadExferenceSession` for
 Haskell source directories. The raw
 `CheckedSourceEnvironment -> ExferenceSession` bridge lives separately in
@@ -552,10 +601,11 @@ any / the right solution. Some common current limitations are:
   identifies the two backends and re-exports their checked session/query APIs.
   The backend-selecting `djex exference` driver now consumes only that stable
   facade. The native name/constraint/type migration has removed Exference's
-  duplicate source-type IR; the next convergence priority is to make both
-  engines construct the stable result envelope directly, followed by making
-  the shared inventories authoritative and retiring deprecated compatibility
-  entry points.
+  duplicate source-type IR, and both engines now construct their stable result
+  envelopes directly. The next convergence frontier is to make the shared
+  inventories authoritative, followed by retiring deprecated compatibility
+  entry points; the two backend search algorithms remain intentionally
+  independent for now.
 - The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
   records concrete correctness reproducers, shared-IR boundaries, and the
   staged migration order.

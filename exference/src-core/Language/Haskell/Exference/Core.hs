@@ -7,6 +7,7 @@ module Language.Haskell.Exference.Core
   , findGeneratedSearchBatchesWithHintsEither
   , findGeneratedSearchBatchesInEnvironmentEither
   , findGeneratedSearchBatchesWithHintsInEnvironmentEither
+  , E.findQueryResultsInEnvironmentEither
   , E.ExferenceHeuristicsConfig (..)
   , E.ExferenceInput (..)
   , E.ExferenceEnvironment
@@ -17,6 +18,8 @@ module Language.Haskell.Exference.Core
   , E.ExferenceSearchBatch
   , E.ExferenceGeneratedOutputElement
   , E.ExferenceGeneratedSearchBatch
+  , E.ExferenceCandidate
+  , E.ExferenceResult
   , C.ExferenceCandidateDetails (..)
   , C.ExferenceCandidateError (..)
   , C.ExferenceTypeVariableHints

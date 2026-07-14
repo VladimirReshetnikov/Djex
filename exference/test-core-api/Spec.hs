@@ -16,7 +16,17 @@ import Language.Haskell.Djex.Exference.FrontendSupport
   )
 import Language.Haskell.Exference.Core.Declaration
   ( prepareNeutralSynthesisInventory )
+import Language.Haskell.Exference.Core
+  ( ExferenceQuery (..)
+  , findQueryResultsInEnvironmentEither
+  , mkExferenceEnvironment
+  )
+import Language.Haskell.Exference.Core.FunctionBinding
+  ( EnvDictionary (..)
+  )
 import qualified Language.Haskell.Exference.Core.Types as CoreTypes
+import Language.Haskell.Synthesis.Candidate (candidateOutput)
+import Language.Haskell.Synthesis.Generated (clauseName)
 import Language.Haskell.Synthesis.Inventory
   ( InventoryError
   , mkInventory
@@ -26,6 +36,7 @@ import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed)
   , mkIdentifier
+  , mkOperator
   , tupleName
   )
 import Language.Haskell.Synthesis.Query
@@ -61,22 +72,48 @@ main = defaultMain $ testGroup "Exference core API"
       sessionClasses session @?= mempty
       allocateFreshTypeVariableId mempty @?= Just 0
 
-      target <- expectRight $ mkIdentifier "identity"
+      target <- expectRight $ mkOperator "<~>"
       checkedTarget <- expectRight $ validateExferenceTarget target
       let variable = FlexibleVariable 0
           goal = FunctionType
             (TypeVariable variable)
             (TypeVariable variable)
+          options = defaultExferenceOptions
+            { exferenceMaximumSteps = 16 }
       request <- expectRight
         $ mkExferenceRequestWithSourceInfo mempty Nothing QueryRequest
           { requestTarget = checkedTarget
           , requestGoal = goal
           , requestContexts = []
-          , requestOptions = defaultExferenceOptions
+          , requestOptions = options
           }
       results <- expectRight $ runExferenceQuery session request
+      backendGoal <- expectRight $ CoreTypes.fromSynthesisType goal
+      coreEnvironment <- expectRight $ mkExferenceEnvironment
+        $ EnvDictionary [] [] CoreTypes.emptyStaticClassEnv
+      direct <- expectRight $ findQueryResultsInEnvironmentEither
+        checkedTarget mempty coreEnvironment ExferenceQuery
+          { queryGoalType = backendGoal
+          , queryExcludedBindings = mempty
+          , queryAllowUnused = exferenceAllowUnused options
+          , queryAllowConstraints =
+              exferenceAllowResidualConstraints options
+          , queryConstraintDeferralSteps =
+              exferenceConstraintDeferralSteps options
+          , queryMultiConstructorPatterns =
+              exferenceMultiConstructorPatterns options
+          , queryMaximumSteps = exferenceMaximumSteps options
+          , queryMaximumQueueSize = exferenceMaximumQueueSize options
+          , queryMaximumDepth = exferenceMaximumDepth options
+          , queryHeuristics = exferenceHeuristics options
+          }
+      results @?= direct
       assertBool "the core-only adapter found no identity candidate"
         $ any (not . null . batchCandidates . resultSearch) results
+      case concatMap (batchCandidates . resultSearch) results of
+        candidate : _ -> clauseName (candidateOutput candidate) @?=
+          checkedTarget
+        [] -> assertFailure "the direct result path found no identity"
   , testCase "the native shared type has honest compatibility views" $ do
       let rigidForall = CoreTypes.TypeForallNative
             [RigidVariable 7]

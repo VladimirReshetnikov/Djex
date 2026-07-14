@@ -210,6 +210,7 @@ Test-Suite djex-facade-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-facade
+  Other-Modules:  ExferencePatternImports
   Build-Depends:  djex
 
 Test-Suite djex-cli-tests

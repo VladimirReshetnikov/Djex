@@ -7,6 +7,8 @@ module Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
   , findExpressionsWithIdentifierCapacitiesEither
   , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
+  , findQueryResultsWithIdentifierCapacitiesEither
+  , attachQueryTargetForTesting
   , compatibilityPruningCount
   , compatibilityBindingUsageCounts
   , mergePriorityQueueAtCapacity
@@ -23,12 +25,13 @@ import Numeric.Natural (Natural)
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
 import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Score (Penalty)
-import Language.Haskell.Exference.Core.Types (HsType)
+import Language.Haskell.Exference.Core.Types (HsType, TypeVarIndex)
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( identifierSupplySize )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.SearchControl
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import Language.Haskell.Synthesis.Generated (DefinitionName)
 
 -- | Total capacities for the three independent dynamic search namespaces.
 -- Term capacity excludes root hole zero; flexible and scope capacities include
@@ -57,6 +60,27 @@ findGeneratedSearchBatchesWithIdentifierCapacitiesEither capacities input = do
   checked <- E.prepareExferenceInput input
   pure $ E.findGeneratedSearchBatchesWithAllocators
     (finiteSearchAllocators capacities) Map.empty checked
+
+-- | Exercise the canonical result path with bounded internal namespaces.
+-- Unlike the compatibility-input helpers above, this retains the checked
+-- definition target and shared logical-evidence envelope.
+findQueryResultsWithIdentifierCapacitiesEither
+  :: IdentifierCapacities
+  -> DefinitionName
+  -> TypeVarIndex
+  -> E.ExferenceEnvironment
+  -> E.ExferenceQuery
+  -> Either E.ExferenceInputError [E.ExferenceResult]
+findQueryResultsWithIdentifierCapacitiesEither capacities =
+  E.findQueryResultsWithAllocators $ finiteSearchAllocators capacities
+
+-- | Direct access to the final target-attachment boundary for poison-tail
+-- tests. Production callers use 'E.findQueryResultsInEnvironmentEither'.
+attachQueryTargetForTesting
+  :: DefinitionName
+  -> E.ExferenceGeneratedSearchBatch
+  -> E.ExferenceResult
+attachQueryTargetForTesting = E.attachQueryTarget
 
 -- | Exercise the queue representation boundary with tiny payloads rather
 -- than attempting to allocate an Int-sized frontier.

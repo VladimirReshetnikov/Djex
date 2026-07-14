@@ -924,7 +924,18 @@ tests = testGroup "Exference"
             @?= "scope allocator attempted to reuse scope 7"
       ]
   , testGroup "type traversal"
-      [ testCase "forall substitution protects context binders" $ do
+      [ testCase "forall substitution avoids capture in context and body" $ do
+          let source = TypeForall [1]
+                [HsConstraint (name "C") [TypeVar 0, TypeVar 1]]
+                (TypeArrow (TypeVar 0) (TypeVar 1))
+              substitutions = IntMap.singleton 0 $ TypeVar 1
+              expected = TypeForall [2]
+                [HsConstraint (name "C") [TypeVar 1, TypeVar 2]]
+                (TypeArrow (TypeVar 1) (TypeVar 2))
+          applySubstsChecked substitutions source
+            @?= Right (Any True, expected)
+          applySubst (Subst 0 $ TypeVar 1) source @?= expected
+      , testCase "forall substitution protects shadowed keys" $ do
           let ty = TypeForall [0]
                 [HsConstraint (name "C") [TypeVar 0, TypeVar 1]]
                 (TypeVar 0)
@@ -935,6 +946,32 @@ tests = testGroup "Exference"
           actual @?= TypeForall [0]
             [HsConstraint (name "C") [TypeVar 0, replacement]]
             (TypeVar 0)
+      , testCase "substitution freshens every same-name binder in a chain" $ do
+          let source = TypeForall [1] []
+                $ TypeForall [1] [] $ TypeVar 0
+              expected = TypeForall [2] []
+                $ TypeForall [3] [] $ TypeVar 1
+          applySubsts (IntMap.singleton 0 $ TypeVar 1) source
+            @?= (Any True, expected)
+      , testCase "substitution is simultaneous rather than recursive" $ do
+          let integer = TypeCons $ name "Int"
+              source = TypeArrow (TypeVar 0) (TypeVar 1)
+              substitutions = IntMap.fromList
+                [(0, TypeVar 1), (1, integer)]
+          applySubsts substitutions source
+            @?= (Any True, TypeArrow (TypeVar 1) integer)
+      , testCase "identity substitution retains the historical change flag" $ do
+          let source = TypeArrow (TypeVar 0) $ TypeCons $ name "Int"
+          applySubsts (IntMap.singleton 0 $ TypeVar 0) source
+            @?= (Any True, source)
+      , testCase "standalone constraint substitution also avoids capture" $ do
+          let source = HsConstraint (name "C")
+                [TypeForall [1] [] $ TypeVar 0]
+              expected = HsConstraint (name "C")
+                [TypeForall [2] [] $ TypeVar 1]
+          constraintApplySubstsChecked
+              (IntMap.singleton 0 $ TypeVar 1) source
+            @?= Right (Any True, expected)
       , testCase "forall normalization retains an unclaimed binder ID" $ do
           let source = TypeForall [7] []
                 $ TypeArrow (TypeVar 7) (TypeVar 7)
@@ -1415,6 +1452,10 @@ tests = testGroup "Exference"
       [ testCase "fresh variables cover the complete tagged Int domain" $ do
           let flexible = SharedType.FlexibleVariable
               rigid = SharedType.RigidVariable
+          -- Allocation is gap-filling, not max-plus-one. This matters after
+          -- moving the supply below both declaration and type operations.
+          freshSynthesisVariable (Set.singleton $ flexible 7) (flexible 7)
+            @?= Just (flexible 0)
           freshSynthesisVariable
               (Set.fromList [flexible maxBound, flexible minBound])
               (flexible maxBound)

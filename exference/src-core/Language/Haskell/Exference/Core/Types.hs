@@ -16,6 +16,7 @@ module Language.Haskell.Exference.Core.Types
   , fromSynthesisType
   , Subst (..)
   , Substs
+  , HsSubstitutionError (..)
   , HsTypeClass (..)
   , HsInstance (..)
   , HsConstraint
@@ -41,9 +42,12 @@ module Language.Haskell.Exference.Core.Types
   , qClassEnv_constraints
   , qClassEnv_inflatedConstraints
   , constraintApplySubsts
+  , constraintApplySubstsChecked
   , inflateHsConstraints
   , applySubst
+  , applySubstChecked
   , applySubsts
+  , applySubstsChecked
   -- , typeParser
   , containsVar
   , showVar
@@ -63,9 +67,7 @@ where
 import Data.Char ( ord, chr, toLower )
 import Data.Foldable (traverse_)
 import Data.Graph (SCC (..), stronglyConnComp)
-import Data.Maybe ( fromMaybe )
 import Data.Monoid ( Any(..) )
-import Control.Monad ( liftM2 )
 
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
@@ -73,6 +75,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as L
 
 import Language.Haskell.Exference.Core.Internal.Closure ( closure )
+import Language.Haskell.Exference.Core.Internal.VariableSupply
+  ( freshSynthesisVariable )
 import Language.Haskell.Exference.Core.Name
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
@@ -100,6 +104,20 @@ instance NFData SynthesisTypeError
 
 data Subst  = Subst {-# UNPACK #-} !TVarId !HsType
 type Substs = IntMap.IntMap HsType
+
+-- | A checked substitution can fail only when alpha-renaming exhausts
+-- Exference's finite 'Int' identity space, or if the shared substitution
+-- primitive violates the structural projection invariant used by this
+-- adapter.  The latter constructors keep such an internal defect observable
+-- instead of silently returning a captured or unsubstituted type.
+data HsSubstitutionError
+  = SharedSubstitutionFailure
+      (SharedType.SubstitutionError SynthesisVariable)
+  | SubstitutionResultTypeError SynthesisTypeError
+  | UnexpectedConstraintSubstitutionResult SynthesisType
+  deriving (Eq, Show, Generic)
+
+instance NFData HsSubstitutionError
 
 data HsType = TypeVar      {-# UNPACK #-} !TVarId
             | TypeConstant {-# UNPACK #-} !TVarId
@@ -151,7 +169,16 @@ fromSynthesisType source = do
   let canonical = SharedType.canonicalizeType source
   either (Left . InvalidSynthesisType) Right
     $ SharedType.validateType canonical
-  convert canonical
+  fromSynthesisTypeStructure canonical
+
+-- Deliberately skip validation and canonicalization here.  Substitution acts
+-- on the structural image of an existing 'HsType', which can include
+-- temporary search forms (for example a duplicate binder list) that checked
+-- public boundaries reject but legacy low-level operations must preserve.
+fromSynthesisTypeStructure
+  :: SynthesisType
+  -> Either SynthesisTypeError HsType
+fromSynthesisTypeStructure = convert
  where
   convert typeExpression = case typeExpression of
     SharedType.TypeVariable (SharedType.FlexibleVariable variable) ->
@@ -572,25 +599,35 @@ inflateInstances environment =
                 constraints
       _ -> []
 
-constraintApplySubst :: Subst -> HsConstraint -> HsConstraint
-constraintApplySubst s (HsConstraint c ps) =
-  HsConstraint c $ map (applySubst s) ps
+-- | Checked simultaneous substitution across every argument of a constraint.
+-- A structural tuple coordinates the fresh-variable reservation set across
+-- sibling arguments; it is removed again before the result is returned.
+constraintApplySubstsChecked
+  :: Substs
+  -> HsConstraint
+  -> Either HsSubstitutionError (Any, HsConstraint)
+constraintApplySubstsChecked substitutions constraint
+  | IntMap.null substitutions = Right (Any False, constraint)
+  | HsConstraint className parameters <- constraint = do
+      substituted <- substituteShared substitutions $ SharedType.TupleType
+        SharedName.Unboxed $ map toSynthesisTypeStructure parameters
+      resultParameters <- case substituted of
+        SharedType.TupleType SharedName.Unboxed results ->
+          mapM lowerSubstitutionResult results
+        unexpected -> Left $ UnexpectedConstraintSubstitutionResult unexpected
+      Right
+        ( Any $ substitutionsAffect substitutions $ foldMap freeVars parameters
+        , HsConstraint className resultParameters
+        )
 
--- returns if any change was necessary,
--- plus the (potentially changed) constraint
--- constraintApplySubst' :: Subst -> HsConstraint -> (Bool, HsConstraint)
--- constraintApplySubst' s (HsConstraint c ps) =
---   let applied = map (applySubst' s) ps
---   in (any fst applied, HsConstraint c $ snd <$> applied)
-
--- returns if any change was necessary,
--- plus the (potentially changed) constraint
+-- | Compatibility wrapper around 'constraintApplySubstsChecked'.  It throws a
+-- descriptive exception only if capture avoidance would require a fresh
+-- variable after every 'Int' identity has been reserved, or if an internal
+-- shared/core projection invariant is broken.
 {-# INLINE constraintApplySubsts #-}
 constraintApplySubsts :: Substs -> HsConstraint -> (Any, HsConstraint)
-constraintApplySubsts ss c
-  | IntMap.null ss = return c
-  | HsConstraint cl ps <- c =
-    HsConstraint cl <$> mapM (applySubsts ss) ps
+constraintApplySubsts substitutions = checkedSubstitution
+  "constraintApplySubsts" . constraintApplySubstsChecked substitutions
 
 showVar :: TVarId -> String
 showVar 0 = "v0"
@@ -622,29 +659,85 @@ preferredVarName i = h
   h (TypeApp t _)      = h t
   h (TypeForall _ _ t) = h t
 
-applySubst :: Subst -> HsType -> HsType
-applySubst (Subst i t) v@(TypeVar j) = if i==j then t else v
-applySubst _ c@(TypeConstant _) = c
-applySubst _ c@(TypeCons _)     = c
-applySubst s (TypeArrow t1 t2)  = TypeArrow (applySubst s t1) (applySubst s t2)
-applySubst s (TypeApp t1 t2)    = TypeApp (applySubst s t1) (applySubst s t2)
-applySubst s@(Subst i _) f@(TypeForall js cs t) = if i `elem` js
-  then f
-  else TypeForall js (constraintApplySubst s <$> cs) (applySubst s t)
+-- | Capture-avoiding single-variable substitution.
+applySubstChecked
+  :: Subst
+  -> HsType
+  -> Either HsSubstitutionError HsType
+applySubstChecked (Subst variable replacement) source = snd
+  <$> applySubstsChecked (IntMap.singleton variable replacement) source
 
+-- | Compatibility wrapper around 'applySubstChecked'; see 'applySubsts' for
+-- the exceptional finite-namespace invariant.
+applySubst :: Subst -> HsType -> HsType
+applySubst substitution = checkedSubstitution "applySubst"
+  . applySubstChecked substitution
+
+-- | Simultaneously substitute free flexible variables, alpha-renaming forall
+-- binders when a replacement would otherwise be captured.  The 'Any' flag
+-- retains Exference's historical operational meaning: it is true whenever a
+-- substitution key occurs free in the source, including an identity mapping.
+applySubstsChecked
+  :: Substs
+  -> HsType
+  -> Either HsSubstitutionError (Any, HsType)
+applySubstsChecked substitutions source
+  | IntMap.null substitutions = Right (Any False, source)
+  | otherwise = do
+      substituted <- substituteShared substitutions
+        $ toSynthesisTypeStructure source
+      result <- lowerSubstitutionResult substituted
+      Right
+        ( Any $ substitutionsAffect substitutions $ freeVars source
+        , result
+        )
+
+-- | Legacy total-shaped substitution API.  Capture avoidance over a finite
+-- 'Int' namespace is itself fallible: this wrapper throws a descriptive
+-- exception if every identity is reserved.  Call 'applySubstsChecked' when
+-- that theoretical exhaustion case must be represented explicitly.
 applySubsts :: Substs -> HsType -> (Any, HsType)
-applySubsts s v@(TypeVar i)      = fromMaybe (return v)
-                                  $ (,) (Any True) <$> IntMap.lookup i s
-applySubsts _ c@(TypeConstant _) = return c
-applySubsts _ c@(TypeCons _)     = return c
-applySubsts s (TypeArrow t1 t2)  = liftM2 TypeArrow (applySubsts s t1) (applySubsts s t2)
-applySubsts s (TypeApp t1 t2)    = liftM2 TypeApp   (applySubsts s t1) (applySubsts s t2)
-applySubsts s (TypeForall js cs t) = liftM2 (TypeForall js)
-  (sequence $ constraintApplySubsts unbound <$> cs)
-  (applySubsts unbound t)
-  where
-    -- Bound variables are protected in both the context and the body.
-    unbound = foldr IntMap.delete s js
+applySubsts substitutions = checkedSubstitution "applySubsts"
+  . applySubstsChecked substitutions
+
+substituteShared
+  :: Substs
+  -> SynthesisType
+  -> Either HsSubstitutionError SynthesisType
+substituteShared substitutions source = case
+    SharedType.substituteTypeVariables
+      freshSynthesisVariable
+      S.empty
+      (M.fromList
+        [ ( SharedType.FlexibleVariable variable
+          , toSynthesisTypeStructure replacement
+          )
+        | (variable, replacement) <- IntMap.toList substitutions
+        ])
+      source of
+  Left failure -> Left $ SharedSubstitutionFailure failure
+  Right result -> Right result
+
+lowerSubstitutionResult
+  :: SynthesisType
+  -> Either HsSubstitutionError HsType
+lowerSubstitutionResult = either
+  (Left . SubstitutionResultTypeError)
+  Right
+  . fromSynthesisTypeStructure
+
+substitutionsAffect :: Substs -> S.Set TVarId -> Bool
+substitutionsAffect substitutions variables = any
+  (`S.member` variables) $ IntMap.keys substitutions
+
+checkedSubstitution :: String -> Either HsSubstitutionError result -> result
+checkedSubstitution operation = either failure id
+ where
+  failure substitutionError = error
+    $ "Language.Haskell.Exference.Core.Types."
+    ++ operation
+    ++ ": capture-avoiding substitution failed: "
+    ++ show substitutionError
 
 freeVars :: HsType -> S.Set TVarId
 freeVars (TypeVar i)         = S.singleton i

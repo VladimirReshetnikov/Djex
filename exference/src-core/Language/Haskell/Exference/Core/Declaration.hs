@@ -58,6 +58,10 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Language.Haskell.Exference.Core.FunctionBinding
+import Language.Haskell.Exference.Core.Internal.VariableSupply
+  ( freshSynthesisVariable
+  , synthesisIdentifierNamespace
+  )
 import Language.Haskell.Exference.Core.Name
 import Language.Haskell.Exference.Core.Score
   ( Penalty
@@ -152,20 +156,6 @@ data SynthesisDeclarationError
       (SharedTypeSynonym.SynonymExpansionError SynthesisVariable)
   | NeutralVariableNamespaceExhausted SynthesisVariable
   deriving (Eq, Show)
-
--- | Allocate in Exference's complete finite identifier domain without using
--- arithmetic on a caller-provided endpoint. The flexible and rigid tags are
--- independent identity spaces in the shared IR, so preserve the old tag and
--- search all non-negative IDs before the negative half of 'Int'.
-freshSynthesisVariable
-  :: SharedTypeSynonym.FreshVariable SynthesisVariable
-freshSynthesisVariable reserved old = case old of
-  SharedType.FlexibleVariable _ ->
-    SharedType.FlexibleVariable <$> available SharedType.FlexibleVariable
-  SharedType.RigidVariable _ ->
-    SharedType.RigidVariable <$> available SharedType.RigidVariable
- where
-  available tag = find ((`Set.notMember` reserved) . tag) fullIntNamespace
 
 -- | Lower an already checked neutral inventory to Exference's search
 -- dictionary. Type aliases and explicit kinds remain authoritative in that
@@ -329,12 +319,6 @@ lowerNeutralSynthesisEnvironment synonyms environment = do
       SharedDeclaration.AbstractTypeDeclaration{} -> pure
         (functions, deconstructors, classes, instances)
 
--- Use every 'Int' value exactly once. Beginning at zero preserves the core's
--- historical non-negative class-parameter invariant; the negative half keeps
--- the allocator total over the full finite identity domain without overflow.
-fullIntNamespace :: [TVarId]
-fullIntNamespace = [0 .. maxBound] ++ [minBound .. (-1)]
-
 type NeutralSynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void ()
 
@@ -381,7 +365,7 @@ normalizeDeclarationVariables declaration = case declaration of
     | variable@SharedType.FlexibleVariable{} <- declarationVariables declaration
     ]
   replacements = Map.fromList $ zip flexibleVariables
-    (map SharedType.FlexibleVariable fullIntNamespace)
+    (map SharedType.FlexibleVariable synthesisIdentifierNamespace)
 
   renameVariable variable = Map.findWithDefault variable variable replacements
   renameType = fmap renameVariable

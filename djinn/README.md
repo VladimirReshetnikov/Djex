@@ -508,8 +508,9 @@ should replace direct construction or record updates of `DjinnRequest` with a
 neutral `QueryRequest` followed by `mkDjinnRequest`, and use
 `djinnRequestQuery` when they need to inspect that original value. Sealing
 receives the request's already checked shared `DefinitionName`, checks Djinn's
-narrower class-name namespace, and caches the target spelling, lowered goal,
-and context arguments exactly once. The raw-`Name` parser helper constructs
+narrower class-name namespace, retains that target in the original
+`QueryRequest`, and caches only the lowered goal and context arguments. The
+raw-`Name` parser helper constructs
 that checked target before parsing so target diagnostics retain precedence;
 search-option validation and all environment-dependent class and kind checks
 still occur when the request is run. Here
@@ -521,9 +522,10 @@ used only behind that checked boundary: parsed raw types are projected into
 Its checked `QueryResult` carries the same shared `Candidate DjinnType`
 structure as Exference plus Djinn's
 formula/proof metadata; even the currently empty residual constraints no
-longer expose a backend type. The stable adapter rejects any mismatch between
-the raw report's logical evidence and its candidate payload before either can
-escape. The definition/expression renderers consume
+longer expose a backend type. The Core constructs this `QueryResult` directly,
+and its checked constructor rejects any mismatch between logical evidence and
+the candidate payload before either can escape. The definition/expression
+renderers consume
 canonical candidates through the shared rendering pipeline and return
 its `RenderError` directly, without conflating logical evidence with
 operational completion.

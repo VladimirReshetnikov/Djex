@@ -342,6 +342,7 @@ Library exference-core
     Language.Haskell.Exference.Core.FunctionBinding
     Language.Haskell.Exference.Core.Score
     Language.Haskell.Exference.Core.Internal.Scope
+    Language.Haskell.Exference.Core.Internal.Testing
 
   Other-Modules:
     Language.Haskell.Djex.Exference.Internal.Request
@@ -354,6 +355,7 @@ Library exference-core
     Language.Haskell.Exference.Core.Internal.ExferenceNode
     Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
     Language.Haskell.Exference.Core.Internal.Exference
+    Language.Haskell.Exference.Core.Internal.SearchControl
 
   Build-Depends:
     pqueue >= 1.3.1 && < 1.8

@@ -52,7 +52,7 @@ import Language.Haskell.Synthesis.Query (resultSearch)
 import Language.Haskell.Synthesis.Search
   ( ObservedProgress (..)
   , Progress
-  , TruncationReason (StepLimitReached)
+  , TruncationReason (IdentifierSpaceExhausted, StepLimitReached)
   , batchCandidates
   , batchProgress
   , observeProgress
@@ -343,6 +343,8 @@ noResultsMessage progress = case observeProgress progress of
   ObservedTruncated reasons
     | StepLimitReached `elem` NonEmpty.toList reasons ->
         "[no results found before the step limit; inhabitation is undecided]"
+    | IdentifierSpaceExhausted `elem` NonEmpty.toList reasons ->
+        "[no results found before an internal identifier-space limit; inhabitation is undecided]"
     | otherwise ->
         "[no results found after pruning; inhabitation is undecided]"
   ObservedContinuing ->

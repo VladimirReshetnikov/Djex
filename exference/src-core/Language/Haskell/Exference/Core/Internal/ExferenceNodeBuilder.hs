@@ -9,30 +9,43 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 where
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  (FlexibleRenaming)
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
+import Language.Haskell.Exference.Core.Internal.SearchControl
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
-import Control.Monad.Trans.State.Lazy (StateT, gets, modify, state)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Lazy (StateT, gets, modify)
 import qualified Data.IntMap.Strict as IntMap
 
 -- Allocate an expression hole without treating it as a variable introduced
 -- into scope. The returned identifier is the value before the increment.
-builderAllocHole :: Monad m => StateT SearchNode m TVarId
-builderAllocHole = state $ \node ->
-  let vid = nodeNextVarId node
-  in (vid, node { nodeNextVarId = vid + 1 })
+builderAllocHole
+  :: SearchAllocators
+  -> StateT SearchNode SearchBranches TVarId
+builderAllocHole = builderAllocTermIdentifier
 
 -- Allocate a variable whose usage must be tracked by the search heuristic.
-builderAllocVar :: Monad m => StateT SearchNode m TVarId
-builderAllocVar = state $ \node ->
-  let vid = nodeNextVarId node
-  in
-  ( vid
-  , node
-      { nodeNextVarId = vid + 1
-      , nodeVarUses = IntMap.insert vid 0 (nodeVarUses node)
-      }
-  )
+builderAllocVar
+  :: SearchAllocators
+  -> StateT SearchNode SearchBranches TVarId
+builderAllocVar allocators = do
+  identifier <- builderAllocTermIdentifier allocators
+  modify $ \node -> node
+    { nodeVarUses = IntMap.insert identifier 0 $ nodeVarUses node }
+  pure identifier
+
+builderAllocTermIdentifier
+  :: SearchAllocators
+  -> StateT SearchNode SearchBranches TVarId
+builderAllocTermIdentifier allocators = do
+  next <- gets nodeNextVarId
+  case searchAllocateTermIdentifier allocators next of
+    Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
+    Just (identifier, following) -> do
+      modify $ \node -> node {nodeNextVarId = following}
+      pure identifier
 
 builderRecordVarUse :: Monad m => TVarId -> StateT SearchNode m ()
 builderRecordVarUse vid = do
@@ -47,23 +60,31 @@ builderRecordVarUse vid = do
 -- | Allocate one injective spelling for every ID in a source polymorphic
 -- namespace and reserve the complete namespace in this search branch.
 builderFreshenTVarNamespace
-  :: Monad m
-  => [TVarId]
-  -> StateT SearchNode m FlexibleRenaming
-builderFreshenTVarNamespace identifiers = state $ \node ->
-  case allocateNamespace identifiers $ nodeFlexibleIds node of
-    Just (renaming, supply) ->
-      (renaming, node {nodeFlexibleIds = supply})
-    Nothing -> error
-      "Exference exhausted the finite flexible-variable identifier supply"
+  :: SearchAllocators
+  -> [TVarId]
+  -> StateT SearchNode SearchBranches FlexibleRenaming
+builderFreshenTVarNamespace allocators identifiers = do
+  supply <- gets nodeFlexibleIds
+  case searchAllocateFlexibleNamespace allocators identifiers supply of
+    Just (renaming, nextSupply) ->
+      modify (\node -> node {nodeFlexibleIds = nextSupply}) >> pure renaming
+    Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
 
 -- Take the current scope, add a child scope, and return its identifier.
-builderAddScope :: Monad m => ScopeId -> StateT SearchNode m ScopeId
-builderAddScope parentId = do
+builderAddScope
+  :: SearchAllocators
+  -> ScopeId
+  -> StateT SearchNode SearchBranches ScopeId
+builderAddScope allocators parentId = do
   scopes <- gets nodeProvidedScopes
-  let (newId, newScopes) = addScope parentId scopes
-  modify $ \node -> node { nodeProvidedScopes = newScopes }
-  pure newId
+  case searchAddScope allocators parentId scopes of
+    Left (Scope.ScopeIdCollision _) ->
+      lift $ truncateBranch BranchIdentifierSpaceExhausted
+    Left failure -> error
+      $ "Exference internal scope invariant violated: " ++ show failure
+    Right (newId, newScopes) -> do
+      modify $ \node -> node {nodeProvidedScopes = newScopes}
+      pure newId
 
 -- Apply substitutions to goals and scopes. Constraint goals are handled by
 -- the caller because their admissibility depends on the search branch.

@@ -29,6 +29,10 @@ data TruncationReason
   = StepLimitReached
   | ChoicePointLimitReached
   | CandidateLimitReached
+  | IdentifierSpaceExhausted
+    -- ^ A finite internal identifier namespace could not safely represent an
+    -- unexplored branch.  This is an operational resource limit, not evidence
+    -- that the requested type is uninhabited.
   | QueueLimitPruned Natural
   | DepthLimitPruned Natural
   deriving (Eq, Ord, Show, Generic)

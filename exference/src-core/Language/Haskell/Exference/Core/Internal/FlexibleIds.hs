@@ -12,6 +12,7 @@ module Language.Haskell.Exference.Core.Internal.FlexibleIds
   , FlexibleRenaming
   , supplyFromIdentifiers
   , supplyFromIdentifierSet
+  , identifierSupplySize
   , reserveIdentifiers
   , allocateFreshIdentifier
   , allocateFreshNonNegativeIdentifier
@@ -29,6 +30,7 @@ import Control.Monad (foldM, guard)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Types
 
@@ -54,6 +56,13 @@ supplyFromIdentifiers = IdentifierSupply . foldr IntSet.insert IntSet.empty
 -- allocation logarithmic instead of repeatedly traversing the whole scope.
 supplyFromIdentifierSet :: IntSet.IntSet -> IdentifierSupply
 supplyFromIdentifierSet = IdentifierSupply
+
+-- | Number of currently reserved spellings.  Production allocation needs
+-- only membership; this observation supports a small finite-capacity test
+-- allocator without exposing the supply representation.
+identifierSupplySize :: IdentifierSupply -> Natural
+identifierSupplySize (IdentifierSupply identifiers) =
+  fromIntegral $ IntSet.size identifiers
 
 reserveIdentifiers
   :: Foldable collection

@@ -17,7 +17,6 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   , goalApplySubst
   , scopesApplySubsts
   , mkGoals
-  , addScope
   , scopeGetAllBindings
   , scopesAddPBinding
   , splitBinding
@@ -101,9 +100,6 @@ scopesAddBinding sid binding scopes =
 scopesAddPBinding :: ScopeId -> VarPBinding -> Scopes -> Scopes
 scopesAddPBinding sid binding =
   requireValidScopes . Scope.scopesAddBinding sid binding
-
-addScope :: ScopeId -> Scopes -> (ScopeId, Scopes)
-addScope parent = requireValidScopes . Scope.addScope parent
 
 requireValidScopes :: Either Scope.ScopeInvariantError a -> a
 requireValidScopes = either

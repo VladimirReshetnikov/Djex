@@ -29,6 +29,7 @@ import qualified Language.Haskell.Exts.SrcLoc as HSE
 import Language.Haskell.Exference.Core
   ( ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
+  , ExferenceGeneratedSearchBatch
   , ExferenceCandidateDetails (..)
   , ExferenceCandidateError (..)
   , ExferenceEnvironment
@@ -79,6 +80,11 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   )
 import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
+import Language.Haskell.Exference.Core.Internal.Testing
+  ( IdentifierCapacities (..)
+  , findExpressionsWithIdentifierCapacitiesEither
+  , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
+  )
 import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify
@@ -2487,6 +2493,82 @@ tests = testGroup "Exference"
           toSearchProgress (chunkStatus chunk) @?= Right
             (SharedSearch.Completed $ SharedSearch.truncated
               SharedSearch.StepLimitReached)
+      , testCase "term identifier exhaustion truncates instead of colliding" $ do
+          chunk <- lastCapacityChunk
+            (IdentifierCapacities 0 100 100) identityInput
+          chunkStatus chunk @?=
+            SearchStatus SearchIdentifierSpaceExhausted 0 0
+          assertBool "an exhausted term-ID branch produced a candidate"
+            $ null $ chunkElements chunk
+      , testCase "identifier truncation survives a successful sibling" $ do
+          let integer = TypeCons $ name "Int"
+              polymorphic = FunctionBinding
+                (TypeVar 0) (name "polymorphic") 0 [] []
+              constant = FunctionBinding
+                integer (name "constant") 0 [] []
+              input = identityInput
+                { input_goalType = integer
+                , input_envFuncs = [polymorphic, constant]
+                }
+              capacities = IdentifierCapacities 100 0 100
+          chunk <- lastCapacityChunk capacities input
+          searchCompletion (chunkStatus chunk) @?=
+            SearchIdentifierSpaceExhausted
+          assertBool "a viable sibling was suppressed by identifier exhaustion"
+            $ not $ null $ chunkElements chunk
+          batch <- lastCapacityBatch capacities input
+          SharedSearch.batchProgress batch @?= SharedSearch.Completed
+            (SharedSearch.Truncated
+              $ SharedSearch.IdentifierSpaceExhausted :| [])
+      , testCase "deconstructor namespace exhaustion retains fallback work" $ do
+          let integer = TypeCons $ name "Int"
+              box argument = TypeApp (TypeCons $ name "Box") argument
+              deconstructor = DeconstructorBinding
+                (box $ TypeVar 0)
+                [ConstructorBinding (name "Box") [TypeVar 0]]
+                False
+              constant = FunctionBinding
+                integer (name "constant") 0 [] []
+              input = identityInput
+                { input_goalType = TypeArrow (box integer) integer
+                , input_envFuncs = [constant]
+                , input_envDeconsS = [deconstructor]
+                , input_allowUnused = True
+                }
+          chunk <- lastCapacityChunk
+            (IdentifierCapacities 100 0 100) input
+          searchCompletion (chunkStatus chunk) @?=
+            SearchIdentifierSpaceExhausted
+          assertBool "deconstructor exhaustion suppressed fallback search"
+            $ not $ null $ chunkElements chunk
+      , testCase "scope identifier collisions are operational truncations" $ do
+          chunk <- lastCapacityChunk
+            (IdentifierCapacities 100 100 1) identityInput
+          chunkStatus chunk @?=
+            SearchStatus SearchIdentifierSpaceExhausted 0 0
+      , testCase "exact progress retains simultaneous step and ID limits" $ do
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              polymorphic = FunctionBinding
+                (TypeVar 0) (name "polymorphic") 0 [] []
+              deferred = FunctionBinding
+                boolean (name "deferred") 0 [] [integer]
+              input = identityInput
+                { input_goalType = boolean
+                , input_envFuncs = [polymorphic, deferred]
+                -- The root opens even an empty leading forall before the
+                -- binding-expansion step under test.
+                , input_maxSteps = 2
+                }
+              capacities = IdentifierCapacities 100 0 100
+          chunk <- lastCapacityChunk capacities input
+          searchCompletion (chunkStatus chunk) @?=
+            SearchIdentifierSpaceExhausted
+          batch <- lastCapacityBatch capacities input
+          SharedSearch.batchProgress batch @?= SharedSearch.Completed
+            (SharedSearch.Truncated
+              $ SharedSearch.StepLimitReached
+                :| [SharedSearch.IdentifierSpaceExhausted])
       , testCase "candidate statistics count completed search steps" $ do
           chunk <- lastChunk identityInput
           let candidateSteps =
@@ -2660,6 +2742,13 @@ tests = testGroup "Exference"
             result -> fail $ "expected two identity candidates, got "
               ++ show result
       , testCase "malformed compatibility statuses are rejected" $ do
+          toSearchProgress
+              (SearchStatus SearchIdentifierSpaceExhausted 2 3) @?=
+            Right (SharedSearch.Completed $ SharedSearch.Truncated
+              $ SharedSearch.IdentifierSpaceExhausted
+                :| [ SharedSearch.QueueLimitPruned 2
+                   , SharedSearch.DepthLimitPruned 3
+                   ])
           toSearchProgress (SearchStatus SearchPruned 0 0) @?=
             Left PrunedWithoutDiscardedNodes
           toSearchProgress (SearchStatus SearchExhausted 1 0) @?=
@@ -5312,6 +5401,32 @@ lastChunk input = case findExpressionsWithStats input of
  where
   go latest [] = latest
   go _ (next : rest) = go next rest
+
+lastCapacityChunk
+  :: IdentifierCapacities
+  -> ExferenceInput
+  -> IO ExferenceChunkElement
+lastCapacityChunk capacities input = do
+  chunks <- expectRight
+    $ findExpressionsWithIdentifierCapacitiesEither capacities input
+  case chunks of
+    [] -> fail "expected at least one capacity-limited search chunk"
+    chunk : remaining -> pure $ lastElement chunk remaining
+
+lastCapacityBatch
+  :: IdentifierCapacities
+  -> ExferenceInput
+  -> IO ExferenceGeneratedSearchBatch
+lastCapacityBatch capacities input = do
+  batches <- expectRight
+    $ findGeneratedSearchBatchesWithIdentifierCapacitiesEither capacities input
+  case batches of
+    [] -> fail "expected at least one capacity-limited search batch"
+    batch : remaining -> pure $ lastElement batch remaining
+
+lastElement :: value -> [value] -> value
+lastElement latest [] = latest
+lastElement _ (next : remaining) = lastElement next remaining
 
 expectRight :: Show problem => Either problem result -> IO result
 expectRight = either (fail . show) pure

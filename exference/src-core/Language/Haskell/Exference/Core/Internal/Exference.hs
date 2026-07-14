@@ -4,7 +4,9 @@
 
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
+  , findExpressionsWithAllocators
   , findGeneratedSearchBatches
+  , findGeneratedSearchBatchesWithAllocators
   , prepareExferenceInput
   , prepareExferenceQuery
   , ExferenceHeuristicsConfig (..)
@@ -53,6 +55,7 @@ import Language.Haskell.Exference.Core.Internal.Unify
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
+import Language.Haskell.Exference.Core.Internal.SearchControl
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
@@ -64,17 +67,17 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 
-import Data.Maybe ( maybeToList, fromMaybe, listToMaybe )
-import Control.Monad ( mzero, replicateM, forM, liftM )
+import Data.Maybe ( maybeToList, listToMaybe )
+import Control.Monad ( mzero, replicateM, forM )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, unfoldr )
 import Data.Monoid ( Any(..) )
-import Data.Foldable ( asum, traverse_ )
+import Data.Foldable ( traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Control.Monad.Trans.Class ( lift )
 import Control.Monad.Trans.State.Lazy
   ( StateT(..), gets, modify, state
-  , execStateT, runStateT, mapStateT
+  , execStateT, runStateT
   )
 
 data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
@@ -199,6 +202,10 @@ data SearchCompletion
   | SearchPruned
     -- ^ No retained nodes remain, but queue or depth bounds discarded nodes;
     -- absence of an answer is therefore not a non-inhabitation result.
+  | SearchIdentifierSpaceExhausted
+    -- ^ One or more branches could not be represented in a finite internal
+    -- identifier namespace, so exhaustion of the retained queue is not
+    -- conclusive.
   deriving (Eq, Show)
 
 data SearchStatus = SearchStatus
@@ -238,6 +245,9 @@ toSearchProgress (SearchStatus completion queuePruned depthPruned)
         reason : remaining -> Right $ SharedSearch.Completed
           $ SharedSearch.Truncated $ reason :| remaining
         [] -> Left PrunedWithoutDiscardedNodes
+      SearchIdentifierSpaceExhausted -> Right $ SharedSearch.Completed
+        $ SharedSearch.Truncated
+        $ SharedSearch.IdentifierSpaceExhausted :| pruningReasons
  where
   pruningReasons =
     [ SharedSearch.QueueLimitPruned $ fromIntegral queuePruned
@@ -316,6 +326,7 @@ data FindExpressionsState = FindExpressionsState
   { findSteps :: Int -- number of steps already performed
   , findQueuePruned :: Int
   , findDepthPruned :: Int
+  , findIdentifierSpaceExhausted :: Bool
   , findBindingUsages :: BindingUsages
   , findQueue :: RatedNodes
   }
@@ -357,10 +368,11 @@ recordBindingUsage node searchState = case nodeLastStepBinding node of
 --   - call stateStep repeatedly
 --   - convert stuff
 --   - consider some special abort conditions
-findEngineChunks
-  :: CheckedExferenceQuery
+findEngineChunksWith
+  :: SearchAllocators
+  -> CheckedExferenceQuery
   -> [EngineChunk]
-findEngineChunks
+findEngineChunksWith allocators
     (CheckedExferenceQuery
       (ExferenceEnvironment EnvDictionary
       { environmentFunctions = allFunctions
@@ -393,6 +405,7 @@ findEngineChunks
     { findSteps = 0
     , findQueuePruned = 0
     , findDepthPruned = 0
+    , findIdentifierSpaceExhausted = False
     , findBindingUsages = M.empty
     , findQueue = Q.singleton 0 rootSearchNode
     }
@@ -454,34 +467,40 @@ findEngineChunks
       n' = findSteps searchState
       totalQueuePruned = findQueuePruned searchState
       totalDepthPruned = findDepthPruned searchState
+      identifierSpaceExhausted = findIdentifierSpaceExhausted searchState
       newBindingUsages = findBindingUsages searchState
       newNodes = findQueue searchState
       (compatibilityCompletion, progress)
         | Q.null newNodes
-        , Just reasons <- pruningReasons =
-            (SearchPruned, SharedSearch.Completed
-              $ SharedSearch.Truncated reasons)
+        , reason : remaining <- truncationReasons =
+            ( identifierCompletion SearchPruned
+            , SharedSearch.Completed $ SharedSearch.Truncated
+                $ reason :| remaining
+            )
         | Q.null newNodes =
             (SearchExhausted, SharedSearch.Completed SharedSearch.Finished)
         | n' >= maxSteps =
-            ( SearchStepLimitReached
+            ( identifierCompletion SearchStepLimitReached
             , SharedSearch.Completed $ SharedSearch.Truncated
-                $ SharedSearch.StepLimitReached :| maybe [] nonEmptyReasons
-                    pruningReasons
+                $ SharedSearch.StepLimitReached :| truncationReasons
             )
         | otherwise = (SearchRunning, SharedSearch.Continuing)
-      pruningReasons = case
-          (totalQueuePruned > 0, totalDepthPruned > 0) of
-        (True, True) -> Just
-          ( SharedSearch.QueueLimitPruned (fromIntegral totalQueuePruned)
-          :| [SharedSearch.DepthLimitPruned $ fromIntegral totalDepthPruned]
-          )
-        (True, False) -> Just
-          (SharedSearch.QueueLimitPruned (fromIntegral totalQueuePruned) :| [])
-        (False, True) -> Just
-          (SharedSearch.DepthLimitPruned (fromIntegral totalDepthPruned) :| [])
-        (False, False) -> Nothing
-      nonEmptyReasons (reason :| remaining) = reason : remaining
+      -- The compatibility enum has one primary completion cause. Prefer the
+      -- novel identifier limit so it can never project as conclusive; the
+      -- private shared progress above still retains a simultaneous step limit.
+      identifierCompletion fallback
+        | identifierSpaceExhausted = SearchIdentifierSpaceExhausted
+        | otherwise = fallback
+      truncationReasons =
+        [ SharedSearch.IdentifierSpaceExhausted
+        | identifierSpaceExhausted
+        ] ++
+        [ SharedSearch.QueueLimitPruned $ fromIntegral totalQueuePruned
+        | totalQueuePruned > 0
+        ] ++
+        [ SharedSearch.DepthLimitPruned $ fromIntegral totalDepthPruned
+        | totalDepthPruned > 0
+        ]
       -- Validate the exact tree returned to callers.  This used to check the
       -- raw search result and let the CLI rewrite it afterwards, so a
       -- simplifier bug could invalidate an already-approved candidate.  The
@@ -514,10 +533,13 @@ findEngineChunks
       -- when the caller explicitly requested constrained results.
       relaxConstraints = constraintsRelaxedAtStep
         allowConstraints allowConstraintsStopStep n'
-      rNodes = (`execStateT` s)
-        $ stateStep multiPM
+      stepResults = runSearchBranches $ (`execStateT` s)
+        $ stateStep allocators
+                    multiPM
                     relaxConstraints
                     heuristics
+      (rNodes, stepIdentifierSpaceExhausted) =
+        foldr collectStepResult ([], False) stepResults
       (withinDepth, tooDeep) = partition depthAllowed rNodes
       (potentialSolutions, futures) = partition
         (Seq.null . nodeGoals) withinDepth
@@ -533,12 +555,19 @@ findEngineChunks
                                  in 1 + 2*k**3 - 3*k**2
         ]
       depthAllowed node = maybe True (nodeDepth node <=) maxDepth
+      collectStepResult result (nodes, exhausted) = case result of
+        Right node -> (node : nodes, exhausted)
+        Left BranchIdentifierSpaceExhausted -> (nodes, True)
     -- Account for generated branches rather than only nodes eventually popped
     -- from the queue.  This includes applications that immediately solve the
     -- current goal and branches discarded by the configured bounds.
     traverse_ (modify . recordBindingUsage) rNodes
     modify $ \current -> current
-      { findDepthPruned = findDepthPruned current + length tooDeep }
+      { findDepthPruned = findDepthPruned current + length tooDeep
+      , findIdentifierSpaceExhausted =
+          findIdentifierSpaceExhausted current
+            || stepIdentifierSpaceExhausted
+      }
     queued <- gets findQueue
     let combined = Q.union queued (Q.fromList ratedNew)
         (retained, queueDiscarded) = limitQueue maxQueueSize combined
@@ -550,7 +579,14 @@ findEngineChunks
 
 -- | Historical status-bearing view of an already checked engine trace.
 findExpressions :: CheckedExferenceQuery -> [ExferenceChunkElement]
-findExpressions = map projectCompatibilityChunk . findEngineChunks
+findExpressions = findExpressionsWithAllocators defaultSearchAllocators
+
+findExpressionsWithAllocators
+  :: SearchAllocators
+  -> CheckedExferenceQuery
+  -> [ExferenceChunkElement]
+findExpressionsWithAllocators allocators' =
+  map projectCompatibilityChunk . findEngineChunksWith allocators'
 
 projectCompatibilityChunk :: EngineChunk -> ExferenceChunkElement
 projectCompatibilityChunk chunk = ExferenceChunkElement
@@ -566,8 +602,16 @@ findGeneratedSearchBatches
   :: ExferenceTypeVariableHints
   -> CheckedExferenceQuery
   -> [ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatches typeHints =
-  map (projectGeneratedBatch typeHints) . findEngineChunks
+findGeneratedSearchBatches =
+  findGeneratedSearchBatchesWithAllocators defaultSearchAllocators
+
+findGeneratedSearchBatchesWithAllocators
+  :: SearchAllocators
+  -> ExferenceTypeVariableHints
+  -> CheckedExferenceQuery
+  -> [ExferenceGeneratedSearchBatch]
+findGeneratedSearchBatchesWithAllocators allocators' typeHints =
+  map (projectGeneratedBatch typeHints) . findEngineChunksWith allocators'
 
 -- | Propagate frontend spellings through the exact rigid-variable plan of a
 -- checked query. Validation happens first so this helper preserves the same
@@ -1049,35 +1093,39 @@ getUnusedVarCount = length . filter (== 0) . IntMap.elems . nodeVarUses
 -- Basic implementation idea:
 -- Take the first goal for this SearchNode. Its type determines what the next
 -- step is (and which sub-function to use).
-stateStep :: Bool
+stateStep :: SearchAllocators
+          -> Bool
           -> Bool
           -> ExferenceHeuristicsConfig
-          -> StateT SearchNode [] ()
-stateStep multiPM allowConstrs h = do
+          -> StateT SearchNode SearchBranches ()
+stateStep allocators multiPM allowConstrs h = do
   -- This paragraph is evil, and hopefully temporary. (Scoping issues make it necessary.)
   contxt <- gets nodeQueryClassEnv
   constraintGoals' <- gets nodeConstraintGoals
 
-  (TGoal (VarBinding var goalType) scopeId Seq.:< remainingGoals) <-
-    gets $ Seq.viewl . nodeGoals
+  goalView <- gets $ Seq.viewl . nodeGoals
+  let (var, goalType, scopeId, remainingGoals) = case goalView of
+        TGoal (VarBinding goalVariable goal) currentScope Seq.:< remaining ->
+          (goalVariable, goal, currentScope, remaining)
+        Seq.EmptyL -> error
+          "Exference internal search invariant violated: scheduled solved node"
   modify $ \node -> node { nodeGoals = remainingGoals }
 
   let
     -- if type is TypeArrow, transform to lambda expression.
     arrowStep
-      :: Monad m
-      => HsType
+      :: HsType
       -> [VarBinding]
-      -> StateT SearchNode m ()
+      -> StateT SearchNode SearchBranches ()
     arrowStep g ts
       -- descend until no more TypeArrows, accumulating what is seen.
       | TypeArrow t1 t2 <- g = do
-          nextId <- builderAllocVar
+          nextId <- builderAllocVar allocators
           arrowStep t2 (VarBinding nextId t1 : ts)
       -- finally, do the goal/expression transformation.
       | otherwise = do
-          nextId <- builderAllocHole
-          newScopeId <- builderAddScope scopeId
+          nextId <- builderAllocHole allocators
+          newScopeId <- builderAddScope allocators scopeId
           modify $ \node -> node
             { nodeExpression = fillExprHole var
                 (foldl (\e (VarBinding v ty) -> ExpLambda v ty e)
@@ -1091,7 +1139,8 @@ stateStep multiPM allowConstrs h = do
           -- it may be possible to pattern-match. and pattern-matching
           -- may cause duplication of the goals (e.g. for the different cases
           -- in the pattern match).
-          additionalGoals <- addScopePatternMatch multiPM g nextId newScopeId
+          additionalGoals <- addScopePatternMatch
+            allocators multiPM g nextId newScopeId
             $ map splitBinding
             $ reverse ts
           modify $ \node -> node
@@ -1100,11 +1149,10 @@ stateStep multiPM allowConstrs h = do
     -- if type is TypeForall, fix the forall-variables, i.e. invent a fresh
     -- set of constants that replace the relevant forall-variables.
     forallStep
-      :: Monad m
-      => [TVarId]
+      :: [TVarId]
       -> [HsConstraint]
       -> HsType
-      -> StateT SearchNode m ()
+      -> StateT SearchNode SearchBranches ()
     forallStep vs cs t = do
       instantiations <- state $ \node ->
         let (current, remaining) = splitAt (length vs)
@@ -1134,9 +1182,9 @@ stateStep multiPM allowConstrs h = do
     -- e.g. for (\x -> (_ :: Int)), the goal can be filled by `x` if
     -- `x :: Int`.
 
-    byProvided :: StateT SearchNode [] ()
+    byProvided :: StateT SearchNode SearchBranches ()
     byProvided = do
-      provided <- lift =<< gets
+      provided <- lift . chooseBranches =<< gets
         (scopeGetAllBindings scopeId . nodeProvidedScopes)
       let
         provId = varPVariable provided
@@ -1145,7 +1193,7 @@ stateStep multiPM allowConstrs h = do
         -- Scoped values are monotypes. Constraints introduced while partially
         -- applying an environment function already live on the search node.
         provConstrs = S.toList $ qClassEnv_constraints contxt
-      mapStateT maybeToList $ byGenericUnify
+      byGenericUnify
         (Right (provId, foldr TypeArrow provType dependencies))
         provType
         provConstrs
@@ -1159,10 +1207,11 @@ stateStep multiPM allowConstrs h = do
         ((\substs -> (substs, substs)) <$> unifyShared goalType provType)
 
     -- try to resolve the goal by looking at functions from the environment.
-    byFunctionSimple :: StateT SearchNode [] ()
+    byFunctionSimple :: StateT SearchNode SearchBranches ()
     byFunctionSimple = do
-      binding <- lift =<< gets nodeFunctions
-      renaming <- builderFreshenTVarNamespace $ IntSet.toAscList $ IntSet.unions
+      binding <- lift . chooseBranches =<< gets nodeFunctions
+      renaming <- builderFreshenTVarNamespace allocators
+        $ IntSet.toAscList $ IntSet.unions
         $ flexibleIdentifiers (functionResult binding)
         : ( map flexibleIdentifiers (functionParameters binding)
           ++ map constraintFlexibleIdentifiers (functionConstraints binding)
@@ -1170,7 +1219,7 @@ stateStep multiPM allowConstrs h = do
       let
         rename = renameFlexibleType renaming
         provType = rename $ functionResult binding
-      mapStateT maybeToList $ byGenericUnify
+      byGenericUnify
         (Left $ functionName binding)
         provType
         (map (renameFlexibleConstraint renaming) $ functionConstraints binding)
@@ -1187,7 +1236,7 @@ stateStep multiPM allowConstrs h = do
                    -> Penalty
                    -> Penalty
                    -> Maybe (Substs, Substs)
-                   -> StateT SearchNode Maybe ()
+                   -> StateT SearchNode SearchBranches ()
     byGenericUnify applier
                    provided
                    provConstrs
@@ -1201,12 +1250,12 @@ stateStep multiPM allowConstrs h = do
         Right variable -> (Nothing, Just variable)
       coreExp = either ExpName (uncurry ExpVar) applier
 
-      noUnify :: StateT SearchNode Maybe ()
+      noUnify :: StateT SearchNode SearchBranches ()
       noUnify = case dependencies of
         [] -> mzero -- we can't (randomly) partially apply a non-function
         (d:ds) -> do
-          vResult <- builderAllocVar
-          vParam <- builderAllocHole
+          vResult <- builderAllocVar allocators
+          vParam <- builderAllocHole allocators
           modify $ \node -> node
             { nodeExpression = fillExprHole var (ExpLet
                 vResult
@@ -1217,7 +1266,7 @@ stateStep multiPM allowConstrs h = do
             , nodeGoals = TGoal (VarBinding vParam d) scopeId
                 Seq.<| nodeGoals node
             }
-          newScopeId <- builderAddScope scopeId
+          newScopeId <- builderAddScope allocators scopeId
           modify $ \node -> node
             { nodeConstraintGoals = nodeConstraintGoals node <> provConstrs
             , nodeDepth = addScore (nodeDepth node) depthModNoMatch
@@ -1225,6 +1274,7 @@ stateStep multiPM allowConstrs h = do
             }
           traverse_ (builderRecordVarUse . fst) applierVariable
           additionalGoals <- addScopePatternMatch
+            allocators
             multiPM
             goalType
             var
@@ -1233,7 +1283,7 @@ stateStep multiPM allowConstrs h = do
           modify $ \node -> node
             { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
 
-      byUnified :: Substs -> Substs -> StateT SearchNode Maybe ()
+      byUnified :: Substs -> Substs -> StateT SearchNode SearchBranches ()
       byUnified goalSS provSS = do
         let allSS = IntMap.union goalSS provSS
             substs = case applier of
@@ -1243,13 +1293,13 @@ stateStep multiPM allowConstrs h = do
                                         constraintGoals'
             constrs2 = map (snd . constraintApplySubsts provSS)
               provConstrs
-        newConstraints <- lift $ if allowConstrs
+        newConstraints <- lift $ maybeBranch $ if allowConstrs
           then Just $ constrs1 ++ constrs2
           else if getAny applied1
             then                   isPossible contxt (constrs1 ++ constrs2)
             else (constrs1 ++) <$> isPossible contxt constrs2
         let paramN = length dependencies
-        vars <- replicateM paramN builderAllocHole
+        vars <- replicateM paramN $ builderAllocHole allocators
         let newGoals = mkGoals scopeId $ zipWith VarBinding vars dependencies
             applyProviderSubstitution = case applier of
               Left _ -> goalApplySubst provSS
@@ -1282,15 +1332,15 @@ stateStep multiPM allowConstrs h = do
 -- TGoals are duplicated when the pattern-matching involves more than one case,
 -- as the goals for different cases are distinct because their scopes are
 -- modified when new bindings are added by the pattern-matching.
-addScopePatternMatch :: Monad m
-                     => Bool -- should p-m on anything but newtypes?
+addScopePatternMatch :: SearchAllocators
+                     -> Bool -- should p-m on anything but newtypes?
                      -> HsType -- the current goal (should be returned in one
                                --  form or another)
                      -> Int    -- goal id (hole id)
                      -> ScopeId -- scope for this goal
                      -> [VarPBinding]
-                     -> StateT SearchNode m [TGoal]
-addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
+                     -> StateT SearchNode SearchBranches [TGoal]
+addScopePatternMatch allocators multiPM goalType vid sid bindings = case bindings of
   [] -> return [TGoal (VarBinding vid goalType) sid]
   (b : bindingRest) -> do
     let v = varPVariable b
@@ -1300,7 +1350,8 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
     modify $ \node -> node
       { nodeProvidedScopes = scopesAddPBinding sid b
           $ nodeProvidedScopes node }
-    let defaultHandleRest = addScopePatternMatch multiPM goalType vid sid bindingRest
+    let defaultHandleRest = addScopePatternMatch
+          allocators multiPM goalType vid sid bindingRest
     case vtResult of
       TypeVar {}    -> defaultHandleRest -- dont pattern-match on variables, even if it unifies
       TypeArrow {}  ->
@@ -1311,80 +1362,119 @@ addScopePatternMatch multiPM goalType vid sid bindings = case bindings of
       _ | not $ null vtParams -> defaultHandleRest
         | otherwise -> do
             supply <- gets nodeFlexibleIds
-            fromMaybe defaultHandleRest . asum . map (mapFunc supply)
-              =<< gets nodeDeconstructors
+            selectDeconstructor supply =<< gets nodeDeconstructors
          where
+          -- Preserve the historical first-applicable deconstructor policy.
+          -- An unrepresentable namespace is different from a non-match: emit
+          -- a truncation event, then keep looking so viable sibling work is
+          -- not suppressed by this failed branch.
+          selectDeconstructor _ [] = defaultHandleRest
+          selectDeconstructor supply (deconstructor : remaining) =
+            case mapFunc supply deconstructor of
+              Left truncation ->
+                (lift $ truncateBranch truncation)
+                  <|> selectDeconstructor supply remaining
+              Right Nothing -> selectDeconstructor supply remaining
+              Right (Just action) -> action
+
           mapFunc
-            :: Monad m
-            => FlexibleIdSupply
+            :: FlexibleIdSupply
             -> DeconstructorBinding
-            -> Maybe (StateT SearchNode m [TGoal])
+            -> Either
+                BranchTruncation
+                (Maybe (StateT SearchNode SearchBranches [TGoal]))
           mapFunc supply deconstructor@(DeconstructorBinding matchParam
-                    [ConstructorBinding matchId matchRs] False) = let
-            (renaming, nextSupply) = freshenDeconstructor supply deconstructor
-            resultTypes = map (renameFlexibleType renaming) matchRs
-            unifyResult = unifyRight vtResult
-              $ renameFlexibleType renaming matchParam
-            mapFunc1 substs = do -- m
-              modify $ \node -> node {nodeFlexibleIds = nextSupply}
-              vars <- replicateM (length matchRs) builderAllocVar
-              builderRecordVarUse v
-              let newProvTypes = map (snd . applySubsts substs) resultTypes
-                  newBinds = zipWith (\x y -> splitBinding (VarBinding x y))
-                                     vars
-                                     newProvTypes
-                  expr = ExpLetMatch matchId
-                                     (zip vars newProvTypes)
-                                     expVar
-                                     (ExpHole vid)
-              modify $ \node -> node
-                { nodeExpression = fillExprHole vid expr
-                    $ nodeExpression node }
-              addScopePatternMatch multiPM
-                                   goalType
-                                   vid
-                                   sid
-                                   (reverse newBinds ++ bindingRest)
-            in liftM mapFunc1 unifyResult
+                    [ConstructorBinding matchId matchRs] False) =
+            case allocateDeconstructorNamespace supply deconstructor of
+              Nothing -> Left BranchIdentifierSpaceExhausted
+              Just (renaming, nextSupply) ->
+                let resultTypes = map (renameFlexibleType renaming) matchRs
+                    mapFunc1 substs = do
+                      modify $ \node -> node {nodeFlexibleIds = nextSupply}
+                      vars <- replicateM (length matchRs)
+                        $ builderAllocVar allocators
+                      builderRecordVarUse v
+                      let newProvTypes =
+                            map (snd . applySubsts substs) resultTypes
+                          newBinds = zipWith
+                            (\x y -> splitBinding $ VarBinding x y)
+                            vars
+                            newProvTypes
+                          expr = ExpLetMatch matchId
+                            (zip vars newProvTypes)
+                            expVar
+                            (ExpHole vid)
+                      modify $ \node -> node
+                        { nodeExpression = fillExprHole vid expr
+                            $ nodeExpression node }
+                      addScopePatternMatch
+                        allocators
+                        multiPM
+                        goalType
+                        vid
+                        sid
+                        (reverse newBinds ++ bindingRest)
+                in Right $ fmap mapFunc1
+                  $ unifyRight vtResult
+                  $ renameFlexibleType renaming matchParam
           mapFunc supply deconstructor@(DeconstructorBinding matchParam
               matchers@(_ : _) False)
-            | multiPM = let
-            (renaming, nextSupply) = freshenDeconstructor supply deconstructor
-            unifyResult = unifyRight vtResult
-              $ renameFlexibleType renaming matchParam
-            mapFunc2 substs = do -- m
-              modify $ \node -> node {nodeFlexibleIds = nextSupply}
-              -- The case expression evaluates its scrutinee once.  Its
-              -- alternatives do not constitute additional uses of that
-              -- variable; charging one use per constructor biases the queue
-              -- against datatypes merely for having more constructors.
-              builderRecordVarUse v
-              mData <- matchers `forM` \matcher -> do -- m
-                let matchId = constructorName matcher
-                    matchRs = constructorFields matcher
-                newSid <- builderAddScope sid
-                let resultTypes = map (renameFlexibleType renaming) matchRs
-                vars <- replicateM (length matchRs) builderAllocVar
-                newVid <- builderAllocHole
-                let newProvTypes = map (snd . applySubsts substs) resultTypes
-                    newBinds = zipWith (\x y -> splitBinding (VarBinding x y)) vars newProvTypes
-                return ( (matchId, zip vars newProvTypes, ExpHole newVid)
-                       , (newVid, reverse newBinds, newSid) )
-              modify $ \node -> node
-                { nodeExpression = fillExprHole vid
-                    (ExpCaseMatch expVar $ map fst mData)
-                    (nodeExpression node) }
-              liftM concat $ map snd mData `forM` \(newVid, newBinds, newSid) ->
-                addScopePatternMatch multiPM goalType newVid newSid (newBinds++bindingRest)
-            in liftM mapFunc2 unifyResult
-          mapFunc _ _ = Nothing -- TODO: decons for recursive data types
+            | multiPM = case
+                allocateDeconstructorNamespace supply deconstructor of
+              Nothing -> Left BranchIdentifierSpaceExhausted
+              Just (renaming, nextSupply) ->
+                let mapFunc2 substs = do
+                      modify $ \node -> node {nodeFlexibleIds = nextSupply}
+                      -- The case expression evaluates its scrutinee once. Its
+                      -- alternatives do not constitute additional uses of
+                      -- that variable; charging one use per constructor
+                      -- biases the queue against datatypes merely for having
+                      -- more constructors.
+                      builderRecordVarUse v
+                      matchData <- matchers `forM` \matcher -> do
+                        let matchId = constructorName matcher
+                            matchRs = constructorFields matcher
+                        newSid <- builderAddScope allocators sid
+                        let resultTypes =
+                              map (renameFlexibleType renaming) matchRs
+                        vars <- replicateM (length matchRs)
+                          $ builderAllocVar allocators
+                        newVid <- builderAllocHole allocators
+                        let newProvTypes =
+                              map (snd . applySubsts substs) resultTypes
+                            newBinds = zipWith
+                              (\x y -> splitBinding $ VarBinding x y)
+                              vars
+                              newProvTypes
+                        return
+                          ( (matchId, zip vars newProvTypes, ExpHole newVid)
+                          , (newVid, reverse newBinds, newSid)
+                          )
+                      modify $ \node -> node
+                        { nodeExpression = fillExprHole vid
+                            (ExpCaseMatch expVar $ map fst matchData)
+                            (nodeExpression node) }
+                      fmap concat $ map snd matchData `forM`
+                        \(newVid, newBinds, newSid) ->
+                          addScopePatternMatch
+                            allocators
+                            multiPM
+                            goalType
+                            newVid
+                            newSid
+                            (newBinds ++ bindingRest)
+                in Right $ fmap mapFunc2
+                  $ unifyRight vtResult
+                  $ renameFlexibleType renaming matchParam
+          mapFunc _ _ = Right Nothing
+            -- TODO: deconstructors for recursive data types.
 
-          freshenDeconstructor supply deconstructor = case allocateNamespace
-              (IntSet.toAscList $ deconstructorFlexibleIdentifiers deconstructor)
-              supply of
-            Just result -> result
-            Nothing -> error
-              "Exference exhausted the finite flexible-variable identifier supply"
+          allocateDeconstructorNamespace supply deconstructor =
+            searchAllocateFlexibleNamespace
+              allocators
+              (IntSet.toAscList
+                $ deconstructorFlexibleIdentifiers deconstructor)
+              supply
 
           deconstructorFlexibleIdentifiers deconstructor = IntSet.unions
             $ flexibleIdentifiers (deconstructorInput deconstructor)

@@ -1,0 +1,88 @@
+-- | Narrow test seam for otherwise unreachable finite identifier exhaustion.
+--
+-- This module is explicitly internal: production searches always use the full
+-- 'Int' namespaces.  Small capacities let regression tests exercise truthful
+-- operational truncation without attempting to materialize billions of IDs.
+module Language.Haskell.Exference.Core.Internal.Testing
+  ( IdentifierCapacities (..)
+  , findExpressionsWithIdentifierCapacitiesEither
+  , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
+  )
+where
+
+import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
+import Numeric.Natural (Natural)
+
+import qualified Language.Haskell.Exference.Core.Internal.Exference as E
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  ( identifierSupplySize )
+import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
+import Language.Haskell.Exference.Core.Internal.SearchControl
+
+-- | Total capacities for the three independent dynamic search namespaces.
+-- Term capacity excludes root hole zero; flexible and scope capacities include
+-- identifiers already reserved by the checked root node.
+data IdentifierCapacities = IdentifierCapacities
+  { termIdentifierCapacity :: Natural
+  , flexibleIdentifierCapacity :: Natural
+  , scopeIdentifierCapacity :: Natural
+  }
+  deriving (Eq, Show)
+
+findExpressionsWithIdentifierCapacitiesEither
+  :: IdentifierCapacities
+  -> E.ExferenceInput
+  -> Either E.ExferenceInputError [E.ExferenceChunkElement]
+findExpressionsWithIdentifierCapacitiesEither capacities input = do
+  checked <- E.prepareExferenceInput input
+  pure $ E.findExpressionsWithAllocators
+    (finiteSearchAllocators capacities) checked
+
+findGeneratedSearchBatchesWithIdentifierCapacitiesEither
+  :: IdentifierCapacities
+  -> E.ExferenceInput
+  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
+findGeneratedSearchBatchesWithIdentifierCapacitiesEither capacities input = do
+  checked <- E.prepareExferenceInput input
+  pure $ E.findGeneratedSearchBatchesWithAllocators
+    (finiteSearchAllocators capacities) Map.empty checked
+
+finiteSearchAllocators :: IdentifierCapacities -> SearchAllocators
+finiteSearchAllocators capacities = defaultSearchAllocators
+  { searchAllocateTermIdentifier = allocateTerm
+  , searchAllocateFlexibleNamespace = allocateFlexible
+  , searchAddScope = allocateScope
+  }
+ where
+  allocateTerm next
+    | allocatedTermIdentifiers next
+        < toInteger (termIdentifierCapacity capacities) =
+          searchAllocateTermIdentifier defaultSearchAllocators next
+    | otherwise = Nothing
+
+  allocateFlexible identifiers supply
+    | identifierSupplySize supply + requested
+        <= flexibleIdentifierCapacity capacities =
+          searchAllocateFlexibleNamespace
+            defaultSearchAllocators identifiers supply
+    | otherwise = Nothing
+   where
+    requested = fromIntegral $ IntSet.size $ IntSet.fromList identifiers
+
+  allocateScope parent scopes
+    | occupied < scopeIdentifierCapacity capacities =
+        searchAddScope defaultSearchAllocators parent scopes
+    | otherwise = Left $ Scope.ScopeIdCollision 0
+   where
+    occupied = fromIntegral $ length $ Scope.scopesToAscList scopes
+
+-- Count the sequential identifiers preceding the current counter.  The
+-- production allocator traverses positive IDs first, then the negative half,
+-- and stops before revisiting root hole zero.
+allocatedTermIdentifiers :: Int -> Integer
+allocatedTermIdentifiers next
+  | next > 0 = toInteger next - 1
+  | next < 0 = toInteger (maxBound :: Int)
+      + toInteger next - toInteger (minBound :: Int)
+  | otherwise = toInteger (maxBound :: Int) * 2 + 1

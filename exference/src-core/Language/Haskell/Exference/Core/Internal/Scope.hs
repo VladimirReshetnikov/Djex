@@ -31,7 +31,7 @@ import Data.List (intercalate)
 import GHC.Generics (Generic)
 
 
--- | An opaque reference into a particular 'Scopes' value.
+-- | An opaque reference into a particular t'Scopes' value.
 --
 -- IDs returned by a newer forest may not be used with an older snapshot: the
 -- checked operations report such stale references as 'MissingScopeId'.
@@ -173,7 +173,7 @@ scopesToAscList (Scopes _ scopeMap) =
 -- | Validate a raw @scope -> parent@ graph.
 --
 -- This diagnostic boundary intentionally accepts raw integer IDs while
--- 'Scopes' itself remains abstract.  It supports import/debug tooling and lets
+-- t'Scopes' itself remains abstract.  It supports import/debug tooling and lets
 -- regression tests exercise malformed graphs without adding an unsafe forest
 -- constructor to the production API.
 validateScopeParentGraph

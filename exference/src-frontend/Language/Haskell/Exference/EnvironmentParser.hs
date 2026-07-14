@@ -104,7 +104,7 @@ sourceBindingFunction binding = case binding of
   SourceClassMethod _ function -> function
 
 -- | The complete source inventory produced by the HSE frontend. Signatures
--- enter the backend's named 'FunctionBinding' shape during extraction, so
+-- enter the backend's named t'FunctionBinding' shape during extraction, so
 -- rating and checked lowering update one representation rather than carrying
 -- a parallel raw tuple layer.
 data SourceEnvironment = SourceEnvironment
@@ -412,7 +412,7 @@ sourceTypeSynonymMap :: SourceEnvironment -> TypeDeclMap
 sourceTypeSynonymMap = uniqueTypeDeclMap . sourceTypeSynonyms
 
 -- | Seal the complete frontend inventory in the common environment IR.
--- Unlike the search-core 'EnvDictionary' adapter, this boundary retains type
+-- Unlike the search-core t'EnvDictionary' adapter, this boundary retains type
 -- synonyms so later validation does not have to rediscover declarations from
 -- the HSE modules or a parallel tuple field.
 toSynthesisSourceEnvironment

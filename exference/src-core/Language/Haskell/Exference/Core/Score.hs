@@ -89,7 +89,7 @@ negateScore :: Penalty -> Penalty
 negateScore = penaltyUnary negate
 
 -- | Strict saturating accumulation. This is used instead of 'sum' anywhere a
--- finite input collection may exceed 'Double''s representable range.
+-- finite input collection may exceed @Double@'s representable range.
 sumScores :: Foldable collection => collection Penalty -> Penalty
 sumScores = Foldable.foldl' addScore 0
 

@@ -176,7 +176,7 @@ inferSharedVariableKinds assumptions sharedVariables types = do
 -- generalized class parameters as 'Nothing' or default them to @Type@.
 -- Frontends with explicit kind syntax must resolve it before
 -- crossing this boundary; frontends without such syntax use 'Nothing' on
--- their 'TypeParameter's.
+-- their t'TypeParameter's.
 inferDeclarationKinds
   :: Ord variable
   => Environment variable Void annotation

@@ -209,7 +209,7 @@ data HsInstance = HsInstance
   deriving (Eq, Show, Ord, Generic)
 
 -- | A finite nominal class constraint. Class declarations live exclusively in
--- 'StaticClassEnv'; storing the already narrowed name directly makes ordinary
+-- t'StaticClassEnv'; storing the already narrowed name directly makes ordinary
 -- access independent of the shared conversion boundary.
 data HsConstraint = HsConstraint !QualifiedName [HsType]
   deriving (Eq, Ord)

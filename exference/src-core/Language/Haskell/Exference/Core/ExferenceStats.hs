@@ -19,7 +19,8 @@ import Language.Haskell.Exference.Core.Score
 type BindingUsages = M.Map QualifiedName Int
 
 -- | Lossless operational metadata for one Exference search batch.  Pruning
--- counts remain visible on continuing batches, where shared 'Progress' has no
+-- counts remain visible on continuing batches, where shared
+-- 'Language.Haskell.Synthesis.Search.Progress' has no
 -- terminal truncation reasons yet.
 data ExferenceBatchMetadata = ExferenceBatchMetadata
   { exferenceBindingUsages :: BindingUsages

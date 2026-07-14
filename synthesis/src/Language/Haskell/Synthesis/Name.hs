@@ -3,7 +3,7 @@
 -- Ordinary identifiers and operators retain an optional module qualifier.
 -- Built-in constructors are structural: clients never need to recognize
 -- @"[]"@, @"(:)"@, or comma counts by string comparison.  'Name' and
--- 'ModuleName' are opaque so every value satisfies the lexical invariants.
+-- t'ModuleName' are opaque so every value satisfies the lexical invariants.
 module Language.Haskell.Synthesis.Name
   ( Name
   , ModuleName

@@ -72,7 +72,7 @@ data DefinitionName = DefinitionName !Name !String
   deriving (Eq, Ord)
 
 -- Preserve the historical presentation of request records.  In particular,
--- derived 'Show' instances containing a 'DefinitionName' render the wrapped
+-- derived 'Show' instances containing a t'DefinitionName' render the wrapped
 -- structural name directly rather than exposing this implementation wrapper.
 instance Show DefinitionName where
   showsPrec precedence (DefinitionName name _) = showsPrec precedence name
@@ -465,7 +465,7 @@ mkDefinitionName name
 -- | Validate a generated top-level value name independently of its body.
 --
 -- Retained for source compatibility with clients that only need validation;
--- new request boundaries should retain the 'DefinitionName' returned by
+-- new request boundaries should retain the t'DefinitionName' returned by
 -- 'mkDefinitionName'.
 validateDefinitionName :: Name -> Either RenderError ()
 validateDefinitionName name = () <$ mkDefinitionName name

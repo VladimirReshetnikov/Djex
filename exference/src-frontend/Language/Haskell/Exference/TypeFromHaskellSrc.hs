@@ -105,7 +105,7 @@ convDataReservedIds = conversionReservedIds
 type ConversionT error m result = ExceptT error (StateT ConvData m) result
 
 -- | Run one isolated source-conversion scope, discarding its private variable
--- inventory.  Keeping 'ExceptT' inside 'StateT' preserves the historical
+-- inventory.  Keeping t'ExceptT' inside 'StateT' preserves the historical
 -- behavior: a caught conversion failure does not roll back allocations made
 -- before the failure.
 runConversionT

@@ -97,35 +97,41 @@ the request's opaque `DefinitionName` before parsing so invalid-target
 diagnostics retain their historical precedence. Programmatic `QueryRequest`s
 cannot carry an unchecked target at all.
 
-Core names are validated, opaque structural wrappers over `djex:synthesis`:
-module segments, ordinary identifiers and operators, list/cons/function
-constructors, and boxed tuples can no longer be confused by rendered spelling.
-The compatibility import `QualifiedName(..)` retains exhaustive match views,
-but its input-bearing `QualifiedName` and `TupleCon` patterns are match-only;
-construct them with `mkQualifiedName` and `mkBoxedTupleName` so invalid source
-text or tuple arity is reported explicitly. The total `ListCon` and `Cons`
-constants remain constructible. `Data` and `Generic` representation reflection
-is deliberately absent. Unqualified frontend lookup now rejects ambiguous
-imported type names instead of silently choosing the first.
+Core names use `djex:synthesis`'s validated structural `Name` directly:
+`QualifiedName` is now a compatibility alias, not an opaque wrapper. The
+`QualifiedName`, `ListCon`, `TupleCon`, `UnboxedTupleCon`, and `Cons`
+compatibility views remain separately exported patterns. The input-bearing
+ordinary and boxed-tuple views are match-only; construct them with
+`mkQualifiedName` and `mkBoxedTupleName` so invalid source text or tuple arity
+is reported explicitly. Programmatic unboxed tuples use the shared
+`tupleName Unboxed` builder; the compatibility HSE frontend still rejects
+unboxed tuple syntax because the search language cannot generate its terms.
+Unqualified frontend lookup rejects ambiguous imported type names instead of
+silently choosing the first.
 
-Class constraints are finite nominal values that store the narrowed name and
-argument list directly, never a recursively embedded declaration or a partial
-shared-wrapper view. Checked conversion to and from
-`Language.Haskell.Synthesis.Constraint` happens at the common boundary. Class
-declarations and instances live in sealed strict maps built by
+Class constraints use `Language.Haskell.Synthesis.Constraint` directly as
+`Constraint HsType`; the historical `HsConstraint` constructor spelling is a
+bidirectional compatibility pattern. Class declarations and instances live in
+sealed strict maps built by
 `mkStaticClassEnv`, which
 checks names, duplicate declarations/parameters, superclass variables and
 cycles, referenced classes, and exact arities before superclass inflation.
 Query and binding inputs likewise reject wrong arities for known classes while
 retaining unknown classes as explicit external constraints.
 
-`toSynthesisType` and `fromSynthesisType` adapt Exference's flexible and rigid
-type IDs, applications, arrows, tuples, foralls, and constraints to the shared
-source-type IR. The checked reverse conversion rejects rigid forall binders and
-shared names outside Exference's representable subset rather than weakening
-them during lowering. `toSynthesisConstraint` now converts argument types all
-the way to that IR and validates the class namespace; the former shallow
-wrapper projection is no longer exposed under a misleading conversion name.
+Exact compatibility imports must now name the aliases and patterns separately
+and enable `PatternSynonyms`, for example `QualifiedName, pattern QualifiedName`
+and `HsConstraint, pattern HsConstraint`. Imports such as `QualifiedName(..)`
+and `HsConstraint(HsConstraint)` cannot describe constructors of type aliases.
+The now-impossible `UnsupportedSpecialName`, `UnsupportedSynthesisName`, and
+`DeclarationNameConversionError` alternatives have consequently been removed.
+
+`toSynthesisType` and `fromSynthesisType` still adapt Exference's flexible and
+rigid type IDs, applications, arrows, tuples, foralls, and constraints to the
+shared source-type IR. The checked reverse conversion rejects rigid forall
+binders rather than weakening them during lowering. `toSynthesisConstraint`
+converts argument types all the way to that IR and validates the class
+namespace; names and the outer constraint node no longer require conversion.
 
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration
@@ -280,7 +286,8 @@ silently changing meaning when returned to Exference's implicit form.
 ## Exference 1.7 migration
 
 Version 1.7 intentionally breaks the old recursive class representation.
-`HsConstraint` now matches `HsConstraint QualifiedName [HsType]`;
+`HsConstraint` is now an alias for the shared `Constraint HsType`, with
+`pattern HsConstraint` preserving construction and matching;
 `HsInstance` stores prerequisites plus an `instance_head`; class collections
 are strict `Map QualifiedName HsTypeClass` values; and `mkStaticClassEnv`
 returns `Either ClassEnvError StaticClassEnv`. `StaticClassEnv` and

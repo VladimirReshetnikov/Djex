@@ -99,7 +99,6 @@ data PreparedNeutralSynthesisInventory = PreparedNeutralSynthesisInventory
 
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError
-  | DeclarationNameConversionError QualifiedNameError
   | InvalidSharedDeclaration
       (SharedDeclaration.DeclarationError SynthesisVariable)
   | ExpectedValueDeclaration
@@ -529,7 +528,7 @@ valueSignature
         SynthesisVariable DeclarationMetadata)
 valueSignature binding = SharedDeclaration.ValueSignature
   (SearchPenaltyMetadata $ functionPenalty binding)
-  (toSynthesisName $ functionName binding)
+  (functionName binding)
   <$> convertedType (TypeForall [] (functionConstraints binding)
         $ foldr TypeArrow (functionResult binding)
         $ functionParameters binding)
@@ -545,7 +544,7 @@ fromSynthesisFunctionBinding declaration = do
         SearchPenaltyMetadata value -> Right value
         _ -> Left $ MissingSearchPenaltyMetadata
           $ SharedDeclaration.valueName signature
-      name <- convertedName $ SharedDeclaration.valueName signature
+      let name = SharedDeclaration.valueName signature
       functionType <- loweredType $ SharedDeclaration.valueType signature
       let (variables, constraints, body) = case functionType of
             TypeForall binders context nested -> (binders, context, nested)
@@ -573,7 +572,7 @@ toSynthesisClassDeclarationWithMethods
   -> Either SynthesisDeclarationError SynthesisDeclaration
 toSynthesisClassDeclarationWithMethods declaration methods = checked $
   SharedDeclaration.ClassDeclaration NoDeclarationMetadata
-    (toSynthesisName $ tclass_name declaration)
+    (tclass_name declaration)
     (map flexibleParameter $ tclass_params declaration)
     <$> mapM convertedConstraint (tclass_constraints declaration)
     <*> mapM convertedMethod methods
@@ -595,8 +594,8 @@ fromSynthesisClassDeclaration declaration = do
   validateShared declaration
   case declaration of
     SharedDeclaration.ClassDeclaration _ name parameters superclasses methods
-      | null methods -> HsTypeClass <$> convertedName name
-          <*> mapM plainFlexibleParameter parameters
+      | null methods -> HsTypeClass name
+          <$> mapM plainFlexibleParameter parameters
           <*> mapM loweredConstraint superclasses
       | otherwise -> Left $ ClassMethodsUnsupported
           $ map SharedDeclaration.valueName methods
@@ -613,8 +612,8 @@ fromSynthesisClassDeclarationWithMethods declaration = do
   validateShared declaration
   case declaration of
     SharedDeclaration.ClassDeclaration _ name parameters superclasses methods -> do
-      typeClass <- HsTypeClass <$> convertedName name
-        <*> mapM plainFlexibleParameter parameters
+      typeClass <- HsTypeClass name
+        <$> mapM plainFlexibleParameter parameters
         <*> mapM loweredConstraint superclasses
       bindings <- mapM (lowerMethod $ classMethodConstraint typeClass) methods
       Right (typeClass, bindings)
@@ -700,7 +699,7 @@ toSynthesisDataDeclarationWith constructorMetadata declaration = do
   (name, parameters) <- deconstructorHead $ deconstructorInput declaration
   checked $ SharedDeclaration.DataTypeDeclaration
     (RecursiveDataMetadata $ deconstructorRecursive declaration)
-    (toSynthesisName name)
+    name
     (map flexibleParameter parameters)
     <$> mapM (convertedConstructorWith constructorMetadata)
           (deconstructorConstructors declaration)
@@ -715,10 +714,9 @@ fromSynthesisDataDeclaration declaration = do
       recursive <- case metadata of
         RecursiveDataMetadata value -> Right value
         _ -> Left MissingRecursiveDataMetadata
-      convertedTypeName <- convertedName name
       variables <- mapM plainFlexibleParameter parameters
       convertedConstructors <- mapM loweredConstructor constructors
-      let input = foldl TypeApp (TypeCons convertedTypeName)
+      let input = foldl TypeApp (TypeCons name)
             $ map TypeVar variables
       Right $ DeconstructorBinding input convertedConstructors recursive
     _ -> Left ExpectedDataDeclaration
@@ -738,9 +736,9 @@ deriveRecursiveDataMetadata declarations = map attach declarations
     :: [SharedDeclaration.Declaration SynthesisVariable Void ()]
   sharedDeclarations =
     [ SharedDeclaration.DataTypeDeclaration ()
-        (toSynthesisName name) []
+        name []
         [ SharedDeclaration.DataConstructor ()
-            (toSynthesisName $ constructorName constructor)
+            (constructorName constructor)
             (map toSynthesisTypeStructure $ constructorFields constructor)
         | constructor <- deconstructorConstructors declaration
         ]
@@ -751,7 +749,7 @@ deriveRecursiveDataMetadata declarations = map attach declarations
     { deconstructorRecursive = case deconstructorHead
         (deconstructorInput declaration) of
         Left _ -> False
-        Right (name, _) -> toSynthesisName name `Set.member` recursiveNames
+        Right (name, _) -> name `Set.member` recursiveNames
     }
 
 -- | Lower a rated shared datatype to the two records consumed by Exference
@@ -934,25 +932,19 @@ isFlexibleVariable :: SynthesisVariable -> Bool
 isFlexibleVariable SharedType.FlexibleVariable{} = True
 isFlexibleVariable SharedType.RigidVariable{} = False
 
-convertedName
-  :: SharedName.Name
-  -> Either SynthesisDeclarationError QualifiedName
-convertedName = either (Left . DeclarationNameConversionError) Right
-  . fromSynthesisName
-
 convertedConstraint
   :: HsConstraint
   -> Either SynthesisDeclarationError
       (SharedConstraint.Constraint (SharedType.Type SynthesisVariable))
 convertedConstraint (HsConstraint className arguments) =
-  SharedConstraint.Constraint (toSynthesisName className)
+  SharedConstraint.Constraint className
     <$> mapM convertedType arguments
 
 loweredConstraint
   :: SharedConstraint.Constraint (SharedType.Type SynthesisVariable)
   -> Either SynthesisDeclarationError HsConstraint
 loweredConstraint (SharedConstraint.Constraint className arguments) =
-  HsConstraint <$> convertedName className <*> mapM loweredType arguments
+  HsConstraint className <$> mapM loweredType arguments
 
 flexibleParameter
   :: TVarId
@@ -980,7 +972,7 @@ convertedConstructorWith
         SynthesisVariable DeclarationMetadata)
 convertedConstructorWith metadata constructor = SharedDeclaration.DataConstructor
   <$> metadata constructor
-  <*> pure (toSynthesisName $ constructorName constructor)
+  <*> pure (constructorName constructor)
   <*> mapM convertedType (constructorFields constructor)
 
 loweredConstructor
@@ -988,8 +980,8 @@ loweredConstructor
       SynthesisVariable DeclarationMetadata
   -> Either SynthesisDeclarationError ConstructorBinding
 loweredConstructor constructor = ConstructorBinding
-  <$> convertedName (SharedDeclaration.constructorName constructor)
-  <*> mapM loweredType (SharedDeclaration.constructorFields constructor)
+  (SharedDeclaration.constructorName constructor)
+  <$> mapM loweredType (SharedDeclaration.constructorFields constructor)
 
 loweredRatedConstructor
   :: HsType

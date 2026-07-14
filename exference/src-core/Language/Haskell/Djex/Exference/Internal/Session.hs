@@ -54,9 +54,7 @@ import Language.Haskell.Exference.Core.Types
   , QualifiedName
   , SynthesisVariable
   , constraint_params
-  , fromSynthesisName
   , sClassEnv_tclasses
-  , toSynthesisName
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -153,7 +151,7 @@ sealPreparedEnvironment exclusions overrides prepared = do
     $ environmentFunctions backend
   let excludedBindings = Set.fromList exclusions
       functionExcluded binding = Set.member
-        (toSynthesisName $ functionName binding) excludedBindings
+        (functionName binding) excludedBindings
       supportedFunctions =
         [ binding
         | binding <- ratedFunctions
@@ -169,7 +167,7 @@ sealPreparedEnvironment exclusions overrides prepared = do
         }
       omissions =
         [ ExferenceOmission
-            (toSynthesisName $ functionName binding)
+            (functionName binding)
             BindingIntroduction
             reason
         | binding <- ratedFunctions
@@ -181,12 +179,9 @@ sealPreparedEnvironment exclusions overrides prepared = do
     (shownErrorDiagnostic "DJEX_EXF_ENV"
       "cannot seal the Exference session environment")
     $ mkExferenceEnvironment supportedBackend
-  typeNames <- first
-    (preparationFailure "cannot lower Exference's parser type-name index")
-    $ traverse fromSynthesisName
-    $ Map.keys
-    $ SharedEnvironment.typeDeclarationMap
-    $ inventoryEnvironment inventory
+  let typeNames = Map.keys
+        $ SharedEnvironment.typeDeclarationMap
+        $ inventoryEnvironment inventory
   pure ExferenceSession
     { searchView = searchEnvironment
     , inventoryView = inventory
@@ -209,8 +204,7 @@ applyRatingOverrides overrides bindings = do
     [] -> pure ()
     invalid -> Left $ policyFailure
       "Exference rating overrides must be finite" invalid
-  let available = Set.fromList
-        $ map (toSynthesisName . functionName) bindings
+  let available = Set.fromList $ map functionName bindings
       unknown = Map.keysSet overrides Set.\\ available
   if Set.null unknown
     then pure ()
@@ -222,7 +216,7 @@ applyRatingOverrides overrides bindings = do
   applyOverride binding = binding
     { functionPenalty = Map.findWithDefault
         (functionPenalty binding)
-        (toSynthesisName $ functionName binding)
+        (functionName binding)
         overrides
     }
 
@@ -264,7 +258,7 @@ deconstructorOmission :: DeconstructorBinding -> Maybe ExferenceOmission
 deconstructorOmission binding = do
   name <- typeConstructorHead $ deconstructorInput binding
   pure $ ExferenceOmission
-    (toSynthesisName name)
+    name
     DataElimination
     reason
  where

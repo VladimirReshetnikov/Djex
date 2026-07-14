@@ -41,9 +41,10 @@ The package is not yet one library internally: its default facade still sits
 over five named sublibraries. The current duplication audit and the ordered
 path from those components to a genuinely shared implementation are recorded
 in [the 2026-07-14 remaining-convergence audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
-In particular, the next source migration makes the shared type, constraint,
-and name vocabulary native to Exference before package boundaries are erased;
-otherwise a one-library manifest would merely conceal the duplicate IRs while
+The first source milestone now makes the shared name and constraint vocabulary
+native to Exference. The next stage replaces its remaining recursive type tree
+with the shared type IR before package boundaries are erased; otherwise a
+one-library manifest would merely conceal the largest duplicate IR while
 discarding useful dependency checks.
 
 ## Dependency migration
@@ -185,18 +186,16 @@ proof of uninhabitability.
 
 ## Query boundary
 
-Exference core names are an opaque, validated subset of the shared synthesis
-name domain. The compatibility import `QualifiedName(..)` still bundles the
-four historical pattern views, but the input-bearing `QualifiedName` and
-`TupleCon` patterns are intentionally match-only: construct ordinary names and
-boxed tuples with `mkQualifiedName` and `mkBoxedTupleName`, which can report
-invalid spelling, qualification, or tuple arity. `ListCon` and `Cons` remain
-total constants. Representation reflection through `Data` or `Generic` is no
-longer part of this compatibility surface, so it cannot manufacture names
-outside Exference's supported subset. Exference constraints likewise store a
-strict narrowed nominal name and their argument list directly; complete checked
-conversion to and from `Language.Haskell.Synthesis.Constraint` happens at the
-shared boundary rather than during ordinary field access.
+Exference core names now are the shared synthesis `Name` itself; `QualifiedName`
+is a compatibility alias rather than another nominal wrapper. Compatibility views
+remain separately exported patterns (`QualifiedName`, `ListCon`, `TupleCon`,
+`UnboxedTupleCon`, and `Cons`), while ordinary names and boxed tuples are still
+constructed with `mkQualifiedName` and `mkBoxedTupleName` so malformed source
+spelling, qualification, or tuple arity receives a structured error. Exference
+constraints likewise are `Constraint HsType`, with `HsConstraint` retained as
+a compatibility pattern. Consequently ordinary name and constraint access no
+longer crosses a representation boundary; checked type conversion remains only
+while Exference's recursive `HsType` tree is being migrated.
 
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept

@@ -351,5 +351,4 @@ duplicateClassMessage name =
 
 unqualifiedClassName :: QualifiedName -> String
 unqualifiedClassName name = fromMaybe (show name)
-  $ SharedName.nameSpelling
-  $ toSynthesisName name
+  $ SharedName.nameSpelling name

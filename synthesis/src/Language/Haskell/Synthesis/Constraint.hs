@@ -23,6 +23,7 @@ import Language.Haskell.Synthesis.Name
   , Name
   , nameLexicalClass
   , nameSpecial
+  , renderPrefix
   )
 
 -- | A class name applied to zero or more type arguments.
@@ -40,7 +41,7 @@ data Constraint ty = Constraint
 instance Show ty => Show (Constraint ty) where
   showsPrec precedence (Constraint className arguments) =
     showParen (precedence > 0 && not (null arguments)) $
-      shows className . foldr showArgument id arguments
+      showString (renderPrefix className) . foldr showArgument id arguments
     where
       showArgument argument rest =
         showChar ' ' . showsPrec 11 argument . rest

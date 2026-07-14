@@ -3,6 +3,8 @@
 -- owns both a processed-node limit and a retained-queue limit: a benchmark
 -- must remain finite even when a future heuristic makes its frontier worse.
 --
+{-# LANGUAGE PatternSynonyms #-}
+
 module Corpus
   ( Demand (..)
   , Entry (..)
@@ -25,7 +27,7 @@ import Language.Haskell.Exference.Core.Name
   , mkQualifiedName
   )
 import Language.Haskell.Exference.Core.Types
-  ( HsConstraint (..)
+  ( pattern HsConstraint
   , HsInstance (..)
   , HsType (..)
   , HsTypeClass (..)

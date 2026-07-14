@@ -83,7 +83,7 @@ toSynthesisTypeDeclaration declaration = do
     $ toSynthesisType $ tdecl_result declaration
   let shared = SharedDeclaration.TypeSynonymDeclaration
         NoDeclarationMetadata
-        (toSynthesisName $ tdecl_name declaration)
+        (tdecl_name declaration)
         [ SharedDeclaration.TypeParameter
             (SharedType.FlexibleVariable parameter) Nothing
         | parameter <- tdecl_params declaration
@@ -100,10 +100,8 @@ fromSynthesisTypeDeclaration declaration = do
     $ SharedDeclaration.validateDeclaration declaration
   case declaration of
     SharedDeclaration.TypeSynonymDeclaration _ name parameters body ->
-      HsTypeDecl
-        <$> either (Left . DeclarationNameConversionError) Right
-              (fromSynthesisName name)
-        <*> mapM plainParameter parameters
+      HsTypeDecl name
+        <$> mapM plainParameter parameters
         <*> either (Left . DeclarationTypeConversionError) Right
               (fromSynthesisType body)
     _ -> Left ExpectedTypeSynonymDeclaration
@@ -129,7 +127,7 @@ applyTypeDecls declarations source = do
   -- them here retains their applications as ordinary nominal constructors;
   -- the shared traversal still expands aliases inside their arguments.
   definitions = M.fromList
-    [ ( toSynthesisName alias
+    [ ( alias
       , ( map SharedType.FlexibleVariable parameters
         , toSynthesisTypeStructure body
         )

@@ -326,7 +326,7 @@ normalizeInventoryDataMetadata inventory projection = do
   entry deconstructor = do
     name <- deconstructorTypeName deconstructor
     pure
-      ( toSynthesisName name
+      ( name
       , deconstructorRecursive deconstructor
       )
 
@@ -394,7 +394,7 @@ normalizeBackendProjection prepared environment = do
     , projected
     )
  where
-  ordinaryTypeName name = case SharedName.nameSpecial $ toSynthesisName name of
+  ordinaryTypeName name = case SharedName.nameSpecial name of
     Nothing -> True
     Just _ -> False
 
@@ -442,7 +442,7 @@ toSynthesisSourceInventory environment = do
       constructorNames = M.keysSet constructorDefinitions
       isConstructorBinding binding =
         SharedName.nameLexicalClass
-          (toSynthesisName $ functionName binding)
+          (functionName binding)
           == SharedName.ConstructorLike
       constructorFunctionGroups = M.fromListWith (++)
         [ (functionName binding, [binding])
@@ -486,19 +486,19 @@ toSynthesisSourceInventory environment = do
   if null missingFunctions
     then pure ()
     else Left $ MissingConstructorFunctionBindings
-      $ map toSynthesisName missingFunctions
+      missingFunctions
   if null duplicateFunctions
     then pure ()
     else Left $ DuplicateConstructorFunctionBindings
-      $ map toSynthesisName duplicateFunctions
+      duplicateFunctions
   if null orphanConstructors
     then pure ()
     else Left $ OrphanConstructorBindings
-      $ map toSynthesisName orphanConstructors
+      orphanConstructors
   if null mismatchedFunctions
     then pure ()
     else Left $ MismatchedConstructorFunctionBindings
-      $ map toSynthesisName mismatchedFunctions
+      mismatchedFunctions
   synonyms <- mapM toSynthesisTypeDeclaration
     $ sourceTypeSynonyms environment
   core <- toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
@@ -555,8 +555,8 @@ builtInConstructorEnvironment = do
 
 builtInDeconstructors :: Either QualifiedNameError [DeconstructorBinding]
 builtInDeconstructors = do
-  listName <- fromSynthesisName SharedName.listName
-  consName <- fromSynthesisName SharedName.consName
+  let listName = SharedName.listName
+      consName = SharedName.consName
   unitName <- mkBoxedTupleName 0
   tuples <- mapM tupleDeconstructor [2 .. maximumBuiltInTupleArity]
   let listType = TypeApp (TypeCons listName) (TypeVar 0)

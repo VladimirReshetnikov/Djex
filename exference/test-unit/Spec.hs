@@ -263,6 +263,11 @@ tests = testGroup "Exference"
               $ SharedConstraint.InvalidConstraintClass sharedName)
       , testCase "shared constraints reject unboxed class names" $ do
           unboxed <- expectRight $ SharedName.tupleName SharedName.Unboxed 2
+          let expected = InvalidSynthesisConstraint
+                $ SharedConstraint.InvalidConstraintClass unboxed
+          toSynthesisConstraint
+            (HsConstraint unboxed [TypeVar 0])
+            @?= Left expected
           case fromSynthesisConstraint
               (SharedConstraint.Constraint unboxed
                 [SharedType.TypeVariable $ SharedType.FlexibleVariable 0]) of
@@ -1162,6 +1167,16 @@ tests = testGroup "Exference"
           shared <- expectRight $ toSynthesisType source
           SharedType.validateType shared @?= Right ()
           fromSynthesisType shared @?= Right source
+      , testCase "shared unboxed tuple types lower without narrowing names" $
+          mapM_ (\shared -> do
+              source <- expectRight $ fromSynthesisType shared
+              toSynthesisType source @?= Right shared)
+            [ SharedType.TupleType SharedName.Unboxed []
+            , SharedType.TupleType SharedName.Unboxed
+                [ SharedType.TypeVariable $ SharedType.FlexibleVariable 0
+                , SharedType.TypeVariable $ SharedType.RigidVariable 7
+                ]
+            ]
       , testCase "shared type conversion rejects malformed class names" $ do
           let invalidName = name "constraint"
               source = TypeForall [0]
@@ -2951,7 +2966,7 @@ tests = testGroup "Exference"
             Right _ -> pure ()
       ]
   , testGroup "validated names"
-      [ testCase "legacy bundled patterns remain match-compatible" $ do
+      [ testCase "legacy compatibility patterns remain match-compatible" $ do
           ordinary <- expectRight $ mkQualifiedName [] "id"
           unit <- expectRight $ mkBoxedTupleName 0
           map CompatibilityImport.legacyConstructorView
@@ -2972,12 +2987,12 @@ tests = testGroup "Exference"
             , ([], "`map`")
             , (["Data"], "Data.map")
             ]
-      , testCase "shared conversion rejects unboxed tuples" $ do
+      , testCase "shared conversion admits the complete shared name domain" $ do
           shared <- expectRight $ SharedName.tupleName SharedName.Unboxed 2
-          fromSynthesisName shared @?= Left
-            (UnsupportedSpecialName
-              $ SharedName.TupleConstructor SharedName.Unboxed 2)
-      , testCase "shared conversion round-trips the Exference subset" $ do
+          fromSynthesisName shared @?= Right shared
+          CompatibilityImport.legacyConstructorView shared @?=
+            "unboxed-tuple:2"
+      , testCase "identity shims round-trip legacy name forms" $ do
           operator <- expectRight $ mkQualifiedName ["Data", "Function"] "."
           tuple <- expectRight $ mkBoxedTupleName 3
           mapM_ (\qualifiedName ->
@@ -3001,6 +3016,9 @@ tests = testGroup "Exference"
           className <- expectRight $ mkQualifiedName ["Fixture"] "Class"
           let arguments = [TypeVar 2, TypeCons ListCon]
               constraint = HsConstraint className arguments
+          CompatibilityImport.legacyConstraintClass
+            (CompatibilityImport.legacyConstraint className)
+            @?= className
           constraint_tclass constraint @?= className
           constraint_params constraint @?= arguments
           shared <- expectRight $ toSynthesisConstraint constraint

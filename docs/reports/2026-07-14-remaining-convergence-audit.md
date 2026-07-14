@@ -49,29 +49,34 @@ source-level duplication described below.
 
 ## Priority 1: make the shared vocabulary native to Exference
 
-`Language.Haskell.Exference.Core.Types` still defines a second source-type
-model beside `Language.Haskell.Synthesis`:
+**Progress on 2026-07-14:** the first compile-checked stage is implemented.
+`QualifiedName` is now an alias for the complete shared `Name` domain and
+`HsConstraint` is an alias for `Constraint HsType`; historical constructor
+spellings survive as explicit compatibility patterns. This deletes both
+duplicate outer representations. The remaining work in this priority is the
+larger `HsType` migration and removal of its checked-adapter round trips.
 
-- `QualifiedName` wraps the shared `Name` and repeatedly crosses
-  `toSynthesisName` / `fromSynthesisName`;
-- `HsType` duplicates variables, constructors, applications, arrows, and
-  quantified constraints already represented by
-  `Type (Variable Int)`; and
-- `HsConstraint` duplicates `Constraint HsType` while retaining another
-  nominal-name wrapper.
+At audit time `Language.Haskell.Exference.Core.Types` defined three pieces of a
+second source-type model beside `Language.Haskell.Synthesis`: a `QualifiedName`
+wrapper, the recursive `HsType`, and a duplicate `HsConstraint`. The first
+stage removed the name and constraint representations, including every
+production `toSynthesisName` / `fromSynthesisName` call. `HsType` still
+duplicates variables, constructors, applications, arrows, and quantified
+constraints already represented by `Type (Variable Int)`.
 
 This is not confined to a compatibility parser. Thirty-one other Exference
 source or test files import `Core.Types`, and fifteen Exference files contain
 explicit `toSynthesis*` or `fromSynthesis*` seam calls. In the stable adapter,
 `ExferenceType` is already exactly `Type (Variable Int)`, but
 `runExferenceQuery` converts it back to `HsType`; generated candidates,
-constraints, and binding names are then traversed in the opposite direction.
+their residual-constraint arguments, and rendering hints are then traversed in
+the opposite direction.
 
 The migration should proceed in compile-checked stages:
 
-1. Use shared `Name` and `Constraint` values in the search core. Preserve the
-   historical constructors, where worthwhile, as checked compatibility
-   patterns at the public edge rather than as an engine-owned representation.
+1. **Completed:** use shared `Name` and `Constraint` values in the search core,
+   preserving historical constructor spellings as explicit compatibility
+   patterns rather than as engine-owned representations.
 2. Move pure type operations—free-variable collection, substitution,
    rendering hints, and constraint traversal—to `Type (Variable Int)`.
    Exference-specific unification remains backend code, but should operate on
@@ -165,6 +170,7 @@ Every migration milestone should retain the current release-style gates:
 - a clean tracked tree with the milestone commit pushed before the next
   representation is removed.
 
-The immediate next implementation milestone is Priority 1, beginning with a
-compatibility-aware shared-name/constraint layer and continuing until the
-stable Exference query path no longer performs a round trip through `HsType`.
+The immediate next implementation milestone remains Priority 1: extract
+capture-safe shared type substitution, then migrate Exference's operations and
+sealed query path from `HsType` to the shared `Type (Variable Int)` without
+losing tuple canonicalization or lazy search behavior.

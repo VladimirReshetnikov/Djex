@@ -4,13 +4,18 @@
 
 -- | Exference's compatibility view of the shared synthesis name model.
 --
--- The representation is deliberately opaque.  Older clients may continue to
--- import @QualifiedName(..)@ and use the four historical constructors through
--- the bundled pattern synonyms when inspecting values. Ordinary names and
--- tuples are match-only because their input-bearing builders cannot report
--- validation failures; construct them with the checked functions below.
+-- The engine now stores the shared 'Shared.Name' directly. Older constructor
+-- spellings remain as separately exported patterns for source migration;
+-- input-bearing ordinary and tuple patterns are match-only because their
+-- builders cannot report validation failures. Construct names with the
+-- checked functions below.
 module Language.Haskell.Exference.Core.Name
-  ( QualifiedName (QualifiedName, ListCon, TupleCon, Cons)
+  ( QualifiedName
+  , pattern QualifiedName
+  , pattern ListCon
+  , pattern TupleCon
+  , pattern UnboxedTupleCon
+  , pattern Cons
   , QualifiedNameError (..)
   , mkQualifiedName
   , mkBoxedTupleName
@@ -22,22 +27,20 @@ module Language.Haskell.Exference.Core.Name
   )
 where
 
-import Control.DeepSeq (NFData (rnf))
+import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
 import qualified Language.Haskell.Synthesis.Name as Shared
 
--- | A validated name accepted by Exference.
+-- | Exference's historical name alias is now the shared nominal identity.
 --
--- Exference has no representation for unboxed tuples, so this wrapper is a
--- proper subset of the shared 'Shared.Name' domain.
-newtype QualifiedName = QualifiedName_ Shared.Name
-  deriving (Eq, Ord)
+-- The checked builders below retain the historical separated-source API, but
+-- the search engine no longer stores or compares a second wrapper around every
+-- shared name.
+type QualifiedName = Shared.Name
 
--- | A checked conversion failed either because the spelling was not a valid
--- Haskell name or because it denotes syntax that Exference cannot represent.
+-- | A checked source spelling or tuple arity was not a valid Haskell name.
 data QualifiedNameError
   = InvalidQualifiedName Shared.NameError
-  | UnsupportedSpecialName Shared.SpecialName
   deriving (Eq, Show, Generic)
 
 instance NFData QualifiedNameError
@@ -52,7 +55,7 @@ pattern QualifiedName modules spelling <- (ordinaryNameView -> Just (modules, sp
 pattern ListCon :: QualifiedName
 pattern ListCon <- (specialNameView -> Just Shared.ListConstructor)
   where
-    ListCon = QualifiedName_ Shared.listName
+    ListCon = Shared.listName
 
 -- | Historical boxed-tuple view. Construction is intentionally unavailable
 -- through this pattern because invalid arities require structured rejection;
@@ -60,13 +63,18 @@ pattern ListCon <- (specialNameView -> Just Shared.ListConstructor)
 pattern TupleCon :: Int -> QualifiedName
 pattern TupleCon arity <- (specialNameView -> Just (Shared.TupleConstructor Shared.Boxed arity))
 
+-- | Structural unboxed-tuple view admitted by the shared name domain.
+pattern UnboxedTupleCon :: Int -> QualifiedName
+pattern UnboxedTupleCon arity <-
+  (specialNameView -> Just (Shared.TupleConstructor Shared.Unboxed arity))
+
 -- | Historical structural list-cons view.
 pattern Cons :: QualifiedName
 pattern Cons <- (specialNameView -> Just Shared.ConsConstructor)
   where
-    Cons = QualifiedName_ Shared.consName
+    Cons = Shared.consName
 
-{-# COMPLETE QualifiedName, ListCon, TupleCon, Cons #-}
+{-# COMPLETE QualifiedName, ListCon, TupleCon, UnboxedTupleCon, Cons #-}
 
 -- | Construct an ordinary identifier or operator from its separated legacy
 -- components.  A parenthesized operator payload is accepted and normalized to
@@ -76,10 +84,10 @@ mkQualifiedName
   :: [String]
   -> String
   -> Either QualifiedNameError QualifiedName
-mkQualifiedName [] "->" = Right $ QualifiedName_ Shared.functionName
-mkQualifiedName [] "(->)" = Right $ QualifiedName_ Shared.functionName
-mkQualifiedName modules source = do
-  shared <- case legacyOperatorPayload source of
+mkQualifiedName [] "->" = Right Shared.functionName
+mkQualifiedName [] "(->)" = Right Shared.functionName
+mkQualifiedName modules source =
+  case legacyOperatorPayload source of
     Just spelling -> qualifyOperator modules spelling
     Nothing -> case Shared.mkIdentifier source of
       Right _ -> qualifyIdentifier modules source
@@ -89,7 +97,6 @@ mkQualifiedName modules source = do
           | not (null source) && all Shared.isOperatorCharacter source ->
               Left operatorError
           | otherwise -> Left $ InvalidQualifiedName identifierError
-  fromSynthesisName shared
   where
     qualifyIdentifier [] spelling =
       mapLeft InvalidQualifiedName $ Shared.mkIdentifier spelling
@@ -122,28 +129,24 @@ mkQualifiedName modules source = do
 -- and ordinary tuples (arity at least two), but not singleton or negative
 -- arities.
 mkBoxedTupleName :: Int -> Either QualifiedNameError QualifiedName
-mkBoxedTupleName arity = do
-  name <- mapLeft InvalidQualifiedName $ Shared.tupleName Shared.Boxed arity
-  fromSynthesisName name
+mkBoxedTupleName arity =
+  mapLeft InvalidQualifiedName $ Shared.tupleName Shared.Boxed arity
 
--- | Narrow a shared name to Exference's representable subset.
+-- | Historical conversion retained as an identity compatibility shim.
 fromSynthesisName
   :: Shared.Name
   -> Either QualifiedNameError QualifiedName
-fromSynthesisName name = case Shared.nameSpecial name of
-  Just special@(Shared.TupleConstructor Shared.Unboxed _) ->
-    Left $ UnsupportedSpecialName special
-  _ -> Right $ QualifiedName_ name
+fromSynthesisName = Right
 
 -- | Recover the shared, parser-independent representation.
 toSynthesisName :: QualifiedName -> Shared.Name
-toSynthesisName (QualifiedName_ name) = name
+toSynthesisName = id
 
 qualifiedNameModule :: QualifiedName -> Maybe Shared.ModuleName
-qualifiedNameModule = Shared.nameModule . toSynthesisName
+qualifiedNameModule = Shared.nameModule
 
 qualifiedNameOccurrence :: QualifiedName -> Shared.Occurrence
-qualifiedNameOccurrence = Shared.nameOccurrence . toSynthesisName
+qualifiedNameOccurrence = Shared.nameOccurrence
 
 -- | Return the bare spelling of an ordinary symbolic occurrence.
 qualifiedNameOperator :: QualifiedName -> Maybe String
@@ -151,12 +154,6 @@ qualifiedNameOperator name = case qualifiedNameOccurrence name of
   Shared.OperatorOccurrence _ spelling -> Just spelling
   Shared.SpecialOccurrence Shared.FunctionConstructor -> Just "->"
   _ -> Nothing
-
-instance Show QualifiedName where
-  show = Shared.renderCanonical . toSynthesisName
-
-instance NFData QualifiedName where
-  rnf = rnf . toSynthesisName
 
 ordinaryNameView :: QualifiedName -> Maybe ([String], String)
 ordinaryNameView name = case qualifiedNameOccurrence name of
@@ -168,7 +165,7 @@ ordinaryNameView name = case qualifiedNameOccurrence name of
   Shared.SpecialOccurrence _ -> Nothing
 
 specialNameView :: QualifiedName -> Maybe Shared.SpecialName
-specialNameView = Shared.nameSpecial . toSynthesisName
+specialNameView = Shared.nameSpecial
 
 moduleSegments :: QualifiedName -> [String]
 moduleSegments = maybe [] Shared.moduleNameSegments . qualifiedNameModule

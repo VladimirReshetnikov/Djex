@@ -66,7 +66,6 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , fromSynthesisType
-  , toSynthesisName
   , showVar
   )
 import Language.Haskell.Djex.Exference.Internal.Session
@@ -392,11 +391,7 @@ projectBatchMetadata
   :: CoreStats.ExferenceBatchMetadata
   -> ExferenceBatchMetadata
 projectBatchMetadata metadata = ExferenceBatchMetadata
-  { exferenceBatchBindingUsages = Map.fromList
-      [ (toSynthesisName backendName, count)
-      | (backendName, count) <- Map.toList
-          $ CoreStats.exferenceBindingUsages metadata
-      ]
+  { exferenceBatchBindingUsages = CoreStats.exferenceBindingUsages metadata
   , exferenceBatchQueuePruned = CoreStats.exferenceQueuePruned metadata
   , exferenceBatchDepthPruned = CoreStats.exferenceDepthPruned metadata
   }

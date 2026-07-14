@@ -207,10 +207,8 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = do
   helper (TyCon _ name)     = T.TypeCons
                           <$> either throwE pure
                                 (convertQName defModuleName ds name)
-  helper (TyList _ t)       = do
-    listName <- either throwE pure $ qualifiedNameResult
-      $ T.fromSynthesisName SharedName.listName
-    T.TypeApp (T.TypeCons listName) <$> helper t
+  helper (TyList _ t)       =
+    T.TypeApp (T.TypeCons SharedName.listName) <$> helper t
   helper (TyParen _ t)      = helper t
   helper TyInfix{}        = throwE "infix operator"
   helper TyKind{}         = throwE "kind annotation"
@@ -285,9 +283,10 @@ getVar n = do
 
 -- defaultModule -> potentially-qualified-name-thingy -> exference-q-name
 --
--- Unboxed tuples deliberately have no core representation.  Returning an
--- error here prevents them from being confused with boxed tuples at every
--- elaboration site, including constraints and instance heads.
+-- The shared core can represent unboxed tuple names and types, but Exference's
+-- HSE compatibility frontend and search engine do not yet implement their
+-- term syntax. Rejecting them here records that frontend capability boundary
+-- without narrowing the core's nominal representation again.
 convertQName
   :: Maybe (ModuleName SrcSpanInfo)
   -> [T.QualifiedName]
@@ -295,18 +294,15 @@ convertQName
   -> Either String T.QualifiedName
 convertQName _ _ (Special _ (UnitCon _)) = qualifiedNameResult
   $ T.mkBoxedTupleName 0
-convertQName _ _ (Special _ (ListCon _)) = qualifiedNameResult
-  $ T.fromSynthesisName SharedName.listName
-convertQName _ _ (Special _ (FunCon _)) = qualifiedNameResult
-  $ T.fromSynthesisName SharedName.functionName
+convertQName _ _ (Special _ (ListCon _)) = Right SharedName.listName
+convertQName _ _ (Special _ (FunCon _)) = Right SharedName.functionName
 convertQName _ _ (Special _ special@(TupleCon _ Unboxed _)) = Left
   $ "unsupported unboxed tuple constructor: " ++ prettyPrint special
 convertQName _ _ (Special _ special@(TupleCon _ Boxed arity))
   | arity >= 2 = qualifiedNameResult $ T.mkBoxedTupleName arity
   | otherwise = Left $ "invalid boxed tuple constructor arity " ++ show arity
       ++ ": " ++ prettyPrint special
-convertQName _ _ (Special _ (Cons _)) = qualifiedNameResult
-  $ T.fromSynthesisName SharedName.consName
+convertQName _ _ (Special _ (Cons _)) = Right SharedName.consName
 convertQName _ _ (Special _ special@(UnboxedSingleCon _)) = Left
   $ "unsupported unboxed single constructor: " ++ prettyPrint special
 convertQName _ _ (Special _ special@(ExprHole _)) = Left
@@ -377,10 +373,8 @@ convertModuleName (ModuleName _ moduleSource) syntaxName = do
 -- constructors are recovered as their structural 'T.QualifiedName' variants
 -- so rating lookup does not depend on rendered-text coincidences.
 parseQualifiedName :: String -> Either Diagnostic T.QualifiedName
-parseQualifiedName input = do
-  shared <- either (invalid . SharedName.renderNameError) Right
-    $ SharedName.parseName input
-  either (invalid . show) Right $ T.fromSynthesisName shared
+parseQualifiedName input = either (invalid . SharedName.renderNameError) Right
+  $ SharedName.parseName input
   where
     invalid :: String -> Either Diagnostic a
     invalid message = Left $ diagnostic
@@ -427,8 +421,7 @@ validateConstraintArity classes name actual = case M.lookup name classes of
   _ -> Right ()
  where
   unqualifiedClassName qualifiedName = fromMaybe (show qualifiedName)
-    $ SharedName.nameSpelling
-    $ T.toSynthesisName qualifiedName
+    $ SharedName.nameSpelling qualifiedName
 
 tyVarTransform :: Monad m
                => TyVarBind SrcSpanInfo

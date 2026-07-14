@@ -55,7 +55,7 @@ data ExpressionRenderError
 toGeneratedExpression :: Expression -> Generated.Expression TVarId
 toGeneratedExpression expression = case expression of
   ExpVar variable _ -> Generated.Local variable
-  ExpName name -> Generated.Global $ toSynthesisName name
+  ExpName name -> Generated.Global name
   ExpLambda variable _ body ->
     Generated.Lambda [Generated.Bind variable]
       $ toGeneratedExpression body
@@ -64,7 +64,7 @@ toGeneratedExpression expression = case expression of
     (toGeneratedExpression argument)
   ExpHole variable -> Generated.Hole variable
   ExpLetMatch constructor variables binding body -> Generated.Let
-    (Generated.Constructor (toSynthesisName constructor)
+    (Generated.Constructor constructor
       $ map (Generated.Bind . fst) variables)
     (toGeneratedExpression binding)
     (toGeneratedExpression body)
@@ -74,7 +74,7 @@ toGeneratedExpression expression = case expression of
     (toGeneratedExpression body)
   ExpCaseMatch scrutinee alternatives -> Generated.Case
     (toGeneratedExpression scrutinee)
-    [ ( Generated.Constructor (toSynthesisName constructor)
+    [ ( Generated.Constructor constructor
           $ map (Generated.Bind . fst) variables
       , toGeneratedExpression body
       )

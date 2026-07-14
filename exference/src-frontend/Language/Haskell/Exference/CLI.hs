@@ -32,7 +32,6 @@ import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Types
   ( sClassEnv_instances
   , sClassEnv_tclasses
-  , toSynthesisName
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( LoadReport (..)
@@ -373,7 +372,7 @@ freshTarget :: SourceEnvironment -> IO DefinitionName
 freshTarget environment = go 0
  where
   occupied = Set.fromList
-    [toSynthesisName $ functionName binding
+    [functionName binding
     | binding <- sourceFunctions environment]
   go :: Natural -> IO DefinitionName
   go suffix = do

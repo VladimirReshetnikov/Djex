@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MonadComprehensions #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Language.Haskell.Exference.Core.Types
   ( TVarId
@@ -17,7 +18,8 @@ module Language.Haskell.Exference.Core.Types
   , Substs
   , HsTypeClass (..)
   , HsInstance (..)
-  , HsConstraint (HsConstraint)
+  , HsConstraint
+  , pattern HsConstraint
   , constraint_tclass
   , constraint_params
   , toSynthesisConstraintStructure
@@ -91,7 +93,6 @@ type SynthesisType = SharedType.Type SynthesisVariable
 data SynthesisTypeError
   = InvalidSynthesisType (SharedType.TypeError SynthesisVariable)
   | InvalidSynthesisConstraint SharedConstraint.ConstraintError
-  | UnsupportedSynthesisName QualifiedNameError
   | RigidForallBinder TVarId
   deriving (Eq, Show, Generic)
 
@@ -119,7 +120,7 @@ toSynthesisTypeStructure typeExpression = case typeExpression of
     $ SharedType.FlexibleVariable variable
   TypeConstant variable -> SharedType.TypeVariable
     $ SharedType.RigidVariable variable
-  TypeCons name -> SharedType.TypeConstructor $ toSynthesisName name
+  TypeCons name -> SharedType.TypeConstructor name
   TypeArrow parameter result -> SharedType.FunctionType
     (toSynthesisTypeStructure parameter)
     (toSynthesisTypeStructure result)
@@ -157,37 +158,29 @@ fromSynthesisType source = do
       Right $ TypeVar variable
     SharedType.TypeVariable (SharedType.RigidVariable variable) ->
       Right $ TypeConstant variable
-    SharedType.TypeConstructor name ->
-      TypeCons <$> checkedName name
+    SharedType.TypeConstructor name -> Right $ TypeCons name
     SharedType.TypeApplication function argument -> TypeApp
       <$> convert function <*> convert argument
     SharedType.FunctionType parameter result -> TypeArrow
       <$> convert parameter <*> convert result
     SharedType.TupleType boxity elements -> do
       tuple <- either
-        (Left . UnsupportedSynthesisName . InvalidQualifiedName)
+        (const $ Left $ InvalidSynthesisType
+          $ SharedType.InvalidTupleTypeArity boxity $ length elements)
         Right
         $ SharedName.tupleName boxity $ length elements
-      constructor <- checkedName tuple
-      foldl TypeApp (TypeCons constructor) <$> mapM convert elements
+      foldl TypeApp (TypeCons tuple) <$> mapM convert elements
     SharedType.ForallType variables constraints body -> do
       binders <- mapM flexibleBinder variables
       TypeForall binders
         <$> mapM convertConstraint constraints
         <*> convert body
 
-  checkedName = either (Left . UnsupportedSynthesisName) Right
-    . fromSynthesisName
-
   flexibleBinder (SharedType.FlexibleVariable variable) = Right variable
   flexibleBinder (SharedType.RigidVariable variable) =
     Left $ RigidForallBinder variable
 
-  convertConstraint (SharedConstraint.Constraint className arguments) = do
-    convertedArguments <- mapM convert arguments
-    either (Left . UnsupportedSynthesisName) Right
-      $ fromSynthesisConstraintRepresentation
-      $ SharedConstraint.Constraint className convertedArguments
+  convertConstraint = traverse convert
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
@@ -208,27 +201,25 @@ data HsInstance = HsInstance
   }
   deriving (Eq, Show, Ord, Generic)
 
--- | A finite nominal class constraint. Class declarations live exclusively in
--- t'StaticClassEnv'; storing the already narrowed name directly makes ordinary
--- access independent of the shared conversion boundary.
-data HsConstraint = HsConstraint !QualifiedName [HsType]
-  deriving (Eq, Ord)
+-- | Exference constraints now use the shared nominal/traversable node
+-- directly. The historical constructor name remains as a bidirectional
+-- pattern, so existing engine code does not conceal another representation.
+type HsConstraint = SharedConstraint.Constraint HsType
+
+pattern HsConstraint :: QualifiedName -> [HsType] -> HsConstraint
+pattern HsConstraint className arguments =
+  SharedConstraint.Constraint className arguments
+
+{-# COMPLETE HsConstraint #-}
 
 -- 'QualifiedName' guarantees general lexical validity; the
 -- checked type and environment boundaries additionally enforce that the name
 -- occupies the class namespace.
 constraint_tclass :: HsConstraint -> QualifiedName
-constraint_tclass (HsConstraint className _) = className
+constraint_tclass = SharedConstraint.constraintClass
 
 constraint_params :: HsConstraint -> [HsType]
-constraint_params (HsConstraint _ arguments) = arguments
-
--- | A nominal shared view of the direct Exference representation. Its type
--- arguments remain in Exference's internal vocabulary, so this is a private
--- implementation detail rather than the public shared conversion.
-constraintRepresentation :: HsConstraint -> SharedConstraint.Constraint HsType
-constraintRepresentation (HsConstraint className arguments) =
-  SharedConstraint.Constraint (toSynthesisName className) arguments
+constraint_params = SharedConstraint.constraintArguments
 
 -- | Project the whole constraint, including every type argument, into shared
 -- syntax without validation.  The checked engine uses this only after input
@@ -236,8 +227,7 @@ constraintRepresentation (HsConstraint className arguments) =
 toSynthesisConstraintStructure
   :: HsConstraint
   -> SharedConstraint.Constraint SynthesisType
-toSynthesisConstraintStructure =
-  fmap toSynthesisTypeStructure . constraintRepresentation
+toSynthesisConstraintStructure = fmap toSynthesisTypeStructure
 
 -- | Convert a constraint completely to shared syntax and validate both its
 -- nominal class identity and all type arguments.
@@ -246,31 +236,21 @@ toSynthesisConstraint
   -> Either SynthesisTypeError
        (SharedConstraint.Constraint SynthesisType)
 toSynthesisConstraint constraint = do
-  converted <- traverse toSynthesisType $ constraintRepresentation constraint
+  converted <- traverse toSynthesisType constraint
   either (Left . InvalidSynthesisConstraint) Right
     $ SharedConstraint.validateConstraint converted
   return converted
 
--- | Narrow a fully shared constraint back to Exference.  In particular,
--- unboxed tuple constructor names are rejected rather than smuggled through
--- an opaque wrapper.
+-- | Narrow a fully shared constraint back to Exference. Structural names such
+-- as unboxed tuple constructors are rejected in the /class-name/ position by
+-- shared namespace validation; unboxed tuple types remain valid arguments.
 fromSynthesisConstraint
   :: SharedConstraint.Constraint SynthesisType
   -> Either SynthesisTypeError HsConstraint
 fromSynthesisConstraint constraint = do
   either (Left . InvalidSynthesisConstraint) Right
     $ SharedConstraint.validateConstraint constraint
-  converted <- traverse fromSynthesisType constraint
-  either (Left . UnsupportedSynthesisName) Right
-    $ fromSynthesisConstraintRepresentation converted
-
-fromSynthesisConstraintRepresentation
-  :: SharedConstraint.Constraint HsType
-  -> Either QualifiedNameError HsConstraint
-fromSynthesisConstraintRepresentation
-    (SharedConstraint.Constraint className arguments) = do
-  exferenceName <- fromSynthesisName className
-  return $ HsConstraint exferenceName arguments
+  traverse fromSynthesisType constraint
 
 -- | Location of a constraint while validating a class environment or public
 -- search input.
@@ -458,7 +438,7 @@ validateConstraintClass constraint =
 
 validateClassName :: QualifiedName -> Either ClassEnvError ()
 validateClassName name = case SharedConstraint.validateConstraintClassName
-    (toSynthesisName name) of
+    name of
   Left _ -> Left $ InvalidClassName name
   Right () -> Right ()
 
@@ -486,8 +466,6 @@ qClassEnv_inflatedConstraints (QueryClassEnv _ _ constraints) = constraints
 instance NFData HsType
 instance NFData HsTypeClass
 instance NFData HsInstance
-instance NFData HsConstraint where
-  rnf = rnf . constraintRepresentation
 instance NFData StaticClassEnv
 instance NFData QueryClassEnv
 
@@ -503,10 +481,6 @@ showHsType sourceNames = SharedRender.renderType
 
 -- instance Read HsType where
 --   readsPrec _ = maybeToList . parseType
-
-instance Show HsConstraint where
-  showsPrec precedence source = SharedRender.showsConstraint
-    defaultVariableName precedence $ toSynthesisConstraintStructure source
 
 showHsConstraint :: TypeVarIndex
                  -> HsConstraint

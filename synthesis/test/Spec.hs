@@ -2120,6 +2120,11 @@ constraintTests = testGroup "constraints"
       Constraint classA [()] @?= Constraint classA [()]
       assertBool "different qualified classes compared equal"
         $ Constraint classA [()] /= Constraint classB [()]
+  , testCase "render symbolic classes in valid prefix form" $ do
+      let namespace = right $ mkModuleName "M"
+          symbolic = right $ mkQualifiedOperator namespace ":+:"
+      show (Constraint symbolic ["a"] :: Constraint String) @?=
+        "(M.:+:) \"a\""
   , testCase "validate the ordinary constructor class namespace" $ do
       let namespace = right $ mkModuleName "M"
           ordinary = right $ mkIdentifier "C"

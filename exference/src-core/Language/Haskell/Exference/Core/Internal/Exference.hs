@@ -421,7 +421,7 @@ findEngineChunksWith allocators
   -- Use the same exact projection for search and independent result checking,
   -- otherwise a generated definition could regain the binding it shadows.
   funcs = filter bindingAvailable allFunctions
-  bindingAvailable binding = toSynthesisName (functionName binding)
+  bindingAvailable binding = functionName binding
     `S.notMember` excludedBindings
 
   rootFindExpressionState = FindExpressionsState
@@ -922,7 +922,7 @@ validateEnvironmentDeconstructors environment =
     headName <- case typeConstructorHead input of
       Nothing -> Left $ DeconstructorInputWithoutNominalHead input
       Just name
-        | SynthesisName.nameSpecial (toSynthesisName name)
+        | SynthesisName.nameSpecial name
             == Just SynthesisName.FunctionConstructor ->
               Left $ UnsupportedDeconstructorTypeHead name
         | otherwise -> Right name
@@ -995,8 +995,7 @@ firstInvalidGeneratedConstructor environment = listToMaybe
   | deconstructor <- environmentDeconstructors environment
   , constructor <- deconstructorConstructors deconstructor
   , let name = constructorName constructor
-        generatedPattern = SharedGenerated.Constructor
-          (toSynthesisName name)
+        generatedPattern = SharedGenerated.Constructor name
           (SharedGenerated.Wildcard <$ constructorFields constructor)
         probe = SharedGenerated.Lambda [generatedPattern]
           $ SharedGenerated.Hole ()
@@ -1011,7 +1010,7 @@ firstInvalidGeneratedBinding environment = listToMaybe
   | binding <- environmentFunctions environment
   , let name = functionName binding
   , Left syntaxError <- [SharedGenerated.validateExpressionSyntax
-      $ SharedGenerated.Global $ toSynthesisName name]
+      $ SharedGenerated.Global name]
   ]
 
 environmentTypes :: EnvDictionary -> [HsType]

@@ -34,6 +34,8 @@ data TruncationReason
     -- unexplored branch.  This is an operational resource limit, not evidence
     -- that the requested type is uninhabited.
   | QueueLimitPruned Natural
+    -- ^ Queued work discarded at either a caller-configured bound or the
+    -- backend's finite queue representation capacity.
   | DepthLimitPruned Natural
   deriving (Eq, Ord, Show, Generic)
 

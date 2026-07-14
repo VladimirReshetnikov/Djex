@@ -259,7 +259,8 @@ instantiateGoal plan goal
   -- layer per step, so consume the same ordered segment for each layer.  A
   -- single IntMap for the whole chain would collapse legal shadowed IDs.
   instantiateFrom remaining (TypeForall variables _ body) =
-    let (current, rest) = splitAt (length variables) remaining
+    let (current, rest) =
+          splitRigidInstantiationLayer variables remaining
         substitutions = IntMap.fromList
           [(variable, TypeConstant rigid) | (variable, rigid) <- current]
         instantiatedBody = snd $ applySubsts substitutions body

@@ -10,6 +10,7 @@ import qualified Data.Map.Strict as Map
 import Data.Ord (comparing)
 import qualified Data.Set as Set
 import Data.Version (showVersion)
+import Numeric.Natural (Natural)
 import System.Console.GetOpt
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
@@ -369,11 +370,12 @@ printEnvironment verbosity environment = do
 -- body, so choose a target outside the loaded source namespace instead of
 -- needlessly making such a binding unavailable to expression search.
 freshTarget :: SourceEnvironment -> IO DefinitionName
-freshTarget environment = go (0 :: Int)
+freshTarget environment = go 0
  where
   occupied = Set.fromList
     [toSynthesisName $ functionName binding
     | binding <- sourceFunctions environment]
+  go :: Natural -> IO DefinitionName
   go suffix = do
     let spelling = "_djexResult" ++ if suffix == 0 then "" else show suffix
     candidate <- either

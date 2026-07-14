@@ -14,6 +14,7 @@ module Language.Haskell.Exference.Core.RigidInstantiation
   , RigidInstantiationPlan
   , rigidInstantiations
   , planRigidInstantiation
+  , splitRigidInstantiationLayer
   ) where
 
 import Control.DeepSeq (NFData)
@@ -35,7 +36,9 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 
 -- | The finite 'Int' identity space cannot hold all skolems required by a
 -- query.  The maximum is reported as 'Nothing' only when the environment and
--- goal contain no pre-existing rigid variables.
+-- goal contain no pre-existing rigid variables. The requested count retains
+-- its historical 'Int' API and saturates at 'maxBound' if a larger binder list
+-- is ever supplied; it never wraps into a misleading non-positive value.
 data RigidInstantiationError = RigidIdentifierSupplyExhausted
   { maximumPreexistingRigidIdentifier :: Maybe TVarId
   , requestedRigidIdentifierCount :: Int
@@ -85,15 +88,13 @@ planRigidInstantiation
   -> [HsConstraint]
   -> HsType
   -> Either RigidInstantiationError RigidInstantiationPlan
-planRigidInstantiation context extraConstraints goal
-  | null binders = Right $ RigidInstantiationPlan []
-  | otherwise = case allocateRigidIdentifiers binderCount initialSupply of
-      Nothing -> Left $ RigidIdentifierSupplyExhausted maximumRigid binderCount
-      Just identifiers -> Right $ RigidInstantiationPlan
-        $ zip binders identifiers
+planRigidInstantiation context extraConstraints goal =
+  case allocateRigidInstantiations binders initialSupply of
+    Nothing -> Left $ RigidIdentifierSupplyExhausted
+      maximumRigid (saturatingBinderCount binders)
+    Just instantiations -> Right $ RigidInstantiationPlan instantiations
  where
   binders = leadingBinders $ forallify goal
-  binderCount = length binders
   queryTypes = goal : concatMap constraint_params extraConstraints
   maximumRigid = Foldable.foldl' maximumMaybe
     (maximumEnvironmentRigidIdentifier context)
@@ -103,16 +104,41 @@ planRigidInstantiation context extraConstraints goal
     (concatMap rigidIdentifiersInType queryTypes)
     (environmentRigidIdentifiers context)
 
-allocateRigidIdentifiers
-  :: Int
+allocateRigidInstantiations
+  :: [TVarId]
   -> IdentifierSupply
-  -> Maybe [TVarId]
-allocateRigidIdentifiers count initialSupply = fmap (reverse . fst)
-  $ foldM allocate ([], initialSupply) $ replicate count ()
+  -> Maybe [(TVarId, TVarId)]
+allocateRigidInstantiations binders initialSupply = fmap (reverse . fst)
+  $ foldM allocate ([], initialSupply) binders
  where
-  allocate (identifiers, supply) _ = do
+  allocate (instantiations, supply) binder = do
     (identifier, nextSupply) <- allocateFreshNonNegativeIdentifier supply
-    pure (identifier : identifiers, nextSupply)
+    pure ((binder, identifier) : instantiations, nextSupply)
+
+-- Count only for the compatibility diagnostic after allocation has failed.
+-- The allocation path itself follows binders directly and cannot disagree
+-- with this machine-sized projection.
+saturatingBinderCount :: [value] -> Int
+saturatingBinderCount = Foldable.foldl' increment 0
+ where
+  increment count _
+    | count == maxBound = count
+    | otherwise = count + 1
+
+-- | Split off the instantiations belonging to one forall layer by following
+-- the binder spine directly.  This has the semantics of splitting at the
+-- binder count without first projecting that count into a machine-sized
+-- 'Int'.  Callers remain responsible for checking that the paired binder IDs
+-- agree with the layer they are opening.
+splitRigidInstantiationLayer
+  :: [TVarId]
+  -> [(TVarId, TVarId)]
+  -> ([(TVarId, TVarId)], [(TVarId, TVarId)])
+splitRigidInstantiationLayer [] remaining = ([], remaining)
+splitRigidInstantiationLayer _ [] = ([], [])
+splitRigidInstantiationLayer (_ : binders) (current : remaining) =
+  let (selected, rest) = splitRigidInstantiationLayer binders remaining
+  in (current : selected, rest)
 
 leadingBinders :: HsType -> [TVarId]
 leadingBinders (TypeForall variables _ body) =

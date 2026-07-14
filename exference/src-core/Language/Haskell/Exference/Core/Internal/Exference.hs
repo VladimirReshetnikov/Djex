@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE MonadComprehensions #-}
@@ -28,6 +29,9 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , toGeneratedSearchBatch
   , toGeneratedSearchBatchWithHints
   , constraintsRelaxedAtStep
+  , mergeQueueWithCapacity
+  , naturalPruningReasons
+  , saturatingNaturalToInt
   , ExferenceInputError (..)
   , mkExferenceEnvironment
   , validateExferenceQuery
@@ -70,7 +74,7 @@ import qualified Data.Sequence as Seq
 import Data.Maybe ( maybeToList, listToMaybe )
 import Control.Monad ( mzero, replicateM, forM )
 import Control.Applicative ( (<|>) )
-import Data.List ( find, partition, unfoldr )
+import Data.List ( find, partition, sortBy, unfoldr )
 import Data.Monoid ( Any(..) )
 import Data.Foldable ( traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
@@ -211,6 +215,8 @@ data SearchCompletion
 
 data SearchStatus = SearchStatus
   { searchCompletion :: SearchCompletion
+  -- These historical counters cannot represent every exact engine total.
+  -- Engine-produced values saturate; modern batch metadata remains lossless.
   , searchQueuePruned :: Int
   , searchDepthPruned :: Int
   }
@@ -325,8 +331,8 @@ toGeneratedSearchBatchWithHints typeHints chunk = do
 type RatedNodes = Q.MaxPQueue Priority SearchNode
 data FindExpressionsState = FindExpressionsState
   { findSteps :: Int -- number of steps already performed
-  , findQueuePruned :: Int
-  , findDepthPruned :: Int
+  , findQueuePruned :: !Natural
+  , findDepthPruned :: !Natural
   , findIdentifierSpaceExhausted :: Bool
   , findBindingUsages :: BindingUsages
   , findQueue :: RatedNodes
@@ -431,14 +437,21 @@ findEngineChunksWith allocators
     }
   transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineChunk
   transformSolutions potentialSolutions searchState = EngineChunk
-      (SearchStatus compatibilityCompletion totalQueuePruned totalDepthPruned)
+      (SearchStatus compatibilityCompletion
+        (saturatingNaturalToInt totalQueuePruned)
+        (saturatingNaturalToInt totalDepthPruned))
       progress
       (ExferenceBatchMetadata
         { exferenceBindingUsages = newBindingUsages
-        , exferenceQueuePruned = fromIntegral totalQueuePruned
-        , exferenceDepthPruned = fromIntegral totalDepthPruned
+        , exferenceQueuePruned = totalQueuePruned
+        , exferenceDepthPruned = totalDepthPruned
         })
-      [ (e, remainingConstraints, ExferenceStats n' d $ Q.size newNodes)
+      [ ( e
+        , remainingConstraints
+        , ExferenceStats n' d
+            $ saturatingNaturalToInt
+            $ queueSizeNatural newNodes
+        )
       | solution <- potentialSolutions
       , let contxt = nodeQueryClassEnv solution
       , remainingConstraints <- maybeToList
@@ -496,12 +509,7 @@ findEngineChunksWith allocators
         [ SharedSearch.IdentifierSpaceExhausted
         | identifierSpaceExhausted
         ] ++
-        [ SharedSearch.QueueLimitPruned $ fromIntegral totalQueuePruned
-        | totalQueuePruned > 0
-        ] ++
-        [ SharedSearch.DepthLimitPruned $ fromIntegral totalDepthPruned
-        | totalDepthPruned > 0
-        ]
+        naturalPruningReasons totalQueuePruned totalDepthPruned
       -- Validate the exact tree returned to callers.  This used to check the
       -- raw search result and let the CLI rewrite it afterwards, so a
       -- simplifier bug could invalidate an already-approved candidate.  The
@@ -563,15 +571,16 @@ findEngineChunksWith allocators
     -- from the queue.  This includes applications that immediately solve the
     -- current goal and branches discarded by the configured bounds.
     traverse_ (modify . recordBindingUsage) rNodes
+    let !depthDiscarded = strictNaturalLength tooDeep
     modify $ \current -> current
-      { findDepthPruned = findDepthPruned current + length tooDeep
+      { findDepthPruned = findDepthPruned current + depthDiscarded
       , findIdentifierSpaceExhausted =
           findIdentifierSpaceExhausted current
             || stepIdentifierSpaceExhausted
       }
     queued <- gets findQueue
-    let combined = Q.union queued (Q.fromList ratedNew)
-        (retained, queueDiscarded) = limitQueue maxQueueSize combined
+    let (retained, queueDiscarded) = mergeQueueWithCapacity
+          maximumPQueueSize maxQueueSize queued ratedNew
     modify $ \current -> current
       { findQueue = retained
       , findQueuePruned = findQueuePruned current + queueDiscarded
@@ -1019,12 +1028,79 @@ environmentConstraints environment =
    where
     headName = constraint_tclass $ instance_head instanceDeclaration
 
-limitQueue :: Maybe Int -> RatedNodes -> (RatedNodes, Int)
+-- | Merge a generated frontier without ever overflowing pqueue's internal
+-- Int size. The ordinary branch deliberately retains the historical
+-- construction and tie behavior. The fallback is reachable in tests through
+-- a small injected capacity; production reaches it only at Int-sized
+-- representation exhaustion, where it keeps the best representable nodes and
+-- reports every omitted node as queue pruning.
+mergeQueueWithCapacity
+  :: Ord priority
+  => Natural
+  -> Maybe Int
+  -> Q.MaxPQueue priority value
+  -> [(priority, value)]
+  -> (Q.MaxPQueue priority value, Natural)
+mergeQueueWithCapacity requestedCapacity maximumSize queued newEntries
+  | combinedSize <= capacity =
+      let combined = Q.union queued (Q.fromList newEntries)
+      in limitQueue normalizedMaximumSize combined
+  | otherwise =
+      ( Q.fromList
+          $ take (fromIntegral retainedSize)
+          $ sortBy descendingPriority
+          $ Q.toDescList queued ++ newEntries
+      , combinedSize - retainedSize
+      )
+ where
+  capacity = min requestedCapacity maximumPQueueSize
+  combinedSize = queueSizeNatural queued + strictNaturalLength newEntries
+  normalizedMaximumSize = max 0 <$> maximumSize
+  configuredCapacity = maybe capacity
+    (min capacity . fromIntegral) normalizedMaximumSize
+  retainedSize = min combinedSize configuredCapacity
+  descendingPriority (left, _) (right, _) = compare right left
+
+limitQueue
+  :: Ord priority
+  => Maybe Int
+  -> Q.MaxPQueue priority value
+  -> (Q.MaxPQueue priority value, Natural)
 limitQueue Nothing queue = (queue, 0)
 limitQueue (Just maximumSize) queue =
   let entries = Q.toDescList queue
-      retained = take maximumSize entries
-  in (Q.fromList retained, length entries - length retained)
+      retentionLimit = max 0 maximumSize
+      retained = take retentionLimit entries
+      queueSize = Q.size queue
+      retainedSize = min retentionLimit queueSize
+  in (Q.fromList retained, fromIntegral $ queueSize - retainedSize)
+
+maximumPQueueSize :: Natural
+maximumPQueueSize = fromIntegral (maxBound :: Int)
+
+queueSizeNatural :: Q.MaxPQueue priority value -> Natural
+queueSizeNatural = fromIntegral . Q.size
+
+strictNaturalLength :: [value] -> Natural
+strictNaturalLength = go 0
+ where
+  go !count [] = count
+  go !count (_ : remaining) = go (count + 1) remaining
+
+saturatingNaturalToInt :: Natural -> Int
+saturatingNaturalToInt = fromIntegral . min maximumPQueueSize
+
+naturalPruningReasons
+  :: Natural
+  -> Natural
+  -> [SharedSearch.TruncationReason]
+naturalPruningReasons queuePruned depthPruned =
+  [ SharedSearch.QueueLimitPruned queuePruned
+  | queuePruned > 0
+  ] ++
+  [ SharedSearch.DepthLimitPruned depthPruned
+  | depthPruned > 0
+  ]
 
 functionBindingType :: FunctionBinding -> HsType
 functionBindingType binding =
@@ -1160,7 +1236,7 @@ stateStep allocators multiPM allowConstrs h = do
       -> StateT SearchNode SearchBranches ()
     forallStep vs cs t = do
       instantiations <- state $ \node ->
-        let (current, remaining) = splitAt (length vs)
+        let (current, remaining) = splitRigidInstantiationLayer vs
               $ nodeRigidInstantiations node
         in if map fst current == vs
           then (current, node {nodeRigidInstantiations = remaining})
@@ -1182,6 +1258,7 @@ stateStep allocators multiPM allowConstrs h = do
             (snd . constraintApplySubsts substs <$> cs)
             (nodeQueryClassEnv node)
         }
+
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
     -- e.g. for (\x -> (_ :: Int)), the goal can be filled by `x` if

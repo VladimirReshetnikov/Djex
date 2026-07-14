@@ -7,11 +7,15 @@ module Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
   , findExpressionsWithIdentifierCapacitiesEither
   , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
+  , compatibilityPruningCount
+  , mergePriorityQueueAtCapacity
+  , pruningReasonsFromNaturalTotals
   )
 where
 
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
+import qualified Data.PQueue.Prio.Max as Q
 import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
@@ -19,6 +23,7 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( identifierSupplySize )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.SearchControl
+import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 -- | Total capacities for the three independent dynamic search namespaces.
 -- Term capacity excludes root hole zero; flexible and scope capacities include
@@ -47,6 +52,29 @@ findGeneratedSearchBatchesWithIdentifierCapacitiesEither capacities input = do
   checked <- E.prepareExferenceInput input
   pure $ E.findGeneratedSearchBatchesWithAllocators
     (finiteSearchAllocators capacities) Map.empty checked
+
+-- | Exercise the queue representation boundary with tiny payloads rather
+-- than attempting to allocate an Int-sized frontier.
+mergePriorityQueueAtCapacity
+  :: Natural
+  -> Maybe Int
+  -> [(Int, Int)]
+  -> [(Int, Int)]
+  -> ([(Int, Int)], Natural)
+mergePriorityQueueAtCapacity capacity maximumSize queued newEntries =
+  (Q.toDescList retained, discarded)
+ where
+  (retained, discarded) = E.mergeQueueWithCapacity
+    capacity maximumSize (Q.fromList queued) newEntries
+
+compatibilityPruningCount :: Natural -> Int
+compatibilityPruningCount = E.saturatingNaturalToInt
+
+pruningReasonsFromNaturalTotals
+  :: Natural
+  -> Natural
+  -> [SharedSearch.TruncationReason]
+pruningReasonsFromNaturalTotals = E.naturalPruningReasons
 
 finiteSearchAllocators :: IdentifierCapacities -> SearchAllocators
 finiteSearchAllocators capacities = defaultSearchAllocators

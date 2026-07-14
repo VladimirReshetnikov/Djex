@@ -15,6 +15,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
+import Numeric.Natural (Natural)
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -82,8 +83,11 @@ import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
+  , compatibilityPruningCount
   , findExpressionsWithIdentifierCapacitiesEither
   , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
+  , mergePriorityQueueAtCapacity
+  , pruningReasonsFromNaturalTotals
   )
 import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
 import Language.Haskell.Exference.Core.Types
@@ -2047,6 +2051,15 @@ tests = testGroup "Exference"
           plan <- expectRight $ planRigidInstantiation
             (mkRigidInstantiationContext environment) [] goal
           rigidInstantiations plan @?= [(4, 0), (9, 1)]
+      , testCase "rigid planning pairs a wide binder layer directly" $ do
+          let binders = [0 .. 4095]
+              goal = TypeForall binders []
+                $ TypeArrow (TypeVar 4095) (TypeVar 4095)
+          plan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext
+              $ EnvDictionary [] [] emptyClassEnv)
+            [] goal
+          rigidInstantiations plan @?= zip binders [0 .. 4095]
       , testCase "search freshens negative and boundary namespaces" $ do
           let applied constructor argument = TypeApp
                 (TypeCons $ name constructor) argument
@@ -2709,6 +2722,29 @@ tests = testGroup "Exference"
           toSearchProgress (chunkStatus chunk) @?= Right
             (SharedSearch.Completed $ SharedSearch.truncated
               $ SharedSearch.QueueLimitPruned 1)
+      , testCase "queue representation overflow retains the best priorities" $ do
+          let queued = [(2, 20)]
+              generated = [(3, 30), (1, 10)]
+          mergePriorityQueueAtCapacity 3 Nothing queued generated @?=
+            ([(3, 30), (2, 20), (1, 10)], 0)
+          mergePriorityQueueAtCapacity 2 Nothing queued generated @?=
+            ([(3, 30), (2, 20)], 1)
+          mergePriorityQueueAtCapacity 2 (Just 1) queued generated @?=
+            ([(3, 30)], 2)
+          mergePriorityQueueAtCapacity 3 (Just (-1)) queued generated @?=
+            ([], 3)
+      , testCase "compatibility pruning counts saturate without losing reasons" $ do
+          let maximumCount = fromIntegral (maxBound :: Int) :: Natural
+              queueTotal = maximumCount + 1
+              depthTotal = maximumCount + 2
+          compatibilityPruningCount (maximumCount - 1) @?=
+            maxBound - 1
+          compatibilityPruningCount maximumCount @?= maxBound
+          compatibilityPruningCount queueTotal @?= maxBound
+          pruningReasonsFromNaturalTotals queueTotal depthTotal @?=
+            [ SharedSearch.QueueLimitPruned queueTotal
+            , SharedSearch.DepthLimitPruned depthTotal
+            ]
       , testCase "depth pruning is configured and reported" $ do
           let config = defaultHeuristicsConfig
                 {heuristics_functionGoalTransform = 1}

@@ -97,6 +97,23 @@ cabal build all
 cabal test all --test-show-details=direct
 ```
 
+The project pins the Hackage index snapshot used by the solver, while
+`djex.cabal` retains explicit dependency ranges for library consumers and
+lower-bound testing. Update that snapshot only as part of a dependency review;
+this keeps otherwise identical checkouts on one package universe without
+turning the package metadata into an application-style version lock.
+
+The complete component graph and test matrix are also expected to work with
+the oldest dependency versions permitted by those ranges on the supported GHC:
+
+```console
+cabal build all --prefer-oldest --builddir=dist-newstyle-oldest
+cabal test all --prefer-oldest --builddir=dist-newstyle-oldest --test-show-details=direct
+```
+
+Use an isolated build directory as above so lower-bound validation cannot
+replace the ordinary latest-compatible build plan.
+
 Useful component and compatibility-executable targets include:
 
 ```console

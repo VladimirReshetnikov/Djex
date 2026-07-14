@@ -26,10 +26,7 @@ import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import Data.Void (Void)
 
-import Language.Haskell.Exference.Core
-  ( ExferenceInputError
-  , mkExferenceEnvironment
-  )
+import Language.Haskell.Exference.Core (mkExferenceEnvironment)
 import qualified Language.Haskell.Exference.Core as Core
 import Language.Haskell.Exference.Core.Declaration
   ( PreparedNeutralSynthesisInventory
@@ -63,8 +60,7 @@ import Language.Haskell.Exference.Core.Types
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , Severity (Error)
-  , contextualDiagnostic
+  , shownErrorDiagnostic
   )
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -181,7 +177,9 @@ sealPreparedEnvironment exclusions overrides prepared = do
             then [ExcludedByPolicy]
             else [UnsupportedNestedForall | not $ functionSupported binding]
         ] ++ mapMaybe deconstructorOmission omittedDeconstructors
-  searchEnvironment <- first sessionFailureDiagnostic
+  searchEnvironment <- first
+    (shownErrorDiagnostic "DJEX_EXF_ENV"
+      "cannot seal the Exference session environment")
     $ mkExferenceEnvironment supportedBackend
   typeNames <- first
     (preparationFailure "cannot lower Exference's parser type-name index")
@@ -279,18 +277,11 @@ preparationFailure
   => String
   -> detail
   -> Diagnostic
-preparationFailure message detail = contextualDiagnostic
-  Error "DJEX_EXF_ENV" message (show detail)
+preparationFailure = shownErrorDiagnostic "DJEX_EXF_ENV"
 
 policyFailure
   :: Show detail
   => String
   -> detail
   -> Diagnostic
-policyFailure message detail = contextualDiagnostic
-  Error "DJEX_EXF_POLICY_RATING" message (show detail)
-
-sessionFailureDiagnostic :: ExferenceInputError -> Diagnostic
-sessionFailureDiagnostic detail = contextualDiagnostic
-  Error "DJEX_EXF_ENV" "cannot seal the Exference session environment"
-  (show detail)
+policyFailure = shownErrorDiagnostic "DJEX_EXF_POLICY_RATING"

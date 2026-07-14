@@ -99,8 +99,9 @@ import Language.Haskell.Synthesis.Candidate
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , Severity (Error, Info, Warning)
+  , Severity (Info, Warning)
   , contextualDiagnostic
+  , shownErrorDiagnostic
   , withLocation
   )
 import Language.Haskell.Synthesis.Generated
@@ -320,7 +321,7 @@ runExferenceQuery session request = do
         ProperTypeKind
         sharedGoal
   backendGoal <- either
-    (Left . failureDiagnostic
+    (Left . shownErrorDiagnostic
       "DJEX_EXF_LOWER"
       "cannot lower the shared query to Exference"
     )
@@ -330,7 +331,7 @@ runExferenceQuery session request = do
   -- Result projection retains the exact checked target from the request.
   let input = searchQuery (Just $ definitionName target) backendGoal
         $ requestOptions query
-      searchFailure failure = failureDiagnostic
+      searchFailure failure = shownErrorDiagnostic
         (if optionFailure failure
           then "DJEX_EXF_OPTIONS"
           else "DJEX_EXF_QUERY")
@@ -354,15 +355,15 @@ elaborationFailure
   :: TypeElaborationError ExferenceTypeVariable
   -> Diagnostic
 elaborationFailure failure = case failure of
-  IllKindedType _ _ -> failureDiagnostic
+  IllKindedType _ _ -> shownErrorDiagnostic
     "DJEX_EXF_KIND"
     "Exference rejected the query kind"
     failure
-  SynonymExpansionFailed _ -> failureDiagnostic
+  SynonymExpansionFailed _ -> shownErrorDiagnostic
     "DJEX_EXF_SYNONYM"
     "Exference could not expand the query's type synonyms"
     failure
-  InvalidElaborationType _ _ -> failureDiagnostic
+  InvalidElaborationType _ _ -> shownErrorDiagnostic
     "DJEX_EXF_QUERY"
     "Exference rejected the shared query type"
     failure
@@ -467,12 +468,3 @@ omissionDiagnostic omission = contextualDiagnostic severity code message
       , "DJEX_EXF_POLICY_OMISSION"
       , "Exference omitted a source binding disabled by session policy"
       )
-
-failureDiagnostic
-  :: Show detail
-  => String
-  -> String
-  -> detail
-  -> Diagnostic
-failureDiagnostic code message detail =
-  contextualDiagnostic Error code message (show detail)

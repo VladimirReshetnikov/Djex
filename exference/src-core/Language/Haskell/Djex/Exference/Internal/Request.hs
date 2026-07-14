@@ -34,9 +34,8 @@ import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
 import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , Severity (Error)
   , SourceSpan
-  , contextualDiagnostic
+  , shownErrorDiagnostic
   )
 import Language.Haskell.Synthesis.Generated
   ( DefinitionName
@@ -153,7 +152,7 @@ validateRequest
   -> Either Diagnostic ()
 validateRequest query = do
   either
-    (Left . failureDiagnostic
+    (Left . shownErrorDiagnostic
       "DJEX_EXF_REQUEST"
       "invalid shared Exference request"
     )
@@ -168,7 +167,7 @@ validateRequest query = do
       extraneous = Set.toAscList $ contextVariables Set.\\ goalVariables
   case extraneous of
     [] -> Right ()
-    _ -> Left $ failureDiagnostic
+    _ -> Left $ shownErrorDiagnostic
       "DJEX_EXF_REQUEST"
       "explicit Exference contexts contain variables not in scope"
       extraneous
@@ -192,15 +191,6 @@ inScopeContextVariables goal = SharedType.freeVariables goal
 validateExferenceTarget :: Name -> Either Diagnostic DefinitionName
 validateExferenceTarget target = case mkDefinitionName target of
   Right checked -> Right checked
-  Left failure -> Left $ contextualDiagnostic Error "DJEX_EXF_TARGET"
+  Left failure -> Left $ shownErrorDiagnostic "DJEX_EXF_TARGET"
     "Exference targets must be unqualified value identifiers or operators"
-    (show (renderCanonical target, failure))
-
-failureDiagnostic
-  :: Show detail
-  => String
-  -> String
-  -> detail
-  -> Diagnostic
-failureDiagnostic code message detail =
-  contextualDiagnostic Error code message (show detail)
+    (renderCanonical target, failure)

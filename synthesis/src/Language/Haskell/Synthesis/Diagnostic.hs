@@ -14,6 +14,7 @@ module Language.Haskell.Synthesis.Diagnostic
   , diagnostic
   , codedDiagnostic
   , contextualDiagnostic
+  , shownErrorDiagnostic
   , withCode
   , withSource
   , withSpan
@@ -150,6 +151,19 @@ codedDiagnostic severity code = withCode code . diagnostic severity
 contextualDiagnostic :: Severity -> String -> String -> String -> Diagnostic
 contextualDiagnostic severity code message context =
   withContext context $ codedDiagnostic severity code message
+
+-- | Start an error diagnostic whose explanatory context is the 'Show'
+-- representation of a structured failure. Backend adapters use this at
+-- representation boundaries where the shared diagnostic vocabulary should
+-- retain a backend-specific error without defining another error type.
+shownErrorDiagnostic
+  :: Show detail
+  => String
+  -> String
+  -> detail
+  -> Diagnostic
+shownErrorDiagnostic code message detail =
+  contextualDiagnostic Error code message (show detail)
 
 withCode :: String -> Diagnostic -> Diagnostic
 withCode code value = value { diagnosticCode = Just code }

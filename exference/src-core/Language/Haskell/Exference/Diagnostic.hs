@@ -18,6 +18,7 @@ module Language.Haskell.Exference.Diagnostic
   , diagnostic
   , codedDiagnostic
   , contextualDiagnostic
+  , shownErrorDiagnostic
   , withCode
   , withSource
   , withSpan
@@ -42,6 +43,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , mkSourceSpan
   , codedDiagnostic
   , contextualDiagnostic
+  , shownErrorDiagnostic
   , renderDiagnostic
   , sourceTextSpan
   , withCode

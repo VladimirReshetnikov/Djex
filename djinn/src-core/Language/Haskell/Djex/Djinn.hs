@@ -68,6 +68,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , Severity (Error)
   , SourceSpan
   , contextualDiagnostic
+  , shownErrorDiagnostic
   , sourceTextSpan
   , withLocation
   , withSource
@@ -174,8 +175,8 @@ mkDjinnSession sharedEnvironment = DjinnSession <$>
 environmentFailure
   :: Core.SynthesisEnvironmentError
   -> Diagnostic
-environmentFailure failure = contextualDiagnostic Error "DJEX_DJINN_ENV"
-  "cannot lower the shared environment to Djinn" (show failure)
+environmentFailure = shownErrorDiagnostic "DJEX_DJINN_ENV"
+  "cannot lower the shared environment to Djinn"
 
 -- | The historical checked Djinn prelude, sealed for facade-only clients.
 -- Advanced clients can convert an editable raw environment with
@@ -393,14 +394,12 @@ contextLoweringFailure failure = contextualDiagnostic Error
   ("context: " ++ failure)
 
 candidateProjectionFailure :: Core.SynthesisTypeError -> Diagnostic
-candidateProjectionFailure failure = contextualDiagnostic Error
+candidateProjectionFailure = shownErrorDiagnostic
   "DJEX_DJINN_PROJECT" "cannot project a Djinn candidate to shared types"
-  (show failure)
 
 queryResultFailure :: QueryResultInvariantError -> Diagnostic
-queryResultFailure failure = contextualDiagnostic Error
+queryResultFailure = shownErrorDiagnostic
   "DJEX_DJINN_RESULT" "Djinn produced inconsistent logical evidence"
-  (show failure)
 
 checkDefinitionTarget :: Name -> Either Diagnostic DefinitionName
 checkDefinitionTarget target = case mkDefinitionName target of

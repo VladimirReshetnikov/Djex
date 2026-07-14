@@ -326,9 +326,9 @@ makeDjinnResult :: State -> String -> [Context] -> HType
                 -> Either Diagnostic.Diagnostic DjinnResult
 makeDjinnResult s name contexts goal = do
     target <- case SharedName.parseName name of
-        Left failure -> Left $ Diagnostic.contextualDiagnostic
-            Diagnostic.Error "DJEX_DJINN_TARGET"
-            "cannot convert the parsed Djinn target" (show failure)
+        Left failure -> Left $ Diagnostic.shownErrorDiagnostic
+            "DJEX_DJINN_TARGET" "cannot convert the parsed Djinn target"
+            failure
         Right value -> Right value
     checkedTarget <- case Generated.mkDefinitionName target of
         Left _ -> Left $ Diagnostic.contextualDiagnostic

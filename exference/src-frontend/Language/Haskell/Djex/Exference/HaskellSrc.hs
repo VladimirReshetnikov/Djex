@@ -42,9 +42,8 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( parseTypeWithKinds )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , Severity (Error)
   , SourceSpan
-  , contextualDiagnostic
+  , shownErrorDiagnostic
   , sourceTextSpan
   , withCode
   )
@@ -139,7 +138,7 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
   (backendType, sourceVariables) <- first
     (withCode "DJEX_EXF_PARSE") parsed
   sharedType <- either
-    (Left . failureDiagnostic
+    (Left . shownErrorDiagnostic
       "DJEX_EXF_PARSE"
       "cannot project the parsed Exference type"
     )
@@ -157,7 +156,3 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
       sourceLocation = Just (sourceName, sourceTextSpan source)
   Frontend.mkExferenceRequestWithSourceInfo
     sourceVariables' sourceLocation query
-
-failureDiagnostic :: Show detail => String -> String -> detail -> Diagnostic
-failureDiagnostic code message detail =
-  contextualDiagnostic Error code message (show detail)

@@ -2286,6 +2286,16 @@ diagnosticTests = testGroup "diagnostics"
       renderDiagnostic value @?=
         "warning [SYN002]: search used a fallback\n\
         \  context: while checking Example.answer"
+  , testCase "shown errors equal and render like explicit contexts" $ do
+      let detail = NonPositiveSourceColumn 0
+          value = shownErrorDiagnostic "SYN004"
+            "cannot represent a source position" detail
+          expected = contextualDiagnostic Error "SYN004"
+            "cannot represent a source position" (show detail)
+      value @?= expected
+      renderDiagnostic value @?=
+        "error [SYN004]: cannot represent a source position\n\
+        \  context: NonPositiveSourceColumn 0"
   , testCase "complete source location" $ do
       let span' = validSourceSpan 2 3 4 5
           value = withLocation "Example.hs" span'

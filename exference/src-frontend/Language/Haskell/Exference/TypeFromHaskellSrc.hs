@@ -8,6 +8,7 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , runConversionTWithState
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
+  , normalizeConvertedForalls
   , convertName
   , convertQName
   , convertModuleName
@@ -30,9 +31,11 @@ import Language.Haskell.Exts.Pretty ( prettyPrint )
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import qualified Language.Haskell.Exference.Core.Types as T
+import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map.Strict as M
+import qualified Data.IntSet as IntSet
 import qualified Data.Set as S
 
 import Data.Maybe ( fromMaybe )
@@ -137,7 +140,11 @@ convertTypeNoDeclInternal
                                          -- (to keep things unique)
   -> Type SrcSpanInfo
   -> ConversionT String m T.HsType
-convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
+convertTypeNoDeclInternal tcs defModuleName ds ty = do
+  ConvData _ visibleVariables <- lift get
+  converted <- helper ty
+  normalizeConvertedForalls
+    (IntSet.fromList $ M.elems visibleVariables) converted
  where
   helper (TyFun _ a b)      = T.TypeArrow
                               <$> helper a
@@ -177,6 +184,42 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = helper ty
       <*> convertConstraint tcs defModuleName ds `mapM` contextConstraints context
       <*> helper t
   helper x                = throwE $ "unknown type element: " ++ show x -- TODO
+
+-- HSE's spelling map deliberately remains the compatibility hint index, but
+-- one spelling can denote several lexically shadowing binders. Normalize only
+-- after raw conversion succeeds, retain the original hint, and advance the
+-- dense parser namespace beyond every hidden alpha-renamed identity.
+normalizeConvertedForalls
+  :: Monad m
+  => IntSet.IntSet
+  -> T.HsType
+  -> ConversionT String m T.HsType
+normalizeConvertedForalls claimed typeExpression = case
+    TypeUtils.alphaNormalizeForalls claimed typeExpression of
+  Left failure -> throwE $ renderForallNormalizationError failure
+  Right (normalized, reserved) -> do
+    ConvData next variables <- lift get
+    advanced <- either throwE pure $ advanceConversionId next reserved
+    lift $ put $ ConvData advanced variables
+    pure normalized
+
+renderForallNormalizationError
+  :: TypeUtils.ForallNormalizationError
+  -> String
+renderForallNormalizationError failure = case failure of
+  TypeUtils.DuplicateForallBinder variable ->
+    "duplicate explicitly quantified type variable " ++ show variable
+  TypeUtils.ForallNormalizationSupplyExhausted ->
+    "cannot allocate a fresh explicitly quantified type variable"
+
+advanceConversionId :: Int -> IntSet.IntSet -> Either String Int
+advanceConversionId next reserved
+  | IntSet.null reserved = Right next
+  | greatest < next = Right next
+  | greatest < maxBound = Right $ greatest + 1
+  | otherwise = Left "type-variable conversion namespace is exhausted"
+ where
+  greatest = IntSet.findMax reserved
 
 getVar :: Monad m => Name SrcSpanInfo -> ConversionT error m Int
 getVar n = do

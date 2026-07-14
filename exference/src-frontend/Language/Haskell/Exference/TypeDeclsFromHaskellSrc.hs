@@ -19,6 +19,7 @@ where
 
 
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
@@ -35,6 +36,8 @@ import Control.Monad.Trans.Except ( runExceptT
                                   , ExceptT(..)
                                   , throwE
                                   )
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Lazy (get)
 
 import Control.Monad ( forM, liftM )
 import Data.Either ( rights )
@@ -45,6 +48,7 @@ import qualified Data.List.NonEmpty as NonEmpty
 
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as M
+import qualified Data.IntSet as IntSet
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
@@ -168,7 +172,9 @@ getTypeDecls ds modules = do
       -- arbitrary sentinel that can eventually collide with a large RHS.
       vars <- runConversionT (ConvData (M.size tyVarIndex) tyVarIndex)
         $ rawVars `forM` tyVarTransform
-      return $ HsTypeDecl qname vars ty
+      normalized <- either (throwE . show) (pure . fst)
+        $ TypeUtils.alphaNormalizeForalls (IntSet.fromList vars) ty
+      return $ HsTypeDecl qname vars normalized
   let validDeclarations = rights rawList
       declarationMap = M.map Right $ uniqueTypeDeclMap validDeclarations
       -- Validate every reachable expansion now so the compatibility loader
@@ -189,8 +195,13 @@ convertType :: Monad m
             -> ExceptT String m (HsType, TypeVarIndex)
 convertType tcs mn ds declMap t = do
   (ty, index) <- convertTypeNoDecl tcs mn ds t
-  ty' <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
-  return $ (ty', index)
+  expanded <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
+  -- The returned index describes this type's own source spellings; treating
+  -- those IDs as an enclosing namespace would needlessly rename an ordinary
+  -- @forall a@ and leave its hint pointing at a dead identity.
+  normalized <- either (throwE . show) (pure . fst)
+    $ TypeUtils.alphaNormalizeForalls IntSet.empty expanded
+  return (normalized, index)
 
 convertTypeInternal
   :: Monad m
@@ -203,9 +214,11 @@ convertTypeInternal
   -> Type SrcSpanInfo
   -> ConversionT String m HsType
 convertTypeInternal tcs defModuleName ds declMap t = do
+  ConvData _ visibleVariables <- lift get
   ty <- convertTypeNoDeclInternal tcs defModuleName ds t
-  ty' <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
-  return $ ty'
+  expanded <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
+  normalizeConvertedForalls
+    (IntSet.fromList $ M.elems visibleVariables) expanded
 
 parseType
   :: (Monad m)
@@ -258,10 +271,14 @@ parseTypeWithKinds assumptions tcs mn ds declarations mode source = do
   checkKind rawType
   expanded <- either (throwE . conversionDiagnostic) pure
     $ applyTypeDecls (M.map Right declarations) rawType
+  -- As in 'convertType', query hints are not ambient binders. True free
+  -- variables are claimed by the normalizer itself.
+  normalized <- either (throwE . conversionDiagnostic . show) (pure . fst)
+    $ TypeUtils.alphaNormalizeForalls IntSet.empty expanded
   -- Expansion is expected to preserve kind, but this defensive obligation
   -- also guards parser-adapter tables assembled by compatibility callers.
-  checkKind expanded
-  pure (expanded, variableIndex)
+  checkKind normalized
+  pure (normalized, variableIndex)
  where
   checkKind typeExpression = do
     shared <- either (throwE . kindDiagnostic . show) pure

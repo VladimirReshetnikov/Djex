@@ -15,6 +15,8 @@ module Language.Haskell.Exference.Core.TypeUtils
   , constraintMapTypes
   , constraintContainsVariables
   , inflateInstances
+  , ForallNormalizationError (..)
+  , alphaNormalizeForalls
   , splitArrowResultParams
   , containsForall
   , containsNestedForall
@@ -29,7 +31,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
-  ( allocateFreshIdentifier
+  ( IdentifierSupply
+  , allocateFreshIdentifier
   , flexibleIdentifiers
   , supplyFromIdentifiers
   )
@@ -97,74 +100,170 @@ constraintContainsVariables :: HsConstraint -> Bool
 constraintContainsVariables =
   any (not . S.null . freeVars) . constraint_params
 
--- | Alpha-normalize and peel the complete leading prenex chain, then split
--- consecutive arrows. A forall reached after an arrow remains in the result:
--- crossing it would flatten a rank-N type and let callers accidentally discard
--- its binder IDs. Shadowing binders in the leading chain are freshened before
--- that chain is flattened, so their constraints and body occurrences cannot be
--- conflated in the implicit-polymorphism representation.
-splitArrowResultParams :: HsType -> (HsType, [HsType], [TVarId], [HsConstraint])
-splitArrowResultParams source =
-  let (body, variables, constraints) = splitForalls source
-      (result, parameters) = splitArrows body
-  in (result, parameters, variables, constraints)
- where
-  splitForalls = go IntSet.empty
-    (supplyFromIdentifiers $ IntSet.toAscList $ flexibleIdentifiers source)
+-- | Why a lexical forall namespace could not be alpha-normalized.
+data ForallNormalizationError
+  = DuplicateForallBinder TVarId
+  | ForallNormalizationSupplyExhausted
+  deriving (Eq, Show)
 
-  go claimed supply quantified@(TypeForall variables constraints body)
-    -- Duplicate IDs in one binder list are malformed, rather than lexical
-    -- shadowing. Leave that forall visible so checked boundaries reject it.
-    | hasDuplicate variables = (quantified, [], [])
-    | otherwise = case freshenLayer claimed supply variables of
-        -- This requires the entire finite Int domain to be occupied, but keep
-        -- the explicit forall (and therefore fail closed) if it ever occurs.
-        Nothing -> (quantified, [], [])
-        Just (claimed', supply', normalizedVariables, renaming) ->
-          let substitutions = IntMap.map TypeVar renaming
-              normalizedConstraints = map
-                (snd . constraintApplySubsts substitutions) constraints
-              -- 'applySubsts' deletes a nested forall's binders before
-              -- traversing it, preserving lexical re-shadowing.
-              normalizedBody = snd $ applySubsts substitutions body
-              (result, nestedVariables, nestedConstraints) =
-                go claimed' supply' normalizedBody
-          in ( result
-             , normalizedVariables ++ nestedVariables
-             , normalizedConstraints ++ nestedConstraints
-             )
-  go _ _ body = (body, [], [])
+data ForallNormalizationState = ForallNormalizationState
+  { normalizationClaimed :: IntSet.IntSet
+  , normalizationReserved :: IntSet.IntSet
+  , normalizationSupply :: IdentifierSupply
+  }
+
+-- | Give every explicit forall binder a globally distinct flexible identity
+-- while respecting lexical shadowing. External IDs and the type's true free
+-- variables are claimed before traversal. Every ID occurring anywhere in the
+-- source is reserved up front, so a fresh binder cannot capture a later free,
+-- bound, or constraint occurrence.
+--
+-- The returned set is the complete final namespace. Parser adapters must carry
+-- it forward (or advance beyond its maximum) because alpha-renamed binders do
+-- not have an unambiguous source spelling to add to a 'TypeVarIndex'.
+alphaNormalizeForalls
+  :: IntSet.IntSet
+  -> HsType
+  -> Either ForallNormalizationError (HsType, IntSet.IntSet)
+alphaNormalizeForalls externalVariables source = do
+  (normalized, finalState) <- normalizeForallsInType initialState source
+  pure (normalized, normalizationReserved finalState)
+ where
+  sourceVariables = flexibleIdentifiers source
+  reserved = externalVariables `IntSet.union` sourceVariables
+  claimed = externalVariables `IntSet.union`
+    IntSet.fromList (S.toAscList $ freeVars source)
+  initialState = ForallNormalizationState
+    { normalizationClaimed = claimed
+    , normalizationReserved = reserved
+    , normalizationSupply = supplyFromIdentifiers $ IntSet.toAscList reserved
+    }
+
+normalizeForallsInType
+  :: ForallNormalizationState
+  -> HsType
+  -> Either ForallNormalizationError (HsType, ForallNormalizationState)
+normalizeForallsInType state typeExpression = case typeExpression of
+  TypeVar{} -> pure (typeExpression, state)
+  TypeConstant{} -> pure (typeExpression, state)
+  TypeCons{} -> pure (typeExpression, state)
+  TypeArrow parameter result -> do
+    (normalizedParameter, parameterState) <-
+      normalizeForallsInType state parameter
+    (normalizedResult, resultState) <-
+      normalizeForallsInType parameterState result
+    pure (TypeArrow normalizedParameter normalizedResult, resultState)
+  TypeApp function argument -> do
+    (normalizedFunction, functionState) <-
+      normalizeForallsInType state function
+    (normalizedArgument, argumentState) <-
+      normalizeForallsInType functionState argument
+    pure (TypeApp normalizedFunction normalizedArgument, argumentState)
+  TypeForall variables constraints body -> do
+    case firstDuplicateVariable variables of
+      Just duplicate -> Left $ DuplicateForallBinder duplicate
+      Nothing -> pure ()
+    (normalizedVariables, renaming, binderState) <-
+      normalizeForallBinders state variables
+    let substitutions = IntMap.map TypeVar renaming
+        renamedConstraints = map
+          (snd . constraintApplySubsts substitutions) constraints
+        renamedBody = snd $ applySubsts substitutions body
+    (normalizedConstraints, constraintState) <-
+      normalizeForallConstraints binderState renamedConstraints
+    (normalizedBody, bodyState) <-
+      normalizeForallsInType constraintState renamedBody
+    pure
+      ( TypeForall normalizedVariables normalizedConstraints normalizedBody
+      , bodyState
+      )
+
+normalizeForallConstraints
+  :: ForallNormalizationState
+  -> [HsConstraint]
+  -> Either ForallNormalizationError
+      ([HsConstraint], ForallNormalizationState)
+normalizeForallConstraints state [] = pure ([], state)
+normalizeForallConstraints state (HsConstraint name parameters : remaining) = do
+  (normalizedParameters, parameterState) <-
+    normalizeForallTypes state parameters
+  (normalizedRemaining, finalState) <-
+    normalizeForallConstraints parameterState remaining
+  pure
+    (HsConstraint name normalizedParameters : normalizedRemaining, finalState)
+
+normalizeForallTypes
+  :: ForallNormalizationState
+  -> [HsType]
+  -> Either ForallNormalizationError ([HsType], ForallNormalizationState)
+normalizeForallTypes state [] = pure ([], state)
+normalizeForallTypes state (typeExpression : remaining) = do
+  (normalizedType, typeState) <- normalizeForallsInType state typeExpression
+  (normalizedRemaining, finalState) <-
+    normalizeForallTypes typeState remaining
+  pure (normalizedType : normalizedRemaining, finalState)
+
+normalizeForallBinders
+  :: ForallNormalizationState
+  -> [TVarId]
+  -> Either ForallNormalizationError
+      ([TVarId], IntMap.IntMap TVarId, ForallNormalizationState)
+normalizeForallBinders initialState = go initialState [] IntMap.empty
+ where
+  go state reversed renaming [] =
+    pure (reverse reversed, renaming, state)
+  go state reversed renaming (variable : remaining)
+    | IntSet.notMember variable $ normalizationClaimed state =
+        go (claim variable state) (variable : reversed) renaming remaining
+    | otherwise = case allocateFreshIdentifier $ normalizationSupply state of
+        Nothing -> Left ForallNormalizationSupplyExhausted
+        Just (replacement, nextSupply) -> go
+          ( (claim replacement state)
+              {normalizationSupply = nextSupply}
+          )
+          (replacement : reversed)
+          (IntMap.insert variable replacement renaming)
+          remaining
+
+  claim variable state = state
+    { normalizationClaimed = IntSet.insert variable
+        $ normalizationClaimed state
+    , normalizationReserved = IntSet.insert variable
+        $ normalizationReserved state
+    }
+
+firstDuplicateVariable :: [TVarId] -> Maybe TVarId
+firstDuplicateVariable = go IntSet.empty
+ where
+  go _ [] = Nothing
+  go seen (variable : remaining)
+    | IntSet.member variable seen = Just variable
+    | otherwise = go (IntSet.insert variable seen) remaining
+
+-- | Normalize the complete type, peel only its leading prenex chain, then
+-- split consecutive arrows. A forall reached after an arrow remains in the
+-- result. Malformed binder lists or namespace exhaustion retain the entire
+-- source type, ensuring checked callers fail closed instead of flattening it.
+splitArrowResultParams :: HsType -> (HsType, [HsType], [TVarId], [HsConstraint])
+splitArrowResultParams source = case alphaNormalizeForalls IntSet.empty source of
+  Left _ -> (source, [], [], [])
+  Right (normalized, _) ->
+    let (body, variables, constraints) = splitForalls normalized
+        (result, parameters) = splitArrows body
+    in (result, parameters, variables, constraints)
+ where
+  splitForalls (TypeForall variables constraints body) =
+    let (result, nestedVariables, nestedConstraints) = splitForalls body
+    in ( result
+       , variables ++ nestedVariables
+       , constraints ++ nestedConstraints
+       )
+  splitForalls body = (body, [], [])
 
   splitArrows (TypeArrow parameter result) =
     let (finalResult, parameters) = splitArrows result
     in (finalResult, parameter : parameters)
   splitArrows result = (result, [])
-
-  -- Once a prenex chain becomes Exference's flat implicit-polymorphism shape,
-  -- every binder must have a distinct identity. Retain ordinary IDs for trace
-  -- stability and freshen only cross-layer lexical shadows. The supply reserves
-  -- the complete source namespace up front, including free and nested variables,
-  -- so erasing a binder cannot capture an unrelated deeper occurrence.
-  freshenLayer claimed supply = freshen claimed supply [] IntMap.empty
-   where
-    freshen claimed' supply' reversed renaming [] = Just
-      (claimed', supply', reverse reversed, renaming)
-    freshen claimed' supply' reversed renaming (variable : remaining)
-      | IntSet.notMember variable claimed' = freshen
-          (IntSet.insert variable claimed') supply'
-          (variable : reversed) renaming remaining
-      | otherwise = do
-          (replacement, nextSupply) <- allocateFreshIdentifier supply'
-          freshen (IntSet.insert replacement claimed') nextSupply
-            (replacement : reversed)
-            (IntMap.insert variable replacement renaming) remaining
-
-  hasDuplicate = check IntSet.empty
-   where
-    check _ [] = False
-    check seen (variable : remaining)
-      | IntSet.member variable seen = True
-      | otherwise = check (IntSet.insert variable seen) remaining
 
 -- | Whether a type contains explicit quantification at any depth.
 containsForall :: HsType -> Bool

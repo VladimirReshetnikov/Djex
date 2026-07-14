@@ -12,6 +12,7 @@ import Data.Functor.Identity (Identity, runIdentity)
 import Data.List (find, isInfixOf, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
@@ -157,6 +158,8 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
   ( ConvData (..)
   , ConversionT
+  , convertTypeNoDecl
+  , convertTypeNoDeclInternal
   , getVar
   , haskellSrcExtsParseMode
   , parseQualifiedName
@@ -483,6 +486,54 @@ tests = testGroup "Exference"
                   constraint_tclass constraint @?= classAName
                 [] -> fail "class method omitted its owner constraint"
             result -> fail $ "unexpected class methods: " ++ show result
+      , testCase "class methods preserve lexical forall identities" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module LexicalMethods where"
+            , "class Outer a"
+            , "class Inner a"
+            , "class Depends a"
+            , "class Owner a where"
+            , "  shadowed :: forall a. Outer a => forall a. Inner a => a -> a"
+            , "  ownerReferenced :: forall b. Depends a => b -> b"
+            , "  ordinary :: a -> a"
+            ]
+          ownerName <- expectRight
+            $ mkQualifiedName ["LexicalMethods"] "Owner"
+          outerName <- expectRight
+            $ mkQualifiedName ["LexicalMethods"] "Outer"
+          innerName <- expectRight
+            $ mkQualifiedName ["LexicalMethods"] "Inner"
+          dependsName <- expectRight
+            $ mkQualifiedName ["LexicalMethods"] "Depends"
+          loaded <- expectRight $ runIdentity
+            $ loadClassEnvironment [] Map.empty [parsedModule]
+          case rights $ concat $ loadedClassMethodsByModule loaded of
+            [ ClassMethodDeclaration shadowedOwner shadowed
+              , ClassMethodDeclaration referencedOwner ownerReferenced
+              , ClassMethodDeclaration ordinaryOwner ordinary
+              ] -> do
+                shadowedOwner @?= ownerName
+                referencedOwner @?= ownerName
+                ordinaryOwner @?= ownerName
+                functionConstraints shadowed @?=
+                  [ HsConstraint ownerName [TypeVar 0]
+                  , HsConstraint outerName [TypeVar 1]
+                  , HsConstraint innerName [TypeVar 2]
+                  ]
+                functionParameters shadowed @?= [TypeVar 2]
+                functionResult shadowed @?= TypeVar 2
+                functionConstraints ownerReferenced @?=
+                  [ HsConstraint ownerName [TypeVar 0]
+                  , HsConstraint dependsName [TypeVar 0]
+                  ]
+                functionParameters ownerReferenced @?= [TypeVar 3]
+                functionResult ownerReferenced @?= TypeVar 3
+                functionConstraints ordinary @?=
+                  [HsConstraint ownerName [TypeVar 0]]
+                functionParameters ordinary @?= [TypeVar 0]
+                functionResult ordinary @?= TypeVar 0
+            result -> fail $ "unexpected lexical class methods: " ++ show result
       , testCase "cyclic instance prerequisites remain unresolved" $ do
           let cls = HsTypeClass (name "C") [0] []
               prerequisite = HsConstraint (name "C") [TypeVar 0]
@@ -537,6 +588,21 @@ tests = testGroup "Exference"
           let extracted = runIdentity
                 $ getDecls [] Map.empty Map.empty [parsedModule]
           map (fmap functionName) extracted @?= [Right identityName]
+      , testCase "source bindings preserve rank-N lexical identity" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module RankNBinding where"
+            , "ordinary :: (forall foo. foo -> foo) -> foo"
+            ]
+          ordinary <- expectRight
+            $ mkQualifiedName ["RankNBinding"] "ordinary"
+          let nested = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              expected = FunctionBinding
+                (TypeVar 0) ordinary 0 [] [nested]
+              extracted = runIdentity
+                $ getDecls [] Map.empty Map.empty [parsedModule]
+          extracted @?= [Right expected]
       , testCase "monomorphic deconstructors have no empty forall wrapper" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module Fixture where"
@@ -549,6 +615,24 @@ tests = testGroup "Exference"
             [Right (_, DeconstructorBinding input _ _)] ->
               input @?= TypeCons flag
             result -> fail $ "unexpected datatype bindings: " ++ show result
+      , testCase "rank-N fields shadow and restore datatype parameters" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module RankNField where"
+            , "data Box a = Box (forall a. a -> a) a"
+            ]
+          box <- expectRight $ mkQualifiedName ["RankNField"] "Box"
+          makeBox <- expectRight $ mkQualifiedName ["RankNField"] "Box"
+          let nested = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              input = TypeApp (TypeCons box) (TypeVar 0)
+              expectedFunction = FunctionBinding
+                input makeBox 0 [] [nested, TypeVar 0]
+              expectedDeconstructor = DeconstructorBinding input
+                [ConstructorBinding makeBox [nested, TypeVar 0]] False
+              extracted = runIdentity
+                $ getDataConss Map.empty [] Map.empty [parsedModule]
+          extracted @?= [Right ([expectedFunction], expectedDeconstructor)]
       , testCase "constructor forall scopes over fields and polymorphic result" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module Fixture where"
@@ -814,6 +898,20 @@ tests = testGroup "Exference"
           actual @?= TypeForall [0]
             [HsConstraint (name "C") [TypeVar 0, replacement]]
             (TypeVar 0)
+      , testCase "forall normalization retains an unclaimed binder ID" $ do
+          let source = TypeForall [7] []
+                $ TypeArrow (TypeVar 7) (TypeVar 7)
+          alphaNormalizeForalls IntSet.empty source @?=
+            Right (source, IntSet.singleton 7)
+      , testCase "forall normalization protects a later free identity" $ do
+          let source = TypeArrow
+                (TypeForall [0] [] $ TypeArrow (TypeVar 0) (TypeVar 0))
+                (TypeVar 0)
+              expected = TypeArrow
+                (TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 1))
+                (TypeVar 0)
+          alphaNormalizeForalls IntSet.empty source @?=
+            Right (expected, IntSet.fromList [0, 1])
       , testCase "arrow splitting stops before a result forall" $ do
           let integer = TypeCons $ name "Int"
               nestedConstraint = HsConstraint (name "C") [TypeVar 2]
@@ -2632,6 +2730,44 @@ tests = testGroup "Exference"
               nextId @?= 2
               variables @?= Map.fromList [("failed", 0), ("recovered", 1)]
             Left failure -> fail $ "conversion did not recover: " ++ failure
+      , testCase "caught failures cannot reuse an alpha-normalized ID" $ do
+          let syntaxName spelling = HSE.Ident HSE.noSrcSpan spelling
+              binder = syntaxName "a"
+              quantified = HSE.TyForall HSE.noSrcSpan
+                (Just [HSE.UnkindedVar HSE.noSrcSpan binder])
+                Nothing
+                (HSE.TyVar HSE.noSrcSpan binder)
+              action :: ConversionT String Identity (HsType, Int)
+              action = do
+                normalized <- convertTypeNoDeclInternal
+                  Map.empty Nothing [] quantified
+                _ <- catchE
+                  (throwE "expected failure")
+                  (const $ pure ())
+                recovered <- getVar $ syntaxName "recovered"
+                pure (normalized, recovered)
+              initial = ConvData 1 $ Map.singleton "a" 0
+              result = runIdentity $ runExceptT
+                $ runConversionTWithState initial action
+          case result of
+            Right ((normalized, recoveredId), ConvData nextId variables) -> do
+              normalized @?= TypeForall [1] [] (TypeVar 1)
+              recoveredId @?= 2
+              nextId @?= 3
+              variables @?= Map.fromList [("a", 0), ("recovered", 2)]
+            Left failure -> fail $ "conversion did not recover: " ++ failure
+      , testCase "duplicate explicit forall binders are rejected" $ do
+          let binder = HSE.Ident HSE.noSrcSpan "a"
+              quantified = HSE.TyForall HSE.noSrcSpan
+                (Just
+                  [ HSE.UnkindedVar HSE.noSrcSpan binder
+                  , HSE.UnkindedVar HSE.noSrcSpan binder
+                  ])
+                Nothing
+                (HSE.TyVar HSE.noSrcSpan binder)
+              result = runIdentity $ runExceptT
+                $ convertTypeNoDecl Map.empty Nothing [] quantified
+          result @?= Left "duplicate explicitly quantified type variable 0"
       , testCase "failed conversion runners hide their final state" $ do
           let action :: ConversionT String Identity ()
               action = do
@@ -3453,6 +3589,18 @@ tests = testGroup "Exference"
               tdecl_params flipped @?= [1, 0, 2]
               Set.size (Set.fromList $ tdecl_params flipped) @?= 3
             result -> fail $ "unexpected synonym declarations: " ++ show result
+      , testCase "type-synonym foralls shadow their head parameters" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module SynonymShadow where"
+            , "type F a = forall a. a"
+            ]
+          declarationName <- expectRight
+            $ mkQualifiedName ["SynonymShadow"] "F"
+          case rights $ runIdentity $ getTypeDecls [] [parsedModule] of
+            [declaration] -> declaration @?= HsTypeDecl
+              declarationName [0] (TypeForall [1] [] $ TypeVar 1)
+            result -> fail $ "unexpected shadowing synonym: " ++ show result
       , testCase "loader kind-checks phantom alias arguments before erasure" $
           withTemporaryFile (unlines
             [ "module PhantomKind where"
@@ -3566,8 +3714,8 @@ tests = testGroup "Exference"
                         [HsConstraint owner [TypeVar ownerVariable]]
                     } -> do
                       owner @?= className
-                      assertBool "method-local forall captured the class parameter"
-                        $ methodVariable /= ownerVariable
+                      ownerVariable @?= 0
+                      methodVariable @?= 1
                 Just binding -> fail $ "unexpected method projection: "
                   ++ show binding
                 Nothing -> fail "the checked projection lost MethodCapture.method"
@@ -4079,6 +4227,32 @@ tests = testGroup "Exference"
                     (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
               className @?= name "Eq"
             Right result -> fail $ "unexpected elaboration: " ++ show result
+      , testCase "explicit forall retains its source hint identity" $ do
+          (converted, hints) <- expectRight
+            $ parseTypePure "forall foo. foo -> foo"
+          converted @?= TypeForall [0] []
+            (TypeArrow (TypeVar 0) (TypeVar 0))
+          hints @?= Map.singleton "foo" 0
+      , testCase "rank-N forall does not capture a later free spelling" $ do
+          let mode = enableExtensions [HSE.RankNTypes]
+                $ haskellSrcExtsParseMode "rank-n-shadow"
+          (converted, hints) <- expectRight
+            $ parseTypeWithModePure mode "(forall foo. foo -> foo) -> foo"
+          converted @?= TypeArrow
+            (TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 1))
+            (TypeVar 0)
+          hints @?= Map.singleton "foo" 0
+      , testCase "nested forall contexts follow lexical shadowing" $ do
+          let mode = enableExtensions [HSE.RankNTypes]
+                $ haskellSrcExtsParseMode "nested-context-shadow"
+          (converted, hints) <- expectRight $ parseTypeWithModePure mode
+            "forall a. Outer a => forall a. Inner a => a -> a"
+          converted @?= TypeForall [0]
+            [HsConstraint (name "Outer") [TypeVar 0]]
+            (TypeForall [1]
+              [HsConstraint (name "Inner") [TypeVar 1]]
+              (TypeArrow (TypeVar 1) (TypeVar 1)))
+          hints @?= Map.singleton "a" 0
       ]
   , testGroup "shared generated output"
       [ testCase "typed expressions erase to stable local identities" $ do

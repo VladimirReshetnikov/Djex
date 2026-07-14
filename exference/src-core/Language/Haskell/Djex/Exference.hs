@@ -104,7 +104,8 @@ import Language.Haskell.Synthesis.Diagnostic
   , withLocation
   )
 import Language.Haskell.Synthesis.Generated
-  ( FunctionClause (FunctionClause)
+  ( DefinitionName
+  , FunctionClause (FunctionClause)
   , Qualification (..)
   , RenderError (..)
   , RenderOptions (renderQualification)
@@ -309,9 +310,7 @@ runExferenceQuery
   -> Either Diagnostic [ExferenceResult]
 runExferenceQuery session request = do
   let query = exferenceRequestQuery request
-      -- Exference's private search and the shared output clause still consume
-      -- structural names; request construction has already checked validity.
-      target = definitionName $ requestTarget query
+      target = requestTarget query
       sharedGoal = requestContextualGoal request
   elaboratedGoal <- either
     (Left . attachRequestSource request . elaborationFailure)
@@ -327,7 +326,9 @@ runExferenceQuery session request = do
     )
     Right
     $ fromSynthesisType elaboratedGoal
-  let input = searchQuery (Just target) backendGoal
+  -- Only Exference's private exclusion set needs the raw structural name.
+  -- Result projection retains the exact checked target from the request.
+  let input = searchQuery (Just $ definitionName target) backendGoal
         $ requestOptions query
       searchFailure failure = failureDiagnostic
         (if optionFailure failure
@@ -382,7 +383,7 @@ optionFailure failure = case failure of
   _ -> False
 
 resultBatch
-  :: Name
+  :: DefinitionName
   -> ExferenceGeneratedSearchBatch
   -> ExferenceResult
 resultBatch target batch = queryResultFromCandidates $ SearchBatch
@@ -404,7 +405,7 @@ projectBatchMetadata metadata = ExferenceBatchMetadata
   }
 
 projectCandidate
-  :: Name
+  :: DefinitionName
   -> CoreCandidate.ExferenceGeneratedCandidate
   -> ExferenceCandidate
 projectCandidate target candidate = Candidate

@@ -62,6 +62,17 @@ generatedFunctionClauseToHaskellSrc
 generatedFunctionClauseToHaskellSrc options clause = do
   first HaskellSrcScopeError
     $ Generated.validateFunctionClauseScope clause
+  convertCheckedFunctionClause options clause
+
+-- The caller has established lexical scope.  Separating the remaining
+-- structural conversion lets the raw-name compatibility entry point preserve
+-- its historical scope-before-name diagnostics without checking scope twice.
+convertCheckedFunctionClause
+  :: Ord local
+  => Generated.RenderOptions local
+  -> Generated.FunctionClause local
+  -> Either (HaskellSrcConversionError local) HsDecl
+convertCheckedFunctionClause options clause = do
   first HaskellSrcSyntaxError
     $ Generated.validateFunctionClauseSyntax
         (Generated.renderQualification options) clause
@@ -94,15 +105,21 @@ functionToHaskellSrc
   -> SharedName.Name
   -> E.Expression
   -> Either E.ExpressionRenderError HsDecl
-functionToHaskellSrc qualification functionName expression =
+functionToHaskellSrc qualification functionName expression = do
   first toExpressionRenderError
-    $ generatedFunctionClauseToHaskellSrc options clause
+    $ first HaskellSrcScopeError
+    $ Generated.validateExpressionScope
+    $ Generated.Lambda patterns body
+  checkedName <- first (toExpressionRenderError . HaskellSrcSyntaxError)
+    $ Generated.mkDefinitionName functionName
+  first toExpressionRenderError
+    $ convertCheckedFunctionClause options
+    $ Generated.FunctionClause checkedName patterns body
  where
   policy = E.qualificationFromLevel qualification
   options = expressionRenderOptions policy expression
   generated = E.toGeneratedExpression expression
   (patterns, body) = promoteLeadingLambdas generated
-  clause = Generated.FunctionClause functionName patterns body
 
 expressionRenderOptions
   :: Generated.Qualification
@@ -151,8 +168,7 @@ convertFunctionClause
   -> Generated.FunctionClause local
   -> Conversion local HsDecl
 convertFunctionClause qualification (Generated.FunctionClause name patterns body) = do
-  convertedName <- definitionName name
-  convertFunctionParts qualification convertedName patterns body
+  convertFunctionParts qualification (definitionName name) patterns body
 
 convertFunctionParts
   :: Ord local
@@ -281,13 +297,17 @@ namedExpression qualification name
   qname = toQName qualification name
 
 definitionName
-  :: SharedName.Name
-  -> Conversion local (Name SrcSpanInfo)
-definitionName name = case SharedName.nameOccurrence name of
-  SharedName.IdentifierOccurrence _ spelling -> pure $ Ident noLoc spelling
-  SharedName.OperatorOccurrence _ spelling -> pure $ Symbol noLoc spelling
-  SharedName.SpecialOccurrence{} -> lift $ Left
-    $ HaskellSrcSyntaxError $ Generated.InvalidFunctionName name
+  :: Generated.DefinitionName
+  -> Name SrcSpanInfo
+definitionName checked = case SharedName.nameOccurrence
+    $ Generated.definitionName checked of
+  SharedName.IdentifierOccurrence _ spelling -> Ident noLoc spelling
+  SharedName.OperatorOccurrence _ spelling -> Symbol noLoc spelling
+  -- 'DefinitionName' excludes every special occurrence.  Keeping this case
+  -- explicit makes the structural conversion visibly total if the shared
+  -- name representation gains another occurrence form.
+  SharedName.SpecialOccurrence{} ->
+    Ident noLoc $ Generated.definitionSpelling checked
 
 variableExpression :: String -> HsExp
 variableExpression = Var noLoc . UnQual noLoc . Ident noLoc

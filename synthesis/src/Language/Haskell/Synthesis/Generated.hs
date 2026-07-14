@@ -123,7 +123,7 @@ instance NFData local => NFData (Expression local)
 
 -- | One ordinary top-level function equation.
 data FunctionClause local = FunctionClause
-  { clauseName :: Name
+  { clauseName :: DefinitionName
   , clausePatterns :: [Pattern local]
   , clauseBody :: Expression local
   }
@@ -288,7 +288,8 @@ allocateClauseLocalNames options (FunctionClause name patterns body) =
   allocate options
     (concatMap patternLocals patterns ++ expressionLocals body)
     (Set.fromList $ expressionHoleLocals body)
-    (name : concatMap patternGlobals patterns ++ expressionGlobals body)
+    (definitionName name :
+      concatMap patternGlobals patterns ++ expressionGlobals body)
 
 allocate
   :: Ord local
@@ -366,7 +367,8 @@ renderFunctionClause options clause@(FunctionClause name patterns body) = do
   validateFunctionClauseSyntax (renderQualification options) clause
   names <- allocateClauseLocalNames options clause
   Right $ renderStyle style $ sep
-    [ text (renderNamePrefix (renderQualification options) name) <+>
+    [ text (renderNamePrefix (renderQualification options)
+        $ definitionName name) <+>
         sep (map (ppPattern options names 10) patterns) <+> text "="
     , nest 2 $ ppExpression options names 0 body
     ]
@@ -405,15 +407,16 @@ validateFunctionClauseSyntax
   -> Either RenderError ()
 validateFunctionClauseSyntax qualification
     (FunctionClause name patterns body) = do
-  validateDefinitionName name
   mapM_ validatePatternSyntax patterns
   validateExpressionSyntax body
   case List.find capturesDefinition $ expressionGlobals body of
-    Just global -> Left $ GlobalDefinitionCapture name global qualification
+    Just global -> Left $ GlobalDefinitionCapture
+      (definitionName name) global qualification
     Nothing -> Right ()
  where
   capturesDefinition global =
-    renderNamePrefix qualification global == renderNamePrefix qualification name
+    renderNamePrefix qualification global ==
+      renderNamePrefix qualification (definitionName name)
 
 -- | Count structural nodes independently of rendered names and qualification.
 -- Search heuristics can prefer smaller terms without making rank depend on

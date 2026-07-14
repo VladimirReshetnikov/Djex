@@ -88,6 +88,9 @@ tests = testGroup "Djex facade"
       case batchCandidates $ resultSearch result of
         candidate : _ -> do
           candidateResidualConstraints candidate @?= []
+          clauseName (candidateOutput candidate) @?=
+            requestTarget (djinnRequestQuery request)
+          definitionName (clauseName $ candidateOutput candidate) @?= target
           djinnUnusedBinderFraction (candidateDetails candidate) @?= 0
           djinnBinderCount (candidateDetails candidate) @?= 2
           renderFunctionClause
@@ -247,7 +250,9 @@ tests = testGroup "Djex facade"
           case batchCandidates $ resultSearch result of
             candidate : _ -> case candidateOutput candidate of
               FunctionClause actualTarget patterns _ -> do
-                actualTarget @?= target
+                actualTarget @?=
+                  requestTarget (exferenceRequestQuery request)
+                definitionName actualTarget @?= target
                 patterns @?= []
                 exferenceCandidateMetrics candidate @?=
                   exferenceCandidateStatistics (candidateDetails candidate)
@@ -665,9 +670,10 @@ tests = testGroup "Djex facade"
         [Just "DJEX_EXF_POLICY_OMISSION"]
   , testCase "reject definition qualification that creates self-reference" $ do
       target <- expectRight $ mkIdentifier "result"
+      checkedTarget <- expectRight $ mkDefinitionName target
       sharedGlobal <- expectRight $ parseName "Fixture.result"
       let candidate = Candidate
-            (FunctionClause target [] $ Global sharedGlobal)
+            (FunctionClause checkedTarget [] $ Global sharedGlobal)
             [] emptyExferenceCandidateDetails
       renderExferenceCandidateDefinition Unqualified candidate @?=
         Left (GlobalDefinitionCapture target sharedGlobal Unqualified)
@@ -675,9 +681,10 @@ tests = testGroup "Djex facade"
         Right "result = Fixture.result"
   , testCase "preserve Exference clause binders in expression rendering" $ do
       target <- expectRight $ mkIdentifier "result"
+      checkedTarget <- expectRight $ mkDefinitionName target
       sharedGlobal <- expectRight $ parseName "Fixture.value"
       let patternedCandidate = Candidate
-            (FunctionClause target [Wildcard] $ Global sharedGlobal)
+            (FunctionClause checkedTarget [Wildcard] $ Global sharedGlobal)
             [] emptyExferenceCandidateDetails
       renderExferenceCandidateExpression FullyQualified patternedCandidate @?=
         Right "\\_ -> Fixture.value"

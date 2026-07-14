@@ -64,15 +64,20 @@ toGeneratedClause
   :: HClause
   -> Either String (Generated.FunctionClause HSymbol)
 toGeneratedClause (HClause functionName patterns expression) = do
-  name <- generatedName "function" functionName
+  rawName <- generatedName "function" functionName
   convertedPatterns <- mapM convertPattern patterns
   let bound = Set.fromList $ filter (/= "_") $
         concatMap getBinderVarsHP patterns
   convertedExpression <- convertExpression bound expression
+  -- Clause scope historically precedes definition-name syntax in Djinn's
+  -- compatibility diagnostics.  A lambda has exactly the same binder scope
+  -- as a clause, including for an empty pattern list, and lets us preserve
+  -- that ordering before constructing the checked shared name.
+  either (Left . show) Right $ Generated.validateExpressionScope
+    $ Generated.Lambda convertedPatterns convertedExpression
+  name <- either (Left . show) Right $ Generated.mkDefinitionName rawName
   let generated = Generated.FunctionClause
         name convertedPatterns convertedExpression
-  either (Left . show) Right $
-    Generated.validateFunctionClauseScope generated
   either (Left . show) Right $
     Generated.validateFunctionClauseSyntax Generated.FullyQualified generated
   return generated

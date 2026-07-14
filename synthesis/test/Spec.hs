@@ -88,19 +88,21 @@ candidateTests = testGroup "candidates"
       pure ()
   , testCase "render a clause candidate as an expression or definition" $ do
       let identity = right $ mkIdentifier "identity"
+          checkedIdentity = right $ mkDefinitionName identity
           candidate :: Candidate String () (FunctionClause Int)
           candidate = Candidate
-            (FunctionClause identity [Bind 0] $ Local 0) [] ()
+            (FunctionClause checkedIdentity [Bind 0] $ Local 0) [] ()
           options = defaultRenderOptions $ \local -> "a" ++ show local
       renderCandidateExpression options candidate @?= Right "\\a0 -> a0"
       renderCandidateDefinition options candidate @?=
         Right "identity a0 = a0"
   , testCase "return shared syntax errors from candidate rendering" $ do
       let target = right $ mkIdentifier "result"
+          checkedTarget = right $ mkDefinitionName target
           global = right $ parseName "Fixture.result"
           candidate :: Candidate String () (FunctionClause Int)
           candidate = Candidate
-            (FunctionClause target [] $ Global global) [] ()
+            (FunctionClause checkedTarget [] $ Global global) [] ()
           options = (defaultRenderOptions $ const "a")
             { renderQualification = Unqualified }
       renderCandidateDefinition options candidate @?=
@@ -1632,6 +1634,10 @@ generatedTests = testGroup "generated syntax"
           constructorOperator = right $ mkOperator ":+"
           acceptedIdentifier = right $ mkDefinitionName identifier
           acceptedOperator = right $ mkDefinitionName operator
+          checkedClause :: FunctionClause Int
+          checkedClause = FunctionClause acceptedIdentifier [] $ Tuple []
+          checkedOperatorClause :: FunctionClause Int
+          checkedOperatorClause = FunctionClause acceptedOperator [] $ Tuple []
           rejected name = mkDefinitionName name @?=
             Left (InvalidFunctionName name)
           query :: QueryRequest String ()
@@ -1641,6 +1647,9 @@ generatedTests = testGroup "generated syntax"
       definitionName acceptedOperator @?= operator
       definitionSpelling acceptedOperator @?= "+"
       show acceptedIdentifier @?= show identifier
+      clauseName checkedClause @?= acceptedIdentifier
+      renderFunctionClause (defaultRenderOptions show)
+          checkedOperatorClause @?= Right "(+) = ()"
       show query @?=
         "QueryRequest {requestTarget = result, requestGoal = \"goal\", \
         \requestContexts = [], requestOptions = ()}"
@@ -1733,7 +1742,8 @@ generatedTests = testGroup "generated syntax"
         Right "\\x -> x + (True, False)"
   , testCase "render an empty case with explicit braces" $ do
       let eliminate = right $ mkIdentifier "eliminate"
-          clause = FunctionClause eliminate [Bind (0 :: Int)] $
+          checkedEliminate = right $ mkDefinitionName eliminate
+          clause = FunctionClause checkedEliminate [Bind (0 :: Int)] $
             Case (Local 0) []
           options = defaultRenderOptions $ const "emptyValue"
       validateFunctionClauseScope clause @?= Right ()
@@ -1761,9 +1771,10 @@ generatedTests = testGroup "generated syntax"
         Right "Data.List.map Data.List.++ Data.List.map"
   , testCase "render function clauses with scoped case patterns" $ do
       let select = right $ mkIdentifier "select"
+          checkedSelect = right $ mkDefinitionName select
           just = right $ mkIdentifier "Just"
           nothing = right $ mkIdentifier "Nothing"
-          clause = FunctionClause select [Bind (0 :: Int)] $
+          clause = FunctionClause checkedSelect [Bind (0 :: Int)] $
             Case (Local 0)
               [ (Constructor just [Bind 1], Local 1)
               , (Constructor nothing [], Local 0)
@@ -1780,30 +1791,33 @@ generatedTests = testGroup "generated syntax"
           ])
   , testCase "recover clause expressions without discarding binders" $ do
       let target = right $ mkIdentifier "target"
+          checkedTarget = right $ mkDefinitionName target
           body = Local (0 :: Int)
-          valueClause = FunctionClause target [] body
-          functionClause = FunctionClause target [Bind 0, Wildcard] body
+          valueClause = FunctionClause checkedTarget [] body
+          functionClause = FunctionClause checkedTarget [Bind 0, Wildcard] body
       functionClauseExpression valueClause @?= body
       functionClauseExpression functionClause @?=
         Lambda [Bind 0, Wildcard] body
-  , testCase "validate every function-clause syntax layer" $ do
+  , testCase "validate every checked function-clause syntax layer" $ do
       let target = right $ mkIdentifier "target"
+          checkedTarget = right $ mkDefinitionName target
           constructorName = right $ mkIdentifier "Just"
           variableName = right $ mkIdentifier "value"
           unit = Tuple [] :: Expression Int
-      validateFunctionClauseSyntax FullyQualified
-          (FunctionClause constructorName [] unit) @?=
+      mkDefinitionName constructorName @?=
         Left (InvalidFunctionName constructorName)
       validateFunctionClauseSyntax FullyQualified
-          (FunctionClause target [Constructor variableName []] unit) @?=
+          (FunctionClause checkedTarget [Constructor variableName []] unit) @?=
         Left (InvalidConstructorPattern variableName)
       validateFunctionClauseSyntax FullyQualified
-          (FunctionClause target [] $ Lambda [] unit) @?= Left EmptyLambda
+          (FunctionClause checkedTarget [] $ Lambda [] unit) @?= Left EmptyLambda
   , testCase "reject qualification that captures a definition global" $ do
       let target = right $ mkIdentifier "result"
+          checkedTarget = right $ mkDefinitionName target
           namespace = right $ mkModuleName "Fixture"
           global = right $ mkQualifiedIdentifier namespace "result"
-          clause = FunctionClause target [] (Global global :: Expression Int)
+          clause = FunctionClause checkedTarget []
+            (Global global :: Expression Int)
           options qualification = RenderOptions qualification show []
       validateFunctionClauseSyntax Unqualified clause @?=
         Left (GlobalDefinitionCapture target global Unqualified)

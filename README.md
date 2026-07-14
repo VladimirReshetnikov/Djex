@@ -280,9 +280,11 @@ import Language.Haskell.Djex.Exference.HaskellSrc
 Those batches preserve queue/depth pruning, nominal binding usage, residual
 constraints, statistics, and rendering hints without forcing the remaining
 trace. Each generated expression is wrapped in a target-bearing shared
-`FunctionClause`. The shared candidate expression/definition renderers own the
-common clause projection and return `RenderError` directly; each backend
-adapter contributes only its local-name hints and qualification options.
+`FunctionClause` whose opaque `DefinitionName` preserves the checked request
+target through result projection. The shared candidate expression/definition
+renderers own the common clause projection and return `RenderError` directly;
+each backend adapter contributes only its local-name hints and qualification
+options.
 Candidate selection and rendering remain presentation policies outside both
 session operations. The shared `Selection` module now
 provides first, global-best, streaming-all, batch-lookahead, and preferred-tier

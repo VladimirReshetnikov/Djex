@@ -31,9 +31,10 @@ remain free to present the structured value themselves.
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s,
 and its opaque `DefinitionName` checks the narrower generated top-level value
-namespace exactly once at request construction. Function clauses deliberately
-retain a structural `Name` because independently constructed output is still
-validated by the clause renderer. The module represents lambdas, application,
+namespace exactly once at a raw request or compatibility boundary. Function
+clauses retain that checked name, so neither independently constructed output
+nor a backend result can reintroduce an invalid definition between query
+validation and rendering. The module represents lambdas, application,
 tuples, holes, lets, cases, constructor/tuple
 patterns, as-patterns, and function clauses. Its independent scope checker
 rejects free locals, repeated binders in one pattern, and identity reuse in an

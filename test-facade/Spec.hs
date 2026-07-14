@@ -20,7 +20,7 @@ main = defaultMain $ testGroup "public Djex facade"
       definitionName checkedTarget @?= target
       definitionSpelling checkedTarget @?= "identity"
       renderFunctionClause (defaultRenderOptions id)
-          (FunctionClause target [Bind "value"] $ Local "value") @?=
+          (FunctionClause checkedTarget [Bind "value"] $ Local "value") @?=
         Right "identity value = value"
   , testCase "exports checked Exference options" $
       exferenceMaximumSteps defaultExferenceOptions @?= 65536

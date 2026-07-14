@@ -1803,12 +1803,23 @@ testGeneratedClauseBoundary = do
         duplicateAsBinder = DjinnGenerated.HClause "badAs"
             [DjinnGenerated.HPAt "value" $ DjinnGenerated.HPVar "value"]
             (DjinnGenerated.HEVar "value")
+        invalidDefinition = DjinnGenerated.HClause "Result" []
+            (DjinnGenerated.HEVar "value")
+        invalidDefinitionAndScope = DjinnGenerated.HClause "Result"
+            [DjinnGenerated.HPVar "value", DjinnGenerated.HPVar "value"]
+            (DjinnGenerated.HEVar "value")
     assertLeftContains "tuple patterns cannot bind a local twice"
         "DuplicatePatternBinder \"value\""
         (DjinnGenerated.toGeneratedClause duplicateTupleBinder)
     assertLeftContains "as-patterns cannot bind a local twice"
         "DuplicatePatternBinder \"value\""
         (DjinnGenerated.toGeneratedClause duplicateAsBinder)
+    assertLeftContains "raw clauses reject invalid definition names"
+        "InvalidFunctionName Result"
+        (DjinnGenerated.toGeneratedClause invalidDefinition)
+    assertLeftContains "scope errors retain precedence over definition syntax"
+        "DuplicatePatternBinder \"value\""
+        (DjinnGenerated.toGeneratedClause invalidDefinitionAndScope)
 
     goals <- mapM (either fail return . parseHType)
         ["a -> a", "a -> b -> a"]
@@ -1823,6 +1834,9 @@ testGeneratedClauseBoundary = do
   where
     validateCandidate candidate = do
         let clause = SharedCandidate.candidateOutput candidate
+        assertEqual "generated clause retains its checked definition"
+            "generated" $ SharedGenerated.definitionSpelling
+                $ SharedGenerated.clauseName clause
         assertEqual "generated candidate has valid lexical scope"
             (Right ()) $ SharedGenerated.validateFunctionClauseScope clause
         assertEqual "generated candidate has valid renderer-independent syntax"

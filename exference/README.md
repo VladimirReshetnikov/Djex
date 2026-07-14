@@ -327,9 +327,11 @@ second naming implementation. Its `expressionToHaskellSrc` and
 `functionToHaskellSrc` conveniences validate Exference expressions before
 conversion; the lower-level `generatedExpressionToHaskellSrc` and
 `generatedFunctionClauseToHaskellSrc` functions accept the shared output IR
-directly. Every entry point reports free locals, malformed syntax, invalid
-definition names, and globals that qualification would turn into accidental
-recursion instead of exposing an unchecked rendering path.
+directly. The raw-name function convenience rejects invalid definitions before
+constructing a clause; shared clauses already carry an opaque checked
+`DefinitionName`. Every entry point reports free locals, malformed syntax, and
+globals that qualification would turn into accidental recursion instead of
+exposing an unchecked rendering path.
 `findGeneratedSearchBatchesEither` is the one-shot core-only shared result API;
 `findGeneratedSearchBatchesWithHintsEither` additionally accepts source-name
 hints from a frontend. Repeated callers can instead seal an abstract

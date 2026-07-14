@@ -4417,6 +4417,8 @@ tests = testGroup "Exference"
   , testGroup "Haskell AST conversion"
       [ testCase "shared clauses preserve every generated pattern form" $ do
           definition <- expectRight $ SharedName.mkIdentifier "match"
+          checkedDefinition <- expectRight
+            $ Generated.mkDefinitionName definition
           justName <- expectRight $ SharedName.mkIdentifier "Just"
           let preferred local = case local of
                 0 -> "tuplePart"
@@ -4424,7 +4426,7 @@ tests = testGroup "Exference"
                 _ -> "part"
               options = Generated.RenderOptions
                 Generated.Unqualified preferred []
-              clause = Generated.FunctionClause definition
+              clause = Generated.FunctionClause checkedDefinition
                 [ Generated.Wildcard
                 , Generated.TuplePattern
                     [Generated.Bind (0 :: Int), Generated.Wildcard]
@@ -4670,6 +4672,17 @@ tests = testGroup "Exference"
                 (toSynthesisName global) Generated.Unqualified)
             Right rendered -> fail $ "checked conversion created recursion: "
               ++ show rendered
+      , testCase "compatibility functions validate raw definitions once" $ do
+          invalidTarget <- expectRight $ SharedName.mkIdentifier "Result"
+          value <- expectRight $ mkQualifiedName [] "value"
+          functionToHaskellSrc 0 invalidTarget (ExpName value) @?=
+            Left (ExpressionSyntaxError
+              $ Generated.InvalidFunctionName invalidTarget)
+          -- Keep the compatibility API's historical failure ordering: clause
+          -- scope is diagnosed before definition-name syntax.
+          functionToHaskellSrc 0 invalidTarget
+              (ExpVar 7 $ TypeVar 0) @?=
+            Left (ExpressionScopeError $ Generated.UnboundLocal 7)
       , testCase "checked operator definitions use symbolic names" $ do
           target <- expectRight $ SharedName.mkOperator "<+>"
           let expression = ExpLambda 1 (TypeVar 0) $ ExpVar 1 $ TypeVar 0

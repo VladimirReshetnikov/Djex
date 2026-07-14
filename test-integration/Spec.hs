@@ -612,17 +612,34 @@ tests = testGroup "Djex facade"
       results <- expectRight $ runExferenceQuery session request
       assertBool "scoped nested-forall context produced no identity"
         $ any (not . null . batchCandidates . resultSearch) results
-  , testCase "classify malformed Exference options independently" $ do
+  , testCase "retain parsed provenance on malformed Exference options" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       target <- expectRight $ mkIdentifier "identity"
-      request <- expectRight $ parseExferenceRequest session
+      let sourceName = "invalid-options"
+          source = "a -> a"
+      parsed <- expectRight $ parseExferenceRequest session
         defaultExferenceOptions {exferenceMaximumSteps = 0}
-        target "invalid-options" "a -> a"
-      case runExferenceQuery session request of
-        Left failure ->
-          diagnosticCode failure @?= Just "DJEX_EXF_OPTIONS"
-        Right _ -> fail "Exference accepted a zero search-step limit"
+        target sourceName source
+      programmatic <- expectRight $ mkExferenceRequest
+        $ exferenceRequestQuery parsed
+      parsed @?= programmatic
+      parsedFailure <- case runExferenceQuery session parsed of
+        Left failure -> pure failure
+        Right _ -> fail "Exference accepted parsed zero-step options"
+      programmaticFailure <- case runExferenceQuery session programmatic of
+        Left failure -> pure failure
+        Right _ -> fail "Exference accepted programmatic zero-step options"
+      diagnosticCode parsedFailure @?= Just "DJEX_EXF_OPTIONS"
+      diagnosticSource parsedFailure @?= Just sourceName
+      diagnosticSpan parsedFailure @?= Just (sourceTextSpan source)
+      diagnosticSource programmaticFailure @?= Nothing
+      diagnosticSpan programmaticFailure @?= Nothing
+      parsedFailure
+          { diagnosticSource = Nothing
+          , diagnosticSpan = Nothing
+          }
+        @?= programmaticFailure
   , testCase "preserve an Exference query filename extension" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked

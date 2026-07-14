@@ -102,7 +102,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , Severity (Info, Warning)
   , contextualDiagnostic
   , shownErrorDiagnostic
-  , withLocation
+  , withOptionalLocation
   )
 import Language.Haskell.Synthesis.Generated
   ( DefinitionName
@@ -312,15 +312,17 @@ runExferenceQuery session request = do
   let query = exferenceRequestQuery request
       target = requestTarget query
       sharedGoal = requestContextualGoal request
+      requestDiagnostic = withOptionalLocation
+        $ requestSourceLocation request
   elaboratedGoal <- either
-    (Left . attachRequestSource request . elaborationFailure)
+    (Left . requestDiagnostic . elaborationFailure)
     Right
     $ elaborateType freshSynthesisVariable
         (Session.sessionTypeSynonyms session)
         ProperTypeKind
         sharedGoal
   backendGoal <- either
-    (Left . shownErrorDiagnostic
+    (Left . requestDiagnostic . shownErrorDiagnostic
       "DJEX_EXF_LOWER"
       "cannot lower the shared query to Exference"
     )
@@ -330,7 +332,7 @@ runExferenceQuery session request = do
   -- Result projection retains the exact checked target from the request.
   let input = searchQuery (Just $ definitionName target) backendGoal
         $ requestOptions query
-      searchFailure failure = shownErrorDiagnostic
+      searchFailure failure = requestDiagnostic $ shownErrorDiagnostic
         (if optionFailure failure
           then "DJEX_EXF_OPTIONS"
           else "DJEX_EXF_QUERY")
@@ -366,12 +368,6 @@ elaborationFailure failure = case failure of
     "DJEX_EXF_QUERY"
     "Exference rejected the shared query type"
     failure
-
-attachRequestSource :: ExferenceRequest -> Diagnostic -> Diagnostic
-attachRequestSource request value = case requestSourceLocation request of
-  Nothing -> value
-  Just (sourceName, sourceSpan) ->
-    withLocation sourceName sourceSpan value
 
 optionFailure :: ExferenceInputError -> Bool
 optionFailure failure = case failure of

@@ -19,6 +19,7 @@ module Language.Haskell.Synthesis.Diagnostic
   , withSource
   , withSpan
   , withLocation
+  , withOptionalLocation
   , withContext
   , sourceTextSpan
   , renderDiagnostic
@@ -177,6 +178,19 @@ withSpan span' value = value { diagnosticSpan = Just span' }
 -- | Attach a complete source location in one operation.
 withLocation :: FilePath -> SourceSpan -> Diagnostic -> Diagnostic
 withLocation source span' = withSpan span' . withSource source
+
+-- | Attach a complete source location when one is available.
+--
+-- Programmatic requests deliberately carry no location, whereas source
+-- frontends retain the exact filename and span as one optional pair.  Keeping
+-- that distinction here prevents backend adapters from implementing subtly
+-- different @Nothing@ behavior.
+withOptionalLocation
+  :: Maybe (FilePath, SourceSpan)
+  -> Diagnostic
+  -> Diagnostic
+withOptionalLocation Nothing = id
+withOptionalLocation (Just (source, span')) = withLocation source span'
 
 -- | Add outer-to-inner explanatory context.  Rendering preserves insertion
 -- order so adapters can build a readable trail such as module, declaration,

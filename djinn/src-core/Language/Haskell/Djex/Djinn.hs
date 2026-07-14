@@ -70,7 +70,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , contextualDiagnostic
   , shownErrorDiagnostic
   , sourceTextSpan
-  , withLocation
+  , withOptionalLocation
   , withSource
   )
 import Language.Haskell.Synthesis.Generated
@@ -293,7 +293,8 @@ runDjinnQuery (DjinnSession prepared) request = do
       (cachedCoreContexts cache)
       (cachedTargetSymbol cache)
       (cachedCoreGoal cache) of
-    Left failure -> Left $ attachRequestSource request
+    Left failure -> Left $ withOptionalLocation
+      (cachedSourceLocation cache)
       $ contextualDiagnostic Error "DJEX_DJINN_QUERY"
         "Djinn rejected the query" failure
     Right value -> Right value
@@ -310,18 +311,6 @@ runDjinnQuery (DjinnSession prepared) request = do
         candidates
   first queryResultFailure
     $ mkQueryResult (generatedReportEvidence report) batch
-
--- Programmatic requests deliberately carry no source. Parsed requests retain
--- their complete input range so only environment-dependent proof-search
--- rejection acquires that location; eager parser/lowering diagnostics and
--- adapter-internal projection/invariant failures retain their established
--- source-less shape.
-attachRequestSource :: DjinnRequest -> Diagnostic -> Diagnostic
-attachRequestSource request diagnostic = case cachedSourceLocation
-    $ djinnRequestCache request of
-  Nothing -> diagnostic
-  Just (sourceName, sourceSpan) ->
-    withLocation sourceName sourceSpan diagnostic
 
 -- The core currently proves every obligation and therefore emits no residual
 -- constraints. Keep this projection checked nevertheless: it preserves the

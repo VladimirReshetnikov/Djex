@@ -443,6 +443,7 @@ Test-Suite exference-tests
   Other-Modules:
     Paths_djex
     CompatibilityImport
+    DeprecatedCompatibility
   Autogen-Modules: Paths_djex
 
   Build-Depends:

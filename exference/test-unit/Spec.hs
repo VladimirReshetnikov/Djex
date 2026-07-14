@@ -1,5 +1,4 @@
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# OPTIONS_GHC -Wno-deprecations #-}
 
 module Main (main) where
 
@@ -80,7 +79,7 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   )
 import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
-import Language.Haskell.Exference.Core.TypeUtils
+import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify
 import Language.Haskell.Exference
@@ -89,8 +88,8 @@ import Language.Haskell.Exference
   , ExferenceStats (..)
   , Penalty (..)
   , findExpressionsEither
-  , findOneExpression
   )
+import DeprecatedCompatibility (findOneExpression, largestId)
 import Language.Haskell.Exference.EnvironmentParser
   ( EnvironmentLoadError (..)
   , LoadReport (..)

@@ -4732,8 +4732,9 @@ tests = testGroup "Exference"
             Left (InvalidCandidate
               $ InvalidCandidateScope
               $ Generated.UnboundLocal 7)
-          toGeneratedSearchBatch (chunk $ ExpHole 8) @?=
-            Left (InvalidCandidate $ IncompleteCandidate (8 :| []))
+          toGeneratedSearchBatch
+              (chunk $ ExpApply (ExpHole 8) (ExpHole 9)) @?=
+            Left (InvalidCandidate $ IncompleteCandidate (8 :| [9]))
       , testCase "compatibility candidates reject malformed syntax" $ do
           let invalidName = name "notAConstructor"
               expression = ExpLetMatch invalidName []

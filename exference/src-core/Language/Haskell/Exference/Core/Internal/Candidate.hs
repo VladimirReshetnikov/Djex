@@ -90,7 +90,7 @@ mkExferenceGeneratedCandidate typeNames expression constraints statistics = do
     $ Generated.validateExpressionSyntax generated
   either (Left . InvalidCandidateScope) Right
     $ Generated.validateExpressionScope generated
-  case candidateHoles generated of
+  case Generated.expressionHoles generated of
     firstHole : remainingHoles ->
       Left $ IncompleteCandidate $ firstHole :| remainingHoles
     [] -> pure ()
@@ -145,21 +145,6 @@ detachCandidate typeNames expression generated constraints statistics = force
       , exferenceLocalNameHints = Exference.expressionNameHints expression
       , exferenceTypeVariableHints = typeNames
       }
-
-candidateHoles :: Generated.Expression local -> [local]
-candidateHoles expression = case expression of
-  Generated.Local{} -> []
-  Generated.Global{} -> []
-  Generated.Lambda _ body -> candidateHoles body
-  Generated.Apply function argument ->
-    candidateHoles function ++ candidateHoles argument
-  Generated.Tuple elements -> concatMap candidateHoles elements
-  Generated.Hole local -> [local]
-  Generated.Let _ binding body ->
-    candidateHoles binding ++ candidateHoles body
-  Generated.Case scrutinee alternatives ->
-    candidateHoles scrutinee
-      ++ concatMap (candidateHoles . snd) alternatives
 
 -- | Environment-free compatibility helper.  Core and Djex session searches
 -- use the checked environment-aware helper exported from @Core@, because an

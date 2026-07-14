@@ -1909,6 +1909,16 @@ generatedTests = testGroup "generated syntax"
         Right "(a, _a', _a)"
       allocateLocalNames (options []) unaffected @?=
         Right (Map.fromList [("a", "a"), ("_a", "_a")])
+  , testCase "collect holes in left-to-right structural order" $ do
+      let global = right $ mkIdentifier "value"
+          expression :: Expression Int
+          expression = Lambda [Bind 0] $ Apply
+            (Tuple [Hole 1, Local 1, Hole 2])
+            (Let Wildcard (Hole 3) $ Case (Global global)
+              [ (Wildcard, Hole 4)
+              , (Bind 5, Tuple [Hole 2, Hole 5])
+              ])
+      expressionHoles expression @?= [1, 2, 3, 4, 2, 5]
   , testCase "render local hints with fallback, reservations, and policy" $ do
       let namespace = right $ mkModuleName "Data.List"
           mapping = right $ mkQualifiedIdentifier namespace "map"

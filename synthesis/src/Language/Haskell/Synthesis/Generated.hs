@@ -29,6 +29,7 @@ module Language.Haskell.Synthesis.Generated
   , validateFunctionClauseSyntax
   , validateDefinitionName
   , functionClauseExpression
+  , expressionHoles
   , expressionSizeNatural
   , expressionSize
   , allocateLocalNames
@@ -301,7 +302,7 @@ allocateLocalNames
 allocateLocalNames options expression =
   allocate options
     (expressionLocals expression)
-    (Set.fromList $ expressionHoleLocals expression)
+    (Set.fromList $ expressionHoles expression)
     (expressionGlobals expression)
 
 allocateClauseLocalNames
@@ -312,7 +313,7 @@ allocateClauseLocalNames
 allocateClauseLocalNames options (FunctionClause name patterns body) =
   allocate options
     (concatMap patternLocals patterns ++ expressionLocals body)
-    (Set.fromList $ expressionHoleLocals body)
+    (Set.fromList $ expressionHoles body)
     (definitionName name :
       concatMap patternGlobals patterns ++ expressionGlobals body)
 
@@ -712,24 +713,24 @@ expressionLocals expression = case expression of
       | (pattern, body) <- alternatives
       ]
 
--- Collect hole identities independently of allocation order.  A local may be
--- encountered first as an ordinary binder/use and only later as a hole; its
--- first occurrence still wins, but the spelling chosen there must reserve the
--- later underscore-prefixed form as well.
-expressionHoleLocals :: Expression local -> [local]
-expressionHoleLocals expression = case expression of
+-- | Collect hole identities in left-to-right structural order, retaining
+-- duplicates. Patterns do not contain holes and therefore do not contribute
+-- their binders. Keeping this independent of local-allocation order also lets
+-- an ordinary occurrence precede a hole with the same identity safely.
+expressionHoles :: Expression local -> [local]
+expressionHoles expression = case expression of
   Local{} -> []
   Global{} -> []
-  Lambda _ body -> expressionHoleLocals body
+  Lambda _ body -> expressionHoles body
   Apply function argument ->
-    expressionHoleLocals function ++ expressionHoleLocals argument
-  Tuple elements -> concatMap expressionHoleLocals elements
+    expressionHoles function ++ expressionHoles argument
+  Tuple elements -> concatMap expressionHoles elements
   Hole local -> [local]
   Let _ binding body ->
-    expressionHoleLocals binding ++ expressionHoleLocals body
+    expressionHoles binding ++ expressionHoles body
   Case scrutinee alternatives ->
-    expressionHoleLocals scrutinee ++ concat
-      [ expressionHoleLocals body | (_, body) <- alternatives ]
+    expressionHoles scrutinee ++ concat
+      [ expressionHoles body | (_, body) <- alternatives ]
 
 expressionGlobals :: Expression local -> [Name]
 expressionGlobals expression = case expression of

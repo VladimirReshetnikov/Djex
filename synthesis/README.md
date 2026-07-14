@@ -42,7 +42,9 @@ validation and rendering. The module represents lambdas, application,
 tuples, holes, lets, cases, constructor/tuple
 patterns, as-patterns, and function clauses. Its independent scope checker
 rejects free locals, repeated binders in one pattern, and identity reuse in an
-overlapping scope. `functionClauseExpression` recovers the expression denoted
+overlapping scope. `expressionHoles` retains structural order and duplicate
+identities so allocation and backend completeness checks share one traversal.
+`functionClauseExpression` recovers the expression denoted
 by a clause, retaining its argument patterns as a leading lambda while leaving
 a patternless value body unchanged. The renderer allocates stable Haskell
 variable spellings against globals and caller reservations, supports the three

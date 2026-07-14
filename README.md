@@ -47,11 +47,13 @@ Exference's `HsType` is an alias for the shared `Type (Variable Int)`, with
 compatibility patterns over the native tree and one canonical structural
 representation for saturated functions and tuples. Both engines now construct
 their stable `QueryResult` payloads in the core: Djinn preserves its richer
-logical evidence, while Exference derives evidence from each lazy candidate
-batch after one checked query preparation. The next convergence priority is
-making the shared inventories authoritative. Package boundaries should be
-erased only after the competing environment authorities have converged; an
-earlier manifest-only collapse would still discard useful dependency checks.
+  logical evidence, while Exference derives evidence from each lazy candidate
+  batch after one checked query preparation. Exference source checking and both
+  stable sessions now make their shared inventories authoritative. The
+  remaining convergence priority is narrowing Djinn's private prepared proof
+  caches. Package boundaries should be erased only after that environment
+  authority has converged; an earlier manifest-only collapse would still
+  discard useful dependency checks.
 
 ## Dependency migration
 
@@ -280,15 +282,20 @@ search inventory without changing source order. HSE aliases remain unexpanded
 through common Inventory kind checking; the same neutral lowering used by
 programmatic sessions then expands them capture-safely, normalizes classes and
 instances, and derives cross-module recursion before source ratings/order are
-reapplied. That lowering returns an opaque witness which owns the neutral
-inventory, synonym table, and backend together; the source frontend can
+reapplied. Source checking returns one opaque annotated witness which owns the
+checked Inventory, synonym table, and backend together; the frontend can
 reorder the exact checked names and attach finite ratings, but cannot combine
-an inventory with an independently prepared search dictionary. A session
-retains that one prepared witness, its policy-adjusted checked search
-environment, and structured omissions. HSE query parsing derives known types
-and class arities from the witness's shared inventory rather than retaining
-parallel type/class caches; neither an HSE source environment nor its legacy
-synonym map survives sealing.
+an inventory with an independently prepared search dictionary. Alias-aware
+recursion metadata is attached to that Inventory without resealing it or
+repeating kind inference. The historical flat `SourceEnvironment` projection
+is derived on demand from the witness; only legacy synonym spellings remain as
+frontend presentation data. Erasing annotations for a stable session shares
+the same prepared synonym table and backend. A session retains that one
+prepared witness, its policy-adjusted checked search environment, and
+structured omissions. HSE query parsing derives known types and class arities
+from the witness's shared inventory rather than retaining parallel type/class
+caches; neither an HSE source environment nor its legacy synonym map survives
+sealing.
 
 `ExferenceSessionPolicy` applies exact structural-name exclusions and finite,
 signed rating overrides while the private search projection is sealed.

@@ -777,6 +777,42 @@ environmentTests = testGroup "environments"
           $ Inventory.inventoryEnvironment erased) @?= [constructorName]
       Inventory.inventoryKindAssumptions erased @?=
         Inventory.inventoryKindAssumptions inventory
+  , testCase "adjust datatype metadata without rebuilding an inventory" $ do
+      let typeName = right $ mkIdentifier "T"
+          constructorName = right $ mkIdentifier "MkT"
+          valueName = right $ mkIdentifier "value"
+          declarations :: [Declaration.Declaration String Void Int]
+          declarations =
+            [ Declaration.DataTypeDeclaration 1 typeName []
+                [Declaration.DataConstructor 2 constructorName []]
+            , Declaration.ValueDeclaration $ Declaration.ValueSignature
+                3 valueName $ SharedType.TypeConstructor typeName
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.ClosedKindInventory declarations
+          adjusted = Inventory.adjustInventoryDataTypeAnnotations
+            (\name annotation ->
+              if name == typeName then annotation + 10 else annotation)
+            inventory
+          expectedData = Declaration.DataTypeDeclaration 11 typeName []
+            [Declaration.DataConstructor 2 constructorName []]
+          expected =
+            [ expectedData
+            , Declaration.ValueDeclaration $ Declaration.ValueSignature
+                3 valueName $ SharedType.TypeConstructor typeName
+            ]
+          environment = Inventory.inventoryEnvironment adjusted
+      Environment.environmentDeclarations environment @?= expected
+      Map.lookup typeName (Environment.typeDeclarationMap environment) @?=
+        Just expectedData
+      Declaration.constructorAnnotation
+        <$> Map.lookup constructorName
+          (Environment.dataConstructorMap environment) @?= Just 2
+      Declaration.valueAnnotation
+        <$> Map.lookup valueName
+          (Environment.valueSignatureMap environment) @?= Just 3
+      Inventory.inventoryKindAssumptions adjusted @?=
+        Inventory.inventoryKindAssumptions inventory
   , testCase "inventories retain the first unsolved declaration kind" $ do
       let typeName = right $ mkIdentifier "T"
           declarations :: [Declaration.Declaration String String ()]

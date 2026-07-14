@@ -13,6 +13,7 @@ module Language.Haskell.Synthesis.Inventory
   , mkInventory
   , mkInventoryWithClassPolicy
   , mkInventoryFromEnvironmentWithClassPolicy
+  , adjustInventoryDataTypeAnnotations
   , inventoryEnvironment
   , inventoryKindAssumptions
   ) where
@@ -24,6 +25,7 @@ import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Environment (Environment, EnvironmentError)
 import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.KindInference
+import Language.Haskell.Synthesis.Name (Name)
 
 data Inventory typeVariable annotation = Inventory
   { inventoryEnvironment ::
@@ -92,3 +94,17 @@ inferInventory policy classKindPolicy environment = do
   assumptions <- inferDeclarationKindsWithClassPolicy
     policy classKindPolicy environment
   pure $ Inventory environment assumptions
+
+-- | Attach derived datatype metadata without repeating structural validation
+-- or kind inference.  Only top-level datatype annotations can change; the
+-- sealed environment's names, declarations, indexes, and assumptions remain
+-- authoritative.
+adjustInventoryDataTypeAnnotations
+  :: (Name -> annotation -> annotation)
+  -> Inventory typeVariable annotation
+  -> Inventory typeVariable annotation
+adjustInventoryDataTypeAnnotations adjust inventory = inventory
+  { inventoryEnvironment =
+      Environment.adjustEnvironmentDataTypeAnnotations adjust
+      $ inventoryEnvironment inventory
+  }

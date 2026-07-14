@@ -117,7 +117,7 @@ sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
     $ prepareNeutralSynthesisInventory inventory
   sealPreparedEnvironment exclusions overrides prepared
 
--- | Seal a checked source projection without retaining its parser-specific
+-- | Seal a prepared checked-source witness without retaining parser-specific
 -- representation. The opaque prepared inventory proves that the synonym
 -- table and rated, ordered backend are projections of the same neutral
 -- inventory; exposed source-frontend seams cannot recombine those views.

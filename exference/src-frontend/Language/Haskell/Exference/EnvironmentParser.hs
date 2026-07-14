@@ -114,8 +114,9 @@ data SourceEnvironment = SourceEnvironment
   , sourceClasses :: StaticClassEnv
   , sourceTypeNames :: [QualifiedName]
       -- ^ Compatibility lookup cache. Raw callers may populate it, but
-      -- 'checkSourceEnvironment' always rebuilds it from the declarations
-      -- that actually survived validation and backend normalization.
+      -- 'checkSourceEnvironment' ignores it; 'checkedSourceProjection'
+      -- derives a fresh view from declarations that survived validation and
+      -- backend normalization.
   , sourceTypeSynonyms :: [HsTypeDecl]
   }
   deriving (Show)
@@ -126,16 +127,62 @@ data SourceEnvironment = SourceEnvironment
 sourceFunctions :: SourceEnvironment -> [FunctionBinding]
 sourceFunctions = map sourceBindingFunction . sourceBindings
 
--- | A backend projection paired with the exact shared inventory that validated
--- it and the opaque neutral lowering prepared from that inventory.  The
--- constructor is private so CLI and library loaders cannot expose a searchable
--- source environment before structural and kind sealing succeeds, or later
--- recombine its inventory with an unrelated backend dictionary.
+-- | One authoritative prepared source inventory plus the historical synonym
+-- spellings needed by the compatibility frontend. Every other source view is
+-- derived from the witness's ordered, rated backend and checked declarations.
+-- The constructor remains private so callers cannot recombine these spellings
+-- with an unrelated semantic environment.
 data CheckedSourceEnvironment = CheckedSourceEnvironment
-  { checkedSourceProjection :: SourceEnvironment
-  , checkedSourceInventory :: SynthesisInventory
-  , checkedSourcePreparedInventory :: PreparedNeutralSynthesisInventory
-  }
+  (PreparedSynthesisInventory DeclarationMetadata)
+  [HsTypeDecl]
+
+-- | The exact annotated Inventory owned by the prepared source witness.
+checkedSourceInventory :: CheckedSourceEnvironment -> SynthesisInventory
+checkedSourceInventory (CheckedSourceEnvironment prepared _) =
+  preparedSynthesisInventory prepared
+
+-- | An annotation-free view for the stable core session. This shares the
+-- already prepared synonyms and backend; it never repeats lowering.
+checkedSourcePreparedInventory
+  :: CheckedSourceEnvironment
+  -> PreparedNeutralSynthesisInventory
+checkedSourcePreparedInventory (CheckedSourceEnvironment prepared _) =
+  erasePreparedSynthesisAnnotations prepared
+
+-- | Reconstruct the historical flat frontend view from the one prepared
+-- witness. Only source synonym spellings are retained separately; function
+-- order, ratings, datatype recursion, and classes come from the backend, while
+-- method ownership comes from the checked shared declarations.
+checkedSourceProjection :: CheckedSourceEnvironment -> SourceEnvironment
+checkedSourceProjection (CheckedSourceEnvironment prepared synonyms) =
+  SourceEnvironment
+    { sourceBindings = map tagBinding $ environmentFunctions backend
+    , sourceDeconstructors = environmentDeconstructors backend
+    , sourceClasses = classes
+    , sourceTypeNames = filter ordinaryTypeName dataNames
+        ++ map tdecl_name synonyms
+        ++ M.keys (sClassEnv_tclasses classes)
+    , sourceTypeSynonyms = synonyms
+    }
+ where
+  backend = preparedSynthesisBackend prepared
+  classes = environmentClasses backend
+  shared = SharedInventory.inventoryEnvironment
+    $ preparedSynthesisInventory prepared
+  dataNames =
+    [ name
+    | SharedDeclaration.DataTypeDeclaration _ name _ _ <-
+        SharedEnvironment.environmentDeclarations shared
+    ]
+  methodOwners = M.fromList
+    [ (SharedDeclaration.valueName method, owner)
+    | SharedDeclaration.ClassDeclaration _ owner _ _ methods <-
+        M.elems $ SharedEnvironment.classDeclarationMap shared
+    , method <- methods
+    ]
+  tagBinding binding = case M.lookup (functionName binding) methodOwners of
+    Nothing -> SourceFunction binding
+    Just owner -> SourceClassMethod owner binding
 
 -- | The result of an environment-loading operation together with its
 -- non-fatal diagnostics.  Keeping the report in 'IO' hides the loader's
@@ -301,53 +348,23 @@ checkSourceEnvironment environment = do
   sourceInventory <- first InvalidSourceInventory
     $ toSynthesisSourceInventory environment
   prepared <- first InvalidSourceInventory
-    $ prepareNeutralSynthesisInventory $ fmap (const ()) sourceInventory
-  (projection, projected) <- first InvalidSourceInventory
+    $ prepareSynthesisInventory sourceInventory
+  projected <- first InvalidSourceInventory
     $ normalizeBackendProjection prepared environment
-  inventory <- first InvalidSourceInventory
-    $ normalizeInventoryDataMetadata sourceInventory projection
-  pure $ CheckedSourceEnvironment projection inventory projected
-
--- | Make derived datatype metadata in the public checked Inventory agree with
--- the post-expansion backend projection.  Rebuilding is intentional: Inventory
--- is opaque, and changing declaration annotations through a parallel cache
--- would leave its environment indexes out of sync.
-normalizeInventoryDataMetadata
-  :: SynthesisInventory
-  -> SourceEnvironment
-  -> Either SynthesisDeclarationError SynthesisInventory
-normalizeInventoryDataMetadata inventory projection = do
-  metadata <- M.fromList <$> mapM entry (sourceDeconstructors projection)
-  declarations <- mapM (attach metadata)
-    $ SharedEnvironment.environmentDeclarations
-    $ SharedInventory.inventoryEnvironment inventory
-  sealSynthesisInventory declarations
- where
-  entry deconstructor = do
-    name <- deconstructorTypeName deconstructor
-    pure
-      ( name
-      , deconstructorRecursive deconstructor
-      )
-
-  attach metadata declaration = case declaration of
-    SharedDeclaration.DataTypeDeclaration _ name parameters constructors ->
-      case M.lookup name metadata of
-        Nothing -> Left $ PreparedDataMetadataMissing name
-        Just recursive -> Right $ SharedDeclaration.DataTypeDeclaration
-          (RecursiveDataMetadata recursive) name parameters constructors
-    _ -> Right declaration
+  pure $ CheckedSourceEnvironment projected
+    (sourceTypeSynonyms environment)
 
 -- | Lower the checked, alias-preserving inventory exactly once, then reconcile
--- its backend records with source order and ratings.  The neutral lowerer owns
+-- its backend records with source order and ratings. The neutral lowerer owns
 -- capture-safe synonym expansion, declaration-local variable normalization,
 -- and global recursive-datatype classification; the HSE projection contributes
--- only presentation order, method ownership tags, and heuristic penalties.
+-- only presentation order and heuristic penalties. Method ownership is later
+-- recovered from the prepared witness's checked class declarations.
 normalizeBackendProjection
-  :: PreparedNeutralSynthesisInventory
+  :: PreparedSynthesisInventory annotation
   -> SourceEnvironment
   -> Either SynthesisDeclarationError
-      (SourceEnvironment, PreparedNeutralSynthesisInventory)
+      (PreparedSynthesisInventory annotation)
 normalizeBackendProjection prepared environment = do
   let sourceBindingNames = sort
         $ map (functionName . sourceBindingFunction)
@@ -355,7 +372,7 @@ normalizeBackendProjection prepared environment = do
       preparedBindingNames = sort
         $ map functionName
         $ environmentFunctions
-        $ preparedNeutralBackend prepared
+        $ preparedSynthesisBackend prepared
   -- Retain the historical error precedence for malformed compatibility
   -- records: a binding-inventory mismatch is reported before attempting to
   -- inspect datatype heads. The core projection repeats this cheap check so
@@ -366,37 +383,18 @@ normalizeBackendProjection prepared environment = do
       sourceBindingNames preparedBindingNames
   sourceDataNames <- mapM deconstructorTypeName
     $ sourceDeconstructors environment
-  projected <- projectNeutralSynthesisInventory
+  projectSynthesisInventory
     [ (functionName binding, functionPenalty binding)
     | tagged <- sourceBindings environment
     , let binding = sourceBindingFunction tagged
     ]
     sourceDataNames
     prepared
-  let backend = preparedNeutralBackend projected
-      normalizedBindings = zipWith retainTag
-        (sourceBindings environment) (environmentFunctions backend)
-      normalizedDeconstructors = environmentDeconstructors backend
-      retainTag tagged binding = case tagged of
-        SourceFunction _ -> SourceFunction binding
-        SourceClassMethod owner _ -> SourceClassMethod owner binding
-  let ordinaryDataNames = filter ordinaryTypeName sourceDataNames
-      canonicalTypeNames = ordinaryDataNames
-        ++ map tdecl_name (sourceTypeSynonyms environment)
-        ++ M.keys (sClassEnv_tclasses $ environmentClasses backend)
-  pure
-    ( environment
-        { sourceBindings = normalizedBindings
-        , sourceDeconstructors = normalizedDeconstructors
-        , sourceClasses = environmentClasses backend
-        , sourceTypeNames = canonicalTypeNames
-        }
-    , projected
-    )
- where
-  ordinaryTypeName name = case SharedName.nameSpecial name of
-    Nothing -> True
-    Just _ -> False
+
+ordinaryTypeName :: QualifiedName -> Bool
+ordinaryTypeName name = case SharedName.nameSpecial name of
+  Nothing -> True
+  Just _ -> False
 
 deconstructorTypeName
   :: DeconstructorBinding
@@ -843,7 +841,7 @@ parseModulesM inputs = do
       -- Inventory has checked the original applications.  Passing the empty
       -- compatibility map still performs all HSE name/shape conversion; the
       -- checked backend projection expands the retained synonym declarations
-      -- later through 'prepareNeutralSynthesisInventory'.
+      -- later through 'prepareSynthesisInventory'.
       classResult <- lift
         $ loadClassEnvironment dataTypes M.empty modules
       loadedClasses <- either

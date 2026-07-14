@@ -11,6 +11,7 @@ module Language.Haskell.Synthesis.Environment
   , EnvironmentError (..)
   , mkEnvironment
   , groundEnvironmentKinds
+  , adjustEnvironmentDataTypeAnnotations
   , environmentDeclarations
   , typeDeclarationMap
   , valueSignatureMap
@@ -124,6 +125,28 @@ groundEnvironmentKinds environment = do
     , canonicalInstanceHeads = canonicalInstanceHeads environment
     , occupiedValueNames = occupiedValueNames environment
     }
+
+-- | Change only the top-level annotation of every datatype declaration.
+--
+-- The declaration list and type index contain the same sealed declarations,
+-- so both views must be updated together.  Constructor annotations and every
+-- structural field remain untouched; consequently no namespace validation or
+-- index reconstruction is necessary.
+adjustEnvironmentDataTypeAnnotations
+  :: (Name -> annotation -> annotation)
+  -> Environment typeVariable kindVariable annotation
+  -> Environment typeVariable kindVariable annotation
+adjustEnvironmentDataTypeAnnotations adjust environment = environment
+  { reversedDeclarations = map adjustDeclaration
+      $ reversedDeclarations environment
+  , typeDeclarationsByName = Map.map adjustDeclaration
+      $ typeDeclarationsByName environment
+  }
+ where
+  adjustDeclaration declaration = case declaration of
+    DataTypeDeclaration annotation name parameters constructors ->
+      DataTypeDeclaration (adjust name annotation) name parameters constructors
+    _ -> declaration
 
 emptyEnvironment :: Environment typeVariable kindVariable annotation
 emptyEnvironment = Environment [] Map.empty Map.empty Map.empty

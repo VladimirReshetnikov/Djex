@@ -1,8 +1,8 @@
 -- | Parser-neutral support for implementing Exference source frontends.
 --
 -- This module is an explicit service-provider interface: it exposes the
--- narrow operations needed to turn an already checked source projection into
--- a sealed session and to attach source provenance to a checked request. It
+-- narrow operations needed to turn an already prepared checked-source witness
+-- into a sealed session and to attach source provenance to a checked request. It
 -- does not expose either opaque representation, and applications that already
 -- have a neutral synthesis environment should use
 -- "Language.Haskell.Djex.Exference" instead.
@@ -43,8 +43,8 @@ import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Query (QueryRequest)
 
--- | Seal a source frontend's checked, internally consistent projection while
--- applying the same exclusions and rating overrides as the neutral session
+-- | Seal a source frontend's checked, internally consistent prepared witness
+-- while applying the same exclusions and rating overrides as the neutral session
 -- constructor. The prepared inventory's opaque representation prevents a
 -- frontend from pairing declarations with an unrelated search dictionary.
 sealPreparedExferenceSessionWithPolicy

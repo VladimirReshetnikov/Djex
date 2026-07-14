@@ -148,14 +148,19 @@ backend-specific search algorithms.
 
 ## Priority 3: make shared inventories authoritative
 
-**In progress:** Exference sessions now retain one opaque prepared-inventory
-witness instead of independently caching its inventory, synonym table, type
-names, and classes. HSE query parsing derives its minimal known-type and
-class-arity resolver from that session inventory. Source loading still retains
-a `SourceEnvironment`, an annotated shared inventory, and a prepared neutral
-inventory/backend projection; extraction should next create shared declarations
-once, leaving source order, ratings, spans, and method ownership as frontend
-metadata rather than competing semantic environments.
+**Exference source authority completed:** source checking now retains one
+opaque annotated prepared-inventory witness instead of a `SourceEnvironment`,
+an annotated Inventory, and a neutral Inventory/backend projection. The
+witness owns the sealed alias-bearing Inventory, its synonym table, and the
+exact ordered/rated backend. Alias-aware recursive-datatype metadata is
+attached through an annotation-only Inventory adjustment, so sealing and kind
+inference run once. The compatibility `SourceEnvironment` projection is
+derived on demand; method ownership comes from nested shared class methods,
+while order, ratings, classes, constructors, and recursion come from the
+prepared backend. Only historical HSE synonym spellings remain separately as
+presentation data. Stable sessions erase annotations without re-preparing the
+synonym table or backend, and HSE query parsing derives its minimal known-type
+and class-arity resolver from that same session inventory.
 
 **Djinn REPL authority completed:** a session now retains its editable shared
 environment with the exact prepared projection derived from it, and declaration
@@ -198,8 +203,9 @@ Every migration milestone should retain the current release-style gates:
 - a clean tracked tree with the milestone commit pushed before the next
   representation is removed.
 
-The immediate next implementation milestone is Priority 3: make each retained
-shared inventory the semantic authority and reduce backend environments to
-private derived search indexes, while preserving source diagnostic precedence,
-transactional Djinn edits, Exference source order and ratings, kind assumptions,
-class-method ownership, and session policy behavior.
+The immediate next implementation milestone is the remaining Priority 3
+Djinn work: narrow `PreparedEnvironment` into private class, kind, synonym,
+formula, and cached global-premise indexes without restoring a raw editable
+environment. Once that cache boundary is stable, fold the parser-free
+foundation and backend cores into the unnamed library and retire component
+seams that no longer enforce a semantic boundary.

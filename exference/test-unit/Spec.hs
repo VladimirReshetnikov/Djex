@@ -116,6 +116,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , sourceFunctions
   , sourceTypeSynonymMap
   , checkedSourceInventory
+  , checkedSourcePreparedInventory
   , checkedSourceProjection
   , checkSourceEnvironment
   , environmentLoadErrorDiagnostics
@@ -4236,6 +4237,8 @@ tests = testGroup "Exference"
                 $ mkQualifiedName ["Owned"] "ordinary"
               let projection = checkedSourceProjection checked
                   inventory = checkedSourceInventory checked
+                  neutral = checkedSourcePreparedInventory checked
+                  backend = preparedNeutralBackend neutral
                   shared = SharedInventory.inventoryEnvironment inventory
                   methodEntries =
                     [ (owner, binding)
@@ -4243,6 +4246,11 @@ tests = testGroup "Exference"
                         sourceBindings projection
                     , functionName binding == methodName
                     ]
+              preparedNeutralInventory neutral @?= fmap (const ()) inventory
+              environmentFunctions backend @?= sourceFunctions projection
+              environmentDeconstructors backend @?=
+                sourceDeconstructors projection
+              environmentClasses backend @?= sourceClasses projection
               parameter <- case Map.lookup className
                   (sClassEnv_tclasses $ sourceClasses projection) of
                 Just declaration -> case tclass_params declaration of
@@ -4367,7 +4375,7 @@ tests = testGroup "Exference"
                 Left failure -> diagnosticCode failure @?= Just "EXF_KIND"
                 Right value -> fail $ "ill-kinded query was accepted as "
                   ++ show value
-      , testCase "checked projections rebuild their type-name cache" $
+      , testCase "checked projections derive type names from their inventory" $
           withTemporaryFile (unlines
             [ "module TypeNames where"
             , "data Data = MakeData"
@@ -4564,6 +4572,39 @@ tests = testGroup "Exference"
                   ++ show failure
                 Right value -> pure value
               mutualFlags (checkedSourceProjection checked) @?= [True, True]
+      , testCase "checked alias recursion shares one prepared witness" $
+          withTemporaryFile (unlines
+            [ "module AliasRecursion where"
+            , "type Self = Loop"
+            , "data Loop = MakeLoop Self"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              loopName <- expectRight
+                $ mkQualifiedName ["AliasRecursion"] "Loop"
+              let projection = checkedSourceProjection checked
+                  annotated = checkedSourceInventory checked
+                  neutral = checkedSourcePreparedInventory checked
+                  backend = preparedNeutralBackend neutral
+                  declarations = SharedEnvironment.typeDeclarationMap
+                    $ SharedInventory.inventoryEnvironment annotated
+              preparedNeutralInventory neutral @?= fmap (const ()) annotated
+              environmentFunctions backend @?= sourceFunctions projection
+              environmentDeconstructors backend @?=
+                sourceDeconstructors projection
+              environmentClasses backend @?= sourceClasses projection
+              case Map.lookup (toSynthesisName loopName) declarations of
+                Just (SharedDeclaration.DataTypeDeclaration
+                    (RecursiveDataMetadata recursive) _ _ _) ->
+                      recursive @?= True
+                declaration -> fail $ "unexpected Loop declaration: "
+                  ++ show declaration
+              case find ((== Just loopName)
+                  . typeConstructorHead . deconstructorInput)
+                  (sourceDeconstructors projection) of
+                Just deconstructor ->
+                  deconstructorRecursive deconstructor @?= True
+                Nothing -> fail "the checked projection lost AliasRecursion.Loop"
       , testCase "duplicate synonyms reach the shared inventory in source order" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module M where"

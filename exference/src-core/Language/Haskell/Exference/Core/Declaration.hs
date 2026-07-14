@@ -9,14 +9,21 @@ module Language.Haskell.Exference.Core.Declaration
   , SynthesisEnvironment
   , SynthesisInventory
   , NeutralSynthesisInventory
+  , PreparedSynthesisInventory
   , PreparedNeutralSynthesisInventory
   , SynthesisDeclarationError (..)
   , freshSynthesisVariable
+  , prepareSynthesisInventory
   , prepareNeutralSynthesisInventory
+  , projectSynthesisInventory
   , projectNeutralSynthesisInventory
+  , preparedSynthesisInventory
+  , preparedSynthesisTypeSynonyms
+  , preparedSynthesisBackend
   , preparedNeutralInventory
   , preparedNeutralTypeSynonyms
   , preparedNeutralBackend
+  , erasePreparedSynthesisAnnotations
   , deriveRecursiveDataMetadata
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
@@ -91,15 +98,18 @@ type SynthesisInventory = SharedInventory.Inventory
 -- they are backend policy, not source declaration syntax.
 type NeutralSynthesisInventory = SharedInventory.Inventory SynthesisVariable ()
 
--- | One neutral inventory and the exact synonym table and backend lowering
--- prepared from it.  Keeping the constructor private prevents source
--- frontends from pairing a checked inventory with an unrelated search
--- dictionary.  Accessors return immutable views; only the projection function
--- below can change backend order or ratings, and it never changes semantics.
-data PreparedNeutralSynthesisInventory = PreparedNeutralSynthesisInventory
-  NeutralSynthesisInventory
+-- | One checked inventory and the exact synonym table and backend lowering
+-- prepared from it. Keeping the constructor private prevents frontends from
+-- pairing a checked inventory with an unrelated search dictionary. The
+-- annotation parameter lets a source frontend retain presentation metadata
+-- without creating a second semantic inventory.
+data PreparedSynthesisInventory annotation = PreparedSynthesisInventory
+  (SharedInventory.Inventory SynthesisVariable annotation)
   (SharedTypeSynonym.TypeSynonyms SynthesisVariable)
   EnvDictionary
+
+-- | The annotation-free prepared witness accepted by stable core sessions.
+type PreparedNeutralSynthesisInventory = PreparedSynthesisInventory ()
 
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError
@@ -157,33 +167,48 @@ data SynthesisDeclarationError
   | NeutralVariableNamespaceExhausted SynthesisVariable
   deriving (Eq, Show)
 
--- | Lower an already checked neutral inventory to Exference's search
--- dictionary. Type aliases and explicit kinds remain authoritative in that
--- inventory; this projection expands aliases, erases the kinds the core cannot
--- store, and derives only backend operational metadata. All introduction rules
--- receive the neutral zero penalty.
+-- | Lower an already checked inventory to Exference's search dictionary.
+-- Type aliases and explicit kinds remain authoritative in that inventory;
+-- annotations are frontend metadata and never participate in lowering.
+prepareSynthesisInventory
+  :: SynthesisInventory
+  -> Either SynthesisDeclarationError
+      (PreparedSynthesisInventory DeclarationMetadata)
+prepareSynthesisInventory inventory =
+  prepareInventory inventory >>= normalizePreparedDataMetadata
+
+prepareInventory
+  :: SharedInventory.Inventory SynthesisVariable annotation
+  -> Either SynthesisDeclarationError
+      (PreparedSynthesisInventory annotation)
+prepareInventory inventory = do
+  let neutralInventory = fmap (const ()) inventory
+  synonyms <- first NeutralSynonymPreparationError
+    $ SharedTypeSynonym.prepareTypeSynonyms
+        freshSynthesisVariable neutralInventory
+  backend <- lowerNeutralSynthesisEnvironment synonyms
+    $ SharedInventory.inventoryEnvironment neutralInventory
+  pure $ PreparedSynthesisInventory inventory synonyms backend
+
+-- | Compatibility specialization for annotation-free callers.
 prepareNeutralSynthesisInventory
   :: NeutralSynthesisInventory
   -> Either SynthesisDeclarationError PreparedNeutralSynthesisInventory
-prepareNeutralSynthesisInventory inventory = do
-  synonyms <- first NeutralSynonymPreparationError
-    $ SharedTypeSynonym.prepareTypeSynonyms freshSynthesisVariable inventory
-  backend <- lowerNeutralSynthesisEnvironment synonyms
-    $ SharedInventory.inventoryEnvironment inventory
-  pure $ PreparedNeutralSynthesisInventory inventory synonyms backend
+prepareNeutralSynthesisInventory = prepareInventory
 
 -- | Reorder a canonical backend to match a source frontend and attach its
 -- finite heuristic ratings.  Names are an exact inventory: callers may choose
 -- order and ratings, but cannot replace types, constraints, classes,
 -- instances, constructors, or datatype metadata with independently prepared
 -- values.
-projectNeutralSynthesisInventory
+projectSynthesisInventory
   :: [(QualifiedName, Penalty)]
   -> [QualifiedName]
-  -> PreparedNeutralSynthesisInventory
-  -> Either SynthesisDeclarationError PreparedNeutralSynthesisInventory
-projectNeutralSynthesisInventory functionProjection dataProjection
-    (PreparedNeutralSynthesisInventory inventory synonyms backend) = do
+  -> PreparedSynthesisInventory annotation
+  -> Either SynthesisDeclarationError
+      (PreparedSynthesisInventory annotation)
+projectSynthesisInventory functionProjection dataProjection
+    (PreparedSynthesisInventory inventory synonyms backend) = do
   let preparedFunctions = environmentFunctions backend
       sourceBindingNames = sort $ map fst functionProjection
       preparedBindingNames = sort $ map functionName preparedFunctions
@@ -221,32 +246,104 @@ projectNeutralSynthesisInventory functionProjection dataProjection
         $ Map.lookup name deconstructorsByName
   functions <- mapM projectFunction functionProjection
   deconstructors <- mapM projectDeconstructor dataProjection
-  pure $ PreparedNeutralSynthesisInventory inventory synonyms
+  pure $ PreparedSynthesisInventory inventory synonyms
     (backend
       { environmentFunctions = functions
       , environmentDeconstructors = deconstructors
       })
 
+-- | Compatibility name retained for annotation-free callers. The operation is
+-- actually annotation-polymorphic because it changes only backend order and
+-- penalties.
+projectNeutralSynthesisInventory
+  :: [(QualifiedName, Penalty)]
+  -> [QualifiedName]
+  -> PreparedNeutralSynthesisInventory
+  -> Either SynthesisDeclarationError PreparedNeutralSynthesisInventory
+projectNeutralSynthesisInventory = projectSynthesisInventory
+
+-- | The authoritative checked inventory owned by a prepared lowering.
+preparedSynthesisInventory
+  :: PreparedSynthesisInventory annotation
+  -> SharedInventory.Inventory SynthesisVariable annotation
+preparedSynthesisInventory
+    (PreparedSynthesisInventory inventory _ _) = inventory
+
 -- | The authoritative checked inventory owned by a prepared lowering.
 preparedNeutralInventory
   :: PreparedNeutralSynthesisInventory
   -> NeutralSynthesisInventory
-preparedNeutralInventory
-    (PreparedNeutralSynthesisInventory inventory _ _) = inventory
+preparedNeutralInventory = preparedSynthesisInventory
 
 -- | The alias table prepared from the witness's own checked inventory.
+preparedSynthesisTypeSynonyms
+  :: PreparedSynthesisInventory annotation
+  -> SharedTypeSynonym.TypeSynonyms SynthesisVariable
+preparedSynthesisTypeSynonyms
+    (PreparedSynthesisInventory _ synonyms _) = synonyms
+
+-- | The canonical or safely reordered/rated backend owned by the witness.
+preparedSynthesisBackend
+  :: PreparedSynthesisInventory annotation
+  -> EnvDictionary
+preparedSynthesisBackend
+    (PreparedSynthesisInventory _ _ backend) = backend
+
+-- | Compatibility accessor specialized to an annotation-free witness.
 preparedNeutralTypeSynonyms
   :: PreparedNeutralSynthesisInventory
   -> SharedTypeSynonym.TypeSynonyms SynthesisVariable
-preparedNeutralTypeSynonyms
-    (PreparedNeutralSynthesisInventory _ synonyms _) = synonyms
+preparedNeutralTypeSynonyms = preparedSynthesisTypeSynonyms
 
--- | The canonical or safely reordered/rated backend owned by the witness.
+-- | Compatibility accessor specialized to an annotation-free witness.
 preparedNeutralBackend
   :: PreparedNeutralSynthesisInventory
   -> EnvDictionary
-preparedNeutralBackend
-    (PreparedNeutralSynthesisInventory _ _ backend) = backend
+preparedNeutralBackend = preparedSynthesisBackend
+
+-- | Erase frontend annotations without rebuilding the inventory, synonym
+-- table, or projected backend. The resulting witness has exactly the same
+-- semantic declarations and kind assumptions.
+erasePreparedSynthesisAnnotations
+  :: PreparedSynthesisInventory annotation
+  -> PreparedNeutralSynthesisInventory
+erasePreparedSynthesisAnnotations
+    (PreparedSynthesisInventory inventory synonyms backend) =
+  PreparedSynthesisInventory (fmap (const ()) inventory) synonyms backend
+
+-- Attach alias-aware recursion flags derived by the canonical core lowerer to
+-- both opaque Inventory views. Every concrete datatype must have one backend
+-- deconstructor; abstract types deliberately have none.
+normalizePreparedDataMetadata
+  :: PreparedSynthesisInventory DeclarationMetadata
+  -> Either SynthesisDeclarationError
+      (PreparedSynthesisInventory DeclarationMetadata)
+normalizePreparedDataMetadata
+    (PreparedSynthesisInventory inventory synonyms backend) = do
+  metadata <- Map.fromList <$> mapM entry
+    (environmentDeconstructors backend)
+  mapM_ (requireMetadata metadata)
+    $ SharedEnvironment.environmentDeclarations
+    $ SharedInventory.inventoryEnvironment inventory
+  let adjusted = SharedInventory.adjustInventoryDataTypeAnnotations
+        (attachMetadata metadata) inventory
+  pure $ PreparedSynthesisInventory adjusted synonyms backend
+ where
+  entry deconstructor = do
+    name <- deconstructorTypeName deconstructor
+    pure (name, deconstructorRecursive deconstructor)
+
+  requireMetadata metadata declaration = case declaration of
+    SharedDeclaration.DataTypeDeclaration _ name _ _ ->
+      case Map.lookup name metadata of
+        Nothing -> Left $ PreparedDataMetadataMissing name
+        Just _ -> Right ()
+    _ -> Right ()
+
+  -- 'requireMetadata' has checked every datatype in source order, so the
+  -- default cannot be observed for a well-formed prepared witness.
+  attachMetadata metadata name _ = RecursiveDataMetadata
+    $ Map.findWithDefault False name metadata
 
 deconstructorTypeName
   :: DeconstructorBinding

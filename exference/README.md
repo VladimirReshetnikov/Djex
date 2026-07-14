@@ -205,16 +205,22 @@ parser detail preserved as context. HSE locations cross the shared checked
 one-based, half-open span boundary explicitly; a malformed native location
 retains its source and becomes diagnostic context rather than causing a crash
 or forging an invalid span. Low-level `parseModules` keeps aliases
-unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` first seals and kind-checks that
-source graph, then sends the checked Inventory through the parser-independent
-neutral lowerer. The resulting backend projection is reconciled by name with
-the original binding/deconstructor order and ratings. An opaque prepared value
-keeps that Inventory, its synonym table, and the backend lowering inseparable;
-the cross-sublibrary frontend seam accepts only exact-name order and finite
-rating metadata, never a second independently prepared dictionary. Thus
-synonym expansion, forall freshness, class/instance normalization, and
-whole-inventory recursion classification have one implementation, while the
-checked Inventory still retains the source aliases needed by later queries.
+unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` seals and
+kind-checks that source graph once, then sends the checked Inventory through
+the parser-independent neutral lowerer. The resulting backend projection is
+reconciled by name with the original binding/deconstructor order and ratings.
+One opaque annotated prepared value keeps that Inventory, its synonym table,
+and the backend lowering inseparable; the cross-sublibrary frontend seam
+accepts only exact-name order and finite rating metadata, never a second
+independently prepared dictionary. Alias-aware recursion metadata is attached
+to the sealed Inventory through a checked annotation-only adjustment, without
+rebuilding its indexes or repeating kind inference. `CheckedSourceEnvironment`
+stores only that witness and the historical synonym spellings; its flat source
+projection is derived on demand, and its annotation-free session view shares
+the already prepared synonyms and backend. Thus synonym expansion, forall
+freshness, class/instance normalization, and whole-inventory recursion
+classification have one implementation, while the checked Inventory still
+retains the source aliases needed by later queries.
 Its ordered binding field is now `sourceBindings :: [SourceBinding]`, where
 `SourceFunction` denotes an ordinary `FunctionBinding` and
 `SourceClassMethod QualifiedName` records the
@@ -268,8 +274,8 @@ materializes only arities 2 through 7: higher eager constructors would add a
 partial-application branch to every non-arrow goal. This operational cap is
 exported as `maximumBuiltInTupleArity` rather than repeated as a magic number.
 Recursive flags are derived after alias expansion across all loaded modules
-and written back into both the checked projection and Inventory; caller-
-supplied or module-local preliminary bits are never authoritative.
+and appear in both the backend-derived projection and checked Inventory;
+caller-supplied or module-local preliminary bits are never authoritative.
 Class-environment construction likewise rejects repeated instance heads before
 building its lookup index; each shipped primitive instance now has one owning
 module instead of a second shadow declaration in `Data.hs`.
@@ -487,12 +493,13 @@ source/declaration order. The adapter's expression and definition conveniences
 supply the retained local-name hints to the shared candidate renderer and
 expose the common `RenderError` directly.
 
-The session retains the neutral inventory, shared `TypeSynonyms`, core search
-environment, and parser-independent type-name/class indexes only. Parsed
-requests use those indexes for syntax and name resolution; both parsed and
-programmatic goals then pass through the same capture-avoiding shared synonym
-elaborator and its pre/post kind checks before core lowering. The former HSE
-`TypeDeclMap` is therefore a loader concern rather than hidden session state.
+The session retains one neutral prepared-inventory witness, its policy-filtered
+search environment, and structured omissions. Parser-independent type-name and
+class-arity resolvers are derived from the witness Inventory rather than stored
+as parallel caches. Parsed and programmatic goals then pass through the same
+capture-avoiding shared synonym elaborator and its pre/post kind checks before
+core lowering. The former HSE `TypeDeclMap` is therefore a loader concern
+rather than hidden session state.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the
@@ -602,10 +609,11 @@ any / the right solution. Some common current limitations are:
   The backend-selecting `djex exference` driver now consumes only that stable
   facade. The native name/constraint/type migration has removed Exference's
   duplicate source-type IR, and both engines now construct their stable result
-  envelopes directly. The next convergence frontier is to make the shared
-  inventories authoritative, followed by retiring deprecated compatibility
-  entry points; the two backend search algorithms remain intentionally
-  independent for now.
+  envelopes directly. Exference source checking and both stable sessions now
+  make their shared inventories authoritative. The next convergence frontier
+  is to narrow Djinn's prepared proof caches and then fold the parser-free
+  cores into the default library; the two backend search algorithms remain
+  intentionally independent for now.
 - The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
   records concrete correctness reproducers, shared-IR boundaries, and the
   staged migration order.

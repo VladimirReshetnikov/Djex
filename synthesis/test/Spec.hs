@@ -1220,6 +1220,93 @@ typeTests = testGroup "source types"
       SharedType.renameScopedVariables
           (Map.fromList [("a", "outer"), ("b", "free")]) source
         @?= expected
+  , testCase "substitution avoids capture in constraints and tuple bodies" $ do
+      let className = right $ mkIdentifier "C"
+          substitutions = Map.fromList
+            [ ("bound", SharedType.TypeVariable "ignored")
+            , ("free", SharedType.TypeVariable "bound")
+            ]
+          source = SharedType.ForallType ["bound"]
+            [Constraint className
+              [ SharedType.TypeVariable "free"
+              , SharedType.TypeVariable "bound"
+              ]]
+            $ SharedType.TupleType Boxed
+              [ SharedType.TypeVariable "free"
+              , SharedType.TypeVariable "bound"
+              ]
+          expected = SharedType.ForallType ["bound'"]
+            [Constraint className
+              [ SharedType.TypeVariable "bound"
+              , SharedType.TypeVariable "bound'"
+              ]]
+            $ SharedType.TupleType Boxed
+              [ SharedType.TypeVariable "bound"
+              , SharedType.TypeVariable "bound'"
+              ]
+      SharedType.substituteTypeVariables freshStringVariable Set.empty
+          substitutions source @?= Right expected
+  , testCase "substitution is simultaneous" $ do
+      let source = SharedType.TupleType Boxed
+            [ SharedType.TypeVariable "left"
+            , SharedType.TypeVariable "right"
+            ]
+          substitutions = Map.fromList
+            [ ("left", SharedType.TypeVariable "right")
+            , ("right", SharedType.TypeVariable "left")
+            ]
+          expected = SharedType.TupleType Boxed
+            [ SharedType.TypeVariable "right"
+            , SharedType.TypeVariable "left"
+            ]
+      SharedType.substituteTypeVariables (\_ _ -> Nothing) Set.empty
+          substitutions source @?= Right expected
+  , testCase "irrelevant substitutions do not consume fresh supply" $ do
+      let source = SharedType.ForallType ["bound"] []
+            $ SharedType.TypeVariable "body"
+          substitutions = Map.singleton "absent"
+            $ SharedType.TypeVariable "bound"
+      SharedType.substituteTypeVariables (\_ _ -> Nothing) Set.empty
+          substitutions source @?= Right source
+  , testCase "nested shadowing freshens the complete capture chain" $ do
+      let source = SharedType.ForallType ["bound"] []
+            $ SharedType.TupleType Boxed
+              [ SharedType.TypeVariable "bound"
+              , SharedType.ForallType ["bound"] []
+                  $ SharedType.FunctionType
+                      (SharedType.TypeVariable "free")
+                      (SharedType.TypeVariable "bound")
+              ]
+          substitutions = Map.singleton "free"
+            $ SharedType.TypeVariable "bound"
+          -- Freshening only the inner binder would expose the outer one and
+          -- capture the free "bound" introduced for "free".
+          expected = SharedType.ForallType ["bound'"] []
+            $ SharedType.TupleType Boxed
+              [ SharedType.TypeVariable "bound'"
+              , SharedType.ForallType ["bound''"] []
+                  $ SharedType.FunctionType
+                      (SharedType.TypeVariable "bound")
+                      (SharedType.TypeVariable "bound''")
+              ]
+      SharedType.substituteTypeVariables freshStringVariable Set.empty
+          substitutions source @?= Right expected
+  , testCase "substitution reports fresh-supply failures in binder order" $ do
+      let source = SharedType.ForallType ["first", "second"] []
+            $ SharedType.TupleType Boxed
+              [ SharedType.TypeVariable "left"
+              , SharedType.TypeVariable "right"
+              ]
+          substitutions = Map.fromList
+            [ ("left", SharedType.TypeVariable "first")
+            , ("right", SharedType.TypeVariable "second")
+            ]
+      SharedType.substituteTypeVariables (\_ _ -> Nothing) Set.empty
+          substitutions source @?=
+        Left (SharedType.FreshVariableSupplyExhausted "first")
+      SharedType.substituteTypeVariables
+          (\_ _ -> Just "second") Set.empty substitutions source @?=
+        Left (SharedType.FreshVariableAlreadyReserved "first" "second")
   , testCase "reject malformed forall constraint class names" $ do
       let invalidName = right $ mkIdentifier "constraint"
           typeExpression = SharedType.ForallType ["a"]
@@ -1357,6 +1444,33 @@ synonymTests = testGroup "type synonyms"
       TypeSynonym.expandTypeSynonyms
           (\_ binder -> Just binder) aliases applied @?=
         Left (TypeSynonym.FreshVariableCollision "q" "q")
+      TypeSynonym.expandTypeSynonyms
+          (\_ _ -> Nothing) aliases applied @?=
+        Left (TypeSynonym.FreshVariableUnavailable "q")
+  , testCase "reserve fresh binders across repeated alias instantiations" $ do
+      let captureName = right $ mkIdentifier "Capture"
+          capture = Declaration.TypeSynonymDeclaration () captureName
+            [Declaration.TypeParameter "p" Nothing]
+            $ SharedType.ForallType ["q"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "p")
+                (SharedType.TypeVariable "q")
+          aliases = preparedSynonyms [capture]
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor captureName)
+            (SharedType.TypeVariable "q")
+      TypeSynonym.expandTypeSynonyms freshStringVariable aliases
+          (SharedType.TupleType Boxed [applied, applied]) @?=
+        Right (SharedType.TupleType Boxed
+          [ SharedType.ForallType ["q'"] []
+              $ SharedType.FunctionType
+                  (SharedType.TypeVariable "q")
+                  (SharedType.TypeVariable "q'")
+          , SharedType.ForallType ["q''"] []
+              $ SharedType.FunctionType
+                  (SharedType.TypeVariable "q")
+                  (SharedType.TypeVariable "q''")
+          ])
   , testCase "raw definitions expand only reachable aliases safely" $ do
       let captureName = right $ mkIdentifier "Capture"
           cycleA = right $ mkIdentifier "CycleA"

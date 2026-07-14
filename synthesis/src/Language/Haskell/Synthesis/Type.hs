@@ -14,16 +14,25 @@ module Language.Haskell.Synthesis.Type
   ( Variable (..)
   , Type (..)
   , TypeError (..)
+  , FreshVariableAllocator
+  , SubstitutionError (..)
   , canonicalizeType
   , applicationSpine
   , renameScopedVariables
+  , substituteTypeVariables
   , validateType
   , freeVariables
   , typeConstructors
   ) where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (unless)
+import Control.Monad (foldM, unless)
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict
+  ( evalStateT
+  , get
+  , put
+  )
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
@@ -63,6 +72,22 @@ data TypeError variable
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData variable => NFData (TypeError variable)
+
+-- | Choose a fresh replacement for a binder from the complete reserved set.
+-- Returning 'Nothing' reports deterministic exhaustion to the caller.
+type FreshVariableAllocator variable =
+  Set variable -> variable -> Maybe variable
+
+-- | Failures from capture-avoiding type-variable substitution.
+--
+-- Both cases identify the source binder that required alpha-renaming. The
+-- second also records the invalid candidate returned by the allocator.
+data SubstitutionError variable
+  = FreshVariableSupplyExhausted variable
+  | FreshVariableAlreadyReserved variable variable
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData variable => NFData (SubstitutionError variable)
 
 -- | Give saturated function and tuple constructors one structural form.
 -- Partial and over-applied constructors remain ordinary applications so kind
@@ -130,6 +155,94 @@ renameScopedVariables renaming source = case source of
     in ForallType binders
       (map (fmap $ renameScopedVariables visible) constraints)
       (renameScopedVariables visible body)
+
+-- | Simultaneously substitute free type variables without capturing any
+-- free variable of a replacement.
+--
+-- The allocator receives the complete set of identities that it must avoid
+-- and the binder being renamed. The explicit reservation set lets a caller
+-- coordinate several otherwise independent transformations; variables in
+-- the subject, substitution domain, and substitution range are reserved
+-- automatically. Binders and constraint arguments are visited in source
+-- order, making allocation and exhaustion deterministic.
+--
+-- A forall binder is alpha-renamed only when a substitution that is active
+-- in that binder's lexical scope would introduce the same identity. In
+-- particular, an irrelevant substitution does not consume fresh supply.
+-- Every same-named binder on a nested shadowing chain is nevertheless
+-- freshened: renaming only the innermost binder would expose the next binder
+-- and let that binder capture the replacement. Replacement types are inserted
+-- as-is rather than recursively rewritten, so the operation is simultaneous
+-- rather than sequential.
+substituteTypeVariables
+  :: Ord variable
+  => FreshVariableAllocator variable
+  -> Set variable
+  -> Map.Map variable (Type variable)
+  -> Type variable
+  -> Either (SubstitutionError variable) (Type variable)
+substituteTypeVariables fresh extraReserved substitutions source =
+  evalStateT (substitute substitutions source) initialReserved
+ where
+  initialReserved = Set.unions
+    [ extraReserved
+    , allTypeVariables source
+    , Map.keysSet substitutions
+    , foldMap allTypeVariables substitutions
+    ]
+
+  substitute active typeExpression = case typeExpression of
+    TypeVariable variable -> pure
+      $ Map.findWithDefault typeExpression variable active
+    TypeConstructor{} -> pure typeExpression
+    TypeApplication function argument -> TypeApplication
+      <$> substitute active function
+      <*> substitute active argument
+    FunctionType parameter result -> FunctionType
+      <$> substitute active parameter
+      <*> substitute active result
+    TupleType boxity elements -> TupleType boxity
+      <$> mapM (substitute active) elements
+    ForallType binders constraints body -> do
+      let visible = foldr Map.delete active binders
+          subjectVariables = freeVariables
+            $ ForallType binders constraints body
+          relevant = Map.restrictKeys visible subjectVariables
+          rangeVariables = foldMap freeVariables relevant
+      renaming <- foldM (freshenBinder rangeVariables) Map.empty binders
+      let renamedBinders = map
+            (\binder -> Map.findWithDefault binder binder renaming)
+            binders
+          renamedConstraints = map
+            (fmap $ renameScopedVariables renaming)
+            constraints
+          renamedBody = renameScopedVariables renaming body
+          belowBinders = foldr Map.delete relevant renamedBinders
+      substitutedConstraints <- mapM
+        (substituteConstraint belowBinders)
+        renamedConstraints
+      substitutedBody <- substitute belowBinders renamedBody
+      pure $ ForallType renamedBinders substitutedConstraints substitutedBody
+
+  substituteConstraint active constraint = Constraint
+    (constraintClass constraint)
+    <$> mapM (substitute active) (constraintArguments constraint)
+
+  freshenBinder rangeVariables renaming binder
+    | binder `Set.notMember` rangeVariables = pure renaming
+    | otherwise = do
+        reserved <- get
+        replacement <- case fresh reserved binder of
+          Nothing -> lift $ Left $ FreshVariableSupplyExhausted binder
+          Just candidate
+            | candidate `Set.member` reserved -> lift $ Left
+                $ FreshVariableAlreadyReserved binder candidate
+            | otherwise -> pure candidate
+        put $ Set.insert replacement reserved
+        pure $ Map.insert binder replacement renaming
+
+allTypeVariables :: Ord variable => Type variable -> Set variable
+allTypeVariables = foldMap Set.singleton
 
 validateType :: Ord variable => Type variable -> Either (TypeError variable) ()
 validateType source = validate $ canonicalizeType source

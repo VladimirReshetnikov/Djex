@@ -21,7 +21,7 @@ module Language.Haskell.Synthesis.TypeSynonym
   ) where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (foldM, when)
+import Control.Monad (when)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
   ( StateT
@@ -63,12 +63,13 @@ import Language.Haskell.Synthesis.KindInference
   )
 import Language.Haskell.Synthesis.Name (Name, nameSpecial)
 import Language.Haskell.Synthesis.Type
-  ( Type (..)
+  ( FreshVariableAllocator
+  , SubstitutionError (..)
+  , Type (..)
   , TypeError
   , applicationSpine
   , canonicalizeType
-  , freeVariables
-  , renameScopedVariables
+  , substituteTypeVariables
   , validateType
   )
 import qualified Language.Haskell.Synthesis.Environment as Environment
@@ -77,7 +78,7 @@ import qualified Language.Haskell.Synthesis.Environment as Environment
 -- range. The first argument is the complete reserved set; the second is the
 -- old binder, allowing callers to preserve distinctions such as flexible and
 -- rigid variable namespaces.
-type FreshVariable variable = Set variable -> variable -> Maybe variable
+type FreshVariable variable = FreshVariableAllocator variable
 
 data SynonymDefinition variable = SynonymDefinition
   { definitionParameters :: [variable]
@@ -422,67 +423,20 @@ substitute
   -> Map variable (Type variable)
   -> Type variable
   -> Expansion variable (Type variable)
-substitute fresh substitutions source = case source of
-  TypeVariable variable -> pure
-    $ Map.findWithDefault source variable substitutions
-  TypeConstructor{} -> pure source
-  TypeApplication function argument -> TypeApplication
-    <$> substitute fresh substitutions function
-    <*> substitute fresh substitutions argument
-  FunctionType parameter result -> FunctionType
-    <$> substitute fresh substitutions parameter
-    <*> substitute fresh substitutions result
-  TupleType boxity elements -> TupleType boxity
-    <$> mapM (substitute fresh substitutions) elements
-  ForallType binders constraints body -> do
-    let active = foldr Map.delete substitutions binders
-        subjectVariables = freeVariables
-          $ ForallType binders constraints body
-        relevant = Map.restrictKeys active subjectVariables
-        rangeVariables = foldMap freeVariables relevant
-    renaming <- foldM (freshenBinder fresh rangeVariables)
-      Map.empty binders
-    let renamedBinders = map
-          (\binder -> Map.findWithDefault binder binder renaming) binders
-        renamedConstraints = map
-          (fmap $ renameScopedVariables renaming) constraints
-        renamedBody = renameScopedVariables renaming body
-        withoutFreshBinders = foldr Map.delete relevant renamedBinders
-    ForallType renamedBinders
-      <$> mapM (substituteConstraint fresh withoutFreshBinders)
-            renamedConstraints
-      <*> substitute fresh withoutFreshBinders renamedBody
-
-substituteConstraint
-  :: Ord variable
-  => FreshVariable variable
-  -> Map variable (Type variable)
-  -> Constraint (Type variable)
-  -> Expansion variable (Constraint (Type variable))
-substituteConstraint fresh substitutions constraint = Constraint
-  (constraintClass constraint)
-  <$> mapM (substitute fresh substitutions)
-        (constraintArguments constraint)
-
-freshenBinder
-  :: Ord variable
-  => FreshVariable variable
-  -> Set variable
-  -> Map variable variable
-  -> variable
-  -> Expansion variable (Map variable variable)
-freshenBinder fresh rangeVariables renaming binder
-  | binder `Set.notMember` rangeVariables = pure renaming
-  | otherwise = do
-      reserved <- get
-      replacement <- case fresh reserved binder of
-        Nothing -> lift $ Left $ FreshVariableUnavailable binder
-        Just candidate
-          | candidate `Set.member` reserved -> lift $ Left
-              $ FreshVariableCollision binder candidate
-          | otherwise -> pure candidate
-      put $ Set.insert replacement reserved
-      pure $ Map.insert binder replacement renaming
+substitute fresh substitutions source = do
+  reserved <- get
+  result <- case substituteTypeVariables
+      fresh reserved substitutions source of
+    Left (FreshVariableSupplyExhausted binder) ->
+      lift $ Left $ FreshVariableUnavailable binder
+    Left (FreshVariableAlreadyReserved binder candidate) ->
+      lift $ Left $ FreshVariableCollision binder candidate
+    Right substituted -> pure substituted
+  -- The shared primitive owns a local supply. Feed every allocated binder
+  -- back into the wider synonym-expansion supply so later instantiations
+  -- preserve the historical deterministic freshness sequence.
+  put $ reserved `Set.union` typeVariables result
+  pure result
 
 pushExpansionName
   :: Name

@@ -44,7 +44,8 @@ type SynthesisDeclaration =
   SharedDeclaration.Declaration HSymbol Int ()
 
 -- | The declaration position a name owns in Djinn's source grammar.
--- Keeping the role explicit prevents a broadly valid shared 'Name' from
+-- Keeping the role explicit prevents a broadly valid shared
+-- t'SharedName.Name' from
 -- silently crossing into a narrower local namespace.
 data DjinnDeclarationNameRole
   = TypeOwner

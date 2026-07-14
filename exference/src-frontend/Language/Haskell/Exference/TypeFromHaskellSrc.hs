@@ -157,7 +157,7 @@ haskellSrcExtsParseMode sourceName = P.ParseMode parseSourceName
 -- The returned 'T.TypeVarIndex' contains rendering hints for source spellings,
 -- not the complete namespace. Alpha-renamed binders can reserve identifiers
 -- without acquiring an unambiguous spelling, so the index must not be used to
--- resume this conversion. Use 'runConversionTWithState' and retain 'ConvData'
+-- resume this conversion. Use 'runConversionTWithState' and retain t'ConvData'
 -- when later conversions must share the exact namespace.
 convertTypeNoDecl
   :: Monad m

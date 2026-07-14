@@ -126,11 +126,8 @@ expressionRenderOptions
   -> E.Expression
   -> Generated.RenderOptions T.TVarId
 expressionRenderOptions qualification expression =
-  Generated.RenderOptions qualification preferred []
- where
-  hints = E.expressionNameHints expression
-  preferred variable =
-    Map.findWithDefault (T.showVar variable) variable hints
+  Generated.renderOptionsWithLocalNameHints
+    qualification (E.expressionNameHints expression) T.showVar []
 
 toExpressionRenderError
   :: HaskellSrcConversionError T.TVarId

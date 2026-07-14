@@ -1907,6 +1907,31 @@ generatedTests = testGroup "generated syntax"
         Right "(a, _a', _a)"
       allocateLocalNames (options []) unaffected @?=
         Right (Map.fromList [("a", "a"), ("_a", "_a")])
+  , testCase "render local hints with fallback, reservations, and policy" $ do
+      let namespace = right $ mkModuleName "Data.List"
+          mapping = right $ mkQualifiedIdentifier namespace "map"
+          expression = Lambda [Bind (0 :: Int), Bind 1]
+            $ Apply (Global mapping) $ Tuple [Local 0, Local 1]
+          options = renderOptionsWithLocalNameHints QualifyIdentifiers
+            (Map.singleton 0 "hint")
+            (\local -> "fallback" ++ show local)
+            ["hint"]
+      renderQualification options @?= QualifyIdentifiers
+      reservedLocalNames options @?= ["hint"]
+      localNamePreference options 0 @?= "hint"
+      localNamePreference options 1 @?= "fallback1"
+      allocateLocalNames options expression @?=
+        Right (Map.fromList [(0, "hint'"), (1, "fallback1")])
+      renderExpression options expression @?=
+        Right "\\hint' fallback1 -> Data.List.map (hint', fallback1)"
+  , testCase "reject an invalid present hint without consulting fallback" $ do
+      let expression = Lambda [Bind (0 :: Int)] $ Local 0
+          options = renderOptionsWithLocalNameHints Unqualified
+            (Map.singleton 0 "case")
+            (const $ error "present local-name hint consulted fallback")
+            []
+      renderExpression options expression @?=
+        Left (InvalidLocalName "case" $ ReservedIdentifier "case")
   , testCase "render lambdas, tuples, and symbolic applications" $ do
       let plus = right $ mkOperator "+"
           true = right $ mkIdentifier "True"

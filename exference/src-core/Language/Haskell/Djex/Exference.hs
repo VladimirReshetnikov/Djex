@@ -109,9 +109,9 @@ import Language.Haskell.Synthesis.Generated
   , FunctionClause (FunctionClause)
   , Qualification (..)
   , RenderError (..)
-  , RenderOptions (renderQualification)
-  , defaultRenderOptions
+  , RenderOptions
   , definitionName
+  , renderOptionsWithLocalNameHints
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
@@ -288,11 +288,10 @@ candidateRenderOptions
   -> ExferenceCandidate
   -> RenderOptions ExferenceLocal
 candidateRenderOptions qualification candidate =
-  (defaultRenderOptions preferred)
-    {renderQualification = qualification}
- where
-  hints = exferenceCandidateLocalNames $ candidateDetails candidate
-  preferred local = Map.findWithDefault (showVar local) local hints
+  renderOptionsWithLocalNameHints qualification
+    (exferenceCandidateLocalNames $ candidateDetails candidate)
+    showVar
+    []
 
 candidateTypeVariableName
   :: ExferenceCandidate

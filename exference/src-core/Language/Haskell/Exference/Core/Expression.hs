@@ -130,12 +130,9 @@ renderOptions
   -> [String]
   -> Expression
   -> Generated.RenderOptions TVarId
-renderOptions qualification reserved expression = Generated.RenderOptions
-  qualification preferred reserved
- where
-  hints = expressionNameHints expression
-  preferred variable = M.findWithDefault (showVar variable) variable
-    hints
+renderOptions qualification reserved expression =
+  Generated.renderOptionsWithLocalNameHints
+    qualification (expressionNameHints expression) showVar reserved
 
 -- | Preserve the type-derived spelling preferences that would otherwise be
 -- erased at the shared generated-expression boundary.  These remain hints:

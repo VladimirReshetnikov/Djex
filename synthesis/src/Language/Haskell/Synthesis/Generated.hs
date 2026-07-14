@@ -20,6 +20,7 @@ module Language.Haskell.Synthesis.Generated
   , Qualification (..)
   , RenderOptions (..)
   , defaultRenderOptions
+  , renderOptionsWithLocalNameHints
   , RenderError (..)
   , ScopeError (..)
   , validateExpressionScope
@@ -167,6 +168,27 @@ defaultRenderOptions preference = RenderOptions
   , localNamePreference = preference
   , reservedLocalNames = []
   }
+
+-- | Construct rendering options from backend-provided local-name hints.
+--
+-- A present hint is authoritative: the renderer validates it as supplied and
+-- reports any lexical error instead of silently replacing it. Only locals
+-- absent from the map use the fallback. Explicit reservations still
+-- participate in ordinary collision avoidance during allocation.
+renderOptionsWithLocalNameHints
+  :: Ord local
+  => Qualification
+  -> Map local String
+  -> (local -> String)
+  -> [String]
+  -> RenderOptions local
+renderOptionsWithLocalNameHints qualification hints fallback reserved =
+  RenderOptions
+    { renderQualification = qualification
+    , localNamePreference = \local ->
+        Map.findWithDefault (fallback local) local hints
+    , reservedLocalNames = reserved
+    }
 
 data RenderError
   = InvalidLocalName String NameError

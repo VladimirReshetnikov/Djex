@@ -92,8 +92,8 @@ findGeneratedSearchBatchesWithHintsEither
   -> E.ExferenceInput
   -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
 findGeneratedSearchBatchesWithHintsEither typeHints input = do
-  E.validateExferenceInput input
-  pure $ E.findGeneratedSearchBatches typeHints input
+  checked <- E.prepareExferenceInput input
+  pure $ E.findGeneratedSearchBatches typeHints checked
 
 -- | Validate only a new query, then search a reusable sealed environment.
 -- Environment validation happened once at 'E.mkExferenceEnvironment'.
@@ -111,9 +111,8 @@ findGeneratedSearchBatchesWithHintsInEnvironmentEither
   -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
 findGeneratedSearchBatchesWithHintsInEnvironmentEither
     typeHints environment query = do
-  E.validateExferenceQuery environment query
-  pure $ E.findGeneratedSearchBatchesInEnvironment
-    typeHints environment query
+  checked <- E.prepareExferenceQuery environment query
+  pure $ E.findGeneratedSearchBatches typeHints checked
 
 -- Keep validation at the public boundary and run it exactly once. The raw
 -- engine assumes a checked input; list-returning compatibility functions
@@ -121,4 +120,4 @@ findGeneratedSearchBatchesWithHintsInEnvironmentEither
 runSearch
   :: E.ExferenceInput
   -> Either E.ExferenceInputError [E.ExferenceChunkElement]
-runSearch input = E.validateExferenceInput input >> pure (E.findExpressions input)
+runSearch input = E.findExpressions <$> E.prepareExferenceInput input

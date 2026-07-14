@@ -5,7 +5,8 @@
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findGeneratedSearchBatches
-  , findGeneratedSearchBatchesInEnvironment
+  , prepareExferenceInput
+  , prepareExferenceQuery
   , ExferenceHeuristicsConfig (..)
   , ExferenceInput (..)
   , ExferenceEnvironment
@@ -150,6 +151,15 @@ data ExferenceQuery = ExferenceQuery
   , queryHeuristics :: ExferenceHeuristicsConfig
   }
   deriving (Eq, Show)
+
+-- | A query sealed together with the exact environment and rigid-variable
+-- plan against which it was validated.  Keeping this artifact private makes
+-- it impossible for the raw lazy engine to recompute fallible derived state,
+-- or to run a checked query against a different environment by mistake.
+data CheckedExferenceQuery = CheckedExferenceQuery
+  !ExferenceEnvironment
+  !ExferenceQuery
+  !RigidInstantiationPlan
 
 data ExferenceInputError
   = NestedForallInGoal HsType
@@ -348,16 +358,16 @@ recordBindingUsage node searchState = case nodeLastStepBinding node of
 --   - convert stuff
 --   - consider some special abort conditions
 findEngineChunks
-  :: ExferenceEnvironment
-  -> ExferenceQuery
+  :: CheckedExferenceQuery
   -> [EngineChunk]
 findEngineChunks
-    (ExferenceEnvironment EnvDictionary
+    (CheckedExferenceQuery
+      (ExferenceEnvironment EnvDictionary
       { environmentFunctions = allFunctions
       , environmentDeconstructors = deconss'
       , environmentClasses = sClassEnv
-      } rigidContext)
-    ExferenceQuery
+      } _)
+      ExferenceQuery
       { queryGoalType = rawType
       , queryExcludedBindings = excludedBindings
       , queryAllowUnused = allowUnused
@@ -368,7 +378,8 @@ findEngineChunks
       , queryMaximumQueueSize = maxQueueSize
       , queryMaximumDepth = maxDepth
       , queryHeuristics = heuristics
-      } =
+      }
+      rigidPlan) =
   unfoldr helper rootFindExpressionState
  where
   -- Removing an already checked binding cannot invalidate the environment.
@@ -386,13 +397,6 @@ findEngineChunks
     , findQueue = Q.singleton 0 rootSearchNode
     }
   t = forallify rawType
-  -- Query validation constructed this same finite plan before exposing the
-  -- lazy trace. Recomputing only the goal-sized suffix from the cached
-  -- environment maximum is cheap and keeps the raw engine total thereafter.
-  rigidPlan = case planRigidInstantiation rigidContext [] rawType of
-    Right plan -> plan
-    Left failure -> error $ "validated rigid-instantiation invariant violated: "
-      ++ show failure
   rootSearchNode = SearchNode
     { nodeGoals           = Seq.singleton
         (TGoal (VarBinding 0 t) initialScopeId)
@@ -544,10 +548,9 @@ findEngineChunks
       }
     gets $ transformSolutions potentialSolutions) searchState
 
--- | Historical status-bearing view of the engine trace.
-findExpressions :: ExferenceInput -> [ExferenceChunkElement]
-findExpressions input = map projectCompatibilityChunk
-  $ uncurry findEngineChunks $ validatedInputParts input
+-- | Historical status-bearing view of an already checked engine trace.
+findExpressions :: CheckedExferenceQuery -> [ExferenceChunkElement]
+findExpressions = map projectCompatibilityChunk . findEngineChunks
 
 projectCompatibilityChunk :: EngineChunk -> ExferenceChunkElement
 projectCompatibilityChunk chunk = ExferenceChunkElement
@@ -561,19 +564,10 @@ projectCompatibilityChunk chunk = ExferenceChunkElement
 -- caller-constructed compatibility chunks.
 findGeneratedSearchBatches
   :: ExferenceTypeVariableHints
-  -> ExferenceInput
+  -> CheckedExferenceQuery
   -> [ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatches typeHints input =
-  uncurry (findGeneratedSearchBatchesInEnvironment typeHints)
-    $ validatedInputParts input
-
-findGeneratedSearchBatchesInEnvironment
-  :: ExferenceTypeVariableHints
-  -> ExferenceEnvironment
-  -> ExferenceQuery
-  -> [ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatchesInEnvironment typeHints environment =
-  map (projectGeneratedBatch typeHints) . findEngineChunks environment
+findGeneratedSearchBatches typeHints =
+  map (projectGeneratedBatch typeHints) . findEngineChunks
 
 -- | Propagate frontend spellings through the exact rigid-variable plan of a
 -- checked query. Validation happens first so this helper preserves the same
@@ -583,11 +577,8 @@ typeVariableHintsInEnvironment
   -> ExferenceQuery
   -> TypeVarIndex
   -> Either ExferenceInputError ExferenceTypeVariableHints
-typeVariableHintsInEnvironment environment@(ExferenceEnvironment _ context)
-    query sourceNames = do
-  validateExferenceQuery environment query
-  plan <- either (Left . RigidIdentifierExhaustion) Right
-    $ planRigidInstantiation context [] $ queryGoalType query
+typeVariableHintsInEnvironment environment query sourceNames = do
+  CheckedExferenceQuery _ _ plan <- prepareExferenceQuery environment query
   pure $ typeVariableHintsWithPlan plan sourceNames
 
 projectGeneratedBatch
@@ -607,8 +598,13 @@ constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
 constraintsRelaxedAtStep allowConstraints stopStep currentStep =
   allowConstraints || currentStep <= stopStep
 
-validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
-validateExferenceInput input = do
+-- | Validate a compatibility input eagerly and retain every fallible value
+-- needed by its lazy trace.  The validation order is the historical public
+-- error precedence; constructing the checked artifact adds no later checks.
+prepareExferenceInput
+  :: ExferenceInput
+  -> Either ExferenceInputError CheckedExferenceQuery
+prepareExferenceInput input = do
   -- Keep this order identical to the historical guard chain.  Besides being
   -- more useful to callers, the first error is part of the compatibility API.
   validateQueryLimits query
@@ -625,13 +621,19 @@ validateExferenceInput input = do
     ++ environmentTypes environment
     ++ concatMap (constraint_params . snd) allConstraints
   validateEnvironmentDeconstructors environment
-  validateRigidInstantiation
-    (mkRigidInstantiationContext environment) query
+  let rigidContext = mkRigidInstantiationContext environment
+  rigidPlan <- prepareRigidInstantiation rigidContext query
+  pure $ CheckedExferenceQuery
+    (ExferenceEnvironment environment rigidContext) query rigidPlan
  where
   environment = inputEnvironment input
   query = inputQuery input
   allConstraints = queryConstraints query
     ++ environmentConstraints environment
+
+-- | Compatibility projection retaining the established validation API.
+validateExferenceInput :: ExferenceInput -> Either ExferenceInputError ()
+validateExferenceInput input = () <$ prepareExferenceInput input
 
 -- | Seal a reusable environment after validating everything independent of a
 -- particular query.  The abstract result can subsequently be paired with many
@@ -644,14 +646,16 @@ mkExferenceEnvironment environment = do
   pure $ ExferenceEnvironment environment
     $ mkRigidInstantiationContext environment
 
--- | Validate the varying part of a search against an already sealed class
--- environment.  Excluding bindings only removes capabilities and therefore
--- cannot invalidate the environment.
-validateExferenceQuery
+-- | Validate the varying part of a search against an already sealed
+-- environment and retain its exact rigid-instantiation plan. Excluding
+-- bindings only removes capabilities and therefore cannot invalidate the
+-- environment.
+prepareExferenceQuery
   :: ExferenceEnvironment
   -> ExferenceQuery
-  -> Either ExferenceInputError ()
-validateExferenceQuery (ExferenceEnvironment environment rigidContext) query = do
+  -> Either ExferenceInputError CheckedExferenceQuery
+prepareExferenceQuery sealed@(ExferenceEnvironment environment rigidContext)
+    query = do
   validateQueryLimits query
   validateQueryHeuristics query
   validateQueryForall query
@@ -660,9 +664,18 @@ validateExferenceQuery (ExferenceEnvironment environment rigidContext) query = d
   validateInputTypes
     $ queryGoalType query
     : concatMap (constraint_params . snd) constraints
-  validateRigidInstantiation rigidContext query
+  rigidPlan <- prepareRigidInstantiation rigidContext query
+  pure $ CheckedExferenceQuery sealed query rigidPlan
  where
   constraints = queryConstraints query
+
+-- | Compatibility projection retaining the established validation API.
+validateExferenceQuery
+  :: ExferenceEnvironment
+  -> ExferenceQuery
+  -> Either ExferenceInputError ()
+validateExferenceQuery environment query =
+  () <$ prepareExferenceQuery environment query
 
 validateExferenceEnvironment
   :: EnvDictionary
@@ -849,13 +862,13 @@ validateEnvironmentDeconstructors environment =
       (map flexibleIdentifiers $ constructorFields constructor)
       `IntSet.difference` parameters
 
-validateRigidInstantiation
+prepareRigidInstantiation
   :: RigidInstantiationContext
   -> ExferenceQuery
-  -> Either ExferenceInputError ()
-validateRigidInstantiation context query = either
+  -> Either ExferenceInputError RigidInstantiationPlan
+prepareRigidInstantiation context query = either
   (Left . RigidIdentifierExhaustion)
-  (const $ Right ())
+  Right
   $ planRigidInstantiation context [] $ queryGoalType query
 
 inputEnvironment :: ExferenceInput -> EnvDictionary
@@ -878,18 +891,6 @@ inputQuery input = ExferenceQuery
   , queryMaximumDepth = input_maxDepth input
   , queryHeuristics = input_heuristicsConfig input
   }
-
--- This conversion is internal and deliberately skips validation.  Every
--- compatibility entry point validates first, just as it did before the split.
-validatedInputParts
-  :: ExferenceInput
-  -> (ExferenceEnvironment, ExferenceQuery)
-validatedInputParts input =
-  ( ExferenceEnvironment environment $ mkRigidInstantiationContext environment
-  , inputQuery input
-  )
- where
-  environment = inputEnvironment input
 
 -- Report the complete stable duplicate set.  Search explores every raw
 -- binding while the independent checker historically selected the first one,

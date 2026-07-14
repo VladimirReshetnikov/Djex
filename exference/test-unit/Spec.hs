@@ -1857,6 +1857,32 @@ tests = testGroup "Exference"
                     hints environment (legacyInputQuery input)
               assertEqual (label ++ " trace") legacy sealed)
             variants
+      , testCase "validators exactly project checked search preparation" $ do
+          environment <- expectRight $ sealLegacyEnvironment identityInput
+          let query = legacyInputQuery identityInput
+              invalidHeuristics = defaultHeuristicsConfig
+                {heuristics_goalVar = -1}
+              duplicate = FunctionBinding
+                (TypeVar 0) (name "duplicate") 0 [] []
+              invalidInput = identityInput
+                { input_maxSteps = 0
+                , input_envFuncs = [duplicate, duplicate]
+                }
+              invalidQuery = query
+                { queryMaximumSteps = 0
+                , queryHeuristics = invalidHeuristics
+                }
+              preparedInput input = ()
+                <$ findGeneratedSearchBatchesWithHintsEither Map.empty input
+              preparedQuery value = ()
+                <$ findGeneratedSearchBatchesWithHintsInEnvironmentEither
+                    Map.empty environment value
+          validateExferenceInput identityInput @?=
+            preparedInput identityInput
+          validateExferenceInput invalidInput @?= preparedInput invalidInput
+          validateExferenceQuery environment query @?= preparedQuery query
+          validateExferenceQuery environment invalidQuery @?=
+            preparedQuery invalidQuery
       , testCase "query options validate against one sealed environment" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
           let query = legacyInputQuery identityInput
@@ -2114,6 +2140,16 @@ tests = testGroup "Exference"
             [] twoBinders
           rigidInstantiations penultimatePlan @?=
             [(0, maxBound), (1, 0)]
+          let boundarySearch =
+                findGeneratedSearchBatchesWithHintsInEnvironmentEither
+                  Map.empty penultimateEnvironment twoBinderQuery
+          validateExferenceQuery penultimateEnvironment twoBinderQuery @?=
+            (() <$ boundarySearch)
+          boundaryBatches <- expectRight boundarySearch
+          assertBool "the retained boundary plan produced no candidate"
+            $ not
+            $ null
+            $ concatMap SharedSearch.batchCandidates boundaryBatches
       , testCase "legacy validation preserves compound-error precedence" $ do
           let duplicateName = name "duplicate"
               binding = FunctionBinding (TypeVar 0) duplicateName 0 [] []

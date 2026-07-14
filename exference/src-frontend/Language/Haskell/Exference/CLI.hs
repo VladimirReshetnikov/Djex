@@ -46,11 +46,12 @@ import Language.Haskell.Synthesis.Diagnostic (renderDiagnostic)
 import Language.Haskell.Synthesis.Name (Name, mkIdentifier, parseName)
 import Language.Haskell.Synthesis.Query (resultSearch)
 import Language.Haskell.Synthesis.Search
-  ( Completion (Finished, Truncated)
-  , Progress (Completed, Continuing)
+  ( ObservedProgress (..)
+  , Progress
   , TruncationReason (StepLimitReached)
   , batchCandidates
   , batchProgress
+  , observeProgress
   )
 import Language.Haskell.Synthesis.Selection
   ( Selection (..)
@@ -332,16 +333,16 @@ printCandidate qualification candidate = do
     ++ " final queue size)"
 
 noResultsMessage :: Maybe Progress -> String
-noResultsMessage Nothing = "[no search states were produced]"
-noResultsMessage (Just (Completed Finished)) =
-  "[no results: search space exhausted]"
-noResultsMessage (Just (Completed (Truncated reasons)))
-  | StepLimitReached `elem` NonEmpty.toList reasons =
-      "[no results found before the step limit; inhabitation is undecided]"
-  | otherwise =
-      "[no results found after pruning; inhabitation is undecided]"
-noResultsMessage (Just Continuing) =
-  "[no results in the inspected search prefix; inhabitation is undecided]"
+noResultsMessage progress = case observeProgress progress of
+  NoProgressObserved -> "[no search states were produced]"
+  ObservedFinished -> "[no results: search space exhausted]"
+  ObservedTruncated reasons
+    | StepLimitReached `elem` NonEmpty.toList reasons ->
+        "[no results found before the step limit; inhabitation is undecided]"
+    | otherwise ->
+        "[no results found after pruning; inhabitation is undecided]"
+  ObservedContinuing ->
+    "[no results in the inspected search prefix; inhabitation is undecided]"
 
 printEnvironment :: Int -> SourceEnvironment -> IO ()
 printEnvironment verbosity environment = do

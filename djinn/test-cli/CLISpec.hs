@@ -75,6 +75,13 @@ testMissingBatchFile = do
 testOptionsAfterFiles :: Assertion
 testOptionsAfterFiles = withCommandFile
     "choice ? a -> a -> a\n" $ \path -> do
+        (defaultExit, defaultOutput, defaultErrors) <-
+            readProcessWithExitCode "djinn" [path] ""
+        assertEqual ("default djinn batch stderr: " ++ defaultErrors)
+            ExitSuccess defaultExit
+        assertBool "default mode should select exactly one realization" $
+            not $ "-- or" `isInfixOf` defaultOutput
+
         (exitCode, output, errors) <-
             readProcessWithExitCode "djinn" [path, "+multi"] ""
         assertEqual ("djinn batch stderr: " ++ errors) ExitSuccess exitCode

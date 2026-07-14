@@ -25,6 +25,7 @@ import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import Language.Haskell.Synthesis.Query
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import qualified Language.Haskell.Synthesis.Selection as SharedSelection
 import qualified Paths_djex
 
 version :: String
@@ -368,12 +369,12 @@ formatDjinnResult :: Bool -> State -> String -> [Context] -> HType
                   -> DjinnResult -> Either String [String]
 formatDjinnResult prType s name ctx goal result =
     fmap (debugFormula ++) $ case resultEvidence result of
-      NoEvidence -> case SharedSearch.batchProgress search of
-          SharedSearch.Completed (SharedSearch.Truncated _) ->
+      NoEvidence -> case SharedSearch.observeProgress $ Just progress of
+          SharedSearch.ObservedTruncated _ ->
               Right ["-- " ++ name ++
                   ": no proof found within budget " ++
                   show (budget s) ++ "; inhabitation is undecided."]
-          progress -> Left $ "Djinn returned no evidence after " ++ show progress
+          _ -> Left $ "Djinn returned no evidence after " ++ show progress
       RequiresTargetReference -> Right ["-- " ++ name ++
           " cannot be safely realized without a recursive self-reference."]
       ProvedUninhabitable ->
@@ -387,10 +388,13 @@ formatDjinnResult prType s name ctx goal result =
                 concat [["-- or", alternative] | alternative <- alternatives]
   where
     search = resultSearch result
-    candidates = SharedSearch.batchCandidates search
-    selectedCandidates
-      | multi s = candidates
-      | otherwise = take 1 candidates
+    progress = SharedSearch.batchProgress search
+    selectedCandidates = SharedSelection.selectionCandidates
+        $ SharedSelection.selectQueryResults selectionMode
+            (const ()) (const True) [result]
+    selectionMode
+      | multi s = SharedSelection.SelectAll
+      | otherwise = SharedSelection.SelectFirst
     metadata = SharedSearch.batchMetadata search
     debugFormula
       | debug s = ["*** " ++ djinnTranslatedFormula metadata]

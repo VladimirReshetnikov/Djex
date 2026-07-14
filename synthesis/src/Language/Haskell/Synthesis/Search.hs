@@ -13,6 +13,8 @@ module Language.Haskell.Synthesis.Search
   ( TruncationReason (..)
   , Completion (..)
   , Progress (..)
+  , ObservedProgress (..)
+  , observeProgress
   , SearchBatch (..)
   , truncated
   ) where
@@ -49,6 +51,34 @@ data Progress
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData Progress
+
+-- | A lossless frontend-oriented view of the last progress value actually
+-- observed.
+--
+-- In particular, 'ObservedContinuing' does not inspect an incremental trace
+-- for a later terminal batch, and 'ObservedFinished' makes no inhabitation
+-- claim. Logical evidence remains in the accompanying query result.
+data ObservedProgress
+  = NoProgressObserved
+    -- ^ No search batch was inspected.
+  | ObservedContinuing
+    -- ^ The last inspected batch reported that more batches may follow.
+  | ObservedFinished
+    -- ^ The configured exploration finished without a resource truncation.
+  | ObservedTruncated (NonEmpty TruncationReason)
+    -- ^ The configured exploration stopped with the retained reasons.
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ObservedProgress
+
+-- | Classify supplied optional progress without looking beyond that
+-- observation or interpreting the backend's logical evidence.
+observeProgress :: Maybe Progress -> ObservedProgress
+observeProgress Nothing = NoProgressObserved
+observeProgress (Just Continuing) = ObservedContinuing
+observeProgress (Just (Completed Finished)) = ObservedFinished
+observeProgress (Just (Completed (Truncated reasons))) =
+  ObservedTruncated reasons
 
 -- | Common envelope for a chunk of backend-owned candidates and metadata.
 -- The candidate parameter is last so ordinary 'fmap' transforms candidates

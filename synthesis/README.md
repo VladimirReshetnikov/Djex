@@ -51,6 +51,9 @@ checks.
 one truncated by step, choice-point, candidate, queue, or depth limits, and
 supports continuing chunk streams. It deliberately carries no logical
 inhabitation claim: each backend keeps its own evidence and search semantics.
+`observeProgress` losslessly classifies the last progress value a frontend
+actually inspected as absent, continuing, finished, or truncated, without
+looking beyond that supplied observation or interpreting logical evidence.
 
 `Language.Haskell.Synthesis.Candidate` is the corresponding neutral candidate
 envelope. It keeps generated output together with shared residual constraints

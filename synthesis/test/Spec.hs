@@ -1540,6 +1540,15 @@ searchTests = testGroup "search status"
       Completed Finished @?= Completed Finished
       truncated StepLimitReached @?=
         Truncated (StepLimitReached :| [])
+  , testCase "classify every optional progress state without losing reasons" $ do
+      observeProgress Nothing @?= NoProgressObserved
+      observeProgress (Just Continuing) @?= ObservedContinuing
+      observeProgress (Just $ Completed Finished) @?= ObservedFinished
+      let reasons = QueueLimitPruned 7 :| [DepthLimitPruned 2]
+          observed = ObservedTruncated reasons
+      observeProgress (Just $ Completed $ Truncated reasons) @?= observed
+      _ <- evaluate $ force observed
+      pure ()
   , testCase "truncation retains every independent pruning reason" $ do
       let completion = Truncated
             (QueueLimitPruned 7 :| [DepthLimitPruned 2])
@@ -1605,6 +1614,7 @@ selectionTests = testGroup "result selection"
             (\_ -> error "SelectFirst evaluated its unused rank function" :: Int)
             odd results
       selection @?= Selection (Just Continuing) [3]
+      observeProgress (selectionProgress selection) @?= ObservedContinuing
   , testCase "all preserves order and streams without forcing final progress" $ do
       let streaming = selectQueryResults SelectAll
             (\_ -> error "SelectAll evaluated its unused rank function" :: Int)

@@ -241,17 +241,18 @@ reportNoExferenceResult progress = emitDiagnostic
   $ contextualDiagnostic Info "DJEX_EXF_NO_RESULT" message
       (maybe "no search batch" show progress)
  where
-  message = case progress of
-    Just (Completed Finished) ->
+  message = case observeProgress progress of
+    ObservedFinished ->
       "Exference exhausted its configured search without finding a candidate"
     _ -> "Exference found no candidate in the inspected search"
 
 reportTruncation :: Maybe Progress -> IO ()
-reportTruncation (Just (Completed (Truncated reasons))) = emitDiagnostic
-  $ contextualDiagnostic Warning "DJEX_SEARCH_TRUNCATED"
-      "search stopped before exploring all remaining work"
-      (intercalate ", " $ map show $ toList reasons)
-reportTruncation _ = pure ()
+reportTruncation progress = case observeProgress progress of
+  ObservedTruncated reasons -> emitDiagnostic
+    $ contextualDiagnostic Warning "DJEX_SEARCH_TRUNCATED"
+        "search stopped before exploring all remaining work"
+        (intercalate ", " $ map show $ toList reasons)
+  _ -> pure ()
 
 djinnQueryOptions :: DjinnOptions -> QueryOptions
 djinnQueryOptions options = defaultQueryOptions

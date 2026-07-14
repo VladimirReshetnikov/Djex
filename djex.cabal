@@ -431,10 +431,9 @@ Executable exference
   Hs-Source-Dirs: exference/app
   Build-Depends:  djex:exference-frontend
 
-  Ghc-Options:
-    -rtsopts
-    -threaded
-    -with-rtsopts "-H2G -M4G -N"
+  -- Search is serial. Permit explicit caller tuning without inheriting the
+  -- historical multi-gigabyte heap hint or starting one capability per core.
+  Ghc-Options: -rtsopts
 
 Test-Suite exference-tests
   import:          tasty-hunit-test, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep

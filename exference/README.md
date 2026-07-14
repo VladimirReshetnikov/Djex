@@ -430,10 +430,12 @@ remains undecided.
 
 The `exference` executable is a normal build target again. Its implementation
 lives in `Language.Haskell.Exference.CLI`, making the executable component a
-pure launcher while keeping its established RTS profile. Its obsolete Hood,
-search-tree, parallel-mode, and embedded manual-test machinery has been
-removed; deterministic regressions live in `exference-tests`, the
-frontend-import check, and the separate `exference-cli-tests` subprocess suite.
+pure launcher. The serial search accepts caller-supplied heap and GC `+RTS`
+tuning but no longer starts one capability per core or reserves a
+multi-gigabyte heap for trivial invocations. Its obsolete Hood, search-tree,
+parallel-mode, and embedded manual-test machinery has been removed;
+deterministic regressions live in `exference-tests`, the frontend-import check,
+and the separate `exference-cli-tests` subprocess suite.
 
 ```console
 cabal run exference -- --first "a -> a"

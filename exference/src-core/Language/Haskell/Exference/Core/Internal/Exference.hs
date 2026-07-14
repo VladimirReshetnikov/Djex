@@ -74,6 +74,7 @@ import Data.List ( find, partition, unfoldr )
 import Data.Monoid ( Any(..) )
 import Data.Foldable ( traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
+import Numeric.Natural (Natural)
 import Control.Monad.Trans.Class ( lift )
 import Control.Monad.Trans.State.Lazy
   ( StateT(..), gets, modify, state
@@ -1077,14 +1078,18 @@ rateGoals h = sumScores . fmap rateGoal
 
 rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Penalty
 rateUsage h = sumScores . map f . IntMap.elems . nodeVarUses where
-  f :: Int -> Penalty
+  f :: Natural -> Penalty
   f 0 = negateScore $ heuristics_tempUnusedVarPenalty h
   f 1 = 0
   f k = negateScore $ multiplyScore
-    (fromIntegral $ k-1) (heuristics_tempMultiVarUsePenalty h)
+    (fromIntegral (k - 1)) (heuristics_tempMultiVarUsePenalty h)
 
-getUnusedVarCount :: SearchNode -> Int
-getUnusedVarCount = length . filter (== 0) . IntMap.elems . nodeVarUses
+getUnusedVarCount :: SearchNode -> Natural
+getUnusedVarCount = IntMap.foldl' countUnused 0 . nodeVarUses
+ where
+  countUnused count uses
+    | uses == 0 = count + 1
+    | otherwise = count
 
 -- Take one SearchNode, return some amount of sub-SearchNodes. Some of the
 -- returned SearchNodes may in fact be (potential) solutions that do not

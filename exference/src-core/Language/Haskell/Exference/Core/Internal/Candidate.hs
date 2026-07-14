@@ -65,6 +65,8 @@ data ExferenceCandidateError
   | InvalidCandidateScope (Generated.ScopeError TVarId)
   | IncompleteCandidate (NonEmpty TVarId)
   | InvalidCandidateType SynthesisTypeError
+  | InvalidCandidateSteps Int
+  | InvalidCandidateFinalQueueSize Int
   | InvalidCandidateComplexity Penalty
   deriving (Eq, Show, Generic)
 
@@ -94,6 +96,14 @@ mkExferenceGeneratedCandidate typeNames expression constraints statistics = do
     [] -> pure ()
   sharedConstraints <- either (Left . InvalidCandidateType) Right
     $ traverse toSynthesisConstraint constraints
+  case exference_steps statistics of
+    steps
+      | steps < 0 -> Left $ InvalidCandidateSteps steps
+      | otherwise -> pure ()
+  case exference_finalSize statistics of
+    finalSize
+      | finalSize < 0 -> Left $ InvalidCandidateFinalQueueSize finalSize
+      | otherwise -> pure ()
   case exference_complexityRating statistics of
     complexity
       | isFiniteScore complexity -> pure ()

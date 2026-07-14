@@ -37,6 +37,7 @@ import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
 import Data.Sequence
+import Numeric.Natural (Natural)
 
 import Control.DeepSeq
 import GHC.Generics
@@ -106,7 +107,7 @@ requireValidScopes = either
   (error . ("Exference internal scope invariant violated: " ++) . show)
   id
 
-type VarUsageMap = IntMap.IntMap Int
+type VarUsageMap = IntMap.IntMap Natural
 
 -- | An expression hole and the innermost lexical scope visible from it.
 data TGoal = TGoal

@@ -32,12 +32,12 @@ simplifyLets (ExpApply e1 e2) = ExpApply (simplifyLets e1) (simplifyLets e2)
 simplifyLets e@ExpHole{}      = e
 simplifyLets (ExpLetMatch name vids bindExp inExp) =
   ExpLetMatch name vids (simplifyLets bindExp) (simplifyLets inExp)
-simplifyLets (ExpLet i ty bindExp inExp) = case countUses i inExp of
-  0 -> simplifyLets inExp
-  1 -> case replaceVar i bindExp inExp of
+simplifyLets (ExpLet i ty bindExp inExp) = case occurrencesOf i inExp of
+  Unused -> simplifyLets inExp
+  UsedOnce -> case replaceVar i bindExp inExp of
     Just replaced -> simplifyLets replaced
     Nothing -> retainLet
-  _ -> ExpLet i ty (simplifyLets bindExp) (simplifyLets inExp)
+  UsedMany -> ExpLet i ty (simplifyLets bindExp) (simplifyLets inExp)
  where
   retainLet = ExpLet i ty (simplifyLets bindExp) (simplifyLets inExp)
 simplifyLets (ExpCaseMatch bindExp alts) =
@@ -62,7 +62,7 @@ simplifyEta (ExpCaseMatch bindExp alts) =
 
 simplifyEta' :: Expression -> Expression
 simplifyEta' (ExpLambda i _ (ExpApply e1 (ExpVar j _)))
-  | i==j && 0==countUses i e1 = e1
+  | i == j && occurrencesOf i e1 == Unused = e1
 simplifyEta' e = e
 
 -- Return 'Nothing' rather than alpha-renaming when a substitution would
@@ -109,7 +109,7 @@ replaceVar replaced replacement = go
   -- where no replacement will actually be inserted.
   binderCaptures binders body =
     any (`IntSet.member` replacementFree) binders
-      && countUses replaced body /= 0
+      && occurrencesOf replaced body /= Unused
 
 
 freeVariables :: Expression -> IntSet.IntSet
@@ -136,28 +136,45 @@ freeVariables expression = case expression of
     foldr (IntSet.delete . fst) free variables
 
 
-countUses :: TVarId -> Expression -> Int
-countUses i (ExpVar j _) | i==j           = 1
-                         | otherwise      = 0
-countUses _ ExpName{}                     = 0
-countUses i (ExpLambda j _ e) | i==j      = 0
-                              | otherwise = countUses i e
-countUses i (ExpApply e1 e2)              = countUses i e1 + countUses i e2
-countUses _ ExpHole{}                     = 0
-countUses i (ExpLetMatch _ variables bindExp inExp) =
-  countUses i bindExp + countUnder (map fst variables) inExp
+-- Only the distinctions below affect simplification: an unused binding can be
+-- removed, a single use may be inlined, and every larger count must retain the
+-- binding. Saturating at 'UsedMany' avoids making exact occurrence totals an
+-- overflowable part of the optimizer's correctness boundary.
+data Occurrences = Unused | UsedOnce | UsedMany
+  deriving (Eq)
+
+combineOccurrences :: Occurrences -> Occurrences -> Occurrences
+combineOccurrences Unused right = right
+combineOccurrences left Unused = left
+combineOccurrences _ _ = UsedMany
+
+occurrencesOf :: TVarId -> Expression -> Occurrences
+occurrencesOf i (ExpVar j _)
+  | i == j = UsedOnce
+  | otherwise = Unused
+occurrencesOf _ ExpName{} = Unused
+occurrencesOf i (ExpLambda j _ e)
+  | i == j = Unused
+  | otherwise = occurrencesOf i e
+occurrencesOf i (ExpApply e1 e2) =
+  combineOccurrences (occurrencesOf i e1) (occurrencesOf i e2)
+occurrencesOf _ ExpHole{} = Unused
+occurrencesOf i (ExpLetMatch _ variables bindExp inExp) =
+  combineOccurrences
+    (occurrencesOf i bindExp)
+    (occurrencesUnder (map fst variables) inExp)
  where
-  countUnder binders body
-    | i `elem` binders = 0
-    | otherwise = countUses i body
-countUses i (ExpLet j _ bindExp inExp) =
-  countUses i bindExp
-    + if i == j then 0 else countUses i inExp
-countUses i (ExpCaseMatch bindExp alts)   = sum $ countUses i bindExp
-                                                : [ countAlternative vars expr
-                                                  | (_, vars, expr) <- alts
-                                                  ]
+  occurrencesUnder binders body
+    | i `elem` binders = Unused
+    | otherwise = occurrencesOf i body
+occurrencesOf i (ExpLet j _ bindExp inExp) = combineOccurrences
+  (occurrencesOf i bindExp)
+  (if i == j then Unused else occurrencesOf i inExp)
+occurrencesOf i (ExpCaseMatch bindExp alts) = foldr
+  (combineOccurrences . occurrenceInAlternative)
+  (occurrencesOf i bindExp)
+  alts
  where
-  countAlternative variables body
-    | i `elem` map fst variables = 0
-    | otherwise = countUses i body
+  occurrenceInAlternative (_, variables, body)
+    | i `elem` map fst variables = Unused
+    | otherwise = occurrencesOf i body

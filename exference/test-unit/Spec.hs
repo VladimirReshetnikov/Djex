@@ -4668,6 +4668,17 @@ tests = testGroup "Exference"
               assertBool "candidate error did not preserve NaN" $ isNaN actual
             Left failure -> fail $ "unexpected candidate failure: " ++ show failure
             Right _ -> fail "a non-finite candidate metric was accepted"
+      , testCase "compatibility candidates reject negative counters" $ do
+          let chunk statistics = ExferenceChunkElement
+                (SearchStatus SearchExhausted 0 0)
+                Map.empty
+                [(ExpName $ name "value", [], statistics)]
+          toGeneratedSearchBatch
+              (chunk $ ExferenceStats (-1) (Penalty 0) 0) @?=
+            Left (InvalidCandidate $ InvalidCandidateSteps (-1))
+          toGeneratedSearchBatch
+              (chunk $ ExferenceStats 1 (Penalty 0) (-1)) @?=
+            Left (InvalidCandidate $ InvalidCandidateFinalQueueSize (-1))
       , testCase "compatibility candidates reject unbound locals and holes" $ do
           let chunk expression = ExferenceChunkElement
                 (SearchStatus SearchExhausted 0 0)
@@ -5078,6 +5089,21 @@ tests = testGroup "Exference"
             $ simplifyExpression branchShadow == expectedShadow
           assertBool "case binder captured an inlined free variable"
             $ simplifyExpression branchCapture == branchCapture
+      , testCase "case occurrences saturate across unshadowed alternatives" $ do
+          let ty = TypeVar 20
+              firstConstructor = name "First"
+              shadowingConstructor = name "Shadowing"
+              finalConstructor = name "Final"
+              scrutinee = ExpName $ name "scrutinee"
+              source = ExpName $ name "source"
+              expression = ExpLet 0 ty source
+                $ ExpCaseMatch scrutinee
+                    [ (firstConstructor, [], ExpVar 0 ty)
+                    , (shadowingConstructor, [(0, ty)], ExpVar 0 ty)
+                    , (finalConstructor, [], ExpVar 0 ty)
+                    ]
+          assertBool "multiple branch uses incorrectly permitted inlining"
+            $ simplifyExpression expression == expression
       , testCase "accepts a typed identity" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let variable = TypeVar 0

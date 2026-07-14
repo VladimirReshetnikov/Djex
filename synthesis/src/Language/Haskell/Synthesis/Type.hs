@@ -15,6 +15,7 @@ module Language.Haskell.Synthesis.Type
   , Type (..)
   , TypeError (..)
   , canonicalizeType
+  , applicationSpine
   , renameScopedVariables
   , validateType
   , freeVariables
@@ -86,6 +87,8 @@ canonicalizeType source = case source of
     (map (fmap canonicalizeType) constraints)
     (canonicalizeType body)
 
+-- | Decompose a left-associated type application into its head and arguments
+-- in source order. Non-application types have an empty argument list.
 applicationSpine :: Type variable -> (Type variable, [Type variable])
 applicationSpine = collect []
   where

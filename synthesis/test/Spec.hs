@@ -1099,6 +1099,15 @@ typeTests = testGroup "source types"
           (SharedType.TypeConstructor (right $ tupleName Unboxed 0)
             :: SharedType.Type String) @?=
         SharedType.TupleType Unboxed []
+  , testCase "decompose application spines in source order" $ do
+      let headType = SharedType.TypeVariable "f"
+          first = SharedType.TypeVariable "a"
+          second = SharedType.TypeVariable "b"
+          application = SharedType.TypeApplication
+            (SharedType.TypeApplication headType first) second
+      SharedType.applicationSpine application @?=
+        (headType, [first, second])
+      SharedType.applicationSpine first @?= (first, [])
   , testCase "forall binders protect bodies and constraints" $ do
       let className = right $ mkIdentifier "C"
           typeExpression = SharedType.ForallType ["a"]

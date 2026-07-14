@@ -90,7 +90,8 @@ rescanning a lazy search trace.
 tree: variables (optionally flexible/rigid), structural names, application,
 functions, boxed or unboxed tuples, and explicit foralls with shared
 constraints. It canonicalizes saturated function and tuple constructors,
-validates lexical/arity/binder invariants, and computes free variables.
+decomposes application spines in source order, validates
+lexical/arity/binder invariants, and computes free variables.
 Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
 this AST; those belong to the declaration layer instead of being encoded as
 special type nodes.

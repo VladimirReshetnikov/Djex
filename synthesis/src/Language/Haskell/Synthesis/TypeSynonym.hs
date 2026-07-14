@@ -62,6 +62,7 @@ import Language.Haskell.Synthesis.Name (Name, nameSpecial)
 import Language.Haskell.Synthesis.Type
   ( Type (..)
   , TypeError
+  , applicationSpine
   , canonicalizeType
   , freeVariables
   , renameScopedVariables
@@ -418,13 +419,6 @@ freshenBinder fresh rangeVariables renaming binder
           | otherwise -> pure candidate
       put $ Set.insert replacement reserved
       pure $ Map.insert binder replacement renaming
-
-applicationSpine :: Type variable -> (Type variable, [Type variable])
-applicationSpine = collect []
- where
-  collect arguments (TypeApplication function argument) =
-    collect (argument : arguments) function
-  collect arguments function = (function, arguments)
 
 cycleFrom :: Name -> [Name] -> Maybe (NonEmpty Name)
 cycleFrom name path = case dropWhile (/= name) path of

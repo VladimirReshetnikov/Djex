@@ -24,7 +24,14 @@ module Language.Haskell.Djex.Djinn
   , DjinnResult
   , mkDjinnSession
   , standardDjinnSession
+  , djinnSessionEnvironment
   , djinnSessionInventory
+  , declareDjinnDeclaration
+  , removeDjinnDeclaration
+  , djinnSessionTypeDeclarations
+  , djinnSessionFunctionDeclarations
+  , djinnSessionClassDeclarations
+  , resolveDjinnInstanceMethods
   , mkDjinnRequest
   , djinnRequestQuery
   , parseDjinnRequest
@@ -39,15 +46,20 @@ import Data.Bifunctor (first)
 import Djinn.Core
   ( DjinnCandidateDetails (..)
   , DjinnCandidate
+  , Declaration
   , DjinnQueryError (..)
   , DjinnQueryMetadata (..)
   , DjinnResult
   , PreparedEnvironment
   , QueryOptions (..)
   , defaultQueryOptions
+  , declareSynthesisEnvironment
+  , removeSynthesisDeclaration
   , inhabitResultPrepared
   , prepareSynthesisEnvironment
+  , preparedEnvironmentSource
   , preparedEnvironmentInventory
+  , resolvePreparedInstanceMethods
   )
 import qualified Djinn.Core as Core
 import Language.Haskell.Synthesis.Candidate
@@ -114,10 +126,11 @@ type DjinnLocal = String
 -- checked t'DjinnRequest'.
 type DjinnType = Type DjinnTypeVariable
 
--- | A validated Djinn environment paired with its exact shared inventory and
--- prepared synonym table. The constructor is private so those views cannot
--- drift apart.
-newtype DjinnSession = DjinnSession PreparedEnvironment
+-- | A validated shared environment and the exact backend indexes projected
+-- from it.  The constructor is private so compatibility editing can replace
+-- both values transactionally and raw Djinn tables never become a second
+-- retained source authority in the frontend.
+data DjinnSession = DjinnSession DjinnEnvironment PreparedEnvironment
 
 -- | The raw projection and optional source provenance derived while sealing
 -- a request. The shared 'CachedQuery' envelope keeps both details out of the
@@ -139,7 +152,7 @@ newtype DjinnRequest = DjinnRequest
 -- | Lower a shared declaration environment through Djinn's stricter lexical,
 -- dependency, and kind checks, then seal it into a reusable session.
 mkDjinnSession :: DjinnEnvironment -> Either Diagnostic DjinnSession
-mkDjinnSession sharedEnvironment = DjinnSession <$>
+mkDjinnSession sharedEnvironment = DjinnSession sharedEnvironment <$>
   first environmentFailure (prepareSynthesisEnvironment sharedEnvironment)
 
 environmentFailure
@@ -148,16 +161,73 @@ environmentFailure
 environmentFailure = shownErrorDiagnostic "DJEX_DJINN_ENV"
   "cannot lower the shared environment to Djinn"
 
--- | The historical checked Djinn prelude, sealed directly from its
--- authoritative raw environment. Neutral environments use 'mkDjinnSession'.
+-- | The historical checked Djinn prelude. Its raw declaration spelling is a
+-- compatibility source only: convert it once and use the same neutral session
+-- constructor as every other caller.
 standardDjinnSession :: Either Diagnostic DjinnSession
-standardDjinnSession = DjinnSession <$>
-  first environmentFailure
-    (Core.prepareEnvironment Core.standardEnvironment)
+standardDjinnSession = do
+  environment <- first environmentFailure
+    $ Core.toSynthesisEnvironment Core.standardEnvironment
+  mkDjinnSession environment
+
+djinnSessionEnvironment :: DjinnSession -> DjinnEnvironment
+djinnSessionEnvironment (DjinnSession environment _) = environment
 
 djinnSessionInventory :: DjinnSession -> DjinnInventory
-djinnSessionInventory (DjinnSession prepared) =
+djinnSessionInventory (DjinnSession _ prepared) =
   preparedEnvironmentInventory prepared
+
+-- | Apply one historical declaration to the authoritative shared environment
+-- and publish the replacement session only after complete validation.
+declareDjinnDeclaration
+  :: Declaration
+  -> DjinnSession
+  -> Either Diagnostic DjinnSession
+declareDjinnDeclaration declaration (DjinnSession environment _) = do
+  (environment', prepared) <- first environmentEditFailure
+    $ declareSynthesisEnvironment declaration environment
+  pure $ DjinnSession environment' prepared
+
+-- | Transactional counterpart of the historical @:delete@ command.
+removeDjinnDeclaration
+  :: String
+  -> DjinnSession
+  -> Either Diagnostic DjinnSession
+removeDjinnDeclaration name (DjinnSession environment _) = do
+  (environment', prepared) <- first environmentEditFailure
+    $ removeSynthesisDeclaration name environment
+  pure $ DjinnSession environment' prepared
+
+-- The following projections keep the compatibility frontend's exact display
+-- and instance-generation behavior without making it retain a raw Environment.
+-- Each view comes from the backend index already derived while sealing.
+djinnSessionTypeDeclarations
+  :: DjinnSession
+  -> [(Core.HSymbol, ([Core.HSymbol], Core.HType, Core.HKind))]
+djinnSessionTypeDeclarations (DjinnSession _ prepared) =
+  Core.typeDeclarations $ preparedEnvironmentSource prepared
+
+djinnSessionFunctionDeclarations
+  :: DjinnSession
+  -> [(Core.HSymbol, Core.HType)]
+djinnSessionFunctionDeclarations (DjinnSession _ prepared) =
+  Core.functionDeclarations $ preparedEnvironmentSource prepared
+
+djinnSessionClassDeclarations
+  :: DjinnSession
+  -> [(Core.HSymbol,
+      ([(Core.HSymbol, Core.HKind)], [(Core.HSymbol, Core.HType)]))]
+djinnSessionClassDeclarations (DjinnSession _ prepared) =
+  Core.classDeclarations $ preparedEnvironmentSource prepared
+
+resolveDjinnInstanceMethods
+  :: DjinnSession
+  -> [Core.Context]
+  -> Core.Context
+  -> Either Diagnostic [(Core.HSymbol, Core.HType)]
+resolveDjinnInstanceMethods (DjinnSession _ prepared) prerequisites target =
+  first instanceResolutionFailure
+    $ resolvePreparedInstanceMethods prepared prerequisites target
 
 -- | Check and lower the session-independent portion of a neutral Djinn
 -- query.  Target spelling, the goal, and context arguments are converted
@@ -252,7 +322,7 @@ runDjinnQuery
   :: DjinnSession
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
-runDjinnQuery (DjinnSession prepared) request = do
+runDjinnQuery (DjinnSession _ prepared) request = do
   let cache = djinnRequestCache request
   case inhabitResultPrepared
       (requestOptions $ djinnRequestQuery request)
@@ -334,3 +404,20 @@ djinnQueryFailure failure = case failure of
     "DJEX_DJINN_RESULT"
     "Djinn produced inconsistent logical evidence"
     invariant
+
+environmentEditFailure
+  :: Core.SynthesisEnvironmentError
+  -> Diagnostic
+environmentEditFailure failure = case failure of
+  Core.SynthesisDeclarationNotFound name -> contextualDiagnostic Error
+    "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
+    (name ++ " is not defined")
+  Core.ProtectedSynthesisUnit -> contextualDiagnostic Error
+    "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
+    "() is a built-in type and cannot be removed"
+  _ -> shownErrorDiagnostic "DJEX_DJINN_ENV"
+    "cannot update the shared Djinn environment" failure
+
+instanceResolutionFailure :: String -> Diagnostic
+instanceResolutionFailure = contextualDiagnostic Error
+  "DJEX_DJINN_QUERY" "Djinn rejected the instance context"

@@ -65,6 +65,8 @@ tests =
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse and render through the checked Djinn adapter",
           testCheckedDjinnAdapter)
+    , ("edit checked Djinn sessions through the shared environment",
+          testCheckedDjinnSessionEditing)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
@@ -249,6 +251,64 @@ testCheckedDjinnAdapter = do
 
 expectShownRight :: Show failure => Either failure value -> IO value
 expectShownRight = either (fail . show) return
+
+testCheckedDjinnSessionEditing :: IO ()
+testCheckedDjinnSessionEditing = do
+    initial <- expectShownRight Djex.standardDjinnSession
+    first <- expectShownRight $ Djex.declareDjinnDeclaration
+        (Function "first" $ HTCon "Bool") initial
+    second <- expectShownRight $ Djex.declareDjinnDeclaration
+        (Function "second" $ HTCon "Bool") first
+    replaced <- expectShownRight $ Djex.declareDjinnDeclaration
+        (Function "first" $ HTArrow (HTCon "Bool") (HTCon "Bool"))
+        second
+    assertEqual "replacement lost newest-first function search order"
+        ["first", "second"]
+        (map fst $ Djex.djinnSessionFunctionDeclarations replaced)
+
+    case Djex.declareDjinnDeclaration
+        (TypeSynonym "Bad" ["a"] $ HTVar "b") replaced of
+      Left failure -> assertEqual
+        "failed edits did not use the structured environment boundary"
+        (Just "DJEX_DJINN_ENV")
+        (SharedDiagnostic.diagnosticCode failure)
+      Right _ -> fail "an invalid synonym committed to the checked session"
+    assertEqual "a failed edit changed the prior session"
+        ["first", "second"]
+        (map fst $ Djex.djinnSessionFunctionDeclarations replaced)
+
+    withoutSecond <- expectShownRight $
+        Djex.removeDjinnDeclaration "second" replaced
+    assertEqual "deletion reordered surviving functions"
+        ["first"]
+        (map fst $ Djex.djinnSessionFunctionDeclarations withoutSecond)
+
+    withBase <- expectShownRight $ Djex.declareDjinnDeclaration
+        (AbstractType "Base" KStar) withoutSecond
+    withAlias <- expectShownRight $ Djex.declareDjinnDeclaration
+        (TypeSynonym "UsesBase" [] $ HTCon "Base") withBase
+    case Djex.removeDjinnDeclaration "Base" withAlias of
+      Left failure -> assertEqual "dependent deletion lost its diagnostic code"
+        (Just "DJEX_DJINN_ENV")
+        (SharedDiagnostic.diagnosticCode failure)
+      Right _ -> fail "deletion committed while a surviving alias depended on it"
+
+    case Djex.removeDjinnDeclaration "()" initial of
+      Left failure -> do
+        assertEqual "unit deletion lost its diagnostic code"
+            (Just "DJEX_DJINN_ENV")
+            (SharedDiagnostic.diagnosticCode failure)
+        assertBool "unit deletion lost its compatibility explanation"
+            $ "built-in type" `isInfixOf`
+                unwords (SharedDiagnostic.diagnosticContext failure)
+      Right _ -> fail "the shared editor removed the canonical unit"
+
+    equality <- either fail pure $
+        mkContext "Eq" [HTCon "Bool"]
+    methods <- expectShownRight $
+        Djex.resolveDjinnInstanceMethods initial [] equality
+    assertEqual "session-level instance lookup changed class method order"
+        ["=="] (map fst methods)
 
 -- The library facade must make invalid environments unrepresentable and
 -- report search results honestly.

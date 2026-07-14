@@ -29,11 +29,12 @@ module Djinn.Core (
     -- * Environments
     Environment, emptyEnvironment, standardEnvironment,
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
-    preparedEnvironmentInventory,
+    preparedEnvironmentSource, preparedEnvironmentInventory,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
     fromSynthesisEnvironment,
+    declareSynthesisEnvironment, removeSynthesisDeclaration,
     declare, removeDeclaration,
     typeDeclarations, functionDeclarations, classDeclarations,
     -- * Queries

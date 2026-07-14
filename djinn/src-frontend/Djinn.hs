@@ -94,11 +94,9 @@ hsGenRepl state = REPL {
     }
 
 data State = State {
-    -- These two fields are committed together by 'installEnvironment'. The
-    -- opaque session must always be the lowering of this exact editable REPL
-    -- environment; otherwise a declaration can print successfully while later
-    -- queries search a stale inventory.
-    environment :: Environment,
+    -- Declaration edits are transactional operations on this opaque session.
+    -- Its shared environment is authoritative; historical raw tables exist
+    -- only as private projections used by search and the views below.
     djinnSession :: DjinnSession,
     multi :: Bool,
     sorted :: Bool,
@@ -111,7 +109,6 @@ data State = State {
 
 startState :: State
 startState = State {
-    environment = standardEnvironment,
     djinnSession = standardSession,
     multi = False,
     sorted = True,
@@ -188,15 +185,17 @@ runCmd s (Help verbose) = do
 runCmd s Quit =
     return (True, s)
 runCmd s (Load f) = loadFile s f
-runCmd s (Add i t) = updateEnvironment s $ declare (Function i t)
+runCmd s (Add i t) = updateSession s $
+    declareDjinnDeclaration (Function i t)
 runCmd s Clear =
     return (False, startState { commandFailed = commandFailed s })
 runCmd s (Del i) =
-    case removeDeclaration i (environment s) of
-        Left message -> do
-            putStrLn $ "Error: cannot delete " ++ i ++ ": " ++ message
+    case removeDjinnDeclaration i (djinnSession s) of
+        Left failure -> do
+            putStrLn $ "Error: cannot delete " ++ i ++ ": " ++
+                Diagnostic.renderDiagnostic failure
             return (False, markFailed s)
-        Right environment' -> installEnvironment s environment'
+        Right session -> installSession s session
 runCmd s Env = do
     let showType (i, (_, HTAbstract _ kind, _)) =
             "type " ++ i ++ " :: " ++ show kind
@@ -206,14 +205,14 @@ runCmd s Env = do
         showd (HTUnion []) = ""
         showd t = " = " ++ show t
     mapM_ (putStrLn . showType)
-        (reverse $ typeDeclarations $ environment s)
+        (reverse $ djinnSessionTypeDeclarations $ djinnSession s)
     mapM_ (\ (i, t) -> putStrLn $ prHSymbolOp i ++ " :: " ++ show t)
-        (reverse $ functionDeclarations $ environment s)
+        (reverse $ djinnSessionFunctionDeclarations $ djinnSession s)
     mapM_ (putStrLn . showClass)
-        (reverse $ classDeclarations $ environment s)
+        (reverse $ djinnSessionClassDeclarations $ djinnSession s)
     return (False, s)
 runCmd s (Type (name, (params, body, _))) =
-    updateEnvironment s $ declare $
+    updateSession s . declareDjinnDeclaration $
         case body of
             HTUnion constructors -> DataType name params constructors
             HTAbstract _ kind -> AbstractType name kind
@@ -223,11 +222,12 @@ runCmd s (Set f) =
 runCmd s (Query i ctx g) =
     query True s i ctx g
 runCmd s (Class (name, (params, methods))) =
-    updateEnvironment s $ declare $ ClassDecl name params methods
+    updateSession s $ declareDjinnDeclaration $
+        ClassDecl name params methods
 runCmd s (QueryInstance ctx target) =
-    case resolveInstanceMethods (environment s) ctx target of
-        Left msg -> do
-            putStrLn $ "Error: " ++ msg
+    case resolveDjinnInstanceMethods (djinnSession s) ctx target of
+        Left failure -> do
+            putStrLn $ "Error: " ++ commandDiagnostic failure
             return (False, markFailed s)
         Right methods -> do
             let instanceHeading = "instance " ++ contextPrefix ctx ++
@@ -277,32 +277,19 @@ runCmd s (QueryInstance ctx target) =
                         mapM_ printFailedMethod failures
                     return (False, s)
 
-updateEnvironment :: State -> (Environment -> Either String Environment)
-                  -> IO (Bool, State)
-updateEnvironment s change =
-    case change (environment s) of
-        Left msg -> do
-            putStrLn $ "Error: " ++ msg
-            return (False, markFailed s)
-        Right environment' -> installEnvironment s environment'
+updateSession :: State
+              -> (DjinnSession -> Either Diagnostic.Diagnostic DjinnSession)
+              -> IO (Bool, State)
+updateSession state change =
+    case change (djinnSession state) of
+        Left failure -> do
+            putStrLn $ "Error: " ++ Diagnostic.renderDiagnostic failure
+            return (False, markFailed state)
+        Right session -> installSession state session
 
-installEnvironment :: State -> Environment -> IO (Bool, State)
-installEnvironment state environment' = case
-    sealCompatibilityEnvironment environment' of
-    Left failure -> do
-        putStrLn $ "Error: " ++ failure
-        return (False, markFailed state)
-    Right session -> return (False, state {
-        environment = environment',
-        djinnSession = session
-        })
-
--- Raw declarations remain convenient for the historical REPL, while the
--- reusable Djex session boundary consumes only the shared structural view.
-sealCompatibilityEnvironment :: Environment -> Either String DjinnSession
-sealCompatibilityEnvironment environment' = do
-    shared <- either (Left . show) Right $ toSynthesisEnvironment environment'
-    either (Left . Diagnostic.renderDiagnostic) Right $ mkDjinnSession shared
+installSession :: State -> DjinnSession -> IO (Bool, State)
+installSession state session =
+    return (False, state { djinnSession = session })
 
 markFailed :: State -> State
 markFailed state = state { commandFailed = True }

@@ -12,6 +12,7 @@ module Djinn.Internal.Environment (
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
+    declareSynthesisEnvironment, removeSynthesisDeclaration,
     validateEnvironment,
     replace, requireDistinct, requireUnusedName,
     checkConstructors
@@ -85,6 +86,8 @@ data SynthesisEnvironmentError
     | MissingSynthesisClassKinds SharedName.Name
     | SynthesisClassKindArityMismatch SharedName.Name Int Int
     | UnresolvedSynthesisClassKind SharedName.Name HSymbol
+    | SynthesisDeclarationNotFound HSymbol
+    | ProtectedSynthesisUnit
     | DjinnEnvironmentValidationError String
     deriving (Eq, Show)
 
@@ -167,6 +170,110 @@ prepareSynthesisEnvironment sourceEnvironment = do
         (SharedInventory.inventoryKindAssumptions inventory)
         sourceDeclarations
     sealPreparedEnvironment environment inventory synonyms
+
+-- | Apply one compatibility declaration directly to the shared environment,
+-- then seal the resulting session state before returning it.  Djinn's
+-- historical association lists put replacements first within each category;
+-- encode that policy here rather than round-tripping through those lists and
+-- accidentally making them the editable authority again.
+declareSynthesisEnvironment
+    :: Declaration
+    -> SynthesisEnvironment
+    -> Either SynthesisEnvironmentError
+        (SynthesisEnvironment, PreparedEnvironment)
+declareSynthesisEnvironment declaration sourceEnvironment = do
+    sharedDeclaration <- first SynthesisEnvironmentDeclarationError $
+        toSynthesisDeclaration declaration
+    (group, owner) <- synthesisDeclarationOwner sharedDeclaration
+    categorized <- mapM categorize $
+        SharedEnvironment.environmentDeclarations sourceEnvironment
+    let declarations selected =
+            [ candidate
+            | (candidate, candidateGroup, candidateOwner) <- categorized
+            , candidateGroup == selected
+            , candidateGroup /= group || candidateOwner /= owner
+            ]
+        candidateDeclarations =
+            declarations SynthesisTypeDeclaration ++
+            declarations SynthesisValueDeclaration ++
+            declarations SynthesisClassDeclaration
+        withReplacement = case group of
+            SynthesisTypeDeclaration ->
+                sharedDeclaration : candidateDeclarations
+            SynthesisValueDeclaration ->
+                declarations SynthesisTypeDeclaration ++
+                sharedDeclaration :
+                (declarations SynthesisValueDeclaration ++
+                 declarations SynthesisClassDeclaration)
+            SynthesisClassDeclaration ->
+                declarations SynthesisTypeDeclaration ++
+                declarations SynthesisValueDeclaration ++
+                sharedDeclaration : declarations SynthesisClassDeclaration
+    candidate <- first InvalidSynthesisEnvironment $
+        SharedEnvironment.mkEnvironment withReplacement
+    prepared <- prepareSynthesisEnvironment candidate
+    return (candidate, prepared)
+  where
+    categorize candidate = do
+        (group, owner) <- synthesisDeclarationOwner candidate
+        return (candidate, group, owner)
+
+-- | Delete one top-level Djinn declaration from the shared environment and
+-- validate every survivor before committing. Constructor and method names are
+-- deliberately not top-level deletion keys, matching the historical REPL.
+removeSynthesisDeclaration
+    :: HSymbol
+    -> SynthesisEnvironment
+    -> Either SynthesisEnvironmentError
+        (SynthesisEnvironment, PreparedEnvironment)
+removeSynthesisDeclaration sourceName sourceEnvironment = do
+    owner <- case SharedName.parseName sourceName of
+        Left _ -> Left $ SynthesisDeclarationNotFound sourceName
+        Right name -> Right name
+    declarations <- mapM attachOwner $
+        SharedEnvironment.environmentDeclarations sourceEnvironment
+    let matching = [declaration |
+            (declaration, candidateOwner) <- declarations,
+            candidateOwner == owner]
+    if null matching then Left $ SynthesisDeclarationNotFound sourceName
+    else if sourceName == "()" then Left ProtectedSynthesisUnit
+    else do
+        candidate <- first InvalidSynthesisEnvironment $
+            SharedEnvironment.mkEnvironment
+                [ declaration
+                | (declaration, candidateOwner) <- declarations
+                , candidateOwner /= owner
+                ]
+        prepared <- prepareSynthesisEnvironment candidate
+        return (candidate, prepared)
+  where
+    attachOwner declaration = do
+        (_, owner) <- synthesisDeclarationOwner declaration
+        return (declaration, owner)
+
+data SynthesisDeclarationGroup
+    = SynthesisTypeDeclaration
+    | SynthesisValueDeclaration
+    | SynthesisClassDeclaration
+    deriving (Eq)
+
+synthesisDeclarationOwner
+    :: SynthesisDeclaration
+    -> Either SynthesisEnvironmentError
+        (SynthesisDeclarationGroup, SharedName.Name)
+synthesisDeclarationOwner declaration = case declaration of
+    SharedDeclaration.TypeSynonymDeclaration _ name _ _ ->
+        Right (SynthesisTypeDeclaration, name)
+    SharedDeclaration.DataTypeDeclaration _ name _ _ ->
+        Right (SynthesisTypeDeclaration, name)
+    SharedDeclaration.AbstractTypeDeclaration _ name _ ->
+        Right (SynthesisTypeDeclaration, name)
+    SharedDeclaration.ValueDeclaration signature -> Right
+        (SynthesisValueDeclaration, SharedDeclaration.valueName signature)
+    SharedDeclaration.ClassDeclaration _ name _ _ _ ->
+        Right (SynthesisClassDeclaration, name)
+    SharedDeclaration.InstanceDeclaration{} -> Left $
+        SynthesisEnvironmentDeclarationError InstanceDeclarationUnsupported
 
 -- Expand aliases before classifying datatype recursion. Looking only at raw
 -- fields can hide a real cycle through an alias or invent one in an argument

@@ -18,6 +18,8 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testNominalEmptyTypes
     , testCase "failed deletion rolls back the environment"
         testMutationRollback
+    , testCase "failed shared sealing rolls back the session"
+        testSealRollback
     , testCase "qualified and underscore names render correctly"
         testIdentifiers
     , testCase "file errors do not terminate the session"
@@ -276,6 +278,21 @@ testMutationRollback = do
         "data Base = Base" output
     assertContains "the dependent synonym should remain"
         "type Alias = Base" output
+
+testSealRollback :: Assertion
+testSealRollback = do
+    output <- runSession
+        [ "type Bad a = b"
+        , ":environment"
+        , "identity ? a -> a"
+        , ":quit"
+        ]
+    assertContains "the shared sealing failure lost its stable code"
+        "DJEX_DJINN_ENV" output
+    assertBool "the rejected declaration appeared in the environment"
+        (not $ "type Bad a" `isInfixOf` output)
+    assertContains "the prior session stopped answering after rollback"
+        "identity a = a" output
 
 testIdentifiers :: Assertion
 testIdentifiers = do

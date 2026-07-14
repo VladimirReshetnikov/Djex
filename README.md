@@ -232,8 +232,8 @@ validation before the original alias-bearing declarations are lowered for
 proof search. At query time Djinn elaborates the goal and all class arguments
 as one shared kind scope, then sends the alias-free projection to proof search;
 opaque requests still retain their exact session-independent source view.
-`standardDjinnSession` seals the authoritative checked built-in raw environment
-directly, while caller-supplied neutral environments use `mkDjinnSession`.
+`standardDjinnSession` converts the historical built-in spelling once and then
+uses the same neutral `mkDjinnSession` path as every caller-supplied environment.
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
 grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
 point rather than importing an internal parser. Both `DjinnRequest` and
@@ -255,8 +255,10 @@ The one-import `Language.Haskell.Djex` surface reexports the complete neutral
 declaration, environment, inventory, kind-inference, synonym-elaboration, and
 type-rendering vocabulary. `DjinnEnvironment`, `DjinnInventory`,
 `DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make every Djinn adapter
-signature nameable without depending on a hidden backend alias; the historical
-REPL explicitly converts its editable raw environment at the adapter boundary.
+signature nameable without depending on a hidden backend alias. The historical
+REPL now edits the shared environment transactionally through its opaque
+session; raw declarations are one-way parser inputs and private derived
+display/search views, not retained editable state.
 Exference now has the same stable construction boundary:
 `ExferenceEnvironment = Environment ExferenceTypeVariable Void ()`, and
 `mkExferenceSession` kind-checks and lowers that parser-independent environment
@@ -394,10 +396,14 @@ profile. `--short` now adds backend-neutral structural expression size to the
 candidate cost instead of being a dead option.
 
 The `djinn` compatibility frontend likewise retains its declaration REPL while
-storing each editable `Environment` together with the exact sealed
-`DjinnSession`. Successful mutations replace that pair transactionally; type
-queries and instance methods consume shared evidence, progress, metadata, and
-`FunctionClause` output through `runDjinnQuery`. Startup-file mode now carries
+storing only the exact sealed `DjinnSession`. Successful mutations edit its
+authoritative shared environment and publish a replacement session only after
+complete structural, kind, alias, recursion, and backend validation. Historical
+`:environment` ordering and instance-method lookup are projections of the
+already prepared backend rather than separately retained or repeatedly sealed
+raw environments. Type queries and instance methods consume shared evidence,
+progress, metadata, and `FunctionClause` output through `runDjinnQuery`.
+Startup-file mode now carries
 aggregate failure status across later commands and `:clear`, accepts settings
 on either side of filenames, and rejects unknown or ambiguous option prefixes;
 interactive recovery remains unchanged.

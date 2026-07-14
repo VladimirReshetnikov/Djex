@@ -13,6 +13,9 @@ module Main (main) where
 
 import Test.Tasty.Bench
 
+import Djinn.Internal.Environment
+    (Environment, TypeDefinition, prepareEnvironment)
+import Djinn.Internal.HTypes (prepareTypeFormulaTranslator)
 import Djinn.Internal.LJT
 import Corpus
 
@@ -38,7 +41,42 @@ main = defaultMain
     , bgroup "budgetOverhead"
         [ bench (entryName e) $ whnf budgetedFirst (entryFormula e)
         | e <- corpus ]
+    -- Preparation benchmarks stay separate from proof search.  The first
+    -- group measures the raw formula translator's whole-table validation;
+    -- the second includes shared inventory/kind/synonym preparation and the
+    -- cached translator retained by a complete checked environment.
+    , bgroup "aliasPreparation"
+        [ bgroup "translator"
+            [ bench (aliasEntryName entry) $
+                whnf prepareTranslator (aliasDefinitions entry)
+            | entry <- aliasPreparationCorpus
+            ]
+        , bgroup "environment"
+            [ bench (aliasEntryName entry) $
+                whnf prepareFullEnvironment (aliasEnvironment entry)
+            | entry <- aliasPreparationCorpus
+            ]
+        ]
     ]
+
+-- Pattern-matching on Right forces the validation and closure construction.
+-- The closure itself is put into WHNF, but no query is translated and no
+-- expanded formula tree is rendered or traversed by the benchmark consumer.
+{-# NOINLINE prepareTranslator #-}
+prepareTranslator :: [TypeDefinition] -> Bool
+prepareTranslator definitions = case
+        prepareTypeFormulaTranslator definitions of
+    Left failure -> error $ "invalid alias benchmark: " ++ failure
+    Right translate -> translate `seq` True
+
+-- The PreparedEnvironment constructor is private, so seq is the narrowest
+-- public way to force successful sealing without inspecting or rendering any
+-- of its cached expanded representations.
+{-# NOINLINE prepareFullEnvironment #-}
+prepareFullEnvironment :: Environment -> Bool
+prepareFullEnvironment environment = case prepareEnvironment environment of
+    Left failure -> error $ "invalid environment benchmark: " ++ show failure
+    Right prepared -> prepared `seq` True
 
 firstIn :: Strategy -> Formula -> Int
 firstIn strat formula =

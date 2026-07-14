@@ -6,16 +6,27 @@
 -- and tests can assert the corpus itself stays honest.
 --
 module Corpus (
-    Entry(..), corpus,
+    Entry(..), corpus, AliasEntry(..), aliasPreparationCorpus,
     atom, nots, implChain, pickOne, wideDisj, projection
     ) where
 
+import Djinn.Internal.Environment (Environment(..), TypeDefinition)
+import Djinn.Internal.HTypes (HKind(..), HType(..))
 import Djinn.Internal.LJTFormula
 
 data Entry = Entry {
     entryName :: String,
     entryProvable :: Bool,
     entryFormula :: Formula
+    }
+
+-- Source-sized alias fixtures used to measure the two preparation boundaries
+-- independently.  Construction is shared outside the timed closure; each
+-- benchmark iteration still performs fresh validation and preparation.
+data AliasEntry = AliasEntry {
+    aliasEntryName :: String,
+    aliasDefinitions :: [TypeDefinition],
+    aliasEnvironment :: Environment
     }
 
 atom :: Int -> Formula
@@ -129,3 +140,65 @@ corpus =
     backChain =
         foldr (:->) (atom 10 :-> atom 1)
             [atom i :-> atom (i + 1) | i <- [1 .. 9]]
+
+-- Linear aliases expose repeated whole-table normalization.  Duplication
+-- aliases have linear source size but expand into a binary tree; these small
+-- depths are intentionally large enough to reveal accidental materialization
+-- without making the benchmark itself unbounded.
+aliasPreparationCorpus :: [AliasEntry]
+aliasPreparationCorpus =
+    map linearAliasEntry [32, 64, 128, 256] ++
+    map duplicationAliasEntry [8, 12, 16, 20]
+
+linearAliasEntry :: Int -> AliasEntry
+linearAliasEntry size = aliasEntry
+    ("linear/" ++ show size)
+    [ (linearName index,
+        ([parameter], linearBody index, unaryProperKind))
+    | index <- [0 .. size - 1]
+    ]
+  where
+    parameter = "a"
+    linearBody 0 = HTVar parameter
+    linearBody index = HTApp
+        (HTCon $ linearName (index - 1))
+        (HTVar parameter)
+
+duplicationAliasEntry :: Int -> AliasEntry
+duplicationAliasEntry depth = aliasEntry
+    ("duplication/" ++ show depth)
+    (leafDefinition : duplicateDefinition : treeDefinitions)
+  where
+    leafDefinition =
+        ("Leaf", ([], HTAbstract "Leaf" KStar, KStar))
+    duplicateDefinition =
+        ( "Duplicate"
+        , ( ["a"]
+          , HTTuple [HTVar "a", HTVar "a"]
+          , unaryProperKind
+          )
+        )
+    treeDefinitions =
+        (treeName 0, ([], HTCon "Leaf", KStar)) :
+        [ ( treeName index
+          , ( []
+            , HTApp (HTCon "Duplicate")
+                (HTCon $ treeName (index - 1))
+            , KStar
+            )
+          )
+        | index <- [1 .. depth]
+        ]
+
+aliasEntry :: String -> [TypeDefinition] -> AliasEntry
+aliasEntry name definitions = AliasEntry
+    name definitions $ Environment definitions [] []
+
+linearName :: Int -> String
+linearName index = "Linear" ++ show index
+
+treeName :: Int -> String
+treeName index = "Tree" ++ show index
+
+unaryProperKind :: HKind
+unaryProperKind = KArrow KStar KStar

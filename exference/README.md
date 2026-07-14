@@ -36,7 +36,7 @@ from the repository root or `djex/`:
 
 ```console
 cabal build djex:lib:exference-core djex:lib:exference-frontend djex:exe:exference
-cabal test exference-tests exference-cli-tests --test-show-details=direct
+cabal test exference-core-api-tests exference-frontend-api-tests exference-tests exference-cli-tests --test-show-details=direct
 ```
 
 The former top-level `exference/` package is now the `djex/exference/` source
@@ -63,8 +63,9 @@ substitution to a common namespace. The historical `unify` name remains a
 compatibility alias for `unifyDisjoint`.
 The public named `exference-frontend` sublibrary is rooted at `src-frontend/`;
 it contains the `haskell-src-exts` frontend and environment loader and
-preserves the historical core import paths through Cabal reexports. The
-compatibility executable has its own thin `app/` root. The stable
+preserves the historical core import paths through Cabal reexports. It also
+owns the public `Language.Haskell.Exference.CLI` compatibility entry point;
+the executable's `app/` root contains only a six-line launcher. The stable
 `Language.Haskell.Djex.Exference` adapter now lives in `exference-core`; the
 frontend adds `Language.Haskell.Djex.Exference.HaskellSrc` for directory loading
 and Haskell type parsing. The package's default `djex` library re-exports the
@@ -427,10 +428,12 @@ the selected candidates. The executable therefore validates and runs search
 once, then says when an empty result is conclusive versus when inhabitation
 remains undecided.
 
-The `exference` executable is a normal build target again. Its obsolete Hood,
+The `exference` executable is a normal build target again. Its implementation
+lives in `Language.Haskell.Exference.CLI`, making the executable component a
+pure launcher while keeping its established RTS profile. Its obsolete Hood,
 search-tree, parallel-mode, and embedded manual-test machinery has been
-removed; deterministic regressions live in `exference-tests` and the separate
-`exference-cli-tests` subprocess suite.
+removed; deterministic regressions live in `exference-tests`, the
+frontend-import check, and the separate `exference-cli-tests` subprocess suite.
 
 ```console
 cabal run exference -- --first "a -> a"

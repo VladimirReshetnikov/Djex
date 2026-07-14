@@ -377,6 +377,7 @@ Library exference-frontend
 
   Exposed-Modules:
     Language.Haskell.Djex.Exference.HaskellSrc
+    Language.Haskell.Exference.CLI
     Language.Haskell.Exference.ExpressionToHaskellSrc
     Language.Haskell.Exference.TypeFromHaskellSrc
     Language.Haskell.Exference.TypeDeclsFromHaskellSrc
@@ -408,21 +409,27 @@ Library exference-frontend
 
   Other-Modules:
     Language.Haskell.Exference.HaskellSrcUtils
+    Paths_djex
+  Autogen-Modules: Paths_djex
 
   Build-Depends:
     djex:exference-core,
     filepath >= 1.4 && < 1.6
 
+-- Keep the compatibility command implementation in the frontend component;
+-- the executable below is deliberately only a launcher for this public API.
+Test-Suite exference-frontend-api-tests
+  import:         tasty-hunit-test
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Spec.hs
+  Hs-Source-Dirs: exference/test-frontend-api
+  Build-Depends:  djex:exference-frontend
+
 Executable exference
-  import:         build-settings, containers-dep
+  import:         build-settings
   Main-Is:        Main.hs
   Hs-Source-Dirs: exference/app
-  Other-Modules:  Paths_djex
-  Autogen-Modules: Paths_djex
-
-  Build-Depends:
-    djex:exference-frontend,
-    djex:synthesis
+  Build-Depends:  djex:exference-frontend
 
   Ghc-Options:
     -rtsopts

@@ -27,7 +27,9 @@ generated-output infrastructure is progressively consolidated.
   uses.
 - `exference/` supplies the public parser-independent `exference-core`
   sublibrary, including the checked Djex/Exference session adapter, and the
-  `exference-frontend` Haskell-source/environment-loader sublibrary.
+  `exference-frontend` Haskell-source/environment-loader sublibrary. The latter
+  also owns `Language.Haskell.Exference.CLI`; the executable component is only
+  its six-line launcher.
 
 The `djex` executable is the merged one-shot frontend and selects either checked
 backend explicitly. The historical `djinn` and `exference` executable names
@@ -332,11 +334,13 @@ that both backend adapters can now share. Its batch operation preserves source
 order while assigning one kind to each free variable shared by a goal and its
 separate context arguments.
 
-The `exference` compatibility executable is a thin consumer of this boundary:
-it loads and seals one session, parses every requested type through
-`parseExferenceRequest`, selects shared candidates, and renders their generated
-expression bodies. Exact nominal session policy replaces its former
-occurrence-text filtering of recursion helpers. Parse, kind, option, and search
+The `exference` compatibility executable is a six-line launcher for
+`Language.Haskell.Exference.CLI` in the frontend component. That module is the
+compatibility orchestrator at this boundary: it loads and seals one session,
+parses every requested type through `parseExferenceRequest`, selects shared
+candidates, and renders their generated expression bodies. Exact nominal
+session policy replaces its former occurrence-text filtering of recursion
+helpers. Parse, kind, option, and search
 failures are structured diagnostics on stderr with failure exit status;
 repeated inputs are all processed and conflicting presentation modes are
 rejected. Its historical ranking vector remains an explicit compatibility

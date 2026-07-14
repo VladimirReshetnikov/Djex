@@ -518,31 +518,47 @@ rejectActiveExpansion
     frameName (ExpansionFrame frameName' _) = frameName'
     frameOrigin (ExpansionFrame _ frameOrigin') = frameOrigin'
 
--- Alias-normalize an atom without unfolding its outer datatype/abstract
--- constructor. Argument markers preserve the same path semantics as logical
--- lowering, so opaque applications cannot hide a query-created alias cycle.
-normalizeExpansionAliases
+-- Alias expansion has two consumers: surface reconstruction for atoms and a
+-- reference summary for whole-table validation. Keeping traversal, lazy
+-- substitution, occurrence provenance, and error order in one fold prevents
+-- those interpretations from drifting apart.
+data ExpansionAlgebra result = ExpansionAlgebra
+    { algebraVariable :: HSymbol -> result
+    , algebraConstructorApplication :: HSymbol -> [result] -> result
+    , algebraApplication :: result -> [result] -> result
+    , algebraTuple :: [result] -> result
+    , algebraArrow :: result -> result -> result
+    , algebraUnion :: [(HSymbol, [result])] -> result
+    , algebraAbstract :: HSymbol -> HKind -> result
+    }
+
+foldExpansionAliases
     :: FormulaDefinitions
+    -> ExpansionAlgebra result
     -> ExpansionPath
     -> ExpansionType
-    -> Either String HType
-normalizeExpansionAliases definitions path source =
+    -> Either String result
+foldExpansionAliases definitions algebra path source =
     case source of
         ExpansionArgument origin argument ->
-            normalizeExpansionAliases definitions origin argument
-        ExpansionApp _ _ -> normalizeApplication
-        ExpansionCon _ _ -> normalizeApplication
-        ExpansionVar variable -> Right $ HTVar variable
+            foldExpansionAliases definitions algebra origin argument
+        ExpansionApp _ _ -> foldApplication
+        ExpansionCon _ _ -> foldApplication
+        ExpansionVar variable -> Right $ algebraVariable algebra variable
         ExpansionTuple types ->
-            HTTuple `fmap` mapM normalize types
-        ExpansionArrow argument result -> HTArrow
-            `fmap` normalize argument `apEither` normalize result
-        ExpansionUnion constructors -> HTUnion `fmap` mapM normalizeConstructor constructors
-        ExpansionAbstract name kind -> Right $ HTAbstract name kind
+            algebraTuple algebra `fmap` mapM foldCurrent types
+        ExpansionArrow argument result -> do
+            foldedArgument <- foldCurrent argument
+            foldedResult <- foldCurrent result
+            return $ algebraArrow algebra foldedArgument foldedResult
+        ExpansionUnion constructors ->
+            algebraUnion algebra `fmap` mapM foldConstructor constructors
+        ExpansionAbstract name kind ->
+            Right $ algebraAbstract algebra name kind
   where
-    normalize = normalizeExpansionAliases definitions path
+    foldCurrent = foldExpansionAliases definitions algebra path
 
-    normalizeApplication =
+    foldApplication =
         case expansionApplication source [] of
             (ExpansionCon name origin, arguments) ->
                 case lookupFormulaDefinition name definitions of
@@ -556,24 +572,84 @@ normalizeExpansionAliases definitions path source =
                                         map (ExpansionArgument path) arguments
                                 expanded = substituteExpansion replacements $
                                     instantiateDefinitionOrigins origin name body
-                            normalizeExpansionAliases definitions
+                            foldExpansionAliases definitions algebra
                                 (pushExpansion name origin path)
                                 expanded
-                    _ -> rebuildConstructor name arguments
-            (headType, arguments) -> rebuild headType arguments
+                    _ -> do
+                        foldedArguments <- mapM foldCurrent arguments
+                        return $ algebraConstructorApplication algebra
+                            name foldedArguments
+            (headType, arguments) -> do
+                foldedHead <- foldCurrent headType
+                foldedArguments <- mapM foldCurrent arguments
+                return $ algebraApplication algebra
+                    foldedHead foldedArguments
 
-    rebuildConstructor name arguments = do
-        normalizedArguments <- mapM normalize arguments
-        return $ foldl hTApp (HTCon name) normalizedArguments
+    foldConstructor (constructor, fields) = do
+        foldedFields <- mapM foldCurrent fields
+        return (constructor, foldedFields)
 
-    rebuild headType arguments = do
-        normalizedHead <- normalize headType
-        normalizedArguments <- mapM normalize arguments
-        return $ foldl hTApp normalizedHead normalizedArguments
+-- Alias-normalize an atom without unfolding its outer datatype/abstract
+-- constructor. Argument markers preserve the same path semantics as logical
+-- lowering, so opaque applications cannot hide a query-created alias cycle.
+normalizeExpansionAliases
+    :: FormulaDefinitions
+    -> ExpansionPath
+    -> ExpansionType
+    -> Either String HType
+normalizeExpansionAliases definitions =
+    foldExpansionAliases definitions hTypeExpansionAlgebra
 
-    normalizeConstructor (constructor, fields) = do
-        normalizedFields <- mapM normalize fields
-        return (constructor, normalizedFields)
+hTypeExpansionAlgebra :: ExpansionAlgebra HType
+hTypeExpansionAlgebra = ExpansionAlgebra
+    { algebraVariable = HTVar
+    , algebraConstructorApplication = \name arguments ->
+        foldl hTApp (HTCon name) arguments
+    , algebraApplication = foldl hTApp
+    , algebraTuple = HTTuple
+    , algebraArrow = HTArrow
+    , algebraUnion = HTUnion
+    , algebraAbstract = HTAbstract
+    }
+
+-- Collect the definition graph after alias normalization without allocating
+-- the normalized HType that 'validateDefinitionExpansion' immediately threw
+-- away. The shared fold ensures alias arguments remain lazy until
+-- substitution uses them and preserves ExpansionArgument path semantics.
+summarizeExpansionReferences
+    :: Set.Set HSymbol
+    -> FormulaDefinitions
+    -> ExpansionPath
+    -> ExpansionType
+    -> Either String (Set.Set HSymbol)
+summarizeExpansionReferences interesting definitions =
+    foldExpansionAliases definitions $ referenceExpansionAlgebra interesting
+
+referenceExpansionAlgebra
+    :: Set.Set HSymbol
+    -> ExpansionAlgebra (Set.Set HSymbol)
+referenceExpansionAlgebra interesting = ExpansionAlgebra
+    { algebraVariable = const Set.empty
+    , algebraConstructorApplication = summarizeConstructor
+    , algebraApplication = \headReferences argumentReferences ->
+        Set.unions $ headReferences : argumentReferences
+    , algebraTuple = Set.unions
+    , algebraArrow = Set.union
+    , algebraUnion = Set.unions . concatMap snd
+    , algebraAbstract = \_ _ -> Set.empty
+    }
+  where
+    -- hTApp canonicalizes every prefix spelling `(->) a b` to HTArrow, whose
+    -- historical definitionReferences traversal contains no "->" node.
+    summarizeConstructor name arguments
+        | name == "->" && length arguments >= 2 = references
+        | name `Set.member` interesting = Set.insert name references
+        | otherwise = references
+      where
+        -- The shared fold visits every argument before invoking the algebra;
+        -- having found all interesting names therefore cannot hide a later
+        -- higher-order expansion failure.
+        references = Set.unions arguments
 
 -- Validate the actual definition-expansion graph, not merely repeated runtime
 -- types.  The latter would miss growing cycles such as @A a = A [a]@, while an
@@ -590,11 +666,10 @@ validateDefinitionExpansion
     -> Either String ()
 validateDefinitionExpansion supplied prepared = do
     rejectFirstCycle True aliases aliasReferences
-    normalized <- Map.fromList `fmap` mapM normalizeDefinition definitions
-    let normalizedReferences (name, _) = maybe Set.empty
-            (references definitionNames)
-            (Map.lookup name normalized)
-    rejectFirstCycle False definitions normalizedReferences
+    summaries <- Map.fromList `fmap` mapM summarizeDefinition definitions
+    let summarizedReferences (name, _) =
+            Map.findWithDefault Set.empty name summaries
+    rejectFirstCycle False definitions summarizedReferences
   where
     definitions = firstBindings supplied
     aliases = filter (isAliasBody . definitionBody) definitions
@@ -603,13 +678,13 @@ validateDefinitionExpansion supplied prepared = do
     references names = Set.intersection names . definitionReferences
     aliasReferences = references aliasNames . definitionBody
 
-    normalizeDefinition (name, (_, body, _)) = do
-        normalizedBody <- first
+    summarizeDefinition (name, (_, body, _)) = do
+        summary <- first
             (("type definition " ++ name ++ ": ") ++)
-            (normalizeExpansionAliases
+            (summarizeExpansionReferences definitionNames
                 prepared emptyExpansionPath $
                 definitionExpansionType body)
-        return (name, normalizedBody)
+        return (name, summary)
 
 -- Report the first recursive component in first-binding source order.  SCC
 -- membership is ordered the same way, keeping diagnostics independent of the

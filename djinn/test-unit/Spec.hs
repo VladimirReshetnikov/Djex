@@ -166,6 +166,10 @@ testCheckedDjinnAdapter = do
         Djex.mkDjinnRequest programmaticQuery
     assertEqual "programmatic request round-trip"
         programmaticQuery (Djex.djinnRequestQuery programmaticRequest)
+    assertEqual "request source caches do not affect equality"
+        request programmaticRequest
+    assertEqual "request source caches do not affect display"
+        (show programmaticRequest) (show request)
 
     result <- expectShownRight $
         Djex.runDjinnQuery session programmaticRequest
@@ -193,6 +197,8 @@ testCheckedDjinnAdapter = do
             assertEqual "parse failures retain their caller-supplied source"
                 (Just "malformed-query.djinn")
                 (SharedDiagnostic.diagnosticSource failure)
+            assertEqual "eager parse failures do not acquire a cached span"
+                Nothing (SharedDiagnostic.diagnosticSpan failure)
         Right _ -> fail "the checked Djinn parser accepted trailing input"
 
     let unsupportedGoal = SharedType.TupleType SharedName.Unboxed
@@ -1018,6 +1024,32 @@ testRawTypeExpansionCycles = do
             , definition "A" [] $
                 apply "S" $ HTCon "S"
             ]
+        phantomCycle =
+            [ definition "S" ["f"] $
+                HTApp (HTVar "f") (HTVar "f")
+            , definition "Phantom" ["unused"] $ HTCon "Bool"
+            , definition "A" [] $
+                apply "Phantom" $ apply "S" $ HTCon "S"
+            ]
+        wrappedNormalizationCycle =
+            [ definition "S" ["f"] $
+                HTApp (HTVar "f") (HTVar "f")
+            , definition "Identity" ["a"] $ HTVar "a"
+            , definition "A" [] $
+                apply "Identity" $ apply "S" $ HTCon "S"
+            ]
+        lateNormalizationCycle =
+            [ definition "S" ["f"] $
+                HTApp (HTVar "f") (HTVar "f")
+            , definition "D" [] $ HTUnion
+                [("MkD", [HTCon "D", apply "S" $ HTCon "S"])]
+            ]
+        saturatedPrefixArrow =
+            [ definition "->" [] $ HTUnion
+                [("MkArrow", [HTCon "A"])]
+            , definition "A" [] $
+                applications (HTCon "->") [HTCon "X", HTCon "Y"]
+            ]
         opaqueSourceOnly = definition "F" []
             (HTAbstract "F" $ KArrow KStar KStar) : sourceOnly
         directData = [definition "D" [] $
@@ -1066,6 +1098,18 @@ testRawTypeExpansionCycles = do
     assertLeftMessage "whole-table alias normalization is itself finite"
         "type definition A: recursive type synonym expansion: S, S"
         (hTypeToFormula normalizationCycle $ HTVar "unrelated")
+    assertEqual "a phantom alias does not inspect its cyclic argument"
+        (Right $ PVar $ Symbol "unrelated")
+        (hTypeToFormula phantomCycle $ HTVar "unrelated")
+    assertLeftMessage "a transparent wrapper retains the argument cycle path"
+        "type definition A: recursive type synonym expansion: S, S"
+        (hTypeToFormula wrappedNormalizationCycle $ HTVar "unrelated")
+    assertLeftMessage "a late expansion error precedes a known structural edge"
+        "type definition D: recursive type synonym expansion: S, S"
+        (hTypeToFormula lateNormalizationCycle $ HTVar "unrelated")
+    assertEqual "a saturated prefix arrow contributes no raw constructor edge"
+        (Right $ PVar $ Symbol "unrelated")
+        (hTypeToFormula saturatedPrefixArrow $ HTVar "unrelated")
     assertLeftMessage "an unused cycle invalidates the whole supplied table"
         "recursive type synonym: A"
         (hTypeToFormula direct $ HTVar "unrelated")

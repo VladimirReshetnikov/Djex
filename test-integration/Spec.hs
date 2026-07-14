@@ -17,6 +17,7 @@ import Djinn.Core
   , generatedReportFormula
   , generatedReportProof
   , inhabitGenerated
+  , inhabitResult
   , mkContext
   , parseHType
   , standardEnvironment
@@ -48,7 +49,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , checkedSourceInventory
   )
 import Test.Tasty (TestTree, defaultMain, testGroup)
-import Test.Tasty.HUnit ((@?=), assertBool, testCase)
+import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
 
 main :: IO ()
 main = defaultMain tests
@@ -127,6 +128,18 @@ tests = testGroup "Djex facade"
             CandidateLimitReached `elem` reasons
         completion -> fail $ "expected candidate truncation, got "
           ++ show completion
+  , testCase "retain the exact checked Djinn operator target" $ do
+      session <- sealDjinnEnvironment standardEnvironment
+      target <- expectRight $ mkOperator "<~>"
+      goal <- expectRight $ parseHType "a -> a"
+      request <- sharedDjinnRequest target [] defaultQueryOptions goal
+      result <- expectRight $ runDjinnQuery session request
+      case batchCandidates $ resultSearch result of
+        candidate : _ -> do
+          clauseName (candidateOutput candidate) @?=
+            requestTarget (djinnRequestQuery request)
+          definitionName (clauseName $ candidateOutput candidate) @?= target
+        [] -> fail "Djinn returned no candidate for the identity operator"
   , testCase "keep Djinn evidence independent of search completion" $ do
       session <- sealDjinnEnvironment standardEnvironment
       target <- expectRight $ mkIdentifier "peirce"
@@ -770,22 +783,25 @@ assertDjinnCompatibility
   -> IO ()
 assertDjinnCompatibility label environment session contexts options target goal = do
   targetName <- expectRight $ mkIdentifier target
+  checkedTarget <- expectRight $ mkDefinitionName targetName
   compatibility <- expectRight $ inhabitGenerated
     options environment contexts target goal
+  canonical <- expectRight $ inhabitResult
+    options environment contexts checkedTarget goal
   request <- sharedDjinnRequest targetName contexts options goal
   shared <- expectRight $ runDjinnQuery session request
-  generatedReportEvidence compatibility @?= resultEvidence shared
-  case batchProgress $ resultSearch shared of
+  assertEqual (label ++ ": checked adapter rebuilt the core result")
+    canonical shared
+  let search = resultSearch canonical
+      metadata = batchMetadata search
+  generatedReportEvidence compatibility @?= resultEvidence canonical
+  case batchProgress search of
     Completed completion ->
       generatedReportCompletion compatibility @?= completion
     Continuing -> fail $ label ++ ": Djinn returned a nonterminal batch"
-  generatedReportCandidates compatibility @?=
-    batchCandidates (resultSearch shared)
-  let metadata = batchMetadata $ resultSearch shared
-  assertBool (label ++ ": translated formula changed") $
-    generatedReportFormula compatibility == djinnTranslatedFormula metadata
-  assertBool (label ++ ": first proof changed") $
-    generatedReportProof compatibility == djinnFirstExploredProof metadata
+  generatedReportCandidates compatibility @?= batchCandidates search
+  generatedReportFormula compatibility @?= djinnTranslatedFormula metadata
+  generatedReportProof compatibility @?= djinnFirstExploredProof metadata
 
 sharedDjinnRequest
   :: Name

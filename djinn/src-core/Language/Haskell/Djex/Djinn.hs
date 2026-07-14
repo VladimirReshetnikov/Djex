@@ -38,22 +38,20 @@ import Data.Bifunctor (first)
 
 import Djinn.Core
   ( DjinnCandidateDetails (..)
+  , DjinnCandidate
+  , DjinnQueryError (..)
+  , DjinnQueryMetadata (..)
+  , DjinnResult
   , PreparedEnvironment
   , QueryOptions (..)
   , defaultQueryOptions
-  , generatedReportCandidates
-  , generatedReportCompletion
-  , generatedReportEvidence
-  , generatedReportFormula
-  , generatedReportProof
-  , inhabitGeneratedPrepared
+  , inhabitResultPrepared
   , prepareSynthesisEnvironment
   , preparedEnvironmentInventory
   )
 import qualified Djinn.Core as Core
 import Language.Haskell.Synthesis.Candidate
-  ( Candidate
-  , renderCandidateDefinition
+  ( renderCandidateDefinition
   , renderCandidateExpression
   )
 import Language.Haskell.Synthesis.Constraint
@@ -73,12 +71,10 @@ import Language.Haskell.Synthesis.Diagnostic
   )
 import Language.Haskell.Synthesis.Generated
   ( DefinitionName
-  , FunctionClause
   , Qualification (..)
   , RenderError (..)
   , RenderOptions (renderQualification)
   , defaultRenderOptions
-  , definitionSpelling
   , mkDefinitionName
   )
 import Language.Haskell.Synthesis.Name
@@ -88,16 +84,9 @@ import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Query
   ( CachedQuery
   , QueryRequest (..)
-  , QueryResult
-  , QueryResultInvariantError
   , cachedQueryCache
   , cachedQueryRequest
   , mkCachedQuery
-  , mkQueryResult
-  )
-import Language.Haskell.Synthesis.Search
-  ( Progress (Completed)
-  , SearchBatch (SearchBatch)
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory (Inventory)
@@ -130,20 +119,11 @@ type DjinnType = Type DjinnTypeVariable
 -- drift apart.
 newtype DjinnSession = DjinnSession PreparedEnvironment
 
--- | Djinn-specific explanatory data that does not belong in the common
--- operational search status.
-data DjinnQueryMetadata = DjinnQueryMetadata
-  { djinnTranslatedFormula :: String
-  , djinnFirstExploredProof :: Maybe String
-  }
-  deriving (Eq, Show)
-
 -- | The raw projection and optional source provenance derived while sealing
 -- a request. The shared 'CachedQuery' envelope keeps both details out of the
 -- request's stable equality and display contract.
 data DjinnRequestCache = DjinnRequestCache
-  { cachedTargetSymbol :: Core.HSymbol
-  , cachedCoreGoal :: Core.HType
+  { cachedCoreGoal :: Core.HType
   , cachedCoreContexts :: [Core.Context]
   , cachedSourceLocation :: Maybe (FilePath, SourceSpan)
   }
@@ -155,14 +135,6 @@ newtype DjinnRequest = DjinnRequest
   (CachedQuery DjinnType QueryOptions DjinnRequestCache)
   deriving (Eq, Show)
     via (CachedQuery DjinnType QueryOptions DjinnRequestCache)
-
--- | The shared candidate shape returned by checked Djinn sessions. Djinn has
--- no residual obligations, and Core gives that empty slot 'DjinnType'
--- directly, so the stable session does not need a result projection.
-type DjinnCandidate =
-  Candidate DjinnType DjinnCandidateDetails (FunctionClause DjinnLocal)
-
-type DjinnResult = QueryResult DjinnQueryMetadata DjinnCandidate
 
 -- | Lower a shared declaration environment through Djinn's stricter lexical,
 -- dependency, and kind checks, then seal it into a reusable session.
@@ -204,12 +176,10 @@ mkDjinnRequestWithSource
   -> QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
 mkDjinnRequestWithSource sourceLocation query = do
-  let target = definitionSpelling $ requestTarget query
   goal <- lowerRequestType "goal" $ requestGoal query
   contexts <- traverse lowerRequestContext $ requestContexts query
   pure $ DjinnRequest $ mkCachedQuery query DjinnRequestCache
-    { cachedTargetSymbol = target
-    , cachedCoreGoal = goal
+    { cachedCoreGoal = goal
     , cachedCoreContexts = contexts
     , cachedSourceLocation = sourceLocation
     }
@@ -284,27 +254,15 @@ runDjinnQuery
   -> Either Diagnostic DjinnResult
 runDjinnQuery (DjinnSession prepared) request = do
   let cache = djinnRequestCache request
-  report <- case inhabitGeneratedPrepared
+  case inhabitResultPrepared
       (requestOptions $ djinnRequestQuery request)
       prepared
       (cachedCoreContexts cache)
-      (cachedTargetSymbol cache)
+      (requestTarget $ djinnRequestQuery request)
       (cachedCoreGoal cache) of
-    Left failure -> Left $ withOptionalLocation
-      (cachedSourceLocation cache)
-      $ contextualDiagnostic Error "DJEX_DJINN_QUERY"
-        "Djinn rejected the query" failure
-    Right value -> Right value
-  let metadata = DjinnQueryMetadata
-        { djinnTranslatedFormula = generatedReportFormula report
-        , djinnFirstExploredProof = generatedReportProof report
-        }
-      batch = SearchBatch
-        (Completed $ generatedReportCompletion report)
-        metadata
-        (generatedReportCandidates report)
-  first queryResultFailure
-    $ mkQueryResult (generatedReportEvidence report) batch
+    Left failure -> Left $ withOptionalLocation (cachedSourceLocation cache)
+      $ djinnQueryFailure failure
+    Right result -> Right result
 
 renderDjinnCandidateExpression
   :: Qualification
@@ -361,13 +319,18 @@ contextLoweringFailure failure = contextualDiagnostic Error
   "DJEX_DJINN_LOWER" "cannot lower the shared query to Djinn"
   ("context: " ++ failure)
 
-queryResultFailure :: QueryResultInvariantError -> Diagnostic
-queryResultFailure = shownErrorDiagnostic
-  "DJEX_DJINN_RESULT" "Djinn produced inconsistent logical evidence"
-
 checkDefinitionTarget :: Name -> Either Diagnostic DefinitionName
 checkDefinitionTarget target = case mkDefinitionName target of
   Right checked -> Right checked
   Left _ -> Left $ contextualDiagnostic Error "DJEX_DJINN_TARGET"
       "Djinn targets must be unqualified value identifiers or operators"
       (renderCanonical target)
+
+djinnQueryFailure :: DjinnQueryError -> Diagnostic
+djinnQueryFailure failure = case failure of
+  DjinnQueryFailure message -> contextualDiagnostic Error
+    "DJEX_DJINN_QUERY" "Djinn rejected the query" message
+  DjinnResultInvariantFailure invariant -> shownErrorDiagnostic
+    "DJEX_DJINN_RESULT"
+    "Djinn produced inconsistent logical evidence"
+    invariant

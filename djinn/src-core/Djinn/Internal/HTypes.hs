@@ -9,7 +9,7 @@ module Djinn.Internal.HTypes(
         pHDataType, pHTAtom, pHKind,
         prHSymbolOp, htNot, isHTUnion, getHTVars, substHT,
         HClause, HPat, HExpr(HEVar), hPrClause, renderGeneratedClause,
-        toGeneratedClause,
+        toGeneratedClause, toGeneratedClauseWithName,
         termToHExpr, termToHClause,
         getBinderVars
     ) where

@@ -11,6 +11,7 @@ module Djinn.Internal.Generated
   , hPrClause
   , renderGeneratedClause
   , toGeneratedClause
+  , toGeneratedClauseWithName
   , getBinderVars
   , getBinderVarsHE
   , getBinderVarsHP
@@ -65,6 +66,27 @@ toGeneratedClause
   -> Either String (Generated.FunctionClause HSymbol)
 toGeneratedClause (HClause functionName patterns expression) = do
   rawName <- generatedName "function" functionName
+  toGeneratedClauseWith
+    (either (Left . show) Right $ Generated.mkDefinitionName rawName)
+    patterns
+    expression
+
+-- | Convert a clause while retaining an already checked definition identity.
+-- The proof tree still supplies the textual name used internally, but the
+-- stable request remains authoritative for generated output.
+toGeneratedClauseWithName
+  :: Generated.DefinitionName
+  -> HClause
+  -> Either String (Generated.FunctionClause HSymbol)
+toGeneratedClauseWithName name (HClause _ patterns expression) =
+  toGeneratedClauseWith (Right name) patterns expression
+
+toGeneratedClauseWith
+  :: Either String Generated.DefinitionName
+  -> [HPat]
+  -> HExpr
+  -> Either String (Generated.FunctionClause HSymbol)
+toGeneratedClauseWith checkedName patterns expression = do
   convertedPatterns <- mapM convertPattern patterns
   let bound = Set.fromList $ filter (/= "_") $
         concatMap getBinderVarsHP patterns
@@ -75,7 +97,7 @@ toGeneratedClause (HClause functionName patterns expression) = do
   -- that ordering before constructing the checked shared name.
   either (Left . show) Right $ Generated.validateExpressionScope
     $ Generated.Lambda convertedPatterns convertedExpression
-  name <- either (Left . show) Right $ Generated.mkDefinitionName rawName
+  name <- checkedName
   let generated = Generated.FunctionClause
         name convertedPatterns convertedExpression
   either (Left . show) Right $

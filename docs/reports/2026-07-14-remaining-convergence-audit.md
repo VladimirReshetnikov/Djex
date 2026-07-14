@@ -107,10 +107,14 @@ both supported compiler graphs. Priority 2 is therefore the active frontier.
 Both engines still have an older result model immediately below the shared
 one.
 
-Djinn constructs `GeneratedQueryReport`, which the checked adapter repackages
-as `QueryResult`. The compatibility-only `QueryOutcome`, `QueryReport`,
-`inhabit`, `outcomeEvidence`, and `evidenceOutcome` retain another interpretation
-of the same evidence and completion states.
+**Djinn progress on 2026-07-14:** the proof core now constructs
+`QueryResult DjinnQueryMetadata DjinnCandidate` directly, retaining the exact
+checked `DefinitionName` in every candidate. The checked adapter returns that
+same value without a metadata, completion, evidence, or candidate rebuild.
+`GeneratedQueryReport`, `QueryOutcome`, and `QueryReport` remain outer
+compatibility projections only; they no longer own the canonical search
+result. Structured invariant failures also remain distinct from ordinary
+query rejection.
 
 Exference retains `SearchCompletion`, `SearchStatus`, `ExferenceChunkElement`,
 and conversion functions leading to shared `Progress` and `SearchBatch`.

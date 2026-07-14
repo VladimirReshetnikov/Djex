@@ -3,10 +3,10 @@
 -- |
 -- The stable, validated interface to the Djinn core.
 --
--- Build a checked t'Environment' from declarations, then ask
--- 'inhabitGenerated' for
--- checked shared candidates of a given type; 'inhabit' is the rendered-string
--- compatibility adapter.  Every entry point validates its
+-- Build a checked t'Environment' from declarations, then ask 'inhabitResult'
+-- for a checked shared result of a given type; 'inhabitGenerated' and
+-- 'inhabit' are structured and rendered compatibility projections. Every
+-- entry point validates its
 -- input — names must be lexically valid, declarations are kind-checked
 -- transactionally, class arguments must fit their parameters' inferred
 -- kinds — so the proof machinery only ever sees well-formed data.  The
@@ -41,6 +41,8 @@ module Djinn.Core (
     resolvePreparedContext, resolvePreparedInstanceMethods,
     QueryOptions(..), defaultQueryOptions,
     DjinnCandidateDetails(..), DjinnCandidate,
+    DjinnQueryMetadata(..), DjinnResult, DjinnQueryError(..),
+    inhabitResult, inhabitResultPrepared,
     GeneratedQueryReport(..), inhabitGenerated, inhabitGeneratedPrepared,
     QueryOutcome(..), QueryReport(..), inhabit
     ) where
@@ -585,7 +587,32 @@ type DjinnCandidate =
     SharedCandidate.Candidate (SharedType.Type HSymbol) DjinnCandidateDetails
         (SharedGenerated.FunctionClause HSymbol)
 
--- | Canonical structured result of one Djinn proof search.
+-- | Djinn-specific explanatory data retained in the shared result batch.
+-- Formula translation and the first explored proof are diagnostics rather
+-- than operational search status or logical evidence.
+data DjinnQueryMetadata = DjinnQueryMetadata {
+    djinnTranslatedFormula :: String,
+    djinnFirstExploredProof :: Maybe String
+    }
+    deriving (Eq, Show)
+
+-- | Canonical structured result of one Djinn proof search.  The proof core
+-- constructs the shared envelope directly; checked adapters consume this
+-- value without unpacking and rebuilding an intermediate report.
+type DjinnResult =
+    SharedQuery.QueryResult DjinnQueryMetadata DjinnCandidate
+
+-- | Failure from the canonical checked result path.  Ordinary query failures
+-- retain the historical message, while an impossible evidence/candidate
+-- mismatch stays distinguishable for structured adapters.
+data DjinnQueryError
+    = DjinnQueryFailure String
+    | DjinnResultInvariantFailure SharedQuery.QueryResultInvariantError
+    deriving (Eq, Show)
+
+-- | Historical structured report retained only at the compatibility edge.
+-- Proof search itself constructs 'DjinnResult'; this DTO is projected from
+-- that checked value for callers of 'inhabitGenerated'.
 data GeneratedQueryReport = GeneratedQueryReport {
     generatedReportFormula :: String,
     generatedReportProof :: Maybe String,
@@ -654,55 +681,97 @@ inhabit options environment contexts name goal = do
   where
     labeled what = either (Left . ((what ++ ": ") ++)) Right
 
--- | Search for checked structured candidates without committing to a
--- rendering policy.
+-- | Canonical search for checked structured candidates without committing to
+-- a rendering policy. The exact checked target becomes the candidate clause
+-- name and the proof core constructs the shared result envelope directly.
 --
 -- At most @optionCutoff + 1@ proofs are observed.  The extra observation is
 -- solely a truncation witness: when present, neither the remaining proof
 -- stream nor 'searchExhausted' is forced.  When absent, reaching the end of
 -- the prefix has already established whether proof search finished or spent
 -- its choice-point budget.
-inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
-                 -> Either String GeneratedQueryReport
-inhabitGenerated options environment contexts name goal = do
-    validateGeneratedQueryInput options name
-    prepared <- prepareCompatibilityEnvironment environment
-    inhabitGeneratedPreparedChecked options prepared contexts name goal
+inhabitResult
+    :: QueryOptions
+    -> Environment
+    -> [Context]
+    -> SharedGenerated.DefinitionName
+    -> HType
+    -> Either DjinnQueryError DjinnResult
+inhabitResult options environment contexts target goal = do
+    first DjinnQueryFailure $ validateQueryOptions options
+    prepared <- first DjinnQueryFailure $
+        prepareCompatibilityEnvironment environment
+    inhabitResultPreparedChecked options prepared contexts target goal
 
 -- | Search using a sealed environment.  All context, goal, and instantiated
 -- method obligations share the cached assumptions prepared with the session;
 -- this function never reconstructs them from 'envTypes'.
+inhabitResultPrepared
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Context]
+    -> SharedGenerated.DefinitionName
+    -> HType
+    -> Either DjinnQueryError DjinnResult
+inhabitResultPrepared options prepared contexts target goal = do
+    first DjinnQueryFailure $ validateQueryOptions options
+    inhabitResultPreparedChecked options prepared contexts target goal
+
+-- | Compatibility projection of 'inhabitResult'.
+inhabitGenerated :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
+                 -> Either String GeneratedQueryReport
+inhabitGenerated options environment contexts name goal = do
+    target <- validateGeneratedQueryTarget name
+    result <- first renderDjinnQueryError $
+        inhabitResult options environment contexts target goal
+    resultToGeneratedReport result
+
+-- | Compatibility projection of 'inhabitResultPrepared'.
 inhabitGeneratedPrepared
     :: QueryOptions -> PreparedEnvironment -> [Context] -> HSymbol -> HType
     -> Either String GeneratedQueryReport
 inhabitGeneratedPrepared options prepared contexts name goal = do
-    validateGeneratedQueryInput options name
-    inhabitGeneratedPreparedChecked options prepared contexts name goal
+    target <- validateGeneratedQueryTarget name
+    result <- first renderDjinnQueryError $
+        inhabitResultPrepared options prepared contexts target goal
+    resultToGeneratedReport result
 
-validateGeneratedQueryInput :: QueryOptions -> HSymbol -> Either String ()
-validateGeneratedQueryInput options name = do
+validateGeneratedQueryTarget
+    :: HSymbol
+    -> Either String SharedGenerated.DefinitionName
+validateGeneratedQueryTarget name = do
     requireName "target" (isDjinnDeclarationName MethodOwner) name
+    rawName <- first show $ SharedName.parseName name
+    first show $ SharedGenerated.mkDefinitionName rawName
+
+validateQueryOptions :: QueryOptions -> Either String ()
+validateQueryOptions options = do
     unless (optionCutoff options > 0) $
         Left "optionCutoff must be positive"
     case optionBudget options of
         Just n | n < 0 -> Left "optionBudget must be non-negative"
         _ -> Right ()
 
-inhabitGeneratedPreparedChecked
-    :: QueryOptions -> PreparedEnvironment -> [Context] -> HSymbol -> HType
-    -> Either String GeneratedQueryReport
-inhabitGeneratedPreparedChecked options prepared contexts name goal = do
-    (elaboratedGoal, contextMethods) <- resolveQueryContexts prepared
+inhabitResultPreparedChecked
+    :: QueryOptions
+    -> PreparedEnvironment
+    -> [Context]
+    -> SharedGenerated.DefinitionName
+    -> HType
+    -> Either DjinnQueryError DjinnResult
+inhabitResultPreparedChecked options prepared contexts target goal = do
+    (elaboratedGoal, contextMethods) <- queryFailure $
+        resolveQueryContexts prepared
         ("goal type " ++ show goal, KStar, goal) contexts
     let translate = preparedEnvironmentFormulaTranslator prepared
         translateBinding category (symbol, source) =
             (,) (Symbol symbol) `fmap`
                 first ((category ++ " " ++ prHSymbolOp symbol ++ ": ") ++)
                     (translate source)
-    form <- first ("goal type: " ++) $ translate elaboratedGoal
-    functionEnv <- mapM (translateBinding "function") $
+    form <- queryFailure $ first ("goal type: " ++) $ translate elaboratedGoal
+    functionEnv <- queryFailure $ mapM (translateBinding "function") $
         envFunctions environment
-    methodEnv <- concat `fmap`
+    methodEnv <- queryFailure $ concat `fmap`
         mapM (mapM $ translateBinding "method") contextMethods
     let externalEnv = functionEnv ++ methodEnv
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
@@ -712,7 +781,7 @@ inhabitGeneratedPreparedChecked options prepared contexts name goal = do
             searchBudget = optionBudget options
             }
         outcome = proveWithMode mode internalEnv form
-        labeled what = either (Left . ((what ++ ": ") ++)) Right
+        labeled what = queryFailure . first ((what ++ ": ") ++)
     case searchProofs outcome of
         [] -> do
             failure <-
@@ -740,13 +809,12 @@ inhabitGeneratedPreparedChecked options prepared contexts name goal = do
                                 checkProof diagnosticEnv form diagnosticProof
                             return UnrealizableWithoutSelfReference
                         [] -> return Unrealizable
-            return GeneratedQueryReport {
-                generatedReportFormula = show form,
-                generatedReportProof = Nothing,
-                generatedReportCompletion = queryCompletion outcome,
-                generatedReportCandidates = [],
-                generatedReportEvidence = outcomeEvidence failure
-                }
+            makeDjinnResult
+                (show form)
+                Nothing
+                (queryCompletion outcome)
+                []
+                (outcomeEvidence failure)
         proofs@(p : _) -> do
             -- Bound the raw proof stream before checking, conversion, ranking,
             -- or de-duplication.  In particular, duplicate printed clauses
@@ -770,21 +838,22 @@ inhabitGeneratedPreparedChecked options prepared contexts name goal = do
                     else
                         rendered
             generatedClauses <- labeled "cannot convert generated clause" $
-                mapM toGeneratedClause clauses
+                mapM (toGeneratedClauseWithName target) clauses
             let candidates = zipWith makeCandidate clauses generatedClauses
                 completion
                     | candidateLimitReached = SharedSearch.truncated
                         SharedSearch.CandidateLimitReached
                     | otherwise = queryCompletion outcome
-            return GeneratedQueryReport {
-                generatedReportFormula = show form,
-                generatedReportProof = Just (show p),
-                generatedReportCompletion = completion,
-                generatedReportCandidates = candidates,
-                generatedReportEvidence = SharedQuery.ValidatedCandidates
-                }
+            makeDjinnResult
+                (show form)
+                (Just $ show p)
+                completion
+                candidates
+                SharedQuery.ValidatedCandidates
   where
     environment = preparedEnvironmentSource prepared
+    name = SharedGenerated.definitionSpelling target
+    queryFailure = first DjinnQueryFailure
 
 candidateDetails :: HClause -> DjinnCandidateDetails
 candidateDetails clause
@@ -811,6 +880,42 @@ makeCandidate clause generated = SharedCandidate.Candidate {
     SharedCandidate.candidateResidualConstraints = [],
     SharedCandidate.candidateDetails = candidateDetails clause
     }
+
+makeDjinnResult
+    :: String
+    -> Maybe String
+    -> SharedSearch.Completion
+    -> [DjinnCandidate]
+    -> SharedQuery.QueryEvidence
+    -> Either DjinnQueryError DjinnResult
+makeDjinnResult formula proof completion candidates evidence =
+    first DjinnResultInvariantFailure $
+        SharedQuery.mkQueryResult evidence $
+            SharedSearch.SearchBatch
+                (SharedSearch.Completed completion)
+                (DjinnQueryMetadata formula proof)
+                candidates
+
+resultToGeneratedReport :: DjinnResult -> Either String GeneratedQueryReport
+resultToGeneratedReport result = case SharedSearch.batchProgress search of
+    SharedSearch.Completed completion -> Right GeneratedQueryReport {
+        generatedReportFormula = djinnTranslatedFormula metadata,
+        generatedReportProof = djinnFirstExploredProof metadata,
+        generatedReportCompletion = completion,
+        generatedReportCandidates = SharedSearch.batchCandidates search,
+        generatedReportEvidence = SharedQuery.resultEvidence result
+        }
+    SharedSearch.Continuing -> Left $
+        "internal Djinn result invariant: proof search returned a continuing batch"
+  where
+    search = SharedQuery.resultSearch result
+    metadata = SharedSearch.batchMetadata search
+
+renderDjinnQueryError :: DjinnQueryError -> String
+renderDjinnQueryError failure = case failure of
+    DjinnQueryFailure message -> message
+    DjinnResultInvariantFailure invariant ->
+        "internal Djinn result invariant: " ++ show invariant
 
 outcomeEvidence :: QueryOutcome -> SharedQuery.QueryEvidence
 outcomeEvidence outcome = case outcome of

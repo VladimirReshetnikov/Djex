@@ -413,7 +413,11 @@ candidates while keeping logical evidence separate from search completion:
 
 ```haskell
 import Djinn.Core
-import Language.Haskell.Synthesis.Query (QueryEvidence(..))
+import Language.Haskell.Synthesis.Query
+    (QueryEvidence(..), resultEvidence, resultSearch)
+import Language.Haskell.Synthesis.Search (batchCandidates)
+import Language.Haskell.Synthesis.Generated (mkDefinitionName)
+import Language.Haskell.Synthesis.Name (mkIdentifier)
 
 demo :: Either String [DjinnCandidate]
 demo = do
@@ -426,9 +430,13 @@ demo = do
        >>= declare (AbstractType "Output" kStar)
        >>= declare (Function "first" first)
        >>= declare (Function "second" second)
-    report <- inhabitGenerated defaultQueryOptions env [] "pipeline" goal
-    case generatedReportEvidence report of
-        ValidatedCandidates -> Right (generatedReportCandidates report)
+    targetName <- either (Left . show) Right $ mkIdentifier "pipeline"
+    target <- either (Left . show) Right $ mkDefinitionName targetName
+    result <- either (Left . show) Right $
+        inhabitResult defaultQueryOptions env [] target goal
+    case resultEvidence result of
+        ValidatedCandidates -> Right
+            (batchCandidates $ resultSearch result)
         ProvedUninhabitable -> Left "no total inhabitant exists"
         RequiresTargetReference -> Left "only via recursion"
         NoEvidence -> Left "the search limit established no conclusion"
@@ -443,8 +451,9 @@ The essentials: `declare`/`removeDeclaration` grow and shrink an
 `parseHType`/`parseContextualHType`/`parseHKind` parse with full-input
 validation; the contextual entry point owns the REPL's optional constraint
 grammar so checked clients need not import its internal `ReadP` parser.
-`inhabitGenerated` runs translation, budgeted proof search, independent proof
-checking, and shared-candidate construction without choosing a renderer.
+`inhabitResult` runs translation, budgeted proof search, independent proof
+checking, and constructs the shared `QueryResult` directly without choosing a
+renderer or passing through a backend-owned report envelope.
 The historical `inhabit` entry point is its explicit rendered-string
 compatibility wrapper. Both report the formula and first proof term for
 debugging. Their completion uses the shared operational vocabulary:
@@ -477,12 +486,13 @@ inferred environment. Raw
 `prepareEnvironment` applies that same expand-first recursion preflight, so a
 constructor-forged compatibility environment cannot bypass it while phantom
 aliases retain their alias-free meaning.
-Successful canonical reports expose `generatedReportCandidates`; every Djinn
-candidate has empty residual constraints and retains the unused-binder fraction
-and exact arbitrary-precision binder count used by the historical ranking
-policy. Compatibility
-`QueryReport`s still expose `reportGeneratedClauses`, derived from those
-candidates alongside the legacy rendered strings.
+Canonical `DjinnResult`s expose candidates through
+`batchCandidates . resultSearch`; every Djinn candidate has empty residual
+constraints and retains the unused-binder fraction and exact
+arbitrary-precision binder count used by the historical ranking policy.
+`GeneratedQueryReport` and `QueryReport` remain compatibility projections of
+that result, with the latter retaining `reportGeneratedClauses` and legacy
+rendered strings.
 The default `djex` library additionally exposes
 `Language.Haskell.Djex.Djinn`: `mkDjinnSession` lowers a neutral
 `DjinnEnvironment` and pairs the checked Djinn projection with the exact shared

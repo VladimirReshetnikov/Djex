@@ -9,8 +9,11 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , ConversionT
   , runConversionT
   , runConversionTWithState
+  , TypeResolver (..)
+  , legacyTypeResolver
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
+  , convertTypeNoDeclWithResolver
   , normalizeConvertedForalls
   , convertName
   , convertQName
@@ -74,6 +77,29 @@ import Language.Haskell.Exts.Extension ( Language (..)
 data ConvData = ConvData
   { conversionTypeVarIndex :: !T.TypeVarIndex
   , conversionReservedIds :: !IntSet.IntSet
+  }
+
+-- | The complete nominal information needed while elaborating one Haskell
+-- source type.  Query parsing needs only type-constructor identities and
+-- class arities; retaining complete backend class declarations here would
+-- make an immutable parser cache look like a second environment authority.
+data TypeResolver = TypeResolver
+  { resolverTypeNames :: [T.QualifiedName]
+  , resolverClassArities :: M.Map T.QualifiedName Int
+  }
+  deriving (Eq, Show)
+
+-- | Project the historical parser arguments onto the smaller resolver used
+-- internally.  This keeps the low-level compatibility API source-compatible
+-- while new checked frontends can derive a resolver from the shared
+-- declaration inventory instead of a backend class dictionary.
+legacyTypeResolver
+  :: M.Map T.QualifiedName T.HsTypeClass
+  -> [T.QualifiedName]
+  -> TypeResolver
+legacyTypeResolver classes typeNames = TypeResolver
+  { resolverTypeNames = typeNames
+  , resolverClassArities = length . T.tclass_params <$> classes
   }
 
 -- | An empty, collision-free source-conversion inventory.
@@ -165,10 +191,20 @@ convertTypeNoDecl
   -> [T.QualifiedName]
   -> Type SrcSpanInfo
   -> ExceptT String m (T.HsType, T.TypeVarIndex)
-convertTypeNoDecl tcs mn ds t = do
+convertTypeNoDecl tcs mn ds =
+  convertTypeNoDeclWithResolver (legacyTypeResolver tcs ds) mn
+
+-- | Convert one source type using only its nominal lookup resolver.
+convertTypeNoDeclWithResolver
+  :: Monad m
+  => TypeResolver
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> Type SrcSpanInfo
+  -> ExceptT String m (T.HsType, T.TypeVarIndex)
+convertTypeNoDeclWithResolver resolver mn t = do
   (converted, finalState) <- runConversionTWithState
     emptyConvData
-    (convertTypeNoDeclInternal tcs mn ds t)
+    (convertTypeNoDeclInternalWithResolver resolver mn t)
   pure (converted, convDataTypeVarIndex finalState)
 
 convertTypeNoDeclInternal
@@ -180,7 +216,18 @@ convertTypeNoDeclInternal
                                          -- (to keep things unique)
   -> Type SrcSpanInfo
   -> ConversionT String m T.HsType
-convertTypeNoDeclInternal tcs defModuleName ds ty = do
+convertTypeNoDeclInternal tcs defModuleName ds =
+  convertTypeNoDeclInternalWithResolver
+    (legacyTypeResolver tcs ds) defModuleName
+
+-- | Stateful counterpart of 'convertTypeNoDeclWithResolver'.
+convertTypeNoDeclInternalWithResolver
+  :: Monad m
+  => TypeResolver
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> Type SrcSpanInfo
+  -> ConversionT String m T.HsType
+convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
   ambientVariables <- convDataReservedIds <$> lift get
   converted <- helper ty
   normalizeConvertedForalls ambientVariables converted
@@ -206,7 +253,8 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = do
                               return $ T.TypeVar i
   helper (TyCon _ name)     = T.TypeCons
                           <$> either throwE pure
-                                (convertQName defModuleName ds name)
+                                (convertQName defModuleName
+                                  (resolverTypeNames resolver) name)
   helper (TyList _ t)       =
     T.TypeApp (T.TypeCons SharedName.listName) <$> helper t
   helper (TyParen _ t)      = helper t
@@ -218,7 +266,8 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = do
       <$> case maybeTVars of
             Nothing -> return []
             Just tvs -> tyVarTransform `mapM` tvs
-      <*> convertConstraint tcs defModuleName ds `mapM` contextConstraints context
+      <*> convertConstraintWithResolver resolver defModuleName
+            `mapM` contextConstraints context
       <*> helper t
   helper x                = throwE $ "unknown type element: " ++ show x -- TODO
 
@@ -390,19 +439,34 @@ convertConstraint
   -> [T.QualifiedName]
   -> Asst SrcSpanInfo
   -> ConversionT String m T.HsConstraint
-convertConstraint tcs defModuleName ds (TypeA _ classType) = do
+convertConstraint tcs defModuleName ds = convertConstraintWithResolver
+  (legacyTypeResolver tcs ds) defModuleName
+
+-- | Convert a source constraint using only known class identities and their
+-- declared arities. Unknown external classes remain representable, exactly as
+-- in the historical frontend.
+convertConstraintWithResolver
+  :: Monad m
+  => TypeResolver
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> Asst SrcSpanInfo
+  -> ConversionT String m T.HsConstraint
+convertConstraintWithResolver resolver defModuleName (TypeA _ classType) = do
   (qname, types) <- maybe
     (throwE $ "invalid class constraint: " ++ prettyPrint classType)
     pure
     (splitClassApplication classType)
   name <- either throwE pure
-    $ convertQName defModuleName (M.keys tcs) qname
-  parameters <- mapM (convertTypeNoDeclInternal tcs defModuleName ds) types
-  either throwE pure $ validateConstraintArity tcs name (length parameters)
+    $ convertQName defModuleName
+        (M.keys $ resolverClassArities resolver) qname
+  parameters <- mapM
+    (convertTypeNoDeclInternalWithResolver resolver defModuleName) types
+  either throwE pure $ validateConstraintArityMap
+    (resolverClassArities resolver) name (length parameters)
   pure $ T.HsConstraint name parameters
-convertConstraint env defModuleName ds (ParenA _ c)
-  = convertConstraint env defModuleName ds c
-convertConstraint _ _ _ c
+convertConstraintWithResolver resolver defModuleName (ParenA _ c)
+  = convertConstraintWithResolver resolver defModuleName c
+convertConstraintWithResolver _ _ c
   = throwE $ "bad constraint: " ++ show c
 
 -- | Reject an application whose class is known but whose number of
@@ -414,10 +478,18 @@ validateConstraintArity
   -> T.QualifiedName
   -> Int
   -> Either String ()
-validateConstraintArity classes name actual = case M.lookup name classes of
-  Just typeClass
-    | expected <- length $ T.tclass_params typeClass
-    , expected /= actual -> Left
+validateConstraintArity classes = validateConstraintArityMap
+  (length . T.tclass_params <$> classes)
+
+-- | Validate one class application against a minimal nominal arity table.
+validateConstraintArityMap
+  :: M.Map T.QualifiedName Int
+  -> T.QualifiedName
+  -> Int
+  -> Either String ()
+validateConstraintArityMap classes name actual = case M.lookup name classes of
+  Just expected
+    | expected /= actual -> Left
         $ "wrong number of parameters for type class "
         ++ unqualifiedClassName name
         ++ ": expected " ++ show expected ++ ", got " ++ show actual

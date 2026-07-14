@@ -10,6 +10,8 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , convertTypeInternal
   , parseType
   , parseTypeWithKinds
+  , parseTypeWithInventory
+  , typeResolverFromInventory
   , toSynthesisTypeDeclaration
   , fromSynthesisTypeDeclaration
   )
@@ -25,6 +27,8 @@ import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.Diagnostic
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 
 import Language.Haskell.Exts.Syntax hiding (TypeApp)
 import qualified Language.Haskell.Exts.Parser as P
@@ -260,9 +264,59 @@ parseTypeWithKinds
   -> P.ParseMode
   -> String
   -> ExceptT Diagnostic m (HsType, TypeVarIndex)
-parseTypeWithKinds assumptions tcs mn ds declarations mode source = do
+parseTypeWithKinds assumptions tcs mn ds = parseTypeWithResolverKinds
+  assumptions (legacyTypeResolver tcs ds) mn
+
+-- | Parse a query against one checked shared inventory. Both nominal lookup
+-- and kind checking are derived from that same opaque value; source-projection
+-- lookup caches and backend class dictionaries cannot affect elaboration.
+-- Type synonyms deliberately remain nominal here and are expanded later by
+-- the stable session from this inventory's own prepared synonym table.
+parseTypeWithInventory
+  :: Monad m
+  => SharedInventory.Inventory typeVariable annotation
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> P.ParseMode
+  -> String
+  -> ExceptT Diagnostic m (HsType, TypeVarIndex)
+parseTypeWithInventory inventory mn = parseTypeWithResolverKinds
+  (SharedInventory.inventoryKindAssumptions inventory)
+  (typeResolverFromInventory inventory)
+  mn
+  M.empty
+
+-- | Derive precisely the nominal information required by source-type lookup
+-- from the shared declaration environment. A class entry contributes only
+-- its declared arity; methods, superclasses, and backend solver indexes are
+-- irrelevant to parsing a query.
+typeResolverFromInventory
+  :: SharedInventory.Inventory typeVariable annotation
+  -> TypeResolver
+typeResolverFromInventory inventory = TypeResolver
+  { resolverTypeNames = M.keys
+      $ SharedEnvironment.typeDeclarationMap environment
+  , resolverClassArities = M.mapMaybe classArity
+      $ SharedEnvironment.classDeclarationMap environment
+  }
+ where
+  environment = SharedInventory.inventoryEnvironment inventory
+  classArity declaration = case declaration of
+    SharedDeclaration.ClassDeclaration _ _ parameters _ _ ->
+      Just $ length parameters
+    _ -> Nothing
+
+parseTypeWithResolverKinds
+  :: Monad m
+  => SharedKindInference.KindAssumptions
+  -> TypeResolver
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> TypeDeclMap
+  -> P.ParseMode
+  -> String
+  -> ExceptT Diagnostic m (HsType, TypeVarIndex)
+parseTypeWithResolverKinds assumptions resolver mn declarations mode source = do
   (rawType, variableIndex) <- parseHaskellSrcType
-    (convertTypeNoDecl tcs mn ds) mode source
+    (convertTypeNoDeclWithResolver resolver mn) mode source
   -- Haskell synonym parameters are kind-checked even when their RHS does not
   -- mention them. Checking the raw application first prevents a phantom
   -- parameter from erasing an invalid higher-kinded argument.

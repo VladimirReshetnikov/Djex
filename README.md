@@ -284,9 +284,11 @@ reapplied. That lowering returns an opaque witness which owns the neutral
 inventory, synonym table, and backend together; the source frontend can
 reorder the exact checked names and attach finite ratings, but cannot combine
 an inventory with an independently prepared search dictionary. A session
-retains only its neutral inventory and synonym table, its checked core search
-environment, and parser-independent type-name and class indexes; neither an
-HSE source environment nor its legacy synonym map survives sealing.
+retains that one prepared witness, its policy-adjusted checked search
+environment, and structured omissions. HSE query parsing derives known types
+and class arities from the witness's shared inventory rather than retaining
+parallel type/class caches; neither an HSE source environment nor its legacy
+synonym map survives sealing.
 
 `ExferenceSessionPolicy` applies exact structural-name exclusions and finite,
 signed rating overrides while the private search projection is sealed.

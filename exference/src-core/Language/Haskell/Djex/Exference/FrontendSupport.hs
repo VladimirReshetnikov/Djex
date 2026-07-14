@@ -12,8 +12,6 @@
 -- contract by importing it directly from @djex:exference-core@.
 module Language.Haskell.Djex.Exference.FrontendSupport
   ( sealPreparedExferenceSessionWithPolicy
-  , sessionTypeNames
-  , sessionClasses
   , mkExferenceRequestWithSourceInfo
   , validateExferenceTarget
   , allocateFreshTypeVariableId
@@ -36,11 +34,7 @@ import Language.Haskell.Exference.Core.Declaration
   ( PreparedNeutralSynthesisInventory )
 import qualified Language.Haskell.Exference.Core.Internal.FlexibleIds
   as FlexibleIds
-import Language.Haskell.Exference.Core.Types
-  ( HsTypeClass
-  , QualifiedName
-  , TVarId
-  )
+import Language.Haskell.Exference.Core.Types (TVarId)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceSpan
@@ -61,17 +55,6 @@ sealPreparedExferenceSessionWithPolicy
 sealPreparedExferenceSessionWithPolicy exclusions overrides prepared =
   Session.sealPreparedExferenceSessionWithPolicy
     exclusions overrides prepared
-
--- | Core type names retained by a sealed session for source-type lookup.
--- These are Exference names rather than parser syntax.
-sessionTypeNames :: ExferenceSession -> [QualifiedName]
-sessionTypeNames = Session.sessionTypeNames
-
--- | Core class declarations retained by a sealed session for source
--- constraint lookup. These are Exference declarations rather than parser
--- syntax.
-sessionClasses :: ExferenceSession -> Map QualifiedName HsTypeClass
-sessionClasses = Session.sessionClasses
 
 -- | Construct a checked request and attach parser-neutral rendering hints and
 -- source location information. Provenance cannot be replaced after the

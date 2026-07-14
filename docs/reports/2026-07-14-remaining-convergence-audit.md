@@ -148,19 +148,25 @@ backend-specific search algorithms.
 
 ## Priority 3: make shared inventories authoritative
 
-Exference source loading currently retains a `SourceEnvironment`, a shared
-inventory, a prepared neutral inventory/backend projection, and additional
-type/class indexes. HSE extraction should create shared declarations once;
-source order, ratings, spans, and method ownership are frontend metadata rather
-than competing semantic environments. Session type and class lookup can then
-derive from the retained shared inventory.
+**In progress:** Exference sessions now retain one opaque prepared-inventory
+witness instead of independently caching its inventory, synonym table, type
+names, and classes. HSE query parsing derives its minimal known-type and
+class-arity resolver from that session inventory. Source loading still retains
+a `SourceEnvironment`, an annotated shared inventory, and a prepared neutral
+inventory/backend projection; extraction should next create shared declarations
+once, leaving source order, ratings, spans, and method ownership as frontend
+metadata rather than competing semantic environments.
 
-Djinn likewise retains its raw editable `Environment` beside a shared
-`Inventory`, with bidirectional declaration/environment bridges. The REPL
-stores the raw environment together with a sealed `DjinnSession` and converts
-the complete environment after each mutation. Its eventual authority should be
-the shared transactional declaration environment; parsing remains a one-way
-compatibility edge, and proof-oriented indexes remain private derived state.
+**Djinn REPL authority completed:** a session now retains its editable shared
+environment with the exact prepared projection derived from it, and declaration
+replacement/removal edits that shared environment directly. The REPL stores no
+raw `Environment`; display and instance lookup consume the already prepared
+backend. Raw preparation also reprojects embedded kinds from the inferred
+inventory, fixing a split-brain bug in which a forged raw class parameter kind
+could override the inventory during context checking. Raw declarations remain
+compatibility parser inputs, while proof-oriented tables are private derived
+indexes. Further internal work can narrow `PreparedEnvironment` into dedicated
+class, premise, kind, synonym, and formula caches without changing authority.
 
 These changes must preserve source diagnostic precedence, declaration
 replacement/removal order, alias saturation and recursion checks, inferred

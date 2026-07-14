@@ -133,6 +133,8 @@ import Language.Haskell.Djex.Exference
   , ExferenceOmissionReason (..)
   , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
+  , defaultExferenceOptions
+  , exferenceRequestQuery
   , exferenceSessionDiagnostics
   , exferenceSessionOmissions
   , mkExferenceSessionWithPolicy
@@ -141,6 +143,7 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
+  , parseExferenceRequest
   )
 import qualified Language.Haskell.Exference.Session as ExferenceSession
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
@@ -4384,6 +4387,53 @@ tests = testGroup "Exference"
                 $ mkQualifiedName ["TypeNames"] "Class"
               sourceTypeNames (checkedSourceProjection checked) @?=
                 [dataName, aliasName, className]
+      , testCase "session queries resolve names and class arities from Inventory" $
+          withTemporaryFile (unlines
+            [ "module InventoryResolver where"
+            , "data Local = Local"
+            , "class Pair a b"
+            ]) $ \modulePath -> do
+              LoadReport parsedResult _ <- parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              parsed <- expectRight parsedResult
+              -- This legacy field is intentionally public for compatibility.
+              -- A poisoned value must not cross the checked-session boundary.
+              let poisoned = parsed {sourceTypeNames = [name "Bogus"]}
+              checked <- expectRight $ checkSourceEnvironment poisoned
+              session <- expectRight
+                $ ExferenceSession.mkExferenceSession checked
+              target <- expectRight $ SharedName.mkIdentifier "answer"
+              request <- expectRight $ parseExferenceRequest session
+                defaultExferenceOptions target "inventory-resolver-query"
+                "Pair Local Local => Local -> Local"
+              localName <- expectRight
+                $ SharedName.parseName "InventoryResolver.Local"
+              pairName <- expectRight
+                $ SharedName.parseName "InventoryResolver.Pair"
+              case SharedQuery.requestGoal $ exferenceRequestQuery request of
+                SharedType.ForallType [] [constraint]
+                    (SharedType.FunctionType
+                      (SharedType.TypeConstructor parameter)
+                      (SharedType.TypeConstructor result)) -> do
+                  SharedConstraint.constraintClass constraint @?= pairName
+                  SharedConstraint.constraintArguments constraint @?=
+                    [ SharedType.TypeConstructor localName
+                    , SharedType.TypeConstructor localName
+                    ]
+                  parameter @?= localName
+                  result @?= localName
+                actual -> fail $ "unexpected inventory-resolved query: "
+                  ++ show actual
+              case parseExferenceRequest session defaultExferenceOptions target
+                  "inventory-resolver-query" "Pair Local => Local -> Local" of
+                Left failure -> do
+                  diagnosticCode failure @?= Just "DJEX_EXF_PARSE"
+                  assertBool "class arity diagnostic lost its declaration"
+                    $ "expected 2, got 1" `isInfixOf`
+                        diagnosticMessage failure
+                Right requestWithBadArity -> fail
+                  $ "inventory class arity was ignored: "
+                  ++ show requestWithBadArity
       , testCase "checked inventory retains aliases while projection expands" $
           withTemporaryFile (unlines
             [ "module AliasBoundary where"

@@ -39,7 +39,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , haskellSrcExtsParseMode
   )
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-  ( parseTypeWithKinds )
+  ( parseTypeWithInventory )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceSpan
@@ -48,8 +48,6 @@ import Language.Haskell.Synthesis.Diagnostic
   , withCode
   )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
-import Language.Haskell.Synthesis.Inventory
-  ( inventoryKindAssumptions )
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Query (QueryRequest (..))
 
@@ -124,12 +122,9 @@ parseExferenceRequestWithCheckedTarget
   -> Either Diagnostic ExferenceRequest
 parseExferenceRequestWithCheckedTarget session options checkedTarget
     sourceName source = do
-  let parsed = runIdentity $ runExceptT $ parseTypeWithKinds
-        (inventoryKindAssumptions $ exferenceSessionInventory session)
-        (Frontend.sessionClasses session)
+  let parsed = runIdentity $ runExceptT $ parseTypeWithInventory
+        (exferenceSessionInventory session)
         Nothing
-        (Frontend.sessionTypeNames session)
-        Map.empty
         (haskellSrcExtsParseMode sourceName)
         source
   -- The HSE compatibility frontend predates structured diagnostic codes.

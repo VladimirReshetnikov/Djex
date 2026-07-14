@@ -12,8 +12,6 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , sealPreparedExferenceSessionWithPolicy
   , sessionSearchEnvironment
   , sessionTypeSynonyms
-  , sessionTypeNames
-  , sessionClasses
   , exferenceSessionInventory
   , sessionOmissions
   ) where
@@ -50,21 +48,16 @@ import Language.Haskell.Exference.Core.TypeUtils
   , typeConstructorHead
   )
 import Language.Haskell.Exference.Core.Types
-  ( HsTypeClass
-  , QualifiedName
-  , SynthesisVariable
+  ( SynthesisVariable
   , constraint_params
-  , sClassEnv_tclasses
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , shownErrorDiagnostic
   )
-import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
-  , inventoryEnvironment
   , mkInventoryFromEnvironmentWithClassPolicy
   )
 import Language.Haskell.Synthesis.KindInference
@@ -216,19 +209,6 @@ sessionTypeSynonyms
   :: ExferenceSession
   -> TypeSynonyms SynthesisVariable
 sessionTypeSynonyms = preparedNeutralTypeSynonyms . preparedView
-
-sessionTypeNames :: ExferenceSession -> [QualifiedName]
-sessionTypeNames = Map.keys
-  . SharedEnvironment.typeDeclarationMap
-  . inventoryEnvironment
-  . preparedNeutralInventory
-  . preparedView
-
-sessionClasses :: ExferenceSession -> Map QualifiedName HsTypeClass
-sessionClasses = sClassEnv_tclasses
-  . environmentClasses
-  . preparedNeutralBackend
-  . preparedView
 
 exferenceSessionInventory
   :: ExferenceSession

@@ -10,8 +10,6 @@ import Language.Haskell.Djex.Exference.FrontendSupport
   ( allocateFreshTypeVariableId
   , mkExferenceRequestWithSourceInfo
   , sealPreparedExferenceSessionWithPolicy
-  , sessionClasses
-  , sessionTypeNames
   , validateExferenceTarget
   )
 import Language.Haskell.Exference.Core.Declaration
@@ -68,8 +66,6 @@ main = defaultMain $ testGroup "Exference core API"
       session <- expectRight
         $ sealPreparedExferenceSessionWithPolicy [] mempty prepared
 
-      sessionTypeNames session @?= []
-      sessionClasses session @?= mempty
       allocateFreshTypeVariableId mempty @?= Just 0
 
       target <- expectRight $ mkOperator "<~>"

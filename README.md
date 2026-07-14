@@ -37,6 +37,15 @@ remain available for their REPL and compatibility contracts. The package also
 retains the facade, integration, backend, property, CLI, and benchmark suites;
 this preserves differential testing while the two engines continue converging.
 
+The package is not yet one library internally: its default facade still sits
+over five named sublibraries. The current duplication audit and the ordered
+path from those components to a genuinely shared implementation are recorded
+in [the 2026-07-14 remaining-convergence audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
+In particular, the next source migration makes the shared type, constraint,
+and name vocabulary native to Exference before package boundaries are erased;
+otherwise a one-library manifest would merely conceal the duplicate IRs while
+discarding useful dependency checks.
+
 ## Dependency migration
 
 The single-package layout intentionally replaces the three former package

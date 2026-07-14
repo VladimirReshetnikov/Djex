@@ -27,6 +27,7 @@ Copyright:
 
 Extra-Source-Files:
   README.md
+  docs/reports/*.md
   synthesis/README.md
   djinn/README.md
   djinn/docs/reports/*.md

@@ -373,14 +373,21 @@ checkedQualification source = case source of
   _ -> Left "--qualification must be none, identifiers, or full"
 
 positiveInt :: String -> String -> Either String Int
-positiveInt option source = case readMaybe source of
-  Just value | value > 0 -> Right value
-  _ -> Left $ option ++ " must be a positive integer"
+positiveInt option = checkedInt 1
+  $ option ++ " must be a positive integer"
 
 nonNegativeInt :: String -> String -> Either String Int
-nonNegativeInt option source = case readMaybe source of
-  Just value | value >= 0 -> Right value
-  _ -> Left $ option ++ " must be a non-negative integer"
+nonNegativeInt option = checkedInt 0
+  $ option ++ " must be a non-negative integer"
+
+-- Parse through the unbounded representation before converting. Reading an
+-- out-of-range literal directly as Int silently wraps modulo the Int range.
+checkedInt :: Integer -> String -> String -> Either String Int
+checkedInt lowerBound failure source = case readMaybe source :: Maybe Integer of
+  Just value
+    | value >= lowerBound
+    , value <= toInteger (maxBound :: Int) -> Right $ fromInteger value
+  _ -> Left failure
 
 nonNegativeInteger :: String -> String -> Either String Integer
 nonNegativeInteger option source = case readMaybe source of

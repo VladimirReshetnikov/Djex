@@ -27,6 +27,7 @@ main = defaultMain $ testGroup "Djex CLI integration"
   , testCase "backend help loads no environment" testBackendHelp
   , testCase "usage errors have a distinct exit status" testUsageErrors
   , testCase "backend options are validated before search" testOptionErrors
+  , testCase "machine-sized options cannot wrap around" testIntOptionOverflow
   , testCase "Djinn renders definitions and expressions" testDjinnRendering
   , testCase "Djinn parses its shared class-context grammar" testDjinnContext
   , testCase "Djinn distinguishes refutation from truncation"
@@ -100,6 +101,32 @@ testOptionErrors = do
   assertUsageFailure
     ["exference", "--allow-unused", "--allow-unused", "a -> a"]
     "--allow-unused may be specified only once"
+
+testIntOptionOverflow :: Assertion
+testIntOptionOverflow = do
+  let wrappedZero = show intModulus
+      wrappedOne = show $ intModulus + 1
+  assertUsageFailure
+    ["djinn", "--candidate-limit", wrappedOne, "a -> a"]
+    "--candidate-limit must be a positive integer"
+  assertUsageFailure
+    [ "exference"
+    , "--constraint-deferral-steps", wrappedZero
+    , "a -> a"
+    ]
+    "--constraint-deferral-steps must be a non-negative integer"
+  assertUsageFailure
+    ["exference", "--max-steps", wrappedOne, "a -> a"]
+    "--max-steps must be a positive integer"
+  assertUsageFailure
+    ["exference", "--max-queue", wrappedZero, "a -> a"]
+    "--max-queue must be a non-negative integer"
+
+-- Values at these offsets previously became zero or one when read as Int.
+-- Deriving the modulus from the host bounds keeps the regression portable.
+intModulus :: Integer
+intModulus =
+  toInteger (maxBound :: Int) - toInteger (minBound :: Int) + 1
 
 testDjinnRendering :: Assertion
 testDjinnRendering = do

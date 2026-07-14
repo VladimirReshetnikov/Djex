@@ -18,6 +18,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "ill-kinded queries stop before search" testKindFailure
   , testCase "invalid searches never enter reporting modes" testInvalidSearch
   , testCase "invalid verbosity is a controlled usage error" testInvalidVerbosity
+  , testCase "out-of-range verbosity cannot wrap" testVerbosityComponentOverflow
   , testCase "repeated verbosity cannot overflow" testVerbosityOverflow
   , testCase "repeated inputs are all searched" testRepeatedInputs
   , testCase "conflicting selection modes are rejected" testConflictingModes
@@ -96,6 +97,19 @@ testInvalidVerbosity = do
   assertBool "invalid verbosity must not expose a call stack"
     (not $ "CallStack" `isInfixOf` errors)
 
+testVerbosityComponentOverflow :: Assertion
+testVerbosityComponentOverflow = do
+  let wrappedOne = show $ intModulus + 1
+  (output, errors) <- runExferenceFailure
+    ["--verbose=" ++ wrappedOne, "a -> a"]
+  assertEqual "out-of-range verbosity stdout" "" output
+  assertContains "out-of-range verbosity should identify its value"
+    ("invalid verbosity " ++ show wrappedOne) errors
+  assertEqual "a verbosity error should print usage exactly once"
+    1 $ countOccurrences "Usage: exference" errors
+  assertBool "out-of-range verbosity must fail before loading the environment"
+    (not $ "[Environment]" `isInfixOf` output)
+
 testVerbosityOverflow :: Assertion
 testVerbosityOverflow = do
   (output, errors) <- runExferenceFailure
@@ -110,6 +124,12 @@ testVerbosityOverflow = do
     1 $ countOccurrences "Usage: exference" errors
   assertBool "overflowing verbosity must fail before loading the environment"
     (not $ "[Environment]" `isInfixOf` output)
+
+-- Read Int used to accept this plus one as verbosity 1. Computing the modulus
+-- from the host bounds makes the subprocess regression architecture-neutral.
+intModulus :: Integer
+intModulus =
+  toInteger (maxBound :: Int) - toInteger (minBound :: Int) + 1
 
 testRepeatedInputs :: Assertion
 testRepeatedInputs = do

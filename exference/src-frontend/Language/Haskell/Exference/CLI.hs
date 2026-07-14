@@ -390,18 +390,21 @@ freshTarget environment = go (0 :: Int)
 parseVerbosity :: [Flag] -> Either String Int
 parseVerbosity flags = do
   values <- mapM parseValue [value | Verbose value <- flags]
-  -- Every individual option may fit in Int while their repeated sum does not.
-  let total = sum $ map toInteger values
-      maximumVerbosity = toInteger (maxBound :: Int)
+  -- Every individual option now fits in Int, but their repeated sum may not.
+  let total = sum values
   if total <= maximumVerbosity
     then Right $ fromInteger total
     else Left $ "combined verbosity exceeds maximum "
       ++ show maximumVerbosity
  where
-  parseValue :: Maybe String -> Either String Int
+  maximumVerbosity = toInteger (maxBound :: Int)
+
+  parseValue :: Maybe String -> Either String Integer
   parseValue Nothing = Right 1
-  parseValue (Just source) = case readMaybe source of
-    Just value | value >= 0 -> Right value
+  parseValue (Just source) = case readMaybe source :: Maybe Integer of
+    Just value
+      | value >= 0
+      , value <= maximumVerbosity -> Right value
     _ -> Left $ "invalid verbosity " ++ show source
 
 validateFlagCombinations :: [Flag] -> [String] -> IO ()

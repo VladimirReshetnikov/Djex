@@ -4,7 +4,7 @@
 --
 -- Backends need several views of duplicate input: reusable membership checks,
 -- a stable set for sorted diagnostics, and the order in which values first
--- become known duplicates.  'DuplicateSummary' computes those views together
+-- become known duplicates.  t'DuplicateSummary' computes those views together
 -- without a machine-sized occurrence count.
 module Language.Haskell.Synthesis.Collection
   ( Multiplicity (..)

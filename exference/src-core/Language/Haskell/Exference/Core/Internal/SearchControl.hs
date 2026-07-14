@@ -4,7 +4,7 @@
 -- | Private effects and allocation policy for one Exference search step.
 --
 -- A truncated nondeterministic branch must remain observable even though it
--- has no successor 'SearchNode'.  Putting 'ExceptT' outside the historical
+-- has no successor @SearchNode@.  Putting t'ExceptT' outside the historical
 -- list nondeterminism gives exactly that shape: successful and truncated
 -- sibling branches coexist in the lazy @[Either BranchTruncation a]@ stream.
 module Language.Haskell.Exference.Core.Internal.SearchControl

@@ -689,13 +689,17 @@ inhabitGeneratedPreparedChecked
 inhabitGeneratedPreparedChecked options prepared contexts name goal = do
     (elaboratedGoal, contextMethods) <- resolveQueryContexts prepared
         ("goal type " ++ show goal, KStar, goal) contexts
-    let types = envTypes environment
-        form = hTypeToFormula types elaboratedGoal
-        externalEnv =
-            [ (Symbol v, hTypeToFormula types t)
-            | (v, t) <- envFunctions environment ] ++
-            [ (Symbol v, hTypeToFormula types t)
-            | methods <- contextMethods, (v, t) <- methods ]
+    let translate = preparedEnvironmentFormulaTranslator prepared
+        translateBinding category (symbol, source) =
+            (,) (Symbol symbol) `fmap`
+                first ((category ++ " " ++ prHSymbolOp symbol ++ ": ") ++)
+                    (translate source)
+    form <- first ("goal type: " ++) $ translate elaboratedGoal
+    functionEnv <- mapM (translateBinding "function") $
+        envFunctions environment
+    methodEnv <- concat `fmap`
+        mapM (mapM $ translateBinding "method") contextMethods
+    let externalEnv = functionEnv ++ methodEnv
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
         mode = (defaultSearchMode

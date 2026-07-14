@@ -7,7 +7,8 @@ module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
-    preparedEnvironmentKindCheck, elaboratePreparedTypes,
+    preparedEnvironmentKindCheck, preparedEnvironmentFormulaTranslator,
+    elaboratePreparedTypes,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
@@ -38,6 +39,7 @@ import Djinn.Internal.HCheck
     , prepareKindCheckWithAssumptions
     )
 import Djinn.Internal.HTypes
+import Djinn.Internal.LJTFormula (Formula)
 import Djinn.Internal.Type (fromSynthesisType, toSynthesisType)
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
@@ -60,6 +62,7 @@ data PreparedEnvironment = PreparedEnvironment
     SynthesisInventory
     (SharedTypeSynonym.TypeSynonyms HSymbol)
     PreparedKindCheck
+    (HType -> Either String Formula)
 
 type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
@@ -75,6 +78,7 @@ data SynthesisEnvironmentError
     | InvalidSynthesisTypeSynonyms
         (SharedTypeSynonym.SynonymExpansionError HSymbol)
     | RecursiveSynthesisDataTypes [SharedName.Name]
+    | InvalidSynthesisFormulaDefinitions String
     | MissingSynthesisTypeKind SharedName.Name
     | MissingSynthesisClassKinds SharedName.Name
     | SynthesisClassKindArityMismatch SharedName.Name Int Int
@@ -108,15 +112,16 @@ toSynthesisInventory environment = do
 -- | Seal all reusable views of an environment in one operation.  Inventory
 -- kind inference is the sole whole-environment kind pass; individual queries,
 -- context arguments, and instantiated methods consume the cached result.
+-- Alias expansion and recursive-datatype classification use the same neutral
+-- preflight as 'prepareSynthesisEnvironment', so even a raw constructor-forged
+-- environment cannot send a recursive expansion graph into formula lowering.
 prepareEnvironment
     :: Environment
     -> Either SynthesisEnvironmentError PreparedEnvironment
 prepareEnvironment environment = do
     inventory <- toSynthesisInventory environment
-    synonyms <- first InvalidSynthesisTypeSynonyms $
-        SharedTypeSynonym.prepareTypeSynonyms
-            freshDjinnTypeVariable inventory
-    return $ sealPreparedEnvironment environment inventory synonyms
+    synonyms <- prepareInventoryExpansion inventory
+    sealPreparedEnvironment environment inventory synonyms
 
 -- | Validate a neutral environment once, then derive Djinn's compatibility
 -- projection from the resulting inventory. Conversion is deliberately split
@@ -144,6 +149,22 @@ prepareSynthesisEnvironment sourceEnvironment = do
         SharedInventory.mkInventoryFromEnvironmentWithClassPolicy
             SharedInference.ClosedKindInventory
             SharedInference.DefaultClassKinds groundedEnvironment
+    synonyms <- prepareInventoryExpansion inventory
+    environment <- projectSynthesisEnvironment
+        (SharedInventory.inventoryKindAssumptions inventory)
+        sourceDeclarations
+    sealPreparedEnvironment environment inventory synonyms
+
+-- Expand aliases before classifying datatype recursion. Looking only at raw
+-- fields can hide a real cycle through an alias or invent one in an argument
+-- erased by a phantom alias, so both raw and neutral session construction must
+-- share this exact preflight. Return the same prepared table retained by the
+-- sealed environment rather than expanding its declarations a second time.
+prepareInventoryExpansion
+    :: SynthesisInventory
+    -> Either SynthesisEnvironmentError
+        (SharedTypeSynonym.TypeSynonyms HSymbol)
+prepareInventoryExpansion inventory = do
     synonyms <- first InvalidSynthesisTypeSynonyms $
         SharedTypeSynonym.prepareTypeSynonyms
             freshDjinnTypeVariable inventory
@@ -155,32 +176,41 @@ prepareSynthesisEnvironment sourceEnvironment = do
             SharedInventory.inventoryEnvironment inventory)
     let recursiveNames = SharedDeclaration.recursiveDataTypeNames
             expandedDeclarations
-    if Set.null recursiveNames then return () else
+    if Set.null recursiveNames then return synonyms else
         Left $ RecursiveSynthesisDataTypes $ Set.toAscList recursiveNames
-    environment <- projectSynthesisEnvironment
-        (SharedInventory.inventoryKindAssumptions inventory)
-        sourceDeclarations
-    return $ sealPreparedEnvironment environment inventory synonyms
 
 sealPreparedEnvironment
     :: Environment
     -> SynthesisInventory
     -> SharedTypeSynonym.TypeSynonyms HSymbol
-    -> PreparedEnvironment
-sealPreparedEnvironment environment inventory synonyms =
-    PreparedEnvironment environment inventory synonyms $
-        prepareKindCheckWithAssumptions
+    -> Either SynthesisEnvironmentError PreparedEnvironment
+sealPreparedEnvironment environment inventory synonyms = do
+    translate <- first InvalidSynthesisFormulaDefinitions $
+        prepareTypeFormulaTranslator $ envTypes environment
+    return $ PreparedEnvironment environment inventory synonyms
+        (prepareKindCheckWithAssumptions
             (envTypes environment)
-            (SharedInventory.inventoryKindAssumptions inventory)
+            (SharedInventory.inventoryKindAssumptions inventory))
+        translate
 
 preparedEnvironmentSource :: PreparedEnvironment -> Environment
-preparedEnvironmentSource (PreparedEnvironment environment _ _ _) = environment
+preparedEnvironmentSource (PreparedEnvironment environment _ _ _ _) = environment
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
-preparedEnvironmentInventory (PreparedEnvironment _ inventory _ _) = inventory
+preparedEnvironmentInventory (PreparedEnvironment _ inventory _ _ _) = inventory
 
 preparedEnvironmentKindCheck :: PreparedEnvironment -> PreparedKindCheck
-preparedEnvironmentKindCheck (PreparedEnvironment _ _ _ kindCheck) = kindCheck
+preparedEnvironmentKindCheck (PreparedEnvironment _ _ _ kindCheck _) = kindCheck
+
+-- | The definition table is validated and compiled exactly once when the
+-- environment is sealed. Individual queries retain only their source-local
+-- expansion-path check; they never repeat whole-table SCC analysis.
+preparedEnvironmentFormulaTranslator
+    :: PreparedEnvironment
+    -> HType
+    -> Either String Formula
+preparedEnvironmentFormulaTranslator
+        (PreparedEnvironment _ _ _ _ translate) = translate
 
 -- | Elaborate a query batch through the exact alias table retained by its
 -- prepared environment. The list is checked in one free-variable kind scope;
@@ -191,7 +221,9 @@ elaboratePreparedTypes
     :: PreparedEnvironment
     -> [(HKind, HType)]
     -> Either String [HType]
-elaboratePreparedTypes (PreparedEnvironment _ _ synonyms _) obligations = do
+elaboratePreparedTypes
+        (PreparedEnvironment _ _ synonyms _ _)
+        obligations = do
     sharedObligations <- mapM convertObligation obligations
     elaborated <- first renderElaborationError $
         SharedTypeSynonym.elaborateTypes

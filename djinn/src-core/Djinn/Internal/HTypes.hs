@@ -4,7 +4,8 @@
 --
 module Djinn.Internal.HTypes(
         HKind(..), HType(..), HSymbol,
-        hTypeToFormula, pHSymbol, pHType, pHContext, pHConstraint,
+        prepareTypeFormulaTranslator, hTypeToFormula,
+        pHSymbol, pHType, pHContext, pHConstraint,
         pHDataType, pHTAtom, pHKind,
         prHSymbolOp, htNot, isHTUnion, getHTVars, substHT,
         HClause, HPat, HExpr(HEVar), hPrClause, renderGeneratedClause,
@@ -12,8 +13,11 @@ module Djinn.Internal.HTypes(
         termToHExpr, termToHClause,
         getBinderVars
     ) where
-import Data.List(find, transpose, union, (\\))
-import Data.Maybe(fromMaybe)
+import Data.Bifunctor (first)
+import Data.Graph (SCC(..), stronglyConnComp)
+import Data.List(find, intercalate, sortOn, transpose, union, (\\))
+import qualified Data.Map.Strict as Map
+import Data.Maybe(fromMaybe, listToMaybe)
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
 import Text.ParserCombinators.ReadP
@@ -181,69 +185,499 @@ getHTVars (HTAbstract _ _) = []
 
 -------------------------------
 
-hTypeToFormula :: [(HSymbol, ([HSymbol], HType, a))] -> HType -> Formula
-hTypeToFormula ss (HTTuple ts) = Conj (map (hTypeToFormula ss) ts)
-hTypeToFormula ss (HTArrow t1 t2) = hTypeToFormula ss t1 :-> hTypeToFormula ss t2
-hTypeToFormula _ (HTUnion []) = false
-hTypeToFormula ss (HTUnion ctss) = Disj
-    [(ConsDesc c (length ts), hTypeToFormula ss (HTTuple ts)) |
-        (c, ts) <- ctss]
-hTypeToFormula ss t =
-    case expandSyn ss t [] of
-    -- Opaque applications are atoms, but aliases inside them are still
-    -- definitionally transparent.  Atomizing the surface spelling made
-    -- @F (Id a)@ different from @F a@ even when @type Id a = a@.
-    Nothing -> PVar $ Symbol $ show $ normalizeAliases ss t
-    -- Tag an empty datatype at the declaration that introduced it.  An alias
-    -- is expanded again first, so aliases share the underlying nominal tag.
-    Just (HTUnion []) -> Empty $ Symbol $ show $ normalizeAliases ss t
-    Just t' -> hTypeToFormula ss t'
+-- | Check a raw definition table once and return its checked formula
+-- translator.
+-- The complete first-binding table is checked before any unfolding: recursive
+-- synonym, datatype, and mixed expansion components are invalid input rather
+-- than an excuse for this exposed low-level operation to diverge. Preparing a
+-- closure lets a query translate its goal and every premise without repeating
+-- the SCC analysis. Each translation remains checked because higher-order raw
+-- applications can create an expansion cycle absent from the definition graph
+-- (for example, @S f = f f@ applied to @S@ itself). Since arbitrary raw input
+-- is not kind-checked, re-entering one active source occurrence is rejected
+-- conservatively; checked Djinn sessions cannot construct that untyped case.
+prepareTypeFormulaTranslator
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> Either String (HType -> Either String Formula)
+prepareTypeFormulaTranslator definitions = do
+    let prepared = prepareFormulaDefinitions definitions
+    validateDefinitionExpansion definitions prepared
+    return $ \source -> lowerExpansionType
+        prepared emptyExpansionPath $ queryExpansionType source
 
--- Empty propositions use their applied datatype as a nominal identity.  Type
--- synonyms inside that application are definitionally transparent in Haskell,
--- so normalize aliases without expanding the datatype declaration itself.
-normalizeAliases :: [(HSymbol, ([HSymbol], HType, a))] -> HType -> HType
-normalizeAliases definitions source =
-    case application source [] of
-        (HTCon name, arguments) ->
-            case lookup name definitions of
-                Just (parameters, body, _)
-                    | length parameters == length arguments &&
-                      isAliasBody body ->
-                        normalizeAliases definitions $
-                            substHT (zip parameters arguments) body
-                _ -> foldl hTApp (HTCon name) $
-                    map (normalizeAliases definitions) arguments
-        _ -> normalizeStructure source
+-- | Checked one-shot convenience wrapper around
+-- 'prepareTypeFormulaTranslator'.
+hTypeToFormula
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> HType
+    -> Either String Formula
+hTypeToFormula definitions source =
+    prepareTypeFormulaTranslator definitions >>= ($ source)
+
+-- Expansion arguments carry the definition path at which they were supplied.
+-- Returning a parameter as a complete type resumes at that origin, so finite
+-- @Id (Id a)@ nesting does not look recursive. If a parameter is used in
+-- function position, application-spine discovery deliberately retains the
+-- current path: @A a = B a; B f = f f@ must reject the query @A A@ rather than
+-- resetting past the active @A@ expansion.
+data ExpansionType
+    = ExpansionApp ExpansionType ExpansionType
+    | ExpansionVar HSymbol
+    | ExpansionCon HSymbol ExpansionOrigin
+    | ExpansionTuple [ExpansionType]
+    | ExpansionArrow ExpansionType ExpansionType
+    | ExpansionUnion [(HSymbol, [ExpansionType])]
+    | ExpansionAbstract HSymbol HKind
+    | ExpansionArgument ExpansionPath ExpansionType
+
+-- A constructor occurrence keeps its identity when substitution duplicates
+-- it. Query nodes are identified by their tree path. Nodes written in a
+-- definition body are templates until that definition is expanded, when they
+-- are placed under the concrete head occurrence that created this instance.
+-- This distinguishes finite well-kinded nesting while making higher-order raw
+-- recurrence revisit the same finite source occurrence and fail early.
+data ExpansionOrigin
+    = QueryOrigin [Int]
+    | DefinitionTemplateOrigin [Int]
+    | DefinitionOrigin ExpansionOrigin HSymbol [Int]
+    deriving (Eq, Ord)
+
+data ExpansionFrame = ExpansionFrame HSymbol ExpansionOrigin
+
+-- The newest expansion is kept at the head for constant-time extension; the
+-- accompanying set makes the common nonrecursive occurrence check
+-- logarithmic. The ordered frames remain necessary only for diagnostics.
+data ExpansionPath =
+    ExpansionPath [ExpansionFrame] (Set.Set ExpansionOrigin)
+
+emptyExpansionPath :: ExpansionPath
+emptyExpansionPath = ExpansionPath [] Set.empty
+
+pushExpansion :: HSymbol -> ExpansionOrigin -> ExpansionPath -> ExpansionPath
+pushExpansion name origin (ExpansionPath frames active) =
+    ExpansionPath
+        (ExpansionFrame name origin : frames)
+        (Set.insert origin active)
+
+-- First-binding lookup and alias classification are immutable properties of
+-- the checked table. Retaining them in the prepared closure avoids rebuilding
+-- an alias set and linearly searching the raw association list at every redex.
+data FormulaDefinitions = FormulaDefinitions
+    (Map.Map HSymbol ([HSymbol], ExpansionType))
+    (Set.Set HSymbol)
+
+prepareFormulaDefinitions
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> FormulaDefinitions
+prepareFormulaDefinitions supplied = FormulaDefinitions
+    (Map.fromList
+        [(name, (parameters, definitionExpansionType body)) |
+            (name, (parameters, body, _)) <- definitions])
+    (Set.fromList
+        [name | (name, (_, body, _)) <- definitions, isAliasBody body])
   where
-    application (HTApp function argument) arguments =
-        application function (argument : arguments)
-    application headType arguments = (headType, arguments)
+    definitions = firstBindings supplied
 
-    isAliasBody (HTUnion _) = False
-    isAliasBody (HTAbstract _ _) = False
-    isAliasBody _ = True
+lookupFormulaDefinition
+    :: HSymbol
+    -> FormulaDefinitions
+    -> Maybe ([HSymbol], ExpansionType)
+lookupFormulaDefinition name (FormulaDefinitions definitions _) =
+    Map.lookup name definitions
 
-    normalizeStructure (HTApp function argument) =
-        hTApp (normalizeAliases definitions function) $
-            normalizeAliases definitions argument
-    normalizeStructure (HTTuple types) =
-        HTTuple $ map (normalizeAliases definitions) types
-    normalizeStructure (HTArrow argument result) =
-        HTArrow (normalizeAliases definitions argument) $
-            normalizeAliases definitions result
-    normalizeStructure (HTUnion constructors) = HTUnion
-        [(constructor, map (normalizeAliases definitions) types) |
-            (constructor, types) <- constructors]
-    normalizeStructure other = other
+formulaDefinitionIsAlias :: HSymbol -> FormulaDefinitions -> Bool
+formulaDefinitionIsAlias name (FormulaDefinitions _ aliases) =
+    name `Set.member` aliases
 
-expandSyn :: [(HSymbol, ([HSymbol], HType, a))] -> HType -> [HType] -> Maybe HType
-expandSyn ss (HTApp f a) as = expandSyn ss f (a:as)
-expandSyn ss (HTCon c) as =
-    case lookup c ss of
-    Just (vs, t, _) | length vs == length as -> Just $ substHT (zip vs as) t
-    _ -> Nothing
-expandSyn _ _ _ = Nothing
+queryExpansionType :: HType -> ExpansionType
+queryExpansionType = expansionTypeAt QueryOrigin
+
+definitionExpansionType :: HType -> ExpansionType
+definitionExpansionType = expansionTypeAt DefinitionTemplateOrigin
+
+-- Reverse tree paths make child extension constant-time. Constructor and
+-- field positions are both included, so two equal spellings in one finite
+-- input still receive distinct identities.
+expansionTypeAt :: ([Int] -> ExpansionOrigin) -> HType -> ExpansionType
+expansionTypeAt origin = convert []
+  where
+    convert path source =
+        case source of
+            HTApp function argument -> ExpansionApp
+                (convert (0 : path) function)
+                (convert (1 : path) argument)
+            HTVar variable -> ExpansionVar variable
+            HTCon name -> ExpansionCon name $ origin path
+            HTTuple types -> ExpansionTuple $
+                zipWith (\index -> convert (index : path)) [0 ..] types
+            HTArrow argument result -> ExpansionArrow
+                (convert (0 : path) argument)
+                (convert (1 : path) result)
+            HTUnion constructors -> ExpansionUnion
+                [(constructor,
+                    zipWith
+                        (\fieldIndex ->
+                            convert (fieldIndex : constructorIndex : path))
+                        [0 ..]
+                        fields) |
+                    (constructorIndex, (constructor, fields)) <-
+                        zip [0 ..] constructors]
+            HTAbstract name kind -> ExpansionAbstract name kind
+
+-- Turn cached body-local origins into identities for this particular
+-- expansion instance. Origins brought in later by parameter substitution are
+-- already concrete and are deliberately left unchanged.
+instantiateDefinitionOrigins
+    :: ExpansionOrigin
+    -> HSymbol
+    -> ExpansionType
+    -> ExpansionType
+instantiateDefinitionOrigins parent owner = instantiate
+  where
+    instantiate source =
+        case source of
+            ExpansionApp function argument -> ExpansionApp
+                (instantiate function) (instantiate argument)
+            variable@(ExpansionVar _) -> variable
+            ExpansionCon name origin -> ExpansionCon name $
+                case origin of
+                    DefinitionTemplateOrigin path ->
+                        DefinitionOrigin parent owner path
+                    _ -> origin
+            ExpansionTuple types -> ExpansionTuple $ map instantiate types
+            ExpansionArrow argument result ->
+                ExpansionArrow (instantiate argument) (instantiate result)
+            ExpansionUnion constructors -> ExpansionUnion
+                [(constructor, map instantiate fields) |
+                    (constructor, fields) <- constructors]
+            abstract@(ExpansionAbstract _ _) -> abstract
+            ExpansionArgument path argument ->
+                ExpansionArgument path $ instantiate argument
+
+expansionApp :: ExpansionType -> ExpansionType -> ExpansionType
+expansionApp function argument =
+    case partialExpansionArrow function of
+        Just arrowArgument -> ExpansionArrow arrowArgument argument
+        Nothing -> ExpansionApp function argument
+
+-- Match 'hTApp' even when substitution has put an argument-origin marker
+-- around @(->)@ or around an already partial arrow application. In the latter
+-- case the domain came from that marked argument and must retain its origin;
+-- the newly supplied codomain belongs to the current expansion.
+partialExpansionArrow :: ExpansionType -> Maybe ExpansionType
+partialExpansionArrow source =
+    case source of
+        ExpansionApp headType argument
+            | expansionArrowHead headType -> Just argument
+        ExpansionArgument origin function ->
+            ExpansionArgument origin `fmap` partialExpansionArrow function
+        _ -> Nothing
+
+expansionArrowHead :: ExpansionType -> Bool
+expansionArrowHead source =
+    case source of
+        ExpansionCon "->" _ -> True
+        ExpansionArgument _ headType -> expansionArrowHead headType
+        _ -> False
+
+lowerExpansionType
+    :: FormulaDefinitions
+    -> ExpansionPath
+    -> ExpansionType
+    -> Either String Formula
+lowerExpansionType definitions path source =
+    case source of
+        ExpansionArgument origin argument ->
+            lowerExpansionType definitions origin argument
+        ExpansionTuple types ->
+            Conj `fmap` mapM (lowerExpansionType definitions path) types
+        ExpansionArrow argument result -> (:->)
+            `fmap` lowerExpansionType definitions path argument
+            `apEither` lowerExpansionType definitions path result
+        ExpansionUnion [] -> Right false
+        ExpansionUnion constructors -> Disj `fmap` mapM lowerConstructor constructors
+        _ -> lowerApplication definitions path source
+  where
+    lowerConstructor (constructor, fields) = do
+        formula <- lowerExpansionType definitions path $ ExpansionTuple fields
+        return (ConsDesc constructor (length fields), formula)
+
+-- Local applicative sequencing without depending on an Applicative style in
+-- the surrounding historical module.
+apEither :: Either String (a -> b) -> Either String a -> Either String b
+apEither function argument = do
+    apply <- function
+    value <- argument
+    return $ apply value
+
+lowerApplication
+    :: FormulaDefinitions
+    -> ExpansionPath
+    -> ExpansionType
+    -> Either String Formula
+lowerApplication definitions path source =
+    case expansionApplication source [] of
+        (ExpansionCon name origin, arguments) ->
+            case lookupFormulaDefinition name definitions of
+                Just (parameters, body)
+                    | length parameters == length arguments -> do
+                        rejectActiveExpansion definitions path name origin
+                        let replacements = zip parameters $
+                                map (ExpansionArgument path) arguments
+                            expanded = substituteExpansion replacements $
+                                instantiateDefinitionOrigins origin name body
+                        case expanded of
+                            ExpansionUnion [] -> do
+                                normalized <- normalizeExpansionAliases
+                                    definitions path source
+                                return $ Empty $ Symbol $ show normalized
+                            _ -> lowerExpansionType definitions
+                                (pushExpansion name origin path)
+                                expanded
+                _ -> atom
+        _ -> atom
+  where
+    atom = (PVar . Symbol . show) `fmap`
+        normalizeExpansionAliases definitions path source
+
+-- A marker in function position is unwrapped without resetting the current
+-- definition path; a marker around the complete expression is handled by
+-- 'lowerExpansionType' above and does reset it.
+expansionApplication
+    :: ExpansionType
+    -> [ExpansionType]
+    -> (ExpansionType, [ExpansionType])
+expansionApplication (ExpansionApp function argument) arguments =
+    expansionApplication function (argument : arguments)
+expansionApplication (ExpansionArgument _ function) arguments =
+    expansionApplication function arguments
+expansionApplication headType arguments = (headType, arguments)
+
+substituteExpansion
+    :: [(HSymbol, ExpansionType)]
+    -> ExpansionType
+    -> ExpansionType
+substituteExpansion replacements source =
+    case source of
+        ExpansionApp function argument -> expansionApp
+            (substituteExpansion replacements function)
+            (substituteExpansion replacements argument)
+        variable@(ExpansionVar name) -> fromMaybe variable $
+            lookup name replacements
+        constructor@(ExpansionCon _ _) -> constructor
+        ExpansionTuple types ->
+            ExpansionTuple $ map (substituteExpansion replacements) types
+        ExpansionArrow argument result -> ExpansionArrow
+            (substituteExpansion replacements argument)
+            (substituteExpansion replacements result)
+        ExpansionUnion constructors -> ExpansionUnion
+            [(constructor, map (substituteExpansion replacements) fields) |
+                (constructor, fields) <- constructors]
+        abstract@(ExpansionAbstract _ _) -> abstract
+        argument@(ExpansionArgument _ _) -> argument
+
+rejectActiveExpansion
+    :: FormulaDefinitions
+    -> ExpansionPath
+    -> HSymbol
+    -> ExpansionOrigin
+    -> Either String ()
+rejectActiveExpansion
+        (FormulaDefinitions _ aliasNames)
+        (ExpansionPath frames active)
+        name
+        origin
+    | origin `Set.notMember` active = Right ()
+    | otherwise = Left $
+            "recursive type " ++ expansionKind ++ " expansion: " ++
+                intercalate ", " cycleMembers
+  where
+    -- Frames are stored newest-first. Restore expansion order, but classify
+    -- aliases by their names rather than by the occurrence identities that
+    -- make the termination guard precise.
+    newerFrames = takeWhile ((/= origin) . frameOrigin) frames
+    cycleMembers =
+        name : reverse (map frameName newerFrames) ++ [name]
+    expansionKind
+        | all (`Set.member` aliasNames) cycleMembers = "synonym"
+        | otherwise = "definition"
+
+    frameName (ExpansionFrame frameName' _) = frameName'
+    frameOrigin (ExpansionFrame _ frameOrigin') = frameOrigin'
+
+-- Alias-normalize an atom without unfolding its outer datatype/abstract
+-- constructor. Argument markers preserve the same path semantics as logical
+-- lowering, so opaque applications cannot hide a query-created alias cycle.
+normalizeExpansionAliases
+    :: FormulaDefinitions
+    -> ExpansionPath
+    -> ExpansionType
+    -> Either String HType
+normalizeExpansionAliases definitions path source =
+    case source of
+        ExpansionArgument origin argument ->
+            normalizeExpansionAliases definitions origin argument
+        ExpansionApp _ _ -> normalizeApplication
+        ExpansionCon _ _ -> normalizeApplication
+        ExpansionVar variable -> Right $ HTVar variable
+        ExpansionTuple types ->
+            HTTuple `fmap` mapM normalize types
+        ExpansionArrow argument result -> HTArrow
+            `fmap` normalize argument `apEither` normalize result
+        ExpansionUnion constructors -> HTUnion `fmap` mapM normalizeConstructor constructors
+        ExpansionAbstract name kind -> Right $ HTAbstract name kind
+  where
+    normalize = normalizeExpansionAliases definitions path
+
+    normalizeApplication =
+        case expansionApplication source [] of
+            (ExpansionCon name origin, arguments) ->
+                case lookupFormulaDefinition name definitions of
+                    Just (parameters, body)
+                        | length parameters == length arguments &&
+                          formulaDefinitionIsAlias name definitions -> do
+                            rejectActiveExpansion
+                                definitions path name origin
+                            let replacements = zip parameters $
+                                    map (ExpansionArgument path) arguments
+                                expanded = substituteExpansion replacements $
+                                    instantiateDefinitionOrigins origin name body
+                            normalizeExpansionAliases definitions
+                                (pushExpansion name origin path)
+                                expanded
+                    _ -> rebuildConstructor name arguments
+            (headType, arguments) -> rebuild headType arguments
+
+    rebuildConstructor name arguments = do
+        normalizedArguments <- mapM normalize arguments
+        return $ foldl hTApp (HTCon name) normalizedArguments
+
+    rebuild headType arguments = do
+        normalizedHead <- normalize headType
+        normalizedArguments <- mapM normalize arguments
+        return $ foldl hTApp normalizedHead normalizedArguments
+
+    normalizeConstructor (constructor, fields) = do
+        normalizedFields <- mapM normalize fields
+        return (constructor, normalizedFields)
+
+-- Validate the actual definition-expansion graph, not merely repeated runtime
+-- types.  The latter would miss growing cycles such as @A a = A [a]@, while an
+-- active-name guard would falsely reject finite nested inputs such as
+-- @Id (Id a)@. Every nominal occurrence contributes an edge because
+-- higher-order substitution can saturate a bare constructor later. Synonym
+-- SCCs are found before normalization; after that safe expansion, datatype
+-- SCCs are classified from alias-free fields so phantom aliases can erase
+-- apparent surface recursion exactly as at the shared Djinn environment
+-- boundary.
+validateDefinitionExpansion
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> FormulaDefinitions
+    -> Either String ()
+validateDefinitionExpansion supplied prepared = do
+    rejectFirstCycle True aliases aliasReferences
+    normalized <- Map.fromList `fmap` mapM normalizeDefinition definitions
+    let normalizedReferences (name, _) = maybe Set.empty
+            (references definitionNames)
+            (Map.lookup name normalized)
+    rejectFirstCycle False definitions normalizedReferences
+  where
+    definitions = firstBindings supplied
+    aliases = filter (isAliasBody . definitionBody) definitions
+    aliasNames = Set.fromList $ map fst aliases
+    definitionNames = Set.fromList $ map fst definitions
+    references names = Set.intersection names . definitionReferences
+    aliasReferences = references aliasNames . definitionBody
+
+    normalizeDefinition (name, (_, body, _)) = do
+        normalizedBody <- first
+            (("type definition " ++ name ++ ": ") ++)
+            (normalizeExpansionAliases
+                prepared emptyExpansionPath $
+                definitionExpansionType body)
+        return (name, normalizedBody)
+
+-- Report the first recursive component in first-binding source order.  SCC
+-- membership is ordered the same way, keeping diagnostics independent of the
+-- traversal order chosen by Data.Graph.
+rejectFirstCycle
+    :: Bool
+    -> [(HSymbol, ([HSymbol], HType, a))]
+    -> ((HSymbol, ([HSymbol], HType, a)) -> Set.Set HSymbol)
+    -> Either String ()
+rejectFirstCycle synonymsOnly definitions references =
+    case firstRecursiveComponent definitions references of
+        Nothing -> Right ()
+        Just names -> Left $ recursiveDefinitionsMessage synonymsOnly names
+
+firstRecursiveComponent
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> ((HSymbol, ([HSymbol], HType, a)) -> Set.Set HSymbol)
+    -> Maybe [HSymbol]
+firstRecursiveComponent definitions references =
+    listToMaybe $ sortOn componentPosition orderedCycles
+  where
+    positions = Map.fromList $ zip (map fst definitions) [0 :: Int ..]
+    position name = Map.findWithDefault maxBound name positions
+    componentPosition names = minimum $ map position names
+    orderedCycles =
+        [sortOn position names |
+            CyclicSCC names <- stronglyConnComp
+                [(name, name, Set.toAscList $ references definition) |
+                    definition@(name, _) <- definitions]]
+
+recursiveDefinitionsMessage :: Bool -> [HSymbol] -> String
+recursiveDefinitionsMessage synonymsOnly names =
+    "recursive type " ++ noun ++ ": " ++ intercalate ", " names
+  where
+    noun
+        | synonymsOnly && length names == 1 = "synonym"
+        | synonymsOnly = "synonyms"
+        | length names == 1 = "definition"
+        | otherwise = "definitions"
+
+-- Match association-list lookup throughout this module: a later duplicate is
+-- unreachable and therefore cannot add an expansion edge or a spurious cycle.
+firstBindings
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> [(HSymbol, ([HSymbol], HType, a))]
+firstBindings = collect Set.empty
+  where
+    collect _ [] = []
+    collect seen (definition@(name, _) : rest)
+        | name `Set.member` seen = collect seen rest
+        | otherwise = definition : collect (Set.insert name seen) rest
+
+definitionBody :: (HSymbol, ([HSymbol], HType, a)) -> HType
+definitionBody (_, (_, body, _)) = body
+
+-- Collect every nominal reference, not only applications saturated in the
+-- source spelling. Substitution can turn a higher-order argument into a fresh
+-- saturated redex: with @Apply f a = f a@ and @A a = Apply A a@, the bare @A@
+-- in the latter body becomes @A a@ after expanding @Apply@. The conservative
+-- graph also rejects malformed under/over-saturated recursive raw tables;
+-- checked Djinn environments reject those applications independently.
+definitionReferences :: HType -> Set.Set HSymbol
+definitionReferences source =
+    case source of
+        HTApp function argument ->
+            definitionReferences function `Set.union`
+                definitionReferences argument
+        HTCon name -> Set.singleton name
+        HTTuple types -> Set.unions $ map definitionReferences types
+        HTArrow argument result ->
+            definitionReferences argument `Set.union`
+                definitionReferences result
+        HTUnion constructors -> Set.unions
+            [definitionReferences field |
+                (_, fields) <- constructors, field <- fields]
+        HTVar _ -> Set.empty
+        HTAbstract _ _ -> Set.empty
+
+isAliasBody :: HType -> Bool
+isAliasBody (HTUnion _) = False
+isAliasBody (HTAbstract _ _) = False
+isAliasBody _ = True
 
 substHT :: [(HSymbol, HType)] -> HType -> HType
 substHT r (HTApp f a) = hTApp (substHT r f) (substHT r a)

@@ -466,8 +466,12 @@ The opaque Djinn `Environment` itself now round-trips through
 stricter source subset, grounds and checks the neutral Inventory once, validates
 synonym saturation in every type-bearing declaration position, and classifies
 recursive datatypes only after aliases have been expanded. The resulting raw
-search tables and query-time kind checker are projections of those same cached
-assumptions rather than a second independently inferred environment.
+search tables, query-time kind checker, and checked formula translator are
+projections of those same cached assumptions rather than a second independently
+inferred environment. Raw
+`prepareEnvironment` applies that same expand-first recursion preflight, so a
+constructor-forged compatibility environment cannot bypass it while phantom
+aliases retain their alias-free meaning.
 Successful canonical reports expose `generatedReportCandidates`; every Djinn
 candidate has empty residual constraints and retains the unused-binder fraction
 and binder count used by the historical ranking policy. Compatibility
@@ -510,7 +514,26 @@ The raw proof/search `Djinn.Internal.*` modules used by compatibility tests and
 research tooling remain exposed by `djinn-core`, but their constructors can
 violate these invariants and carry no stability promise. The checked
 declaration/type implementation modules and the frontend-only Help and REPL
-modules are deliberately not exposed.
+modules are deliberately not exposed. Raw formula translation is nevertheless
+total as a checked operation over finite inputs: `prepareTypeFormulaTranslator`
+checks the complete first-binding definition expansion graph once and returns a
+reusable `HType -> Either String Formula` translator. The graph conservatively
+counts every nominal definition reference, so even malformed inert recursive
+tables whose references are under- or over-saturated are rejected. Each
+translation also tracks active constructor occurrences, because a higher-order
+source such as `S S` for `S f = f f` can create a cycle absent from the
+definition graph. Query-tree identities survive substitution and duplication;
+cached definition-body identities are instantiated beneath the concrete head
+occurrence that expanded them. Distinct finite occurrences and definition
+instances therefore remain distinct. Re-entering one still-active occurrence
+is rejected conservatively: checked, well-kinded sessions cannot encode such
+untyped self-application, while arbitrary raw `Djinn.Internal` inputs otherwise
+make exact normalization undecidable. The returned closure consequently fails
+deterministically on a source-created recursive synonym/type-definition
+expansion; `hTypeToFormula`
+is the one-shot checked wrapper. Checked Djinn sessions retain that compiled
+closure in `PreparedEnvironment`, so later queries perform only their
+source-local expansion checks rather than repeating whole-table analysis.
 
 The central pipeline is:
 

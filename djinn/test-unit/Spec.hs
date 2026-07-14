@@ -28,6 +28,7 @@ import Djinn.Core (
     toSynthesisKind,
     toSynthesisType, typeDeclarations)
 import Djinn.Internal.Environment (elaboratePreparedTypes, validateEnvironment)
+import qualified Djinn.Internal.Environment as RawEnvironment
 import qualified Djinn.Internal.Generated as DjinnGenerated
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
@@ -70,6 +71,10 @@ tests =
     , ("prepare neutral Djinn environments authoritatively",
           testNeutralDjinnPreparation)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
+    , ("reject every raw recursive type-expansion graph finitely",
+          testRawTypeExpansionCycles)
+    , ("preflight raw environment recursion after alias expansion",
+          testRawEnvironmentRecursionPreflight)
     , ("separate synonym saturation from kind errors",
           testSynonymSaturationBoundary)
     , ("elaborate prepared query synonyms without changing compatibility views",
@@ -969,6 +974,252 @@ testOpaqueAliasAtoms = do
             "the normalized opaque application should admit identity"
             (Realized ["coerce a = a"]) (reportOutcome report)
 
+-- The low-level translator is deliberately exposed for research clients, so
+-- malformed caller-built tables must fail rather than relying on the checked
+-- Environment facade to make them unreachable. Validate the whole first-
+-- binding table: otherwise an unused cycle remains a latent divergence.
+testRawTypeExpansionCycles :: IO ()
+testRawTypeExpansionCycles = do
+    let definition name parameters body = (name, (parameters, body, ()))
+        apply constructor argument = HTApp (HTCon constructor) argument
+        applications = foldl HTApp
+        direct = [definition "A" [] $ HTCon "A"]
+        mutual =
+            [ definition "A" [] $ HTCon "B"
+            , definition "B" [] $ HTCon "A"
+            ]
+        growing = [definition "A" ["a"] $
+            apply "A" $ apply "[]" $ HTVar "a"]
+        underSaturated = [definition "A" ["a"] $ HTCon "A"]
+        overSaturated = [definition "A" [] $
+            apply "A" $ HTCon "Bool"]
+        higherOrder =
+            [ definition "Apply" ["f", "a"] $
+                HTApp (HTVar "f") (HTVar "a")
+            , definition "A" ["a"] $
+                HTApp (apply "Apply" $ HTCon "A") (HTVar "a")
+            ]
+        sourceOnly = [definition "S" ["f"] $
+            HTApp (HTVar "f") (HTVar "f")]
+        normalizationCycle =
+            [ definition "S" ["f"] $
+                HTApp (HTVar "f") (HTVar "f")
+            , definition "A" [] $
+                apply "S" $ HTCon "S"
+            ]
+        opaqueSourceOnly = definition "F" []
+            (HTAbstract "F" $ KArrow KStar KStar) : sourceOnly
+        directData = [definition "D" [] $
+            HTUnion [("MkD", [HTCon "D"])]]
+        mixed =
+            [ definition "Alias" [] $ HTCon "D"
+            , definition "D" [] $
+                HTUnion [("MkD", [HTCon "Alias"])]
+            ]
+        opaqueDirect = definition "F" []
+            (HTAbstract "F" $ KArrow KStar KStar) : direct
+
+    assertLeftMessage "a direct synonym cycle is finite and diagnosed"
+        "recursive type synonym: A"
+        (hTypeToFormula direct $ HTCon "A")
+    assertLeftMessage "a mutual synonym cycle has source-ordered names"
+        "recursive type synonyms: A, B"
+        (hTypeToFormula mutual $ HTCon "A")
+    assertLeftMessage "a cycle below an opaque atom is diagnosed"
+        "recursive type synonym: A"
+        (hTypeToFormula opaqueDirect $
+            apply "F" $ HTCon "A")
+    assertLeftMessage "a growing synonym cycle cannot evade the SCC check"
+        "recursive type synonym: A"
+        (hTypeToFormula growing $ apply "A" $ HTVar "x")
+    assertLeftMessage "an inert under-saturated raw cycle is rejected"
+        "recursive type synonym: A"
+        (hTypeToFormula underSaturated $ HTVar "unrelated")
+    assertLeftMessage "an inert over-saturated raw cycle is rejected"
+        "recursive type synonym: A"
+        (hTypeToFormula overSaturated $ HTVar "unrelated")
+    assertLeftMessage "higher-order substitution cannot create a hidden cycle"
+        "recursive type synonym: A"
+        (hTypeToFormula higherOrder $ apply "A" $ HTVar "x")
+    sourceOnlyTranslate <- expectRight $
+        prepareTypeFormulaTranslator sourceOnly
+    assertLeftMessage "a source-created self-application cycle is diagnosed"
+        "recursive type synonym expansion: S, S"
+        (sourceOnlyTranslate $ apply "S" $ HTCon "S")
+    opaqueSourceOnlyTranslate <- expectRight $
+        prepareTypeFormulaTranslator opaqueSourceOnly
+    assertLeftMessage "an opaque atom cannot hide a source-created cycle"
+        "recursive type synonym expansion: S, S"
+        (opaqueSourceOnlyTranslate $
+            apply "F" $ apply "S" $ HTCon "S")
+    assertLeftMessage "whole-table alias normalization is itself finite"
+        "type definition A: recursive type synonym expansion: S, S"
+        (hTypeToFormula normalizationCycle $ HTVar "unrelated")
+    assertLeftMessage "an unused cycle invalidates the whole supplied table"
+        "recursive type synonym: A"
+        (hTypeToFormula direct $ HTVar "unrelated")
+    assertLeftMessage "a directly recursive datatype is diagnosed"
+        "recursive type definition: D"
+        (hTypeToFormula directData $ HTCon "D")
+    assertLeftMessage "an alias-datatype cycle is diagnosed after expansion"
+        "recursive type definition: D"
+        (hTypeToFormula mixed $ HTCon "Alias")
+
+    let identity = [definition "Id" ["a"] $ HTVar "a"]
+    assertEqual "finite repetition of one acyclic alias is not a cycle"
+        (Right $ PVar $ Symbol "x")
+        (hTypeToFormula identity $
+            apply "Id" $ apply "Id" $ HTVar "x")
+
+    -- A partial datatype supplied as a higher-kinded argument may be
+    -- saturated inside another expansion. Distinct finite source occurrences
+    -- and distinct instances of one cached definition body must not be
+    -- mistaken for recursive use of the same occurrence.
+    let higherKindedDefinitions =
+            [ definition "D" ["f", "a"] $ HTUnion
+                [("MkD", [HTApp (HTVar "f") (HTVar "a")])]
+            , definition "Id" ["a"] $ HTVar "a"
+            , definition "F" [] $
+                HTAbstract "F" $ KArrow KStar KStar
+            ]
+        d arguments = applications (HTCon "D") arguments
+        nestedD formula = Disj [(ConsDesc "MkD" 1, Conj [formula])]
+    assertEqual "a finite nested partial datatype keeps source provenance"
+        (Right $ nestedD $ nestedD $ PVar $ Symbol "F x")
+        (hTypeToFormula higherKindedDefinitions $
+            d [d [HTCon "F"], HTVar "x"])
+    assertEqual "cached body occurrences are fresh for each finite instance"
+        (Right $ nestedD $ nestedD $ nestedD $ PVar $ Symbol "x")
+        (hTypeToFormula higherKindedDefinitions $
+            d [d [HTCon "Id"], d [HTCon "Id", HTVar "x"]])
+
+    let sourceLoopDefinitions =
+            [ definition "S" ["f"] $
+                HTApp (HTVar "f") (HTVar "f")
+            , definition "D" ["f", "a"] $ HTUnion
+                [("MkD", [HTApp (HTVar "f") (HTVar "a")])]
+            ]
+    assertLeftMessage "partial-application provenance still detects a loop"
+        "recursive type definition expansion: D, S, D"
+        (hTypeToFormula sourceLoopDefinitions $
+            apply "S" $ d [HTCon "S"])
+
+    -- Arbitrary raw inputs are not kind-checked and can encode untyped
+    -- normalization. Re-entering one active source occurrence is therefore a
+    -- deliberately conservative boundary: it rejects a finite but ill-kinded
+    -- rewrite as well as non-repeating growth before either can diverge.
+    let finiteReentryDefinitions =
+            [ definition "A" ["f", "x"] $
+                HTApp (HTApp (HTVar "f") (HTCon "C")) (HTVar "x")
+            , definition "S" ["f", "x"] $
+                HTApp (HTApp (HTVar "f") (HTVar "f")) (HTVar "x")
+            ]
+        growingSourceDefinitions =
+            [ definition "S" ["f", "x"] $
+                HTApp
+                    (HTApp (HTVar "f") (HTVar "f"))
+                    (apply "F" $ HTVar "x")
+            ]
+    assertLeftMessage "raw active-occurrence re-entry is conservative"
+        "recursive type synonym expansion: A, A"
+        (hTypeToFormula finiteReentryDefinitions $
+            applications (HTCon "S") [HTCon "A", HTVar "y"])
+    assertLeftMessage "growing untyped self-application is rejected early"
+        "recursive type synonym expansion: S, S"
+        (hTypeToFormula growingSourceDefinitions $
+            applications (HTCon "S") [HTCon "S", HTVar "x"])
+
+    -- Substitution may supply @(->)@ in function position, either directly or
+    -- already applied to its domain. Both spellings must retain 'hTApp' arrow
+    -- canonicalization while carrying argument-origin markers.
+    let applyDefinitions =
+            [ definition "Apply" ["f", "a"] $
+                HTApp (HTVar "f") (HTVar "a")
+            , definition "Apply2" ["f", "a", "b"] $
+                HTApp (HTApp (HTVar "f") (HTVar "a")) (HTVar "b")
+            ]
+        argument = HTVar "x"
+        result = HTVar "y"
+        arrow = HTArrow argument result
+        partialArrow = HTApp (HTCon "->") argument
+        rawPrefixArrow = HTApp partialArrow result
+    assertEqual "a direct raw prefix arrow retains its historical atom"
+        (Right $ PVar $ Symbol "x -> y")
+        (hTypeToFormula applyDefinitions rawPrefixArrow)
+    assertEqual "a marked partial arrow remains a logical implication"
+        (hTypeToFormula applyDefinitions arrow)
+        (hTypeToFormula applyDefinitions $
+            applications (HTCon "Apply") [partialArrow, result])
+    assertEqual "a marked arrow constructor remains a logical implication"
+        (hTypeToFormula applyDefinitions arrow)
+        (hTypeToFormula applyDefinitions $
+            applications (HTCon "Apply2")
+                [HTCon "->", argument, result])
+
+    -- Both expansion and cycle analysis follow association-list lookup: the
+    -- unreachable duplicate must not poison a valid first definition.
+    let firstWins =
+            [ definition "A" [] $ HTCon "Bool"
+            , definition "A" [] $ HTCon "A"
+            ]
+    assertEqual "cycle validation honors first-binding lookup semantics"
+        (Right $ PVar $ Symbol "Bool")
+        (hTypeToFormula firstWins $ HTCon "A")
+
+-- Raw Environment constructors remain available to explicit low-level
+-- clients. Their checked preparation must apply the same expand-first
+-- recursion policy as neutral Djinn sessions: real data cycles fail, while a
+-- phantom alias can erase a merely apparent surface edge.
+testRawEnvironmentRecursionPreflight :: IO ()
+testRawEnvironmentRecursionPreflight = do
+    let direct = RawEnvironment.Environment
+            [ ("D", ([], HTUnion [("MkD", [HTCon "D"])], KStar)) ]
+            [] []
+        mixed = RawEnvironment.Environment
+            [ ("Alias", ([], HTCon "D", KStar))
+            , ("D", ([], HTUnion [("MkD", [HTCon "Alias"])], KStar))
+            ] [] []
+        phantomUse = HTApp (HTCon "Phantom") (HTCon "D")
+        phantom = RawEnvironment.Environment
+            [ ("Bool", ([], HTAbstract "Bool" KStar, KStar))
+            , ("Phantom", (["a"], HTCon "Bool", KArrow KStar KStar))
+            , ("D", ([], HTUnion [("MkD", [phantomUse])], KStar))
+            ] [] []
+        higherKinded = RawEnvironment.Environment
+            [ ("F", ([], HTAbstract "F" $ KArrow KStar KStar,
+                KArrow KStar KStar))
+            , ("D", (["f", "a"],
+                HTUnion [("MkD", [HTApp (HTVar "f") (HTVar "a")])],
+                KArrow (KArrow KStar KStar) $ KArrow KStar KStar))
+            ] [] []
+
+    assertRecursiveDataRejection "direct raw data recursion" "D" direct
+    assertRecursiveDataRejection "mixed raw alias/data recursion" "D" mixed
+    case prepareEnvironment phantom of
+        Left failure -> fail $ "phantom alias invented raw recursion: " ++
+            show failure
+        Right _ -> return ()
+    preparedHigherKinded <- case prepareEnvironment higherKinded of
+        Left failure -> fail $ "valid higher-kinded data was rejected: " ++
+            show failure
+        Right prepared -> return prepared
+    let applyMany = foldl HTApp
+        partialD = applyMany (HTCon "D") [HTCon "F"]
+        nestedGoal = applyMany (HTCon "D") [partialD, HTVar "x"]
+    case inhabitGeneratedPrepared defaultQueryOptions
+            preparedHigherKinded [] "nested" nestedGoal of
+        Left failure -> fail $
+            "cached formula translation rejected finite nesting: " ++ failure
+        Right _ -> return ()
+  where
+    assertRecursiveDataRejection description expected environment =
+        case prepareEnvironment environment of
+            Left (RecursiveSynthesisDataTypes names) ->
+                assertEqual description [sharedName expected] names
+            Left failure -> fail $ description ++
+                " produced the wrong failure: " ++ show failure
+            Right _ -> fail $ description ++ " reached a prepared environment"
+
 -- Grounding must recursively eliminate every unification variable.  Foo's
 -- inferred kind is reused after kind inference has reset its local IntMap;
 -- leaving a KVar behind used to make this second check crash at IntMap.!
@@ -1633,14 +1884,15 @@ testNominalEmptyTypes = do
             , ("Flag", ([], HTUnion [("Flag", [])], ()))
             , ("FlagAlias", ([], HTCon "Flag", ()))
             ]
-        emptyA = hTypeToFormula definitions $ HTCon "EmptyA"
-        emptyB = hTypeToFormula definitions $ HTCon "EmptyB"
-        aliasA = hTypeToFormula definitions $ HTCon "AliasA"
-        emptyOfFlag = hTypeToFormula definitions $
-            HTApp (HTCon "EmptyOf") (HTCon "Flag")
-        emptyOfAlias = hTypeToFormula definitions $
-            HTApp (HTCon "EmptyOf") (HTCon "FlagAlias")
-        cast = emptyA :-> emptyB
+    translate <- expectRight $ prepareTypeFormulaTranslator definitions
+    emptyA <- expectRight $ translate $ HTCon "EmptyA"
+    emptyB <- expectRight $ translate $ HTCon "EmptyB"
+    aliasA <- expectRight $ translate $ HTCon "AliasA"
+    emptyOfFlag <- expectRight $ translate $
+        HTApp (HTCon "EmptyOf") (HTCon "Flag")
+    emptyOfAlias <- expectRight $ translate $
+        HTApp (HTCon "EmptyOf") (HTCon "FlagAlias")
+    let cast = emptyA :-> emptyB
         identity = emptyA :-> emptyA
     assertBool "distinct empty datatypes need distinct propositions"
         (emptyA /= emptyB)

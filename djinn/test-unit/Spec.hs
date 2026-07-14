@@ -111,6 +111,8 @@ tests =
           testSelfReferenceEvidence)
     , ("isolate external proof identities", testProofEnvironment)
     , ("type-check generated proofs independently", testGeneratedProofsCheck)
+    , ("allocate wide proof metavariable plans without reuse",
+          testWideProofMetas)
     , ("reject malformed proof terms", testMalformedProofTerms)
     , ("preserve nominal empty types", testNominalEmptyTypes)
     , ("validate declaration mutations transactionally", testEnvironmentValidation)
@@ -1883,6 +1885,24 @@ testResolveInstanceMethods = do
         (resolveContext multiCaptureEnvironment $
             context "MultiCapture" [compoundArgument])
 
+    -- Exercise a substantial collision chain without a machine-sized prime
+    -- count or rebuilding every candidate with 'replicate'. Candidate
+    -- spellings are extended directly, so the next name stays exact.
+    wideCaptureEnvironment <- expectRight $
+        declare (ClassDecl "WideCapture" ["a"]
+            [("wideCapture", HTApp (HTVar "f") (HTVar "a"))])
+            multiCaptureEnvironment
+    let primeNames = iterate (++ "'") "f"
+        occupiedVariables = take 65 primeNames
+        freshVariable = primeNames !! 65
+        wideArgument = foldr
+            (\variable rest -> HTTuple [HTVar variable, rest])
+            (HTCon "()") occupiedVariables
+    assertEqual "long prime collision chains retain the next exact spelling"
+        (Right [("wideCapture", HTApp (HTVar freshVariable) wideArgument)])
+        (resolveContext wideCaptureEnvironment $
+            context "WideCapture" [wideArgument])
+
 testSelfReferenceEvidence :: IO ()
 testSelfReferenceEvidence = do
     let a = HTVar "a"
@@ -1943,6 +1963,13 @@ testProofEnvironment = do
         [atomA, atomA, atomB] (map snd allBindings)
     assertEqual "excluded assumptions also receive unique proof identities"
         3 (length $ nub $ map fst allBindings)
+    let numberedCollisionEnvironment = prepareProofEnvironment target
+            [ (Symbol "$assumption1", atomA)
+            , (Symbol "$assumption2", atomB)
+            ]
+    assertEqual "internal proof identities skip occupied numeric suffixes"
+        [Symbol "$assumption3", Symbol "$assumption4"]
+        (map fst $ proofBindings numberedCollisionEnvironment)
     case bindings of
         (internal, _) : _ -> do
             assertEqual "free proof identities should regain their display names"
@@ -1970,6 +1997,15 @@ testGeneratedProofsCheck = do
             proof : _ -> assertEqual
                 ("independent checker rejected " ++ show proof)
                 (Right ()) (checkProof environment formula proof)
+
+testWideProofMetas :: IO ()
+testWideProofMetas = do
+    let arity = 512
+        elements = replicate arity true
+        handler = foldr (:->) true elements
+        formula = handler :-> Conj elements :-> true
+    assertEqual "every wide product component keeps a distinct metavariable"
+        (Right ()) (checkProof [] formula $ Csplit arity)
 
 testMalformedProofTerms :: IO ()
 testMalformedProofTerms = do

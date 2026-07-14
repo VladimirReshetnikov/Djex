@@ -8,13 +8,14 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (
     StateT, evalStateT, get, gets, modify, put)
 import Data.List (intercalate, (!?))
-import qualified Data.IntMap as IntMap
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 
 import Djinn.Internal.LJTFormula
 
 data ProofType
-    = Meta Int
+    = Meta Natural
     | Product [ProofType]
     | Sum [(ConsDesc, ProofType)]
     | EmptyType Symbol
@@ -29,8 +30,10 @@ data Constraint
     | EmptyEliminator ProofType
 
 data CheckState = CheckState {
-    nextMeta :: Int,
-    substitutions :: IntMap.IntMap ProofType,
+    -- Metavariables are private identities, so an arbitrary-precision counter
+    -- avoids semantic reuse without changing the public Int-valued term arities.
+    nextMeta :: Natural,
+    substitutions :: Map.Map Natural ProofType,
     constraints :: [Constraint]
     }
 
@@ -38,7 +41,7 @@ type Check a = StateT CheckState (Either String) a
 type Environment = [(Symbol, ProofType)]
 
 initialState :: CheckState
-initialState = CheckState 0 IntMap.empty []
+initialState = CheckState 0 Map.empty []
 
 checkProof :: [(Symbol, Formula)] -> Formula -> Term -> Either String ()
 checkProof environment expected term =
@@ -102,7 +105,9 @@ infer environment term =
             return $ payload :~> result
         Ccases constructors -> do
             mapM_ ensureConstructor constructors
-            branches <- freshMetas (length constructors)
+            -- Constructors already are the allocation plan; following that
+            -- spine avoids a lossy list-length projection.
+            branches <- mapM (const freshMeta) constructors
             result <- freshMeta
             if null constructors then do
                 emptyInput <- freshMeta
@@ -132,6 +137,8 @@ freshMeta = do
     return $ Meta index
 
 freshMetas :: Int -> Check [ProofType]
+-- Raw proof combinators retain their historical Int arities. They are checked
+-- non-negative before this finite compatibility count reaches 'replicateM'.
 freshMetas count = replicateM count freshMeta
 
 addConstraint :: Constraint -> Check ()
@@ -171,18 +178,18 @@ unifyLists description first second = do
         show (length first) ++ " vs " ++ show (length second)
     sequence_ $ zipWith unify first second
 
-bind :: Int -> ProofType -> Check ()
+bind :: Natural -> ProofType -> Check ()
 bind index proofType = do
     cyclic <- occurs index proofType
     when cyclic $ failCheck $
         "cyclic proof type: t" ++ show index ++ " occurs in " ++
         showProofType proofType
     modify $ \ checkState -> checkState {
-        substitutions = IntMap.insert index proofType
+        substitutions = Map.insert index proofType
             (substitutions checkState)
         }
 
-occurs :: Int -> ProofType -> Check Bool
+occurs :: Natural -> ProofType -> Check Bool
 occurs index proofType = do
     proofType' <- prune proofType
     case proofType' of
@@ -204,12 +211,12 @@ anyM predicate (value : values) = do
 prune :: ProofType -> Check ProofType
 prune proofType@(Meta index) = do
     table <- gets substitutions
-    case IntMap.lookup index table of
+    case Map.lookup index table of
         Nothing -> return proofType
         Just replacement -> do
             replacement' <- prune replacement
             modify $ \ checkState -> checkState {
-                substitutions = IntMap.insert index replacement'
+                substitutions = Map.insert index replacement'
                     (substitutions checkState)
                 }
             return replacement'

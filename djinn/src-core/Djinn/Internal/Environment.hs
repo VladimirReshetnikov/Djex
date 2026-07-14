@@ -31,6 +31,7 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Djinn.Internal.Declaration
+import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.HCheck
     ( PreparedKindCheck
     , htCheckTypePrepared
@@ -384,11 +385,11 @@ groundKindToHKind = fromSynthesisKind . fmap absurd
 
 freshDjinnTypeVariable
     :: SharedTypeSynonym.FreshVariable HSymbol
-freshDjinnTypeVariable reserved = Just . choose . (++ "'")
+freshDjinnTypeVariable reserved variable = Just fresh
   where
-    choose candidate
-        | candidate `Set.member` reserved = choose $ candidate ++ "'"
-        | otherwise = candidate
+    (fresh, _, _) = allocateFresh
+        (\candidate -> (candidate, candidate ++ "'"))
+        reserved (variable ++ "'")
 
 -- The Environment-native constructor cannot encounter an ungrounded kind,
 -- but its error parameter remembers the already-erased input type. Retag the

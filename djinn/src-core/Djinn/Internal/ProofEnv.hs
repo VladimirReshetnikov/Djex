@@ -9,7 +9,9 @@ module Djinn.Internal.ProofEnv (
 
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 
+import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.LJTFormula
 
 data ProofEnvironment = ProofEnvironment {
@@ -34,27 +36,24 @@ prepareProofEnvironment target bindings =
         displayBindings =
             [(internalName, external)
             | (external, internalName, _) <- safe],
-        targetWasExcluded = length safe /= length internalized
+        targetWasExcluded = any
+            (\ (external, _, _) -> external == target) internalized
         }
   where
     initiallyUsed = Set.fromList $
         map fst bindings ++ concatMap (formulaSymbols . snd) bindings
-    internalized = build bindings initiallyUsed (1 :: Integer)
+    internalized = build bindings initiallyUsed (1 :: Natural)
     safe = filter (\ (external, _, _) -> external /= target) internalized
     strip entries =
         [(internalName, formula) | (_, internalName, formula) <- entries]
 
     build [] _ _ = []
     build ((external, formula) : rest) used next =
-        let (internalName, used', next') = freshInternal used next
+        let (internalName, used', next') = allocateFresh
+                (\suffix ->
+                    (Symbol $ "$assumption" ++ show suffix, suffix + 1))
+                used next
         in (external, internalName, formula) : build rest used' next'
-
-    freshInternal used next =
-        let candidate = Symbol ("$assumption" ++ show next)
-        in if candidate `Set.member` used then
-               freshInternal used (next + 1)
-           else
-               (candidate, Set.insert candidate used, next + 1)
 
 -- Restore only free assumption variables.  Removing a mapping below a lambda
 -- makes this correct even for externally supplied terms that shadow an internal

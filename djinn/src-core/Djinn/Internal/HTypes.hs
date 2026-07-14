@@ -21,7 +21,9 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe(fromMaybe, listToMaybe)
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 import Text.ParserCombinators.ReadP
+import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.Generated
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.LJTFormula
@@ -238,9 +240,9 @@ data ExpansionType
 -- This distinguishes finite well-kinded nesting while making higher-order raw
 -- recurrence revisit the same finite source occurrence and fail early.
 data ExpansionOrigin
-    = QueryOrigin [Int]
-    | DefinitionTemplateOrigin [Int]
-    | DefinitionOrigin ExpansionOrigin HSymbol [Int]
+    = QueryOrigin [Natural]
+    | DefinitionTemplateOrigin [Natural]
+    | DefinitionOrigin ExpansionOrigin HSymbol [Natural]
     deriving (Eq, Ord)
 
 data ExpansionFrame = ExpansionFrame HSymbol ExpansionOrigin
@@ -299,7 +301,7 @@ definitionExpansionType = expansionTypeAt DefinitionTemplateOrigin
 -- Reverse tree paths make child extension constant-time. Constructor and
 -- field positions are both included, so two equal spellings in one finite
 -- input still receive distinct identities.
-expansionTypeAt :: ([Int] -> ExpansionOrigin) -> HType -> ExpansionType
+expansionTypeAt :: ([Natural] -> ExpansionOrigin) -> HType -> ExpansionType
 expansionTypeAt origin = convert []
   where
     convert path source =
@@ -706,8 +708,9 @@ firstRecursiveComponent
 firstRecursiveComponent definitions references =
     listToMaybe $ sortOn componentPosition orderedCycles
   where
-    positions = Map.fromList $ zip (map fst definitions) [0 :: Int ..]
-    position name = Map.findWithDefault maxBound name positions
+    positions = Map.fromList $ zip (map fst definitions) [0 :: Natural ..]
+    position name = Map.findWithDefault fallbackPosition name positions
+    fallbackPosition = 1 + maximum (0 : Map.elems positions)
     componentPosition names = minimum $ map position names
     orderedCycles =
         [sortOn position names |
@@ -956,7 +959,7 @@ termToHExpr term = do
         -- prefix comes from a globally unique proof binder and candidates are
         -- also checked against every source name, so external assumptions
         -- cannot be captured.
-        payloadValues owner = go reservedNames (1 :: Integer)
+        payloadValues owner = go reservedNames (1 :: Natural)
           where
             go _ _ [] = ([], [])
             go used next (pattern' : patterns) =
@@ -976,14 +979,10 @@ termToHExpr term = do
                         in (HPAt fresh pattern', HEVar fresh, used', next')
 
             freshField used next =
-                let candidate = owner ++ "_field" ++ show next
-                in if candidate `Set.member` used then
-                       freshField used (next + 1)
-                   else
-                       ( candidate
-                       , Set.insert candidate used
-                       , next + 1
-                       )
+                allocateFresh
+                    (\suffix ->
+                        (owner ++ "_field" ++ show suffix, suffix + 1))
+                    used next
 
         unLam 0 e = Right ([], e)
         unLam n (HELam patterns e) | length patterns >= n =
@@ -1071,7 +1070,7 @@ alphaRenameTerm :: Term -> Term
 alphaRenameTerm term = renamed
   where
     (renamed, _, _) =
-        rename [] (Set.fromList $ freeVars term) (1 :: Integer) term
+        rename [] (Set.fromList $ freeVars term) (1 :: Natural) term
 
     rename environment used next proofTerm =
         case proofTerm of
@@ -1096,11 +1095,9 @@ alphaRenameTerm term = renamed
             _ -> (proofTerm, used, next)
 
     freshBinder used next =
-        let candidate = Symbol $ "__djinn" ++ show next
-        in if candidate `Set.member` used then
-               freshBinder used (next + 1)
-           else
-               (candidate, Set.insert candidate used, next + 1)
+        allocateFresh
+            (\suffix -> (Symbol $ "__djinn" ++ show suffix, suffix + 1))
+            used next
 
 -- Eliminate degenerate as-patterns such as x@y by retaining y and renaming x.
 -- This can make all branches of a case visibly equal, so collapse that case in
@@ -1164,7 +1161,8 @@ fixSillyAt = fixAt []
 niceNames :: HExpr -> HExpr
 niceNames e =
     let bvars = filter (/= "_") $ getBinderVarsHE e
-        nvars = [[c] | c <- ['a'..'z']] ++ [ "x" ++ show i | i <- [1::Integer ..]]
+        nvars = [[c] | c <- ['a'..'z']] ++
+            ["x" ++ show i | i <- [1 :: Natural ..]]
         freevars = getAllVars e \\ bvars
         vars = nvars \\ freevars
         sub = zip bvars vars

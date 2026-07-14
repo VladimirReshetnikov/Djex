@@ -61,6 +61,7 @@ import qualified Language.Haskell.Synthesis.Search as SharedSearch
 
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
+import qualified Djinn.Internal.Fresh as Fresh
 import Djinn.Internal.HCheck (
     PreparedKindCheck,
     htCheckTypePrepared, htCheckTypeKindPrepared,
@@ -524,18 +525,14 @@ instantiateMethod parameters arguments methodType =
         filter (`Set.member` imageVariables) localVariables
     initiallyUnavailable = Set.fromList $
         parameterNames ++ methodVariables ++ concatMap getHTVars arguments
-    (_, renamings) = mapAccumL allocateFresh
+    (_, renamings) = mapAccumL allocateRenaming
         initiallyUnavailable capturedLocals
 
-    allocateFresh unavailable variable =
-        let fresh = chooseFresh 1
-            chooseFresh primeCount =
-                let candidate = variable ++ replicate primeCount '\''
-                in if Set.member candidate unavailable then
-                       chooseFresh (primeCount + 1)
-                   else
-                       candidate
-        in (Set.insert fresh unavailable, (variable, HTVar fresh))
+    allocateRenaming unavailable variable =
+        let (fresh, unavailable', _) = Fresh.allocateFresh
+                (\candidate -> (candidate, candidate ++ "'"))
+                unavailable (variable ++ "'")
+        in (unavailable', (variable, HTVar fresh))
 
 data QueryOptions = QueryOptions {
     -- | Collect alternative solutions beyond the first.

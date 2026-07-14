@@ -247,6 +247,7 @@ Library djinn-core
 
   Other-Modules:
     Djinn.Internal.Declaration
+    Djinn.Internal.Fresh
     Djinn.Internal.Type
 
 -- Compatibility frontend for the historical Djinn library.  Cabal component

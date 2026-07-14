@@ -30,7 +30,9 @@ import Data.List ((!?))
 import Data.Maybe (fromMaybe)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 
+import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.LJTFormula
 
 -- Whether local proof-search cuts should retain their alternative paths.
@@ -281,7 +283,7 @@ replay sk fk = go
 -- The state carries both the next suffix and every symbol already in use.
 -- The initial used set contains caller-supplied term and formula symbols; each
 -- generated symbol is then recorded here as well.
-data PS = PS !Integer (Set.Set Symbol)
+data PS = PS !Natural (Set.Set Symbol)
 
 startPS :: [Symbol] -> PS
 startPS = PS 1 . Set.fromList
@@ -366,13 +368,10 @@ addNestImp nested nestedImps
 ----- Generate a new unique variable
 newSym :: String -> P Symbol
 newSym prefix = P $ \ _ (PS next used) sk fk ->
-    let (suffix, symbol) = firstUnused next
-        firstUnused i =
-            let candidate = Symbol (prefix ++ show i)
-            in if candidate `Set.member` used
-               then firstUnused (i + 1)
-               else (i, candidate)
-    in sk (PS (suffix + 1) (Set.insert symbol used)) symbol fk
+    let (symbol, used', next') = allocateFresh
+            (\suffix -> (Symbol $ prefix ++ show suffix, suffix + 1))
+            used next
+    in sk (PS next' used') symbol fk
 
 ------------------------------
 ----- Generate all ways to select one element of a list

@@ -96,7 +96,8 @@ hsGenRepl state = REPL {
 data State = State {
     -- Declaration edits are transactional operations on this opaque session.
     -- Its shared environment is authoritative; historical raw tables exist
-    -- only as private projections used by search and the views below.
+    -- only as private display projections. Search uses sealed premise, class,
+    -- kind, synonym, and formula indexes instead.
     djinnSession :: DjinnSession,
     multi :: Bool,
     sorted :: Bool,

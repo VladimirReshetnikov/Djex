@@ -1100,6 +1100,29 @@ declarationTests = testGroup "declarations"
       fmap (+ 10) declaration @?= expected
       toList declaration @?= [1, 2, 3]
       traverse (Just . (+ 10)) declaration @?= Just expected
+  , testCase "map declaration kind variables without changing source data" $ do
+      let typeName = right $ mkIdentifier "Higher"
+          className = right $ mkIdentifier "C"
+          source :: [Declaration.Declaration String Int Int]
+          source =
+            [ Declaration.AbstractTypeDeclaration 1 typeName
+                $ Kind.KindVariable 2
+            , Declaration.ClassDeclaration 3 className
+                [ Declaration.TypeParameter "a"
+                    $ Just $ Kind.KindVariable 4
+                ] [] []
+            ]
+          expected :: [Declaration.Declaration String Int Int]
+          expected =
+            [ Declaration.AbstractTypeDeclaration 1 typeName
+                $ Kind.KindVariable 12
+            , Declaration.ClassDeclaration 3 className
+                [ Declaration.TypeParameter "a"
+                    $ Just $ Kind.KindVariable 14
+                ] [] []
+            ]
+      map (Declaration.mapDeclarationKindVariables (+ 10)) source @?=
+        expected
   , testCase "kind variables traverse and report free identities" $ do
       let kind = Kind.FunctionKind (Kind.KindVariable (1 :: Int))
             Kind.ProperTypeKind

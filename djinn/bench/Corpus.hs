@@ -192,7 +192,12 @@ duplicationAliasEntry depth = aliasEntry
 
 aliasEntry :: String -> [TypeDefinition] -> AliasEntry
 aliasEntry name definitions = AliasEntry
-    name definitions $ Environment definitions [] []
+    name definitions $ Environment definitions
+        [("identity", HTArrow premise premise)] []
+  where
+    -- Keep one cheap global assumption in every fixture so full-environment
+    -- preparation measures the premise cache as well as the alias tables.
+    premise = HTVar "premise"
 
 linearName :: Int -> String
 linearName index = "Linear" ++ show index

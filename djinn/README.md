@@ -370,7 +370,7 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn` (`src-frontend/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Djinn compatibility adapter over shared kind inference, plus saturated-synonym policy. |
-| `Djinn.Internal.Environment` | Transactional rebuilding/validation of declarations and shared shape checks. |
+| `Djinn.Internal.Environment` | Authoritative Inventory preparation plus private class, kind, synonym, formula, and ordered global-premise indexes. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated `djex:synthesis` name and operator rules. |
 | `Djinn.Internal.HTypes` | Type parser, logical translation, and proof-term conversion/cleanup. |
 | `Djinn.Internal.Type` | Checked conversion between Djinn source types and the shared source-type IR. |
@@ -480,9 +480,13 @@ The opaque Djinn `Environment` itself now round-trips through
 stricter source subset, grounds and checks the neutral Inventory once, validates
 synonym saturation in every type-bearing declaration position, and classifies
 recursive datatypes only after aliases have been expanded. The resulting raw
-search tables, query-time kind checker, and checked formula translator are
-projections of those same cached assumptions rather than a second independently
-inferred environment. Raw
+query-time kind checker, synonym table, nominal class index, checked formula
+translator, and ordered global proof premises are projections of those same
+cached assumptions rather than a second independently inferred environment.
+Global assumptions are translated once while sealing; only a query goal and
+its instantiated class methods still vary per search. Historical raw search
+tables are reconstructed from the Inventory only for compatibility inspection,
+not retained in `PreparedEnvironment`. Raw
 `prepareEnvironment` applies that same expand-first recursion preflight, so a
 constructor-forged compatibility environment cannot bypass it while phantom
 aliases retain their alias-free meaning.
@@ -495,12 +499,11 @@ that result, with the latter retaining `reportGeneratedClauses` and legacy
 rendered strings.
 The default `djex` library additionally exposes
 `Language.Haskell.Djex.Djinn`: `mkDjinnSession` lowers a neutral
-`DjinnEnvironment` and pairs the checked Djinn projection with the exact shared
-`DjinnInventory` that validated it. The editable raw `Djinn.Core.Environment`
-therefore remains confined to the compatibility library and REPL;
-`standardDjinnSession` seals the authoritative checked built-in raw environment
-directly without exposing its representation, while caller-supplied neutral
-environments continue through `mkDjinnSession`,
+`DjinnEnvironment` and retains the exact shared `DjinnInventory` that validated
+its private proof indexes. The editable raw `Djinn.Core.Environment` therefore
+remains confined to compatibility inputs and the REPL parser;
+`standardDjinnSession` converts the checked built-in spelling once and then
+uses the same neutral `mkDjinnSession` path as caller-supplied environments,
 `parseDjinnRequest` shares the REPL's optional class-context grammar, and
 `mkDjinnRequest` seals a `QueryRequest DjinnType QueryOptions` into the opaque
 `DjinnRequest` consumed by `runDjinnQuery`. Existing programmatic clients
@@ -551,8 +554,10 @@ make exact normalization undecidable. The returned closure consequently fails
 deterministically on a source-created recursive synonym/type-definition
 expansion; `hTypeToFormula`
 is the one-shot checked wrapper. Checked Djinn sessions retain that compiled
-closure in `PreparedEnvironment`, so later queries perform only their
-source-local expansion checks rather than repeating whole-table analysis.
+closure and every ordered global premise in `PreparedEnvironment`, so later
+queries perform only their source-local goal and instantiated-method expansion
+checks rather than repeating whole-table analysis or translating unchanged
+function assumptions.
 
 The central pipeline is:
 

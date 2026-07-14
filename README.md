@@ -49,11 +49,11 @@ representation for saturated functions and tuples. Both engines now construct
 their stable `QueryResult` payloads in the core: Djinn preserves its richer
   logical evidence, while Exference derives evidence from each lazy candidate
   batch after one checked query preparation. Exference source checking and both
-  stable sessions now make their shared inventories authoritative. The
-  remaining convergence priority is narrowing Djinn's private prepared proof
-  caches. Package boundaries should be erased only after that environment
-  authority has converged; an earlier manifest-only collapse would still
-  discard useful dependency checks.
+  stable sessions now make their shared inventories authoritative; Djinn also
+  seals its ordered global proof premises and class lookup from that Inventory
+  without retaining raw backend tables. The next convergence priority is to
+  fold the parser-free foundation and cores into the default library while
+  retaining the compatibility frontends' useful dependency isolation.
 
 ## Dependency migration
 
@@ -229,11 +229,16 @@ first constructor, so they do not sacrifice lazy candidate tails.
 `DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
 class-kind defaulting and retains the synonym table prepared from that exact
 inventory; the mutable raw `Djinn.Core.Environment` no longer crosses the
-default facade. Synonyms are expanded for saturation and recursive datatype
-validation before the original alias-bearing declarations are lowered for
-proof search. At query time Djinn elaborates the goal and all class arguments
-as one shared kind scope, then sends the alias-free projection to proof search;
-opaque requests still retain their exact session-independent source view.
+default facade or survives inside `PreparedEnvironment`. Synonyms are expanded
+for saturation and recursive datatype validation before ordered global
+assumptions are translated once into proof premises. Class lookup, kinds,
+synonyms, formula definitions, and those premises are private indexes of the
+same Inventory; historical raw declaration tables are derived only when a
+compatibility caller asks to display them. At query time Djinn elaborates the
+goal and all class arguments as one shared kind scope, translates only the goal
+and instantiated class methods, then sends the alias-free projection to proof
+search; opaque requests still retain their exact session-independent source
+view.
 `standardDjinnSession` converts the historical built-in spelling once and then
 uses the same neutral `mkDjinnSession` path as every caller-supplied environment.
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
@@ -408,10 +413,12 @@ The `djinn` compatibility frontend likewise retains its declaration REPL while
 storing only the exact sealed `DjinnSession`. Successful mutations edit its
 authoritative shared environment and publish a replacement session only after
 complete structural, kind, alias, recursion, and backend validation. Historical
-`:environment` ordering and instance-method lookup are projections of the
-already prepared backend rather than separately retained or repeatedly sealed
-raw environments. Type queries and instance methods consume shared evidence,
-progress, metadata, and `FunctionClause` output through `runDjinnQuery`.
+`:environment` ordering is derived on demand from the retained Inventory;
+instance-method lookup uses its prepared nominal class index, and type queries
+reuse the ordered global premise cache. None requires a separately retained or
+repeatedly sealed raw environment. Queries and instance methods consume shared
+evidence, progress, metadata, and `FunctionClause` output through
+`runDjinnQuery`.
 Startup-file mode now carries
 aggregate failure status across later commands and `:clear`, accepts settings
 on either side of filenames, and rejects unknown or ambiguous option prefixes;

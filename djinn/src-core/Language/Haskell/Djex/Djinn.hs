@@ -200,7 +200,8 @@ removeDjinnDeclaration name (DjinnSession environment _) = do
 
 -- The following projections keep the compatibility frontend's exact display
 -- and instance-generation behavior without making it retain a raw Environment.
--- Each view comes from the backend index already derived while sealing.
+-- Display views are reconstructed from the authoritative Inventory on demand;
+-- instance lookup separately uses the sealed nominal class index.
 djinnSessionTypeDeclarations
   :: DjinnSession
   -> [(Core.HSymbol, ([Core.HSymbol], Core.HType, Core.HKind))]

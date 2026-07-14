@@ -47,8 +47,18 @@ prepareKindCheckWithAssumptions
     :: [(HSymbol, ([HSymbol], HType, HKind))]
     -> SharedInference.KindAssumptions
     -> PreparedKindCheck
-prepareKindCheckWithAssumptions definitions =
-    PreparedKindCheck (synonymArities definitions)
+prepareKindCheckWithAssumptions definitions assumptions =
+    forceSynonymArities arities `seq` PreparedKindCheck arities assumptions
+  where
+    -- Force the derived list while the source projection is transient. The
+    -- prepared checker then retains names and arities, never deferred access
+    -- to complete raw type definitions.
+    arities = synonymArities definitions
+
+forceSynonymArities :: [(HSymbol, Int)] -> ()
+forceSynonymArities [] = ()
+forceSynonymArities ((name, arity) : rest) =
+    name `seq` arity `seq` forceSynonymArities rest
 
 htCheckType :: [(HSymbol, ([HSymbol], HType, HKind))] -> HType -> Either String ()
 htCheckType its = htCheckTypeKind its KStar

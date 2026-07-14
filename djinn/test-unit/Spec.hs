@@ -67,6 +67,8 @@ tests =
           testCheckedDjinnAdapter)
     , ("edit checked Djinn sessions through the shared environment",
           testCheckedDjinnSessionEditing)
+    , ("invalidate prepared Djinn caches transactionally",
+          testCheckedDjinnCacheInvalidation)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
@@ -74,6 +76,8 @@ tests =
     , ("round-trip shared environments", testSharedEnvironmentAdapter)
     , ("prepare neutral Djinn environments authoritatively",
           testNeutralDjinnPreparation)
+    , ("cache prepared global premises in declaration order",
+          testPreparedFunctionPremises)
     , ("project raw Djinn kinds from the authoritative inventory",
           testRawDjinnPreparationKinds)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
@@ -309,6 +313,88 @@ testCheckedDjinnSessionEditing = do
         Djex.resolveDjinnInstanceMethods initial [] equality
     assertEqual "session-level instance lookup changed class method order"
         ["=="] (map fst methods)
+
+    withTokenType <- expectShownRight $ Djex.declareDjinnDeclaration
+        (AbstractType "Token" KStar) initial
+    withTokenValue <- expectShownRight $ Djex.declareDjinnDeclaration
+        (Function "token" $ HTCon "Token") withTokenType
+    target <- expectShownRight $ SharedName.mkIdentifier "answer"
+    request <- expectShownRight $ Djex.parseDjinnRequest
+        withTokenValue defaultQueryOptions target "premise-cache.djinn" "Token"
+    inhabited <- expectShownRight $
+        Djex.runDjinnQuery withTokenValue request
+    assertBool "a newly sealed global premise was unavailable to proof search"
+        $ not $ null $ SharedSearch.batchCandidates
+        $ SharedQuery.resultSearch inhabited
+
+    withoutTokenValue <- expectShownRight $ Djex.declareDjinnDeclaration
+        (Function "token" $ HTArrow (HTCon "Token") (HTCon "Token"))
+        withTokenValue
+    uninhabited <- expectShownRight $
+        Djex.runDjinnQuery withoutTokenValue request
+    assertEqual "function replacement retained a stale prepared premise"
+        []
+        (SharedSearch.batchCandidates $ SharedQuery.resultSearch uninhabited)
+
+testCheckedDjinnCacheInvalidation :: IO ()
+testCheckedDjinnCacheInvalidation = do
+    initial <- expectShownRight Djex.standardDjinnSession
+    withA <- expectShownRight $ Djex.declareDjinnDeclaration
+        (AbstractType "A" KStar) initial
+    withAB <- expectShownRight $ Djex.declareDjinnDeclaration
+        (AbstractType "B" KStar) withA
+    withAlias <- expectShownRight $ Djex.declareDjinnDeclaration
+        (TypeSynonym "Selected" [] $ HTCon "A") withAB
+    withSelected <- expectShownRight $ Djex.declareDjinnDeclaration
+        (Function "selected" $ HTCon "Selected") withAlias
+    targetA <- expectShownRight $ SharedName.mkIdentifier "answerA"
+    requestA <- expectShownRight $ Djex.parseDjinnRequest
+        withSelected defaultQueryOptions targetA "synonym-cache.djinn" "A"
+    beforeReplacement <- expectShownRight $
+        Djex.runDjinnQuery withSelected requestA
+    assertBool "the alias-backed premise did not initially prove A"
+        $ hasCandidates beforeReplacement
+
+    retargeted <- expectShownRight $ Djex.declareDjinnDeclaration
+        (TypeSynonym "Selected" [] $ HTCon "B") withSelected
+    staleA <- expectShownRight $ Djex.runDjinnQuery retargeted requestA
+    assertBool "synonym replacement retained the old global formula"
+        $ not $ hasCandidates staleA
+    targetB <- expectShownRight $ SharedName.mkIdentifier "answerB"
+    requestB <- expectShownRight $ Djex.parseDjinnRequest
+        retargeted defaultQueryOptions targetB "synonym-cache.djinn" "B"
+    freshB <- expectShownRight $ Djex.runDjinnQuery retargeted requestB
+    assertBool "synonym replacement did not rebuild the global formula"
+        $ hasCandidates freshB
+
+    withOldClass <- expectShownRight $ Djex.declareDjinnDeclaration
+        (ClassDecl "Selectable" ["a"] [("oldMethod", HTVar "a")])
+        initial
+    selectedBool <- either fail pure $
+        mkContext "Selectable" [HTCon "Bool"]
+    oldMethods <- expectShownRight $ Djex.resolveDjinnInstanceMethods
+        withOldClass [] selectedBool
+    assertEqual "the initial class index lost its method"
+        ["oldMethod"] (map fst oldMethods)
+
+    withNewClass <- expectShownRight $ Djex.declareDjinnDeclaration
+        (ClassDecl "Selectable" ["a"] [("newMethod", HTVar "a")])
+        withOldClass
+    newMethods <- expectShownRight $ Djex.resolveDjinnInstanceMethods
+        withNewClass [] selectedBool
+    assertEqual "class replacement retained a stale method index"
+        ["newMethod"] (map fst newMethods)
+    withoutClass <- expectShownRight $
+        Djex.removeDjinnDeclaration "Selectable" withNewClass
+    case Djex.resolveDjinnInstanceMethods withoutClass [] selectedBool of
+        Left failure -> assertBool "class deletion lost its lookup diagnostic"
+            $ "Class not found: Selectable" `isInfixOf`
+                unwords (SharedDiagnostic.diagnosticContext failure)
+        Right methods -> fail $ "class deletion retained methods: " ++
+            show methods
+  where
+    hasCandidates = not . null . SharedSearch.batchCandidates .
+        SharedQuery.resultSearch
 
 -- The library facade must make invalid environments unrepresentable and
 -- report search results honestly.
@@ -703,10 +789,9 @@ testSharedEnvironmentAdapter = do
         (typeDeclarations loweredUnit)
 
 -- The stable Djex boundary must preserve the neutral Environment as the
--- authoritative declaration inventory.  Lowering may organize declarations
--- into Djinn's three historical lookup tables, but rebuilding the public
--- inventory from those tables loses global source order and can also change
--- the meaning of synonym-transparent recursion.
+-- authoritative declaration inventory. Historical raw tables are on-demand
+-- compatibility projections; making them the retained source instead would
+-- lose global order and can change synonym-transparent recursion.
 testNeutralDjinnPreparation :: IO ()
 testNeutralDjinnPreparation = do
     let proper = SharedKind.ProperTypeKind
@@ -838,6 +923,40 @@ testNeutralDjinnPreparation = do
                         "2" `isInfixOf` contextText)
             Right _ -> fail $ description ++
                 ": an unsaturated type synonym reached Djinn"
+
+-- Global assumptions are invariant across queries, so sealing translates
+-- them once in exact declaration order. The raw table remains an on-demand
+-- compatibility projection of the shared inventory rather than retained
+-- session state.
+testPreparedFunctionPremises :: IO ()
+testPreparedFunctionPremises = do
+    let atom = HTCon "Atom"
+        alias = HTCon "Alias"
+        environment = RawEnvironment.Environment
+            [ ("Atom", ([], HTAbstract "Atom" KStar, KStar))
+            , ("Alias", ([], atom, KStar))
+            ]
+            [ ("aliased", alias)
+            , ("identity", HTArrow alias alias)
+            ]
+            []
+        atomFormula = PVar $ Symbol "Atom"
+    prepared <- expectShownRight $ prepareEnvironment environment
+    assertEqual "prepared premises changed source order or alias expansion"
+        [ (Symbol "aliased", atomFormula)
+        , (Symbol "identity", atomFormula :-> atomFormula)
+        ]
+        (RawEnvironment.preparedEnvironmentFunctionPremises prepared)
+    assertEqual "the compatibility projection changed the sealed declarations"
+        environment (RawEnvironment.preparedEnvironmentSource prepared)
+    firstResult <- expectRight $ inhabitGeneratedPrepared
+        defaultQueryOptions prepared [] "answer" alias
+    secondResult <- expectRight $ inhabitGeneratedPrepared
+        defaultQueryOptions prepared [] "answer" alias
+    assertBool "cached global premises were not consumed by proof search"
+        $ not $ null $ generatedReportCandidates firstResult
+    assertEqual "reusing cached premises changed a repeated query"
+        firstResult secondResult
 
 mkNeutralDjinnEnvironment
     :: [SharedDeclaration.Declaration String Int ()]

@@ -8,6 +8,7 @@ module Djinn.Internal.Environment (
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
     preparedEnvironmentKindCheck, preparedEnvironmentFormulaTranslator,
+    preparedEnvironmentFunctionPremises, lookupPreparedEnvironmentClass,
     elaboratePreparedTypes,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
@@ -42,7 +43,7 @@ import Djinn.Internal.HCheck
     , prepareKindCheckWithAssumptions
     )
 import Djinn.Internal.HTypes
-import Djinn.Internal.LJTFormula (Formula)
+import Djinn.Internal.LJTFormula (Formula, Symbol(..))
 import Djinn.Internal.Type (fromSynthesisType, toSynthesisType)
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
@@ -56,15 +57,16 @@ data Environment = Environment {
     }
     deriving (Eq, Show)
 
--- | A source environment sealed together with the exact shared inventory and
--- query-time kind-check state derived from it.  The constructor is private:
--- cached assumptions therefore cannot drift away from the declarations whose
--- synonym rules and proof-search lowering they accompany.
+-- | One authoritative shared inventory and the private proof-search indexes
+-- derived from it. The constructor is private, so cached class lookup,
+-- translated global premises, kind assumptions, synonyms, and formula
+-- definitions cannot drift away from their declarations.
 data PreparedEnvironment = PreparedEnvironment
-    Environment
     SynthesisInventory
     (SharedTypeSynonym.TypeSynonyms HSymbol)
     PreparedKindCheck
+    (Map.Map HSymbol ([(HSymbol, HKind)], [Axiom]))
+    [(Symbol, Formula)]
     (HType -> Either String Formula)
 
 type SynthesisEnvironment =
@@ -146,10 +148,12 @@ prepareEnvironment environment = do
 -- rebuilding the environment; finally the shared kind assumptions become the
 -- sole authority for every kind embedded in Djinn's raw representation.
 --
--- Synonyms stay in the stored raw environment because the proof translation
--- uses them definitionally. They are nevertheless expanded across every
--- declaration before sealing, both to enforce Haskell's saturation rule and
--- to classify recursive datatypes by their actual (alias-free) fields.
+-- Synonym declarations stay in the authoritative Inventory. The synonym
+-- table and formula translator are derived caches, while raw declaration
+-- tables are reconstructed only for compatibility inspection. Aliases are
+-- expanded across every declaration before sealing, both to enforce Haskell's
+-- saturation rule and to classify recursive datatypes by their actual
+-- (alias-free) fields.
 prepareSynthesisEnvironment
     :: SynthesisEnvironment
     -> Either SynthesisEnvironmentError PreparedEnvironment
@@ -312,23 +316,54 @@ sealPreparedEnvironment
     -> SynthesisInventory
     -> SharedTypeSynonym.TypeSynonyms HSymbol
     -> Either SynthesisEnvironmentError PreparedEnvironment
-sealPreparedEnvironment environment inventory synonyms = do
+sealPreparedEnvironment (Environment types functions classes)
+        inventory synonyms = do
     translate <- first InvalidSynthesisFormulaDefinitions $
-        prepareTypeFormulaTranslator $ envTypes environment
-    return $ PreparedEnvironment environment inventory synonyms
-        (prepareKindCheckWithAssumptions
-            (envTypes environment)
-            (SharedInventory.inventoryKindAssumptions inventory))
-        translate
+        prepareTypeFormulaTranslator types
+    -- Moving an invariant translation failure from query execution to sealing
+    -- is deliberate. Kind checking plus whole-definition graph validation
+    -- excludes such failures for supported declarations, and eager preparation
+    -- ensures every published environment owns a complete premise cache.
+    premises <- first InvalidSynthesisFormulaDefinitions $
+        mapM (translateFunction translate) functions
+    let kindCheck = prepareKindCheckWithAssumptions types
+            $ SharedInventory.inventoryKindAssumptions inventory
+        classIndex = Map.fromList classes
+    -- Force the derived index before the transient compatibility projection
+    -- leaves scope; its field cannot retain the complete raw Environment thunk.
+    classIndex `seq` kindCheck `seq` return (PreparedEnvironment
+        inventory synonyms kindCheck classIndex premises translate)
+  where
+    translateFunction translate (name, source) =
+        (,) (Symbol name) `fmap`
+            first (("function " ++ prHSymbolOp name ++ ": ") ++)
+                (translate source)
 
+-- | Reconstruct the historical raw declaration tables on demand. The
+-- inventory is opaque and can enter 'PreparedEnvironment' only after Djinn's
+-- declaration preflight, so a failure here denotes an internal invariant
+-- violation rather than a caller error.
 preparedEnvironmentSource :: PreparedEnvironment -> Environment
-preparedEnvironmentSource (PreparedEnvironment environment _ _ _ _) = environment
+preparedEnvironmentSource prepared =
+    case projectPreparedInventory prepared of
+        Right environment -> environment
+        Left failure -> error $
+            "Djinn.Internal.Environment.preparedEnvironmentSource: " ++
+            "sealed inventory invariant failed: " ++ show failure
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
-preparedEnvironmentInventory (PreparedEnvironment _ inventory _ _ _) = inventory
+preparedEnvironmentInventory
+        (PreparedEnvironment inventory _ _ _ _ _) = inventory
 
 preparedEnvironmentKindCheck :: PreparedEnvironment -> PreparedKindCheck
-preparedEnvironmentKindCheck (PreparedEnvironment _ _ _ kindCheck _) = kindCheck
+preparedEnvironmentKindCheck
+        (PreparedEnvironment _ _ kindCheck _ _ _) = kindCheck
+
+preparedEnvironmentFunctionPremises
+    :: PreparedEnvironment
+    -> [(Symbol, Formula)]
+preparedEnvironmentFunctionPremises
+        (PreparedEnvironment _ _ _ _ premises _) = premises
 
 -- | The definition table is validated and compiled exactly once when the
 -- environment is sealed. Individual queries retain only their source-local
@@ -338,7 +373,33 @@ preparedEnvironmentFormulaTranslator
     -> HType
     -> Either String Formula
 preparedEnvironmentFormulaTranslator
-        (PreparedEnvironment _ _ _ _ translate) = translate
+        (PreparedEnvironment _ _ _ _ _ translate) = translate
+
+preparedEnvironmentTypeSynonyms
+    :: PreparedEnvironment
+    -> SharedTypeSynonym.TypeSynonyms HSymbol
+preparedEnvironmentTypeSynonyms
+        (PreparedEnvironment _ synonyms _ _ _ _) = synonyms
+
+projectPreparedInventory
+    :: PreparedEnvironment
+    -> Either SynthesisEnvironmentError Environment
+projectPreparedInventory prepared = do
+    sourceDeclarations <- mapM preflightDeclaration $
+        map (SharedDeclaration.mapDeclarationKindVariables absurd) $
+        SharedEnvironment.environmentDeclarations environment
+    projectSynthesisEnvironment assumptions sourceDeclarations
+  where
+    inventory = preparedEnvironmentInventory prepared
+    environment = SharedInventory.inventoryEnvironment inventory
+    assumptions = SharedInventory.inventoryKindAssumptions inventory
+
+lookupPreparedEnvironmentClass
+    :: HSymbol
+    -> PreparedEnvironment
+    -> Maybe ([(HSymbol, HKind)], [Axiom])
+lookupPreparedEnvironmentClass name
+        (PreparedEnvironment _ _ _ classes _ _) = Map.lookup name classes
 
 -- | Elaborate a query batch through the exact alias table retained by its
 -- prepared environment. The list is checked in one free-variable kind scope;
@@ -349,9 +410,7 @@ elaboratePreparedTypes
     :: PreparedEnvironment
     -> [(HKind, HType)]
     -> Either String [HType]
-elaboratePreparedTypes
-        (PreparedEnvironment _ _ synonyms _ _)
-        obligations = do
+elaboratePreparedTypes prepared obligations = do
     sharedObligations <- mapM convertObligation obligations
     elaborated <- first renderElaborationError $
         SharedTypeSynonym.elaborateTypes
@@ -361,6 +420,8 @@ elaboratePreparedTypes
     convertObligation (expected, source) = (,)
         <$> groundHKind expected
         <*> first show (toSynthesisType source)
+
+    synonyms = preparedEnvironmentTypeSynonyms prepared
 
 -- Match the compatibility checker's established spelling for the one query
 -- failure users commonly act on. Other failures retain their structured Show

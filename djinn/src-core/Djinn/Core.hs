@@ -375,12 +375,10 @@ resolvedArguments = constraintArguments . resolvedConstraint
 resolveContexts :: PreparedEnvironment -> [(String, HKind, HType)] -> [Context]
                 -> Either String [[(HSymbol, HType)]]
 resolveContexts prepared additionalTypes contexts = do
-    resolved <- mapM (lookupContext environment) contexts
+    resolved <- mapM (lookupContext prepared) contexts
     checkKindObligations (preparedEnvironmentKindCheck prepared) $
         additionalTypes ++ concatMap argumentObligations resolved
     mapM (instantiateContext prepared) resolved
-  where
-    environment = preparedEnvironmentSource prepared
 
 -- Query aliases are session-dependent, so elaborate only after lookup and
 -- arity validation against the prepared environment. The goal and every
@@ -400,7 +398,7 @@ resolveQueryContexts
     -> [Context]
     -> Either String (HType, [[(HSymbol, HType)]])
 resolveQueryContexts prepared goalObligation contexts = do
-    resolved <- mapM (lookupContext environment) contexts
+    resolved <- mapM (lookupContext prepared) contexts
     let obligations = goalObligation : concatMap argumentObligations resolved
     checkKindObligations (preparedEnvironmentKindCheck prepared) obligations
     elaborated <- elaboratePreparedTypes prepared
@@ -412,9 +410,6 @@ resolveQueryContexts prepared goalObligation contexts = do
                 resolved elaboratedArguments
             methods <- mapM (instantiateContext prepared) elaboratedContexts
             return (elaboratedGoal, methods)
-  where
-    environment = preparedEnvironmentSource prepared
-
 -- Rebuild the already resolved constraints with their alias-free arguments.
 -- The shared batch operation is shape-preserving, but check that invariant at
 -- this representation boundary rather than silently dropping a suffix if it
@@ -438,13 +433,13 @@ attachElaboratedArguments (context : contexts) arguments = do
                 }
         return (context {resolvedConstraint = constraint} : rest)
 
-lookupContext :: Environment -> Context -> Either String ResolvedContext
-lookupContext environment context = do
+lookupContext :: PreparedEnvironment -> Context -> Either String ResolvedContext
+lookupContext prepared context = do
     -- Context is a shared, intentionally permissive syntax node.  Reassert
     -- Djinn's narrower class namespace even when a caller constructs that
     -- node directly instead of going through mkContext.
     requireName "class" (isDjinnDeclarationName ClassOwner) name
-    case lookup name (envClasses environment) of
+    case lookupPreparedEnvironmentClass name prepared of
         Nothing -> Left $ "Class not found: " ++ name
         Just (params, methods)
             | length params == constraintArity context ->
@@ -765,16 +760,14 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
         resolveQueryContexts prepared
         ("goal type " ++ show goal, KStar, goal) contexts
     let translate = preparedEnvironmentFormulaTranslator prepared
-        translateBinding category (symbol, source) =
+        translateMethod (symbol, source) =
             (,) (Symbol symbol) `fmap`
-                first ((category ++ " " ++ prHSymbolOp symbol ++ ": ") ++)
+                first (("method " ++ prHSymbolOp symbol ++ ": ") ++)
                     (translate source)
     form <- queryFailure $ first ("goal type: " ++) $ translate elaboratedGoal
-    functionEnv <- queryFailure $ mapM (translateBinding "function") $
-        envFunctions environment
     methodEnv <- queryFailure $ concat `fmap`
-        mapM (mapM $ translateBinding "method") contextMethods
-    let externalEnv = functionEnv ++ methodEnv
+        mapM (mapM translateMethod) contextMethods
+    let externalEnv = preparedEnvironmentFunctionPremises prepared ++ methodEnv
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
         mode = (defaultSearchMode
@@ -852,7 +845,6 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
                 candidates
                 SharedQuery.ValidatedCandidates
   where
-    environment = preparedEnvironmentSource prepared
     name = SharedGenerated.definitionSpelling target
     queryFailure = first DjinnQueryFailure
 

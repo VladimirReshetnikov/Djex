@@ -44,7 +44,8 @@ main = defaultMain
     -- Preparation benchmarks stay separate from proof search.  The first
     -- group measures the raw formula translator's whole-table validation;
     -- the second includes shared inventory/kind/synonym preparation and the
-    -- cached translator retained by a complete checked environment.
+    -- cached translator and global premise lowering retained by a complete
+    -- checked environment.
     , bgroup "aliasPreparation"
         [ bgroup "translator"
             [ bench (aliasEntryName entry) $

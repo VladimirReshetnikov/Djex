@@ -14,6 +14,7 @@ module Language.Haskell.Synthesis.Declaration
   , DeclarationError (..)
   , validateDeclaration
   , recursiveDataTypeNames
+  , mapDeclarationKindVariables
   , groundDeclarationKinds
   ) where
 
@@ -204,6 +205,32 @@ recursiveDataTypeNames declarations = Set.fromList
     | constructor <- constructors
     , field <- constructorFields constructor
     ]
+
+-- | Rename every explicit kind variable without changing source types,
+-- annotations, or declaration shape.
+mapDeclarationKindVariables
+  :: (kindVariable -> kindVariable')
+  -> Declaration typeVariable kindVariable annotation
+  -> Declaration typeVariable kindVariable' annotation
+mapDeclarationKindVariables convert declaration = case declaration of
+  TypeSynonymDeclaration annotation name parameters body ->
+    TypeSynonymDeclaration annotation name
+      (map convertParameter parameters) body
+  DataTypeDeclaration annotation name parameters constructors ->
+    DataTypeDeclaration annotation name
+      (map convertParameter parameters) constructors
+  AbstractTypeDeclaration annotation name kind ->
+    AbstractTypeDeclaration annotation name $ fmap convert kind
+  ValueDeclaration signature -> ValueDeclaration signature
+  ClassDeclaration annotation name parameters superclasses methods ->
+    ClassDeclaration annotation name (map convertParameter parameters)
+      superclasses methods
+  InstanceDeclaration annotation variables prerequisites headConstraint ->
+    InstanceDeclaration annotation variables prerequisites headConstraint
+ where
+  convertParameter parameter = TypeParameter
+    (parameterVariable parameter)
+    (fmap (fmap convert) $ parameterKind parameter)
 
 -- | Ground every explicit declaration kind without changing source-type
 -- variables, annotations, or declaration shape.

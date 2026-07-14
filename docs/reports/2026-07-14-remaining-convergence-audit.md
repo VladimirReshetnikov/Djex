@@ -44,9 +44,11 @@ A mechanical six-to-one Cabal collapse is possible: the 79 live library source
 files have distinct module names and an acyclic component import graph. Its
 external dependency union would be `base`, `containers`, `deepseq`, `directory`,
 `filepath`, `haskeline`, `haskell-src-exts`, `pqueue`, `pretty`, and
-`transformers`. Doing that now, however, would broaden every client's
-dependency closure and erase the isolation tests without removing the
-environment-authority duplication described below.
+`transformers`. The environment-authority duplication described below has now
+been removed. A staged fold of `synthesis`, both parser-free cores, and the
+facade is therefore justified and does not broaden the facade's existing
+dependency closure; retaining the two compatibility frontends temporarily
+continues to isolate `haskell-src-exts` and `haskeline`.
 
 ## Priority 1: make the shared vocabulary native to Exference
 
@@ -162,16 +164,18 @@ presentation data. Stable sessions erase annotations without re-preparing the
 synonym table or backend, and HSE query parsing derives its minimal known-type
 and class-arity resolver from that same session inventory.
 
-**Djinn REPL authority completed:** a session now retains its editable shared
+**Djinn prepared authority completed:** a session now retains its editable shared
 environment with the exact prepared projection derived from it, and declaration
 replacement/removal edits that shared environment directly. The REPL stores no
-raw `Environment`; display and instance lookup consume the already prepared
-backend. Raw preparation also reprojects embedded kinds from the inferred
-inventory, fixing a split-brain bug in which a forged raw class parameter kind
-could override the inventory during context checking. Raw declarations remain
-compatibility parser inputs, while proof-oriented tables are private derived
-indexes. Further internal work can narrow `PreparedEnvironment` into dedicated
-class, premise, kind, synonym, and formula caches without changing authority.
+raw `Environment`; display reconstructs historical tables from the Inventory
+on demand, while instance lookup consumes a nominal class index. Raw preparation
+also reprojects embedded kinds from the inferred inventory, fixing a split-brain
+bug in which a forged raw class parameter kind could override the inventory
+during context checking. `PreparedEnvironment` now retains only the Inventory
+and justified private class, ordered global-premise, kind, synonym, and formula
+caches. Global functions are translated once while sealing rather than once per
+query; instantiated class methods remain query-dependent. Transactional edits
+rebuild all caches before publishing the replacement session.
 
 These changes must preserve source diagnostic precedence, declaration
 replacement/removal order, alias saturation and recursion checks, inferred
@@ -180,11 +184,11 @@ rollback.
 
 ## Packaging end state
 
-Only after the remaining duplicated environment authorities are removed
-should the named core and foundation sublibraries be folded into the unnamed
-`djex` library. Compatibility frontends may be folded in at the same time if a
-single dependency closure is the desired final contract, or retained briefly
-as deprecated migration shells with no independent semantic representation.
+With the duplicated environment authorities removed, the named parser-free
+core and foundation sublibraries should now be folded into the unnamed `djex`
+library. Compatibility frontends may be folded in at the same time if a single
+dependency closure is the desired final contract, or retained briefly as
+deprecated migration shells with no independent semantic representation.
 
 This ordering makes the final Cabal change evidence of a source merger rather
 than a relabeling. It also makes deletion measurable: internal `djex:*`
@@ -203,9 +207,9 @@ Every migration milestone should retain the current release-style gates:
 - a clean tracked tree with the milestone commit pushed before the next
   representation is removed.
 
-The immediate next implementation milestone is the remaining Priority 3
-Djinn work: narrow `PreparedEnvironment` into private class, kind, synonym,
-formula, and cached global-premise indexes without restoring a raw editable
-environment. Once that cache boundary is stable, fold the parser-free
-foundation and backend cores into the unnamed library and retire component
-seams that no longer enforce a semantic boundary.
+The immediate next implementation milestone is packaging: fold the parser-free
+foundation and both backend cores into the unnamed library, then delete API
+tests and service-provider seams whose component boundary no longer enforces a
+semantic or dependency invariant. Keep the two compatibility frontends
+separate until their parser/interactive dependencies and deprecated raw
+surfaces receive an explicit final policy.

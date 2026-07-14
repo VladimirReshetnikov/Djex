@@ -218,13 +218,14 @@ Library djinn-core
   Visibility:       public
   Hs-Source-Dirs:   djinn/src-core
 
-  -- Djinn.Core is the stable library API.  The core Djinn.Internal.* modules
-  -- expose raw machinery without stability or invariant guarantees.
+  -- Djinn.Core is the stable library API.  Raw proof/search modules remain
+  -- exposed for the compatibility frontend, tests, and benchmark, without
+  -- stability or invariant guarantees.  The checked shared-IR adapters are
+  -- exported through Djinn.Core; their implementation modules stay private.
   Exposed-Modules:
     Djinn.Core
     Language.Haskell.Djex.Djinn
     Djinn.Internal.Environment
-    Djinn.Internal.Declaration
     Djinn.Internal.Generated
     Djinn.Internal.HCheck
     Djinn.Internal.HIdentifier
@@ -233,6 +234,9 @@ Library djinn-core
     Djinn.Internal.LJTFormula
     Djinn.Internal.ProofCheck
     Djinn.Internal.ProofEnv
+
+  Other-Modules:
+    Djinn.Internal.Declaration
     Djinn.Internal.Type
 
 -- Compatibility frontend for the historical Djinn library.  Cabal component

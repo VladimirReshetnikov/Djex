@@ -381,7 +381,9 @@ scanning when a file name itself begins with `+` or `-`.
 
 `Djinn.Core`, `Language.Haskell.Djex.Djinn`, and the proof, type, environment,
 and validation modules under `src-core/` form the public named `djinn-core`
-component. `Djinn`,
+component. The checked declaration and type adapters are exported by
+`Djinn.Core`; their `Djinn.Internal.Declaration` and `Djinn.Internal.Type`
+implementation modules remain private. `Djinn`,
 `Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-frontend/` in the
 named `djinn-frontend` component; Help and REPL are private implementation
 modules. The executable's `app/` source root contains only its launcher, so
@@ -504,10 +506,11 @@ escape. The definition/expression renderers consume
 canonical candidates through the shared rendering pipeline and return
 its `RenderError` directly, without conflating logical evidence with
 operational completion.
-The core `Djinn.Internal.*` modules listed above remain
-exposed by `djinn-core` for research use, but they provide raw constructors
-that can violate these invariants and carry no stability promise. The
-frontend-only Help and REPL modules are deliberately not exposed.
+The raw proof/search `Djinn.Internal.*` modules used by compatibility tests and
+research tooling remain exposed by `djinn-core`, but their constructors can
+violate these invariants and carry no stability promise. The checked
+declaration/type implementation modules and the frontend-only Help and REPL
+modules are deliberately not exposed.
 
 The central pipeline is:
 

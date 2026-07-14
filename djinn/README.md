@@ -24,8 +24,9 @@ class-kind defaulting, and derive every raw backend kind from that Inventory.
 
 ## Build and run
 
-Djinn is part of the unified `djex` Cabal package and is tested with GHC 9.12.4
-and Cabal 3.16.1.0. Run these commands from the repository root or `djex/`:
+Djinn is part of the unified `djex` Cabal package and is tested with GHC 9.8.4
+and GHC 9.12.4 using Cabal 3.16.1.0. Run these commands from the repository root
+or `djex/`:
 
 ```console
 cabal build djex:lib:djinn-core djex:lib:djinn-frontend djex:exe:djinn

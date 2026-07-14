@@ -99,6 +99,18 @@ cabal build all
 cabal test all --test-show-details=direct
 ```
 
+The complete package graph is tested warning-clean on GHC 9.8.4 and GHC
+9.12.4. The declared `base >= 4.19` floor is therefore exercised by GHC 9.8.4,
+not merely inferred from dependency metadata. GHC 9.12.4 remains the preferred
+local toolchain because it is the newest installed compiler with full Haskell
+Language Server support. To reproduce the lower-compiler check without
+changing the selected compiler, use an isolated build directory:
+
+```console
+cabal build all -w ghc-9.8.4 --builddir=dist-newstyle-ghc-9.8.4 --enable-tests --enable-benchmarks --ghc-options=-Werror
+cabal test all -w ghc-9.8.4 --builddir=dist-newstyle-ghc-9.8.4 --enable-tests --ghc-options=-Werror --test-show-details=direct
+```
+
 The project pins the Hackage index snapshot used by the solver, while
 `djex.cabal` retains explicit dependency ranges for library consumers and
 lower-bound testing. Update that snapshot only as part of a dependency review;

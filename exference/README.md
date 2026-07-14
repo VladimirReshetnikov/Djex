@@ -28,8 +28,9 @@ sometimes stopping with "i could not find any solutions".
 ## Building from source
 
 Exference is part of the unified `djex` Cabal package. Its libraries and
-deterministic test suites build with GHC 9.12.4 and Cabal 3.16.1.0. Cabal is the
-maintained build path; the historical Stack file targeted LTS 5.18 and
+deterministic test suites build with GHC 9.8.4 and GHC 9.12.4 using Cabal
+3.16.1.0. Cabal is the maintained build path; the historical Stack file
+targeted LTS 5.18 and
 dependencies that no longer exist in this tree, so it has been removed rather
 than pretending to provide a second supported toolchain. Run these commands
 from the repository root or `djex/`:

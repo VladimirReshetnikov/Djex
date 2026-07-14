@@ -16,7 +16,9 @@ Author:        Vladimir Reshetnikov, Lennart Augustsson, Lennart Spitzner, and c
 Maintainer:    Vladimir Reshetnikov
 Homepage:      https://github.com/VladimirReshetnikov/Haskell/tree/main/djex
 Bug-Reports:   https://github.com/VladimirReshetnikov/Haskell/issues
-Tested-With:   GHC == 9.12.4
+Tested-With:
+  GHC == 9.8.4,
+  GHC == 9.12.4
 Stability:     experimental
 Copyright:
   Copyright (c) 2005-2014 Lennart Augustsson

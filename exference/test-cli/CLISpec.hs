@@ -18,6 +18,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "ill-kinded queries stop before search" testKindFailure
   , testCase "invalid searches never enter reporting modes" testInvalidSearch
   , testCase "invalid verbosity is a controlled usage error" testInvalidVerbosity
+  , testCase "repeated verbosity cannot overflow" testVerbosityOverflow
   , testCase "repeated inputs are all searched" testRepeatedInputs
   , testCase "conflicting selection modes are rejected" testConflictingModes
   , testCase "short mode contributes structural expression cost" testShortMode
@@ -88,10 +89,27 @@ testInvalidVerbosity = do
   assertEqual "invalid verbosity stdout" "" output
   assertContains "invalid verbosity should identify its value"
     "invalid verbosity \"wat\"" errors
+  assertEqual "invalid verbosity should print usage exactly once"
+    1 $ countOccurrences "Usage: exference" errors
   assertBool "invalid verbosity must not expose partial read"
     (not $ "Prelude.read" `isInfixOf` errors)
   assertBool "invalid verbosity must not expose a call stack"
     (not $ "CallStack" `isInfixOf` errors)
+
+testVerbosityOverflow :: Assertion
+testVerbosityOverflow = do
+  (output, errors) <- runExferenceFailure
+    [ "--verbose=" ++ show (maxBound :: Int)
+    , "--verbose=1"
+    , "a -> a"
+    ]
+  assertEqual "overflowing verbosity stdout" "" output
+  assertContains "the overflowing sum should report its bound"
+    "combined verbosity exceeds maximum " errors
+  assertEqual "a verbosity error should print usage exactly once"
+    1 $ countOccurrences "Usage: exference" errors
+  assertBool "overflowing verbosity must fail before loading the environment"
+    (not $ "[Environment]" `isInfixOf` output)
 
 testRepeatedInputs :: Assertion
 testRepeatedInputs = do

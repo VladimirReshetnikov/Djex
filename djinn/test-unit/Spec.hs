@@ -2386,7 +2386,7 @@ assertLeftContains message expectedFragment result =
         Right value ->
             fail $ message ++ ": expected an error, got " ++ show value
 
-assertRight :: Show a => String -> Either String a -> IO ()
+assertRight :: String -> Either String a -> IO ()
 assertRight _ (Right _) = return ()
 assertRight message (Left errorMessage) =
     fail $ message ++ ": unexpected error: " ++ errorMessage

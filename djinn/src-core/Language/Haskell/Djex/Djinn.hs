@@ -49,12 +49,10 @@ import Djinn.Core
   , inhabitGeneratedPrepared
   , prepareSynthesisEnvironment
   , preparedEnvironmentInventory
-  , standardEnvironment
-  , toSynthesisEnvironment
   )
 import qualified Djinn.Core as Core
 import Language.Haskell.Synthesis.Candidate
-  ( Candidate (..)
+  ( Candidate
   , renderCandidateDefinition
   , renderCandidateExpression
   )
@@ -158,9 +156,9 @@ newtype DjinnRequest = DjinnRequest
   deriving (Eq, Show)
     via (CachedQuery DjinnType QueryOptions DjinnRequestCache)
 
--- Spell out the shared candidate shape here instead of re-exporting Djinn's
--- identical alias, whose historical @HSymbol@ name is intentionally private
--- to the raw compatibility API.
+-- | The shared candidate shape returned by checked Djinn sessions. Djinn has
+-- no residual obligations, and Core gives that empty slot 'DjinnType'
+-- directly, so the stable session does not need a result projection.
 type DjinnCandidate =
   Candidate DjinnType DjinnCandidateDetails (FunctionClause DjinnLocal)
 
@@ -178,13 +176,12 @@ environmentFailure
 environmentFailure = shownErrorDiagnostic "DJEX_DJINN_ENV"
   "cannot lower the shared environment to Djinn"
 
--- | The historical checked Djinn prelude, sealed for facade-only clients.
--- Advanced clients can convert an editable raw environment with
--- @Djinn.Core.toSynthesisEnvironment@ before calling 'mkDjinnSession'.
+-- | The historical checked Djinn prelude, sealed directly from its
+-- authoritative raw environment. Neutral environments use 'mkDjinnSession'.
 standardDjinnSession :: Either Diagnostic DjinnSession
-standardDjinnSession =
-  first environmentFailure (toSynthesisEnvironment standardEnvironment)
-    >>= mkDjinnSession
+standardDjinnSession = DjinnSession <$>
+  first environmentFailure
+    (Core.prepareEnvironment Core.standardEnvironment)
 
 djinnSessionInventory :: DjinnSession -> DjinnInventory
 djinnSessionInventory (DjinnSession prepared) =
@@ -277,7 +274,7 @@ parseDjinnRequestWithCheckedTarget _session options checkedTarget
   mkDjinnRequestWithSource
     (Just (sourceName, sourceTextSpan source)) query
 
--- | Run one complete configured Djinn search and project it into a single
+-- | Run one complete configured Djinn search and package it into a single
 -- terminal shared batch.  Logical evidence stays independent of operational
 -- completion: a validated candidate found before a budget expires remains a
 -- candidate, while an empty truncated search remains undecided.
@@ -298,9 +295,6 @@ runDjinnQuery (DjinnSession prepared) request = do
       $ contextualDiagnostic Error "DJEX_DJINN_QUERY"
         "Djinn rejected the query" failure
     Right value -> Right value
-  candidates <- first candidateProjectionFailure
-    $ traverse projectCandidate
-    $ generatedReportCandidates report
   let metadata = DjinnQueryMetadata
         { djinnTranslatedFormula = generatedReportFormula report
         , djinnFirstExploredProof = generatedReportProof report
@@ -308,24 +302,9 @@ runDjinnQuery (DjinnSession prepared) request = do
       batch = SearchBatch
         (Completed $ generatedReportCompletion report)
         metadata
-        candidates
+        (generatedReportCandidates report)
   first queryResultFailure
     $ mkQueryResult (generatedReportEvidence report) batch
-
--- The core currently proves every obligation and therefore emits no residual
--- constraints. Keep this projection checked nevertheless: it preserves the
--- stable candidate type if the backend later starts returning obligations.
-projectCandidate
-  :: Core.DjinnCandidate
-  -> Either Core.SynthesisTypeError DjinnCandidate
-projectCandidate candidate = do
-  residualConstraints <- traverse (traverse Core.toSynthesisType)
-    $ candidateResidualConstraints candidate
-  pure Candidate
-    { candidateOutput = candidateOutput candidate
-    , candidateResidualConstraints = residualConstraints
-    , candidateDetails = candidateDetails candidate
-    }
 
 renderDjinnCandidateExpression
   :: Qualification
@@ -381,10 +360,6 @@ contextLoweringFailure :: String -> Diagnostic
 contextLoweringFailure failure = contextualDiagnostic Error
   "DJEX_DJINN_LOWER" "cannot lower the shared query to Djinn"
   ("context: " ++ failure)
-
-candidateProjectionFailure :: Core.SynthesisTypeError -> Diagnostic
-candidateProjectionFailure = shownErrorDiagnostic
-  "DJEX_DJINN_PROJECT" "cannot project a Djinn candidate to shared types"
 
 queryResultFailure :: QueryResultInvariantError -> Diagnostic
 queryResultFailure = shownErrorDiagnostic

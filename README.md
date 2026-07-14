@@ -211,7 +211,8 @@ validation before the original alias-bearing declarations are lowered for
 proof search. At query time Djinn elaborates the goal and all class arguments
 as one shared kind scope, then sends the alias-free projection to proof search;
 opaque requests still retain their exact session-independent source view.
-`standardDjinnSession` exercises the same neutral path, and
+`standardDjinnSession` seals the authoritative checked built-in raw environment
+directly, while caller-supplied neutral environments use `mkDjinnSession`.
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
 grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
 point rather than importing an internal parser. Both `DjinnRequest` and

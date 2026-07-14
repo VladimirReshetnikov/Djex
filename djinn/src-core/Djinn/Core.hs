@@ -58,6 +58,7 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
@@ -573,8 +574,10 @@ data DjinnCandidateDetails = DjinnCandidateDetails {
 
 -- | A checked Djinn result in the backend-neutral candidate envelope.
 -- Djinn proves closed obligations, so its residual-constraint list is empty.
+-- Give that invariantly empty slot the shared source-type representation at
+-- construction time, so checked adapters can consume candidates verbatim.
 type DjinnCandidate =
-    SharedCandidate.Candidate HType DjinnCandidateDetails
+    SharedCandidate.Candidate (SharedType.Type HSymbol) DjinnCandidateDetails
         (SharedGenerated.FunctionClause HSymbol)
 
 -- | Canonical structured result of one Djinn proof search.

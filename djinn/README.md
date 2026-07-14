@@ -487,8 +487,9 @@ The default `djex` library additionally exposes
 `DjinnEnvironment` and pairs the checked Djinn projection with the exact shared
 `DjinnInventory` that validated it. The editable raw `Djinn.Core.Environment`
 therefore remains confined to the compatibility library and REPL;
-`standardDjinnSession` sends the checked built-in environment through that same
-neutral boundary without exposing its raw representation,
+`standardDjinnSession` seals the authoritative checked built-in raw environment
+directly without exposing its representation, while caller-supplied neutral
+environments continue through `mkDjinnSession`,
 `parseDjinnRequest` shares the REPL's optional class-context grammar, and
 `mkDjinnRequest` seals a `QueryRequest DjinnType QueryOptions` into the opaque
 `DjinnRequest` consumed by `runDjinnQuery`. Existing programmatic clients

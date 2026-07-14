@@ -21,7 +21,7 @@ import Djinn.Core
   , toSynthesisEnvironment
   , toSynthesisType
   )
-import qualified Djinn.Core as DjinnCore (DjinnCandidate, Environment)
+import qualified Djinn.Core as DjinnCore (Environment)
 -- Raw Exference fixtures below use their historical @functionName@ field;
 -- hide the shared structural-name accessor at this integration-only seam.
 import Language.Haskell.Djex hiding (functionName)
@@ -776,9 +776,8 @@ assertDjinnCompatibility label environment session contexts options target goal 
     Completed completion ->
       generatedReportCompletion compatibility @?= completion
     Continuing -> fail $ label ++ ": Djinn returned a nonterminal batch"
-  compatibilityCandidates <- mapM projectDjinnCandidate
-    $ generatedReportCandidates compatibility
-  compatibilityCandidates @?= batchCandidates (resultSearch shared)
+  generatedReportCandidates compatibility @?=
+    batchCandidates (resultSearch shared)
   let metadata = batchMetadata $ resultSearch shared
   assertBool (label ++ ": translated formula changed") $
     generatedReportFormula compatibility == djinnTranslatedFormula metadata
@@ -811,17 +810,6 @@ sharedDjinnQuery target contexts options goal = do
     , requestGoal = sharedGoal
     , requestContexts = sharedContexts
     , requestOptions = options
-    }
-
-projectDjinnCandidate :: DjinnCore.DjinnCandidate -> IO DjinnCandidate
-projectDjinnCandidate candidate = do
-  residualConstraints <- expectRight
-    $ traverse (traverse toSynthesisType)
-    $ candidateResidualConstraints candidate
-  pure Candidate
-    { candidateOutput = candidateOutput candidate
-    , candidateResidualConstraints = residualConstraints
-    , candidateDetails = candidateDetails candidate
     }
 
 sealDjinnEnvironment :: DjinnCore.Environment -> IO DjinnSession

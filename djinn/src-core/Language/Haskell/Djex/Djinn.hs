@@ -1,8 +1,9 @@
 -- | Checked Djinn sessions behind Djex's backend-neutral query envelope.
 --
--- A session seals the exact Djinn environment once and retains the shared
--- inventory that justified it. Queries use the shared source-type vocabulary
--- while retaining Djinn's proof-search options and backend-specific evidence.
+-- A session seals the exact Djinn environment once and retains both the shared
+-- inventory that justified it and the alias table prepared from that same
+-- inventory. Queries use the shared source-type vocabulary while retaining
+-- Djinn's proof-search options and backend-specific evidence.
 module Language.Haskell.Djex.Djinn
   ( DjinnSession
   , DjinnEnvironment
@@ -112,11 +113,12 @@ type DjinnLocal = String
 
 -- | Source types accepted and returned by the stable Djinn adapter.
 -- They are lowered to backend-specific proof types only while sealing a
--- 'DjinnRequest'.
+-- checked t'DjinnRequest'.
 type DjinnType = Type DjinnTypeVariable
 
--- | A validated Djinn environment paired with its exact shared inventory.
--- The constructor is private so the two views cannot drift apart.
+-- | A validated Djinn environment paired with its exact shared inventory and
+-- prepared synonym table. The constructor is private so those views cannot
+-- drift apart.
 newtype DjinnSession = DjinnSession PreparedEnvironment
 
 -- | Djinn-specific explanatory data that does not belong in the common
@@ -181,8 +183,10 @@ djinnSessionInventory (DjinnSession prepared) =
 -- | Check and lower the session-independent portion of a neutral Djinn
 -- query.  Target spelling, the goal, and context arguments are converted
 -- exactly once and retained behind the opaque request boundary.  Search
--- options and all environment-dependent kind/class checks deliberately remain
--- the responsibility of 'runDjinnQuery'.
+-- options and all environment-dependent kind, class, and synonym checks
+-- deliberately remain the responsibility of 'runDjinnQuery'. A request can
+-- therefore be run against another compatible session without retaining the
+-- first session's alias meanings.
 mkDjinnRequest
   :: QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
@@ -207,7 +211,7 @@ djinnRequestQuery = requestQuery
 -- | Parse the type portion of a Djinn query.  The accepted context grammar is
 -- exactly the historical one: either one constraint or a comma-separated
 -- parenthesized list, followed by @=>@ and the goal.  The session argument
--- keeps this boundary parallel with 'parseExferenceRequest'; Djinn's parser
+-- keeps this boundary parallel with Exference's request parser; Djinn's parser
 -- itself is environment-independent, while kind and class lookup remain part
 -- of 'runDjinnQuery'.
 parseDjinnRequest

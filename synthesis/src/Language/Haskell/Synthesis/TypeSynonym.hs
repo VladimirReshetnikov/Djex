@@ -15,6 +15,7 @@ module Language.Haskell.Synthesis.TypeSynonym
   , prepareTypeSynonyms
   , expandTypeSynonymDefinitions
   , expandTypeSynonyms
+  , elaborateTypes
   , elaborateType
   , expandDeclarationTypeSynonyms
   ) where
@@ -28,6 +29,8 @@ import Control.Monad.Trans.State.Strict
   , get
   , put
   )
+import Data.Foldable (toList)
+import Data.Functor.Identity (Identity (..))
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -200,10 +203,26 @@ expandWithTable fresh table source = evalStateT
   (expand fresh table [] $ canonicalizeType source)
   (synonymVariables table `Set.union` typeVariables source)
 
+-- | Elaborate several types in one kind-variable scope.
+--
+-- Each source is canonicalized and validated before the complete batch is
+-- kind-checked. Every member is then expanded independently (its binders have
+-- their own lexical scope), after which the complete batch is validated and
+-- kind-checked again. The first kind pass is semantically significant: a
+-- phantom synonym parameter must not erase an ill-kinded argument before it
+-- is diagnosed. The empty batch is valid and returns an empty batch.
+elaborateTypes
+  :: Ord variable
+  => FreshVariable variable
+  -> TypeSynonyms variable
+  -> [(GroundKind, Type variable)]
+  -> Either (TypeElaborationError variable) [Type variable]
+elaborateTypes = elaborateTypesTraversable
+
 -- | Validate and kind-check before expanding, then validate and kind-check
--- the elaborated result defensively. The first kind pass is semantically
--- significant: a phantom synonym parameter must not erase an ill-kinded
--- argument before it is diagnosed.
+-- the elaborated result defensively. This is the singleton specialization of
+-- 'elaborateTypes'; keeping both entry points on one worker prevents their
+-- validation or expansion order from drifting apart.
 elaborateType
   :: Ord variable
   => FreshVariable variable
@@ -211,19 +230,45 @@ elaborateType
   -> GroundKind
   -> Type variable
   -> Either (TypeElaborationError variable) (Type variable)
-elaborateType fresh table expected source = do
-  let canonical = canonicalizeType source
-  either (Left . InvalidElaborationType BeforeExpansion) Right
-    $ validateType canonical
-  either (Left . IllKindedType BeforeExpansion) Right
-    $ checkTypesKinds (synonymKindAssumptions table) [(expected, canonical)]
-  expanded <- either (Left . SynonymExpansionFailed) Right
-    $ expandTypeSynonyms fresh table canonical
-  either (Left . InvalidElaborationType AfterExpansion) Right
-    $ validateType expanded
-  either (Left . IllKindedType AfterExpansion) Right
-    $ checkTypesKinds (synonymKindAssumptions table) [(expected, expanded)]
-  pure expanded
+elaborateType fresh table expected source = runIdentity <$>
+  elaborateTypesTraversable fresh table (Identity (expected, source))
+
+-- Preserve the caller's container shape so singleton elaboration can be total
+-- without extracting the head of a list whose length is known only by
+-- convention. The public batch API specializes this worker to lists.
+elaborateTypesTraversable
+  :: (Ord variable, Traversable collection)
+  => FreshVariable variable
+  -> TypeSynonyms variable
+  -> collection (GroundKind, Type variable)
+  -> Either (TypeElaborationError variable)
+      (collection (Type variable))
+elaborateTypesTraversable fresh table sources = do
+  canonical <- traverse canonicalizeAndValidate sources
+  checkKinds BeforeExpansion canonical
+  expanded <- traverse expandOne canonical
+  validated <- traverse validateExpanded expanded
+  checkKinds AfterExpansion validated
+  pure $ snd <$> validated
+ where
+  canonicalizeAndValidate (expected, source) = do
+    let canonical = canonicalizeType source
+    either (Left . InvalidElaborationType BeforeExpansion) Right
+      $ validateType canonical
+    pure (expected, canonical)
+
+  expandOne (expected, source) = do
+    expanded <- either (Left . SynonymExpansionFailed) Right
+      $ expandTypeSynonyms fresh table source
+    pure (expected, expanded)
+
+  validateExpanded (expected, expanded) = do
+    either (Left . InvalidElaborationType AfterExpansion) Right
+      $ validateType expanded
+    pure (expected, expanded)
+
+  checkKinds phase types = either (Left . IllKindedType phase) Right
+    $ checkTypesKinds (synonymKindAssumptions table) $ toList types
 
 -- | Expand every type-bearing position of a declaration while retaining its
 -- names, binders, explicit kinds, annotations, and declaration shape.

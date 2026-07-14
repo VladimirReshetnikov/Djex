@@ -5,7 +5,7 @@ import Data.List (isInfixOf, nub)
 import qualified Data.Map.Strict as Map
 import Djinn.Core
   ( Context
-  , Declaration (ClassDecl, DataType, Function)
+  , Declaration (ClassDecl, DataType, Function, TypeSynonym)
   , HType
   , declare
   , emptyEnvironment
@@ -347,7 +347,21 @@ tests = testGroup "Djex facade"
       _ <- firstExferenceCandidate =<< expectRight
         (runExferenceQuery session request)
       pure ()
-  , testCase "expand neutral Exference synonyms for parsed and shared queries" $ do
+  , testCase "expand neutral synonyms through both checked backends" $ do
+      djinnAliasBody <- expectRight $ parseHType "a"
+      djinnEnvironment <- expectRight $ declare
+        (TypeSynonym "Identity" ["a"] djinnAliasBody) standardEnvironment
+      djinnSession <- sealDjinnEnvironment djinnEnvironment
+      djinnTarget <- expectRight $ mkIdentifier "djinnSynonymIdentity"
+      djinnGoal <- expectRight $ parseHType "Identity a -> a"
+      djinnRequest <- sharedDjinnRequest djinnTarget []
+        defaultQueryOptions djinnGoal
+      originalDjinnGoal <- expectRight $ toSynthesisType djinnGoal
+      requestGoal (djinnRequestQuery djinnRequest) @?= originalDjinnGoal
+      djinnResult <- expectRight $ runDjinnQuery djinnSession djinnRequest
+      assertBool "Djinn did not elaborate its session-dependent goal alias"
+        $ not $ null $ batchCandidates $ resultSearch djinnResult
+
       aliasName <- expectRight $ parseName "Fixture.Identity"
       target <- expectRight $ mkIdentifier "synonymIdentity"
       let variable = FlexibleVariable 0

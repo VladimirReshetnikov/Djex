@@ -7,7 +7,7 @@ module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
-    preparedEnvironmentKindCheck,
+    preparedEnvironmentKindCheck, elaboratePreparedTypes,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
@@ -24,6 +24,7 @@ import Data.Void (Void, absurd)
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
@@ -37,6 +38,7 @@ import Djinn.Internal.HCheck
     , prepareKindCheckWithAssumptions
     )
 import Djinn.Internal.HTypes
+import Djinn.Internal.Type (fromSynthesisType, toSynthesisType)
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
 type Axiom = (HSymbol, HType)
@@ -56,6 +58,7 @@ data Environment = Environment {
 data PreparedEnvironment = PreparedEnvironment
     Environment
     SynthesisInventory
+    (SharedTypeSynonym.TypeSynonyms HSymbol)
     PreparedKindCheck
 
 type SynthesisEnvironment =
@@ -90,7 +93,8 @@ toSynthesisEnvironment environment = do
 -- | Seal the shared structural view together with the kinds inferred from
 -- exactly those declarations. Standalone declaration adapters may still
 -- round-trip 'KVar'; a checked environment cannot retain one, and the
--- inventory reports its identity through 'UngroundedInventoryKind'.
+-- inventory reports its identity through
+-- 'SharedInventory.UngroundedInventoryKind'.
 toSynthesisInventory
     :: Environment
     -> Either SynthesisEnvironmentError SynthesisInventory
@@ -109,7 +113,10 @@ prepareEnvironment
     -> Either SynthesisEnvironmentError PreparedEnvironment
 prepareEnvironment environment = do
     inventory <- toSynthesisInventory environment
-    return $ sealPreparedEnvironment environment inventory
+    synonyms <- first InvalidSynthesisTypeSynonyms $
+        SharedTypeSynonym.prepareTypeSynonyms
+            freshDjinnTypeVariable inventory
+    return $ sealPreparedEnvironment environment inventory synonyms
 
 -- | Validate a neutral environment once, then derive Djinn's compatibility
 -- projection from the resulting inventory. Conversion is deliberately split
@@ -153,24 +160,73 @@ prepareSynthesisEnvironment sourceEnvironment = do
     environment <- projectSynthesisEnvironment
         (SharedInventory.inventoryKindAssumptions inventory)
         sourceDeclarations
-    return $ sealPreparedEnvironment environment inventory
+    return $ sealPreparedEnvironment environment inventory synonyms
 
 sealPreparedEnvironment
-    :: Environment -> SynthesisInventory -> PreparedEnvironment
-sealPreparedEnvironment environment inventory =
-    PreparedEnvironment environment inventory $
+    :: Environment
+    -> SynthesisInventory
+    -> SharedTypeSynonym.TypeSynonyms HSymbol
+    -> PreparedEnvironment
+sealPreparedEnvironment environment inventory synonyms =
+    PreparedEnvironment environment inventory synonyms $
         prepareKindCheckWithAssumptions
             (envTypes environment)
             (SharedInventory.inventoryKindAssumptions inventory)
 
 preparedEnvironmentSource :: PreparedEnvironment -> Environment
-preparedEnvironmentSource (PreparedEnvironment environment _ _) = environment
+preparedEnvironmentSource (PreparedEnvironment environment _ _ _) = environment
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
-preparedEnvironmentInventory (PreparedEnvironment _ inventory _) = inventory
+preparedEnvironmentInventory (PreparedEnvironment _ inventory _ _) = inventory
 
 preparedEnvironmentKindCheck :: PreparedEnvironment -> PreparedKindCheck
-preparedEnvironmentKindCheck (PreparedEnvironment _ _ kindCheck) = kindCheck
+preparedEnvironmentKindCheck (PreparedEnvironment _ _ _ kindCheck) = kindCheck
+
+-- | Elaborate a query batch through the exact alias table retained by its
+-- prepared environment. The list is checked in one free-variable kind scope;
+-- conversion back to Djinn's raw syntax is safe because environment preflight
+-- already excludes shared forms (such as explicit forall and unboxed tuples)
+-- that Djinn cannot represent.
+elaboratePreparedTypes
+    :: PreparedEnvironment
+    -> [(HKind, HType)]
+    -> Either String [HType]
+elaboratePreparedTypes (PreparedEnvironment _ _ synonyms _) obligations = do
+    sharedObligations <- mapM convertObligation obligations
+    elaborated <- first renderElaborationError $
+        SharedTypeSynonym.elaborateTypes
+            freshDjinnTypeVariable synonyms sharedObligations
+    mapM (first show . fromSynthesisType) elaborated
+  where
+    convertObligation (expected, source) = (,)
+        <$> groundHKind expected
+        <*> first show (toSynthesisType source)
+
+-- Match the compatibility checker's established spelling for the one query
+-- failure users commonly act on. Other failures retain their structured Show
+-- representation; in normal operation the legacy preflight has already
+-- rejected them with its more local source label.
+renderElaborationError
+    :: SharedTypeSynonym.TypeElaborationError HSymbol
+    -> String
+renderElaborationError failure = case failure of
+    SharedTypeSynonym.IllKindedType _ kindError -> show kindError
+    SharedTypeSynonym.InvalidElaborationType _ typeError -> show typeError
+    SharedTypeSynonym.SynonymExpansionFailed expansionError ->
+        case expansionError of
+            SharedTypeSynonym.UnsaturatedTypeSynonym name expected supplied ->
+                "Type synonym " ++ SharedName.renderCanonical name ++
+                " expects at least " ++ show expected ++
+                " argument(s), but got " ++ show supplied
+            _ -> show expansionError
+
+groundHKind :: HKind -> Either String SharedInference.GroundKind
+groundHKind kind = case kind of
+    KStar -> Right SharedKind.ProperTypeKind
+    KArrow parameter result -> SharedKind.FunctionKind
+        <$> groundHKind parameter <*> groundHKind result
+    KVar variable -> Left $
+        "kind contains an unsolved variable: " ++ show variable
 
 synthesisDeclarations
     :: Environment

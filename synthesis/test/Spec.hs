@@ -1266,6 +1266,49 @@ synonymTests = testGroup "type synonyms"
       TypeSynonym.expandTypeSynonyms freshStringVariable aliases
           (SharedType.TypeConstructor identityName) @?=
         Left (TypeSynonym.UnsaturatedTypeSynonym identityName 1 0)
+  , testCase "elaborate empty, singleton, and ordered type batches" $ do
+      let identityName = right $ mkIdentifier "Identity"
+          boolName = right $ mkIdentifier "Bool"
+          intName = right $ mkIdentifier "Int"
+          declarations =
+            [ Declaration.TypeSynonymDeclaration () identityName
+                [Declaration.TypeParameter "a" Nothing]
+                $ SharedType.TypeVariable "a"
+            , Declaration.AbstractTypeDeclaration () boolName synonymProper
+            , Declaration.AbstractTypeDeclaration () intName synonymProper
+            ]
+          aliases = preparedSynonyms declarations
+          applyIdentity argument = SharedType.TypeApplication
+            (SharedType.TypeConstructor identityName) argument
+          boolType = SharedType.TypeConstructor boolName
+          intType = SharedType.TypeConstructor intName
+          boolAlias = applyIdentity boolType
+          intAlias = applyIdentity intType
+          emptyBatch = [] ::
+            [(KindInference.GroundKind, SharedType.Type String)]
+      TypeSynonym.elaborateTypes freshStringVariable aliases emptyBatch @?=
+        Right []
+      TypeSynonym.elaborateTypes freshStringVariable aliases
+          [(synonymProper, boolAlias)] @?=
+        (: []) <$> TypeSynonym.elaborateType freshStringVariable aliases
+          synonymProper boolAlias
+      TypeSynonym.elaborateTypes freshStringVariable aliases
+          [(synonymProper, boolAlias), (synonymProper, intAlias)] @?=
+        Right [boolType, intType]
+  , testCase "share free-variable kinds across an elaboration batch" $ do
+      let boolName = right $ mkIdentifier "Bool"
+          boolType = SharedType.TypeConstructor boolName
+          aliases = preparedSynonyms
+            [Declaration.AbstractTypeDeclaration () boolName synonymProper]
+          shared = SharedType.TypeVariable "shared"
+          applied = SharedType.TypeApplication shared boolType
+      -- Either member is independently kindable. Together they would assign
+      -- incompatible proper and function kinds to the same free variable.
+      case TypeSynonym.elaborateTypes freshStringVariable aliases
+          [(synonymProper, shared), (synonymProper, applied)] of
+        Left (TypeSynonym.IllKindedType TypeSynonym.BeforeExpansion _) ->
+          pure ()
+        result -> fail $ "batch kind scope was split: " ++ show result
   , testCase "freshen forall binders before parameter substitution" $ do
       let captureName = right $ mkIdentifier "Capture"
           capture = Declaration.TypeSynonymDeclaration () captureName

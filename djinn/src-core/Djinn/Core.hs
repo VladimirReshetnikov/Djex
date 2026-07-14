@@ -1,7 +1,8 @@
 -- |
 -- The stable, validated interface to the Djinn core.
 --
--- Build an 'Environment' from declarations, then ask 'inhabitGenerated' for
+-- Build a checked t'Environment' from declarations, then ask
+-- 'inhabitGenerated' for
 -- checked shared candidates of a given type; 'inhabit' is the rendered-string
 -- compatibility adapter.  Every entry point validates its
 -- input — names must be lexically valid, declarations are kind-checked
@@ -372,6 +373,62 @@ resolveContexts prepared additionalTypes contexts = do
   where
     environment = preparedEnvironmentSource prepared
 
+-- Query aliases are session-dependent, so elaborate only after lookup and
+-- arity validation against the prepared environment. The goal and every
+-- context argument form one batch: a free variable therefore cannot acquire
+-- incompatible kinds in different parts of the same query.
+--
+-- Keep 'checkKindObligations' as a compatibility preflight. In particular,
+-- Djinn historically reports an unsaturated synonym before an independent
+-- kind error inside the same raw type, whereas the shared elaborator must kind
+-- check before expansion so a phantom parameter cannot erase a bad argument.
+-- Running the established check first preserves that observable diagnostic
+-- order and spelling; shared elaboration then owns the alias-free query sent
+-- to proof search.
+resolveQueryContexts
+    :: PreparedEnvironment
+    -> (String, HKind, HType)
+    -> [Context]
+    -> Either String (HType, [[(HSymbol, HType)]])
+resolveQueryContexts prepared goalObligation contexts = do
+    resolved <- mapM (lookupContext environment) contexts
+    let obligations = goalObligation : concatMap argumentObligations resolved
+    checkKindObligations (preparedEnvironmentKindCheck prepared) obligations
+    elaborated <- elaboratePreparedTypes prepared
+        [(kind, source) | (_, kind, source) <- obligations]
+    case elaborated of
+        [] -> Left "internal error: query elaboration dropped its goal"
+        elaboratedGoal : elaboratedArguments -> do
+            elaboratedContexts <- attachElaboratedArguments
+                resolved elaboratedArguments
+            methods <- mapM (instantiateContext prepared) elaboratedContexts
+            return (elaboratedGoal, methods)
+  where
+    environment = preparedEnvironmentSource prepared
+
+-- Rebuild the already resolved constraints with their alias-free arguments.
+-- The shared batch operation is shape-preserving, but check that invariant at
+-- this representation boundary rather than silently dropping a suffix if it
+-- is ever changed.
+attachElaboratedArguments
+    :: [ResolvedContext]
+    -> [HType]
+    -> Either String [ResolvedContext]
+attachElaboratedArguments [] [] = Right []
+attachElaboratedArguments [] _ =
+    Left "internal error: query elaboration returned extra context arguments"
+attachElaboratedArguments (context : contexts) arguments = do
+    let arity = length $ resolvedParameters context
+        (current, remaining) = splitAt arity arguments
+    if length current /= arity then
+        Left "internal error: query elaboration dropped a context argument"
+    else do
+        rest <- attachElaboratedArguments contexts remaining
+        let constraint = (resolvedConstraint context) {
+                constraintArguments = current
+                }
+        return (context {resolvedConstraint = constraint} : rest)
+
 lookupContext :: Environment -> Context -> Either String ResolvedContext
 lookupContext environment context = do
     -- Context is a shared, intentionally permissive syntax node.  Reassert
@@ -630,10 +687,10 @@ inhabitGeneratedPreparedChecked
     :: QueryOptions -> PreparedEnvironment -> [Context] -> HSymbol -> HType
     -> Either String GeneratedQueryReport
 inhabitGeneratedPreparedChecked options prepared contexts name goal = do
-    contextMethods <- resolveContexts prepared
-        [("goal type " ++ show goal, KStar, goal)] contexts
+    (elaboratedGoal, contextMethods) <- resolveQueryContexts prepared
+        ("goal type " ++ show goal, KStar, goal) contexts
     let types = envTypes environment
-        form = hTypeToFormula types goal
+        form = hTypeToFormula types elaboratedGoal
         externalEnv =
             [ (Symbol v, hTypeToFormula types t)
             | (v, t) <- envFunctions environment ] ++

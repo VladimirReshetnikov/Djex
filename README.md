@@ -158,10 +158,14 @@ ordinary heuristic-search batches. Both checks inspect only the list spine's
 first constructor, so they do not sacrifice lazy candidate tails.
 `mkDjinnSession` lowers and seals the neutral shared
 `DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
-class-kind defaulting; the mutable raw `Djinn.Core.Environment` no longer
-crosses the default facade. Synonyms are expanded for saturation and recursive
-datatype validation before the original alias-bearing declarations are lowered
-for proof search. `standardDjinnSession` exercises the same neutral path, and
+class-kind defaulting and retains the synonym table prepared from that exact
+inventory; the mutable raw `Djinn.Core.Environment` no longer crosses the
+default facade. Synonyms are expanded for saturation and recursive datatype
+validation before the original alias-bearing declarations are lowered for
+proof search. At query time Djinn elaborates the goal and all class arguments
+as one shared kind scope, then sends the alias-free projection to proof search;
+opaque requests still retain their exact session-independent source view.
+`standardDjinnSession` exercises the same neutral path, and
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
 grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
 point rather than importing an internal parser. Both `DjinnRequest` and
@@ -296,7 +300,9 @@ shared types and constraints from tagged variable-name hints without collapsing
 flexible and rigid identities.
 `TypeSynonym` prepares aliases from the retained neutral inventory and owns
 capture-avoiding, saturation-checked expansion plus the pre/post kind checks
-that both backend adapters can now share.
+that both backend adapters can now share. Its batch operation preserves source
+order while assigning one kind to each free variable shared by a goal and its
+separate context arguments.
 
 The `exference` compatibility executable is a thin consumer of this boundary:
 it loads and seals one session, parses every requested type through

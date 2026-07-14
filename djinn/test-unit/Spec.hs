@@ -15,18 +15,19 @@ import Djinn.Core (
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, generatedReportCandidates,
     generatedReportCompletion, inhabit, inhabitGenerated,
+    inhabitGeneratedPrepared,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
     fromSynthesisKind, fromSynthesisType,
     mkContext, parseContextualHType, parseHKind, parseHType,
-    removeDeclaration,
+    prepareEnvironment, removeDeclaration,
     reportCompletion, reportGeneratedClauses, reportOutcome,
-    resolveContext, resolveInstanceMethods,
+    resolveContext, resolveInstanceMethods, resolvePreparedContext,
     standardEnvironment, toSynthesisDeclaration, toSynthesisEnvironment,
     toSynthesisInventory,
     toSynthesisKind,
     toSynthesisType, typeDeclarations)
-import Djinn.Internal.Environment (validateEnvironment)
+import Djinn.Internal.Environment (elaboratePreparedTypes, validateEnvironment)
 import qualified Djinn.Internal.Generated as DjinnGenerated
 import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
@@ -71,6 +72,8 @@ tests =
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("separate synonym saturation from kind errors",
           testSynonymSaturationBoundary)
+    , ("elaborate prepared query synonyms without changing compatibility views",
+          testPreparedQuerySynonyms)
     , ("infer and reuse a higher-kinded synonym", testHigherKindedGrounding)
     , ("reject an ill-kinded higher-kinded application", testIllKindedApplication)
     , ("reject a higher-kinded synonym body", testHigherKindedSynonymBody)
@@ -849,6 +852,88 @@ testSynonymSaturationBoundary = do
                     unwords (SharedDiagnostic.diagnosticContext failure)
             Right _ -> fail "stable partial application was accepted"
 
+    needle `notElemText` haystack = not $ needle `isInfixOf` haystack
+
+-- Prepared sessions retain a shared synonym table for operational queries,
+-- while the historical context-resolution surface continues to return the
+-- caller's alias-bearing raw spelling. This distinction keeps requests and
+-- compatibility inspection source-oriented without making proof-search atoms
+-- depend on how an alias happened to be written.
+testPreparedQuerySynonyms :: IO ()
+testPreparedQuerySynonyms = do
+    let variable = HTVar "a"
+        boolType = HTCon "Bool"
+        voidType = HTCon "Void"
+        identity argument = HTApp (HTCon "Identity") argument
+        valueMethod valueType = HTArrow valueType valueType
+    withIdentity <- expectRight $ declare
+        (TypeSynonym "Identity" ["a"] variable) standardEnvironment
+    environment <- expectRight $ declare
+        (ClassDecl "ValueAlias" ["x"]
+            [("valueAlias", valueMethod $ HTVar "x")])
+        withIdentity
+    prepared <- expectShownRight $ prepareEnvironment environment
+
+    assertEqual "the prepared environment retained its exact alias table"
+        (Right [boolType, voidType])
+        (elaboratePreparedTypes prepared
+            [ (KStar, identity boolType)
+            , (KStar, identity voidType)
+            ])
+
+    let aliasContext = context "ValueAlias" [identity boolType]
+        expandedContext = context "ValueAlias" [boolType]
+        aliasMethod = valueMethod $ identity boolType
+    assertEqual "prepared compatibility resolution erased an alias spelling"
+        (Right [("valueAlias", aliasMethod)])
+        (resolvePreparedContext prepared aliasContext)
+
+    let expandedGoal = HTArrow variable variable
+        aliasGoal = HTArrow (identity variable) variable
+    aliasGoalReport <- expectRight $ inhabitGeneratedPrepared
+        defaultQueryOptions prepared [] "aliasGoal" aliasGoal
+    expandedGoalReport <- expectRight $ inhabitGeneratedPrepared
+        defaultQueryOptions prepared [] "aliasGoal" expandedGoal
+    assertEqual "a goal alias changed prepared proof search"
+        expandedGoalReport aliasGoalReport
+
+    let contextualGoal = valueMethod boolType
+    aliasContextReport <- expectRight $ inhabitGeneratedPrepared
+        defaultQueryOptions prepared [aliasContext]
+        "aliasContext" contextualGoal
+    expandedContextReport <- expectRight $ inhabitGeneratedPrepared
+        defaultQueryOptions prepared [expandedContext]
+        "aliasContext" contextualGoal
+    assertEqual "a class-argument alias changed prepared proof search"
+        expandedContextReport aliasContextReport
+
+    case inhabitGeneratedPrepared defaultQueryOptions prepared
+        [context "ValueAlias" [HTCon "Identity"]]
+        "partialAlias" expandedGoal of
+      Left message -> assertBool
+        "a partial class-argument alias lost its compatibility diagnostic"
+        $ ("argument Identity of class ValueAlias: Type synonym Identity " ++
+          "expects at least 1 argument(s), but got 0") `isInfixOf` message
+      Right _ -> fail "a partial class-argument alias reached proof search"
+
+    -- Shared elaboration checks kinds before expansion, but Djinn has always
+    -- diagnosed saturation first within one raw HType. The compatibility
+    -- preflight deliberately preserves that ordering even when another tuple
+    -- element is independently ill-kinded.
+    let mixedFailure = HTTuple
+            [ HTCon "Identity"
+            , HTApp boolType variable
+            ]
+    case inhabitGeneratedPrepared defaultQueryOptions prepared []
+        "mixedAliasFailure" mixedFailure of
+      Left message -> do
+        assertBool "legacy saturation precedence was lost"
+            $ "Type synonym Identity expects at least 1 argument(s), but got 0"
+                `isInfixOf` message
+        assertBool "an unrelated kind error replaced the saturation failure"
+            $ "KindMismatch" `notElemText` message
+      Right _ -> fail "an unsaturated, ill-kinded query reached proof search"
+  where
     needle `notElemText` haystack = not $ needle `isInfixOf` haystack
 
 -- Type synonyms are transparent even when they occur below an opaque type

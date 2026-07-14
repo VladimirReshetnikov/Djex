@@ -41,7 +41,7 @@ prepareKindCheck definitions = do
 -- | Pair declarations with assumptions already inferred from their exact
 -- shared inventory.  This is an internal trusted constructor: callers must
 -- obtain the assumptions while sealing the same declarations.  Keeping the
--- 'PreparedKindCheck' constructor private prevents later query code from
+-- t'PreparedKindCheck' constructor private prevents later query code from
 -- assembling or changing such a pair.
 prepareKindCheckWithAssumptions
     :: [(HSymbol, ([HSymbol], HType, HKind))]

@@ -14,6 +14,9 @@ main = defaultMain $ testGroup "public Djex facade"
   , testCase "exports the shared name vocabulary" $
       assertBool "qualified name was rejected" $
         isRight $ parseName "Data.Function.fix"
+  , testCase "exports shared duplicate classification" $
+      multiplicityOf "value" (summarizeDuplicates ["value", "value"])
+        @?= OccursMultipleTimes
   , testCase "exports generated-code rendering" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

@@ -12,6 +12,7 @@ import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Candidate
+import Language.Haskell.Synthesis.Collection
 import Language.Haskell.Synthesis.Count
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
@@ -38,6 +39,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
+  , collectionTests
   , constraintTests
   , declarationTests
   , environmentTests
@@ -110,6 +112,18 @@ candidateTests = testGroup "candidates"
             { renderQualification = Unqualified }
       renderCandidateDefinition options candidate @?=
         Left (GlobalDefinitionCapture target global Unqualified)
+  ]
+
+collectionTests :: TestTree
+collectionTests = testGroup "collections"
+  [ testCase "classify duplicates without losing collection order" $ do
+      let summary = summarizeDuplicates
+            ["alpha", "beta", "beta", "alpha", "alpha", "unique"]
+      multiplicityOf "missing" summary @?= NotPresent
+      multiplicityOf "unique" summary @?= OccursOnce
+      multiplicityOf "alpha" summary @?= OccursMultipleTimes
+      repeatedValueSet summary @?= Set.fromList ["alpha", "beta"]
+      repeatedValuesInFirstRepetitionOrder summary @?= ["beta", "alpha"]
   ]
 
 queryTests :: TestTree

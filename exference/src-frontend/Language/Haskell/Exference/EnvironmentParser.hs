@@ -81,6 +81,7 @@ import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Data.Void (absurd)
 import Text.Read ( readMaybe )
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -1043,8 +1044,8 @@ applyRatings ratings environment =
   , lefts ratingResults
   )
  where
-  declarationCounts = M.fromListWith (+)
-    [ (functionName binding, 1 :: Int)
+  declarations = SharedCollection.summarizeDuplicates
+    [ functionName binding
     | binding <- sourceFunctions environment
     ]
   ratingsByName = M.fromListWith (++)
@@ -1054,15 +1055,16 @@ applyRatings ratings environment =
   ratingResults = map validateRating $ M.toAscList ratingsByName
   effectiveRatings = M.fromList $ rights ratingResults
 
-  validateRating (name, values)
-    | M.findWithDefault 0 name declarationCounts == 0 =
-        Left $ warningDiagnostic
-          $ "rating could not be applied: " ++ show name
-    | M.findWithDefault 0 name declarationCounts > 1 =
-        Left $ warningDiagnostic $ "duplicate function: " ++ show name
-    | [rating] <- values = Right (name, rating)
-    | otherwise = Left $ warningDiagnostic
-        $ "duplicate rating: " ++ show name
+  validateRating (name, values) =
+    case SharedCollection.multiplicityOf name declarations of
+      SharedCollection.NotPresent -> Left $ warningDiagnostic
+        $ "rating could not be applied: " ++ show name
+      SharedCollection.OccursMultipleTimes -> Left $ warningDiagnostic
+        $ "duplicate function: " ++ show name
+      SharedCollection.OccursOnce -> case values of
+        [rating] -> Right (name, rating)
+        _ -> Left $ warningDiagnostic
+          $ "duplicate rating: " ++ show name
 
   rateSourceBinding sourceBinding = case sourceBinding of
     SourceFunction binding -> SourceFunction $ rateBinding binding

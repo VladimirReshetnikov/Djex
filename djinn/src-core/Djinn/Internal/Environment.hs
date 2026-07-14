@@ -18,10 +18,11 @@ module Djinn.Internal.Environment (
     ) where
 
 import Data.Bifunctor (first)
-import Data.List (nub)
+import Data.List (find)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
@@ -487,9 +488,15 @@ replace name binding = (binding :) . filter ((/= name) . fst)
 
 requireDistinct :: String -> [HSymbol] -> Either String ()
 requireDistinct what names =
-    case [name | name <- nub names, length (filter (== name) names) > 1] of
-        [] -> Right ()
-        name:_ -> Left $ "Duplicate " ++ what ++ ": " ++ name
+    case find (`Set.member` repeated) names of
+        Nothing -> Right ()
+        Just name -> Left $ "Duplicate " ++ what ++ ": " ++ name
+  where
+    -- Preserve the historical precedence of the repeated value whose first
+    -- occurrence is earliest; that is not necessarily the value that repeats
+    -- first.  The shared summary removes the former quadratic rescan.
+    repeated = SharedCollection.repeatedValueSet
+        $ SharedCollection.summarizeDuplicates names
 
 requireUnusedName :: String -> HSymbol -> [(HSymbol, a)] -> Either String ()
 requireUnusedName existingKind name definitions

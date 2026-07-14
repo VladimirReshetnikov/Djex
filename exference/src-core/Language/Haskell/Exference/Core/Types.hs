@@ -72,6 +72,7 @@ import qualified Data.List as L
 
 import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 import Language.Haskell.Exference.Core.Name
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -330,7 +331,9 @@ mkStaticClassEnv
 mkStaticClassEnv tclasses instances = do
   classTable <- buildClassTable tclasses
   traverse_ (validateClass classTable) tclasses
-  case repeatedValues $ map instance_head instances of
+  case SharedCollection.repeatedValuesInFirstRepetitionOrder
+      $ SharedCollection.summarizeDuplicates
+      $ map instance_head instances of
     [] -> Right ()
     duplicates -> Left $ DuplicateInstanceHeads duplicates
   traverse_ (validateInstance classTable) instances
@@ -361,9 +364,10 @@ mkStaticClassEnv tclasses instances = do
       constraints = tclass_constraints declaration
       validateParameters = case L.find (< 0) parameters of
         Just invalid -> Left $ NegativeClassParameter name invalid
-        Nothing -> case firstDuplicate parameters of
-          Just duplicate -> Left $ DuplicateClassParameter name duplicate
-          Nothing -> Right ()
+        Nothing -> case SharedCollection.repeatedValuesInFirstRepetitionOrder
+            $ SharedCollection.summarizeDuplicates parameters of
+          duplicate : _ -> Left $ DuplicateClassParameter name duplicate
+          [] -> Right ()
       validateSuperclassVariables = case S.toAscList
           (constraintVariables constraints S.\\ S.fromList parameters) of
         [] -> Right ()
@@ -457,26 +461,6 @@ validateClassName name = case SharedConstraint.validateConstraintClassName
     (toSynthesisName name) of
   Left _ -> Left $ InvalidClassName name
   Right () -> Right ()
-
-firstDuplicate :: Ord a => [a] -> Maybe a
-firstDuplicate = go S.empty
- where
-  go _ [] = Nothing
-  go seen (value : rest)
-    | value `S.member` seen = Just value
-    | otherwise = go (S.insert value seen) rest
-
--- | Return every repeated value once, in the order its first repetition is
--- encountered.  Reporting the complete set lets environment maintainers fix
--- independent duplicate instance declarations in one pass.
-repeatedValues :: Ord a => [a] -> [a]
-repeatedValues = go S.empty S.empty
- where
-  go _ _ [] = []
-  go seen reported (value : rest)
-    | value `S.member` reported = go seen reported rest
-    | value `S.member` seen = value : go seen (S.insert value reported) rest
-    | otherwise = go (S.insert value seen) reported rest
 
 -- This representation is sealed for the same reason: assumed constraints and
 -- their superclass closure must be updated together by 'addQueryClassEnv'.

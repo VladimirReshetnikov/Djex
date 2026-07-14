@@ -2188,6 +2188,14 @@ testPrintedValueNamespace = do
         "Duplicate function assumption: duplicate"
         (validateEnvironment []
             [("duplicate", bool), ("duplicate", bool)] [])
+    assertLeftContains "duplicate precedence follows the first occurrence"
+        "Duplicate function assumption: first"
+        (validateEnvironment []
+            [ ("first", bool)
+            , ("second", bool)
+            , ("second", bool)
+            , ("first", bool)
+            ] [])
     assertLeftContains "raw validation rejects duplicate class owners"
         "Duplicate class: Selectable"
         (validateEnvironment [] []

@@ -60,6 +60,7 @@ import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 import Language.Haskell.Exference.Core.Internal.SearchControl
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
@@ -952,16 +953,10 @@ inputQuery input = ExferenceQuery
 -- so accepting duplicates made both results and penalties list-order
 -- dependent.
 repeatedValues :: Ord value => [value] -> [value]
-repeatedValues = go S.empty S.empty
- where
-  -- Membership carries all the information duplicate detection needs.  In
-  -- particular, it cannot overflow like the former machine-sized occurrence
-  -- count; converting the final set keeps the established ascending order.
-  go _ repeated [] = S.toAscList repeated
-  go !seen !repeated (value : rest)
-    | value `S.member` seen =
-        go seen (S.insert value repeated) rest
-    | otherwise = go (S.insert value seen) repeated rest
+repeatedValues =
+  S.toAscList
+  . SharedCollection.repeatedValueSet
+  . SharedCollection.summarizeDuplicates
 
 -- Duplicate detection deliberately precedes the dedicated deconstructor-shape
 -- validation, preserving the public first-error order while projecting every

@@ -160,7 +160,7 @@ getDataConss tcs ds tDeclMap modules =
         qualifiedSelectors <- mapM
           (either throwE pure . convertModuleName moduleName) names
         pure
-          ( replicate (length qualifiedSelectors) convertedType
+          ( convertedType <$ qualifiedSelectors
           , [(selector, convertedType) | selector <- qualifiedSelectors]
           )
   let

@@ -82,6 +82,7 @@ import qualified Data.Set as S
 import Data.Void (absurd)
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -452,8 +453,7 @@ toSynthesisSourceInventory environment = do
         $ constructorNames S.\\ M.keysSet constructorFunctionGroups
       duplicateFunctions =
         [ name
-        | (name, bindings) <- M.toAscList constructorFunctionGroups
-        , length bindings > 1
+        | (name, _ : _ : _) <- M.toAscList constructorFunctionGroups
         ]
       orphanConstructors = S.toAscList $ S.fromList
         [ functionName binding
@@ -876,6 +876,12 @@ parseModulesM inputs = do
       let classes = sClassEnv_tclasses classEnvironment
           instances = sClassEnv_instances classEnvironment
           allValidNames = dataTypes ++ M.keys classes
+          classCount = SharedCount.naturalLength classes
+          inflatedInstanceCount = sum
+            $ map SharedCount.naturalLength
+            $ M.elems instances
+          functionDeclarationCount =
+            SharedCount.naturalLength declarations
 
           warnUnknownTypeConstructors :: String -> [HsType] -> Loader ()
           warnUnknownTypeConstructors context types = forM_
@@ -954,16 +960,16 @@ parseModulesM inputs = do
           -- The loader has a complete class inventory, unlike public ad-hoc
           -- search input, so binding constraints are checked nominally here.
           warnBindingConstraints bindingName bindingConstraints
-        tell [infoDiagnostic $ "got " ++ show (length classes) ++ " classes"]
+        tell [infoDiagnostic $ "got " ++ show classCount ++ " classes"]
         tell [infoDiagnostic $ "and " ++ show instanceCount ++ " instances"]
         tell
           [ infoDiagnostic
-              $ "(-> " ++ show (length $ concat $ M.elems instances)
+              $ "(-> " ++ show inflatedInstanceCount
                 ++ " instances after inflation)"
           ]
         tell
           [ infoDiagnostic
-              $ "and " ++ show (length declarations) ++ " function decls"
+              $ "and " ++ show functionDeclarationCount ++ " function decls"
           ]
 
       pure SourceEnvironment

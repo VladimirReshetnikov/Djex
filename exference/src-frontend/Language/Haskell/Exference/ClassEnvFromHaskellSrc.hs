@@ -15,6 +15,7 @@ import Data.Bifunctor (first)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Maybe (fromMaybe, maybeToList)
+import Numeric.Natural (Natural)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Language.Haskell.Exts.Pretty (prettyPrint)
@@ -28,6 +29,8 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
 -- Keeping the parser syntax alongside the checked nominal name lets the two
@@ -65,7 +68,7 @@ data ClassEnvironmentLoadError
 -- retain declaration and diagnostic order.
 data LoadedClassEnvironment = LoadedClassEnvironment
   { loadedStaticClassEnvironment :: StaticClassEnv
-  , loadedSourceInstanceCount :: Int
+  , loadedSourceInstanceCount :: Natural
   , loadedClassMethodsByModule
       :: [[Either String ClassMethodDeclaration]]
   }
@@ -105,7 +108,7 @@ loadClassEnvironment dataTypes typeDeclarations modules = do
                 typeDeclarations rawClassesByModule
               pure $ Right LoadedClassEnvironment
                 { loadedStaticClassEnvironment = environment
-                , loadedSourceInstanceCount = length instances
+                , loadedSourceInstanceCount = SharedCount.naturalLength instances
                 , loadedClassMethodsByModule = methods
                 }
 
@@ -124,7 +127,10 @@ getTypeClasses dataTypes typeDeclarations modules = do
         [ (rawClassName rawClass, [rawClass])
         | rawClass <- namedDeclarations
         ]
-      duplicateNames = Map.keys $ Map.filter ((> 1) . length) declarationsByName
+      duplicateNames =
+        [ name
+        | (name, _ : _ : _) <- Map.toAscList declarationsByName
+        ]
       duplicateErrors = map (Left . duplicateClassMessage) duplicateNames
       uniqueDeclarations =
         [ rawClass
@@ -268,8 +274,10 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
       Nothing -> pure Nothing
       Just variables -> do
         ids <- mapM tyVarTransform variables
-        when (Set.size (Set.fromList ids) /= length ids)
-          $ throwE "duplicate explicitly quantified instance variable"
+        case SharedCollection.repeatedValuesInFirstRepetitionOrder
+            $ SharedCollection.summarizeDuplicates ids of
+          _ : _ -> throwE "duplicate explicitly quantified instance variable"
+          [] -> pure ()
         pure $ Just $ Set.fromList ids
     className <- either throwE pure
       $ convertQName (Just moduleName) (Map.keys classes) syntaxName

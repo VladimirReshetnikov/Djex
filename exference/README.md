@@ -361,18 +361,22 @@ sibling projection rather than the modern API reinterpreting legacy status.
 
 `toGeneratedSearchBatch` remains the checked adapter for caller-constructed
 status-bearing compatibility chunks. It rejects malformed generated syntax,
-invalid scope, unfinished holes, malformed constraints, and contradictory
-status, while typed expressions stay available through the historical API.
+invalid scope, unfinished holes, malformed constraints, contradictory status,
+and negative binding-use counts, while typed expressions stay available
+through the historical API.
 Each shared batch carries
-`ExferenceBatchMetadata`: binding-use counts keyed by nominal `QualifiedName`,
-plus cumulative queue- and depth-pruning counts. Keeping the counts in metadata
-makes partial progress observable even though shared `Progress` records pruning
-reasons only when a search terminates.
+`ExferenceBatchMetadata`: exact `Natural` binding-use counts keyed by nominal
+`QualifiedName`, plus cumulative queue- and depth-pruning counts. Keeping the
+counts in metadata makes partial progress observable even though shared
+`Progress` records pruning reasons only when a search terminates. Historical
+status-bearing chunks retain their `Int` binding counts: engine totals saturate
+at that compatibility boundary, while caller-constructed negative counts are
+rejected before the chunk can enter the modern batch API.
 
 The stable `Language.Haskell.Djex.Exference` adapter projects these core-owned
 records into facade-owned `ExferenceCandidateDetails` and
 `ExferenceBatchMetadata`: local/type-variable hints use the shared variable
-tags, binding usage is keyed by shared `Name`, and the retained
+tags, exact `Natural` binding usage is keyed by shared `Name`, and the retained
 `ExferenceInventory` has backend ratings erased by a total functor map. Stable
 callers may construct that inventory through `mkExferenceSession` from a
 neutral `ExferenceEnvironment`. Source clients additionally import

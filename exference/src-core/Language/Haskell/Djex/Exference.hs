@@ -202,9 +202,10 @@ instance NFData ExferenceCandidateDetails where
     rnf (exferenceCandidateLocalNames details) `seq`
     rnf (exferenceCandidateTypeVariableNames details)
 
--- | Stable operational metadata for one Exference result batch.
+-- | Stable, lossless operational metadata for one Exference result batch.
+-- Binding counts are exact non-negative totals, just like pruning counts.
 data ExferenceBatchMetadata = ExferenceBatchMetadata
-  { exferenceBatchBindingUsages :: Map.Map Name Int
+  { exferenceBatchBindingUsages :: Map.Map Name Natural
   , exferenceBatchQueuePruned :: Natural
   , exferenceBatchDepthPruned :: Natural
   }
@@ -251,8 +252,8 @@ exferenceCandidateMetrics
   -> ExferenceCandidateMetrics
 exferenceCandidateMetrics = exferenceCandidateStatistics . candidateDetails
 
--- | Cumulative nominal source-binding usage at this result batch.
-exferenceResultBindingUsages :: ExferenceResult -> Map.Map Name Int
+-- | Exact cumulative nominal source-binding usage at this result batch.
+exferenceResultBindingUsages :: ExferenceResult -> Map.Map Name Natural
 exferenceResultBindingUsages = exferenceBatchBindingUsages
   . batchMetadata . resultSearch
 

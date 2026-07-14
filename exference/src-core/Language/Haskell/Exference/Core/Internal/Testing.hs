@@ -8,6 +8,7 @@ module Language.Haskell.Exference.Core.Internal.Testing
   , findExpressionsWithIdentifierCapacitiesEither
   , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
   , compatibilityPruningCount
+  , compatibilityBindingUsageCounts
   , mergePriorityQueueAtCapacity
   , pruningReasonsFromNaturalTotals
   )
@@ -19,6 +20,7 @@ import qualified Data.PQueue.Prio.Max as Q
 import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
+import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( identifierSupplySize )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
@@ -69,6 +71,13 @@ mergePriorityQueueAtCapacity capacity maximumSize queued newEntries =
 
 compatibilityPruningCount :: Natural -> Int
 compatibilityPruningCount = E.saturatingNaturalToInt
+
+-- | Exercise the historical binding-count projection without constructing an
+-- impossibly large search tree.
+compatibilityBindingUsageCounts
+  :: Map.Map QualifiedName Natural
+  -> Map.Map QualifiedName Int
+compatibilityBindingUsageCounts = E.projectCompatibilityBindingUsages
 
 pruningReasonsFromNaturalTotals
   :: Natural

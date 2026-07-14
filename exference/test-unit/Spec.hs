@@ -83,6 +83,7 @@ import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
+  , compatibilityBindingUsageCounts
   , compatibilityPruningCount
   , findExpressionsWithIdentifierCapacitiesEither
   , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
@@ -427,6 +428,15 @@ tests = testGroup "Exference"
                   ("missing explicit-forall diagnostic: " ++ show errors)
                   $ any ("outside its explicit forall" `isInfixOf`) errors
             other -> fail $ "malformed instance was accepted: " ++ show other
+      , testCase "duplicate instance binders precede head validation" $ do
+          result <- classEnvironmentFromSources
+            [ unlines
+                [ "module M where"
+                , "instance forall a a. Missing a"
+                ]
+            ]
+          result @?= Left (InstanceDeclarationErrors
+            ("duplicate explicitly quantified instance variable" :| []))
       , testCase "instance-head arity is checked against the class table" $ do
           let cls = HsTypeClass (name "C") [0, 1] []
               tooMany = HsInstance [] $ HsConstraint (name "C")
@@ -580,7 +590,9 @@ tests = testGroup "Exference"
             $ loadClassEnvironment dataTypes Map.empty [parsedModule]
           let classEnvironment = loadedStaticClassEnvironment loaded
               methods = concat $ loadedClassMethodsByModule loaded
-          loadedSourceInstanceCount loaded @?= 0
+              sourceInstanceCount :: Natural
+              sourceInstanceCount = loadedSourceInstanceCount loaded
+          sourceInstanceCount @?= 0
           Map.member className (sClassEnv_tclasses classEnvironment) @?= True
           map (fmap $ functionName . classMethodFunction) methods
             @?= [Right methodName]
@@ -2723,6 +2735,31 @@ tests = testGroup "Exference"
             , exferenceQueuePruned = 3
             , exferenceDepthPruned = 2
             }
+      , testCase "compatibility binding usages are exact, checked, and lazy" $ do
+          let binding = name "usedBinding"
+              malformedStatus = ExferenceChunkElement
+                (SearchStatus SearchRunning (-1) 0)
+                (Map.singleton binding (-2))
+                (error "status validation forced compatibility candidates")
+              malformedUsage = ExferenceChunkElement
+                (SearchStatus SearchRunning 0 0)
+                (Map.singleton binding (-2))
+                (error "usage validation forced compatibility candidates")
+              maximumCount = maxBound :: Int
+              valid = ExferenceChunkElement
+                (SearchStatus SearchRunning 0 0)
+                (Map.singleton binding maximumCount)
+                (error "metadata projection forced compatibility candidates")
+          case toSearchBatch malformedStatus of
+            Left failure -> failure @?= NegativeQueuePruningCount (-1)
+            Right _ -> fail "a malformed compatibility status was accepted"
+          case toSearchBatch malformedUsage of
+            Left failure -> failure @?=
+              NegativeBindingUsageCount binding (-2)
+            Right _ -> fail "a negative binding-use count was accepted"
+          batch <- expectRight $ toSearchBatch valid
+          exferenceBindingUsages (SharedSearch.batchMetadata batch) @?=
+            Map.singleton binding (fromIntegral maximumCount :: Natural)
       , testCase "queue pruning is bounded and reported" $ do
           chunk <- onlyChunk $ identityInput {input_maxQueueSize = Just 0}
           searchCompletion (chunkStatus chunk) @?= SearchPruned
@@ -2745,10 +2782,14 @@ tests = testGroup "Exference"
           let maximumCount = fromIntegral (maxBound :: Int) :: Natural
               queueTotal = maximumCount + 1
               depthTotal = maximumCount + 2
+              binding = name "usedBinding"
           compatibilityPruningCount (maximumCount - 1) @?=
             maxBound - 1
           compatibilityPruningCount maximumCount @?= maxBound
           compatibilityPruningCount queueTotal @?= maxBound
+          compatibilityBindingUsageCounts
+              (Map.singleton binding queueTotal) @?=
+            Map.singleton binding maxBound
           pruningReasonsFromNaturalTotals queueTotal depthTotal @?=
             [ SharedSearch.QueueLimitPruned queueTotal
             , SharedSearch.DepthLimitPruned depthTotal

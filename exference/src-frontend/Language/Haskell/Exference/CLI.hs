@@ -424,9 +424,10 @@ validateFlagCombinations flags inputs = do
       [PrintAll, EnvUsage, FirstSol, Best, Constraints]) $
     usageFailure "a search or selection option requires an input type"
  where
-  requireAtMostOne description selected = when (length selected > 1) $
-    usageFailure $ "conflicting " ++ description ++ " options: "
+  requireAtMostOne description selected = case selected of
+    _ : _ : _ -> usageFailure $ "conflicting " ++ description ++ " options: "
       ++ intercalate ", " (map show selected)
+    _ -> pure ()
 
 lastMaybe :: [value] -> Maybe value
 lastMaybe = List.foldl' (\_ value -> Just value) Nothing

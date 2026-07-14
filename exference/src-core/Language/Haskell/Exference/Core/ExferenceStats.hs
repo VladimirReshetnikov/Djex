@@ -14,9 +14,11 @@ import Numeric.Natural (Natural)
 import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Score
 
--- | Cumulative environment-use counts, keyed by nominal binding identity.
+-- | Exact cumulative environment-use counts, keyed by nominal binding
+-- identity. Cumulative operational totals have no semantic machine-word
+-- bound, so they use 'Natural' rather than a wrapping counter.
 -- Rendering belongs at presentation boundaries, not in the search core.
-type BindingUsages = M.Map QualifiedName Int
+type BindingUsages = M.Map QualifiedName Natural
 
 -- | Lossless operational metadata for one Exference search batch.  Pruning
 -- counts remain visible on continuing batches, where shared

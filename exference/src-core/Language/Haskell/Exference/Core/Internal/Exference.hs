@@ -32,6 +32,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , mergeQueueWithCapacity
   , naturalPruningReasons
   , saturatingNaturalToInt
+  , projectCompatibilityBindingUsages
   , ExferenceInputError (..)
   , mkExferenceEnvironment
   , validateExferenceQuery
@@ -67,7 +68,7 @@ import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
 
 import qualified Data.PQueue.Prio.Max as Q
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as S
@@ -227,6 +228,7 @@ data SearchStatus = SearchStatus
 data SearchStatusError
   = NegativeQueuePruningCount Int
   | NegativeDepthPruningCount Int
+  | NegativeBindingUsageCount QualifiedName Int
   | ExhaustedWithDiscardedNodes Int Int
   | PrunedWithoutDiscardedNodes
   deriving (Eq, Show)
@@ -268,7 +270,10 @@ toSearchProgress (SearchStatus completion queuePruned depthPruned)
 
 data ExferenceChunkElement = ExferenceChunkElement
   { chunkStatus :: SearchStatus
-  , chunkBindingUsages :: BindingUsages
+  -- Historical compatibility metadata remains machine-sized. Engine-produced
+  -- counts saturate here; caller-produced negative counts are rejected when
+  -- projected into the modern batch API.
+  , chunkBindingUsages :: M.Map QualifiedName Int
   , chunkElements :: [ExferenceOutputElement]
   }
 
@@ -300,17 +305,26 @@ toSearchBatch
   :: ExferenceChunkElement
   -> Either SearchStatusError ExferenceSearchBatch
 toSearchBatch chunk = do
+  -- Preserve the established envelope-error precedence: malformed status
+  -- wins over binding metadata, and all metadata wins over candidate checks.
   progress <- toSearchProgress $ chunkStatus chunk
-  return $ SharedSearch.SearchBatch
-    progress (chunkMetadata chunk) (chunkElements chunk)
+  metadata <- chunkMetadata chunk
+  pure $ SharedSearch.SearchBatch progress metadata $ chunkElements chunk
 
-chunkMetadata :: ExferenceChunkElement -> ExferenceBatchMetadata
-chunkMetadata chunk = ExferenceBatchMetadata
-  (chunkBindingUsages chunk)
-  (fromIntegral $ searchQueuePruned status)
-  (fromIntegral $ searchDepthPruned status)
+chunkMetadata
+  :: ExferenceChunkElement
+  -> Either SearchStatusError ExferenceBatchMetadata
+chunkMetadata chunk = do
+  usages <- M.traverseWithKey exactUsage $ chunkBindingUsages chunk
+  pure $ ExferenceBatchMetadata
+    usages
+    (fromIntegral $ searchQueuePruned status)
+    (fromIntegral $ searchDepthPruned status)
  where
   status = chunkStatus chunk
+  exactUsage binding count
+    | count < 0 = Left $ NegativeBindingUsageCount binding count
+    | otherwise = Right $ fromIntegral count
 
 toGeneratedSearchBatch
   :: ExferenceChunkElement
@@ -603,8 +617,17 @@ findExpressionsWithAllocators allocators' =
 projectCompatibilityChunk :: EngineChunk -> ExferenceChunkElement
 projectCompatibilityChunk chunk = ExferenceChunkElement
   (engineStatus chunk)
-  (exferenceBindingUsages $ engineMetadata chunk)
+  (projectCompatibilityBindingUsages
+    $ exferenceBindingUsages $ engineMetadata chunk)
   (engineCandidates chunk)
+
+-- | Project exact engine totals into the historical chunk API without
+-- allowing a large count to wrap into a misleading non-positive value.
+projectCompatibilityBindingUsages
+  :: BindingUsages
+  -> M.Map QualifiedName Int
+projectCompatibilityBindingUsages =
+  M.map SharedCount.saturatingNaturalToInt
 
 -- | Project the validated engine trace lazily.  Candidate conversion is total
 -- here: input validation established the shared type invariants, and search

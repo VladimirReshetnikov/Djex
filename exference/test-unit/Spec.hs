@@ -885,6 +885,13 @@ tests = testGroup "Exference"
             (IntMap.fromList
               [(0, Just 1), (1, Just 2), (2, Just 1)])
             @?= Left (Scope.ScopeParentCycle [1, 2, 1])
+      , testCase "scope invariant diagnostics render every alternative" $ do
+          show (Scope.MissingScopeId 9 [2, 9])
+            @?= "missing scope 9 on parent path 2 -> 9"
+          show (Scope.ScopeParentCycle [1, 4, 1])
+            @?= "cyclic scope parents: 1 -> 4 -> 1"
+          show (Scope.ScopeIdCollision 7)
+            @?= "scope allocator attempted to reuse scope 7"
       ]
   , testGroup "type traversal"
       [ testCase "forall substitution protects context binders" $ do

@@ -45,7 +45,12 @@ source-repository head
 
 common build-settings
   Default-Language: Haskell2010
-  Ghc-Options:      -Wall -Wcompat -Wunused-packages
+  Ghc-Options:
+    -Wall
+    -Wcompat
+    -Wincomplete-record-updates
+    -Wpartial-fields
+    -Wunused-packages
   Build-Depends:    base >= 4.19 && < 5
 
 -- Keep the most widely shared dependency bounds in one place without making

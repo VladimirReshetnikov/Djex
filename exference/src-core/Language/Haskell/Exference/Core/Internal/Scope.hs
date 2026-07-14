@@ -72,17 +72,14 @@ instance Show binding => Show (Scopes binding) where
 -- | A corrupt reference or parent relation discovered by checked traversal.
 -- Paths are ordered from the traversal root towards the failure.  Cycle paths
 -- repeat their first ID at the end, for example @[1, 4, 1]@.
+--
+-- The constructors intentionally use positional fields.  Constructor-specific
+-- record fields would export selectors that crash on the other alternatives,
+-- turning this otherwise total diagnostic type into a public partial API.
 data ScopeInvariantError
-  = MissingScopeId
-      { missingScopeId :: !Int
-      , scopeTraversalPath :: [Int]
-      }
-  | ScopeParentCycle
-      { scopeCyclePath :: [Int]
-      }
-  | ScopeIdCollision
-      { collidingScopeId :: !Int
-      }
+  = MissingScopeId !Int [Int]
+  | ScopeParentCycle [Int]
+  | ScopeIdCollision !Int
   deriving (Eq, Generic)
 
 instance Show ScopeInvariantError where

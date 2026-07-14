@@ -27,14 +27,17 @@ import GHC.Generics (Generic)
 
 -- | Exference's compatibility score carrier. Query heuristics and depth
 -- limits are validated as non-negative penalties, while environment binding
--- ratings deliberately remain signed. The public numeric instances retain
--- their historical raw-'Double' behavior so input validation can still reject
--- NaN and infinities; search uses the explicit saturating operations below.
+-- ratings deliberately remain signed. The public 'Num' and 'Fractional'
+-- instances retain their historical raw-'Double' behavior so input validation
+-- can still reject NaN and infinities; search uses the explicit saturating
+-- operations below. 'Real' and 'RealFrac' are deliberately absent: their
+-- inherited conversions are partial for the non-finite values this public
+-- compatibility constructor accepts.
 --
 -- The constructor remains public for compatibility and diagnostics. Checked
 -- boundaries inspect its raw value, while ordering is total even for NaN.
 newtype Penalty = Penalty { penaltyValue :: Double }
-  deriving (Data, Fractional, NFData, Num, Real, RealFrac, Generic)
+  deriving (Data, Fractional, NFData, Num, Generic)
 
 instance Eq Penalty where
   Penalty left == Penalty right = scoreValuesEqual left right
@@ -50,7 +53,7 @@ instance Show Penalty where
 -- NaN sorts below every ordinary priority, so even caller-constructed
 -- compatibility values retain a lawful total order.
 newtype Priority = Priority { priorityValue :: Double }
-  deriving (Data, Fractional, NFData, Num, Real, RealFrac, Generic)
+  deriving (Data, Fractional, NFData, Num, Generic)
 
 instance Eq Priority where
   Priority left == Priority right = scoreValuesEqual left right

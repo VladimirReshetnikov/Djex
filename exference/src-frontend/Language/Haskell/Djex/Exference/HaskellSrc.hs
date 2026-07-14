@@ -28,7 +28,7 @@ import Language.Haskell.Djex.Exference
   , exferenceSessionDiagnostics
   , exferenceSessionInventory
   )
-import qualified Language.Haskell.Djex.Exference.Internal.Frontend as Frontend
+import qualified Language.Haskell.Djex.Exference.FrontendSupport as Frontend
 import qualified Language.Haskell.Exference.Session as CompatibilitySession
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.EnvironmentParser

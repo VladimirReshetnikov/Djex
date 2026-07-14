@@ -36,7 +36,7 @@ import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
-import qualified Language.Haskell.Djex.Exference.Internal.Frontend as Frontend
+import qualified Language.Haskell.Djex.Exference.FrontendSupport as Frontend
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map.Strict as M

@@ -234,10 +234,12 @@ the stable adapter exposes only `mkExferenceRequest` and
 private presentation caches, so they neither affect equality/display nor admit
 an unchecked construction path through the default facade. The core component's
 hidden `Language.Haskell.Djex.Exference.Internal.Request` representation owns
-that metadata. The separately built HSE component reaches only its checked
-constructor and the raw-name-to-`DefinitionName` preflight through the
-deliberately unstable
-`Language.Haskell.Djex.Exference.Internal.Frontend` seam; that seam is not
+that metadata. Source-adapter authors opt into the explicit parser-neutral
+`Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.
+Its checked wrappers also expose only the session vocabulary, prepared-session
+sealing, source-aware request construction, target preflight, and
+collision-safe variable allocation needed at that boundary. It is imported
+directly from `djex:exference-core`, rather than
 re-exported by the default library or the frontend library.
 
 The Haskell-source loader is likewise fail-closed at its vocabulary boundary:

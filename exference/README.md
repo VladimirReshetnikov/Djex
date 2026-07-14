@@ -80,13 +80,16 @@ This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
 
-The source component crosses into core through the deliberately unstable
-`Language.Haskell.Djex.Exference.Internal.Frontend` seam. Cabal must expose
-that module so one sublibrary can consume another, but neither the default
+The source component crosses into core through the explicit parser-neutral
+`Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.
+It documents and wraps the six checked operations needed by source-adapter
+authors without exposing request, session, or allocator representations.
+Adapters import it directly from `djex:exference-core`; neither the default
 `Language.Haskell.Djex` facade nor `exference-frontend` re-exports it. The
-request representation behind it is a hidden module. Stable clients therefore
-see an opaque `ExferenceRequest` with one neutral smart constructor; source
-spans and parsed variable spellings remain frontend implementation details.
+request representation behind it remains a hidden module. Stable clients
+therefore see an opaque `ExferenceRequest` with one neutral smart constructor;
+source spans and parsed variable spellings remain frontend implementation
+details.
 Its compatibility parser still accepts a raw shared `Name`, but converts it to
 the request's opaque `DefinitionName` before parsing so invalid-target
 diagnostics retain their historical precedence. Programmatic `QueryRequest`s

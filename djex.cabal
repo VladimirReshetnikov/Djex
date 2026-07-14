@@ -309,7 +309,7 @@ Library exference-core
 
   Exposed-Modules:
     Language.Haskell.Djex.Exference
-    Language.Haskell.Djex.Exference.Internal.Frontend
+    Language.Haskell.Djex.Exference.FrontendSupport
     Language.Haskell.Exference
     Language.Haskell.Exference.Diagnostic
     Language.Haskell.Exference.SimpleDict

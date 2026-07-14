@@ -74,6 +74,8 @@ tests =
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("reject every raw recursive type-expansion graph finitely",
           testRawTypeExpansionCycles)
+    , ("preserve raw expansion substitution semantics",
+          testRawExpansionSubstitution)
     , ("preflight raw environment recursion after alias expansion",
           testRawEnvironmentRecursionPreflight)
     , ("validate unused synonyms before recursion preflight",
@@ -1174,6 +1176,37 @@ testRawTypeExpansionCycles = do
     assertEqual "cycle validation honors first-binding lookup semantics"
         (Right $ PVar $ Symbol "Bool")
         (hTypeToFormula firstWins $ HTCon "A")
+
+-- Raw definition parameters predate checked declaration validation. Preserve
+-- their historical first-binding behavior while covering an arity wide enough
+-- to exercise the logarithmic substitution index rather than list position.
+testRawExpansionSubstitution :: IO ()
+testRawExpansionSubstitution = do
+    let definition name parameters body = (name, (parameters, body, ()))
+        applications = foldl HTApp
+        duplicateParameters =
+            [ definition "F" [] $
+                HTAbstract "F" $ KArrow KStar KStar
+            , definition "PickFirst" ["a", "a"] $ HTVar "a"
+            ]
+        duplicateArgument = applications (HTCon "PickFirst")
+            [HTVar "x", HTVar "y"]
+    assertEqual "duplicate raw parameters retain their first argument"
+        (Right $ PVar $ Symbol "F x")
+        (hTypeToFormula duplicateParameters $
+            HTApp (HTCon "F") duplicateArgument)
+
+    let indices = [0 .. 127] :: [Int]
+        parameters = map (("p" ++) . show) indices
+        argumentNames = map (("x" ++) . show) indices
+        wideDefinition = [definition "Wide" parameters $
+            HTTuple $ map HTVar $ reverse parameters]
+        wideQuery = applications (HTCon "Wide") $
+            map HTVar argumentNames
+        expected = Conj $ map (PVar . Symbol) $ reverse argumentNames
+    assertEqual "wide raw substitution preserves every parameter position"
+        (Right expected)
+        (hTypeToFormula wideDefinition wideQuery)
 
 -- Raw Environment constructors remain available to explicit low-level
 -- clients. Their checked preparation must apply the same expand-first

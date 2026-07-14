@@ -16,6 +16,7 @@ module Djinn.Internal.HTypes(
 import Data.Bifunctor (first)
 import Data.Graph (SCC(..), stronglyConnComp)
 import Data.List(find, intercalate, sortOn, transpose, union, (\\))
+import qualified Data.Map.Lazy as LazyMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe(fromMaybe, listToMaybe)
 import Control.Monad(foldM, zipWithM)
@@ -422,8 +423,9 @@ lowerApplication definitions path source =
                 Just (parameters, body)
                     | length parameters == length arguments -> do
                         rejectActiveExpansion definitions path name origin
-                        let replacements = zip parameters $
-                                map (ExpansionArgument path) arguments
+                        let replacements = firstExpansionSubstitutions $
+                                zip parameters $
+                                    map (ExpansionArgument path) arguments
                             expanded = substituteExpansion replacements $
                                 instantiateDefinitionOrigins origin name body
                         case expanded of
@@ -454,7 +456,7 @@ expansionApplication (ExpansionArgument _ function) arguments =
 expansionApplication headType arguments = (headType, arguments)
 
 substituteExpansion
-    :: [(HSymbol, ExpansionType)]
+    :: LazyMap.Map HSymbol ExpansionType
     -> ExpansionType
     -> ExpansionType
 substituteExpansion replacements source =
@@ -462,8 +464,8 @@ substituteExpansion replacements source =
         ExpansionApp function argument -> expansionApp
             (substituteExpansion replacements function)
             (substituteExpansion replacements argument)
-        variable@(ExpansionVar name) -> fromMaybe variable $
-            lookup name replacements
+        variable@(ExpansionVar name) ->
+            LazyMap.findWithDefault variable name replacements
         constructor@(ExpansionCon _ _) -> constructor
         ExpansionTuple types ->
             ExpansionTuple $ map (substituteExpansion replacements) types
@@ -475,6 +477,17 @@ substituteExpansion replacements source =
                 (constructor, fields) <- constructors]
         abstract@(ExpansionAbstract _ _) -> abstract
         argument@(ExpansionArgument _ _) -> argument
+
+-- Raw low-level definitions may repeat a parameter. Association-list lookup
+-- historically selected its first binding; folding inserts from the right
+-- retains that behavior while making every body-variable lookup logarithmic.
+-- The lazy Map also leaves substituted expansion values as unevaluated as the
+-- association list did.
+firstExpansionSubstitutions
+    :: [(HSymbol, ExpansionType)]
+    -> LazyMap.Map HSymbol ExpansionType
+firstExpansionSubstitutions =
+    foldr (uncurry LazyMap.insert) LazyMap.empty
 
 rejectActiveExpansion
     :: FormulaDefinitions
@@ -538,8 +551,9 @@ normalizeExpansionAliases definitions path source =
                           formulaDefinitionIsAlias name definitions -> do
                             rejectActiveExpansion
                                 definitions path name origin
-                            let replacements = zip parameters $
-                                    map (ExpansionArgument path) arguments
+                            let replacements = firstExpansionSubstitutions $
+                                    zip parameters $
+                                        map (ExpansionArgument path) arguments
                                 expanded = substituteExpansion replacements $
                                     instantiateDefinitionOrigins origin name body
                             normalizeExpansionAliases definitions

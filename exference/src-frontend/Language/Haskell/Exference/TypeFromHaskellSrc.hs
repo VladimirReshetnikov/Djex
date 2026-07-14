@@ -1,4 +1,3 @@
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE GADTs #-}
 
 module Language.Haskell.Exference.TypeFromHaskellSrc

@@ -1,5 +1,3 @@
-{-# LANGUAGE PatternGuards #-}
-
 module Language.Haskell.Exference.Core.TypeUtils
   ( incVarIds
   , maximumFlexibleId

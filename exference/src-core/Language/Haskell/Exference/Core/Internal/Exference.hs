@@ -1,8 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE MonadComprehensions #-}
-
 
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions

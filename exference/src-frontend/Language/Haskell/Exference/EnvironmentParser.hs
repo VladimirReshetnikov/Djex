@@ -1,4 +1,3 @@
-{-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE TypeOperators #-}

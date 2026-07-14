@@ -1,5 +1,4 @@
 {-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE PatternGuards #-}
 
 module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)

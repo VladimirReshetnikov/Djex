@@ -1,7 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MonadComprehensions #-}
-{-# LANGUAGE PatternGuards #-}
 
 module Language.Haskell.Exference.Core.Types
   ( TVarId

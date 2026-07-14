@@ -13,6 +13,10 @@
 module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
   , requestContextualType
+  , CachedQuery
+  , mkCachedQuery
+  , cachedQueryRequest
+  , cachedQueryCache
   , QueryEvidence (..)
   , QueryResult
   , resultEvidence
@@ -52,6 +56,42 @@ data QueryRequest ty options = QueryRequest
 
 instance (NFData ty, NFData options) =>
     NFData (QueryRequest ty options)
+
+-- | A stable neutral request paired with an adapter-owned projection or
+-- presentation cache.
+--
+-- The constructor is hidden so the request and cache cannot be replaced
+-- independently after an adapter seals its own opaque request.  Equality and
+-- display deliberately observe only the neutral request: cached backend
+-- values and source provenance are implementation details and need not even
+-- have 'Eq' or 'Show' instances.
+data CachedQuery ty options cache = CachedQuery
+  (QueryRequest ty options)
+  cache
+
+-- | Pair a neutral request with the exact cache derived from it.
+mkCachedQuery
+  :: QueryRequest ty options
+  -> cache
+  -> CachedQuery ty options cache
+mkCachedQuery = CachedQuery
+
+-- | Recover the stable neutral request.
+cachedQueryRequest
+  :: CachedQuery ty options cache
+  -> QueryRequest ty options
+cachedQueryRequest (CachedQuery request _) = request
+
+-- | Recover the adapter-owned cache.
+cachedQueryCache :: CachedQuery ty options cache -> cache
+cachedQueryCache (CachedQuery _ cache) = cache
+
+instance (Eq ty, Eq options) => Eq (CachedQuery ty options cache) where
+  left == right = cachedQueryRequest left == cachedQueryRequest right
+
+instance (Show ty, Show options) =>
+    Show (CachedQuery ty options cache) where
+  showsPrec precedence = showsPrec precedence . cachedQueryRequest
 
 -- | Combine a shared source-type goal with its explicit request contexts.
 --

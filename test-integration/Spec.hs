@@ -143,6 +143,28 @@ tests = testGroup "Djex facade"
           assertBool "choice-point truncation reason was lost" $
             ChoicePointLimitReached `elem` reasons
         completion -> fail $ "expected a truncated search, got " ++ show completion
+  , testCase "attach parsed Djinn sources only to deferred diagnostics" $ do
+      session <- sealDjinnEnvironment standardEnvironment
+      target <- expectRight $ mkIdentifier "deferredFailure"
+      let sourceName = "deferred-synonym.djinn"
+          source = "Not"
+      parsed <- expectRight $ parseDjinnRequest session
+        defaultQueryOptions target sourceName source
+      case runDjinnQuery session parsed of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_DJINN_QUERY"
+          diagnosticSource failure @?= Just sourceName
+          diagnosticSpan failure @?= Just (sourceTextSpan source)
+        Right _ -> fail "Djinn accepted an unsaturated parsed synonym"
+      programmatic <- expectRight $ mkDjinnRequest $ djinnRequestQuery parsed
+      parsed @?= programmatic
+      show parsed @?= show programmatic
+      case runDjinnQuery session programmatic of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_DJINN_QUERY"
+          diagnosticSource failure @?= Nothing
+          diagnosticSpan failure @?= Nothing
+        Right _ -> fail "Djinn accepted an unsaturated programmatic synonym"
   , testCase "preserve Djinn's target-reference evidence" $ do
       variable <- expectRight $ parseHType "a"
       environment <- expectRight $

@@ -1,3 +1,5 @@
+{-# LANGUAGE DerivingVia #-}
+
 -- | Checked Djinn sessions behind Djex's backend-neutral query envelope.
 --
 -- A session seals the exact Djinn environment once and retains both the shared
@@ -64,7 +66,10 @@ import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
+  , SourceSpan
   , contextualDiagnostic
+  , sourceTextSpan
+  , withLocation
   , withSource
   )
 import Language.Haskell.Synthesis.Generated
@@ -82,9 +87,13 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
-  ( QueryRequest (..)
+  ( CachedQuery
+  , QueryRequest (..)
   , QueryResult
   , QueryResultInvariantError
+  , cachedQueryCache
+  , cachedQueryRequest
+  , mkCachedQuery
   , mkQueryResult
   )
 import Language.Haskell.Synthesis.Search
@@ -130,24 +139,23 @@ data DjinnQueryMetadata = DjinnQueryMetadata
   }
   deriving (Eq, Show)
 
--- | A checked query whose neutral spelling and backend projection cannot
--- drift apart.  The constructor and cached raw values stay private; callers
--- can inspect the original neutral query with 'djinnRequestQuery'.
-data DjinnRequest = DjinnRequest
-  { requestQuery :: QueryRequest DjinnType QueryOptions
-  , djinnRequestTargetSymbol :: Core.HSymbol
-  , djinnRequestCoreGoal :: Core.HType
-  , djinnRequestCoreContexts :: [Core.Context]
+-- | The raw projection and optional source provenance derived while sealing
+-- a request. The shared 'CachedQuery' envelope keeps both details out of the
+-- request's stable equality and display contract.
+data DjinnRequestCache = DjinnRequestCache
+  { cachedTargetSymbol :: Core.HSymbol
+  , cachedCoreGoal :: Core.HType
+  , cachedCoreContexts :: [Core.Context]
+  , cachedSourceLocation :: Maybe (FilePath, SourceSpan)
   }
 
--- The cached projection is a deterministic implementation detail. Equality
--- and display therefore expose only the stable neutral request, just as the
--- constructor itself does.
-instance Eq DjinnRequest where
-  left == right = requestQuery left == requestQuery right
-
-instance Show DjinnRequest where
-  showsPrec precedence = showsPrec precedence . requestQuery
+-- | A checked query whose neutral spelling and backend projection cannot
+-- drift apart.  The constructor and cached values stay private; callers can
+-- inspect the original neutral query with 'djinnRequestQuery'.
+newtype DjinnRequest = DjinnRequest
+  (CachedQuery DjinnType QueryOptions DjinnRequestCache)
+  deriving (Eq, Show)
+    via (CachedQuery DjinnType QueryOptions DjinnRequestCache)
 
 -- Spell out the shared candidate shape here instead of re-exporting Djinn's
 -- identical alias, whose historical @HSymbol@ name is intentionally private
@@ -191,15 +199,21 @@ djinnSessionInventory (DjinnSession prepared) =
 mkDjinnRequest
   :: QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
-mkDjinnRequest query = do
+mkDjinnRequest = mkDjinnRequestWithSource Nothing
+
+mkDjinnRequestWithSource
+  :: Maybe (FilePath, SourceSpan)
+  -> QueryRequest DjinnType QueryOptions
+  -> Either Diagnostic DjinnRequest
+mkDjinnRequestWithSource sourceLocation query = do
   let target = definitionSpelling $ requestTarget query
   goal <- lowerRequestType "goal" $ requestGoal query
   contexts <- traverse lowerRequestContext $ requestContexts query
-  pure DjinnRequest
-    { requestQuery = query
-    , djinnRequestTargetSymbol = target
-    , djinnRequestCoreGoal = goal
-    , djinnRequestCoreContexts = contexts
+  pure $ DjinnRequest $ mkCachedQuery query DjinnRequestCache
+    { cachedTargetSymbol = target
+    , cachedCoreGoal = goal
+    , cachedCoreContexts = contexts
+    , cachedSourceLocation = sourceLocation
     }
 
 -- | Recover the exact neutral query from which this checked request was
@@ -207,7 +221,10 @@ mkDjinnRequest query = do
 djinnRequestQuery
   :: DjinnRequest
   -> QueryRequest DjinnType QueryOptions
-djinnRequestQuery = requestQuery
+djinnRequestQuery (DjinnRequest query) = cachedQueryRequest query
+
+djinnRequestCache :: DjinnRequest -> DjinnRequestCache
+djinnRequestCache (DjinnRequest query) = cachedQueryCache query
 
 -- | Parse the type portion of a Djinn query.  The accepted context grammar is
 -- exactly the historical one: either one constraint or a comma-separated
@@ -256,7 +273,8 @@ parseDjinnRequestWithCheckedTarget _session options checkedTarget
         , requestContexts = contexts
         , requestOptions = options
         }
-  mkDjinnRequest query
+  mkDjinnRequestWithSource
+    (Just (sourceName, sourceTextSpan source)) query
 
 -- | Run one complete configured Djinn search and project it into a single
 -- terminal shared batch.  Logical evidence stays independent of operational
@@ -267,14 +285,16 @@ runDjinnQuery
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQuery (DjinnSession prepared) request = do
+  let cache = djinnRequestCache request
   report <- case inhabitGeneratedPrepared
       (requestOptions $ djinnRequestQuery request)
       prepared
-      (djinnRequestCoreContexts request)
-      (djinnRequestTargetSymbol request)
-      (djinnRequestCoreGoal request) of
-    Left failure -> Left $ contextualDiagnostic Error "DJEX_DJINN_QUERY"
-      "Djinn rejected the query" failure
+      (cachedCoreContexts cache)
+      (cachedTargetSymbol cache)
+      (cachedCoreGoal cache) of
+    Left failure -> Left $ attachRequestSource request
+      $ contextualDiagnostic Error "DJEX_DJINN_QUERY"
+        "Djinn rejected the query" failure
     Right value -> Right value
   candidates <- first candidateProjectionFailure
     $ traverse projectCandidate
@@ -289,6 +309,18 @@ runDjinnQuery (DjinnSession prepared) request = do
         candidates
   first queryResultFailure
     $ mkQueryResult (generatedReportEvidence report) batch
+
+-- Programmatic requests deliberately carry no source. Parsed requests retain
+-- their complete input range so only environment-dependent proof-search
+-- rejection acquires that location; eager parser/lowering diagnostics and
+-- adapter-internal projection/invariant failures retain their established
+-- source-less shape.
+attachRequestSource :: DjinnRequest -> Diagnostic -> Diagnostic
+attachRequestSource request diagnostic = case cachedSourceLocation
+    $ djinnRequestCache request of
+  Nothing -> diagnostic
+  Just (sourceName, sourceSpan) ->
+    withLocation sourceName sourceSpan diagnostic
 
 -- The core currently proves every obligation and therefore emits no residual
 -- constraints. Keep this projection checked nevertheless: it preserves the

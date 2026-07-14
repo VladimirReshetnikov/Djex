@@ -1,3 +1,5 @@
+{-# LANGUAGE DerivingVia #-}
+
 {-# OPTIONS_HADDOCK not-home #-}
 
 -- | Hidden request representation shared with Exference source frontends.
@@ -45,7 +47,11 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Query
-  ( QueryRequest (..)
+  ( CachedQuery
+  , QueryRequest (..)
+  , cachedQueryCache
+  , cachedQueryRequest
+  , mkCachedQuery
   , requestContextualType
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -88,20 +94,18 @@ type ExferenceType = Type ExferenceTypeVariable
 -- the exact parsed goal. In particular, the spelling index must be converted
 -- after explicit contexts are merged, because that operation can change
 -- Exference's rigid-ID allocation.
-data ExferenceRequest = ExferenceRequest
-  { exferenceRequestQuery :: QueryRequest ExferenceType ExferenceOptions
-  , requestSourceTypeVariables :: Map.Map String ExferenceLocal
-  , requestSourceLocation :: Maybe (FilePath, SourceSpan)
+data ExferenceRequestCache = ExferenceRequestCache
+  { cachedSourceTypeVariables :: Map.Map String ExferenceLocal
+  , cachedSourceLocation :: Maybe (FilePath, SourceSpan)
   }
 
 -- Source spellings and locations are deterministic presentation caches, not
--- part of the stable request value. This matches Djinn's opaque request: both
--- backends expose equality and display solely through the neutral query.
-instance Eq ExferenceRequest where
-  left == right = exferenceRequestQuery left == exferenceRequestQuery right
-
-instance Show ExferenceRequest where
-  showsPrec precedence = showsPrec precedence . exferenceRequestQuery
+-- part of the stable request value. The shared envelope gives both adapters
+-- the same query-only equality and display contract.
+newtype ExferenceRequest = ExferenceRequest
+  (CachedQuery ExferenceType ExferenceOptions ExferenceRequestCache)
+  deriving (Eq, Show)
+    via (CachedQuery ExferenceType ExferenceOptions ExferenceRequestCache)
 
 mkExferenceRequest
   :: QueryRequest ExferenceType ExferenceOptions
@@ -118,7 +122,28 @@ mkExferenceRequestWithSourceInfo
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequestWithSourceInfo sourceVariables sourceLocation query = do
   validateRequest query
-  pure $ ExferenceRequest query sourceVariables sourceLocation
+  pure $ ExferenceRequest $ mkCachedQuery query ExferenceRequestCache
+    { cachedSourceTypeVariables = sourceVariables
+    , cachedSourceLocation = sourceLocation
+    }
+
+exferenceRequestQuery
+  :: ExferenceRequest
+  -> QueryRequest ExferenceType ExferenceOptions
+exferenceRequestQuery (ExferenceRequest query) = cachedQueryRequest query
+
+requestSourceTypeVariables
+  :: ExferenceRequest
+  -> Map.Map String ExferenceLocal
+requestSourceTypeVariables = cachedSourceTypeVariables . exferenceRequestCache
+
+requestSourceLocation
+  :: ExferenceRequest
+  -> Maybe (FilePath, SourceSpan)
+requestSourceLocation = cachedSourceLocation . exferenceRequestCache
+
+exferenceRequestCache :: ExferenceRequest -> ExferenceRequestCache
+exferenceRequestCache (ExferenceRequest query) = cachedQueryCache query
 
 requestContextualGoal :: ExferenceRequest -> ExferenceType
 requestContextualGoal = requestContextualType . exferenceRequestQuery

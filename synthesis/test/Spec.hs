@@ -112,7 +112,19 @@ candidateTests = testGroup "candidates"
 
 queryTests :: TestTree
 queryTests = testGroup "queries"
-  [ testCase "leave a context-free shared goal unchanged" $ do
+  [ testCase "hide adapter caches from request equality and display" $ do
+      let query = request (variable "a") []
+          firstCache = mkCachedQuery query ((+ 1) :: Int -> Int)
+          secondCache = mkCachedQuery query (const 0 :: Int -> Int)
+      firstCache @?= secondCache
+      show firstCache @?= show query
+      cachedQueryRequest firstCache @?= query
+      cachedQueryCache firstCache 41 @?= 42
+      let unavailable = mkCachedQuery query
+            (error "request equality forced its cache" :: ())
+      unavailable @?= mkCachedQuery query ()
+      show unavailable @?= show query
+  , testCase "leave a context-free shared goal unchanged" $ do
       let goal = variable "a"
       requestContextualType (request goal []) @?= goal
   , testCase "quantify contexts around an unquantified goal" $ do
@@ -1592,6 +1604,8 @@ searchTests = testGroup "search status"
       Completed Finished @?= Completed Finished
       truncated StepLimitReached @?=
         Truncated (StepLimitReached :| [])
+      truncated IdentifierSpaceExhausted @?=
+        Truncated (IdentifierSpaceExhausted :| [])
   , testCase "classify every optional progress state without losing reasons" $ do
       observeProgress Nothing @?= NoProgressObserved
       observeProgress (Just Continuing) @?= ObservedContinuing

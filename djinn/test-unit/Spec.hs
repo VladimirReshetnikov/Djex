@@ -53,6 +53,7 @@ import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 main :: IO ()
 main = defaultMain $ testGroup "Djinn unit tests" $
@@ -75,6 +76,8 @@ tests =
           testRawTypeExpansionCycles)
     , ("preflight raw environment recursion after alias expansion",
           testRawEnvironmentRecursionPreflight)
+    , ("validate unused synonyms before recursion preflight",
+          testPreparedSynonymValidationOwnership)
     , ("separate synonym saturation from kind errors",
           testSynonymSaturationBoundary)
     , ("elaborate prepared query synonyms without changing compatibility views",
@@ -1225,6 +1228,36 @@ testRawEnvironmentRecursionPreflight = do
             Left failure -> fail $ description ++
                 " produced the wrong failure: " ++ show failure
             Right _ -> fail $ description ++ " reached a prepared environment"
+
+-- The recursion preflight may retain synonym declarations verbatim because
+-- the prepared synonym table owns whole-table validation. Keep that ownership
+-- explicit: even an otherwise unused bad synonym must fail in the first phase.
+testPreparedSynonymValidationOwnership :: IO ()
+testPreparedSynonymValidationOwnership = do
+    let proper = KStar
+        higherKind = KArrow (KArrow proper proper) proper
+        pairKind = KArrow proper $ KArrow proper proper
+        partialPair = HTApp (HTCon "Pair") (HTCon "Bool")
+        environment = RawEnvironment.Environment
+            [ ("Bool", ([], HTAbstract "Bool" proper, proper))
+            , ("Higher", ([], HTAbstract "Higher" higherKind, higherKind))
+            , ("Pair", (["a", "b"],
+                HTTuple [HTVar "a", HTVar "b"], pairKind))
+            , ("UnusedBad", ([],
+                HTApp (HTCon "Higher") partialPair, proper))
+            ] [] []
+    case prepareEnvironment environment of
+        Left (InvalidSynthesisTypeSynonyms
+                (SharedTypeSynonym.UnsaturatedTypeSynonym name expected supplied)) -> do
+            assertEqual "the prepared table identified the unused synonym"
+                (sharedName "Pair") name
+            assertEqual "the prepared table retained the declared arity"
+                2 expected
+            assertEqual "the prepared table retained the supplied arity"
+                1 supplied
+        Left failure -> fail $ "unused bad synonym produced the wrong failure: " ++
+            show failure
+        Right _ -> fail "an unused bad synonym reached recursion preflight"
 
 -- Grounding must recursively eliminate every unification variable.  Foo's
 -- inferred kind is reused after kind inference has reset its local IntMap;

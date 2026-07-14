@@ -168,16 +168,24 @@ prepareInventoryExpansion inventory = do
     synonyms <- first InvalidSynthesisTypeSynonyms $
         SharedTypeSynonym.prepareTypeSynonyms
             freshDjinnTypeVariable inventory
-    expandedDeclarations <- mapM
-        (first InvalidSynthesisTypeSynonyms .
-            SharedTypeSynonym.expandDeclarationTypeSynonyms
-                freshDjinnTypeVariable synonyms)
+    expandedDeclarations <- mapM (expandForRecursion synonyms)
         (SharedEnvironment.environmentDeclarations $
             SharedInventory.inventoryEnvironment inventory)
     let recursiveNames = SharedDeclaration.recursiveDataTypeNames
             expandedDeclarations
     if Set.null recursiveNames then return synonyms else
         Left $ RecursiveSynthesisDataTypes $ Set.toAscList recursiveNames
+  where
+    expandForRecursion synonyms declaration =
+        case declaration of
+            -- Preparation above has already normalized and validated every
+            -- synonym, including unused ones. Recursion classification ignores
+            -- synonym declarations, so retain their source shape instead of
+            -- materializing the same expansion a second time.
+            SharedDeclaration.TypeSynonymDeclaration{} -> Right declaration
+            _ -> first InvalidSynthesisTypeSynonyms $
+                SharedTypeSynonym.expandDeclarationTypeSynonyms
+                    freshDjinnTypeVariable synonyms declaration
 
 sealPreparedEnvironment
     :: Environment

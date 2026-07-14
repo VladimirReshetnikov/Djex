@@ -28,6 +28,7 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Name
@@ -71,17 +72,21 @@ instance NFData typeVariable => NFData (EnvironmentError typeVariable)
 -- remain untouched everywhere else, including the public instance index and
 -- duplicate diagnostics.
 data CanonicalInstanceVariable typeVariable
-  = CanonicalBoundVariable !Int !Int
+  = CanonicalBoundVariable !Natural !Natural
   | CanonicalFreeVariable typeVariable
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData typeVariable =>
     NFData (CanonicalInstanceVariable typeVariable)
 
+-- Scope and slot identities exist only while constructing a private
+-- alpha-normal form. They use arbitrary-precision counters so sufficiently
+-- deep or wide generated types cannot wrap and conflate distinct binders;
+-- declaration indices and source-facing arities remain machine-sized.
 data CanonicalizationState typeVariable = CanonicalizationState
-  { canonicalVariableSlots :: Map (Int, typeVariable) Int
-  , nextCanonicalSlotByScope :: Map Int Int
-  , nextCanonicalScope :: !Int
+  { canonicalVariableSlots :: Map (Natural, typeVariable) Natural
+  , nextCanonicalSlotByScope :: Map Natural Natural
+  , nextCanonicalScope :: !Natural
   }
 
 mkEnvironment
@@ -235,7 +240,7 @@ canonicalizeInstanceHead variables headConstraint =
 
 canonicalizeInstanceConstraint
   :: Ord typeVariable
-  => Map typeVariable Int
+  => Map typeVariable Natural
   -> Constraint (Type typeVariable)
   -> State (CanonicalizationState typeVariable)
       (Constraint (Type (CanonicalInstanceVariable typeVariable)))
@@ -245,7 +250,7 @@ canonicalizeInstanceConstraint bindings constraint = Constraint
 
 canonicalizeInstanceType
   :: Ord typeVariable
-  => Map typeVariable Int
+  => Map typeVariable Natural
   -> Type typeVariable
   -> State (CanonicalizationState typeVariable)
       (Type (CanonicalInstanceVariable typeVariable))
@@ -275,7 +280,7 @@ canonicalizeInstanceType bindings source = case source of
 
 canonicalizeVariable
   :: Ord typeVariable
-  => Map typeVariable Int
+  => Map typeVariable Natural
   -> typeVariable
   -> State (CanonicalizationState typeVariable)
       (CanonicalInstanceVariable typeVariable)
@@ -297,7 +302,7 @@ canonicalizeVariable bindings variable = case Map.lookup variable bindings of
         pure $ CanonicalBoundVariable scope slot
 
 allocateCanonicalScope
-  :: State (CanonicalizationState typeVariable) Int
+  :: State (CanonicalizationState typeVariable) Natural
 allocateCanonicalScope = do
   state <- get
   let scope = nextCanonicalScope state

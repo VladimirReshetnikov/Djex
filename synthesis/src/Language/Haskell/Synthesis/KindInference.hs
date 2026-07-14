@@ -29,7 +29,6 @@ import Control.Monad.Trans.State.Strict
   , get
   , modify'
   )
-import qualified Data.IntMap.Strict as IntMap
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -37,6 +36,7 @@ import Data.Maybe (isJust)
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
@@ -103,19 +103,22 @@ data KindInferenceError variable
 data InferenceKind
   = InferenceProper
   | InferenceFunction InferenceKind InferenceKind
-  | InferenceVariable Int
+  | InferenceVariable Natural
   deriving (Eq, Show)
 
+-- Inference identities are private freshness tokens, not source positions or
+-- public arities. Their space is therefore arbitrary precision: even a very
+-- large generated inventory cannot wrap a counter and alias two live kinds.
 data InferenceState = InferenceState
-  { nextVariable :: !Int
-  , kindSolutions :: !(IntMap.IntMap InferenceKind)
+  { nextVariable :: !Natural
+  , kindSolutions :: !(Map Natural InferenceKind)
   }
 
 type Inference variable a =
   StateT InferenceState (Either (KindInferenceError variable)) a
 
 initialState :: InferenceState
-initialState = InferenceState 0 IntMap.empty
+initialState = InferenceState 0 Map.empty
 
 data InferenceAssumptions = InferenceAssumptions
   { inferredTypeConstructorKinds :: Map Name InferenceKind
@@ -731,7 +734,7 @@ freshKind = do
   let variable = nextVariable state
   modify' $ \current -> current
     { nextVariable = variable + 1
-    , kindSolutions = IntMap.insert variable
+    , kindSolutions = Map.insert variable
         (InferenceVariable variable) $ kindSolutions current
     }
   pure $ InferenceVariable variable
@@ -739,14 +742,14 @@ freshKind = do
 follow :: InferenceKind -> Inference variable InferenceKind
 follow kind@(InferenceVariable variable) = do
   solutions <- kindSolutions <$> get
-  case IntMap.lookup variable solutions of
+  case Map.lookup variable solutions of
     Nothing -> pure kind
     Just solution
       | solution == kind -> pure kind
       | otherwise -> do
           result <- follow solution
           modify' $ \state -> state
-            { kindSolutions = IntMap.insert variable result
+            { kindSolutions = Map.insert variable result
                 $ kindSolutions state
             }
           pure result
@@ -773,15 +776,15 @@ unify left right = do
       rightKind <- ground resolvedRight
       lift $ Left $ KindMismatch leftKind rightKind
 
-bind :: Int -> InferenceKind -> Inference variable ()
+bind :: Natural -> InferenceKind -> Inference variable ()
 bind variable kind = do
   cyclic <- occurs variable kind
   if cyclic
     then lift $ Left InfiniteKind
     else modify' $ \state -> state
-      { kindSolutions = IntMap.insert variable kind $ kindSolutions state }
+      { kindSolutions = Map.insert variable kind $ kindSolutions state }
 
-occurs :: Int -> InferenceKind -> Inference variable Bool
+occurs :: Natural -> InferenceKind -> Inference variable Bool
 occurs variable kind = do
   resolved <- follow kind
   case resolved of

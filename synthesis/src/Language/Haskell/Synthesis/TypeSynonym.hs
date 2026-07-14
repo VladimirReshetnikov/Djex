@@ -200,7 +200,7 @@ expandWithTable
   -> Type variable
   -> Either (SynonymExpansionError variable) (Type variable)
 expandWithTable fresh table source = evalStateT
-  (expand fresh table [] $ canonicalizeType source)
+  (expand fresh table emptyExpansionPath $ canonicalizeType source)
   (synonymVariables table `Set.union` typeVariables source)
 
 -- | Elaborate several types in one kind-variable scope.
@@ -314,6 +314,21 @@ type Expansion variable = StateT
   (Set variable)
   (Either (SynonymExpansionError variable))
 
+-- The list stores the active expansion stack newest-first, so extending a
+-- successful path is a cons rather than a linear append. The set contains
+-- exactly the same names and makes the usual non-recursive lookup logarithmic;
+-- the forward diagnostic path is reconstructed only when lookup finds a cycle.
+data ExpansionPath = ExpansionPath
+  { reversedExpansionNames :: [Name]
+  , activeExpansionNames :: Set Name
+  }
+
+emptyExpansionPath :: ExpansionPath
+emptyExpansionPath = ExpansionPath [] Set.empty
+
+initialExpansionPath :: Name -> ExpansionPath
+initialExpansionPath name = ExpansionPath [name] $ Set.singleton name
+
 normalizeDefinition
   :: Ord variable
   => FreshVariable variable
@@ -322,14 +337,15 @@ normalizeDefinition
   -> SynonymDefinition variable
   -> Expansion variable (SynonymDefinition variable)
 normalizeDefinition fresh table name definition = do
-  body <- expand fresh table [name] $ definitionBody definition
+  body <- expand fresh table (initialExpansionPath name)
+    $ definitionBody definition
   pure definition {definitionBody = body}
 
 expand
   :: Ord variable
   => FreshVariable variable
   -> TypeSynonyms variable
-  -> [Name]
+  -> ExpansionPath
   -> Type variable
   -> Expansion variable (Type variable)
 expand fresh table path source = case source of
@@ -351,7 +367,7 @@ expandApplication
   :: Ord variable
   => FreshVariable variable
   -> TypeSynonyms variable
-  -> [Name]
+  -> ExpansionPath
   -> Type variable
   -> [Type variable]
   -> Expansion variable (Type variable)
@@ -362,16 +378,19 @@ expandApplication fresh table path headType arguments = case headType of
             supplied = length arguments
         when (supplied < expected) $ lift $ Left
           $ UnsaturatedTypeSynonym name expected supplied
-        case cycleFrom name path of
-          Just cycleNames -> lift $ Left $ RecursiveTypeSynonyms cycleNames
-          Nothing -> pure ()
+        bodyPath <- case pushExpansionName name path of
+          Left cycleNames -> lift $ Left $ RecursiveTypeSynonyms cycleNames
+          Right extended -> pure extended
+        -- Arguments are independent source subtrees, not part of the alias
+        -- body's recursion stack. Keeping the old path here also preserves
+        -- the historical error order for failures inside arguments.
         expandedArguments <- mapM (expand fresh table path) arguments
         let (affected, trailing) = splitAt expected expandedArguments
             substitutions = Map.fromList
               $ zip (definitionParameters definition) affected
         instantiated <- substitute fresh substitutions
           $ definitionBody definition
-        expandedBody <- expand fresh table (path ++ [name]) instantiated
+        expandedBody <- expand fresh table bodyPath instantiated
         pure $ canonicalizeType
           $ foldl TypeApplication expandedBody trailing
   _ -> do
@@ -390,7 +409,7 @@ expandConstraint
   :: Ord variable
   => FreshVariable variable
   -> TypeSynonyms variable
-  -> [Name]
+  -> ExpansionPath
   -> Constraint (Type variable)
   -> Expansion variable (Constraint (Type variable))
 expandConstraint fresh table path constraint = Constraint
@@ -465,10 +484,24 @@ freshenBinder fresh rangeVariables renaming binder
       put $ Set.insert replacement reserved
       pure $ Map.insert binder replacement renaming
 
-cycleFrom :: Name -> [Name] -> Maybe (NonEmpty Name)
-cycleFrom name path = case dropWhile (/= name) path of
-  [] -> Nothing
-  first : remaining -> Just $ first :| remaining ++ [name]
+pushExpansionName
+  :: Name
+  -> ExpansionPath
+  -> Either (NonEmpty Name) ExpansionPath
+pushExpansionName name path
+  | name `Set.member` activeExpansionNames path = Left
+      $ cycleFromReversedPath name $ reversedExpansionNames path
+  | otherwise = Right $ ExpansionPath
+      (name : reversedExpansionNames path)
+      (Set.insert name $ activeExpansionNames path)
+
+-- The membership check above establishes that the name occurs in the private
+-- path. Names preceding it in the reverse list are precisely the newer suffix
+-- of the forward path, so reversing only that suffix reproduces the old
+-- source-ordered cycle and omits any non-cyclic prefix.
+cycleFromReversedPath :: Name -> [Name] -> NonEmpty Name
+cycleFromReversedPath name reversed = name :|
+  (reverse (takeWhile (/= name) reversed) ++ [name])
 
 definitionVariables :: Ord variable => SynonymDefinition variable -> Set variable
 definitionVariables definition = Set.fromList

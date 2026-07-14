@@ -1354,6 +1354,58 @@ synonymTests = testGroup "type synonyms"
           $ SharedType.FunctionType
               (SharedType.TypeVariable "q")
               (SharedType.TypeVariable "q'"))
+  , testCase "report the exact direct synonym cycle path" $ do
+      let aliasName = right $ mkIdentifier "Direct"
+          definitions = Map.singleton aliasName
+            ([], SharedType.TypeConstructor aliasName)
+      TypeSynonym.expandTypeSynonymDefinitions freshStringVariable
+          definitions (SharedType.TypeConstructor aliasName) @?=
+        Left (TypeSynonym.RecursiveTypeSynonyms
+          $ aliasName :| [aliasName])
+  , testCase "report the exact indirect cycle without its prefix" $ do
+      let entryName = right $ mkIdentifier "Entry"
+          aliasA = right $ mkIdentifier "CycleA"
+          aliasB = right $ mkIdentifier "CycleB"
+          reference name = ([], SharedType.TypeConstructor name)
+          definitions = Map.fromList
+            [ (entryName, reference aliasA)
+            , (aliasA, reference aliasB)
+            , (aliasB, reference aliasA)
+            ]
+      TypeSynonym.expandTypeSynonymDefinitions freshStringVariable
+          definitions (SharedType.TypeConstructor entryName) @?=
+        Left (TypeSynonym.RecursiveTypeSynonyms
+          $ aliasA :| [aliasB, aliasA])
+  , testCase "keep repeated aliases in argument subtrees independent" $ do
+      let identityName = right $ mkIdentifier "Identity"
+          intName = right $ mkIdentifier "Int"
+          definitions = Map.singleton identityName
+            (["a"], SharedType.TypeVariable "a")
+          applyIdentity = SharedType.TypeApplication
+            $ SharedType.TypeConstructor identityName
+          nested = applyIdentity $ applyIdentity
+            $ SharedType.TypeConstructor intName
+      TypeSynonym.expandTypeSynonymDefinitions freshStringVariable
+          definitions nested @?=
+        Right (SharedType.TypeConstructor intName)
+  , testCase "expand a long linear synonym chain structurally" $ do
+      let chainLength = 512 :: Int
+          chainName :: Int -> Name
+          chainName index = right $ mkIdentifier
+            $ "Linear" ++ show index
+          intName = right $ mkIdentifier "Int"
+          definitions = Map.fromList $
+            ( chainName 0
+            , ([], SharedType.TypeConstructor intName)
+            ) :
+            [ ( chainName index
+              , ([], SharedType.TypeConstructor $ chainName (index - 1))
+              )
+            | index <- [1 .. chainLength]
+            ]
+      TypeSynonym.expandTypeSynonymDefinitions freshStringVariable definitions
+          (SharedType.TypeConstructor $ chainName chainLength) @?=
+        Right (SharedType.TypeConstructor intName)
   , testCase "substitute parameters simultaneously" $ do
       let swapName = right $ mkIdentifier "Swap"
           swap = Declaration.TypeSynonymDeclaration () swapName

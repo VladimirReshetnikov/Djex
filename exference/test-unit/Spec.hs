@@ -156,16 +156,20 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , toSynthesisTypeDeclaration
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
-  ( ConvData (..)
-  , ConversionT
+  ( ConversionT
+  , convDataFromTypeVarIndex
+  , convDataReservedIds
+  , convDataTypeVarIndex
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
+  , emptyConvData
   , getVar
   , haskellSrcExtsParseMode
   , parseQualifiedName
   , convertName
   , convertModuleName
   , convertQName
+  , normalizeConvertedForalls
   , runConversionTWithState
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
@@ -2730,13 +2734,82 @@ tests = testGroup "Exference"
                 (getVar (syntaxName "failed") >> throwE "expected failure")
                 (const $ getVar $ syntaxName "recovered")
               result = runIdentity $ runExceptT
-                $ runConversionTWithState (ConvData 0 Map.empty) action
+                $ runConversionTWithState emptyConvData action
           case result of
-            Right (recoveredId, ConvData nextId variables) -> do
+            Right (recoveredId, finalState) -> do
               recoveredId @?= 1
-              nextId @?= 2
-              variables @?= Map.fromList [("failed", 0), ("recovered", 1)]
+              convDataTypeVarIndex finalState @?=
+                Map.fromList [("failed", 0), ("recovered", 1)]
+              convDataReservedIds finalState @?= IntSet.fromList [0, 1]
             Left failure -> fail $ "conversion did not recover: " ++ failure
+      , testCase "sparse conversion hints cannot collide with allocation" $ do
+          let syntaxName spelling = HSE.Ident HSE.noSrcSpan spelling
+              initialHints = Map.fromList [("zero", 0), ("two", 2)]
+              result = runIdentity $ runExceptT
+                $ runConversionTWithState
+                    (convDataFromTypeVarIndex initialHints)
+                $ getVar $ syntaxName "fresh"
+          case result of
+            Right (freshId, finalState) -> do
+              freshId @?= 3
+              convDataTypeVarIndex finalState @?=
+                Map.insert "fresh" 3 initialHints
+              convDataReservedIds finalState @?= IntSet.fromList [0, 2, 3]
+            Left failure -> fail $ "sparse allocation failed: " ++ failure
+      , testCase "conversion hints preserve aliases for one ID" $ do
+          let syntaxName spelling = HSE.Ident HSE.noSrcSpan spelling
+              aliases = Map.fromList [("alpha", 7), ("beta", 7)]
+              result = runIdentity $ runExceptT
+                $ runConversionTWithState
+                    (convDataFromTypeVarIndex aliases)
+                $ getVar $ syntaxName "gamma"
+          showHsType aliases (TypeVar 7) @?= "alpha"
+          case result of
+            Right (freshId, finalState) -> do
+              freshId @?= 8
+              convDataTypeVarIndex finalState @?=
+                Map.insert "gamma" 8 aliases
+              convDataReservedIds finalState @?= IntSet.fromList [7, 8]
+            Left failure -> fail $ "alias-preserving allocation failed: "
+              ++ failure
+      , testCase "conversion allocation finds gaps below maxBound" $ do
+          let syntaxName spelling = HSE.Ident HSE.noSrcSpan spelling
+              initialHints = Map.singleton "top" maxBound
+              action :: ConversionT String Identity (Int, Int)
+              action = (,)
+                <$> getVar (syntaxName "first")
+                <*> getVar (syntaxName "second")
+              result = runIdentity $ runExceptT
+                $ runConversionTWithState
+                    (convDataFromTypeVarIndex initialHints) action
+          case result of
+            Right ((firstId, secondId), finalState) -> do
+              (firstId, secondId) @?= (0, 1)
+              convDataTypeVarIndex finalState @?= Map.fromList
+                [("first", 0), ("second", 1), ("top", maxBound)]
+              convDataReservedIds finalState @?=
+                IntSet.fromList [0, 1, maxBound]
+            Left failure -> fail $ "boundary allocation failed: " ++ failure
+      , testCase "hintless maxBound binders remain reserved" $ do
+          let syntaxName spelling = HSE.Ident HSE.noSrcSpan spelling
+              quantified = TypeForall [maxBound] [] $ TypeVar maxBound
+              action :: ConversionT String Identity (HsType, Int)
+              action = do
+                normalized <- normalizeConvertedForalls
+                  IntSet.empty quantified
+                fresh <- getVar $ syntaxName "fresh"
+                pure (normalized, fresh)
+              result = runIdentity $ runExceptT
+                $ runConversionTWithState emptyConvData action
+          case result of
+            Right ((normalized, freshId), finalState) -> do
+              normalized @?= quantified
+              freshId @?= 0
+              convDataTypeVarIndex finalState @?= Map.singleton "fresh" 0
+              convDataReservedIds finalState @?=
+                IntSet.fromList [0, maxBound]
+            Left failure -> fail $ "hidden boundary reservation failed: "
+              ++ failure
       , testCase "caught failures cannot reuse an alpha-normalized ID" $ do
           let syntaxName spelling = HSE.Ident HSE.noSrcSpan spelling
               binder = syntaxName "a"
@@ -2753,15 +2826,16 @@ tests = testGroup "Exference"
                   (const $ pure ())
                 recovered <- getVar $ syntaxName "recovered"
                 pure (normalized, recovered)
-              initial = ConvData 1 $ Map.singleton "a" 0
+              initial = convDataFromTypeVarIndex $ Map.singleton "a" 0
               result = runIdentity $ runExceptT
                 $ runConversionTWithState initial action
           case result of
-            Right ((normalized, recoveredId), ConvData nextId variables) -> do
+            Right ((normalized, recoveredId), finalState) -> do
               normalized @?= TypeForall [1] [] (TypeVar 1)
               recoveredId @?= 2
-              nextId @?= 3
-              variables @?= Map.fromList [("a", 0), ("recovered", 2)]
+              convDataTypeVarIndex finalState @?=
+                Map.fromList [("a", 0), ("recovered", 2)]
+              convDataReservedIds finalState @?= IntSet.fromList [0, 1, 2]
             Left failure -> fail $ "conversion did not recover: " ++ failure
       , testCase "duplicate explicit forall binders are rejected" $ do
           let binder = HSE.Ident HSE.noSrcSpan "a"
@@ -2781,7 +2855,7 @@ tests = testGroup "Exference"
                 _ <- getVar $ HSE.Ident HSE.noSrcSpan "allocated"
                 throwE "expected failure"
               result = runIdentity $ runExceptT
-                $ runConversionTWithState (ConvData 0 Map.empty) action
+                $ runConversionTWithState emptyConvData action
           case result of
             Left failure -> failure @?= "expected failure"
             Right _ -> fail "failed conversion exposed a successful final state"
@@ -3608,6 +3682,22 @@ tests = testGroup "Exference"
             [declaration] -> declaration @?= HsTypeDecl
               declarationName [0] (TypeForall [1] [] $ TypeVar 1)
             result -> fail $ "unexpected shadowing synonym: " ++ show result
+      , testCase "type-synonym heads retain hidden RHS reservations" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module SynonymHidden where"
+            , "type Hidden a phantom = (forall a. a) -> a"
+            ]
+          declarationName <- expectRight
+            $ mkQualifiedName ["SynonymHidden"] "Hidden"
+          case rights $ runIdentity $ getTypeDecls [] [parsedModule] of
+            [declaration] -> declaration @?= HsTypeDecl
+              declarationName [0, 2]
+              (TypeArrow
+                (TypeForall [1] [] $ TypeVar 1)
+                (TypeVar 0))
+            result -> fail $ "unexpected hidden-reservation synonym: "
+              ++ show result
       , testCase "loader kind-checks phantom alias arguments before erasure" $
           withTemporaryFile (unlines
             [ "module PhantomKind where"

@@ -71,9 +71,11 @@ and Haskell type parsing. The package's default `djex` library re-exports the
 neutral adapter together with the shared synthesis vocabulary without acquiring
 HSE or filesystem dependencies.
 Source conversion exposes its concrete `ConversionT` stack, with errors inside
-lazy state so caught failures retain earlier variable allocations.  Together
-with direct reader and strict-writer transformers, this also keeps the frontend
-independent of `mtl`.
+lazy state so caught failures retain earlier variable allocations. Its opaque
+inventory separates source-spelling hints from the exact reserved-ID set: this
+preserves aliases and hintless alpha-renamed binders while allocating safely
+through sparse and `maxBound` namespaces. Together with direct reader and
+strict-writer transformers, this also keeps the frontend independent of `mtl`.
 This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.

@@ -39,7 +39,7 @@ import Control.Monad.Trans.Except ( runExceptT
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy (get)
 
-import Control.Monad ( forM, liftM )
+import Control.Monad ( forM )
 import Data.Either ( rights )
 import Data.Bifunctor ( bimap, first )
 import Data.Maybe ( maybeToList )
@@ -162,19 +162,21 @@ getTypeDecls ds modules = do
     (mn, decls) <- maybeToList $ moduleNameAndDecls modul
     TypeDecl _ rawHead rawTy <- decls
     let (name, rawVars) = splitDeclHead rawHead
-    return $ liftM (bimap (("when parsing type declaration "++show name++": ")++) id)
-           $ runExceptT
-           $ do
-      (ty, tyVarIndex) <- convertTypeNoDecl M.empty (Just mn) ds rawTy
+    pure $ fmap (bimap (("when parsing type declaration "++show name++": ")++) id)
+         $ runExceptT
+         $ runConversionT emptyConvData
+         $ do
+      -- Keep RHS conversion and head binding in one exact namespace. Hidden
+      -- alpha-renamed RHS binders have no spelling-map entry, so rebuilding a
+      -- state from that map could otherwise reuse one for a phantom parameter.
+      ty <- convertTypeNoDeclInternal M.empty (Just mn) ds rawTy
+      -- Retain the historical failure precedence: RHS conversion precedes
+      -- validation of the declaration name.
       qname <- either throwE pure $ convertModuleName mn name
-      -- RHS conversion allocates a dense zero-based namespace. Begin after it
-      -- so legal phantom parameters receive fresh adjacent IDs rather than an
-      -- arbitrary sentinel that can eventually collide with a large RHS.
-      vars <- runConversionT (ConvData (M.size tyVarIndex) tyVarIndex)
-        $ rawVars `forM` tyVarTransform
-      normalized <- either (throwE . show) (pure . fst)
-        $ TypeUtils.alphaNormalizeForalls (IntSet.fromList vars) ty
-      return $ HsTypeDecl qname vars normalized
+      vars <- rawVars `forM` tyVarTransform
+      normalized <- normalizeConvertedForalls
+        (IntSet.fromList vars) ty
+      pure $ HsTypeDecl qname vars normalized
   let validDeclarations = rights rawList
       declarationMap = M.map Right $ uniqueTypeDeclMap validDeclarations
       -- Validate every reachable expansion now so the compatibility loader
@@ -214,11 +216,10 @@ convertTypeInternal
   -> Type SrcSpanInfo
   -> ConversionT String m HsType
 convertTypeInternal tcs defModuleName ds declMap t = do
-  ConvData _ visibleVariables <- lift get
+  ambientVariables <- convDataReservedIds <$> lift get
   ty <- convertTypeNoDeclInternal tcs defModuleName ds t
   expanded <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
-  normalizeConvertedForalls
-    (IntSet.fromList $ M.elems visibleVariables) expanded
+  normalizeConvertedForalls ambientVariables expanded
 
 parseType
   :: (Monad m)

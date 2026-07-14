@@ -165,7 +165,7 @@ getTypeClasses dataTypes typeDeclarations modules = do
     , rawDeclarationsByModule
     )
  where
-  emptyConversionState = ConvData 0 Map.empty
+  emptyConversionState = emptyConvData
 
 rawTypeClasses
   :: Module SrcSpanInfo
@@ -210,7 +210,7 @@ elaborateRawClass classes dataTypes typeDeclarations rawClass =
   case Map.lookup (rawClassName rawClass) classes of
     Nothing -> pure
       [Left $ "unknown type class: " ++ show (rawClassName rawClass)]
-    Just typeClass -> flip evalStateT (ConvData 0 Map.empty) $ do
+    Just typeClass -> flip evalStateT emptyConvData $ do
       parameterResult <- runExceptT
         $ mapM tyVarTransform $ rawClassVariables rawClass
       case parameterResult of
@@ -263,7 +263,7 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
   InstDecl _ _ rule _ <- declarations
   (explicitVariables, context, syntaxName, argumentSyntax) <-
     maybeToList $ splitInstRule rule
-  pure $ runExceptT $ runConversionT (ConvData 0 Map.empty) $ do
+  pure $ runExceptT $ runConversionT emptyConvData $ do
     explicitIds <- case explicitVariables of
       Nothing -> pure Nothing
       Just variables -> do
@@ -289,7 +289,7 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
     case explicitIds of
       Nothing -> pure ()
       Just declaredIds -> do
-        ConvData _ variables <- lift get
+        variables <- convDataTypeVarIndex <$> lift get
         let undeclared = Set.fromList (Map.elems variables)
               Set.\\ declaredIds
         when (not $ Set.null undeclared) $ throwE

@@ -118,9 +118,10 @@ data ForallNormalizationState = ForallNormalizationState
 -- source is reserved up front, so a fresh binder cannot capture a later free,
 -- bound, or constraint occurrence.
 --
--- The returned set is the complete final namespace. Parser adapters must carry
--- it forward (or advance beyond its maximum) because alpha-renamed binders do
--- not have an unambiguous source spelling to add to a 'TypeVarIndex'.
+-- The returned set is the complete final namespace. Parser adapters must
+-- reserve it exactly because alpha-renamed binders do not have an unambiguous
+-- source spelling to add to a 'TypeVarIndex'; a greatest ID of 'maxBound' still
+-- leaves genuine gaps available elsewhere in the finite domain.
 alphaNormalizeForalls
   :: IntSet.IntSet
   -> HsType

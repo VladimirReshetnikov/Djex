@@ -205,7 +205,7 @@ getDataConss tcs ds tDeclMap modules =
                    False
                )
   return $ fmap (either (Left . addConsMsg) Right)
-    $ runExceptT $ runConversionT (ConvData 0 M.empty) convAction
+    $ runExceptT $ runConversionT emptyConvData convAction
 
 -- | HSE retains strictness and unpack annotations in the field's 'Type' node.
 -- They are operational metadata, so remove any outer wrappers before the

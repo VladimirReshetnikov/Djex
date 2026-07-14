@@ -2,7 +2,11 @@
 {-# LANGUAGE GADTs #-}
 
 module Language.Haskell.Exference.TypeFromHaskellSrc
-  ( ConvData(..)
+  ( ConvData
+  , emptyConvData
+  , convDataFromTypeVarIndex
+  , convDataTypeVarIndex
+  , convDataReservedIds
   , ConversionT
   , runConversionT
   , runConversionTWithState
@@ -32,6 +36,7 @@ import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
+import qualified Language.Haskell.Djex.Exference.Internal.Frontend as Frontend
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map.Strict as M
@@ -60,9 +65,38 @@ import Language.Haskell.Exts.Extension ( Language (..)
 
 
 
--- type ConversionMonad = EitherT String (State (Int, ConvMap))
+-- | The private type-variable inventory of one source-conversion scope.
+--
+-- Source spellings are only rendering hints: several spellings may name one
+-- ID, while alpha-renamed lexical binders deliberately have no unambiguous
+-- spelling. The exact reserved set therefore remains separate from the hint
+-- map. Keeping this representation opaque prevents callers from forging a
+-- colliding next-ID cursor.
+data ConvData = ConvData
+  { conversionTypeVarIndex :: !T.TypeVarIndex
+  , conversionReservedIds :: !IntSet.IntSet
+  }
 
-data ConvData = ConvData Int T.TypeVarIndex
+-- | An empty, collision-free source-conversion inventory.
+emptyConvData :: ConvData
+emptyConvData = convDataFromTypeVarIndex M.empty
+
+-- | Start an inventory from compatibility spelling hints.
+--
+-- Duplicate values are intentional aliases, not an error. Every referenced
+-- ID is reserved exactly once, including sparse, negative, and boundary IDs.
+convDataFromTypeVarIndex :: T.TypeVarIndex -> ConvData
+convDataFromTypeVarIndex variables = ConvData variables
+  $ IntSet.fromList $ M.elems variables
+
+-- | Recover the spelling hints accumulated by a conversion.
+convDataTypeVarIndex :: ConvData -> T.TypeVarIndex
+convDataTypeVarIndex = conversionTypeVarIndex
+
+-- | Inspect the complete read-only inventory, including alpha-renamed IDs
+-- with no hint. Use the smart constructors to create conversion state.
+convDataReservedIds :: ConvData -> IntSet.IntSet
+convDataReservedIds = conversionReservedIds
 
 -- | A source-conversion action with one private type-variable inventory.
 -- Keeping errors inside the state transformer means a caught failure retains
@@ -126,10 +160,10 @@ convertTypeNoDecl
   -> Type SrcSpanInfo
   -> ExceptT String m (T.HsType, T.TypeVarIndex)
 convertTypeNoDecl tcs mn ds t = do
-  (converted, ConvData _ index) <- runConversionTWithState
-    (ConvData 0 M.empty)
+  (converted, finalState) <- runConversionTWithState
+    emptyConvData
     (convertTypeNoDeclInternal tcs mn ds t)
-  pure (converted, index)
+  pure (converted, convDataTypeVarIndex finalState)
 
 convertTypeNoDeclInternal
   :: Monad m
@@ -141,10 +175,9 @@ convertTypeNoDeclInternal
   -> Type SrcSpanInfo
   -> ConversionT String m T.HsType
 convertTypeNoDeclInternal tcs defModuleName ds ty = do
-  ConvData _ visibleVariables <- lift get
+  ambientVariables <- convDataReservedIds <$> lift get
   converted <- helper ty
-  normalizeConvertedForalls
-    (IntSet.fromList $ M.elems visibleVariables) converted
+  normalizeConvertedForalls ambientVariables converted
  where
   helper (TyFun _ a b)      = T.TypeArrow
                               <$> helper a
@@ -187,8 +220,11 @@ convertTypeNoDeclInternal tcs defModuleName ds ty = do
 
 -- HSE's spelling map deliberately remains the compatibility hint index, but
 -- one spelling can denote several lexically shadowing binders. Normalize only
--- after raw conversion succeeds, retain the original hint, and advance the
--- dense parser namespace beyond every hidden alpha-renamed identity.
+-- after raw conversion succeeds, retain the original hints, and reserve the
+-- complete returned namespace, including identities with no possible hint.
+-- The claimed set must be the ambient namespace captured before converting
+-- this type; IDs allocated while converting the type are source occurrences,
+-- not enclosing binders.
 normalizeConvertedForalls
   :: Monad m
   => IntSet.IntSet
@@ -198,9 +234,11 @@ normalizeConvertedForalls claimed typeExpression = case
     TypeUtils.alphaNormalizeForalls claimed typeExpression of
   Left failure -> throwE $ renderForallNormalizationError failure
   Right (normalized, reserved) -> do
-    ConvData next variables <- lift get
-    advanced <- either throwE pure $ advanceConversionId next reserved
-    lift $ put $ ConvData advanced variables
+    state <- lift get
+    lift $ put state
+      { conversionReservedIds = reserved `IntSet.union`
+          conversionReservedIds state
+      }
     pure normalized
 
 renderForallNormalizationError
@@ -212,25 +250,32 @@ renderForallNormalizationError failure = case failure of
   TypeUtils.ForallNormalizationSupplyExhausted ->
     "cannot allocate a fresh explicitly quantified type variable"
 
-advanceConversionId :: Int -> IntSet.IntSet -> Either String Int
-advanceConversionId next reserved
-  | IntSet.null reserved = Right next
-  | greatest < next = Right next
-  | greatest < maxBound = Right $ greatest + 1
-  | otherwise = Left "type-variable conversion namespace is exhausted"
- where
-  greatest = IntSet.findMax reserved
-
-getVar :: Monad m => Name SrcSpanInfo -> ConversionT error m Int
+-- | Look up or allocate one spelling in the current conversion scope.
+--
+-- The update happens before returning, so a later error caught in the same
+-- 'ConversionT' retains the allocation. Exhaustion itself leaves state
+-- unchanged. Boundary IDs use the same gap-finding allocator as the core and
+-- therefore never wrap or collide.
+getVar :: Monad m => Name SrcSpanInfo -> ConversionT String m T.TVarId
 getVar n = do
-  ConvData next variables <- lift get
+  state <- lift get
   let key = prettyPrint n
+      variables = conversionTypeVarIndex state
   case M.lookup key variables of
     Nothing -> do
-      lift $ put $ ConvData (next+1) (M.insert key next variables)
-      return next
+      identifier <- maybe
+        (throwE "type-variable conversion namespace is exhausted")
+        pure
+        $ Frontend.allocateFreshTypeVariableId
+        $ conversionReservedIds state
+      lift $ put state
+        { conversionTypeVarIndex = M.insert key identifier variables
+        , conversionReservedIds = IntSet.insert identifier
+            $ conversionReservedIds state
+        }
+      pure identifier
     Just i ->
-      return i
+      pure i
 
 -- defaultModule -> potentially-qualified-name-thingy -> exference-q-name
 --

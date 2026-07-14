@@ -73,7 +73,7 @@ import qualified Data.Set as S
 import qualified Data.Sequence as Seq
 
 import Data.Maybe ( maybeToList, listToMaybe )
-import Control.Monad ( mzero, replicateM, forM )
+import Control.Monad ( mzero, forM )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, sortBy, unfoldr )
 import Data.Monoid ( Any(..) )
@@ -952,12 +952,16 @@ inputQuery input = ExferenceQuery
 -- so accepting duplicates made both results and penalties list-order
 -- dependent.
 repeatedValues :: Ord value => [value] -> [value]
-repeatedValues values =
-  [ value
-  | (value, count) <- M.toAscList $ M.fromListWith (+)
-      [(value, 1 :: Int) | value <- values]
-  , count > 1
-  ]
+repeatedValues = go S.empty S.empty
+ where
+  -- Membership carries all the information duplicate detection needs.  In
+  -- particular, it cannot overflow like the former machine-sized occurrence
+  -- count; converting the final set keeps the established ascending order.
+  go _ repeated [] = S.toAscList repeated
+  go !seen !repeated (value : rest)
+    | value `S.member` seen =
+        go seen (S.insert value repeated) rest
+    | otherwise = go (S.insert value seen) repeated rest
 
 -- Duplicate detection deliberately precedes the dedicated deconstructor-shape
 -- validation, preserving the public first-error order while projecting every
@@ -975,8 +979,7 @@ firstInvalidGeneratedConstructor environment = listToMaybe
   , let name = constructorName constructor
         generatedPattern = SharedGenerated.Constructor
           (toSynthesisName name)
-          (replicate (length $ constructorFields constructor)
-            SharedGenerated.Wildcard)
+          (SharedGenerated.Wildcard <$ constructorFields constructor)
         probe = SharedGenerated.Lambda [generatedPattern]
           $ SharedGenerated.Hole ()
   , Left syntaxError <- [SharedGenerated.validateExpressionSyntax probe]
@@ -1375,8 +1378,7 @@ stateStep allocators multiPM allowConstrs h = do
           else if getAny applied1
             then                   isPossible contxt (constrs1 ++ constrs2)
             else (constrs1 ++) <$> isPossible contxt constrs2
-        let paramN = length dependencies
-        vars <- replicateM paramN $ builderAllocHole allocators
+        vars <- forM dependencies $ \_ -> builderAllocHole allocators
         let newGoals = mkGoals scopeId $ zipWith VarBinding vars dependencies
             applyProviderSubstitution = case applier of
               Left _ -> goalApplySubst provSS
@@ -1468,8 +1470,8 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
                 let resultTypes = map (renameFlexibleType renaming) matchRs
                     mapFunc1 substs = do
                       modify $ \node -> node {nodeFlexibleIds = nextSupply}
-                      vars <- replicateM (length matchRs)
-                        $ builderAllocVar allocators
+                      vars <- forM matchRs $ \_ ->
+                        builderAllocVar allocators
                       builderRecordVarUse v
                       let newProvTypes =
                             map (snd . applySubsts substs) resultTypes
@@ -1514,8 +1516,8 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
                         newSid <- builderAddScope allocators sid
                         let resultTypes =
                               map (renameFlexibleType renaming) matchRs
-                        vars <- replicateM (length matchRs)
-                          $ builderAllocVar allocators
+                        vars <- forM matchRs $ \_ ->
+                          builderAllocVar allocators
                         newVid <- builderAllocHole allocators
                         let newProvTypes =
                               map (snd . applySubsts substs) resultTypes

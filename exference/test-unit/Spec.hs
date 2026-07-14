@@ -2196,17 +2196,25 @@ tests = testGroup "Exference"
               } @?= Left (NestedForallInGoal nestedGoal)
       ]
   , testGroup "search policy"
-      [ testCase "duplicate function names are rejected independently of order" $ do
-          let duplicateName = name "f"
-              intBinding = FunctionBinding
-                (TypeCons $ name "Int") duplicateName 0 [] []
-              boolBinding = FunctionBinding
-                (TypeCons $ name "Bool") duplicateName 1 [] []
-              expected = Left $ DuplicateFunctionNames [duplicateName]
+      [ testCase "duplicate function names are complete and order-independent" $ do
+          let firstName = name "f"
+              secondName = name "g"
+              binding result bindingName penalty = FunctionBinding
+                (TypeCons $ name result) bindingName penalty [] []
+              firstInt = binding "Int" firstName 0
+              firstBool = binding "Bool" firstName 1
+              secondInt = binding "Int" secondName 2
+              secondBool = binding "Bool" secondName 3
+              expected = Left
+                $ DuplicateFunctionNames [firstName, secondName]
           validateExferenceInput identityInput
-            { input_envFuncs = [intBinding, boolBinding] } @?= expected
+            { input_envFuncs =
+                [secondInt, firstInt, secondBool, firstBool]
+            } @?= expected
           validateExferenceInput identityInput
-            { input_envFuncs = [boolBinding, intBinding] } @?= expected
+            { input_envFuncs =
+                [firstBool, secondBool, firstInt, secondInt]
+            } @?= expected
       , testCase "binding usage retains nominal identities" $ do
           firstName <- expectRight $ mkQualifiedName ["First"] "choose"
           secondName <- expectRight $ mkQualifiedName ["Second"] "choose"

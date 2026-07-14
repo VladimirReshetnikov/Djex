@@ -44,63 +44,63 @@ files have distinct module names and an acyclic component import graph. Its
 external dependency union would be `base`, `containers`, `deepseq`, `directory`,
 `filepath`, `haskeline`, `haskell-src-exts`, `pqueue`, `pretty`, and
 `transformers`. Doing that now, however, would broaden every client's
-dependency closure and erase the isolation tests without removing the largest
-source-level duplication described below.
+dependency closure and erase the isolation tests without removing the
+result-envelope and environment-authority duplication described below.
 
 ## Priority 1: make the shared vocabulary native to Exference
 
-**Progress on 2026-07-14:** the first compile-checked stage is implemented.
-`QualifiedName` is now an alias for the complete shared `Name` domain and
-`HsConstraint` is an alias for `Constraint HsType`; historical constructor
-spellings survive as explicit compatibility patterns. This deletes both
-duplicate outer representations. The remaining work in this priority is the
-larger `HsType` migration and removal of its checked-adapter round trips.
+**Completed on 2026-07-14:** `QualifiedName`, `HsConstraint`, and `HsType` now
+use the shared `Name`, `Constraint`, and `Type (Variable Int)` values directly.
+Historical constructor spellings survive as explicit compatibility patterns;
+the structural conversion functions are identity shims, and checked adapters
+only validate and canonicalize. This removes all three duplicate source-type
+representations without collapsing the useful component dependency checks.
 
 At audit time `Language.Haskell.Exference.Core.Types` defined three pieces of a
 second source-type model beside `Language.Haskell.Synthesis`: a `QualifiedName`
 wrapper, the recursive `HsType`, and a duplicate `HsConstraint`. The first
 stage removed the name and constraint representations, including every
-production `toSynthesisName` / `fromSynthesisName` call. `HsType` still
-duplicates variables, constructors, applications, arrows, and quantified
-constraints already represented by `Type (Variable Int)`.
+production `toSynthesisName` / `fromSynthesisName` call. The completed type
+stage then replaced the recursive `HsType` tree with the shared type directly.
 
-This is not confined to a compatibility parser. Thirty-one other Exference
-source or test files import `Core.Types`, and fifteen Exference files contain
-explicit `toSynthesis*` or `fromSynthesis*` seam calls. In the stable adapter,
-`ExferenceType` is already exactly `Type (Variable Int)`, but
-`runExferenceQuery` converts it back to `HsType`; generated candidates,
-their residual-constraint arguments, and rendering hints are then traversed in
-the opposite direction.
+The migration reached the search core, stable request/session storage,
+generated candidates, residual constraints, rendering hints, class
+environments, and the HSE compatibility frontend. Production code no longer
+uses the old total structural-conversion shims; only named validation and
+canonicalization boundaries remain.
 
-The migration should proceed in compile-checked stages:
+The migration proceeded in five compile-checked stages:
 
-1. **Completed:** use shared `Name` and `Constraint` values in the search core,
-   preserving historical constructor spellings as explicit compatibility
+1. **Completed:** moved shared `Name` and `Constraint` values into the search
+   core, preserving historical constructor spellings as explicit compatibility
    patterns rather than as engine-owned representations.
-2. Move pure type operations—free-variable collection, substitution,
-   rendering hints, and constraint traversal—to `Type (Variable Int)`.
-   Exference-specific unification remains backend code, but should operate on
-   the shared tree.
-3. Teach the unifier, rigid-instantiation, expression checker, constraint
-   solver, and search-node builders to consume the shared type directly.
-4. Delete the now-identity type/constraint conversion passes in the checked
-   adapter and candidate projection. Preserve laziness: attaching a checked
-   target to an output clause must remain a lazy `fmap`, not a traversal that
-   forces later search batches.
-5. Make the HSE frontend construct shared types once. Any old `HsType` surface
-   that remains should be explicitly deprecated compatibility syntax, not the
-   representation stored in a sealed session.
+2. **Completed:** moved free-variable collection, substitution, rendering hints,
+   and constraint traversal to `Type (Variable Int)`. Exference-specific
+   unification remains backend code but now operates on the shared tree.
+3. **Completed:** taught the unifier, rigid-instantiation, expression checker,
+   constraint solver, and search-node builders to consume the shared type
+   directly.
+4. **Completed:** deleted the now-identity type/constraint conversion passes in
+   the checked adapter and candidate projection. Attaching a checked target to
+   an output clause remains a lazy `fmap`, so later search batches are not
+   forced.
+5. **Completed:** made the HSE frontend construct shared types once. The old
+   `HsType` surface remains as a compatibility alias and patterns over the
+   native value, not as the representation stored in a sealed session.
 
-Tuple representation needs deliberate treatment. The shared IR has structural
-`TupleType`, whereas historical Exference encodes tuples as constructor
-applications. Algorithms must either learn the structural case or consume one
-documented canonical form; a misleading `COMPLETE` pattern set must not hide an
-unhandled tuple at runtime.
+Tuple representation received explicit treatment. The shared IR's structural
+`TupleType` is the canonical checked form; the search algorithms handle it
+directly and normalize saturated constructor applications to it. The
+documented `COMPLETE` set includes the structural tuple case and the total
+`TypeForallNative` view, so compatibility patterns do not conceal an unhandled
+native constructor.
 
-Required regression evidence includes flexible-versus-rigid identity,
+Regression evidence now covers flexible-versus-rigid identity,
 capture-avoiding forall substitution, tuple canonicalization, residual
 constraint order, unknown-class policy, type-variable rendering hints, and
-lazy batch tails.
+lazy batch tails. It additionally pins malformed native-value rejection,
+higher-kinded tuple/function unification, exact historical tuple ranking, and
+both supported compiler graphs. Priority 2 is therefore the active frontier.
 
 ## Priority 2: remove duplicate result envelopes
 
@@ -147,7 +147,7 @@ rollback.
 
 ## Packaging end state
 
-Only after the duplicated type/result/environment authorities are removed
+Only after the remaining duplicated result/environment authorities are removed
 should the named core and foundation sublibraries be folded into the unnamed
 `djex` library. Compatibility frontends may be folded in at the same time if a
 single dependency closure is the desired final contract, or retained briefly
@@ -170,7 +170,7 @@ Every migration milestone should retain the current release-style gates:
 - a clean tracked tree with the milestone commit pushed before the next
   representation is removed.
 
-The immediate next implementation milestone remains Priority 1: extract
-capture-safe shared type substitution, then migrate Exference's operations and
-sealed query path from `HsType` to the shared `Type (Variable Int)` without
-losing tuple canonicalization or lazy search behavior.
+The immediate next implementation milestone is Priority 2: remove the backend
+result envelopes beneath `QueryResult` and have both cores construct their
+stable payloads directly, while preserving logical evidence, operational
+truncation, exact counts, target names, and lazy search tails.

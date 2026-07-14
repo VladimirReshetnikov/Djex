@@ -75,7 +75,8 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , functionBindingFromType
   )
 import Language.Haskell.Exference.Core.RigidInstantiation
-  ( mkRigidInstantiationContext
+  ( RigidInstantiationError (..)
+  , mkRigidInstantiationContext
   , planRigidInstantiation
   , rigidInstantiations
   )
@@ -89,6 +90,7 @@ import Language.Haskell.Exference.Core.Internal.Testing
   , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
   , mergePriorityQueueAtCapacity
   , pruningReasonsFromNaturalTotals
+  , typeComplexityForTesting
   )
 import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
 import Language.Haskell.Exference.Core.Types
@@ -275,6 +277,28 @@ tests = testGroup "Exference"
                 (SharedConstraint.InvalidConstraintClass actual)) ->
               actual @?= unboxed
             result -> fail $ "unboxed constraint was accepted: " ++ show result
+      , testCase "class environments reject invalid native argument types" $ do
+          let base = HsTypeClass (name "Base") [0] []
+              derived = HsTypeClass (name "Derived") [0]
+                [HsConstraint (name "Base")
+                  [TypeTuple Boxed [TypeVar 0]]]
+              invalidInstance = HsInstance []
+                $ HsConstraint (name "Base")
+                [TypeForallNative
+                  [SharedType.RigidVariable 7] [] (TypeVar 0)]
+          mkStaticClassEnv [base, derived] [] @?= Left
+            (InvalidConstraintArgument
+              (ClassSuperclass $ name "Derived")
+              (name "Base")
+              0
+              (InvalidSynthesisType
+                $ SharedType.InvalidTupleTypeArity Boxed 1))
+          mkStaticClassEnv [base] [invalidInstance] @?= Left
+            (InvalidConstraintArgument
+              InstanceHead
+              (name "Base")
+              0
+              (RigidForallBinder 7))
       , testCase "adding constraints retains existing constraints" $ do
           let cls = HsTypeClass (name "C") [0] []
           staticEnvironment <- expectRight $ mkStaticClassEnv [cls] []
@@ -286,6 +310,26 @@ tests = testGroup "Exference"
             [ HsConstraint (name "C") [TypeVar 1]
             , HsConstraint (name "C") [TypeVar 2]
             ]
+      , testCase "low-level class inflation preserves native rigid binders" $ do
+          let base = HsTypeClass (name "Base") [0] []
+              derived = HsTypeClass (name "Derived") [0]
+                [HsConstraint (name "Base") [TypeVar 0]]
+              rigidArgument = TypeForallNative
+                [SharedType.RigidVariable 7] [] (TypeVar 1)
+              sourceConstraint = HsConstraint (name "Derived")
+                [rigidArgument]
+              impliedConstraint = HsConstraint (name "Base")
+                [rigidArgument]
+              sourceInstance = HsInstance [] sourceConstraint
+              impliedInstance = HsInstance [] impliedConstraint
+          environment <- expectRight
+            $ mkStaticClassEnv [base, derived] []
+          let queryEnvironment = mkQueryClassEnv environment
+                [sourceConstraint]
+          qClassEnv_inflatedConstraints queryEnvironment @?=
+            Set.fromList [sourceConstraint, impliedConstraint]
+          Set.fromList (inflateInstances environment [sourceInstance]) @?=
+            Set.fromList [sourceInstance, impliedInstance]
       , testCase "duplicate class names are rejected in either order" $ do
           let unary = HsTypeClass (name "C") [0] []
               binary = HsTypeClass (name "C") [0, 1] []
@@ -705,11 +749,9 @@ tests = testGroup "Exference"
           common <- expectRight $ mkQualifiedName ["Fixture"] "common"
           pairLeft <- expectRight $ mkQualifiedName ["Fixture"] "pairLeft"
           pairRight <- expectRight $ mkQualifiedName ["Fixture"] "pairRight"
-          pair <- expectRight $ mkBoxedTupleName 2
           let parameter = TypeVar 0
               recordType = TypeApp (TypeCons record) parameter
-              pairType = TypeApp
-                (TypeApp (TypeCons pair) parameter) parameter
+              pairType = TypeTuple Boxed [parameter, parameter]
               extracted = runIdentity
                 $ getDataConss Map.empty dataTypes Map.empty [parsedModule]
           case extracted of
@@ -972,6 +1014,16 @@ tests = testGroup "Exference"
           constraintApplySubstsChecked
               (IntMap.singleton 0 $ TypeVar 1) source
             @?= Right (Any True, expected)
+      , testCase "native tuple mapping preserves rigid identities" $ do
+          let source = TypeForall [0]
+                [HsConstraint (name "C")
+                  [TypeTuple Boxed [TypeVar 0, TypeConstant 0]]]
+                $ TypeTuple Boxed [TypeVar 0, TypeConstant 0]
+              expected = TypeForall [1]
+                [HsConstraint (name "C")
+                  [TypeTuple Boxed [TypeVar 1, TypeConstant 0]]]
+                $ TypeTuple Boxed [TypeVar 1, TypeConstant 0]
+          incVarIds (+ 1) source @?= expected
       , testCase "forall normalization retains an unclaimed binder ID" $ do
           let source = TypeForall [7] []
                 $ TypeArrow (TypeVar 7) (TypeVar 7)
@@ -986,6 +1038,51 @@ tests = testGroup "Exference"
                 (TypeVar 0)
           alphaNormalizeForalls IntSet.empty source @?=
             Right (expected, IntSet.fromList [0, 1])
+      , testCase "forall normalization traverses tuple elements in order" $ do
+          let source = TypeTuple Boxed
+                [TypeForall [0] [] $ TypeVar 0, TypeVar 0]
+              expected = TypeTuple Boxed
+                [TypeForall [1] [] $ TypeVar 1, TypeVar 0]
+          alphaNormalizeForalls IntSet.empty source @?=
+            Right (expected, IntSet.fromList [0, 1])
+      , testCase "forall normalization rejects native rigid binders" $ do
+          let source = TypeForallNative
+                [SharedType.RigidVariable 4] [] $ TypeVar 0
+          alphaNormalizeForalls IntSet.empty source @?=
+            Left (RigidForallBinderCannotBeNormalized 4)
+      , testCase "rigid planning rejects native rigid binders" $ do
+          let environment = EnvDictionary [] [] emptyStaticClassEnv
+              source = TypeForallNative
+                [SharedType.RigidVariable 4] [] $ TypeVar 0
+          planRigidInstantiation
+              (mkRigidInstantiationContext environment) [] source
+            @?= Left (RigidForallBinderCannotBeInstantiated 4)
+      , testCase "rigid planning rejects binders at every input site" $ do
+          let rigidForall identifier = TypeForallNative
+                [SharedType.RigidVariable identifier] [] $ TypeVar 0
+              emptyEnvironment = EnvDictionary [] [] emptyStaticClassEnv
+              context = mkRigidInstantiationContext emptyEnvironment
+              nestedTuple = TypeTuple Boxed
+                [TypeVar 1, rigidForall 4]
+              extraConstraint = HsConstraint (name "C")
+                [TypeApp (TypeCons $ name "Maybe") $ rigidForall 5]
+              invalidBinding = FunctionBinding
+                (TypeArrow (TypeVar 0) $ rigidForall 6)
+                (name "invalid") 0 [] []
+              invalidEnvironment = EnvDictionary
+                [invalidBinding] [] emptyStaticClassEnv
+          planRigidInstantiation context [] nestedTuple
+            @?= Left (RigidForallBinderCannotBeInstantiated 4)
+          planRigidInstantiation context [extraConstraint] (TypeVar 0)
+            @?= Left (RigidForallBinderCannotBeInstantiated 5)
+          planRigidInstantiation
+              (mkRigidInstantiationContext invalidEnvironment) [] (TypeVar 0)
+            @?= Left (RigidForallBinderCannotBeInstantiated 6)
+      , testCase "structural tuples retain their nominal head" $ do
+          pairName <- expectRight $ SharedName.tupleName Boxed 2
+          typeConstructorHead
+              (TypeTuple Boxed [TypeVar 0, TypeConstant 0])
+            @?= Just pairName
       , testCase "arrow splitting stops before a result forall" $ do
           let integer = TypeCons $ name "Int"
               nestedConstraint = HsConstraint (name "C") [TypeVar 2]
@@ -1061,15 +1158,15 @@ tests = testGroup "Exference"
             (TypeForall []
               [HsConstraint (name "C") [TypeVar 0]] $ TypeVar 0)
             @?= "(C x) => x"
-          show (TypeForall [0] [] $ TypeVar 0)
+          showHsType Map.empty (TypeForall [0] [] $ TypeVar 0)
             @?= "forall v0. v0"
-          showsPrec 2 (TypeArrow (TypeVar 0) (TypeVar 1)) ""
-            @?= "(v0 -> a)"
-          showsPrec 2
-              (TypeForall [] [] $ TypeArrow (TypeVar 0) (TypeVar 1)) ""
-            @?= "(v0 -> a)"
-          showsPrec 1 (HsConstraint (name "C") [TypeVar 0]) ""
-            @?= "(C v0)"
+          showHsType Map.empty (TypeArrow (TypeVar 0) (TypeVar 1))
+            @?= "v0 -> a"
+          showHsType Map.empty
+              (TypeForall [] [] $ TypeArrow (TypeVar 0) (TypeVar 1))
+            @?= "v0 -> a"
+          showHsConstraint Map.empty (HsConstraint (name "C") [TypeVar 0])
+            @?= "C v0"
           let twoBinders = TypeForall [0, 1] []
                 $ TypeArrow (TypeVar 0) (TypeVar 1)
               rendered = showHsType names twoBinders
@@ -1094,9 +1191,97 @@ tests = testGroup "Exference"
                 (TypeVar 1))
             @?= "(,) v0 a"
       , testCase "unification rejects nested foralls conservatively" $ do
-          let polymorphic = TypeForall [0] [] (TypeVar 0)
-          unify polymorphic (TypeVar 1) @?= Nothing
-          unifyRight (TypeVar 1) polymorphic @?= Nothing
+          let flexibleForall = TypeForall [0] [] (TypeVar 0)
+              rigidForall = TypeForallNative
+                [SharedType.RigidVariable 0] [] (TypeConstant 0)
+              nestedForall = TypeTuple Boxed
+                [TypeCons $ name "Int", flexibleForall]
+              variable = TypeVar 1
+              assertRejected polymorphic = do
+                unify polymorphic variable @?= Nothing
+                unify variable polymorphic @?= Nothing
+                unifyShared polymorphic variable @?= Nothing
+                unifyShared variable polymorphic @?= Nothing
+                unifyRight polymorphic variable @?= Nothing
+                unifyRight variable polymorphic @?= Nothing
+          mapM_ assertRejected [flexibleForall, rigidForall, nestedForall]
+      , testCase "all unifier modes canonicalize structural tuples" $ do
+          boxedPairName <- expectRight $ mkBoxedTupleName 2
+          unboxedPairName <- expectRight
+            $ SharedName.tupleName Unboxed 2
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              tupleApplication constructor = TypeApp
+                (TypeApp (TypeCons constructor) integer) boolean
+              assertEquivalent structural application = do
+                unify structural application @?=
+                  Just (IntMap.empty, IntMap.empty)
+                unifyShared structural application @?= Just IntMap.empty
+                unifyRight structural application @?= Just IntMap.empty
+                unifyOffset structural (HsTypeOffset application 0) @?=
+                  Just (IntMap.empty, IntMap.empty)
+                unifyRightOffset structural (HsTypeOffset application 0) @?=
+                  Just IntMap.empty
+          assertEquivalent
+            (TypeTuple Boxed [integer, boolean])
+            (tupleApplication boxedPairName)
+          assertEquivalent
+            (TypeTuple Unboxed [integer, boolean])
+            (tupleApplication unboxedPairName)
+          -- A unary unboxed tuple is a valid structural type but deliberately
+          -- has no constructor-application spelling.
+          assertEquivalent
+            (TypeTuple Unboxed [integer])
+            (TypeTuple Unboxed [integer])
+      , testCase "unifiers reject invalid or incompatible tuple shapes" $ do
+          let integer = TypeCons $ name "Int"
+              malformedBoxed = TypeTuple Boxed [integer]
+              oversized = TypeTuple Unboxed
+                $ replicate (SharedName.maximumTupleArity + 1) integer
+              boxedPair = TypeTuple Boxed [integer, integer]
+              unboxedPair = TypeTuple Unboxed [integer, integer]
+              boxedTriple = TypeTuple Boxed [integer, integer, integer]
+              assertRejected left right = do
+                unify left right @?= Nothing
+                unifyShared left right @?= Nothing
+                unifyRight left right @?= Nothing
+                unifyOffset left (HsTypeOffset right 0) @?= Nothing
+                unifyRightOffset left (HsTypeOffset right 0) @?= Nothing
+          mapM_ (uncurry assertRejected)
+            [ (malformedBoxed, malformedBoxed)
+            , (oversized, oversized)
+            , (boxedPair, unboxedPair)
+            , (boxedPair, boxedTriple)
+            ]
+      , testCase "tuple substitutions stay structural and higher-kinded" $ do
+          pairName <- expectRight $ mkBoxedTupleName 2
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              pair = TypeTuple Boxed [integer, boolean]
+              elementPattern = TypeTuple Boxed [TypeVar 1, boolean]
+              constructorPattern = TypeApp
+                (TypeApp (TypeVar 0) integer) boolean
+          unifyRight pair (TypeVar 2) @?=
+            Just (IntMap.singleton 2 pair)
+          unifyRight pair elementPattern @?=
+            Just (IntMap.singleton 1 integer)
+          unifyShared pair elementPattern @?=
+            Just (IntMap.singleton 1 integer)
+          unify pair constructorPattern @?=
+            Just (IntMap.empty, IntMap.singleton 0 $ TypeCons pairName)
+          unifyShared pair constructorPattern @?=
+            Just (IntMap.singleton 0 $ TypeCons pairName)
+          unifyRight pair constructorPattern @?=
+            Just (IntMap.singleton 0 $ TypeCons pairName)
+      , testCase "right unification separates colliding side identifiers" $ do
+          let pair pairParameter pairResult = TypeApp
+                (TypeApp (TypeCons $ name "Pair") pairParameter) pairResult
+              integer = TypeCons $ name "Int"
+              left = pair (TypeVar 1) integer
+              right = pair (TypeVar 0) (TypeVar 1)
+          unifyRight left right @?= Just (IntMap.fromList
+            [(0, TypeVar 1), (1, integer)])
+          assertRightUnifierCloses left right
       , testCase "symmetric unification closes substitutions across sides" $ do
           let pair pairParameter pairResult = TypeApp
                 (TypeApp (TypeCons $ name "Pair") pairParameter) pairResult
@@ -1192,7 +1377,7 @@ tests = testGroup "Exference"
           applyTypeDecls (Map.singleton alias $ Right declaration) applied @?=
             Right (TypeForall [2] [HsConstraint typeClass [TypeVar 1]]
               $ TypeArrow (TypeVar 1) (TypeVar 2))
-      , testCase "shared types round-trip flexible, rigid, tuple, and forall forms" $ do
+      , testCase "shared conversion canonicalizes flexible, rigid, tuple, and forall forms" $ do
           tuple <- expectRight $ mkBoxedTupleName 2
           let source = TypeForall [0]
                 [HsConstraint (name "C") [TypeVar 0]]
@@ -1203,7 +1388,7 @@ tests = testGroup "Exference"
                     (TypeApp (TypeCons ListCon) (TypeVar 0))
           shared <- expectRight $ toSynthesisType source
           SharedType.validateType shared @?= Right ()
-          fromSynthesisType shared @?= Right source
+          fromSynthesisType shared @?= Right shared
       , testCase "shared unboxed tuple types lower without narrowing names" $
           mapM_ (\shared -> do
               source <- expectRight $ fromSynthesisType shared
@@ -1272,6 +1457,14 @@ tests = testGroup "Exference"
             _ -> fail "class-method adapter returned another declaration shape"
           fromSynthesisClassDeclarationWithMethods shared @?=
             Right (classDeclaration, [method])
+      , testCase "class method constraints preserve native forall binders" $ do
+          let owner = HsConstraint (name "Owner") [TypeVar 0]
+              inherited = HsConstraint (name "Inherited") [TypeConstant 7]
+              binders = [SharedType.RigidVariable 7]
+              body = TypeArrow (TypeConstant 7) (TypeVar 0)
+              source = TypeForallNative binders [inherited] body
+          addClassMethodConstraint owner source @?=
+            TypeForallNative binders [owner, inherited] body
       , testCase "class method constraint failures report both sides" $ do
           let className = name "C"
               methodName = name "method"
@@ -2528,6 +2721,21 @@ tests = testGroup "Exference"
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Left (NestedForallInGoal constrainedGoal)
+      , testCase "input errors render native types as Haskell" $ do
+          let polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              goalFailure = show $ NestedForallInGoal polymorphic
+              constraint = HsConstraint (name "C") [TypeVar 0]
+              classFailure = show $ InvalidClassConstraint
+                $ DuplicateInstanceHeads [constraint]
+          assertBool ("structural goal leaked into diagnostic: " ++ goalFailure)
+            $ not ("ForallType" `isInfixOf` goalFailure)
+              && not ("TypeVariable" `isInfixOf` goalFailure)
+              && "forall" `isInfixOf` goalFailure
+          assertBool
+            ("structural constraint leaked into diagnostic: " ++ classFailure)
+            $ not ("TypeVariable" `isInfixOf` classFailure)
+              && "C v0" `isInfixOf` classFailure
       , testCase "nested foralls are rejected throughout the environment" $ do
           let polymorphic = TypeForall [1] [] $ TypeVar 1
               bindingName = name "f"
@@ -2862,6 +3070,36 @@ tests = testGroup "Exference"
           toSearchProgress (chunkStatus chunk) @?= Right
             (SharedSearch.Completed $ SharedSearch.truncated
               $ SharedSearch.DepthLimitPruned 1)
+      , testCase "structural tuple ranking exactly preserves applications" $ do
+          tupleConstructor <- expectRight $ SharedName.tupleName Boxed 3
+          let elements =
+                [ TypeVar 0
+                , TypeConstant 1
+                , TypeArrow (TypeVar 2) (TypeConstant 3)
+                ]
+              structural = TypeTuple Boxed elements
+              legacy = foldl TypeApp (TypeCons tupleConstructor) elements
+              fractional = defaultHeuristicsConfig
+                { heuristics_goalVar = 0.1
+                , heuristics_goalCons = 0.2
+                , heuristics_goalArrow = 0.3
+                , heuristics_goalApp = 0.4
+                }
+              near divisor = Penalty
+                $ Score.penaltyValue Score.maxPenalty / divisor
+              nearSaturation = defaultHeuristicsConfig
+                { heuristics_goalVar = near 13
+                , heuristics_goalCons = near 11
+                , heuristics_goalArrow = near 9
+                , heuristics_goalApp = near 7
+                }
+              complexity config = typeComplexityForTesting config
+          assertEqual "fractional accumulation order"
+            (complexity fractional legacy)
+            (complexity fractional structural)
+          assertEqual "near-saturation accumulation order"
+            (complexity nearSaturation legacy)
+            (complexity nearSaturation structural)
       , testCase "solution length contributes structural candidate cost" $ do
           let firstStatistics input = take 1
                 [ statistics
@@ -5256,6 +5494,50 @@ tests = testGroup "Exference"
               classEnvironment = mkQueryClassEnv staticClasses []
           checkExpression classEnvironment [] []
             (TypeArrow variable variable) [] identity @?= Right ()
+      , testCase "checks structural tuples against constructor applications" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          pairName <- expectRight $ mkBoxedTupleName 2
+          let firstType = TypeVar 0
+              secondType = TypeConstant 1
+              structural = TypeTuple Boxed [firstType, secondType]
+              application = TypeApp
+                (TypeApp (TypeCons pairName) firstType) secondType
+              identity = ExpLambda 1 application
+                $ ExpVar 1 structural
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow structural structural) [] identity @?= Right ()
+      , testCase "instantiates higher-kinded heads to tuple constructors" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let firstType = TypeConstant 0
+              secondType = TypeConstant 1
+              structural = TypeTuple Boxed [firstType, secondType]
+              polymorphicHead = TypeApp
+                (TypeApp (TypeVar 2) firstType) secondType
+              identity = ExpLambda 1 polymorphicHead
+                $ ExpVar 1 structural
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow structural structural) [] identity @?= Right ()
+      , testCase "instantiates higher-kinded heads to the function constructor" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let parameterType = TypeConstant 0
+              resultType = TypeConstant 1
+              structural = TypeArrow parameterType resultType
+              polymorphicHead = TypeApp
+                (TypeApp (TypeVar 2) parameterType) resultType
+              identity = ExpLambda 1 polymorphicHead
+                $ ExpVar 1 structural
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow structural structural) [] identity @?= Right ()
+      , testCase "rejects malformed native types before checking" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let malformed = TypeTuple Boxed [TypeCons $ name "Int"]
+              goal = TypeArrow malformed malformed
+              identity = ExpLambda 1 malformed $ ExpVar 1 malformed
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            goal [] identity @?= Left
+              (InvalidCheckType goal
+                $ InvalidSynthesisType
+                $ SharedType.InvalidTupleTypeArity Boxed 1)
       , testCase "fresh variables do not wrap onto boundary annotations" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let firstType = TypeConstant 0
@@ -5374,8 +5656,10 @@ assertUnifierCloses :: HsType -> HsType -> IO ()
 assertUnifierCloses left right = case unify left right of
   Nothing -> pure ()
   Just (leftSubstitutions, rightSubstitutions) -> do
-    let leftResult = snd $ applySubsts leftSubstitutions left
-        rightResult = snd $ applySubsts rightSubstitutions right
+    let leftResult = canonicalType $ snd
+          $ applySubsts leftSubstitutions left
+        rightResult = canonicalType $ snd
+          $ applySubsts rightSubstitutions right
     assertBool
       ( "unclosed symmetric substitution for " ++ show left ++ " ~ " ++ show right
         ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
@@ -5388,8 +5672,8 @@ assertSharedUnifierCloses :: HsType -> HsType -> IO ()
 assertSharedUnifierCloses left right = case unifyShared left right of
   Nothing -> pure ()
   Just substitutions -> do
-    let leftResult = snd $ applySubsts substitutions left
-        rightResult = snd $ applySubsts substitutions right
+    let leftResult = canonicalType $ snd $ applySubsts substitutions left
+        rightResult = canonicalType $ snd $ applySubsts substitutions right
     assertBool
       ( "unclosed shared substitution for " ++ show left ++ " ~ " ++ show right
         ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
@@ -5403,8 +5687,10 @@ assertOffsetUnifierCloses offset left right =
     Nothing -> pure ()
     Just (leftSubstitutions, rightSubstitutions) -> do
       let shiftedRight = incVarIds (+ offset) right
-          leftResult = snd $ applySubsts leftSubstitutions left
-          rightResult = snd $ applySubsts rightSubstitutions shiftedRight
+          leftResult = canonicalType $ snd
+            $ applySubsts leftSubstitutions left
+          rightResult = canonicalType $ snd
+            $ applySubsts rightSubstitutions shiftedRight
       assertBool
         ( "unclosed offset substitution for " ++ show left ++ " ~ " ++ show right
           ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
@@ -5412,6 +5698,22 @@ assertOffsetUnifierCloses offset left right =
           ++ " and " ++ show rightSubstitutions
         )
         (leftResult == rightResult)
+
+assertRightUnifierCloses :: HsType -> HsType -> IO ()
+assertRightUnifierCloses left right = case unifyRight left right of
+  Nothing -> pure ()
+  Just substitutions -> do
+    let leftResult = canonicalType left
+        rightResult = canonicalType $ snd $ applySubsts substitutions right
+    assertBool
+      ( "unclosed right substitution for " ++ show left ++ " ~ " ++ show right
+        ++ ": " ++ show leftResult ++ " /= " ++ show rightResult
+        ++ " from " ++ show substitutions
+      )
+      (leftResult == rightResult)
+
+canonicalType :: HsType -> HsType
+canonicalType = SharedType.canonicalizeType
 
 parseTypePure :: String -> Either Diagnostic (HsType, TypeVarIndex)
 parseTypePure = parseTypeWithModePure $ haskellSrcExtsParseMode "test"

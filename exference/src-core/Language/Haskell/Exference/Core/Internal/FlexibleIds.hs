@@ -33,6 +33,7 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 newtype IdentifierSupply = IdentifierSupply IntSet.IntSet
   deriving (Eq, Show, Generic)
@@ -184,46 +185,33 @@ allocateCanonicalIdentifiers rawRequested initialSupply = do
           , nextFreshSupply
           )
 
+-- The shared fold visits both binder declarations and occurrences, including
+-- constraint arguments and structural tuple elements. Filtering by the tag
+-- keeps the flexible and rigid integer namespaces distinct.
 flexibleIdentifiers :: HsType -> IntSet.IntSet
-flexibleIdentifiers typeExpression = case typeExpression of
-  TypeVar identifier -> IntSet.singleton identifier
-  TypeConstant{} -> IntSet.empty
-  TypeCons{} -> IntSet.empty
-  TypeArrow parameter result ->
-    flexibleIdentifiers parameter `IntSet.union` flexibleIdentifiers result
-  TypeApp function argument ->
-    flexibleIdentifiers function `IntSet.union` flexibleIdentifiers argument
-  TypeForall identifiers constraints body -> IntSet.unions
-    $ IntSet.fromList identifiers
-    : flexibleIdentifiers body
-    : map constraintFlexibleIdentifiers constraints
+flexibleIdentifiers = foldMap flexibleIdentifier
+ where
+  flexibleIdentifier variable = case variable of
+    SharedType.FlexibleVariable identifier -> IntSet.singleton identifier
+    SharedType.RigidVariable{} -> IntSet.empty
 
 constraintFlexibleIdentifiers :: HsConstraint -> IntSet.IntSet
-constraintFlexibleIdentifiers = IntSet.unions
-  . map flexibleIdentifiers
-  . constraint_params
+constraintFlexibleIdentifiers = foldMap flexibleIdentifiers
 
+-- This is a whole-namespace rename, not a substitution originating outside a
+-- lexical scope: binder declarations and their owned occurrences must move
+-- together.  The shared functor performs exactly that traversal, including
+-- constraints and structural tuples, while preserving rigid identities.
 renameFlexibleType :: FlexibleRenaming -> HsType -> HsType
-renameFlexibleType renaming typeExpression = case typeExpression of
-  TypeVar identifier -> TypeVar $ renamed identifier
-  TypeConstant{} -> typeExpression
-  TypeCons{} -> typeExpression
-  TypeArrow parameter result -> TypeArrow
-    (renameFlexibleType renaming parameter)
-    (renameFlexibleType renaming result)
-  TypeApp function argument -> TypeApp
-    (renameFlexibleType renaming function)
-    (renameFlexibleType renaming argument)
-  TypeForall identifiers constraints body -> TypeForall
-    (map renamed identifiers)
-    (map (renameFlexibleConstraint renaming) constraints)
-    (renameFlexibleType renaming body)
+renameFlexibleType renaming = fmap renameVariable
  where
-  renamed identifier = IntMap.findWithDefault identifier identifier renaming
+  renameVariable variable = case variable of
+    SharedType.FlexibleVariable identifier -> SharedType.FlexibleVariable
+      $ IntMap.findWithDefault identifier identifier renaming
+    SharedType.RigidVariable{} -> variable
 
 renameFlexibleConstraint :: FlexibleRenaming -> HsConstraint -> HsConstraint
-renameFlexibleConstraint renaming (HsConstraint className parameters) =
-  HsConstraint className $ map (renameFlexibleType renaming) parameters
+renameFlexibleConstraint renaming = fmap $ renameFlexibleType renaming
 
 checkedAddIdentifier :: TVarId -> TVarId -> Maybe TVarId
 checkedAddIdentifier left right

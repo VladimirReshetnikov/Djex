@@ -41,11 +41,15 @@ The package is not yet one library internally: its default facade still sits
 over five named sublibraries. The current duplication audit and the ordered
 path from those components to a genuinely shared implementation are recorded
 in [the 2026-07-14 remaining-convergence audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
-The first source milestone now makes the shared name and constraint vocabulary
-native to Exference. The next stage replaces its remaining recursive type tree
-with the shared type IR before package boundaries are erased; otherwise a
-one-library manifest would merely conceal the largest duplicate IR while
-discarding useful dependency checks.
+That report captures the starting point for the current work; its Priority 1
+native-vocabulary migration is now complete. Exference's `HsType` is an alias
+for the shared `Type (Variable Int)`, with compatibility patterns over the
+native tree and one canonical structural representation for saturated
+functions and tuples. The next convergence priority is removing the duplicate
+backend result envelopes so each engine constructs the stable `QueryResult`
+payload directly. Package boundaries should be erased only after those result
+models and the competing environment authorities have converged; an earlier
+manifest-only collapse would still discard useful dependency checks.
 
 ## Dependency migration
 
@@ -193,9 +197,16 @@ remain separately exported patterns (`QualifiedName`, `ListCon`, `TupleCon`,
 constructed with `mkQualifiedName` and `mkBoxedTupleName` so malformed source
 spelling, qualification, or tuple arity receives a structured error. Exference
 constraints likewise are `Constraint HsType`, with `HsConstraint` retained as
-a compatibility pattern. Consequently ordinary name and constraint access no
-longer crosses a representation boundary; checked type conversion remains only
-while Exference's recursive `HsType` tree is being migrated.
+a compatibility pattern. `HsType` itself is now exactly the shared
+`Type (Variable Int)`. Its historical constructors survive as separately
+exported patterns; `TypeForall` preserves the old flexible-binder-only view,
+while the exhaustive `TypeForallNative` exposes every shared binder. Checked
+Exference boundaries canonicalize saturated function and tuple applications
+to structural `FunctionType` and `TupleType` values and reject rigid forall
+binders, which the search engine cannot instantiate as source quantifiers.
+The old structural conversion functions remain identity compatibility shims;
+the checked conversion names now serve only as validation and canonicalization
+boundaries.
 
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept
@@ -359,7 +370,12 @@ flexible and rigid identities.
 capture-avoiding, saturation-checked expansion plus the pre/post kind checks
 that both backend adapters can now share. Its batch operation preserves source
 order while assigning one kind to each free variable shared by a goal and its
-separate context arguments.
+separate context arguments. The underlying shared type module now owns the
+scope-aware simultaneous substitution primitive used by synonym expansion and
+Exference's compatibility substitution API. Exference's backend-specific
+unifiers operate directly on the same native tree, canonicalize their inputs
+and projected substitutions, preserve flexible/rigid and left/right identity,
+and treat structural functions and tuples through the same applicative kernel.
 
 The `exference` compatibility executable is a six-line launcher for
 `Language.Haskell.Exference.CLI` in the frontend component. That module is the

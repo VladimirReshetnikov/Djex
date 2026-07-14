@@ -59,7 +59,8 @@ data VarPBinding = VarPBinding
 
 
 instance Show VarBinding where
-  show (VarBinding vid ty) = showVar vid ++ " :-> " ++ show ty
+  show (VarBinding vid ty) = showVar vid ++ " :-> "
+    ++ showHsType mempty ty
 
 varBindingApplySubsts :: Substs -> VarBinding -> VarBinding
 varBindingApplySubsts substs (VarBinding v t) =

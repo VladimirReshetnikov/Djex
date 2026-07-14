@@ -140,7 +140,7 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
   sharedType <- either
     (Left . shownErrorDiagnostic
       "DJEX_EXF_PARSE"
-      "cannot project the parsed Exference type"
+      "parsed Exference type failed shared validation"
     )
     Right
     $ toSynthesisType backendType

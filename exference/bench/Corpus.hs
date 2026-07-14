@@ -29,11 +29,14 @@ import Language.Haskell.Exference.Core.Name
 import Language.Haskell.Exference.Core.Types
   ( pattern HsConstraint
   , HsInstance (..)
-  , HsType (..)
+  , HsType
   , HsTypeClass (..)
   , StaticClassEnv
   , emptyStaticClassEnv
   , mkStaticClassEnv
+  , pattern TypeArrow
+  , pattern TypeCons
+  , pattern TypeVar
   )
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
 

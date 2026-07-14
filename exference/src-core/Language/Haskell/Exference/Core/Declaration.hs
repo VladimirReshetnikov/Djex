@@ -619,8 +619,8 @@ classMethodConstraint declaration = HsConstraint
 -- | Add one implicit class-method constraint to a prenex source type.
 addClassMethodConstraint :: HsConstraint -> HsType -> HsType
 addClassMethodConstraint constraint typeExpression = case typeExpression of
-  TypeForall variables constraints body ->
-    TypeForall variables (constraint : constraints) body
+  TypeForallNative variables constraints body ->
+    TypeForallNative variables (constraint : constraints) body
   body -> TypeForall [] [constraint] body
 
 toSynthesisInstanceDeclaration
@@ -723,7 +723,7 @@ deriveRecursiveDataMetadata declarations = map attach declarations
         name []
         [ SharedDeclaration.DataConstructor ()
             (constructorName constructor)
-            (map toSynthesisTypeStructure $ constructorFields constructor)
+            (constructorFields constructor)
         | constructor <- deconstructorConstructors declaration
         ]
     | declaration <- declarations
@@ -903,9 +903,7 @@ convertedType typeExpression = either
 loweredType
   :: SharedType.Type SynthesisVariable
   -> Either SynthesisDeclarationError HsType
-loweredType typeExpression = either
-  (Left . DeclarationTypeConversionError) Right
-  $ fromSynthesisType typeExpression
+loweredType = convertedType
 
 constraintVariables
   :: [SharedConstraint.Constraint (SharedType.Type SynthesisVariable)]
@@ -920,15 +918,12 @@ convertedConstraint
   :: HsConstraint
   -> Either SynthesisDeclarationError
       (SharedConstraint.Constraint (SharedType.Type SynthesisVariable))
-convertedConstraint (HsConstraint className arguments) =
-  SharedConstraint.Constraint className
-    <$> mapM convertedType arguments
+convertedConstraint = traverse convertedType
 
 loweredConstraint
   :: SharedConstraint.Constraint (SharedType.Type SynthesisVariable)
   -> Either SynthesisDeclarationError HsConstraint
-loweredConstraint (SharedConstraint.Constraint className arguments) =
-  HsConstraint className <$> mapM loweredType arguments
+loweredConstraint = traverse loweredType
 
 flexibleParameter
   :: TVarId
@@ -990,29 +985,31 @@ deconstructorHead
   -> Either SynthesisDeclarationError (QualifiedName, [TVarId])
 deconstructorHead typeExpression = do
   (binders, body) <- stripForalls [] typeExpression
-  let (headType, arguments) = typeApplicationSpine body
-  case headType of
-    TypeCons name -> do
-      parameters <- mapM typeVariable arguments
-      if null binders || Set.fromList binders == Set.fromList parameters
-        then Right (name, parameters)
-        else Left $ DeconstructorForallMismatch binders parameters
-    _ -> Left $ InvalidDeconstructorHead typeExpression
+  (name, arguments) <- nominalApplication body
+  parameters <- mapM typeVariable arguments
+  if null binders || Set.fromList binders == Set.fromList parameters
+    then Right (name, parameters)
+    else Left $ DeconstructorForallMismatch binders parameters
  where
   stripForalls binders (TypeForall variables [] body) =
     stripForalls (binders ++ variables) body
-  stripForalls _ TypeForall{} = Left $ InvalidDeconstructorHead typeExpression
+  stripForalls _ TypeForallNative{} =
+    Left $ InvalidDeconstructorHead typeExpression
   stripForalls binders body = Right (binders, body)
+
+  nominalApplication (TypeTuple boxity elements) = do
+    name <- either (const $ Left $ InvalidDeconstructorHead typeExpression)
+      Right $ SharedName.tupleName boxity $ length elements
+    Right (name, elements)
+  nominalApplication body = case typeApplicationSpine body of
+    (TypeCons name, arguments) -> Right (name, arguments)
+    _ -> Left $ InvalidDeconstructorHead typeExpression
 
   typeVariable (TypeVar variable) = Right variable
   typeVariable argument = Left $ NonVariableDataParameter argument
 
 typeApplicationSpine :: HsType -> (HsType, [HsType])
-typeApplicationSpine = collect []
-  where
-    collect arguments (TypeApp function argument) =
-      collect (argument : arguments) function
-    collect arguments function = (function, arguments)
+typeApplicationSpine = SharedType.applicationSpine
 
 splitFunctionType :: HsType -> ([HsType], HsType)
 splitFunctionType (TypeArrow parameter result) =

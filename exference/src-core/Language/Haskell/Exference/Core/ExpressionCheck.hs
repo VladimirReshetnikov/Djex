@@ -19,6 +19,8 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data ExpressionCheckError
   = UnknownVariable TVarId
@@ -34,6 +36,8 @@ data ExpressionCheckError
   | RigidInstantiationFailure RigidInstantiationError
   | RigidInstantiationPlanMismatch [TVarId] [TVarId]
   | FlexibleIdentifierSupplyExhausted
+  | InvalidCheckType HsType SynthesisTypeError
+  | InvalidCheckConstraint HsConstraint SynthesisTypeError
   deriving (Eq, Show)
 
 data CheckState = CheckState
@@ -81,6 +85,8 @@ checkExpressionWithRigidInstantiation
   -> Either ExpressionCheckError ()
 checkExpressionWithRigidInstantiation plan classEnvironment functions
     deconstructors goal expected expression = do
+  validateCheckInputs classEnvironment functions deconstructors goal expected
+    expression
   checkedGoal <- instantiateGoal plan goal
   let
       initialState = CheckState
@@ -186,6 +192,70 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
         unifyTypes scrutineeType freshInput
         mapM zonk freshFields
 
+-- The independent checker is also a public raw-input boundary. Validate every
+-- native type reachable from its arguments before equal malformed values can
+-- short-circuit unification or a total-shaped compatibility helper observes
+-- an invariant that only the sealed live-search path had established.
+validateCheckInputs
+  :: QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> [HsConstraint]
+  -> Expression
+  -> Either ExpressionCheckError ()
+validateCheckInputs classEnvironment functions deconstructors goal expected
+    expression = do
+  validateType goal
+  mapM_ validateConstraint expected
+  mapM_ validateConstraint $ Set.toAscList
+    $ qClassEnv_constraints classEnvironment
+  mapM_ validateFunction functions
+  mapM_ validateDeconstructor deconstructors
+  validateAnnotations expression
+ where
+  validateType typeExpression = case toSynthesisType typeExpression of
+    Left failure -> Left $ InvalidCheckType typeExpression failure
+    Right _ -> Right ()
+
+  validateConstraint constraint = case toSynthesisConstraint constraint of
+    Left failure -> Left $ InvalidCheckConstraint constraint failure
+    Right _ -> Right ()
+
+  validateFunction binding = do
+    validateType $ functionResult binding
+    mapM_ validateType $ functionParameters binding
+    mapM_ validateConstraint $ functionConstraints binding
+
+  validateDeconstructor deconstructor = do
+    validateType $ deconstructorInput deconstructor
+    mapM_ validateConstructor $ deconstructorConstructors deconstructor
+
+  validateConstructor constructor =
+    mapM_ validateType $ constructorFields constructor
+
+  validateAnnotations annotated = case annotated of
+    ExpVar _ annotation -> validateType annotation
+    ExpName{} -> Right ()
+    ExpLambda _ annotation body ->
+      validateType annotation >> validateAnnotations body
+    ExpApply function argument ->
+      validateAnnotations function >> validateAnnotations argument
+    ExpHole{} -> Right ()
+    ExpLetMatch _ variables binding body ->
+      mapM_ (validateType . snd) variables
+        >> validateAnnotations binding
+        >> validateAnnotations body
+    ExpLet _ annotation binding body ->
+      validateType annotation
+        >> validateAnnotations binding
+        >> validateAnnotations body
+    ExpCaseMatch scrutinee alternatives ->
+      validateAnnotations scrutinee >> mapM_ validateAlternative alternatives
+
+  validateAlternative (_, variables, body) =
+    mapM_ (validateType . snd) variables >> validateAnnotations body
+
 throwCheck :: ExpressionCheckError -> Check a
 throwCheck = lift . Left
 
@@ -212,19 +282,66 @@ freshenTypes types constraints = do
 
 unifyTypes :: HsType -> HsType -> Check ()
 unifyTypes left right = do
-  left' <- zonk left
-  right' <- zonk right
-  case (left', right') of
-    _ | left' == right' -> pure ()
+  left' <- zonk $ SharedType.canonicalizeType left
+  right' <- zonk $ SharedType.canonicalizeType right
+  case firstForall left' of
+    Just quantified -> throwCheck $ UnsupportedNestedForall quantified
+    Nothing -> pure ()
+  case firstForall right' of
+    Just quantified -> throwCheck $ UnsupportedNestedForall quantified
+    Nothing -> pure ()
+  case (applicativeForm left', applicativeForm right') of
+    (leftForm, rightForm) | leftForm == rightForm -> pure ()
     (TypeVar variable, ty) -> bindVariable variable ty
     (ty, TypeVar variable) -> bindVariable variable ty
-    (TypeArrow leftParameter leftResult, TypeArrow rightParameter rightResult) ->
-      unifyTypes leftParameter rightParameter >> unifyTypes leftResult rightResult
     (TypeApp leftFunction leftArgument, TypeApp rightFunction rightArgument) ->
       unifyTypes leftFunction rightFunction >> unifyTypes leftArgument rightArgument
-    (TypeForall{}, _) -> throwCheck $ UnsupportedNestedForall left'
-    (_, TypeForall{}) -> throwCheck $ UnsupportedNestedForall right'
+    (TypeTuple leftBoxity leftElements, TypeTuple rightBoxity rightElements)
+      | leftBoxity == rightBoxity
+      , length leftElements == length rightElements ->
+          mapM_ (uncurry unifyTypes) $ zip leftElements rightElements
     _ -> throwCheck $ TypeMismatch left' right'
+
+-- Functions and constructor-backed tuples participate in higher-kinded
+-- unification through their intrinsic constructor applications.  Keep the
+-- unary unboxed tuple structural because Haskell has no corresponding unary
+-- tuple constructor name.
+applicativeForm :: HsType -> HsType
+applicativeForm typeExpression = case typeExpression of
+  TypeVar{} -> typeExpression
+  TypeConstant{} -> typeExpression
+  TypeCons{} -> typeExpression
+  TypeArrow parameter result -> intrinsicApplication SharedName.functionName
+    [applicativeForm parameter, applicativeForm result]
+  TypeApp function argument -> TypeApp
+    (applicativeForm function) (applicativeForm argument)
+  TypeTuple Unboxed [element] -> TypeTuple Unboxed [applicativeForm element]
+  TypeTuple boxity elements -> case SharedName.tupleName boxity
+      (length elements) of
+    Right constructor -> intrinsicApplication constructor
+      $ map applicativeForm elements
+    Left _ -> TypeTuple boxity $ map applicativeForm elements
+  TypeForallNative variables constraints body -> TypeForallNative variables
+    (map (fmap applicativeForm) constraints)
+    (applicativeForm body)
+ where
+  intrinsicApplication constructor = foldl TypeApp $ TypeCons constructor
+
+firstForall :: HsType -> Maybe HsType
+firstForall typeExpression = case typeExpression of
+  TypeVar{} -> Nothing
+  TypeConstant{} -> Nothing
+  TypeCons{} -> Nothing
+  TypeArrow parameter result -> firstJust
+    [firstForall parameter, firstForall result]
+  TypeApp function argument -> firstJust
+    [firstForall function, firstForall argument]
+  TypeTuple _ elements -> firstJust $ map firstForall elements
+  quantified@TypeForallNative{} -> Just quantified
+ where
+  firstJust [] = Nothing
+  firstJust (Just value : _) = Just value
+  firstJust (Nothing : remaining) = firstJust remaining
 
 bindVariable :: TVarId -> HsType -> Check ()
 bindVariable variable ty
@@ -239,7 +356,8 @@ zonk :: HsType -> Check HsType
 zonk ty = do
   substitutions <- gets checkSubstitutions
   let (_, applied) = applySubsts substitutions ty
-  if applied == ty then pure ty else zonk applied
+      canonical = SharedType.canonicalizeType applied
+  if canonical == ty then pure canonical else zonk canonical
 
 instantiateGoal
   :: RigidInstantiationPlan

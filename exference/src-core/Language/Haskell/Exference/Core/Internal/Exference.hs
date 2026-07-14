@@ -33,6 +33,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , naturalPruningReasons
   , saturatingNaturalToInt
   , projectCompatibilityBindingUsages
+  , typeComplexity
   , ExferenceInputError (..)
   , mkExferenceEnvironment
   , validateExferenceQuery
@@ -66,6 +67,7 @@ import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import qualified Data.PQueue.Prio.Max as Q
 import qualified Data.Map.Strict as M
@@ -73,6 +75,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as S
 import qualified Data.Sequence as Seq
+import qualified Data.List as L
 
 import Data.Maybe ( maybeToList, listToMaybe )
 import Control.Monad ( mzero, forM )
@@ -196,7 +199,60 @@ data ExferenceInputError
   | InvalidMaxDepth Penalty
   | InvalidHeuristic String Penalty
   | RigidIdentifierExhaustion RigidInstantiationError
-  deriving (Eq, Show)
+  deriving (Eq)
+
+instance Show ExferenceInputError where
+  showsPrec precedence failure = showParen (precedence > 10)
+    $ showString $ renderExferenceInputError failure
+
+renderExferenceInputError :: ExferenceInputError -> String
+renderExferenceInputError failure = case failure of
+  NestedForallInGoal typeExpression ->
+    constructor "NestedForallInGoal" [sourceType typeExpression]
+  NestedForallInBinding name typeExpression -> constructor
+    "NestedForallInBinding" [show name, sourceType typeExpression]
+  NestedForallInDeconstructor typeExpression -> constructor
+    "NestedForallInDeconstructor" [sourceType typeExpression]
+  NestedForallInConstraint site constraint -> constructor
+    "NestedForallInConstraint" [show site, sourceConstraint constraint]
+  InvalidInputType typeExpression typeFailure -> constructor
+    "InvalidInputType" [sourceType typeExpression, show typeFailure]
+  DeconstructorInputWithoutNominalHead typeExpression -> constructor
+    "DeconstructorInputWithoutNominalHead" [sourceType typeExpression]
+  UnsupportedDeconstructorTypeHead name -> constructor
+    "UnsupportedDeconstructorTypeHead" [show name]
+  UnboundDeconstructorFieldVariables typeName fieldConstructor variables ->
+    constructor "UnboundDeconstructorFieldVariables"
+      [show typeName, show fieldConstructor, show variables]
+  InvalidGeneratedBinding name renderFailure -> constructor
+    "InvalidGeneratedBinding" [show name, show renderFailure]
+  InvalidGeneratedConstructor name renderFailure -> constructor
+    "InvalidGeneratedConstructor" [show name, show renderFailure]
+  DuplicateFunctionNames names ->
+    constructor "DuplicateFunctionNames" [show names]
+  DuplicateDeconstructorNames names ->
+    constructor "DuplicateDeconstructorNames" [show names]
+  DuplicateConstructorNames names ->
+    constructor "DuplicateConstructorNames" [show names]
+  InvalidClassConstraint classFailure ->
+    constructor "InvalidClassConstraint" [show classFailure]
+  InvalidMaxSteps maximumSteps ->
+    constructor "InvalidMaxSteps" [show maximumSteps]
+  InvalidConstraintDeferralSteps steps ->
+    constructor "InvalidConstraintDeferralSteps" [show steps]
+  InvalidMaxQueueSize maximumSize ->
+    constructor "InvalidMaxQueueSize" [show maximumSize]
+  InvalidMaxDepth maximumDepth ->
+    constructor "InvalidMaxDepth" [show maximumDepth]
+  InvalidHeuristic fieldName value ->
+    constructor "InvalidHeuristic" [show fieldName, show value]
+  RigidIdentifierExhaustion rigidFailure ->
+    constructor "RigidIdentifierExhaustion" [show rigidFailure]
+ where
+  constructor name fields = unwords $ name : fields
+  sourceType typeExpression = "(" ++ showHsType M.empty typeExpression ++ ")"
+  sourceConstraint constraint =
+    "(" ++ showHsConstraint M.empty constraint ++ ")"
 
 type ExferenceOutputElement = (Expression, [HsConstraint], ExferenceStats)
 data SearchCompletion
@@ -700,10 +756,14 @@ prepareExferenceInput input = do
     ++ environmentTypes environment
     ++ concatMap (constraint_params . snd) allConstraints
   validateEnvironmentDeconstructors environment
-  let rigidContext = mkRigidInstantiationContext environment
-  rigidPlan <- prepareRigidInstantiation rigidContext query
+  let canonicalEnvironment = canonicalizeEnvironment environment
+      canonicalQuery = canonicalizeQuery query
+      rigidContext = mkRigidInstantiationContext canonicalEnvironment
+  rigidPlan <- prepareRigidInstantiation rigidContext canonicalQuery
   pure $ CheckedExferenceQuery
-    (ExferenceEnvironment environment rigidContext) query rigidPlan
+    (ExferenceEnvironment canonicalEnvironment rigidContext)
+    canonicalQuery
+    rigidPlan
  where
   environment = inputEnvironment input
   query = inputQuery input
@@ -722,8 +782,9 @@ mkExferenceEnvironment
   -> Either ExferenceInputError ExferenceEnvironment
 mkExferenceEnvironment environment = do
   validateExferenceEnvironment environment
-  pure $ ExferenceEnvironment environment
-    $ mkRigidInstantiationContext environment
+  let canonicalEnvironment = canonicalizeEnvironment environment
+  pure $ ExferenceEnvironment canonicalEnvironment
+    $ mkRigidInstantiationContext canonicalEnvironment
 
 -- | Validate the varying part of a search against an already sealed
 -- environment and retain its exact rigid-instantiation plan. Excluding
@@ -743,8 +804,9 @@ prepareExferenceQuery sealed@(ExferenceEnvironment environment rigidContext)
   validateInputTypes
     $ queryGoalType query
     : concatMap (constraint_params . snd) constraints
-  rigidPlan <- prepareRigidInstantiation rigidContext query
-  pure $ CheckedExferenceQuery sealed query rigidPlan
+  let canonicalQuery = canonicalizeQuery query
+  rigidPlan <- prepareRigidInstantiation rigidContext canonicalQuery
+  pure $ CheckedExferenceQuery sealed canonicalQuery rigidPlan
  where
   constraints = queryConstraints query
 
@@ -971,6 +1033,50 @@ inputQuery input = ExferenceQuery
   , queryHeuristics = input_heuristicsConfig input
   }
 
+-- Checked values retain the same canonical representation that validation
+-- observes.  In particular, saturated function/tuple constructor applications
+-- must not survive in a sealed session beside equal structural nodes.
+canonicalizeQuery :: ExferenceQuery -> ExferenceQuery
+canonicalizeQuery query = query
+  { queryGoalType = SharedType.canonicalizeType $ queryGoalType query
+  }
+
+canonicalizeEnvironment :: EnvDictionary -> EnvDictionary
+canonicalizeEnvironment environment = environment
+  { environmentFunctions = map canonicalizeFunctionBinding
+      $ environmentFunctions environment
+  , environmentDeconstructors = map canonicalizeDeconstructorBinding
+      $ environmentDeconstructors environment
+  }
+
+canonicalizeFunctionBinding :: FunctionBinding -> FunctionBinding
+canonicalizeFunctionBinding binding = binding
+  { functionResult = canonicalize $ functionResult binding
+  , functionConstraints = map canonicalizeConstraint
+      $ functionConstraints binding
+  , functionParameters = map canonicalize $ functionParameters binding
+  }
+
+canonicalizeDeconstructorBinding
+  :: DeconstructorBinding
+  -> DeconstructorBinding
+canonicalizeDeconstructorBinding binding = binding
+  { deconstructorInput = canonicalize $ deconstructorInput binding
+  , deconstructorConstructors = map canonicalizeConstructorBinding
+      $ deconstructorConstructors binding
+  }
+
+canonicalizeConstructorBinding :: ConstructorBinding -> ConstructorBinding
+canonicalizeConstructorBinding binding = binding
+  { constructorFields = map canonicalize $ constructorFields binding
+  }
+
+canonicalizeConstraint :: HsConstraint -> HsConstraint
+canonicalizeConstraint = fmap canonicalize
+
+canonicalize :: HsType -> HsType
+canonicalize = SharedType.canonicalizeType
+
 -- Report the complete stable duplicate set.  Search explores every raw
 -- binding while the independent checker historically selected the first one,
 -- so accepting duplicates made both results and penalties list-order
@@ -1155,17 +1261,29 @@ rateNode h s = priorityFromPenalty
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sumScores . fmap rateGoal
   where
-    rateGoal (TGoal (VarBinding _ t) _) = tComplexity t
-    -- TODO: actually measure performance with different values,
-    --       use derived values instead of (arbitrarily) chosen ones.
-    tComplexity (TypeVar _)         = heuristics_goalVar h
-    tComplexity (TypeConstant _)    = heuristics_goalCons h -- TODO different heuristic?
-    tComplexity (TypeCons _)        = heuristics_goalCons h
-    tComplexity (TypeArrow t1 t2)   = sumScores
-      [heuristics_goalArrow h, tComplexity t1, tComplexity t2]
-    tComplexity (TypeApp   t1 t2)   = sumScores
-      [heuristics_goalApp h, tComplexity t1, tComplexity t2]
-    tComplexity (TypeForall _ _ t1) = tComplexity t1
+    rateGoal (TGoal (VarBinding _ t) _) = typeComplexity h t
+
+-- TODO: actually measure performance with different values and derive these
+-- weights instead of relying on historically chosen defaults.
+typeComplexity :: ExferenceHeuristicsConfig -> HsType -> Penalty
+typeComplexity h = complexity
+ where
+  complexity TypeVar{} = heuristics_goalVar h
+  complexity TypeConstant{} = heuristics_goalCons h -- TODO distinct heuristic?
+  complexity TypeCons{} = heuristics_goalCons h
+  complexity (TypeArrow parameter result) = sumScores
+    [heuristics_goalArrow h, complexity parameter, complexity result]
+  complexity (TypeApp function argument) = sumScores
+    [heuristics_goalApp h, complexity function, complexity argument]
+  -- Reproduce the former left-associated tuple-constructor application one
+  -- node at a time. 'Penalty' addition saturates and Double addition is not
+  -- associative, so multiplying/grouping equal weights can alter queue order.
+  complexity (TypeTuple _ elements) = L.foldl' applyElement
+    (heuristics_goalCons h) elements
+   where
+    applyElement functionCost element = sumScores
+      [heuristics_goalApp h, functionCost, complexity element]
+  complexity (TypeForallNative _ _ body) = complexity body
 
 rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Penalty
 rateUsage h = sumScores . map f . IntMap.elems . nodeVarUses where
@@ -1417,6 +1535,8 @@ stateStep allocators multiPM allowConstrs h = do
   case goalType of
     TypeArrow _ _ -> arrowStep goalType []
     TypeForall is cs t -> forallStep is cs t
+    TypeForallNative{} -> error
+      "transformGoal: rigid forall binder escaped checked input validation"
     _ -> byProvided <|> byFunctionSimple
 
 
@@ -1452,7 +1572,7 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
       TypeVar {}    -> defaultHandleRest -- dont pattern-match on variables, even if it unifies
       TypeArrow {}  ->
         error $ "addScopePatternMatch: TypeArrow: " ++ show vtResult  -- should never happen, given a pbinding..
-      TypeForall {} ->
+      TypeForallNative {} ->
         error $ "addScopePatternMatch: TypeForall (RankNTypes not yet implemented)" -- todo when we do RankNTypes
                 ++ show vtResult
       _ | not $ null vtParams -> defaultHandleRest

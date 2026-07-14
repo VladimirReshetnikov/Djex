@@ -61,7 +61,17 @@ independent of `mtl`, generated optics, and Template Haskell.
 contracts explicitly: `unifyDisjoint` returns separate substitutions for
 independent input namespaces, while `unifyShared` applies one occurs-checked
 substitution to a common namespace. The historical `unify` name remains a
-compatibility alias for `unifyDisjoint`.
+compatibility alias for `unifyDisjoint`. All three operate directly on the
+native shared type tree, canonicalize saturated functions and tuples before
+solving, reject quantifiers at any depth, and canonicalize their projected
+substitutions. The right-directed matcher uses the same tagged solver while
+keeping left-side variables rigid, so equal numeric IDs from its two inputs
+cannot alias accidentally. Exference's substitution API likewise delegates to
+the shared scope-aware simultaneous substitution primitive, including
+capture-avoiding alpha-renaming under foralls. That representation-level API
+remains total for native rigid-binder forms; checked search boundaries reject
+those unsupported binders before execution.
+
 The public named `exference-frontend` sublibrary is rooted at `src-frontend/`;
 it contains the `haskell-src-exts` frontend and environment loader and
 preserves the historical core import paths through Cabal reexports. It also
@@ -109,29 +119,54 @@ unboxed tuple syntax because the search language cannot generate its terms.
 Unqualified frontend lookup rejects ambiguous imported type names instead of
 silently choosing the first.
 
+Exference's `HsType` is now a compatibility alias for the shared
+`Type (Variable Int)`, not a recursively isomorphic engine-owned tree. The
+historical `TypeVar`, `TypeConstant`, `TypeCons`, `TypeArrow`, `TypeApp`,
+`TypeTuple`, and `TypeForall` spellings remain separately exported patterns.
+`TypeForall` deliberately constructs and matches only flexible binders, as the
+old representation did; `TypeForallNative` is the total view used by exhaustive
+internal matches. Checked environments and requests canonicalize saturated
+function and tuple constructor applications to structural `FunctionType` and
+`TupleType` values. They reject a rigid variable in any forall binder because
+Exference treats rigid IDs as search constants rather than source binders.
+
 Class constraints use `Language.Haskell.Synthesis.Constraint` directly as
 `Constraint HsType`; the historical `HsConstraint` constructor spelling is a
 bidirectional compatibility pattern. Class declarations and instances live in
 sealed strict maps built by
 `mkStaticClassEnv`, which
 checks names, duplicate declarations/parameters, superclass variables and
-cycles, referenced classes, and exact arities before superclass inflation.
+cycles, referenced classes, exact arities, and every native constraint-argument
+type before superclass inflation.
 Query and binding inputs likewise reject wrong arities for known classes while
 retaining unknown classes as explicit external constraints.
 
 Exact compatibility imports must now name the aliases and patterns separately
 and enable `PatternSynonyms`, for example `QualifiedName, pattern QualifiedName`
-and `HsConstraint, pattern HsConstraint`. Imports such as `QualifiedName(..)`
-and `HsConstraint(HsConstraint)` cannot describe constructors of type aliases.
-The now-impossible `UnsupportedSpecialName`, `UnsupportedSynthesisName`, and
+and `HsConstraint, pattern HsConstraint`, or
+`HsType, pattern TypeVar, pattern TypeForallNative`. Imports such as
+`QualifiedName(..)`, `HsType(..)`, and `HsConstraint(HsConstraint)` cannot
+describe constructors of type aliases. A complete compatibility match must use
+`TypeForallNative`; the flexible-only `TypeForall` pattern is intentionally not
+part of the module's `COMPLETE` set. The now-impossible
+`UnsupportedSpecialName`, `UnsupportedSynthesisName`, and
 `DeclarationNameConversionError` alternatives have consequently been removed.
 
-`toSynthesisType` and `fromSynthesisType` still adapt Exference's flexible and
-rigid type IDs, applications, arrows, tuples, foralls, and constraints to the
-shared source-type IR. The checked reverse conversion rejects rigid forall
-binders rather than weakening them during lowering. `toSynthesisConstraint`
-converts argument types all the way to that IR and validates the class
-namespace; names and the outer constraint node no longer require conversion.
+`toSynthesisTypeStructure` and `toSynthesisConstraintStructure` remain as total
+identity shims for source compatibility. `toSynthesisType` and
+`fromSynthesisType` now both canonicalize and validate the native value, and
+both reject rigid forall binders rather than weakening them during lowering.
+The checked constraint operations validate the class namespace and normalize
+their argument types without reconstructing the outer constraint. Because
+`HsType` inherits the shared structural `Show` instance, diagnostics and other
+source-like output should call `showHsType` (and `showHsConstraint`) rather than
+relying on `show`.
+
+The independent generated-expression checker validates every reachable native
+type and constraint before inference. It uses the same higher-kinded view of
+structural functions and tuples as search, while tuple complexity replays the
+historical left-associated constructor/application accumulation exactly so
+floating-point rounding and saturation cannot perturb queue order.
 
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration
@@ -285,9 +320,11 @@ silently changing meaning when returned to Exference's implicit form.
 
 ## Exference 1.7 migration
 
-Version 1.7 intentionally breaks the old recursive class representation.
-`HsConstraint` is now an alias for the shared `Constraint HsType`, with
-`pattern HsConstraint` preserving construction and matching;
+Version 1.7 intentionally breaks the old recursive type and constraint/class
+environment representations. `HsType` is now an alias for the shared
+`Type (Variable Int)`, and `HsConstraint` is an alias for the shared
+`Constraint HsType`; separately imported patterns preserve the historical
+construction and matching vocabulary.
 `HsInstance` stores prerequisites plus an `instance_head`; class collections
 are strict `Map QualifiedName HsTypeClass` values; and `mkStaticClassEnv`
 returns `Either ClassEnvError StaticClassEnv`. `StaticClassEnv` and
@@ -295,7 +332,10 @@ returns `Either ClassEnvError StaticClassEnv`. `StaticClassEnv` and
 The generic `Data` instances that depended on the recursive representation
 were removed. Imports through `Language.Haskell.Exference` and the former core
 module paths remain available, but callers constructing class values must
-adopt the checked API.
+adopt the checked API. `RigidIdentifierSupplyExhausted` is now positional, so
+the partial record selectors `maximumPreexistingRigidIdentifier` and
+`requestedRigidIdentifierCount` have also been removed; pattern matching still
+exposes both values in the same order.
 
 ### Reusable core search inputs
 
@@ -511,9 +551,11 @@ any / the right solution. Some common current limitations are:
   selection now have reusable library boundaries. `Language.Haskell.Djex`
   identifies the two backends and re-exports their checked session/query APIs.
   The backend-selecting `djex exference` driver now consumes only that stable
-  facade; the remaining integration work is convergence behind it and the
-  eventual retirement of deprecated compatibility entry points, not another
-  parallel query envelope.
+  facade. The native name/constraint/type migration has removed Exference's
+  duplicate source-type IR; the next convergence priority is to make both
+  engines construct the stable result envelope directly, followed by making
+  the shared inventories authoritative and retiring deprecated compatibility
+  entry points.
 - The detailed [Djinn/Exference integration audit](docs/reports/2026-07-11-djinn-integration-audit.md)
   records concrete correctness reproducers, shared-IR boundaries, and the
   staged migration order.

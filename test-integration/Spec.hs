@@ -1,3 +1,5 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 module Main (main) where
 
 import Data.Either (isRight)
@@ -33,10 +35,11 @@ import qualified Language.Haskell.Exference.Session as ExferenceCompatibility
 import Language.Haskell.Exference.Core.FunctionBinding (FunctionBinding (..))
 import Language.Haskell.Exference.Core.Name (mkQualifiedName)
 import Language.Haskell.Exference.Core.Types
-  ( HsType (TypeForall, TypeVar)
-  , HsTypeClass (HsTypeClass)
+  ( HsTypeClass (HsTypeClass)
   , emptyStaticClassEnv
   , mkStaticClassEnv
+  , pattern TypeForall
+  , pattern TypeVar
   )
 import Language.Haskell.Exference.EnvironmentParser
   ( SourceBinding (SourceFunction)

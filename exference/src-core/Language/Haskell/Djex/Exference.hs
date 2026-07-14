@@ -324,7 +324,7 @@ runExferenceQuery session request = do
   backendGoal <- either
     (Left . requestDiagnostic . shownErrorDiagnostic
       "DJEX_EXF_LOWER"
-      "cannot lower the shared query to Exference"
+      "Exference rejected the shared query type"
     )
     Right
     $ fromSynthesisType elaboratedGoal

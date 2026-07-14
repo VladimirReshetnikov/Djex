@@ -9,6 +9,12 @@
 - Scope: `djex/djinn/`, `djex/exference/`, and the neutral
   `djex/synthesis/` foundation
 
+> **Historical snapshot.** This report and its implementation update describe
+> the named commits, not the current API. See the
+> [current Djex architecture](../../../README.md) and
+> [remaining-convergence audit](../../../docs/reports/2026-07-14-remaining-convergence-audit.md)
+> for the native shared-type implementation and active priorities.
+
 ## Implementation update
 
 The findings and reproducers below describe the explicitly named audited

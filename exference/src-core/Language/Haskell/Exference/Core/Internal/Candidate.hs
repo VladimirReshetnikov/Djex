@@ -35,7 +35,6 @@ import Language.Haskell.Exference.Core.Types
   , TypeVarIndex
   , emptyStaticClassEnv
   , toSynthesisConstraint
-  , toSynthesisConstraintStructure
   )
 import Language.Haskell.Exference.Core.Score
   (Penalty, isFiniteScore, normalizePenalty)
@@ -125,8 +124,7 @@ projectValidatedCandidate typeNames expression constraints statistics =
     typeNames
     expression
     (Exference.toGeneratedExpression expression)
-    (map (fmap SharedType.canonicalizeType . toSynthesisConstraintStructure)
-      constraints)
+    constraints
     statistics
 
 detachCandidate

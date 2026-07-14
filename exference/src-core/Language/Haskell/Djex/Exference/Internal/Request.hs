@@ -30,6 +30,7 @@ import Language.Haskell.Exference.Core
   ( ExferenceHeuristicsConfig
   , Penalty
   )
+import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
 import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import Language.Haskell.Synthesis.Diagnostic
@@ -120,11 +121,27 @@ mkExferenceRequestWithSourceInfo
   -> QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequestWithSourceInfo sourceVariables sourceLocation query = do
-  validateRequest query
-  pure $ ExferenceRequest $ mkCachedQuery query ExferenceRequestCache
+  canonicalQuery <- normalizeRequest query
+  validateRequest canonicalQuery
+  pure $ ExferenceRequest $ mkCachedQuery canonicalQuery ExferenceRequestCache
     { cachedSourceTypeVariables = sourceVariables
     , cachedSourceLocation = sourceLocation
     }
+
+-- Store exactly the canonical native representation that the checked
+-- Exference core consumes.  Normalizing each context argument separately
+-- also rejects rigid forall binders before contexts are inserted into the
+-- contextual goal by the shared query envelope.
+normalizeRequest
+  :: QueryRequest ExferenceType ExferenceOptions
+  -> Either Diagnostic (QueryRequest ExferenceType ExferenceOptions)
+normalizeRequest query = do
+  goal <- normalizeType $ requestGoal query
+  contexts <- traverse (traverse normalizeType) $ requestContexts query
+  pure query {requestGoal = goal, requestContexts = contexts}
+ where
+  normalizeType source = either (Left . invalidRequest) Right
+    $ toSynthesisType source
 
 exferenceRequestQuery
   :: ExferenceRequest
@@ -152,10 +169,7 @@ validateRequest
   -> Either Diagnostic ()
 validateRequest query = do
   either
-    (Left . shownErrorDiagnostic
-      "DJEX_EXF_REQUEST"
-      "invalid shared Exference request"
-    )
+    (Left . invalidRequest)
     Right
     $ SharedType.validateType $ requestContextualType query
   let goalVariables = inScopeContextVariables $ requestGoal query
@@ -171,6 +185,11 @@ validateRequest query = do
       "DJEX_EXF_REQUEST"
       "explicit Exference contexts contain variables not in scope"
       extraneous
+
+invalidRequest :: Show failure => failure -> Diagnostic
+invalidRequest = shownErrorDiagnostic
+  "DJEX_EXF_REQUEST"
+  "invalid shared Exference request"
 
 -- Explicit contexts are inserted beneath only the leading prenex chain.
 -- Free goal variables remain usable there, as do binders from that chain;

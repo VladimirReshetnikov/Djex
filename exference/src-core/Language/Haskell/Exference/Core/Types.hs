@@ -2,11 +2,21 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MonadComprehensions #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
 
 module Language.Haskell.Exference.Core.Types
   ( TVarId
   , module Language.Haskell.Exference.Core.Name
-  , HsType (..)
+  , Boxity (..)
+  , HsType
+  , pattern TypeVar
+  , pattern TypeConstant
+  , pattern TypeCons
+  , pattern TypeArrow
+  , pattern TypeApp
+  , pattern TypeTuple
+  , pattern TypeForall
+  , pattern TypeForallNative
   , HsTypeOffset (..)
   , SynthesisVariable
   , SynthesisType
@@ -81,6 +91,7 @@ import Language.Haskell.Exference.Core.Name
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import Language.Haskell.Synthesis.Name (Boxity (..))
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 
@@ -94,120 +105,160 @@ type TVarId = Int
 type SynthesisVariable = SharedType.Variable TVarId
 type SynthesisType = SharedType.Type SynthesisVariable
 
+-- | Exference now searches the same type tree used at the neutral Djex
+-- boundary.  The patterns below retain the historical constructor vocabulary
+-- without storing a second, recursively isomorphic representation.
+type HsType = SynthesisType
+
+pattern TypeVar :: TVarId -> HsType
+pattern TypeVar variable =
+  SharedType.TypeVariable (SharedType.FlexibleVariable variable)
+
+pattern TypeConstant :: TVarId -> HsType
+pattern TypeConstant variable =
+  SharedType.TypeVariable (SharedType.RigidVariable variable)
+
+pattern TypeCons :: QualifiedName -> HsType
+pattern TypeCons name = SharedType.TypeConstructor name
+
+pattern TypeArrow :: HsType -> HsType -> HsType
+pattern TypeArrow parameter result =
+  SharedType.FunctionType parameter result
+
+pattern TypeApp :: HsType -> HsType -> HsType
+pattern TypeApp function argument =
+  SharedType.TypeApplication function argument
+
+pattern TypeTuple :: Boxity -> [HsType] -> HsType
+pattern TypeTuple boxity elements = SharedType.TupleType boxity elements
+
+-- | Historical forall view.  It intentionally matches only flexible
+-- binders, because the old Exference representation could not express rigid
+-- binders in that position.  Use 'TypeForallNative' for a total shared view.
+pattern TypeForall :: [TVarId] -> [HsConstraint] -> HsType -> HsType
+pattern TypeForall variables constraints body <-
+  SharedType.ForallType
+    (flexibleBinderList -> Just variables)
+    constraints
+    body
+  where
+    TypeForall variables constraints body = SharedType.ForallType
+      (map SharedType.FlexibleVariable variables)
+      constraints
+      body
+
+-- | Total forall view over the native shared representation.
+pattern TypeForallNative
+  :: [SynthesisVariable]
+  -> [HsConstraint]
+  -> HsType
+  -> HsType
+pattern TypeForallNative variables constraints body =
+  SharedType.ForallType variables constraints body
+
+{-# COMPLETE
+  TypeVar,
+  TypeConstant,
+  TypeCons,
+  TypeArrow,
+  TypeApp,
+  TypeTuple,
+  TypeForallNative
+  #-}
+
+flexibleBinderList :: [SynthesisVariable] -> Maybe [TVarId]
+flexibleBinderList = traverse flexibleBinder
+ where
+  flexibleBinder variable = case variable of
+    SharedType.FlexibleVariable identifier -> Just identifier
+    SharedType.RigidVariable _ -> Nothing
+
 data SynthesisTypeError
   = InvalidSynthesisType (SharedType.TypeError SynthesisVariable)
   | InvalidSynthesisConstraint SharedConstraint.ConstraintError
   | RigidForallBinder TVarId
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Ord, Show, Generic)
 
 instance NFData SynthesisTypeError
 
 data Subst  = Subst {-# UNPACK #-} !TVarId !HsType
 type Substs = IntMap.IntMap HsType
 
--- | A checked substitution can fail only when alpha-renaming exhausts
--- Exference's finite 'Int' identity space, or if the shared substitution
--- primitive violates the structural projection invariant used by this
--- adapter.  The latter constructors keep such an internal defect observable
--- instead of silently returning a captured or unsubstituted type.
+-- | A checked substitution can fail when alpha-renaming exhausts Exference's
+-- finite 'Int' identity space, or if the temporary tuple used to coordinate
+-- substitution across constraint arguments loses its expected shape.
 data HsSubstitutionError
   = SharedSubstitutionFailure
       (SharedType.SubstitutionError SynthesisVariable)
-  | SubstitutionResultTypeError SynthesisTypeError
   | UnexpectedConstraintSubstitutionResult SynthesisType
   deriving (Eq, Show, Generic)
 
 instance NFData HsSubstitutionError
 
-data HsType = TypeVar      {-# UNPACK #-} !TVarId
-            | TypeConstant {-# UNPACK #-} !TVarId
-              -- like TypeCons, for exference-internal purposes.
-            | TypeCons     QualifiedName
-            | TypeArrow    !HsType !HsType
-            | TypeApp      !HsType !HsType
-            | TypeForall   [TVarId] [HsConstraint] !HsType
-  deriving (Ord, Eq, Generic)
-
--- | Structurally project Exference's search representation into the common
--- source type without claiming that binders or constraints are valid.  This
--- total traversal is useful inside the checked search engine; public inputs
--- should normally cross the validating 'toSynthesisType' boundary instead.
+-- | Identity compatibility shim for code that previously projected
+-- Exference's private tree into the shared tree.  It deliberately performs no
+-- validation; public inputs should normally cross 'toSynthesisType' instead.
 toSynthesisTypeStructure :: HsType -> SynthesisType
-toSynthesisTypeStructure typeExpression = case typeExpression of
-  TypeVar variable -> SharedType.TypeVariable
-    $ SharedType.FlexibleVariable variable
-  TypeConstant variable -> SharedType.TypeVariable
-    $ SharedType.RigidVariable variable
-  TypeCons name -> SharedType.TypeConstructor name
-  TypeArrow parameter result -> SharedType.FunctionType
-    (toSynthesisTypeStructure parameter)
-    (toSynthesisTypeStructure result)
-  TypeApp function argument -> SharedType.TypeApplication
-    (toSynthesisTypeStructure function)
-    (toSynthesisTypeStructure argument)
-  TypeForall variables constraints body -> SharedType.ForallType
-    (map SharedType.FlexibleVariable variables)
-    (map toSynthesisConstraintStructure constraints)
-    (toSynthesisTypeStructure body)
+toSynthesisTypeStructure = id
 
--- | Convert and validate an Exference type at the shared source boundary.
--- Flexible and rigid IDs remain distinct, and saturated tuple constructors
--- are canonicalized structurally.
+-- | Validate and canonicalize a native Exference/shared type at the public
+-- boundary. Flexible and rigid IDs remain distinct, and saturated tuple
+-- constructors are stored structurally.
 toSynthesisType :: HsType -> Either SynthesisTypeError SynthesisType
-toSynthesisType source = do
-  let canonical = SharedType.canonicalizeType
-        $ toSynthesisTypeStructure source
-  either (Left . InvalidSynthesisType) Right
-    $ SharedType.validateType canonical
-  return canonical
+toSynthesisType = normalizeExferenceType
 
--- | Narrow a common type back to Exference's typed search vocabulary.
+-- | Validate and canonicalize a shared type for Exference search.  This is no
+-- longer a representational conversion: 'HsType' is the shared type.
 fromSynthesisType
   :: SynthesisType
   -> Either SynthesisTypeError HsType
-fromSynthesisType source = do
+fromSynthesisType = normalizeExferenceType
+
+normalizeExferenceType
+  :: SynthesisType
+  -> Either SynthesisTypeError SynthesisType
+normalizeExferenceType source = do
   let canonical = SharedType.canonicalizeType source
   either (Left . InvalidSynthesisType) Right
     $ SharedType.validateType canonical
-  fromSynthesisTypeStructure canonical
+  ensureFlexibleForallBinders canonical
+  return canonical
 
--- Deliberately skip validation and canonicalization here.  Substitution acts
--- on the structural image of an existing 'HsType', which can include
--- temporary search forms (for example a duplicate binder list) that checked
--- public boundaries reject but legacy low-level operations must preserve.
-fromSynthesisTypeStructure
+-- Deliberately skip validation here. Substitution is a representation-level
+-- operation and can act on temporary search forms (for example a duplicate
+-- binder list) as well as the native rigid-binder forms now expressible by
+-- 'HsType'. Checked search boundaries reject unsupported rigid binders before
+-- execution; this lower-level operation must nevertheless remain total over
+-- values accepted by its native representation. Its result still enters
+-- canonical storage so saturated functions and tuples have one spelling.
+canonicalizeSubstitutionResult
   :: SynthesisType
-  -> Either SynthesisTypeError HsType
-fromSynthesisTypeStructure = convert
+  -> HsType
+canonicalizeSubstitutionResult = SharedType.canonicalizeType
+
+-- Exference treats rigid variables as search constants, never as lexical
+-- forall binders.  Check every nested context and structural tuple explicitly
+-- now that callers can construct the shared representation directly.
+ensureFlexibleForallBinders
+  :: SynthesisType
+  -> Either SynthesisTypeError ()
+ensureFlexibleForallBinders = check
  where
-  convert typeExpression = case typeExpression of
-    SharedType.TypeVariable (SharedType.FlexibleVariable variable) ->
-      Right $ TypeVar variable
-    SharedType.TypeVariable (SharedType.RigidVariable variable) ->
-      Right $ TypeConstant variable
-    SharedType.TypeConstructor name -> Right $ TypeCons name
-    SharedType.TypeApplication function argument -> TypeApp
-      <$> convert function <*> convert argument
-    SharedType.FunctionType parameter result -> TypeArrow
-      <$> convert parameter <*> convert result
-    SharedType.TupleType boxity elements -> do
-      tuple <- either
-        (const $ Left $ InvalidSynthesisType
-          $ SharedType.InvalidTupleTypeArity boxity $ length elements)
-        Right
-        $ SharedName.tupleName boxity $ length elements
-      foldl TypeApp (TypeCons tuple) <$> mapM convert elements
-    SharedType.ForallType variables constraints body -> do
-      binders <- mapM flexibleBinder variables
-      TypeForall binders
-        <$> mapM convertConstraint constraints
-        <*> convert body
+  check typeExpression = case typeExpression of
+    TypeVar{} -> Right ()
+    TypeConstant{} -> Right ()
+    TypeCons{} -> Right ()
+    TypeArrow parameter result -> check parameter >> check result
+    TypeApp function argument -> check function >> check argument
+    TypeTuple _ elements -> traverse_ check elements
+    TypeForallNative variables constraints body -> do
+      traverse_ checkBinder variables
+      traverse_ (traverse_ check . constraint_params) constraints
+      check body
 
-  flexibleBinder (SharedType.FlexibleVariable variable) = Right variable
-  flexibleBinder (SharedType.RigidVariable variable) =
-    Left $ RigidForallBinder variable
-
-  convertConstraint = traverse convert
+  checkBinder variable = case variable of
+    SharedType.FlexibleVariable _ -> Right ()
+    SharedType.RigidVariable identifier -> Left $ RigidForallBinder identifier
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
@@ -248,16 +299,15 @@ constraint_tclass = SharedConstraint.constraintClass
 constraint_params :: HsConstraint -> [HsType]
 constraint_params = SharedConstraint.constraintArguments
 
--- | Project the whole constraint, including every type argument, into shared
--- syntax without validation.  The checked engine uses this only after input
--- validation has established the invariants preserved by search.
+-- | Identity compatibility shim for the former structural constraint
+-- projection. It performs no validation.
 toSynthesisConstraintStructure
   :: HsConstraint
   -> SharedConstraint.Constraint SynthesisType
-toSynthesisConstraintStructure = fmap toSynthesisTypeStructure
+toSynthesisConstraintStructure = id
 
--- | Convert a constraint completely to shared syntax and validate both its
--- nominal class identity and all type arguments.
+-- | Validate and canonicalize both the nominal class identity and every type
+-- argument of a native shared constraint.
 toSynthesisConstraint
   :: HsConstraint
   -> Either SynthesisTypeError
@@ -268,9 +318,10 @@ toSynthesisConstraint constraint = do
     $ SharedConstraint.validateConstraint converted
   return converted
 
--- | Narrow a fully shared constraint back to Exference. Structural names such
--- as unboxed tuple constructors are rejected in the /class-name/ position by
--- shared namespace validation; unboxed tuple types remain valid arguments.
+-- | Validate and canonicalize a shared constraint for Exference. Structural
+-- names such as unboxed tuple constructors are rejected in the /class-name/
+-- position by shared namespace validation; unboxed tuple types remain valid
+-- arguments.
 fromSynthesisConstraint
   :: SharedConstraint.Constraint SynthesisType
   -> Either SynthesisTypeError HsConstraint
@@ -300,9 +351,44 @@ data ClassEnvError
   | UnknownConstraintClass ConstraintSite QualifiedName
   | ConstraintArityMismatch ConstraintSite QualifiedName Int Int
     -- ^ Site, class name, declared arity, supplied arity.
+  | InvalidConstraintArgument
+      ConstraintSite
+      QualifiedName
+      Int -- ^ Zero-based argument index.
+      SynthesisTypeError
   | DuplicateInstanceHeads [HsConstraint]
   | SuperclassCycle [QualifiedName]
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord)
+
+instance Show ClassEnvError where
+  showsPrec precedence failure = showParen (precedence > 10)
+    $ showString $ renderClassEnvError failure
+
+renderClassEnvError :: ClassEnvError -> String
+renderClassEnvError failure = case failure of
+  InvalidClassName name -> constructor "InvalidClassName" [show name]
+  DuplicateClassDeclaration name ->
+    constructor "DuplicateClassDeclaration" [show name]
+  DuplicateClassParameter name variable ->
+    constructor "DuplicateClassParameter" [show name, show variable]
+  NegativeClassParameter name variable ->
+    constructor "NegativeClassParameter" [show name, show variable]
+  UndeclaredSuperclassVariables name variables ->
+    constructor "UndeclaredSuperclassVariables" [show name, show variables]
+  UnknownConstraintClass site name ->
+    constructor "UnknownConstraintClass" [show site, show name]
+  ConstraintArityMismatch site name expected actual -> constructor
+    "ConstraintArityMismatch" [show site, show name, show expected, show actual]
+  InvalidConstraintArgument site name index typeFailure -> constructor
+    "InvalidConstraintArgument"
+    [show site, show name, show index, show typeFailure]
+  DuplicateInstanceHeads constraints -> constructor
+    "DuplicateInstanceHeads" [sourceConstraintList constraints]
+  SuperclassCycle names -> constructor "SuperclassCycle" [show names]
+ where
+  constructor name fields = unwords $ name : fields
+  sourceConstraintList constraints = "[" ++ L.intercalate ","
+    (map (showHsConstraint M.empty) constraints) ++ "]"
 
 -- Positional fields are deliberate.  Exported record labels would let a
 -- downstream caller update the declarations or either derived index and
@@ -335,9 +421,9 @@ mkStaticClassEnv
   :: [HsTypeClass]
   -> [HsInstance]
   -> Either ClassEnvError StaticClassEnv
-mkStaticClassEnv tclasses instances = do
-  classTable <- buildClassTable tclasses
-  traverse_ (validateClass classTable) tclasses
+mkStaticClassEnv sourceClasses sourceInstances = do
+  classTable <- buildClassTable classes
+  traverse_ (validateClass classTable) classes
   case SharedCollection.repeatedValuesInFirstRepetitionOrder
       $ SharedCollection.summarizeDuplicates
       $ map instance_head instances of
@@ -349,6 +435,26 @@ mkStaticClassEnv tclasses instances = do
       allInstances = inflateInstances declarations instances
   return $ StaticClassEnv classTable instances $ indexInstances allInstances
  where
+  -- Canonicalization is total, so normalizing before validation does not
+  -- disturb error precedence.  It does ensure that duplicate-head checks,
+  -- superclass inflation, and every value sealed in the environment observe
+  -- the same structural function/tuple representation.
+  classes = map canonicalizeClass sourceClasses
+  instances = map canonicalizeInstance sourceInstances
+
+  canonicalizeClass declaration = declaration
+    { tclass_constraints = map canonicalizeConstraint
+        $ tclass_constraints declaration
+    }
+
+  canonicalizeInstance declaration = declaration
+    { instance_constraints = map canonicalizeConstraint
+        $ instance_constraints declaration
+    , instance_head = canonicalizeConstraint $ instance_head declaration
+    }
+
+  canonicalizeConstraint = fmap SharedType.canonicalizeType
+
   buildClassTable = go M.empty
     where
       go table [] = Right table
@@ -429,8 +535,9 @@ validateKnownConstraintInEnv environment site constraint = do
   validateConstraintClass constraint
   case M.lookup (constraint_tclass constraint)
       (sClassEnv_tclasses environment) of
-    Nothing -> Right ()
+    Nothing -> validateConstraintArguments site constraint
     Just declaration -> validateConstraintArity site constraint declaration
+      >> validateConstraintArguments site constraint
 
 validateConstraintInTable
   :: M.Map QualifiedName HsTypeClass
@@ -442,6 +549,7 @@ validateConstraintInTable table site constraint = do
   case M.lookup name table of
     Nothing -> Left $ UnknownConstraintClass site name
     Just declaration -> validateConstraintArity site constraint declaration
+      >> validateConstraintArguments site constraint
   where
     name = constraint_tclass constraint
 
@@ -462,6 +570,22 @@ validateConstraintArity site constraint declaration
 validateConstraintClass :: HsConstraint -> Either ClassEnvError ()
 validateConstraintClass constraint =
   validateClassName $ constraint_tclass constraint
+
+-- Validate argument syntax only after the owning class and its arity.  This
+-- preserves the historical nominal-error precedence while ensuring every
+-- type sealed in a class environment satisfies the native shared invariant.
+validateConstraintArguments
+  :: ConstraintSite
+  -> HsConstraint
+  -> Either ClassEnvError ()
+validateConstraintArguments site constraint = traverse_ validateArgument
+  $ zip [0 ..] $ constraint_params constraint
+ where
+  className = constraint_tclass constraint
+  validateArgument (index, argument) = case toSynthesisType argument of
+    Left failure -> Left
+      $ InvalidConstraintArgument site className index failure
+    Right _ -> Right ()
 
 validateClassName :: QualifiedName -> Either ClassEnvError ()
 validateClassName name = case SharedConstraint.validateConstraintClassName
@@ -487,24 +611,17 @@ qClassEnv_inflatedConstraints :: QueryClassEnv -> S.Set HsConstraint
 qClassEnv_inflatedConstraints (QueryClassEnv _ _ constraints) = constraints
 
 -- deepseq provides the same Generic-derived defaults that this package used
--- to obtain from deepseq-generics.  Constraints now contain only shared
--- nominal class names, so forcing a class environment walks a finite value
--- rather than a recursively tied declaration graph.
-instance NFData HsType
+-- to obtain from deepseq-generics.  The native shared type already has its
+-- own 'NFData' instance; forcing a class environment still walks only finite
+-- nominal constraints rather than a recursively tied declaration graph.
 instance NFData HsTypeClass
 instance NFData HsInstance
 instance NFData StaticClassEnv
 instance NFData QueryClassEnv
 
-instance Show HsType where
-  -- Render the total structural projection without validating or
-  -- canonicalizing it: Show is also needed while reporting rejected input.
-  showsPrec precedence source = SharedRender.showsType
-    defaultVariableName precedence $ toSynthesisTypeStructure source
-
 showHsType :: TypeVarIndex -> HsType -> String
 showHsType sourceNames = SharedRender.renderType
-  (sourceVariableName sourceNames) . toSynthesisTypeStructure
+  (sourceVariableName sourceNames)
 
 -- instance Read HsType where
 --   readsPrec _ = maybeToList . parseType
@@ -513,7 +630,7 @@ showHsConstraint :: TypeVarIndex
                  -> HsConstraint
                  -> String
 showHsConstraint sourceNames = SharedRender.renderConstraint
-  (sourceVariableName sourceNames) . toSynthesisConstraintStructure
+  (sourceVariableName sourceNames)
 
 defaultVariableName :: SynthesisVariable -> String
 defaultVariableName variable = case variable of
@@ -556,7 +673,11 @@ addQueryClassEnv :: [HsConstraint] -> QueryClassEnv -> QueryClassEnv
 addQueryClassEnv constrs env = QueryClassEnv
   (qClassEnv_env env) csSet inflated
   where
-    csSet = S.fromList constrs `S.union` qClassEnv_constraints env
+    canonicalConstraints = map
+      (fmap SharedType.canonicalizeType)
+      constrs
+    csSet = S.fromList canonicalConstraints
+      `S.union` qClassEnv_constraints env
     inflated = inflateHsConstraints (qClassEnv_env env) csSet
 
 -- | Add all transitively implied superclasses using declarations from the
@@ -610,7 +731,7 @@ constraintApplySubstsChecked substitutions constraint
   | IntMap.null substitutions = Right (Any False, constraint)
   | HsConstraint className parameters <- constraint = do
       substituted <- substituteShared substitutions $ SharedType.TupleType
-        SharedName.Unboxed $ map toSynthesisTypeStructure parameters
+        SharedName.Unboxed parameters
       resultParameters <- case substituted of
         SharedType.TupleType SharedName.Unboxed results ->
           mapM lowerSubstitutionResult results
@@ -657,7 +778,8 @@ preferredVarName i = h
     SharedName.SpecialOccurrence _ -> showVar i
   h TypeArrow{}        = "f" ++ suffix
   h (TypeApp t _)      = h t
-  h (TypeForall _ _ t) = h t
+  h TypeTuple{}        = showVar i
+  h (TypeForallNative _ _ t) = h t
 
 -- | Capture-avoiding single-variable substitution.
 applySubstChecked
@@ -685,7 +807,7 @@ applySubstsChecked substitutions source
   | IntMap.null substitutions = Right (Any False, source)
   | otherwise = do
       substituted <- substituteShared substitutions
-        $ toSynthesisTypeStructure source
+        source
       result <- lowerSubstitutionResult substituted
       Right
         ( Any $ substitutionsAffect substitutions $ freeVars source
@@ -710,7 +832,7 @@ substituteShared substitutions source = case
       S.empty
       (M.fromList
         [ ( SharedType.FlexibleVariable variable
-          , toSynthesisTypeStructure replacement
+          , replacement
           )
         | (variable, replacement) <- IntMap.toList substitutions
         ])
@@ -721,10 +843,7 @@ substituteShared substitutions source = case
 lowerSubstitutionResult
   :: SynthesisType
   -> Either HsSubstitutionError HsType
-lowerSubstitutionResult = either
-  (Left . SubstitutionResultTypeError)
-  Right
-  . fromSynthesisTypeStructure
+lowerSubstitutionResult = Right . canonicalizeSubstitutionResult
 
 substitutionsAffect :: Substs -> S.Set TVarId -> Bool
 substitutionsAffect substitutions variables = any
@@ -740,14 +859,11 @@ checkedSubstitution operation = either failure id
     ++ show substitutionError
 
 freeVars :: HsType -> S.Set TVarId
-freeVars (TypeVar i)         = S.singleton i
-freeVars (TypeConstant _)    = S.empty
-freeVars (TypeCons _)        = S.empty
-freeVars (TypeArrow t1 t2)   = S.union (freeVars t1) (freeVars t2)
-freeVars (TypeApp t1 t2)     = S.union (freeVars t1) (freeVars t2)
-freeVars (TypeForall is cs t) = foldr S.delete allVars is
-  where
-    allVars = freeVars t `S.union` foldMap (foldMap freeVars . constraint_params) cs
+freeVars typeExpression = S.fromList
+  [ identifier
+  | SharedType.FlexibleVariable identifier <- S.toList
+      $ SharedType.freeVariables typeExpression
+  ]
 
 -- | Collect every class constraint embedded in a type, including contexts
 -- nested under arrows and applications.  Keeping this traversal in the core
@@ -762,7 +878,8 @@ typeConstraints (TypeArrow parameter result) =
   typeConstraints parameter ++ typeConstraints result
 typeConstraints (TypeApp function argument) =
   typeConstraints function ++ typeConstraints argument
-typeConstraints (TypeForall _ constraints body) =
+typeConstraints (TypeTuple _ elements) = concatMap typeConstraints elements
+typeConstraints (TypeForallNative _ constraints body) =
   constraints
     ++ concatMap (concatMap typeConstraints . constraint_params) constraints
     ++ typeConstraints body

@@ -35,15 +35,18 @@ import Language.Haskell.Exference.Core.TypeUtils (forallify)
 import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
--- | The finite 'Int' identity space cannot hold all skolems required by a
--- query.  The maximum is reported as 'Nothing' only when the environment and
--- goal contain no pre-existing rigid variables. The requested count retains
--- its historical 'Int' API and saturates at 'maxBound' if a larger binder list
--- is ever supplied; it never wraps into a misleading non-positive value.
-data RigidInstantiationError = RigidIdentifierSupplyExhausted
-  { maximumPreexistingRigidIdentifier :: Maybe TVarId
-  , requestedRigidIdentifierCount :: Int
-  }
+-- | Rigid-instantiation planning either exhausts the finite 'Int' identity
+-- space or encounters an already-rigid forall binder, which Exference cannot
+-- instantiate as one of its flexible source quantifiers. For exhaustion, the
+-- maximum is reported as 'Nothing' only when the environment and goal contain
+-- no pre-existing rigid variables. The requested count retains its historical
+-- 'Int' API and saturates at 'maxBound' if a larger binder list is ever
+-- supplied; it never wraps into a misleading non-positive value.
+data RigidInstantiationError
+  = RigidIdentifierSupplyExhausted
+      (Maybe TVarId) -- ^ Greatest pre-existing rigid ID, when one exists.
+      Int -- ^ Saturating number of requested skolems.
+  | RigidForallBinderCannotBeInstantiated TVarId
   deriving (Eq, Show, Generic)
 
 instance NFData RigidInstantiationError
@@ -53,6 +56,7 @@ instance NFData RigidInstantiationError
 data RigidInstantiationContext = RigidInstantiationContext
   { maximumEnvironmentRigidIdentifier :: Maybe TVarId
   , environmentRigidIdentifiers :: IdentifierSupply
+  , environmentRigidForallBinder :: Maybe TVarId
   }
   deriving (Eq, Show, Generic)
 
@@ -64,6 +68,7 @@ mkRigidInstantiationContext environment = RigidInstantiationContext
   (Foldable.foldl' maximumMaybe Nothing
     $ map maximumRigidInType types)
   (supplyFromIdentifiers $ concatMap rigidIdentifiersInType types)
+  (firstJust $ map firstRigidForallBinder types)
  where
   types = environmentTypes environment
 
@@ -83,20 +88,27 @@ instance NFData RigidInstantiationPlan
 -- The extra constraints are for callers such as the standalone independent
 -- checker which receive assumptions separately from the goal.  Live search
 -- passes an empty list because query contexts are embedded in the goal before
--- it reaches the core.
+-- it reaches the core. A native forall containing a rigid binder is rejected
+-- before allocation so it cannot be silently treated as a flexible binder.
 planRigidInstantiation
   :: RigidInstantiationContext
   -> [HsConstraint]
   -> HsType
   -> Either RigidInstantiationError RigidInstantiationPlan
-planRigidInstantiation context extraConstraints goal =
+planRigidInstantiation context extraConstraints goal = do
+  case firstJust
+      (map firstRigidForallBinder queryTypes
+        ++ [environmentRigidForallBinder context]) of
+    Just identifier -> Left
+      $ RigidForallBinderCannotBeInstantiated identifier
+    Nothing -> Right ()
+  binders <- leadingBinders $ forallify goal
   case allocateRigidInstantiations binders initialSupply of
     Nothing -> Left $ RigidIdentifierSupplyExhausted
       maximumRigid
       (SharedCount.saturatingNaturalToInt $ SharedCount.naturalLength binders)
     Just instantiations -> Right $ RigidInstantiationPlan instantiations
  where
-  binders = leadingBinders $ forallify goal
   queryTypes = goal : concatMap constraint_params extraConstraints
   maximumRigid = Foldable.foldl' maximumMaybe
     (maximumEnvironmentRigidIdentifier context)
@@ -132,10 +144,48 @@ splitRigidInstantiationLayer (_ : binders) (current : remaining) =
   let (selected, rest) = splitRigidInstantiationLayer binders remaining
   in (current : selected, rest)
 
-leadingBinders :: HsType -> [TVarId]
-leadingBinders (TypeForall variables _ body) =
-  variables ++ leadingBinders body
-leadingBinders _ = []
+leadingBinders
+  :: HsType
+  -> Either RigidInstantiationError [TVarId]
+leadingBinders (TypeForallNative variables _ body) = do
+  identifiers <- traverse flexibleBinder variables
+  remaining <- leadingBinders body
+  pure $ identifiers ++ remaining
+ where
+  flexibleBinder variable = case variable of
+    SharedType.FlexibleVariable identifier -> Right identifier
+    SharedType.RigidVariable identifier -> Left
+      $ RigidForallBinderCannotBeInstantiated identifier
+leadingBinders _ = Right []
+
+-- Locate forbidden rigid variables specifically in binder position.  A
+-- generic fold cannot distinguish a rigid occurrence from a rigid binder.
+firstRigidForallBinder :: HsType -> Maybe TVarId
+firstRigidForallBinder typeExpression = case typeExpression of
+  TypeVar{} -> Nothing
+  TypeConstant{} -> Nothing
+  TypeCons{} -> Nothing
+  TypeArrow parameter result -> firstJust
+    [firstRigidForallBinder parameter, firstRigidForallBinder result]
+  TypeApp function argument -> firstJust
+    [firstRigidForallBinder function, firstRigidForallBinder argument]
+  TypeTuple _ elements -> firstJust $ map firstRigidForallBinder elements
+  TypeForallNative variables constraints body ->
+    firstJust
+      ( map rigidBinder variables
+        ++ map (firstJust . map firstRigidForallBinder . constraint_params)
+          constraints
+        ++ [firstRigidForallBinder body]
+      )
+ where
+  rigidBinder variable = case variable of
+    SharedType.FlexibleVariable _ -> Nothing
+    SharedType.RigidVariable identifier -> Just identifier
+
+firstJust :: [Maybe value] -> Maybe value
+firstJust [] = Nothing
+firstJust (Just value : _) = Just value
+firstJust (Nothing : remaining) = firstJust remaining
 
 environmentTypes :: EnvDictionary -> [HsType]
 environmentTypes environment =
@@ -169,7 +219,7 @@ maximumRigidInType = Foldable.foldl' maximumMaybe Nothing
   . map Just . rigidIdentifiersInType
 
 rigidIdentifiersInType :: HsType -> [TVarId]
-rigidIdentifiersInType = Foldable.foldr collect [] . toSynthesisTypeStructure
+rigidIdentifiersInType = Foldable.foldr collect []
  where
   collect variable identifiers = case variable of
     SharedType.FlexibleVariable{} -> identifiers

@@ -251,6 +251,9 @@ renderForallNormalizationError
 renderForallNormalizationError failure = case failure of
   TypeUtils.DuplicateForallBinder variable ->
     "duplicate explicitly quantified type variable " ++ show variable
+  TypeUtils.RigidForallBinderCannotBeNormalized variable ->
+    "rigid forall binder " ++ show variable
+      ++ " cannot be alpha-normalized as a flexible source variable"
   TypeUtils.ForallNormalizationSupplyExhausted ->
     "cannot allocate a fresh explicitly quantified type variable"
 
@@ -440,7 +443,9 @@ findInvalidNames valids (T.TypeArrow t1 t2)   =
   findInvalidNames valids t1 ++ findInvalidNames valids t2
 findInvalidNames valids (T.TypeApp t1 t2)     =
   findInvalidNames valids t1 ++ findInvalidNames valids t2
-findInvalidNames valids (T.TypeForall _ constraints t1) =
+findInvalidNames valids (T.TypeTuple _ elements) =
+  concatMap (findInvalidNames valids) elements
+findInvalidNames valids (T.TypeForallNative _ constraints t1) =
   findInvalidNames valids t1
   ++ concatMap (concatMap (findInvalidNames valids) . T.constraint_params) constraints
 

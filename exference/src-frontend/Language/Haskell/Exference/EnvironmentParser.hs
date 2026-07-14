@@ -918,7 +918,7 @@ parseModulesM inputs = do
             "unknown constraint class '" ++ show className
               ++ "' used in the binding " ++ show bindingName
           renderConstraintFailure bindingName constraint failure =
-            "invalid class constraint '" ++ show constraint
+            "invalid class constraint '" ++ showHsConstraint mempty constraint
               ++ "' used in the binding " ++ show bindingName
               ++ ": " ++ show failure
 

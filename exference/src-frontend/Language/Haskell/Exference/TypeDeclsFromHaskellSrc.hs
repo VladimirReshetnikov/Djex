@@ -129,7 +129,7 @@ applyTypeDecls declarations source = do
   definitions = M.fromList
     [ ( alias
       , ( map SharedType.FlexibleVariable parameters
-        , toSynthesisTypeStructure body
+        , body
         )
       )
     | (alias, Right (HsTypeDecl _ parameters body)) <- M.toAscList declarations

@@ -11,6 +11,7 @@ module Language.Haskell.Exference.Core.Internal.Testing
   , compatibilityBindingUsageCounts
   , mergePriorityQueueAtCapacity
   , pruningReasonsFromNaturalTotals
+  , typeComplexityForTesting
   )
 where
 
@@ -21,6 +22,8 @@ import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
 import Language.Haskell.Exference.Core.Name (QualifiedName)
+import Language.Haskell.Exference.Core.Score (Penalty)
+import Language.Haskell.Exference.Core.Types (HsType)
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( identifierSupplySize )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
@@ -84,6 +87,14 @@ pruningReasonsFromNaturalTotals
   -> Natural
   -> [SharedSearch.TruncationReason]
 pruningReasonsFromNaturalTotals = E.naturalPruningReasons
+
+-- | Compare native structural types with their historical engine spellings
+-- without exposing search-node internals to the regression suite.
+typeComplexityForTesting
+  :: E.ExferenceHeuristicsConfig
+  -> HsType
+  -> Penalty
+typeComplexityForTesting = E.typeComplexity
 
 finiteSearchAllocators :: IdentifierCapacities -> SearchAllocators
 finiteSearchAllocators capacities = defaultSearchAllocators

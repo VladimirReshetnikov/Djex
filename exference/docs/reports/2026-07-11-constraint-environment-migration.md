@@ -5,6 +5,13 @@
 - Shared foundation: `haskell-synthesis` 0.1.1.0
 - Integration target: Djinn `Context`
 
+> **Historical snapshot.** This report records the standalone 1.7 migration;
+> its package names, conversion seams, test counts, and next steps are retained
+> as historical evidence. See the
+> [current Djex architecture](../../../README.md) and
+> [remaining-convergence audit](../../../docs/reports/2026-07-14-remaining-convergence-audit.md)
+> for the unified package and native shared-type boundary.
+
 ## Result
 
 Exference no longer represents a class constraint by embedding a complete

@@ -28,6 +28,7 @@ where
 import qualified Data.Set as S
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as M
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( IdentifierSupply
@@ -36,27 +37,32 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
   , supplyFromIdentifiers
   )
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
 
 -- binds everything in Foralls, so there are no free variables anymore.
 forallify :: HsType -> HsType
 forallify t = case t of
-  TypeForall is cs t' -> TypeForall (S.toList frees++is) cs t'
-  _                   -> TypeForall (S.toList frees) [] t
- where frees = freeVars t
+  TypeForallNative variables constraints body -> TypeForallNative
+    (map SharedType.FlexibleVariable (S.toList frees) ++ variables)
+    constraints
+    body
+  _ -> TypeForall (S.toList frees) [] t
+ where
+  frees = freeVars t
 
+-- | Transform the complete flexible namespace, including forall binders and
+-- constraints, without changing rigid search constants. The shared functor
+-- also keeps structural tuple elements in the traversal automatically.
 incVarIds :: (TVarId -> TVarId) -> HsType -> HsType
-incVarIds f (TypeVar i) = TypeVar (f i)
-incVarIds f (TypeArrow t1 t2) = TypeArrow (incVarIds f t1) (incVarIds f t2)
-incVarIds f (TypeApp t1 t2) = TypeApp (incVarIds f t1) (incVarIds f t2)
-incVarIds f (TypeForall is cs t) = TypeForall
-                                     (f <$> is)
-                                     (g <$> cs) 
-                                     (incVarIds f t)
-  where
-    g (HsConstraint cls params) = HsConstraint cls (incVarIds f <$> params)
-incVarIds _ t = t
+incVarIds transform = fmap transformVariable
+ where
+  transformVariable variable = case variable of
+    SharedType.FlexibleVariable identifier ->
+      SharedType.FlexibleVariable $ transform identifier
+    SharedType.RigidVariable{} -> variable
 
 -- | The actual greatest flexible ID, including forall binders and context
 -- arguments.  'Nothing' represents a ground type without stealing an 'Int'
@@ -93,7 +99,7 @@ largestSubstsId = maybe 0 id . maximumSubstitutionFlexibleId
   "Use maximumSubstitutionFlexibleId; every Int is a valid TVarId." #-}
 
 constraintMapTypes :: (HsType -> HsType) -> HsConstraint -> HsConstraint
-constraintMapTypes f (HsConstraint a ts) = HsConstraint a (map f ts)
+constraintMapTypes = fmap
 
 constraintContainsVariables :: HsConstraint -> Bool
 constraintContainsVariables =
@@ -102,6 +108,7 @@ constraintContainsVariables =
 -- | Why a lexical forall namespace could not be alpha-normalized.
 data ForallNormalizationError
   = DuplicateForallBinder TVarId
+  | RigidForallBinderCannotBeNormalized TVarId
   | ForallNormalizationSupplyExhausted
   deriving (Eq, Show)
 
@@ -115,7 +122,8 @@ data ForallNormalizationState = ForallNormalizationState
 -- while respecting lexical shadowing. External IDs and the type's true free
 -- variables are claimed before traversal. Every ID occurring anywhere in the
 -- source is reserved up front, so a fresh binder cannot capture a later free,
--- bound, or constraint occurrence.
+-- bound, or constraint occurrence. A rigid binder is not an inference
+-- variable and is rejected explicitly rather than being retagged as one.
 --
 -- The returned set is the complete final namespace. Parser adapters must
 -- reserve it exactly because alpha-renamed binders do not have an unambiguous
@@ -159,16 +167,29 @@ normalizeForallsInType state typeExpression = case typeExpression of
     (normalizedArgument, argumentState) <-
       normalizeForallsInType functionState argument
     pure (TypeApp normalizedFunction normalizedArgument, argumentState)
-  TypeForall variables constraints body -> do
+  TypeTuple boxity elements -> do
+    (normalizedElements, finalState) <- normalizeForallTypes state elements
+    pure (TypeTuple boxity normalizedElements, finalState)
+  TypeForallNative nativeVariables constraints body -> do
+    variables <- case flexibleBinderIdentifiers nativeVariables of
+      Left rigid -> Left $ RigidForallBinderCannotBeNormalized rigid
+      Right flexible -> Right flexible
     case firstDuplicateVariable variables of
       Just duplicate -> Left $ DuplicateForallBinder duplicate
       Nothing -> pure ()
     (normalizedVariables, renaming, binderState) <-
       normalizeForallBinders state variables
-    let substitutions = IntMap.map TypeVar renaming
+    let sharedRenaming = M.fromList
+          [ ( SharedType.FlexibleVariable source
+            , SharedType.FlexibleVariable target
+            )
+          | (source, target) <- IntMap.toList renaming
+          ]
+        renameOwnedOccurrences =
+          SharedType.renameScopedVariables sharedRenaming
         renamedConstraints = map
-          (snd . constraintApplySubsts substitutions) constraints
-        renamedBody = snd $ applySubsts substitutions body
+          (fmap renameOwnedOccurrences) constraints
+        renamedBody = renameOwnedOccurrences body
     (normalizedConstraints, constraintState) <-
       normalizeForallConstraints binderState renamedConstraints
     (normalizedBody, bodyState) <-
@@ -177,6 +198,15 @@ normalizeForallsInType state typeExpression = case typeExpression of
       ( TypeForall normalizedVariables normalizedConstraints normalizedBody
       , bodyState
       )
+
+flexibleBinderIdentifiers
+  :: [SynthesisVariable]
+  -> Either TVarId [TVarId]
+flexibleBinderIdentifiers = traverse flexibleIdentifier
+ where
+  flexibleIdentifier variable = case variable of
+    SharedType.FlexibleVariable identifier -> Right identifier
+    SharedType.RigidVariable identifier -> Left identifier
 
 normalizeForallConstraints
   :: ForallNormalizationState
@@ -273,21 +303,22 @@ splitArrowChain result = (result, [])
 
 -- | Whether a type contains explicit quantification at any depth.
 containsForall :: HsType -> Bool
-containsForall TypeForall{} = True
+containsForall TypeForallNative{} = True
 containsForall (TypeArrow parameter result) =
   containsForall parameter || containsForall result
 containsForall (TypeApp function argument) =
   containsForall function || containsForall argument
+containsForall (TypeTuple _ elements) = any containsForall elements
 containsForall _ = False
 
 -- | Whether quantification occurs below the complete leading prenex chain or
 -- inside an outer constraint argument.
 containsNestedForall :: HsType -> Bool
-containsNestedForall ty@TypeForall{} =
+containsNestedForall ty@TypeForallNative{} =
   any constraintContainsForall outerConstraints || containsForall body
   where
     (outerConstraints, body) = stripOuterForalls ty
-    stripOuterForalls (TypeForall _ constraints inner) =
+    stripOuterForalls (TypeForallNative _ constraints inner) =
       let (nestedConstraints, result) = stripOuterForalls inner
       in (constraints ++ nestedConstraints, result)
     stripOuterForalls other = ([], other)
@@ -299,7 +330,9 @@ constraintContainsForall = any containsForall . constraint_params
 -- | Find the nominal head beneath foralls and type applications.
 typeConstructorHead :: HsType -> Maybe QualifiedName
 typeConstructorHead typeExpression = case typeExpression of
-  TypeForall _ _ body -> typeConstructorHead body
+  TypeForallNative _ _ body -> typeConstructorHead body
   TypeApp function _ -> typeConstructorHead function
   TypeCons name -> Just name
+  TypeTuple boxity elements -> either (const Nothing) Just
+    $ SharedName.tupleName boxity $ length elements
   _ -> Nothing

@@ -60,6 +60,7 @@ import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 import Language.Haskell.Exference.Core.Internal.SearchControl
+import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
@@ -473,7 +474,7 @@ findEngineChunksWith allocators
               , multiplyScore (heuristics_unusedVar heuristics)
                   $ fromIntegral unusedVarCount
               , multiplyScore (heuristics_solutionLength heuristics)
-                  $ fromIntegral (SharedGenerated.expressionSize
+                  $ fromIntegral (SharedGenerated.expressionSizeNatural
                       $ toGeneratedExpression e)
               ]
       ]
@@ -571,7 +572,7 @@ findEngineChunksWith allocators
     -- from the queue.  This includes applications that immediately solve the
     -- current goal and branches discarded by the configured bounds.
     traverse_ (modify . recordBindingUsage) rNodes
-    let !depthDiscarded = strictNaturalLength tooDeep
+    let !depthDiscarded = SharedCount.naturalLength tooDeep
     modify $ \current -> current
       { findDepthPruned = findDepthPruned current + depthDiscarded
       , findIdentifierSpaceExhausted =
@@ -1054,7 +1055,7 @@ mergeQueueWithCapacity requestedCapacity maximumSize queued newEntries
       )
  where
   capacity = min requestedCapacity maximumPQueueSize
-  combinedSize = queueSizeNatural queued + strictNaturalLength newEntries
+  combinedSize = queueSizeNatural queued + SharedCount.naturalLength newEntries
   normalizedMaximumSize = max 0 <$> maximumSize
   configuredCapacity = maybe capacity
     (min capacity . fromIntegral) normalizedMaximumSize
@@ -1081,14 +1082,8 @@ maximumPQueueSize = fromIntegral (maxBound :: Int)
 queueSizeNatural :: Q.MaxPQueue priority value -> Natural
 queueSizeNatural = fromIntegral . Q.size
 
-strictNaturalLength :: [value] -> Natural
-strictNaturalLength = go 0
- where
-  go !count [] = count
-  go !count (_ : remaining) = go (count + 1) remaining
-
 saturatingNaturalToInt :: Natural -> Int
-saturatingNaturalToInt = fromIntegral . min maximumPQueueSize
+saturatingNaturalToInt = SharedCount.saturatingNaturalToInt
 
 naturalPruningReasons
   :: Natural

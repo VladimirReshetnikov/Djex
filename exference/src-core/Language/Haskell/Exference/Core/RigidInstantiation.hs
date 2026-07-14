@@ -32,6 +32,7 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
   )
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils (forallify)
+import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 -- | The finite 'Int' identity space cannot hold all skolems required by a
@@ -91,7 +92,8 @@ planRigidInstantiation
 planRigidInstantiation context extraConstraints goal =
   case allocateRigidInstantiations binders initialSupply of
     Nothing -> Left $ RigidIdentifierSupplyExhausted
-      maximumRigid (saturatingBinderCount binders)
+      maximumRigid
+      (SharedCount.saturatingNaturalToInt $ SharedCount.naturalLength binders)
     Just instantiations -> Right $ RigidInstantiationPlan instantiations
  where
   binders = leadingBinders $ forallify goal
@@ -114,16 +116,6 @@ allocateRigidInstantiations binders initialSupply = fmap (reverse . fst)
   allocate (instantiations, supply) binder = do
     (identifier, nextSupply) <- allocateFreshNonNegativeIdentifier supply
     pure ((binder, identifier) : instantiations, nextSupply)
-
--- Count only for the compatibility diagnostic after allocation has failed.
--- The allocation path itself follows binders directly and cannot disagree
--- with this machine-sized projection.
-saturatingBinderCount :: [value] -> Int
-saturatingBinderCount = Foldable.foldl' increment 0
- where
-  increment count _
-    | count == maxBound = count
-    | otherwise = count + 1
 
 -- | Split off the instantiations belonging to one forall layer by following
 -- the binder spine directly.  This has the semantics of splitting at the

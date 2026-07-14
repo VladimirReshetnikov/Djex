@@ -28,6 +28,10 @@ documented one-based, ordered half-open range cannot be forged through the
 public API. Its renderer is deterministic and compiler-shaped, but callers
 remain free to present the structured value themselves.
 
+`Language.Haskell.Synthesis.Count` keeps intrinsically non-negative totals in
+`Natural`, with a strict collection count and one explicit saturating boundary
+for historical APIs that still expose machine-sized `Int` values.
+
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s,
 and its opaque `DefinitionName` checks the narrower generated top-level value

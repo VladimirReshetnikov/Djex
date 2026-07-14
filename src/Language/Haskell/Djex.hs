@@ -20,6 +20,7 @@ module Language.Haskell.Djex
   ( module Language.Haskell.Djex.Djinn
   , module Language.Haskell.Djex.Exference
   , module Language.Haskell.Synthesis.Candidate
+  , module Language.Haskell.Synthesis.Count
   , module Language.Haskell.Synthesis.Constraint
   , module Language.Haskell.Synthesis.Declaration
   , module Language.Haskell.Synthesis.Diagnostic
@@ -45,6 +46,7 @@ module Language.Haskell.Djex
 import Language.Haskell.Djex.Djinn
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Synthesis.Candidate
+import Language.Haskell.Synthesis.Count
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Diagnostic

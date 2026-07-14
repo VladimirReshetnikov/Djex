@@ -29,6 +29,7 @@ module Language.Haskell.Synthesis.Generated
   , validateFunctionClauseSyntax
   , validateDefinitionName
   , functionClauseExpression
+  , expressionSizeNatural
   , expressionSize
   , allocateLocalNames
   , allocateClauseLocalNames
@@ -45,7 +46,9 @@ import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
+import Language.Haskell.Synthesis.Count (saturatingNaturalToInt)
 import Language.Haskell.Synthesis.Name
+import Numeric.Natural (Natural)
 import Text.PrettyPrint.HughesPJ
   ( Doc
   , ($$)
@@ -440,20 +443,33 @@ validateFunctionClauseSyntax qualification
     renderNamePrefix qualification global ==
       renderNamePrefix qualification (definitionName name)
 
--- | Count structural nodes independently of rendered names and qualification.
--- Search heuristics can prefer smaller terms without making rank depend on
--- presentation policy or identifier length.
-expressionSize :: Expression local -> Int
-expressionSize expression = 1 + case expression of
+-- | Count structural nodes losslessly, independently of rendered names and
+-- qualification. Search heuristics can prefer smaller terms without making
+-- rank depend on presentation policy or identifier length.
+expressionSizeNatural :: Expression local -> Natural
+expressionSizeNatural expression = 1 + case expression of
   Local{} -> 0
   Global{} -> 0
-  Lambda _ body -> expressionSize body
-  Apply function argument -> expressionSize function + expressionSize argument
-  Tuple elements -> sum $ map expressionSize elements
+  Lambda _ body -> expressionSizeNatural body
+  Apply function argument ->
+    expressionSizeNatural function + expressionSizeNatural argument
+  Tuple elements -> sumExpressionSizes elements
   Hole{} -> 0
-  Let _ value body -> expressionSize value + expressionSize body
-  Case scrutinee alternatives -> expressionSize scrutinee
-    + sum [expressionSize body | (_, body) <- alternatives]
+  Let _ value body ->
+    expressionSizeNatural value + expressionSizeNatural body
+  Case scrutinee alternatives -> expressionSizeNatural scrutinee
+    + List.foldl'
+        (\total (_, body) -> total + expressionSizeNatural body)
+        0 alternatives
+ where
+  sumExpressionSizes = List.foldl'
+    (\total child -> total + expressionSizeNatural child) 0
+
+-- | Historical machine-sized projection of 'expressionSizeNatural'. Large
+-- generated trees saturate instead of wrapping to a misleading small or
+-- negative size.
+expressionSize :: Expression local -> Int
+expressionSize = saturatingNaturalToInt . expressionSizeNatural
 
 validatePatternSyntax :: Pattern local -> Either RenderError ()
 validatePatternSyntax pattern = case pattern of

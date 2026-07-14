@@ -123,6 +123,7 @@ Library
     Language.Haskell.Djex.Djinn,
     Language.Haskell.Djex.Exference,
     Language.Haskell.Synthesis.Candidate,
+    Language.Haskell.Synthesis.Count,
     Language.Haskell.Synthesis.Constraint,
     Language.Haskell.Synthesis.Declaration,
     Language.Haskell.Synthesis.Diagnostic,
@@ -166,6 +167,7 @@ Library synthesis
 
   Exposed-Modules:
     Language.Haskell.Synthesis.Candidate
+    Language.Haskell.Synthesis.Count
     Language.Haskell.Synthesis.Constraint
     Language.Haskell.Synthesis.Declaration
     Language.Haskell.Synthesis.Diagnostic

@@ -10,7 +10,9 @@ import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
+import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Candidate
+import Language.Haskell.Synthesis.Count
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import qualified Language.Haskell.Synthesis.Declaration as Declaration
@@ -2031,11 +2033,28 @@ generatedTests = testGroup "generated syntax"
       renderFunctionClause (options FullyQualified) clause @?=
         Right "result = Fixture.result"
   , testCase "measure generated expressions structurally" $ do
-      let identity = Lambda [Bind (0 :: Int)] $ Local 0
+      let leaf = Local (0 :: Int)
+          identity = Lambda [Bind 0] leaf
           application = Apply identity identity
-      expressionSize (Local (0 :: Int)) @?= 1
-      expressionSize identity @?= 2
-      expressionSize application @?= 5
+          composite = Let (Bind 1) (Tuple [Hole 1, leaf])
+            $ Case leaf
+                [ (Wildcard, application)
+                , (Bind 2, Tuple [])
+                ]
+          examples =
+            [ (leaf, 1)
+            , (identity, 2)
+            , (application, 5)
+            , (composite, 12)
+            ]
+      forM_ examples $ \(expression, expected) -> do
+        expressionSizeNatural expression @?= expected
+        expressionSize expression @?= fromIntegral expected
+      let maximumCount = fromIntegral (maxBound :: Int) :: Natural
+      saturatingNaturalToInt (maximumCount - 1) @?= maxBound - 1
+      saturatingNaturalToInt maximumCount @?= maxBound
+      saturatingNaturalToInt (maximumCount + 1) @?= maxBound
+      naturalLength [1 .. 4096 :: Int] @?= 4096
   , testCase "render holes and reject malformed surface shapes" $ do
       let options = defaultRenderOptions (\local -> 't' : show (local :: Int))
           variableName = right $ mkIdentifier "value"

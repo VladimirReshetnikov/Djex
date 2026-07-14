@@ -106,6 +106,12 @@ toSynthesisInventory
     -> Either SynthesisEnvironmentError SynthesisInventory
 toSynthesisInventory environment = do
     declarations <- synthesisDeclarations environment
+    synthesisInventory declarations
+
+synthesisInventory
+    :: [SynthesisDeclaration]
+    -> Either SynthesisEnvironmentError SynthesisInventory
+synthesisInventory declarations =
     either (Left . InvalidSynthesisInventory) Right $
         SharedInventory.mkInventoryWithClassPolicy
             SharedInference.ClosedKindInventory
@@ -121,9 +127,14 @@ prepareEnvironment
     :: Environment
     -> Either SynthesisEnvironmentError PreparedEnvironment
 prepareEnvironment environment = do
-    inventory <- toSynthesisInventory environment
+    declarations <- synthesisDeclarations environment
+    inventory <- synthesisInventory declarations
+    sourceDeclarations <- mapM preflightDeclaration declarations
     synonyms <- prepareInventoryExpansion inventory
-    sealPreparedEnvironment environment inventory synonyms
+    projected <- projectSynthesisEnvironment
+        (SharedInventory.inventoryKindAssumptions inventory)
+        sourceDeclarations
+    sealPreparedEnvironment projected inventory synonyms
 
 -- | Validate a neutral environment once, then derive Djinn's compatibility
 -- projection from the resulting inventory. Conversion is deliberately split

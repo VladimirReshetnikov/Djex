@@ -72,6 +72,8 @@ tests =
     , ("round-trip shared environments", testSharedEnvironmentAdapter)
     , ("prepare neutral Djinn environments authoritatively",
           testNeutralDjinnPreparation)
+    , ("project raw Djinn kinds from the authoritative inventory",
+          testRawDjinnPreparationKinds)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("reject every raw recursive type-expansion graph finitely",
           testRawTypeExpansionCycles)
@@ -791,6 +793,23 @@ assertDjinnSessionRejected description result = case result of
     Left failure -> assertEqual (description ++ " has the environment code")
         (Just "DJEX_DJINN_ENV") (SharedDiagnostic.diagnosticCode failure)
     Right _ -> fail $ description ++ ": a recursive datatype reached Djinn"
+
+-- Raw Environment is a compatibility input, not a second kind authority.
+-- In particular, callers of the internal constructor can forge stale class
+-- parameter kinds; preparation must replace them with the assumptions inferred
+-- from the same declarations before context lookup sees the backend table.
+testRawDjinnPreparationKinds :: IO ()
+testRawDjinnPreparationKinds = do
+    let RawEnvironment.Environment types functions _ = standardEnvironment
+        forged = RawEnvironment.Environment types functions
+            [("Marker", ([("a", KArrow KStar KStar)], []))]
+    prepared <- expectShownRight $ prepareEnvironment forged
+    assertEqual "raw class kinds did not follow the checked inventory"
+        [("Marker", ([("a", KStar)], []))]
+        (classDeclarations $ RawEnvironment.preparedEnvironmentSource prepared)
+    markerMaybe <- either fail pure $ mkContext "Marker" [HTCon "Maybe"]
+    assertLeft "a stale raw class kind overrode the shared inventory"
+        $ resolvePreparedContext prepared markerMaybe
 
 -- Saturation and kind checking own different failures. A partial synonym can
 -- be kind-compatible in a higher-kinded position, so the explicit arity guard

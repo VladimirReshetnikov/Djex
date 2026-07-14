@@ -139,7 +139,13 @@ cabal run exe:djex -- exference --select first "a -> a"
 cabal run djinn
 cabal run exference -- --first "a -> a"
 cabal bench djinn-bench
+cabal bench exference-bench
 ```
+
+The Exference benchmark uses parser-free, explicitly step- and queue-bounded
+core fixtures. For an optimization-sensitive comparison of the search engine,
+build its whole local dependency graph consistently with
+`cabal bench exference-bench --enable-optimization=2`.
 
 The backend subdirectories are source roots, not independent Cabal projects;
 run package commands from the repository root or from `djex/`.

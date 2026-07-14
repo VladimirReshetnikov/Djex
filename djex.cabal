@@ -75,6 +75,10 @@ common transformers-dep
 common tasty-quickcheck-dep
   Build-Depends: tasty-quickcheck >= 0.10 && < 1
 
+common tasty-benchmark
+  import:        build-settings
+  Build-Depends: tasty-bench >= 0.3 && < 0.6
+
 -- Cabal restricts common stanzas to build-information fields, so each test
 -- suite still declares its interface locally.
 common tasty-test
@@ -295,14 +299,12 @@ Test-Suite djinn-property-tests
   Build-Depends:  djex:djinn-core
 
 Benchmark djinn-bench
-  import:         build-settings
+  import:         tasty-benchmark
   Type:           exitcode-stdio-1.0
   Main-Is:        Bench.hs
   Other-Modules:  Corpus
   Hs-Source-Dirs: djinn/bench
-  Build-Depends:
-    djex:djinn-core,
-    tasty-bench >= 0.3 && < 0.6
+  Build-Depends:  djex:djinn-core
 
 Test-Suite djinn-cli-tests
   import:         cli-test
@@ -361,6 +363,16 @@ Test-Suite exference-core-api-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: exference/test-core-api
+  Build-Depends:
+    djex:exference-core,
+    djex:synthesis
+
+Benchmark exference-bench
+  import:         tasty-benchmark
+  Type:           exitcode-stdio-1.0
+  Main-Is:        Bench.hs
+  Other-Modules:  Corpus
+  Hs-Source-Dirs: exference/bench
   Build-Depends:
     djex:exference-core,
     djex:synthesis

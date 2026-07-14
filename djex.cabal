@@ -314,10 +314,6 @@ Test-Suite djinn-cli-tests
 Library exference-core
   import:         backend-core, deepseq-dep
   Visibility:     public
-  -- Preserve the historical search-core optimization policy across the raw
-  -- engine and its parser-neutral stable adapter. HSE frontend and executable
-  -- code use the package-wide defaults.
-  Ghc-Options:    -fno-spec-constr
   Hs-Source-Dirs: exference/src-core
 
   Exposed-Modules:

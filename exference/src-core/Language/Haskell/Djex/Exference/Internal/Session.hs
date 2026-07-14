@@ -8,9 +8,8 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , ExferenceOmission (..)
   , ExferenceOmissionCapability (..)
   , ExferenceOmissionReason (..)
-  , sealNeutralExferenceSession
   , sealNeutralExferenceSessionWithPolicy
-  , sealProjectedExferenceSessionWithPolicy
+  , sealPreparedExferenceSessionWithPolicy
   , sessionSearchEnvironment
   , sessionTypeSynonyms
   , sessionTypeNames
@@ -33,8 +32,11 @@ import Language.Haskell.Exference.Core
   )
 import qualified Language.Haskell.Exference.Core as Core
 import Language.Haskell.Exference.Core.Declaration
-  ( freshSynthesisVariable
+  ( PreparedNeutralSynthesisInventory
   , prepareNeutralSynthesisInventory
+  , preparedNeutralBackend
+  , preparedNeutralInventory
+  , preparedNeutralTypeSynonyms
   )
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (constructorFields)
@@ -81,7 +83,6 @@ import Language.Haskell.Synthesis.Name
   )
 import Language.Haskell.Synthesis.TypeSynonym
   ( TypeSynonyms
-  , prepareTypeSynonyms
   )
 
 data ExferenceOmissionCapability
@@ -117,12 +118,6 @@ data ExferenceSession = ExferenceSession
 
 type NeutralEnvironment = Environment SynthesisVariable Void ()
 
-sealNeutralExferenceSession
-  :: NeutralEnvironment
-  -> Either Diagnostic ExferenceSession
-sealNeutralExferenceSession = sealNeutralExferenceSessionWithPolicy
-  [] Map.empty
-
 sealNeutralExferenceSessionWithPolicy
   :: [Name]
   -> Map Name Penalty
@@ -133,41 +128,31 @@ sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
     (preparationFailure "cannot validate the neutral Exference inventory")
     $ mkInventoryFromEnvironmentWithClassPolicy
         OpenKindInventory GeneralizeClassKinds environment
-  (synonyms, backend) <- first
+  prepared <- first
     (preparationFailure "cannot prepare the neutral Exference environment")
     $ prepareNeutralSynthesisInventory inventory
-  sealPreparedEnvironment exclusions overrides inventory synonyms backend
+  sealPreparedEnvironment exclusions overrides prepared
 
--- | Seal a checked parser projection without retaining its source-specific
--- representation. The caller supplies the authoritative neutral inventory
--- together with the rated backend dictionary whose order controls equal-cost
--- search. This is the deliberately narrow seam used by source frontends.
-sealProjectedExferenceSessionWithPolicy
+-- | Seal a checked source projection without retaining its parser-specific
+-- representation. The opaque prepared inventory proves that the synonym
+-- table and rated, ordered backend are projections of the same neutral
+-- inventory; exposed source-frontend seams cannot recombine those views.
+sealPreparedExferenceSessionWithPolicy
   :: [Name]
   -> Map Name Penalty
-  -> Inventory SynthesisVariable ()
-  -> EnvDictionary
+  -> PreparedNeutralSynthesisInventory
   -> Either Diagnostic ExferenceSession
-sealProjectedExferenceSessionWithPolicy
-    exclusions overrides inventory backend = do
-  synonyms <- prepareSynonyms inventory
-  sealPreparedEnvironment exclusions overrides inventory synonyms backend
-
-prepareSynonyms
-  :: Inventory SynthesisVariable ()
-  -> Either Diagnostic (TypeSynonyms SynthesisVariable)
-prepareSynonyms = first
-  (preparationFailure "cannot prepare Exference type synonyms")
-  . prepareTypeSynonyms freshSynthesisVariable
+sealPreparedExferenceSessionWithPolicy = sealPreparedEnvironment
 
 sealPreparedEnvironment
   :: [Name]
   -> Map Name Penalty
-  -> Inventory SynthesisVariable ()
-  -> TypeSynonyms SynthesisVariable
-  -> EnvDictionary
+  -> PreparedNeutralSynthesisInventory
   -> Either Diagnostic ExferenceSession
-sealPreparedEnvironment exclusions overrides inventory synonyms backend = do
+sealPreparedEnvironment exclusions overrides prepared = do
+  let inventory = preparedNeutralInventory prepared
+      synonyms = preparedNeutralTypeSynonyms prepared
+      backend = preparedNeutralBackend prepared
   ratedFunctions <- applyRatingOverrides overrides
     $ environmentFunctions backend
   let excludedBindings = Set.fromList exclusions

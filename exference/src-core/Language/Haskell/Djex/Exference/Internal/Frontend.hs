@@ -4,7 +4,7 @@
 -- adapter needs. Session representation and search invariants remain owned by
 -- the private implementation module.
 module Language.Haskell.Djex.Exference.Internal.Frontend
-  ( sealProjectedExferenceSessionWithPolicy
+  ( sealPreparedExferenceSessionWithPolicy
   , sessionTypeNames
   , sessionClasses
   , mkExferenceRequestWithSourceInfo
@@ -24,7 +24,7 @@ import Language.Haskell.Djex.Exference.Internal.Request
   , validateExferenceTarget
   )
 import Language.Haskell.Djex.Exference.Internal.Session
-  ( sealProjectedExferenceSessionWithPolicy
+  ( sealPreparedExferenceSessionWithPolicy
   , sessionClasses
   , sessionTypeNames
   )

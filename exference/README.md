@@ -162,12 +162,16 @@ or forging an invalid span. Low-level `parseModules` keeps aliases
 unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` first seals and kind-checks that
 source graph, then sends the checked Inventory through the parser-independent
 neutral lowerer. The resulting backend projection is reconciled by name with
-the original binding/deconstructor order and ratings. Thus synonym expansion,
-forall freshness, class/instance normalization, and whole-inventory recursion
-classification have one implementation, while the checked Inventory still
-retains the source aliases needed by later queries. Its ordered binding field is
-now `sourceBindings :: [SourceBinding]`, where `SourceFunction` denotes an
-ordinary `FunctionBinding` and `SourceClassMethod QualifiedName` records the
+the original binding/deconstructor order and ratings. An opaque prepared value
+keeps that Inventory, its synonym table, and the backend lowering inseparable;
+the cross-sublibrary frontend seam accepts only exact-name order and finite
+rating metadata, never a second independently prepared dictionary. Thus
+synonym expansion, forall freshness, class/instance normalization, and
+whole-inventory recursion classification have one implementation, while the
+checked Inventory still retains the source aliases needed by later queries.
+Its ordered binding field is now `sourceBindings :: [SourceBinding]`, where
+`SourceFunction` denotes an ordinary `FunctionBinding` and
+`SourceClassMethod QualifiedName` records the
 exact owning class beside one. Both `SourceBinding` and `SourceEnvironment` are
 monomorphic: HSE signatures cross `functionBindingFromType` once during
 extraction, and rating updates change only `functionPenalty`. The flat

@@ -9,9 +9,14 @@ module Language.Haskell.Exference.Core.Declaration
   , SynthesisEnvironment
   , SynthesisInventory
   , NeutralSynthesisInventory
+  , PreparedNeutralSynthesisInventory
   , SynthesisDeclarationError (..)
   , freshSynthesisVariable
   , prepareNeutralSynthesisInventory
+  , projectNeutralSynthesisInventory
+  , preparedNeutralInventory
+  , preparedNeutralTypeSynonyms
+  , preparedNeutralBackend
   , deriveRecursiveDataMetadata
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
@@ -38,7 +43,7 @@ import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
 import Data.Foldable (toList)
-import Data.List (find)
+import Data.List (find, sort)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
@@ -54,7 +59,10 @@ import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Name
-import Language.Haskell.Exference.Core.Score (Penalty)
+import Language.Haskell.Exference.Core.Score
+  ( Penalty
+  , isFiniteScore
+  )
 import Language.Haskell.Exference.Core.Types
 
 data DeclarationMetadata
@@ -78,6 +86,16 @@ type SynthesisInventory = SharedInventory.Inventory
 -- lowerer. Ratings and recursive-datatype flags are derived while lowering;
 -- they are backend policy, not source declaration syntax.
 type NeutralSynthesisInventory = SharedInventory.Inventory SynthesisVariable ()
+
+-- | One neutral inventory and the exact synonym table and backend lowering
+-- prepared from it.  Keeping the constructor private prevents source
+-- frontends from pairing a checked inventory with an unrelated search
+-- dictionary.  Accessors return immutable views; only the projection function
+-- below can change backend order or ratings, and it never changes semantics.
+data PreparedNeutralSynthesisInventory = PreparedNeutralSynthesisInventory
+  NeutralSynthesisInventory
+  (SharedTypeSynonym.TypeSynonyms SynthesisVariable)
+  EnvDictionary
 
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError
@@ -110,6 +128,7 @@ data SynthesisDeclarationError
   | PreparedDataTypeNamesMismatch
       [QualifiedName] -- ^ Ordered source multiset.
       [QualifiedName] -- ^ Ordered prepared-backend multiset.
+  | InvalidPreparedBindingPenalty QualifiedName Penalty
   | PreparedDataMetadataMissing SharedName.Name
   | ExplicitParameterKindUnsupported SynthesisVariable
   | InvalidDeconstructorHead HsType
@@ -156,18 +175,99 @@ freshSynthesisVariable reserved old = case old of
 -- receive the neutral zero penalty.
 prepareNeutralSynthesisInventory
   :: NeutralSynthesisInventory
-  -> Either SynthesisDeclarationError
-      (SharedTypeSynonym.TypeSynonyms SynthesisVariable, EnvDictionary)
+  -> Either SynthesisDeclarationError PreparedNeutralSynthesisInventory
 prepareNeutralSynthesisInventory inventory = do
   synonyms <- first NeutralSynonymPreparationError
     $ SharedTypeSynonym.prepareTypeSynonyms freshSynthesisVariable inventory
   backend <- lowerNeutralSynthesisEnvironment synonyms
     $ SharedInventory.inventoryEnvironment inventory
-  pure (synonyms, backend)
+  pure $ PreparedNeutralSynthesisInventory inventory synonyms backend
 
--- Keep the alias table and environment private once separated: accepting two
--- independently prepared public arguments would allow a mismatched table to
--- turn an alias into a fictitious nominal constructor silently.
+-- | Reorder a canonical backend to match a source frontend and attach its
+-- finite heuristic ratings.  Names are an exact inventory: callers may choose
+-- order and ratings, but cannot replace types, constraints, classes,
+-- instances, constructors, or datatype metadata with independently prepared
+-- values.
+projectNeutralSynthesisInventory
+  :: [(QualifiedName, Penalty)]
+  -> [QualifiedName]
+  -> PreparedNeutralSynthesisInventory
+  -> Either SynthesisDeclarationError PreparedNeutralSynthesisInventory
+projectNeutralSynthesisInventory functionProjection dataProjection
+    (PreparedNeutralSynthesisInventory inventory synonyms backend) = do
+  let preparedFunctions = environmentFunctions backend
+      sourceBindingNames = sort $ map fst functionProjection
+      preparedBindingNames = sort $ map functionName preparedFunctions
+  if sourceBindingNames == preparedBindingNames
+    then pure ()
+    else Left $ PreparedBindingNamesMismatch
+      sourceBindingNames preparedBindingNames
+  preparedDataNames <- mapM deconstructorTypeName
+    $ environmentDeconstructors backend
+  let sourceDataNames = sort dataProjection
+      canonicalDataNames = sort preparedDataNames
+  if sourceDataNames == canonicalDataNames
+    then pure ()
+    else Left $ PreparedDataTypeNamesMismatch
+      sourceDataNames canonicalDataNames
+  case find (not . isFiniteScore . snd) functionProjection of
+    Just (name, penalty) -> Left $ InvalidPreparedBindingPenalty name penalty
+    Nothing -> pure ()
+  let functionsByName = Map.fromList
+        [ (functionName binding, binding)
+        | binding <- preparedFunctions
+        ]
+      deconstructorsByName = Map.fromList
+        $ zip preparedDataNames $ environmentDeconstructors backend
+      projectFunction (name, penalty) = case Map.lookup name functionsByName of
+        Just binding -> Right binding {functionPenalty = penalty}
+        -- Exact multiset validation above makes this branch unreachable, but
+        -- retaining a total lookup keeps the invariant local to this function.
+        Nothing -> Left $ PreparedBindingNamesMismatch
+          sourceBindingNames preparedBindingNames
+      projectDeconstructor name = maybe
+        (Left $ PreparedDataTypeNamesMismatch
+          sourceDataNames canonicalDataNames)
+        Right
+        $ Map.lookup name deconstructorsByName
+  functions <- mapM projectFunction functionProjection
+  deconstructors <- mapM projectDeconstructor dataProjection
+  pure $ PreparedNeutralSynthesisInventory inventory synonyms
+    (backend
+      { environmentFunctions = functions
+      , environmentDeconstructors = deconstructors
+      })
+
+-- | The authoritative checked inventory owned by a prepared lowering.
+preparedNeutralInventory
+  :: PreparedNeutralSynthesisInventory
+  -> NeutralSynthesisInventory
+preparedNeutralInventory
+    (PreparedNeutralSynthesisInventory inventory _ _) = inventory
+
+-- | The alias table prepared from the witness's own checked inventory.
+preparedNeutralTypeSynonyms
+  :: PreparedNeutralSynthesisInventory
+  -> SharedTypeSynonym.TypeSynonyms SynthesisVariable
+preparedNeutralTypeSynonyms
+    (PreparedNeutralSynthesisInventory _ synonyms _) = synonyms
+
+-- | The canonical or safely reordered/rated backend owned by the witness.
+preparedNeutralBackend
+  :: PreparedNeutralSynthesisInventory
+  -> EnvDictionary
+preparedNeutralBackend
+    (PreparedNeutralSynthesisInventory _ _ backend) = backend
+
+deconstructorTypeName
+  :: DeconstructorBinding
+  -> Either SynthesisDeclarationError QualifiedName
+deconstructorTypeName declaration = fst
+  <$> deconstructorHead (deconstructorInput declaration)
+
+-- Keep the actual lowering private once the witness has been assembled:
+-- accepting an independently prepared alias table here would allow a
+-- mismatched table to turn an alias into a fictitious nominal constructor.
 lowerNeutralSynthesisEnvironment
   :: SharedTypeSynonym.TypeSynonyms SynthesisVariable
   -> SharedEnvironment.Environment SynthesisVariable Void ()

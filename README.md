@@ -206,10 +206,13 @@ search inventory without changing source order. HSE aliases remain unexpanded
 through common Inventory kind checking; the same neutral lowering used by
 programmatic sessions then expands them capture-safely, normalizes classes and
 instances, and derives cross-module recursion before source ratings/order are
-reapplied. A session retains only its
-neutral inventory and synonym table, its checked core search environment, and
-parser-independent type-name and class indexes; neither an HSE source
-environment nor its legacy synonym map survives sealing.
+reapplied. That lowering returns an opaque witness which owns the neutral
+inventory, synonym table, and backend together; the source frontend can
+reorder the exact checked names and attach finite ratings, but cannot combine
+an inventory with an independently prepared search dictionary. A session
+retains only its neutral inventory and synonym table, its checked core search
+environment, and parser-independent type-name and class indexes; neither an
+HSE source environment nor its legacy synonym map survives sealing.
 
 `ExferenceSessionPolicy` applies exact structural-name exclusions and finite,
 signed rating overrides while the private search projection is sealed.

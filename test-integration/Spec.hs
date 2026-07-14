@@ -231,13 +231,8 @@ tests = testGroup "Djex facade"
   , testCase "run a checked Exference session through the shared envelope" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
-      environmentDeclarations
-          (inventoryEnvironment $ exferenceSessionInventory session) @?=
-        map (fmap $ const ())
-          (environmentDeclarations
-            $ inventoryEnvironment $ checkedSourceInventory checked)
-      inventoryKindAssumptions (exferenceSessionInventory session) @?=
-        inventoryKindAssumptions (checkedSourceInventory checked)
+      exferenceSessionInventory session @?=
+        fmap (const ()) (checkedSourceInventory checked)
       exferenceSessionOmissions session @?= []
       exferenceSessionDiagnostics session @?= []
       target <- expectRight $ mkIdentifier "identity"

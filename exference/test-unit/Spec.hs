@@ -1556,6 +1556,83 @@ tests = testGroup "Exference"
             , HsInstance [] $ HsConstraint (name "C")
                 [TypeCons $ name "Bool"]
             ]
+      , testCase "prepared inventories reject an unrelated valid binding view" $ do
+          let variable = neutralVariable 0
+              identityType = SharedType.FunctionType
+                (SharedType.TypeVariable variable)
+                (SharedType.TypeVariable variable)
+              declaration spelling = neutralValue
+                (neutralName spelling) identityType
+          leftInventory <- expectRight $ SharedInventory.mkInventory
+            SharedKindInference.OpenKindInventory [declaration "left"]
+          rightInventory <- expectRight $ SharedInventory.mkInventory
+            SharedKindInference.OpenKindInventory [declaration "right"]
+          leftPrepared <- expectRight
+            $ prepareNeutralSynthesisInventory leftInventory
+          rightPrepared <- expectRight
+            $ prepareNeutralSynthesisInventory rightInventory
+          let unrelatedView =
+                [ (functionName binding, functionPenalty binding)
+                | binding <- environmentFunctions
+                    $ preparedNeutralBackend rightPrepared
+                ]
+          case projectNeutralSynthesisInventory
+              unrelatedView [] leftPrepared of
+            Left failure -> failure @?= PreparedBindingNamesMismatch
+              [name "right"] [name "left"]
+            Right _ -> fail
+              "an unrelated backend view was attached to a checked inventory"
+      , testCase "prepared projections preserve exact order, ratings, and shapes" $ do
+          let dataDeclaration
+                :: String
+                -> String
+                -> SharedDeclaration.Declaration SynthesisVariable Void ()
+              dataDeclaration typeSpelling constructorSpelling =
+                SharedDeclaration.DataTypeDeclaration ()
+                  (neutralName typeSpelling) []
+                  [ SharedDeclaration.DataConstructor ()
+                      (neutralName constructorSpelling) []
+                  ]
+          inventory <- expectRight $ SharedInventory.mkInventory
+            SharedKindInference.OpenKindInventory
+            [ dataDeclaration "First" "MakeFirst"
+            , dataDeclaration "Second" "MakeSecond"
+            ]
+          prepared <- expectRight
+            $ prepareNeutralSynthesisInventory inventory
+          projected <- expectRight $ projectNeutralSynthesisInventory
+            [ (name "MakeSecond", Penalty (-2.5))
+            , (name "MakeFirst", Penalty 7.25)
+            ]
+            [name "Second", name "First"]
+            prepared
+          let backend = preparedNeutralBackend projected
+          map (\binding ->
+              ( functionName binding
+              , functionPenalty binding
+              , functionResult binding
+              )) (environmentFunctions backend) @?=
+            [ (name "MakeSecond", Penalty (-2.5), TypeCons $ name "Second")
+            , (name "MakeFirst", Penalty 7.25, TypeCons $ name "First")
+            ]
+          map (typeConstructorHead . deconstructorInput)
+              (environmentDeconstructors backend) @?=
+            map (Just . name) ["Second", "First"]
+      , testCase "prepared projections reject non-finite source ratings" $ do
+          let valueName = neutralName "value"
+              notANumber = Penalty $ 0 / 0
+          inventory <- expectRight $ SharedInventory.mkInventory
+            SharedKindInference.OpenKindInventory
+            [ neutralValue valueName
+                $ SharedType.TypeConstructor $ neutralName "Int"
+            ]
+          prepared <- expectRight
+            $ prepareNeutralSynthesisInventory inventory
+          case projectNeutralSynthesisInventory
+              [(name "value", notANumber)] [] prepared of
+            Left failure -> failure @?=
+              InvalidPreparedBindingPenalty (name "value") notANumber
+            Right _ -> fail "a non-finite source rating was prepared"
       , testCase "alias-expanded direct and mutual recursion is classified" $ do
           let aliasVariable = neutralVariable 70
               phantomVariable = neutralVariable 71
@@ -4948,9 +5025,9 @@ lowerNeutralDeclarations
 lowerNeutralDeclarations declarations = do
   inventory <- expectRight $ SharedInventory.mkInventory
     SharedKindInference.OpenKindInventory declarations
-  (_, environment) <- expectRight
+  prepared <- expectRight
     $ prepareNeutralSynthesisInventory inventory
-  pure environment
+  pure $ preparedNeutralBackend prepared
 
 name :: String -> QualifiedName
 name = validQualifiedName []

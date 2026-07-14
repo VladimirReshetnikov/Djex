@@ -11,6 +11,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , CheckedSourceEnvironment
   , checkedSourceProjection
   , checkedSourceInventory
+  , checkedSourcePreparedInventory
   , checkSourceEnvironment
   , LoadReport (..)
   , UnsupportedVocabularyForm (..)
@@ -125,11 +126,14 @@ sourceFunctions :: SourceEnvironment -> [FunctionBinding]
 sourceFunctions = map sourceBindingFunction . sourceBindings
 
 -- | A backend projection paired with the exact shared inventory that validated
--- it.  The constructor is private so CLI and library loaders cannot expose a
--- searchable source environment before structural and kind sealing succeeds.
+-- it and the opaque neutral lowering prepared from that inventory.  The
+-- constructor is private so CLI and library loaders cannot expose a searchable
+-- source environment before structural and kind sealing succeeds, or later
+-- recombine its inventory with an unrelated backend dictionary.
 data CheckedSourceEnvironment = CheckedSourceEnvironment
   { checkedSourceProjection :: SourceEnvironment
   , checkedSourceInventory :: SynthesisInventory
+  , checkedSourcePreparedInventory :: PreparedNeutralSynthesisInventory
   }
 
 -- | The result of an environment-loading operation together with its
@@ -295,11 +299,13 @@ checkSourceEnvironment
 checkSourceEnvironment environment = do
   sourceInventory <- first InvalidSourceInventory
     $ toSynthesisSourceInventory environment
-  projection <- first InvalidSourceInventory
-    $ normalizeBackendProjection sourceInventory environment
+  prepared <- first InvalidSourceInventory
+    $ prepareNeutralSynthesisInventory $ fmap (const ()) sourceInventory
+  (projection, projected) <- first InvalidSourceInventory
+    $ normalizeBackendProjection prepared environment
   inventory <- first InvalidSourceInventory
     $ normalizeInventoryDataMetadata sourceInventory projection
-  pure $ CheckedSourceEnvironment projection inventory
+  pure $ CheckedSourceEnvironment projection inventory projected
 
 -- | Make derived datatype metadata in the public checked Inventory agree with
 -- the post-expansion backend projection.  Rebuilding is intentional: Inventory
@@ -337,69 +343,55 @@ normalizeInventoryDataMetadata inventory projection = do
 -- and global recursive-datatype classification; the HSE projection contributes
 -- only presentation order, method ownership tags, and heuristic penalties.
 normalizeBackendProjection
-  :: SynthesisInventory
+  :: PreparedNeutralSynthesisInventory
   -> SourceEnvironment
   -> Either SynthesisDeclarationError
-      SourceEnvironment
-normalizeBackendProjection inventory environment = do
-  (_, backend) <- prepareNeutralSynthesisInventory
-    $ fmap (const ()) inventory
+      (SourceEnvironment, PreparedNeutralSynthesisInventory)
+normalizeBackendProjection prepared environment = do
   let sourceBindingNames = sort
         $ map (functionName . sourceBindingFunction)
         $ sourceBindings environment
       preparedBindingNames = sort
-        $ map functionName $ environmentFunctions backend
-      preparedBindings = M.fromList
-        [ (functionName binding, binding)
-        | binding <- environmentFunctions backend
-        ]
-      sourceDataNamesResult = mapM deconstructorTypeName
-        $ sourceDeconstructors environment
-      preparedDataNamesResult = mapM deconstructorTypeName
-        $ environmentDeconstructors backend
+        $ map functionName
+        $ environmentFunctions
+        $ preparedNeutralBackend prepared
+  -- Retain the historical error precedence for malformed compatibility
+  -- records: a binding-inventory mismatch is reported before attempting to
+  -- inspect datatype heads. The core projection repeats this cheap check so
+  -- its opaque witness remains safe for every caller, not only this frontend.
   if sourceBindingNames == preparedBindingNames
     then pure ()
     else Left $ PreparedBindingNamesMismatch
       sourceBindingNames preparedBindingNames
-  sourceDataNames <- sourceDataNamesResult
-  preparedDataNames <- preparedDataNamesResult
-  if sort sourceDataNames == sort preparedDataNames
-    then pure ()
-    else Left $ PreparedDataTypeNamesMismatch
-      (sort sourceDataNames) (sort preparedDataNames)
-  let preparedDeconstructors = M.fromList
-        $ zip preparedDataNames $ environmentDeconstructors backend
-      replaceBinding tagged = do
-        let source = sourceBindingFunction tagged
-        prepared <- maybe
-          (Left $ PreparedBindingNamesMismatch
-            sourceBindingNames preparedBindingNames)
-          Right
-          $ M.lookup (functionName source) preparedBindings
-        let rated = prepared {functionPenalty = functionPenalty source}
-        pure $ case tagged of
-          SourceFunction _ -> SourceFunction rated
-          SourceClassMethod owner _ -> SourceClassMethod owner rated
-      replaceDeconstructor source = do
-        name <- deconstructorTypeName source
-        maybe
-          (Left $ PreparedDataTypeNamesMismatch
-            (sort sourceDataNames) (sort preparedDataNames))
-          Right
-          $ M.lookup name preparedDeconstructors
-  normalizedBindings <- mapM replaceBinding $ sourceBindings environment
-  normalizedDeconstructors <- mapM replaceDeconstructor
+  sourceDataNames <- mapM deconstructorTypeName
     $ sourceDeconstructors environment
+  projected <- projectNeutralSynthesisInventory
+    [ (functionName binding, functionPenalty binding)
+    | tagged <- sourceBindings environment
+    , let binding = sourceBindingFunction tagged
+    ]
+    sourceDataNames
+    prepared
+  let backend = preparedNeutralBackend projected
+      normalizedBindings = zipWith retainTag
+        (sourceBindings environment) (environmentFunctions backend)
+      normalizedDeconstructors = environmentDeconstructors backend
+      retainTag tagged binding = case tagged of
+        SourceFunction _ -> SourceFunction binding
+        SourceClassMethod owner _ -> SourceClassMethod owner binding
   let ordinaryDataNames = filter ordinaryTypeName sourceDataNames
       canonicalTypeNames = ordinaryDataNames
         ++ map tdecl_name (sourceTypeSynonyms environment)
         ++ M.keys (sClassEnv_tclasses $ environmentClasses backend)
-  pure environment
-    { sourceBindings = normalizedBindings
-    , sourceDeconstructors = normalizedDeconstructors
-    , sourceClasses = environmentClasses backend
-    , sourceTypeNames = canonicalTypeNames
-    }
+  pure
+    ( environment
+        { sourceBindings = normalizedBindings
+        , sourceDeconstructors = normalizedDeconstructors
+        , sourceClasses = environmentClasses backend
+        , sourceTypeNames = canonicalTypeNames
+        }
+    , projected
+    )
  where
   ordinaryTypeName name = case SharedName.nameSpecial $ toSynthesisName name of
     Nothing -> True

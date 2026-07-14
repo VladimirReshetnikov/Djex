@@ -98,15 +98,12 @@ data ExferenceOmission = ExferenceOmission
   deriving (Eq, Ord, Show)
 
 -- | All reusable session state is independent of the parser that supplied the
--- declarations.  The legacy name and class indexes contain Exference core
--- values, not HSE syntax; they are retained only to elaborate Haskell type
--- text without reconstructing them for every request.
+-- declarations.  The prepared inventory is the authority for declarations,
+-- synonyms, and the unfiltered backend projection; retaining its individual
+-- views here as well would allow those immutable values to drift apart.
 data ExferenceSession = ExferenceSession
   { searchView :: Core.ExferenceEnvironment
-  , inventoryView :: Inventory SynthesisVariable ()
-  , synonymView :: TypeSynonyms SynthesisVariable
-  , typeNameView :: [QualifiedName]
-  , classView :: Map QualifiedName HsTypeClass
+  , preparedView :: PreparedNeutralSynthesisInventory
   , omissionView :: [ExferenceOmission]
   }
 
@@ -144,9 +141,7 @@ sealPreparedEnvironment
   -> PreparedNeutralSynthesisInventory
   -> Either Diagnostic ExferenceSession
 sealPreparedEnvironment exclusions overrides prepared = do
-  let inventory = preparedNeutralInventory prepared
-      synonyms = preparedNeutralTypeSynonyms prepared
-      backend = preparedNeutralBackend prepared
+  let backend = preparedNeutralBackend prepared
   ratedFunctions <- applyRatingOverrides overrides
     $ environmentFunctions backend
   let excludedBindings = Set.fromList exclusions
@@ -179,15 +174,9 @@ sealPreparedEnvironment exclusions overrides prepared = do
     (shownErrorDiagnostic "DJEX_EXF_ENV"
       "cannot seal the Exference session environment")
     $ mkExferenceEnvironment supportedBackend
-  let typeNames = Map.keys
-        $ SharedEnvironment.typeDeclarationMap
-        $ inventoryEnvironment inventory
   pure ExferenceSession
     { searchView = searchEnvironment
-    , inventoryView = inventory
-    , synonymView = synonyms
-    , typeNameView = typeNames
-    , classView = sClassEnv_tclasses $ environmentClasses backend
+    , preparedView = prepared
     , omissionView = omissions
     }
 
@@ -226,18 +215,25 @@ sessionSearchEnvironment = searchView
 sessionTypeSynonyms
   :: ExferenceSession
   -> TypeSynonyms SynthesisVariable
-sessionTypeSynonyms = synonymView
+sessionTypeSynonyms = preparedNeutralTypeSynonyms . preparedView
 
 sessionTypeNames :: ExferenceSession -> [QualifiedName]
-sessionTypeNames = typeNameView
+sessionTypeNames = Map.keys
+  . SharedEnvironment.typeDeclarationMap
+  . inventoryEnvironment
+  . preparedNeutralInventory
+  . preparedView
 
 sessionClasses :: ExferenceSession -> Map QualifiedName HsTypeClass
-sessionClasses = classView
+sessionClasses = sClassEnv_tclasses
+  . environmentClasses
+  . preparedNeutralBackend
+  . preparedView
 
 exferenceSessionInventory
   :: ExferenceSession
   -> Inventory SynthesisVariable ()
-exferenceSessionInventory = inventoryView
+exferenceSessionInventory = preparedNeutralInventory . preparedView
 
 sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView

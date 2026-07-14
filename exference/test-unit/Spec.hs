@@ -952,6 +952,7 @@ tests = testGroup "Exference"
               substituted = snd $ applySubsts
                 (IntMap.singleton 0 $ TypeArrow integer boolean)
                 (TypeVar 0)
+          splitArrowChain substituted @?= (boolean, [integer])
           splitArrowResultParams substituted @?=
             (boolean, [integer], [], [])
       , testCase "free variables include a forall context" $ do

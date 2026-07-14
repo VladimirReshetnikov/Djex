@@ -17,6 +17,7 @@ module Language.Haskell.Exference.Core.TypeUtils
   , inflateInstances
   , ForallNormalizationError (..)
   , alphaNormalizeForalls
+  , splitArrowChain
   , splitArrowResultParams
   , containsForall
   , containsNestedForall
@@ -250,7 +251,7 @@ splitArrowResultParams source = case alphaNormalizeForalls IntSet.empty source o
   Left _ -> (source, [], [], [])
   Right (normalized, _) ->
     let (body, variables, constraints) = splitForalls normalized
-        (result, parameters) = splitArrows body
+        (result, parameters) = splitArrowChain body
     in (result, parameters, variables, constraints)
  where
   splitForalls (TypeForall variables constraints body) =
@@ -261,10 +262,16 @@ splitArrowResultParams source = case alphaNormalizeForalls IntSet.empty source o
        )
   splitForalls body = (body, [], [])
 
-  splitArrows (TypeArrow parameter result) =
-    let (finalResult, parameters) = splitArrows result
-    in (finalResult, parameter : parameters)
-  splitArrows result = (result, [])
+
+-- | Split the consecutive outer arrow chain without inspecting or rewriting
+-- its component types. In particular, a forall below an arrow remains the
+-- result rather than being opened. This is the total monotype decomposition
+-- used when substitutions expose more function parameters during search.
+splitArrowChain :: HsType -> (HsType, [HsType])
+splitArrowChain (TypeArrow parameter result) =
+  let (finalResult, parameters) = splitArrowChain result
+  in (finalResult, parameter : parameters)
+splitArrowChain result = (result, [])
 
 -- | Whether a type contains explicit quantification at any depth.
 containsForall :: HsType -> Bool

@@ -657,9 +657,11 @@ hECase e [] = HECase e []
 hECase _ [(HPCon "()", e)] = e
 hECase e pes | all (uncurry eqPatExpr) pes = e
 hECase e [(p, HELam ps b)] = HELam ps $ hECase e [(p, b)]
-hECase se alts@((_, HELam _ _):_) | m > 0 =
+hECase se alts@((_, firstExpression@(HELam _ _)):rest) | m > 0 =
     HELam (map HPVar canonicalNames) $ hECase se alts'
-  where m = minimum (map (numBind . snd) alts)
+  where -- The pattern supplies a nonempty seed, so this fold is total while
+        -- retaining the minimum common lambda prefix across all alternatives.
+        m = foldr (min . numBind . snd) (numBind firstExpression) rest
         numBind (HELam ps _) = length (takeWhile isPVar ps)
         numBind _ = 0
         isPVar (HPVar _) = True

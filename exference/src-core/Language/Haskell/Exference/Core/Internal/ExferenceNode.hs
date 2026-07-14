@@ -170,7 +170,10 @@ splitBindingWithParameters previousParameters (VarBinding variable ty)
   | any containsForall $ ty : previousParameters = error
       $ "Exference internal scoped binding contains a forall: "
       ++ show (previousParameters, ty)
-  | otherwise = case splitArrowResultParams ty of
-      (result, parameters, [], []) -> VarPBinding variable result
-        $ previousParameters ++ parameters
-      _ -> error "Exference internal monotype splitter returned quantifiers"
+  | otherwise = VarPBinding variable result
+      $ previousParameters ++ parameters
+ where
+  -- The guard establishes the monotype invariant once. Splitting the arrow
+  -- chain directly avoids both needless alpha-normalization and an impossible
+  -- second failure branch for quantifiers or constraints.
+  (result, parameters) = splitArrowChain ty

@@ -16,7 +16,7 @@ import qualified Data.IntSet as IntSet
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( allocateFreshIdentifier
-  , supplyFromIdentifiers
+  , supplyFromIdentifierSet
   )
 import Language.Haskell.Exference.Core.Types (TVarId)
 import Language.Haskell.Djex.Exference.Internal.Request
@@ -35,4 +35,4 @@ import Language.Haskell.Djex.Exference.Internal.Session
 allocateFreshTypeVariableId :: IntSet.IntSet -> Maybe TVarId
 allocateFreshTypeVariableId reserved = fst
   <$> allocateFreshIdentifier
-    (supplyFromIdentifiers $ IntSet.toAscList reserved)
+    (supplyFromIdentifierSet reserved)

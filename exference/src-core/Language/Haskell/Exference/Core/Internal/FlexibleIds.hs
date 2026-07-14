@@ -11,6 +11,7 @@ module Language.Haskell.Exference.Core.Internal.FlexibleIds
   , FlexibleIdSupply
   , FlexibleRenaming
   , supplyFromIdentifiers
+  , supplyFromIdentifierSet
   , reserveIdentifiers
   , allocateFreshIdentifier
   , allocateFreshNonNegativeIdentifier
@@ -44,6 +45,15 @@ type FlexibleRenaming = IntMap.IntMap TVarId
 
 supplyFromIdentifiers :: Foldable collection => collection TVarId -> IdentifierSupply
 supplyFromIdentifiers = IdentifierSupply . foldr IntSet.insert IntSet.empty
+
+-- | Wrap an already canonical identifier set without rebuilding it.
+--
+-- This remains an internal operation: public boundaries expose allocation,
+-- not the supply representation. Source conversion calls it for every new
+-- spelling, so preserving the existing 'IntSet.IntSet' makes each ordinary
+-- allocation logarithmic instead of repeatedly traversing the whole scope.
+supplyFromIdentifierSet :: IntSet.IntSet -> IdentifierSupply
+supplyFromIdentifierSet = IdentifierSupply
 
 reserveIdentifiers
   :: Foldable collection

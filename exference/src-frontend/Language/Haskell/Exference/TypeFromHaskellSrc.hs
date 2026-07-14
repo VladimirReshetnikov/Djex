@@ -152,6 +152,13 @@ haskellSrcExtsParseMode sourceName = P.ParseMode parseSourceName
             , MultiParamTypeClasses ]
     exts2 = map EnableExtension exts1
 
+-- | Convert one source type in an isolated type-variable namespace.
+--
+-- The returned 'T.TypeVarIndex' contains rendering hints for source spellings,
+-- not the complete namespace. Alpha-renamed binders can reserve identifiers
+-- without acquiring an unambiguous spelling, so the index must not be used to
+-- resume this conversion. Use 'runConversionTWithState' and retain 'ConvData'
+-- when later conversions must share the exact namespace.
 convertTypeNoDecl
   :: Monad m
   => M.Map T.QualifiedName T.HsTypeClass

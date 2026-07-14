@@ -21,7 +21,10 @@ generated-output infrastructure is progressively consolidated.
   names, types, kinds, declarations, environments, diagnostics, generated
   output, and operational search status.
 - `djinn/` supplies the public `djinn-core` proof-search sublibrary and the
-  `djinn-frontend` compatibility/REPL sublibrary.
+  `djinn-frontend` compatibility/REPL sublibrary. The frontend re-exports both
+  `Djinn.Core` and the checked `Language.Haskell.Djex.Djinn` adapter, so a
+  compatibility dependency is a strict superset of the core entry points it
+  uses.
 - `exference/` supplies the public parser-independent `exference-core`
   sublibrary, including the checked Djex/Exference session adapter, and the
   `exference-frontend` Haskell-source/environment-loader sublibrary.
@@ -54,6 +57,12 @@ transitively. Build-tool dependencies for the historical commands remain
 The default library and `djex:exference-core` have no transitive
 `haskell-src-exts`, `directory`, or `filepath` dependency. Source clients add
 `djex:exference-frontend` explicitly.
+
+Both compatibility components re-export their stable checked adapter:
+`djinn-frontend` provides `Language.Haskell.Djex.Djinn`, and
+`exference-frontend` provides `Language.Haskell.Djex.Exference` alongside its
+source-loading extension. Clients therefore do not need a redundant direct
+dependency on the corresponding core component merely to name the adapter.
 
 The filesystem and Cabal-project migration is equally deliberate:
 

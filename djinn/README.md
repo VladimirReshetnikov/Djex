@@ -479,7 +479,8 @@ constructor-forged compatibility environment cannot bypass it while phantom
 aliases retain their alias-free meaning.
 Successful canonical reports expose `generatedReportCandidates`; every Djinn
 candidate has empty residual constraints and retains the unused-binder fraction
-and binder count used by the historical ranking policy. Compatibility
+and exact arbitrary-precision binder count used by the historical ranking
+policy. Compatibility
 `QueryReport`s still expose `reportGeneratedClauses`, derived from those
 candidates alongside the legacy rendered strings.
 The default `djex` library additionally exposes

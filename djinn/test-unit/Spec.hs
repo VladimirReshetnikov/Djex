@@ -2,6 +2,7 @@ module Main (main) where
 
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
+import Numeric.Natural (Natural)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 import Text.ParserCombinators.ReadP (ReadP, eof, readP_to_S, skipSpaces)
@@ -1758,6 +1759,11 @@ testWholeConstructorPayload = do
         [expected, expected] rendered
     assertBool "no alpha-renamed implementation binder may escape" $
         all (not . isInfixOf "__djinn") rendered
+
+    let beyondMachineCount = fromIntegral (maxBound :: Int) + 1 :: Natural
+    assertBool "candidate ordering retains binder counts beyond Int" $
+        DjinnCandidateDetails 0 beyondMachineCount <
+            DjinnCandidateDetails 0 (beyondMachineCount + 1)
 
     goal <- either fail return $ parseHType "T a b -> (a, b)"
     environment <- either fail return $

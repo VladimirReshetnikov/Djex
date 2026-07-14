@@ -1,3 +1,5 @@
+{-# LANGUAGE BangPatterns #-}
+
 -- |
 -- The stable, validated interface to the Djinn core.
 --
@@ -46,8 +48,10 @@ module Djinn.Core (
 import Control.Monad (foldM, unless)
 import Data.Bifunctor (first)
 import Data.List (intercalate, mapAccumL, nub, sortOn)
+import qualified Data.List as List
 import Data.Ratio ((%))
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 import Text.ParserCombinators.ReadP
     (ReadP, option, readP_to_S, skipSpaces)
 
@@ -565,10 +569,11 @@ defaultQueryOptions = QueryOptions {
 -- The historical compatibility API orders alternatives by the fraction of
 -- unused binders and then by total binder count.  Keeping both inputs here
 -- makes that backend-specific judgement inspectable without coupling the
--- shared candidate boundary to Djinn's policy.
+-- shared candidate boundary to Djinn's policy.  The count is arbitrary-
+-- precision because it is both observable metadata and the secondary rank.
 data DjinnCandidateDetails = DjinnCandidateDetails {
     djinnUnusedBinderFraction :: Rational,
-    djinnBinderCount :: Int
+    djinnBinderCount :: Natural
     }
     deriving (Eq, Ord, Show)
 
@@ -783,13 +788,19 @@ inhabitGeneratedPreparedChecked options prepared contexts name goal = do
 
 candidateDetails :: HClause -> DjinnCandidateDetails
 candidateDetails clause
-    | null binders = DjinnCandidateDetails 0 0
+    | total == 0 = DjinnCandidateDetails 0 0
     | otherwise = DjinnCandidateDetails
-        (fromIntegral (length (filter (== "_") binders)) %
-            fromIntegral (length binders))
-        (length binders)
+        (toInteger unused % toInteger total)
+        total
   where
-    binders = getBinderVars clause
+    (unused, total) = List.foldl' countBinder (0, 0) $ getBinderVars clause
+
+    countBinder :: (Natural, Natural) -> HSymbol -> (Natural, Natural)
+    countBinder (!unusedCount, !totalCount) binder =
+        let !nextUnused =
+                if binder == "_" then unusedCount + 1 else unusedCount
+            !nextTotal = totalCount + 1
+        in (nextUnused, nextTotal)
 
 makeCandidate
     :: HClause

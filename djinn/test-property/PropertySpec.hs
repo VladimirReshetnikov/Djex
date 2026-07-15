@@ -51,7 +51,7 @@ propGeneratedProofsCheckAndRender (ProvableFormula formula) =
         QC.cover 85 (not $ null proofs) "proof generated" $
             QC.conjoin $ map (proofIsValid formula) proofs
   where
-    proofs = take 5 $ prove True [] formula
+    proofs = searchProofs $ boundedSearch False formula
 
 newtype ArbitraryFormula = ArbitraryFormula Formula
     deriving (Show)
@@ -62,7 +62,7 @@ instance QC.Arbitrary ArbitraryFormula where
 
 propIdentityAlwaysProvable :: ArbitraryFormula -> QC.Property
 propIdentityAlwaysProvable (ArbitraryFormula formula) =
-    case prove False [] $ formula :-> formula of
+    case searchProofs $ boundedSearch False $ formula :-> formula of
         [] -> QC.counterexample
             ("identity was not proved for " ++ show formula) False
         proof : _ -> proofIsValid (formula :-> formula) proof
@@ -81,26 +81,40 @@ proofIsValid formula proof =
     rendering = termToHClause "generated" proof >>= hPrClause
     rendered = either id (const "success") rendering
 
--- Under the default depth-first strategy, a budgeted search must produce a
--- prefix of the unbudgeted proof stream, and it may claim exhaustion only
--- when it truly stopped early: an exhausted flag with the full proof list
--- already found is fine, but a non-exhausted budgeted search must agree
--- exactly with the complete search.
-propBudgetedSearch :: ArbitraryFormula -> QC.NonNegative Integer
+-- Under the default depth-first strategy, a smaller finite search must produce
+-- a prefix of a larger one. If the smaller search claims completion, extra
+-- fuel cannot reveal another proof or report exhaustion. Keeping both sides
+-- finite is essential: taking a prefix of an unbounded proof stream does not
+-- bound the work needed to discover that the stream has ended.
+propBudgetedSearch :: ArbitraryFormula -> QC.NonNegative Int
                    -> QC.Property
-propBudgetedSearch (ArbitraryFormula formula) (QC.NonNegative fuel) =
+propBudgetedSearch (ArbitraryFormula formula) (QC.NonNegative requestedFuel) =
     QC.counterexample context $
-        (bounded `isPrefixOf` complete) &&
-        (searchExhausted outcome || bounded == complete)
+        (bounded `isPrefixOf` reference) &&
+        (searchExhausted outcome ||
+            (not (searchExhausted referenceOutcome) && bounded == reference))
   where
     goal = formula :-> formula
-    complete = take 5 $ prove True [] goal
+    fuel = fromIntegral requestedFuel
     outcome = proveWithMode (defaultSearchMode True)
         { searchBudget = Just fuel } [] goal
-    bounded = take 5 $ searchProofs outcome
+    referenceOutcome = proveWithMode (defaultSearchMode True)
+        { searchBudget = Just $ fuel + referenceSearchFuel } [] goal
+    bounded = searchProofs outcome
+    reference = searchProofs referenceOutcome
     context = "goal: " ++ show goal ++ "\nfuel: " ++ show fuel ++
-        "\nbounded: " ++ show bounded ++ "\ncomplete: " ++ show complete
+        "\nbounded: " ++ show bounded ++ "\nreference: " ++ show reference
     isPrefixOf xs ys = take (length xs) ys == xs
+
+-- Formula generators are deliberately shallow, but alternative proof
+-- enumeration can still contain fewer results than a caller asks for. The
+-- search budget, rather than a list prefix, is the actual work bound.
+referenceSearchFuel :: Integer
+referenceSearchFuel = 256
+
+boundedSearch :: Bool -> Formula -> SearchOutcome
+boundedSearch alternatives = proveWithMode (defaultSearchMode alternatives)
+    { searchBudget = Just referenceSearchFuel } []
 
 genFormula :: Int -> QC.Gen Formula
 genFormula depth

@@ -242,7 +242,10 @@ keeps both reconstruction routes closed.
 lazy derived cache. Parsed requests materialize their complete neutral
 `SourceLocation` while sealing, avoiding retention of the input buffer;
 programmatic requests carry an explicit source-free provenance. Equality and
-display continue to observe only the neutral request.
+display continue to observe only the neutral request. Both adapters enter
+`sealCachedQueryWithProvenance`, so validation failures receive the same
+source attribution and strictness contract without duplicating that subtle
+protocol in their private request constructors; backend caches remain lazy.
 `mkDjinnSession` lowers and seals the neutral shared
 `DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
 class-kind defaulting. An opaque shared `PreparedInventory` keeps that

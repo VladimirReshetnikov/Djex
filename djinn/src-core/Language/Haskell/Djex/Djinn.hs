@@ -97,7 +97,7 @@ import Language.Haskell.Synthesis.Query
   , cachedQueryCache
   , cachedQueryProvenance
   , cachedQueryRequest
-  , mkCachedQueryWithProvenance
+  , sealCachedQueryWithProvenance
   , withRequestProvenance
   )
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -125,8 +125,8 @@ type DjinnLocal = String
 
 -- | Source types accepted and returned by the stable Djinn adapter.
 -- Checked requests retain this shared representation through kind checking
--- and synonym elaboration; only the proof-formula boundary uses Djinn's
--- historical raw type.
+-- synonym elaboration, class-method instantiation, and formula compilation.
+-- Djinn's historical raw type remains only at compatibility API boundaries.
 type DjinnType = Type DjinnTypeVariable
 
 -- | One prepared shared inventory and the exact backend indexes projected
@@ -255,18 +255,17 @@ mkDjinnRequestWithProvenance
   :: RequestProvenance
   -> QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
-mkDjinnRequestWithProvenance provenance query =
-  -- Force a sourced span at the sealing boundary.  Merely storing it in the
-  -- strict field of a newtype-wrapped 'CachedQuery' is insufficient: a caller
-  -- can inspect the outer 'Right' without forcing that payload.
-  provenance `seq` first (withRequestProvenance provenance) (do
+mkDjinnRequestWithProvenance provenance query = DjinnRequest <$>
+  sealCachedQueryWithProvenance provenance (do
     goal <- normalizeRequestType "goal" $ requestGoal query
     contexts <- traverse normalizeRequestContext $ requestContexts query
-    pure $ DjinnRequest $
-      mkCachedQueryWithProvenance provenance query DjinnRequestPlan
+    pure
+      ( query
+      , DjinnRequestPlan
         { plannedGoal = goal
         , plannedContexts = contexts
-        })
+        }
+      ))
 
 -- | Recover the exact neutral query from which this checked request was
 -- sealed.  Modifications must be passed back through 'mkDjinnRequest'.

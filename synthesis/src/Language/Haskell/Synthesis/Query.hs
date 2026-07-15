@@ -18,6 +18,7 @@ module Language.Haskell.Synthesis.Query
   , CachedQuery
   , mkCachedQuery
   , mkCachedQueryWithProvenance
+  , sealCachedQueryWithProvenance
   , cachedQueryRequest
   , cachedQueryProvenance
   , cachedQueryCache
@@ -32,6 +33,7 @@ module Language.Haskell.Synthesis.Query
   ) where
 
 import Control.DeepSeq (NFData (rnf))
+import Data.Bifunctor (first)
 import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint (Constraint)
@@ -121,6 +123,24 @@ mkCachedQueryWithProvenance
   -> CachedQuery ty options cache
 mkCachedQueryWithProvenance provenance request =
   CachedQuery request provenance
+
+-- | Validate and seal an adapter-owned request projection under one shared
+-- provenance protocol.
+--
+-- The checked action returns the exact neutral request to publish together
+-- with the private cache derived from it. Every failure receives source
+-- provenance, while successful programmatic requests remain source-less.
+-- The provenance is forced before inspecting the action so a sourced span is
+-- materialized at the sealing boundary instead of retaining the caller's
+-- source buffer behind a lazy 'CachedQuery'.
+sealCachedQueryWithProvenance
+  :: RequestProvenance
+  -> Either Diagnostic (QueryRequest ty options, cache)
+  -> Either Diagnostic (CachedQuery ty options cache)
+sealCachedQueryWithProvenance provenance checked =
+  provenance `seq` first (withRequestProvenance provenance) (do
+    (request, cache) <- checked
+    pure $ mkCachedQueryWithProvenance provenance request cache)
 
 -- | Recover the stable neutral request.
 cachedQueryRequest

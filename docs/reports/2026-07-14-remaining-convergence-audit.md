@@ -440,6 +440,23 @@ compiler identifier. Other dependency bounds remain ranges so
 `--prefer-oldest` continues to validate the actual declared compatibility
 surface on GHC 9.12.4.
 
+## Post-fold request-sealing authority follow-up
+
+**Completed on 2026-07-15:** after provenance storage moved into the shared
+`CachedQuery`, the Djinn and Exference constructors still independently
+implemented the same non-obvious sealing protocol: force a source location
+before inspecting validation, attach it to every input failure, publish the
+adapter's chosen neutral request, and leave its private cache lazy. The two
+copies were behaviorally tested but could still drift.
+
+`sealCachedQueryWithProvenance` now owns that protocol in the synthesis query
+layer. Djinn supplies its exact caller-visible request plus canonical shared
+plan; Exference supplies its canonical request plus checked source-name hints.
+Foundation regressions independently pin successful projections, sourced and
+programmatic failure attribution, eager source-span materialization, and lazy
+backend caches, while the existing adapter integration tests continue to pin
+their diagnostic phase policies.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

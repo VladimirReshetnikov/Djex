@@ -56,10 +56,9 @@ import Language.Haskell.Synthesis.Query
   , RequestProvenance (..)
   , cachedQueryCache
   , cachedQueryRequest
-  , mkCachedQueryWithProvenance
+  , sealCachedQueryWithProvenance
   , requestContextualType
   , withCachedQueryProvenance
-  , withRequestProvenance
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type (Type)
@@ -136,17 +135,13 @@ mkExferenceRequestWithProvenance
   -> QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequestWithProvenance sourceVariables provenance query =
-  -- Force a sourced span at the sealing boundary.  The request is a newtype
-  -- inside 'Either', so the strict field of 'CachedQuery' alone would not
-  -- prevent a caller matching only on 'Right' from retaining the input text.
-  provenance `seq` first (withRequestProvenance provenance) (do
+  ExferenceRequest <$> sealCachedQueryWithProvenance provenance (do
     canonicalQuery <- normalizeRequest query
     validateRequest canonicalQuery
     let contextualGoal = requestContextualType canonicalQuery
     sourceHints <- first sourceHintFailure
       $ mkExferenceSourceTypeVariableHints contextualGoal sourceVariables
-    pure $ ExferenceRequest $
-      mkCachedQueryWithProvenance provenance canonicalQuery sourceHints)
+    pure (canonicalQuery, sourceHints))
 
 -- Store exactly the canonical native representation that the checked
 -- Exference core consumes.  Normalizing each context argument separately

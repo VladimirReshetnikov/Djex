@@ -169,6 +169,47 @@ queryTests = testGroup "queries"
         Left _ -> pure ()
         Right _ -> assertFailure
           "sourced CachedQuery retained a lazy source-span traversal"
+  , testCase "seal checked caches under one strict provenance protocol" $ do
+      let query = request (variable "a") []
+          location = sourceTextLocation "Request.djex" "a"
+          sourced = sealCachedQueryWithProvenance
+            (SourceRequest location)
+            (Right (query, "checked cache"))
+      cached <- either (assertFailure . show) pure sourced
+      cachedQueryRequest cached @?= query
+      cachedQueryCache cached @?= "checked cache"
+      cachedQueryProvenance cached @?= SourceRequest location
+      let lazyCache = sealCachedQueryWithProvenance ProgrammaticRequest
+            (Right (query, error "request sealing forced its cache" :: ()))
+      lazyCached <- either (assertFailure . show) pure lazyCache
+      cachedQueryRequest lazyCached @?= query
+      let failure = sealCachedQueryWithProvenance
+            (SourceRequest location)
+            (Left $ diagnostic Error "invalid request")
+      case failure of
+        Left checkedFailure -> do
+          diagnosticSource checkedFailure @?= Just "Request.djex"
+          diagnosticSpan checkedFailure @?= Just (sourceTextSpan "a")
+        Right _ -> assertFailure "request sealing accepted a failed check"
+      let programmaticFailure = sealCachedQueryWithProvenance
+            ProgrammaticRequest
+            (Left $ diagnostic Error "invalid programmatic request")
+      case programmaticFailure of
+        Left checkedFailure -> do
+          diagnosticSource checkedFailure @?= Nothing
+          diagnosticSpan checkedFailure @?= Nothing
+        Right _ -> assertFailure
+          "programmatic request sealing accepted a failed check"
+      let partialSource = 'a' : error "unforced sealed request source tail"
+          partial = sealCachedQueryWithProvenance
+            (SourceRequest $ sourceTextLocation "Request" partialSource)
+            (Right (query, ()))
+      strictResult <- try $ evaluate partial
+      case strictResult :: Either SomeException
+          (Either Diagnostic (CachedQuery (SharedType.Type String) () ())) of
+        Left _ -> pure ()
+        Right _ -> assertFailure
+          "request sealing retained a lazy source-span traversal"
   , testCase "leave a context-free shared goal unchanged" $ do
       let goal = variable "a"
       requestContextualType (request goal []) @?= goal

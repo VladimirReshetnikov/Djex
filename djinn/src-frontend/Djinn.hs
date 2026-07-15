@@ -343,6 +343,9 @@ makeDjinnResult s name contexts goal = do
 -- REPL parsers still produce the historical raw types. Their grammar lies in
 -- the lossless shared subset, but keep the bridge checked so future grammar
 -- extensions cannot smuggle a declaration-only node into the stable session.
+-- Once projected, the query stays shared through kind checking, synonym
+-- elaboration, and class-method instantiation; only the alias-free formula
+-- compiler input is reconstructed as 'HType'.
 projectCompatibilityType
     :: String -> HType -> Either Diagnostic.Diagnostic DjinnType
 projectCompatibilityType role source = case toSynthesisType source of

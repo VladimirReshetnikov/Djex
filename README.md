@@ -253,10 +253,11 @@ assumptions are translated once into proof premises. Class lookup, kinds,
 synonyms, formula definitions, and those premises are private indexes of the
 same Inventory; historical raw declaration tables are derived only when a
 compatibility caller asks to display them. At query time Djinn elaborates the
-goal and all class arguments as one shared kind scope, translates only the goal
-and instantiated class methods, then sends the alias-free projection to proof
-search; opaque requests still retain their exact session-independent source
-view. Invalid search controls now have a typed core failure and stable
+goal and all class arguments as one shared kind scope, instantiates class
+methods in that same shared type tree, and projects only the alias-free goal and
+methods into historical `HType` immediately beside formula translation; opaque
+requests still retain their exact session-independent source view. Invalid
+search controls now have a typed core failure and stable
 `DJEX_DJINN_OPTIONS` diagnostic; query-type provenance is attached only to
 source-derived input rejection, never to separately supplied options or an
 internal proof/result invariant.
@@ -266,10 +267,13 @@ uses the same neutral `mkDjinnSession` path as every caller-supplied environment
 grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
 point rather than importing an internal parser. Both `DjinnRequest` and
 `DjinnCandidate` expose `DjinnType = Type DjinnTypeVariable`; that shared type
-is checked and lowered once by `mkDjinnRequest`, which seals the neutral query
-and its raw projection behind an opaque request exactly as Exference does.
-Parsed raw types travel in the opposite direction and are checked into the
-shared IR; `djinnRequestQuery` recovers the stable source view. The query
+is checked and canonicalized once by `mkDjinnRequest`, which seals an opaque
+shared execution plan while retaining the caller's exact neutral query.
+Parsed raw types travel through a checked compatibility projection into the
+same shared IR; `djinnRequestQuery` recovers the exact stable source view. The
+plan remains shared through environment-dependent kind checking, synonym
+elaboration, and class-method instantiation, so the legacy proof compiler is
+the only point after compatibility ingress that constructs `HType`. The query
 returns shared candidates containing
 structured generated
 clauses, empty residual constraints, and Djinn's unused-binder ranking details

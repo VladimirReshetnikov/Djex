@@ -6,8 +6,8 @@ Date: 2026-07-14
 
 This audit began by recording what remained before Djex could honestly be
 described as one parser-free library rather than one package containing two
-engines and a shared foundation. It now also records the completed inventory
-authority and Cabal-component convergence on the
+engines and a shared foundation. It now also records the completed inventory,
+query-type authority, and Cabal-component convergence on the
 `codex/unify-djinn-and-exference` branch.
 
 The existing work is substantial, but the original merger objective is not
@@ -259,9 +259,9 @@ The shared query layer now owns a strict `RequestProvenance` in every
 `CachedQuery`, independently of the adapter's lazy derived cache. A strict
 opaque `SourceLocation` materializes complete text spans during sealing;
 programmatic requests remain explicitly source-free, and equality/display
-still observe only the neutral `QueryRequest`. Djinn's cache now contains only
-its raw proof-core projection, while Exference's contains only one opaque
-checked source-hint value.
+still observe only the neutral `QueryRequest`. At that stage, Djinn's cache
+contained only its raw proof-core projection, while Exference's contained only
+one opaque checked source-hint value.
 
 The review also fixed two attribution bugs. Exference now retains the exact
 normalized HSE parse filename for deferred failures, including preserving
@@ -344,6 +344,32 @@ useful generic instances.
 to fail when forced. Because that suite is a downstream Cabal component, the
 regression observes the real public API under the sole supported GHC 9.12.4
 rather than privileged home-module constructor scope.
+
+## Post-fold Djinn query-type authority review
+
+**Completed on 2026-07-15:** the stable Djinn adapter previously accepted the
+common `Type String`, converted it to the historical recursive `HType` while
+sealing a request, converted it back for shared kind checking and synonym
+elaboration, and finally reconstructed `HType` for the formula compiler. This
+was lossless for the supported subset but retained a redundant private query
+representation and made the stable path look less native than Exference's.
+
+`mkDjinnRequest` now retains two deliberately different shared values: the exact
+neutral `QueryRequest` returned by `djinnRequestQuery`, including any
+noncanonical but valid constructor spelling, and a private canonical shared
+plan. Reusing that plan against another session still resolves aliases and
+classes against the session being run; request sealing does not capture an
+environment's synonym meanings.
+
+The common type tree now survives environment-dependent kind checking, synonym
+elaboration, and capture-safe class-method instantiation. Only the alias-free
+goal and instantiated methods are projected to `HType`, immediately beside the
+historical formula translator. The public raw `HType` query APIs remain
+compatibility boundaries: they perform their established diagnostic preflight,
+project checked ordinary types into the shared IR, and delegate to the same
+native worker. Regression coverage compares raw and native prepared-core
+results, preserves the exact neutral request view, and reuses one alias-bearing
+request against sessions with different alias definitions.
 
 ## Validation gates for each stage
 

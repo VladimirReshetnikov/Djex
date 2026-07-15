@@ -17,7 +17,8 @@ import Djinn.Core (
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, generatedReportCandidates,
     generatedReportCompletion, inhabit, inhabitGenerated, inhabitResult,
-    inhabitGeneratedPrepared,
+    inhabitGeneratedPrepared, inhabitResultPrepared,
+    inhabitSynthesisResultPrepared,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
     fromSynthesisKind, fromSynthesisType,
@@ -57,6 +58,7 @@ import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 main :: IO ()
@@ -70,6 +72,8 @@ tests =
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse and render through the checked Djinn adapter",
           testCheckedDjinnAdapter)
+    , ("reuse canonical shared Djinn request plans across sessions",
+          testCheckedDjinnRequestReuse)
     , ("edit checked Djinn sessions through the shared environment",
           testCheckedDjinnSessionEditing)
     , ("invalidate prepared Djinn caches transactionally",
@@ -203,6 +207,37 @@ testCheckedDjinnAdapter = do
                     Djex.FullyQualified candidate)
         [] -> fail "the checked Djinn adapter found no identity candidate"
 
+    -- The private execution plan is canonical, but the public request remains
+    -- the exact shared value supplied by its caller. In particular, sealing a
+    -- saturated prefix arrow must not rewrite djinnRequestQuery even though
+    -- the proof core consumes the structural FunctionType form.
+    let noncanonicalGoal = SharedType.TypeApplication
+            (SharedType.TypeApplication
+                (SharedType.TypeConstructor SharedName.functionName)
+                (SharedType.TypeVariable "a"))
+            (SharedType.TypeVariable "a")
+        noncanonicalQuery = programmaticQuery
+            { SharedQuery.requestGoal = noncanonicalGoal
+            , SharedQuery.requestContexts = []
+            }
+    noncanonicalRequest <- expectShownRight $
+        Djex.mkDjinnRequest noncanonicalQuery
+    assertEqual "request projection rewrote a noncanonical shared type"
+        noncanonicalQuery (Djex.djinnRequestQuery noncanonicalRequest)
+    nativeResult <- expectShownRight $
+        Djex.runDjinnQuery session noncanonicalRequest
+    prepared <- expectShownRight $ prepareEnvironment standardEnvironment
+    rawResult <- expectShownRight $
+        inhabitResultPrepared defaultQueryOptions prepared [] checkedTarget
+            (HTArrow (HTVar "a") (HTVar "a"))
+    nativeCoreResult <- expectShownRight $
+        inhabitSynthesisResultPrepared defaultQueryOptions prepared []
+            checkedTarget noncanonicalGoal
+    assertEqual "native and raw prepared core query paths diverged"
+        rawResult nativeCoreResult
+    assertEqual "the stable adapter rebuilt the native core result"
+        nativeCoreResult nativeResult
+
     let malformedSource = "Eq a => a -> a ;"
     case Djex.parseDjinnRequestWithCheckedTarget
             session defaultQueryOptions checkedTarget
@@ -259,6 +294,34 @@ testCheckedDjinnAdapter = do
     -- the field projected through the opaque request boundary.
     assertEqualReversed actual expected = assertEqual "parsed request field"
         expected actual
+
+testCheckedDjinnRequestReuse :: IO ()
+testCheckedDjinnRequestReuse = do
+    initial <- expectShownRight Djex.standardDjinnSession
+    boolSession <- expectShownRight $ Djex.declareDjinnDeclaration
+        (TypeSynonym "Selected" [] $ HTCon "Bool") initial
+    voidSession <- expectShownRight $ Djex.declareDjinnDeclaration
+        (TypeSynonym "Selected" [] $ HTCon "Void") initial
+    target <- expectShownRight $ SharedName.mkIdentifier "selectedValue"
+    checkedTarget <- expectShownRight $ SharedGenerated.mkDefinitionName target
+    let query = SharedQuery.QueryRequest
+            { SharedQuery.requestTarget = checkedTarget
+            , SharedQuery.requestGoal =
+                SharedType.TypeConstructor $ sharedName "Selected"
+            , SharedQuery.requestContexts = []
+            , SharedQuery.requestOptions = defaultQueryOptions
+            }
+    request <- expectShownRight $ Djex.mkDjinnRequest query
+    boolResult <- expectShownRight $ Djex.runDjinnQuery boolSession request
+    voidResult <- expectShownRight $ Djex.runDjinnQuery voidSession request
+    assertBool "a request did not elaborate Selected against the Bool session"
+        $ not $ null $ SharedSearch.batchCandidates
+        $ SharedQuery.resultSearch boolResult
+    assertEqual "a request retained the Bool meaning of Selected in another session"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch voidResult
+    assertEqual "the empty Selected session lost proof-backed evidence"
+        SharedQuery.ProvedUninhabitable
+        (SharedQuery.resultEvidence voidResult)
 
 expectShownRight :: Show failure => Either failure value -> IO value
 expectShownRight = either (fail . show) return
@@ -625,6 +688,8 @@ testSharedTypeAdapter = do
     shared <- either (fail . show) pure $ toSynthesisType source
     assertEqual "the shared type satisfies its own invariants"
         (Right ()) (SharedType.validateType shared)
+    assertEqual "the shared renderer preserves Djinn source syntax"
+        (show source) (SharedTypeRender.renderType id shared)
     assertEqual "Djinn's source-type subset round-trips losslessly"
         (Right source) (fromSynthesisType shared)
     unit <- either (fail . show) pure $ toSynthesisType $ HTCon "()"
@@ -655,6 +720,18 @@ testSharedTypeAdapter = do
     assertEqual "raw Djinn type operators cannot cross the shared boundary"
         (Left $ UnsupportedDjinnTypeConstructorName typeOperator)
         (toSynthesisType $ HTCon "(:+:)")
+    mapM_ assertSharedRendering
+        [ HTCon "[]"
+        , HTApp (HTCon "[]") (HTVar "a")
+        , HTApp (HTApp (HTCon "[]") (HTVar "a")) (HTVar "b")
+        , HTApp (HTCon "[]") $
+            HTApp (HTCon "[]") (HTVar "a")
+        ]
+  where
+    assertSharedRendering raw = do
+        projected <- expectShownRight $ toSynthesisType raw
+        assertEqual ("shared rendering changed " ++ show raw)
+            (show raw) (SharedTypeRender.renderType id projected)
 
 testSharedDeclarationAdapter :: IO ()
 testSharedDeclarationAdapter = do
@@ -1190,6 +1267,43 @@ testPreparedQuerySynonyms = do
         assertBool "an unrelated kind error replaced the saturation failure"
             $ "KindMismatch" `notElemText` message
       Right _ -> fail "an unsaturated, ill-kinded query reached proof search"
+
+    -- Raw callers historically resolve every context before inspecting the
+    -- goal tree. Keep that observable order at the compatibility preflight:
+    -- a declaration-only goal must not hide the more immediate missing-class
+    -- error merely because the native worker accepts only shared source types.
+    case inhabitGeneratedPrepared defaultQueryOptions prepared
+        [context "MissingClass" []]
+        "missingClassFirst" (HTUnion []) of
+      Left message -> assertBool
+        "raw goal projection overtook context lookup"
+        $ "Class not found: MissingClass" `isInfixOf` message
+      Right _ -> fail "a missing raw context class reached goal projection"
+
+    targetName <- expectShownRight $
+        SharedName.mkIdentifier "sharedPrecedence"
+    checkedTarget <- expectShownRight $
+        SharedGenerated.mkDefinitionName targetName
+    missingClassName <- expectShownRight $
+        SharedName.mkIdentifier "MissingClass"
+    let invalidSharedGoal = SharedType.TupleType SharedName.Boxed
+            [ SharedType.TypeConstructor $ sharedName "Identity"
+            , SharedType.TypeVariable "A"
+            ]
+        missingSharedContext = Constraint missingClassName []
+    case inhabitSynthesisResultPrepared defaultQueryOptions prepared
+        [missingSharedContext] checkedTarget invalidSharedGoal of
+      Left (DjinnQueryFailure message) -> assertBool
+        "native type validation overtook context lookup"
+        $ "Class not found: MissingClass" `isInfixOf` message
+      result -> fail $ "native missing-class precedence changed: " ++ show result
+    case inhabitSynthesisResultPrepared defaultQueryOptions prepared []
+        checkedTarget invalidSharedGoal of
+      Left (DjinnQueryFailure message) -> assertBool
+        "native structural validation overtook synonym saturation"
+        $ "Type synonym Identity expects at least 1 argument(s), but got 0"
+            `isInfixOf` message
+      result -> fail $ "native saturation precedence changed: " ++ show result
   where
     needle `notElemText` haystack = not $ needle `isInfixOf` haystack
 

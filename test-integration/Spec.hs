@@ -260,10 +260,49 @@ tests = testGroup "Djex facade"
       captureArgument <- expectRight $ parseHType "f"
       captureContext <- expectRight $
         mkContext "CapturePrepared" [captureArgument]
-      captureGoal <- expectRight $ parseHType "x -> x"
+      -- The class argument @f@ collides with the method-local @f@. Requiring
+      -- the resulting @f' f@ premise makes this exercise native shared-type
+      -- alpha-renaming rather than merely carrying an unused context.
+      captureGoal <- expectRight $ parseHType "f' f"
       assertDjinnCompatibility "capture-safe instantiated method"
         captureEnvironment captureSession [captureContext]
         defaultQueryOptions "captureSafePrepared" captureGoal
+      captureTarget <- expectRight $ mkIdentifier "captureSafePrepared"
+      captureRequest <- sharedDjinnRequest captureTarget [captureContext]
+        defaultQueryOptions captureGoal
+      captureResult <- expectRight $
+        runDjinnQuery captureSession captureRequest
+      assertDjinnCandidateMentions "capture-safe instantiated method"
+        "capturePrepared" captureResult
+
+      -- Use an otherwise uninhabited nominal result so the operator premise
+      -- is mandatory. This pins the native Name -> proof-symbol projection to
+      -- Djinn's historical bare spelling; @(==)@ must not become a symbol
+      -- whose stored name literally contains parentheses.
+      tokenType <- expectRight $ parseHType "TokenPrepared"
+      operatorMethod <- expectRight $ parseHType "a -> ProofPrepared"
+      operatorEnvironment <- expectRight $ do
+        withToken <- declare
+          (DataType "TokenPrepared" [] []) emptyEnvironment
+        withProof <- declare
+          (DataType "ProofPrepared" [] []) withToken
+        declare (ClassDecl "EqualPrepared" ["a"]
+          [("==", operatorMethod)]) withProof
+      operatorSession <- sealDjinnEnvironment operatorEnvironment
+      operatorContext <- expectRight $
+        mkContext "EqualPrepared" [tokenType]
+      operatorGoal <- expectRight $
+        parseHType "TokenPrepared -> ProofPrepared"
+      assertDjinnCompatibility "native operator method"
+        operatorEnvironment operatorSession [operatorContext]
+        defaultQueryOptions "operatorPrepared" operatorGoal
+      operatorTarget <- expectRight $ mkIdentifier "operatorPrepared"
+      operatorRequest <- sharedDjinnRequest operatorTarget [operatorContext]
+        defaultQueryOptions operatorGoal
+      operatorResult <- expectRight $
+        runDjinnQuery operatorSession operatorRequest
+      assertDjinnCandidateMentions "native operator method"
+        "(==)" operatorResult
 
       higherMethod <- expectRight $ parseHType "f a -> f a"
       higherEnvironment <- expectRight $ declare
@@ -1012,6 +1051,18 @@ assertDjinnCompatibility label environment session contexts options target goal 
   generatedReportCandidates compatibility @?= batchCandidates search
   generatedReportFormula compatibility @?= djinnTranslatedFormula metadata
   generatedReportProof compatibility @?= djinnFirstExploredProof metadata
+
+assertDjinnCandidateMentions :: String -> String -> DjinnResult -> IO ()
+assertDjinnCandidateMentions label needle result =
+  case batchCandidates $ resultSearch result of
+    candidate : _ -> case renderFunctionClause
+        (defaultRenderOptions id) (candidateOutput candidate) of
+      Left failure -> fail $ label ++ ": candidate did not render: "
+        ++ show failure
+      Right rendered -> assertBool
+        (label ++ ": candidate did not use " ++ needle ++ ": " ++ rendered)
+        $ needle `isInfixOf` rendered
+    [] -> fail $ label ++ ": query produced no candidate"
 
 sharedDjinnRequest
   :: Name

@@ -56,7 +56,6 @@ import Djinn.Core
   , defaultQueryOptions
   , declareSynthesisEnvironment
   , removeSynthesisDeclaration
-  , inhabitResultPrepared
   , prepareSynthesisEnvironment
   , preparedEnvironmentSource
   , preparedEnvironmentInventory
@@ -68,7 +67,7 @@ import Language.Haskell.Synthesis.Candidate
   , renderCandidateExpression
   )
 import Language.Haskell.Synthesis.Constraint
-  ( Constraint
+  ( Constraint (Constraint)
   , constraintArguments
   , constraintClass
   )
@@ -125,8 +124,9 @@ type DjinnTypeVariable = String
 type DjinnLocal = String
 
 -- | Source types accepted and returned by the stable Djinn adapter.
--- They are lowered to backend-specific proof types only while sealing a
--- checked t'DjinnRequest'.
+-- Checked requests retain this shared representation through kind checking
+-- and synonym elaboration; only the proof-formula boundary uses Djinn's
+-- historical raw type.
 type DjinnType = Type DjinnTypeVariable
 
 -- | One prepared shared inventory and the exact backend indexes projected
@@ -135,21 +135,23 @@ type DjinnType = Type DjinnTypeVariable
 -- complete environment has been sealed transactionally.
 newtype DjinnSession = DjinnSession PreparedEnvironment
 
--- | The raw projection derived while sealing a request. The shared
--- 'CachedQuery' envelope owns source provenance separately and keeps both
--- details out of the request's stable equality and display contract.
-data DjinnRequestCache = DjinnRequestCache
-  { cachedCoreGoal :: Core.HType
-  , cachedCoreContexts :: [Core.Context]
+-- | The canonical shared query projection consumed by the proof core.
+--
+-- Keep this separate from the stable request: callers can recover their exact
+-- (possibly noncanonical) neutral spelling with 'djinnRequestQuery', while a
+-- reusable request never retains a second recursive type representation.
+data DjinnRequestPlan = DjinnRequestPlan
+  { plannedGoal :: DjinnType
+  , plannedContexts :: [Constraint DjinnType]
   }
 
--- | A checked query whose neutral spelling and backend projection cannot
--- drift apart.  The constructor and cached values stay private; callers can
+-- | A checked query whose exact neutral spelling and canonical shared plan
+-- cannot drift apart. The constructor and plan stay private; callers can
 -- inspect the original neutral query with 'djinnRequestQuery'.
 newtype DjinnRequest = DjinnRequest
-  (CachedQuery DjinnType QueryOptions DjinnRequestCache)
+  (CachedQuery DjinnType QueryOptions DjinnRequestPlan)
   deriving (Eq, Show)
-    via (CachedQuery DjinnType QueryOptions DjinnRequestCache)
+    via (CachedQuery DjinnType QueryOptions DjinnRequestPlan)
 
 -- | Lower a shared declaration environment through Djinn's stricter lexical,
 -- dependency, and kind checks, then seal it into a reusable session.
@@ -237,13 +239,13 @@ resolveDjinnInstanceMethods (DjinnSession prepared) prerequisites target =
   first instanceResolutionFailure
     $ resolvePreparedInstanceMethods prepared prerequisites target
 
--- | Check and lower the session-independent portion of a neutral Djinn
--- query.  Target spelling, the goal, and context arguments are converted
--- exactly once and retained behind the opaque request boundary.  Search
--- options and all environment-dependent kind, class, and synonym checks
--- deliberately remain the responsibility of 'runDjinnQuery'. A request can
--- therefore be run against another compatible session without retaining the
--- first session's alias meanings.
+-- | Check the session-independent portion of a neutral Djinn query.
+-- Goal and context arguments are canonicalized once into a shared plan, while
+-- 'djinnRequestQuery' retains the caller's exact neutral value. Search options
+-- and all environment-dependent kind, class, and synonym checks deliberately
+-- remain the responsibility of 'runDjinnQuery'. A request can therefore be
+-- run against another compatible session without retaining the first
+-- session's alias meanings.
 mkDjinnRequest
   :: QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
@@ -258,12 +260,12 @@ mkDjinnRequestWithProvenance provenance query =
   -- strict field of a newtype-wrapped 'CachedQuery' is insufficient: a caller
   -- can inspect the outer 'Right' without forcing that payload.
   provenance `seq` first (withRequestProvenance provenance) (do
-    goal <- lowerRequestType "goal" $ requestGoal query
-    contexts <- traverse lowerRequestContext $ requestContexts query
+    goal <- normalizeRequestType "goal" $ requestGoal query
+    contexts <- traverse normalizeRequestContext $ requestContexts query
     pure $ DjinnRequest $
-      mkCachedQueryWithProvenance provenance query DjinnRequestCache
-        { cachedCoreGoal = goal
-        , cachedCoreContexts = contexts
+      mkCachedQueryWithProvenance provenance query DjinnRequestPlan
+        { plannedGoal = goal
+        , plannedContexts = contexts
         })
 
 -- | Recover the exact neutral query from which this checked request was
@@ -273,8 +275,8 @@ djinnRequestQuery
   -> QueryRequest DjinnType QueryOptions
 djinnRequestQuery (DjinnRequest query) = cachedQueryRequest query
 
-djinnRequestCache :: DjinnRequest -> DjinnRequestCache
-djinnRequestCache (DjinnRequest query) = cachedQueryCache query
+djinnRequestPlan :: DjinnRequest -> DjinnRequestPlan
+djinnRequestPlan (DjinnRequest query) = cachedQueryCache query
 
 djinnRequestProvenance :: DjinnRequest -> RequestProvenance
 djinnRequestProvenance (DjinnRequest query) = cachedQueryProvenance query
@@ -338,13 +340,14 @@ runDjinnQuery
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
 runDjinnQuery (DjinnSession prepared) request = do
-  let cache = djinnRequestCache request
-  case inhabitResultPrepared
-      (requestOptions $ djinnRequestQuery request)
+  let query = djinnRequestQuery request
+      plan = djinnRequestPlan request
+  case Core.inhabitSynthesisResultPrepared
+      (requestOptions query)
       prepared
-      (cachedCoreContexts cache)
-      (requestTarget $ djinnRequestQuery request)
-      (cachedCoreGoal cache) of
+      (plannedContexts plan)
+      (requestTarget query)
+      (plannedGoal plan) of
     Left failure -> Left $
       djinnQueryFailure (djinnRequestProvenance request) failure
     Right result -> Right result
@@ -367,23 +370,26 @@ candidateRenderOptions :: Qualification -> RenderOptions DjinnLocal
 candidateRenderOptions qualification =
   (defaultRenderOptions id) {renderQualification = qualification}
 
-lowerRequestType :: String -> DjinnType -> Either Diagnostic Core.HType
-lowerRequestType role = first (loweringFailure role)
-  . Core.fromSynthesisType
+normalizeRequestType :: String -> DjinnType -> Either Diagnostic DjinnType
+normalizeRequestType role = first (loweringFailure role)
+  . Core.normalizeSynthesisType
 
 -- Constraint is intentionally a more permissive neutral node than Djinn's
--- historical grammar.  Rebuild it with the core smart constructor so a
--- qualified or otherwise non-Djinn class name cannot cross the sealed
--- request boundary even when a caller constructed the shared node directly.
-lowerRequestContext
+-- historical grammar. Validate its name with the core smart constructor so a
+-- qualified or otherwise non-Djinn class cannot cross the sealed request
+-- boundary, then retain its canonical arguments in the shared representation.
+normalizeRequestContext
   :: Constraint DjinnType
-  -> Either Diagnostic Core.Context
-lowerRequestContext context = do
-  arguments <- traverse (lowerRequestType "context")
+  -> Either Diagnostic (Constraint DjinnType)
+normalizeRequestContext context = do
+  arguments <- traverse (normalizeRequestType "context")
     $ constraintArguments context
-  first contextLoweringFailure $ Core.mkContext
+  -- No raw type is retained: the empty context is only the historical
+  -- namespace validator for the exact structural class name.
+  _ <- first contextLoweringFailure $ Core.mkContext
     (renderCanonical $ constraintClass context)
-    arguments
+    []
+  pure $ Constraint (constraintClass context) arguments
 
 parsedTypeFailure
   :: RequestProvenance

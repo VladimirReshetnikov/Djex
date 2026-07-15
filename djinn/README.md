@@ -76,7 +76,7 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 59 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kind representation and compatibility, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 60 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kind representation and compatibility, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-frontend-api-tests` | Three import-boundary checks proving that a dependency on `djinn-frontend` alone exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn`. |
 | `djinn-cli-tests` | Nineteen subprocess scenarios against the packaged executable, including EOF, explicit RTS tuning, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
@@ -384,11 +384,11 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn` (`src-frontend/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Pre-cache five-operation raw compatibility facade over shared kind inference. |
-| `Djinn.Internal.HCheck.Implementation` | Private prepared kind-check cache, trusted Inventory bridge, and saturated-synonym policy. |
+| `Djinn.Internal.HCheck.Implementation` | Private prepared kind-check cache, native shared-type checks, trusted Inventory bridge, and saturated-synonym policy. |
 | `Djinn.Internal.Environment` | Authoritative Inventory preparation plus private class, kind, synonym, formula, and ordered global-premise indexes. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated shared name and operator rules in `djex`. |
 | `Djinn.Internal.HTypes` | Shared-kind compatibility view, type parser, logical translation, and proof-term conversion/cleanup. |
-| `Djinn.Internal.Type` | Checked conversion between Djinn source types and the shared source-type IR. |
+| `Djinn.Internal.Type` | Native shared-type validation/canonicalization plus checked projection to and from Djinn's historical source types. |
 | `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
 | `Language.Haskell.Synthesis.Generated` | Shared local/global output tree, scope validation, capture-safe naming, qualification, and Haskell rendering. |
 | `Language.Haskell.Synthesis.KindInference` | Shared kind unification, class-parameter inference, and acyclic declaration dependency ordering. |
@@ -474,9 +474,12 @@ The essentials: `declare`/`removeDeclaration` grow and shrink an
 `parseHType`/`parseContextualHType`/`parseHKind` parse with full-input
 validation; the contextual entry point owns the REPL's optional constraint
 grammar so checked clients need not import its internal `ReadP` parser.
-`inhabitResult` runs translation, budgeted proof search, independent proof
-checking, and constructs the shared `QueryResult` directly without choosing a
-renderer or passing through a backend-owned report envelope.
+Raw `HType` query entry points retain Djinn's historical class lookup, arity,
+kind, and synonym-saturation diagnostic preflight, project the validated
+ordinary types into the shared IR, and delegate to the native query worker.
+`inhabitResult` then runs formula translation, budgeted proof search,
+independent proof checking, and constructs the shared `QueryResult` directly
+without choosing a renderer or passing through a backend-owned report envelope.
 The historical `inhabit` entry point is its explicit rendered-string
 compatibility wrapper. Both report the formula and first proof term for
 debugging. Their completion uses the shared operational vocabulary:
@@ -502,8 +505,8 @@ The opaque Djinn `Environment` itself now round-trips through
 `Language.Haskell.Synthesis.Environment`; reverse lowering preflights Djinn's
 stricter source subset, grounds and checks the neutral Inventory once, validates
 synonym saturation in every type-bearing declaration position, and classifies
-recursive datatypes only after aliases have been expanded. The resulting raw
-query-time kind checker, synonym table, nominal class index, checked formula
+recursive datatypes only after aliases have been expanded. The resulting
+prepared kind checker, synonym table, nominal class index, checked formula
 translator, and ordered global proof premises are projections of those same
 cached assumptions rather than a second independently inferred environment.
 Global assumptions are translated once while sealing; only a query goal and
@@ -538,12 +541,14 @@ neutral `QueryRequest` followed by `mkDjinnRequest`, and use
 `djinnRequestQuery` when they need to inspect that original value. Sealing
 receives the request's already checked shared `DefinitionName`, checks Djinn's
 narrower class-name namespace, retains that target in the original
-`QueryRequest`, and caches only the lowered goal and context arguments. The
-raw-`Name` parser helper constructs
+`QueryRequest`, and caches only a canonical shared goal and shared context
+arguments. The raw-`Name` parser helper constructs
 that checked target before parsing so target diagnostics retain precedence;
 search-option validation and all environment-dependent class and kind checks
-still occur when the request is run. The shared `CachedQuery` owns a strict
-programmatic-or-source `RequestProvenance` independently of that raw projection;
+still occur when the request is run. One request can therefore elaborate the
+same alias spelling against different compatible sessions without capturing
+the first session's meaning. The shared `CachedQuery` owns a strict
+programmatic-or-source `RequestProvenance` independently of its private plan;
 source-derived constructor and query failures receive its complete input span,
 while options and internal proof/result invariants remain unlocated. Invalid
 cutoffs and budgets are typed `DjinnQueryOptionsError` values and map to
@@ -551,9 +556,12 @@ cutoffs and budgets are typed `DjinnQueryOptionsError` values and map to
 messages. Here
 `DjinnType` is the shared `Type DjinnTypeVariable` source representation;
 `DjinnTypeVariable` and the generated-binder `DjinnLocal` remain distinct API
-names despite both currently being represented by `String`. Raw `HType` is
-used only behind that checked boundary: parsed raw types are projected into
-`DjinnType`, while neutral requests are lowered once as they are sealed.
+names despite both currently being represented by `String`. Parsed raw types
+are checked into `DjinnType`; stable requests retain that shared representation
+for the goal, constraints, and instantiated class methods throughout kind
+checking and synonym elaboration. Only the resulting alias-free goal and method
+types are projected to raw `HType`, immediately at the legacy formula compiler
+boundary rather than as request or session state.
 Its checked `QueryResult` carries the same shared `Candidate DjinnType`
 structure as Exference plus Djinn's
 formula/proof metadata; even the currently empty residual constraints no
@@ -592,13 +600,16 @@ queries perform only their source-local goal and instantiated-method expansion
 checks rather than repeating whole-table analysis or translating unchanged
 function assumptions.
 
-The central pipeline is:
+The central pipelines converge before environment-dependent validation:
 
 ```text
-command -> HType -> kind check -> Formula -> LJT proof search
-        -> proof-term normalization -> independent proof check
-        -> Haskell AST cleanup -> shared Candidate + Generated scope check/renderer
-        -> printed clause
+REPL command -> HType -> checked compatibility projection --\
+neutral request -> Type String -> canonical shared plan -----+-> shared kind check
+    -> shared synonym elaboration + class-method instantiation
+    -> alias-free HType at formula boundary -> Formula -> LJT proof search
+    -> proof-term normalization -> independent proof check
+    -> Haskell AST cleanup -> shared Candidate + Generated scope check/renderer
+    -> printed clause
 ```
 
 ## How proof search works

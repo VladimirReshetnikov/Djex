@@ -1172,6 +1172,14 @@ tests = testGroup "Exference"
             @?= "forall v0. v0"
           showHsType Map.empty (TypeArrow (TypeVar 0) (TypeVar 1))
             @?= "v0 -> a"
+          showHsType Map.empty (TypeCons SharedName.listName) @?= "([])"
+          let renderedList = showHsType Map.empty
+                (TypeApp (TypeCons SharedName.listName) (TypeVar 0))
+          renderedList @?= "[v0]"
+          case parseTypePure renderedList of
+            Right _ -> pure ()
+            Left failure -> fail $ "rendered list did not parse: "
+              ++ show failure
           showHsType Map.empty
               (TypeForall [] [] $ TypeArrow (TypeVar 0) (TypeVar 1))
             @?= "v0 -> a"

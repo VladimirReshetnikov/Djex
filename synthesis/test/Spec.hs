@@ -1272,6 +1272,16 @@ typeTests = testGroup "source types"
       TypeRender.renderType variableName
           (SharedType.TupleType Unboxed
             [SharedType.TypeVariable flexible]) @?= "(# a #)"
+      TypeRender.renderType variableName
+          (SharedType.TypeConstructor listName) @?= "([])"
+      let listOf element = SharedType.TypeApplication
+            (SharedType.TypeConstructor listName) element
+          listOfA = listOf $ SharedType.TypeVariable flexible
+      TypeRender.renderType variableName listOfA @?= "[a]"
+      TypeRender.renderType variableName
+          (SharedType.TypeApplication listOfA
+            $ SharedType.TypeVariable rigid) @?= "[a] skolem"
+      TypeRender.renderType variableName (listOf listOfA) @?= "[[a]]"
   , testCase "canonicalize saturated function and tuple constructors" $ do
       let a = SharedType.TypeVariable "a"
           b = SharedType.TypeVariable "b"

@@ -4,12 +4,15 @@ module Djinn.Internal.Type
   ( SynthesisTypeError (..)
   , isDjinnTypeVariable
   , checkedDjinnTypeVariable
+  , normalizeSynthesisType
+  , renderSynthesisType
   , toSynthesisType
   , fromSynthesisType
   ) where
 
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 
 import Djinn.Internal.HIdentifier (isQualifiedConId, isVarId)
 import Djinn.Internal.HTypes (HType (..), HSymbol)
@@ -43,10 +46,7 @@ toSynthesisType
   -> Either SynthesisTypeError (SharedType.Type HSymbol)
 toSynthesisType source = do
   converted <- convert source
-  let canonical = SharedType.canonicalizeType converted
-  either (Left . InvalidSynthesisType) Right
-    $ SharedType.validateType canonical
-  return canonical
+  normalizeSynthesisType converted
  where
   convert typeExpression = case typeExpression of
     HTVar variable -> SharedType.TypeVariable
@@ -84,18 +84,46 @@ toSynthesisType source = do
       Just _ -> False
       Nothing -> isQualifiedConId sourceName
 
-fromSynthesisType
+-- | Validate and canonicalize a shared type without rebuilding it as the
+-- historical 'HType' tree. This is the checked entrance used by Djex's native
+-- Djinn query path; the raw conversion below remains a compatibility edge.
+normalizeSynthesisType
   :: SharedType.Type HSymbol
-  -> Either SynthesisTypeError HType
-fromSynthesisType source = do
+  -> Either SynthesisTypeError (SharedType.Type HSymbol)
+normalizeSynthesisType source = do
   let canonical = SharedType.canonicalizeType source
   either (Left . InvalidSynthesisType) Right
     $ SharedType.validateType canonical
-  convert canonical
+  validateSupported canonical
+  return canonical
+ where
+  validateSupported typeExpression = case typeExpression of
+    SharedType.TypeVariable variable ->
+      () <$ checkedDjinnTypeVariable variable
+    SharedType.TypeConstructor name -> () <$ djinnName name
+    SharedType.TypeApplication function argument ->
+      validateSupported function >> validateSupported argument
+    SharedType.FunctionType parameter result ->
+      validateSupported parameter >> validateSupported result
+    SharedType.TupleType SharedName.Boxed elements ->
+      mapM_ validateSupported elements
+    SharedType.TupleType SharedName.Unboxed elements ->
+      Left $ SynthesisUnboxedTupleUnsupported $ length elements
+    SharedType.ForallType{} -> Left SynthesisForallUnsupported
+
+-- | Render a checked shared type with Djinn's historical source-like syntax.
+-- Keeping this projection native avoids constructing an 'HType' merely to
+-- label a kind or synonym diagnostic.
+renderSynthesisType :: SharedType.Type HSymbol -> String
+renderSynthesisType = SharedTypeRender.renderType id
+
+fromSynthesisType
+  :: SharedType.Type HSymbol
+  -> Either SynthesisTypeError HType
+fromSynthesisType source = normalizeSynthesisType source >>= convert
  where
   convert typeExpression = case typeExpression of
-    SharedType.TypeVariable variable -> HTVar
-      <$> checkedDjinnTypeVariable variable
+    SharedType.TypeVariable variable -> Right $ HTVar variable
     SharedType.TypeConstructor name -> HTCon <$> djinnName name
     SharedType.TypeApplication function argument -> HTApp
       <$> convert function <*> convert argument
@@ -104,21 +132,23 @@ fromSynthesisType source = do
     SharedType.TupleType SharedName.Boxed [] -> Right $ HTCon "()"
     SharedType.TupleType SharedName.Boxed elements ->
       HTTuple <$> mapM convert elements
+    -- 'normalizeSynthesisType' rejects both alternatives before conversion.
     SharedType.TupleType SharedName.Unboxed elements ->
       Left $ SynthesisUnboxedTupleUnsupported $ length elements
     SharedType.ForallType{} -> Left SynthesisForallUnsupported
 
-  djinnName name = case SharedName.nameSpecial name of
-    Just SharedName.ListConstructor -> Right "[]"
-    Just SharedName.FunctionConstructor -> Right "->"
-    Just (SharedName.TupleConstructor boxity arity) ->
-      Left $ PartialTupleConstructorUnsupported boxity arity
-    Just SharedName.ConsConstructor ->
-      -- 'validateType' rejects this before conversion.
-      Left $ InvalidSynthesisType $ SharedType.InvalidTypeConstructor name
-    Nothing ->
-      let spelling = SharedName.renderCanonical name
-      in if isQualifiedConId spelling then
-           Right spelling
-         else
-           Left $ UnsupportedDjinnTypeConstructorName name
+djinnName :: SharedName.Name -> Either SynthesisTypeError HSymbol
+djinnName name = case SharedName.nameSpecial name of
+  Just SharedName.ListConstructor -> Right "[]"
+  Just SharedName.FunctionConstructor -> Right "->"
+  Just (SharedName.TupleConstructor boxity arity) ->
+    Left $ PartialTupleConstructorUnsupported boxity arity
+  Just SharedName.ConsConstructor ->
+    -- 'SharedType.validateType' rejects this before this projection.
+    Left $ InvalidSynthesisType $ SharedType.InvalidTypeConstructor name
+  Nothing ->
+    let spelling = SharedName.renderCanonical name
+    in if isQualifiedConId spelling then
+         Right spelling
+       else
+         Left $ UnsupportedDjinnTypeConstructorName name

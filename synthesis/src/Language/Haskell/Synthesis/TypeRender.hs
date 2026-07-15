@@ -18,6 +18,8 @@ import Data.List (intercalate)
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed, Unboxed)
+  , SpecialName (ListConstructor)
+  , nameSpecial
   , renderPrefix
   )
 import Language.Haskell.Synthesis.Type (Type (..))
@@ -59,7 +61,16 @@ showsType
   -> ShowS
 showsType variableName precedence typeExpression = case typeExpression of
   TypeVariable variable -> showString $ variableName variable
-  TypeConstructor name -> showString $ renderPrefix name
+  -- Lists have no dedicated 'Type' node. Parenthesize the higher-kinded
+  -- constructor, sugar its first application, and let the generic case render
+  -- any trailing overapplication as @[a] b@.
+  TypeConstructor name
+    | nameSpecial name == Just ListConstructor -> showString "([])"
+    | otherwise -> showString $ renderPrefix name
+  TypeApplication (TypeConstructor name) argument
+    | nameSpecial name == Just ListConstructor -> showChar '['
+      . showsType variableName 0 argument
+      . showChar ']'
   TypeApplication function argument -> showParen (precedence > 1)
     $ showsType variableName 1 function
     . showChar ' '

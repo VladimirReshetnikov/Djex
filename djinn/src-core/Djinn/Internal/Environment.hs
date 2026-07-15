@@ -7,9 +7,11 @@ module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
-    checkPreparedTypesKinds, preparedEnvironmentFormulaTranslator,
+    checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
+    preparedEnvironmentFormulaTranslator,
     preparedEnvironmentFunctionPremises, lookupPreparedEnvironmentClass,
-    elaboratePreparedTypes,
+    lookupPreparedSynthesisClass, synthesisMethodSymbol,
+    elaboratePreparedTypes, elaboratePreparedSynthesisTypes,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
@@ -38,6 +40,7 @@ import Djinn.Internal.HCheck.Implementation
     ( PreparedKindCheck
     , htCheckTypePrepared
     , htCheckTypesKindsPrepared
+    , htCheckSynthesisTypesKindsPrepared
     , htInferClassKindsPrepared
     , prepareKindEnvironment
     , prepareKindCheckWithAssumptions
@@ -45,6 +48,7 @@ import Djinn.Internal.HCheck.Implementation
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJTFormula (Formula, Symbol(..))
 import Djinn.Internal.Type (fromSynthesisType, toSynthesisType)
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
 type Axiom = (HSymbol, HType)
@@ -64,9 +68,31 @@ data Environment = Environment {
 data PreparedEnvironment = PreparedEnvironment
     PreparedSynthesisInventory
     PreparedKindCheck
-    (Map.Map HSymbol ([(HSymbol, HKind)], [Axiom]))
+    (Map.Map SharedName.Name SynthesisClassDefinition)
     [(Symbol, Formula)]
     (HType -> Either String Formula)
+
+-- The prepared class index stays in the authoritative shared type and name
+-- vocabulary. Historical context APIs project it back to 'HType' only at
+-- their compatibility edge; native queries never perform that round trip.
+type SynthesisClassDefinition =
+    ( [(HSymbol, HKind)]
+    , [(SharedName.Name, SharedType.Type HSymbol)]
+    )
+
+-- | Project a validated shared class-method name into Djinn's historical
+-- proof-symbol namespace. Operators are stored bare there (for example
+-- @==@, not the canonical prefix spelling @(==)@). Prepared inventories can
+-- contain only the unqualified variable names accepted by Djinn's declaration
+-- boundary, but keep that invariant checked at this private projection edge.
+synthesisMethodSymbol :: SharedName.Name -> Either String HSymbol
+synthesisMethodSymbol name =
+    case (SharedName.nameModule name, SharedName.nameSpelling name) of
+        (Nothing, Just spelling)
+            | isDjinnDeclarationName MethodOwner spelling -> Right spelling
+        _ -> Left $
+            "sealed class method name is not a Djinn value symbol: " ++
+            SharedName.renderCanonical name
 
 type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
@@ -318,7 +344,7 @@ sealPreparedEnvironment
     :: Environment
     -> PreparedSynthesisInventory
     -> Either SynthesisEnvironmentError PreparedEnvironment
-sealPreparedEnvironment (Environment types functions classes)
+sealPreparedEnvironment (Environment types functions _)
         prepared = do
     translate <- first InvalidSynthesisFormulaDefinitions $
         prepareTypeFormulaTranslator types
@@ -330,7 +356,7 @@ sealPreparedEnvironment (Environment types functions classes)
         mapM (translateFunction translate) functions
     let kindCheck = prepareKindCheckWithAssumptions types
             $ SharedInventory.inventoryKindAssumptions inventory
-        classIndex = Map.fromList classes
+    classIndex <- prepareSynthesisClassIndex inventory
     -- Force the derived index before the transient compatibility projection
     -- leaves scope; its field cannot retain the complete raw Environment thunk.
     classIndex `seq` kindCheck `seq` return (PreparedEnvironment
@@ -342,6 +368,35 @@ sealPreparedEnvironment (Environment types functions classes)
         (,) (Symbol name) `fmap`
             first (("function " ++ prHSymbolOp name ++ ": ") ++)
                 (translate source)
+
+prepareSynthesisClassIndex
+    :: SynthesisInventory
+    -> Either SynthesisEnvironmentError
+        (Map.Map SharedName.Name SynthesisClassDefinition)
+prepareSynthesisClassIndex inventory =
+    Map.fromList `fmap` mapM prepareClass
+        [ (name, parameters, methods)
+        | SharedDeclaration.ClassDeclaration
+              _ name parameters _ methods <- declarations
+        ]
+  where
+    declarations = SharedEnvironment.environmentDeclarations $
+        SharedInventory.inventoryEnvironment inventory
+    assumptions = SharedInventory.inventoryKindAssumptions inventory
+
+    prepareClass (name, parameters, methods) = do
+        let parameterNames = map SharedDeclaration.parameterVariable parameters
+        kinds <- requiredClassKinds assumptions name parameterNames
+        return
+            ( name
+            , ( zip parameterNames kinds
+              , [ ( SharedDeclaration.valueName method
+                  , SharedDeclaration.valueType method
+                  )
+                | method <- methods
+                ]
+              )
+            )
 
 -- | Reconstruct the historical raw declaration tables on demand. The
 -- inventory is opaque and can enter t'PreparedEnvironment' only after Djinn's
@@ -370,6 +425,17 @@ checkPreparedTypesKinds
 checkPreparedTypesKinds
         (PreparedEnvironment _ kindCheck _ _ _) =
     htCheckTypesKindsPrepared kindCheck
+
+-- | Native shared-type counterpart of 'checkPreparedTypesKinds'. It consumes
+-- the same sealed synonym arities and kind assumptions without rebuilding a
+-- compatibility tree.
+checkPreparedSynthesisTypesKinds
+    :: PreparedEnvironment
+    -> [(HKind, SharedType.Type HSymbol)]
+    -> Either String ()
+checkPreparedSynthesisTypesKinds
+        (PreparedEnvironment _ kindCheck _ _ _) =
+    htCheckSynthesisTypesKindsPrepared kindCheck
 
 preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
@@ -411,7 +477,29 @@ lookupPreparedEnvironmentClass
     :: HSymbol
     -> PreparedEnvironment
     -> Maybe ([(HSymbol, HKind)], [Axiom])
-lookupPreparedEnvironmentClass name
+lookupPreparedEnvironmentClass sourceName prepared = do
+    name <- either (const Nothing) Just $ SharedName.parseName sourceName
+    (parameters, methods) <- lookupPreparedSynthesisClass name prepared
+    let projectMethod (methodName, methodType) = do
+            methodSymbol <- synthesisMethodSymbol methodName
+            projected <- first show $ fromSynthesisType methodType
+            return (methodSymbol, projected)
+    case mapM projectMethod methods of
+        Right projected -> Just (parameters, projected)
+        Left failure -> error $
+            "Djinn.Internal.Environment.lookupPreparedEnvironmentClass: " ++
+            "sealed class invariant failed: " ++ failure
+
+-- | Look up one class in the authoritative shared name/type index retained by
+-- a sealed environment. The compatibility lookup above is its raw projection.
+lookupPreparedSynthesisClass
+    :: SharedName.Name
+    -> PreparedEnvironment
+    -> Maybe
+        ( [(HSymbol, HKind)]
+        , [(SharedName.Name, SharedType.Type HSymbol)]
+        )
+lookupPreparedSynthesisClass name
         (PreparedEnvironment _ _ classes _ _) = Map.lookup name classes
 
 -- | Elaborate a query batch through the exact alias table retained by its
@@ -425,14 +513,31 @@ elaboratePreparedTypes
     -> Either String [HType]
 elaboratePreparedTypes prepared obligations = do
     sharedObligations <- mapM convertObligation obligations
-    elaborated <- first renderElaborationError $
+    elaborated <- elaboratePreparedSynthesisTypes prepared sharedObligations
+    mapM (first show . fromSynthesisType) elaborated
+  where
+    convertObligation (expected, source) = do
+        -- Retain the raw helper's historical per-obligation precedence:
+        -- reject an unsolved expected kind before inspecting its type.
+        _ <- checkedGroundHKind expected
+        shared <- first show $ toSynthesisType source
+        return (expected, shared)
+
+-- | Elaborate native shared types in one free-variable kind scope through the
+-- exact synonym table retained by the prepared inventory.
+elaboratePreparedSynthesisTypes
+    :: PreparedEnvironment
+    -> [(HKind, SharedType.Type HSymbol)]
+    -> Either String [SharedType.Type HSymbol]
+elaboratePreparedSynthesisTypes prepared obligations = do
+    sharedObligations <- mapM convertObligation obligations
+    first renderElaborationError $
         SharedTypeSynonym.elaborateTypes
             freshDjinnTypeVariable synonyms sharedObligations
-    mapM (first show . fromSynthesisType) elaborated
   where
     convertObligation (expected, source) = (,)
         <$> checkedGroundHKind expected
-        <*> first show (toSynthesisType source)
+        <*> pure source
 
     synonyms = preparedEnvironmentTypeSynonyms prepared
 

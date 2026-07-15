@@ -42,7 +42,7 @@ module Language.Haskell.Djex.Djinn
   ) where
 
 import Data.Bifunctor (first)
-import Data.Void (absurd)
+import Data.Void (Void, absurd)
 
 import Djinn.Core
   ( DjinnCandidateDetails (..)
@@ -56,12 +56,12 @@ import Djinn.Core
   , defaultQueryOptions
   , declareSynthesisEnvironment
   , removeSynthesisDeclaration
-  , prepareSynthesisEnvironment
   , preparedEnvironmentSource
   , preparedEnvironmentInventory
   , resolvePreparedInstanceMethods
   )
 import qualified Djinn.Core as Core
+import qualified Djinn.Internal.Environment as RawEnvironment
 import Language.Haskell.Synthesis.Candidate
   ( renderCandidateDefinition
   , renderCandidateExpression
@@ -107,9 +107,10 @@ import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import Language.Haskell.Synthesis.Type (Type)
 
 -- | The neutral declaration environment accepted by the Djinn adapter.
--- Djinn currently uses textual source variables and integer kind variables;
--- neither choice leaks its mutable compatibility environment through Djex.
-type DjinnEnvironment = Environment DjinnTypeVariable Int ()
+-- Djinn uses textual source variables, while explicit declaration kinds are
+-- ground at this stable boundary just as they are for Exference. Historical
+-- @KVar@ values remain confined to the raw compatibility API.
+type DjinnEnvironment = Environment DjinnTypeVariable Void ()
 
 -- | The checked neutral inventory sealed into a Djinn session.
 type DjinnInventory = Inventory DjinnTypeVariable ()
@@ -157,7 +158,8 @@ newtype DjinnRequest = DjinnRequest
 -- dependency, and kind checks, then seal it into a reusable session.
 mkDjinnSession :: DjinnEnvironment -> Either Diagnostic DjinnSession
 mkDjinnSession sharedEnvironment = DjinnSession <$>
-  first environmentFailure (prepareSynthesisEnvironment sharedEnvironment)
+  first environmentFailure
+    (RawEnvironment.prepareGroundSynthesisEnvironment sharedEnvironment)
 
 environmentFailure
   :: Core.SynthesisEnvironmentError
@@ -170,14 +172,17 @@ environmentFailure = shownErrorDiagnostic "DJEX_DJINN_ENV"
 -- constructor as every other caller.
 standardDjinnSession :: Either Diagnostic DjinnSession
 standardDjinnSession = do
-  environment <- first environmentFailure
+  compatibilityEnvironment <- first environmentFailure
     $ Core.toSynthesisEnvironment Core.standardEnvironment
+  environment <- first
+    (environmentFailure . Core.InvalidSynthesisInventory
+      . SharedInventory.UngroundedInventoryKind)
+    $ SharedEnvironment.groundEnvironmentKinds compatibilityEnvironment
   mkDjinnSession environment
 
 djinnSessionEnvironment :: DjinnSession -> DjinnEnvironment
 djinnSessionEnvironment =
-  SharedEnvironment.mapEnvironmentKindVariables absurd
-    . SharedInventory.inventoryEnvironment
+  SharedInventory.inventoryEnvironment
     . djinnSessionInventory
 
 djinnSessionInventory :: DjinnSession -> DjinnInventory
@@ -193,6 +198,7 @@ declareDjinnDeclaration
 declareDjinnDeclaration declaration session = do
   (_, prepared) <- first environmentEditFailure
     $ declareSynthesisEnvironment declaration
+    $ SharedEnvironment.mapEnvironmentKindVariables absurd
     $ djinnSessionEnvironment session
   pure $ DjinnSession prepared
 
@@ -204,6 +210,7 @@ removeDjinnDeclaration
 removeDjinnDeclaration name session = do
   (_, prepared) <- first environmentEditFailure
     $ removeSynthesisDeclaration name
+    $ SharedEnvironment.mapEnvironmentKindVariables absurd
     $ djinnSessionEnvironment session
   pure $ DjinnSession prepared
 

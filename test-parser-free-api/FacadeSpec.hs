@@ -43,6 +43,10 @@ facadeTests = testGroup "public Djex facade"
             -> Candidate DjinnType DjinnCandidateDetails
                 (FunctionClause DjinnLocal)
           djinnCandidateProjection = id
+          djinnEnvironmentProjection
+            :: DjinnEnvironment
+            -> Environment DjinnTypeVariable Void ()
+          djinnEnvironmentProjection = id
           inventoryProjection
             :: ExferenceSession -> ExferenceInventory
           inventoryProjection = exferenceSessionInventory
@@ -64,7 +68,8 @@ facadeTests = testGroup "public Djex facade"
             :: ExferenceResult -> ExferenceBatchMetadata
           metadataProjection = batchMetadata . resultSearch
       djinnTypeProjection `seq` djinnRequestProjection `seq`
-        djinnCandidateProjection `seq` inventoryProjection `seq`
+        djinnCandidateProjection `seq` djinnEnvironmentProjection `seq`
+        inventoryProjection `seq`
         sessionEnvironmentProjection `seq`
         environmentProjection `seq`
         requestProjection `seq` candidateProjection `seq`

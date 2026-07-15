@@ -2,6 +2,7 @@ module Main (main) where
 
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
+import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
@@ -934,10 +935,8 @@ testNeutralDjinnPreparation = do
     assertEqual "the session changed its derived editable environment"
         orderedEnvironment
         (Djex.djinnSessionEnvironment orderedSession)
-    groundedOrderedEnvironment <- expectShownRight
-        $ SharedEnvironment.groundEnvironmentKinds orderedEnvironment
     assertEqual "the session inventory changed global declaration order"
-        (SharedEnvironment.environmentDeclarations groundedOrderedEnvironment)
+        (SharedEnvironment.environmentDeclarations orderedEnvironment)
         (SharedEnvironment.environmentDeclarations
             $ SharedInventory.inventoryEnvironment
             $ Djex.djinnSessionInventory orderedSession)
@@ -958,7 +957,9 @@ testNeutralDjinnPreparation = do
         phantomDeclarations =
             [boolDeclaration, phantomDeclaration, dataType "D" [phantomUse]]
     phantomEnvironment <- mkNeutralDjinnEnvironment phantomDeclarations
-    _ <- expectShownRight $ fromSynthesisEnvironment phantomEnvironment
+    _ <- expectShownRight $ fromSynthesisEnvironment
+        $ SharedEnvironment.mapEnvironmentKindVariables absurd
+        phantomEnvironment
     _ <- expectShownRight $ Djex.mkDjinnSession phantomEnvironment
 
     let identityDeclaration = SharedDeclaration.TypeSynonymDeclaration ()
@@ -1178,7 +1179,7 @@ testPreparedFormulaParity = do
             expected nativeFormula
 
 mkNeutralDjinnEnvironment
-    :: [SharedDeclaration.Declaration String Int ()]
+    :: [SharedDeclaration.Declaration String Void ()]
     -> IO Djex.DjinnEnvironment
 mkNeutralDjinnEnvironment = expectShownRight .
     SharedEnvironment.mkEnvironment

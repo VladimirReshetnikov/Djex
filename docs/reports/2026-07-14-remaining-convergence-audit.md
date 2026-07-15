@@ -471,6 +471,25 @@ ownership invariant explicit and aligning the two stable session surfaces.
 Parser-free and cross-backend regressions pin both the public type and the
 policy-preserving value behavior.
 
+## Post-fold stable kind-grounding alignment
+
+**Completed on 2026-07-15:** the curated Exference environment used `Void` for
+explicit kind variables, while `DjinnEnvironment` still exposed `Int` from the
+historical `HKind` vocabulary. That suggested a stable capability which did
+not exist: `mkDjinnSession` rejected every environment in which such a kind
+variable survived.
+
+`DjinnEnvironment` is now `Environment DjinnTypeVariable Void ()`, matching
+`ExferenceEnvironment` and making the shared ground-kind invariant visible in
+the public type. Djinn has a direct ground-environment preparation entrance,
+so the stable path no longer weakens impossible kind variables and immediately
+traverses the environment again to reject them. The raw `Djinn.Core`
+`SynthesisEnvironment` and `HKind` retain `Int` and `KVar` for historical
+round-tripping; transactional raw declarations explicitly weaken the sealed
+ground environment only at that compatibility edge. Parser-free compile
+coverage pins the public type equality, while Djinn and cross-backend tests pin
+standard-session conversion, declaration order, editing, and query behavior.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

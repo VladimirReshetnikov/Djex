@@ -246,9 +246,13 @@ display continue to observe only the neutral request. Both adapters enter
 `sealCachedQueryWithProvenance`, so validation failures receive the same
 source attribution and strictness contract without duplicating that subtle
 protocol in their private request constructors; backend caches remain lazy.
-`mkDjinnSession` lowers and seals the neutral shared
-`DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
-class-kind defaulting. An opaque shared `PreparedInventory` keeps that
+`mkDjinnSession` lowers and seals the kind-ground neutral shared
+`DjinnEnvironment = Environment DjinnTypeVariable Void ()` through one
+authoritative closed Inventory with Haskell 98 class-kind defaulting. Djinn's
+historical `Kind Int` remains only in its raw compatibility API; a surviving
+kind variable was never valid session state, so the stable path no longer
+weakens and re-grounds an already ground environment. An opaque shared
+`PreparedInventory` keeps that
 Inventory and its exact normalized synonym table inseparable; the mutable raw
 `Djinn.Core.Environment` no longer crosses the
 curated facade or survives inside `PreparedEnvironment`. Synonyms are expanded
@@ -292,7 +296,9 @@ The one-import `Language.Haskell.Djex` surface reexports the complete neutral
 declaration, environment, inventory, kind-inference, synonym-elaboration, and
 type-rendering vocabulary. `DjinnEnvironment`, `DjinnInventory`,
 `DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make every Djinn adapter
-signature nameable without depending on a hidden backend alias. The historical
+signature nameable without depending on a hidden backend alias. Both stable
+environment aliases now use `Void` for explicit kind variables, making their
+common ground-kind contract visible in types. The historical
 REPL now derives the editable shared environment from the grounded Inventory,
 edits it transactionally, and publishes only the completely resealed opaque
 session; raw declarations are one-way parser inputs and private derived

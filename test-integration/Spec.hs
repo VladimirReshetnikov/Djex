@@ -1100,7 +1100,8 @@ sharedDjinnQuery target contexts options goal = do
 sealDjinnEnvironment :: DjinnCore.Environment -> IO DjinnSession
 sealDjinnEnvironment environment = do
   shared <- expectRight $ toSynthesisEnvironment environment
-  expectRight $ mkDjinnSession shared
+  grounded <- expectRight $ groundEnvironmentKinds shared
+  expectRight $ mkDjinnSession grounded
 
 emptyExferenceCandidateDetails :: ExferenceCandidateDetails
 emptyExferenceCandidateDetails = ExferenceCandidateDetails

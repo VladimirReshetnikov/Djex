@@ -28,10 +28,12 @@ This compatibility is deliberately value-level: unlike the former data
 constructors, pattern synonyms cannot be promoted as `'KStar` or `'KArrow` by
 `DataKinds`. The stable `Djinn.Core` surface has always exposed `HKind`
 abstractly; promoted uses of the raw research AST were outside its contract.
-Neutral `DjinnEnvironment` sessions preserve their original
-sealed declaration order in one authoritative Inventory with Haskell 98
-class-kind defaulting, derive every raw backend kind from that Inventory, and
-reconstruct the editable neutral environment only for transactional REPL edits.
+Neutral `DjinnEnvironment = Environment DjinnTypeVariable Void ()` sessions
+make ungrounded explicit kinds unrepresentable by construction, matching
+Exference's stable environment contract. They preserve their original sealed
+declaration order in one authoritative Inventory with Haskell 98 class-kind
+defaulting, derive every raw backend kind from that Inventory, and reconstruct
+the editable neutral environment only for transactional REPL edits.
 
 ## Build and run
 
@@ -530,11 +532,12 @@ that result, with the latter retaining `reportGeneratedClauses` and legacy
 rendered strings.
 The default `djex` library additionally exposes
 `Language.Haskell.Djex.Djinn`: `mkDjinnSession` lowers a neutral
-`DjinnEnvironment` and retains the exact shared `DjinnInventory` that validated
-its private proof indexes together with the exact prepared synonym table. The
-session no longer retains a second editable `DjinnEnvironment`; the grounded
-Inventory is weakened losslessly when an edit begins, then the replacement is
-fully resealed before publication. The raw `Djinn.Core.Environment` therefore
+kind-ground `DjinnEnvironment` directly and retains the exact shared
+`DjinnInventory` that validated its private proof indexes together with the
+exact prepared synonym table. The session no longer retains a second editable
+`DjinnEnvironment`; the grounded Inventory is weakened losslessly only when a
+raw compatibility edit begins, then the replacement is fully resealed before
+publication. The raw `Djinn.Core.Environment` therefore
 remains confined to compatibility inputs and the REPL parser;
 `standardDjinnSession` converts the checked built-in spelling once and then
 uses the same neutral `mkDjinnSession` path as caller-supplied environments,

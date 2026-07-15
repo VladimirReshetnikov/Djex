@@ -6,6 +6,7 @@
 module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
+    prepareGroundSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentFormulaTranslator,
@@ -211,11 +212,31 @@ prepareSynthesisEnvironment sourceEnvironment = do
         (InvalidSynthesisInventory .
             SharedInventory.UngroundedInventoryKind) $
         SharedEnvironment.groundEnvironmentKinds sourceEnvironment
+    prepareGroundSynthesisEnvironmentFrom
+        sourceDeclarations groundedEnvironment
+
+-- | Seal the kind-ground neutral environment accepted by the stable Djex
+-- adapter. Unlike the raw compatibility entrance above, this path does not
+-- weaken impossible kind variables merely to traverse and reject them again.
+prepareGroundSynthesisEnvironment
+    :: SharedEnvironment.Environment HSymbol Void ()
+    -> Either SynthesisEnvironmentError PreparedEnvironment
+prepareGroundSynthesisEnvironment sourceEnvironment = do
+    sourceDeclarations <- mapM preflightGroundDeclaration $
+        SharedEnvironment.environmentDeclarations sourceEnvironment
+    prepareGroundSynthesisEnvironmentFrom
+        sourceDeclarations sourceEnvironment
+
+prepareGroundSynthesisEnvironmentFrom
+    :: [(SynthesisDeclaration, Declaration)]
+    -> SharedEnvironment.Environment HSymbol Void ()
+    -> Either SynthesisEnvironmentError PreparedEnvironment
+prepareGroundSynthesisEnvironmentFrom sourceDeclarations sourceEnvironment = do
     inventory <- first
         (InvalidSynthesisInventory . promoteVoidInventoryError) $
         SharedInventory.mkInventoryFromEnvironmentWithClassPolicy
             SharedInference.ClosedKindInventory
-            SharedInference.DefaultClassKinds groundedEnvironment
+            SharedInference.DefaultClassKinds sourceEnvironment
     expansion <- prepareInventoryExpansion inventory
     environment <- projectSynthesisEnvironment
         (SharedInventory.inventoryKindAssumptions inventory)
@@ -746,6 +767,12 @@ preflightDeclaration sharedDeclaration = do
     rawDeclaration <- first SynthesisEnvironmentDeclarationError $
         fromSynthesisDeclaration sharedDeclaration
     return (sharedDeclaration, rawDeclaration)
+
+preflightGroundDeclaration
+    :: SharedDeclaration.Declaration HSymbol Void ()
+    -> Either SynthesisEnvironmentError (SynthesisDeclaration, Declaration)
+preflightGroundDeclaration = preflightDeclaration .
+    SharedDeclaration.mapDeclarationKindVariables absurd
 
 data ProjectedDeclaration
     = ProjectedType TypeDefinition

@@ -1294,6 +1294,45 @@ declarationTests = testGroup "declarations"
             ]
       map (Declaration.mapDeclarationKindVariables (+ 10)) source @?=
         expected
+  , testCase "map and inspect declaration type variables uniformly" $ do
+      let className = right $ mkIdentifier "C"
+          superclassName = right $ mkIdentifier "Super"
+          prerequisiteName = right $ mkIdentifier "Prerequisite"
+          methodName = right $ mkIdentifier "method"
+          variable = SharedType.TypeVariable
+          parameter name = Declaration.TypeParameter name
+            $ Just $ Kind.KindVariable (2 :: Int)
+          sourceClass :: Declaration.Declaration String Int Int
+          sourceClass = Declaration.ClassDeclaration 1 className
+            [parameter "parameter"]
+            [Constraint superclassName [variable "super"]]
+            [Declaration.ValueSignature 3 methodName
+              $ SharedType.FunctionType
+                  (variable "argument") (variable "parameter")]
+          expectedClass = Declaration.ClassDeclaration 1 className
+            [parameter "parameter'"]
+            [Constraint superclassName [variable "super'"]]
+            [Declaration.ValueSignature 3 methodName
+              $ SharedType.FunctionType
+                  (variable "argument'") (variable "parameter'")]
+          sourceInstance :: Declaration.Declaration String Int Int
+          sourceInstance = Declaration.InstanceDeclaration 4 ["bound"]
+            [Constraint prerequisiteName [variable "prerequisite"]]
+            (Constraint className [variable "head"])
+          expectedInstance = Declaration.InstanceDeclaration 4 ["bound'"]
+            [Constraint prerequisiteName [variable "prerequisite'"]]
+            (Constraint className [variable "head'"])
+          rename name = name ++ "'"
+      Declaration.declarationSubjectName sourceClass @?= className
+      Declaration.declarationTypeVariables sourceClass @?=
+        ["parameter", "super", "argument", "parameter"]
+      Declaration.mapDeclarationTypeVariables rename sourceClass @?=
+        expectedClass
+      Declaration.declarationSubjectName sourceInstance @?= className
+      Declaration.declarationTypeVariables sourceInstance @?=
+        ["bound", "prerequisite", "head"]
+      Declaration.mapDeclarationTypeVariables rename sourceInstance @?=
+        expectedInstance
   , testCase "kind variables traverse and report free identities" $ do
       let kind = Kind.FunctionKind (Kind.KindVariable (1 :: Int))
             Kind.ProperTypeKind

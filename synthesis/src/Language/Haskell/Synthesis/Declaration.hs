@@ -12,14 +12,18 @@ module Language.Haskell.Synthesis.Declaration
   , ValueSignature (..)
   , Declaration (..)
   , DeclarationError (..)
+  , declarationSubjectName
+  , declarationTypeVariables
   , validateDeclaration
   , recursiveDataTypeNames
+  , mapDeclarationTypeVariables
   , mapDeclarationKindVariables
   , groundDeclarationKinds
   ) where
 
 import Control.DeepSeq (NFData)
 import Control.Monad (unless)
+import Data.Foldable (toList)
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -99,6 +103,47 @@ data DeclarationError typeVariable
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData typeVariable => NFData (DeclarationError typeVariable)
+
+-- | The nominal subject used to identify a declaration in diagnostics.
+-- Instances have no declared value or type name, so their subject is the
+-- class at the head of the instance.
+declarationSubjectName
+  :: Declaration typeVariable kindVariable annotation
+  -> Name
+declarationSubjectName declaration = case declaration of
+  TypeSynonymDeclaration _ name _ _ -> name
+  DataTypeDeclaration _ name _ _ -> name
+  AbstractTypeDeclaration _ name _ -> name
+  ValueDeclaration signature -> valueName signature
+  ClassDeclaration _ name _ _ _ -> name
+  InstanceDeclaration _ _ _ headConstraint -> constraintClass headConstraint
+
+-- | Every explicit type-variable occurrence in structural source order.
+-- Declaration parameters or instance binders precede the syntax they scope;
+-- superclass and instance prerequisites precede methods and the instance
+-- head respectively. Duplicates are retained so callers can impose their own
+-- identity or occurrence policy.
+declarationTypeVariables
+  :: Declaration typeVariable kindVariable annotation
+  -> [typeVariable]
+declarationTypeVariables declaration = case declaration of
+  TypeSynonymDeclaration _ _ parameters body ->
+    parameterVariables parameters ++ toList body
+  DataTypeDeclaration _ _ parameters constructors ->
+    parameterVariables parameters
+      ++ concatMap (concatMap toList . constructorFields) constructors
+  AbstractTypeDeclaration{} -> []
+  ValueDeclaration signature -> toList $ valueType signature
+  ClassDeclaration _ _ parameters superclasses methods ->
+    parameterVariables parameters
+      ++ concatMap constraintVariables superclasses
+      ++ concatMap (toList . valueType) methods
+  InstanceDeclaration _ variables prerequisites headConstraint ->
+    variables ++ concatMap constraintVariables prerequisites
+      ++ constraintVariables headConstraint
+ where
+  parameterVariables = map parameterVariable
+  constraintVariables = concatMap toList . constraintArguments
 
 validateDeclaration
   :: Ord typeVariable
@@ -206,6 +251,44 @@ recursiveDataTypeNames declarations = Set.fromList
     | constructor <- constructors
     , field <- constructorFields constructor
     ]
+
+-- | Rename every type variable without changing kinds, annotations, names,
+-- or declaration shape. Binder and occurrence identities are transformed by
+-- the same function; callers remain responsible for choosing a scope-safe
+-- renaming.
+mapDeclarationTypeVariables
+  :: (typeVariable -> typeVariable')
+  -> Declaration typeVariable kindVariable annotation
+  -> Declaration typeVariable' kindVariable annotation
+mapDeclarationTypeVariables convert declaration = case declaration of
+  TypeSynonymDeclaration annotation name parameters body ->
+    TypeSynonymDeclaration annotation name
+      (map convertParameter parameters) (convertType body)
+  DataTypeDeclaration annotation name parameters constructors ->
+    DataTypeDeclaration annotation name
+      (map convertParameter parameters) (map convertConstructor constructors)
+  AbstractTypeDeclaration annotation name kind ->
+    AbstractTypeDeclaration annotation name kind
+  ValueDeclaration signature -> ValueDeclaration $ convertSignature signature
+  ClassDeclaration annotation name parameters superclasses methods ->
+    ClassDeclaration annotation name
+      (map convertParameter parameters)
+      (map convertConstraint superclasses)
+      (map convertSignature methods)
+  InstanceDeclaration annotation variables prerequisites headConstraint ->
+    InstanceDeclaration annotation (map convert variables)
+      (map convertConstraint prerequisites) (convertConstraint headConstraint)
+ where
+  convertType = fmap convert
+  convertConstraint = fmap convertType
+  convertParameter parameter = TypeParameter
+    (convert $ parameterVariable parameter) (parameterKind parameter)
+  convertConstructor constructor = DataConstructor
+    (constructorAnnotation constructor) (constructorName constructor)
+    (map convertType $ constructorFields constructor)
+  convertSignature signature = ValueSignature
+    (valueAnnotation signature) (valueName signature)
+    (convertType $ valueType signature)
 
 -- | Rename every explicit kind variable without changing source types,
 -- annotations, or declaration shape.

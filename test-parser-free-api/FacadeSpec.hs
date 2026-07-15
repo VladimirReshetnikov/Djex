@@ -42,6 +42,13 @@ facadeTests = testGroup "public Djex facade"
       typeConstraints typeExpression @?= []
       typeConstructorHead typeExpression @?= Just checkedName
       freeVariablesInFirstOccurrenceOrder typeExpression @?= []
+      declaredValueName <- expectRight $ mkIdentifier "value"
+      let declaration = ValueDeclaration
+            $ ValueSignature () declaredValueName typeExpression
+      declarationSubjectName declaration @?= declaredValueName
+      declarationTypeVariables declaration @?= ["a", "a"]
+      declarationTypeVariables
+          (mapDeclarationTypeVariables length declaration) @?= [1, 1]
       let requestTraversal
             :: (RequestTypeSite -> String -> Maybe String)
             -> (Constraint String -> Maybe (Constraint String))

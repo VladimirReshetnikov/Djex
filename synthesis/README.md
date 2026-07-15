@@ -177,6 +177,11 @@ the common type invariants. Synonym bodies, datatype fields, superclasses, and
 instance constraints must be covered by their declaration binders; value
 signatures and class methods retain Haskell's implicit local quantification.
 The layer does not prescribe backend-specific class or instance resolution.
+It maps type and kind identities independently, exposes every type-variable
+occurrence in structural source order, and assigns each declaration a nominal
+diagnostic subject (the head class for an instance). Backend projections can
+therefore repack identities or attribute failures without rebuilding every
+declaration constructor privately.
 Its `recursiveDataTypeNames` query is the common whole-declaration SCC
 classifier. Callers invoke it only after synonym expansion; otherwise phantom
 aliases can invent edges and alias-mediated recursion can hide them. Backend

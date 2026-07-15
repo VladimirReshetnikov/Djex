@@ -596,6 +596,28 @@ pin constraint-before-body order and productive prefix emission, existing
 Djinn capture tests retain exact generated prime spellings, and the
 parser-free facade exposes the common query.
 
+## Post-fold declaration traversal consolidation
+
+**Completed on 2026-07-15:** Exference's neutral lowerer reconstructed every
+shared declaration form to rename type variables, then maintained a second
+constructor-by-constructor walk to discover those variables. It also carried
+a private declaration-subject switch for synonym-expansion diagnostics. These
+walks duplicated the declaration grammar already owned by the foundation and
+could drift whenever that grammar changed.
+
+`Language.Haskell.Synthesis.Declaration` now owns
+`mapDeclarationTypeVariables`, `declarationTypeVariables`, and
+`declarationSubjectName`, complementing its existing kind-variable map.
+Exference's normalization becomes one shared map over a replacement table and
+deletes both recursive declaration copies. The variable projection explicitly
+retains duplicates and structural order: parameters or instance binders first,
+then superclasses or prerequisites before methods or the instance head. This
+also corrects the old private helper's misleading source-order claim; checked
+instances already bind every used variable explicitly, so accepted lowerings
+retain the same normalized identities. Foundation tests pin class and instance
+mapping, ordering, annotations, kinds, and diagnostic subjects, while the
+parser-free facade pins all three operations.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

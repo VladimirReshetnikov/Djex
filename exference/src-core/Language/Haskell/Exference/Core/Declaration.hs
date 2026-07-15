@@ -389,7 +389,8 @@ lowerNeutralSynthesisEnvironment synonyms environment = do
     SharedDeclaration.TypeSynonymDeclaration{} -> Right declaration
     SharedDeclaration.AbstractTypeDeclaration{} -> Right declaration
     _ -> first
-      (NeutralSynonymExpansionError index $ declarationName declaration)
+      (NeutralSynonymExpansionError index
+        $ SharedDeclaration.declarationSubjectName declaration)
       $ SharedTypeSynonym.expandDeclarationTypeSynonyms
           freshSynthesisVariable synonyms declaration
 
@@ -433,17 +434,6 @@ lowerNeutralSynthesisEnvironment synonyms environment = do
 type NeutralSynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void ()
 
-declarationName :: NeutralSynthesisDeclaration -> SharedName.Name
-declarationName declaration = case declaration of
-  SharedDeclaration.TypeSynonymDeclaration _ name _ _ -> name
-  SharedDeclaration.DataTypeDeclaration _ name _ _ -> name
-  SharedDeclaration.AbstractTypeDeclaration _ name _ -> name
-  SharedDeclaration.ValueDeclaration signature ->
-    SharedDeclaration.valueName signature
-  SharedDeclaration.ClassDeclaration _ name _ _ _ -> name
-  SharedDeclaration.InstanceDeclaration _ _ _ headConstraint ->
-    SharedConstraint.constraintClass headConstraint
-
 -- Variable identities are local to a source declaration. Repacking flexible
 -- IDs makes negative class parameters acceptable to the historical core and
 -- gives every method in a class the same coherent owner namespace. Parameters
@@ -451,70 +441,18 @@ declarationName declaration = case declaration of
 normalizeDeclarationVariables
   :: NeutralSynthesisDeclaration
   -> NeutralSynthesisDeclaration
-normalizeDeclarationVariables declaration = case declaration of
-  SharedDeclaration.TypeSynonymDeclaration annotation name parameters body ->
-    SharedDeclaration.TypeSynonymDeclaration annotation name
-      (map renameParameter parameters) (renameType body)
-  SharedDeclaration.DataTypeDeclaration annotation name parameters constructors ->
-    SharedDeclaration.DataTypeDeclaration annotation name
-      (map renameParameter parameters) (map renameConstructor constructors)
-  SharedDeclaration.AbstractTypeDeclaration{} -> declaration
-  SharedDeclaration.ValueDeclaration signature ->
-    SharedDeclaration.ValueDeclaration $ renameSignature signature
-  SharedDeclaration.ClassDeclaration annotation name parameters
-      superclasses methods -> SharedDeclaration.ClassDeclaration annotation name
-        (map renameParameter parameters)
-        (map renameConstraint superclasses)
-        (map renameSignature methods)
-  SharedDeclaration.InstanceDeclaration annotation variables
-      prerequisites headConstraint -> SharedDeclaration.InstanceDeclaration
-        annotation (map renameVariable variables)
-        (map renameConstraint prerequisites) (renameConstraint headConstraint)
+normalizeDeclarationVariables declaration =
+  SharedDeclaration.mapDeclarationTypeVariables renameVariable declaration
  where
   flexibleVariables = SharedCollection.distinctOn id
     [ variable
-    | variable@SharedType.FlexibleVariable{} <- declarationVariables declaration
+    | variable@SharedType.FlexibleVariable{} <-
+        SharedDeclaration.declarationTypeVariables declaration
     ]
   replacements = Map.fromList $ zip flexibleVariables
     (map SharedType.FlexibleVariable synthesisIdentifierNamespace)
 
   renameVariable variable = Map.findWithDefault variable variable replacements
-  renameType = fmap renameVariable
-  renameConstraint = fmap renameType
-  renameParameter parameter = SharedDeclaration.TypeParameter
-    (renameVariable $ SharedDeclaration.parameterVariable parameter)
-    (SharedDeclaration.parameterKind parameter)
-  renameConstructor constructor = SharedDeclaration.DataConstructor
-    (SharedDeclaration.constructorAnnotation constructor)
-    (SharedDeclaration.constructorName constructor)
-    (map renameType $ SharedDeclaration.constructorFields constructor)
-  renameSignature signature = SharedDeclaration.ValueSignature
-    (SharedDeclaration.valueAnnotation signature)
-    (SharedDeclaration.valueName signature)
-    (renameType $ SharedDeclaration.valueType signature)
-
-declarationVariables :: NeutralSynthesisDeclaration -> [SynthesisVariable]
-declarationVariables declaration = case declaration of
-  SharedDeclaration.TypeSynonymDeclaration _ _ parameters body ->
-    parameterVariables parameters ++ toList body
-  SharedDeclaration.DataTypeDeclaration _ _ parameters constructors ->
-    parameterVariables parameters
-      ++ concatMap (concatMap toList . SharedDeclaration.constructorFields)
-          constructors
-  SharedDeclaration.AbstractTypeDeclaration{} -> []
-  SharedDeclaration.ValueDeclaration signature ->
-    toList $ SharedDeclaration.valueType signature
-  SharedDeclaration.ClassDeclaration _ _ parameters superclasses methods ->
-    parameterVariables parameters
-      ++ concatMap constraintTypeVariables superclasses
-      ++ concatMap (toList . SharedDeclaration.valueType) methods
-  SharedDeclaration.InstanceDeclaration _ variables prerequisites headConstraint ->
-    variables ++ concatMap constraintTypeVariables
-      (headConstraint : prerequisites)
- where
-  parameterVariables = map SharedDeclaration.parameterVariable
-  constraintTypeVariables = concatMap toList
-    . SharedConstraint.constraintArguments
 
 prepareSearchDeclaration
   :: Set.Set SharedName.Name

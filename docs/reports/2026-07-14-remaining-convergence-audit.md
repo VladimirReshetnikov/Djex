@@ -755,6 +755,25 @@ is documented as unproducible by the new path. Foundation regressions pin
 avoidance of a later sibling's source identity and distinct allocations across
 members; Exference pins the corresponding multi-argument constraint behavior.
 
+## Post-fold superclass-instantiation consolidation
+
+**Completed on 2026-07-15:** Exference repeated immediate-superclass lookup,
+arity checking, parameter substitution, and malformed-input fallback inside
+both query-constraint closure and derived instance-head closure. The two paths
+operated on the same sealed `StaticClassEnv`, so keeping separate algorithms
+made a future substitution or validation change liable to diverge between
+assumptions and the instance lookup index.
+
+One private `directSuperclasses` operation now owns that transition. Constraint
+closure consumes its results directly; instance closure only reattaches the
+source instance's prerequisite list. The shared helper deliberately retains
+the arity guard because both exported low-level closure functions remain total
+for caller-built malformed constraints even though sealed environments reject
+them. A binary-class regression swaps superclass parameters and proves that
+both closures produce the same instantiated head while the instance path
+preserves prerequisites; the existing cycle, rigid-argument, malformed-arity,
+and packaged-environment count tests continue to cover the surrounding graph.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

@@ -340,6 +340,26 @@ tests = testGroup "Exference"
             Set.fromList [sourceConstraint, impliedConstraint]
           Set.fromList (inflateInstances environment [sourceInstance]) @?=
             Set.fromList [sourceInstance, impliedInstance]
+      , testCase "constraint and instance closure share parameter substitution" $ do
+          let base = HsTypeClass (name "Base") [0, 1] []
+              derived = HsTypeClass (name "Derived") [2, 3]
+                [HsConstraint (name "Base") [TypeVar 3, TypeVar 2]]
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              sourceConstraint = HsConstraint (name "Derived")
+                [integer, boolean]
+              impliedConstraint = HsConstraint (name "Base")
+                [boolean, integer]
+              prerequisite = HsConstraint (name "Base")
+                [integer, boolean]
+              sourceInstance = HsInstance [prerequisite] sourceConstraint
+              impliedInstance = HsInstance [prerequisite] impliedConstraint
+          environment <- expectRight
+            $ mkStaticClassEnv [base, derived] []
+          inflateHsConstraints environment (Set.singleton sourceConstraint)
+            @?= Set.fromList [sourceConstraint, impliedConstraint]
+          Set.fromList (inflateInstances environment [sourceInstance]) @?=
+            Set.fromList [sourceInstance, impliedInstance]
       , testCase "duplicate class names are rejected in either order" $ do
           let unary = HsTypeClass (name "C") [0] []
               binary = HsTypeClass (name "C") [0, 1] []

@@ -689,16 +689,8 @@ inflateHsConstraints
   :: StaticClassEnv
   -> S.Set HsConstraint
   -> S.Set HsConstraint
-inflateHsConstraints environment = closure (S.fromList . superclasses)
-  where
-    superclasses :: HsConstraint -> [HsConstraint]
-    superclasses (HsConstraint className arguments) = case
-      M.lookup className (sClassEnv_tclasses environment) of
-        Just (HsTypeClass _ parameters constraints)
-          | length parameters == length arguments ->
-              let substitutions = IntMap.fromList $ zip parameters arguments
-              in map (snd . constraintApplySubsts substitutions) constraints
-        _ -> []
+inflateHsConstraints environment = closure
+  $ S.fromList . directSuperclasses environment
 
 -- | Add instance heads implied by superclass declarations.  Exact arity is
 -- checked before substitution, so no malformed head can be truncated by
@@ -707,19 +699,22 @@ inflateInstances :: StaticClassEnv -> [HsInstance] -> [HsInstance]
 inflateInstances environment =
   S.toList . closure (S.fromList . superclasses) . S.fromList
  where
-  superclasses :: HsInstance -> [HsInstance]
-  superclasses (HsInstance prerequisites
-      (HsConstraint className arguments)) = case
-    M.lookup className (sClassEnv_tclasses environment) of
-      Just (HsTypeClass _ parameters constraints)
-        | length parameters == length arguments ->
-            let substitutions = IntMap.fromList $ zip parameters arguments
-            in map
-                (HsInstance prerequisites
-                  . snd
-                  . constraintApplySubsts substitutions)
-                constraints
-      _ -> []
+  superclasses (HsInstance prerequisites headConstraint) = map
+    (HsInstance prerequisites) $ directSuperclasses environment headConstraint
+
+-- | Instantiate one constraint's declared immediate superclasses. The arity
+-- guard keeps the two low-level closure helpers total for caller-built
+-- constraints even though sealed class environments validate every stored
+-- declaration and instance before invoking them.
+directSuperclasses :: StaticClassEnv -> HsConstraint -> [HsConstraint]
+directSuperclasses environment
+    (HsConstraint className arguments) = case
+  M.lookup className $ sClassEnv_tclasses environment of
+    Just (HsTypeClass _ parameters constraints)
+      | length parameters == length arguments ->
+          let substitutions = IntMap.fromList $ zip parameters arguments
+          in map (snd . constraintApplySubsts substitutions) constraints
+    _ -> []
 
 -- | Checked simultaneous substitution across every argument of a constraint
 -- under one shared fresh-variable reservation set.

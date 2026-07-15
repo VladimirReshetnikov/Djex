@@ -43,9 +43,12 @@ facadeTests = testGroup "public Djex facade"
         )
       typeConstraints typeExpression @?= []
       typeConstructorHead typeExpression @?= Just checkedName
+      functionSpine typeExpression @?= ([], typeExpression)
       freeVariablesInFirstOccurrenceOrder typeExpression @?= []
       constraintFreeVariables
           (Constraint checkedName [typeExpression]) @?= Set.empty
+      quantifyFreeVariables (const True) (TypeVariable "b") @?=
+        ForallType ["b"] [] (TypeVariable "b")
       uniquifyTypeBinders acceptBinder (\_ _ -> Nothing) Set.empty
           typeExpression @?= Right (typeExpression, Set.singleton "a")
       declaredValueName <- expectRight $ mkIdentifier "value"

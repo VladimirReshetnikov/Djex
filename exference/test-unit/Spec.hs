@@ -1138,6 +1138,29 @@ tests = testGroup "Exference"
                 [HsConstraint (name "C") [TypeVar 0, TypeVar 1]]
                 (TypeVar 0)
           freeVars ty @?= Set.singleton 1
+      , testCase "forallify binds flexible variables in canonical order" $ do
+          let source = TypeForallNative
+                [SharedType.FlexibleVariable 2]
+                []
+                (TypeTuple Boxed
+                  [ TypeVar 3
+                  , TypeConstant 0
+                  , TypeVar 2
+                  , TypeVar 1
+                  ])
+              expected = TypeForallNative
+                [ SharedType.FlexibleVariable 1
+                , SharedType.FlexibleVariable 3
+                , SharedType.FlexibleVariable 2
+                ]
+                []
+                (TypeTuple Boxed
+                  [ TypeVar 3
+                  , TypeConstant 0
+                  , TypeVar 2
+                  , TypeVar 1
+                  ])
+          forallify source @?= expected
       , testCase "largestId includes forall binders and context variables" $ do
           let ty = TypeForall [7]
                 [HsConstraint (name "C") [TypeVar 9]] (TypeVar 2)

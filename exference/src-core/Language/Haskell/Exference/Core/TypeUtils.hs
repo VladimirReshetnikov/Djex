@@ -4,7 +4,7 @@ module Language.Haskell.Exference.Core.TypeUtils
   , maximumSubstitutionFlexibleId
   , largestId
   , largestSubstsId
-  , forallify -- unused atm
+  , forallify
   , ConstraintSite (..)
   , ClassEnvError (..)
   , mkStaticClassEnv
@@ -40,16 +40,15 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
 
--- binds everything in Foralls, so there are no free variables anymore.
+-- | Bind every free flexible variable at the outermost forall while leaving
+-- rigid skolems free. This compatibility name preserves Exference's canonical
+-- ascending integer binder order.
 forallify :: HsType -> HsType
-forallify t = case t of
-  TypeForallNative variables constraints body -> TypeForallNative
-    (map SharedType.FlexibleVariable (S.toList frees) ++ variables)
-    constraints
-    body
-  _ -> TypeForall (S.toList frees) [] t
+forallify = SharedType.quantifyFreeVariables isFlexible
  where
-  frees = freeVars t
+  isFlexible variable = case variable of
+    SharedType.FlexibleVariable{} -> True
+    SharedType.RigidVariable{} -> False
 
 -- | Transform the complete flexible namespace, including forall binders and
 -- constraints, without changing rigid search constants. The shared functor
@@ -205,10 +204,9 @@ splitArrowResultParams source = case alphaNormalizeForalls IntSet.empty source o
 -- result rather than being opened. This is the total monotype decomposition
 -- used when substitutions expose more function parameters during search.
 splitArrowChain :: HsType -> (HsType, [HsType])
-splitArrowChain (TypeArrow parameter result) =
-  let (finalResult, parameters) = splitArrowChain result
-  in (finalResult, parameter : parameters)
-splitArrowChain result = (result, [])
+splitArrowChain source =
+  let (parameters, result) = SharedType.functionSpine source
+  in (result, parameters)
 
 -- | Whether a type contains explicit quantification at any depth.
 containsForall :: HsType -> Bool

@@ -1561,6 +1561,27 @@ typeTests = testGroup "source types"
       SharedType.renameScopedVariables
           (Map.fromList [("a", "outer"), ("b", "free")]) source
         @?= expected
+  , testCase "function spines retain parameter and residual structure" $ do
+      let variable = SharedType.TypeVariable
+          nested = SharedType.ForallType ["c"] [] $ variable "c"
+          source = SharedType.FunctionType (variable "a")
+            $ SharedType.FunctionType (variable "b") nested
+      SharedType.functionSpine source @?=
+        ([variable "a", variable "b"], nested)
+      SharedType.functionSpine nested @?= ([], nested)
+  , testCase "quantify selected free variables at one outer scope" $ do
+      let variable = SharedType.TypeVariable
+          source = SharedType.ForallType ["z"] [] $ SharedType.TupleType Boxed
+            [variable "b", variable "rigid", variable "z", variable "a"]
+          expected = SharedType.ForallType ["a", "b", "z"] []
+            $ SharedType.TupleType Boxed
+              [variable "b", variable "rigid", variable "z", variable "a"]
+          ground = SharedType.TupleType Boxed [] :: SharedType.Type String
+          select variableName = variableName /= "rigid"
+      SharedType.quantifyFreeVariables select source @?= expected
+      SharedType.quantifyFreeVariables select expected @?= expected
+      SharedType.quantifyFreeVariables (const True) ground @?=
+        SharedType.ForallType [] [] ground
   , testCase "uniquify binders against complete source scope" $ do
       let variable = SharedType.TypeVariable
           acceptAll _ = Nothing :: Maybe String

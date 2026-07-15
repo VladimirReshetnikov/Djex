@@ -655,6 +655,25 @@ allocator exhaustion. Exference pins its external-ID allocation spelling and
 existing rank-N/source/session suite, while the parser-free facade exposes the
 shared operation.
 
+## Post-fold type-closure and function-spine consolidation
+
+**Completed on 2026-07-15:** the shared type vocabulary now also owns the two
+remaining structural operations behind Exference's `forallify` and arrow
+decomposition. `quantifyFreeVariables` closes a policy-selected namespace in
+canonical identity order, prepending binders to one existing leading forall
+or introducing one explicit outer layer. The selection policy keeps flexible
+inference variables distinct from rigid skolems without making their tagged
+representation a foundation concern. `functionSpine` splits only consecutive
+right-associated arrows and leaves a quantified or otherwise structured result
+intact.
+
+Exference retains `forallify` and `splitArrowChain` as source-compatible thin
+adapters for its flexible-ID policy and historical result-first tuple order.
+Declaration conversion now calls the shared function-spine operation directly,
+removing its second recursive arrow walk. Foundation, Exference, and facade
+regressions pin canonical binder order, rigid exclusion, idempotent closure,
+ground wrappers, parameter order, and the quantified-result stopping boundary.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

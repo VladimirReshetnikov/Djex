@@ -575,7 +575,7 @@ fromSynthesisFunctionBinding declaration = do
             TypeForall binders context nested -> (binders, context, nested)
             nested -> ([], [], nested)
       if null variables
-        then let (parameters, result) = splitFunctionType body
+        then let (parameters, result) = SharedType.functionSpine body
              in Right $ FunctionBinding result name penalty constraints parameters
         else Left $ ExplicitFunctionForallUnsupported variables
     _ -> Left ExpectedValueDeclaration
@@ -1053,9 +1053,3 @@ deconstructorHead typeExpression = do
 
 typeApplicationSpine :: HsType -> (HsType, [HsType])
 typeApplicationSpine = SharedType.applicationSpine
-
-splitFunctionType :: HsType -> ([HsType], HsType)
-splitFunctionType (TypeArrow parameter result) =
-  let (parameters, finalResult) = splitFunctionType result
-  in (parameter : parameters, finalResult)
-splitFunctionType result = ([], result)

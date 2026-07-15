@@ -19,6 +19,8 @@ module Language.Haskell.Synthesis.Type
   , BinderNormalizationError (..)
   , canonicalizeType
   , applicationSpine
+  , functionSpine
+  , quantifyFreeVariables
   , splitLeadingForalls
   , leadingForallVariables
   , containsForall
@@ -149,6 +151,39 @@ applicationSpine = collect []
     collect arguments (TypeApplication function argument) =
       collect (argument : arguments) function
     collect arguments function = (function, arguments)
+
+-- | Decompose a right-associated function type into its parameters and final
+-- result in source order. A non-function type has no parameters. Quantifiers
+-- or other structure below an arrow remain part of the final result.
+functionSpine :: Type variable -> ([Type variable], Type variable)
+functionSpine (FunctionType parameter result) =
+  let (parameters, finalResult) = functionSpine result
+  in (parameter : parameters, finalResult)
+functionSpine result = ([], result)
+
+-- | Quantify the selected free variables at the outermost scope.
+--
+-- Selected identities use their canonical 'Ord' order. When the source
+-- already begins with a forall, new binders are prepended to that layer while
+-- its constraints and body retain their exact structure. Otherwise one
+-- explicit forall layer is introduced, including for a ground type. The
+-- predicate lets a tagged namespace quantify flexible variables without
+-- accidentally binding rigid skolems.
+quantifyFreeVariables
+  :: Ord variable
+  => (variable -> Bool)
+  -> Type variable
+  -> Type variable
+quantifyFreeVariables shouldQuantify source = case source of
+  ForallType variables constraints body -> ForallType
+    (selectedVariables ++ variables)
+    constraints
+    body
+  _ -> ForallType selectedVariables [] source
+ where
+  selectedVariables = Set.toAscList
+    $ Set.filter shouldQuantify
+    $ freeVariables source
 
 -- | Split the complete leading prenex chain into its binders, direct
 -- constraints, and residual body. All lists preserve source order. A forall

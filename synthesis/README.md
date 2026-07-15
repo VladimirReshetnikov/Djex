@@ -143,9 +143,11 @@ rescanning a lazy search trace.
 tree: variables (optionally flexible/rigid), structural names, application,
 functions, boxed or unboxed tuples, and explicit foralls with shared
 constraints. It canonicalizes saturated function and tuple constructors,
-decomposes application spines in source order, validates
-lexical/arity/binder invariants, and computes free variables for both complete
-types and individual constraint arguments with nested quantifier scope.
+decomposes application and right-associated function spines in source order,
+quantifies a policy-selected free-variable namespace at one outer scope,
+validates lexical/arity/binder invariants, and computes free variables for
+both complete types and individual constraint arguments with nested quantifier
+scope.
 Its checked binder normalizer makes every explicit forall identity globally
 unique against free and caller-protected names while leaving backend binder
 admissibility and fresh-identity selection as explicit policies.

@@ -71,10 +71,6 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
 import qualified Djinn.Internal.Fresh as Fresh
-import Djinn.Internal.HCheck (
-    PreparedKindCheck,
-    htCheckTypePrepared, htCheckTypeKindPrepared,
-    htCheckTypesKindsPrepared)
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
@@ -293,11 +289,10 @@ requireName what valid name
     | otherwise = Left $ show name ++ " is not a valid " ++ what ++ " name"
 
 requireGroundKind :: HKind -> Either String ()
-requireGroundKind KStar = Right ()
-requireGroundKind (KArrow argument result) =
-    requireGroundKind argument >> requireGroundKind result
-requireGroundKind kind =
-    Left $ "kind contains an unsolved variable: " ++ show kind
+requireGroundKind kind = case groundHKind kind of
+    Right _ -> Right ()
+    Left variable -> Left $
+        "kind contains an unsolved variable: " ++ show (KVar variable)
 
 ------------------------------------------------------------------
 -- Queries
@@ -377,7 +372,7 @@ resolveContexts :: PreparedEnvironment -> [(String, HKind, HType)] -> [Context]
                 -> Either String [[(HSymbol, HType)]]
 resolveContexts prepared additionalTypes contexts = do
     resolved <- mapM (lookupContext prepared) contexts
-    checkKindObligations (preparedEnvironmentKindCheck prepared) $
+    checkKindObligations prepared $
         additionalTypes ++ concatMap argumentObligations resolved
     mapM (instantiateContext prepared) resolved
 
@@ -402,7 +397,7 @@ resolveQueryContexts prepared goalObligation contexts = do
     resolved <- queryFailure $ mapM (lookupContext prepared) contexts
     let obligations = goalObligation : concatMap argumentObligations resolved
     queryFailure $
-        checkKindObligations (preparedEnvironmentKindCheck prepared) obligations
+        checkKindObligations prepared obligations
     elaborated <- queryFailure $ elaboratePreparedTypes prepared
         [(kind, source) | (_, kind, source) <- obligations]
     case elaborated of
@@ -477,17 +472,17 @@ argumentObligations context =
 -- Retain the precise historical diagnostic when one type is independently
 -- ill-kinded.  If every component works alone, report the actual problem:
 -- inconsistent kinds assigned to a free variable shared by components.
-checkKindObligations :: PreparedKindCheck -> [(String, HKind, HType)]
+checkKindObligations :: PreparedEnvironment -> [(String, HKind, HType)]
                      -> Either String ()
 checkKindObligations prepared obligations =
-    case htCheckTypesKindsPrepared prepared
+    case checkPreparedTypesKinds prepared
             [(kind, t) | (_, kind, t) <- obligations] of
         Right () -> Right ()
         Left jointError ->
             case [(label, message)
                     | (label, kind, t) <- obligations
                     , Left message <-
-                        [htCheckTypeKindPrepared prepared kind t]] of
+                        [checkPreparedTypesKinds prepared [(kind, t)]]] of
                 (label, message) : _ -> Left $ label ++ ": " ++ message
                 [] -> Left $
                     "inconsistent kinds across " ++
@@ -510,8 +505,7 @@ instantiateContext prepared context = do
     return instantiated
   where
     checkMethod (methodName, methodType) =
-        case htCheckTypePrepared
-                (preparedEnvironmentKindCheck prepared) methodType of
+        case checkPreparedTypesKinds prepared [(KStar, methodType)] of
             Left message -> Left $
                 "method " ++ prHSymbolOp methodName ++ " of class " ++
                 resolvedName context ++ ": " ++ message

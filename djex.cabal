@@ -173,6 +173,7 @@ Library
   Other-Modules:
     Djinn.Internal.Declaration
     Djinn.Internal.Fresh
+    Djinn.Internal.HCheck.Implementation
     Djinn.Internal.Type
     Language.Haskell.Djex.Exference.Internal.Request
     Language.Haskell.Djex.Exference.Internal.Session
@@ -282,6 +283,9 @@ Test-Suite djinn-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: djinn/test-unit
+  Other-Modules:
+    HCheckCompatibility
+    HKindCompatibility
   Build-Depends:  djex
 
 Test-Suite djinn-property-tests

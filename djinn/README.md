@@ -21,7 +21,14 @@ seal that Inventory together with its exact normalized synonyms in the shared
 opaque `PreparedInventory` witness.
 Standalone declaration adapters still round-trip historical `KVar` syntax,
 while inventory sealing rejects any unsolved kind rather than allowing it into
-query elaboration. Neutral `DjinnEnvironment` sessions preserve their original
+query elaboration. `HKind` now stores the shared `Kind Int` tree directly
+behind bundled compatibility patterns, retaining `HKind(..)` imports and
+Djinn's exact `*`/`kN` rendering without a second recursive representation.
+This compatibility is deliberately value-level: unlike the former data
+constructors, pattern synonyms cannot be promoted as `'KStar` or `'KArrow` by
+`DataKinds`. The stable `Djinn.Core` surface has always exposed `HKind`
+abstractly; promoted uses of the raw research AST were outside its contract.
+Neutral `DjinnEnvironment` sessions preserve their original
 sealed declaration order in one authoritative Inventory with Haskell 98
 class-kind defaulting, derive every raw backend kind from that Inventory, and
 reconstruct the editable neutral environment only for transactional REPL edits.
@@ -69,7 +76,7 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 54 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kinds, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 59 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kind representation and compatibility, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-frontend-api-tests` | Three import-boundary checks proving that a dependency on `djinn-frontend` alone exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn`. |
 | `djinn-cli-tests` | Eighteen subprocess scenarios against the packaged executable, including EOF, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
@@ -376,10 +383,11 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn.Internal.Declaration` | Djinn declaration compatibility values and checked shared-IR lowering. |
 | `Djinn` (`src-frontend/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
-| `Djinn.Internal.HCheck` | Djinn compatibility adapter over shared kind inference, plus saturated-synonym policy. |
+| `Djinn.Internal.HCheck` | Pre-cache five-operation raw compatibility facade over shared kind inference. |
+| `Djinn.Internal.HCheck.Implementation` | Private prepared kind-check cache, trusted Inventory bridge, and saturated-synonym policy. |
 | `Djinn.Internal.Environment` | Authoritative Inventory preparation plus private class, kind, synonym, formula, and ordered global-premise indexes. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated shared name and operator rules in `djex`. |
-| `Djinn.Internal.HTypes` | Type parser, logical translation, and proof-term conversion/cleanup. |
+| `Djinn.Internal.HTypes` | Shared-kind compatibility view, type parser, logical translation, and proof-term conversion/cleanup. |
 | `Djinn.Internal.Type` | Checked conversion between Djinn source types and the shared source-type IR. |
 | `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
 | `Language.Haskell.Synthesis.Generated` | Shared local/global output tree, scope validation, capture-safe naming, qualification, and Haskell rendering. |
@@ -401,6 +409,13 @@ modules, while the component re-exports both stable core entry modules. The
 executable's `app/` source root contains only its launcher, so
 neither the frontend nor executable can accidentally compile core modules as
 home modules.
+
+The exposed `Djinn.Internal.HCheck` deliberately retains only the five raw
+operations from Djinn's pre-cache checker surface. Sealed-session caches pair
+synonym arities with kind assumptions derived from one exact Inventory, so
+their constructor and operations live in the package-private
+`Djinn.Internal.HCheck.Implementation` module; compatibility clients cannot
+assemble unrelated halves or depend on query-time cache structure.
 
 The REPL state stores only an opaque `DjinnSession`; every declaration or
 deletion produces and validates a fully resealed replacement before installing
@@ -552,8 +567,9 @@ operational completion.
 The raw proof/search `Djinn.Internal.*` modules used by compatibility tests and
 research tooling remain exposed by `djex`, but their constructors can
 violate these invariants and carry no stability promise. The checked
-declaration/type implementation modules and the frontend-only Help and REPL
-modules are deliberately not exposed. Raw formula translation is nevertheless
+declaration/type and prepared-kind-check implementation modules, plus the
+frontend-only Help and REPL modules, are deliberately not exposed. Raw formula
+translation is nevertheless
 total as a checked operation over finite inputs: `prepareTypeFormulaTranslator`
 checks the complete first-binding definition expansion graph once and returns a
 reusable `HType -> Either String Formula` translator. The graph conservatively

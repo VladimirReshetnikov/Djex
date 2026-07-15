@@ -42,7 +42,7 @@ that a module happens to import.
 
 **Completed on 2026-07-14:** `djex.cabal` now defines three library components:
 the unnamed parser-free `djex` library, `djinn-frontend`, and
-`exference-frontend`. The first compiles all 67 uniquely named modules under
+`exference-frontend`. The first compiles every uniquely named module under
 `src`, `synthesis/src`, `djinn/src-core`, and `exference/src-core` into one
 acyclic unit. Its external dependency union is only `base`, `containers`,
 `deepseq`, `pqueue`, `pretty`, and `transformers`. `directory`, `filepath`,
@@ -350,7 +350,7 @@ rather than privileged home-module constructor scope.
 Every migration milestone should retain the current release-style gates:
 
 - focused unit/property tests for touched core operations;
-- all 12 Djex test suites and both benchmarks compiled with `-Werror`;
+- all Djex test suites and both benchmarks compiled with `-Werror`;
 - the supported GHC 9.12.4 build and test graph;
 - `--prefer-oldest` resolution for the declared bounds;
 - `cabal check`, source-distribution inspection, and Haddock generation; and

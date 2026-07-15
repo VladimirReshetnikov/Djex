@@ -13,7 +13,6 @@ module Djinn.Internal.Declaration
   ) where
 
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
-import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Djinn.Internal.HIdentifier
@@ -22,7 +21,13 @@ import Djinn.Internal.HIdentifier
   , isVarId
   , isVarOperator
   )
-import Djinn.Internal.HTypes (HKind (..), HSymbol, HType)
+import Djinn.Internal.HTypes
+  ( HKind
+  , HSymbol
+  , HType
+  , fromSynthesisKind
+  , toSynthesisKind
+  )
 import Djinn.Internal.Type
   ( SynthesisTypeError
   , checkedDjinnTypeVariable
@@ -79,20 +84,6 @@ isDjinnDeclarationName role name = case role of
   ClassOwner -> isConId name
   MethodOwner -> isVarId name || isVarOperator name
   FunctionOwner -> isQualifiedVarId name || isVarOperator name
-
-toSynthesisKind :: HKind -> SharedKind.Kind Int
-toSynthesisKind kind = case kind of
-  KStar -> SharedKind.ProperTypeKind
-  KArrow parameter result -> SharedKind.FunctionKind
-    (toSynthesisKind parameter) (toSynthesisKind result)
-  KVar variable -> SharedKind.KindVariable variable
-
-fromSynthesisKind :: SharedKind.Kind Int -> HKind
-fromSynthesisKind kind = case kind of
-  SharedKind.ProperTypeKind -> KStar
-  SharedKind.FunctionKind parameter result -> KArrow
-    (fromSynthesisKind parameter) (fromSynthesisKind result)
-  SharedKind.KindVariable variable -> KVar variable
 
 toSynthesisDeclaration
   :: Declaration

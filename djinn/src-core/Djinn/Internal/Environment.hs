@@ -7,7 +7,7 @@ module Djinn.Internal.Environment (
     TypeDefinition, Axiom, ClassDefinition, Environment(..),
     PreparedEnvironment, prepareEnvironment, prepareSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
-    preparedEnvironmentKindCheck, preparedEnvironmentFormulaTranslator,
+    checkPreparedTypesKinds, preparedEnvironmentFormulaTranslator,
     preparedEnvironmentFunctionPremises, lookupPreparedEnvironmentClass,
     elaboratePreparedTypes,
     SynthesisEnvironment, SynthesisInventory,
@@ -28,16 +28,16 @@ import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
-import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Djinn.Internal.Declaration
 import Djinn.Internal.Fresh (allocateFresh)
-import Djinn.Internal.HCheck
+import Djinn.Internal.HCheck.Implementation
     ( PreparedKindCheck
     , htCheckTypePrepared
+    , htCheckTypesKindsPrepared
     , htInferClassKindsPrepared
     , prepareKindEnvironment
     , prepareKindCheckWithAssumptions
@@ -344,7 +344,7 @@ sealPreparedEnvironment (Environment types functions classes)
                 (translate source)
 
 -- | Reconstruct the historical raw declaration tables on demand. The
--- inventory is opaque and can enter 'PreparedEnvironment' only after Djinn's
+-- inventory is opaque and can enter t'PreparedEnvironment' only after Djinn's
 -- declaration preflight, so a failure here denotes an internal invariant
 -- violation rather than a caller error.
 preparedEnvironmentSource :: PreparedEnvironment -> Environment
@@ -360,9 +360,16 @@ preparedEnvironmentInventory
         (PreparedEnvironment prepared _ _ _ _) =
     SharedTypeSynonym.preparedInventory prepared
 
-preparedEnvironmentKindCheck :: PreparedEnvironment -> PreparedKindCheck
-preparedEnvironmentKindCheck
-        (PreparedEnvironment _ kindCheck _ _ _) = kindCheck
+-- | Check a batch in the one kind scope sealed with this exact environment.
+-- Keeping the cache behind this operation prevents callers from retaining or
+-- pairing its private synonym arities and assumptions independently.
+checkPreparedTypesKinds
+    :: PreparedEnvironment
+    -> [(HKind, HType)]
+    -> Either String ()
+checkPreparedTypesKinds
+        (PreparedEnvironment _ kindCheck _ _ _) =
+    htCheckTypesKindsPrepared kindCheck
 
 preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
@@ -424,7 +431,7 @@ elaboratePreparedTypes prepared obligations = do
     mapM (first show . fromSynthesisType) elaborated
   where
     convertObligation (expected, source) = (,)
-        <$> groundHKind expected
+        <$> checkedGroundHKind expected
         <*> first show (toSynthesisType source)
 
     synonyms = preparedEnvironmentTypeSynonyms prepared
@@ -447,12 +454,11 @@ renderElaborationError failure = case failure of
                 " argument(s), but got " ++ show supplied
             _ -> show expansionError
 
-groundHKind :: HKind -> Either String SharedInference.GroundKind
-groundHKind kind = case kind of
-    KStar -> Right SharedKind.ProperTypeKind
-    KArrow parameter result -> SharedKind.FunctionKind
-        <$> groundHKind parameter <*> groundHKind result
-    KVar variable -> Left $
+checkedGroundHKind :: HKind -> Either String SharedInference.GroundKind
+checkedGroundHKind = first renderUnsolved . groundHKind
+  where
+    -- Preserve the raw environment API's historical bare-identity spelling.
+    renderUnsolved variable =
         "kind contains an unsolved variable: " ++ show variable
 
 synthesisDeclarations
@@ -545,7 +551,7 @@ requiredTypeKind
     -> Either SynthesisEnvironmentError HKind
 requiredTypeKind assumptions name =
     maybe (Left $ MissingSynthesisTypeKind name)
-        (Right . groundKindToHKind) $
+        (Right . fromGroundHKind) $
         Map.lookup name $ SharedInference.typeConstructorKinds assumptions
 
 requiredClassKinds
@@ -562,12 +568,9 @@ requiredClassKinds assumptions name parameters =
                     (length parameters) (length kinds)
             | otherwise -> sequence
                 [ maybe (Left $ UnresolvedSynthesisClassKind name parameter)
-                    (Right . groundKindToHKind) kind
+                    (Right . fromGroundHKind) kind
                 | (parameter, kind) <- zip parameters kinds
                 ]
-
-groundKindToHKind :: SharedInference.GroundKind -> HKind
-groundKindToHKind = fromSynthesisKind . fmap absurd
 
 freshDjinnTypeVariable
     :: SharedTypeSynonym.FreshVariable HSymbol

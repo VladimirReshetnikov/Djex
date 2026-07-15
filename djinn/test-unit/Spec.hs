@@ -36,10 +36,12 @@ import Djinn.Internal.HCheck (
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htInferClassKinds)
 import Djinn.Internal.HIdentifier
-import Djinn.Internal.HTypes
+import Djinn.Internal.HTypes hiding (fromSynthesisKind, toSynthesisKind)
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
+import HCheckCompatibility (hCheckCompatibilityTests)
+import HKindCompatibility (hKindCompatibilityTests)
 import qualified Language.Haskell.Djex.Djinn as Djex
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
@@ -63,6 +65,8 @@ main = defaultMain $ testGroup "Djinn unit tests" $
 
 tests :: [(String, Assertion)]
 tests =
+    hKindCompatibilityTests ++
+    hCheckCompatibilityTests ++
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse and render through the checked Djinn adapter",
           testCheckedDjinnAdapter)

@@ -1,9 +1,14 @@
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ViewPatterns #-}
+
 --
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.HTypes(
-        HKind(..), HType(..), HSymbol,
+        HKind(KStar, KArrow, KVar), HType(..), HSymbol,
+        toSynthesisKind, fromSynthesisKind,
+        groundHKind, fromGroundHKind,
         prepareTypeFormulaTranslator, hTypeToFormula,
         pHSymbol, pHType, pHContext, pHConstraint,
         pHDataType, pHTAtom, pHKind,
@@ -21,6 +26,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe(fromMaybe, listToMaybe)
 import Control.Monad(foldM, zipWithM)
 import qualified Data.Set as Set
+import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
 import Text.ParserCombinators.ReadP
 import Djinn.Internal.Fresh (allocateFresh)
@@ -28,15 +34,55 @@ import Djinn.Internal.Generated
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.LJTFormula
 import Language.Haskell.Synthesis.Constraint (Constraint(..))
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
 type HSymbol = String
 
-data HKind
-    = KStar
-    | KArrow HKind HKind
-    | KVar Int
+-- | Djinn's historical kind vocabulary over the common Djex kind tree.
+--
+-- A newtype, rather than a type synonym, preserves Djinn's source-like 'Show'
+-- contract.  The bundled patterns retain @HKind(..)@ imports and construction
+-- syntax while keeping the representation constructor private.
+newtype HKind = HKindRepresentation (SharedKind.Kind Int)
     deriving (Eq)
+
+pattern KStar :: HKind
+pattern KStar = HKindRepresentation SharedKind.ProperTypeKind
+
+pattern KArrow :: HKind -> HKind -> HKind
+pattern KArrow parameter result <-
+    HKindRepresentation
+        (SharedKind.FunctionKind
+            (HKindRepresentation -> parameter)
+            (HKindRepresentation -> result))
+  where
+    KArrow (HKindRepresentation parameter) (HKindRepresentation result) =
+        HKindRepresentation $ SharedKind.FunctionKind parameter result
+
+pattern KVar :: Int -> HKind
+pattern KVar variable =
+    HKindRepresentation (SharedKind.KindVariable variable)
+
+{-# COMPLETE KStar, KArrow, KVar #-}
+
+-- | Project a compatibility kind without recursively rebuilding it.
+toSynthesisKind :: HKind -> SharedKind.Kind Int
+toSynthesisKind (HKindRepresentation kind) = kind
+
+-- | Wrap a shared kind in Djinn's compatibility rendering contract.
+fromSynthesisKind :: SharedKind.Kind Int -> HKind
+fromSynthesisKind = HKindRepresentation
+
+-- | Eliminate inference variables while retaining the first unsolved identity.
+-- Callers deliberately own its presentation: historical low-level checks show
+-- the bare identity, whereas 'Djinn.Core' renders it as @kN@.
+groundHKind :: HKind -> Either Int (SharedKind.Kind Void)
+groundHKind = SharedKind.groundKind . toSynthesisKind
+
+-- | Lift a fully solved shared kind back into Djinn's identity domain.
+fromGroundHKind :: SharedKind.Kind Void -> HKind
+fromGroundHKind = fromSynthesisKind . fmap absurd
 
 instance Show HKind where
     showsPrec _ KStar = showString "*"

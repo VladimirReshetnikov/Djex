@@ -44,7 +44,13 @@ That report captures the starting point for the current work; its Priority 1
 native-vocabulary and Priority 2 result-envelope migrations are now complete.
 Exference's `HsType` is an alias for the shared `Type (Variable Int)`, with
 compatibility patterns over the native tree and one canonical structural
-representation for saturated functions and tuples. Both engines now construct
+representation for saturated functions and tuples. Djinn's `HKind` is a
+private-representation compatibility newtype over shared `Kind Int`; bundled
+patterns preserve `HKind(..)` imports and the historical `*`/`kN` rendering,
+while all kind bridging and grounding operate on the single shared tree.
+Prepared Djinn kind-check caches and their trusted Inventory bridge are private
+implementation details rather than authority exposed by the raw compatibility
+module. Both engines now construct
 their stable `QueryResult` payloads in the core: Djinn preserves its richer
   logical evidence, while Exference derives evidence from each lazy candidate
   batch after one checked query preparation. Exference source checking and both

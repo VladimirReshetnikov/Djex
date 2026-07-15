@@ -2,6 +2,7 @@ module Main (main) where
 
 import Data.Either (isRight)
 
+import qualified Djinn
 import Djinn.Core (parseHType)
 import Language.Haskell.Djex.Djinn (standardDjinnSession)
 import Test.Tasty (defaultMain, testGroup)
@@ -15,4 +16,6 @@ main = defaultMain $ testGroup "Djinn frontend import surface"
   , testCase "reexports the checked Djex adapter" $
       assertBool "the reexported standard Djinn session did not seal"
         $ isRight standardDjinnSession
+  , testCase "owns the historical compatibility module" $
+      Djinn.main `seq` pure ()
   ]

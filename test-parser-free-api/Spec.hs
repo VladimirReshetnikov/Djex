@@ -2,9 +2,11 @@
 
 module Main (main) where
 
-import Data.Void (Void)
+import Data.Either (isRight)
 import Data.Foldable (toList)
+import Data.Void (Void)
 
+import Djinn.Core (parseHType)
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.FrontendSupport
   ( allocateFreshTypeVariableId
@@ -55,8 +57,11 @@ import Test.Tasty.HUnit
   )
 
 main :: IO ()
-main = defaultMain $ testGroup "Exference core API"
-  [ testCase "the parser-neutral frontend-support boundary is complete" $ do
+main = defaultMain $ testGroup "Djex parser-free API"
+  [ testCase "both engines are available from one parser-free dependency" $
+      assertBool "the Djinn parser was unavailable from djex"
+        $ isRight $ parseHType "a -> a"
+  , testCase "the Exference frontend-support boundary is complete" $ do
       inventory <- expectRight
         (mkInventory OpenKindInventory []
           :: Either

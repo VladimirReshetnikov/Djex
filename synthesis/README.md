@@ -1,9 +1,10 @@
 # Haskell Synthesis
 
-The public `synthesis` sublibrary of the `djex` package is the parser- and
+The `synthesis/src` area of the parser-free `djex` library is the parser- and
 backend-independent foundation for Djinn and Exference. It was formerly the
-standalone `haskell-synthesis` package. Its layers define validated Haskell
-names, structured diagnostics, non-recursive class constraints parameterized
+standalone `haskell-synthesis` package and then a named Djex sublibrary. Its
+layers define validated Haskell names, structured diagnostics, non-recursive
+class constraints parameterized
 over a backend's type representation, a scope-aware generated-code tree, and
 neutral operational search status. Djinn
 and Exference both store query contexts through the shared `Constraint` value
@@ -184,9 +185,10 @@ source environment.
 This is the boundary checked sessions retain; engine-specific dictionaries are
 derived projections of it, not competing sources of truth.
 
-Build or test just this sublibrary from the repository root or `djex/`:
+Build the parser-free library or run the focused foundation suite from the
+repository root or `djex/`:
 
 ```console
-cabal build djex:lib:synthesis
+cabal build djex:lib:djex
 cabal test synthesis-tests --test-show-details=direct
 ```

@@ -60,7 +60,7 @@ testGlobalInformation = do
 
   (versionExit, versionOutput, versionErrors) <- runDjex ["--version"]
   assertEqual "version exit" ExitSuccess versionExit
-  assertContains "version output" "djex version 2026.7.12" versionOutput
+  assertContains "version output" "djex version 2026.7.14" versionOutput
   assertEqual "version stderr" "" versionErrors
 
 testBackendHelp :: Assertion

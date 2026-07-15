@@ -4,8 +4,9 @@
 --
 -- This module is the backend-neutral entry point. Checked Djinn and Exference
 -- session adapters share its query envelope and the common types needed to
--- inspect, select, diagnose, and render their results. Lower-level search APIs
--- remain available from explicit named sublibrary dependencies:
+-- inspect, select, diagnose, and render their results. The same parser-free
+-- @djex@ dependency also exposes the lower-level search APIs for import
+-- compatibility, while this module remains the curated entry point:
 --
 -- * "Djinn.Core" is the stable, validated Djinn API.
 -- * "Language.Haskell.Djex.Exference" is the checked, parser-neutral adapter.
@@ -15,7 +16,7 @@
 -- * @Language.Haskell.Synthesis.*@ modules hold the shared neutral vocabulary.
 --
 -- Compatibility CLI modules and modules containing @.Internal.@ are not part
--- of the stable library surface.
+-- of this module's stable surface or stability contract.
 module Language.Haskell.Djex
   ( module Language.Haskell.Djex.Djinn
   , module Language.Haskell.Djex.Exference

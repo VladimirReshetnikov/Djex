@@ -7,9 +7,10 @@
 -- have a neutral synthesis environment should use
 -- "Language.Haskell.Djex.Exference" instead.
 --
--- The module is intentionally not re-exported by the default @djex@ library
--- or by @exference-frontend@. A source adapter opts into this lower-level
--- contract by importing it directly from @djex:exference-core@.
+-- The module is exposed by the parser-free @djex@ library but intentionally
+-- not re-exported by "Language.Haskell.Djex" or by @exference-frontend@. A
+-- source adapter opts into this lower-level contract with a direct module
+-- import from its ordinary @djex@ dependency.
 module Language.Haskell.Djex.Exference.FrontendSupport
   ( sealPreparedExferenceSessionWithPolicy
   , mkExferenceRequestWithSourceInfo

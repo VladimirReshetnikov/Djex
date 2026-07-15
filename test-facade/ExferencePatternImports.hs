@@ -1,8 +1,9 @@
 {-# LANGUAGE PatternSynonyms #-}
 
 -- Compile guard for the explicit-import form required by the zero-copy stable
--- record views.  This component depends only on the default @djex@ library,
--- so a leaked raw-core import cannot make the check pass accidentally.
+-- record views. This module imports only the curated facade, so the check pins
+-- that module's self-contained public surface even though lower-level modules
+-- now live in the same Cabal library.
 module ExferencePatternImports (patternViewsRoundTrip) where
 
 import Language.Haskell.Djex

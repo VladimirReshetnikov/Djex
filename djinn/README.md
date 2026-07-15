@@ -6,13 +6,14 @@ and uses a terminating proof search for intuitionistic propositional logic to
 construct a proof term. Each candidate is independently type-checked, converted
 through a total error-reporting boundary, simplified, and printed as Haskell.
 
-This directory contains the Djinn backend of Djex `2026.7.12`, based on a
+This directory contains the Djinn backend of Djex `2026.7.14`, based on a
 reviewed local fork of
 [`djinn-2025.2.21`](https://hackage.haskell.org/package/djinn-2025.2.21), based on
 the [upstream `augustss/djinn` repository](https://github.com/augustss/djinn).
-Djex's date version records the now-source-breaking checked library facade;
-the original one-line import note has been expanded here because upstream ships
-its user guide inside the executable rather than as a README.
+Djex's date version records the source-breaking checked facade and parser-free
+component fold; the original one-line import note has been expanded here
+because upstream ships its user guide inside the executable rather than as a
+README.
 
 `Djinn.Core.toSynthesisInventory` exposes the validated Djinn environment as
 the same retained structural-and-kind artifact used by Exference sessions.
@@ -29,14 +30,15 @@ and GHC 9.12.4 using Cabal 3.16.1.0. Run these commands from the repository root
 or `djex/`:
 
 ```console
-cabal build djex:lib:djinn-core djex:lib:djinn-frontend djex:exe:djinn
+cabal build djex:lib:djex djex:lib:djinn-frontend djex:exe:djinn
 cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-tests
 cabal run djinn
 ```
 
 The former top-level `djinn/` package is now the `djex/djinn/` source tree and
 has no independent package or project file. Library dependencies migrate to
-`djex:djinn-core` or `djex:djinn-frontend`; package-generated code imports
+`djex` or, for the historical REPL API, `djex:djinn-frontend`;
+package-generated code imports
 `Paths_djex` rather than `Paths_djinn`. The complete component and filesystem
 migration is documented in the [Djex guide](../README.md).
 
@@ -63,10 +65,10 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 47 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kinds, class signatures, neutral-environment sealing, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 54 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kinds, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
-| `djinn-frontend-api-tests` | Two import-boundary checks proving that a dependency on `djinn-frontend` alone exposes both `Djinn.Core` and `Language.Haskell.Djex.Djinn`. |
-| `djinn-cli-tests` | Seventeen subprocess scenarios against the packaged executable, including EOF, diagnostics, parser recovery and token boundaries, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
+| `djinn-frontend-api-tests` | Three import-boundary checks proving that a dependency on `djinn-frontend` alone exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn`. |
+| `djinn-cli-tests` | Eighteen subprocess scenarios against the packaged executable, including EOF, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
 named test. For example:
@@ -76,14 +78,15 @@ cabal test djinn-property-tests --test-show-details=direct
 cabal test djinn-tests --test-options='-p /nominal empty/'
 ```
 
-The proof/search engine lives in the public named `djinn-core` sublibrary. The
-public `djinn-frontend` sublibrary is a separate compatibility/CLI facade that
+The proof/search engine lives in `djinn/src-core` as part of the single
+parser-free `djex` library. The public `djinn-frontend` sublibrary is a
+separate compatibility/CLI facade that
 re-exports both `Djinn.Core` and the checked
 `Language.Haskell.Djex.Djinn` adapter; the executable depends only on that
-facade. The package's default `djex` library re-exports the checked adapter,
-but not the historical `Djinn.Core` API or the REPL. This keeps Haskeline and
-the raw compatibility surface out of default-facade consumers while
-preserving one authoritative core compilation. HPC coverage is available for
+facade. The `djex` library exposes `Djinn.Core` and the formerly public
+research modules for import compatibility, while its curated
+`Language.Haskell.Djex` module re-exports only the checked adapter. The REPL and
+Haskeline remain confined to `djinn-frontend`. HPC coverage is available for
 the in-process unit and property suites:
 
 ```console
@@ -194,9 +197,9 @@ package environment nor instantiates arbitrary polymorphic methods. Classes and
 methods needed beyond the small initial environment must be declared explicitly.
 
 At the library boundary, `Context` is the shared backend-neutral
-`Constraint HType` value from `djex:synthesis`, rather than Djinn's former
-raw `(String, [HType])` pair. `mkContext` is the checked bridge for existing
-string-based clients:
+`Constraint HType` value from the shared synthesis modules in `djex`, rather
+than Djinn's former raw `(String, [HType])` pair. `mkContext` is the checked
+bridge for existing string-based clients:
 
 ```haskell
 a <- parseHType "a"
@@ -371,7 +374,7 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Djinn compatibility adapter over shared kind inference, plus saturated-synonym policy. |
 | `Djinn.Internal.Environment` | Authoritative Inventory preparation plus private class, kind, synonym, formula, and ordered global-premise indexes. |
-| `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated `djex:synthesis` name and operator rules. |
+| `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated shared name and operator rules in `djex`. |
 | `Djinn.Internal.HTypes` | Type parser, logical translation, and proof-term conversion/cleanup. |
 | `Djinn.Internal.Type` | Checked conversion between Djinn source types and the shared source-type IR. |
 | `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
@@ -384,8 +387,8 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn.Internal.Help` | Extended in-program help. |
 
 `Djinn.Core`, `Language.Haskell.Djex.Djinn`, and the proof, type, environment,
-and validation modules under `src-core/` form the public named `djinn-core`
-component. The checked declaration and type adapters are exported by
+and validation modules under `src-core/` compile into the parser-free `djex`
+library. The checked declaration and type adapters are exported by
 `Djinn.Core`; their `Djinn.Internal.Declaration` and `Djinn.Internal.Type`
 implementation modules remain private. `Djinn`,
 `Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-frontend/` in the
@@ -395,15 +398,15 @@ executable's `app/` source root contains only its launcher, so
 neither the frontend nor executable can accidentally compile core modules as
 home modules.
 
-The REPL state commits its editable `Environment` together with an opaque
-`DjinnSession`; every declaration or deletion reseals the session before either
-field changes. Queries and instance methods go through `runDjinnQuery`, consume
+The REPL state stores only an opaque `DjinnSession`; every declaration or
+deletion produces and validates a fully resealed replacement before installing
+it. Queries and instance methods go through `runDjinnQuery`, consume
 shared logical evidence and operational completion independently, and render
 the `FunctionClause` output of returned shared `Candidate`s. This preserves the
 declaration language while eliminating the frontend's former direct
 `inhabit`/`QueryReport` path.
 
-## Using djinn-core as a library
+## Using Djinn through the `djex` library
 
 `Djinn.Core` is the supported programmatic interface. It keeps invalid data
 unrepresentable: environments are opaque and only constructible through
@@ -442,9 +445,10 @@ demo = do
         NoEvidence -> Left "the search limit established no conclusion"
 ```
 
-With named-library dependencies, this example uses both `djex:djinn-core` and
-`djex:synthesis`; the unnamed `djex` library instead exposes their checked
-adapter and neutral vocabulary without re-exporting the raw core.
+This example needs only the unnamed `djex` library. The same dependency exposes
+the shared vocabulary, checked adapter, `Djinn.Core`, and the formerly public
+raw research modules; `Language.Haskell.Djex` remains the smaller curated
+import surface.
 
 The essentials: `declare`/`removeDeclaration` grow and shrink an
 `Environment` (starting from `emptyEnvironment` or `standardEnvironment`);
@@ -533,7 +537,7 @@ canonical candidates through the shared rendering pipeline and return
 its `RenderError` directly, without conflating logical evidence with
 operational completion.
 The raw proof/search `Djinn.Internal.*` modules used by compatibility tests and
-research tooling remain exposed by `djinn-core`, but their constructors can
+research tooling remain exposed by `djex`, but their constructors can
 violate these invariants and carry no stability promise. The checked
 declaration/type implementation modules and the frontend-only Help and REPL
 modules are deliberately not exposed. Raw formula translation is nevertheless

@@ -4,21 +4,21 @@ Date: 2026-07-14
 
 ## Scope
 
-This is a current-state audit of what remains before Djex can honestly be
-described as one library rather than one package containing two engines and a
-shared foundation. It follows the consolidation, checked-session, shared-query,
-candidate, diagnostic, generated-output, exact-count, and dependency-bound
-work already present on the `codex/unify-djinn-and-exference` branch.
+This audit began by recording what remained before Djex could honestly be
+described as one parser-free library rather than one package containing two
+engines and a shared foundation. It now also records the completed inventory
+authority and Cabal-component convergence on the
+`codex/unify-djinn-and-exference` branch.
 
 The existing work is substantial, but the original merger objective is not
 complete. Search algorithms may remain backend-specific; duplicate language
-IRs targeted by Priority 1 and the competing result authorities have now been
-removed, while general-purpose environments and public component identities
-remain duplicated.
+IRs, competing result/environment authorities, and the three parser-free
+component identities targeted here have now been removed. The two compatibility
+frontends remain separate to isolate parser and interactive dependencies.
 
 ## Evidence from the current tree
 
-`djex.cabal` still defines six library components:
+At audit time `djex.cabal` defined six library components:
 
 1. the unnamed `djex` facade;
 2. `synthesis`;
@@ -27,7 +27,7 @@ remain duplicated.
 5. `exference-core`; and
 6. `exference-frontend`.
 
-That component DAG currently enforces a useful direction:
+That component DAG enforced a useful direction:
 
 ```text
 synthesis <- backend cores <- compatibility frontends
@@ -35,20 +35,36 @@ synthesis <- backend cores <- compatibility frontends
                     \- djex facade -----/
 ```
 
-The default library and parser-independent cores consequently do not acquire
+The default library and parser-independent cores consequently did not acquire
 `haskell-src-exts`, `directory`, `filepath`, or `haskeline`. The core and
 facade API suites exercise those package boundaries rather than merely checking
 that a module happens to import.
 
-A mechanical six-to-one Cabal collapse is possible: the 79 live library source
-files have distinct module names and an acyclic component import graph. Its
-external dependency union would be `base`, `containers`, `deepseq`, `directory`,
-`filepath`, `haskeline`, `haskell-src-exts`, `pqueue`, `pretty`, and
-`transformers`. The environment-authority duplication described below has now
-been removed. A staged fold of `synthesis`, both parser-free cores, and the
-facade is therefore justified and does not broaden the facade's existing
-dependency closure; retaining the two compatibility frontends temporarily
-continues to isolate `haskell-src-exts` and `haskeline`.
+**Completed on 2026-07-14:** `djex.cabal` now defines three library components:
+the unnamed parser-free `djex` library, `djinn-frontend`, and
+`exference-frontend`. The first compiles all 67 uniquely named modules under
+`src`, `synthesis/src`, `djinn/src-core`, and `exference/src-core` into one
+acyclic unit. Its external dependency union is only `base`, `containers`,
+`deepseq`, `pqueue`, `pretty`, and `transformers`. `directory`, `filepath`,
+`haskeline`, and `haskell-src-exts` remain confined to the two compatibility
+frontends. All modules formerly exposed by `synthesis`, `djinn-core`, and
+`exference-core` remain exposed by `djex`; only their obsolete Cabal unit
+identities and internal self-dependencies disappeared.
+
+The resulting component graph is:
+
+```text
+                         djinn-frontend (Haskeline)
+                        /
+parser-free djex library
+                        \
+                         exference-frontend (HSE/filesystem)
+```
+
+`djex-parser-free-api-tests` depends only on `djex` and imports the shared
+vocabulary plus both engines. The two frontend API suites depend only on their
+respective frontend and verify that compatibility reexports still cross this
+boundary.
 
 ## Priority 1: make the shared vocabulary native to Exference
 
@@ -56,8 +72,9 @@ continues to isolate `haskell-src-exts` and `haskeline`.
 use the shared `Name`, `Constraint`, and `Type (Variable Int)` values directly.
 Historical constructor spellings survive as explicit compatibility patterns;
 the structural conversion functions are identity shims, and checked adapters
-only validate and canonicalize. This removes all three duplicate source-type
-representations without collapsing the useful component dependency checks.
+only validate and canonicalize. This removed all three duplicate source-type
+representations without collapsing the useful component dependency checks at
+that stage; the later fold retains only frontend dependency-isolation checks.
 
 At audit time `Language.Haskell.Exference.Core.Types` defined three pieces of a
 second source-type model beside `Language.Haskell.Synthesis`: a `QualifiedName`
@@ -144,9 +161,10 @@ must not treat the former derived `Show` text as a stable serialization.
 Regression coverage pins direct core/adapter equality, exact operator targets,
 target exclusion without excluding qualified homonyms, candidate-derived
 logical evidence, simultaneous operational truncation reasons, exact
-`Natural` accounting, and lazy batch and candidate tails. Priority 3 is now the
-active convergence frontier; completing Priority 2 does not merge the two
-backend-specific search algorithms.
+`Natural` accounting, and lazy batch and candidate tails. Priority 3 and the
+parser-free packaging fold subsequently removed the remaining authority and
+component splits beneath those envelopes; the backend-specific search
+algorithms remain intentionally distinct.
 
 ## Priority 3: make shared inventories authoritative
 
@@ -184,16 +202,23 @@ rollback.
 
 ## Packaging end state
 
-With the duplicated environment authorities removed, the named parser-free
-core and foundation sublibraries should now be folded into the unnamed `djex`
-library. Compatibility frontends may be folded in at the same time if a single
-dependency closure is the desired final contract, or retained briefly as
-deprecated migration shells with no independent semantic representation.
+**Completed on 2026-07-14:** with duplicated environment authorities removed,
+the named parser-free core and foundation sublibraries were folded into the
+unnamed `djex` library. `djex:synthesis`, `djex:djinn-core`, and
+`djex:exference-core` migrate to plain `djex`; Haskell module names remain
+available, but their unit identities deliberately change and downstream
+clients must recompile.
 
-This ordering makes the final Cabal change evidence of a source merger rather
-than a relabeling. It also makes deletion measurable: internal `djex:*`
-dependencies disappear because their implementations already share one native
-vocabulary and result boundary.
+The compatibility frontends remain named libraries with no independent
+semantic environment or search representation. This is a dependency boundary,
+not a competing core architecture: `djinn-frontend` owns Haskeline and the
+historical REPL, while `exference-frontend` owns HSE, filesystem loading, and
+source-aware compatibility APIs.
+
+This ordering made the Cabal change evidence of a source merger rather than a
+relabeling. Deletion is measurable: three public library stanzas and all
+internal dependencies on them disappeared after their implementations already
+shared one native vocabulary, result boundary, and inventory authority.
 
 ## Validation gates for each stage
 
@@ -207,9 +232,10 @@ Every migration milestone should retain the current release-style gates:
 - a clean tracked tree with the milestone commit pushed before the next
   representation is removed.
 
-The immediate next implementation milestone is packaging: fold the parser-free
-foundation and both backend cores into the unnamed library, then delete API
-tests and service-provider seams whose component boundary no longer enforces a
-semantic or dependency invariant. Keep the two compatibility frontends
-separate until their parser/interactive dependencies and deprecated raw
-surfaces receive an explicit final policy.
+The next architecture decision is whether compatibility merits keeping the two
+frontend libraries as explicit dependency-isolation boundaries. Folding either
+one into `djex` would broaden every client with Haskeline or HSE/filesystem
+dependencies; deleting one instead would retire a historical public API. Until
+that policy is chosen, further convergence should target source duplication and
+shared behavior rather than erasing a boundary that still enforces a real
+dependency invariant.

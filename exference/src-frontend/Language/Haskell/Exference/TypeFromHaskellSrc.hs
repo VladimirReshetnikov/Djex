@@ -186,11 +186,13 @@ haskellSrcExtsParseMode sourceName = P.ParseMode parseSourceName
 
 -- | Convert one source type in an isolated type-variable namespace.
 --
--- The returned 'T.TypeVarIndex' contains rendering hints for source spellings,
--- not the complete namespace. Alpha-renamed binders can reserve identifiers
--- without acquiring an unambiguous spelling, so the index must not be used to
--- resume this conversion. Use 'runConversionTWithState' and retain t'ConvData'
--- when later conversions must share the exact namespace.
+-- The returned 'T.TypeVarIndex' contains untrusted rendering hints for source
+-- spellings, not the complete namespace. Canonical search callers must seal it
+-- through the checked request or source-hint boundary before use.
+-- Alpha-renamed binders can reserve identifiers without acquiring an
+-- unambiguous spelling, so the index must not be used to resume this
+-- conversion. Use 'runConversionTWithState' and retain t'ConvData' when later
+-- conversions must share the exact namespace.
 convertTypeNoDecl
   :: Monad m
   => M.Map T.QualifiedName T.HsTypeClass

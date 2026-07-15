@@ -3,7 +3,7 @@
 module Main (main) where
 
 import Control.DeepSeq (force)
-import Control.Exception (bracket)
+import Control.Exception (SomeException, bracket, evaluate, try)
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
 import Data.Either (rights)
@@ -35,17 +35,21 @@ import Language.Haskell.Exference.Core
   , ExferenceEnvironment
   , ExferenceQuery (..)
   , ExferenceProjectionError (..)
+  , ExferenceSourceTypeVariableHints
+  , ExferenceSourceTypeVariableHintError (..)
   , ExferenceHeuristicsConfig (..)
   , SearchCompletion (..)
   , SearchStatus (..)
   , SearchStatusError (..)
   , constraintsRelaxedAtStep
+  , emptyExferenceSourceTypeVariableHints
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
   , findGeneratedSearchBatchesWithHintsEither
   , findGeneratedSearchBatchesWithHintsInEnvironmentEither
   , findQueryResultsInEnvironmentEither
   , mkExferenceEnvironment
+  , mkExferenceSourceTypeVariableHints
   , toSearchProgress
   , toSearchBatch
   , toGeneratedSearchBatch
@@ -2241,7 +2245,8 @@ tests = testGroup "Exference"
           environment <- expectRight $ sealLegacyEnvironment input
           results <- expectRight
             $ findQueryResultsInEnvironmentEither
-                target Map.empty environment (legacyInputQuery input)
+                target (emptyExferenceSourceTypeVariableHints resultType)
+                environment (legacyInputQuery input)
           let batches = map SharedQuery.resultSearch results
           let outputs =
                 [ SharedCandidate.candidateOutput candidate
@@ -2837,7 +2842,9 @@ tests = testGroup "Exference"
           environment <- expectRight $ sealLegacyEnvironment input
           results <- expectRight
             $ findQueryResultsWithIdentifierCapacitiesEither
-                capacities target Map.empty environment (legacyInputQuery input)
+                capacities target
+                (emptyExferenceSourceTypeVariableHints $ input_goalType input)
+                environment (legacyInputQuery input)
           result <- case results of
             [] -> fail "expected at least one capacity-limited query result"
             firstResult : remaining ->
@@ -2901,7 +2908,9 @@ tests = testGroup "Exference"
           environment <- expectRight $ sealLegacyEnvironment input
           results <- expectRight
             $ findQueryResultsWithIdentifierCapacitiesEither
-                capacities target Map.empty environment (legacyInputQuery input)
+                capacities target
+                (emptyExferenceSourceTypeVariableHints $ input_goalType input)
+                environment (legacyInputQuery input)
           result <- case results of
             [] -> fail "expected at least one capacity-limited query result"
             firstResult : remaining ->
@@ -5067,6 +5076,141 @@ tests = testGroup "Exference"
               [HsConstraint (name "Inner") [TypeVar 1]]
               (TypeArrow (TypeVar 1) (TypeVar 1)))
           hints @?= Map.singleton "a" 0
+      ]
+  , testGroup "source type-variable hints"
+      [ testCase "accept every flexible position and Int boundary" $ do
+          let ground = TypeCons $ name "Ground"
+              fixtures =
+                [ ( "free occurrence"
+                  , TypeVar 7
+                  , Map.singleton "free" 7
+                  )
+                , ( "forall binder"
+                  , TypeForall [11] [] ground
+                  , Map.singleton "quantified" 11
+                  )
+                , ( "forall context"
+                  , TypeForall []
+                      [HsConstraint (name "C") [TypeVar 13]] ground
+                  , Map.singleton "contextual" 13
+                  )
+                , ( "minimum Int"
+                  , TypeVar minBound
+                  , Map.singleton "minimum" minBound
+                  )
+                , ( "maximum Int"
+                  , TypeVar maxBound
+                  , Map.singleton "maximum" maxBound
+                  )
+                ]
+          mapM_ (\(label, goal, sourceNames) ->
+              case mkExferenceSourceTypeVariableHints goal sourceNames of
+                Left failure -> fail $ label ++ " hint was rejected: "
+                  ++ show failure
+                Right hints -> force hints @?= hints)
+            fixtures
+          emptyHints <- expectRight
+            $ mkExferenceSourceTypeVariableHints ground Map.empty
+          emptyHints @?= emptyExferenceSourceTypeVariableHints ground
+      , testCase "reject every non-variable source spelling exactly" $ do
+          let goal = TypeVar 0
+              invalid spelling failure =
+                mkExferenceSourceTypeVariableHints goal
+                  (Map.singleton spelling 0) @?= Left failure
+          invalid "_" WildcardSourceTypeVariableSpelling
+          mapM_ (uncurry invalid)
+            [ ("", InvalidSourceTypeVariableSpelling "" SharedName.EmptyName)
+            , ("A", InvalidSourceTypeVariableSpelling "A"
+                $ SharedName.InvalidIdentifier "A")
+            , ("where", InvalidSourceTypeVariableSpelling "where"
+                $ SharedName.ReservedIdentifier "where")
+            , ("forall", InvalidSourceTypeVariableSpelling "forall"
+                $ SharedName.ReservedIdentifier "forall")
+            , ("family", InvalidSourceTypeVariableSpelling "family"
+                $ SharedName.ReservedIdentifier "family")
+            , ("a b", InvalidSourceTypeVariableSpelling "a b"
+                $ SharedName.InvalidIdentifier "a b")
+            , ("a\nb", InvalidSourceTypeVariableSpelling "a\nb"
+                $ SharedName.InvalidIdentifier "a\nb")
+            , ("\ESC[31m", InvalidSourceTypeVariableSpelling "\ESC[31m"
+                $ SharedName.InvalidIdentifier "\ESC[31m")
+            , ("+", InvalidSourceTypeVariableSpelling "+"
+                $ SharedName.InvalidIdentifier "+")
+            ]
+      , testCase "reject hints outside the flexible source scope" $ do
+          mkExferenceSourceTypeVariableHints (TypeVar 0)
+              (Map.singleton "outside" 1) @?=
+            Left (SourceTypeVariableHintOutOfScope "outside" 1)
+          mkExferenceSourceTypeVariableHints (TypeConstant 7)
+              (Map.singleton "rigid" 7) @?=
+            Left (SourceTypeVariableHintOutOfScope "rigid" 7)
+      , testCase "validate every alias before deterministic collapse" $ do
+          let goal = TypeArrow (TypeVar 7) (TypeVar 7)
+          mkExferenceSourceTypeVariableHints goal
+              (Map.fromList [("alpha", 7), ("where", 7)]) @?=
+            Left (InvalidSourceTypeVariableSpelling "where"
+              $ SharedName.ReservedIdentifier "where")
+          aliases <- expectRight $ mkExferenceSourceTypeVariableHints goal
+            $ Map.fromList [("zeta", 7), ("alpha", 7)]
+          preferred <- expectRight $ mkExferenceSourceTypeVariableHints goal
+            $ Map.singleton "alpha" 7
+          aliases @?= preferred
+          targetName <- expectRight $ SharedName.mkIdentifier "hinted"
+          target <- expectRight $ Generated.mkDefinitionName targetName
+          let input = identityInput {input_goalType = goal}
+          environment <- expectRight $ sealLegacyEnvironment input
+          results <- expectRight $ findQueryResultsInEnvironmentEither
+            target aliases environment (legacyInputQuery input)
+          case concatMap
+              (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+              results of
+            candidate : _ -> exferenceTypeVariableHints
+                (SharedCandidate.candidateDetails candidate) @?=
+              Map.fromList
+                [ (SharedType.FlexibleVariable 7, "alpha")
+                , (SharedType.RigidVariable 0, "alpha")
+                ]
+            [] -> fail "canonical source-hint search found no identity"
+      , testCase "reject reuse against a different same-ID query" $ do
+          let hintedGoal = TypeVar 0
+              searchedGoal = TypeArrow (TypeVar 0) (TypeVar 0)
+              input = identityInput {input_goalType = searchedGoal}
+          hints <- expectRight $ mkExferenceSourceTypeVariableHints
+            hintedGoal $ Map.singleton "fromOtherQuery" 0
+          targetName <- expectRight $ SharedName.mkIdentifier "hinted"
+          target <- expectRight $ Generated.mkDefinitionName targetName
+          environment <- expectRight $ sealLegacyEnvironment input
+          findQueryResultsInEnvironmentEither target hints environment
+              (legacyInputQuery input) @?=
+            Left (InvalidSourceTypeVariableHints
+              $ SourceTypeVariableHintGoalMismatch
+                  hintedGoal searchedGoal)
+      , testCase "detach accepted and rejected spellings eagerly" $ do
+          let partialSpelling = 'a' : error "unforced hint spelling tail"
+              sourceNames = Map.singleton partialSpelling 0
+          result <- try $ evaluate
+            $ mkExferenceSourceTypeVariableHints (TypeVar 0) sourceNames
+          case result
+              :: Either SomeException
+                  (Either
+                    ExferenceSourceTypeVariableHintError
+                    ExferenceSourceTypeVariableHints) of
+            Left _ -> pure ()
+            Right _ -> fail
+              "checked source hints retained a lazy spelling validation"
+          let partialInvalid = '\ESC'
+                : error "unforced invalid hint spelling tail"
+          invalidResult <- try $ evaluate
+            $ mkExferenceSourceTypeVariableHints (TypeVar 0)
+            $ Map.singleton partialInvalid 0
+          case invalidResult
+              :: Either SomeException
+                  (Either
+                    ExferenceSourceTypeVariableHintError
+                    ExferenceSourceTypeVariableHints) of
+            Left _ -> pure ()
+            Right _ -> fail
+              "rejected source hints retained a lazy spelling tail"
       ]
   , testGroup "shared generated output"
       [ testCase "typed expressions erase to stable local identities" $ do

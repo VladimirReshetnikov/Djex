@@ -263,7 +263,11 @@ ensureFlexibleForallBinders = check
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
 -- Source locations do not belong in variable identity. Keeping only the
--- spelling also decouples the search core from a particular parser AST.
+-- spelling also decouples conversion and historical rendering from a
+-- particular parser AST. This raw spelling-oriented compatibility map is not
+-- a trusted canonical-search input; cross it through
+-- @mkExferenceSourceTypeVariableHints@ or the checked request boundary first,
+-- which also binds it to the exact canonical goal whose IDs it describes.
 type TypeVarIndex = M.Map String Int
 
 data HsTypeClass = HsTypeClass

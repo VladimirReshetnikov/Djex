@@ -18,7 +18,7 @@ module Language.Haskell.Djex.Exference.Internal.Request
   , mkExferenceRequestWithSourceInfo
   , exferenceRequestQuery
   , requestContextualGoal
-  , requestSourceTypeVariables
+  , requestSourceTypeVariableHints
   , withExferenceRequestProvenance
   , validateExferenceTarget
   ) where
@@ -29,7 +29,10 @@ import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core
   ( ExferenceHeuristicsConfig
+  , ExferenceSourceTypeVariableHintError
+  , ExferenceSourceTypeVariableHints
   , Penalty
+  , mkExferenceSourceTypeVariableHints
   )
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
@@ -94,21 +97,20 @@ type ExferenceTypeVariable = SharedType.Variable ExferenceLocal
 -- | Exference's checked type surface, expressed entirely in the neutral IR.
 type ExferenceType = Type ExferenceTypeVariable
 
--- Keep the frontend caches private: they are meaningful only when paired with
--- the exact parsed goal. In particular, the spelling index must be converted
--- after explicit contexts are merged, because that operation can change
--- Exference's rigid-ID allocation.
-data ExferenceRequestCache = ExferenceRequestCache
-  { cachedSourceTypeVariables :: Map.Map String ExferenceLocal }
-
--- Source spellings are a deterministic presentation cache, not part of the
--- stable request value. Location provenance is owned separately by the shared
--- envelope, which gives both adapters the same query-only equality and display
--- contract.
+-- Checked source spellings are a deterministic presentation cache, not part
+-- of the stable request value. Location provenance is owned separately by the
+-- shared envelope, which gives both adapters the same query-only equality and
+-- display contract.
 newtype ExferenceRequest = ExferenceRequest
-  (CachedQuery ExferenceType ExferenceOptions ExferenceRequestCache)
+  (CachedQuery
+    ExferenceType
+    ExferenceOptions
+    ExferenceSourceTypeVariableHints)
   deriving (Eq, Show)
-    via (CachedQuery ExferenceType ExferenceOptions ExferenceRequestCache)
+    via (CachedQuery
+      ExferenceType
+      ExferenceOptions
+      ExferenceSourceTypeVariableHints)
 
 mkExferenceRequest
   :: QueryRequest ExferenceType ExferenceOptions
@@ -125,7 +127,8 @@ mkExferenceRequestWithSourceInfo
   -> QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequestWithSourceInfo sourceVariables location =
-  mkExferenceRequestWithProvenance sourceVariables $ SourceRequest location
+  mkExferenceRequestWithProvenance sourceVariables
+    $ SourceRequest location
 
 mkExferenceRequestWithProvenance
   :: Map.Map String ExferenceLocal
@@ -139,10 +142,11 @@ mkExferenceRequestWithProvenance sourceVariables provenance query =
   provenance `seq` first (withRequestProvenance provenance) (do
     canonicalQuery <- normalizeRequest query
     validateRequest canonicalQuery
+    let contextualGoal = requestContextualType canonicalQuery
+    sourceHints <- first sourceHintFailure
+      $ mkExferenceSourceTypeVariableHints contextualGoal sourceVariables
     pure $ ExferenceRequest $
-      mkCachedQueryWithProvenance provenance canonicalQuery
-        ExferenceRequestCache
-          { cachedSourceTypeVariables = sourceVariables })
+      mkCachedQueryWithProvenance provenance canonicalQuery sourceHints)
 
 -- Store exactly the canonical native representation that the checked
 -- Exference core consumes.  Normalizing each context argument separately
@@ -164,10 +168,11 @@ exferenceRequestQuery
   -> QueryRequest ExferenceType ExferenceOptions
 exferenceRequestQuery (ExferenceRequest query) = cachedQueryRequest query
 
-requestSourceTypeVariables
+requestSourceTypeVariableHints
   :: ExferenceRequest
-  -> Map.Map String ExferenceLocal
-requestSourceTypeVariables = cachedSourceTypeVariables . exferenceRequestCache
+  -> ExferenceSourceTypeVariableHints
+requestSourceTypeVariableHints (ExferenceRequest query) =
+  cachedQueryCache query
 
 withExferenceRequestProvenance
   :: ExferenceRequest
@@ -175,9 +180,6 @@ withExferenceRequestProvenance
   -> Diagnostic
 withExferenceRequestProvenance (ExferenceRequest query) =
   withCachedQueryProvenance query
-
-exferenceRequestCache :: ExferenceRequest -> ExferenceRequestCache
-exferenceRequestCache (ExferenceRequest query) = cachedQueryCache query
 
 requestContextualGoal :: ExferenceRequest -> ExferenceType
 requestContextualGoal = requestContextualType . exferenceRequestQuery
@@ -208,6 +210,13 @@ invalidRequest :: Show failure => failure -> Diagnostic
 invalidRequest = shownErrorDiagnostic
   "DJEX_EXF_REQUEST"
   "invalid shared Exference request"
+
+sourceHintFailure
+  :: ExferenceSourceTypeVariableHintError
+  -> Diagnostic
+sourceHintFailure = shownErrorDiagnostic
+  "DJEX_EXF_SOURCE_HINT"
+  "invalid Exference source type-variable rendering hint"
 
 -- Explicit contexts are inserted beneath only the leading prenex chain.
 -- Free goal variables remain usable there, as do binders from that chain;

@@ -1,9 +1,11 @@
 -- | Compact Haskell-source rendering for shared types and constraints.
 --
 -- Variable spelling remains a caller policy because backends retain different
--- source-name and rigidity information. Names are validated by the shared AST;
--- rendering remains total for structurally unchecked types as well, so a
--- validation diagnostic can safely print the input it rejected.
+-- source-name and rigidity information. Nominal constructor and class names
+-- are validated by the shared AST; callers that accept untrusted variable-name
+-- hints must validate those hints before supplying the callback. Rendering
+-- with a total callback remains total for structurally unchecked types as
+-- well, so a validation diagnostic can safely print the input it rejected.
 module Language.Haskell.Synthesis.TypeRender
   ( renderType
   , renderConstraint

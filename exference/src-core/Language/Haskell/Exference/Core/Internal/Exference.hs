@@ -54,7 +54,10 @@ import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.Candidate
 import Language.Haskell.Exference.Core.Internal.Candidate
-  (projectValidatedCandidate, typeVariableHintsWithPlan)
+  ( compatibilityTypeVariableHintsWithPlan
+  , projectValidatedCandidate
+  , typeVariableHintsWithPlan
+  )
 import Language.Haskell.Exference.Core.ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify
 import Language.Haskell.Exference.Core.Score
@@ -206,6 +209,7 @@ data ExferenceInputError
   | InvalidMaxDepth Penalty
   | InvalidHeuristic String Penalty
   | RigidIdentifierExhaustion RigidInstantiationError
+  | InvalidSourceTypeVariableHints ExferenceSourceTypeVariableHintError
   deriving (Eq)
 
 instance Show ExferenceInputError where
@@ -255,6 +259,8 @@ renderExferenceInputError failure = case failure of
     constructor "InvalidHeuristic" [show fieldName, show value]
   RigidIdentifierExhaustion rigidFailure ->
     constructor "RigidIdentifierExhaustion" [show rigidFailure]
+  InvalidSourceTypeVariableHints hintFailure ->
+    constructor "InvalidSourceTypeVariableHints" [show hintFailure]
  where
   constructor name fields = unwords $ name : fields
   sourceType typeExpression = "(" ++ showHsType M.empty typeExpression ++ ")"
@@ -729,10 +735,12 @@ findGeneratedSearchBatchesWithAllocators allocators' typeHints =
 -- trace lazily in the common query envelope.  The exact target is excluded
 -- before validation so search and the independent candidate checker see the
 -- same environment.  The retained rigid-variable plan supplies rendering
--- hints without preparing the query a second time.
+-- hints without preparing the query a second time. The opaque hint value must
+-- retain the same canonical goal; a value sealed for another local integer
+-- namespace is rejected before the lazy trace is exposed.
 findQueryResultsInEnvironmentEither
   :: SharedGenerated.DefinitionName
-  -> TypeVarIndex
+  -> ExferenceSourceTypeVariableHints
   -> ExferenceEnvironment
   -> ExferenceQuery
   -> Either ExferenceInputError [ExferenceResult]
@@ -745,14 +753,22 @@ findQueryResultsInEnvironmentEither =
 findQueryResultsWithAllocators
   :: SearchAllocators
   -> SharedGenerated.DefinitionName
-  -> TypeVarIndex
+  -> ExferenceSourceTypeVariableHints
   -> ExferenceEnvironment
   -> ExferenceQuery
   -> Either ExferenceInputError [ExferenceResult]
-findQueryResultsWithAllocators allocators' target sourceNames environment query = do
-  checked@(CheckedExferenceQuery _ _ rigidPlan) <-
+findQueryResultsWithAllocators allocators' target sourceHints environment query = do
+  checked@(CheckedExferenceQuery _ checkedQuery rigidPlan) <-
     prepareExferenceQuery environment queryWithTargetExcluded
-  let typeHints = typeVariableHintsWithPlan rigidPlan sourceNames
+  -- The opaque value is paired with the exact canonical goal for which its
+  -- spelling scope was checked. Stable adapters retarget it only while
+  -- performing origin-safe synonym elaboration; direct core callers cannot
+  -- accidentally reuse a same-numbered hint with an unrelated query.
+  typeHints <- either
+    (Left . InvalidSourceTypeVariableHints)
+    Right
+    $ typeVariableHintsWithPlan
+        (queryGoalType checkedQuery) rigidPlan sourceHints
   pure $ map (projectQueryResult target typeHints)
     $ findEngineChunksWith allocators' checked
  where
@@ -794,7 +810,7 @@ typeVariableHintsInEnvironment
   -> Either ExferenceInputError ExferenceTypeVariableHints
 typeVariableHintsInEnvironment environment query sourceNames = do
   CheckedExferenceQuery _ _ plan <- prepareExferenceQuery environment query
-  pure $ typeVariableHintsWithPlan plan sourceNames
+  pure $ compatibilityTypeVariableHintsWithPlan plan sourceNames
 
 projectGeneratedBatch
   :: ExferenceTypeVariableHints

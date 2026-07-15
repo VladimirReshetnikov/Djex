@@ -28,8 +28,9 @@ reconstruct the editable neutral environment only for transactional REPL edits.
 
 ## Build and run
 
-Djinn is part of the unified `djex` Cabal package and is tested with GHC 9.8.4
-and GHC 9.12.4 using Cabal 3.16.1.0. Run these commands from the repository root
+Djinn is part of the unified `djex` Cabal package and is tested with the
+supported GHC 9.12.4 toolchain using Cabal 3.16.1.0. Run these commands from
+the repository root
 or `djex/`:
 
 ```console

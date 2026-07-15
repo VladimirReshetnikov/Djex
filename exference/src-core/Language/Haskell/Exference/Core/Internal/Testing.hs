@@ -23,9 +23,11 @@ import qualified Data.PQueue.Prio.Max as Q
 import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
+import Language.Haskell.Exference.Core.Candidate
+  ( ExferenceSourceTypeVariableHints )
 import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Score (Penalty)
-import Language.Haskell.Exference.Core.Types (HsType, TypeVarIndex)
+import Language.Haskell.Exference.Core.Types (HsType)
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( identifierSupplySize )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
@@ -67,7 +69,7 @@ findGeneratedSearchBatchesWithIdentifierCapacitiesEither capacities input = do
 findQueryResultsWithIdentifierCapacitiesEither
   :: IdentifierCapacities
   -> DefinitionName
-  -> TypeVarIndex
+  -> ExferenceSourceTypeVariableHints
   -> E.ExferenceEnvironment
   -> E.ExferenceQuery
   -> Either E.ExferenceInputError [E.ExferenceResult]

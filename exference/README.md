@@ -28,8 +28,8 @@ sometimes stopping with "i could not find any solutions".
 ## Building from source
 
 Exference is part of the unified `djex` Cabal package. Its libraries and
-deterministic test suites build with GHC 9.8.4 and GHC 9.12.4 using Cabal
-3.16.1.0. Cabal is the maintained build path; the historical Stack file
+deterministic test suites build with the supported GHC 9.12.4 toolchain using
+Cabal 3.16.1.0. Cabal is the maintained build path; the historical Stack file
 targeted LTS 5.18 and
 dependencies that no longer exist in this tree, so it has been removed rather
 than pretending to provide a second supported toolchain. Run these commands
@@ -89,6 +89,15 @@ inventory separates source-spelling hints from the exact reserved-ID set: this
 preserves aliases and hintless alpha-renamed binders while allocating safely
 through sparse and `maxBound` namespaces. Together with direct reader and
 strict-writer transformers, this also keeps the frontend independent of `mtl`.
+That raw spelling-oriented index remains a parser/compatibility value. The
+checked request boundary validates every alias as a non-wildcard identifier in
+Exference's enabled Haskell type grammar (including its extension keywords),
+requires its ID to occur flexibly in the complete
+contextual goal, collapses aliases to the lexicographically least spelling,
+retains that exact canonical goal as a scope witness, and fully detaches the
+resulting opaque variable-to-spelling map while sealing. Accepted and rejected
+spellings are both forced at this boundary. Malformed maps therefore fail early as source-located
+`DJEX_EXF_SOURCE_HINT` diagnostics rather than reaching candidate rendering.
 This mirrors Djinn's library-first organization and lets future shared
 frontends depend on the search engine without inheriting source-parser,
 filesystem, or process dependencies.
@@ -102,9 +111,10 @@ Adapters import it directly from `djex`; neither the curated
 request representation behind it remains a hidden module. Stable clients
 therefore see an opaque `ExferenceRequest` with one neutral smart constructor;
 the shared `CachedQuery` owns its strict complete source provenance, while
-parsed variable spellings remain a backend-specific frontend detail. Neither
-participates in request equality or display, and the strict location prevents
-a reusable request from retaining its complete source buffer.
+its backend cache is exactly one opaque checked source-hint value. Neither
+provenance nor hints participate in request equality or display; sealing
+materializes both the complete location and every accepted spelling, so a
+reusable request retains neither its source buffer nor the raw parser map.
 Its compatibility parser still accepts a raw shared `Name`, but converts it to
 the request's opaque `DefinitionName` before parsing so invalid-target
 diagnostics retain their historical precedence. Programmatic `QueryRequest`s
@@ -413,21 +423,37 @@ exposing an unchecked rendering path.
 `findQueryResultsInEnvironmentEither` is the canonical core result API.
 Repeated callers seal an abstract `ExferenceEnvironment` once, then supply its
 varying `ExferenceQuery`, exact checked `DefinitionName`, and source type-name
-hints. The core inserts that exact target into the excluded-binding set before
-checking the query, prepares and validates the query once, and derives its
-rendering hints from that same retained rigid-instantiation plan. The target
-then becomes the name of every generated `FunctionClause`; it is never
-round-tripped through source text. `runExferenceQuery` elaborates the stable
-request and returns those core-built `QueryResult`s directly rather than
-rebuilding their progress, evidence, metadata, or candidates in the adapter.
-Type-source provenance is applied to elaboration, lowering, and query-input
-failures. Search controls are supplied independently and therefore report
-`DJEX_EXF_OPTIONS` without falsely pointing at the type text.
+hints as an opaque `ExferenceSourceTypeVariableHints`. Core callers
+construct it with `mkExferenceSourceTypeVariableHints`; the frontend SPI keeps
+its raw-map signature only as a source-compatible checked entrance. The core
+inserts the exact target into the excluded-binding set before checking the
+query, prepares and validates the query once, and derives final flexible and
+rigid rendering hints from that same retained rigid-instantiation plan. Shared
+synonym expansion alpha-freshens binders introduced by every direct, nested,
+or zero-argument alias away from the complete original source namespace. The
+stable adapter can therefore retarget only genuinely surviving hints after
+elaboration; the core additionally rejects any hint witness whose canonical
+goal differs from the prepared query. The target then
+becomes the name of every generated `FunctionClause`; it is never round-tripped
+through source text. `runExferenceQuery` returns those core-built
+`QueryResult`s directly rather than rebuilding progress, evidence, metadata,
+or candidates in the adapter. Type-source provenance is applied to
+elaboration, lowering, and query-input failures. Search controls are supplied
+independently and therefore report `DJEX_EXF_OPTIONS` without falsely pointing
+at the type text.
 
 The older `findGeneratedSearchBatchesEither` and
 `findGeneratedSearchBatchesWithHintsEither` entry points remain core
 compatibility conveniences for callers that do not need the checked target or
-logical-evidence envelope. All paths still project the engine trace lazily:
+logical-evidence envelope. Their historical raw final-hint map and
+`typeVariableHints` helpers remain explicitly unchecked compatibility
+surfaces; canonical result search accepts only the opaque source form, and the
+stable residual renderer validates bounded copies, rejects partial/infinite or
+malformed names, deduplicates preferences, and freshens fallbacks before any
+such compatibility value reaches output. Expression and definition rendering
+applies the same bounded-copy rule to caller-built term-local hints while
+retaining structured lexical errors for finite bad names. All paths still
+project the engine trace lazily:
 candidate conversion never traverses the whole search. Every canonical result
 contains a shared `Candidate` whose output is the exact-target
 `FunctionClause`, together with fully shared residual constraints and

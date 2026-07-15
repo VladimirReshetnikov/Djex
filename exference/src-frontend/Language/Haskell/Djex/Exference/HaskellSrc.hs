@@ -18,12 +18,10 @@ import Data.Bifunctor (first)
 import Data.Functor.Identity (runIdentity)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
-import qualified Data.Map.Strict as Map
 import qualified Language.Haskell.Exts.Parser as HSE
 
 import Language.Haskell.Djex.Exference
-  ( ExferenceLocal
-  , ExferenceOptions
+  ( ExferenceOptions
   , ExferenceRequest
   , ExferenceSession
   , ExferenceSessionPolicy (..)
@@ -180,7 +178,5 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
         , requestContexts = []
         , requestOptions = options
         }
-      sourceVariables' :: Map.Map String ExferenceLocal
-      sourceVariables' = sourceVariables
   Frontend.mkExferenceRequestWithSourceInfo
-    sourceVariables' location query
+    sourceVariables location query

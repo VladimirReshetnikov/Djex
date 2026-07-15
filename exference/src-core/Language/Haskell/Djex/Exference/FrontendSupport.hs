@@ -2,9 +2,9 @@
 --
 -- This module is an explicit service-provider interface: it exposes the
 -- narrow operations needed to turn an already prepared checked-source witness
--- into a sealed session and to attach source provenance to a checked request. It
--- does not expose either opaque representation, and applications that already
--- have a neutral synthesis environment should use
+-- into a sealed session and to validate rendering hints and provenance while
+-- sealing a checked request. It does not expose either opaque representation,
+-- and applications that already have a neutral synthesis environment should use
 -- "Language.Haskell.Djex.Exference" instead.
 --
 -- The module is exposed by the parser-free @djex@ library but intentionally
@@ -58,8 +58,12 @@ sealPreparedExferenceSessionWithPolicy exclusions overrides prepared =
     exclusions overrides prepared
 
 -- | Construct a checked request and attach parser-neutral rendering hints and
--- source location information. Provenance cannot be replaced after the
--- request has been sealed, and it does not affect request equality or display.
+-- source location information. Every spelling is validated as a non-wildcard
+-- variable in Exference's enabled Haskell type grammar and must identify a
+-- flexible variable in the complete
+-- contextual goal; that canonical goal is retained as the hint scope witness.
+-- Provenance and detached hints cannot be replaced after the request is
+-- sealed, and neither affects request equality or display.
 mkExferenceRequestWithSourceInfo
   :: Map String ExferenceLocal
   -> SourceLocation

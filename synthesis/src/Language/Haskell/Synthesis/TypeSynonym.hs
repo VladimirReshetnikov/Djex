@@ -76,15 +76,17 @@ import Language.Haskell.Synthesis.Type
   , TypeError
   , applicationSpine
   , canonicalizeType
+  , freshenTypeBindersAwayFrom
   , substituteTypeVariables
   , validateType
   )
 import qualified Language.Haskell.Synthesis.Environment as Environment
 
 -- | Allocate a replacement for a binder that would capture a substitution
--- range. The first argument is the complete reserved set; the second is the
--- old binder, allowing callers to preserve distinctions such as flexible and
--- rigid variable namespaces.
+-- range or collide with the source namespace during alias hygiene. The first
+-- argument is the complete reserved set; the second is the old binder,
+-- allowing callers to preserve distinctions such as flexible and rigid
+-- variable namespaces.
 type FreshVariable variable = FreshVariableAllocator variable
 
 data SynonymDefinition variable = SynonymDefinition
@@ -129,7 +131,7 @@ preparedTypeSynonyms
   -> TypeSynonyms variable
 preparedTypeSynonyms (PreparedInventory _ synonyms) = synonyms
 
--- | Failures that are specific to alias preparation or substitution.
+-- | Failures specific to alias preparation, hygiene, or substitution.
 data SynonymExpansionError variable
   = IntrinsicTypeSynonym Name
   | UnsaturatedTypeSynonym Name Int Int
@@ -255,8 +257,14 @@ expandWithTable
   -> Type variable
   -> Either (SynonymExpansionError variable) (Type variable)
 expandWithTable fresh table source = evalStateT
-  (expand fresh table emptyExpansionPath $ canonicalizeType source)
-  (synonymVariables table `Set.union` typeVariables source)
+  (expand fresh table sourceVariables emptyExpansionPath canonicalSource)
+  (synonymVariables table `Set.union` sourceVariables)
+ where
+  canonicalSource = canonicalizeType source
+  -- Alias bodies come from independently scoped declarations. Preserve the
+  -- complete caller namespace so even a phantom argument cannot disappear
+  -- and leave its identity available to an unrelated introduced binder.
+  sourceVariables = typeVariables canonicalSource
 
 -- | Elaborate several types in one kind-variable scope.
 --
@@ -392,7 +400,8 @@ normalizeDefinition
   -> SynonymDefinition variable
   -> Expansion variable (SynonymDefinition variable)
 normalizeDefinition fresh table name definition = do
-  body <- expand fresh table (initialExpansionPath name)
+  body <- expand fresh table (definitionVariables definition)
+    (initialExpansionPath name)
     $ definitionBody definition
   pure definition {definitionBody = body}
 
@@ -400,33 +409,36 @@ expand
   :: Ord variable
   => FreshVariable variable
   -> TypeSynonyms variable
+  -> Set variable
   -> ExpansionPath
   -> Type variable
   -> Expansion variable (Type variable)
-expand fresh table path source = case source of
+expand fresh table protected path source = case source of
   TypeVariable{} -> pure source
-  TypeConstructor{} -> expandApplication fresh table path source []
+  TypeConstructor{} ->
+    expandApplication fresh table protected path source []
   TypeApplication{} ->
     let (headType, arguments) = applicationSpine source
-    in expandApplication fresh table path headType arguments
+    in expandApplication fresh table protected path headType arguments
   FunctionType parameter result -> FunctionType
-    <$> expand fresh table path parameter
-    <*> expand fresh table path result
+    <$> expand fresh table protected path parameter
+    <*> expand fresh table protected path result
   TupleType boxity elements -> TupleType boxity
-    <$> mapM (expand fresh table path) elements
+    <$> mapM (expand fresh table protected path) elements
   ForallType variables constraints body -> ForallType variables
-    <$> mapM (expandConstraint fresh table path) constraints
-    <*> expand fresh table path body
+    <$> mapM (expandConstraint fresh table protected path) constraints
+    <*> expand fresh table protected path body
 
 expandApplication
   :: Ord variable
   => FreshVariable variable
   -> TypeSynonyms variable
+  -> Set variable
   -> ExpansionPath
   -> Type variable
   -> [Type variable]
   -> Expansion variable (Type variable)
-expandApplication fresh table path headType arguments = case headType of
+expandApplication fresh table protected path headType arguments = case headType of
   TypeConstructor name
     | Just definition <- Map.lookup name $ synonymDefinitions table -> do
         let expected = length $ definitionParameters definition
@@ -439,13 +451,20 @@ expandApplication fresh table path headType arguments = case headType of
         -- Arguments are independent source subtrees, not part of the alias
         -- body's recursion stack. Keeping the old path here also preserves
         -- the historical error order for failures inside arguments.
-        expandedArguments <- mapM (expand fresh table path) arguments
+        expandedArguments <- mapM
+          (expand fresh table protected path) arguments
         let (affected, trailing) = splitAt expected expandedArguments
             substitutions = Map.fromList
               $ zip (definitionParameters definition) affected
-        instantiated <- substitute fresh substitutions
+        -- Definitions have their own lexical identity namespace. Freshen its
+        -- colliding binders before substitution even when all corresponding
+        -- arguments are phantom. Repeating this for every reached definition
+        -- also covers nested and zero-argument aliases.
+        hygienicBody <- freshenSynonymBody fresh protected
           $ definitionBody definition
-        expandedBody <- expand fresh table bodyPath instantiated
+        instantiated <- substitute fresh substitutions
+          hygienicBody
+        expandedBody <- expand fresh table protected bodyPath instantiated
         pure $ canonicalizeType
           $ foldl TypeApplication expandedBody trailing
   _ -> do
@@ -455,8 +474,9 @@ expandApplication fresh table path headType arguments = case headType of
     expandedHead <- case headType of
       TypeVariable{} -> pure headType
       TypeConstructor{} -> pure headType
-      _ -> expand fresh table path headType
-    expandedArguments <- mapM (expand fresh table path) arguments
+      _ -> expand fresh table protected path headType
+    expandedArguments <- mapM
+      (expand fresh table protected path) arguments
     pure $ canonicalizeType
       $ foldl TypeApplication expandedHead expandedArguments
 
@@ -464,12 +484,35 @@ expandConstraint
   :: Ord variable
   => FreshVariable variable
   -> TypeSynonyms variable
+  -> Set variable
   -> ExpansionPath
   -> Constraint (Type variable)
   -> Expansion variable (Constraint (Type variable))
-expandConstraint fresh table path constraint = Constraint
+expandConstraint fresh table protected path constraint = Constraint
   (constraintClass constraint)
-  <$> mapM (expand fresh table path) (constraintArguments constraint)
+  <$> mapM
+      (expand fresh table protected path)
+      (constraintArguments constraint)
+
+-- Run the stronger alias-origin freshening rule inside the same supply used
+-- by capture-avoiding substitution and later alias instantiations.
+freshenSynonymBody
+  :: Ord variable
+  => FreshVariable variable
+  -> Set variable
+  -> Type variable
+  -> Expansion variable (Type variable)
+freshenSynonymBody fresh protected source = do
+  reserved <- get
+  result <- case freshenTypeBindersAwayFrom
+      fresh reserved protected source of
+    Left (FreshVariableSupplyExhausted binder) ->
+      lift $ Left $ FreshVariableUnavailable binder
+    Left (FreshVariableAlreadyReserved binder candidate) ->
+      lift $ Left $ FreshVariableCollision binder candidate
+    Right freshened -> pure freshened
+  put $ reserved `Set.union` typeVariables result
+  pure result
 
 substitute
   :: Ord variable

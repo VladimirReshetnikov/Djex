@@ -2,7 +2,14 @@
 
 module Main (main) where
 
-import Control.Exception (SomeException, evaluate, try)
+import Control.Exception
+  ( AsyncException (ThreadKilled)
+  , SomeException
+  , evaluate
+  , fromException
+  , throw
+  , try
+  )
 import Data.Either (isRight)
 import Data.List (isInfixOf, nub)
 import qualified Data.Map.Strict as Map
@@ -347,6 +354,40 @@ tests = testGroup "Djex facade"
       assertBool "the internal source cache did not reach rendering hints"
         $ "sourceVariable" `elem` Map.elems
             (exferenceCandidateTypeVariableNames $ candidateDetails candidate)
+  , testCase "propagate parsed spellings to flexible and rigid constraints" $ do
+      className <- expectRight $ mkIdentifier "C"
+      producerName <- expectRight $ parseName "Fixture.produce"
+      target <- expectRight $ mkIdentifier "residualProducer"
+      let variable = FlexibleVariable 0
+          variableType = TypeVariable variable
+          declarations =
+            [ ClassDeclaration () className
+                [TypeParameter variable Nothing] [] []
+            , ValueDeclaration $ ValueSignature () producerName
+                $ ForallType [variable]
+                    [Constraint className [variableType]] variableType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions
+          { exferenceAllowResidualConstraints = True
+          , exferenceMaximumSteps = 64
+          }
+        target "residual-source-hints" "forall source. source"
+      candidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      candidateResidualConstraints candidate @?=
+        [Constraint className [TypeVariable $ RigidVariable 0]]
+      exferenceCandidateTypeVariableNames
+          (candidateDetails candidate) @?=
+        Map.fromList
+          [ (FlexibleVariable 0, "source")
+          , (RigidVariable 0, "source")
+          ]
+      renderExferenceResidualConstraints candidate @?= ["C source"]
   , testCase "keep checked-HSE and neutral Exference sessions equivalent" $ do
       backendIdentityName <- expectRight
         $ mkQualifiedName ["Fixture"] "identity"
@@ -464,6 +505,34 @@ tests = testGroup "Djex facade"
       _ <- firstExferenceCandidate =<< expectRight
         (runExferenceQuery session shared)
       pure ()
+  , testCase "do not reuse erased hints for synonym-introduced binders" $ do
+      innerName <- expectRight $ parseName "Fixture.Inner"
+      phantomName <- expectRight $ parseName "Fixture.Phantom"
+      target <- expectRight $ mkIdentifier "phantomIdentity"
+      let introduced = FlexibleVariable 0
+          parameter = FlexibleVariable 1
+          introducedType = TypeVariable introduced
+          declarations =
+            [ TypeSynonymDeclaration () innerName []
+                $ ForallType [introduced] []
+                $ FunctionType introducedType introducedType
+            , TypeSynonymDeclaration () phantomName
+                [TypeParameter parameter Nothing]
+                (TypeConstructor innerName)
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions
+          { exferenceMaximumSteps = 64 }
+        target "phantom-source-hints"
+        "Fixture.Phantom erased"
+      candidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      exferenceCandidateTypeVariableNames
+          (candidateDetails candidate) @?= Map.empty
   , testCase "canonicalize Exference source names for every failure phase" $ do
       aliasName <- expectRight $ parseName "Fixture.Alias"
       higherName <- expectRight $ parseName "Fixture.Higher"
@@ -817,6 +886,100 @@ tests = testGroup "Djex facade"
             [] emptyExferenceCandidateDetails
       renderExferenceCandidateExpression FullyQualified patternedCandidate @?=
         Right "\\_ -> Fixture.value"
+  , testCase "sanitize caller-created Exference residual hints" $ do
+      className <- expectRight $ mkIdentifier "C"
+      target <- expectRight $ mkIdentifier "result"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      let same = FlexibleVariable 0
+          duplicate = FlexibleVariable 1
+          wildcard = FlexibleVariable 2
+          control = FlexibleVariable 3
+          partial = FlexibleVariable 4
+          infinite = FlexibleVariable 5
+          collision = FlexibleVariable 6
+          typeFamilyKeyword = FlexibleVariable 7
+          forallKeyword = FlexibleVariable 8
+          variables =
+            [ same, duplicate, wildcard, control, partial, infinite, collision
+            , typeFamilyKeyword, forallKeyword
+            ]
+          details = emptyExferenceCandidateDetails
+            { exferenceCandidateTypeVariableNames = Map.fromList
+                [ (same, "same")
+                , (duplicate, "same")
+                , (wildcard, "_")
+                , (control, "bad\nname")
+                , (partial, 'p' : error "unforced rendering-hint tail")
+                , (infinite, repeat 'i')
+                , (collision, "a")
+                , (typeFamilyKeyword, "family")
+                , (forallKeyword, "forall")
+                ]
+            }
+          candidate = Candidate
+            (FunctionClause checkedTarget [] $ Local 0)
+            [Constraint className $ map TypeVariable variables]
+            details
+          expected = ["C same a' b c d e a g h"]
+          candidateWithHint variable hint = Candidate
+            (FunctionClause checkedTarget [] $ Local 0)
+            [Constraint className [TypeVariable variable]]
+            emptyExferenceCandidateDetails
+              { exferenceCandidateTypeVariableNames =
+                  Map.singleton variable hint
+              }
+      rendered <- try $ evaluate
+        $ renderExferenceResidualConstraints candidate == expected
+      case rendered :: Either SomeException Bool of
+        Left failure -> fail $ "residual rendering forced an unsafe hint: "
+          ++ show failure
+        Right matches -> assertBool
+          "residual rendering did not validate or freshen raw hints" matches
+      let atLimit = replicate 4096 'x'
+      renderExferenceResidualConstraints
+          (candidateWithHint (FlexibleVariable 9) atLimit) @?=
+        ["C " ++ atLimit]
+      renderExferenceResidualConstraints
+          (candidateWithHint (FlexibleVariable 10) $ replicate 4097 'x') @?=
+        ["C j"]
+      asyncResult <- try $ evaluate
+        $ renderExferenceResidualConstraints
+            (candidateWithHint (FlexibleVariable 11)
+              $ 'x' : throw ThreadKilled)
+        == ["C k"]
+      case asyncResult :: Either SomeException Bool of
+        Left failure -> case fromException failure of
+          Just ThreadKilled -> pure ()
+          _ -> fail $ "residual rendering changed an asynchronous exception: "
+            ++ show failure
+        Right _ -> fail "residual rendering swallowed ThreadKilled"
+  , testCase "bound caller-created Exference local hints" $ do
+      target <- expectRight $ mkIdentifier "result"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      let candidateWithHint local hint = Candidate
+            (FunctionClause checkedTarget []
+              $ Lambda [Bind local] $ Local local)
+            [] emptyExferenceCandidateDetails
+              { exferenceCandidateLocalNames = Map.singleton local hint }
+          render local hint = renderExferenceCandidateExpression Unqualified
+            $ candidateWithHint local hint
+      render 0 ('p' : error "unforced local-hint tail") @?=
+        Right "\\v0 -> v0"
+      render 1 (repeat 'i') @?= Right "\\a -> a"
+      render 2 (replicate 4097 'x') @?= Right "\\b -> b"
+      let atLimit = replicate 4096 'x'
+      case render 3 atLimit of
+        Left failure -> fail $ "maximum-length local hint was rejected: "
+          ++ show failure
+        Right rendered ->
+          filter (`notElem` " \n\r\t") rendered @?=
+            "\\" ++ atLimit ++ "->" ++ atLimit
+      case render 4 "bad\nname" of
+        Left _ -> pure ()
+        Right rendered -> fail $ "malformed local hint rendered as " ++ rendered
+      case render 5 "forall" of
+        Left _ -> pure ()
+        Right rendered -> fail $ "reserved local hint rendered as " ++ rendered
   ]
 
 assertDjinnCompatibility

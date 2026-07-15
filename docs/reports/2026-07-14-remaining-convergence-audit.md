@@ -120,8 +120,8 @@ capture-avoiding forall substitution, tuple canonicalization, residual
 constraint order, unknown-class policy, type-variable rendering hints, and
 lazy batch tails. It additionally pins malformed native-value rejection,
 higher-kinded tuple/function unification, exact historical tuple ranking, and
-both supported compiler graphs. Priority 2 subsequently removed the remaining
-result authority beneath the shared envelope.
+the supported GHC 9.12.4 compiler graph. Priority 2 subsequently removed the
+remaining result authority beneath the shared envelope.
 
 ## Priority 2: remove duplicate result envelopes
 
@@ -260,8 +260,8 @@ The shared query layer now owns a strict `RequestProvenance` in every
 opaque `SourceLocation` materializes complete text spans during sealing;
 programmatic requests remain explicitly source-free, and equality/display
 still observe only the neutral `QueryRequest`. Djinn's cache now contains only
-its raw proof-core projection, while Exference's contains only source variable
-spellings.
+its raw proof-core projection, while Exference's contains only one opaque
+checked source-hint value.
 
 The review also fixed two attribution bugs. Exference now retains the exact
 normalized HSE parse filename for deferred failures, including preserving
@@ -272,13 +272,63 @@ rejection; separately supplied options and internal invariants are source-less
 in both adapters. Historical Djinn string entry points retain their established
 option messages.
 
+## Post-fold source-hint trust-boundary review
+
+**Completed on 2026-07-14:** Exference's source frontend previously passed an
+unchecked `Map String Int` through its public SPI, opaque request cache, and
+canonical core result API. Although those spellings could not change search
+or evidence, malformed names and control characters could reach rendered
+residual constraints and terminal/source output. Out-of-scope IDs could also
+pollute public candidate details or collide with a later search allocation;
+validation and forcing cost remained deferred until a candidate demanded the
+map.
+
+Canonical search now accepts an opaque, fully forced
+`ExferenceSourceTypeVariableHints`. Its checked constructor validates every
+alias against the supported extension-aware type-variable grammar, rejects
+wildcard, constructor, `forall`, and type-family keyword spellings,
+requires IDs in the contextual goal's flexible namespace, stores one
+lexicographically least spelling per ID, and retains the exact canonical goal
+as a scope witness. Successful values and rejected spelling details are both
+fully detached. The source-aware request SPI retains
+its raw-map signature as a compatibility entrance but seals it immediately,
+reporting `DJEX_EXF_SOURCE_HINT` with the exact request location. Programmatic
+requests store a goal-bound empty value, the obsolete one-field request cache
+wrapper is gone, and canonical core search rejects a witness paired with a
+different same-numbered query. The invariant witness deliberately has no
+`Generic` instance: `Generic.to` would otherwise reconstruct its hidden fields
+despite the abstract export.
+
+The first independent review found that integer intersection alone was not an
+origin proof: an erased phantom argument and an unrelated `forall` binder from
+a synonym body could share an ID. The repair belongs to the common synthesis
+layer. Alias expansion now alpha-freshens every introduced binder away from
+the complete original source namespace, recursively through direct, nested,
+and zero-argument aliases, while ordinary substitution retains its narrower
+capture-avoidance semantics. The stable adapter then retargets the paired
+hints to the elaborated goal before rigid-name propagation.
+
+Historical caller-constructed candidate/batch hint maps no longer feed the
+modern checked result path. They remain observable compatibility data, but the
+stable residual renderer treats them only as untrusted preferences: it copies
+a bounded finite prefix under synchronous-exception containment, validates
+the complete identifier, rejects wildcard/malformed/partial/infinite values,
+deduplicates accepted names, and freshens deterministic fallbacks. Stable term
+rendering applies the same bounded detachment to caller-built local hints while
+preserving finite lexical errors, and both paths rethrow asynchronous
+exceptions. Regression
+coverage includes malformed/control spellings, failure-path strictness, scope
+and tag errors, full-`Int` IDs, alias selection, cross-query witness rejection,
+source-located SPI errors, flexible/rigid residual rendering, malicious raw
+candidate details, and direct plus nested phantom/binder collisions.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:
 
 - focused unit/property tests for touched core operations;
 - all 12 Djex test suites and both benchmarks compiled with `-Werror`;
-- GHC 9.12.4 and supported GHC 9.8.4 builds;
+- the supported GHC 9.12.4 build and test graph;
 - `--prefer-oldest` resolution for the declared bounds;
 - `cabal check`, source-distribution inspection, and Haddock generation; and
 - a clean tracked tree with the milestone commit pushed before the next

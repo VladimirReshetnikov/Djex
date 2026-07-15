@@ -16,9 +16,7 @@ Author:        Vladimir Reshetnikov, Lennart Augustsson, Lennart Spitzner, and c
 Maintainer:    Vladimir Reshetnikov
 Homepage:      https://github.com/VladimirReshetnikov/Haskell/tree/main/djex
 Bug-Reports:   https://github.com/VladimirReshetnikov/Haskell/issues
-Tested-With:
-  GHC == 9.8.4,
-  GHC == 9.12.4
+Tested-With:   GHC == 9.12.4
 Stability:     experimental
 Copyright:
   Copyright (c) 2005-2014 Lennart Augustsson
@@ -312,7 +310,7 @@ Test-Suite djinn-cli-tests
 -- shared vocabulary and both engines together. The main-library stanza above
 -- keeps HSE and filesystem dependencies out of that surface.
 Test-Suite djex-parser-free-api-tests
-  import:         tasty-hunit-test
+  import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-parser-free-api

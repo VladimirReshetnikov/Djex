@@ -5,6 +5,7 @@ module Main (main) where
 import Control.Exception (SomeException, evaluate, try)
 import Data.Either (isRight)
 import Data.Foldable (toList)
+import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 
 import Djinn.Core (parseHType)
@@ -19,6 +20,7 @@ import Language.Haskell.Exference.Core.Declaration
   ( prepareNeutralSynthesisInventory )
 import Language.Haskell.Exference.Core
   ( ExferenceQuery (..)
+  , emptyExferenceSourceTypeVariableHints
   , findQueryResultsInEnvironmentEither
   , mkExferenceEnvironment
   )
@@ -114,12 +116,26 @@ main = defaultMain $ testGroup "Djex parser-free API"
           diagnosticSpan failure @?= Just (sourceTextSpan source)
         Right _ -> assertFailure
           "the sourced SPI accepted an out-of-scope context variable"
+      case mkExferenceRequestWithSourceInfo
+          (Map.singleton "where" 0) location QueryRequest
+          { requestTarget = checkedTarget
+          , requestGoal = goal
+          , requestContexts = []
+          , requestOptions = options
+          } of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_EXF_SOURCE_HINT"
+          diagnosticSource failure @?= Just "parser-free-api"
+          diagnosticSpan failure @?= Just (sourceTextSpan source)
+        Right _ -> assertFailure
+          "the sourced SPI accepted a reserved type-variable spelling"
       results <- expectRight $ runExferenceQuery session request
       backendGoal <- expectRight $ CoreTypes.fromSynthesisType goal
       coreEnvironment <- expectRight $ mkExferenceEnvironment
         $ EnvDictionary [] [] CoreTypes.emptyStaticClassEnv
       direct <- expectRight $ findQueryResultsInEnvironmentEither
-        checkedTarget mempty coreEnvironment ExferenceQuery
+        checkedTarget (emptyExferenceSourceTypeVariableHints backendGoal)
+        coreEnvironment ExferenceQuery
           { queryGoalType = backendGoal
           , queryExcludedBindings = mempty
           , queryAllowUnused = exferenceAllowUnused options
@@ -165,6 +181,29 @@ main = defaultMain $ testGroup "Djex parser-free API"
         Left _ -> pure ()
         Right _ -> assertFailure
           "the source-aware adapter retained a lazy source-span traversal"
+      let finiteLocation = sourceTextLocation "parser-free-api" "a -> a"
+          partialSpelling = 'a' : error "unforced source-hint tail"
+      hintResult <- try $ evaluate $
+        mkExferenceRequestWithSourceInfo
+          (Map.singleton partialSpelling 0) finiteLocation query
+      case hintResult
+          :: Either
+              SomeException
+              (Either Diagnostic ExferenceRequest) of
+        Left _ -> pure ()
+        Right _ -> assertFailure
+          "the source-aware adapter retained a lazy spelling validation"
+      let partialMap = Map.fromDistinctAscList
+            $ ("source", 0) : error "unforced source-hint map tail"
+      mapResult <- try $ evaluate $
+        mkExferenceRequestWithSourceInfo partialMap finiteLocation query
+      case mapResult
+          :: Either
+              SomeException
+              (Either Diagnostic ExferenceRequest) of
+        Left _ -> pure ()
+        Right _ -> assertFailure
+          "the source-aware adapter retained a lazy source-hint map"
   , testCase "the native shared type has honest compatibility views" $ do
       let rigidForall = CoreTypes.TypeForallNative
             [RigidVariable 7]

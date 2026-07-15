@@ -3,8 +3,12 @@ module Language.Haskell.Exference.Core.Candidate
   ( ExferenceCandidateDetails (..)
   , ExferenceCandidateError (..)
   , ExferenceTypeVariableHints
+  , ExferenceSourceTypeVariableHints
+  , ExferenceSourceTypeVariableHintError (..)
   , ExferenceGeneratedCandidate
   , mkExferenceGeneratedCandidate
+  , emptyExferenceSourceTypeVariableHints
+  , mkExferenceSourceTypeVariableHints
   , typeVariableHints
   ) where
 

@@ -19,6 +19,7 @@ module Language.Haskell.Synthesis.Type
   , canonicalizeType
   , applicationSpine
   , renameScopedVariables
+  , freshenTypeBindersAwayFrom
   , substituteTypeVariables
   , validateType
   , freeVariables
@@ -29,7 +30,8 @@ import Control.DeepSeq (NFData)
 import Control.Monad (foldM, unless)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
-  ( evalStateT
+  ( StateT
+  , evalStateT
   , get
   , put
   )
@@ -78,7 +80,7 @@ instance NFData variable => NFData (TypeError variable)
 type FreshVariableAllocator variable =
   Set variable -> variable -> Maybe variable
 
--- | Failures from capture-avoiding type-variable substitution.
+-- | Failures from binder freshening or capture-avoiding substitution.
 --
 -- Both cases identify the source binder that required alpha-renaming. The
 -- second also records the invalid candidate returned by the allocator.
@@ -156,6 +158,66 @@ renameScopedVariables renaming source = case source of
       (map (fmap $ renameScopedVariables visible) constraints)
       (renameScopedVariables visible body)
 
+-- | Alpha-rename binders that collide with a protected namespace.
+--
+-- This is distinct from substitution: it freshens a colliding binder even
+-- when no free occurrence beneath that binder will be replaced.  Synonym
+-- expansion uses that stronger rule to distinguish variables introduced by
+-- an alias body from variables in the complete source type.  Binders already
+-- outside the protected set retain their identities, and nested shadowing is
+-- traversed scope by scope.
+freshenTypeBindersAwayFrom
+  :: Ord variable
+  => FreshVariableAllocator variable
+  -> Set variable
+     -- ^ Identities unavailable as replacements during the surrounding
+     -- multi-step transformation. Membership here alone does not trigger
+     -- binder renaming.
+  -> Set variable
+     -- ^ Source identities that alias-introduced binders must not reuse.
+  -> Type variable
+  -> Either (SubstitutionError variable) (Type variable)
+freshenTypeBindersAwayFrom fresh extraReserved protected source =
+  evalStateT (freshen source) initialReserved
+ where
+  initialReserved = Set.unions
+    [ extraReserved
+    , protected
+    , allTypeVariables source
+    ]
+
+  freshen typeExpression = case typeExpression of
+    TypeVariable{} -> pure typeExpression
+    TypeConstructor{} -> pure typeExpression
+    TypeApplication function argument -> TypeApplication
+      <$> freshen function
+      <*> freshen argument
+    FunctionType parameter result -> FunctionType
+      <$> freshen parameter
+      <*> freshen result
+    TupleType boxity elements -> TupleType boxity
+      <$> mapM freshen elements
+    ForallType binders constraints body -> do
+      renaming <- foldM freshenProtectedBinder Map.empty binders
+      let renamedBinders = map
+            (\binder -> Map.findWithDefault binder binder renaming)
+            binders
+          renamedConstraints = map
+            (fmap $ renameScopedVariables renaming) constraints
+          renamedBody = renameScopedVariables renaming body
+      ForallType renamedBinders
+        <$> mapM freshenConstraint renamedConstraints
+        <*> freshen renamedBody
+
+  freshenConstraint (Constraint className arguments) = Constraint className
+    <$> mapM freshen arguments
+
+  freshenProtectedBinder renaming binder
+    | binder `Set.notMember` protected = pure renaming
+    | otherwise = do
+        replacement <- allocateFreshBinder fresh binder
+        pure $ Map.insert binder replacement renaming
+
 -- | Simultaneously substitute free type variables without capturing any
 -- free variable of a replacement.
 --
@@ -231,15 +293,27 @@ substituteTypeVariables fresh extraReserved substitutions source =
   freshenBinder rangeVariables renaming binder
     | binder `Set.notMember` rangeVariables = pure renaming
     | otherwise = do
-        reserved <- get
-        replacement <- case fresh reserved binder of
-          Nothing -> lift $ Left $ FreshVariableSupplyExhausted binder
-          Just candidate
-            | candidate `Set.member` reserved -> lift $ Left
-                $ FreshVariableAlreadyReserved binder candidate
-            | otherwise -> pure candidate
-        put $ Set.insert replacement reserved
+        replacement <- allocateFreshBinder fresh binder
         pure $ Map.insert binder replacement renaming
+
+allocateFreshBinder
+  :: Ord variable
+  => FreshVariableAllocator variable
+  -> variable
+  -> StateT
+      (Set variable)
+      (Either (SubstitutionError variable))
+      variable
+allocateFreshBinder fresh binder = do
+  reserved <- get
+  replacement <- case fresh reserved binder of
+    Nothing -> lift $ Left $ FreshVariableSupplyExhausted binder
+    Just candidate
+      | candidate `Set.member` reserved -> lift $ Left
+          $ FreshVariableAlreadyReserved binder candidate
+      | otherwise -> pure candidate
+  put $ Set.insert replacement reserved
+  pure replacement
 
 allTypeVariables :: Ord variable => Type variable -> Set variable
 allTypeVariables = foldMap Set.singleton

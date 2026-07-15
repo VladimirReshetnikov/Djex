@@ -1785,7 +1785,7 @@ synonymTests = testGroup "type synonyms"
                       (SharedType.TypeVariable "q")
                       (SharedType.TypeVariable "q''")
               ])
-  , testCase "do not freshen binders for irrelevant substitutions" $ do
+  , testCase "freshen direct phantom-alias binders away from source IDs" $ do
       let constantName = right $ mkIdentifier "Constant"
           intName = right $ mkIdentifier "Int"
           constant = Declaration.TypeSynonymDeclaration () constantName
@@ -1800,9 +1800,39 @@ synonymTests = testGroup "type synonyms"
             (SharedType.TypeConstructor constantName)
             (SharedType.TypeVariable "q")
       TypeSynonym.expandTypeSynonyms
-          (\_ _ -> Nothing) aliases applied @?=
-        Right (SharedType.ForallType ["q"] []
+          freshStringVariable aliases applied @?=
+        Right (SharedType.ForallType ["q'"] []
           $ SharedType.TypeConstructor intName)
+      TypeSynonym.expandTypeSynonyms
+          (\_ _ -> Nothing) aliases applied @?=
+        Left (TypeSynonym.FreshVariableUnavailable "q")
+  , testCase "freshen nested zero-argument phantom-alias binders" $ do
+      let innerName = right $ mkIdentifier "Inner"
+          outerName = right $ mkIdentifier "Outer"
+          definitions = Map.fromList
+            [ ( innerName
+              , ( []
+                , SharedType.ForallType ["source"] []
+                  $ SharedType.FunctionType
+                      (SharedType.TypeVariable "source")
+                      (SharedType.TypeVariable "source")
+                )
+              )
+            , ( outerName
+              , ( ["phantom"]
+                , SharedType.TypeConstructor innerName
+                )
+              )
+            ]
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor outerName)
+            (SharedType.TypeVariable "source")
+      TypeSynonym.expandTypeSynonymDefinitions
+          freshStringVariable definitions applied @?=
+        Right (SharedType.ForallType ["source'"] []
+          $ SharedType.FunctionType
+              (SharedType.TypeVariable "source'")
+              (SharedType.TypeVariable "source'"))
   , testCase "kind-check phantom arguments before expansion" $ do
       let phantomName = right $ mkIdentifier "Phantom"
           intName = right $ mkIdentifier "Int"
@@ -2890,7 +2920,7 @@ backticked source = [toEnum 96] ++ source ++ [toEnum 96]
 reservedIdentifiers :: [String]
 reservedIdentifiers =
   [ "_", "as", "case", "class", "data", "default", "deriving"
-  , "do", "else", "foreign", "hiding", "if", "import", "in"
+  , "do", "else", "forall", "foreign", "hiding", "if", "import", "in"
   , "infix", "infixl", "infixr", "instance", "let", "module"
   , "newtype", "of", "qualified", "then", "type", "where"
   ]

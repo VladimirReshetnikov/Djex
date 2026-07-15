@@ -574,10 +574,13 @@ trim = dropWhileEnd isSpace . dropWhile isSpace
 dropWhileEnd :: (a -> Bool) -> [a] -> [a]
 dropWhileEnd predicate = reverse . dropWhile predicate . reverse
 
+-- Generated Djex source may contain explicit forall syntax, so its extension
+-- keyword is reserved uniformly rather than allowing a local named @forall@
+-- whose validity would change with the surrounding module's extensions.
 reservedIdentifiers :: [String]
 reservedIdentifiers =
   [ "_", "as", "case", "class", "data", "default", "deriving"
-  , "do", "else", "foreign", "hiding", "if", "import", "in"
+  , "do", "else", "forall", "foreign", "hiding", "if", "import", "in"
   , "infix", "infixl", "infixr", "instance", "let", "module"
   , "newtype", "of", "qualified", "then", "type", "where"
   ]

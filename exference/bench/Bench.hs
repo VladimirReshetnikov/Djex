@@ -17,6 +17,7 @@ import Language.Haskell.Exference.Core
   ( ExferenceCandidate
   , ExferenceQuery (..)
   , ExferenceResult
+  , emptyExferenceSourceTypeVariableHints
   , findQueryResultsInEnvironmentEither
   )
 import Language.Haskell.Exference.Core.Candidate
@@ -46,7 +47,9 @@ benchmarkEntry entry = bench (entryName entry)
 runEntry :: Entry -> ExferenceQuery -> Int
 runEntry entry query = case
     findQueryResultsInEnvironmentEither
-      benchmarkTarget mempty (entryEnvironment entry) query of
+      benchmarkTarget
+        (emptyExferenceSourceTypeVariableHints $ queryGoalType query)
+        (entryEnvironment entry) query of
   Left failure -> error $ entryName entry ++ ": search failed: " ++ show failure
   Right results -> case entryDemand entry of
     FirstCandidate -> candidateDigest $ firstCandidate label results

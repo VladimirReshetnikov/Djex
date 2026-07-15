@@ -23,8 +23,12 @@ module Language.Haskell.Exference.Core
   , C.ExferenceCandidateDetails (..)
   , C.ExferenceCandidateError (..)
   , C.ExferenceTypeVariableHints
+  , C.ExferenceSourceTypeVariableHints
+  , C.ExferenceSourceTypeVariableHintError (..)
   , C.ExferenceGeneratedCandidate
   , C.mkExferenceGeneratedCandidate
+  , C.emptyExferenceSourceTypeVariableHints
+  , C.mkExferenceSourceTypeVariableHints
   , C.typeVariableHints
   , E.typeVariableHintsInEnvironment
   , E.ExferenceProjectionError (..)

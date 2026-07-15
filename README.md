@@ -116,21 +116,15 @@ cabal build all
 cabal test all --test-show-details=direct
 ```
 
-The complete package graph is tested warning-clean on GHC 9.8.4 and GHC
-9.12.4. The declared `base >= 4.19` floor is therefore exercised by GHC 9.8.4,
-not merely inferred from dependency metadata. GHC 9.12.4 remains the preferred
-local toolchain because it is the newest installed compiler with full Haskell
-Language Server support. To reproduce the lower-compiler check without
-changing the selected compiler, use an isolated build directory:
-
-```console
-cabal build all -w ghc-9.8.4 --builddir=dist-newstyle-ghc-9.8.4 --enable-tests --enable-benchmarks --ghc-options=-Werror
-cabal test all -w ghc-9.8.4 --builddir=dist-newstyle-ghc-9.8.4 --enable-tests --ghc-options=-Werror --test-show-details=direct
-```
+The complete package graph is tested warning-clean on, and currently supports,
+GHC 9.12.4. It is the active toolchain because it has full Haskell Language
+Server support. The broad `base >= 4.19 && < 5` dependency bound remains an
+honest API compatibility range rather than a claim that every corresponding
+compiler is part of the supported test matrix.
 
 The project pins the Hackage index snapshot used by the solver, while
 `djex.cabal` retains explicit dependency ranges for library consumers and
-lower-bound testing. Update that snapshot only as part of a dependency review;
+solver checks. Update that snapshot only as part of a dependency review;
 this keeps otherwise identical checkouts on one package universe without
 turning the package metadata into an application-style version lock.
 
@@ -324,9 +318,19 @@ and then elimination order.
 `ExferenceRequest` is opaque in the same operational sense as `DjinnRequest`:
 the stable adapter exposes only `mkExferenceRequest` and
 `exferenceRequestQuery`. Source locations and parsed variable spellings are
-private presentation data, while the common `CachedQuery` owns the strict
-location separately from the backend-specific spelling cache. Neither affects
-equality/display nor admits an unchecked construction path through the curated facade. The parser-free
+private presentation data. The common `CachedQuery` owns the strict location
+separately from an opaque backend-specific variable-to-spelling value. The
+source SPI validates every raw alias as a non-wildcard variable identifier,
+bounds its ID to the complete contextual goal, collapses aliases
+deterministically, retains the exact canonical goal as a scope witness, and
+detaches the map before returning. Shared synonym elaboration alpha-freshens
+every alias-introduced binder away from the complete original source
+namespace, including through nested and zero-argument aliases. The adapter can
+therefore retarget surviving hints to the elaborated goal without confusing an
+erased phantom argument with an unrelated same-numbered binder, and core search
+rejects a hint value paired with any other query.
+Neither provenance nor hints affects equality/display or admits an unchecked
+construction path through the curated facade. The parser-free
 library's hidden `Language.Haskell.Djex.Exference.Internal.Request`
 representation owns that metadata. Source-adapter authors opt into the explicit parser-neutral
 `Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.

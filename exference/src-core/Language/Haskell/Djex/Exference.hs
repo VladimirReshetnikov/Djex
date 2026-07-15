@@ -58,10 +58,20 @@ module Language.Haskell.Djex.Exference
   , renderExferenceResidualConstraints
   ) where
 
+import Control.DeepSeq (force)
+import Control.Exception
+  ( SomeAsyncException
+  , SomeException
+  , evaluate
+  , fromException
+  , tryJust
+  )
+import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
+import System.IO.Unsafe (unsafePerformIO)
 
 import Language.Haskell.Exference.Core
   ( ExferenceHeuristicsConfig (..)
@@ -78,6 +88,10 @@ import Language.Haskell.Exference.Core.Types
   ( HsType
   , fromSynthesisType
   , showVar
+  )
+import Language.Haskell.Exference.Core.Internal.Candidate
+  ( retargetExferenceSourceTypeVariableHints
+  , validateExferenceTypeVariableSpelling
   )
 import Language.Haskell.Djex.Exference.Internal.Session
   ( ExferenceOmission (..)
@@ -96,11 +110,12 @@ import Language.Haskell.Djex.Exference.Internal.Request
   , exferenceRequestQuery
   , mkExferenceRequest
   , requestContextualGoal
-  , requestSourceTypeVariables
+  , requestSourceTypeVariableHints
   , withExferenceRequestProvenance
   )
 import Language.Haskell.Synthesis.Candidate
   ( candidateDetails
+  , candidateOutput
   , candidateResidualConstraints
   , renderCandidateDefinition
   , renderCandidateExpression
@@ -291,12 +306,14 @@ renderExferenceResidualConstraints
   :: ExferenceCandidate
   -> [String]
 renderExferenceResidualConstraints candidate =
-  map (SharedRender.renderConstraint variableName)
-  $ Set.toAscList
-  $ Set.fromList
-  $ candidateResidualConstraints candidate
+  map (SharedRender.renderConstraint variableName) constraints
  where
-  variableName = candidateTypeVariableName candidate
+  constraints = Set.toAscList $ Set.fromList
+    $ candidateResidualConstraints candidate
+  variables = foldMap (foldMap $ foldMap Set.singleton) constraints
+  variableNames = residualTypeVariableNames candidate variables
+  variableName variable = Map.findWithDefault
+    (candidateTypeVariableFallback variable) variable variableNames
 
 candidateRenderOptions
   :: Qualification
@@ -304,20 +321,107 @@ candidateRenderOptions
   -> RenderOptions ExferenceLocal
 candidateRenderOptions qualification candidate =
   renderOptionsWithLocalNameHints qualification
-    (exferenceCandidateLocalNames $ candidateDetails candidate)
+    (boundedLocalNameHints candidate)
     showVar
     []
 
-candidateTypeVariableName
+-- Public compatibility constructors can still attach caller-created hint
+-- maps to a candidate. Treat both local and type-variable maps as untrusted at
+-- the final stable rendering boundary: inspect only bounded, fully evaluated
+-- copies and fall back on partial, infinite, or oversized values. Type names
+-- are additionally validated and deduplicated here; finite malformed local
+-- names retain the generated renderer's established structured error. Canonical
+-- checked-query candidates take the same path, so this defense does not depend
+-- on a value's unobservable provenance.
+boundedLocalNameHints
   :: ExferenceCandidate
-  -> ExferenceTypeVariable
-  -> String
-candidateTypeVariableName candidate variable = Map.findWithDefault fallback
-  variable $ exferenceCandidateTypeVariableNames $ candidateDetails candidate
+  -> Map.Map ExferenceLocal String
+boundedLocalNameHints candidate = Map.fromAscList
+  [ (local, spelling)
+  | local <- Set.toAscList locals
+  , Just spelling <- [safeBoundedHint $ Map.lookup local rawHints]
+  ]
  where
-  fallback = case variable of
-    FlexibleVariable identifier -> showVar identifier
-    RigidVariable identifier -> "C" ++ showVar identifier
+  locals = foldMap Set.singleton $ candidateOutput candidate
+  rawHints = exferenceCandidateLocalNames $ candidateDetails candidate
+
+residualTypeVariableNames
+  :: ExferenceCandidate
+  -> Set.Set ExferenceTypeVariable
+  -> Map.Map ExferenceTypeVariable String
+residualTypeVariableNames candidate variables = fst
+  $ List.foldl' assignFallback
+      (acceptedHints, acceptedSpellings) orderedVariables
+ where
+  orderedVariables = Set.toAscList variables
+  rawHints = exferenceCandidateTypeVariableNames $ candidateDetails candidate
+
+  (acceptedHints, acceptedSpellings) = List.foldl' acceptHint
+    (Map.empty, Set.empty) orderedVariables
+
+  acceptHint state@(names, used) variable = case
+      safeTypeVariableHint $ Map.lookup variable rawHints of
+    Just spelling
+      | Set.notMember spelling used ->
+          (Map.insert variable spelling names, Set.insert spelling used)
+    _ -> state
+
+  assignFallback state@(names, used) variable
+    | Map.member variable acceptedHints = state
+    | otherwise =
+        let spelling = freshFallback used
+              $ candidateTypeVariableFallback variable
+        in (Map.insert variable spelling names, Set.insert spelling used)
+
+-- Appending a prime preserves the lexical class of both historical fallback
+-- forms. The finite set of rendered variables guarantees termination.
+freshFallback :: Set.Set String -> String -> String
+freshFallback used preferred
+  | Set.member preferred used = freshFallback used $ preferred ++ "'"
+  | otherwise = preferred
+
+candidateTypeVariableFallback :: ExferenceTypeVariable -> String
+candidateTypeVariableFallback variable = case variable of
+  FlexibleVariable identifier -> showVar identifier
+  RigidVariable identifier -> "C" ++ showVar identifier
+
+-- Haskell has no intrinsic identifier-length limit, but a pure renderer
+-- cannot prove that a caller-created lazy String is finite. A generous fixed
+-- observation budget makes rejection total for cyclic/infinite hints and also
+-- bounds presentation work on compatibility values.
+maximumRenderedHintLength :: Int
+maximumRenderedHintLength = 4096
+
+safeTypeVariableHint :: Maybe String -> Maybe String
+safeTypeVariableHint source = do
+  spelling <- safeBoundedHint source
+  case validateExferenceTypeVariableSpelling spelling of
+    Right () -> Just spelling
+    Left _ -> Nothing
+
+safeBoundedHint :: Maybe String -> Maybe String
+safeBoundedHint source = unsafePerformIO $ do
+  copied <- tryJust synchronousException $ evaluate $ force $ case source of
+    Nothing -> Nothing
+    Just spelling -> Just
+      $ take (maximumRenderedHintLength + 1) spelling
+  pure $ case copied of
+    Left () -> Nothing
+    Right Nothing -> Nothing
+    Right (Just spelling)
+      | length spelling > maximumRenderedHintLength -> Nothing
+      | otherwise -> Just spelling
+ where
+  -- Cancellation and runtime resource exceptions must retain their ordinary
+  -- asynchronous semantics; only exceptions raised while evaluating a
+  -- caller-owned pure hint are converted to a missing preference.
+  synchronousException :: SomeException -> Maybe ()
+  synchronousException exception = case
+      fromException exception :: Maybe SomeAsyncException of
+    Just _ -> Nothing
+    Nothing -> Just ()
+
+{-# NOINLINE safeBoundedHint #-}
 
 runExferenceQuery
   :: ExferenceSession
@@ -342,6 +446,8 @@ runExferenceQuery session request = do
     )
     Right
     $ fromSynthesisType elaboratedGoal
+  let sourceHints = retargetExferenceSourceTypeVariableHints
+        elaboratedGoal $ requestSourceTypeVariableHints request
   -- The direct result boundary owns exact target exclusion and result naming,
   -- so query validation and rigid-instantiation planning happen only once.
   let input = searchQuery backendGoal
@@ -356,7 +462,7 @@ runExferenceQuery session request = do
     Right
     $ Core.findQueryResultsInEnvironmentEither
         target
-        (requestSourceTypeVariables request)
+        sourceHints
         (Session.sessionSearchEnvironment session)
         input
 

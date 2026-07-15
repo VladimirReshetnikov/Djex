@@ -1575,6 +1575,46 @@ synonymTests = testGroup "type synonyms"
       TypeSynonym.expandTypeSynonyms freshStringVariable aliases
           (SharedType.TypeConstructor identityName) @?=
         Left (TypeSynonym.UnsaturatedTypeSynonym identityName 1 0)
+  , testCase "preflight saturation from the opaque alias table" $ do
+      let firstName = right $ mkIdentifier "First"
+          secondName = right $ mkIdentifier "Second"
+          className = right $ mkIdentifier "C"
+          parameter name = Declaration.TypeParameter name Nothing
+          aliases = preparedSynonyms
+            [ Declaration.TypeSynonymDeclaration () firstName
+                [parameter "a", parameter "b"]
+                $ SharedType.TypeVariable "a"
+            , Declaration.TypeSynonymDeclaration () secondName
+                [parameter "a"]
+                $ SharedType.TypeVariable "a"
+            ]
+          first = SharedType.TypeConstructor firstName
+          second = SharedType.TypeConstructor secondName
+          variable = SharedType.TypeVariable "x"
+          apply = SharedType.TypeApplication
+          expected name arity supplied = Left
+            $ TypeSynonym.UnsaturatedTypeSynonym name arity supplied
+          check = TypeSynonym.checkTypeSynonymSaturation aliases
+      check first @?= expected firstName 2 0
+      check (apply (apply first second) variable) @?=
+        expected secondName 1 0
+      check (apply (apply first variable) variable) @?= Right ()
+      check (apply (apply (apply first variable) variable) variable) @?=
+        Right ()
+      -- The application head wins over an invalid argument, while forall
+      -- constraints retain their source order ahead of the body.
+      check (apply first second) @?= expected firstName 2 1
+      check (SharedType.ForallType []
+          [Constraint className [second]] first) @?=
+        expected secondName 1 0
+  , testCase "classify validation failures at the elaboration phase" $ do
+      let aliases = preparedSynonyms []
+          invalid = SharedType.TypeConstructor consName
+      TypeSynonym.elaborateType freshStringVariable aliases
+          synonymProper invalid @?=
+        Left (TypeSynonym.InvalidElaborationType
+          TypeSynonym.BeforeExpansion
+          $ SharedType.InvalidTypeConstructor consName)
   , testCase "elaborate empty, singleton, and ordered type batches" $ do
       let identityName = right $ mkIdentifier "Identity"
           boolName = right $ mkIdentifier "Bool"

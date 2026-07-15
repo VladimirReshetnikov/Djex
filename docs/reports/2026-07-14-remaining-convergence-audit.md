@@ -371,6 +371,30 @@ native worker. Regression coverage compares raw and native prepared-core
 results, preserves the exact neutral request view, and reuses one alias-bearing
 request against sessions with different alias definitions.
 
+## Post-fold synonym-saturation authority review
+
+**Completed on 2026-07-15:** the first native Djinn query pass retained a
+second recursive shared-type saturation walker beside the opaque shared
+`TypeSynonyms` table. It also looked up aliases linearly through a separately
+projected list of string names and arities. The two implementations shared
+diagnostic text by convention rather than a semantic authority.
+
+The synthesis layer now exposes a non-expanding minimum-saturation preflight
+on `TypeSynonyms` itself. It checks application heads before arguments and
+forall constraints before bodies, rejects partial aliases, and deliberately
+leaves overapplication to kind inference. Djinn's native path consumes that
+operation plus the exact Inventory kind assumptions; its duplicate shared-tree
+walker is gone. The raw `HType` path keeps one compatibility traversal because
+malformed names and declaration-only nodes must not overtake its historical
+saturation diagnostic.
+
+Elaboration now also lets `KindInference.checkTypesKinds` perform the sole
+structural validation in each pre/post-expansion phase, remapping its explicit
+invalid-type result back to the established phase-tagged error. Raw and native
+labeled kind batches share one reporter. Regressions pin bare, nested,
+saturated, overapplied, head-first, forall-context, phase-classification, and
+raw declaration-node precedence behavior.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

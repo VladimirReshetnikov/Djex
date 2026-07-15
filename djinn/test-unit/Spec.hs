@@ -1268,6 +1268,19 @@ testPreparedQuerySynonyms = do
             $ "KindMismatch" `notElemText` message
       Right _ -> fail "an unsaturated, ill-kinded query reached proof search"
 
+    let unprojectableFailure = HTTuple
+            [ HTCon "Identity"
+            , HTUnion []
+            ]
+    case inhabitGeneratedPrepared defaultQueryOptions prepared []
+        "unprojectableAliasFailure" unprojectableFailure of
+      Left message -> assertBool
+        "raw conversion overtook synonym saturation"
+        $ "Type synonym Identity expects at least 1 argument(s), but got 0"
+            `isInfixOf` message
+      Right _ -> fail
+        "an unsaturated declaration-only query reached proof search"
+
     -- Raw callers historically resolve every context before inspecting the
     -- goal tree. Keep that observable order at the compatibility preflight:
     -- a declaration-only goal must not hide the more immediate missing-class

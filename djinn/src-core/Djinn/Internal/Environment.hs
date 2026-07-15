@@ -40,14 +40,14 @@ import Djinn.Internal.HCheck.Implementation
     ( PreparedKindCheck
     , htCheckTypePrepared
     , htCheckTypesKindsPrepared
-    , htCheckSynthesisTypesKindsPrepared
     , htInferClassKindsPrepared
     , prepareKindEnvironment
     , prepareKindCheckWithAssumptions
     )
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJTFormula (Formula, Symbol(..))
-import Djinn.Internal.Type (fromSynthesisType, toSynthesisType)
+import Djinn.Internal.Type
+    (fromSynthesisType, normalizeSynthesisType, toSynthesisType)
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
@@ -63,8 +63,10 @@ data Environment = Environment {
 
 -- | One authoritative shared inventory and the private proof-search indexes
 -- derived from it. The constructor is private, so cached class lookup,
--- translated global premises, kind assumptions, synonyms, and formula
--- definitions cannot drift away from their declarations.
+-- translated global premises, the raw compatibility kind checker, synonyms,
+-- and formula definitions cannot drift away from their declarations. Native
+-- kind checks consume the Inventory assumptions and opaque synonym table
+-- directly rather than this legacy string-keyed cache.
 data PreparedEnvironment = PreparedEnvironment
     PreparedSynthesisInventory
     PreparedKindCheck
@@ -427,15 +429,28 @@ checkPreparedTypesKinds
     htCheckTypesKindsPrepared kindCheck
 
 -- | Native shared-type counterpart of 'checkPreparedTypesKinds'. It consumes
--- the same sealed synonym arities and kind assumptions without rebuilding a
--- compatibility tree.
+-- the opaque synonym table and kind assumptions from the exact prepared
+-- Inventory without rebuilding a compatibility tree or a string-keyed arity
+-- list.
 checkPreparedSynthesisTypesKinds
     :: PreparedEnvironment
     -> [(HKind, SharedType.Type HSymbol)]
     -> Either String ()
-checkPreparedSynthesisTypesKinds
-        (PreparedEnvironment _ kindCheck _ _ _) =
-    htCheckSynthesisTypesKindsPrepared kindCheck
+checkPreparedSynthesisTypesKinds prepared expectedTypes = do
+    mapM_ (checkSaturation . snd) expectedTypes
+    obligations <- mapM convertObligation expectedTypes
+    first show $ SharedInference.checkTypesKinds assumptions obligations
+  where
+    synonyms = preparedEnvironmentTypeSynonyms prepared
+    assumptions = SharedInventory.inventoryKindAssumptions $
+        preparedEnvironmentInventory prepared
+
+    checkSaturation = first renderSynonymExpansionError .
+        SharedTypeSynonym.checkTypeSynonymSaturation synonyms
+
+    convertObligation (expected, source) = (,)
+        <$> checkedGroundHKind expected
+        <*> first show (normalizeSynthesisType source)
 
 preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
@@ -552,12 +567,17 @@ renderElaborationError failure = case failure of
     SharedTypeSynonym.IllKindedType _ kindError -> show kindError
     SharedTypeSynonym.InvalidElaborationType _ typeError -> show typeError
     SharedTypeSynonym.SynonymExpansionFailed expansionError ->
-        case expansionError of
-            SharedTypeSynonym.UnsaturatedTypeSynonym name expected supplied ->
-                "Type synonym " ++ SharedName.renderCanonical name ++
-                " expects at least " ++ show expected ++
-                " argument(s), but got " ++ show supplied
-            _ -> show expansionError
+        renderSynonymExpansionError expansionError
+
+renderSynonymExpansionError
+    :: SharedTypeSynonym.SynonymExpansionError HSymbol
+    -> String
+renderSynonymExpansionError expansionError = case expansionError of
+    SharedTypeSynonym.UnsaturatedTypeSynonym name expected supplied ->
+        "Type synonym " ++ SharedName.renderCanonical name ++
+        " expects at least " ++ show expected ++
+        " argument(s), but got " ++ show supplied
+    _ -> show expansionError
 
 checkedGroundHKind :: HKind -> Either String SharedInference.GroundKind
 checkedGroundHKind = first renderUnsolved . groundHKind

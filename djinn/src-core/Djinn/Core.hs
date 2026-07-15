@@ -410,20 +410,27 @@ argumentObligations context =
     | ((_, kind), argument) <-
         zip (resolvedParameters context) (resolvedArguments context) ]
 
--- Retain the precise historical diagnostic when one type is independently
--- ill-kinded.  If every component works alone, report the actual problem:
--- inconsistent kinds assigned to a free variable shared by components.
 checkKindObligations :: PreparedEnvironment -> [(String, HKind, HType)]
                      -> Either String ()
-checkKindObligations prepared obligations =
-    case checkPreparedTypesKinds prepared
-            [(kind, t) | (_, kind, t) <- obligations] of
+checkKindObligations prepared =
+    checkKindObligationsWith $ checkPreparedTypesKinds prepared
+
+-- Retain the precise historical diagnostic when one type is independently
+-- ill-kinded. If every component works alone, report the actual problem:
+-- inconsistent kinds assigned to a free variable shared by components. Raw
+-- and native query paths differ only in the checked type representation.
+checkKindObligationsWith
+    :: ([(HKind, source)] -> Either String ())
+    -> [(String, HKind, source)]
+    -> Either String ()
+checkKindObligationsWith check obligations =
+    case check [(kind, source) | (_, kind, source) <- obligations] of
         Right () -> Right ()
         Left jointError ->
             case [(label, message)
-                    | (label, kind, t) <- obligations
+                    | (label, kind, source) <- obligations
                     , Left message <-
-                        [checkPreparedTypesKinds prepared [(kind, t)]]] of
+                        [check [(kind, source)]]] of
                 (label, message) : _ -> Left $ label ++ ": " ++ message
                 [] -> Left $
                     "inconsistent kinds across " ++
@@ -597,25 +604,9 @@ checkSynthesisKindObligations
     :: PreparedEnvironment
     -> [(String, HKind, SharedType.Type HSymbol)]
     -> Either String ()
-checkSynthesisKindObligations prepared obligations =
-    case checkPreparedSynthesisTypesKinds prepared
-            [(kind, source) | (_, kind, source) <- obligations] of
-        Right () -> Right ()
-        Left jointError ->
-            case
-                [ (label, message)
-                | (label, kind, source) <- obligations
-                , Left message <-
-                    [checkPreparedSynthesisTypesKinds
-                        prepared [(kind, source)]]
-                ] of
-                (label, message) : _ ->
-                    Left $ label ++ ": " ++ message
-                [] -> Left $
-                    "inconsistent kinds across " ++
-                    intercalate ", "
-                        [label | (label, _, _) <- obligations] ++
-                    ": " ++ jointError
+checkSynthesisKindObligations prepared =
+    checkKindObligationsWith $
+        checkPreparedSynthesisTypesKinds prepared
 
 instantiateSynthesisContext
     :: PreparedEnvironment

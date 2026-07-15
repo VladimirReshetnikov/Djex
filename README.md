@@ -428,10 +428,12 @@ lookahead policies over either backend's result envelope. `TypeRender` prints
 shared types and constraints from tagged variable-name hints without collapsing
 flexible and rigid identities.
 `TypeSynonym` prepares aliases from the retained neutral inventory and owns
-capture-avoiding, saturation-checked expansion plus the pre/post kind checks
-that both backend adapters can now share. Its batch operation preserves source
-order while assigning one kind to each free variable shared by a goal and its
-separate context arguments. The underlying shared type module now owns the
+the table-backed minimum-saturation preflight, capture-avoiding expansion, and
+pre/post kind checks that both backend adapters can share. Kind inference is
+the single structural validator for each elaboration phase. Its batch
+operation preserves source order while assigning one kind to each free
+variable shared by a goal and its separate context arguments. The underlying
+shared type module now owns the
 scope-aware simultaneous substitution primitive used by synonym expansion and
 Exference's compatibility substitution API. Exference's backend-specific
 unifiers operate directly on the same native tree, canonicalize their inputs

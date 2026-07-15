@@ -384,8 +384,8 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn` (`src-frontend/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Pre-cache five-operation raw compatibility facade over shared kind inference. |
-| `Djinn.Internal.HCheck.Implementation` | Private prepared kind-check cache, native shared-type checks, trusted Inventory bridge, and saturated-synonym policy. |
-| `Djinn.Internal.Environment` | Authoritative Inventory preparation plus private class, kind, synonym, formula, and ordered global-premise indexes. |
+| `Djinn.Internal.HCheck.Implementation` | Private raw-compatibility kind-check cache and trusted Inventory-assumption bridge. |
+| `Djinn.Internal.Environment` | Authoritative Inventory preparation plus native shared-type checking and private class, synonym, formula, and ordered global-premise indexes. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated shared name and operator rules in `djex`. |
 | `Djinn.Internal.HTypes` | Shared-kind compatibility view, type parser, logical translation, and proof-term conversion/cleanup. |
 | `Djinn.Internal.Type` | Native shared-type validation/canonicalization plus checked projection to and from Djinn's historical source types. |
@@ -411,10 +411,12 @@ neither the frontend nor executable can accidentally compile core modules as
 home modules.
 
 The exposed `Djinn.Internal.HCheck` deliberately retains only the five raw
-operations from Djinn's pre-cache checker surface. Sealed-session caches pair
-synonym arities with kind assumptions derived from one exact Inventory, so
-their constructor and operations live in the package-private
-`Djinn.Internal.HCheck.Implementation` module; compatibility clients cannot
+operations from Djinn's pre-cache checker surface. Its sealed compatibility
+cache pairs legacy synonym spellings/arities with kind assumptions derived
+from one exact Inventory, so its constructor and operations live in the
+package-private `Djinn.Internal.HCheck.Implementation` module. Native shared
+types instead preflight saturation against the Inventory's opaque shared
+synonym table and use its exact kind assumptions directly; neither path can
 assemble unrelated halves or depend on query-time cache structure.
 
 The REPL state stores only an opaque `DjinnSession`; every declaration or
@@ -506,9 +508,11 @@ The opaque Djinn `Environment` itself now round-trips through
 stricter source subset, grounds and checks the neutral Inventory once, validates
 synonym saturation in every type-bearing declaration position, and classifies
 recursive datatypes only after aliases have been expanded. The resulting
-prepared kind checker, synonym table, nominal class index, checked formula
-translator, and ordered global proof premises are projections of those same
-cached assumptions rather than a second independently inferred environment.
+raw compatibility checker, synonym table, nominal class index, checked formula
+translator, and ordered global proof premises are projections of that same
+Inventory rather than a second independently inferred environment. Native
+saturation is a `TypeSynonym` table operation; raw `HType` retains one separate
+source-order traversal solely to preserve its malformed-input diagnostics.
 Global assumptions are translated once while sealing; only a query goal and
 its instantiated class methods still vary per search. Historical raw search
 tables are reconstructed from the Inventory only for compatibility inspection,

@@ -19,6 +19,7 @@ module Language.Haskell.Synthesis.TypeSynonym
   , preparedTypeSynonyms
   , adjustPreparedInventoryDataTypeAnnotations
   , prepareTypeSynonyms
+  , checkTypeSynonymSaturation
   , expandTypeSynonymDefinitions
   , expandTypeSynonyms
   , elaborateTypes
@@ -64,7 +65,7 @@ import Language.Haskell.Synthesis.Inventory
 import Language.Haskell.Synthesis.KindInference
   ( GroundKind
   , KindAssumptions
-  , KindInferenceError
+  , KindInferenceError (InvalidKindInferenceType)
   , checkTypesKinds
   , emptyKindAssumptions
   )
@@ -78,7 +79,6 @@ import Language.Haskell.Synthesis.Type
   , canonicalizeType
   , freshenTypeBindersAwayFrom
   , substituteTypeVariables
-  , validateType
   )
 import qualified Language.Haskell.Synthesis.Environment as Environment
 
@@ -251,6 +251,46 @@ expandTypeSynonyms
   -> Either (SynonymExpansionError variable) (Type variable)
 expandTypeSynonyms = expandWithTable
 
+-- | Check Haskell's minimum-saturation rule without expanding any alias.
+--
+-- Keeping this operation on the opaque prepared table makes its definitions
+-- the sole authority for both elaboration and preflight.  Application heads
+-- are checked before their arguments, and forall constraints before the body;
+-- callers can therefore run this before structural or kind validation when
+-- source-compatible diagnostic precedence requires it.  Overapplication is
+-- accepted here and remains the kind checker's responsibility.
+checkTypeSynonymSaturation
+  :: TypeSynonyms variable
+  -> Type variable
+  -> Either (SynonymExpansionError variable) ()
+checkTypeSynonymSaturation table = checkType
+ where
+  checkType application@TypeApplication{} = do
+    let (headType, arguments) = applicationSpine application
+    checkHead headType $ length arguments
+    case headType of
+      TypeConstructor{} -> pure ()
+      _ -> checkType headType
+    mapM_ checkType arguments
+  checkType (TypeConstructor name) = checkName name 0
+  checkType (TypeVariable _) = pure ()
+  checkType (FunctionType parameter result) =
+    checkType parameter >> checkType result
+  checkType (TupleType _ elements) = mapM_ checkType elements
+  checkType (ForallType _ constraints body) =
+    mapM_ (mapM_ checkType) constraints >> checkType body
+
+  checkHead (TypeConstructor name) supplied = checkName name supplied
+  checkHead _ _ = pure ()
+
+  checkName name supplied = case Map.lookup name $ synonymDefinitions table of
+    Just definition
+      | supplied < expected -> Left
+          $ UnsaturatedTypeSynonym name expected supplied
+      where
+        expected = length $ definitionParameters definition
+    _ -> Right ()
+
 expandWithTable
   :: Ord variable
   => FreshVariable variable
@@ -308,31 +348,26 @@ elaborateTypesTraversable
   -> Either (TypeElaborationError variable)
       (collection (Type variable))
 elaborateTypesTraversable fresh table sources = do
-  canonical <- traverse canonicalizeAndValidate sources
+  let canonical = fmap canonicalizeObligation sources
   checkKinds BeforeExpansion canonical
   expanded <- traverse expandOne canonical
-  validated <- traverse validateExpanded expanded
-  checkKinds AfterExpansion validated
-  pure $ snd <$> validated
+  checkKinds AfterExpansion expanded
+  pure $ snd <$> expanded
  where
-  canonicalizeAndValidate (expected, source) = do
-    let canonical = canonicalizeType source
-    either (Left . InvalidElaborationType BeforeExpansion) Right
-      $ validateType canonical
-    pure (expected, canonical)
+  canonicalizeObligation (expected, source) =
+    (expected, canonicalizeType source)
 
   expandOne (expected, source) = do
     expanded <- either (Left . SynonymExpansionFailed) Right
       $ expandTypeSynonyms fresh table source
     pure (expected, expanded)
 
-  validateExpanded (expected, expanded) = do
-    either (Left . InvalidElaborationType AfterExpansion) Right
-      $ validateType expanded
-    pure (expected, expanded)
-
-  checkKinds phase types = either (Left . IllKindedType phase) Right
-    $ checkTypesKinds (synonymKindAssumptions table) $ toList types
+  checkKinds phase types = case
+      checkTypesKinds (synonymKindAssumptions table) $ toList types of
+    Left (InvalidKindInferenceType typeError) ->
+      Left $ InvalidElaborationType phase typeError
+    Left kindError -> Left $ IllKindedType phase kindError
+    Right () -> Right ()
 
 -- | Expand every type-bearing position of a declaration while retaining its
 -- names, binders, explicit kinds, annotations, and declaration shape.

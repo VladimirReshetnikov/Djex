@@ -129,15 +129,18 @@ special type nodes.
 
 `Language.Haskell.Synthesis.TypeSynonym` prepares aliases from the exact
 checked `Inventory` and expands them with simultaneous, capture-avoiding
-substitution. It rejects partial applications and cycles, preserves legal
-overapplication, and kind-checks both before and after expansion so a phantom
-parameter cannot erase an invalid argument. Backends provide only a fresh
-variable allocator for their identity domain; synonym and declaration
-semantics stay parser-independent. Its opaque `PreparedInventory` pairs one
-Inventory with the exact normalized synonym table derived from it, so backend
-sessions cannot recombine those authorities accidentally. Annotation-only
-mapping and name-aware datatype-metadata adjustment preserve that table
-without repeating allocator-sensitive synonym preparation.
+substitution. Its non-expanding saturation preflight consults that same opaque
+table, rejects partial applications in source order, and leaves legal
+overapplication to kind checking. Full elaboration rejects cycles and
+kind-checks both before and after expansion so a phantom parameter cannot
+erase an invalid argument; the kind checker is also the single structural
+validator for each phase. Backends provide only a fresh variable allocator
+for their identity domain; synonym and declaration semantics stay
+parser-independent. Its opaque `PreparedInventory` pairs one Inventory with
+the exact normalized synonym table derived from it, so backend sessions cannot
+recombine those authorities accidentally. Annotation-only mapping and
+name-aware datatype-metadata adjustment preserve that table without repeating
+allocator-sensitive synonym preparation.
 
 `Language.Haskell.Synthesis.TypeRender` renders that shared structure back to
 compact Haskell source while leaving tagged variable spellings to the caller.

@@ -10,7 +10,7 @@ module Djinn.Internal.HCheck.Implementation(
     prepareKindCheckWithAssumptions,
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htCheckTypePrepared, htCheckTypeKindPrepared,
-    htCheckTypesKindsPrepared, htCheckSynthesisTypesKindsPrepared,
+    htCheckTypesKindsPrepared,
     htInferClassKinds, htInferClassKindsPrepared
     ) where
 import Data.Bifunctor (first)
@@ -21,12 +21,12 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Djinn.Internal.HTypes
-import Djinn.Internal.Type (normalizeSynthesisType, toSynthesisType)
+import Djinn.Internal.Type (toSynthesisType)
 
--- | The immutable part of Djinn's query-time kind checker.  It deliberately
--- retains only synonym arities and the already-ground shared assumptions, not
--- the source declarations from which assumptions could accidentally be
--- recomputed for every obligation or class method.
+-- | The immutable part of Djinn's raw compatibility kind checker. It retains
+-- only legacy synonym spellings/arities and the already-ground shared
+-- assumptions, never the source declarations from which either was derived.
+-- Native shared-type checks use their opaque 'TypeSynonyms' table directly.
 data PreparedKindCheck = PreparedKindCheck
     [(HSymbol, Int)]
     SharedInference.KindAssumptions
@@ -102,26 +102,6 @@ htCheckTypesKindsPrepared
     convertObligation (expected, typeExpression) = (,)
         <$> checkedGroundHKind expected
         <*> first show (toSynthesisType typeExpression)
-
--- | Check native shared types against the exact assumptions retained by a
--- prepared Djinn environment. Synonym saturation deliberately precedes
--- structural validation and kind inference, matching the raw compatibility
--- API's observable failure order without rebuilding an 'HType'.
-htCheckSynthesisTypesKindsPrepared
-    :: PreparedKindCheck
-    -> [(HKind, SharedType.Type HSymbol)]
-    -> Either String ()
-htCheckSynthesisTypesKindsPrepared
-        (PreparedKindCheck preparedSynonymArities assumptions)
-        expectedTypes = do
-    mapM_ (checkSynthesisSynonymSaturationWith preparedSynonymArities . snd)
-        expectedTypes
-    obligations <- mapM convertObligation expectedTypes
-    checkSynthesisObligations assumptions obligations
-  where
-    convertObligation (expected, typeExpression) = (,)
-        <$> checkedGroundHKind expected
-        <*> first show (normalizeSynthesisType typeExpression)
 
 checkSynthesisObligations
     :: SharedInference.KindAssumptions
@@ -273,41 +253,5 @@ checkSynonymSaturationWith arities = checkType
         case lookup name arities of
             Just expected | supplied < expected -> Left $
                 "Type synonym " ++ name ++ " expects at least " ++
-                show expected ++ " argument(s), but got " ++ show supplied
-            _ -> Right ()
-
--- Native counterpart of 'checkSynonymSaturationWith'. Keep it here, beside
--- the compatibility operation, so both paths continue to own exactly the
--- same minimum-arity policy and diagnostic text.
-checkSynthesisSynonymSaturationWith
-    :: [(HSymbol, Int)]
-    -> SharedType.Type HSymbol
-    -> Either String ()
-checkSynthesisSynonymSaturationWith arities = checkType
-  where
-    checkType application@SharedType.TypeApplication{} = do
-        let (headType, arguments) = SharedType.applicationSpine application
-        checkHead headType (length arguments)
-        case headType of
-            SharedType.TypeConstructor _ -> return ()
-            _ -> checkType headType
-        mapM_ checkType arguments
-    checkType (SharedType.TypeConstructor name) = checkName name 0
-    checkType (SharedType.TupleType _ types) = mapM_ checkType types
-    checkType (SharedType.FunctionType argument result) =
-        checkType argument >> checkType result
-    checkType (SharedType.ForallType _ constraints body) =
-        mapM_ (mapM_ checkType) constraints >> checkType body
-    checkType (SharedType.TypeVariable _) = return ()
-
-    checkHead (SharedType.TypeConstructor name) supplied =
-        checkName name supplied
-    checkHead _ _ = Right ()
-
-    checkName name supplied =
-        let sourceName = SharedName.renderCanonical name
-        in case lookup sourceName arities of
-            Just expected | supplied < expected -> Left $
-                "Type synonym " ++ sourceName ++ " expects at least " ++
                 show expected ++ " argument(s), but got " ++ show supplied
             _ -> Right ()

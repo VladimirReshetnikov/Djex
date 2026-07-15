@@ -14,6 +14,7 @@ import qualified Data.Set as Set
 import Language.Haskell.Exference.Core.Internal.Unify
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 
 -- | Reject refutable constraints and retain constraints whose variables make
 -- them undecidable at the current search node.
@@ -41,8 +42,11 @@ checkConstraints variableResult noEvidenceResult environment = solve Set.empty
       | constraint `Set.member` qClassEnv_inflatedConstraints environment = Just []
       | constraint `Set.member` visiting = Just [constraint]
       | otherwise =
-          bestResult (map (fromInstance $ Set.insert constraint visiting) instances)
-            `orElse` noEvidenceResult constraint
+          SharedCollection.firstPresent
+            [ bestResult
+                $ map (fromInstance $ Set.insert constraint visiting) instances
+            , noEvidenceResult constraint
+            ]
       where
         HsConstraint className parameters = constraint
         instances = Map.findWithDefault []
@@ -61,7 +65,3 @@ bestResult :: [Maybe [a]] -> Maybe [a]
 bestResult results = case catMaybes results of
   [] -> Nothing
   candidates -> Just $ minimumBy (comparing length) candidates
-
-orElse :: Maybe a -> Maybe a -> Maybe a
-orElse (Just value) _ = Just value
-orElse Nothing fallback = fallback

@@ -827,6 +827,17 @@ ordering, maximum selection, and the unforced suffix; Exference's existing
 multi-site diagnostic and machine-boundary allocation tests continue to pin
 the backend policies layered on top.
 
+**Follow-up completed on 2026-07-15:** Exference's constraint solver and
+finite identifier allocator still carried four private definitions of the
+same left-biased optional alternative. Five call sites now use
+`firstPresent`: instance resolution precedes the no-evidence policy,
+historical namespace translation precedes gap allocation, and the
+non-negative identifier range precedes the negative fallback. This deletes
+the remaining private `orElse` implementations from the parser-free Djex
+sources while retaining their lazy fallback contract. Existing constraint,
+negative-identity, `maxBound`, namespace-collision, and branch-exhaustion
+regressions exercise every migrated path.
+
 ## Post-fold type-spine construction consolidation
 
 **Completed on 2026-07-15:** the shared type layer exposed application and

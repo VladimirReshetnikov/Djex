@@ -33,6 +33,7 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 newtype IdentifierSupply = IdentifierSupply IntSet.IntSet
@@ -84,15 +85,14 @@ allocateFreshIdentifier supply@(IdentifierSupply reserved) = do
     else let greatest = IntSet.findMax reserved
       in if greatest < maxBound
         then Just $ greatest + 1
-        else firstGapFrom 0 (dropWhile (< 0) identifiers)
-          `orElse` firstGapFrom minBound identifiers
+        else SharedCollection.firstPresent
+          [ firstGapFrom 0 $ dropWhile (< 0) identifiers
+          , firstGapFrom minBound identifiers
+          ]
   guard $ not $ IntSet.member identifier reserved
   pure (identifier, reserveIdentifiers [identifier] supply)
  where
   identifiers = IntSet.toAscList reserved
-
-  orElse (Just result) _ = Just result
-  orElse Nothing fallback = fallback
 
 -- | Allocate above the non-negative portion of the live namespace when that
 -- is representable, matching Exference's historical rigid-skolem spelling.
@@ -109,15 +109,14 @@ allocateFreshNonNegativeIdentifier supply@(IdentifierSupply reserved) = do
       let greatest = last nonNegative
       in if greatest < maxBound
           then Just $ greatest + 1
-          else firstGapFrom 0 nonNegative
-            `orElse` firstGapFrom minBound identifiers
+          else SharedCollection.firstPresent
+            [ firstGapFrom 0 nonNegative
+            , firstGapFrom minBound identifiers
+            ]
   guard $ not $ IntSet.member identifier reserved
   pure (identifier, reserveIdentifiers [identifier] supply)
  where
   identifiers = IntSet.toAscList reserved
-
-  orElse (Just result) _ = Just result
-  orElse Nothing fallback = fallback
 
 -- | Freshen one local polymorphic namespace.  For ordinary parser-produced
 -- IDs this deliberately retains Exference's historical translation
@@ -129,7 +128,7 @@ allocateNamespace
   -> Maybe (FlexibleRenaming, FlexibleIdSupply)
 allocateNamespace rawSources supply@(IdentifierSupply reserved)
   | null sources = Just (IntMap.empty, supply)
-  | otherwise = translated `orElse` gapAllocated
+  | otherwise = SharedCollection.firstPresent [translated, gapAllocated]
  where
   sources = IntSet.toAscList $ IntSet.fromList rawSources
   offset
@@ -150,9 +149,6 @@ allocateNamespace rawSources supply@(IdentifierSupply reserved)
   allocate (pairs, currentSupply) source = do
     (target, nextSupply) <- allocateFreshIdentifier currentSupply
     pure ((source, target) : pairs, nextSupply)
-
-  orElse (Just result) _ = Just result
-  orElse Nothing fallback = fallback
 
 -- | Give a second unifier namespace canonical external spellings.  Requested
 -- IDs that do not collide are retained.  Collisions are allocated above all

@@ -10,6 +10,8 @@ module Language.Haskell.Synthesis.Collection
   ( Multiplicity (..)
   , DuplicateSummary
   , distinctOn
+  , firstPresent
+  , maximumPresent
   , firstDuplicate
   , summarizeDuplicates
   , multiplicityOf
@@ -32,6 +34,31 @@ distinctOn project = go Set.empty
     | otherwise = value : go (Set.insert key seen) remaining
    where
     key = project value
+
+-- | Return the first present value in traversal order.
+--
+-- Once a 'Just' is encountered, neither the rest of the collection nor the
+-- contained value is forced. This makes the operation suitable for ordered
+-- diagnostics over infinite or partial inputs.
+firstPresent :: Foldable collection => collection (Maybe value) -> Maybe value
+firstPresent = foldr choose Nothing
+ where
+  choose Nothing remaining = remaining
+  choose present@Just{} _ = present
+
+-- | Return the greatest present value in a finite collection.
+--
+-- 'Nothing' elements are ignored, and an all-absent collection returns
+-- 'Nothing'. The strict left fold avoids retaining the traversed collection.
+maximumPresent
+  :: (Foldable collection, Ord value)
+  => collection (Maybe value)
+  -> Maybe value
+maximumPresent = foldl' combine Nothing
+ where
+  combine Nothing candidate = candidate
+  combine current Nothing = current
+  combine (Just current) (Just candidate) = Just $ max current candidate
 
 -- | Exact classification of a value relative to a summarized collection.
 data Multiplicity

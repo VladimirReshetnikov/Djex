@@ -132,6 +132,19 @@ collectionTests = testGroup "collections"
   , testCase "emit a fresh value without forcing the remaining input" $
       take 1 (distinctOn id (1 : error "forced distinct suffix") :: [Int])
         @?= [1]
+  , testCase "return the first present value without forcing its suffix" $ do
+      firstPresent
+          ([Nothing, Just "present", error "forced present suffix"]
+            :: [Maybe String]) @?= Just "present"
+      firstPresent ([Nothing, Nothing] :: [Maybe String]) @?= Nothing
+      case firstPresent [Just $ error "forced present payload"] of
+        Just _ -> pure ()
+        Nothing -> assertFailure "firstPresent discarded a present value"
+  , testCase "find the greatest present value in a finite collection" $ do
+      maximumPresent
+          ([Nothing, Just 3, Just 1, Nothing, Just 5] :: [Maybe Int])
+        @?= Just 5
+      maximumPresent ([Nothing, Nothing] :: [Maybe Int]) @?= Nothing
   , testCase "classify duplicates without losing collection order" $ do
       let summary = summarizeDuplicates
             ["alpha", "beta", "beta", "alpha", "alpha", "unique"]

@@ -19,7 +19,6 @@ module Language.Haskell.Exference.Core.RigidInstantiation
 
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM)
-import qualified Data.Foldable as Foldable
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 
@@ -32,6 +31,7 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
   )
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils (forallify)
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -68,10 +68,9 @@ instance NFData RigidInstantiationContext where
 -- | Cache the environment-wide rigid maximum used by every later query.
 mkRigidInstantiationContext :: EnvDictionary -> RigidInstantiationContext
 mkRigidInstantiationContext environment = RigidInstantiationContext
-  (Foldable.foldl' maximumMaybe Nothing
-    $ map maximumRigidInType types)
+  (SharedCollection.maximumPresent $ map maximumRigidInType types)
   (supplyFromIdentifiers $ concatMap rigidIdentifiersInType types)
-  (firstJust $ map firstRigidForallBinder types)
+  (SharedCollection.firstPresent $ map firstRigidForallBinder types)
  where
   types = environmentTypes environment
 
@@ -104,7 +103,7 @@ planRigidInstantiation
   -> HsType
   -> Either RigidInstantiationError RigidInstantiationPlan
 planRigidInstantiation context extraConstraints goal = do
-  case firstJust
+  case SharedCollection.firstPresent
       (map firstRigidForallBinder queryTypes
         ++ [environmentRigidForallBinder context]) of
     Just identifier -> Left
@@ -118,10 +117,9 @@ planRigidInstantiation context extraConstraints goal = do
     Just instantiations -> Right $ RigidInstantiationPlan instantiations
  where
   queryTypes = goal : concatMap constraint_params extraConstraints
-  maximumRigid = Foldable.foldl' maximumMaybe
-    (maximumEnvironmentRigidIdentifier context)
-    $ map maximumRigidInType
-    queryTypes
+  maximumRigid = SharedCollection.maximumPresent
+    $ maximumEnvironmentRigidIdentifier context
+    : map maximumRigidInType queryTypes
   initialSupply = reserveIdentifiers
     (concatMap rigidIdentifiersInType queryTypes)
     (environmentRigidIdentifiers context)
@@ -167,16 +165,9 @@ leadingBinders = traverse flexibleBinder . SharedType.leadingForallVariables
 -- shared observation distinguishes declarations from ordinary occurrences
 -- and preserves the historical structural failure order.
 firstRigidForallBinder :: HsType -> Maybe TVarId
-firstRigidForallBinder = foldr firstRigid Nothing
+firstRigidForallBinder = SharedCollection.firstPresent
+  . map SharedType.rigidVariableIdentity
   . SharedType.typeBinderVariables
- where
-  firstRigid variable remaining = maybe remaining Just
-    $ SharedType.rigidVariableIdentity variable
-
-firstJust :: [Maybe value] -> Maybe value
-firstJust [] = Nothing
-firstJust (Just value : _) = Just value
-firstJust (Nothing : remaining) = firstJust remaining
 
 environmentTypes :: EnvDictionary -> [HsType]
 environmentTypes environment =
@@ -206,13 +197,9 @@ environmentTypes environment =
       : instance_constraints instanceDeclaration
 
 maximumRigidInType :: HsType -> Maybe TVarId
-maximumRigidInType = Foldable.foldl' maximumMaybe Nothing
-  . map Just . rigidIdentifiersInType
+maximumRigidInType = SharedCollection.maximumPresent
+  . map Just
+  . rigidIdentifiersInType
 
 rigidIdentifiersInType :: HsType -> [TVarId]
 rigidIdentifiersInType = foldMap $ SharedType.foldRigidVariable (: [])
-
-maximumMaybe :: Ord value => Maybe value -> Maybe value -> Maybe value
-maximumMaybe Nothing right = right
-maximumMaybe left Nothing = left
-maximumMaybe (Just left) (Just right) = Just $ max left right

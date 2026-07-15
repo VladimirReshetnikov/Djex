@@ -16,16 +16,20 @@ facadeTests = testGroup "public Djex facade"
   , testCase "exports the shared name vocabulary" $
       assertBool "qualified name was rejected" $
         isRight $ parseName "Data.Function.fix"
-  , testCase "exports shared duplicate classification" $
+  , testCase "exports shared collection observations" $
       ( multiplicityOf "value" (summarizeDuplicates ["value", "value"])
       , firstDuplicate ["first", "second", "first"]
       , distinctOn fst
           ([ ("first", 1), ("first", 2), ("second", 3) ]
             :: [(String, Int)])
+      , firstPresent [Nothing, Just "present"]
+      , maximumPresent [Nothing, Just (3 :: Int), Just 5]
       ) @?=
         ( OccursMultipleTimes
         , Just "first"
         , [("first", 1), ("second", 3)]
+        , Just "present"
+        , Just 5
         )
   , testCase "exports shared type inspection" $ do
       checkedName <- expectRight $ mkIdentifier "Box"

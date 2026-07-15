@@ -76,7 +76,10 @@ ordering without bounded counts or private duplicate-detection loops. The
 separate short-circuiting `firstDuplicate` query preserves second-occurrence
 precedence and can return without forcing an unused suffix. Its lazy
 `distinctOn` operation retains the first value for each ordered key; emitting a
-fresh representative likewise does not force the remaining input.
+fresh representative likewise does not force the remaining input. Ordered
+optional observations use the same explicit semantics: `firstPresent` stops at
+the first value without forcing its suffix, while `maximumPresent` strictly
+folds a finite collection and ignores absent values.
 
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s,

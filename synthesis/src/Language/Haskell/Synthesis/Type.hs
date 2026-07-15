@@ -67,7 +67,11 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
-import Language.Haskell.Synthesis.Collection (distinctOn, firstDuplicate)
+import Language.Haskell.Synthesis.Collection
+  ( distinctOn
+  , firstDuplicate
+  , firstPresent
+  )
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Name
 
@@ -395,10 +399,6 @@ firstForallType typeExpression = case typeExpression of
     [firstForallType parameter, firstForallType result]
   TupleType _ elements -> firstPresent $ map firstForallType elements
   quantified@ForallType{} -> Just quantified
- where
-  firstPresent [] = Nothing
-  firstPresent (Just present : _) = Just present
-  firstPresent (Nothing : remaining) = firstPresent remaining
 
 -- | Whether explicit quantification occurs anywhere in a type.
 containsForall :: Type variable -> Bool

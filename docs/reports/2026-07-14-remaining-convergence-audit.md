@@ -808,6 +808,25 @@ regressions pin both tags, selective mapping, and both folds, while the existing
 Exference boundary tests continue to cover normalization, rigid planning,
 rendering, and allocation at negative and machine-boundary identities.
 
+## Post-fold optional-collection consolidation
+
+**Completed on 2026-07-15:** the shared type traversal and Exference's rigid
+planner independently selected the first successful optional observation,
+while Exference repeated optional-maximum folds for environment rigid IDs,
+query rigid IDs, and substitution-range flexible IDs. These tiny loops carried
+important but unstated evaluation contracts: diagnostic selection must stop at
+the first witness, whereas namespace maxima must consume a complete finite
+input without retaining its spine.
+
+`Language.Haskell.Synthesis.Collection.firstPresent` now owns the lazy ordered
+selection contract, and `maximumPresent` owns the strict finite maximum that
+ignores absent observations. Shared forall inspection, Exference rigid-binder
+precedence, rigid namespace planning, and substitution namespace inspection
+all delegate to those operations. Foundation regressions pin absent inputs,
+ordering, maximum selection, and the unforced suffix; Exference's existing
+multi-site diagnostic and machine-boundary allocation tests continue to pin
+the backend policies layered on top.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

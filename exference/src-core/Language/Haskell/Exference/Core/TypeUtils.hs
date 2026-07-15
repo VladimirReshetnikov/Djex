@@ -27,7 +27,6 @@ where
 
 
 import qualified Data.Set as S
-import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
@@ -36,6 +35,7 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
   , supplyFromIdentifierSet
   )
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
@@ -64,13 +64,8 @@ maximumFlexibleId typeExpression
 
 -- | The greatest flexible ID occurring in a substitution range.
 maximumSubstitutionFlexibleId :: Substs -> Maybe TVarId
-maximumSubstitutionFlexibleId = IntMap.foldl' combine Nothing
- where
-  combine current typeExpression = case
-      (current, maximumFlexibleId typeExpression) of
-    (Nothing, result) -> result
-    (result, Nothing) -> result
-    (Just left, Just right) -> Just $ max left right
+maximumSubstitutionFlexibleId = SharedCollection.maximumPresent
+  . fmap maximumFlexibleId
 
 -- | Compatibility projection for callers that historically used @-1@ as a
 -- ground sentinel.  It now returns the true maximum when variables exist,

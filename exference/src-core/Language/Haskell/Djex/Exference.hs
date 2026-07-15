@@ -45,6 +45,7 @@ module Language.Haskell.Djex.Exference
   , ExferenceResult
   , mkExferenceSession
   , mkExferenceSessionWithPolicy
+  , exferenceSessionEnvironment
   , exferenceSessionInventory
   , exferenceSessionOmissions
   , exferenceSessionDiagnostics
@@ -134,7 +135,9 @@ import Language.Haskell.Synthesis.Generated
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
-  ( Inventory )
+  ( Inventory
+  , inventoryEnvironment
+  )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.Name
   ( Name
@@ -265,6 +268,14 @@ mkExferenceSessionWithPolicy policy =
   Session.sealNeutralExferenceSessionWithPolicy
     (exferenceExcludedBindings policy)
     (exferenceRatingOverrides policy)
+
+-- | Recover the exact neutral declaration environment sealed into this
+-- session. Policy exclusions and rating overrides affect only Exference's
+-- private search projection; they never rewrite the authoritative source
+-- environment, matching the @djinnSessionEnvironment@ projection.
+exferenceSessionEnvironment :: ExferenceSession -> ExferenceEnvironment
+exferenceSessionEnvironment = inventoryEnvironment
+  . exferenceSessionInventory
 
 exferenceSessionInventory :: ExferenceSession -> ExferenceInventory
 exferenceSessionInventory = Session.exferenceSessionInventory

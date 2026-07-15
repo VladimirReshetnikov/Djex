@@ -457,6 +457,20 @@ programmatic failure attribution, eager source-span materialization, and lazy
 backend caches, while the existing adapter integration tests continue to pin
 their diagnostic phase policies.
 
+## Post-fold session-projection alignment
+
+**Completed on 2026-07-15:** both sealed sessions retained an authoritative
+shared Inventory, but only Djinn exposed the corresponding neutral Environment
+directly. Exference callers had to know the Inventory representation protocol
+and compose `inventoryEnvironment . exferenceSessionInventory` themselves.
+
+`exferenceSessionEnvironment` now provides the matching zero-copy projection.
+It returns the exact environment sealed by the caller even when exclusions or
+rating overrides alter Exference's private search dictionary, making that
+ownership invariant explicit and aligning the two stable session surfaces.
+Parser-free and cross-backend regressions pin both the public type and the
+policy-preserving value behavior.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

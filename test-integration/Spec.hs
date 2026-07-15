@@ -472,7 +472,7 @@ tests = testGroup "Djex facade"
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       session <- expectRight $ mkExferenceSession environment
       environmentDeclarations
-          (inventoryEnvironment $ exferenceSessionInventory session) @?= []
+          (exferenceSessionEnvironment session) @?= []
       exferenceSessionOmissions session @?= []
       target <- expectRight $ mkIdentifier "neutralIdentity"
       request <- expectRight $ parseExferenceRequest session
@@ -621,9 +621,7 @@ tests = testGroup "Djex facade"
         (mkEnvironment [declaration] :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       session <- expectRight $ mkExferenceSessionWithPolicy policy environment
-      environmentDeclarations
-          (inventoryEnvironment $ exferenceSessionInventory session) @?=
-        [declaration]
+      exferenceSessionEnvironment session @?= environment
       case exferenceSessionOmissions session of
         [omission] -> do
           omittedName omission @?= bindingName
@@ -870,7 +868,7 @@ tests = testGroup "Djex facade"
       checked <- expectRight $ checkSourceEnvironment source
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       environmentDeclarations
-          (inventoryEnvironment $ exferenceSessionInventory session) @?=
+          (exferenceSessionEnvironment session) @?=
         map (fmap $ const ())
           (environmentDeclarations
             $ inventoryEnvironment $ checkedSourceInventory checked)

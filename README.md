@@ -338,8 +338,11 @@ sealing.
 `ExferenceSessionPolicy` applies exact structural-name exclusions and finite,
 signed rating overrides while the private search projection is sealed.
 Overrides neither reorder declarations nor leak into the annotation-erased
-public inventory. Unknown names and non-finite ratings are fatal structured
-diagnostics; exclusion wins when both policies mention the same binding.
+public inventory. `exferenceSessionEnvironment` and
+`exferenceSessionInventory` expose the unchanged authoritative views in
+parallel with Djinn's stable session API. Unknown names and non-finite ratings
+are fatal structured diagnostics; exclusion wins when both policies mention
+the same binding.
 Unsupported rank-N introduction/elimination and recursive-data elimination
 capabilities remain visible as structured omissions and warning diagnostics
 instead of disappearing per query. Omission order follows introduction order

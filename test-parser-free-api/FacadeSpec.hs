@@ -46,6 +46,9 @@ facadeTests = testGroup "public Djex facade"
           inventoryProjection
             :: ExferenceSession -> ExferenceInventory
           inventoryProjection = exferenceSessionInventory
+          sessionEnvironmentProjection
+            :: ExferenceSession -> ExferenceEnvironment
+          sessionEnvironmentProjection = exferenceSessionEnvironment
           environmentProjection
             :: ExferenceEnvironment
             -> Environment ExferenceTypeVariable Void ()
@@ -62,6 +65,7 @@ facadeTests = testGroup "public Djex facade"
           metadataProjection = batchMetadata . resultSearch
       djinnTypeProjection `seq` djinnRequestProjection `seq`
         djinnCandidateProjection `seq` inventoryProjection `seq`
+        sessionEnvironmentProjection `seq`
         environmentProjection `seq`
         requestProjection `seq` candidateProjection `seq`
         metadataProjection `seq` pure ()
@@ -86,6 +90,7 @@ facadeTests = testGroup "public Djex facade"
       session <- expectRight $ mkExferenceSession environment
       let inventory :: ExferenceInventory
           inventory = exferenceSessionInventory session
+      exferenceSessionEnvironment session @?= environment
       environmentDeclarations (inventoryEnvironment inventory) @?= []
       let fresh :: FreshVariable ExferenceTypeVariable
           fresh _ _ = Nothing

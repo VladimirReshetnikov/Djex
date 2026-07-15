@@ -1514,12 +1514,13 @@ typeTests = testGroup "source types"
         quantifiedApplication
       SharedType.canonicalizeType
           (SharedType.constructorApplicationForm pair) @?= pair
-  , testCase "decompose application spines in source order" $ do
+  , testCase "construct and decompose application spines in source order" $ do
       let headType = SharedType.TypeVariable "f"
           first = SharedType.TypeVariable "a"
           second = SharedType.TypeVariable "b"
           application = SharedType.TypeApplication
             (SharedType.TypeApplication headType first) second
+      SharedType.applyTypeArguments headType [first, second] @?= application
       SharedType.applicationSpine application @?=
         (headType, [first, second])
       SharedType.applicationSpine first @?= (first, [])
@@ -1638,11 +1639,13 @@ typeTests = testGroup "source types"
       SharedType.renameScopedVariables
           (Map.fromList [("a", "outer"), ("b", "free")]) source
         @?= expected
-  , testCase "function spines retain parameter and residual structure" $ do
+  , testCase "construct and decompose function spines in source order" $ do
       let variable = SharedType.TypeVariable
           nested = SharedType.ForallType ["c"] [] $ variable "c"
           source = SharedType.FunctionType (variable "a")
             $ SharedType.FunctionType (variable "b") nested
+      SharedType.functionType [variable "a", variable "b"] nested @?= source
+      SharedType.functionType [] nested @?= nested
       SharedType.functionSpine source @?=
         ([variable "a", variable "b"], nested)
       SharedType.functionSpine nested @?= ([], nested)

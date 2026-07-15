@@ -168,7 +168,7 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
             constraints = functionConstraints binding
             parameters = functionParameters binding
         (freshTypes, freshConstraints) <- freshenTypes
-          [foldr TypeArrow result parameters] constraints
+          [SharedType.functionType parameters result] constraints
         freshType <- case freshTypes of
           [ty] -> pure ty
           _ -> throwCheck $ UnknownBinding name

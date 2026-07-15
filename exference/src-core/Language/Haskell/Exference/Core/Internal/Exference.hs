@@ -1321,7 +1321,9 @@ naturalPruningReasons queuePruned depthPruned =
 
 functionBindingType :: FunctionBinding -> HsType
 functionBindingType binding =
-  foldr TypeArrow (functionResult binding) (functionParameters binding)
+  SharedType.functionType
+    (functionParameters binding)
+    (functionResult binding)
 
 heuristicFields :: ExferenceHeuristicsConfig -> [(String, Penalty)]
 heuristicFields config =
@@ -1342,8 +1344,9 @@ heuristicFields config =
 
 deconstructorBindingType :: DeconstructorBinding -> HsType
 deconstructorBindingType binding =
-  foldr TypeArrow (deconstructorInput binding)
-    $ concatMap constructorFields (deconstructorConstructors binding)
+  SharedType.functionType
+    (concatMap constructorFields $ deconstructorConstructors binding)
+    (deconstructorInput binding)
 
 rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority
 rateNode h s = priorityFromPenalty
@@ -1502,7 +1505,7 @@ stateStep allocators multiPM allowConstrs h = do
         -- applying an environment function already live on the search node.
         provConstrs = S.toList $ qClassEnv_constraints contxt
       byGenericUnify
-        (Right (provId, foldr TypeArrow provType dependencies))
+        (Right (provId, SharedType.functionType dependencies provType))
         provType
         provConstrs
         dependencies
@@ -1655,7 +1658,7 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
     let v = varPVariable b
         vtResult = varPResult b
         vtParams = varPParameters b
-    let expVar = ExpVar v (foldr TypeArrow vtResult vtParams)
+    let expVar = ExpVar v $ SharedType.functionType vtParams vtResult
     modify $ \node -> node
       { nodeProvidedScopes = scopesAddPBinding sid b
           $ nodeProvidedScopes node }

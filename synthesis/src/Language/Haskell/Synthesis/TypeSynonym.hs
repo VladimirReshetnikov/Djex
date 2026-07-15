@@ -75,6 +75,7 @@ import Language.Haskell.Synthesis.Type
   , SubstitutionError (..)
   , Type (..)
   , TypeError
+  , applyTypeArguments
   , applicationSpine
   , canonicalizeType
   , freshenTypeBindersAwayFrom
@@ -502,7 +503,7 @@ expandApplication fresh table protected path headType arguments = case headType 
           hygienicBody
         expandedBody <- expand fresh table protected bodyPath instantiated
         pure $ canonicalizeType
-          $ foldl TypeApplication expandedBody trailing
+          $ applyTypeArguments expandedBody trailing
   _ -> do
     -- An application spine has already exposed an ordinary variable or
     -- constructor head. Re-entering 'expand' for a bare non-synonym
@@ -514,7 +515,7 @@ expandApplication fresh table protected path headType arguments = case headType 
     expandedArguments <- mapM
       (expand fresh table protected path) arguments
     pure $ canonicalizeType
-      $ foldl TypeApplication expandedHead expandedArguments
+      $ applyTypeArguments expandedHead expandedArguments
 
 expandConstraint
   :: Ord variable

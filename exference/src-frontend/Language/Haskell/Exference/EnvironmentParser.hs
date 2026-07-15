@@ -88,6 +88,7 @@ import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 -- | One ordered source binding. Class methods retain their exactly qualified
 -- owning class while exposing the same flat function projection as the
@@ -581,7 +582,7 @@ typeVariables :: Int -> [HsType]
 typeVariables arity = map TypeVar [0 .. arity - 1]
 
 tupleType :: QualifiedName -> Int -> HsType
-tupleType tupleName arity = foldl TypeApp (TypeCons tupleName)
+tupleType tupleName arity = SharedType.applyTypeArguments (TypeCons tupleName)
   $ typeVariables arity
 
 -- | Find every declaration whose source-level type/class meaning would be

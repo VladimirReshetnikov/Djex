@@ -20,6 +20,7 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.HaskellSrcUtils
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Control.Monad (foldM)
 import Control.Monad.Trans.Except
@@ -109,7 +110,7 @@ getDataConss tcs ds tDeclMap modules =
     rTypeM = do
       rName <- either throwE pure $ convertModuleName moduleName name
       ps  <- mapM pTransform params
-      return $ foldl TypeApp (TypeCons rName) ps
+      return $ SharedType.applyTypeArguments (TypeCons rName) ps
     pTransform
       :: Monad m
       => TyVarBind SrcSpanInfo
@@ -187,8 +188,9 @@ getDataConss tcs ds tDeclMap modules =
       return $ ( [ functionBindingFromType
                     (loweredConstructorName constructor) 0
                     $ forallify
-                    $ foldr TypeArrow rtype
-                    $ loweredConstructorFields constructor
+                    $ SharedType.functionType
+                        (loweredConstructorFields constructor)
+                        rtype
                  | constructor <- consDatas
                  ]
                  ++ [ functionBindingFromType selector 0

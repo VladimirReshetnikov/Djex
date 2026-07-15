@@ -539,8 +539,9 @@ valueSignature binding = SharedDeclaration.ValueSignature
   (SearchPenaltyMetadata $ functionPenalty binding)
   (functionName binding)
   <$> convertedType (TypeForall [] (functionConstraints binding)
-        $ foldr TypeArrow (functionResult binding)
-        $ functionParameters binding)
+        $ SharedType.functionType
+            (functionParameters binding)
+            (functionResult binding))
 
 fromSynthesisFunctionBinding
   :: SynthesisDeclaration
@@ -725,7 +726,7 @@ fromSynthesisDataDeclaration declaration = do
         _ -> Left MissingRecursiveDataMetadata
       variables <- mapM plainFlexibleParameter parameters
       convertedConstructors <- mapM loweredConstructor constructors
-      let input = foldl TypeApp (TypeCons name)
+      let input = SharedType.applyTypeArguments (TypeCons name)
             $ map TypeVar variables
       Right $ DeconstructorBinding input convertedConstructors recursive
     _ -> Left ExpectedDataDeclaration

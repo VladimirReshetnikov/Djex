@@ -26,7 +26,9 @@ module Language.Haskell.Synthesis.Type
   , BinderNormalizationError (..)
   , canonicalizeType
   , constructorApplicationForm
+  , applyTypeArguments
   , applicationSpine
+  , functionType
   , functionSpine
   , quantifyFreeVariables
   , implicitizeLeadingForalls
@@ -247,7 +249,16 @@ constructorApplicationForm source = case source of
     (map (fmap constructorApplicationForm) constraints)
     (constructorApplicationForm body)
  where
-  applyConstructor = foldl TypeApplication . TypeConstructor
+  applyConstructor = applyTypeArguments . TypeConstructor
+
+-- | Apply type arguments to a head in source order.
+--
+-- This is the raw left-associated constructor paired with 'applicationSpine';
+-- it deliberately does not canonicalize saturated function or tuple
+-- constructors. Use 'canonicalizeType' when the structural storage form is
+-- required.
+applyTypeArguments :: Type variable -> [Type variable] -> Type variable
+applyTypeArguments = foldl TypeApplication
 
 -- | Decompose a left-associated type application into its head and arguments
 -- in source order. Non-application types have an empty argument list.
@@ -257,6 +268,11 @@ applicationSpine = collect []
     collect arguments (TypeApplication function argument) =
       collect (argument : arguments) function
     collect arguments function = (function, arguments)
+
+-- | Construct a right-associated function type from source-order parameters
+-- and its final result. An empty parameter list returns the result unchanged.
+functionType :: [Type variable] -> Type variable -> Type variable
+functionType parameters result = foldr FunctionType result parameters
 
 -- | Decompose a right-associated function type into its parameters and final
 -- result in source order. A non-function type has no parameters. Quantifiers
@@ -460,7 +476,7 @@ rebuildApplication headType arguments = case headType of
     , [parameter, result] <- arguments -> FunctionType parameter result
     | Just (TupleConstructor boxity arity) <- nameSpecial name
     , arity == length arguments -> TupleType boxity arguments
-  _ -> foldl TypeApplication headType arguments
+  _ -> applyTypeArguments headType arguments
 
 -- | Rename occurrences owned by a surrounding lexical scope. A nested
 -- forall that binds the same nominal identity shadows the supplied renaming

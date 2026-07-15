@@ -59,6 +59,7 @@ import Control.Monad.Trans.State.Lazy
   )
 import Control.Monad.Trans.Except
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Language.Haskell.Exts.Extension ( Language (..)
                                        , Extension (..)
@@ -248,7 +249,7 @@ convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
     | length ts >= 2 = do
         tupleName <- either throwE pure $ qualifiedNameResult
           $ T.mkBoxedTupleName (length ts)
-        foldl T.TypeApp (T.TypeCons tupleName) <$> mapM helper ts
+        SharedType.applyTypeArguments (T.TypeCons tupleName) <$> mapM helper ts
     | otherwise = throwE $ "invalid boxed tuple arity " ++ show (length ts)
         ++ " in " ++ prettyPrint tuple
   helper tuple@(TyTuple _ Unboxed _)

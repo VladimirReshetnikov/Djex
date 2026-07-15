@@ -827,6 +827,26 @@ ordering, maximum selection, and the unforced suffix; Exference's existing
 multi-site diagnostic and machine-boundary allocation tests continue to pin
 the backend policies layered on top.
 
+## Post-fold type-spine construction consolidation
+
+**Completed on 2026-07-15:** the shared type layer exposed application and
+function spine decomposition, but their inverse construction remained encoded
+as fifteen raw `foldl TypeApplication` and `foldr FunctionType` expressions.
+Those copies spanned shared synonym expansion and canonicalization, Exference
+declaration lowering, source conversion, environment construction, independent
+checking, and live search.
+
+`Language.Haskell.Synthesis.Type.applyTypeArguments` now owns raw
+left-associated application in source argument order, while `functionType`
+owns right-associated arrows in source parameter order. They deliberately do
+not add canonicalization or quantification policy. Both shared internals and
+Exference core/frontend callers use the paired builders, and the existing
+`applicationSpine` and `functionSpine` operations remain their structural
+views. Foundation and facade regressions pin non-empty and empty construction,
+associativity, source order, and parser-free exposure; existing declaration,
+source-loader, expression-checker, search, and CLI suites cover every migrated
+consumer.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

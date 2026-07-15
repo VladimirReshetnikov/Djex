@@ -60,6 +60,10 @@ facadeTests = testGroup "public Djex facade"
         )
       typeConstraints typeExpression @?= []
       typeConstructorHead typeExpression @?= Just checkedName
+      applyTypeArguments (TypeConstructor checkedName) [TypeVariable "a"]
+        @?= TypeApplication (TypeConstructor checkedName) (TypeVariable "a")
+      functionType [TypeVariable "a"] (TypeVariable "b") @?=
+        FunctionType (TypeVariable "a") (TypeVariable "b")
       functionSpine typeExpression @?= ([], typeExpression)
       freeVariablesInFirstOccurrenceOrder typeExpression @?= []
       constraintFreeVariables

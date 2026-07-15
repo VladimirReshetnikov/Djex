@@ -674,6 +674,26 @@ removing its second recursive arrow walk. Foundation, Exference, and facade
 regressions pin canonical binder order, rigid exclusion, idempotent closure,
 ground wrappers, parameter order, and the quantified-result stopping boundary.
 
+## Post-fold prenex-implicitization consolidation
+
+**Completed on 2026-07-15:** Exference declaration lowering no longer owns a
+recursive leading-forall eraser. The shared
+`Language.Haskell.Synthesis.Type.implicitizeLeadingForalls` operation reserves
+the protected and complete source namespaces, validates binder policy before
+duplicates, gives every erased lexical binder a checked fresh identity,
+renames its owned constraint and body occurrences without crossing shadowing,
+and folds direct contexts into one empty-binder forall in outer-to-inner order.
+Quantifiers below any other type boundary remain intact.
+
+The shared implementation accumulates context chunks and concatenates once,
+avoiding the old repeated `contexts ++ renamedEmbedded` growth across a long
+prenex chain. Exference now supplies only its flexible-binder predicate,
+complete tagged-`Int` allocator, protected class-parameter namespace, and
+compatibility error mapping. Foundation regressions cover shadowing, complete
+source reservation, ordered contexts, rejection-before-duplicate precedence,
+allocator exhaustion, and the non-leading stopping boundary; the existing
+neutral-environment tests continue to pin standalone and class-method lowering.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

@@ -50,7 +50,6 @@ module Language.Haskell.Exference.Core.Declaration
 import Control.DeepSeq (NFData)
 import Control.Monad (foldM)
 import Data.Bifunctor (first)
-import Data.Foldable (toList)
 import Data.List (find, sort)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -462,7 +461,7 @@ prepareSearchDeclaration recursiveNames declaration = case declaration of
   SharedDeclaration.TypeSynonymDeclaration{} -> Right Nothing
   SharedDeclaration.AbstractTypeDeclaration{} -> Right Nothing
   SharedDeclaration.ValueDeclaration signature -> do
-    functionType <- implicitizeLeadingForalls Set.empty
+    functionType <- implicitizeExferenceForalls Set.empty
       $ SharedDeclaration.valueType signature
     pure $ Just $ SharedDeclaration.ValueDeclaration
       $ SharedDeclaration.ValueSignature (SearchPenaltyMetadata 0)
@@ -491,54 +490,41 @@ prepareSearchDeclaration recursiveNames declaration = case declaration of
     (SharedDeclaration.parameterVariable parameter) Nothing
 
   prepareMethod ownerVariables signature = do
-    methodType <- implicitizeLeadingForalls ownerVariables
+    methodType <- implicitizeExferenceForalls ownerVariables
       $ SharedDeclaration.valueType signature
     pure $ SharedDeclaration.ValueSignature (SearchPenaltyMetadata 0)
       (SharedDeclaration.valueName signature) methodType
 
--- Exference quantifies every free flexible binding variable implicitly. Drop
--- only the complete leading prenex chain and retain its contexts in order;
--- any forall below a type constructor, arrow, tuple, or constraint remains
--- visible to the existing rank-N omission/validation boundary.
-implicitizeLeadingForalls
+-- Exference quantifies every free flexible binding variable implicitly. The
+-- shared operation owns prenex traversal, capture avoidance, and context
+-- order; this adapter supplies only the flexible-binder policy, finite tagged
+-- allocator, and historical error vocabulary. A forall below another type
+-- boundary remains visible to the existing rank-N omission boundary.
+implicitizeExferenceForalls
   :: Set.Set SynthesisVariable
   -> SharedType.Type SynthesisVariable
   -> Either SynthesisDeclarationError
       (SharedType.Type SynthesisVariable)
-implicitizeLeadingForalls outerVariables source =
-  fmap snd $ go initiallyReserved [] source
+implicitizeExferenceForalls outerVariables source =
+  first lowerError $ fmap fst $ SharedType.implicitizeLeadingForalls
+    rejectRigidBinder freshSynthesisVariable outerVariables source
  where
-  -- Every erased binder becomes free in Exference's implicit representation.
-  -- Allocate it outside the complete source namespace, not merely outside the
-  -- binders seen so far: otherwise flattening could capture a free variable
-  -- deeper in the type. Class parameters are also outside a method's explicit
-  -- forall and must remain distinct from a shadowing method binder.
-  initiallyReserved = outerVariables `Set.union` Set.fromList (toList source)
+  rejectRigidBinder variable = case variable of
+    SharedType.FlexibleVariable{} -> Nothing
+    SharedType.RigidVariable identifier -> Just identifier
 
-  go reserved contexts (SharedType.ForallType binders embedded body) = do
-    mapM_ requireFlexible binders
-    (reserved', renaming) <- foldM freshen
-      (reserved, Map.empty) binders
-    let renamedEmbedded = map
-          (fmap $ SharedType.renameScopedVariables renaming) embedded
-        renamedBody = SharedType.renameScopedVariables renaming body
-    go reserved' (contexts ++ renamedEmbedded) renamedBody
-  go reserved contexts body
-    | null contexts = Right (reserved, body)
-    | otherwise = Right
-        (reserved, SharedType.ForallType [] contexts body)
+  lowerError failure = case failure of
+    SharedType.RejectedTypeBinder identifier ->
+      DeclarationTypeConversionError $ RigidForallBinder identifier
+    SharedType.DuplicateTypeBinder variable ->
+      DeclarationTypeConversionError $ InvalidSynthesisType
+        $ SharedType.DuplicateForallVariable variable
+    SharedType.TypeBinderFresheningError fresheningFailure ->
+      NeutralVariableNamespaceExhausted $ failedBinder fresheningFailure
 
-  freshen (reserved, renaming) binder =
-    case freshSynthesisVariable reserved binder of
-      Nothing -> Left $ NeutralVariableNamespaceExhausted binder
-      Just replacement -> Right
-        ( Set.insert replacement reserved
-        , Map.insert binder replacement renaming
-        )
-
-  requireFlexible SharedType.FlexibleVariable{} = Right ()
-  requireFlexible (SharedType.RigidVariable variable) = Left
-    $ DeclarationTypeConversionError $ RigidForallBinder variable
+  failedBinder fresheningFailure = case fresheningFailure of
+    SharedType.FreshVariableSupplyExhausted binder -> binder
+    SharedType.FreshVariableAlreadyReserved binder _ -> binder
 
 toSynthesisFunctionBinding
   :: FunctionBinding

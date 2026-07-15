@@ -21,6 +21,7 @@ module Language.Haskell.Synthesis.Type
   , applicationSpine
   , functionSpine
   , quantifyFreeVariables
+  , implicitizeLeadingForalls
   , splitLeadingForalls
   , leadingForallVariables
   , containsForall
@@ -48,6 +49,7 @@ import Control.Monad.Trans.State.Strict
   , put
   , runStateT
   )
+import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
@@ -184,6 +186,52 @@ quantifyFreeVariables shouldQuantify source = case source of
   selectedVariables = Set.toAscList
     $ Set.filter shouldQuantify
     $ freeVariables source
+
+-- | Erase the complete leading forall chain into fresh implicit variables.
+--
+-- Every erased binder receives a fresh identity outside the protected and
+-- complete source namespaces. This is necessary even for a binder that does
+-- not initially collide: after its lexical scope is erased, retaining that
+-- identity could conflate it with an enclosing declaration variable or with
+-- a separately shadowed binder. Direct contexts from successive leading
+-- foralls are retained in outer-to-inner order under one empty-binder forall.
+-- A forall below any other type boundary remains untouched.
+--
+-- The caller controls admissible binder identities and fresh allocation. The
+-- returned set contains the protected namespace, every source identity, and
+-- all identities introduced while erasing the prenex chain.
+implicitizeLeadingForalls
+  :: Ord variable
+  => (variable -> Maybe rejection)
+  -> FreshVariableAllocator variable
+  -> Set variable
+  -> Type variable
+  -> Either
+      (BinderNormalizationError variable rejection)
+      (Type variable, Set variable)
+implicitizeLeadingForalls rejectBinder fresh protected source =
+  go initiallyReserved [] source
+ where
+  initiallyReserved = protected `Set.union` allTypeVariables source
+
+  go reserved contextChunks (ForallType binders embedded body) = do
+    validateBinderList rejectBinder binders
+    (renaming, reserved') <- first TypeBinderFresheningError
+      $ runStateT (foldM allocateBinder Map.empty binders) reserved
+    let renamedEmbedded = map
+          (fmap $ renameScopedVariables renaming) embedded
+        renamedBody = renameScopedVariables renaming body
+    go reserved' (renamedEmbedded : contextChunks) renamedBody
+  go reserved contextChunks body = Right
+    ( case concat $ reverse contextChunks of
+        [] -> body
+        contexts -> ForallType [] contexts body
+    , reserved
+    )
+
+  allocateBinder renaming binder = do
+    replacement <- allocateFreshBinder fresh binder
+    pure $ Map.insert binder replacement renaming
 
 -- | Split the complete leading prenex chain into its binders, direct
 -- constraints, and residual body. All lists preserve source order. A forall
@@ -337,12 +385,7 @@ uniquifyTypeBinders rejectBinder fresh protected source = do
       <*> normalize result
     TupleType boxity elements -> TupleType boxity <$> mapM normalize elements
     ForallType binders constraints body -> do
-      case firstRejectedBinder binders of
-        Just rejection -> lift $ Left $ RejectedTypeBinder rejection
-        Nothing -> pure ()
-      case firstDuplicate binders of
-        Just duplicate -> lift $ Left $ DuplicateTypeBinder duplicate
-        Nothing -> pure ()
+      either (lift . Left) pure $ validateBinderList rejectBinder binders
       renaming <- foldM normalizeBinder Map.empty binders
       let renamedBinders = map
             (\binder -> Map.findWithDefault binder binder renaming)
@@ -383,15 +426,33 @@ uniquifyTypeBinders rejectBinder fresh protected source = do
               { binderReserved = Set.insert candidate $ binderReserved state }
             pure candidate
 
-  firstRejectedBinder [] = Nothing
-  firstRejectedBinder (binder : remaining) = case rejectBinder binder of
-    Just rejection -> Just rejection
-    Nothing -> firstRejectedBinder remaining
-
 data BinderNormalizationState variable = BinderNormalizationState
   { binderClaimed :: Set variable
   , binderReserved :: Set variable
   }
+
+validateBinderList
+  :: Ord variable
+  => (variable -> Maybe rejection)
+  -> [variable]
+  -> Either (BinderNormalizationError variable rejection) ()
+validateBinderList rejectBinder binders = do
+  case firstRejectedBinder rejectBinder binders of
+    Just rejection -> Left $ RejectedTypeBinder rejection
+    Nothing -> Right ()
+  case firstDuplicate binders of
+    Just duplicate -> Left $ DuplicateTypeBinder duplicate
+    Nothing -> Right ()
+
+firstRejectedBinder
+  :: (variable -> Maybe rejection)
+  -> [variable]
+  -> Maybe rejection
+firstRejectedBinder _ [] = Nothing
+firstRejectedBinder rejectBinder (binder : remaining) =
+  case rejectBinder binder of
+    Just rejection -> Just rejection
+    Nothing -> firstRejectedBinder rejectBinder remaining
 
 -- | Alpha-rename binders that collide with a protected namespace.
 --

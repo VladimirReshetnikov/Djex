@@ -1582,6 +1582,52 @@ typeTests = testGroup "source types"
       SharedType.quantifyFreeVariables select expected @?= expected
       SharedType.quantifyFreeVariables (const True) ground @?=
         SharedType.ForallType [] [] ground
+  , testCase "implicitize a complete prenex chain without capture" $ do
+      let variable = SharedType.TypeVariable
+          outerName = right $ mkIdentifier "Outer"
+          innerName = right $ mkIdentifier "Inner"
+          acceptAll _ = Nothing :: Maybe String
+          source = SharedType.ForallType ["a"]
+            [Constraint outerName [variable "a"]]
+            $ SharedType.ForallType ["a"]
+                [Constraint innerName [variable "a"]]
+                $ SharedType.FunctionType (variable "a") (variable "free")
+          expected = SharedType.ForallType []
+            [ Constraint outerName [variable "a'"]
+            , Constraint innerName [variable "a''"]
+            ]
+            $ SharedType.FunctionType (variable "a''") (variable "free")
+      SharedType.implicitizeLeadingForalls acceptAll freshStringVariable
+          (Set.singleton "owner") source @?=
+        Right
+          ( expected
+          , Set.fromList ["a", "a'", "a''", "free", "owner"]
+          )
+  , testCase "implicitization validates binders and stops at arrows" $ do
+      let variable = SharedType.TypeVariable
+          acceptAll _ = Nothing :: Maybe String
+          reject binder
+            | binder == "rejected" = Just "unsupported"
+            | otherwise = Nothing
+          malformed = SharedType.ForallType ["rejected", "rejected"] []
+            $ variable "rejected"
+          nested = SharedType.FunctionType
+            (SharedType.ForallType ["nested"] [] $ variable "nested")
+            (variable "free")
+      SharedType.implicitizeLeadingForalls reject freshStringVariable
+          Set.empty malformed @?=
+        Left (SharedType.RejectedTypeBinder "unsupported")
+      SharedType.implicitizeLeadingForalls acceptAll freshStringVariable
+          Set.empty malformed @?=
+        Left (SharedType.DuplicateTypeBinder "rejected")
+      SharedType.implicitizeLeadingForalls acceptAll (\_ _ -> Nothing)
+          Set.empty
+          (SharedType.ForallType ["bound"] [] $ variable "bound") @?=
+        Left (SharedType.TypeBinderFresheningError
+          $ SharedType.FreshVariableSupplyExhausted "bound")
+      SharedType.implicitizeLeadingForalls acceptAll freshStringVariable
+          Set.empty nested @?=
+        Right (nested, Set.fromList ["free", "nested"])
   , testCase "uniquify binders against complete source scope" $ do
       let variable = SharedType.TypeVariable
           acceptAll _ = Nothing :: Maybe String

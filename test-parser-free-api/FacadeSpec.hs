@@ -49,6 +49,12 @@ facadeTests = testGroup "public Djex facade"
           (Constraint checkedName [typeExpression]) @?= Set.empty
       quantifyFreeVariables (const True) (TypeVariable "b") @?=
         ForallType ["b"] [] (TypeVariable "b")
+      implicitizeLeadingForalls acceptBinder (\_ _ -> Just "b")
+          Set.empty typeExpression @?=
+        Right
+          ( TypeApplication (TypeConstructor checkedName) (TypeVariable "b")
+          , Set.fromList ["a", "b"]
+          )
       uniquifyTypeBinders acceptBinder (\_ _ -> Nothing) Set.empty
           typeExpression @?= Right (typeExpression, Set.singleton "a")
       declaredValueName <- expectRight $ mkIdentifier "value"

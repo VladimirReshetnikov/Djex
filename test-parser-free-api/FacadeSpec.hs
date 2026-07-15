@@ -33,6 +33,12 @@ facadeTests = testGroup "public Djex facade"
             $ TypeVariable "a"
       leadingForallVariables typeExpression @?= ["a"]
       containsForall typeExpression @?= True
+      containsNestedForall typeExpression @?= False
+      splitLeadingForalls typeExpression @?=
+        ( ["a"]
+        , []
+        , TypeApplication (TypeConstructor checkedName) (TypeVariable "a")
+        )
       typeConstraints typeExpression @?= []
       typeConstructorHead typeExpression @?= Just checkedName
       let requestTraversal

@@ -371,7 +371,8 @@ instantiateGoal plan goal
   instantiations = rigidInstantiations plan
   plannedBinders = map fst instantiations
   quantifiedGoal = forallify goal
-  actualBinders = collectBinders quantifiedGoal
+  actualBinders = maybe [] id $ traverse flexibleBinder
+    $ SharedType.leadingForallVariables quantifiedGoal
 
   -- Validation permits a chain of prenex quantifiers.  Search consumes one
   -- layer per step, so consume the same ordered segment for each layer.  A
@@ -385,9 +386,9 @@ instantiateGoal plan goal
     in instantiateFrom rest instantiatedBody
   instantiateFrom _ instantiated = instantiated
 
-  collectBinders (TypeForall variables _ body) =
-    variables ++ collectBinders body
-  collectBinders _ = []
+  flexibleBinder variable = case variable of
+    SharedType.FlexibleVariable identifier -> Just identifier
+    SharedType.RigidVariable{} -> Nothing
 
 expressionFlexibleIdentifiers :: Expression -> IntSet.IntSet
 expressionFlexibleIdentifiers expression = case expression of

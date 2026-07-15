@@ -558,6 +558,25 @@ through the parser-free facade. Djinn's separate `nub` over rendered
 `HClause`s remains local: those clauses provide equality but no ordered key,
 and their result-level equivalence is unrelated to declaration identity.
 
+## Post-fold leading-prenex consolidation
+
+**Completed on 2026-07-15:** after the first shared-type inspection pass,
+Exference still independently peeled the complete leading `forall` chain in
+its arrow-result decomposition, deconstructor validation, nested-quantifier
+check, and generated-expression rigid-plan comparison. Those walkers agreed
+on source order but returned different subsets of binders, constraints, and
+the residual body, leaving their common boundary implicit.
+
+`Language.Haskell.Synthesis.Type.splitLeadingForalls` now owns that boundary.
+The existing binder query is derived from it, and the new shared
+`containsNestedForall` distinguishes a leading prenex chain from a forall in
+its constraint arguments or residual body. Exference's historical predicate
+is a compatibility alias; arrow decomposition, deconstructor validation, and
+the independent expression checker consume the shared split or binder view.
+Regressions pin binder and direct-constraint order, the exact residual body,
+prenex-only and rank-N classification, parser-free exposure, and productive
+outer-binder emission from a partial type.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

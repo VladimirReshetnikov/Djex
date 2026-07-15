@@ -18,8 +18,10 @@ module Language.Haskell.Synthesis.Type
   , SubstitutionError (..)
   , canonicalizeType
   , applicationSpine
+  , splitLeadingForalls
   , leadingForallVariables
   , containsForall
+  , containsNestedForall
   , typeConstraints
   , typeConstructorHead
   , renameScopedVariables
@@ -128,13 +130,28 @@ applicationSpine = collect []
       collect (argument : arguments) function
     collect arguments function = (function, arguments)
 
+-- | Split the complete leading prenex chain into its binders, direct
+-- constraints, and residual body. All lists preserve source order. A forall
+-- below an application, function, tuple, or constraint boundary is residual
+-- structure rather than part of the leading chain. Emitting an outer binder
+-- or constraint does not inspect subsequent layers.
+splitLeadingForalls
+  :: Type variable
+  -> ([variable], [Constraint (Type variable)], Type variable)
+splitLeadingForalls (ForallType variables constraints body) =
+  let (nestedVariables, nestedConstraints, residualBody) =
+        splitLeadingForalls body
+  in ( variables ++ nestedVariables
+     , constraints ++ nestedConstraints
+     , residualBody
+     )
+splitLeadingForalls body = ([], [], body)
+
 -- | Collect binders from the complete leading prenex chain in source order.
--- A forall below an application, function, or tuple boundary is not leading
--- and is therefore excluded.
 leadingForallVariables :: Type variable -> [variable]
-leadingForallVariables (ForallType variables _ body) =
-  variables ++ leadingForallVariables body
-leadingForallVariables _ = []
+leadingForallVariables typeExpression = variables
+ where
+  (variables, _, _) = splitLeadingForalls typeExpression
 
 -- | Whether explicit quantification occurs anywhere in a type.
 containsForall :: Type variable -> Bool
@@ -147,6 +164,17 @@ containsForall typeExpression = case typeExpression of
     containsForall parameter || containsForall result
   TupleType _ elements -> any containsForall elements
   ForallType{} -> True
+
+-- | Whether explicit quantification occurs outside the leading prenex chain.
+--
+-- Quantification inside a leading constraint argument is nested even though
+-- the constraint itself belongs to the prenex chain.
+containsNestedForall :: Type variable -> Bool
+containsNestedForall typeExpression =
+  any (any containsForall . constraintArguments) constraints
+    || containsForall body
+ where
+  (_, constraints, body) = splitLeadingForalls typeExpression
 
 -- | Collect every explicit class constraint embedded in a type.
 --

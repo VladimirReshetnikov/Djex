@@ -1444,8 +1444,22 @@ typeTests = testGroup "source types"
             $ SharedType.TypeApplication
                 (SharedType.TypeConstructor headName)
                 (variable "c")
+          residualBody = SharedType.TypeApplication
+            (SharedType.TypeConstructor headName)
+            (variable "c")
+      SharedType.splitLeadingForalls source @?=
+        ( ["a", "c"]
+        , [outerConstraint, siblingConstraint, bodyConstraint]
+        , residualBody
+        )
       SharedType.leadingForallVariables source @?= ["a", "c"]
+      take 1 (SharedType.leadingForallVariables
+        $ SharedType.ForallType ["outer"] []
+        $ error "forced leading forall body") @?= ["outer"]
       SharedType.containsForall source @?= True
+      SharedType.containsNestedForall source @?= True
+      SharedType.containsNestedForall
+          (SharedType.ForallType ["a"] [] $ variable "a") @?= False
       SharedType.containsForall
           (SharedType.FunctionType (variable "a") (variable "b")) @?= False
       SharedType.containsForall

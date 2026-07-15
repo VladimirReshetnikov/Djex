@@ -271,17 +271,13 @@ splitArrowResultParams :: HsType -> (HsType, [HsType], [TVarId], [HsConstraint])
 splitArrowResultParams source = case alphaNormalizeForalls IntSet.empty source of
   Left _ -> (source, [], [], [])
   Right (normalized, _) ->
-    let (body, variables, constraints) = splitForalls normalized
-        (result, parameters) = splitArrowChain body
-    in (result, parameters, variables, constraints)
- where
-  splitForalls (TypeForall variables constraints body) =
-    let (result, nestedVariables, nestedConstraints) = splitForalls body
-    in ( result
-       , variables ++ nestedVariables
-       , constraints ++ nestedConstraints
-       )
-  splitForalls body = (body, [], [])
+    let (nativeVariables, constraints, body) =
+          SharedType.splitLeadingForalls normalized
+    in case flexibleBinderIdentifiers nativeVariables of
+      Left _ -> (source, [], [], [])
+      Right variables ->
+        let (result, parameters) = splitArrowChain body
+        in (result, parameters, variables, constraints)
 
 
 -- | Split the consecutive outer arrow chain without inspecting or rewriting
@@ -301,15 +297,7 @@ containsForall = SharedType.containsForall
 -- | Whether quantification occurs below the complete leading prenex chain or
 -- inside an outer constraint argument.
 containsNestedForall :: HsType -> Bool
-containsNestedForall ty@TypeForallNative{} =
-  any constraintContainsForall outerConstraints || containsForall body
-  where
-    (outerConstraints, body) = stripOuterForalls ty
-    stripOuterForalls (TypeForallNative _ constraints inner) =
-      let (nestedConstraints, result) = stripOuterForalls inner
-      in (constraints ++ nestedConstraints, result)
-    stripOuterForalls other = ([], other)
-containsNestedForall ty = containsForall ty
+containsNestedForall = SharedType.containsNestedForall
 
 constraintContainsForall :: HsConstraint -> Bool
 constraintContainsForall = any containsForall . constraint_params

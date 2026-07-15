@@ -1087,18 +1087,20 @@ deconstructorHead
   :: HsType
   -> Either SynthesisDeclarationError (QualifiedName, [TVarId])
 deconstructorHead typeExpression = do
-  (binders, body) <- stripForalls [] typeExpression
+  (binders, body) <- case SharedType.splitLeadingForalls typeExpression of
+    (nativeBinders, [], body) -> case traverse flexibleBinder nativeBinders of
+      Just binders -> Right (binders, body)
+      Nothing -> Left $ InvalidDeconstructorHead typeExpression
+    _ -> Left $ InvalidDeconstructorHead typeExpression
   (name, arguments) <- nominalApplication body
   parameters <- mapM typeVariable arguments
   if null binders || Set.fromList binders == Set.fromList parameters
     then Right (name, parameters)
     else Left $ DeconstructorForallMismatch binders parameters
  where
-  stripForalls binders (TypeForall variables [] body) =
-    stripForalls (binders ++ variables) body
-  stripForalls _ TypeForallNative{} =
-    Left $ InvalidDeconstructorHead typeExpression
-  stripForalls binders body = Right (binders, body)
+  flexibleBinder variable = case variable of
+    SharedType.FlexibleVariable identifier -> Just identifier
+    SharedType.RigidVariable{} -> Nothing
 
   nominalApplication (TypeTuple boxity elements) = do
     name <- either (const $ Left $ InvalidDeconstructorHead typeExpression)

@@ -126,9 +126,10 @@ cabal test all --test-show-details=direct
 
 The complete package graph is tested warning-clean on, and currently supports,
 GHC 9.12.4. It is the active toolchain because it has full Haskell Language
-Server support. The broad `base >= 4.19 && < 5` dependency bound remains an
-honest API compatibility range rather than a claim that every corresponding
-compiler is part of the supported test matrix.
+Server support. `Tested-With: GHC == 9.12.4` states the exact compiler contract;
+the matching `base == 4.21.2.*` bound pins the library API line bundled with
+that toolchain. A `base` version is not itself a unique compiler identity, so
+both declarations are intentional.
 
 The project pins the Hackage index snapshot used by the solver, while
 `djex.cabal` retains explicit dependency ranges for library consumers and

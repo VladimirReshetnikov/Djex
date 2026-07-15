@@ -425,6 +425,21 @@ also cover source order that differs from map order and bare operator symbols;
 the integration operator-method fixture now has an inhabited domain and a
 no-context negative control, making that method logically necessary.
 
+## Post-fold compiler-support alignment
+
+**Completed on 2026-07-15:** Djex's package metadata named GHC 9.12.4 as its
+sole tested compiler while retaining `base >= 4.19 && < 5`, an intentionally
+broad range that still admitted several unsupported compiler release series.
+That portability claim no longer matched the workspace policy or the two
+sibling packages.
+
+All three workspace packages now use `base == 4.21.2.*`, the API line bundled
+with the installed GHC 9.12.4 toolchain. `Tested-With: GHC == 9.12.4` continues
+to carry the exact compiler identity because a `base` version is not a unique
+compiler identifier. Other dependency bounds remain ranges so
+`--prefer-oldest` continues to validate the actual declared compatibility
+surface on GHC 9.12.4.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

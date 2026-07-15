@@ -54,7 +54,9 @@ common build-settings
     -Wpartial-fields
     -Wredundant-constraints
     -Wunused-packages
-  Build-Depends:    base >= 4.19 && < 5
+  -- The package supports only GHC 9.12.4. Tested-With carries the exact
+  -- compiler identity; this is the base API line bundled with that toolchain.
+  Build-Depends:    base == 4.21.2.*
 
 -- All three search commands remain serial, but callers may explicitly tune
 -- ordinary RTS resource limits when a large search needs them.

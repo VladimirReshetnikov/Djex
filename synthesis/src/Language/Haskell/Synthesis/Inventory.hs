@@ -28,11 +28,20 @@ import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name (Name)
 
 data Inventory typeVariable annotation = Inventory
-  { inventoryEnvironment ::
-      Environment typeVariable Void annotation
-  , inventoryKindAssumptions :: KindAssumptions
-  }
-  deriving (Eq, Show, Functor, Generic)
+  (Environment typeVariable Void annotation)
+  KindAssumptions
+  deriving (Eq, Show, Functor)
+
+-- Ordinary projections, rather than record fields, are deliberate. A record
+-- update does not require the hidden constructor to be in scope and would let
+-- callers pair an environment with unrelated inferred assumptions.
+inventoryEnvironment
+  :: Inventory typeVariable annotation
+  -> Environment typeVariable Void annotation
+inventoryEnvironment (Inventory environment _) = environment
+
+inventoryKindAssumptions :: Inventory typeVariable annotation -> KindAssumptions
+inventoryKindAssumptions (Inventory _ assumptions) = assumptions
 
 data InventoryError typeVariable kindVariable
   = InvalidInventoryEnvironment (EnvironmentError typeVariable)
@@ -103,8 +112,7 @@ adjustInventoryDataTypeAnnotations
   :: (Name -> annotation -> annotation)
   -> Inventory typeVariable annotation
   -> Inventory typeVariable annotation
-adjustInventoryDataTypeAnnotations adjust inventory = inventory
-  { inventoryEnvironment =
-      Environment.adjustEnvironmentDataTypeAnnotations adjust
-      $ inventoryEnvironment inventory
-  }
+adjustInventoryDataTypeAnnotations adjust (Inventory environment assumptions) =
+  Inventory
+    (Environment.adjustEnvironmentDataTypeAnnotations adjust environment)
+    assumptions

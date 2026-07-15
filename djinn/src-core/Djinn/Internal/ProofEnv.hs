@@ -14,31 +14,39 @@ import Numeric.Natural (Natural)
 import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.LJTFormula
 
-data ProofEnvironment = ProofEnvironment {
-    -- Bindings that are safe to use in the generated definition.
-    proofBindings :: [(Symbol, Formula)],
-    -- Every binding, including target-named assumptions.  This environment
-    -- exists only to prove whether the more specific self-reference
-    -- diagnostic is justified; its proofs must never be rendered.
-    proofBindingsIncludingTarget :: [(Symbol, Formula)],
-    displayBindings :: [(Symbol, Symbol)],
-    targetWasExcluded :: Bool
-    }
+data ProofEnvironment = ProofEnvironment
+    [(Symbol, Formula)]
+    [(Symbol, Formula)]
+    [(Symbol, Symbol)]
+    Bool
+
+-- Ordinary projections are intentional. Exported record fields would allow
+-- callers to update one derived view while leaving the hidden display-name
+-- map and target-exclusion flag unchanged.
+proofBindings :: ProofEnvironment -> [(Symbol, Formula)]
+proofBindings (ProofEnvironment bindings _ _ _) = bindings
+
+-- | Every binding, including target-named assumptions. This environment
+-- exists only to prove whether the more specific self-reference diagnostic
+-- is justified; its proofs must never be rendered.
+proofBindingsIncludingTarget :: ProofEnvironment -> [(Symbol, Formula)]
+proofBindingsIncludingTarget (ProofEnvironment _ bindings _ _) = bindings
+
+targetWasExcluded :: ProofEnvironment -> Bool
+targetWasExcluded (ProofEnvironment _ _ _ excluded) = excluded
 
 -- A same-named assumption would be printed as a recursive reference to the
 -- definition being generated.  Other assumptions receive internal names so
 -- proof checking never has to guess between overloaded display names.
 prepareProofEnvironment :: Symbol -> [(Symbol, Formula)] -> ProofEnvironment
 prepareProofEnvironment target bindings =
-    ProofEnvironment {
-        proofBindings = strip safe,
-        proofBindingsIncludingTarget = strip internalized,
-        displayBindings =
-            [(internalName, external)
-            | (external, internalName, _) <- safe],
-        targetWasExcluded = any
-            (\ (external, _, _) -> external == target) internalized
-        }
+    ProofEnvironment
+        (strip safe)
+        (strip internalized)
+        [ (internalName, external)
+        | (external, internalName, _) <- safe
+        ]
+        (any (\ (external, _, _) -> external == target) internalized)
   where
     initiallyUsed = Set.fromList $
         map fst bindings ++ concatMap (formulaSymbols . snd) bindings
@@ -59,7 +67,7 @@ prepareProofEnvironment target bindings =
 -- makes this correct even for externally supplied terms that shadow an internal
 -- name, although LJT itself reserves every environment symbol.
 restoreProofTerm :: ProofEnvironment -> Term -> Term
-restoreProofTerm environment = rename (displayBindings environment)
+restoreProofTerm (ProofEnvironment _ _ displayNames _) = rename displayNames
   where
     rename names (Var symbol) = Var $ fromMaybe symbol $ lookup symbol names
     rename names (Lam binder body) =

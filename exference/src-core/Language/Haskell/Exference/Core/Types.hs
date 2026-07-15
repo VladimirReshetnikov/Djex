@@ -402,7 +402,7 @@ data StaticClassEnv = StaticClassEnv
   !(M.Map QualifiedName HsTypeClass)
   ![HsInstance]
   !(M.Map QualifiedName [HsInstance])
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show)
 
 sClassEnv_tclasses :: StaticClassEnv -> M.Map QualifiedName HsTypeClass
 sClassEnv_tclasses (StaticClassEnv classes _ _) = classes
@@ -603,7 +603,6 @@ data QueryClassEnv = QueryClassEnv
   !StaticClassEnv
   !(S.Set HsConstraint)
   !(S.Set HsConstraint)
-  deriving (Generic)
 
 qClassEnv_env :: QueryClassEnv -> StaticClassEnv
 qClassEnv_env (QueryClassEnv environment _ _) = environment
@@ -620,8 +619,13 @@ qClassEnv_inflatedConstraints (QueryClassEnv _ _ constraints) = constraints
 -- nominal constraints rather than a recursively tied declaration graph.
 instance NFData HsTypeClass
 instance NFData HsInstance
-instance NFData StaticClassEnv
-instance NFData QueryClassEnv
+instance NFData StaticClassEnv where
+  rnf (StaticClassEnv classes explicitInstances indexedInstances) =
+    rnf classes `seq` rnf explicitInstances `seq` rnf indexedInstances
+
+instance NFData QueryClassEnv where
+  rnf (QueryClassEnv environment constraints inflatedConstraints) =
+    rnf environment `seq` rnf constraints `seq` rnf inflatedConstraints
 
 showHsType :: TypeVarIndex -> HsType -> String
 showHsType sourceNames = SharedRender.renderType

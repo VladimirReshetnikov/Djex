@@ -314,6 +314,7 @@ Test-Suite djex-parser-free-api-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-parser-free-api
+  Other-Modules:  AbstractionBoundary
   Build-Depends:  djex
 
 Benchmark exference-bench

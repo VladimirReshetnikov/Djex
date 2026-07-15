@@ -117,8 +117,8 @@ type DjinnInventory = Inventory DjinnTypeVariable ()
 
 -- | Djinn's source-level type-variable identity.
 --
--- It currently shares the same representation as generated binders, but the
--- distinct alias keeps those unrelated namespaces separate in the public API.
+-- The vocabulary distinguishes this role from generated binders in signatures,
+-- but both compatibility aliases remain 'String' and are not nominally distinct.
 type DjinnTypeVariable = String
 
 -- | Djinn's generated-expression binder identity.

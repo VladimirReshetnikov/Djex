@@ -17,7 +17,7 @@ module Language.Haskell.Exference.Core.RigidInstantiation
   , splitRigidInstantiationLayer
   ) where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM)
 import qualified Data.Foldable as Foldable
 import qualified Data.Map.Strict as Map
@@ -53,14 +53,17 @@ instance NFData RigidInstantiationError
 
 -- | The rigid namespace of a sealed environment. Retaining the finite set,
 -- rather than only its maximum, lets boundary queries allocate real gaps.
+-- 'Generic' is deliberately omitted because the constructor is not public.
 data RigidInstantiationContext = RigidInstantiationContext
   { maximumEnvironmentRigidIdentifier :: Maybe TVarId
   , environmentRigidIdentifiers :: IdentifierSupply
   , environmentRigidForallBinder :: Maybe TVarId
   }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show)
 
-instance NFData RigidInstantiationContext
+instance NFData RigidInstantiationContext where
+  rnf (RigidInstantiationContext maximumIdentifier identifiers binder) =
+    rnf maximumIdentifier `seq` rnf identifiers `seq` rnf binder
 
 -- | Cache the environment-wide rigid maximum used by every later query.
 mkRigidInstantiationContext :: EnvDictionary -> RigidInstantiationContext
@@ -77,11 +80,16 @@ mkRigidInstantiationContext environment = RigidInstantiationContext
 --
 -- The constructor is private so the pairing cannot drift from 'forallify'.
 newtype RigidInstantiationPlan = RigidInstantiationPlan
-  { rigidInstantiations :: [(TVarId, TVarId)]
-  }
-  deriving (Eq, Show, Generic)
+  [(TVarId, TVarId)]
+  deriving (Eq, Show)
 
-instance NFData RigidInstantiationPlan
+instance NFData RigidInstantiationPlan where
+  rnf (RigidInstantiationPlan instantiations) = rnf instantiations
+
+-- An ordinary projection prevents record-update syntax from replacing the
+-- checked lexical pairing while the constructor remains hidden.
+rigidInstantiations :: RigidInstantiationPlan -> [(TVarId, TVarId)]
+rigidInstantiations (RigidInstantiationPlan instantiations) = instantiations
 
 -- | Plan every rigid variable needed to open a goal.
 --

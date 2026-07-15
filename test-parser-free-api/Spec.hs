@@ -2,13 +2,18 @@
 
 module Main (main) where
 
-import Control.Exception (SomeException, evaluate, try)
+import Control.Exception (SomeException, displayException, evaluate, try)
+import Control.Monad (forM_)
 import Data.Either (isRight)
 import Data.Foldable (toList)
+import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import Data.Void (Void)
 
 import Djinn.Core (parseHType)
+import qualified Djinn.Internal.LJTFormula as LJT
+import qualified Djinn.Internal.ProofEnv as ProofEnv
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.FrontendSupport
   ( allocateFreshTypeVariableId
@@ -18,6 +23,7 @@ import Language.Haskell.Djex.Exference.FrontendSupport
   )
 import Language.Haskell.Exference.Core.Declaration
   ( prepareNeutralSynthesisInventory )
+import qualified Language.Haskell.Exference.Core.Declaration as Declaration
 import Language.Haskell.Exference.Core
   ( ExferenceQuery (..)
   , emptyExferenceSourceTypeVariableHints
@@ -27,6 +33,7 @@ import Language.Haskell.Exference.Core
 import Language.Haskell.Exference.Core.FunctionBinding
   ( EnvDictionary (..)
   )
+import qualified Language.Haskell.Exference.Core.RigidInstantiation as Rigid
 import qualified Language.Haskell.Exference.Core.Types as CoreTypes
 import Language.Haskell.Synthesis.Candidate (candidateOutput)
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
@@ -39,12 +46,15 @@ import Language.Haskell.Synthesis.Diagnostic
   , sourceTextSpan
   )
 import Language.Haskell.Synthesis.Generated (clauseName)
+import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.Inventory
   ( InventoryError
   , mkInventory
   )
+import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import Language.Haskell.Synthesis.KindInference
   ( KindInventoryPolicy (OpenKindInventory) )
+import qualified Language.Haskell.Synthesis.KindInference as KindInference
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed)
   , mkIdentifier
@@ -55,11 +65,14 @@ import Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
   , resultSearch
   )
+import qualified Language.Haskell.Synthesis.Query as Query
 import Language.Haskell.Synthesis.Search (batchCandidates)
+import qualified Language.Haskell.Synthesis.Search as Search
 import Language.Haskell.Synthesis.Type
   ( Type (FunctionType, TypeVariable)
   , Variable (FlexibleVariable, RigidVariable)
   )
+import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit
   ( (@?=)
@@ -68,11 +81,105 @@ import Test.Tasty.HUnit
   , testCase
   )
 
+import AbstractionBoundary
+  ( allowedConstructionAttempts
+  , forbiddenConstructionAttempts
+  )
+
+-- These references compile without deferred type errors. They pin the result
+-- type of every ordinary projection whose same-named record label is rejected
+-- by 'AbstractionBoundary'.
+projectionSignatures :: ()
+projectionSignatures =
+  (Inventory.inventoryEnvironment
+    :: Inventory.Inventory Int ()
+    -> Environment.Environment Int Void ()) `seq`
+  (Inventory.inventoryKindAssumptions
+    :: Inventory.Inventory Int ()
+    -> KindInference.KindAssumptions) `seq`
+  (Query.resultEvidence
+    :: Query.QueryResult () ()
+    -> Query.QueryEvidence) `seq`
+  (Query.resultSearch
+    :: Query.QueryResult () ()
+    -> Search.SearchBatch () ()) `seq`
+  (Rigid.rigidInstantiations
+    :: Rigid.RigidInstantiationPlan
+    -> [(CoreTypes.TVarId, CoreTypes.TVarId)]) `seq`
+  (TypeSynonym.preparedInventory
+    :: TypeSynonym.PreparedInventory Int ()
+    -> Inventory.Inventory Int ()) `seq`
+  (TypeSynonym.preparedTypeSynonyms
+    :: TypeSynonym.PreparedInventory Int ()
+    -> TypeSynonym.TypeSynonyms Int) `seq`
+  (CoreTypes.sClassEnv_tclasses
+    :: CoreTypes.StaticClassEnv
+    -> Map.Map CoreTypes.QualifiedName CoreTypes.HsTypeClass) `seq`
+  (CoreTypes.sClassEnv_explicitInstances
+    :: CoreTypes.StaticClassEnv
+    -> [CoreTypes.HsInstance]) `seq`
+  (CoreTypes.sClassEnv_instances
+    :: CoreTypes.StaticClassEnv
+    -> Map.Map CoreTypes.QualifiedName [CoreTypes.HsInstance]) `seq`
+  (CoreTypes.qClassEnv_env
+    :: CoreTypes.QueryClassEnv
+    -> CoreTypes.StaticClassEnv) `seq`
+  (CoreTypes.qClassEnv_constraints
+    :: CoreTypes.QueryClassEnv
+    -> Set.Set CoreTypes.HsConstraint) `seq`
+  (CoreTypes.qClassEnv_inflatedConstraints
+    :: CoreTypes.QueryClassEnv
+    -> Set.Set CoreTypes.HsConstraint) `seq`
+  (Declaration.preparedSynthesisInventory
+    :: Declaration.PreparedSynthesisInventory ()
+    -> Inventory.Inventory CoreTypes.SynthesisVariable ()) `seq`
+  (Declaration.preparedSynthesisTypeSynonyms
+    :: Declaration.PreparedSynthesisInventory ()
+    -> TypeSynonym.TypeSynonyms CoreTypes.SynthesisVariable) `seq`
+  (Declaration.preparedSynthesisWitness
+    :: Declaration.PreparedSynthesisInventory ()
+    -> TypeSynonym.PreparedInventory CoreTypes.SynthesisVariable ()) `seq`
+  (Declaration.preparedSynthesisBackend
+    :: Declaration.PreparedSynthesisInventory ()
+    -> EnvDictionary) `seq`
+  (ProofEnv.proofBindings
+    :: ProofEnv.ProofEnvironment
+    -> [(LJT.Symbol, LJT.Formula)]) `seq`
+  (ProofEnv.proofBindingsIncludingTarget
+    :: ProofEnv.ProofEnvironment
+    -> [(LJT.Symbol, LJT.Formula)]) `seq`
+  (ProofEnv.targetWasExcluded
+    :: ProofEnv.ProofEnvironment
+    -> Bool) `seq`
+  ()
+
 main :: IO ()
 main = defaultMain $ testGroup "Djex parser-free API"
   [ testCase "both engines are available from one parser-free dependency" $
       assertBool "the Djinn parser was unavailable from djex"
         $ isRight $ parseHType "a -> a"
+  , testCase "abstraction-boundary controls can obtain public dictionaries" $
+      forM_ allowedConstructionAttempts $ \(description, attempt) -> do
+        result <- try $ evaluate attempt
+        case result :: Either SomeException () of
+          Left exception -> assertFailure $
+            description ++ " failed: " ++ displayException exception
+          Right () -> pure ()
+  , testCase "opaque witnesses expose no representation constructors" $
+      projectionSignatures `seq`
+      forM_ forbiddenConstructionAttempts (\(description, attempt) -> do
+        result <- try $ evaluate attempt
+        case result :: Either SomeException () of
+          Left exception -> do
+            let message = displayException exception
+                isMissingDictionary =
+                  "No instance for" `isInfixOf` message &&
+                  ("Generic" `isInfixOf` message ||
+                    "HasField" `isInfixOf` message)
+            assertBool
+              (description ++ " raised an unrelated exception: " ++ message)
+              isMissingDictionary
+          Right () -> assertFailure description)
   , testCase "the Exference frontend-support boundary is complete" $ do
       inventory <- expectRight
         (mkInventory OpenKindInventory []

@@ -322,6 +322,29 @@ and tag errors, full-`Int` IDs, alias selection, cross-query witness rejection,
 source-located SPI errors, flexible/rigid residual rendering, malicious raw
 candidate details, and direct plus nested phantom/binder collisions.
 
+## Seal representation-derived invariant witnesses
+
+**Completed on 2026-07-14:** a cross-package abstraction audit found two GHC
+capabilities that constructor hiding alone does not prevent. A derived
+`Generic` instance makes `Generic.to` a public representation constructor, and
+record update needs an exported field label but does not need the data
+constructor. Either route could recombine separately validated pieces of the
+shared `Environment`, `Inventory`, `TypeSynonyms`, or `QueryResult` values.
+
+The shared witnesses no longer derive `Generic`; invariant-bearing record
+labels on `Inventory` and `QueryResult` are now same-named ordinary projections.
+The same repair covers Exference's rigid-instantiation context and plan, static
+and per-query class indexes, and scope forest, plus Djinn's derived proof
+environment. Explicit `NFData` instances retain the previous forcing contract.
+Ordinary public payloads whose constructors are already exported keep their
+useful generic instances.
+
+`djex-parser-free-api-tests` now compiles deliberately forbidden `Generic` and
+`HasField` constraints with deferred type errors, then requires each constraint
+to fail when forced. Because that suite is a downstream Cabal component, the
+regression observes the real public API under the sole supported GHC 9.12.4
+rather than privileged home-module constructor scope.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

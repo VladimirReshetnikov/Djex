@@ -36,7 +36,7 @@ import GHC.Generics (Generic)
 -- IDs returned by a newer forest may not be used with an older snapshot: the
 -- checked operations report such stale references as 'MissingScopeId'.
 newtype ScopeId = ScopeId Int
-  deriving (Eq, Ord, Generic)
+  deriving (Eq, Ord)
 
 instance Show ScopeId where
   show (ScopeId scopeId) = show scopeId
@@ -48,7 +48,6 @@ data Scope binding = Scope
   { scopeBindings :: [binding]
   , scopeParent :: !(Maybe ScopeId)
   }
-  deriving Generic
 
 instance NFData binding => NFData (Scope binding) where
   rnf (Scope bindings parent) = rnf bindings `seq` rnf parent
@@ -57,7 +56,6 @@ instance NFData binding => NFData (Scope binding) where
 -- Constructors are hidden: in particular, callers cannot reparent a scope or
 -- insert an edge to a scope that does not already exist.
 data Scopes binding = Scopes !Int !(IntMap.IntMap (Scope binding))
-  deriving Generic
 
 instance NFData binding => NFData (Scopes binding) where
   rnf (Scopes nextId scopeMap) = rnf nextId `seq` rnf scopeMap

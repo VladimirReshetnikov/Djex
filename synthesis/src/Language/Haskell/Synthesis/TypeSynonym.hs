@@ -99,13 +99,14 @@ instance NFData variable => NFData (SynonymDefinition variable)
 
 -- | Prepared aliases and the exact kind assumptions of their source
 -- inventory. The constructor is private so definitions cannot drift from the
--- assumptions used by 'elaborateType'.
+-- assumptions used by 'elaborateType'. A 'Generic' instance would defeat that
+-- constructor boundary through 'GHC.Generics.to'.
 data TypeSynonyms variable = TypeSynonyms
   { synonymDefinitions :: Map Name (SynonymDefinition variable)
   , synonymKindAssumptions :: KindAssumptions
   , synonymVariables :: Set variable
   }
-  deriving (Eq, Show, Generic)
+  deriving (Eq, Show)
 
 -- | A checked inventory paired with the exact alias table prepared from it.
 --

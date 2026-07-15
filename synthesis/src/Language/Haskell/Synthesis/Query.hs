@@ -31,7 +31,7 @@ module Language.Haskell.Synthesis.Query
   , queryResultFromCandidates
   ) where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint (Constraint)
@@ -215,9 +215,8 @@ instance NFData QueryResultInvariantError
 -- The candidate parameter is last so 'fmap', 'foldMap', and 'traverse' operate
 -- on candidates without disturbing logical evidence, progress, or metadata.
 data QueryResult metadata candidate = QueryResult
-  { resultEvidence :: QueryEvidence
-  , resultSearch :: SearchBatch metadata candidate
-  }
+  QueryEvidence
+  (SearchBatch metadata candidate)
   deriving
     ( Eq
     , Ord
@@ -225,11 +224,22 @@ data QueryResult metadata candidate = QueryResult
     , Functor
     , Foldable
     , Traversable
-    , Generic
     )
 
 instance (NFData metadata, NFData candidate) =>
-    NFData (QueryResult metadata candidate)
+    NFData (QueryResult metadata candidate) where
+  rnf (QueryResult evidence search) = rnf evidence `seq` rnf search
+
+-- These are ordinary projections rather than record fields. Otherwise a
+-- downstream record update could bypass 'mkQueryResult' even though the
+-- 'QueryResult' constructor is hidden.
+resultEvidence :: QueryResult metadata candidate -> QueryEvidence
+resultEvidence (QueryResult evidence _) = evidence
+
+resultSearch
+  :: QueryResult metadata candidate
+  -> SearchBatch metadata candidate
+resultSearch (QueryResult _ search) = search
 
 -- | Construct a result only when its evidence agrees with whether the batch
 -- contains candidates.

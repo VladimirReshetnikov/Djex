@@ -21,7 +21,7 @@ module Language.Haskell.Synthesis.Environment
   , instanceDeclarationMap
   ) where
 
-import Control.DeepSeq (NFData)
+import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM)
 import Control.Monad.Trans.State.Strict (State, evalState, get, put)
 import qualified Data.Map.Strict as Map
@@ -36,6 +36,9 @@ import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Type
 
+-- 'Generic' is intentionally absent: although the constructor is private,
+-- 'GHC.Generics.to' would otherwise let downstream callers rebuild mutually
+-- inconsistent declaration indexes.
 data Environment typeVariable kindVariable annotation = Environment
   { reversedDeclarations ::
       [Declaration typeVariable kindVariable annotation]
@@ -53,11 +56,21 @@ data Environment typeVariable kindVariable annotation = Environment
       Set (Constraint (Type (CanonicalInstanceVariable typeVariable)))
   , occupiedValueNames :: Set Name
   }
-  deriving (Eq, Show, Functor, Generic)
+  deriving (Eq, Show, Functor)
 
 instance
     (NFData typeVariable, NFData kindVariable, NFData annotation) =>
-    NFData (Environment typeVariable kindVariable annotation)
+    NFData (Environment typeVariable kindVariable annotation) where
+  rnf (Environment declarations types values constructors classes instances
+      canonicalHeads occupiedNames) =
+    rnf declarations `seq`
+    rnf types `seq`
+    rnf values `seq`
+    rnf constructors `seq`
+    rnf classes `seq`
+    rnf instances `seq`
+    rnf canonicalHeads `seq`
+    rnf occupiedNames
 
 data EnvironmentError typeVariable
   = InvalidEnvironmentDeclaration Int (DeclarationError typeVariable)

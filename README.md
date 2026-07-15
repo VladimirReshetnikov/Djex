@@ -216,6 +216,15 @@ constructor is opaque:
 nonempty batches, while `queryResultFromCandidates` derives that evidence for
 ordinary heuristic-search batches. Both checks inspect only the list spine's
 first constructor, so they do not sacrifice lazy candidate tails.
+Opaque invariant witnesses do not derive representation-producing classes such
+as `Generic`. Their exported observations are ordinary functions rather than
+record fields whenever record update could split checked state: this applies to
+the shared environment, inventory, synonym table, and result envelope, as well
+as the corresponding rigid-instantiation, class-index, scope, and proof-state
+witnesses in the backends. Hiding a constructor alone is insufficient because
+`Generic.to` can rebuild its representation and GHC record update needs an
+exported field label, not the constructor. The parser-free downstream API suite
+keeps both reconstruction routes closed.
 `CachedQuery` separately owns a strict `RequestProvenance` and the adapter's
 lazy derived cache. Parsed requests materialize their complete neutral
 `SourceLocation` while sealing, avoiding retention of the input buffer;

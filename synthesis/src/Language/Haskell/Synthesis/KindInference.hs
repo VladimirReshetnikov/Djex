@@ -382,19 +382,6 @@ declarationConstraints declaration = direct ++
       headConstraint : prerequisites
     _ -> []
 
-typeConstraints :: Type variable -> [Constraint (Type variable)]
-typeConstraints typeExpression = case typeExpression of
-  TypeVariable{} -> []
-  TypeConstructor{} -> []
-  TypeApplication function argument ->
-    typeConstraints function ++ typeConstraints argument
-  FunctionType parameter result ->
-    typeConstraints parameter ++ typeConstraints result
-  TupleType _ elements -> concatMap typeConstraints elements
-  ForallType _ constraints body -> constraints
-    ++ concatMap (concatMap typeConstraints . constraintArguments) constraints
-    ++ typeConstraints body
-
 generalizeKind :: InferenceKind -> Inference variable (Maybe InferenceKind)
 generalizeKind kind = do
   resolved <- follow kind

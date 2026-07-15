@@ -20,6 +20,15 @@ valid structural `Type`, but use `MkSolo#` rather than a comma-spelled tuple
 constructor. The finite constructor ceiling also keeps every public name and
 error renderer bounded even when handed an adversarial `SpecialName` payload.
 
+`Language.Haskell.Synthesis.Type` is the single source-type tree used by the
+foundation and both engines. Its structural queries own leading-prenex binder
+collection, quantifier detection, complete embedded-constraint traversal, and
+nominal constructor-head discovery. Constraint collection has an explicit
+source-order contract: every direct constraint at a forall precedes nested
+constraints in its arguments, followed by constraints in the body. Historical
+Exference query names are compatibility aliases over these operations rather
+than independent recursive walkers.
+
 `Language.Haskell.Synthesis.Diagnostic` is the parser-independent reporting
 boundary used by both sessions. It carries severity, an optional stable code,
 source file and half-open span, and an ordered context trail; parser adapters

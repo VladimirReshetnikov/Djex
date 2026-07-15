@@ -155,16 +155,12 @@ splitRigidInstantiationLayer (_ : binders) (current : remaining) =
 leadingBinders
   :: HsType
   -> Either RigidInstantiationError [TVarId]
-leadingBinders (TypeForallNative variables _ body) = do
-  identifiers <- traverse flexibleBinder variables
-  remaining <- leadingBinders body
-  pure $ identifiers ++ remaining
+leadingBinders = traverse flexibleBinder . SharedType.leadingForallVariables
  where
   flexibleBinder variable = case variable of
     SharedType.FlexibleVariable identifier -> Right identifier
     SharedType.RigidVariable identifier -> Left
       $ RigidForallBinderCannotBeInstantiated identifier
-leadingBinders _ = Right []
 
 -- Locate forbidden rigid variables specifically in binder position.  A
 -- generic fold cannot distinguish a rigid occurrence from a rigid binder.

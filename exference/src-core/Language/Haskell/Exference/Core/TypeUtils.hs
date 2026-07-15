@@ -19,6 +19,7 @@ module Language.Haskell.Exference.Core.TypeUtils
   , splitArrowResultParams
   , containsForall
   , containsNestedForall
+  , constraintContainsForall
   , typeConstructorHead
   )
 where
@@ -38,7 +39,6 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
   )
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Synthesis.Collection (firstDuplicate)
-import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
@@ -296,13 +296,7 @@ splitArrowChain result = (result, [])
 
 -- | Whether a type contains explicit quantification at any depth.
 containsForall :: HsType -> Bool
-containsForall TypeForallNative{} = True
-containsForall (TypeArrow parameter result) =
-  containsForall parameter || containsForall result
-containsForall (TypeApp function argument) =
-  containsForall function || containsForall argument
-containsForall (TypeTuple _ elements) = any containsForall elements
-containsForall _ = False
+containsForall = SharedType.containsForall
 
 -- | Whether quantification occurs below the complete leading prenex chain or
 -- inside an outer constraint argument.
@@ -322,10 +316,4 @@ constraintContainsForall = any containsForall . constraint_params
 
 -- | Find the nominal head beneath foralls and type applications.
 typeConstructorHead :: HsType -> Maybe QualifiedName
-typeConstructorHead typeExpression = case typeExpression of
-  TypeForallNative _ _ body -> typeConstructorHead body
-  TypeApp function _ -> typeConstructorHead function
-  TypeCons name -> Just name
-  TypeTuple boxity elements -> either (const Nothing) Just
-    $ SharedName.tupleName boxity $ length elements
-  _ -> Nothing
+typeConstructorHead = SharedType.typeConstructorHead

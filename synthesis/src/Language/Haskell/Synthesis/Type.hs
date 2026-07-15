@@ -18,6 +18,10 @@ module Language.Haskell.Synthesis.Type
   , SubstitutionError (..)
   , canonicalizeType
   , applicationSpine
+  , leadingForallVariables
+  , containsForall
+  , typeConstraints
+  , typeConstructorHead
   , renameScopedVariables
   , freshenTypeBindersAwayFrom
   , substituteTypeVariables
@@ -123,6 +127,57 @@ applicationSpine = collect []
     collect arguments (TypeApplication function argument) =
       collect (argument : arguments) function
     collect arguments function = (function, arguments)
+
+-- | Collect binders from the complete leading prenex chain in source order.
+-- A forall below an application, function, or tuple boundary is not leading
+-- and is therefore excluded.
+leadingForallVariables :: Type variable -> [variable]
+leadingForallVariables (ForallType variables _ body) =
+  variables ++ leadingForallVariables body
+leadingForallVariables _ = []
+
+-- | Whether explicit quantification occurs anywhere in a type.
+containsForall :: Type variable -> Bool
+containsForall typeExpression = case typeExpression of
+  TypeVariable{} -> False
+  TypeConstructor{} -> False
+  TypeApplication function argument ->
+    containsForall function || containsForall argument
+  FunctionType parameter result ->
+    containsForall parameter || containsForall result
+  TupleType _ elements -> any containsForall elements
+  ForallType{} -> True
+
+-- | Collect every explicit class constraint embedded in a type.
+--
+-- Constraints are returned in source traversal order. At each forall, its
+-- direct constraints precede constraints nested in their arguments, which in
+-- turn precede constraints in the body.
+typeConstraints :: Type variable -> [Constraint (Type variable)]
+typeConstraints typeExpression = case typeExpression of
+  TypeVariable{} -> []
+  TypeConstructor{} -> []
+  TypeApplication function argument ->
+    typeConstraints function ++ typeConstraints argument
+  FunctionType parameter result ->
+    typeConstraints parameter ++ typeConstraints result
+  TupleType _ elements -> concatMap typeConstraints elements
+  ForallType _ constraints body -> constraints
+    ++ concatMap (concatMap typeConstraints . constraintArguments) constraints
+    ++ typeConstraints body
+
+-- | Find the nominal constructor at the head of forall and application
+-- layers. Structural tuples are reported through their corresponding
+-- constructor name. Other structural forms and variables have no nominal
+-- head. This query does not canonicalize its input.
+typeConstructorHead :: Type variable -> Maybe Name
+typeConstructorHead typeExpression = case typeExpression of
+  ForallType _ _ body -> typeConstructorHead body
+  TypeApplication function _ -> typeConstructorHead function
+  TypeConstructor name -> Just name
+  TupleType boxity elements -> either (const Nothing) Just
+    $ tupleName boxity $ length elements
+  _ -> Nothing
 
 rebuildApplication :: Type variable -> [Type variable] -> Type variable
 rebuildApplication headType arguments = case headType of

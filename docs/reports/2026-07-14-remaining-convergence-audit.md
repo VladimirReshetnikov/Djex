@@ -505,6 +505,25 @@ lazy. Djinn's distinct historical rule for choosing the repeated value whose
 *first* occurrence is earliest continues to use the complete shared summary;
 the two semantics are intentionally not conflated.
 
+## Post-fold shared-type inspection consolidation
+
+**Completed on 2026-07-15:** the synthesis kind checker and Exference core
+still independently traversed the now-shared `Type` tree to collect embedded
+constraints. Exference additionally owned private walkers for detecting
+foralls, collecting the complete leading binder spine, and finding a nominal
+constructor head beneath forall/application layers; its input checker even
+redeclared the same constraint-contains-forall predicate as `TypeUtils`.
+
+`Language.Haskell.Synthesis.Type` now owns all four structural queries with
+explicit traversal contracts. Kind inference consumes the shared constraint
+order directly. Exference's historical `typeConstraints`, `containsForall`,
+and `typeConstructorHead` names are zero-cost compatibility aliases, while its
+request scoping, rigid-instantiation plan, session omission policy, source
+loader, and search validation all use the same authority. Regressions pin
+direct-before-nested constraint ordering, the complete leading prenex chain,
+short-circuit quantifier detection, valid and invalid structural tuple heads,
+and parser-free facade exposure.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

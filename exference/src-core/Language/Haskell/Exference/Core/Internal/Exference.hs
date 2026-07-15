@@ -1345,9 +1345,6 @@ deconstructorBindingType binding =
   foldr TypeArrow (deconstructorInput binding)
     $ concatMap constructorFields (deconstructorConstructors binding)
 
-constraintContainsForall :: HsConstraint -> Bool
-constraintContainsForall = any containsForall . constraint_params
-
 rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority
 rateNode h s = priorityFromPenalty
   $ addScore

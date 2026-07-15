@@ -220,11 +220,7 @@ inScopeContextVariables
   :: ExferenceType
   -> Set.Set ExferenceTypeVariable
 inScopeContextVariables goal = SharedType.freeVariables goal
-  `Set.union` leadingForallVariables goal
- where
-  leadingForallVariables (SharedType.ForallType variables _ body) =
-    Set.fromList variables `Set.union` leadingForallVariables body
-  leadingForallVariables _ = Set.empty
+  `Set.union` Set.fromList (SharedType.leadingForallVariables goal)
 
 -- | Check the source-level name of an Exference result definition.
 -- Frontends use this before parsing so command-usage errors retain precedence

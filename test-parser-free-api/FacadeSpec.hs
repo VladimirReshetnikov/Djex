@@ -19,6 +19,15 @@ facadeTests = testGroup "public Djex facade"
       ( multiplicityOf "value" (summarizeDuplicates ["value", "value"])
       , firstDuplicate ["first", "second", "first"]
       ) @?= (OccursMultipleTimes, Just "first")
+  , testCase "exports shared type inspection" $ do
+      checkedName <- expectRight $ mkIdentifier "Box"
+      let typeExpression = ForallType ["a"] []
+            $ TypeApplication (TypeConstructor checkedName)
+            $ TypeVariable "a"
+      leadingForallVariables typeExpression @?= ["a"]
+      containsForall typeExpression @?= True
+      typeConstraints typeExpression @?= []
+      typeConstructorHead typeExpression @?= Just checkedName
   , testCase "exports generated-code rendering" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

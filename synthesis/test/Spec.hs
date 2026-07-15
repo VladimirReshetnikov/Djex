@@ -1358,6 +1358,46 @@ typeTests = testGroup "source types"
       SharedType.applicationSpine application @?=
         (headType, [first, second])
       SharedType.applicationSpine first @?= (first, [])
+  , testCase "inspect shared type structure in source order" $ do
+      let outerClass = right $ mkIdentifier "Outer"
+          innerClass = right $ mkIdentifier "Inner"
+          siblingClass = right $ mkIdentifier "Sibling"
+          bodyClass = right $ mkIdentifier "Body"
+          headName = right $ mkIdentifier "Head"
+          variable = SharedType.TypeVariable
+          innerConstraint = Constraint innerClass [variable "b"]
+          outerConstraint = Constraint outerClass
+            [ SharedType.ForallType ["b"] [innerConstraint]
+                $ variable "b"
+            ]
+          siblingConstraint = Constraint siblingClass [variable "a"]
+          bodyConstraint = Constraint bodyClass [variable "c"]
+          source = SharedType.ForallType ["a"]
+            [outerConstraint, siblingConstraint]
+            $ SharedType.ForallType ["c"] [bodyConstraint]
+            $ SharedType.TypeApplication
+                (SharedType.TypeConstructor headName)
+                (variable "c")
+      SharedType.leadingForallVariables source @?= ["a", "c"]
+      SharedType.containsForall source @?= True
+      SharedType.containsForall
+          (SharedType.FunctionType (variable "a") (variable "b")) @?= False
+      SharedType.containsForall
+          (SharedType.FunctionType
+            (SharedType.ForallType [] [] $ variable "a")
+            (error "forced containsForall suffix")) @?= True
+      SharedType.typeConstraints source @?=
+        [ outerConstraint
+        , siblingConstraint
+        , innerConstraint
+        , bodyConstraint
+        ]
+      SharedType.typeConstructorHead source @?= Just headName
+      SharedType.typeConstructorHead
+          (SharedType.TupleType Boxed [variable "a", variable "b"]) @?=
+        Just (right $ tupleName Boxed 2)
+      SharedType.typeConstructorHead
+          (SharedType.TupleType Boxed [variable "a"]) @?= Nothing
   , testCase "forall binders protect bodies and constraints" $ do
       let className = right $ mkIdentifier "C"
           typeExpression = SharedType.ForallType ["a"]

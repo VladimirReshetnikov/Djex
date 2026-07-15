@@ -878,15 +878,4 @@ freeVars typeExpression = S.fromList
 -- validation apply their deliberately different unknown-class policies to
 -- exactly the same syntax.
 typeConstraints :: HsType -> [HsConstraint]
-typeConstraints TypeVar{} = []
-typeConstraints TypeConstant{} = []
-typeConstraints TypeCons{} = []
-typeConstraints (TypeArrow parameter result) =
-  typeConstraints parameter ++ typeConstraints result
-typeConstraints (TypeApp function argument) =
-  typeConstraints function ++ typeConstraints argument
-typeConstraints (TypeTuple _ elements) = concatMap typeConstraints elements
-typeConstraints (TypeForallNative _ constraints body) =
-  constraints
-    ++ concatMap (concatMap typeConstraints . constraint_params) constraints
-    ++ typeConstraints body
+typeConstraints = SharedType.typeConstraints

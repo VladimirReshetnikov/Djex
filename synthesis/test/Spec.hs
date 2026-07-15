@@ -1454,6 +1454,35 @@ typeTests = testGroup "source types"
           (SharedType.TypeConstructor (right $ tupleName Unboxed 0)
             :: SharedType.Type String) @?=
         SharedType.TupleType Unboxed []
+  , testCase "expose intrinsic types as constructor applications" $ do
+      let className = right $ mkIdentifier "C"
+          a = SharedType.TypeVariable "a"
+          b = SharedType.TypeVariable "b"
+          arrow = SharedType.FunctionType a b
+          arrowApplication = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor functionName) a) b
+          pair = SharedType.TupleType Boxed [a, arrow]
+          pairApplication = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor $ right $ tupleName Boxed 2) a)
+            arrowApplication
+          unaryUnboxed = SharedType.TupleType Unboxed [arrow]
+          malformedBoxed = SharedType.TupleType Boxed [arrow]
+          quantified = SharedType.ForallType ["a"]
+            [Constraint className [arrow]] pair
+          quantifiedApplication = SharedType.ForallType ["a"]
+            [Constraint className [arrowApplication]] pairApplication
+      SharedType.constructorApplicationForm arrow @?= arrowApplication
+      SharedType.constructorApplicationForm pair @?= pairApplication
+      SharedType.constructorApplicationForm unaryUnboxed @?=
+        SharedType.TupleType Unboxed [arrowApplication]
+      SharedType.constructorApplicationForm malformedBoxed @?=
+        SharedType.TupleType Boxed [arrowApplication]
+      SharedType.constructorApplicationForm quantified @?=
+        quantifiedApplication
+      SharedType.canonicalizeType
+          (SharedType.constructorApplicationForm pair) @?= pair
   , testCase "decompose application spines in source order" $ do
       let headType = SharedType.TypeVariable "f"
           first = SharedType.TypeVariable "a"

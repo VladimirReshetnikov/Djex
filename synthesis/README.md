@@ -142,7 +142,9 @@ rescanning a lazy search trace.
 `Language.Haskell.Synthesis.Type` is the common parser-independent source-type
 tree: variables (optionally flexible/rigid), structural names, application,
 functions, boxed or unboxed tuples, and explicit foralls with shared
-constraints. It canonicalizes saturated function and tuple constructors,
+constraints. It canonicalizes saturated function and tuple constructors and
+exposes the inverse constructor-application view used by higher-kinded
+unification without changing that structural storage convention. It
 decomposes application and right-associated function spines in source order,
 quantifies a policy-selected free-variable namespace at one outer scope,
 capture-safely converts a leading explicit prenex chain into implicit fresh

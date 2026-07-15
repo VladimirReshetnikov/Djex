@@ -18,6 +18,7 @@ module Language.Haskell.Synthesis.Type
   , SubstitutionError (..)
   , BinderNormalizationError (..)
   , canonicalizeType
+  , constructorApplicationForm
   , applicationSpine
   , functionSpine
   , quantifyFreeVariables
@@ -146,6 +147,37 @@ canonicalizeType source = case source of
   ForallType variables constraints body -> ForallType variables
     (map (fmap canonicalizeType) constraints)
     (canonicalizeType body)
+
+-- | Expose structural functions and constructor-backed tuples as ordinary
+-- constructor applications.
+--
+-- This is the applicative view used by higher-kinded unification: a flexible
+-- head can unify with @(->)@ or an n-tuple constructor. It does not replace
+-- 'canonicalizeType' as the storage convention. Unary unboxed tuples remain
+-- structural because Haskell has no corresponding unary tuple constructor;
+-- any other tuple shape for which 'tupleName' fails is likewise preserved so
+-- this total transformation does not hide a later 'validateType' diagnostic.
+constructorApplicationForm :: Type variable -> Type variable
+constructorApplicationForm source = case source of
+  TypeVariable{} -> source
+  TypeConstructor{} -> source
+  TypeApplication function argument -> TypeApplication
+    (constructorApplicationForm function)
+    (constructorApplicationForm argument)
+  FunctionType parameter result -> applyConstructor functionName
+    [ constructorApplicationForm parameter
+    , constructorApplicationForm result
+    ]
+  TupleType boxity elements ->
+    let convertedElements = map constructorApplicationForm elements
+    in case tupleName boxity $ length elements of
+      Right constructor -> applyConstructor constructor convertedElements
+      Left _ -> TupleType boxity convertedElements
+  ForallType variables constraints body -> ForallType variables
+    (map (fmap constructorApplicationForm) constraints)
+    (constructorApplicationForm body)
+ where
+  applyConstructor = foldl TypeApplication . TypeConstructor
 
 -- | Decompose a left-associated type application into its head and arguments
 -- in source order. Non-application types have an empty argument list.

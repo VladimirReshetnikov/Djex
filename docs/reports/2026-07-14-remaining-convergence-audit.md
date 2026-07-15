@@ -713,6 +713,28 @@ and both observations leave unused suffixes lazy. Foundation and facade tests
 pin those order and laziness guarantees, while Exference's existing rigid-site
 and independent-checker regressions pin the compatibility diagnostics.
 
+## Post-fold constructor-application consolidation
+
+**Completed on 2026-07-15:** Exference's tagged search unifier and independent
+expression checker separately converted structural functions and tuples into
+nominal constructor applications. Both need that view so a flexible
+higher-kinded head can bind to `(->)` or an n-tuple constructor, and both kept
+unary unboxed tuples structural because Haskell exposes no corresponding unary
+constructor.
+
+`Language.Haskell.Synthesis.Type.constructorApplicationForm` now owns the
+total recursive transformation. It is explicitly an applicative view rather
+than a second storage convention: `canonicalizeType` continues to store
+saturated functions and tuples structurally. Invalid tuple shapes are retained
+while their elements are transformed, ensuring that the view cannot hide a
+later validation diagnostic. The independent checker now consumes the shared
+operation directly. The tagged unifier applies it once before its generic
+tree conversion, deleting its intrinsic-name dependency and private
+application builder. Foundation regressions cover arrows, valid tuples, unary
+unboxed tuples, malformed tuples, nested conversion, and canonical
+round-tripping; Exference's existing higher-kinded function and tuple checks
+pin both backend consumers.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

@@ -19,7 +19,6 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
-import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data ExpressionCheckError
@@ -290,7 +289,9 @@ unifyTypes left right = do
   case SharedType.firstForallType right' of
     Just quantified -> throwCheck $ UnsupportedNestedForall quantified
     Nothing -> pure ()
-  case (applicativeForm left', applicativeForm right') of
+  case ( SharedType.constructorApplicationForm left'
+       , SharedType.constructorApplicationForm right'
+       ) of
     (leftForm, rightForm) | leftForm == rightForm -> pure ()
     (TypeVar variable, ty) -> bindVariable variable ty
     (ty, TypeVar variable) -> bindVariable variable ty
@@ -301,31 +302,6 @@ unifyTypes left right = do
       , length leftElements == length rightElements ->
           mapM_ (uncurry unifyTypes) $ zip leftElements rightElements
     _ -> throwCheck $ TypeMismatch left' right'
-
--- Functions and constructor-backed tuples participate in higher-kinded
--- unification through their intrinsic constructor applications.  Keep the
--- unary unboxed tuple structural because Haskell has no corresponding unary
--- tuple constructor name.
-applicativeForm :: HsType -> HsType
-applicativeForm typeExpression = case typeExpression of
-  TypeVar{} -> typeExpression
-  TypeConstant{} -> typeExpression
-  TypeCons{} -> typeExpression
-  TypeArrow parameter result -> intrinsicApplication SharedName.functionName
-    [applicativeForm parameter, applicativeForm result]
-  TypeApp function argument -> TypeApp
-    (applicativeForm function) (applicativeForm argument)
-  TypeTuple Unboxed [element] -> TypeTuple Unboxed [applicativeForm element]
-  TypeTuple boxity elements -> case SharedName.tupleName boxity
-      (length elements) of
-    Right constructor -> intrinsicApplication constructor
-      $ map applicativeForm elements
-    Left _ -> TypeTuple boxity $ map applicativeForm elements
-  TypeForallNative variables constraints body -> TypeForallNative variables
-    (map (fmap applicativeForm) constraints)
-    (applicativeForm body)
- where
-  intrinsicApplication constructor = foldl TypeApp $ TypeCons constructor
 
 bindVariable :: TVarId -> HsType -> Check ()
 bindVariable variable ty

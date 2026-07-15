@@ -17,7 +17,6 @@ import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Types
-import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data TypeEq = TypeEq !HsType !HsType
@@ -125,35 +124,22 @@ canonicalUnificationType source = case SharedType.validateType canonical of
   canonical = SharedType.canonicalizeType source
 
 tagType :: (TVarId -> TaggedVariable) -> HsType -> Maybe TaggedType
-tagType side ty = case ty of
-  TypeVar variable -> Just $ TaggedVar $ side variable
-  TypeConstant constant -> Just $ TaggedConstant constant
-  TypeCons constructor -> Just $ TaggedConstructor constructor
-  TypeArrow parameter result -> tagIntrinsicApplication
-    side SharedName.functionName [parameter, result]
-  TypeApp function argument ->
-    TaggedApplication <$> tagType side function <*> tagType side argument
-  -- Unary unboxed tuples are valid structural types, but Haskell has no unary
-  -- unboxed tuple constructor that could serve as an applicative head.
-  TypeTuple Unboxed [element] ->
-    TaggedTuple Unboxed . (: []) <$> tagType side element
-  TypeTuple boxity elements -> do
-    constructor <- either (const Nothing) Just
-      $ SharedName.tupleName boxity $ length elements
-    tagIntrinsicApplication side constructor elements
-  -- Higher-rank subsumption requires skolemization and escape checks.
-  -- Conservatively reject every native forall instead of erasing binders or
-  -- accidentally accepting the match-only legacy 'TypeForall' view.
-  TypeForallNative{} -> Nothing
-
-tagIntrinsicApplication
-  :: (TVarId -> TaggedVariable)
-  -> QualifiedName
-  -> [HsType]
-  -> Maybe TaggedType
-tagIntrinsicApplication side constructor arguments =
-  foldl TaggedApplication (TaggedConstructor constructor)
-    <$> mapM (tagType side) arguments
+tagType side = tag . SharedType.constructorApplicationForm
+ where
+  tag ty = case ty of
+    TypeVar variable -> Just $ TaggedVar $ side variable
+    TypeConstant constant -> Just $ TaggedConstant constant
+    TypeCons constructor -> Just $ TaggedConstructor constructor
+    TypeArrow{} -> Nothing
+    TypeApp function argument ->
+      TaggedApplication <$> tag function <*> tag argument
+    -- The shared applicative view leaves unary unboxed tuples structural
+    -- because Haskell has no corresponding unary constructor.
+    TypeTuple boxity elements -> TaggedTuple boxity <$> mapM tag elements
+    -- Higher-rank subsumption requires skolemization and escape checks.
+    -- Conservatively reject every native forall instead of erasing binders or
+    -- accidentally accepting the match-only legacy 'TypeForall' view.
+    TypeForallNative{} -> Nothing
 
 solveTagged
   :: (TaggedVariable -> Bool)

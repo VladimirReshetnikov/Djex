@@ -452,7 +452,9 @@ scope-aware simultaneous substitution primitive used by synonym expansion and
 Exference's compatibility substitution API. Exference's backend-specific
 unifiers operate directly on the same native tree, canonicalize their inputs
 and projected substitutions, preserve flexible/rigid and left/right identity,
-and treat structural functions and tuples through the same applicative kernel.
+and consume the foundation's one constructor-application view for structural
+functions and tuples. Unary unboxed tuples remain structural because Haskell
+has no corresponding unary tuple constructor.
 
 The `exference` compatibility executable is a six-line launcher for
 `Language.Haskell.Exference.CLI` in the frontend component. That module is the

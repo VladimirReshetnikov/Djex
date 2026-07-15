@@ -387,8 +387,9 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn.Internal.HCheck.Implementation` | Private raw-compatibility kind-check cache and trusted Inventory-assumption bridge. |
 | `Djinn.Internal.Environment` | Authoritative Inventory preparation plus native shared-type checking and private class, synonym, formula, and ordered global-premise indexes. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated shared name and operator rules in `djex`. |
-| `Djinn.Internal.HTypes` | Shared-kind compatibility view, type parser, logical translation, and proof-term conversion/cleanup. |
+| `Djinn.Internal.HTypes` | Shared-kind compatibility view, type parser, raw formula adapter, and proof-term conversion/cleanup. |
 | `Djinn.Internal.Type` | Native shared-type validation/canonicalization plus checked projection to and from Djinn's historical source types. |
+| `Djinn.Internal.TypeFormula` | Package-private, representation-neutral prepared formula compiler shared by raw `HType` and native `Type String` entrances. |
 | `Djinn.Internal.Generated` | Djinn's Haskell-shaped cleanup tree and its adapter to the shared generated-code AST. |
 | `Language.Haskell.Synthesis.Generated` | Shared local/global output tree, scope validation, capture-safe naming, qualification, and Haskell rendering. |
 | `Language.Haskell.Synthesis.KindInference` | Shared kind unification, class-parameter inference, and acyclic declaration dependency ordering. |
@@ -563,9 +564,9 @@ messages. Here
 names despite both currently being represented by `String`. Parsed raw types
 are checked into `DjinnType`; stable requests retain that shared representation
 for the goal, constraints, and instantiated class methods throughout kind
-checking and synonym elaboration. Only the resulting alias-free goal and method
-types are projected to raw `HType`, immediately at the legacy formula compiler
-boundary rather than as request or session state.
+checking, synonym elaboration, and formula compilation. The resulting
+alias-free goal and method types enter the same prepared compiler as raw
+compatibility queries without first rebuilding `HType`.
 Its checked `QueryResult` carries the same shared `Candidate DjinnType`
 structure as Exference plus Djinn's
 formula/proof metadata; even the currently empty residual constraints no
@@ -598,8 +599,9 @@ untyped self-application, while arbitrary raw `Djinn.Internal` inputs otherwise
 make exact normalization undecidable. The returned closure consequently fails
 deterministically on a source-created recursive synonym/type-definition
 expansion; `hTypeToFormula`
-is the one-shot checked wrapper. Checked Djinn sessions retain that compiled
-closure and every ordered global premise in `PreparedEnvironment`, so later
+is the one-shot checked wrapper. Checked Djinn sessions retain the same opaque
+compiled definition table used by the native shared-type entrance and every
+ordered global premise in `PreparedEnvironment`, so later
 queries perform only their source-local goal and instantiated-method expansion
 checks rather than repeating whole-table analysis or translating unchanged
 function assumptions.
@@ -610,7 +612,8 @@ The central pipelines converge before environment-dependent validation:
 REPL command -> HType -> checked compatibility projection --\
 neutral request -> Type String -> canonical shared plan -----+-> shared kind check
     -> shared synonym elaboration + class-method instantiation
-    -> alias-free HType at formula boundary -> Formula -> LJT proof search
+    -> alias-free Type String -> prepared formula compiler -> Formula
+    -> LJT proof search
     -> proof-term normalization -> independent proof check
     -> Haskell AST cleanup -> shared Candidate + Generated scope check/renderer
     -> printed clause

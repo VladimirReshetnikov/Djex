@@ -254,8 +254,9 @@ synonyms, formula definitions, and those premises are private indexes of the
 same Inventory; historical raw declaration tables are derived only when a
 compatibility caller asks to display them. At query time Djinn elaborates the
 goal and all class arguments as one shared kind scope, instantiates class
-methods in that same shared type tree, and projects only the alias-free goal and
-methods into historical `HType` immediately beside formula translation; opaque
+methods in that same shared type tree, and compiles the alias-free goal and
+methods directly into formulas through one representation-neutral prepared
+definition cache; opaque
 requests still retain their exact session-independent source view. Invalid
 search controls now have a typed core failure and stable
 `DJEX_DJINN_OPTIONS` diagnostic; query-type provenance is attached only to
@@ -272,8 +273,8 @@ shared execution plan while retaining the caller's exact neutral query.
 Parsed raw types travel through a checked compatibility projection into the
 same shared IR; `djinnRequestQuery` recovers the exact stable source view. The
 plan remains shared through environment-dependent kind checking, synonym
-elaboration, and class-method instantiation, so the legacy proof compiler is
-the only point after compatibility ingress that constructs `HType`. The query
+elaboration, class-method instantiation, and formula compilation; no `HType`
+tree is reconstructed after compatibility ingress. The query
 returns shared candidates containing
 structured generated
 clauses, empty residual constraints, and Djinn's unused-binder ranking details

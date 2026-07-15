@@ -900,8 +900,8 @@ inhabitResultPrepared options prepared contexts target goal = do
 
 -- | Search a sealed Djinn environment while keeping the query in Djex's
 -- common type representation through validation, kind checking, synonym
--- elaboration, and class-method instantiation. The historical 'HType' is
--- constructed only for the final alias-free formula-translation boundary.
+-- elaboration, class-method instantiation, and formula compilation. The
+-- native path never reconstructs the historical 'HType' tree.
 inhabitSynthesisResultPrepared
     :: QueryOptions
     -> PreparedEnvironment
@@ -967,17 +967,16 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
             , goal
             )
             contexts
-    let translate = preparedEnvironmentFormulaTranslator prepared
-        translateType label source = do
-            raw <- first ((label ++) . show) $ fromSynthesisType source
-            first (label ++) $ translate raw
+    let translate =
+            preparedEnvironmentSynthesisFormulaTranslator prepared
+        translateType label source =
+            first (label ++) $ translate source
         translateMethod (symbol, source) =
             (,) (Symbol symbol) `fmap`
                 translateType ("method " ++ prHSymbolOp symbol ++ ": ")
                     source
-    -- Every shared value above is checked, alias-free, and native to the
-    -- prepared inventory. Conversion is deliberately adjacent to the legacy
-    -- formula compiler so no raw tree becomes query or session state.
+    -- Every shared value above is checked, alias-free, and remains native to
+    -- the prepared inventory through formula compilation.
     form <- translatorFailure $
         translateType "goal type: " elaboratedGoal
     methodEnv <- translatorFailure $ concat `fmap`

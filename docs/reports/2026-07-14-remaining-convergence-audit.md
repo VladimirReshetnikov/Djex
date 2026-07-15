@@ -362,9 +362,11 @@ classes against the session being run; request sealing does not capture an
 environment's synonym meanings.
 
 The common type tree now survives environment-dependent kind checking, synonym
-elaboration, and capture-safe class-method instantiation. Only the alias-free
-goal and instantiated methods are projected to `HType`, immediately beside the
-historical formula translator. The public raw `HType` query APIs remain
+elaboration, and capture-safe class-method instantiation. At this stage only,
+the alias-free goal and instantiated methods were still projected to `HType`
+immediately beside the historical formula translator; the follow-on formula
+authority pass below removes that last stable-path projection. The public raw
+`HType` query APIs remain
 compatibility boundaries: they perform their established diagnostic preflight,
 project checked ordinary types into the shared IR, and delegate to the same
 native worker. Regression coverage compares raw and native prepared-core
@@ -394,6 +396,34 @@ invalid-type result back to the established phase-tagged error. Raw and native
 labeled kind batches share one reporter. Regressions pin bare, nested,
 saturated, overapplied, head-first, forall-context, phase-classification, and
 raw declaration-node precedence behavior.
+
+## Post-fold formula compilation authority review
+
+**Completed on 2026-07-15:** Djinn's last stable-path representation detour was
+the alias-free `Type String -> HType -> Formula` conversion. The formula engine
+also occupied nearly six hundred lines of the exposed `HTypes` compatibility
+module even though its expansion provenance, cycle validation, and logical
+lowering are independent of either source-type tree.
+
+`Djinn.Internal.TypeFormula` is now a package-private compiler driven by a
+one-layer type view. Raw `HType` and native shared types enter the same opaque
+prepared definition table, so stable goals, instantiated class methods, and
+ordered global assumptions remain in `Type String` through formula
+compilation. The compiler is built from the exact prepared Inventory stream:
+synonym definitions retain their checked bodies, while all other declarations
+reuse the alias-expanded forms already computed for datatype-recursion
+classification. Historical raw formula APIs remain checked compatibility
+wrappers and preserve their first-binding, malformed-prefix-arrow, expansion
+cycle, and diagnostic-order contracts.
+
+The shared zero-field boxed tuple is deliberately viewed as the nominal `()`
+constructor rather than structural truth. Regressions pin its translated
+formula `(|true)`, first proof `Inj0 Tuple0`, and rendered clause, plus explicit
+raw/native formula equality for aliases, lists, tuples, abstract and empty
+types, datatype constructor order, and unary tuple fields. Global premise tests
+also cover source order that differs from map order and bare operator symbols;
+the integration operator-method fixture now has an inhabited domain and a
+no-context negative control, making that method logically necessary.
 
 ## Validation gates for each stage
 

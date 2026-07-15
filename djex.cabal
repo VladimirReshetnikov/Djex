@@ -181,6 +181,7 @@ Library
     Djinn.Internal.Fresh
     Djinn.Internal.HCheck.Implementation
     Djinn.Internal.Type
+    Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Exference.Internal.Request
     Language.Haskell.Djex.Exference.Internal.Session
     Language.Haskell.Exference.Core.Internal.FlexibleIds

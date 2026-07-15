@@ -283,7 +283,8 @@ tests = testGroup "Djex facade"
       operatorMethod <- expectRight $ parseHType "a -> ProofPrepared"
       operatorEnvironment <- expectRight $ do
         withToken <- declare
-          (DataType "TokenPrepared" [] []) emptyEnvironment
+          (DataType "TokenPrepared" [] [("TokenPrepared", [])])
+          emptyEnvironment
         withProof <- declare
           (DataType "ProofPrepared" [] []) withToken
         declare (ClassDecl "EqualPrepared" ["a"]
@@ -293,10 +294,16 @@ tests = testGroup "Djex facade"
         mkContext "EqualPrepared" [tokenType]
       operatorGoal <- expectRight $
         parseHType "TokenPrepared -> ProofPrepared"
+      operatorTarget <- expectRight $ mkIdentifier "operatorPrepared"
+      checkedOperatorTarget <- expectRight $
+        mkDefinitionName operatorTarget
+      withoutContext <- expectRight $ inhabitResult
+        defaultQueryOptions operatorEnvironment []
+        checkedOperatorTarget operatorGoal
+      batchCandidates (resultSearch withoutContext) @?= []
       assertDjinnCompatibility "native operator method"
         operatorEnvironment operatorSession [operatorContext]
         defaultQueryOptions "operatorPrepared" operatorGoal
-      operatorTarget <- expectRight $ mkIdentifier "operatorPrepared"
       operatorRequest <- sharedDjinnRequest operatorTarget [operatorContext]
         defaultQueryOptions operatorGoal
       operatorResult <- expectRight $

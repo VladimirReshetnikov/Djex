@@ -9,6 +9,7 @@ module Djinn.Internal.Environment (
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentFormulaTranslator,
+    preparedEnvironmentSynthesisFormulaTranslator,
     preparedEnvironmentFunctionPremises, lookupPreparedEnvironmentClass,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
     elaboratePreparedTypes, elaboratePreparedSynthesisTypes,
@@ -46,8 +47,13 @@ import Djinn.Internal.HCheck.Implementation
     )
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJTFormula (Formula, Symbol(..))
+import Djinn.Internal.TypeFormula
 import Djinn.Internal.Type
-    (fromSynthesisType, normalizeSynthesisType, toSynthesisType)
+    ( djinnTypeConstructorSymbol
+    , fromSynthesisType
+    , normalizeSynthesisType
+    , toSynthesisType
+    )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 type TypeDefinition = (HSymbol, ([HSymbol], HType, HKind))
@@ -72,7 +78,7 @@ data PreparedEnvironment = PreparedEnvironment
     PreparedKindCheck
     (Map.Map SharedName.Name SynthesisClassDefinition)
     [(Symbol, Formula)]
-    (HType -> Either String Formula)
+    PreparedFormulaCompiler
 
 -- The prepared class index stays in the authoritative shared type and name
 -- vocabulary. Historical context APIs project it back to 'HType' only at
@@ -88,13 +94,24 @@ type SynthesisClassDefinition =
 -- contain only the unqualified variable names accepted by Djinn's declaration
 -- boundary, but keep that invariant checked at this private projection edge.
 synthesisMethodSymbol :: SharedName.Name -> Either String HSymbol
-synthesisMethodSymbol name =
-    case (SharedName.nameModule name, SharedName.nameSpelling name) of
-        (Nothing, Just spelling)
-            | isDjinnDeclarationName MethodOwner spelling -> Right spelling
+synthesisMethodSymbol = synthesisValueSymbol MethodOwner "class method"
+
+-- Identifiers retain their canonical qualification; operators use the bare
+-- spelling stored in Djinn's proof namespace. Qualified operators and every
+-- other name form are outside the compatibility declaration grammar.
+synthesisValueSymbol
+    :: DjinnDeclarationNameRole
+    -> String
+    -> SharedName.Name
+    -> Either String HSymbol
+synthesisValueSymbol role description name =
+    case djinnDeclarationSpelling name of
+        Just spelling
+            | isDjinnDeclarationName role spelling -> Right spelling
         _ -> Left $
-            "sealed class method name is not a Djinn value symbol: " ++
-            SharedName.renderCanonical name
+            "sealed " ++ description ++
+                " name is not a Djinn value symbol: " ++
+                SharedName.renderCanonical name
 
 type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
@@ -165,11 +182,11 @@ prepareEnvironment environment = do
     declarations <- synthesisDeclarations environment
     inventory <- synthesisInventory declarations
     sourceDeclarations <- mapM preflightDeclaration declarations
-    prepared <- prepareInventoryExpansion inventory
+    expansion <- prepareInventoryExpansion inventory
     projected <- projectSynthesisEnvironment
         (SharedInventory.inventoryKindAssumptions inventory)
         sourceDeclarations
-    sealPreparedEnvironment projected prepared
+    sealPreparedEnvironment projected expansion
 
 -- | Validate a neutral environment once, then derive Djinn's compatibility
 -- projection from the resulting inventory. Conversion is deliberately split
@@ -199,11 +216,11 @@ prepareSynthesisEnvironment sourceEnvironment = do
         SharedInventory.mkInventoryFromEnvironmentWithClassPolicy
             SharedInference.ClosedKindInventory
             SharedInference.DefaultClassKinds groundedEnvironment
-    prepared <- prepareInventoryExpansion inventory
+    expansion <- prepareInventoryExpansion inventory
     environment <- projectSynthesisEnvironment
         (SharedInventory.inventoryKindAssumptions inventory)
         sourceDeclarations
-    sealPreparedEnvironment environment prepared
+    sealPreparedEnvironment environment expansion
 
 -- | Apply one compatibility declaration directly to the shared environment,
 -- then seal the resulting session state before returning it.  Djinn's
@@ -313,11 +330,12 @@ synthesisDeclarationOwner declaration = case declaration of
 -- fields can hide a real cycle through an alias or invent one in an argument
 -- erased by a phantom alias, so both raw and neutral session construction must
 -- share this exact preflight. Return the same prepared table retained by the
--- sealed environment rather than expanding its declarations a second time.
+-- sealed environment together with the transient expanded declarations, so
+-- formula definitions and premises do not repeat the same expansion.
 prepareInventoryExpansion
     :: SynthesisInventory
     -> Either SynthesisEnvironmentError
-        PreparedSynthesisInventory
+        PreparedInventoryExpansion
 prepareInventoryExpansion inventory = do
     prepared <- first InvalidSynthesisTypeSynonyms $
         SharedTypeSynonym.prepareInventory
@@ -328,7 +346,9 @@ prepareInventoryExpansion inventory = do
             SharedInventory.inventoryEnvironment inventory)
     let recursiveNames = SharedDeclaration.recursiveDataTypeNames
             expandedDeclarations
-    if Set.null recursiveNames then return prepared else
+    if Set.null recursiveNames then
+        return $ PreparedInventoryExpansion prepared expandedDeclarations
+    else
         Left $ RecursiveSynthesisDataTypes $ Set.toAscList recursiveNames
   where
     expandForRecursion synonyms declaration =
@@ -342,34 +362,135 @@ prepareInventoryExpansion inventory = do
                 SharedTypeSynonym.expandDeclarationTypeSynonyms
                     freshDjinnTypeVariable synonyms declaration
 
+data PreparedInventoryExpansion = PreparedInventoryExpansion
+    PreparedSynthesisInventory
+    [SharedDeclaration.Declaration HSymbol Void ()]
+
+-- Build the formula-definition cache from the same transient declaration
+-- stream used for recursion classification. Synonyms retain their checked
+-- source bodies; every other declaration has already had aliases expanded.
+-- Source order is significant for deterministic recursive-component errors.
+prepareSynthesisFormulaCompiler
+    :: [SharedDeclaration.Declaration HSymbol kindVariable annotation]
+    -> Either String PreparedFormulaCompiler
+prepareSynthesisFormulaCompiler declarations = do
+    definitions <- concat `fmap`
+        mapM synthesisFormulaDefinition declarations
+    prepareFormulaCompiler synthesisFormulaTypeView definitions
+
+synthesisFormulaDefinition
+    :: SharedDeclaration.Declaration HSymbol kindVariable annotation
+    -> Either String
+        [FormulaDefinition (SharedType.Type HSymbol)]
+synthesisFormulaDefinition declaration = case declaration of
+    SharedDeclaration.TypeSynonymDeclaration _ name parameters body -> do
+        owner <- synthesisFormulaTypeSymbol name
+        return [FormulaAlias owner (map parameterVariable parameters) $
+            SharedType.canonicalizeType body]
+    SharedDeclaration.DataTypeDeclaration _ name parameters constructors -> do
+        owner <- synthesisFormulaTypeSymbol name
+        alternatives <- mapM convertConstructor constructors
+        return [FormulaData owner
+            (map parameterVariable parameters) alternatives]
+    SharedDeclaration.AbstractTypeDeclaration _ name _ -> do
+        owner <- synthesisFormulaTypeSymbol name
+        return [FormulaAbstract owner [] owner]
+    SharedDeclaration.ValueDeclaration{} -> Right []
+    SharedDeclaration.ClassDeclaration{} -> Right []
+    SharedDeclaration.InstanceDeclaration{} -> Right []
+  where
+    parameterVariable = SharedDeclaration.parameterVariable
+
+    convertConstructor constructor = do
+        name <- synthesisFormulaTypeSymbol $
+            SharedDeclaration.constructorName constructor
+        return (name, map SharedType.canonicalizeType $
+            SharedDeclaration.constructorFields constructor)
+
+-- Inputs are canonicalized once before entering this one-layer view. The zero
+-- boxed tuple is deliberately projected to the nominal @()@ constructor used
+-- by Djinn's standard environment rather than to structural truth.
+synthesisFormulaTypeView
+    :: TypeView (SharedType.Type HSymbol)
+synthesisFormulaTypeView source = case source of
+    SharedType.TypeVariable variable ->
+        Right $ TypeVariableLayer variable
+    SharedType.TypeConstructor name ->
+        TypeConstructorLayer `fmap` synthesisFormulaTypeSymbol name
+    SharedType.TypeApplication function argument ->
+        Right $ TypeApplicationLayer function argument
+    SharedType.FunctionType argument result ->
+        Right $ TypeArrowLayer argument result
+    SharedType.TupleType SharedName.Boxed [] ->
+        Right $ TypeConstructorLayer "()"
+    SharedType.TupleType SharedName.Boxed elements ->
+        Right $ TypeTupleLayer elements
+    SharedType.TupleType SharedName.Unboxed elements -> Left $
+        "unboxed tuple reached Djinn formula compilation (arity " ++
+            show (length elements) ++ ")"
+    SharedType.ForallType{} ->
+        Left "forall type reached Djinn formula compilation"
+
+compileSynthesisFormula
+    :: PreparedFormulaCompiler
+    -> SharedType.Type HSymbol
+    -> Either String Formula
+compileSynthesisFormula compiler =
+    compileFormula synthesisFormulaTypeView compiler .
+        SharedType.canonicalizeType
+
+synthesisFormulaTypeSymbol :: SharedName.Name -> Either String HSymbol
+synthesisFormulaTypeSymbol = first show . djinnTypeConstructorSymbol
+
+-- The compatibility operation below enters the same compiler through the raw
+-- tree. Keeping this tiny view at the sealed boundary avoids retaining a raw
+-- definition table or exposing package-private compiler types from HTypes.
+rawFormulaTypeView :: TypeView HType
+rawFormulaTypeView source = Right $ case source of
+    HTApp function argument -> TypeApplicationLayer function argument
+    HTVar variable -> TypeVariableLayer variable
+    HTCon name -> TypeConstructorLayer name
+    HTTuple types -> TypeTupleLayer types
+    HTArrow argument result -> TypeArrowLayer argument result
+    HTUnion constructors -> TypeUnionLayer constructors
+    HTAbstract name _ -> TypeAbstractLayer name
+
 sealPreparedEnvironment
     :: Environment
-    -> PreparedSynthesisInventory
+    -> PreparedInventoryExpansion
     -> Either SynthesisEnvironmentError PreparedEnvironment
-sealPreparedEnvironment (Environment types functions _)
-        prepared = do
-    translate <- first InvalidSynthesisFormulaDefinitions $
-        prepareTypeFormulaTranslator types
+sealPreparedEnvironment (Environment types _ _)
+        (PreparedInventoryExpansion prepared expandedDeclarations) = do
+    compiler <- first InvalidSynthesisFormulaDefinitions $
+        prepareSynthesisFormulaCompiler expandedDeclarations
     -- Moving an invariant translation failure from query execution to sealing
     -- is deliberate. Kind checking plus whole-definition graph validation
     -- excludes such failures for supported declarations, and eager preparation
     -- ensures every published environment owns a complete premise cache.
     premises <- first InvalidSynthesisFormulaDefinitions $
-        mapM (translateFunction translate) functions
+        mapM (translateFunction compiler)
+            [ signature
+            | SharedDeclaration.ValueDeclaration signature <-
+                expandedDeclarations
+            ]
     let kindCheck = prepareKindCheckWithAssumptions types
             $ SharedInventory.inventoryKindAssumptions inventory
     classIndex <- prepareSynthesisClassIndex inventory
     -- Force the derived index before the transient compatibility projection
     -- leaves scope; its field cannot retain the complete raw Environment thunk.
-    classIndex `seq` kindCheck `seq` return (PreparedEnvironment
-        prepared kindCheck classIndex premises translate)
+    compiler `seq` classIndex `seq` kindCheck `seq`
+        return (PreparedEnvironment
+            prepared kindCheck classIndex premises compiler)
   where
     inventory = SharedTypeSynonym.preparedInventory prepared
 
-    translateFunction translate (name, source) =
-        (,) (Symbol name) `fmap`
-            first (("function " ++ prHSymbolOp name ++ ": ") ++)
-                (translate source)
+    translateFunction compiler signature = do
+        name <- synthesisValueSymbol FunctionOwner "function" $
+            SharedDeclaration.valueName signature
+        formula <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
+            compileSynthesisFormula compiler $
+                SharedDeclaration.valueType signature
+        return (Symbol name, formula)
 
 prepareSynthesisClassIndex
     :: SynthesisInventory
@@ -466,7 +587,19 @@ preparedEnvironmentFormulaTranslator
     -> HType
     -> Either String Formula
 preparedEnvironmentFormulaTranslator
-        (PreparedEnvironment _ _ _ _ translate) = translate
+        (PreparedEnvironment _ _ _ _ compiler) =
+    compileFormula rawFormulaTypeView compiler
+
+-- | Translate a checked shared type without constructing Djinn's historical
+-- HType tree. Stable raw and native queries meet here after validation and use
+-- the exact same prepared formula-definition cache.
+preparedEnvironmentSynthesisFormulaTranslator
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> Either String Formula
+preparedEnvironmentSynthesisFormulaTranslator
+        (PreparedEnvironment _ _ _ _ compiler) =
+    compileSynthesisFormula compiler
 
 preparedEnvironmentTypeSynonyms
     :: PreparedEnvironment

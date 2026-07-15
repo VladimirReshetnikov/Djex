@@ -10,6 +10,7 @@ import Text.Read (readMaybe)
 
 import Djinn.Core (
     Context, Declaration(..), DjinnCandidateDetails(..),
+    DjinnQueryMetadata(..),
     DjinnDeclarationNameRole(..), QueryOutcome(..),
     DjinnQueryError(..), DjinnQueryOptionsError(..),
     SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
@@ -87,6 +88,8 @@ tests =
           testNeutralDjinnPreparation)
     , ("cache prepared global premises in declaration order",
           testPreparedFunctionPremises)
+    , ("compile prepared raw and shared types to identical formulas",
+          testPreparedFormulaParity)
     , ("project raw Djinn kinds from the authoritative inventory",
           testRawDjinnPreparationKinds)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
@@ -1047,17 +1050,29 @@ testPreparedFunctionPremises = do
             [ ("Atom", ([], HTAbstract "Atom" KStar, KStar))
             , ("Alias", ([], atom, KStar))
             ]
-            [ ("aliased", alias)
-            , ("identity", HTArrow alias alias)
+            [ ("zAliased", alias)
+            , ("External.zAliased", alias)
+            , ("%%", alias)
+            , ("aIdentity", HTArrow alias alias)
             ]
             []
         atomFormula = PVar $ Symbol "Atom"
+        expectedPremises =
+            [ (Symbol "zAliased", atomFormula)
+            , (Symbol "External.zAliased", atomFormula)
+            , (Symbol "%%", atomFormula)
+            , (Symbol "aIdentity", atomFormula :-> atomFormula)
+            ]
     prepared <- expectShownRight $ prepareEnvironment environment
     assertEqual "prepared premises changed source order or alias expansion"
-        [ (Symbol "aliased", atomFormula)
-        , (Symbol "identity", atomFormula :-> atomFormula)
-        ]
+        expectedPremises
         (RawEnvironment.preparedEnvironmentFunctionPremises prepared)
+    neutral <- expectShownRight $ toSynthesisEnvironment environment
+    nativePrepared <- expectShownRight $
+        RawEnvironment.prepareSynthesisEnvironment neutral
+    assertEqual "native preparation changed premise order or operator names"
+        expectedPremises
+        (RawEnvironment.preparedEnvironmentFunctionPremises nativePrepared)
     assertEqual "the compatibility projection changed the sealed declarations"
         environment (RawEnvironment.preparedEnvironmentSource prepared)
     firstResult <- expectRight $ inhabitGeneratedPrepared
@@ -1068,6 +1083,99 @@ testPreparedFunctionPremises = do
         $ not $ null $ generatedReportCandidates firstResult
     assertEqual "reusing cached premises changed a repeated query"
         firstResult secondResult
+
+-- The stable query path and global-premise cache must not need an HType
+-- round-trip. Assert explicit formulas, rather than equality alone, so the two
+-- entrances cannot drift together. In particular, unit is a nominal datatype
+-- in Djinn: treating the shared zero-tuple as structural truth renders the
+-- same Haskell value but changes both the formula and explored proof.
+testPreparedFormulaParity :: IO ()
+testPreparedFormulaParity = do
+    environment <- expectRight $ do
+        withIdentity <- declare
+            (TypeSynonym "Id" ["x"] $ HTVar "x")
+            standardEnvironment
+        withAbstract <- declare
+            (AbstractType "F" $ KArrow KStar KStar)
+            withIdentity
+        withEmpty <- declare
+            (DataType "EmptyOf" ["x"] []) withAbstract
+        declare
+            (DataType "Box" ["x"] [("MkBox", [HTVar "x"])])
+            withEmpty
+    prepared <- expectShownRight $ prepareEnvironment environment
+
+    let atom name = PVar $ Symbol name
+        pair = HTTuple [HTVar "a", HTVar "b"]
+        pairFormula = Conj [atomA, atomB]
+        apply name arguments = foldl HTApp (HTCon name) arguments
+        identity source = apply "Id" [source]
+        list source = apply "[]" [source]
+        abstract source = apply "F" [source]
+        empty source = apply "EmptyOf" [source]
+        box source = apply "Box" [source]
+        listPairFormula = atom "[(a, b)]"
+        emptyPairFormula = Empty $ Symbol "EmptyOf (a, b)"
+        unitFormula = Disj [(ConsDesc "()" 0, Conj [])]
+        cases =
+            [ ("unit", HTCon "()", unitFormula)
+            , ("qualified opaque constructor", HTCon "External.T",
+                  atom "External.T")
+            , ("prefix function constructor atom", HTCon "->",
+                  atom "(->)")
+            , ("tuple", pair, pairFormula)
+            , ("opaque list", list pair, listPairFormula)
+            , ("transparent alias", identity pair, pairFormula)
+            , ("alias under list", list $ identity pair, listPairFormula)
+            , ("alias under abstract", abstract $ identity pair,
+                  atom "F (a, b)")
+            , ("parameterized empty type", empty $ identity pair,
+                  emptyPairFormula)
+            , ("unary tuple payload", box $ identity pair,
+                  Disj [(ConsDesc "MkBox" 1, Conj [pairFormula])])
+            , ("constructor order", apply "Maybe" [HTVar "a"],
+                  Disj
+                    [ (ConsDesc "Nothing" 0, Conj [])
+                    , (ConsDesc "Just" 1, Conj [atomA])
+                    ])
+            , ("recursive arrow view",
+                  HTArrow (list $ identity pair) (empty $ identity pair),
+                  listPairFormula :-> emptyPairFormula)
+            ]
+
+    mapM_ (assertFormulaParity prepared) cases
+
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "nativeUnit"
+    result <- expectShownRight $ inhabitSynthesisResultPrepared
+        defaultQueryOptions prepared [] target $
+            SharedType.TupleType SharedName.Boxed []
+    let search = SharedQuery.resultSearch result
+        metadata = SharedSearch.batchMetadata search
+    assertEqual "native unit lost its nominal formula"
+        "(|true)" (djinnTranslatedFormula metadata)
+    assertEqual "native unit lost its constructor injection"
+        (Just "Inj0 Tuple0") (djinnFirstExploredProof metadata)
+    case SharedSearch.batchCandidates search of
+        candidate : _ -> assertEqual
+            "native unit candidate changed despite stable metadata"
+            (Right "nativeUnit = ()") $
+                SharedGenerated.renderFunctionClause
+                    (SharedGenerated.defaultRenderOptions id)
+                    (SharedCandidate.candidateOutput candidate)
+        [] -> fail "native unit query produced no candidate"
+  where
+    assertFormulaParity prepared (description, raw, expected) = do
+        shared <- expectShownRight $ toSynthesisType raw
+        rawFormula <- expectRight $
+            RawEnvironment.preparedEnvironmentFormulaTranslator prepared raw
+        nativeFormula <- expectRight $
+            RawEnvironment.preparedEnvironmentSynthesisFormulaTranslator
+                prepared shared
+        assertEqual (description ++ ": raw formula changed")
+            expected rawFormula
+        assertEqual (description ++ ": shared formula changed")
+            expected nativeFormula
 
 mkNeutralDjinnEnvironment
     :: [SharedDeclaration.Declaration String Int ()]

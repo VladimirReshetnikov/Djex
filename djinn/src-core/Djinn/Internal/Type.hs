@@ -4,6 +4,7 @@ module Djinn.Internal.Type
   ( SynthesisTypeError (..)
   , isDjinnTypeVariable
   , checkedDjinnTypeVariable
+  , djinnTypeConstructorSymbol
   , normalizeSynthesisType
   , renderSynthesisType
   , toSynthesisType
@@ -100,7 +101,7 @@ normalizeSynthesisType source = do
   validateSupported typeExpression = case typeExpression of
     SharedType.TypeVariable variable ->
       () <$ checkedDjinnTypeVariable variable
-    SharedType.TypeConstructor name -> () <$ djinnName name
+    SharedType.TypeConstructor name -> () <$ djinnTypeConstructorSymbol name
     SharedType.TypeApplication function argument ->
       validateSupported function >> validateSupported argument
     SharedType.FunctionType parameter result ->
@@ -124,7 +125,8 @@ fromSynthesisType source = normalizeSynthesisType source >>= convert
  where
   convert typeExpression = case typeExpression of
     SharedType.TypeVariable variable -> Right $ HTVar variable
-    SharedType.TypeConstructor name -> HTCon <$> djinnName name
+    SharedType.TypeConstructor name -> HTCon <$>
+      djinnTypeConstructorSymbol name
     SharedType.TypeApplication function argument -> HTApp
       <$> convert function <*> convert argument
     SharedType.FunctionType parameter result -> HTArrow
@@ -137,10 +139,16 @@ fromSynthesisType source = normalizeSynthesisType source >>= convert
       Left $ SynthesisUnboxedTupleUnsupported $ length elements
     SharedType.ForallType{} -> Left SynthesisForallUnsupported
 
-djinnName :: SharedName.Name -> Either SynthesisTypeError HSymbol
-djinnName name = case SharedName.nameSpecial name of
+-- | Project one validated shared type-constructor name into Djinn's spelling.
+-- Unit is included because declaration owners use the nominal name directly;
+-- canonical ordinary types represent it structurally as a zero boxed tuple.
+djinnTypeConstructorSymbol
+  :: SharedName.Name
+  -> Either SynthesisTypeError HSymbol
+djinnTypeConstructorSymbol name = case SharedName.nameSpecial name of
   Just SharedName.ListConstructor -> Right "[]"
   Just SharedName.FunctionConstructor -> Right "->"
+  Just (SharedName.TupleConstructor SharedName.Boxed 0) -> Right "()"
   Just (SharedName.TupleConstructor boxity arity) ->
     Left $ PartialTupleConstructorUnsupported boxity arity
   Just SharedName.ConsConstructor ->

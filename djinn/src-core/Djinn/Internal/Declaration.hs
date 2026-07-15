@@ -6,6 +6,7 @@ module Djinn.Internal.Declaration
   , DjinnDeclarationNameRole (..)
   , SynthesisDeclarationError (..)
   , isDjinnDeclarationName
+  , djinnDeclarationSpelling
   , toSynthesisKind
   , fromSynthesisKind
   , toSynthesisDeclaration

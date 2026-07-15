@@ -56,6 +56,12 @@ common build-settings
     -Wunused-packages
   Build-Depends:    base >= 4.19 && < 5
 
+-- All three search commands remain serial, but callers may explicitly tune
+-- ordinary RTS resource limits when a large search needs them.
+common search-executable
+  import:      build-settings
+  Ghc-Options: -rtsopts
+
 -- Keep the most widely shared dependency bounds in one place without making
 -- components depend on packages they do not import.
 common containers-dep
@@ -196,7 +202,7 @@ Library
 -- the explicit Exference Haskell-source adapter. The historical executables
 -- below remain available for their REPL and legacy compatibility contracts.
 Executable djex
-  import:         build-settings
+  import:         search-executable
   Main-Is:        Main.hs
   Hs-Source-Dirs: app
   Other-Modules:
@@ -217,16 +223,6 @@ Test-Suite djex-tests
   Build-Depends:
     djex,
     djex:exference-frontend
-
--- Compile and exercise the single-import facade independently of both named
--- compatibility frontends. This catches accidental frontend type leaks.
-Test-Suite djex-facade-tests
-  import:         tasty-hunit-test
-  Type:           exitcode-stdio-1.0
-  Main-Is:        Spec.hs
-  Hs-Source-Dirs: test-facade
-  Other-Modules:  ExferencePatternImports
-  Build-Depends:  djex
 
 Test-Suite djex-cli-tests
   import:         cli-test
@@ -273,7 +269,7 @@ Test-Suite djinn-frontend-api-tests
   Build-Depends:  djex:djinn-frontend
 
 Executable djinn
-  import:         build-settings
+  import:         search-executable
   Main-Is:        Main.hs
   Hs-Source-Dirs: djinn/app
   Build-Depends:  djex:djinn-frontend
@@ -310,15 +306,18 @@ Test-Suite djinn-cli-tests
   Hs-Source-Dirs: djinn/test-cli
   Build-Tool-Depends: djex:djinn
 
--- This suite depends only on the parser-neutral main library and exercises the
--- shared vocabulary and both engines together. The main-library stanza above
--- keeps HSE and filesystem dependencies out of that surface.
+-- This suite depends only on the parser-neutral main library. It exercises the
+-- curated facade and both lower-level engines while the main-library stanza
+-- above keeps HSE and filesystem dependencies out of that surface.
 Test-Suite djex-parser-free-api-tests
   import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-parser-free-api
-  Other-Modules:  AbstractionBoundary
+  Other-Modules:
+    AbstractionBoundary
+    ExferencePatternImports
+    FacadeSpec
   Build-Depends:  djex
 
 Benchmark exference-bench
@@ -387,14 +386,10 @@ Test-Suite exference-frontend-api-tests
   Build-Depends:  djex:exference-frontend
 
 Executable exference
-  import:         build-settings
+  import:         search-executable
   Main-Is:        Main.hs
   Hs-Source-Dirs: exference/app
   Build-Depends:  djex:exference-frontend
-
-  -- Search is serial. Permit explicit caller tuning without inheriting the
-  -- historical multi-gigabyte heap hint or starting one capability per core.
-  Ghc-Options: -rtsopts
 
 Test-Suite exference-tests
   import:          tasty-hunit-test, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep

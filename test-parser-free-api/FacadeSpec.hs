@@ -1,15 +1,15 @@
-module Main (main) where
+module FacadeSpec (facadeTests) where
 
 import Data.Either (isRight)
 import Data.Void (Void)
 
 import ExferencePatternImports (patternViewsRoundTrip)
 import Language.Haskell.Djex
-import Test.Tasty (defaultMain, testGroup)
+import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, testCase)
 
-main :: IO ()
-main = defaultMain $ testGroup "public Djex facade"
+facadeTests :: TestTree
+facadeTests = testGroup "public Djex facade"
   [ testCase "enumerates both checked backends" $
       map backend availableBackends @?= [DjinnBackend, ExferenceBackend]
   , testCase "exports the shared name vocabulary" $

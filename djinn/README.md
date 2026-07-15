@@ -79,7 +79,7 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 | `djinn-tests` | 59 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kind representation and compatibility, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-frontend-api-tests` | Three import-boundary checks proving that a dependency on `djinn-frontend` alone exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn`. |
-| `djinn-cli-tests` | Eighteen subprocess scenarios against the packaged executable, including EOF, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
+| `djinn-cli-tests` | Nineteen subprocess scenarios against the packaged executable, including EOF, explicit RTS tuning, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
 named test. For example:

@@ -31,8 +31,9 @@ generated-output infrastructure is progressively consolidated.
 The `djex` executable is the merged one-shot frontend and selects either checked
 backend explicitly. The historical `djinn` and `exference` executable names
 remain available for their REPL and compatibility contracts. The package also
-retains the facade, integration, backend, property, CLI, and benchmark suites;
-this preserves differential testing while the two engines continue converging.
+retains facade coverage inside its parser-free API suite, plus the integration,
+backend, property, CLI, and benchmark suites; this preserves differential
+testing while the two engines continue converging.
 
 The parser-free package is now genuinely one library rather than a facade over
 three separately compiled internal units. Only the two compatibility
@@ -96,7 +97,8 @@ The filesystem and Cabal-project migration is equally deliberate:
 - both backend trees follow the same live layout: `src-core/`,
   `src-frontend/`, `app/`, and one explicit directory per test suite. The
   package root similarly uses `src/`, `app/`, `test-integration/`,
-  `test-facade/`, `test-parser-free-api/`, and `test-cli/`;
+  `test-parser-free-api/` (including the curated-facade import guard), and
+  `test-cli/`;
 - their separate package descriptions and project files have been replaced by
   `djex/djex.cabal`; the repository-root `cabal.project` is the single solver
   root, and Cabal discovers it by walking to the parent when invoked here;
@@ -156,6 +158,10 @@ cabal run exference -- --first "a -> a"
 cabal bench djinn-bench
 cabal bench exference-bench
 ```
+
+All three commands are serial and accept explicit caller-supplied `+RTS`
+resource tuning, for example `+RTS -K64m -RTS`. None starts one capability per
+core or inherits a fixed multi-gigabyte heap hint.
 
 The Exference benchmark uses parser-free, explicitly step- and queue-bounded
 core fixtures. For an optimization-sensitive comparison of the search engine,

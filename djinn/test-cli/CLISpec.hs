@@ -12,6 +12,7 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 main :: IO ()
 main = defaultMain $ testGroup "Djinn CLI integration"
     [ testCase "EOF exits a successful session" testEof
+    , testCase "explicit RTS tuning reaches the application" testRtsOptions
     , testCase "same-named assumptions cannot become recursion"
         testSelfReference
     , testCase "nominal empty conversions use explicit elimination"
@@ -45,6 +46,17 @@ main = defaultMain $ testGroup "Djinn CLI integration"
     , testCase "logical negative results are successful batch answers"
         testNegativeBatchResult
     ]
+
+testRtsOptions :: Assertion
+testRtsOptions = do
+    (exitCode, output, errors) <- readProcessWithExitCode "djinn"
+        ["+RTS", "-K64m", "-RTS"] ":quit\n"
+    assertEqual ("RTS-tuned Djinn stderr: " ++ errors)
+        ExitSuccess exitCode
+    assertContains "application ran after RTS parsing"
+        "Welcome to Djinn" output
+    assertContains "the RTS-tuned session exited normally" "Bye." output
+    assertEqual "RTS-tuned Djinn stderr" "" errors
 
 testBatchFailureStatus :: Assertion
 testBatchFailureStatus = withCommandFile (unlines

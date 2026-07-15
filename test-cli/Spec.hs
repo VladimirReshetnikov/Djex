@@ -24,6 +24,7 @@ import Test.Tasty.HUnit
 main :: IO ()
 main = defaultMain $ testGroup "Djex CLI integration"
   [ testCase "global help and version load no backend" testGlobalInformation
+  , testCase "explicit RTS tuning reaches the application" testRtsOptions
   , testCase "backend help loads no environment" testBackendHelp
   , testCase "usage errors have a distinct exit status" testUsageErrors
   , testCase "backend options are validated before search" testOptionErrors
@@ -64,6 +65,15 @@ testGlobalInformation = do
   assertEqual "version exit" ExitSuccess versionExit
   assertContains "version output" "djex version 2026.7.14" versionOutput
   assertEqual "version stderr" "" versionErrors
+
+testRtsOptions :: Assertion
+testRtsOptions = do
+  (exitCode, output, errors) <-
+    runDjex ["+RTS", "-K64m", "-RTS", "--version"]
+  assertEqual "RTS-tuned version exit" ExitSuccess exitCode
+  assertContains "application ran after RTS parsing"
+    "djex version 2026.7.14" output
+  assertEqual "RTS-tuned version stderr" "" errors
 
 testBackendHelp :: Assertion
 testBackendHelp = do

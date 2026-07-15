@@ -13,6 +13,7 @@ import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 main :: IO ()
 main = defaultMain $ testGroup "Exference CLI integration"
   [ testCase "no arguments print help" testHelp
+  , testCase "explicit RTS tuning reaches the application" testRtsOptions
   , testCase "the shipped environment supports identity search" testIdentity
   , testCase "parse failures are controlled diagnostics" testParseFailure
   , testCase "ill-kinded queries stop before search" testKindFailure
@@ -41,6 +42,12 @@ testHelp = do
   assertContains "help should describe invocation" "Usage: exference" output
   assertBool "the removed embedded test mode must stay absent"
     (not $ "--tests" `isInfixOf` output)
+
+testRtsOptions :: Assertion
+testRtsOptions = do
+  output <- runExference ["+RTS", "-K64m", "-RTS", "--version"]
+  assertContains "application ran after RTS parsing"
+    "exference version 2026.7.14" output
 
 -- This is deliberately an end-to-end default-environment test. The shipped
 -- ratings include negative bonuses; applying the non-negative heuristic policy

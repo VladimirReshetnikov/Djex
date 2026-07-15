@@ -85,6 +85,7 @@ import AbstractionBoundary
   ( allowedConstructionAttempts
   , forbiddenConstructionAttempts
   )
+import FacadeSpec (facadeTests)
 
 -- These references compile without deferred type errors. They pin the result
 -- type of every ordinary projection whose same-named record label is rejected
@@ -155,7 +156,8 @@ projectionSignatures =
 
 main :: IO ()
 main = defaultMain $ testGroup "Djex parser-free API"
-  [ testCase "both engines are available from one parser-free dependency" $
+  [ facadeTests
+  , testCase "both engines are available from one parser-free dependency" $
       assertBool "the Djinn parser was unavailable from djex"
         $ isRight $ parseHType "a -> a"
   , testCase "abstraction-boundary controls can obtain public dictionaries" $

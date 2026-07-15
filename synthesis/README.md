@@ -64,7 +64,9 @@ absent, unique, and duplicate membership, the repeated-value set, and repeats
 in first-repetition order, so adapters can retain their established diagnostic
 ordering without bounded counts or private duplicate-detection loops. The
 separate short-circuiting `firstDuplicate` query preserves second-occurrence
-precedence and can return without forcing an unused suffix.
+precedence and can return without forcing an unused suffix. Its lazy
+`distinctOn` operation retains the first value for each ordered key; emitting a
+fresh representative likewise does not force the remaining input.
 
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s,

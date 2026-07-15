@@ -18,7 +18,14 @@ facadeTests = testGroup "public Djex facade"
   , testCase "exports shared duplicate classification" $
       ( multiplicityOf "value" (summarizeDuplicates ["value", "value"])
       , firstDuplicate ["first", "second", "first"]
-      ) @?= (OccursMultipleTimes, Just "first")
+      , distinctOn fst
+          ([ ("first", 1), ("first", 2), ("second", 3) ]
+            :: [(String, Int)])
+      ) @?=
+        ( OccursMultipleTimes
+        , Just "first"
+        , [("first", 1), ("second", 3)]
+        )
   , testCase "exports shared type inspection" $ do
       checkedName <- expectRight $ mkIdentifier "Box"
       let typeExpression = ForallType ["a"] []

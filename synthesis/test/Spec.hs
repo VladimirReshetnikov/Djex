@@ -122,7 +122,17 @@ candidateTests = testGroup "candidates"
 
 collectionTests :: TestTree
 collectionTests = testGroup "collections"
-  [ testCase "classify duplicates without losing collection order" $ do
+  [ testCase "retain the first value for each key in source order" $ do
+      distinctOn fst
+        ([ ("alpha", 1)
+         , ("alpha", error "forced duplicate payload")
+         , ("beta", 2)
+         ] :: [(String, Int)]) @?=
+        [("alpha", 1), ("beta", 2)]
+  , testCase "emit a fresh value without forcing the remaining input" $
+      take 1 (distinctOn id (1 : error "forced distinct suffix") :: [Int])
+        @?= [1]
+  , testCase "classify duplicates without losing collection order" $ do
       let summary = summarizeDuplicates
             ["alpha", "beta", "beta", "alpha", "alpha", "unique"]
       multiplicityOf "missing" summary @?= NotPresent

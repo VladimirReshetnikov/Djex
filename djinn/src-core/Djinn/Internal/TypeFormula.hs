@@ -30,6 +30,7 @@ import Numeric.Natural (Natural)
 
 import Djinn.Internal.HIdentifier (isQualifiedConId)
 import Djinn.Internal.LJTFormula
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 
 -- | A single observable layer of a source type.  Keeping children in the
 -- caller's representation avoids introducing another source-facing recursive
@@ -628,13 +629,7 @@ recursiveDefinitionsMessage synonymsOnly names =
 firstBindings
     :: [FormulaDefinition source]
     -> [FormulaDefinition source]
-firstBindings = collect Set.empty
-  where
-    collect _ [] = []
-    collect seen (definition : rest)
-        | definitionName definition `Set.member` seen = collect seen rest
-        | otherwise = definition :
-            collect (Set.insert (definitionName definition) seen) rest
+firstBindings = SharedCollection.distinctOn definitionName
 
 definitionName :: FormulaDefinition source -> String
 definitionName definition = case definition of

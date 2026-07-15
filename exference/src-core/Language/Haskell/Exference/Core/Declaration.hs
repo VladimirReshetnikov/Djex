@@ -56,6 +56,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -470,7 +471,7 @@ normalizeDeclarationVariables declaration = case declaration of
         annotation (map renameVariable variables)
         (map renameConstraint prerequisites) (renameConstraint headConstraint)
  where
-  flexibleVariables = orderedDistinct
+  flexibleVariables = SharedCollection.distinctOn id
     [ variable
     | variable@SharedType.FlexibleVariable{} <- declarationVariables declaration
     ]
@@ -514,14 +515,6 @@ declarationVariables declaration = case declaration of
   parameterVariables = map SharedDeclaration.parameterVariable
   constraintTypeVariables = concatMap toList
     . SharedConstraint.constraintArguments
-
-orderedDistinct :: Ord value => [value] -> [value]
-orderedDistinct = go Set.empty
- where
-  go _ [] = []
-  go seen (value : remaining)
-    | value `Set.member` seen = go seen remaining
-    | otherwise = value : go (Set.insert value seen) remaining
 
 prepareSearchDeclaration
   :: Set.Set SharedName.Name

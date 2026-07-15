@@ -542,6 +542,22 @@ short-circuiting with deliberately partial context tails, a Djinn regression
 pins exact inter-context diagnostic precedence, and the parser-free facade
 pins the public traversal type.
 
+## Post-fold stable first-key deduplication
+
+**Completed on 2026-07-15:** Exference's declaration-variable repacker and
+Djinn's formula-definition compatibility table each carried the same
+ordered-set traversal: preserve source order and keep the first value for each
+key. The ordering is semantic in both places. It controls Exference's fresh
+variable allocation and preserves Djinn's association-list rule that later
+duplicate definitions are unreachable.
+
+`Language.Haskell.Synthesis.Collection.distinctOn` now owns that lazy stable
+operation. Regressions pin key-based first-representative selection, confirm
+that a fresh output does not inspect a partial suffix, and expose the operation
+through the parser-free facade. Djinn's separate `nub` over rendered
+`HClause`s remains local: those clauses provide equality but no ordered key,
+and their result-level equivalence is unrelated to declaration identity.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

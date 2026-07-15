@@ -1,6 +1,6 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | Counter-free duplicate classification for finite ordered collections.
+-- | Stable deduplication and counter-free duplicate classification.
 --
 -- Backends need several views of duplicate input: reusable membership checks,
 -- a stable set for sorted diagnostics, and the order in which values first
@@ -9,6 +9,7 @@
 module Language.Haskell.Synthesis.Collection
   ( Multiplicity (..)
   , DuplicateSummary
+  , distinctOn
   , firstDuplicate
   , summarizeDuplicates
   , multiplicityOf
@@ -17,6 +18,20 @@ module Language.Haskell.Synthesis.Collection
   ) where
 
 import qualified Data.Set as Set
+
+-- | Keep the first value for each key, preserving source order.
+--
+-- Emitting a fresh value does not inspect the remaining input, so consumers
+-- can obtain a finite prefix even when the input is infinite or partial.
+distinctOn :: Ord key => (value -> key) -> [value] -> [value]
+distinctOn project = go Set.empty
+ where
+  go !_ [] = []
+  go !seen (value : remaining)
+    | key `Set.member` seen = go seen remaining
+    | otherwise = value : go (Set.insert key seen) remaining
+   where
+    key = project value
 
 -- | Exact classification of a value relative to a summarized collection.
 data Multiplicity

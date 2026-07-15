@@ -1,7 +1,7 @@
 module Main (main) where
 
 import Control.DeepSeq (force)
-import Control.Exception (evaluate)
+import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (forM_)
 import Data.Either (isLeft)
 import Data.Foldable (toList)
@@ -30,7 +30,13 @@ import qualified Language.Haskell.Synthesis.TypeRender as TypeRender
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
-import Test.Tasty.HUnit (Assertion, assertBool, testCase, (@?=))
+import Test.Tasty.HUnit
+  ( Assertion
+  , assertBool
+  , assertFailure
+  , testCase
+  , (@?=)
+  )
 import qualified Test.Tasty.QuickCheck as QC
 
 main :: IO ()
@@ -132,14 +138,37 @@ queryTests = testGroup "queries"
       let query = request (variable "a") []
           firstCache = mkCachedQuery query ((+ 1) :: Int -> Int)
           secondCache = mkCachedQuery query (const 0 :: Int -> Int)
+          location = sourceTextLocation "Query.hs" "a"
+          sourcedCache = mkCachedQueryWithProvenance
+            (SourceRequest location) query ((+ 2) :: Int -> Int)
       firstCache @?= secondCache
+      firstCache @?= sourcedCache
       show firstCache @?= show query
+      show sourcedCache @?= show query
       cachedQueryRequest firstCache @?= query
+      cachedQueryProvenance firstCache @?= ProgrammaticRequest
+      cachedQueryProvenance sourcedCache @?= SourceRequest location
       cachedQueryCache firstCache 41 @?= 42
+      cachedQueryCache sourcedCache 40 @?= 42
+      let sourcedFailure = withCachedQueryProvenance sourcedCache
+            $ diagnostic Error "failure"
+      diagnosticSource sourcedFailure @?= Just "Query.hs"
+      diagnosticSpan sourcedFailure @?= Just (sourceTextSpan "a")
       let unavailable = mkCachedQuery query
             (error "request equality forced its cache" :: ())
       unavailable @?= mkCachedQuery query ()
       show unavailable @?= show query
+  , testCase "materialize a sourced span while sealing its cache" $ do
+      let query = request (variable "a") []
+          partialSource = 'a' : error "unforced request source tail"
+          cached = mkCachedQueryWithProvenance
+            (SourceRequest $ sourceTextLocation "Query" partialSource)
+            query ()
+      result <- try $ evaluate $ cachedQueryProvenance cached
+      case result :: Either SomeException RequestProvenance of
+        Left _ -> pure ()
+        Right _ -> assertFailure
+          "sourced CachedQuery retained a lazy source-span traversal"
   , testCase "leave a context-free shared goal unchanged" $ do
       let goal = variable "a"
       requestContextualType (request goal []) @?= goal
@@ -2644,10 +2673,15 @@ diagnosticTests = testGroup "diagnostics"
         \  context: NonPositiveSourceColumn 0"
   , testCase "complete source location" $ do
       let span' = validSourceSpan 2 3 4 5
-          value = withLocation "Example.hs" span'
+          location = sourceLocation "Example.hs" span'
+          value = withSourceLocation location
             $ codedDiagnostic Error "SYN003" "cannot lower declaration"
+      locationSource location @?= "Example.hs"
+      locationSpan location @?= span'
       diagnosticSource value @?= Just "Example.hs"
       diagnosticSpan value @?= Just span'
+      withOptionalLocation (Just location)
+          (codedDiagnostic Error "SYN003" "cannot lower declaration") @?= value
       renderDiagnostic value @?=
         "Example.hs:2:3-4:5: error [SYN003]: cannot lower declaration"
   , testCase "code, source, span, and ordered context" $ do
@@ -2689,9 +2723,14 @@ diagnosticTests = testGroup "diagnostics"
         validSourceSpan 1 1 2 2
       sourceTextSpan "ab\n" @?=
         validSourceSpan 1 1 2 1
+      let location = sourceTextLocation "Buffer" "ab\nc"
+      locationSource location @?= "Buffer"
+      locationSpan location @?= validSourceSpan 1 1 2 2
   , testCase "total NFData instances" $ do
       _ <- evaluate (force (right (parseName "Data.List.(++)")))
       _ <- evaluate (force (withContext "query" (diagnostic Error "failure")))
+      _ <- evaluate (force (sourceTextLocation "Buffer" "a\nb"))
+      _ <- evaluate (force (SourceRequest $ sourceTextLocation "Buffer" "a"))
       return ()
   , testCase "malformed public tuple errors render in bounded space" $ do
       renderNameError (NameHasNoInfixForm

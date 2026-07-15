@@ -26,8 +26,21 @@ source file and half-open span, and an ordered context trail; parser adapters
 decide how native locations map into that neutral representation. Source
 positions and spans are opaque and checked by smart constructors, so the
 documented one-based, ordered half-open range cannot be forged through the
-public API. Its renderer is deterministic and compiler-shaped, but callers
-remain free to present the structured value themselves.
+public API. A strict opaque `SourceLocation` pairs the complete name/span case
+used by checked requests; `sourceTextLocation` evaluates the span while a
+request is sealed, so a reusable request does not retain its complete input
+buffer through a deferred traversal. Diagnostics deliberately retain separate
+file and span fields because parser and filesystem failures can know only one.
+Its renderer is deterministic and compiler-shaped, but callers remain free to
+present the structured value themselves.
+
+`Language.Haskell.Synthesis.Query` keeps source provenance out of semantic
+`QueryRequest` equality and display. Its opaque `CachedQuery` owns a strict
+`RequestProvenance` beside the neutral request and a lazy backend cache; both
+adapters therefore share one programmatic-versus-sourced lifetime and
+diagnostic contract without making parser metadata part of the synthesis
+request. Cache and provenance differences remain intentionally invisible to
+`Eq` and `Show`.
 
 `Language.Haskell.Synthesis.Count` keeps intrinsically non-negative totals in
 `Natural`, with a strict collection count and one explicit saturating boundary

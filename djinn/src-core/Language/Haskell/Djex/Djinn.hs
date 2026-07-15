@@ -75,12 +75,9 @@ import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
-  , SourceSpan
   , contextualDiagnostic
   , shownErrorDiagnostic
-  , sourceTextSpan
-  , withOptionalLocation
-  , withSource
+  , sourceTextLocation
   )
 import Language.Haskell.Synthesis.Generated
   ( DefinitionName
@@ -97,9 +94,12 @@ import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Query
   ( CachedQuery
   , QueryRequest (..)
+  , RequestProvenance (..)
   , cachedQueryCache
+  , cachedQueryProvenance
   , cachedQueryRequest
-  , mkCachedQuery
+  , mkCachedQueryWithProvenance
+  , withRequestProvenance
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -135,13 +135,12 @@ type DjinnType = Type DjinnTypeVariable
 -- complete environment has been sealed transactionally.
 newtype DjinnSession = DjinnSession PreparedEnvironment
 
--- | The raw projection and optional source provenance derived while sealing
--- a request. The shared 'CachedQuery' envelope keeps both details out of the
--- request's stable equality and display contract.
+-- | The raw projection derived while sealing a request. The shared
+-- 'CachedQuery' envelope owns source provenance separately and keeps both
+-- details out of the request's stable equality and display contract.
 data DjinnRequestCache = DjinnRequestCache
   { cachedCoreGoal :: Core.HType
   , cachedCoreContexts :: [Core.Context]
-  , cachedSourceLocation :: Maybe (FilePath, SourceSpan)
   }
 
 -- | A checked query whose neutral spelling and backend projection cannot
@@ -248,20 +247,24 @@ resolveDjinnInstanceMethods (DjinnSession prepared) prerequisites target =
 mkDjinnRequest
   :: QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
-mkDjinnRequest = mkDjinnRequestWithSource Nothing
+mkDjinnRequest = mkDjinnRequestWithProvenance ProgrammaticRequest
 
-mkDjinnRequestWithSource
-  :: Maybe (FilePath, SourceSpan)
+mkDjinnRequestWithProvenance
+  :: RequestProvenance
   -> QueryRequest DjinnType QueryOptions
   -> Either Diagnostic DjinnRequest
-mkDjinnRequestWithSource sourceLocation query = do
-  goal <- lowerRequestType "goal" $ requestGoal query
-  contexts <- traverse lowerRequestContext $ requestContexts query
-  pure $ DjinnRequest $ mkCachedQuery query DjinnRequestCache
-    { cachedCoreGoal = goal
-    , cachedCoreContexts = contexts
-    , cachedSourceLocation = sourceLocation
-    }
+mkDjinnRequestWithProvenance provenance query =
+  -- Force a sourced span at the sealing boundary.  Merely storing it in the
+  -- strict field of a newtype-wrapped 'CachedQuery' is insufficient: a caller
+  -- can inspect the outer 'Right' without forcing that payload.
+  provenance `seq` first (withRequestProvenance provenance) (do
+    goal <- lowerRequestType "goal" $ requestGoal query
+    contexts <- traverse lowerRequestContext $ requestContexts query
+    pure $ DjinnRequest $
+      mkCachedQueryWithProvenance provenance query DjinnRequestCache
+        { cachedCoreGoal = goal
+        , cachedCoreContexts = contexts
+        })
 
 -- | Recover the exact neutral query from which this checked request was
 -- sealed.  Modifications must be passed back through 'mkDjinnRequest'.
@@ -272,6 +275,9 @@ djinnRequestQuery (DjinnRequest query) = cachedQueryRequest query
 
 djinnRequestCache :: DjinnRequest -> DjinnRequestCache
 djinnRequestCache (DjinnRequest query) = cachedQueryCache query
+
+djinnRequestProvenance :: DjinnRequest -> RequestProvenance
+djinnRequestProvenance (DjinnRequest query) = cachedQueryProvenance query
 
 -- | Parse the type portion of a Djinn query.  The accepted context grammar is
 -- exactly the historical one: either one constraint or a comma-separated
@@ -305,14 +311,15 @@ parseDjinnRequestWithCheckedTarget
   -> Either Diagnostic DjinnRequest
 parseDjinnRequestWithCheckedTarget _session options checkedTarget
     sourceName source = do
+  let provenance = SourceRequest $ sourceTextLocation sourceName source
   (rawContexts, rawGoal) <- case Core.parseContextualHType source of
     Right parsed -> Right parsed
-    Left failure -> Left $ withSource sourceName
+    Left failure -> Left $ withRequestProvenance provenance
       $ contextualDiagnostic Error "DJEX_DJINN_PARSE"
           "cannot parse the Djinn query type" failure
-  goal <- first (parsedTypeFailure sourceName "goal")
+  goal <- first (parsedTypeFailure provenance "goal")
     $ Core.toSynthesisType rawGoal
-  contexts <- first (parsedTypeFailure sourceName "context")
+  contexts <- first (parsedTypeFailure provenance "context")
     $ traverse (traverse Core.toSynthesisType) rawContexts
   let query = QueryRequest
         { requestTarget = checkedTarget
@@ -320,8 +327,7 @@ parseDjinnRequestWithCheckedTarget _session options checkedTarget
         , requestContexts = contexts
         , requestOptions = options
         }
-  mkDjinnRequestWithSource
-    (Just (sourceName, sourceTextSpan source)) query
+  mkDjinnRequestWithProvenance provenance query
 
 -- | Run one complete configured Djinn search and package it into a single
 -- terminal shared batch.  Logical evidence stays independent of operational
@@ -339,8 +345,8 @@ runDjinnQuery (DjinnSession prepared) request = do
       (cachedCoreContexts cache)
       (requestTarget $ djinnRequestQuery request)
       (cachedCoreGoal cache) of
-    Left failure -> Left $ withOptionalLocation (cachedSourceLocation cache)
-      $ djinnQueryFailure failure
+    Left failure -> Left $
+      djinnQueryFailure (djinnRequestProvenance request) failure
     Right result -> Right result
 
 renderDjinnCandidateExpression
@@ -380,11 +386,11 @@ lowerRequestContext context = do
     arguments
 
 parsedTypeFailure
-  :: FilePath
+  :: RequestProvenance
   -> String
   -> Core.SynthesisTypeError
   -> Diagnostic
-parsedTypeFailure sourceName role failure = withSource sourceName
+parsedTypeFailure provenance role failure = withRequestProvenance provenance
   $ contextualDiagnostic Error "DJEX_DJINN_PARSE"
       "cannot project the parsed Djinn query type"
       (role ++ ": " ++ show failure)
@@ -405,10 +411,20 @@ checkDefinitionTarget target = case mkDefinitionName target of
       "Djinn targets must be unqualified value identifiers or operators"
       (renderCanonical target)
 
-djinnQueryFailure :: DjinnQueryError -> Diagnostic
-djinnQueryFailure failure = case failure of
-  DjinnQueryFailure message -> contextualDiagnostic Error
-    "DJEX_DJINN_QUERY" "Djinn rejected the query" message
+djinnQueryFailure
+  :: RequestProvenance
+  -> DjinnQueryError
+  -> Diagnostic
+djinnQueryFailure provenance failure = case failure of
+  DjinnQueryOptionsFailure optionsFailure -> shownErrorDiagnostic
+    "DJEX_DJINN_OPTIONS" "invalid Djinn search options" optionsFailure
+  DjinnQueryFailure message -> withRequestProvenance provenance
+    $ contextualDiagnostic Error
+        "DJEX_DJINN_QUERY" "Djinn rejected the query" message
+  DjinnInternalQueryFailure message -> contextualDiagnostic Error
+    "DJEX_DJINN_INTERNAL"
+    "Djinn violated an internal query invariant"
+    message
   DjinnResultInvariantFailure invariant -> shownErrorDiagnostic
     "DJEX_DJINN_RESULT"
     "Djinn produced inconsistent logical evidence"

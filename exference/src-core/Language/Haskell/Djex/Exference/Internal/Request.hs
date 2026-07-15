@@ -19,10 +19,11 @@ module Language.Haskell.Djex.Exference.Internal.Request
   , exferenceRequestQuery
   , requestContextualGoal
   , requestSourceTypeVariables
-  , requestSourceLocation
+  , withExferenceRequestProvenance
   , validateExferenceTarget
   ) where
 
+import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
@@ -35,7 +36,7 @@ import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
 import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , SourceSpan
+  , SourceLocation
   , shownErrorDiagnostic
   )
 import Language.Haskell.Synthesis.Generated
@@ -49,10 +50,13 @@ import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Query
   ( CachedQuery
   , QueryRequest (..)
+  , RequestProvenance (..)
   , cachedQueryCache
   , cachedQueryRequest
-  , mkCachedQuery
+  , mkCachedQueryWithProvenance
   , requestContextualType
+  , withCachedQueryProvenance
+  , withRequestProvenance
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type (Type)
@@ -95,13 +99,12 @@ type ExferenceType = Type ExferenceTypeVariable
 -- after explicit contexts are merged, because that operation can change
 -- Exference's rigid-ID allocation.
 data ExferenceRequestCache = ExferenceRequestCache
-  { cachedSourceTypeVariables :: Map.Map String ExferenceLocal
-  , cachedSourceLocation :: Maybe (FilePath, SourceSpan)
-  }
+  { cachedSourceTypeVariables :: Map.Map String ExferenceLocal }
 
--- Source spellings and locations are deterministic presentation caches, not
--- part of the stable request value. The shared envelope gives both adapters
--- the same query-only equality and display contract.
+-- Source spellings are a deterministic presentation cache, not part of the
+-- stable request value. Location provenance is owned separately by the shared
+-- envelope, which gives both adapters the same query-only equality and display
+-- contract.
 newtype ExferenceRequest = ExferenceRequest
   (CachedQuery ExferenceType ExferenceOptions ExferenceRequestCache)
   deriving (Eq, Show)
@@ -110,23 +113,36 @@ newtype ExferenceRequest = ExferenceRequest
 mkExferenceRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
-mkExferenceRequest = mkExferenceRequestWithSourceInfo Map.empty Nothing
+mkExferenceRequest = mkExferenceRequestWithProvenance
+  Map.empty ProgrammaticRequest
 
--- | Construct a checked request with parser-neutral source caches. This
--- internal operation is the only provenance entry point: callers cannot
--- rewrite the caches of an already validated request.
+-- | Construct a checked request with parser-neutral rendering hints and
+-- source provenance. This internal operation is the only such entry point:
+-- callers cannot rewrite either after validation.
 mkExferenceRequestWithSourceInfo
   :: Map.Map String ExferenceLocal
-  -> Maybe (FilePath, SourceSpan)
+  -> SourceLocation
   -> QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
-mkExferenceRequestWithSourceInfo sourceVariables sourceLocation query = do
-  canonicalQuery <- normalizeRequest query
-  validateRequest canonicalQuery
-  pure $ ExferenceRequest $ mkCachedQuery canonicalQuery ExferenceRequestCache
-    { cachedSourceTypeVariables = sourceVariables
-    , cachedSourceLocation = sourceLocation
-    }
+mkExferenceRequestWithSourceInfo sourceVariables location =
+  mkExferenceRequestWithProvenance sourceVariables $ SourceRequest location
+
+mkExferenceRequestWithProvenance
+  :: Map.Map String ExferenceLocal
+  -> RequestProvenance
+  -> QueryRequest ExferenceType ExferenceOptions
+  -> Either Diagnostic ExferenceRequest
+mkExferenceRequestWithProvenance sourceVariables provenance query =
+  -- Force a sourced span at the sealing boundary.  The request is a newtype
+  -- inside 'Either', so the strict field of 'CachedQuery' alone would not
+  -- prevent a caller matching only on 'Right' from retaining the input text.
+  provenance `seq` first (withRequestProvenance provenance) (do
+    canonicalQuery <- normalizeRequest query
+    validateRequest canonicalQuery
+    pure $ ExferenceRequest $
+      mkCachedQueryWithProvenance provenance canonicalQuery
+        ExferenceRequestCache
+          { cachedSourceTypeVariables = sourceVariables })
 
 -- Store exactly the canonical native representation that the checked
 -- Exference core consumes.  Normalizing each context argument separately
@@ -153,10 +169,12 @@ requestSourceTypeVariables
   -> Map.Map String ExferenceLocal
 requestSourceTypeVariables = cachedSourceTypeVariables . exferenceRequestCache
 
-requestSourceLocation
+withExferenceRequestProvenance
   :: ExferenceRequest
-  -> Maybe (FilePath, SourceSpan)
-requestSourceLocation = cachedSourceLocation . exferenceRequestCache
+  -> Diagnostic
+  -> Diagnostic
+withExferenceRequestProvenance (ExferenceRequest query) =
+  withCachedQueryProvenance query
 
 exferenceRequestCache :: ExferenceRequest -> ExferenceRequestCache
 exferenceRequestCache (ExferenceRequest query) = cachedQueryCache query

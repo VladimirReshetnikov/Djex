@@ -96,8 +96,8 @@ import Language.Haskell.Djex.Exference.Internal.Request
   , exferenceRequestQuery
   , mkExferenceRequest
   , requestContextualGoal
-  , requestSourceLocation
   , requestSourceTypeVariables
+  , withExferenceRequestProvenance
   )
 import Language.Haskell.Synthesis.Candidate
   ( candidateDetails
@@ -110,7 +110,6 @@ import Language.Haskell.Synthesis.Diagnostic
   , Severity (Info, Warning)
   , contextualDiagnostic
   , shownErrorDiagnostic
-  , withOptionalLocation
   )
 import Language.Haskell.Synthesis.Generated
   ( Qualification (..)
@@ -328,8 +327,7 @@ runExferenceQuery session request = do
   let query = exferenceRequestQuery request
       target = requestTarget query
       sharedGoal = requestContextualGoal request
-      requestDiagnostic = withOptionalLocation
-        $ requestSourceLocation request
+      requestDiagnostic = withExferenceRequestProvenance request
   elaboratedGoal <- either
     (Left . requestDiagnostic . elaborationFailure)
     Right
@@ -348,14 +346,11 @@ runExferenceQuery session request = do
   -- so query validation and rigid-instantiation planning happen only once.
   let input = searchQuery backendGoal
         $ requestOptions query
-      searchFailure failure = requestDiagnostic $ shownErrorDiagnostic
-        (if optionFailure failure
-          then "DJEX_EXF_OPTIONS"
-          else "DJEX_EXF_QUERY")
-        (if optionFailure failure
-          then "invalid Exference search options"
-          else "Exference rejected the query")
-        failure
+      searchFailure failure
+        | optionFailure failure = shownErrorDiagnostic
+            "DJEX_EXF_OPTIONS" "invalid Exference search options" failure
+        | otherwise = requestDiagnostic $ shownErrorDiagnostic
+            "DJEX_EXF_QUERY" "Exference rejected the query" failure
   either
     (Left . searchFailure)
     Right

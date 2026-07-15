@@ -7,6 +7,10 @@ module Language.Haskell.Synthesis.Diagnostic
   , SourceSpan
   , sourceStart
   , sourceEnd
+  , SourceLocation
+  , sourceLocation
+  , locationSource
+  , locationSpan
   , SourceLocationError (..)
   , mkSourcePosition
   , mkSourceSpan
@@ -19,9 +23,11 @@ module Language.Haskell.Synthesis.Diagnostic
   , withSource
   , withSpan
   , withLocation
+  , withSourceLocation
   , withOptionalLocation
   , withContext
   , sourceTextSpan
+  , sourceTextLocation
   , renderDiagnostic
   ) where
 
@@ -40,6 +46,17 @@ data SourcePosition = SourcePosition !Int !Int
 -- parser adapters decide how their native locations map into it.
 data SourceSpan = SourceSpan !SourcePosition !SourcePosition
   deriving (Eq, Ord)
+
+-- | A complete parser-independent source location.
+--
+-- Diagnostics intentionally keep source names and spans independent because
+-- filesystem and parser failures can know only one of them. Checked requests,
+-- however, always have either no provenance or one complete location. This
+-- strict value records that stronger invariant and ensures a span computed
+-- from an input buffer is evaluated before a reusable request can retain the
+-- buffer accidentally.
+data SourceLocation = SourceLocation !FilePath !SourceSpan
+  deriving (Eq, Ord, Show)
 
 -- | Why a source position or span could not be represented. Positions are
 -- one-based, and a half-open span cannot finish before it starts.
@@ -62,6 +79,16 @@ sourceStart (SourceSpan start _) = start
 
 sourceEnd :: SourceSpan -> SourcePosition
 sourceEnd (SourceSpan _ end) = end
+
+-- | Pair a source name with an already validated span.
+sourceLocation :: FilePath -> SourceSpan -> SourceLocation
+sourceLocation = SourceLocation
+
+locationSource :: SourceLocation -> FilePath
+locationSource (SourceLocation source _) = source
+
+locationSpan :: SourceLocation -> SourceSpan
+locationSpan (SourceLocation _ span') = span'
 
 instance Show SourcePosition where
   showsPrec precedence (SourcePosition line column) =
@@ -101,6 +128,9 @@ instance NFData SourcePosition where
 
 instance NFData SourceSpan where
   rnf (SourceSpan start end) = rnf start `seq` rnf end
+
+instance NFData SourceLocation where
+  rnf (SourceLocation source span') = rnf source `seq` rnf span'
 
 instance NFData SourceLocationError where
   rnf (NonPositiveSourceLine line) = rnf line
@@ -179,18 +209,23 @@ withSpan span' value = value { diagnosticSpan = Just span' }
 withLocation :: FilePath -> SourceSpan -> Diagnostic -> Diagnostic
 withLocation source span' = withSpan span' . withSource source
 
+-- | Attach one complete source location to a diagnostic.
+withSourceLocation :: SourceLocation -> Diagnostic -> Diagnostic
+withSourceLocation location =
+  withLocation (locationSource location) (locationSpan location)
+
 -- | Attach a complete source location when one is available.
 --
 -- Programmatic requests deliberately carry no location, whereas source
--- frontends retain the exact filename and span as one optional pair.  Keeping
+-- frontends retain the exact filename and span as one optional value. Keeping
 -- that distinction here prevents backend adapters from implementing subtly
 -- different @Nothing@ behavior.
 withOptionalLocation
-  :: Maybe (FilePath, SourceSpan)
+  :: Maybe SourceLocation
   -> Diagnostic
   -> Diagnostic
 withOptionalLocation Nothing = id
-withOptionalLocation (Just (source, span')) = withLocation source span'
+withOptionalLocation (Just location) = withSourceLocation location
 
 -- | Add outer-to-inner explanatory context.  Rendering preserves insertion
 -- order so adapters can build a readable trail such as module, declaration,
@@ -214,6 +249,14 @@ sourceTextSpan = SourceSpan (SourcePosition 1 1)
   increment value
     | value == maxBound = maxBound
     | otherwise = value + 1
+
+-- | Name and eagerly span a complete source buffer.
+--
+-- 'SourceLocation' is strict in the span, so evaluating this value traverses
+-- the buffer immediately instead of leaving that traversal inside a retained
+-- request cache.
+sourceTextLocation :: FilePath -> String -> SourceLocation
+sourceTextLocation source = SourceLocation source . sourceTextSpan
 
 -- | Render in a compiler-style, single-header format.
 --

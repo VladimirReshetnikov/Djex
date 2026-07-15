@@ -247,6 +247,31 @@ unrestricted for programmatic callers. Subprocess regressions exercise both
 command paths, including a fix-only source environment; the merged command also
 rejects repeated `--fix` before loading that environment.
 
+## Post-fold request-provenance review
+
+**Completed on 2026-07-14:** both opaque request types previously stored an
+identical lazy `Maybe (FilePath, SourceSpan)` inside their backend cache. This
+duplicated the same authority, allowed a reusable request to retain its complete
+source buffer until a deferred diagnostic demanded the span, and left
+source-aware constructor failures unlocated.
+
+The shared query layer now owns a strict `RequestProvenance` in every
+`CachedQuery`, independently of the adapter's lazy derived cache. A strict
+opaque `SourceLocation` materializes complete text spans during sealing;
+programmatic requests remain explicitly source-free, and equality/display
+still observe only the neutral `QueryRequest`. Djinn's cache now contains only
+its raw proof-core projection, while Exference's contains only source variable
+spellings.
+
+The review also fixed two attribution bugs. Exference now retains the exact
+normalized HSE parse filename for deferred failures, including preserving
+angle-bracket virtual-buffer names. Djinn now distinguishes typed invalid
+options, ordinary query rejection, internal proof/projection failures, and
+shared result-invariant failures. Type-source provenance applies only to input
+rejection; separately supplied options and internal invariants are source-less
+in both adapters. Historical Djinn string entry points retain their established
+option messages.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

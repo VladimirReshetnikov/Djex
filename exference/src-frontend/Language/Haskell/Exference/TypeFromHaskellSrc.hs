@@ -165,9 +165,16 @@ haskellSrcExtsParseMode sourceName = P.ParseMode parseSourceName
     -- Historical callers supplied extensionless labels, while module loading
     -- supplies actual paths. Appending only when there is no extension keeps
     -- both forms readable and avoids diagnostics such as @Prelude.hs.hs@.
+    -- Angle-bracket names denote virtual buffers rather than filesystem paths
+    -- and must remain stable across eager and deferred failures.
     parseSourceName
+      | isVirtualSourceName sourceName = sourceName
       | null $ takeExtension sourceName = sourceName <.> "hs"
       | otherwise = sourceName
+    isVirtualSourceName ('<' : rest) = case reverse rest of
+      '>' : _ -> True
+      _ -> False
+    isVirtualSourceName _ = False
     exts1 = [ TypeOperators
             , ExplicitForAll
             , ExistentialQuantification

@@ -12,6 +12,10 @@ module Language.Haskell.Exference.Diagnostic
   , SourceSpan
   , sourceStart
   , sourceEnd
+  , SourceLocation
+  , sourceLocation
+  , locationSource
+  , locationSpan
   , SourceLocationError (..)
   , mkSourcePosition
   , mkSourceSpan
@@ -23,8 +27,11 @@ module Language.Haskell.Exference.Diagnostic
   , withSource
   , withSpan
   , withLocation
+  , withSourceLocation
+  , withOptionalLocation
   , withContext
   , sourceTextSpan
+  , sourceTextLocation
   , renderDiagnostic
   )
 where
@@ -38,6 +45,10 @@ import Language.Haskell.Synthesis.Diagnostic
   , SourceSpan
   , sourceStart
   , sourceEnd
+  , SourceLocation
+  , sourceLocation
+  , locationSource
+  , locationSpan
   , SourceLocationError (..)
   , mkSourcePosition
   , mkSourceSpan
@@ -46,10 +57,13 @@ import Language.Haskell.Synthesis.Diagnostic
   , shownErrorDiagnostic
   , renderDiagnostic
   , sourceTextSpan
+  , sourceTextLocation
   , withCode
   , withContext
   , withLocation
+  , withOptionalLocation
   , withSource
+  , withSourceLocation
   , withSpan
   )
 import qualified Language.Haskell.Synthesis.Diagnostic as Shared

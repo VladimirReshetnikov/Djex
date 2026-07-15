@@ -19,6 +19,7 @@ import Data.Functor.Identity (runIdentity)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
+import qualified Language.Haskell.Exts.Parser as HSE
 
 import Language.Haskell.Djex.Exference
   ( ExferenceLocal
@@ -43,10 +44,10 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( parseTypeWithInventory )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , SourceSpan
   , shownErrorDiagnostic
-  , sourceTextSpan
+  , sourceTextLocation
   , withCode
+  , withSourceLocation
   )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Name (Name, parseName)
@@ -155,10 +156,12 @@ parseExferenceRequestWithCheckedTarget
   -> Either Diagnostic ExferenceRequest
 parseExferenceRequestWithCheckedTarget session options checkedTarget
     sourceName source = do
-  let parsed = runIdentity $ runExceptT $ parseTypeWithInventory
+  let mode = haskellSrcExtsParseMode sourceName
+      location = sourceTextLocation (HSE.parseFilename mode) source
+      parsed = runIdentity $ runExceptT $ parseTypeWithInventory
         (exferenceSessionInventory session)
         Nothing
-        (haskellSrcExtsParseMode sourceName)
+        mode
         source
   -- The HSE compatibility frontend predates structured diagnostic codes.
   -- Seal every failure at this boundary while preserving its exact message,
@@ -166,9 +169,8 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
   (backendType, sourceVariables) <- first
     (withCode "DJEX_EXF_PARSE") parsed
   sharedType <- either
-    (Left . shownErrorDiagnostic
-      "DJEX_EXF_PARSE"
-      "parsed Exference type failed shared validation"
+    (Left . withSourceLocation location . shownErrorDiagnostic
+      "DJEX_EXF_PARSE" "parsed Exference type failed shared validation"
     )
     Right
     $ toSynthesisType backendType
@@ -180,7 +182,5 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
         }
       sourceVariables' :: Map.Map String ExferenceLocal
       sourceVariables' = sourceVariables
-      sourceLocation :: Maybe (FilePath, SourceSpan)
-      sourceLocation = Just (sourceName, sourceTextSpan source)
   Frontend.mkExferenceRequestWithSourceInfo
-    sourceVariables' sourceLocation query
+    sourceVariables' location query

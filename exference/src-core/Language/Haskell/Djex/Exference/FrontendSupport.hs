@@ -38,7 +38,7 @@ import qualified Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Types (TVarId)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
-  , SourceSpan
+  , SourceLocation
   )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Name (Name)
@@ -62,12 +62,12 @@ sealPreparedExferenceSessionWithPolicy exclusions overrides prepared =
 -- request has been sealed, and it does not affect request equality or display.
 mkExferenceRequestWithSourceInfo
   :: Map String ExferenceLocal
-  -> Maybe (FilePath, SourceSpan)
+  -> SourceLocation
   -> QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
-mkExferenceRequestWithSourceInfo sourceVariables sourceLocation query =
+mkExferenceRequestWithSourceInfo sourceVariables location query =
   Request.mkExferenceRequestWithSourceInfo
-    sourceVariables sourceLocation query
+    sourceVariables location query
 
 -- | Validate a raw source-level result name before parsing its type. Source
 -- frontends use this preflight to preserve target-diagnostic precedence.

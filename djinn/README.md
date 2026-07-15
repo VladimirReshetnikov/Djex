@@ -526,7 +526,13 @@ narrower class-name namespace, retains that target in the original
 raw-`Name` parser helper constructs
 that checked target before parsing so target diagnostics retain precedence;
 search-option validation and all environment-dependent class and kind checks
-still occur when the request is run. Here
+still occur when the request is run. The shared `CachedQuery` owns a strict
+programmatic-or-source `RequestProvenance` independently of that raw projection;
+source-derived constructor and query failures receive its complete input span,
+while options and internal proof/result invariants remain unlocated. Invalid
+cutoffs and budgets are typed `DjinnQueryOptionsError` values and map to
+`DJEX_DJINN_OPTIONS`; the historical `Either String` facade preserves its exact
+messages. Here
 `DjinnType` is the shared `Type DjinnTypeVariable` source representation;
 `DjinnTypeVariable` and the generated-binder `DjinnLocal` remain distinct API
 names despite both currently being represented by `String`. Raw `HType` is

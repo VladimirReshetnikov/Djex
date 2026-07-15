@@ -42,7 +42,8 @@ module Djinn.Core (
     resolvePreparedContext, resolvePreparedInstanceMethods,
     QueryOptions(..), defaultQueryOptions,
     DjinnCandidateDetails(..), DjinnCandidate,
-    DjinnQueryMetadata(..), DjinnResult, DjinnQueryError(..),
+    DjinnQueryMetadata(..), DjinnResult,
+    DjinnQueryOptionsError(..), DjinnQueryError(..),
     inhabitResult, inhabitResultPrepared,
     GeneratedQueryReport(..), inhabitGenerated, inhabitGeneratedPrepared,
     QueryOutcome(..), QueryReport(..), inhabit
@@ -396,20 +397,28 @@ resolveQueryContexts
     :: PreparedEnvironment
     -> (String, HKind, HType)
     -> [Context]
-    -> Either String (HType, [[(HSymbol, HType)]])
+    -> Either DjinnQueryError (HType, [[(HSymbol, HType)]])
 resolveQueryContexts prepared goalObligation contexts = do
-    resolved <- mapM (lookupContext prepared) contexts
+    resolved <- queryFailure $ mapM (lookupContext prepared) contexts
     let obligations = goalObligation : concatMap argumentObligations resolved
-    checkKindObligations (preparedEnvironmentKindCheck prepared) obligations
-    elaborated <- elaboratePreparedTypes prepared
+    queryFailure $
+        checkKindObligations (preparedEnvironmentKindCheck prepared) obligations
+    elaborated <- queryFailure $ elaboratePreparedTypes prepared
         [(kind, source) | (_, kind, source) <- obligations]
     case elaborated of
-        [] -> Left "internal error: query elaboration dropped its goal"
+        [] -> internalQueryFailure "query elaboration dropped its goal"
         elaboratedGoal : elaboratedArguments -> do
             elaboratedContexts <- attachElaboratedArguments
                 resolved elaboratedArguments
-            methods <- mapM (instantiateContext prepared) elaboratedContexts
+            -- Resolution, kind checking, and shared elaboration have already
+            -- validated these method types. A failure while instantiating the
+            -- sealed class inventory is therefore an implementation/session
+            -- invariant, not a defect in the query source.
+            methods <- first DjinnInternalQueryFailure $
+                mapM (instantiateContext prepared) elaboratedContexts
             return (elaboratedGoal, methods)
+  where
+    queryFailure = first DjinnQueryFailure
 -- Rebuild the already resolved constraints with their alias-free arguments.
 -- The shared batch operation is shape-preserving, but check that invariant at
 -- this representation boundary rather than silently dropping a suffix if it
@@ -417,21 +426,25 @@ resolveQueryContexts prepared goalObligation contexts = do
 attachElaboratedArguments
     :: [ResolvedContext]
     -> [HType]
-    -> Either String [ResolvedContext]
+    -> Either DjinnQueryError [ResolvedContext]
 attachElaboratedArguments [] [] = Right []
 attachElaboratedArguments [] _ =
-    Left "internal error: query elaboration returned extra context arguments"
+    internalQueryFailure "query elaboration returned extra context arguments"
 attachElaboratedArguments (context : contexts) arguments = do
     let arity = length $ resolvedParameters context
         (current, remaining) = splitAt arity arguments
     if length current /= arity then
-        Left "internal error: query elaboration dropped a context argument"
+        internalQueryFailure "query elaboration dropped a context argument"
     else do
         rest <- attachElaboratedArguments contexts remaining
         let constraint = (resolvedConstraint context) {
                 constraintArguments = current
                 }
         return (context {resolvedConstraint = constraint} : rest)
+
+internalQueryFailure :: String -> Either DjinnQueryError value
+internalQueryFailure =
+    Left . DjinnInternalQueryFailure . ("internal error: " ++)
 
 lookupContext :: PreparedEnvironment -> Context -> Either String ResolvedContext
 lookupContext prepared context = do
@@ -598,12 +611,23 @@ data DjinnQueryMetadata = DjinnQueryMetadata {
 type DjinnResult =
     SharedQuery.QueryResult DjinnQueryMetadata DjinnCandidate
 
--- | Failure from the canonical checked result path.  Ordinary query failures
--- retain the historical message, while an impossible evidence/candidate
--- mismatch stays distinguishable for structured adapters.
+-- | Failure from the canonical checked result path. Invalid controls,
+-- ordinary input rejection, internal proof/projection failures, and an
+-- impossible evidence/candidate mismatch remain distinguishable for
+-- structured adapters; compatibility projections retain historical text.
 data DjinnQueryError
-    = DjinnQueryFailure String
+    = DjinnQueryOptionsFailure DjinnQueryOptionsError
+    | DjinnQueryFailure String
+    | DjinnInternalQueryFailure String
     | DjinnResultInvariantFailure SharedQuery.QueryResultInvariantError
+    deriving (Eq, Show)
+
+-- | Invalid controls rejected before proof search. Keeping the supplied value
+-- makes the stable adapter able to classify options independently while the
+-- historical string API can retain its exact message.
+data DjinnQueryOptionsError
+    = NonPositiveCandidateCutoff Int
+    | NegativeChoicePointBudget Integer
     deriving (Eq, Show)
 
 -- | Historical structured report retained only at the compatibility edge.
@@ -694,7 +718,7 @@ inhabitResult
     -> HType
     -> Either DjinnQueryError DjinnResult
 inhabitResult options environment contexts target goal = do
-    first DjinnQueryFailure $ validateQueryOptions options
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
     prepared <- first DjinnQueryFailure $
         prepareCompatibilityEnvironment environment
     inhabitResultPreparedChecked options prepared contexts target goal
@@ -710,7 +734,7 @@ inhabitResultPrepared
     -> HType
     -> Either DjinnQueryError DjinnResult
 inhabitResultPrepared options prepared contexts target goal = do
-    first DjinnQueryFailure $ validateQueryOptions options
+    first DjinnQueryOptionsFailure $ validateQueryOptions options
     inhabitResultPreparedChecked options prepared contexts target goal
 
 -- | Compatibility projection of 'inhabitResult'.
@@ -740,12 +764,12 @@ validateGeneratedQueryTarget name = do
     rawName <- first show $ SharedName.parseName name
     first show $ SharedGenerated.mkDefinitionName rawName
 
-validateQueryOptions :: QueryOptions -> Either String ()
+validateQueryOptions :: QueryOptions -> Either DjinnQueryOptionsError ()
 validateQueryOptions options = do
     unless (optionCutoff options > 0) $
-        Left "optionCutoff must be positive"
+        Left $ NonPositiveCandidateCutoff $ optionCutoff options
     case optionBudget options of
-        Just n | n < 0 -> Left "optionBudget must be non-negative"
+        Just n | n < 0 -> Left $ NegativeChoicePointBudget n
         _ -> Right ()
 
 inhabitResultPreparedChecked
@@ -756,7 +780,7 @@ inhabitResultPreparedChecked
     -> HType
     -> Either DjinnQueryError DjinnResult
 inhabitResultPreparedChecked options prepared contexts target goal = do
-    (elaboratedGoal, contextMethods) <- queryFailure $
+    (elaboratedGoal, contextMethods) <-
         resolveQueryContexts prepared
         ("goal type " ++ show goal, KStar, goal) contexts
     let translate = preparedEnvironmentFormulaTranslator prepared
@@ -764,8 +788,13 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
             (,) (Symbol symbol) `fmap`
                 first (("method " ++ prHSymbolOp symbol ++ ": ") ++)
                     (translate source)
-    form <- queryFailure $ first ("goal type: " ++) $ translate elaboratedGoal
-    methodEnv <- queryFailure $ concat `fmap`
+    -- The prepared translator was built from the same checked environment,
+    -- and this request batch has already been alias-elaborated. Its remaining
+    -- failure mode is a broken sealed-session invariant and must not be
+    -- attributed to the query's source span.
+    form <- translatorFailure $ first ("goal type: " ++) $
+        translate elaboratedGoal
+    methodEnv <- translatorFailure $ concat `fmap`
         mapM (mapM translateMethod) contextMethods
     let externalEnv = preparedEnvironmentFunctionPremises prepared ++ methodEnv
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
@@ -775,7 +804,8 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
             searchBudget = optionBudget options
             }
         outcome = proveWithMode mode internalEnv form
-        labeled what = queryFailure . first ((what ++ ": ") ++)
+        internalFailure what = first $
+            DjinnInternalQueryFailure . ((what ++ ": ") ++)
     case searchProofs outcome of
         [] -> do
             failure <-
@@ -799,7 +829,8 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
                             proveWithMode diagnosticMode diagnosticEnv form
                     case searchProofs diagnosticOutcome of
                         diagnosticProof : _ -> do
-                            labeled "generated an invalid self-reference proof" $
+                            internalFailure
+                                "generated an invalid self-reference proof" $
                                 checkProof diagnosticEnv form diagnosticProof
                             return UnrealizableWithoutSelfReference
                         [] -> return Unrealizable
@@ -818,9 +849,9 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
                 candidateLimitReached = not $ null overflow
             -- Every candidate must check against the requested formula
             -- before display names are restored and it is rendered.
-            labeled "generated an invalid proof" $
+            internalFailure "generated an invalid proof" $
                 mapM_ (checkProof internalEnv form) internalProofs
-            rendered <- labeled "cannot render generated proof" $
+            rendered <- internalFailure "cannot render generated proof" $
                 mapM (termToHClause name . restoreProofTerm proofEnv)
                     internalProofs
             -- Preserve the historical stable ratio-then-count ordering over
@@ -831,7 +862,8 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
                         map snd $ sortOn fst $ map scored rendered
                     else
                         rendered
-            generatedClauses <- labeled "cannot convert generated clause" $
+            generatedClauses <- internalFailure
+                "cannot convert generated clause" $
                 mapM (toGeneratedClauseWithName target) clauses
             let candidates = zipWith makeCandidate clauses generatedClauses
                 completion
@@ -846,7 +878,7 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
                 SharedQuery.ValidatedCandidates
   where
     name = SharedGenerated.definitionSpelling target
-    queryFailure = first DjinnQueryFailure
+    translatorFailure = first DjinnInternalQueryFailure
 
 candidateDetails :: HClause -> DjinnCandidateDetails
 candidateDetails clause
@@ -906,9 +938,17 @@ resultToGeneratedReport result = case SharedSearch.batchProgress search of
 
 renderDjinnQueryError :: DjinnQueryError -> String
 renderDjinnQueryError failure = case failure of
+    DjinnQueryOptionsFailure optionsFailure ->
+        renderDjinnQueryOptionsError optionsFailure
     DjinnQueryFailure message -> message
+    DjinnInternalQueryFailure message -> message
     DjinnResultInvariantFailure invariant ->
         "internal Djinn result invariant: " ++ show invariant
+
+renderDjinnQueryOptionsError :: DjinnQueryOptionsError -> String
+renderDjinnQueryOptionsError failure = case failure of
+    NonPositiveCandidateCutoff _ -> "optionCutoff must be positive"
+    NegativeChoicePointBudget _ -> "optionBudget must be non-negative"
 
 outcomeEvidence :: QueryOutcome -> SharedQuery.QueryEvidence
 outcomeEvidence outcome = case outcome of

@@ -11,11 +11,12 @@ import Text.Read (readMaybe)
 import Djinn.Core (
     Context, Declaration(..), DjinnCandidateDetails(..),
     DjinnDeclarationNameRole(..), QueryOutcome(..),
+    DjinnQueryError(..), DjinnQueryOptionsError(..),
     SynthesisDeclarationError(..), SynthesisEnvironmentError(..),
     SynthesisTypeError(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, generatedReportCandidates,
-    generatedReportCompletion, inhabit, inhabitGenerated,
+    generatedReportCompletion, inhabit, inhabitGenerated, inhabitResult,
     inhabitGeneratedPrepared,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
     fromSynthesisDeclaration, fromSynthesisEnvironment,
@@ -177,9 +178,9 @@ testCheckedDjinnAdapter = do
         Djex.mkDjinnRequest programmaticQuery
     assertEqual "programmatic request round-trip"
         programmaticQuery (Djex.djinnRequestQuery programmaticRequest)
-    assertEqual "request source caches do not affect equality"
+    assertEqual "request provenance does not affect equality"
         request programmaticRequest
-    assertEqual "request source caches do not affect display"
+    assertEqual "request provenance does not affect display"
         (show programmaticRequest) (show request)
 
     result <- expectShownRight $
@@ -198,9 +199,10 @@ testCheckedDjinnAdapter = do
                     Djex.FullyQualified candidate)
         [] -> fail "the checked Djinn adapter found no identity candidate"
 
+    let malformedSource = "Eq a => a -> a ;"
     case Djex.parseDjinnRequestWithCheckedTarget
             session defaultQueryOptions checkedTarget
-            "malformed-query.djinn" "Eq a => a -> a ;" of
+            "malformed-query.djinn" malformedSource of
         Left failure -> do
             assertEqual "parse failures have a stable diagnostic code"
                 (Just "DJEX_DJINN_PARSE")
@@ -208,8 +210,9 @@ testCheckedDjinnAdapter = do
             assertEqual "parse failures retain their caller-supplied source"
                 (Just "malformed-query.djinn")
                 (SharedDiagnostic.diagnosticSource failure)
-            assertEqual "eager parse failures do not acquire a cached span"
-                Nothing (SharedDiagnostic.diagnosticSpan failure)
+            assertEqual "parse failures retain their complete input span"
+                (Just $ SharedDiagnostic.sourceTextSpan malformedSource)
+                (SharedDiagnostic.diagnosticSpan failure)
         Right _ -> fail "the checked Djinn parser accepted trailing input"
 
     let unsupportedGoal = SharedType.TupleType SharedName.Unboxed
@@ -532,6 +535,30 @@ testCoreFacade = do
     assertLeft "negative public search budgets are rejected" $
         inhabit defaultQueryOptions { optionBudget = Just (-1) }
             standardEnvironment [] "identity" (HTArrow (HTVar "a") (HTVar "a"))
+    checkedIdentity <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "identity"
+    case inhabitResult defaultQueryOptions {optionCutoff = 0}
+            standardEnvironment [] checkedIdentity
+            (HTArrow (HTVar "a") (HTVar "a")) of
+        Left (DjinnQueryOptionsFailure (NonPositiveCandidateCutoff 0)) ->
+            return ()
+        other -> fail $ "unexpected cutoff validation result: " ++ show other
+    case inhabitResult defaultQueryOptions {optionBudget = Just (-7)}
+            standardEnvironment [] checkedIdentity
+            (HTArrow (HTVar "a") (HTVar "a")) of
+        Left (DjinnQueryOptionsFailure (NegativeChoicePointBudget (-7))) ->
+            return ()
+        other -> fail $ "unexpected budget validation result: " ++ show other
+    assertEqual "the historical option error text remains stable"
+        (Left "optionCutoff must be positive")
+        (inhabitGenerated defaultQueryOptions {optionCutoff = 0}
+            standardEnvironment [] "identity"
+            (HTArrow (HTVar "a") (HTVar "a")))
+    assertEqual "the historical budget error text remains stable"
+        (Left "optionBudget must be non-negative")
+        (inhabitGenerated defaultQueryOptions {optionBudget = Just (-7)}
+            standardEnvironment [] "identity"
+            (HTArrow (HTVar "a") (HTVar "a")))
     reflexive <- expectRight $ inhabit defaultQueryOptions
         standardEnvironment [context "Eq" [HTVar "a"]] "reflexive"
         (HTArrow (HTVar "a") (HTCon "Bool"))

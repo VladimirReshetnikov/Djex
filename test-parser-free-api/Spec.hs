@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Exception (SomeException, evaluate, try)
 import Data.Either (isRight)
 import Data.Foldable (toList)
 import Data.Void (Void)
@@ -26,6 +27,15 @@ import Language.Haskell.Exference.Core.FunctionBinding
   )
 import qualified Language.Haskell.Exference.Core.Types as CoreTypes
 import Language.Haskell.Synthesis.Candidate (candidateOutput)
+import Language.Haskell.Synthesis.Constraint (Constraint (..))
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic
+  , diagnosticCode
+  , diagnosticSource
+  , diagnosticSpan
+  , sourceTextLocation
+  , sourceTextSpan
+  )
 import Language.Haskell.Synthesis.Generated (clauseName)
 import Language.Haskell.Synthesis.Inventory
   ( InventoryError
@@ -81,13 +91,29 @@ main = defaultMain $ testGroup "Djex parser-free API"
             (TypeVariable variable)
           options = defaultExferenceOptions
             { exferenceMaximumSteps = 16 }
+      let source = "a -> a"
+          location = sourceTextLocation "parser-free-api" source
       request <- expectRight
-        $ mkExferenceRequestWithSourceInfo mempty Nothing QueryRequest
+        $ mkExferenceRequestWithSourceInfo mempty location QueryRequest
           { requestTarget = checkedTarget
           , requestGoal = goal
           , requestContexts = []
           , requestOptions = options
           }
+      className <- expectRight $ mkIdentifier "C"
+      case mkExferenceRequestWithSourceInfo mempty location QueryRequest
+          { requestTarget = checkedTarget
+          , requestGoal = goal
+          , requestContexts =
+              [Constraint className [TypeVariable $ FlexibleVariable 1]]
+          , requestOptions = options
+          } of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
+          diagnosticSource failure @?= Just "parser-free-api"
+          diagnosticSpan failure @?= Just (sourceTextSpan source)
+        Right _ -> assertFailure
+          "the sourced SPI accepted an out-of-scope context variable"
       results <- expectRight $ runExferenceQuery session request
       backendGoal <- expectRight $ CoreTypes.fromSynthesisType goal
       coreEnvironment <- expectRight $ mkExferenceEnvironment
@@ -115,6 +141,30 @@ main = defaultMain $ testGroup "Djex parser-free API"
         candidate : _ -> clauseName (candidateOutput candidate) @?=
           checkedTarget
         [] -> assertFailure "the direct result path found no identity"
+  , testCase "source-aware request sealing materializes source spans" $ do
+      targetName <- expectRight $ mkIdentifier "identity"
+      target <- expectRight $ validateExferenceTarget targetName
+      let variable = FlexibleVariable 0
+          goal = FunctionType
+            (TypeVariable variable)
+            (TypeVariable variable)
+          partialSource = 'a' : error "unforced adapter source tail"
+          location = sourceTextLocation "parser-free-api" partialSource
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = goal
+            , requestContexts = []
+            , requestOptions = defaultExferenceOptions
+            }
+      result <- try $ evaluate $
+        mkExferenceRequestWithSourceInfo mempty location query
+      case result
+          :: Either
+              SomeException
+              (Either Diagnostic ExferenceRequest) of
+        Left _ -> pure ()
+        Right _ -> assertFailure
+          "the source-aware adapter retained a lazy source-span traversal"
   , testCase "the native shared type has honest compatibility views" $ do
       let rigidForall = CoreTypes.TypeForallNative
             [RigidVariable 7]

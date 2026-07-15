@@ -13,10 +13,15 @@
 module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
   , requestContextualType
+  , RequestProvenance (..)
+  , withRequestProvenance
   , CachedQuery
   , mkCachedQuery
+  , mkCachedQueryWithProvenance
   , cachedQueryRequest
+  , cachedQueryProvenance
   , cachedQueryCache
+  , withCachedQueryProvenance
   , QueryEvidence (..)
   , QueryResult
   , resultEvidence
@@ -30,6 +35,11 @@ import Control.DeepSeq (NFData)
 import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint (Constraint)
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic
+  , SourceLocation
+  , withSourceLocation
+  )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Search
   ( SearchBatch
@@ -57,16 +67,39 @@ data QueryRequest ty options = QueryRequest
 instance (NFData ty, NFData options) =>
     NFData (QueryRequest ty options)
 
+-- | Whether a checked request came from an in-memory API value or a complete
+-- source location.
+--
+-- Provenance affects only diagnostics. It is deliberately separate from
+-- 'QueryRequest', whose equality and display describe synthesis semantics.
+-- The source constructor is strict so a 'SourceLocation' derived from a text
+-- buffer is materialized while the request is sealed.
+data RequestProvenance
+  = ProgrammaticRequest
+  | SourceRequest !SourceLocation
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData RequestProvenance
+
+-- | Attach source provenance to a diagnostic when the request came from text.
+withRequestProvenance
+  :: RequestProvenance
+  -> Diagnostic
+  -> Diagnostic
+withRequestProvenance ProgrammaticRequest = id
+withRequestProvenance (SourceRequest location) = withSourceLocation location
+
 -- | A stable neutral request paired with an adapter-owned projection or
 -- presentation cache.
 --
--- The constructor is hidden so the request and cache cannot be replaced
--- independently after an adapter seals its own opaque request.  Equality and
+-- The constructor is hidden so request, provenance, and cache cannot be
+-- replaced independently after an adapter seals its own opaque request. Equality and
 -- display deliberately observe only the neutral request: cached backend
--- values and source provenance are implementation details and need not even
+-- values are implementation details and need not even
 -- have 'Eq' or 'Show' instances.
 data CachedQuery ty options cache = CachedQuery
   (QueryRequest ty options)
+  !RequestProvenance
   cache
 
 -- | Pair a neutral request with the exact cache derived from it.
@@ -74,17 +107,43 @@ mkCachedQuery
   :: QueryRequest ty options
   -> cache
   -> CachedQuery ty options cache
-mkCachedQuery = CachedQuery
+mkCachedQuery = mkCachedQueryWithProvenance ProgrammaticRequest
+
+-- | Pair a neutral request with its exact provenance and derived cache.
+--
+-- Keeping provenance outside the backend cache gives every adapter the same
+-- source-location lifetime and diagnostic contract without making it part of
+-- semantic request equality.
+mkCachedQueryWithProvenance
+  :: RequestProvenance
+  -> QueryRequest ty options
+  -> cache
+  -> CachedQuery ty options cache
+mkCachedQueryWithProvenance provenance request =
+  CachedQuery request provenance
 
 -- | Recover the stable neutral request.
 cachedQueryRequest
   :: CachedQuery ty options cache
   -> QueryRequest ty options
-cachedQueryRequest (CachedQuery request _) = request
+cachedQueryRequest (CachedQuery request _ _) = request
+
+-- | Recover diagnostic provenance without exposing the backend cache.
+cachedQueryProvenance
+  :: CachedQuery ty options cache
+  -> RequestProvenance
+cachedQueryProvenance (CachedQuery _ provenance _) = provenance
 
 -- | Recover the adapter-owned cache.
 cachedQueryCache :: CachedQuery ty options cache -> cache
-cachedQueryCache (CachedQuery _ cache) = cache
+cachedQueryCache (CachedQuery _ _ cache) = cache
+
+-- | Attach this checked request's provenance to a diagnostic.
+withCachedQueryProvenance
+  :: CachedQuery ty options cache
+  -> Diagnostic
+  -> Diagnostic
+withCachedQueryProvenance = withRequestProvenance . cachedQueryProvenance
 
 instance (Eq ty, Eq options) => Eq (CachedQuery ty options cache) where
   left == right = cachedQueryRequest left == cachedQueryRequest right

@@ -222,6 +222,11 @@ constructor is opaque:
 nonempty batches, while `queryResultFromCandidates` derives that evidence for
 ordinary heuristic-search batches. Both checks inspect only the list spine's
 first constructor, so they do not sacrifice lazy candidate tails.
+`CachedQuery` separately owns a strict `RequestProvenance` and the adapter's
+lazy derived cache. Parsed requests materialize their complete neutral
+`SourceLocation` while sealing, avoiding retention of the input buffer;
+programmatic requests carry an explicit source-free provenance. Equality and
+display continue to observe only the neutral request.
 `mkDjinnSession` lowers and seals the neutral shared
 `DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
 class-kind defaulting. An opaque shared `PreparedInventory` keeps that
@@ -236,7 +241,10 @@ compatibility caller asks to display them. At query time Djinn elaborates the
 goal and all class arguments as one shared kind scope, translates only the goal
 and instantiated class methods, then sends the alias-free projection to proof
 search; opaque requests still retain their exact session-independent source
-view.
+view. Invalid search controls now have a typed core failure and stable
+`DJEX_DJINN_OPTIONS` diagnostic; query-type provenance is attached only to
+source-derived input rejection, never to separately supplied options or an
+internal proof/result invariant.
 `standardDjinnSession` converts the historical built-in spelling once and then
 uses the same neutral `mkDjinnSession` path as every caller-supplied environment.
 `parseDjinnRequest` shares the compatibility frontend's optional class-context
@@ -316,8 +324,9 @@ and then elimination order.
 `ExferenceRequest` is opaque in the same operational sense as `DjinnRequest`:
 the stable adapter exposes only `mkExferenceRequest` and
 `exferenceRequestQuery`. Source locations and parsed variable spellings are
-private presentation caches, so they neither affect equality/display nor admit
-an unchecked construction path through the curated facade. The parser-free
+private presentation data, while the common `CachedQuery` owns the strict
+location separately from the backend-specific spelling cache. Neither affects
+equality/display nor admits an unchecked construction path through the curated facade. The parser-free
 library's hidden `Language.Haskell.Djex.Exference.Internal.Request`
 representation owns that metadata. Source-adapter authors opt into the explicit parser-neutral
 `Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.
@@ -326,6 +335,9 @@ sealing, source-aware request construction, target preflight, and
 collision-safe variable allocation needed at that boundary. It is exposed
 directly by `djex`, but deliberately not re-exported by
 `Language.Haskell.Djex` or the frontend library.
+HSE's normalized parse filename is also the filename retained for deferred
+diagnostics, so extensionless labels no longer change identity between parse
+and search phases; angle-bracket virtual-buffer names remain verbatim.
 
 The Haskell-source loader is likewise fail-closed at its vocabulary boundary:
 after parsing, but before constructing any partial inventory, it reports

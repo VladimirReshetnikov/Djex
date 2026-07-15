@@ -101,12 +101,18 @@ Adapters import it directly from `djex`; neither the curated
 `Language.Haskell.Djex` facade nor `exference-frontend` re-exports it. The
 request representation behind it remains a hidden module. Stable clients
 therefore see an opaque `ExferenceRequest` with one neutral smart constructor;
-source spans and parsed variable spellings remain frontend implementation
-details.
+the shared `CachedQuery` owns its strict complete source provenance, while
+parsed variable spellings remain a backend-specific frontend detail. Neither
+participates in request equality or display, and the strict location prevents
+a reusable request from retaining its complete source buffer.
 Its compatibility parser still accepts a raw shared `Name`, but converts it to
 the request's opaque `DefinitionName` before parsing so invalid-target
 diagnostics retain their historical precedence. Programmatic `QueryRequest`s
 cannot carry an unchecked target at all.
+The filename stored after a successful parse is the same normalized HSE
+filename used by immediate parse diagnostics: ordinary extensionless labels
+gain `.hs`, existing extensions remain unchanged, and angle-bracket virtual
+buffer names remain verbatim.
 
 Core names use the shared synthesis modules in `djex` and their validated
 structural `Name` directly:
@@ -414,6 +420,9 @@ then becomes the name of every generated `FunctionClause`; it is never
 round-tripped through source text. `runExferenceQuery` elaborates the stable
 request and returns those core-built `QueryResult`s directly rather than
 rebuilding their progress, evidence, metadata, or candidates in the adapter.
+Type-source provenance is applied to elaboration, lowering, and query-input
+failures. Search controls are supplied independently and therefore report
+`DJEX_EXF_OPTIONS` without falsely pointing at the type text.
 
 The older `findGeneratedSearchBatchesEither` and
 `findGeneratedSearchBatchesWithHintsEither` entry points remain core

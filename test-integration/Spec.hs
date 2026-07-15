@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Control.Exception (SomeException, evaluate, try)
 import Data.Either (isRight)
 import Data.List (isInfixOf, nub)
 import qualified Data.Map.Strict as Map
@@ -181,6 +182,37 @@ tests = testGroup "Djex facade"
           diagnosticSource failure @?= Nothing
           diagnosticSpan failure @?= Nothing
         Right _ -> fail "Djinn accepted an unsaturated programmatic synonym"
+  , testCase "materialize Djinn provenance while sealing a request" $ do
+      session <- sealDjinnEnvironment standardEnvironment
+      target <- expectRight $ mkIdentifier "strictProvenance"
+      result <- try $ evaluate $ parseDjinnRequest session
+        defaultQueryOptions target
+        (error "unforced Djinn source name") "a -> a"
+      case result
+          :: Either SomeException (Either Diagnostic DjinnRequest) of
+        Left _ -> pure ()
+        Right _ -> fail
+          "the Djinn adapter retained lazy provenance past request sealing"
+  , testCase "classify Djinn options without attributing type source" $ do
+      session <- sealDjinnEnvironment standardEnvironment
+      target <- expectRight $ mkIdentifier "invalidOptions"
+      let options = defaultQueryOptions {optionCutoff = 0}
+      parsed <- expectRight $ parseDjinnRequest session options target
+        "invalid-options.djinn" "a -> a"
+      programmatic <- expectRight $ mkDjinnRequest $ djinnRequestQuery parsed
+      parsed @?= programmatic
+      parsedFailure <- case runDjinnQuery session parsed of
+        Left failure -> pure failure
+        Right _ -> fail "Djinn accepted a parsed zero candidate cutoff"
+      programmaticFailure <- case runDjinnQuery session programmatic of
+        Left failure -> pure failure
+        Right _ -> fail "Djinn accepted a programmatic zero candidate cutoff"
+      diagnosticCode parsedFailure @?= Just "DJEX_DJINN_OPTIONS"
+      diagnosticContext parsedFailure @?=
+        ["NonPositiveCandidateCutoff 0"]
+      diagnosticSource parsedFailure @?= Nothing
+      diagnosticSpan parsedFailure @?= Nothing
+      parsedFailure @?= programmaticFailure
   , testCase "preserve Djinn's target-reference evidence" $ do
       variable <- expectRight $ parseHType "a"
       environment <- expectRight $
@@ -432,7 +464,7 @@ tests = testGroup "Djex facade"
       _ <- firstExferenceCandidate =<< expectRight
         (runExferenceQuery session shared)
       pure ()
-  , testCase "retain source locations for deferred synonym failures" $ do
+  , testCase "canonicalize Exference source names for every failure phase" $ do
       aliasName <- expectRight $ parseName "Fixture.Alias"
       higherName <- expectRight $ parseName "Fixture.Higher"
       target <- expectRight $ mkIdentifier "partialAlias"
@@ -446,13 +478,20 @@ tests = testGroup "Djex facade"
         (mkEnvironment [alias, higher] :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       session <- expectRight $ mkExferenceSession environment
+      let sourceName = "partial-alias"
+          canonicalSourceName = "partial-alias.hs"
+      case parseExferenceRequest session defaultExferenceOptions target
+          sourceName "(" of
+        Left failure ->
+          diagnosticSource failure @?= Just canonicalSourceName
+        Right _ -> fail "an incomplete Exference type parsed successfully"
       request <- expectRight $ parseExferenceRequest session
-        defaultExferenceOptions target "partial-alias.djex"
+        defaultExferenceOptions target sourceName
         "Fixture.Higher Fixture.Alias"
       case runExferenceQuery session request of
         Left failure -> do
           diagnosticCode failure @?= Just "DJEX_EXF_SYNONYM"
-          diagnosticSource failure @?= Just "partial-alias.djex"
+          diagnosticSource failure @?= Just canonicalSourceName
           assertBool "deferred synonym failure lost its source range"
             $ diagnosticSpan failure /= Nothing
         Right _ -> fail "an unsaturated synonym reached Exference search"
@@ -631,7 +670,7 @@ tests = testGroup "Djex facade"
       results <- expectRight $ runExferenceQuery session request
       assertBool "scoped nested-forall context produced no identity"
         $ any (not . null . batchCandidates . resultSearch) results
-  , testCase "retain parsed provenance on malformed Exference options" $ do
+  , testCase "classify Exference options without attributing type source" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
       target <- expectRight $ mkIdentifier "identity"
@@ -650,15 +689,11 @@ tests = testGroup "Djex facade"
         Left failure -> pure failure
         Right _ -> fail "Exference accepted programmatic zero-step options"
       diagnosticCode parsedFailure @?= Just "DJEX_EXF_OPTIONS"
-      diagnosticSource parsedFailure @?= Just sourceName
-      diagnosticSpan parsedFailure @?= Just (sourceTextSpan source)
+      diagnosticSource parsedFailure @?= Nothing
+      diagnosticSpan parsedFailure @?= Nothing
       diagnosticSource programmaticFailure @?= Nothing
       diagnosticSpan programmaticFailure @?= Nothing
-      parsedFailure
-          { diagnosticSource = Nothing
-          , diagnosticSpan = Nothing
-          }
-        @?= programmaticFailure
+      parsedFailure @?= programmaticFailure
   , testCase "preserve an Exference query filename extension" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
@@ -669,6 +704,15 @@ tests = testGroup "Djex facade"
           diagnosticCode failure @?= Just "DJEX_EXF_PARSE"
           diagnosticSource failure @?= Just "query.hs"
         Right _ -> fail "Exference parsed an incomplete input type"
+  , testCase "preserve virtual Exference source names verbatim" $ do
+      checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
+      target <- expectRight $ mkIdentifier "broken"
+      case parseExferenceRequest session defaultExferenceOptions target
+          "<command-line>" "(" of
+        Left failure ->
+          diagnosticSource failure @?= Just "<command-line>"
+        Right _ -> fail "Exference parsed an incomplete virtual-buffer type"
   , testCase "do not turn an Exference environment binding into recursion" $ do
       target <- expectRight $ mkIdentifier "identity"
       backendTarget <- expectRight $ mkQualifiedName [] "identity"

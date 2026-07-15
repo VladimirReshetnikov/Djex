@@ -35,6 +35,7 @@ module Language.Haskell.Synthesis.Type
   , uniquifyTypeBinders
   , freshenTypeBindersAwayFrom
   , substituteTypeVariables
+  , substituteTypeVariablesBatch
   , validateType
   , freeVariablesInFirstOccurrenceOrder
   , freeVariables
@@ -53,6 +54,7 @@ import Control.Monad.Trans.State.Strict
   , runStateT
   )
 import Data.Bifunctor (first)
+import Data.Functor.Identity (Identity (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
@@ -610,11 +612,40 @@ substituteTypeVariables
   -> Type variable
   -> Either (SubstitutionError variable) (Type variable)
 substituteTypeVariables fresh extraReserved substitutions source =
-  evalStateT (substitute substitutions source) initialReserved
+  runIdentity <$> substituteTypeVariablesTraversable
+    fresh extraReserved substitutions (Identity source)
+
+-- | Simultaneously substitute across a batch of types under one fresh-name
+-- reservation set.
+--
+-- In addition to the guarantees of 'substituteTypeVariables', every source
+-- identity is reserved before the first type is visited and binders allocated
+-- for earlier types remain reserved for later ones. This lets constraints and
+-- other grouped obligations preserve one variable namespace without packing
+-- their members into a synthetic tuple or application node.
+substituteTypeVariablesBatch
+  :: Ord variable
+  => FreshVariableAllocator variable
+  -> Set variable
+  -> Map.Map variable (Type variable)
+  -> [Type variable]
+  -> Either (SubstitutionError variable) [Type variable]
+substituteTypeVariablesBatch = substituteTypeVariablesTraversable
+
+substituteTypeVariablesTraversable
+  :: (Ord variable, Traversable collection)
+  => FreshVariableAllocator variable
+  -> Set variable
+  -> Map.Map variable (Type variable)
+  -> collection (Type variable)
+  -> Either (SubstitutionError variable) (collection (Type variable))
+substituteTypeVariablesTraversable
+    fresh extraReserved substitutions sources =
+  evalStateT (traverse (substitute substitutions) sources) initialReserved
  where
   initialReserved = Set.unions
     [ extraReserved
-    , allTypeVariables source
+    , foldMap allTypeVariables sources
     , Map.keysSet substitutions
     , foldMap allTypeVariables substitutions
     ]

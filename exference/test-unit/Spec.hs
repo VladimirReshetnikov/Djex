@@ -1024,6 +1024,23 @@ tests = testGroup "Exference"
           constraintApplySubstsChecked
               (IntMap.singleton 0 $ TypeVar 1) source
             @?= Right (Any True, expected)
+      , testCase "constraint substitution shares freshness across arguments" $ do
+          let source = HsConstraint (name "C")
+                [ TypeForall [1] [] $ TypeVar 0
+                , TypeForall [1] [] $ TypeVar 0
+                ]
+              expected = HsConstraint (name "C")
+                [ TypeForall [2] [] $ TypeVar 1
+                , TypeForall [3] [] $ TypeVar 1
+                ]
+          constraintApplySubstsChecked
+              (IntMap.singleton 0 $ TypeVar 1) source
+            @?= Right (Any True, expected)
+      , testCase "constraint substitution preserves an empty argument list" $ do
+          let source = HsConstraint (name "C") []
+          constraintApplySubstsChecked
+              (IntMap.singleton 0 $ TypeVar 1) source
+            @?= Right (Any False, source)
       , testCase "native tuple mapping preserves rigid identities" $ do
           let source = TypeForall [0]
                 [HsConstraint (name "C")

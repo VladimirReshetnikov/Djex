@@ -449,7 +449,9 @@ operation preserves source order while assigning one kind to each free
 variable shared by a goal and its separate context arguments. The underlying
 shared type module now owns the
 scope-aware simultaneous substitution primitive used by synonym expansion and
-Exference's compatibility substitution API. Exference's backend-specific
+Exference's compatibility substitution API. Its batch form lets Exference
+substitute constraint arguments under one fresh namespace without encoding
+the list as a temporary unboxed tuple. Exference's backend-specific
 unifiers operate directly on the same native tree, canonicalize their inputs
 and projected substitutions, preserve flexible/rigid and left/right identity,
 and consume the foundation's one constructor-application view for structural

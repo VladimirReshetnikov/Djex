@@ -735,6 +735,26 @@ unboxed tuples, malformed tuples, nested conversion, and canonical
 round-tripping; Exference's existing higher-kinded function and tuple checks
 pin both backend consumers.
 
+## Post-fold batch-substitution consolidation
+
+**Completed on 2026-07-15:** Exference substituted a constraint's type
+arguments together by packing them into a synthetic unboxed tuple, invoking
+the shared capture-avoiding substitution operation, and projecting the tuple
+again. The workaround coordinated fresh forall identities across sibling
+arguments, but leaked representation machinery into the backend and required
+an otherwise impossible projection-error alternative.
+
+`Language.Haskell.Synthesis.Type.substituteTypeVariablesBatch` now provides
+that operation directly. The single-type API and batch API share one generic
+implementation; the batch reserves every identity in every source before
+traversal and retains allocated binders between members in deterministic
+source order. Exference's constraint substitution consumes the resulting list
+directly and no longer constructs, validates, or deconstructs a tuple. The old
+projection-error constructor remains as a source-compatibility spelling but
+is documented as unproducible by the new path. Foundation regressions pin
+avoidance of a later sibling's source identity and distinct allocations across
+members; Exference pins the corresponding multi-argument constraint behavior.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

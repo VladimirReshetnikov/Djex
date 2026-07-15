@@ -155,7 +155,9 @@ from ordinary occurrences and returns the exact first quantified subtree for
 diagnostics, so adapters do not need private type-grammar inspections.
 Its checked binder normalizer makes every explicit forall identity globally
 unique against free and caller-protected names while leaving backend binder
-admissibility and fresh-identity selection as explicit policies.
+admissibility and fresh-identity selection as explicit policies. Capture-safe
+substitution also has a batch form that reserves every sibling source before
+traversal and threads one fresh namespace across grouped types.
 Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
 this AST; those belong to the declaration layer instead of being encoded as
 special type nodes.

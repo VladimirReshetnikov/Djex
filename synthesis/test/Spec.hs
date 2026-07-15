@@ -1745,6 +1745,28 @@ typeTests = testGroup "source types"
             ]
       SharedType.substituteTypeVariables (\_ _ -> Nothing) Set.empty
           substitutions source @?= Right expected
+  , testCase "batch substitution shares one complete fresh namespace" $ do
+      let quantified = SharedType.ForallType ["bound"] []
+            $ SharedType.TypeVariable "free"
+          sources =
+            [ quantified
+            , SharedType.TypeVariable "bound'"
+            , quantified
+            ]
+          substitutions = Map.singleton "free"
+            $ SharedType.TypeVariable "bound"
+          expected =
+            [ SharedType.ForallType ["bound''"] []
+                $ SharedType.TypeVariable "bound"
+            , SharedType.TypeVariable "bound'"
+            , SharedType.ForallType ["bound'''"] []
+                $ SharedType.TypeVariable "bound"
+            ]
+      SharedType.substituteTypeVariablesBatch freshStringVariable Set.empty
+          substitutions sources @?= Right expected
+      SharedType.substituteTypeVariablesBatch
+          (\_ _ -> error "allocated for empty batch") Set.empty
+          substitutions [] @?= Right []
   , testCase "irrelevant substitutions do not consume fresh supply" $ do
       let source = SharedType.ForallType ["bound"] []
             $ SharedType.TypeVariable "body"

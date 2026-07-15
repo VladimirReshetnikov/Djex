@@ -74,6 +74,7 @@ where
 
 
 
+import Data.Bifunctor (first)
 import Data.Char ( ord, chr, toLower )
 import Data.Foldable (traverse_)
 import Data.Graph (SCC (..), stronglyConnComp)
@@ -190,6 +191,8 @@ type Substs = IntMap.IntMap HsType
 data HsSubstitutionError
   = SharedSubstitutionFailure
       (SharedType.SubstitutionError SynthesisVariable)
+  -- | Retained for source compatibility. Constraint substitution now uses the
+  -- shared batch operation and cannot produce a synthetic projection failure.
   | UnexpectedConstraintSubstitutionResult SynthesisType
   deriving (Eq, Show, Generic)
 
@@ -718,9 +721,8 @@ inflateInstances environment =
                 constraints
       _ -> []
 
--- | Checked simultaneous substitution across every argument of a constraint.
--- A structural tuple coordinates the fresh-variable reservation set across
--- sibling arguments; it is removed again before the result is returned.
+-- | Checked simultaneous substitution across every argument of a constraint
+-- under one shared fresh-variable reservation set.
 constraintApplySubstsChecked
   :: Substs
   -> HsConstraint
@@ -728,21 +730,16 @@ constraintApplySubstsChecked
 constraintApplySubstsChecked substitutions constraint
   | IntMap.null substitutions = Right (Any False, constraint)
   | HsConstraint className parameters <- constraint = do
-      substituted <- substituteShared substitutions $ SharedType.TupleType
-        SharedName.Unboxed parameters
-      resultParameters <- case substituted of
-        SharedType.TupleType SharedName.Unboxed results ->
-          mapM lowerSubstitutionResult results
-        unexpected -> Left $ UnexpectedConstraintSubstitutionResult unexpected
+      substituted <- substituteSharedBatch substitutions parameters
       Right
         ( Any $ substitutionsAffect substitutions $ foldMap freeVars parameters
-        , HsConstraint className resultParameters
+        , HsConstraint className
+            $ map canonicalizeSubstitutionResult substituted
         )
 
 -- | Compatibility wrapper around 'constraintApplySubstsChecked'.  It throws a
 -- descriptive exception only if capture avoidance would require a fresh
--- variable after every 'Int' identity has been reserved, or if an internal
--- shared/core projection invariant is broken.
+-- variable after every 'Int' identity has been reserved.
 {-# INLINE constraintApplySubsts #-}
 constraintApplySubsts :: Substs -> HsConstraint -> (Any, HsConstraint)
 constraintApplySubsts substitutions = checkedSubstitution
@@ -806,10 +803,9 @@ applySubstsChecked substitutions source
   | otherwise = do
       substituted <- substituteShared substitutions
         source
-      result <- lowerSubstitutionResult substituted
       Right
         ( Any $ substitutionsAffect substitutions $ freeVars source
-        , result
+        , canonicalizeSubstitutionResult substituted
         )
 
 -- | Legacy total-shaped substitution API.  Capture avoidance over a finite
@@ -824,24 +820,23 @@ substituteShared
   :: Substs
   -> SynthesisType
   -> Either HsSubstitutionError SynthesisType
-substituteShared substitutions source = case
-    SharedType.substituteTypeVariables
-      freshSynthesisVariable
-      S.empty
-      (M.fromList
-        [ ( SharedType.FlexibleVariable variable
-          , replacement
-          )
-        | (variable, replacement) <- IntMap.toList substitutions
-        ])
-      source of
-  Left failure -> Left $ SharedSubstitutionFailure failure
-  Right result -> Right result
+substituteShared substitutions = first SharedSubstitutionFailure
+  . SharedType.substituteTypeVariables
+      freshSynthesisVariable S.empty (sharedSubstitutions substitutions)
 
-lowerSubstitutionResult
-  :: SynthesisType
-  -> Either HsSubstitutionError HsType
-lowerSubstitutionResult = Right . canonicalizeSubstitutionResult
+substituteSharedBatch
+  :: Substs
+  -> [SynthesisType]
+  -> Either HsSubstitutionError [SynthesisType]
+substituteSharedBatch substitutions = first SharedSubstitutionFailure
+  . SharedType.substituteTypeVariablesBatch
+      freshSynthesisVariable S.empty (sharedSubstitutions substitutions)
+
+sharedSubstitutions :: Substs -> M.Map SynthesisVariable SynthesisType
+sharedSubstitutions substitutions = M.fromList
+  [ (SharedType.FlexibleVariable variable, replacement)
+  | (variable, replacement) <- IntMap.toList substitutions
+  ]
 
 substitutionsAffect :: Substs -> S.Set TVarId -> Bool
 substitutionsAffect substitutions variables = any

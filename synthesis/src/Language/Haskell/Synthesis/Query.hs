@@ -12,6 +12,8 @@
 -- participate in a common session API.
 module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
+  , RequestTypeSite (..)
+  , traverseRequestTypes
   , requestContextualType
   , RequestProvenance (..)
   , withRequestProvenance
@@ -68,6 +70,41 @@ data QueryRequest ty options = QueryRequest
 
 instance (NFData ty, NFData options) =>
     NFData (QueryRequest ty options)
+
+-- | The role of one type visited inside a 'QueryRequest'.
+--
+-- A backend can use this distinction to retain goal-versus-context diagnostic
+-- wording while sharing the envelope's traversal order.
+data RequestTypeSite
+  = RequestGoal
+  | RequestContextArgument
+  deriving (Bounded, Enum, Eq, Ord, Show, Generic)
+
+instance NFData RequestTypeSite
+
+-- | Traverse the goal followed by every explicit context argument in source
+-- order, without changing the checked target or search options. The second
+-- callback can validate or normalize each complete context after its
+-- arguments and before the next context is inspected.
+--
+-- Owning this order in the neutral envelope keeps adapters from independently
+-- rebuilding requests during normalization. In particular, ordinary
+-- left-biased monads such as 'Either' observe goal failures before the
+-- context list, and a context-level failure before any later context.
+traverseRequestTypes
+  :: Monad effect
+  => (RequestTypeSite -> source -> effect target)
+  -> (Constraint target -> effect (Constraint target))
+  -> QueryRequest source options
+  -> effect (QueryRequest target options)
+traverseRequestTypes transform finishContext request = QueryRequest
+  (requestTarget request)
+  <$> transform RequestGoal (requestGoal request)
+  <*> traverse
+      (\context -> traverse (transform RequestContextArgument) context
+        >>= finishContext)
+      (requestContexts request)
+  <*> pure (requestOptions request)
 
 -- | Whether a checked request came from an in-memory API value or a complete
 -- source location.

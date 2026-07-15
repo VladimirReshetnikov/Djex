@@ -275,12 +275,24 @@ testCheckedDjinnAdapter = do
     let invalidClassQuery = programmaticQuery
             { SharedQuery.requestContexts =
                 [Constraint invalidClass [SharedType.TypeVariable "a"]] }
-    case Djex.mkDjinnRequest invalidClassQuery of
-        Left failure -> assertEqual
-            "qualified classes fail while sealing the request"
-            (Just "DJEX_DJINN_LOWER")
-            (SharedDiagnostic.diagnosticCode failure)
+    invalidClassFailure <- case Djex.mkDjinnRequest invalidClassQuery of
+        Left failure -> do
+            assertEqual "qualified classes fail while sealing the request"
+                (Just "DJEX_DJINN_LOWER")
+                (SharedDiagnostic.diagnosticCode failure)
+            pure failure
         Right _ -> fail "the Djinn request constructor accepted a qualified class"
+    let interContextPrecedenceQuery = programmaticQuery
+            { SharedQuery.requestContexts =
+                [ Constraint invalidClass [SharedType.TypeVariable "a"]
+                , Constraint (sharedName "Eq") [unsupportedGoal]
+                ]
+            }
+    case Djex.mkDjinnRequest interContextPrecedenceQuery of
+        Left failure -> assertEqual
+            "an earlier class failure was overtaken by a later context type"
+            invalidClassFailure failure
+        Right _ -> fail "the Djinn request constructor lost both context errors"
 
     invalidTarget <- expectShownRight $
         SharedName.mkQualifiedIdentifier qualifier "identity"

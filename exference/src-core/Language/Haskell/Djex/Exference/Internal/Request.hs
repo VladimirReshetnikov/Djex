@@ -57,6 +57,7 @@ import Language.Haskell.Synthesis.Query
   , cachedQueryCache
   , cachedQueryRequest
   , sealCachedQueryWithProvenance
+  , traverseRequestTypes
   , requestContextualType
   , withCachedQueryProvenance
   )
@@ -150,13 +151,8 @@ mkExferenceRequestWithProvenance sourceVariables provenance query =
 normalizeRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic (QueryRequest ExferenceType ExferenceOptions)
-normalizeRequest query = do
-  goal <- normalizeType $ requestGoal query
-  contexts <- traverse (traverse normalizeType) $ requestContexts query
-  pure query {requestGoal = goal, requestContexts = contexts}
- where
-  normalizeType source = either (Left . invalidRequest) Right
-    $ toSynthesisType source
+normalizeRequest = first invalidRequest
+  . traverseRequestTypes (const toSynthesisType) pure
 
 exferenceRequestQuery
   :: ExferenceRequest

@@ -28,6 +28,14 @@ facadeTests = testGroup "public Djex facade"
       containsForall typeExpression @?= True
       typeConstraints typeExpression @?= []
       typeConstructorHead typeExpression @?= Just checkedName
+      let requestTraversal
+            :: (RequestTypeSite -> String -> Maybe String)
+            -> (Constraint String -> Maybe (Constraint String))
+            -> QueryRequest String ()
+            -> Maybe (QueryRequest String ())
+          requestTraversal = traverseRequestTypes
+      requestTraversal `seq`
+        (RequestGoal < RequestContextArgument) @?= True
   , testCase "exports generated-code rendering" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

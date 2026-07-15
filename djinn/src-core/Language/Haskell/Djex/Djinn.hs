@@ -67,8 +67,7 @@ import Language.Haskell.Synthesis.Candidate
   , renderCandidateExpression
   )
 import Language.Haskell.Synthesis.Constraint
-  ( Constraint (Constraint)
-  , constraintArguments
+  ( Constraint
   , constraintClass
   )
 import Language.Haskell.Synthesis.Diagnostic
@@ -94,10 +93,12 @@ import Language.Haskell.Synthesis.Query
   ( CachedQuery
   , QueryRequest (..)
   , RequestProvenance (..)
+  , RequestTypeSite (..)
   , cachedQueryCache
   , cachedQueryProvenance
   , cachedQueryRequest
   , sealCachedQueryWithProvenance
+  , traverseRequestTypes
   , withRequestProvenance
   )
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -264,13 +265,13 @@ mkDjinnRequestWithProvenance
   -> Either Diagnostic DjinnRequest
 mkDjinnRequestWithProvenance provenance query = DjinnRequest <$>
   sealCachedQueryWithProvenance provenance (do
-    goal <- normalizeRequestType "goal" $ requestGoal query
-    contexts <- traverse normalizeRequestContext $ requestContexts query
+    normalized <- traverseRequestTypes
+      normalizeRequestType validateRequestContext query
     pure
       ( query
       , DjinnRequestPlan
-        { plannedGoal = goal
-        , plannedContexts = contexts
+        { plannedGoal = requestGoal normalized
+        , plannedContexts = requestContexts normalized
         }
       ))
 
@@ -376,26 +377,31 @@ candidateRenderOptions :: Qualification -> RenderOptions DjinnLocal
 candidateRenderOptions qualification =
   (defaultRenderOptions id) {renderQualification = qualification}
 
-normalizeRequestType :: String -> DjinnType -> Either Diagnostic DjinnType
-normalizeRequestType role = first (loweringFailure role)
+normalizeRequestType
+  :: RequestTypeSite
+  -> DjinnType
+  -> Either Diagnostic DjinnType
+normalizeRequestType site = first (loweringFailure $ siteRole site)
   . Core.normalizeSynthesisType
+
+siteRole :: RequestTypeSite -> String
+siteRole RequestGoal = "goal"
+siteRole RequestContextArgument = "context"
 
 -- Constraint is intentionally a more permissive neutral node than Djinn's
 -- historical grammar. Validate its name with the core smart constructor so a
 -- qualified or otherwise non-Djinn class cannot cross the sealed request
 -- boundary, then retain its canonical arguments in the shared representation.
-normalizeRequestContext
+validateRequestContext
   :: Constraint DjinnType
   -> Either Diagnostic (Constraint DjinnType)
-normalizeRequestContext context = do
-  arguments <- traverse (normalizeRequestType "context")
-    $ constraintArguments context
+validateRequestContext context = do
   -- No raw type is retained: the empty context is only the historical
   -- namespace validator for the exact structural class name.
   _ <- first contextLoweringFailure $ Core.mkContext
     (renderCanonical $ constraintClass context)
     []
-  pure $ Constraint (constraintClass context) arguments
+  pure context
 
 parsedTypeFailure
   :: RequestProvenance

@@ -524,6 +524,24 @@ direct-before-nested constraint ordering, the complete leading prenex chain,
 short-circuit quantifier detection, valid and invalid structural tuple heads,
 and parser-free facade exposure.
 
+## Post-fold request-type traversal consolidation
+
+**Completed on 2026-07-15:** both adapters manually rebuilt the same neutral
+`QueryRequest` shape to normalize its goal and every explicit context
+argument. That duplicated a user-visible failure order: the goal precedes all
+contexts, while each context's arguments precede that context's nominal class
+check and every later context.
+
+`traverseRequestTypes` now owns this site-aware traversal in
+`Language.Haskell.Synthesis.Query`. Its effectful complete-context hook is
+sequenced immediately after the transformed arguments, so Djinn retains its
+historical argument-before-class and context-before-later-context diagnostics;
+Exference supplies the identity hook and publishes the canonical request
+returned by the same traversal. Foundation regressions pin visit order and
+short-circuiting with deliberately partial context tails, a Djinn regression
+pins exact inter-context diagnostic precedence, and the parser-free facade
+pins the public traversal type.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

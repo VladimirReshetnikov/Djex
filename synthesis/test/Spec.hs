@@ -138,7 +138,63 @@ collectionTests = testGroup "collections"
 
 queryTests :: TestTree
 queryTests = testGroup "queries"
-  [ testCase "hide adapter caches from request equality and display" $ do
+  [ testCase "traverse request types in diagnostic order" $ do
+      let target = right $ mkDefinitionName $ right $ mkIdentifier "result"
+          firstClass = right $ mkIdentifier "First"
+          secondClass = right $ mkIdentifier "Second"
+          source = QueryRequest
+            { requestTarget = target
+            , requestGoal = "goal"
+            , requestContexts =
+                [ Constraint firstClass ["first", "second"]
+                , Constraint secondClass ["third"]
+                ]
+            , requestOptions = 42 :: Int
+            }
+          expected = QueryRequest
+            { requestTarget = target
+            , requestGoal = (RequestGoal, "goal")
+            , requestContexts =
+                [ Constraint firstClass
+                    [ (RequestContextArgument, "first")
+                    , (RequestContextArgument, "second")
+                    ]
+                , Constraint secondClass
+                    [(RequestContextArgument, "third")]
+                ]
+            , requestOptions = 42 :: Int
+            }
+      traverseRequestTypes
+          (\site typeExpression -> Just (site, typeExpression))
+          Just source @?=
+        Just expected
+      let goalFailure = QueryRequest
+            { requestTarget = target
+            , requestGoal = "invalid goal"
+            , requestContexts =
+                error "goal failure forced request contexts"
+            , requestOptions = ()
+            }
+          failType site typeExpression =
+            Left (site, typeExpression)
+              :: Either (RequestTypeSite, String) String
+      case traverseRequestTypes failType Right goalFailure of
+        Left failure -> failure @?= (RequestGoal, "invalid goal")
+        Right _ -> assertFailure "request traversal ignored a goal failure"
+      let contextFailure = QueryRequest
+            { requestTarget = target
+            , requestGoal = "valid goal"
+            , requestContexts = Constraint firstClass []
+                : error "context failure forced the next context"
+            , requestOptions = ()
+            }
+          keepType _ typeExpression = Right typeExpression
+            :: Either Name String
+          failContext = Left . constraintClass
+      case traverseRequestTypes keepType failContext contextFailure of
+        Left failure -> failure @?= firstClass
+        Right _ -> assertFailure "request traversal ignored a context failure"
+  , testCase "hide adapter caches from request equality and display" $ do
       let query = request (variable "a") []
           firstCache = mkCachedQuery query ((+ 1) :: Int -> Int)
           secondCache = mkCachedQuery query (const 0 :: Int -> Int)

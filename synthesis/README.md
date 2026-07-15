@@ -48,8 +48,11 @@ present the structured value themselves.
 `RequestProvenance` beside the neutral request and a lazy backend cache; both
 adapters therefore share one programmatic-versus-sourced lifetime and
 diagnostic contract without making parser metadata part of the synthesis
-request. Cache and provenance differences remain intentionally invisible to
-`Eq` and `Show`.
+request. Its site-aware request traversal visits the goal first, then each
+context's arguments and complete-context hook before the next context. Djinn
+and Exference therefore share normalization order without giving up
+backend-specific class validation or diagnostic wording. Cache and provenance
+differences remain intentionally invisible to `Eq` and `Show`.
 
 `Language.Haskell.Synthesis.Count` keeps intrinsically non-negative totals in
 `Natural`, with a strict collection count and one explicit saturating boundary

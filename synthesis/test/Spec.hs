@@ -1495,6 +1495,11 @@ typeTests = testGroup "source types"
       take 1 (SharedType.leadingForallVariables
         $ SharedType.ForallType ["outer"] []
         $ error "forced leading forall body") @?= ["outer"]
+      SharedType.typeBinderVariables source @?= ["a", "b", "c"]
+      take 1 (SharedType.typeBinderVariables
+        $ SharedType.ForallType ["outer"] []
+        $ error "forced all-depth binder body") @?= ["outer"]
+      SharedType.firstForallType source @?= Just source
       SharedType.containsForall source @?= True
       SharedType.containsNestedForall source @?= True
       SharedType.containsNestedForall
@@ -1505,6 +1510,11 @@ typeTests = testGroup "source types"
           (SharedType.FunctionType
             (SharedType.ForallType [] [] $ variable "a")
             (error "forced containsForall suffix")) @?= True
+      SharedType.firstForallType
+          (SharedType.FunctionType
+            (SharedType.ForallType [] [] $ variable "a")
+            (error "forced firstForallType suffix")) @?=
+        Just (SharedType.ForallType [] [] $ variable "a")
       SharedType.typeConstraints source @?=
         [ outerConstraint
         , siblingConstraint

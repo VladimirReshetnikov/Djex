@@ -24,6 +24,8 @@ module Language.Haskell.Synthesis.Type
   , implicitizeLeadingForalls
   , splitLeadingForalls
   , leadingForallVariables
+  , typeBinderVariables
+  , firstForallType
   , containsForall
   , containsNestedForall
   , typeConstraints
@@ -256,17 +258,53 @@ leadingForallVariables typeExpression = variables
  where
   (variables, _, _) = splitLeadingForalls typeExpression
 
+-- | Collect every explicit forall binder in structural source order.
+--
+-- At each forall its binder list precedes binders nested in direct constraint
+-- arguments, which in turn precede binders in its body. Unlike a generic fold,
+-- this observation excludes ordinary variable occurrences.
+typeBinderVariables :: Type variable -> [variable]
+typeBinderVariables = collect []
+ where
+  -- A continuation list preserves streaming while avoiding repeated append
+  -- through deep application, function, tuple, or constraint spines.
+  collect remaining typeExpression = case typeExpression of
+    TypeVariable{} -> remaining
+    TypeConstructor{} -> remaining
+    TypeApplication function argument ->
+      collect (collect remaining argument) function
+    FunctionType parameter result ->
+      collect (collect remaining result) parameter
+    TupleType _ elements -> foldr (flip collect) remaining elements
+    ForallType variables constraints body -> variables
+      ++ foldr collectConstraint (collect remaining body) constraints
+
+  collectConstraint constraint remaining =
+    foldr (flip collect) remaining $ constraintArguments constraint
+
+-- | Find the first explicit forall in structural source order.
+--
+-- The returned value is the complete quantified subtree, allowing callers to
+-- retain an exact diagnostic witness instead of only a Boolean. A forall is
+-- observed before inspecting its constraints or body.
+firstForallType :: Type variable -> Maybe (Type variable)
+firstForallType typeExpression = case typeExpression of
+  TypeVariable{} -> Nothing
+  TypeConstructor{} -> Nothing
+  TypeApplication function argument -> firstPresent
+    [firstForallType function, firstForallType argument]
+  FunctionType parameter result -> firstPresent
+    [firstForallType parameter, firstForallType result]
+  TupleType _ elements -> firstPresent $ map firstForallType elements
+  quantified@ForallType{} -> Just quantified
+ where
+  firstPresent [] = Nothing
+  firstPresent (Just present : _) = Just present
+  firstPresent (Nothing : remaining) = firstPresent remaining
+
 -- | Whether explicit quantification occurs anywhere in a type.
 containsForall :: Type variable -> Bool
-containsForall typeExpression = case typeExpression of
-  TypeVariable{} -> False
-  TypeConstructor{} -> False
-  TypeApplication function argument ->
-    containsForall function || containsForall argument
-  FunctionType parameter result ->
-    containsForall parameter || containsForall result
-  TupleType _ elements -> any containsForall elements
-  ForallType{} -> True
+containsForall = maybe False (const True) . firstForallType
 
 -- | Whether explicit quantification occurs outside the leading prenex chain.
 --

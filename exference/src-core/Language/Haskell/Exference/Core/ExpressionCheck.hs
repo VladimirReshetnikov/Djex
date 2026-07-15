@@ -284,10 +284,10 @@ unifyTypes :: HsType -> HsType -> Check ()
 unifyTypes left right = do
   left' <- zonk $ SharedType.canonicalizeType left
   right' <- zonk $ SharedType.canonicalizeType right
-  case firstForall left' of
+  case SharedType.firstForallType left' of
     Just quantified -> throwCheck $ UnsupportedNestedForall quantified
     Nothing -> pure ()
-  case firstForall right' of
+  case SharedType.firstForallType right' of
     Just quantified -> throwCheck $ UnsupportedNestedForall quantified
     Nothing -> pure ()
   case (applicativeForm left', applicativeForm right') of
@@ -326,22 +326,6 @@ applicativeForm typeExpression = case typeExpression of
     (applicativeForm body)
  where
   intrinsicApplication constructor = foldl TypeApp $ TypeCons constructor
-
-firstForall :: HsType -> Maybe HsType
-firstForall typeExpression = case typeExpression of
-  TypeVar{} -> Nothing
-  TypeConstant{} -> Nothing
-  TypeCons{} -> Nothing
-  TypeArrow parameter result -> firstJust
-    [firstForall parameter, firstForall result]
-  TypeApp function argument -> firstJust
-    [firstForall function, firstForall argument]
-  TypeTuple _ elements -> firstJust $ map firstForall elements
-  quantified@TypeForallNative{} -> Just quantified
- where
-  firstJust [] = Nothing
-  firstJust (Just value : _) = Just value
-  firstJust (Nothing : remaining) = firstJust remaining
 
 bindVariable :: TVarId -> HsType -> Check ()
 bindVariable variable ty

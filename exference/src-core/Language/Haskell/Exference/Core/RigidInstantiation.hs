@@ -162,28 +162,15 @@ leadingBinders = traverse flexibleBinder . SharedType.leadingForallVariables
     SharedType.RigidVariable identifier -> Left
       $ RigidForallBinderCannotBeInstantiated identifier
 
--- Locate forbidden rigid variables specifically in binder position.  A
--- generic fold cannot distinguish a rigid occurrence from a rigid binder.
+-- Locate forbidden rigid variables specifically in binder position. The
+-- shared observation distinguishes declarations from ordinary occurrences
+-- and preserves the historical structural failure order.
 firstRigidForallBinder :: HsType -> Maybe TVarId
-firstRigidForallBinder typeExpression = case typeExpression of
-  TypeVar{} -> Nothing
-  TypeConstant{} -> Nothing
-  TypeCons{} -> Nothing
-  TypeArrow parameter result -> firstJust
-    [firstRigidForallBinder parameter, firstRigidForallBinder result]
-  TypeApp function argument -> firstJust
-    [firstRigidForallBinder function, firstRigidForallBinder argument]
-  TypeTuple _ elements -> firstJust $ map firstRigidForallBinder elements
-  TypeForallNative variables constraints body ->
-    firstJust
-      ( map rigidBinder variables
-        ++ map (firstJust . map firstRigidForallBinder . constraint_params)
-          constraints
-        ++ [firstRigidForallBinder body]
-      )
+firstRigidForallBinder = foldr firstRigid Nothing
+  . SharedType.typeBinderVariables
  where
-  rigidBinder variable = case variable of
-    SharedType.FlexibleVariable _ -> Nothing
+  firstRigid variable remaining = case variable of
+    SharedType.FlexibleVariable _ -> remaining
     SharedType.RigidVariable identifier -> Just identifier
 
 firstJust :: [Maybe value] -> Maybe value

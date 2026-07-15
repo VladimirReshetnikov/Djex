@@ -34,6 +34,8 @@ facadeTests = testGroup "public Djex facade"
             $ TypeApplication (TypeConstructor checkedName)
             $ TypeVariable "a"
       leadingForallVariables typeExpression @?= ["a"]
+      typeBinderVariables typeExpression @?= ["a"]
+      firstForallType typeExpression @?= Just typeExpression
       containsForall typeExpression @?= True
       containsNestedForall typeExpression @?= False
       splitLeadingForalls typeExpression @?=

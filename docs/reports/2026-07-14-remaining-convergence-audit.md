@@ -694,6 +694,25 @@ source reservation, ordered contexts, rejection-before-duplicate precedence,
 allocator exhaustion, and the non-leading stopping boundary; the existing
 neutral-environment tests continue to pin standalone and class-method lowering.
 
+## Post-fold forall-inspection consolidation
+
+**Completed on 2026-07-15:** the foundation now owns two observations that a
+generic `Foldable Type` cannot express: `typeBinderVariables` distinguishes
+forall declarations from ordinary occurrences in complete structural order,
+and `firstForallType` returns the exact first quantified subtree rather than a
+Boolean. `containsForall` is now derived from the latter, so the shared module
+itself retains one traversal authority.
+
+This removes three Exference grammar walks. Native type validation checks its
+flexible-only binder policy over `typeBinderVariables`; rigid-instantiation
+planning selects the first forbidden rigid binder from the same lazy order;
+and independent expression checking obtains its exact unsupported-polymorphism
+diagnostic witness from `firstForallType`. Binder lists still precede nested
+constraint arguments and bodies, applications/functions remain left-to-right,
+and both observations leave unused suffixes lazy. Foundation and facade tests
+pin those order and laziness guarantees, while Exference's existing rigid-site
+and independent-checker regressions pin the compatibility diagnostics.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

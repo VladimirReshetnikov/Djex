@@ -148,7 +148,9 @@ quantifies a policy-selected free-variable namespace at one outer scope,
 capture-safely converts a leading explicit prenex chain into implicit fresh
 variables, validates lexical/arity/binder invariants, and computes free
 variables for both complete types and individual constraint arguments with
-nested quantifier scope.
+nested quantifier scope. It also exposes all-depth binder order separately
+from ordinary occurrences and returns the exact first quantified subtree for
+diagnostics, so adapters do not need private type-grammar inspections.
 Its checked binder normalizer makes every explicit forall identity globally
 unique against free and caller-protected names while leaving backend binder
 admissibility and fresh-identity selection as explicit policies.

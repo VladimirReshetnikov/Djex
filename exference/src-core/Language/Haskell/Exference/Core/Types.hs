@@ -242,20 +242,9 @@ canonicalizeSubstitutionResult = SharedType.canonicalizeType
 ensureFlexibleForallBinders
   :: SynthesisType
   -> Either SynthesisTypeError ()
-ensureFlexibleForallBinders = check
+ensureFlexibleForallBinders = traverse_ checkBinder
+  . SharedType.typeBinderVariables
  where
-  check typeExpression = case typeExpression of
-    TypeVar{} -> Right ()
-    TypeConstant{} -> Right ()
-    TypeCons{} -> Right ()
-    TypeArrow parameter result -> check parameter >> check result
-    TypeApp function argument -> check function >> check argument
-    TypeTuple _ elements -> traverse_ check elements
-    TypeForallNative variables constraints body -> do
-      traverse_ checkBinder variables
-      traverse_ (traverse_ check . constraint_params) constraints
-      check body
-
   checkBinder variable = case variable of
     SharedType.FlexibleVariable _ -> Right ()
     SharedType.RigidVariable identifier -> Left $ RigidForallBinder identifier

@@ -73,6 +73,10 @@ the shared scope-aware simultaneous substitution primitive, including
 capture-avoiding alpha-renaming under foralls. That representation-level API
 remains total for native rigid-binder forms; checked search boundaries reject
 those unsupported binders before execution.
+Flexible classification, identity projection, selective renaming, and
+flexible-versus-rigid collection now use the shared tagged-variable operations;
+Exference retains only its finite `Int` allocation and backend-specific error
+policies.
 
 The public named `exference-frontend` library is rooted at `src-frontend/`;
 it contains the `haskell-src-exts` frontend and environment loader and

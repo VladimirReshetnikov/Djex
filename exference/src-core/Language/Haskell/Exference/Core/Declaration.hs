@@ -509,9 +509,7 @@ implicitizeExferenceForalls outerVariables source =
   first lowerError $ fmap fst $ SharedType.implicitizeLeadingForalls
     rejectRigidBinder freshSynthesisVariable outerVariables source
  where
-  rejectRigidBinder variable = case variable of
-    SharedType.FlexibleVariable{} -> Nothing
-    SharedType.RigidVariable identifier -> Just identifier
+  rejectRigidBinder = SharedType.rigidVariableIdentity
 
   lowerError failure = case failure of
     SharedType.RejectedTypeBinder identifier ->
@@ -674,7 +672,7 @@ fromSynthesisInstanceDeclaration declaration = do
     SharedDeclaration.InstanceDeclaration _ variables prerequisites headConstraint
       | Set.fromList variables == constraintVariables
           (headConstraint : prerequisites)
-      , all isFlexibleVariable variables -> HsInstance
+      , all SharedType.isFlexibleVariable variables -> HsInstance
           <$> mapM loweredConstraint prerequisites
           <*> loweredConstraint headConstraint
       | otherwise -> Left $ NonImplicitInstanceForall variables
@@ -937,10 +935,6 @@ constraintVariables
   -> Set.Set SynthesisVariable
 constraintVariables = foldMap SharedType.constraintFreeVariables
 
-isFlexibleVariable :: SynthesisVariable -> Bool
-isFlexibleVariable SharedType.FlexibleVariable{} = True
-isFlexibleVariable SharedType.RigidVariable{} = False
-
 convertedConstraint
   :: HsConstraint
   -> Either SynthesisDeclarationError
@@ -1012,7 +1006,8 @@ deconstructorHead
   -> Either SynthesisDeclarationError (QualifiedName, [TVarId])
 deconstructorHead typeExpression = do
   (binders, body) <- case SharedType.splitLeadingForalls typeExpression of
-    (nativeBinders, [], body) -> case traverse flexibleBinder nativeBinders of
+    (nativeBinders, [], body) -> case traverse
+        SharedType.flexibleVariableIdentity nativeBinders of
       Just binders -> Right (binders, body)
       Nothing -> Left $ InvalidDeconstructorHead typeExpression
     _ -> Left $ InvalidDeconstructorHead typeExpression
@@ -1022,10 +1017,6 @@ deconstructorHead typeExpression = do
     then Right (name, parameters)
     else Left $ DeconstructorForallMismatch binders parameters
  where
-  flexibleBinder variable = case variable of
-    SharedType.FlexibleVariable identifier -> Just identifier
-    SharedType.RigidVariable{} -> Nothing
-
   nominalApplication (TypeTuple boxity elements) = do
     name <- either (const $ Left $ InvalidDeconstructorHead typeExpression)
       Right $ SharedName.tupleName boxity $ length elements

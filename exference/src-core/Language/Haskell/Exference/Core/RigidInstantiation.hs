@@ -157,10 +157,11 @@ leadingBinders
   -> Either RigidInstantiationError [TVarId]
 leadingBinders = traverse flexibleBinder . SharedType.leadingForallVariables
  where
-  flexibleBinder variable = case variable of
-    SharedType.FlexibleVariable identifier -> Right identifier
-    SharedType.RigidVariable identifier -> Left
-      $ RigidForallBinderCannotBeInstantiated identifier
+  flexibleBinder variable = maybe
+    (Left $ RigidForallBinderCannotBeInstantiated
+      $ SharedType.variableIdentity variable)
+    Right
+    $ SharedType.flexibleVariableIdentity variable
 
 -- Locate forbidden rigid variables specifically in binder position. The
 -- shared observation distinguishes declarations from ordinary occurrences
@@ -169,9 +170,8 @@ firstRigidForallBinder :: HsType -> Maybe TVarId
 firstRigidForallBinder = foldr firstRigid Nothing
   . SharedType.typeBinderVariables
  where
-  firstRigid variable remaining = case variable of
-    SharedType.FlexibleVariable _ -> remaining
-    SharedType.RigidVariable identifier -> Just identifier
+  firstRigid variable remaining = maybe remaining Just
+    $ SharedType.rigidVariableIdentity variable
 
 firstJust :: [Maybe value] -> Maybe value
 firstJust [] = Nothing
@@ -210,11 +210,7 @@ maximumRigidInType = Foldable.foldl' maximumMaybe Nothing
   . map Just . rigidIdentifiersInType
 
 rigidIdentifiersInType :: HsType -> [TVarId]
-rigidIdentifiersInType = Foldable.foldr collect []
- where
-  collect variable identifiers = case variable of
-    SharedType.FlexibleVariable{} -> identifiers
-    SharedType.RigidVariable identifier -> identifier : identifiers
+rigidIdentifiersInType = foldMap $ SharedType.foldRigidVariable (: [])
 
 maximumMaybe :: Ord value => Maybe value -> Maybe value -> Maybe value
 maximumMaybe Nothing right = right

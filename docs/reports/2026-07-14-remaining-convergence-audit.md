@@ -790,6 +790,24 @@ positive, negative, and short-circuiting behavior; the Exference regression
 pins the public compatibility projection. The focused suites pass 203 and 344
 tests respectively under `-Werror` on GHC 9.12.4.
 
+## Post-fold tagged-variable operation consolidation
+
+**Completed on 2026-07-15:** after Exference adopted the shared
+`Variable identity` vocabulary, its type utilities, declaration bridge,
+expression checker, renderer, flexible-ID supply, and rigid-instantiation
+planner still repeated the same tag projections and selective traversals.
+Those local cases made a future change to flexible-versus-rigid handling liable
+to update allocation but miss normalization or rendering.
+
+The shared type module now owns total identity projection, flexible
+classification, optional tag projections, flexible-only mapping, and
+monoidal flexible/rigid folds. Exference composes those primitives with its
+`IntSet`, `IntMap`, finite allocator, and structured errors; binder-only
+inspection and error precedence remain deliberately backend-local. Foundation
+regressions pin both tags, selective mapping, and both folds, while the existing
+Exference boundary tests continue to cover normalization, rigid planning,
+rendering, and allocation at negative and machine-boundary identities.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

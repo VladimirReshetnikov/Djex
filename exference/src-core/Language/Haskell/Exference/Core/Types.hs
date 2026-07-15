@@ -168,11 +168,7 @@ pattern TypeForallNative variables constraints body =
   #-}
 
 flexibleBinderList :: [SynthesisVariable] -> Maybe [TVarId]
-flexibleBinderList = traverse flexibleBinder
- where
-  flexibleBinder variable = case variable of
-    SharedType.FlexibleVariable identifier -> Just identifier
-    SharedType.RigidVariable _ -> Nothing
+flexibleBinderList = traverse SharedType.flexibleVariableIdentity
 
 data SynthesisTypeError
   = InvalidSynthesisType (SharedType.TypeError SynthesisVariable)
@@ -248,9 +244,9 @@ ensureFlexibleForallBinders
 ensureFlexibleForallBinders = traverse_ checkBinder
   . SharedType.typeBinderVariables
  where
-  checkBinder variable = case variable of
-    SharedType.FlexibleVariable _ -> Right ()
-    SharedType.RigidVariable identifier -> Left $ RigidForallBinder identifier
+  checkBinder variable = case SharedType.rigidVariableIdentity variable of
+    Nothing -> Right ()
+    Just identifier -> Left $ RigidForallBinder identifier
 
 data HsTypeOffset = HsTypeOffset !HsType {-# UNPACK #-} !Int
 
@@ -651,14 +647,13 @@ sourceVariableName sourceNames = renderVariable
     [ (identifier, spelling)
     | (spelling, identifier) <- M.toList sourceNames
     ]
+  -- This raw compatibility map predates tagged variables and has only one
+  -- numeric key space. Stable candidate hints use separate tagged keys; this
+  -- renderer is the intentional legacy boundary where the tag is erased.
   renderVariable variable = IntMap.findWithDefault
     (defaultVariableName variable)
-    (variableIdentifier variable)
+    (SharedType.variableIdentity variable)
     preferredNames
-  variableIdentifier variable = case variable of
-    SharedType.FlexibleVariable identifier -> identifier
-    SharedType.RigidVariable identifier -> identifier
-  
 
 instance Show QueryClassEnv where
   show (QueryClassEnv _ cs _) = "(QueryClassEnv _ " ++ show cs ++ " _)"

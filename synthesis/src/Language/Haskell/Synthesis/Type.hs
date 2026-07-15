@@ -12,6 +12,13 @@
 -- ordinary type expressions.
 module Language.Haskell.Synthesis.Type
   ( Variable (..)
+  , variableIdentity
+  , isFlexibleVariable
+  , flexibleVariableIdentity
+  , rigidVariableIdentity
+  , mapFlexibleVariable
+  , foldFlexibleVariable
+  , foldRigidVariable
   , Type (..)
   , TypeError (..)
   , FreshVariableAllocator
@@ -73,6 +80,62 @@ data Variable identity
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData identity => NFData (Variable identity)
+
+-- | Recover the underlying identity, deliberately discarding its tag.
+--
+-- Use this only after the caller has handled the namespace distinction or at
+-- a compatibility boundary whose historical key space did not contain tags.
+variableIdentity :: Variable identity -> identity
+variableIdentity variable = case variable of
+  FlexibleVariable identity -> identity
+  RigidVariable identity -> identity
+
+-- | Whether this variable belongs to the flexible inference namespace.
+isFlexibleVariable :: Variable identity -> Bool
+isFlexibleVariable variable = case variable of
+  FlexibleVariable{} -> True
+  RigidVariable{} -> False
+
+-- | Project only a flexible identity.
+flexibleVariableIdentity :: Variable identity -> Maybe identity
+flexibleVariableIdentity variable = case variable of
+  FlexibleVariable identity -> Just identity
+  RigidVariable{} -> Nothing
+
+-- | Project only a rigid identity.
+rigidVariableIdentity :: Variable identity -> Maybe identity
+rigidVariableIdentity variable = case variable of
+  FlexibleVariable{} -> Nothing
+  RigidVariable identity -> Just identity
+
+-- | Transform a flexible identity while preserving rigid search constants.
+mapFlexibleVariable
+  :: (identity -> identity)
+  -> Variable identity
+  -> Variable identity
+mapFlexibleVariable transform variable = case variable of
+  FlexibleVariable identity -> FlexibleVariable $ transform identity
+  RigidVariable{} -> variable
+
+-- | Fold a flexible identity into a monoid, ignoring rigid variables.
+foldFlexibleVariable
+  :: Monoid result
+  => (identity -> result)
+  -> Variable identity
+  -> result
+foldFlexibleVariable transform variable = case variable of
+  FlexibleVariable identity -> transform identity
+  RigidVariable{} -> mempty
+
+-- | Fold a rigid identity into a monoid, ignoring flexible variables.
+foldRigidVariable
+  :: Monoid result
+  => (identity -> result)
+  -> Variable identity
+  -> result
+foldRigidVariable transform variable = case variable of
+  FlexibleVariable{} -> mempty
+  RigidVariable identity -> transform identity
 
 data Type variable
   = TypeVariable variable

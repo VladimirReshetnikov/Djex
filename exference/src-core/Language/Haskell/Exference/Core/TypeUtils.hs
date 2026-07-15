@@ -44,22 +44,13 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 -- rigid skolems free. This compatibility name preserves Exference's canonical
 -- ascending integer binder order.
 forallify :: HsType -> HsType
-forallify = SharedType.quantifyFreeVariables isFlexible
- where
-  isFlexible variable = case variable of
-    SharedType.FlexibleVariable{} -> True
-    SharedType.RigidVariable{} -> False
+forallify = SharedType.quantifyFreeVariables SharedType.isFlexibleVariable
 
 -- | Transform the complete flexible namespace, including forall binders and
 -- constraints, without changing rigid search constants. The shared functor
 -- also keeps structural tuple elements in the traversal automatically.
 incVarIds :: (TVarId -> TVarId) -> HsType -> HsType
-incVarIds transform = fmap transformVariable
- where
-  transformVariable variable = case variable of
-    SharedType.FlexibleVariable identifier ->
-      SharedType.FlexibleVariable $ transform identifier
-    SharedType.RigidVariable{} -> variable
+incVarIds transform = fmap $ SharedType.mapFlexibleVariable transform
 
 -- | The actual greatest flexible ID, including forall binders and context
 -- arguments.  'Nothing' represents a ground type without stealing an 'Int'
@@ -136,9 +127,7 @@ alphaNormalizeForalls externalVariables source = case
     | identifier <- IntSet.toAscList externalVariables
     ]
 
-  rejectRigidBinder variable = case variable of
-    SharedType.FlexibleVariable _ -> Nothing
-    SharedType.RigidVariable identifier -> Just identifier
+  rejectRigidBinder = SharedType.rigidVariableIdentity
 
   -- Preserve the historical greatest-plus-one path in logarithmic time.
   -- Only the maxBound boundary needs the complete IntSet gap search. Rigid
@@ -178,9 +167,10 @@ flexibleBinderIdentifiers
   -> Either TVarId [TVarId]
 flexibleBinderIdentifiers = traverse flexibleIdentifier
  where
-  flexibleIdentifier variable = case variable of
-    SharedType.FlexibleVariable identifier -> Right identifier
-    SharedType.RigidVariable identifier -> Left identifier
+  flexibleIdentifier variable = maybe
+    (Left $ SharedType.variableIdentity variable)
+    Right
+    $ SharedType.flexibleVariableIdentity variable
 
 -- | Normalize the complete type, peel only its leading prenex chain, then
 -- split consecutive arrows. A forall reached after an arrow remains in the

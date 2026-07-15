@@ -30,9 +30,20 @@ facadeTests = testGroup "public Djex facade"
   , testCase "exports shared type inspection" $ do
       checkedName <- expectRight $ mkIdentifier "Box"
       let acceptBinder _ = Nothing :: Maybe String
+          flexible = FlexibleVariable "a"
+          rigid = RigidVariable "s"
           typeExpression = ForallType ["a"] []
             $ TypeApplication (TypeConstructor checkedName)
             $ TypeVariable "a"
+      ( variableIdentity flexible
+        , isFlexibleVariable flexible
+        , flexibleVariableIdentity rigid
+        , rigidVariableIdentity rigid
+        , mapFlexibleVariable (++ "'") rigid
+        , foldFlexibleVariable (: []) flexible
+        , foldRigidVariable (: []) rigid
+        ) @?=
+          ("a", True, Nothing, Just "s", rigid, ["a"], ["s"])
       leadingForallVariables typeExpression @?= ["a"]
       typeBinderVariables typeExpression @?= ["a"]
       firstForallType typeExpression @?= Just typeExpression

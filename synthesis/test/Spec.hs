@@ -1393,7 +1393,25 @@ declarationTests = testGroup "declarations"
 
 typeTests :: TestTree
 typeTests = testGroup "source types"
-  [ testCase "render tagged variables without conflating their identities" $ do
+  [ testCase "tagged variable operations preserve namespace distinctions" $ do
+      let flexible = SharedType.FlexibleVariable (4 :: Int)
+          rigid = SharedType.RigidVariable (7 :: Int)
+      SharedType.variableIdentity flexible @?= 4
+      SharedType.variableIdentity rigid @?= 7
+      SharedType.isFlexibleVariable flexible @?= True
+      SharedType.isFlexibleVariable rigid @?= False
+      SharedType.flexibleVariableIdentity flexible @?= Just 4
+      SharedType.flexibleVariableIdentity rigid @?= Nothing
+      SharedType.rigidVariableIdentity flexible @?= Nothing
+      SharedType.rigidVariableIdentity rigid @?= Just 7
+      SharedType.mapFlexibleVariable (+ 1) flexible @?=
+        SharedType.FlexibleVariable 5
+      SharedType.mapFlexibleVariable (+ 1) rigid @?= rigid
+      SharedType.foldFlexibleVariable (: []) flexible @?= [4]
+      SharedType.foldFlexibleVariable (: []) rigid @?= ([] :: [Int])
+      SharedType.foldRigidVariable (: []) flexible @?= ([] :: [Int])
+      SharedType.foldRigidVariable (: []) rigid @?= [7]
+  , testCase "render tagged variables without conflating their identities" $ do
       let className = right $ mkIdentifier "C"
           flexible = Left (0 :: Int)
           rigid = Right (0 :: Int)

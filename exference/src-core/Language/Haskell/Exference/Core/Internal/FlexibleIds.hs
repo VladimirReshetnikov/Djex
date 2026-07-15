@@ -189,11 +189,8 @@ allocateCanonicalIdentifiers rawRequested initialSupply = do
 -- constraint arguments and structural tuple elements. Filtering by the tag
 -- keeps the flexible and rigid integer namespaces distinct.
 flexibleIdentifiers :: HsType -> IntSet.IntSet
-flexibleIdentifiers = foldMap flexibleIdentifier
- where
-  flexibleIdentifier variable = case variable of
-    SharedType.FlexibleVariable identifier -> IntSet.singleton identifier
-    SharedType.RigidVariable{} -> IntSet.empty
+flexibleIdentifiers = foldMap
+  $ SharedType.foldFlexibleVariable IntSet.singleton
 
 constraintFlexibleIdentifiers :: HsConstraint -> IntSet.IntSet
 constraintFlexibleIdentifiers = foldMap flexibleIdentifiers
@@ -203,12 +200,8 @@ constraintFlexibleIdentifiers = foldMap flexibleIdentifiers
 -- together.  The shared functor performs exactly that traversal, including
 -- constraints and structural tuples, while preserving rigid identities.
 renameFlexibleType :: FlexibleRenaming -> HsType -> HsType
-renameFlexibleType renaming = fmap renameVariable
- where
-  renameVariable variable = case variable of
-    SharedType.FlexibleVariable identifier -> SharedType.FlexibleVariable
-      $ IntMap.findWithDefault identifier identifier renaming
-    SharedType.RigidVariable{} -> variable
+renameFlexibleType renaming = fmap $ SharedType.mapFlexibleVariable
+  $ \identifier -> IntMap.findWithDefault identifier identifier renaming
 
 renameFlexibleConstraint :: FlexibleRenaming -> HsConstraint -> HsConstraint
 renameFlexibleConstraint renaming = fmap $ renameFlexibleType renaming

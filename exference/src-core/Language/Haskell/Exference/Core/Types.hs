@@ -488,6 +488,8 @@ mkStaticClassEnv sourceClasses sourceInstances = do
           (constraintVariables constraints S.\\ S.fromList parameters) of
         [] -> Right ()
         unbound -> Left $ UndeclaredSuperclassVariables name unbound
+      -- The historical class environment stores raw flexible IDs rather than
+      -- tagged synthesis variables, so this projection is intentionally local.
       constraintVariables = foldMap
         (foldMap freeVars . constraint_params)
 

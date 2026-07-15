@@ -1511,6 +1511,9 @@ typeTests = testGroup "source types"
         , innerConstraint
         , bodyConstraint
         ]
+      SharedType.constraintFreeVariables outerConstraint @?= Set.empty
+      SharedType.constraintFreeVariables siblingConstraint @?=
+        Set.singleton "a"
       SharedType.typeConstructorHead source @?= Just headName
       SharedType.typeConstructorHead
           (SharedType.TupleType Boxed [variable "a", variable "b"]) @?=

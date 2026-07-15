@@ -949,7 +949,7 @@ loweredType = convertedType
 constraintVariables
   :: [SharedConstraint.Constraint (SharedType.Type SynthesisVariable)]
   -> Set.Set SynthesisVariable
-constraintVariables = foldMap (foldMap SharedType.freeVariables)
+constraintVariables = foldMap SharedType.constraintFreeVariables
 
 isFlexibleVariable :: SynthesisVariable -> Bool
 isFlexibleVariable SharedType.FlexibleVariable{} = True

@@ -1,6 +1,7 @@
 module FacadeSpec (facadeTests) where
 
 import Data.Either (isRight)
+import qualified Data.Set as Set
 import Data.Void (Void)
 
 import ExferencePatternImports (patternViewsRoundTrip)
@@ -42,6 +43,8 @@ facadeTests = testGroup "public Djex facade"
       typeConstraints typeExpression @?= []
       typeConstructorHead typeExpression @?= Just checkedName
       freeVariablesInFirstOccurrenceOrder typeExpression @?= []
+      constraintFreeVariables
+          (Constraint checkedName [typeExpression]) @?= Set.empty
       declaredValueName <- expectRight $ mkIdentifier "value"
       let declaration = ValueDeclaration
             $ ValueSignature () declaredValueName typeExpression

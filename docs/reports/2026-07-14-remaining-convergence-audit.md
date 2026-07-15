@@ -618,6 +618,22 @@ retain the same normalized identities. Foundation tests pin class and instance
 mapping, ordering, annotations, kinds, and diagnostic subjects, while the
 parser-free facade pins all three operations.
 
+## Post-fold constraint free-variable consolidation
+
+**Completed on 2026-07-15:** Exference independently aggregated free variables
+across constraint arguments while validating neutral instances and explicit
+query contexts. Both operations use the shared tagged variable vocabulary and
+need identical lexical handling for rank-N arguments.
+
+`Language.Haskell.Synthesis.Type.constraintFreeVariables` now owns that scoped
+query. Neutral declaration and request validation compose it across their
+constraint lists, while foundation tests pin that nested binders are excluded
+and unbound sibling variables remain visible. The parser-free facade pins the
+public operation. Exference's historical `StaticClassEnv` deliberately keeps
+its local projection: that compatibility table stores raw flexible `TVarId`s,
+not tagged `SynthesisVariable`s, and a clarifying comment records the distinct
+boundary instead of conflating the identity domains.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

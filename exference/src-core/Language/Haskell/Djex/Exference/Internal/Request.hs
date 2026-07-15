@@ -36,7 +36,6 @@ import Language.Haskell.Exference.Core
   )
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
-import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceLocation
@@ -184,11 +183,8 @@ validateRequest query = do
     Right
     $ SharedType.validateType $ requestContextualType query
   let goalVariables = inScopeContextVariables $ requestGoal query
-      contextVariables = Set.unions
-        [ SharedType.freeVariables argument
-        | constraint <- requestContexts query
-        , argument <- constraintArguments constraint
-        ]
+      contextVariables = foldMap SharedType.constraintFreeVariables
+        $ requestContexts query
       extraneous = Set.toAscList $ contextVariables Set.\\ goalVariables
   case extraneous of
     [] -> Right ()

@@ -144,7 +144,8 @@ tree: variables (optionally flexible/rigid), structural names, application,
 functions, boxed or unboxed tuples, and explicit foralls with shared
 constraints. It canonicalizes saturated function and tuple constructors,
 decomposes application spines in source order, validates
-lexical/arity/binder invariants, and computes free variables.
+lexical/arity/binder invariants, and computes free variables for both complete
+types and individual constraint arguments with nested quantifier scope.
 Datatype, synonym, and opaque declaration bodies deliberately do not inhabit
 this AST; those belong to the declaration layer instead of being encoded as
 special type nodes.

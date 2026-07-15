@@ -30,6 +30,7 @@ module Language.Haskell.Synthesis.Type
   , validateType
   , freeVariablesInFirstOccurrenceOrder
   , freeVariables
+  , constraintFreeVariables
   , typeConstructors
   ) where
 
@@ -472,6 +473,14 @@ freeVariablesInFirstOccurrenceOrder = distinctOn id . collect Set.empty
 -- | The set of variables free in a type.
 freeVariables :: Ord variable => Type variable -> Set variable
 freeVariables = Set.fromList . freeVariablesInFirstOccurrenceOrder
+
+-- | The variables free across all arguments of one class constraint.
+-- Quantifiers nested inside an argument retain their ordinary lexical scope.
+constraintFreeVariables
+  :: Ord variable
+  => Constraint (Type variable)
+  -> Set variable
+constraintFreeVariables = foldMap freeVariables
 
 -- | Collect nominal constructor references from a type. Structural function
 -- and tuple forms have intrinsic kinds and therefore contribute only the

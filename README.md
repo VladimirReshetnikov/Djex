@@ -224,8 +224,9 @@ ordinary heuristic-search batches. Both checks inspect only the list spine's
 first constructor, so they do not sacrifice lazy candidate tails.
 `mkDjinnSession` lowers and seals the neutral shared
 `DjinnEnvironment` through one authoritative closed Inventory with Haskell 98
-class-kind defaulting and retains the synonym table prepared from that exact
-inventory; the mutable raw `Djinn.Core.Environment` no longer crosses the
+class-kind defaulting. An opaque shared `PreparedInventory` keeps that
+Inventory and its exact normalized synonym table inseparable; the mutable raw
+`Djinn.Core.Environment` no longer crosses the
 curated facade or survives inside `PreparedEnvironment`. Synonyms are expanded
 for saturation and recursive datatype validation before ordered global
 assumptions are translated once into proof premises. Class lookup, kinds,
@@ -260,7 +261,8 @@ declaration, environment, inventory, kind-inference, synonym-elaboration, and
 type-rendering vocabulary. `DjinnEnvironment`, `DjinnInventory`,
 `DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make every Djinn adapter
 signature nameable without depending on a hidden backend alias. The historical
-REPL now edits the shared environment transactionally through its opaque
+REPL now derives the editable shared environment from the grounded Inventory,
+edits it transactionally, and publishes only the completely resealed opaque
 session; raw declarations are one-way parser inputs and private derived
 display/search views, not retained editable state.
 Exference now has the same stable construction boundary:
@@ -292,9 +294,11 @@ recursion metadata is attached to that Inventory without resealing it or
 repeating kind inference. The historical flat `SourceEnvironment` projection
 is derived on demand from the witness; only legacy synonym spellings remain as
 frontend presentation data. Erasing annotations for a stable session shares
-the same prepared synonym table and backend. A session retains that one
-prepared witness, its policy-adjusted checked search environment, and
-structured omissions. HSE query parsing derives known types and class arities
+the same prepared synonym table and backend during sealing. The sealed session
+then retains only the shared inventory/synonym witness, its policy-adjusted
+checked search environment, and a fully materialized structured omission
+summary; the complete unfiltered backend-bearing wrapper is released. HSE
+query parsing derives known types and class arities
 from the witness's shared inventory rather than retaining parallel type/class
 caches; neither an HSE source environment nor its legacy synonym map survives
 sealing.

@@ -16,12 +16,15 @@ because upstream ships its user guide inside the executable rather than as a
 README.
 
 `Djinn.Core.toSynthesisInventory` exposes the validated Djinn environment as
-the same retained structural-and-kind artifact used by Exference sessions.
+the same structural-and-kind artifact used by Exference sessions. Both now
+seal that Inventory together with its exact normalized synonyms in the shared
+opaque `PreparedInventory` witness.
 Standalone declaration adapters still round-trip historical `KVar` syntax,
 while inventory sealing rejects any unsolved kind rather than allowing it into
-query elaboration. Neutral `DjinnEnvironment` sessions keep their original
-sealed declaration order, infer one authoritative Inventory with Haskell 98
-class-kind defaulting, and derive every raw backend kind from that Inventory.
+query elaboration. Neutral `DjinnEnvironment` sessions preserve their original
+sealed declaration order in one authoritative Inventory with Haskell 98
+class-kind defaulting, derive every raw backend kind from that Inventory, and
+reconstruct the editable neutral environment only for transactional REPL edits.
 
 ## Build and run
 
@@ -504,7 +507,10 @@ rendered strings.
 The default `djex` library additionally exposes
 `Language.Haskell.Djex.Djinn`: `mkDjinnSession` lowers a neutral
 `DjinnEnvironment` and retains the exact shared `DjinnInventory` that validated
-its private proof indexes. The editable raw `Djinn.Core.Environment` therefore
+its private proof indexes together with the exact prepared synonym table. The
+session no longer retains a second editable `DjinnEnvironment`; the grounded
+Inventory is weakened losslessly when an edit begins, then the replacement is
+fully resealed before publication. The raw `Djinn.Core.Environment` therefore
 remains confined to compatibility inputs and the REPL parser;
 `standardDjinnSession` converts the checked built-in spelling once and then
 uses the same neutral `mkDjinnSession` path as caller-supplied environments,

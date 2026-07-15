@@ -211,8 +211,9 @@ unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` seals and
 kind-checks that source graph once, then sends the checked Inventory through
 the parser-independent neutral lowerer. The resulting backend projection is
 reconciled by name with the original binding/deconstructor order and ratings.
-One opaque annotated prepared value keeps that Inventory, its synonym table,
-and the backend lowering inseparable; the retained frontend/parser-free seam
+One opaque annotated prepared value wraps the shared `PreparedInventory` and
+its backend lowering, keeping the checked Inventory, its exact synonym table,
+and that lowering inseparable; the retained frontend/parser-free seam
 accepts only exact-name order and finite rating metadata, never a second
 independently prepared dictionary. Alias-aware recursion metadata is attached
 to the sealed Inventory through a checked annotation-only adjustment, without
@@ -499,10 +500,13 @@ source/declaration order. The adapter's expression and definition conveniences
 supply the retained local-name hints to the shared candidate renderer and
 expose the common `RenderError` directly.
 
-The session retains one neutral prepared-inventory witness, its policy-filtered
-search environment, and structured omissions. Parser-independent type-name and
-class-arity resolvers are derived from the witness Inventory rather than stored
-as parallel caches. Parsed and programmatic goals then pass through the same
+The session retains one neutral shared prepared-inventory witness, its
+policy-filtered search environment, and a fully evaluated structured omission
+summary. The source wrapper and its complete unfiltered backend are consumed
+during sealing rather than retained beside that filtered view.
+Parser-independent type-name and class-arity resolvers are derived from the
+witness Inventory rather than stored as parallel caches. Parsed and
+programmatic goals then pass through the same
 capture-avoiding shared synonym elaborator and its pre/post kind checks before
 core lowering. The former HSE `TypeDeclMap` is therefore a loader concern
 rather than hidden session state.

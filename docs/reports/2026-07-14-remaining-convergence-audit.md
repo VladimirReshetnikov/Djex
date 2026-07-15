@@ -180,20 +180,31 @@ while order, ratings, classes, constructors, and recursion come from the
 prepared backend. Only historical HSE synonym spellings remain separately as
 presentation data. Stable sessions erase annotations without re-preparing the
 synonym table or backend, and HSE query parsing derives its minimal known-type
-and class-arity resolver from that same session inventory.
+and class-arity resolver from that same session inventory. The final session
+keeps only the shared inventory/synonym witness and policy-filtered search
+environment; the source wrapper's complete unfiltered backend is consumed and
+its omission summary is forced before the wrapper leaves scope.
 
-**Djinn prepared authority completed:** a session now retains its editable shared
-environment with the exact prepared projection derived from it, and declaration
-replacement/removal edits that shared environment directly. The REPL stores no
-raw `Environment`; display reconstructs historical tables from the Inventory
-on demand, while instance lookup consumes a nominal class index. Raw preparation
+**Djinn prepared authority completed:** a session now retains only its exact
+prepared projection; declaration replacement/removal derives the editable
+shared environment losslessly from the grounded Inventory, then publishes the
+replacement only after complete resealing. The REPL stores no raw
+`Environment`; display reconstructs historical tables from the Inventory on
+demand, while instance lookup consumes a nominal class index. Raw preparation
 also reprojects embedded kinds from the inferred inventory, fixing a split-brain
 bug in which a forged raw class parameter kind could override the inventory
-during context checking. `PreparedEnvironment` now retains only the Inventory
-and justified private class, ordered global-premise, kind, synonym, and formula
-caches. Global functions are translated once while sealing rather than once per
-query; instantiated class methods remain query-dependent. Transactional edits
-rebuild all caches before publishing the replacement session.
+during context checking. `PreparedEnvironment` now contains the shared opaque
+Inventory/synonym witness and only its justified private class, ordered
+global-premise, kind, and formula caches. Global functions are translated once
+while sealing rather than once per query; instantiated class methods remain
+query-dependent. Transactional edits rebuild all caches before publishing the
+replacement session.
+
+**Cross-backend prepared authority completed:** the neutral synthesis layer now
+owns one opaque `PreparedInventory` abstraction. Both backends use it instead
+of separately pairing an Inventory with a synonym table; annotation erasure
+and datatype-metadata adjustment preserve the exact normalized table without
+re-running its allocator-sensitive preparation.
 
 These changes must preserve source diagnostic precedence, declaration
 replacement/removal order, alias saturation and recursion checks, inferred

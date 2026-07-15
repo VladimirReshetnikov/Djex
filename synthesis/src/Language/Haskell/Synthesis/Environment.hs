@@ -11,6 +11,7 @@ module Language.Haskell.Synthesis.Environment
   , EnvironmentError (..)
   , mkEnvironment
   , groundEnvironmentKinds
+  , mapEnvironmentKindVariables
   , adjustEnvironmentDataTypeAnnotations
   , environmentDeclarations
   , typeDeclarationMap
@@ -125,6 +126,32 @@ groundEnvironmentKinds environment = do
     , canonicalInstanceHeads = canonicalInstanceHeads environment
     , occupiedValueNames = occupiedValueNames environment
     }
+
+-- | Change only explicit kind-variable identities while preserving the
+-- validated declaration order and every structural index. This is total and
+-- does not repeat namespace validation; in particular, a grounded
+-- @Environment typeVariable Void annotation@ can be weakened to any
+-- kind-variable representation with 'Data.Void.absurd'.
+mapEnvironmentKindVariables
+  :: (kindVariable -> kindVariable')
+  -> Environment typeVariable kindVariable annotation
+  -> Environment typeVariable kindVariable' annotation
+mapEnvironmentKindVariables transform environment = Environment
+  { reversedDeclarations = map mappedDeclaration
+      $ reversedDeclarations environment
+  , typeDeclarationsByName = Map.map mappedDeclaration
+      $ typeDeclarationsByName environment
+  , valuesByName = valuesByName environment
+  , constructorsByName = constructorsByName environment
+  , classesByName = Map.map mappedDeclaration
+      $ classesByName environment
+  , instancesByHead = Map.map mappedDeclaration
+      $ instancesByHead environment
+  , canonicalInstanceHeads = canonicalInstanceHeads environment
+  , occupiedValueNames = occupiedValueNames environment
+  }
+ where
+  mappedDeclaration = mapDeclarationKindVariables transform
 
 -- | Change only the top-level annotation of every datatype declaration.
 --

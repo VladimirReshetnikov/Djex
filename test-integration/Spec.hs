@@ -467,6 +467,9 @@ tests = testGroup "Djex facade"
         (mkEnvironment [declaration] :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       session <- expectRight $ mkExferenceSessionWithPolicy policy environment
+      environmentDeclarations
+          (inventoryEnvironment $ exferenceSessionInventory session) @?=
+        [declaration]
       case exferenceSessionOmissions session of
         [omission] -> do
           omittedName omission @?= bindingName

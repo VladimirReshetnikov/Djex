@@ -19,6 +19,7 @@ module Language.Haskell.Exference.Core.Declaration
   , projectNeutralSynthesisInventory
   , preparedSynthesisInventory
   , preparedSynthesisTypeSynonyms
+  , preparedSynthesisWitness
   , preparedSynthesisBackend
   , preparedNeutralInventory
   , preparedNeutralTypeSynonyms
@@ -104,8 +105,7 @@ type NeutralSynthesisInventory = SharedInventory.Inventory SynthesisVariable ()
 -- annotation parameter lets a source frontend retain presentation metadata
 -- without creating a second semantic inventory.
 data PreparedSynthesisInventory annotation = PreparedSynthesisInventory
-  (SharedInventory.Inventory SynthesisVariable annotation)
-  (SharedTypeSynonym.TypeSynonyms SynthesisVariable)
+  (SharedTypeSynonym.PreparedInventory SynthesisVariable annotation)
   EnvDictionary
 
 -- | The annotation-free prepared witness accepted by stable core sessions.
@@ -182,13 +182,14 @@ prepareInventory
   -> Either SynthesisDeclarationError
       (PreparedSynthesisInventory annotation)
 prepareInventory inventory = do
-  let neutralInventory = fmap (const ()) inventory
-  synonyms <- first NeutralSynonymPreparationError
-    $ SharedTypeSynonym.prepareTypeSynonyms
-        freshSynthesisVariable neutralInventory
+  prepared <- first NeutralSynonymPreparationError
+    $ SharedTypeSynonym.prepareInventory freshSynthesisVariable inventory
+  let synonyms = SharedTypeSynonym.preparedTypeSynonyms prepared
   backend <- lowerNeutralSynthesisEnvironment synonyms
-    $ SharedInventory.inventoryEnvironment neutralInventory
-  pure $ PreparedSynthesisInventory inventory synonyms backend
+    $ fmap (const ())
+    $ SharedInventory.inventoryEnvironment
+    $ SharedTypeSynonym.preparedInventory prepared
+  pure $ PreparedSynthesisInventory prepared backend
 
 -- | Compatibility specialization for annotation-free callers.
 prepareNeutralSynthesisInventory
@@ -208,7 +209,7 @@ projectSynthesisInventory
   -> Either SynthesisDeclarationError
       (PreparedSynthesisInventory annotation)
 projectSynthesisInventory functionProjection dataProjection
-    (PreparedSynthesisInventory inventory synonyms backend) = do
+    (PreparedSynthesisInventory prepared backend) = do
   let preparedFunctions = environmentFunctions backend
       sourceBindingNames = sort $ map fst functionProjection
       preparedBindingNames = sort $ map functionName preparedFunctions
@@ -246,7 +247,7 @@ projectSynthesisInventory functionProjection dataProjection
         $ Map.lookup name deconstructorsByName
   functions <- mapM projectFunction functionProjection
   deconstructors <- mapM projectDeconstructor dataProjection
-  pure $ PreparedSynthesisInventory inventory synonyms
+  pure $ PreparedSynthesisInventory prepared
     (backend
       { environmentFunctions = functions
       , environmentDeconstructors = deconstructors
@@ -267,7 +268,8 @@ preparedSynthesisInventory
   :: PreparedSynthesisInventory annotation
   -> SharedInventory.Inventory SynthesisVariable annotation
 preparedSynthesisInventory
-    (PreparedSynthesisInventory inventory _ _) = inventory
+    (PreparedSynthesisInventory prepared _) =
+  SharedTypeSynonym.preparedInventory prepared
 
 -- | The authoritative checked inventory owned by a prepared lowering.
 preparedNeutralInventory
@@ -280,14 +282,23 @@ preparedSynthesisTypeSynonyms
   :: PreparedSynthesisInventory annotation
   -> SharedTypeSynonym.TypeSynonyms SynthesisVariable
 preparedSynthesisTypeSynonyms
-    (PreparedSynthesisInventory _ synonyms _) = synonyms
+    (PreparedSynthesisInventory prepared _) =
+  SharedTypeSynonym.preparedTypeSynonyms prepared
+
+-- | The shared inventory/alias witness retained after the backend projection
+-- has been consumed. Session sealing uses this projection so the complete
+-- unfiltered search dictionary cannot remain live beside its filtered view.
+preparedSynthesisWitness
+  :: PreparedSynthesisInventory annotation
+  -> SharedTypeSynonym.PreparedInventory SynthesisVariable annotation
+preparedSynthesisWitness (PreparedSynthesisInventory prepared _) = prepared
 
 -- | The canonical or safely reordered/rated backend owned by the witness.
 preparedSynthesisBackend
   :: PreparedSynthesisInventory annotation
   -> EnvDictionary
 preparedSynthesisBackend
-    (PreparedSynthesisInventory _ _ backend) = backend
+    (PreparedSynthesisInventory _ backend) = backend
 
 -- | Compatibility accessor specialized to an annotation-free witness.
 preparedNeutralTypeSynonyms
@@ -308,26 +319,28 @@ erasePreparedSynthesisAnnotations
   :: PreparedSynthesisInventory annotation
   -> PreparedNeutralSynthesisInventory
 erasePreparedSynthesisAnnotations
-    (PreparedSynthesisInventory inventory synonyms backend) =
-  PreparedSynthesisInventory (fmap (const ()) inventory) synonyms backend
+    (PreparedSynthesisInventory prepared backend) =
+  PreparedSynthesisInventory (fmap (const ()) prepared) backend
 
 -- Attach alias-aware recursion flags derived by the canonical core lowerer to
--- both opaque Inventory views. Every concrete datatype must have one backend
+-- the opaque prepared inventory. Every concrete datatype must have one backend
 -- deconstructor; abstract types deliberately have none.
 normalizePreparedDataMetadata
   :: PreparedSynthesisInventory DeclarationMetadata
   -> Either SynthesisDeclarationError
       (PreparedSynthesisInventory DeclarationMetadata)
 normalizePreparedDataMetadata
-    (PreparedSynthesisInventory inventory synonyms backend) = do
+    (PreparedSynthesisInventory prepared backend) = do
   metadata <- Map.fromList <$> mapM entry
     (environmentDeconstructors backend)
   mapM_ (requireMetadata metadata)
     $ SharedEnvironment.environmentDeclarations
-    $ SharedInventory.inventoryEnvironment inventory
-  let adjusted = SharedInventory.adjustInventoryDataTypeAnnotations
-        (attachMetadata metadata) inventory
-  pure $ PreparedSynthesisInventory adjusted synonyms backend
+    $ SharedInventory.inventoryEnvironment
+    $ SharedTypeSynonym.preparedInventory prepared
+  let adjusted =
+        SharedTypeSynonym.adjustPreparedInventoryDataTypeAnnotations
+          (attachMetadata metadata) prepared
+  pure $ PreparedSynthesisInventory adjusted backend
  where
   entry deconstructor = do
     name <- deconstructorTypeName deconstructor

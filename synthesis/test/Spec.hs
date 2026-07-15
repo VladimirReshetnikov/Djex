@@ -721,6 +721,37 @@ environmentTests = testGroup "environments"
         (Inventory.inventoryKindAssumptions inventory) @?=
           Map.singleton typeName
             (Kind.FunctionKind Kind.ProperTypeKind Kind.ProperTypeKind)
+  , testCase "map kind variables without rebuilding environment indexes" $ do
+      let typeName = right $ mkIdentifier "T"
+          constructorName = right $ mkIdentifier "MkT"
+          valueName = right $ mkIdentifier "value"
+          className = right $ mkIdentifier "C"
+          declarations :: [Declaration.Declaration String String ()]
+          declarations =
+            [ Declaration.DataTypeDeclaration () typeName
+                [ Declaration.TypeParameter "t"
+                    $ Just $ Kind.KindVariable "type-kind"
+                ]
+                [Declaration.DataConstructor () constructorName []]
+            , Declaration.ValueDeclaration
+                $ Declaration.ValueSignature () valueName
+                $ SharedType.TypeConstructor typeName
+            , Declaration.ClassDeclaration () className
+                [ Declaration.TypeParameter "a"
+                    $ Just $ Kind.KindVariable "class-kind"
+                ] [] []
+            , Declaration.InstanceDeclaration () [] []
+                $ Constraint className
+                    [SharedType.TypeConstructor typeName]
+            ]
+          environment = right $ Environment.mkEnvironment declarations
+          transform = length
+          mapped = Environment.mapEnvironmentKindVariables
+            transform environment
+          expected = right $ Environment.mkEnvironment
+            $ map (Declaration.mapDeclarationKindVariables transform)
+            declarations
+      mapped @?= expected
   , testCase "thread class kind finalization through inventories" $ do
       let markerName = right $ mkIdentifier "Marker"
           declaration :: Declaration.Declaration String Void ()
@@ -1414,7 +1445,72 @@ typeTests = testGroup "source types"
 
 synonymTests :: TestTree
 synonymTests = testGroup "type synonyms"
-  [ testCase "expand saturated and overapplied aliases" $ do
+  [ testCase "seal inventories with their exact prepared aliases" $ do
+      let identityName = right $ mkIdentifier "Identity"
+          declarations :: [Declaration.Declaration String Void Int]
+          declarations =
+            [ Declaration.TypeSynonymDeclaration 1 identityName
+                [Declaration.TypeParameter "a" Nothing]
+                $ SharedType.TypeVariable "a"
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory declarations
+          prepared = right $ TypeSynonym.prepareInventory
+            freshStringVariable inventory
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor identityName)
+            (SharedType.TypeVariable "x")
+      TypeSynonym.preparedInventory prepared @?= inventory
+      TypeSynonym.preparedTypeSynonyms prepared @?=
+        right (TypeSynonym.prepareTypeSynonyms
+          freshStringVariable inventory)
+      TypeSynonym.expandTypeSynonyms freshStringVariable
+          (TypeSynonym.preparedTypeSynonyms prepared) applied @?=
+        Right (SharedType.TypeVariable "x")
+  , testCase "transform annotations without rebuilding prepared aliases" $ do
+      let identityName = right $ mkIdentifier "Identity"
+          typeName = right $ mkIdentifier "T"
+          constructorName = right $ mkIdentifier "MkT"
+          declarations :: [Declaration.Declaration String Void Int]
+          declarations =
+            [ Declaration.TypeSynonymDeclaration 1 identityName
+                [Declaration.TypeParameter "a" Nothing]
+                $ SharedType.TypeVariable "a"
+            , Declaration.DataTypeDeclaration 2 typeName []
+                [Declaration.DataConstructor 3 constructorName []]
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory declarations
+          prepared = right $ TypeSynonym.prepareInventory
+            freshStringVariable inventory
+          erased = fmap (const ()) prepared
+          adjusted =
+            TypeSynonym.adjustPreparedInventoryDataTypeAnnotations
+              (\name annotation ->
+                if name == typeName then annotation + 10 else annotation)
+              prepared
+          adjustedDeclarations = Environment.environmentDeclarations
+            $ Inventory.inventoryEnvironment
+            $ TypeSynonym.preparedInventory adjusted
+      TypeSynonym.preparedTypeSynonyms erased @?=
+        TypeSynonym.preparedTypeSynonyms prepared
+      TypeSynonym.preparedTypeSynonyms adjusted @?=
+        TypeSynonym.preparedTypeSynonyms prepared
+      Environment.environmentDeclarations
+          (Inventory.inventoryEnvironment
+            $ TypeSynonym.preparedInventory erased) @?=
+        map (fmap $ const ()) declarations
+      adjustedDeclarations @?=
+        [ Declaration.TypeSynonymDeclaration 1 identityName
+            [Declaration.TypeParameter "a" Nothing]
+            $ SharedType.TypeVariable "a"
+        , Declaration.DataTypeDeclaration 12 typeName []
+            [Declaration.DataConstructor 3 constructorName []]
+        ]
+      Inventory.inventoryKindAssumptions
+          (TypeSynonym.preparedInventory adjusted) @?=
+        Inventory.inventoryKindAssumptions inventory
+  , testCase "expand saturated and overapplied aliases" $ do
       let identityName = right $ mkIdentifier "Identity"
           maybeName = right $ mkIdentifier "Maybe"
           intName = right $ mkIdentifier "Int"
@@ -1718,8 +1814,12 @@ synonymTests = testGroup "type synonyms"
             ]
           inventory = right $ Inventory.mkInventory
             KindInference.OpenKindInventory declarations
+          expected = TypeSynonym.UnsaturatedTypeSynonym identityName 1 0
       TypeSynonym.prepareTypeSynonyms freshStringVariable inventory @?=
-        Left (TypeSynonym.UnsaturatedTypeSynonym identityName 1 0)
+        Left expected
+      case TypeSynonym.prepareInventory freshStringVariable inventory of
+        Left failure -> failure @?= expected
+        Right _ -> fail "an invalid alias escaped prepared-inventory sealing"
   , testCase "reject aliases that compete with intrinsic constructors" $ do
       let declaration :: Declaration.Declaration String Void ()
           declaration = Declaration.TypeSynonymDeclaration () functionName

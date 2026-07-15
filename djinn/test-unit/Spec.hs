@@ -820,6 +820,9 @@ testNeutralDjinnPreparation = do
     orderedEnvironment <- mkNeutralDjinnEnvironment orderedDeclarations
     orderedSession <- expectShownRight
         $ Djex.mkDjinnSession orderedEnvironment
+    assertEqual "the session changed its derived editable environment"
+        orderedEnvironment
+        (Djex.djinnSessionEnvironment orderedSession)
     groundedOrderedEnvironment <- expectShownRight
         $ SharedEnvironment.groundEnvironmentKinds orderedEnvironment
     assertEqual "the session inventory changed global declaration order"

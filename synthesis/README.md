@@ -120,7 +120,11 @@ substitution. It rejects partial applications and cycles, preserves legal
 overapplication, and kind-checks both before and after expansion so a phantom
 parameter cannot erase an invalid argument. Backends provide only a fresh
 variable allocator for their identity domain; synonym and declaration
-semantics stay parser-independent.
+semantics stay parser-independent. Its opaque `PreparedInventory` pairs one
+Inventory with the exact normalized synonym table derived from it, so backend
+sessions cannot recombine those authorities accidentally. Annotation-only
+mapping and name-aware datatype-metadata adjustment preserve that table
+without repeating allocator-sensitive synonym preparation.
 
 `Language.Haskell.Synthesis.TypeRender` renders that shared structure back to
 compact Haskell source while leaving tagged variable spellings to the caller.
@@ -172,6 +176,10 @@ duplicate instances modulo alpha-renaming of declaration and nested `forall`
 binders, while preserving the original source heads in its public index and
 diagnostics and preserving qualified-name identity. It does not pretend that
 an index is also a kind proof or a backend's resolution policy.
+`mapEnvironmentKindVariables` changes explicit kind-variable identities across
+every declaration-bearing view without rebuilding or revalidating those
+indexes; in particular, it losslessly weakens a grounded `Void` environment
+when a compatibility editor needs its historical kind-variable parameter.
 
 `Language.Haskell.Synthesis.Inventory` is the frontend handoff that keeps a
 sealed `Environment` together with the kind assumptions inferred from exactly
@@ -181,9 +189,10 @@ retain a frontend's kind-variable identity while being edited or round-tripped;
 sealing grounds their explicit kinds and reports the first unsolved identity.
 Frontends that already own a sealed `Environment` can construct an inventory
 from it directly, avoiding a redundant validation/indexing pass over the
-source environment.
-This is the boundary checked sessions retain; engine-specific dictionaries are
-derived projections of it, not competing sources of truth.
+source environment. `PreparedInventory` is the stronger boundary checked
+sessions retain: engine-specific dictionaries and indexes are derived
+projections of its Inventory and exact synonym table, not competing sources of
+truth.
 
 Build the parser-free library or run the focused foundation suite from the
 repository root or `djex/`:

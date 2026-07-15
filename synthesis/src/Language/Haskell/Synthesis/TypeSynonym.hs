@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveGeneric #-}
 
 -- | Checked, capture-avoiding expansion of source type synonyms.
@@ -9,9 +10,14 @@
 module Language.Haskell.Synthesis.TypeSynonym
   ( FreshVariable
   , TypeSynonyms
+  , PreparedInventory
   , SynonymExpansionError (..)
   , ElaborationPhase (..)
   , TypeElaborationError (..)
+  , prepareInventory
+  , preparedInventory
+  , preparedTypeSynonyms
+  , adjustPreparedInventoryDataTypeAnnotations
   , prepareTypeSynonyms
   , expandTypeSynonymDefinitions
   , expandTypeSynonyms
@@ -51,6 +57,7 @@ import Language.Haskell.Synthesis.Declaration
   )
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
+  , adjustInventoryDataTypeAnnotations
   , inventoryEnvironment
   , inventoryKindAssumptions
   )
@@ -98,6 +105,30 @@ data TypeSynonyms variable = TypeSynonyms
   }
   deriving (Eq, Show, Generic)
 
+-- | A checked inventory paired with the exact alias table prepared from it.
+--
+-- The constructor is private: consumers may inspect either projection, but
+-- cannot accidentally combine declarations and synonyms prepared from
+-- different environments.  The annotation parameter remains functorial
+-- because annotations do not participate in synonym preparation, kind
+-- assumptions, or expansion.
+data PreparedInventory variable annotation = PreparedInventory
+  (Inventory variable annotation)
+  (TypeSynonyms variable)
+  deriving (Functor)
+
+-- | The authoritative checked inventory owned by a prepared witness.
+preparedInventory
+  :: PreparedInventory variable annotation
+  -> Inventory variable annotation
+preparedInventory (PreparedInventory inventory _) = inventory
+
+-- | The alias table prepared from the witness's own inventory.
+preparedTypeSynonyms
+  :: PreparedInventory variable annotation
+  -> TypeSynonyms variable
+preparedTypeSynonyms (PreparedInventory _ synonyms) = synonyms
+
 -- | Failures that are specific to alias preparation or substitution.
 data SynonymExpansionError variable
   = IntrinsicTypeSynonym Name
@@ -126,6 +157,29 @@ data TypeElaborationError variable
   | IllKindedType ElaborationPhase (KindInferenceError variable)
   | SynonymExpansionFailed (SynonymExpansionError variable)
   deriving (Eq, Ord, Show, Generic)
+
+-- | Prepare aliases from an inventory and retain both values as one opaque
+-- witness.  Backends should carry this value through session construction
+-- instead of storing an independently recombinable inventory/table pair.
+prepareInventory
+  :: Ord variable
+  => FreshVariable variable
+  -> Inventory variable annotation
+  -> Either (SynonymExpansionError variable)
+      (PreparedInventory variable annotation)
+prepareInventory fresh inventory = PreparedInventory inventory
+  <$> prepareTypeSynonyms fresh inventory
+
+-- | Adjust derived top-level datatype metadata without rebuilding either the
+-- checked inventory indexes or its alias table.  Synonym definitions contain
+-- no declaration annotations, so the prepared table remains exact.
+adjustPreparedInventoryDataTypeAnnotations
+  :: (Name -> annotation -> annotation)
+  -> PreparedInventory variable annotation
+  -> PreparedInventory variable annotation
+adjustPreparedInventoryDataTypeAnnotations adjust
+    (PreparedInventory inventory synonyms) = PreparedInventory
+  (adjustInventoryDataTypeAnnotations adjust inventory) synonyms
 
 -- | Compile and normalize every synonym in an already checked inventory.
 -- Normalization validates even aliases that no operational declaration uses.

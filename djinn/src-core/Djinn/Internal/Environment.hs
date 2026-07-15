@@ -62,8 +62,7 @@ data Environment = Environment {
 -- translated global premises, kind assumptions, synonyms, and formula
 -- definitions cannot drift away from their declarations.
 data PreparedEnvironment = PreparedEnvironment
-    SynthesisInventory
-    (SharedTypeSynonym.TypeSynonyms HSymbol)
+    PreparedSynthesisInventory
     PreparedKindCheck
     (Map.Map HSymbol ([(HSymbol, HKind)], [Axiom]))
     [(Symbol, Formula)]
@@ -73,6 +72,9 @@ type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
 
 type SynthesisInventory = SharedInventory.Inventory HSymbol ()
+
+type PreparedSynthesisInventory =
+    SharedTypeSynonym.PreparedInventory HSymbol ()
 
 data SynthesisEnvironmentError
     = SynthesisEnvironmentDeclarationError SynthesisDeclarationError
@@ -135,11 +137,11 @@ prepareEnvironment environment = do
     declarations <- synthesisDeclarations environment
     inventory <- synthesisInventory declarations
     sourceDeclarations <- mapM preflightDeclaration declarations
-    synonyms <- prepareInventoryExpansion inventory
+    prepared <- prepareInventoryExpansion inventory
     projected <- projectSynthesisEnvironment
         (SharedInventory.inventoryKindAssumptions inventory)
         sourceDeclarations
-    sealPreparedEnvironment projected inventory synonyms
+    sealPreparedEnvironment projected prepared
 
 -- | Validate a neutral environment once, then derive Djinn's compatibility
 -- projection from the resulting inventory. Conversion is deliberately split
@@ -169,11 +171,11 @@ prepareSynthesisEnvironment sourceEnvironment = do
         SharedInventory.mkInventoryFromEnvironmentWithClassPolicy
             SharedInference.ClosedKindInventory
             SharedInference.DefaultClassKinds groundedEnvironment
-    synonyms <- prepareInventoryExpansion inventory
+    prepared <- prepareInventoryExpansion inventory
     environment <- projectSynthesisEnvironment
         (SharedInventory.inventoryKindAssumptions inventory)
         sourceDeclarations
-    sealPreparedEnvironment environment inventory synonyms
+    sealPreparedEnvironment environment prepared
 
 -- | Apply one compatibility declaration directly to the shared environment,
 -- then seal the resulting session state before returning it.  Djinn's
@@ -287,17 +289,18 @@ synthesisDeclarationOwner declaration = case declaration of
 prepareInventoryExpansion
     :: SynthesisInventory
     -> Either SynthesisEnvironmentError
-        (SharedTypeSynonym.TypeSynonyms HSymbol)
+        PreparedSynthesisInventory
 prepareInventoryExpansion inventory = do
-    synonyms <- first InvalidSynthesisTypeSynonyms $
-        SharedTypeSynonym.prepareTypeSynonyms
+    prepared <- first InvalidSynthesisTypeSynonyms $
+        SharedTypeSynonym.prepareInventory
             freshDjinnTypeVariable inventory
+    let synonyms = SharedTypeSynonym.preparedTypeSynonyms prepared
     expandedDeclarations <- mapM (expandForRecursion synonyms)
         (SharedEnvironment.environmentDeclarations $
             SharedInventory.inventoryEnvironment inventory)
     let recursiveNames = SharedDeclaration.recursiveDataTypeNames
             expandedDeclarations
-    if Set.null recursiveNames then return synonyms else
+    if Set.null recursiveNames then return prepared else
         Left $ RecursiveSynthesisDataTypes $ Set.toAscList recursiveNames
   where
     expandForRecursion synonyms declaration =
@@ -313,11 +316,10 @@ prepareInventoryExpansion inventory = do
 
 sealPreparedEnvironment
     :: Environment
-    -> SynthesisInventory
-    -> SharedTypeSynonym.TypeSynonyms HSymbol
+    -> PreparedSynthesisInventory
     -> Either SynthesisEnvironmentError PreparedEnvironment
 sealPreparedEnvironment (Environment types functions classes)
-        inventory synonyms = do
+        prepared = do
     translate <- first InvalidSynthesisFormulaDefinitions $
         prepareTypeFormulaTranslator types
     -- Moving an invariant translation failure from query execution to sealing
@@ -332,8 +334,10 @@ sealPreparedEnvironment (Environment types functions classes)
     -- Force the derived index before the transient compatibility projection
     -- leaves scope; its field cannot retain the complete raw Environment thunk.
     classIndex `seq` kindCheck `seq` return (PreparedEnvironment
-        inventory synonyms kindCheck classIndex premises translate)
+        prepared kindCheck classIndex premises translate)
   where
+    inventory = SharedTypeSynonym.preparedInventory prepared
+
     translateFunction translate (name, source) =
         (,) (Symbol name) `fmap`
             first (("function " ++ prHSymbolOp name ++ ": ") ++)
@@ -353,17 +357,18 @@ preparedEnvironmentSource prepared =
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
 preparedEnvironmentInventory
-        (PreparedEnvironment inventory _ _ _ _ _) = inventory
+        (PreparedEnvironment prepared _ _ _ _) =
+    SharedTypeSynonym.preparedInventory prepared
 
 preparedEnvironmentKindCheck :: PreparedEnvironment -> PreparedKindCheck
 preparedEnvironmentKindCheck
-        (PreparedEnvironment _ _ kindCheck _ _ _) = kindCheck
+        (PreparedEnvironment _ kindCheck _ _ _) = kindCheck
 
 preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
     -> [(Symbol, Formula)]
 preparedEnvironmentFunctionPremises
-        (PreparedEnvironment _ _ _ _ premises _) = premises
+        (PreparedEnvironment _ _ _ premises _) = premises
 
 -- | The definition table is validated and compiled exactly once when the
 -- environment is sealed. Individual queries retain only their source-local
@@ -373,13 +378,14 @@ preparedEnvironmentFormulaTranslator
     -> HType
     -> Either String Formula
 preparedEnvironmentFormulaTranslator
-        (PreparedEnvironment _ _ _ _ _ translate) = translate
+        (PreparedEnvironment _ _ _ _ translate) = translate
 
 preparedEnvironmentTypeSynonyms
     :: PreparedEnvironment
     -> SharedTypeSynonym.TypeSynonyms HSymbol
 preparedEnvironmentTypeSynonyms
-        (PreparedEnvironment _ synonyms _ _ _ _) = synonyms
+        (PreparedEnvironment prepared _ _ _ _) =
+    SharedTypeSynonym.preparedTypeSynonyms prepared
 
 projectPreparedInventory
     :: PreparedEnvironment
@@ -399,7 +405,7 @@ lookupPreparedEnvironmentClass
     -> PreparedEnvironment
     -> Maybe ([(HSymbol, HKind)], [Axiom])
 lookupPreparedEnvironmentClass name
-        (PreparedEnvironment _ _ _ classes _ _) = Map.lookup name classes
+        (PreparedEnvironment _ _ classes _ _) = Map.lookup name classes
 
 -- | Elaborate a query batch through the exact alias table retained by its
 -- prepared environment. The list is checked in one free-variable kind scope;

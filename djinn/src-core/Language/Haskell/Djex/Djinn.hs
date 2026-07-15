@@ -2,10 +2,10 @@
 
 -- | Checked Djinn sessions behind Djex's backend-neutral query envelope.
 --
--- A session seals the exact Djinn environment once and retains both the shared
--- inventory that justified it and the alias table prepared from that same
--- inventory. Queries use the shared source-type vocabulary while retaining
--- Djinn's proof-search options and backend-specific evidence.
+-- A session seals the exact Djinn environment once and retains one prepared
+-- shared inventory together with every private search index derived from it.
+-- Queries use the shared source-type vocabulary while retaining Djinn's
+-- proof-search options and backend-specific evidence.
 module Language.Haskell.Djex.Djinn
   ( DjinnSession
   , DjinnEnvironment
@@ -42,6 +42,7 @@ module Language.Haskell.Djex.Djinn
   ) where
 
 import Data.Bifunctor (first)
+import Data.Void (absurd)
 
 import Djinn.Core
   ( DjinnCandidateDetails (..)
@@ -101,7 +102,9 @@ import Language.Haskell.Synthesis.Query
   , mkCachedQuery
   )
 import Language.Haskell.Synthesis.Environment (Environment)
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import Language.Haskell.Synthesis.Inventory (Inventory)
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import Language.Haskell.Synthesis.Type (Type)
 
 -- | The neutral declaration environment accepted by the Djinn adapter.
@@ -126,11 +129,11 @@ type DjinnLocal = String
 -- checked t'DjinnRequest'.
 type DjinnType = Type DjinnTypeVariable
 
--- | A validated shared environment and the exact backend indexes projected
--- from it.  The constructor is private so compatibility editing can replace
--- both values transactionally and raw Djinn tables never become a second
--- retained source authority in the frontend.
-data DjinnSession = DjinnSession DjinnEnvironment PreparedEnvironment
+-- | One prepared shared inventory and the exact backend indexes projected
+-- from it. The constructor is private; compatibility editing derives its
+-- neutral source view on demand and publishes a replacement only after the
+-- complete environment has been sealed transactionally.
+newtype DjinnSession = DjinnSession PreparedEnvironment
 
 -- | The raw projection and optional source provenance derived while sealing
 -- a request. The shared 'CachedQuery' envelope keeps both details out of the
@@ -152,7 +155,7 @@ newtype DjinnRequest = DjinnRequest
 -- | Lower a shared declaration environment through Djinn's stricter lexical,
 -- dependency, and kind checks, then seal it into a reusable session.
 mkDjinnSession :: DjinnEnvironment -> Either Diagnostic DjinnSession
-mkDjinnSession sharedEnvironment = DjinnSession sharedEnvironment <$>
+mkDjinnSession sharedEnvironment = DjinnSession <$>
   first environmentFailure (prepareSynthesisEnvironment sharedEnvironment)
 
 environmentFailure
@@ -171,10 +174,13 @@ standardDjinnSession = do
   mkDjinnSession environment
 
 djinnSessionEnvironment :: DjinnSession -> DjinnEnvironment
-djinnSessionEnvironment (DjinnSession environment _) = environment
+djinnSessionEnvironment =
+  SharedEnvironment.mapEnvironmentKindVariables absurd
+    . SharedInventory.inventoryEnvironment
+    . djinnSessionInventory
 
 djinnSessionInventory :: DjinnSession -> DjinnInventory
-djinnSessionInventory (DjinnSession _ prepared) =
+djinnSessionInventory (DjinnSession prepared) =
   preparedEnvironmentInventory prepared
 
 -- | Apply one historical declaration to the authoritative shared environment
@@ -183,20 +189,22 @@ declareDjinnDeclaration
   :: Declaration
   -> DjinnSession
   -> Either Diagnostic DjinnSession
-declareDjinnDeclaration declaration (DjinnSession environment _) = do
-  (environment', prepared) <- first environmentEditFailure
-    $ declareSynthesisEnvironment declaration environment
-  pure $ DjinnSession environment' prepared
+declareDjinnDeclaration declaration session = do
+  (_, prepared) <- first environmentEditFailure
+    $ declareSynthesisEnvironment declaration
+    $ djinnSessionEnvironment session
+  pure $ DjinnSession prepared
 
 -- | Transactional counterpart of the historical @:delete@ command.
 removeDjinnDeclaration
   :: String
   -> DjinnSession
   -> Either Diagnostic DjinnSession
-removeDjinnDeclaration name (DjinnSession environment _) = do
-  (environment', prepared) <- first environmentEditFailure
-    $ removeSynthesisDeclaration name environment
-  pure $ DjinnSession environment' prepared
+removeDjinnDeclaration name session = do
+  (_, prepared) <- first environmentEditFailure
+    $ removeSynthesisDeclaration name
+    $ djinnSessionEnvironment session
+  pure $ DjinnSession prepared
 
 -- The following projections keep the compatibility frontend's exact display
 -- and instance-generation behavior without making it retain a raw Environment.
@@ -205,20 +213,20 @@ removeDjinnDeclaration name (DjinnSession environment _) = do
 djinnSessionTypeDeclarations
   :: DjinnSession
   -> [(Core.HSymbol, ([Core.HSymbol], Core.HType, Core.HKind))]
-djinnSessionTypeDeclarations (DjinnSession _ prepared) =
+djinnSessionTypeDeclarations (DjinnSession prepared) =
   Core.typeDeclarations $ preparedEnvironmentSource prepared
 
 djinnSessionFunctionDeclarations
   :: DjinnSession
   -> [(Core.HSymbol, Core.HType)]
-djinnSessionFunctionDeclarations (DjinnSession _ prepared) =
+djinnSessionFunctionDeclarations (DjinnSession prepared) =
   Core.functionDeclarations $ preparedEnvironmentSource prepared
 
 djinnSessionClassDeclarations
   :: DjinnSession
   -> [(Core.HSymbol,
       ([(Core.HSymbol, Core.HKind)], [(Core.HSymbol, Core.HType)]))]
-djinnSessionClassDeclarations (DjinnSession _ prepared) =
+djinnSessionClassDeclarations (DjinnSession prepared) =
   Core.classDeclarations $ preparedEnvironmentSource prepared
 
 resolveDjinnInstanceMethods
@@ -226,7 +234,7 @@ resolveDjinnInstanceMethods
   -> [Core.Context]
   -> Core.Context
   -> Either Diagnostic [(Core.HSymbol, Core.HType)]
-resolveDjinnInstanceMethods (DjinnSession _ prepared) prerequisites target =
+resolveDjinnInstanceMethods (DjinnSession prepared) prerequisites target =
   first instanceResolutionFailure
     $ resolvePreparedInstanceMethods prepared prerequisites target
 
@@ -323,7 +331,7 @@ runDjinnQuery
   :: DjinnSession
   -> DjinnRequest
   -> Either Diagnostic DjinnResult
-runDjinnQuery (DjinnSession _ prepared) request = do
+runDjinnQuery (DjinnSession prepared) request = do
   let cache = djinnRequestCache request
   case inhabitResultPrepared
       (requestOptions $ djinnRequestQuery request)

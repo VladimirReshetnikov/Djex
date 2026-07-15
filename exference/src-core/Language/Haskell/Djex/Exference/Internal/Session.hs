@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 -- | Private ownership of the parser-neutral Exference session invariant.
 --
 -- A session retains only parser-independent state.  The HSE compatibility
@@ -16,6 +18,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , sessionOmissions
   ) where
 
+import Control.DeepSeq (NFData, deepseq)
 import Data.Bifunctor (first)
 import Data.List (partition)
 import qualified Data.Map.Strict as Map
@@ -23,6 +26,7 @@ import Data.Map.Strict (Map)
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import Data.Void (Void)
+import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core (mkExferenceEnvironment)
 import qualified Language.Haskell.Exference.Core as Core
@@ -30,8 +34,7 @@ import Language.Haskell.Exference.Core.Declaration
   ( PreparedNeutralSynthesisInventory
   , prepareNeutralSynthesisInventory
   , preparedNeutralBackend
-  , preparedNeutralInventory
-  , preparedNeutralTypeSynonyms
+  , preparedSynthesisWitness
   )
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (constructorFields)
@@ -69,34 +72,44 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.TypeSynonym
-  ( TypeSynonyms
+  ( PreparedInventory
+  , TypeSynonyms
+  , preparedInventory
+  , preparedTypeSynonyms
   )
 
 data ExferenceOmissionCapability
   = BindingIntroduction
   | DataElimination
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ExferenceOmissionCapability
 
 data ExferenceOmissionReason
   = UnsupportedNestedForall
   | RecursiveDataEliminationUnsupported
   | ExcludedByPolicy
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ExferenceOmissionReason
 
 data ExferenceOmission = ExferenceOmission
   { omittedName :: Name
   , omittedCapability :: ExferenceOmissionCapability
   , omittedReason :: ExferenceOmissionReason
   }
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ExferenceOmission
 
 -- | All reusable session state is independent of the parser that supplied the
--- declarations.  The prepared inventory is the authority for declarations,
--- synonyms, and the unfiltered backend projection; retaining its individual
--- views here as well would allow those immutable values to drift apart.
+-- declarations. The shared prepared inventory remains the authority for
+-- declarations and synonyms, while only the policy-filtered search lowering
+-- survives sealing. In particular, the complete backend-bearing frontend
+-- witness is deliberately not retained here.
 data ExferenceSession = ExferenceSession
   { searchView :: Core.ExferenceEnvironment
-  , preparedView :: PreparedNeutralSynthesisInventory
+  , preparedView :: PreparedInventory SynthesisVariable ()
   , omissionView :: [ExferenceOmission]
   }
 
@@ -167,11 +180,17 @@ sealPreparedEnvironment exclusions overrides prepared = do
     (shownErrorDiagnostic "DJEX_EXF_ENV"
       "cannot seal the Exference session environment")
     $ mkExferenceEnvironment supportedBackend
-  pure ExferenceSession
-    { searchView = searchEnvironment
-    , preparedView = prepared
-    , omissionView = omissions
-    }
+  let foundation = preparedSynthesisWitness prepared
+      session = ExferenceSession
+        { searchView = searchEnvironment
+        , preparedView = foundation
+        , omissionView = omissions
+        }
+  -- Evaluate the selector and the complete omission summary before the
+  -- backend-bearing witness leaves scope. Otherwise a lazy selector or list
+  -- comprehension could keep the unfiltered EnvDictionary reachable from an
+  -- otherwise parser-neutral session.
+  foundation `seq` (omissions `deepseq` pure session)
 
 applyRatingOverrides
   :: Map Name Penalty
@@ -208,12 +227,12 @@ sessionSearchEnvironment = searchView
 sessionTypeSynonyms
   :: ExferenceSession
   -> TypeSynonyms SynthesisVariable
-sessionTypeSynonyms = preparedNeutralTypeSynonyms . preparedView
+sessionTypeSynonyms = preparedTypeSynonyms . preparedView
 
 exferenceSessionInventory
   :: ExferenceSession
   -> Inventory SynthesisVariable ()
-exferenceSessionInventory = preparedNeutralInventory . preparedView
+exferenceSessionInventory = preparedInventory . preparedView
 
 sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView

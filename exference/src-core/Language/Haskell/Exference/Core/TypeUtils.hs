@@ -29,16 +29,13 @@ where
 import qualified Data.Set as S
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import qualified Data.Map.Strict as M
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
-  ( IdentifierSupply
-  , allocateFreshIdentifier
+  ( allocateFreshIdentifier
   , flexibleIdentifiers
-  , supplyFromIdentifiers
+  , supplyFromIdentifierSet
   )
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Synthesis.Collection (firstDuplicate)
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
@@ -113,12 +110,6 @@ data ForallNormalizationError
   | ForallNormalizationSupplyExhausted
   deriving (Eq, Show)
 
-data ForallNormalizationState = ForallNormalizationState
-  { normalizationClaimed :: IntSet.IntSet
-  , normalizationReserved :: IntSet.IntSet
-  , normalizationSupply :: IdentifierSupply
-  }
-
 -- | Give every explicit forall binder a globally distinct flexible identity
 -- while respecting lexical shadowing. External IDs and the type's true free
 -- variables are claimed before traversal. Every ID occurring anywhere in the
@@ -134,71 +125,54 @@ alphaNormalizeForalls
   :: IntSet.IntSet
   -> HsType
   -> Either ForallNormalizationError (HsType, IntSet.IntSet)
-alphaNormalizeForalls externalVariables source = do
-  (normalized, finalState) <- normalizeForallsInType initialState source
-  pure (normalized, normalizationReserved finalState)
+alphaNormalizeForalls externalVariables source = case
+    SharedType.uniquifyTypeBinders rejectRigidBinder freshFlexibleBinder
+      protectedVariables source of
+  Left failure -> Left $ normalizationError failure
+  Right (normalized, reserved) -> Right
+    (normalized, flexibleIdentifierSet reserved)
  where
-  sourceVariables = flexibleIdentifiers source
-  reserved = externalVariables `IntSet.union` sourceVariables
-  claimed = externalVariables `IntSet.union`
-    IntSet.fromList (S.toAscList $ freeVars source)
-  initialState = ForallNormalizationState
-    { normalizationClaimed = claimed
-    , normalizationReserved = reserved
-    , normalizationSupply = supplyFromIdentifiers $ IntSet.toAscList reserved
-    }
+  protectedVariables = S.fromList
+    [ SharedType.FlexibleVariable identifier
+    | identifier <- IntSet.toAscList externalVariables
+    ]
 
-normalizeForallsInType
-  :: ForallNormalizationState
-  -> HsType
-  -> Either ForallNormalizationError (HsType, ForallNormalizationState)
-normalizeForallsInType state typeExpression = case typeExpression of
-  TypeVar{} -> pure (typeExpression, state)
-  TypeConstant{} -> pure (typeExpression, state)
-  TypeCons{} -> pure (typeExpression, state)
-  TypeArrow parameter result -> do
-    (normalizedParameter, parameterState) <-
-      normalizeForallsInType state parameter
-    (normalizedResult, resultState) <-
-      normalizeForallsInType parameterState result
-    pure (TypeArrow normalizedParameter normalizedResult, resultState)
-  TypeApp function argument -> do
-    (normalizedFunction, functionState) <-
-      normalizeForallsInType state function
-    (normalizedArgument, argumentState) <-
-      normalizeForallsInType functionState argument
-    pure (TypeApp normalizedFunction normalizedArgument, argumentState)
-  TypeTuple boxity elements -> do
-    (normalizedElements, finalState) <- normalizeForallTypes state elements
-    pure (TypeTuple boxity normalizedElements, finalState)
-  TypeForallNative nativeVariables constraints body -> do
-    variables <- case flexibleBinderIdentifiers nativeVariables of
-      Left rigid -> Left $ RigidForallBinderCannotBeNormalized rigid
-      Right flexible -> Right flexible
-    case firstDuplicate variables of
-      Just duplicate -> Left $ DuplicateForallBinder duplicate
-      Nothing -> pure ()
-    (normalizedVariables, renaming, binderState) <-
-      normalizeForallBinders state variables
-    let sharedRenaming = M.fromList
-          [ ( SharedType.FlexibleVariable source
-            , SharedType.FlexibleVariable target
-            )
-          | (source, target) <- IntMap.toList renaming
-          ]
-        renameOwnedOccurrences =
-          SharedType.renameScopedVariables sharedRenaming
-        renamedConstraints = map
-          (fmap renameOwnedOccurrences) constraints
-        renamedBody = renameOwnedOccurrences body
-    (normalizedConstraints, constraintState) <-
-      normalizeForallConstraints binderState renamedConstraints
-    (normalizedBody, bodyState) <-
-      normalizeForallsInType constraintState renamedBody
-    pure
-      ( TypeForall normalizedVariables normalizedConstraints normalizedBody
-      , bodyState
-      )
+  rejectRigidBinder variable = case variable of
+    SharedType.FlexibleVariable _ -> Nothing
+    SharedType.RigidVariable identifier -> Just identifier
+
+  -- Preserve the historical greatest-plus-one path in logarithmic time.
+  -- Only the maxBound boundary needs the complete IntSet gap search. Rigid
+  -- occurrences deliberately do not occupy flexible IDs.
+  freshFlexibleBinder reserved _ = SharedType.FlexibleVariable <$> case
+      greatestFlexibleIdentifier reserved of
+    Nothing -> Just 0
+    Just greatest
+      | greatest < maxBound -> Just $ greatest + 1
+      | otherwise -> fst <$> allocateFreshIdentifier
+          (supplyFromIdentifierSet $ flexibleIdentifierSet reserved)
+
+  normalizationError failure = case failure of
+    SharedType.RejectedTypeBinder identifier ->
+      RigidForallBinderCannotBeNormalized identifier
+    SharedType.DuplicateTypeBinder variable -> case variable of
+      SharedType.FlexibleVariable identifier -> DuplicateForallBinder identifier
+      SharedType.RigidVariable identifier ->
+        RigidForallBinderCannotBeNormalized identifier
+    SharedType.TypeBinderFresheningError{} ->
+      ForallNormalizationSupplyExhausted
+
+flexibleIdentifierSet :: S.Set SynthesisVariable -> IntSet.IntSet
+flexibleIdentifierSet variables = IntSet.fromList
+  [ identifier
+  | SharedType.FlexibleVariable identifier <- S.toAscList variables
+  ]
+
+greatestFlexibleIdentifier :: S.Set SynthesisVariable -> Maybe TVarId
+greatestFlexibleIdentifier variables = case
+    S.lookupLE (SharedType.FlexibleVariable maxBound) variables of
+  Just (SharedType.FlexibleVariable identifier) -> Just identifier
+  _ -> Nothing
 
 flexibleBinderIdentifiers
   :: [SynthesisVariable]
@@ -208,60 +182,6 @@ flexibleBinderIdentifiers = traverse flexibleIdentifier
   flexibleIdentifier variable = case variable of
     SharedType.FlexibleVariable identifier -> Right identifier
     SharedType.RigidVariable identifier -> Left identifier
-
-normalizeForallConstraints
-  :: ForallNormalizationState
-  -> [HsConstraint]
-  -> Either ForallNormalizationError
-      ([HsConstraint], ForallNormalizationState)
-normalizeForallConstraints state [] = pure ([], state)
-normalizeForallConstraints state (HsConstraint name parameters : remaining) = do
-  (normalizedParameters, parameterState) <-
-    normalizeForallTypes state parameters
-  (normalizedRemaining, finalState) <-
-    normalizeForallConstraints parameterState remaining
-  pure
-    (HsConstraint name normalizedParameters : normalizedRemaining, finalState)
-
-normalizeForallTypes
-  :: ForallNormalizationState
-  -> [HsType]
-  -> Either ForallNormalizationError ([HsType], ForallNormalizationState)
-normalizeForallTypes state [] = pure ([], state)
-normalizeForallTypes state (typeExpression : remaining) = do
-  (normalizedType, typeState) <- normalizeForallsInType state typeExpression
-  (normalizedRemaining, finalState) <-
-    normalizeForallTypes typeState remaining
-  pure (normalizedType : normalizedRemaining, finalState)
-
-normalizeForallBinders
-  :: ForallNormalizationState
-  -> [TVarId]
-  -> Either ForallNormalizationError
-      ([TVarId], IntMap.IntMap TVarId, ForallNormalizationState)
-normalizeForallBinders initialState = go initialState [] IntMap.empty
- where
-  go state reversed renaming [] =
-    pure (reverse reversed, renaming, state)
-  go state reversed renaming (variable : remaining)
-    | IntSet.notMember variable $ normalizationClaimed state =
-        go (claim variable state) (variable : reversed) renaming remaining
-    | otherwise = case allocateFreshIdentifier $ normalizationSupply state of
-        Nothing -> Left ForallNormalizationSupplyExhausted
-        Just (replacement, nextSupply) -> go
-          ( (claim replacement state)
-              {normalizationSupply = nextSupply}
-          )
-          (replacement : reversed)
-          (IntMap.insert variable replacement renaming)
-          remaining
-
-  claim variable state = state
-    { normalizationClaimed = IntSet.insert variable
-        $ normalizationClaimed state
-    , normalizationReserved = IntSet.insert variable
-        $ normalizationReserved state
-    }
 
 -- | Normalize the complete type, peel only its leading prenex chain, then
 -- split consecutive arrows. A forall reached after an arrow remains in the

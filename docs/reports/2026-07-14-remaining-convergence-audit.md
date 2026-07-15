@@ -634,6 +634,27 @@ its local projection: that compatibility table stores raw flexible `TVarId`s,
 not tagged `SynthesisVariable`s, and a clarifying comment records the distinct
 boundary instead of conflating the identity domains.
 
+## Post-fold forall-normalization consolidation
+
+**Completed on 2026-07-15:** Exference's `alphaNormalizeForalls` carried a
+second complete recursive implementation of shared type traversal. It tracked
+claimed and reserved namespaces through applications, arrows, tuples,
+constraints, bodies, and lexical shadowing, then used the foundation only for
+the owned-occurrence rename inside each forall.
+
+`Language.Haskell.Synthesis.Type.uniquifyTypeBinders` now owns the complete
+operation. It reserves every source identity before traversal, protects free
+and caller-supplied identities, preserves admissibility-before-duplicate error
+precedence, retains noncolliding binders, freshens collisions in structural
+order, and rejects invalid allocator results. Exference's adapter now supplies
+only its flexible-binder policy, historical `IntSet` allocation order, tagged
+identity projections, and compatibility error vocabulary; 129 lines of its
+private grammar walk and state machinery are gone. Foundation regressions pin
+later-free capture avoidance, nested shadowing, rejection precedence, and
+allocator exhaustion. Exference pins its external-ID allocation spelling and
+existing rank-N/source/session suite, while the parser-free facade exposes the
+shared operation.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

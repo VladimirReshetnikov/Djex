@@ -29,7 +29,8 @@ facadeTests = testGroup "public Djex facade"
         )
   , testCase "exports shared type inspection" $ do
       checkedName <- expectRight $ mkIdentifier "Box"
-      let typeExpression = ForallType ["a"] []
+      let acceptBinder _ = Nothing :: Maybe String
+          typeExpression = ForallType ["a"] []
             $ TypeApplication (TypeConstructor checkedName)
             $ TypeVariable "a"
       leadingForallVariables typeExpression @?= ["a"]
@@ -45,6 +46,8 @@ facadeTests = testGroup "public Djex facade"
       freeVariablesInFirstOccurrenceOrder typeExpression @?= []
       constraintFreeVariables
           (Constraint checkedName [typeExpression]) @?= Set.empty
+      uniquifyTypeBinders acceptBinder (\_ _ -> Nothing) Set.empty
+          typeExpression @?= Right (typeExpression, Set.singleton "a")
       declaredValueName <- expectRight $ mkIdentifier "value"
       let declaration = ValueDeclaration
             $ ValueSignature () declaredValueName typeExpression

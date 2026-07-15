@@ -1055,6 +1055,14 @@ tests = testGroup "Exference"
                 [TypeForall [1] [] $ TypeVar 1, TypeVar 0]
           alphaNormalizeForalls IntSet.empty source @?=
             Right (expected, IntSet.fromList [0, 1])
+      , testCase "forall normalization retains historical external allocation" $ do
+          let source = TypeForall [0] [] $ TypeVar 0
+              expected = TypeForall [3] [] $ TypeVar 3
+          alphaNormalizeForalls (IntSet.fromList [0, 2]) source @?=
+            Right (expected, IntSet.fromList [0, 2, 3])
+          let boundaryExpected = TypeForall [1] [] $ TypeVar 1
+          alphaNormalizeForalls (IntSet.fromList [0, maxBound]) source @?=
+            Right (boundaryExpected, IntSet.fromList [0, 1, maxBound])
       , testCase "forall normalization rejects native rigid binders" $ do
           let source = TypeForallNative
                 [SharedType.RigidVariable 4] [] $ TypeVar 0

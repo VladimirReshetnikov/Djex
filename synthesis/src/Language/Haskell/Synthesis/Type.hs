@@ -16,6 +16,7 @@ module Language.Haskell.Synthesis.Type
   , TypeError (..)
   , FreshVariableAllocator
   , SubstitutionError (..)
+  , BinderNormalizationError (..)
   , canonicalizeType
   , applicationSpine
   , splitLeadingForalls
@@ -25,6 +26,7 @@ module Language.Haskell.Synthesis.Type
   , typeConstraints
   , typeConstructorHead
   , renameScopedVariables
+  , uniquifyTypeBinders
   , freshenTypeBindersAwayFrom
   , substituteTypeVariables
   , validateType
@@ -42,6 +44,7 @@ import Control.Monad.Trans.State.Strict
   , evalStateT
   , get
   , put
+  , runStateT
   )
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -99,6 +102,21 @@ data SubstitutionError variable
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData variable => NFData (SubstitutionError variable)
+
+-- | Failures while making every explicit binder globally unique.
+--
+-- The caller controls which binder identities its backend accepts. Allocation
+-- failures reuse the same checked contract as substitution and synonym
+-- freshening.
+data BinderNormalizationError variable rejection
+  = RejectedTypeBinder rejection
+  | DuplicateTypeBinder variable
+  | TypeBinderFresheningError (SubstitutionError variable)
+  deriving (Eq, Ord, Show, Generic)
+
+instance
+  (NFData variable, NFData rejection) =>
+  NFData (BinderNormalizationError variable rejection)
 
 -- | Give saturated function and tuple constructors one structural form.
 -- Partial and over-applied constructors remain ordinary applications so kind
@@ -243,6 +261,102 @@ renameScopedVariables renaming source = case source of
     in ForallType binders
       (map (fmap $ renameScopedVariables visible) constraints)
       (renameScopedVariables visible body)
+
+-- | Make every explicit forall binder globally unique and disjoint from free
+-- or caller-protected identities.
+--
+-- Every source identity is reserved before traversal, so a replacement cannot
+-- capture an occurrence that appears later. A binder is retained when it has
+-- not already been claimed; otherwise the allocator chooses its replacement.
+-- Constraints precede the body and sibling types retain structural source
+-- order. The caller-supplied rejection query runs before duplicate checking at
+-- each forall, preserving backend-specific binder admissibility precedence.
+-- The returned set contains the protected namespace, all source identities,
+-- and every allocated replacement.
+uniquifyTypeBinders
+  :: Ord variable
+  => (variable -> Maybe rejection)
+  -> FreshVariableAllocator variable
+  -> Set variable
+  -> Type variable
+  -> Either
+      (BinderNormalizationError variable rejection)
+      (Type variable, Set variable)
+uniquifyTypeBinders rejectBinder fresh protected source = do
+  (normalized, finalState) <- runStateT (normalize source) initialState
+  pure (normalized, binderReserved finalState)
+ where
+  initialState = BinderNormalizationState
+    { binderClaimed = protected `Set.union` freeVariables source
+    , binderReserved = protected `Set.union` allTypeVariables source
+    }
+
+  normalize typeExpression = case typeExpression of
+    TypeVariable{} -> pure typeExpression
+    TypeConstructor{} -> pure typeExpression
+    TypeApplication function argument -> TypeApplication
+      <$> normalize function
+      <*> normalize argument
+    FunctionType parameter result -> FunctionType
+      <$> normalize parameter
+      <*> normalize result
+    TupleType boxity elements -> TupleType boxity <$> mapM normalize elements
+    ForallType binders constraints body -> do
+      case firstRejectedBinder binders of
+        Just rejection -> lift $ Left $ RejectedTypeBinder rejection
+        Nothing -> pure ()
+      case firstDuplicate binders of
+        Just duplicate -> lift $ Left $ DuplicateTypeBinder duplicate
+        Nothing -> pure ()
+      renaming <- foldM normalizeBinder Map.empty binders
+      let renamedBinders = map
+            (\binder -> Map.findWithDefault binder binder renaming)
+            binders
+          renamedConstraints = map
+            (fmap $ renameScopedVariables renaming) constraints
+          renamedBody = renameScopedVariables renaming body
+      ForallType renamedBinders
+        <$> mapM normalizeConstraint renamedConstraints
+        <*> normalize renamedBody
+
+  normalizeConstraint (Constraint className arguments) =
+    Constraint className <$> mapM normalize arguments
+
+  normalizeBinder renaming binder = do
+    state <- get
+    if binder `Set.notMember` binderClaimed state
+      then do
+        put state {binderClaimed = Set.insert binder $ binderClaimed state}
+        pure renaming
+      else do
+        replacement <- allocateNormalizedBinder state binder
+        updated <- get
+        put updated
+          { binderClaimed = Set.insert replacement $ binderClaimed updated }
+        pure $ Map.insert binder replacement renaming
+
+  allocateNormalizedBinder state binder =
+    case fresh (binderReserved state) binder of
+      Nothing -> lift $ Left $ TypeBinderFresheningError
+        $ FreshVariableSupplyExhausted binder
+      Just candidate
+        | candidate `Set.member` binderReserved state -> lift $ Left
+            $ TypeBinderFresheningError
+            $ FreshVariableAlreadyReserved binder candidate
+        | otherwise -> do
+            put state
+              { binderReserved = Set.insert candidate $ binderReserved state }
+            pure candidate
+
+  firstRejectedBinder [] = Nothing
+  firstRejectedBinder (binder : remaining) = case rejectBinder binder of
+    Just rejection -> Just rejection
+    Nothing -> firstRejectedBinder remaining
+
+data BinderNormalizationState variable = BinderNormalizationState
+  { binderClaimed :: Set variable
+  , binderReserved :: Set variable
+  }
 
 -- | Alpha-rename binders that collide with a protected namespace.
 --

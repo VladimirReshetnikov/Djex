@@ -1561,6 +1561,43 @@ typeTests = testGroup "source types"
       SharedType.renameScopedVariables
           (Map.fromList [("a", "outer"), ("b", "free")]) source
         @?= expected
+  , testCase "uniquify binders against complete source scope" $ do
+      let variable = SharedType.TypeVariable
+          acceptAll _ = Nothing :: Maybe String
+          source = SharedType.TupleType Boxed
+            [ SharedType.ForallType ["a"] [] $ variable "a"
+            , variable "a"
+            , SharedType.ForallType ["outer"] []
+                $ SharedType.ForallType ["outer"] [] $ variable "outer"
+            ]
+          expected = SharedType.TupleType Boxed
+            [ SharedType.ForallType ["a'"] [] $ variable "a'"
+            , variable "a"
+            , SharedType.ForallType ["outer"] []
+                $ SharedType.ForallType ["outer'"] [] $ variable "outer'"
+            ]
+      SharedType.uniquifyTypeBinders acceptAll freshStringVariable
+          Set.empty source @?=
+        Right (expected, Set.fromList ["a", "a'", "outer", "outer'"])
+  , testCase "binder normalization reports rejection before duplicates" $ do
+      let source = SharedType.ForallType ["rejected", "rejected"] []
+            $ SharedType.TypeVariable "rejected"
+          acceptAll _ = Nothing :: Maybe String
+          reject binder
+            | binder == "rejected" = Just "unsupported"
+            | otherwise = Nothing
+      SharedType.uniquifyTypeBinders reject freshStringVariable Set.empty
+          source @?=
+        Left (SharedType.RejectedTypeBinder "unsupported")
+      SharedType.uniquifyTypeBinders acceptAll freshStringVariable
+          Set.empty source @?=
+        Left (SharedType.DuplicateTypeBinder "rejected")
+      SharedType.uniquifyTypeBinders acceptAll (\_ _ -> Nothing)
+          (Set.singleton "rejected")
+          (SharedType.ForallType ["rejected"] []
+            $ SharedType.TypeVariable "rejected") @?=
+        Left (SharedType.TypeBinderFresheningError
+          $ SharedType.FreshVariableSupplyExhausted "rejected")
   , testCase "substitution avoids capture in constraints and tuple bodies" $ do
       let className = right $ mkIdentifier "C"
           substitutions = Map.fromList

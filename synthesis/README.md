@@ -26,11 +26,14 @@ decomposition, binder collection, general and nested quantifier detection,
 complete embedded-constraint traversal, and nominal constructor-head
 discovery. The prenex split returns binders, direct constraints, and the
 residual body in source order without forcing later layers merely to emit an
-outer binder. Constraint collection has an explicit source-order contract:
-every direct constraint at a forall precedes nested constraints in its
-arguments, followed by constraints in the body. Historical Exference query
-names are compatibility aliases over these operations rather than independent
-recursive walkers.
+outer binder. Its free-variable traversal similarly exposes each scoped value
+once in first-occurrence order, then derives the unordered set view from that
+same authority. Constraint arguments precede a forall body, matching their
+source position, and an available variable does not force an unused suffix.
+Constraint collection has an explicit source-order contract: every direct
+constraint at a forall precedes nested constraints in its arguments, followed
+by constraints in the body. Historical Exference query names are compatibility
+aliases over these operations rather than independent recursive walkers.
 
 `Language.Haskell.Synthesis.Diagnostic` is the parser-independent reporting
 boundary used by both sessions. It carries severity, an optional stable code,

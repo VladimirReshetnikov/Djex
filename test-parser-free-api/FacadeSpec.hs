@@ -41,6 +41,7 @@ facadeTests = testGroup "public Djex facade"
         )
       typeConstraints typeExpression @?= []
       typeConstructorHead typeExpression @?= Just checkedName
+      freeVariablesInFirstOccurrenceOrder typeExpression @?= []
       let requestTraversal
             :: (RequestTypeSite -> String -> Maybe String)
             -> (Constraint String -> Maybe (Constraint String))

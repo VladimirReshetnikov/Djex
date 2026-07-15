@@ -657,19 +657,20 @@ instantiateSynthesisMethod parameters arguments methodType = do
   where
     parameterNames = map fst parameters
     substitution = zip parameterNames arguments
-    methodVariables = synthesisTypeVariables methodType
+    methodVariables =
+        SharedType.freeVariablesInFirstOccurrenceOrder methodType
     activeImages =
         [ argument
         | (parameter, argument) <- substitution
         , parameter `elem` methodVariables
         ]
-    imageVariables = Set.fromList $
-        concatMap synthesisTypeVariables activeImages
+    imageVariables = Set.fromList $ concatMap
+        SharedType.freeVariablesInFirstOccurrenceOrder activeImages
     localVariables = filter (`notElem` parameterNames) methodVariables
     capturedLocals = filter (`Set.member` imageVariables) localVariables
     initiallyUnavailable = Set.fromList $
         parameterNames ++ methodVariables ++
-        concatMap synthesisTypeVariables arguments
+        concatMap SharedType.freeVariablesInFirstOccurrenceOrder arguments
     (_, renamings) = mapAccumL allocateRenaming
         initiallyUnavailable capturedLocals
 
@@ -690,26 +691,6 @@ instantiateSynthesisMethod parameters arguments methodType = do
         (fresh, _, _) = Fresh.allocateFresh
             (\candidate -> (candidate, candidate ++ "'"))
             unavailable (variable ++ "'")
-
-synthesisTypeVariables :: SharedType.Type HSymbol -> [HSymbol]
-synthesisTypeVariables typeExpression = case typeExpression of
-    SharedType.TypeVariable variable -> [variable]
-    SharedType.TypeConstructor _ -> []
-    SharedType.TypeApplication function argument ->
-        synthesisTypeVariables function `List.union`
-        synthesisTypeVariables argument
-    SharedType.FunctionType parameter result ->
-        synthesisTypeVariables parameter `List.union`
-        synthesisTypeVariables result
-    SharedType.TupleType _ elements ->
-        foldr List.union [] $ map synthesisTypeVariables elements
-    SharedType.ForallType binders constraints body ->
-        filter (`notElem` binders) $
-            foldr List.union (synthesisTypeVariables body)
-                [ synthesisTypeVariables argument
-                | constraint <- constraints
-                , argument <- constraintArguments constraint
-                ]
 
 data QueryOptions = QueryOptions {
     -- | Collect alternative solutions beyond the first.

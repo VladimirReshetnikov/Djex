@@ -28,6 +28,7 @@ module Language.Haskell.Synthesis.Type
   , freshenTypeBindersAwayFrom
   , substituteTypeVariables
   , validateType
+  , freeVariablesInFirstOccurrenceOrder
   , freeVariables
   , typeConstructors
   ) where
@@ -45,7 +46,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
-import Language.Haskell.Synthesis.Collection (firstDuplicate)
+import Language.Haskell.Synthesis.Collection (distinctOn, firstDuplicate)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Name
 
@@ -441,22 +442,36 @@ validTupleArity Unboxed arity = withinBounds arity
 withinBounds :: Int -> Bool
 withinBounds arity = arity >= 0 && arity <= maximumTupleArity
 
+-- | Collect free variables once each, ordered by their first source
+-- occurrence. Constraint arguments at a forall precede its body, matching
+-- their textual position before @=>@. Emitting a variable does not inspect
+-- the unused suffix of the type.
+freeVariablesInFirstOccurrenceOrder
+  :: Ord variable
+  => Type variable
+  -> [variable]
+freeVariablesInFirstOccurrenceOrder = distinctOn id . collect Set.empty
+ where
+  collect bound typeExpression = case typeExpression of
+    TypeVariable variable
+      | variable `Set.member` bound -> []
+      | otherwise -> [variable]
+    TypeConstructor{} -> []
+    TypeApplication function argument ->
+      collect bound function ++ collect bound argument
+    FunctionType parameter result ->
+      collect bound parameter ++ collect bound result
+    TupleType _ elements -> concatMap (collect bound) elements
+    ForallType variables constraints body ->
+      let nestedBound = bound `Set.union` Set.fromList variables
+      in concatMap
+          (concatMap (collect nestedBound) . constraintArguments)
+          constraints
+        ++ collect nestedBound body
+
+-- | The set of variables free in a type.
 freeVariables :: Ord variable => Type variable -> Set variable
-freeVariables typeExpression = case typeExpression of
-  TypeVariable variable -> Set.singleton variable
-  TypeConstructor{} -> Set.empty
-  TypeApplication function argument ->
-    freeVariables function `Set.union` freeVariables argument
-  FunctionType parameter result ->
-    freeVariables parameter `Set.union` freeVariables result
-  TupleType _ elements -> Set.unions $ map freeVariables elements
-  ForallType variables constraints body ->
-    (Set.unions
-      (freeVariables body :
-        [ freeVariables argument
-        | constraint <- constraints
-        , argument <- constraintArguments constraint
-        ])) `Set.difference` Set.fromList variables
+freeVariables = Set.fromList . freeVariablesInFirstOccurrenceOrder
 
 -- | Collect nominal constructor references from a type. Structural function
 -- and tuple forms have intrinsic kinds and therefore contribute only the

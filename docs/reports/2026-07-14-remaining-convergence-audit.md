@@ -577,6 +577,25 @@ Regressions pin binder and direct-constraint order, the exact residual body,
 prenex-only and rank-N classification, parser-free exposure, and productive
 outer-binder emission from a partial type.
 
+## Post-fold ordered free-variable consolidation
+
+**Completed on 2026-07-15:** Djinn's class-method instantiator retained a
+private recursive walk over the shared type tree to collect scoped free
+variables in first-occurrence order. The foundation independently traversed
+the same binders, constraints, and body to construct an unordered set. The
+Djinn walk used repeated `Data.List.union`, making a common semantic query
+quadratic in the number of distinct variables.
+
+`Language.Haskell.Synthesis.Type.freeVariablesInFirstOccurrenceOrder` now owns
+the scoped source-order traversal and uses the shared stable seen-set
+operation. The existing `freeVariables` set is derived from it, so both
+backends agree on constraint/body scope even when only Exference needs the set
+projection. Djinn consumes the ordered query directly for deterministic
+capture avoidance and deletes its private tree walk. Foundation regressions
+pin constraint-before-body order and productive prefix emission, existing
+Djinn capture tests retain exact generated prime spellings, and the
+parser-free facade exposes the common query.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

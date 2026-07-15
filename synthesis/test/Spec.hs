@@ -1488,6 +1488,11 @@ typeTests = testGroup "source types"
               (SharedType.TypeVariable "c"))
       SharedType.freeVariables typeExpression @?=
         Set.fromList ["b", "c"]
+      SharedType.freeVariablesInFirstOccurrenceOrder typeExpression @?=
+        ["b", "c"]
+      take 1 (SharedType.freeVariablesInFirstOccurrenceOrder
+        $ SharedType.FunctionType (SharedType.TypeVariable "first")
+        $ error "forced free-variable suffix") @?= ["first"]
       SharedType.validateType typeExpression @?= Right ()
   , testCase "scoped renaming stops at shadowing foralls" $ do
       let className = right $ mkIdentifier "C"

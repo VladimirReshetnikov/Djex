@@ -9,10 +9,10 @@ import Control.Monad.Trans.State.Strict (
     StateT, evalStateT, get, gets, modify, put)
 import Data.List (intercalate, (!?))
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
 import Djinn.Internal.LJTFormula
+import Language.Haskell.Synthesis.Collection (firstDuplicate)
 
 data ProofType
     = Meta Natural
@@ -59,15 +59,10 @@ checkProof environment expected term =
 
 ensureUniqueEnvironment :: [(Symbol, Formula)] -> Check ()
 ensureUniqueEnvironment environment =
-    case firstDuplicate Set.empty $ map fst environment of
+    case firstDuplicate $ map fst environment of
         Nothing -> return ()
         Just symbol -> failCheck $
             "duplicate proof identity in environment: " ++ show symbol
-  where
-    firstDuplicate _ [] = Nothing
-    firstDuplicate seen (symbol : symbols)
-        | symbol `Set.member` seen = Just symbol
-        | otherwise = firstDuplicate (Set.insert symbol seen) symbols
 
 infer :: Environment -> Term -> Check ProofType
 infer environment term =

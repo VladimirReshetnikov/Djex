@@ -130,6 +130,10 @@ collectionTests = testGroup "collections"
       multiplicityOf "alpha" summary @?= OccursMultipleTimes
       repeatedValueSet summary @?= Set.fromList ["alpha", "beta"]
       repeatedValuesInFirstRepetitionOrder summary @?= ["beta", "alpha"]
+  , testCase "stop at the first encountered repetition" $ do
+      firstDuplicate ([1, 2, 1, error "forced duplicate suffix"] :: [Int])
+        @?= Just 1
+      firstDuplicate ([1, 2, 3] :: [Int]) @?= Nothing
   ]
 
 queryTests :: TestTree

@@ -16,8 +16,9 @@ facadeTests = testGroup "public Djex facade"
       assertBool "qualified name was rejected" $
         isRight $ parseName "Data.Function.fix"
   , testCase "exports shared duplicate classification" $
-      multiplicityOf "value" (summarizeDuplicates ["value", "value"])
-        @?= OccursMultipleTimes
+      ( multiplicityOf "value" (summarizeDuplicates ["value", "value"])
+      , firstDuplicate ["first", "second", "first"]
+      ) @?= (OccursMultipleTimes, Just "first")
   , testCase "exports generated-code rendering" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

@@ -39,6 +39,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
+import Language.Haskell.Synthesis.Collection (firstDuplicate)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Name
 
@@ -356,14 +357,6 @@ validTupleArity Unboxed arity = withinBounds arity
 
 withinBounds :: Int -> Bool
 withinBounds arity = arity >= 0 && arity <= maximumTupleArity
-
-firstDuplicate :: Ord value => [value] -> Maybe value
-firstDuplicate = go Set.empty
-  where
-    go _ [] = Nothing
-    go seen (value : remaining)
-      | value `Set.member` seen = Just value
-      | otherwise = go (Set.insert value seen) remaining
 
 freeVariables :: Ord variable => Type variable -> Set variable
 freeVariables typeExpression = case typeExpression of

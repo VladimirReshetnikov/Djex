@@ -9,6 +9,7 @@
 module Language.Haskell.Synthesis.Collection
   ( Multiplicity (..)
   , DuplicateSummary
+  , firstDuplicate
   , summarizeDuplicates
   , multiplicityOf
   , repeatedValueSet
@@ -34,6 +35,18 @@ data DuplicateSummary value = DuplicateSummary
   !(Set.Set value)
   !(Set.Set value)
   [value]
+
+-- | Return the value whose second occurrence is encountered first.
+--
+-- Unlike a complete 'DuplicateSummary', this query short-circuits once its
+-- answer is known and can therefore succeed on an infinite input.
+firstDuplicate :: Ord value => [value] -> Maybe value
+firstDuplicate = go Set.empty
+ where
+  go !_ [] = Nothing
+  go !seen (value : remaining)
+    | value `Set.member` seen = Just value
+    | otherwise = go (Set.insert value seen) remaining
 
 -- | Summarize duplicates in one strict traversal, without occurrence counts.
 summarizeDuplicates :: Ord value => [value] -> DuplicateSummary value

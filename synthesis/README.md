@@ -50,7 +50,9 @@ for historical APIs that still expose machine-sized `Int` values.
 without occurrence counters. Its opaque duplicate summary exposes exact
 absent, unique, and duplicate membership, the repeated-value set, and repeats
 in first-repetition order, so adapters can retain their established diagnostic
-ordering without bounded counts or private duplicate-detection loops.
+ordering without bounded counts or private duplicate-detection loops. The
+separate short-circuiting `firstDuplicate` query preserves second-occurrence
+precedence and can return without forcing an unused suffix.
 
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s,

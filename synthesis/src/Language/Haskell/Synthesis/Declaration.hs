@@ -25,6 +25,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import Language.Haskell.Synthesis.Collection (firstDuplicate)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Kind
 import Language.Haskell.Synthesis.Name
@@ -278,9 +279,6 @@ validateDistinct
   => (value -> error)
   -> [value]
   -> Either error ()
-validateDistinct makeError = go Set.empty
-  where
-    go _ [] = Right ()
-    go seen (value : remaining)
-      | value `Set.member` seen = Left $ makeError value
-      | otherwise = go (Set.insert value seen) remaining
+validateDistinct makeError values = case firstDuplicate values of
+  Nothing -> Right ()
+  Just duplicate -> Left $ makeError duplicate

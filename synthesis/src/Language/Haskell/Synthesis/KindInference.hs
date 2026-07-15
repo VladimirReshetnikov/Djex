@@ -38,6 +38,7 @@ import Data.Void (Void, absurd)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Collection (firstDuplicate)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -839,11 +840,3 @@ intrinsicKind name = case nameSpecial name of
   _ -> Nothing
   where
     arrow = FunctionKind
-
-firstDuplicate :: Ord value => [value] -> Maybe value
-firstDuplicate = go Set.empty
-  where
-    go _ [] = Nothing
-    go seen (value : remaining)
-      | value `Set.member` seen = Just value
-      | otherwise = go (Set.insert value seen) remaining

@@ -481,10 +481,9 @@ mkStaticClassEnv sourceClasses sourceInstances = do
       constraints = tclass_constraints declaration
       validateParameters = case L.find (< 0) parameters of
         Just invalid -> Left $ NegativeClassParameter name invalid
-        Nothing -> case SharedCollection.repeatedValuesInFirstRepetitionOrder
-            $ SharedCollection.summarizeDuplicates parameters of
-          duplicate : _ -> Left $ DuplicateClassParameter name duplicate
-          [] -> Right ()
+        Nothing -> case SharedCollection.firstDuplicate parameters of
+          Just duplicate -> Left $ DuplicateClassParameter name duplicate
+          Nothing -> Right ()
       validateSuperclassVariables = case S.toAscList
           (constraintVariables constraints S.\\ S.fromList parameters) of
         [] -> Right ()

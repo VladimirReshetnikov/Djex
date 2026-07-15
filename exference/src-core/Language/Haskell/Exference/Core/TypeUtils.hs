@@ -37,6 +37,7 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
   , supplyFromIdentifiers
   )
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Synthesis.Collection (firstDuplicate)
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -174,7 +175,7 @@ normalizeForallsInType state typeExpression = case typeExpression of
     variables <- case flexibleBinderIdentifiers nativeVariables of
       Left rigid -> Left $ RigidForallBinderCannotBeNormalized rigid
       Right flexible -> Right flexible
-    case firstDuplicateVariable variables of
+    case firstDuplicate variables of
       Just duplicate -> Left $ DuplicateForallBinder duplicate
       Nothing -> pure ()
     (normalizedVariables, renaming, binderState) <-
@@ -261,14 +262,6 @@ normalizeForallBinders initialState = go initialState [] IntMap.empty
     , normalizationReserved = IntSet.insert variable
         $ normalizationReserved state
     }
-
-firstDuplicateVariable :: [TVarId] -> Maybe TVarId
-firstDuplicateVariable = go IntSet.empty
- where
-  go _ [] = Nothing
-  go seen (variable : remaining)
-    | IntSet.member variable seen = Just variable
-    | otherwise = go (IntSet.insert variable seen) remaining
 
 -- | Normalize the complete type, peel only its leading prenex chain, then
 -- split consecutive arrows. A forall reached after an arrow remains in the

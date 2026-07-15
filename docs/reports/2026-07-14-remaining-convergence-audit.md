@@ -490,6 +490,21 @@ ground environment only at that compatibility edge. Parser-free compile
 coverage pins the public type equality, while Djinn and cross-backend tests pin
 standard-session conversion, declaration order, editing, and query behavior.
 
+## Post-fold duplicate-detection consolidation
+
+**Completed on 2026-07-15:** foundation type, declaration, and kind validation,
+Djinn proof-environment checking, and Exference forall normalization each kept
+an identical ordered-set loop for finding the value whose second occurrence is
+encountered first. Exference class validation additionally computed a complete
+duplicate summary only to inspect its first element.
+
+`Language.Haskell.Synthesis.Collection.firstDuplicate` now owns that
+short-circuiting operation. All six callers preserve their exact diagnostic
+precedence, while a foundation regression proves that an unused suffix remains
+lazy. Djinn's distinct historical rule for choosing the repeated value whose
+*first* occurrence is earliest continues to use the complete shared summary;
+the two semantics are intentionally not conflated.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

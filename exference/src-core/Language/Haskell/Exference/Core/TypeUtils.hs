@@ -218,7 +218,7 @@ containsNestedForall :: HsType -> Bool
 containsNestedForall = SharedType.containsNestedForall
 
 constraintContainsForall :: HsConstraint -> Bool
-constraintContainsForall = any containsForall . constraint_params
+constraintContainsForall = SharedType.constraintContainsForall
 
 -- | Find the nominal head beneath foralls and type applications.
 typeConstructorHead :: HsType -> Maybe QualifiedName

@@ -1138,6 +1138,12 @@ tests = testGroup "Exference"
           typeConstructorHead
               (TypeTuple Boxed [TypeVar 0, TypeConstant 0])
             @?= Just pairName
+      , testCase "constraint forall inspection follows shared type semantics" $ do
+          let plain = HsConstraint (name "Plain") [TypeVar 0]
+              quantified = HsConstraint (name "Quantified")
+                [TypeForall [1] [] $ TypeVar 1]
+          constraintContainsForall plain @?= False
+          constraintContainsForall quantified @?= True
       , testCase "arrow splitting stops before a result forall" $ do
           let integer = TypeCons $ name "Int"
               nestedConstraint = HsConstraint (name "C") [TypeVar 2]

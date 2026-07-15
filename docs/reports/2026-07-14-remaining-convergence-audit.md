@@ -774,6 +774,22 @@ both closures produce the same instantiated head while the instance path
 preserves prerequisites; the existing cycle, rigid-argument, malformed-arity,
 and packaged-environment count tests continue to cover the surrounding graph.
 
+## Post-fold constraint-forall inspection consolidation
+
+**Completed on 2026-07-15:** the shared type layer detected quantification in
+leading constraint arguments while Exference independently repeated the same
+predicate for search-input validation. The implementations were structurally
+small, but they were one diagnostic boundary: a disagreement could admit a
+constraint argument into one path that another path later rejected.
+
+`Language.Haskell.Synthesis.Type.constraintContainsForall` now owns this
+observation. Shared nested-forall inspection and Exference's historical
+`constraintContainsForall` entry point both delegate to it, preserving the
+compatibility name without retaining a second algorithm. Foundation tests pin
+positive, negative, and short-circuiting behavior; the Exference regression
+pins the public compatibility projection. The focused suites pass 203 and 344
+tests respectively under `-Werror` on GHC 9.12.4.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

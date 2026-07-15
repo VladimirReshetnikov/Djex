@@ -64,7 +64,8 @@ independent input namespaces, while `unifyShared` applies one occurs-checked
 substitution to a common namespace. The historical `unify` name remains a
 compatibility alias for `unifyDisjoint`. All three operate directly on the
 native shared type tree, canonicalize saturated functions and tuples before
-solving, reject quantifiers at any depth, and canonicalize their projected
+solving, reject quantifiers at any depth through the shared type and
+constraint-argument inspection authority, and canonicalize their projected
 substitutions. The right-directed matcher uses the same tagged solver while
 keeping left-side variables rigid, so equal numeric IDs from its two inputs
 cannot alias accidentally. Exference's substitution API likewise delegates to

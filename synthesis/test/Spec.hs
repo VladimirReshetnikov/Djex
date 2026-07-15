@@ -1530,6 +1530,13 @@ typeTests = testGroup "source types"
         $ error "forced all-depth binder body") @?= ["outer"]
       SharedType.firstForallType source @?= Just source
       SharedType.containsForall source @?= True
+      SharedType.constraintContainsForall outerConstraint @?= True
+      SharedType.constraintContainsForall siblingConstraint @?= False
+      SharedType.constraintContainsForall
+          (Constraint outerClass
+            [ SharedType.ForallType [] [] $ variable "a"
+            , error "forced constraint forall suffix"
+            ]) @?= True
       SharedType.containsNestedForall source @?= True
       SharedType.containsNestedForall
           (SharedType.ForallType ["a"] [] $ variable "a") @?= False

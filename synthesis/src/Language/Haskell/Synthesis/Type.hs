@@ -28,6 +28,7 @@ module Language.Haskell.Synthesis.Type
   , typeBinderVariables
   , firstForallType
   , containsForall
+  , constraintContainsForall
   , containsNestedForall
   , typeConstraints
   , typeConstructorHead
@@ -340,13 +341,20 @@ firstForallType typeExpression = case typeExpression of
 containsForall :: Type variable -> Bool
 containsForall = maybe False (const True) . firstForallType
 
+-- | Whether explicit quantification occurs in any argument of a constraint.
+--
+-- Keeping this observation beside 'containsForall' gives validation and
+-- backend compatibility layers one traversal authority for constraint types.
+constraintContainsForall :: Constraint (Type variable) -> Bool
+constraintContainsForall = any containsForall
+
 -- | Whether explicit quantification occurs outside the leading prenex chain.
 --
 -- Quantification inside a leading constraint argument is nested even though
 -- the constraint itself belongs to the prenex chain.
 containsNestedForall :: Type variable -> Bool
 containsNestedForall typeExpression =
-  any (any containsForall . constraintArguments) constraints
+  any constraintContainsForall constraints
     || containsForall body
  where
   (_, constraints, body) = splitLeadingForalls typeExpression

@@ -22,11 +22,11 @@ error renderer bounded even when handed an adversarial `SpecialName` payload.
 
 `Language.Haskell.Synthesis.Type` is the single source-type tree used by the
 foundation and both engines. Its structural queries own leading-prenex
-decomposition, binder collection, general and nested quantifier detection,
-complete embedded-constraint traversal, and nominal constructor-head
-discovery. The prenex split returns binders, direct constraints, and the
-residual body in source order without forcing later layers merely to emit an
-outer binder. Its free-variable traversal similarly exposes each scoped value
+decomposition, binder collection, general, constraint-argument, and nested
+quantifier detection, complete embedded-constraint traversal, and nominal
+constructor-head discovery. The prenex split returns binders, direct
+constraints, and the residual body in source order without forcing later
+layers merely to emit an outer binder. Its free-variable traversal similarly exposes each scoped value
 once in first-occurrence order, then derives the unordered set view from that
 same authority. Constraint arguments precede a forall body, matching their
 source position, and an available variable does not force an unused suffix.

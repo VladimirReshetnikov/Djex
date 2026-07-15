@@ -18,8 +18,8 @@ generated-output infrastructure is progressively consolidated.
   query/evidence/search envelope. All modules formerly exposed by the three
   parser-free sublibraries remain exposed by `djex` for import compatibility.
 - `synthesis/` is the neutral foundation source area: validated names, types,
-  kinds, declarations, environments, diagnostics, generated output, and
-  operational search status.
+  kinds, declarations, environments, diagnostics, collision-free allocation,
+  generated output, and operational search status.
 - `djinn/` contributes the LJT proof engine and checked adapter to `djex`, plus
   the named `djinn-frontend` compatibility/REPL library. The frontend
   re-exports both `Djinn.Core` and `Language.Haskell.Djex.Djinn`.

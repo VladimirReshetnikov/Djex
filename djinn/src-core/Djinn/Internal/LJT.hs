@@ -32,7 +32,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
-import Djinn.Internal.Fresh (allocateFresh)
+import Language.Haskell.Synthesis.Fresh (allocateFresh)
 import Djinn.Internal.LJTFormula
 
 -- Whether local proof-search cuts should retain their alternative paths.

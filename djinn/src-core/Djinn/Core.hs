@@ -64,6 +64,7 @@ import Text.ParserCombinators.ReadP
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
@@ -72,7 +73,6 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
-import qualified Djinn.Internal.Fresh as Fresh
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)

@@ -31,13 +31,13 @@ import Data.Void (Void, absurd)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import Language.Haskell.Synthesis.Fresh (allocateFresh)
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Djinn.Internal.Declaration
-import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.HCheck.Implementation
     ( PreparedKindCheck
     , htCheckTypePrepared

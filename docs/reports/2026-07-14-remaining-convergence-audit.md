@@ -858,6 +858,27 @@ associativity, source order, and parser-free exposure; existing declaration,
 source-loader, expression-checker, search, and CLI suites cover every migrated
 consumer.
 
+## Post-fold fresh-allocation consolidation
+
+**Completed on 2026-07-15:** Djinn's string, proof-symbol, generated-binder,
+and synonym namespaces shared one private collision-skipping loop, while
+Exference independently searched its complete tagged `Int` namespace. The
+neutral foundation now owns deterministic allocation from either a total or
+an exhaustible stateful candidate generator. Both forms publish the chosen
+value in the reservation set, return the exact continuation state, and avoid
+forcing that state when the selected candidate is already available.
+
+Every Djinn consumer now imports `Language.Haskell.Synthesis.Fresh`, and the
+obsolete `Djinn.Internal.Fresh` module has been deleted. Exference retains only
+its backend policy: flexible and rigid tags remain disjoint, and identifiers
+traverse the non-negative half before the negative half without overflowing at
+either endpoint. Its bulk declaration renumbering is a lazy view of that same
+private integer state machine, while actual freshening delegates collision
+skipping and exhaustion to the shared allocator. Foundation and parser-free
+facade regressions pin reservation publication, continuation state, finite
+exhaustion, and continuation laziness; existing backend tests cover capture
+avoidance, proof-name restoration, negative identities, and `maxBound` gaps.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

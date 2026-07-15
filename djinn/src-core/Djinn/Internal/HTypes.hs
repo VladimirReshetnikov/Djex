@@ -25,12 +25,12 @@ import qualified Data.Set as Set
 import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
 import Text.ParserCombinators.ReadP
-import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.Generated
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.LJTFormula
 import Djinn.Internal.TypeFormula
 import Language.Haskell.Synthesis.Constraint (Constraint(..))
+import Language.Haskell.Synthesis.Fresh (allocateFresh)
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Name as SharedName
 

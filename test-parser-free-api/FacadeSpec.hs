@@ -31,6 +31,14 @@ facadeTests = testGroup "public Djex facade"
         , Just "present"
         , Just 5
         )
+  , testCase "exports shared collision-free allocation" $ do
+      let candidate suffix = ("v" ++ show suffix, suffix + 1 :: Int)
+          reserved = Set.fromList ["v0", "v1"]
+      allocateFresh candidate reserved 0 @?=
+        ("v2", Set.insert "v2" reserved, 3)
+      allocateFreshMaybe
+          (\available -> if available then Nothing else Just ("v", True))
+          (Set.singleton "v") False @?= Nothing
   , testCase "exports shared type inspection" $ do
       checkedName <- expectRight $ mkIdentifier "Box"
       let acceptBinder _ = Nothing :: Maybe String

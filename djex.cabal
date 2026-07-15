@@ -136,6 +136,7 @@ Library
     Language.Haskell.Synthesis.Declaration
     Language.Haskell.Synthesis.Diagnostic
     Language.Haskell.Synthesis.Environment
+    Language.Haskell.Synthesis.Fresh
     Language.Haskell.Synthesis.Generated
     Language.Haskell.Synthesis.Kind
     Language.Haskell.Synthesis.KindInference
@@ -180,7 +181,6 @@ Library
 
   Other-Modules:
     Djinn.Internal.Declaration
-    Djinn.Internal.Fresh
     Djinn.Internal.HCheck.Implementation
     Djinn.Internal.Type
     Djinn.Internal.TypeFormula

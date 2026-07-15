@@ -18,6 +18,7 @@ import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Diagnostic
 import qualified Language.Haskell.Synthesis.Declaration as Declaration
 import qualified Language.Haskell.Synthesis.Environment as Environment
+import Language.Haskell.Synthesis.Fresh
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Name
 import qualified Language.Haskell.Synthesis.Kind as Kind
@@ -46,6 +47,7 @@ tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
   , collectionTests
+  , freshTests
   , constraintTests
   , declarationTests
   , environmentTests
@@ -158,6 +160,30 @@ collectionTests = testGroup "collections"
         @?= Just 1
       firstDuplicate ([1, 2, 3] :: [Int]) @?= Nothing
   ]
+
+freshTests :: TestTree
+freshTests = testGroup "fresh allocation"
+  [ testCase "skip reserved values and publish the selected candidate" $ do
+      let step suffix = ("v" ++ show suffix, suffix + 1 :: Natural)
+          reserved = Set.fromList ["v0", "v1"]
+      allocateFresh step reserved 0 @?=
+        ("v2", Set.insert "v2" reserved, 3)
+  , testCase "report exhaustion only after every finite candidate" $ do
+      let step candidate
+            | candidate < (3 :: Int) = Just (candidate, candidate + 1)
+            | otherwise = Nothing
+      allocateFreshMaybe step (Set.fromList [0, 1, 2]) 0 @?= Nothing
+      allocateFreshMaybe step (Set.fromList [0, 1]) 0 @?=
+        Just (2, Set.fromList [0, 1, 2], 3)
+  , testCase "leave a successful generator continuation lazy" $
+      case allocateFreshMaybe lazyStep (Set.singleton "used") False of
+        Just ("free", reserved, _) ->
+          reserved @?= Set.fromList ["used", "free"]
+        _ -> assertFailure "fresh allocation did not select the free value"
+ ]
+ where
+  lazyStep False = Just ("used", True)
+  lazyStep True = Just ("free", error "forced fresh continuation")
 
 queryTests :: TestTree
 queryTests = testGroup "queries"

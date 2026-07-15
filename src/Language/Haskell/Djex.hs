@@ -27,6 +27,7 @@ module Language.Haskell.Djex
   , module Language.Haskell.Synthesis.Declaration
   , module Language.Haskell.Synthesis.Diagnostic
   , module Language.Haskell.Synthesis.Environment
+  , module Language.Haskell.Synthesis.Fresh
   , module Language.Haskell.Synthesis.Generated
   , module Language.Haskell.Synthesis.Inventory
   , module Language.Haskell.Synthesis.Kind
@@ -54,6 +55,7 @@ import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Environment
+import Language.Haskell.Synthesis.Fresh
 import Language.Haskell.Synthesis.Generated
 import Language.Haskell.Synthesis.Inventory
 import Language.Haskell.Synthesis.Kind

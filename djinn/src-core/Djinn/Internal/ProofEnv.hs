@@ -11,8 +11,8 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
-import Djinn.Internal.Fresh (allocateFresh)
 import Djinn.Internal.LJTFormula
+import Language.Haskell.Synthesis.Fresh (allocateFresh)
 
 data ProofEnvironment = ProofEnvironment
     [(Symbol, Formula)]

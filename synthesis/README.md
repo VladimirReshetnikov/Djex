@@ -83,6 +83,14 @@ optional observations use the same explicit semantics: `firstPresent` stops at
 the first value without forcing its suffix, while `maximumPresent` strictly
 folds a finite collection and ignores absent values.
 
+`Language.Haskell.Synthesis.Fresh` owns deterministic collision-skipping for
+both unbounded and exhaustible candidate generators. It returns the selected
+value, the reservation set with that value published, and the generator state
+immediately after the selection without forcing that continuation. Djinn uses
+the total form for string and `Natural` namespaces; Exference supplies its
+finite tagged-`Int` traversal and retains its established non-negative-before-
+negative ordering and structured exhaustion policy.
+
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s,
 and its opaque `DefinitionName` checks the narrower generated top-level value

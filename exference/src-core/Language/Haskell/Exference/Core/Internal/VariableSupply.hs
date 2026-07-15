@@ -7,8 +7,8 @@ module Language.Haskell.Exference.Core.Internal.VariableSupply
   , synthesisIdentifierNamespace
   ) where
 
-import Data.List (find)
 import qualified Data.Set as Set
+import qualified Language.Haskell.Synthesis.Fresh as SharedFresh
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 -- | Preserve the flexible or rigid tag and search all non-negative IDs before
@@ -20,14 +20,51 @@ freshSynthesisVariable
   -> Maybe (SharedType.Variable Int)
 freshSynthesisVariable reserved old = case old of
   SharedType.FlexibleVariable _ ->
-    SharedType.FlexibleVariable <$> available SharedType.FlexibleVariable
+    available SharedType.FlexibleVariable
   SharedType.RigidVariable _ ->
-    SharedType.RigidVariable <$> available SharedType.RigidVariable
+    available SharedType.RigidVariable
  where
-  available tag = find ((`Set.notMember` reserved) . tag)
-    synthesisIdentifierNamespace
+  available tag =
+    (\(variable, _, _) -> variable) <$> SharedFresh.allocateFreshMaybe
+      (nextSynthesisVariable tag) reserved (NonNegativeIdentifier 0)
 
--- Use every 'Int' value exactly once.  The list remains lazy, so ordinary
--- allocation examines only the short prefix ending at the first free ID.
+-- The explicit phases traverse every 'Int' exactly once without endpoint
+-- arithmetic overflow. Ordinary allocation retains only its current state.
+data IdentifierState
+  = NonNegativeIdentifier !Int
+  | NegativeIdentifier !Int
+  | IdentifierNamespaceExhausted
+
+nextSynthesisVariable
+  :: (Int -> SharedType.Variable Int)
+  -> IdentifierState
+  -> Maybe (SharedType.Variable Int, IdentifierState)
+nextSynthesisVariable tag state = do
+  (identifier, next) <- nextIdentifier state
+  pure (tag identifier, next)
+
+nextIdentifier :: IdentifierState -> Maybe (Int, IdentifierState)
+nextIdentifier state = case state of
+  NonNegativeIdentifier identifier -> Just
+    ( identifier
+    , if identifier == maxBound
+        then NegativeIdentifier minBound
+        else NonNegativeIdentifier $ identifier + 1
+    )
+  NegativeIdentifier identifier -> Just
+    ( identifier
+    , if identifier == -1
+        then IdentifierNamespaceExhausted
+        else NegativeIdentifier $ identifier + 1
+    )
+  IdentifierNamespaceExhausted -> Nothing
+
+-- | Lazy identifier view used only to canonically renumber a finite batch.
+-- Fresh allocation above consumes the state machine directly, so it does not
+-- retain this conceptually enormous namespace list.
 synthesisIdentifierNamespace :: [Int]
-synthesisIdentifierNamespace = [0 .. maxBound] ++ [minBound .. (-1)]
+synthesisIdentifierNamespace = enumerate $ NonNegativeIdentifier 0
+ where
+  enumerate state = case nextIdentifier state of
+    Just (identifier, next) -> identifier : enumerate next
+    Nothing -> []

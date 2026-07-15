@@ -6,6 +6,7 @@
 -- command boundary.
 module Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
+  , exferenceCommandSessionPolicy
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
   , parseExferenceRequest
@@ -24,7 +25,7 @@ import Language.Haskell.Djex.Exference
   , ExferenceOptions
   , ExferenceRequest
   , ExferenceSession
-  , ExferenceSessionPolicy
+  , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
   , exferenceSessionDiagnostics
   , exferenceSessionInventory
@@ -48,7 +49,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , withCode
   )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
-import Language.Haskell.Synthesis.Name (Name)
+import Language.Haskell.Synthesis.Name (Name, parseName)
 import Language.Haskell.Synthesis.Query (QueryRequest (..))
 
 -- | A fully sealed session or structured fatal diagnostics, paired with all
@@ -59,6 +60,38 @@ data ExferenceSessionLoadReport = ExferenceSessionLoadReport
       :: Either (NonEmpty Diagnostic) ExferenceSession
   , exferenceSessionLoadDiagnostics :: [Diagnostic]
   }
+
+-- | The exact session policy shared by the historical @exference@ command
+-- and the merged @djex exference@ command.  Programmatic sessions deliberately
+-- keep 'defaultExferenceSessionPolicy' unrestricted; command-line synthesis is
+-- conservative by default because these well-known helpers can manufacture
+-- inhabitants only by introducing general recursion or nontermination.
+--
+-- Passing 'True' is the explicit command-line opt-in used by @--fix@.  Parsing
+-- the structural names here, rather than maintaining occurrence-text filters
+-- in each command, keeps qualification exact and turns a malformed built-in
+-- policy entry into a controlled diagnostic.
+exferenceCommandSessionPolicy
+  :: Bool
+  -> Either Diagnostic ExferenceSessionPolicy
+exferenceCommandSessionPolicy allowRecursionHelpers
+  | allowRecursionHelpers = Right defaultExferenceSessionPolicy
+  | otherwise = do
+      exclusions <- traverse checkedName recursionHelperNames
+      pure defaultExferenceSessionPolicy
+        { exferenceExcludedBindings = exclusions }
+ where
+  checkedName source = first
+    (shownErrorDiagnostic
+      "DJEX_EXF_COMMAND_POLICY"
+      "invalid built-in Exference recursion-helper name")
+    $ parseName source
+
+  recursionHelperNames =
+    [ "Data.Function.fix"
+    , "Control.Monad.forever"
+    , "Control.Monad.Loops.iterateM_"
+    ]
 
 -- | Load a directory of source modules and ratings, validate its complete
 -- inventory, and seal an Exference session with the default policy.

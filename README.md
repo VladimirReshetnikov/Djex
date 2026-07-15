@@ -399,7 +399,11 @@ compatibility orchestrator at this boundary: it loads and seals one session,
 parses every requested type through `parseExferenceRequest`, selects shared
 candidates, and renders their generated expression bodies. Exact nominal
 session policy replaces its former occurrence-text filtering of recursion
-helpers. Parse, kind, option, and search
+helpers. The compatibility command and `djex exference` now obtain that policy
+from the same frontend operation: both exclude `Data.Function.fix`,
+`Control.Monad.forever`, and `Control.Monad.Loops.iterateM_` by default, and
+both accept `--fix` as an explicit opt-in. The unrestricted programmatic
+session default is unchanged. Parse, kind, option, and search
 failures are structured diagnostics on stderr with failure exit status;
 repeated inputs are all processed and conflicting presentation modes are
 rejected. Its historical ranking vector remains an explicit compatibility

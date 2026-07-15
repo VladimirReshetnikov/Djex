@@ -312,14 +312,18 @@ class kinds cannot reach heuristic search.
 The executable no longer rebuilds an `ExferenceInput`, repeats rank-N filters,
 or consumes legacy tuple chunks. It maps flags to `ExferenceOptions`, calls
 `runExferenceQuery`, applies the backend-neutral shared selection policies, and
-renders the resulting shared candidates. Its default recursion denylist uses
-exact names (`Data.Function.fix`, `Control.Monad.forever`, and
+renders the resulting shared candidates. The historical `exference` command
+and merged `djex exference` command now consume one checked command-session
+policy. Its conservative default denylist uses exact names
+(`Data.Function.fix`, `Control.Monad.forever`, and
 `Control.Monad.Loops.iterateM_`), so a same-spelled binding in another module
-remains searchable. Multiple input types run in order; conflicting selection
-or qualification flags fail explicitly; parse, kind, and search failures use
-stderr and nonzero status. The historical heuristic vector remains named in
-the CLI, and `--short` now ranks by structural generated-expression size rather
-than rendered identifier length.
+remains searchable; `--fix` explicitly opts either command into those known
+nonterminating helpers. Programmatic sessions remain unrestricted unless their
+caller supplies a policy. Multiple input types run in order; conflicting
+selection or qualification flags fail explicitly; parse, kind, and search
+failures use stderr and nonzero status. The historical heuristic vector remains
+named in the CLI, and `--short` now ranks by structural generated-expression
+size rather than rendered identifier length.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

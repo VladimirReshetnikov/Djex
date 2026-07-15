@@ -25,7 +25,9 @@ import Text.Read (readMaybe)
 
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( parseExferenceRequestWithCheckedTarget )
+  ( exferenceCommandSessionPolicy
+  , parseExferenceRequestWithCheckedTarget
+  )
 import qualified Language.Haskell.Exference.Session as Session
 import Language.Haskell.Exference.Core.FunctionBinding
   ( functionName )
@@ -47,7 +49,7 @@ import Language.Haskell.Synthesis.Generated
   ( DefinitionName
   , mkDefinitionName
   )
-import Language.Haskell.Synthesis.Name (mkIdentifier, parseName)
+import Language.Haskell.Synthesis.Name (mkIdentifier)
 import Language.Haskell.Synthesis.Query (resultSearch)
 import Language.Haskell.Synthesis.Search
   ( ObservedProgress (..)
@@ -186,11 +188,10 @@ run flags inputs = do
     putStrLn $ "environment " ++ renderDiagnostic value
   let sourceEnvironment = checkedSourceProjection checkedEnvironment
 
-  excluded <- if AllowFix `elem` flags
-    then pure []
-    else mapM checkedName recursionHelpers
-  let policy = defaultExferenceSessionPolicy
-        {exferenceExcludedBindings = excluded}
+  policy <- either
+    (fatal . ("invalid Exference command policy: " ++) . renderDiagnostic)
+    pure
+    $ exferenceCommandSessionPolicy (AllowFix `elem` flags)
   session <- either
     (fatal . ("could not seal Exference session: " ++) . renderDiagnostic)
     pure
@@ -202,16 +203,6 @@ run flags inputs = do
     printEnvironment verbosity sourceEnvironment
   target <- freshTarget sourceEnvironment
   forM_ inputs $ runQuery verbosity flags session target
- where
-  recursionHelpers =
-    [ "Data.Function.fix"
-    , "Control.Monad.forever"
-    , "Control.Monad.Loops.iterateM_"
-    ]
-  checkedName source = either
-    (fatal . (("invalid built-in exclusion " ++ show source ++ ": ") ++) . show)
-    pure
-    $ parseName source
 
 runQuery
   :: Int

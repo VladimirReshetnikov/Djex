@@ -220,6 +220,22 @@ relabeling. Deletion is measurable: three public library stanzas and all
 internal dependencies on them disappeared after their implementations already
 shared one native vocabulary, result boundary, and inventory authority.
 
+## Post-fold command-policy review
+
+**Completed on 2026-07-14:** the first review of the merged command found that
+`djex exference` loaded an unrestricted programmatic session while the
+historical `exference` command excluded three known recursion helpers. The
+merged command could therefore synthesize `Data.Function.fix` silently for a
+type that has no terminating inhabitant under the configured environment.
+
+The Exference HSE frontend now owns one checked command-session policy. Both
+commands exclude the exact structural names `Data.Function.fix`,
+`Control.Monad.forever`, and `Control.Monad.Loops.iterateM_` by default and
+accept `--fix` as the same explicit opt-in. The neutral library default remains
+unrestricted for programmatic callers. Subprocess regressions exercise both
+command paths, including a fix-only source environment; the merged command also
+rejects repeated `--fix` before loading that environment.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

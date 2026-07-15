@@ -23,6 +23,8 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "repeated inputs are all searched" testRepeatedInputs
   , testCase "conflicting selection modes are rejected" testConflictingModes
   , testCase "short mode contributes structural expression cost" testShortMode
+  , testCase "recursion helpers require explicit command opt-in"
+      testRecursionPolicy
   , testCase "missing environment directories fail closed" testMissingEnvironment
   , testCase "invalid class environments fail closed" testInvalidEnvironment
   , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
@@ -152,6 +154,25 @@ testShortMode = do
   short <- runExference ["--first", "--short", "a -> a"]
   assertBool "short mode should change structural candidate cost"
     (ordinary /= short)
+
+testRecursionPolicy :: Assertion
+testRecursionPolicy = withTemporaryEnvironment $ \environmentDirectory -> do
+  writeFile (environmentDirectory ++ "/Fix.hs") $ unlines
+    [ "module Data.Function where"
+    , "fix :: (a -> a) -> a"
+    ]
+  let inspect =
+        [ "--envdir", environmentDirectory
+        , "--verbose=1"
+        , "--printenv"
+        ]
+  safe <- runExference inspect
+  assertContains "safe default policy omission"
+    "DJEX_EXF_POLICY_OMISSION" safe
+
+  allowed <- runExference $ "--fix" : inspect
+  assertBool "explicit opt-in retained a policy omission" $
+    not $ "DJEX_EXF_POLICY_OMISSION" `isInfixOf` allowed
 
 testMissingEnvironment :: Assertion
 testMissingEnvironment = withMissingTemporaryEnvironment $ \environmentDirectory -> do

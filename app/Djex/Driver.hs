@@ -23,7 +23,8 @@ import Text.Read (readMaybe)
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
-  , loadExferenceSession
+  , exferenceCommandSessionPolicy
+  , loadExferenceSessionWithPolicy
   , parseExferenceRequestWithCheckedTarget
   )
 import Paths_djex (getDataFileName, version)
@@ -46,6 +47,7 @@ data Flag
   | MaximumStepsFlag String
   | MaximumQueueFlag String
   | MaximumDepthFlag String
+  | AllowFixFlag
   deriving (Eq, Show)
 
 data CommonOptions = CommonOptions
@@ -65,6 +67,7 @@ data DjinnOptions = DjinnOptions
 data ExferenceCliOptions = ExferenceCliOptions
   { exferenceCommon :: CommonOptions
   , exferenceEnvironment :: Maybe FilePath
+  , exferenceAllowFix :: Bool
   , exferenceSearchOptions :: ExferenceOptions
   }
 
@@ -120,31 +123,34 @@ runDjinn options = case standardDjinnSession of
   source = commonInput common
 
 runExference :: ExferenceCliOptions -> IO ExitCode
-runExference options = do
-  environmentPath <- case exferenceEnvironment options of
-    Just path -> pure path
-    Nothing -> getDataFileName "exference/environment"
-  report <- loadExferenceSession environmentPath
-  -- The compatibility loader records progress counters as Info. A one-shot
-  -- compiler-like command stays quiet on success while retaining warnings
-  -- about omissions, defaults, and recoverable source problems.
-  mapM_ emitDiagnostic
-    $ filter ((/= Info) . diagnosticSeverity)
-    $ exferenceSessionLoadDiagnostics report
-  case exferenceSessionLoadResult report of
-    Left failures -> do
-      mapM_ emitDiagnostic $ toList failures
-      pure runtimeFailure
-    Right session -> case parseExferenceRequestWithCheckedTarget
-        session
-        (exferenceSearchOptions options)
-        (commonTarget common)
-        "<command-line>"
-        source of
-      Left failure -> diagnosticFailure failure
-      Right request -> case runExferenceQuery session request of
+runExference options = case
+    exferenceCommandSessionPolicy (exferenceAllowFix options) of
+  Left failure -> diagnosticFailure failure
+  Right policy -> do
+    environmentPath <- case exferenceEnvironment options of
+      Just path -> pure path
+      Nothing -> getDataFileName "exference/environment"
+    report <- loadExferenceSessionWithPolicy policy environmentPath
+    -- The compatibility loader records progress counters as Info. A one-shot
+    -- compiler-like command stays quiet on success while retaining warnings
+    -- about omissions, defaults, and recoverable source problems.
+    mapM_ emitDiagnostic
+      $ filter ((/= Info) . diagnosticSeverity)
+      $ exferenceSessionLoadDiagnostics report
+    case exferenceSessionLoadResult report of
+      Left failures -> do
+        mapM_ emitDiagnostic $ toList failures
+        pure runtimeFailure
+      Right session -> case parseExferenceRequestWithCheckedTarget
+          session
+          (exferenceSearchOptions options)
+          (commonTarget common)
+          "<command-line>"
+          source of
         Left failure -> diagnosticFailure failure
-        Right results -> presentExference common results
+        Right request -> case runExferenceQuery session request of
+          Left failure -> diagnosticFailure failure
+          Right results -> presentExference common results
  where
   common = exferenceCommon options
   source = commonInput common
@@ -288,6 +294,7 @@ parseExferenceOptions arguments = do
     "--allow-constraints" (== AllowConstraintsFlag) flags
   multiConstructorPatterns <- uniqueSwitch
     "--multi-constructor-patterns" (== MultiConstructorPatternsFlag) flags
+  allowFix <- uniqueSwitch "--fix" (== AllowFixFlag) flags
   deferral <- uniqueValue
     "--constraint-deferral-steps" constraintDeferralValue
     (show $ exferenceConstraintDeferralSteps defaults) flags
@@ -304,6 +311,7 @@ parseExferenceOptions arguments = do
   pure ExferenceCliOptions
     { exferenceCommon = common
     , exferenceEnvironment = environment
+    , exferenceAllowFix = allowFix
     , exferenceSearchOptions = defaults
         { exferenceAllowUnused = allowUnused
         , exferenceAllowResidualConstraints = allowConstraints
@@ -514,6 +522,8 @@ exferenceOptions =
       "non-negative queue limit or unbounded (default: 8192)"
   , Option [] ["max-depth"] (ReqArg MaximumDepthFlag "N|unbounded")
       "non-negative search cost or unbounded (default: unbounded)"
+  , Option [] ["fix"] (NoArg AllowFixFlag)
+      "allow known nonterminating recursion helpers"
   ]
 
 fullUsage :: String

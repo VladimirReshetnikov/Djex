@@ -38,6 +38,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testExferenceRendering
   , testCase "Exference accepts an empty checked environment"
       testEmptyExferenceEnvironment
+  , testCase "Exference recursion helpers require explicit command opt-in"
+      testExferenceRecursionPolicy
   , testCase "Exference environment IO failures stay structured"
       testMissingExferenceEnvironment
   , testCase "Exference rejects unsupported source vocabulary"
@@ -101,6 +103,9 @@ testOptionErrors = do
   assertUsageFailure
     ["exference", "--allow-unused", "--allow-unused", "a -> a"]
     "--allow-unused may be specified only once"
+  assertUsageFailure
+    ["exference", "--fix", "--fix", "a -> a"]
+    "--fix may be specified only once"
 
 testIntOptionOverflow :: Assertion
 testIntOptionOverflow = do
@@ -204,6 +209,32 @@ testEmptyExferenceEnvironment = withTemporaryEnvironment [] $ \directory -> do
     , "a -> a"
     ]
   assertEqual "environment-free lambda" "\\a -> a\n" output
+
+testExferenceRecursionPolicy :: Assertion
+testExferenceRecursionPolicy = withTemporaryEnvironment
+    [("Fix.hs", unlines
+      [ "module Data.Function where"
+      , "fix :: (a -> a) -> a"
+      ])] $ \directory -> do
+  let common =
+        [ "exference"
+        , "--environment", directory
+        , "--select", "first"
+        , "--render", "expression"
+        , "--max-steps", "8"
+        ]
+      goal = "a"
+  (defaultExit, defaultOutput, defaultErrors) <- runDjex $ common ++ [goal]
+  assertEqual "safe default exit" ExitSuccess defaultExit
+  assertEqual "safe default output" "" defaultOutput
+  assertContains "safe default no-result diagnostic"
+    "[DJEX_EXF_NO_RESULT]" defaultErrors
+  assertBool "safe default admitted Data.Function.fix" $
+    not $ "Data.Function.fix" `isInfixOf` defaultOutput
+
+  allowedOutput <- assertSuccess $ common ++ ["--fix", goal]
+  assertContains "explicit recursion-helper result"
+    "Data.Function.fix" allowedOutput
 
 testMissingExferenceEnvironment :: Assertion
 testMissingExferenceEnvironment = withMissingPath $ \path -> do

@@ -12,7 +12,7 @@ module Djinn.Internal.Environment (
     preparedEnvironmentSynthesisFormulaTranslator,
     preparedEnvironmentFunctionPremises,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
-    elaboratePreparedTypes, elaboratePreparedSynthesisTypes,
+    elaboratePreparedSynthesisTypes,
     SynthesisEnvironment, SynthesisInventory,
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
@@ -49,9 +49,7 @@ import Djinn.Internal.LJTFormula (Formula, Symbol(..))
 import Djinn.Internal.TypeFormula
 import Djinn.Internal.Type
     ( djinnTypeConstructorSymbol
-    , fromSynthesisType
     , normalizeSynthesisType
-    , toSynthesisType
     )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -637,27 +635,6 @@ lookupPreparedSynthesisClass
         )
 lookupPreparedSynthesisClass name
         (PreparedEnvironment _ _ classes _ _) = Map.lookup name classes
-
--- | Elaborate a query batch through the exact alias table retained by its
--- prepared environment. The list is checked in one free-variable kind scope;
--- conversion back to Djinn's raw syntax is safe because environment preflight
--- already excludes shared forms (such as explicit forall and unboxed tuples)
--- that Djinn cannot represent.
-elaboratePreparedTypes
-    :: PreparedEnvironment
-    -> [(HKind, HType)]
-    -> Either String [HType]
-elaboratePreparedTypes prepared obligations = do
-    sharedObligations <- mapM convertObligation obligations
-    elaborated <- elaboratePreparedSynthesisTypes prepared sharedObligations
-    mapM (first show . fromSynthesisType) elaborated
-  where
-    convertObligation (expected, source) = do
-        -- Retain the raw helper's historical per-obligation precedence:
-        -- reject an unsolved expected kind before inspecting its type.
-        _ <- checkedGroundHKind expected
-        shared <- first show $ toSynthesisType source
-        return (expected, shared)
 
 -- | Elaborate native shared types in one free-variable kind scope through the
 -- exact synonym table retained by the prepared inventory.

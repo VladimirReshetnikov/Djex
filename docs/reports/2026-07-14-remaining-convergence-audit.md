@@ -1331,6 +1331,14 @@ compares its explicit results with the sealed native compiler. This keeps the
 malformed prefix-arrow and unchecked expansion behavior covered without
 presenting a second raw entrance on `PreparedEnvironment`.
 
+The same follow-up retires `elaboratePreparedTypes`, another migration helper
+with no production caller after raw queries began delegating to the native
+worker. Synonym-table coverage now supplies already checked shared types to
+`elaboratePreparedSynthesisTypes`; it no longer creates an `HType` result solely
+to compare that result with another compatibility value. Raw query kind and
+saturation preflight remains deliberately separate because it preserves the
+historical malformed-input diagnostic order.
+
 The same production-source clone audit found the constraint rendering skeleton
 duplicated between the generic `Constraint` `Show` instance and `TypeRender`.
 `showsConstraintWith` now owns class-name and ordered-argument rendering once;

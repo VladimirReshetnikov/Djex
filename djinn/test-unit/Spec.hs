@@ -32,7 +32,7 @@ import Djinn.Core (
     toSynthesisInventory,
     toSynthesisKind,
     toSynthesisType, typeDeclarations)
-import Djinn.Internal.Environment (elaboratePreparedTypes, validateEnvironment)
+import Djinn.Internal.Environment (validateEnvironment)
 import qualified Djinn.Internal.Environment as RawEnvironment
 import qualified Djinn.Internal.Generated as DjinnGenerated
 import Djinn.Internal.HCheck (
@@ -1361,12 +1361,18 @@ testPreparedQuerySynonyms = do
             [("valueAlias", valueMethod $ HTVar "x")])
         withIdentity
     prepared <- expectShownRight $ prepareEnvironment environment
+    sharedBool <- expectShownRight $ toSynthesisType boolType
+    sharedVoid <- expectShownRight $ toSynthesisType voidType
+    sharedIdentityBool <- expectShownRight $
+        toSynthesisType $ identity boolType
+    sharedIdentityVoid <- expectShownRight $
+        toSynthesisType $ identity voidType
 
     assertEqual "the prepared environment retained its exact alias table"
-        (Right [boolType, voidType])
-        (elaboratePreparedTypes prepared
-            [ (KStar, identity boolType)
-            , (KStar, identity voidType)
+        (Right [sharedBool, sharedVoid])
+        (RawEnvironment.elaboratePreparedSynthesisTypes prepared
+            [ (KStar, sharedIdentityBool)
+            , (KStar, sharedIdentityVoid)
             ])
 
     let aliasContext = context "ValueAlias" [identity boolType]

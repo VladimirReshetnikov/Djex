@@ -1639,6 +1639,44 @@ both historical session constructors independently; existing loader, policy,
 omission, CLI, and checked-source integration tests continue to pin their
 shared behavior.
 
+## Prepared-witness query elaboration
+
+**Completed on 2026-07-16:** both backend query paths still projected the
+normalized synonym table from an opaque `PreparedInventory` and immediately
+passed it back to the synthesis foundation. Exference exposed that table from
+its private session module to the stable adapter; Djinn kept a private table
+projection for both its native saturation preflight and batch elaboration.
+Although the projections were exact, they weakened the witness boundary and
+made the table-level compatibility API look like the canonical session API.
+
+`Language.Haskell.Synthesis.TypeSynonym` now provides prepared-witness
+operations for minimum-saturation checking plus singleton and batch
+elaboration. They delegate once to the existing table workers, retaining
+source traversal and first-failure order, pre/post-expansion validation and
+kind phases, empty-batch totality, independent lexical expansion scopes, and
+one shared free-variable kind scope across a batch. The lower-level table
+operations and projections remain available for compatibility and focused
+testing, but sealed backends no longer use them for query semantics.
+
+Djinn's native preflight asks its exact witness for saturation before
+normalization and joint kind checking, preserving the historical diagnostic
+precedence; its later goal/context elaboration consumes the same witness in
+one batch. Exference's private session now owns proper-goal elaboration and
+returns only the structured failure to the stable adapter, where request
+source provenance and the established `DJEX_EXF_KIND`, `DJEX_EXF_SYNONYM`, and
+lowering diagnostics remain unchanged. Neither backend reprepares aliases at
+query time or exposes a session synonym-table accessor.
+
+Foundation laws compare witness and table operations for exact saturation
+order, structured validation phase, synonym-expansion failure classification,
+empty/singleton/ordered batches, and shared free-variable kind scope. Separate
+witnesses with the same alias name but
+different definitions elaborate independently, and both functor-erased and
+datatype-metadata-adjusted witnesses retain identical query semantics. Public
+facade signature and execution tests pin all three prepared operations;
+existing Djinn, Exference, and cross-backend synonym/provenance regressions pin
+the unchanged adapter behavior.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

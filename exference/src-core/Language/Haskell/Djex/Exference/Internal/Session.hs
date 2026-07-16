@@ -13,7 +13,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , sealNeutralExferenceSessionWithPolicy
   , sealPreparedExferenceSessionWithPolicy
   , sessionSearchEnvironment
-  , sessionTypeSynonyms
+  , elaborateSessionGoal
   , exferenceSessionInventory
   , sessionOmissions
   ) where
@@ -32,6 +32,7 @@ import Language.Haskell.Exference.Core (mkExferenceEnvironment)
 import qualified Language.Haskell.Exference.Core as Core
 import Language.Haskell.Exference.Core.Declaration
   ( PreparedSynthesisInventory
+  , freshSynthesisVariable
   , prepareSynthesisInventory
   , preparedSynthesisBackend
   , preparedSynthesisWitness
@@ -65,15 +66,17 @@ import Language.Haskell.Synthesis.KindInference
   ( ClassKindPolicy (GeneralizeClassKinds)
   , KindInventoryPolicy (OpenKindInventory)
   )
+import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
   )
+import Language.Haskell.Synthesis.Type (Type)
 import Language.Haskell.Synthesis.TypeSynonym
   ( PreparedInventory
-  , TypeSynonyms
+  , TypeElaborationError
+  , elaboratePreparedType
   , preparedInventory
-  , preparedTypeSynonyms
   )
 
 data ExferenceOmissionCapability
@@ -222,10 +225,15 @@ applyRatingOverrides overrides bindings = do
 sessionSearchEnvironment :: ExferenceSession -> Core.ExferenceEnvironment
 sessionSearchEnvironment = searchView
 
-sessionTypeSynonyms
+-- | Elaborate a proper query type through the exact alias and kind witness
+-- retained by this session. Request provenance and diagnostic presentation
+-- remain the public adapter's responsibility.
+elaborateSessionGoal
   :: ExferenceSession
-  -> TypeSynonyms SynthesisVariable
-sessionTypeSynonyms = preparedTypeSynonyms . preparedView
+  -> Type SynthesisVariable
+  -> Either (TypeElaborationError SynthesisVariable) (Type SynthesisVariable)
+elaborateSessionGoal session = elaboratePreparedType
+  freshSynthesisVariable (preparedView session) ProperTypeKind
 
 exferenceSessionInventory
   :: ExferenceSession

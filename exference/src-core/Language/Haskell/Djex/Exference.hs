@@ -84,8 +84,6 @@ import Language.Haskell.Exference.Core
 import qualified Language.Haskell.Exference.Core as Core
 import qualified Language.Haskell.Exference.Core.Candidate as CoreCandidate
 import qualified Language.Haskell.Exference.Core.ExferenceStats as CoreStats
-import Language.Haskell.Exference.Core.Declaration
-  ( freshSynthesisVariable )
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , fromSynthesisType
@@ -140,7 +138,6 @@ import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , inventoryEnvironment
   )
-import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -158,7 +155,6 @@ import Language.Haskell.Synthesis.Type
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 import Language.Haskell.Synthesis.TypeSynonym
   ( TypeElaborationError (..)
-  , elaborateType
   )
 
 -- | Environment capabilities disabled before a reusable session is sealed.
@@ -446,10 +442,7 @@ runExferenceQuery session request = do
   elaboratedGoal <- either
     (Left . requestDiagnostic . elaborationFailure)
     Right
-    $ elaborateType freshSynthesisVariable
-        (Session.sessionTypeSynonyms session)
-        ProperTypeKind
-        sharedGoal
+    $ Session.elaborateSessionGoal session sharedGoal
   backendGoal <- either
     (Left . requestDiagnostic . shownErrorDiagnostic
       "DJEX_EXF_LOWER"

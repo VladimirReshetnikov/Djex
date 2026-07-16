@@ -37,7 +37,9 @@ import Language.Haskell.Synthesis.Query
 import qualified Language.Haskell.Synthesis.Query as Query
 import qualified Language.Haskell.Synthesis.Search as Search
 import Language.Haskell.Synthesis.Type
-  ( Variable (RigidVariable) )
+  ( Type
+  , Variable (RigidVariable)
+  )
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit
@@ -79,6 +81,21 @@ projectionSignatures =
   (TypeSynonym.preparedTypeSynonyms
     :: TypeSynonym.PreparedInventory Int ()
     -> TypeSynonym.TypeSynonyms Int) `seq`
+  (TypeSynonym.checkPreparedTypeSynonymSaturation
+    :: TypeSynonym.PreparedInventory Int ()
+    -> Type Int
+    -> Either (TypeSynonym.SynonymExpansionError Int) ()) `seq`
+  (TypeSynonym.elaboratePreparedTypes
+    :: TypeSynonym.FreshVariable Int
+    -> TypeSynonym.PreparedInventory Int ()
+    -> [(KindInference.GroundKind, Type Int)]
+    -> Either (TypeSynonym.TypeElaborationError Int) [Type Int]) `seq`
+  (TypeSynonym.elaboratePreparedType
+    :: TypeSynonym.FreshVariable Int
+    -> TypeSynonym.PreparedInventory Int ()
+    -> KindInference.GroundKind
+    -> Type Int
+    -> Either (TypeSynonym.TypeElaborationError Int) (Type Int)) `seq`
   (TypeSynonym.inventoryExpansionPreparedInventory
     :: TypeSynonym.PreparedInventoryExpansion Int ()
     -> TypeSynonym.PreparedInventory Int ()) `seq`

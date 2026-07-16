@@ -1974,6 +1974,25 @@ synonymTests = testGroup "type synonyms"
       TypeSynonym.expandTypeSynonyms freshStringVariable
           (TypeSynonym.preparedTypeSynonyms prepared) applied @?=
         Right (SharedType.TypeVariable "x")
+  , testCase "elaborate through each prepared inventory's exact aliases" $ do
+      let aliasName = right $ mkIdentifier "Selected"
+          boolName = right $ mkIdentifier "Bool"
+          intName = right $ mkIdentifier "Int"
+          nominal = SharedType.TypeConstructor
+          baseDeclarations =
+            [ Declaration.AbstractTypeDeclaration () boolName synonymProper
+            , Declaration.AbstractTypeDeclaration () intName synonymProper
+            ]
+          preparedFor resultName = preparedSynonymInventory $
+            Declaration.TypeSynonymDeclaration () aliasName []
+              (nominal resultName) : baseDeclarations
+          boolPrepared = preparedFor boolName
+          intPrepared = preparedFor intName
+          source = nominal aliasName
+          elaborate prepared = TypeSynonym.elaboratePreparedType
+            freshStringVariable prepared synonymProper source
+      elaborate boolPrepared @?= Right (nominal boolName)
+      elaborate intPrepared @?= Right (nominal intName)
   , testCase "prepare one source-ordered operational inventory view" $ do
       let intName = right $ mkIdentifier "Int"
           identityName = right $ mkIdentifier "Identity"
@@ -2179,6 +2198,10 @@ synonymTests = testGroup "type synonyms"
           adjustedDeclarations = Environment.environmentDeclarations
             $ Inventory.inventoryEnvironment
             $ TypeSynonym.preparedInventory adjusted
+          applied = SharedType.TypeApplication
+            (SharedType.TypeConstructor identityName)
+            (SharedType.TypeConstructor typeName)
+          expectedElaboration = Right $ SharedType.TypeConstructor typeName
       TypeSynonym.preparedTypeSynonyms erased @?=
         TypeSynonym.preparedTypeSynonyms prepared
       TypeSynonym.preparedTypeSynonyms adjusted @?=
@@ -2197,6 +2220,12 @@ synonymTests = testGroup "type synonyms"
       Inventory.inventoryKindAssumptions
           (TypeSynonym.preparedInventory adjusted) @?=
         Inventory.inventoryKindAssumptions inventory
+      TypeSynonym.elaboratePreparedType freshStringVariable prepared
+          synonymProper applied @?= expectedElaboration
+      TypeSynonym.elaboratePreparedType freshStringVariable erased
+          synonymProper applied @?= expectedElaboration
+      TypeSynonym.elaboratePreparedType freshStringVariable adjusted
+          synonymProper applied @?= expectedElaboration
   , testCase "expand saturated and overapplied aliases" $ do
       let identityName = right $ mkIdentifier "Identity"
           maybeName = right $ mkIdentifier "Maybe"
@@ -2228,7 +2257,7 @@ synonymTests = testGroup "type synonyms"
           secondName = right $ mkIdentifier "Second"
           className = right $ mkIdentifier "C"
           parameter name = Declaration.TypeParameter name Nothing
-          aliases = preparedSynonyms
+          declarations =
             [ Declaration.TypeSynonymDeclaration () firstName
                 [parameter "a", parameter "b"]
                 $ SharedType.TypeVariable "a"
@@ -2236,33 +2265,59 @@ synonymTests = testGroup "type synonyms"
                 [parameter "a"]
                 $ SharedType.TypeVariable "a"
             ]
+          prepared = preparedSynonymInventory declarations
+          aliases = TypeSynonym.preparedTypeSynonyms prepared
           first = SharedType.TypeConstructor firstName
           second = SharedType.TypeConstructor secondName
           variable = SharedType.TypeVariable "x"
           apply = SharedType.TypeApplication
           expected name arity supplied = Left
             $ TypeSynonym.UnsaturatedTypeSynonym name arity supplied
-          check = TypeSynonym.checkTypeSynonymSaturation aliases
-      check first @?= expected firstName 2 0
-      check (apply (apply first second) variable) @?=
+          tableCheck = TypeSynonym.checkTypeSynonymSaturation aliases
+          witnessCheck =
+            TypeSynonym.checkPreparedTypeSynonymSaturation prepared
+          assertCheck source result = do
+            tableCheck source @?= result
+            witnessCheck source @?= result
+      assertCheck first $ expected firstName 2 0
+      assertCheck (apply (apply first second) variable) $
         expected secondName 1 0
-      check (apply (apply first variable) variable) @?= Right ()
-      check (apply (apply (apply first variable) variable) variable) @?=
+      assertCheck (apply (apply first variable) variable) $ Right ()
+      assertCheck (apply (apply (apply first variable) variable) variable) $
         Right ()
       -- The application head wins over an invalid argument, while forall
       -- constraints retain their source order ahead of the body.
-      check (apply first second) @?= expected firstName 2 1
-      check (SharedType.ForallType []
-          [Constraint className [second]] first) @?=
+      assertCheck (apply first second) $ expected firstName 2 1
+      assertCheck (SharedType.ForallType []
+          [Constraint className [second]] first) $
         expected secondName 1 0
-  , testCase "classify validation failures at the elaboration phase" $ do
-      let aliases = preparedSynonyms []
+  , testCase "classify validation and expansion failures by phase" $ do
+      let prepared = preparedSynonymInventory []
+          aliases = TypeSynonym.preparedTypeSynonyms prepared
           invalid = SharedType.TypeConstructor consName
+          expected = Left $ TypeSynonym.InvalidElaborationType
+            TypeSynonym.BeforeExpansion
+            $ SharedType.InvalidTypeConstructor consName
       TypeSynonym.elaborateType freshStringVariable aliases
-          synonymProper invalid @?=
-        Left (TypeSynonym.InvalidElaborationType
-          TypeSynonym.BeforeExpansion
-          $ SharedType.InvalidTypeConstructor consName)
+          synonymProper invalid @?= expected
+      TypeSynonym.elaboratePreparedType freshStringVariable prepared
+          synonymProper invalid @?= expected
+      let identityName = right $ mkIdentifier "Identity"
+          identityPrepared = preparedSynonymInventory
+            [ Declaration.TypeSynonymDeclaration () identityName
+                [Declaration.TypeParameter "a" Nothing]
+                $ SharedType.TypeVariable "a"
+            ]
+          identityAliases =
+            TypeSynonym.preparedTypeSynonyms identityPrepared
+          unsaturated = SharedType.TypeConstructor identityName
+          functionKind = Kind.FunctionKind synonymProper synonymProper
+          expansionFailure = Left $ TypeSynonym.SynonymExpansionFailed
+            $ TypeSynonym.UnsaturatedTypeSynonym identityName 1 0
+      TypeSynonym.elaborateType freshStringVariable identityAliases
+          functionKind unsaturated @?= expansionFailure
+      TypeSynonym.elaboratePreparedType freshStringVariable identityPrepared
+          functionKind unsaturated @?= expansionFailure
   , testCase "elaborate empty, singleton, and ordered type batches" $ do
       let identityName = right $ mkIdentifier "Identity"
           boolName = right $ mkIdentifier "Bool"
@@ -2274,7 +2329,8 @@ synonymTests = testGroup "type synonyms"
             , Declaration.AbstractTypeDeclaration () boolName synonymProper
             , Declaration.AbstractTypeDeclaration () intName synonymProper
             ]
-          aliases = preparedSynonyms declarations
+          prepared = preparedSynonymInventory declarations
+          aliases = TypeSynonym.preparedTypeSynonyms prepared
           applyIdentity argument = SharedType.TypeApplication
             (SharedType.TypeConstructor identityName) argument
           boolType = SharedType.TypeConstructor boolName
@@ -2283,26 +2339,43 @@ synonymTests = testGroup "type synonyms"
           intAlias = applyIdentity intType
           emptyBatch = [] ::
             [(KindInference.GroundKind, SharedType.Type String)]
-      TypeSynonym.elaborateTypes freshStringVariable aliases emptyBatch @?=
-        Right []
-      TypeSynonym.elaborateTypes freshStringVariable aliases
-          [(synonymProper, boolAlias)] @?=
-        (: []) <$> TypeSynonym.elaborateType freshStringVariable aliases
-          synonymProper boolAlias
-      TypeSynonym.elaborateTypes freshStringVariable aliases
-          [(synonymProper, boolAlias), (synonymProper, intAlias)] @?=
-        Right [boolType, intType]
+          singletonBatch = [(synonymProper, boolAlias)]
+          orderedBatch =
+            [(synonymProper, boolAlias), (synonymProper, intAlias)]
+          tableBatch = TypeSynonym.elaborateTypes
+            freshStringVariable aliases
+          witnessBatch = TypeSynonym.elaboratePreparedTypes
+            freshStringVariable prepared
+          tableSingleton = TypeSynonym.elaborateType
+            freshStringVariable aliases synonymProper
+          witnessSingleton = TypeSynonym.elaboratePreparedType
+            freshStringVariable prepared synonymProper
+      tableBatch emptyBatch @?= Right []
+      witnessBatch emptyBatch @?= tableBatch emptyBatch
+      witnessBatch singletonBatch @?=
+        (: []) <$> witnessSingleton boolAlias
+      witnessSingleton boolAlias @?= tableSingleton boolAlias
+      witnessBatch orderedBatch @?= tableBatch orderedBatch
+      witnessBatch orderedBatch @?= Right [boolType, intType]
   , testCase "share free-variable kinds across an elaboration batch" $ do
       let boolName = right $ mkIdentifier "Bool"
           boolType = SharedType.TypeConstructor boolName
-          aliases = preparedSynonyms
+          declarations =
             [Declaration.AbstractTypeDeclaration () boolName synonymProper]
+          prepared = preparedSynonymInventory declarations
+          aliases = TypeSynonym.preparedTypeSynonyms prepared
           shared = SharedType.TypeVariable "shared"
           applied = SharedType.TypeApplication shared boolType
+          obligations =
+            [(synonymProper, shared), (synonymProper, applied)]
+          tableResult = TypeSynonym.elaborateTypes
+            freshStringVariable aliases obligations
+          witnessResult = TypeSynonym.elaboratePreparedTypes
+            freshStringVariable prepared obligations
       -- Either member is independently kindable. Together they would assign
       -- incompatible proper and function kinds to the same free variable.
-      case TypeSynonym.elaborateTypes freshStringVariable aliases
-          [(synonymProper, shared), (synonymProper, applied)] of
+      witnessResult @?= tableResult
+      case witnessResult of
         Left (TypeSynonym.IllKindedType TypeSynonym.BeforeExpansion _) ->
           pure ()
         result -> fail $ "batch kind scope was split: " ++ show result
@@ -2628,13 +2701,19 @@ synonymTests = testGroup "type synonyms"
               (SharedType.TypeConstructor boolName))
   ]
 
+preparedSynonymInventory
+  :: [Declaration.Declaration String Void ()]
+  -> TypeSynonym.PreparedInventory String ()
+preparedSynonymInventory declarations = right
+  $ TypeSynonym.prepareInventory freshStringVariable
+  $ right
+  $ Inventory.mkInventory KindInference.OpenKindInventory declarations
+
 preparedSynonyms
   :: [Declaration.Declaration String Void ()]
   -> TypeSynonym.TypeSynonyms String
-preparedSynonyms declarations = right
-  $ TypeSynonym.prepareTypeSynonyms freshStringVariable
-  $ right
-  $ Inventory.mkInventory KindInference.OpenKindInventory declarations
+preparedSynonyms = TypeSynonym.preparedTypeSynonyms
+  . preparedSynonymInventory
 
 freshStringVariable
   :: Set.Set String

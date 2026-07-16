@@ -184,8 +184,15 @@ facadeTests = testGroup "public Djex facade"
       environmentDeclarations (inventoryEnvironment inventory) @?= []
       let fresh :: FreshVariable ExferenceTypeVariable
           fresh _ _ = Nothing
+          goal :: ExferenceType
+          goal = TypeVariable $ FlexibleVariable 0
       assertBool "the facade did not reexport synonym elaboration"
         $ isRight $ prepareTypeSynonyms fresh inventory
+      prepared <- expectRight $ prepareInventory fresh inventory
+      checkPreparedTypeSynonymSaturation prepared goal @?= Right ()
+      elaboratePreparedType fresh prepared ProperTypeKind goal @?= Right goal
+      elaboratePreparedTypes fresh prepared [(ProperTypeKind, goal)] @?=
+        Right [goal]
   ]
 
 expectRight :: Show error => Either error value -> IO value

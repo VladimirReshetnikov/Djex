@@ -248,9 +248,11 @@ projectSynthesisInventory functionProjection dataProjection
 -- | The shared inventory/alias witness retained after the backend projection
 -- has been consumed. The foundation's 'SharedTypeSynonym.preparedInventory'
 -- and 'SharedTypeSynonym.preparedTypeSynonyms' are the sole projections from
--- that witness; this wrapper does not duplicate them under backend-specific
--- names. Session sealing uses the witness so the complete unfiltered search
--- dictionary cannot remain live beside its filtered view.
+-- that witness, while its prepared operations let callers use the witness
+-- without exposing or independently pairing its table. This wrapper does not
+-- duplicate either projection under backend-specific names. Session sealing
+-- uses the witness so the complete unfiltered search dictionary cannot remain
+-- live beside its filtered view.
 preparedSynthesisWitness
   :: PreparedSynthesisInventory annotation
   -> SharedTypeSynonym.PreparedInventory SynthesisVariable annotation

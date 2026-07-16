@@ -589,10 +589,11 @@ summary. The source wrapper and its complete unfiltered backend are consumed
 during sealing rather than retained beside that filtered view.
 Parser-independent type-name and class-arity resolvers are derived from the
 witness Inventory rather than stored as parallel caches. Parsed and
-programmatic goals then pass through the same
-capture-avoiding shared synonym elaborator and its pre/post kind checks before
-core lowering. The former HSE `TypeDeclMap` is therefore a loader concern
-rather than hidden session state.
+programmatic goals then pass through the same prepared-witness synonym
+elaborator and its pre/post kind checks before core lowering. The session owns
+that operation without exposing its private synonym table to the stable
+adapter. The former HSE `TypeDeclMap` is therefore a loader concern rather than
+hidden session state.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the

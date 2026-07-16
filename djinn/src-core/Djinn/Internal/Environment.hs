@@ -538,10 +538,17 @@ preparedEnvironmentSource prepared =
             "Djinn.Internal.Environment.preparedEnvironmentSource: " ++
             "sealed inventory invariant failed: " ++ show failure
 
-preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
-preparedEnvironmentInventory
+preparedEnvironmentWitness
+    :: PreparedEnvironment
+    -> PreparedSynthesisInventory
+preparedEnvironmentWitness
         (PreparedEnvironment prepared _ _ _ _) =
-    SharedTypeSynonym.preparedInventory prepared
+    prepared
+
+preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
+preparedEnvironmentInventory =
+    SharedTypeSynonym.preparedInventory .
+        preparedEnvironmentWitness
 
 -- | Check a batch in the one kind scope sealed with this exact environment.
 -- Keeping the cache behind this operation prevents callers from retaining or
@@ -555,9 +562,8 @@ checkPreparedTypesKinds
     htCheckTypesKindsPrepared kindCheck
 
 -- | Native shared-type counterpart of 'checkPreparedTypesKinds'. It consumes
--- the opaque synonym table and kind assumptions from the exact prepared
--- Inventory without rebuilding a compatibility tree or a string-keyed arity
--- list.
+-- the exact prepared Inventory without rebuilding a compatibility tree or a
+-- string-keyed arity list.
 checkPreparedSynthesisTypesKinds
     :: PreparedEnvironment
     -> [(HKind, SharedType.Type HSymbol)]
@@ -567,12 +573,12 @@ checkPreparedSynthesisTypesKinds prepared expectedTypes = do
     obligations <- mapM convertObligation expectedTypes
     first show $ SharedInference.checkTypesKinds assumptions obligations
   where
-    synonyms = preparedEnvironmentTypeSynonyms prepared
+    foundation = preparedEnvironmentWitness prepared
     assumptions = SharedInventory.inventoryKindAssumptions $
         preparedEnvironmentInventory prepared
 
     checkSaturation = first renderSynonymExpansionError .
-        SharedTypeSynonym.checkTypeSynonymSaturation synonyms
+        SharedTypeSynonym.checkPreparedTypeSynonymSaturation foundation
 
     convertObligation (expected, source) = (,)
         <$> checkedGroundHKind expected
@@ -596,13 +602,6 @@ preparedEnvironmentSynthesisFormulaTranslator
 preparedEnvironmentSynthesisFormulaTranslator
         (PreparedEnvironment _ _ _ _ compiler) =
     compileSynthesisFormula compiler
-
-preparedEnvironmentTypeSynonyms
-    :: PreparedEnvironment
-    -> SharedTypeSynonym.TypeSynonyms HSymbol
-preparedEnvironmentTypeSynonyms
-        (PreparedEnvironment prepared _ _ _ _) =
-    SharedTypeSynonym.preparedTypeSynonyms prepared
 
 projectPreparedInventory
     :: PreparedEnvironment
@@ -631,7 +630,7 @@ lookupPreparedSynthesisClass name
         (PreparedEnvironment _ _ classes _ _) = Map.lookup name classes
 
 -- | Elaborate native shared types in one free-variable kind scope through the
--- exact synonym table retained by the prepared inventory.
+-- exact prepared inventory.
 elaboratePreparedSynthesisTypes
     :: PreparedEnvironment
     -> [(HKind, SharedType.Type HSymbol)]
@@ -639,14 +638,14 @@ elaboratePreparedSynthesisTypes
 elaboratePreparedSynthesisTypes prepared obligations = do
     sharedObligations <- mapM convertObligation obligations
     first renderElaborationError $
-        SharedTypeSynonym.elaborateTypes
-            freshDjinnTypeVariable synonyms sharedObligations
+        SharedTypeSynonym.elaboratePreparedTypes
+            freshDjinnTypeVariable foundation sharedObligations
   where
     convertObligation (expected, source) = (,)
         <$> checkedGroundHKind expected
         <*> pure source
 
-    synonyms = preparedEnvironmentTypeSynonyms prepared
+    foundation = preparedEnvironmentWitness prepared
 
 -- Match the compatibility checker's established spelling for the one query
 -- failure users commonly act on. Other failures retain their structured Show

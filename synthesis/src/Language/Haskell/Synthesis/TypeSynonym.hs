@@ -26,10 +26,13 @@ module Language.Haskell.Synthesis.TypeSynonym
   , adjustPreparedInventoryDataTypeAnnotations
   , prepareTypeSynonyms
   , checkTypeSynonymSaturation
+  , checkPreparedTypeSynonymSaturation
   , expandTypeSynonymDefinitions
   , expandTypeSynonyms
   , elaborateTypes
+  , elaboratePreparedTypes
   , elaborateType
+  , elaboratePreparedType
   , expandDeclarationTypeSynonyms
   ) where
 
@@ -123,9 +126,11 @@ data TypeSynonyms variable = TypeSynonyms
 --
 -- The constructor is private: consumers may inspect either projection, but
 -- cannot accidentally combine declarations and synonyms prepared from
--- different environments.  The annotation parameter remains functorial
--- because annotations do not participate in synonym preparation, kind
--- assumptions, or expansion.
+-- different environments. Session code should prefer the prepared saturation
+-- and elaboration operations, which consume the paired witness without
+-- exposing its table. The annotation parameter remains functorial because
+-- annotations do not participate in synonym preparation, kind assumptions,
+-- or expansion.
 data PreparedInventory variable annotation = PreparedInventory
   (Inventory variable annotation)
   (TypeSynonyms variable)
@@ -388,6 +393,17 @@ checkTypeSynonymSaturation table = checkType
         expected = length $ definitionParameters definition
     _ -> Right ()
 
+-- | Check Haskell's minimum-saturation rule against the exact alias table
+-- sealed with a prepared inventory. This is the session-facing counterpart of
+-- 'checkTypeSynonymSaturation': it preserves that operation's traversal and
+-- first-failure order without exposing an independently pairable table.
+checkPreparedTypeSynonymSaturation
+  :: PreparedInventory variable annotation
+  -> Type variable
+  -> Either (SynonymExpansionError variable) ()
+checkPreparedTypeSynonymSaturation prepared =
+  checkTypeSynonymSaturation $ preparedTypeSynonyms prepared
+
 expandWithTable
   :: Ord variable
   => FreshVariable variable
@@ -420,6 +436,17 @@ elaborateTypes
   -> Either (TypeElaborationError variable) [Type variable]
 elaborateTypes = elaborateTypesTraversable
 
+-- | Elaborate several types in one kind-variable scope using the exact alias
+-- table and kind assumptions sealed with a prepared inventory.
+elaboratePreparedTypes
+  :: Ord variable
+  => FreshVariable variable
+  -> PreparedInventory variable annotation
+  -> [(GroundKind, Type variable)]
+  -> Either (TypeElaborationError variable) [Type variable]
+elaboratePreparedTypes fresh prepared =
+  elaborateTypes fresh $ preparedTypeSynonyms prepared
+
 -- | Validate and kind-check before expanding, then validate and kind-check
 -- the elaborated result defensively. This is the singleton specialization of
 -- 'elaborateTypes'; keeping both entry points on one worker prevents their
@@ -433,6 +460,17 @@ elaborateType
   -> Either (TypeElaborationError variable) (Type variable)
 elaborateType fresh table expected source = runIdentity <$>
   elaborateTypesTraversable fresh table (Identity (expected, source))
+
+-- | Singleton specialization of 'elaboratePreparedTypes'.
+elaboratePreparedType
+  :: Ord variable
+  => FreshVariable variable
+  -> PreparedInventory variable annotation
+  -> GroundKind
+  -> Type variable
+  -> Either (TypeElaborationError variable) (Type variable)
+elaboratePreparedType fresh prepared =
+  elaborateType fresh $ preparedTypeSynonyms prepared
 
 -- Preserve the caller's container shape so singleton elaboration can be total
 -- without extracting the head of a list whose length is known only by

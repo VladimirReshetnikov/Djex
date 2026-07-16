@@ -433,11 +433,12 @@ Haskell syntax against the session's retained
 type names, classes, and kind assumptions. It deliberately does not use the
 legacy frontend synonym map. `runExferenceQuery` passes both parsed and
 programmatically constructed goals through the shared capture-avoiding
-`TypeSynonym.elaborateType` operation, including its pre- and post-expansion
-kind checks, before lowering to the core search type. Thus the two request
-paths agree on aliases, cycles, saturation, and kinds. Query execution then
-validates only the varying search policy and returns a lazy sequence of shared
-result batches. `ExferenceEnvironment`, `ExferenceType`,
+`TypeSynonym.elaboratePreparedType` operation on the session's exact opaque
+witness, including its pre- and post-expansion kind checks, before lowering to
+the core search type. Thus the two request paths agree on aliases, cycles,
+saturation, and kinds without projecting a separately pairable synonym table.
+Query execution then validates only the varying search policy and returns a
+lazy sequence of shared result batches. `ExferenceEnvironment`, `ExferenceType`,
 `ExferenceTypeVariable`, `ExferenceLocal`, and `ExferenceInventory` make that
 complete surface nameable in the neutral IR. Session construction maps backend
 ratings out of the already-checked inventory without rebuilding its indexes or
@@ -496,10 +497,12 @@ lookahead policies over either backend's result envelope. `TypeRender` prints
 shared types and constraints from tagged variable-name hints without collapsing
 flexible and rigid identities.
 `TypeSynonym` prepares aliases from the retained neutral inventory and owns
-the table-backed minimum-saturation preflight, capture-avoiding expansion, and
-pre/post kind checks that both backend adapters can share. Kind inference is
-the single structural validator for each elaboration phase. Its batch
-operation preserves source order while assigning one kind to each free
+prepared-witness operations for minimum-saturation preflight, capture-avoiding
+expansion, and pre/post kind checks that both backend adapters share. The
+lower-level table operations remain compatibility and focused-testing seams;
+sealed backend paths no longer extract a table only to hand it back. Kind
+inference is the single structural validator for each elaboration phase. Its
+batch operation preserves source order while assigning one kind to each free
 variable shared by a goal and its separate context arguments. The underlying
 shared type module now owns the
 scope-aware simultaneous substitution primitive used by synonym expansion and

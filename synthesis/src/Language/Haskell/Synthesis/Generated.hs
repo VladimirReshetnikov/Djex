@@ -30,6 +30,7 @@ module Language.Haskell.Synthesis.Generated
   , validateDefinitionName
   , functionClauseExpression
   , fillExpressionHole
+  , simplifyExpressionBy
   , expressionHoles
   , expressionSizeNatural
   , expressionSize
@@ -175,6 +176,165 @@ fillExpressionHole selected replacement = fill
     Let pattern (fill binding) (fill body)
   fill (Case scrutinee alternatives) = Case (fill scrutinee)
     [(pattern, fill body) | (pattern, body) <- alternatives]
+
+-- Exact totals are irrelevant to the simplifier: zero, one, and multiple
+-- occurrences are its only semantic cases. Saturating here also keeps the
+-- analysis independent of machine-sized counters.
+data Occurrences = Unused | UsedOnce | UsedMany
+  deriving (Eq)
+
+combineOccurrences :: Occurrences -> Occurrences -> Occurrences
+combineOccurrences Unused right = right
+combineOccurrences left Unused = left
+combineOccurrences _ _ = UsedMany
+
+-- | Simplify a generated synthesis term using a backend's local-identity
+-- projection.
+--
+-- The operation removes unused variable lets, capture-safely inlines a
+-- single use, and applies the ordinary eta law. It is deliberately not a
+-- general Haskell optimizer: synthesis backends use it for their total,
+-- independently checked output trees. Local payloads (such as Exference's
+-- type annotations) are preserved verbatim; only the projected identity
+-- participates in binding and occurrence comparisons.
+simplifyExpressionBy
+  :: Ord identity
+  => (local -> identity)
+  -> Expression local
+  -> Expression local
+simplifyExpressionBy identity = simplifyEta . simplifyLets
+ where
+  simplifyLets expression = case expression of
+    original@Local{} -> original
+    original@Global{} -> original
+    Lambda patterns body -> Lambda patterns $ simplifyLets body
+    Apply function argument ->
+      Apply (simplifyLets function) (simplifyLets argument)
+    Tuple elements -> Tuple $ map simplifyLets elements
+    original@Hole{} -> original
+    Let pattern binding body -> case pattern of
+      Bind local -> case occurrencesOf (identity local) body of
+        Unused -> simplifyLets body
+        UsedOnce -> case replaceLocal (identity local) binding body of
+          Just replaced -> simplifyLets replaced
+          Nothing -> retainLet
+        UsedMany -> retainLet
+      _ -> retainLet
+     where
+      retainLet = Let pattern
+        (simplifyLets binding)
+        (simplifyLets body)
+    Case scrutinee alternatives -> Case (simplifyLets scrutinee)
+      [ (pattern, simplifyLets body)
+      | (pattern, body) <- alternatives
+      ]
+
+  simplifyEta expression = reduceEta $ case expression of
+    original@Local{} -> original
+    original@Global{} -> original
+    Lambda patterns body -> Lambda patterns $ simplifyEta body
+    Apply function argument ->
+      Apply (simplifyEta function) (simplifyEta argument)
+    Tuple elements -> Tuple $ map simplifyEta elements
+    original@Hole{} -> original
+    Let pattern binding body ->
+      Let pattern (simplifyEta binding) (simplifyEta body)
+    Case scrutinee alternatives -> Case (simplifyEta scrutinee)
+      [ (pattern, simplifyEta body)
+      | (pattern, body) <- alternatives
+      ]
+
+  reduceEta expression = case expression of
+    Lambda [Bind binder] (Apply function (Local argument))
+      | identity binder == identity argument
+      , occurrencesOf (identity binder) function == Unused -> function
+    _ -> expression
+
+  replaceLocal selected replacement = replace
+   where
+    replacementFree = freeIdentities replacement
+
+    replace expression = case expression of
+      original@(Local local)
+        | identity local == selected -> Just replacement
+        | otherwise -> Just original
+      original@Global{} -> Just original
+      Lambda patterns body ->
+        Lambda patterns <$> underPatterns patterns body
+      Apply function argument ->
+        Apply <$> replace function <*> replace argument
+      Tuple elements -> Tuple <$> traverse replace elements
+      original@Hole{} -> Just original
+      Let pattern binding body -> Let pattern
+        <$> replace binding
+        <*> underPatterns [pattern] body
+      Case scrutinee alternatives -> Case
+        <$> replace scrutinee
+        <*> traverse replaceAlternative alternatives
+
+    replaceAlternative (pattern, body) = do
+      replacedBody <- underPatterns [pattern] body
+      pure (pattern, replacedBody)
+
+    underPatterns patterns body
+      | selected `elem` binders = Just body
+      | binderCaptures binders body = Nothing
+      | otherwise = replace body
+     where
+      binders = map identity $ concatMap patternLocals patterns
+
+    binderCaptures binders body =
+      any (`Set.member` replacementFree) binders
+        && occurrencesOf selected body /= Unused
+
+  freeIdentities expression = case expression of
+    Local local -> Set.singleton $ identity local
+    Global{} -> Set.empty
+    Lambda patterns body -> removePatternBinders patterns
+      $ freeIdentities body
+    Apply function argument ->
+      freeIdentities function `Set.union` freeIdentities argument
+    Tuple elements -> Set.unions $ map freeIdentities elements
+    Hole{} -> Set.empty
+    Let pattern binding body -> freeIdentities binding `Set.union`
+      removePatternBinders [pattern] (freeIdentities body)
+    Case scrutinee alternatives -> Set.unions
+      $ freeIdentities scrutinee
+      : [ removePatternBinders [pattern] $ freeIdentities body
+        | (pattern, body) <- alternatives
+        ]
+
+  removePatternBinders patterns free = foldr Set.delete free
+    $ map identity $ concatMap patternLocals patterns
+
+  occurrencesOf selected expression = case expression of
+    Local local
+      | identity local == selected -> UsedOnce
+      | otherwise -> Unused
+    Global{} -> Unused
+    Lambda patterns body -> underPatterns patterns body
+    Apply function argument -> combineOccurrences
+      (occurrencesOf selected function)
+      (occurrencesOf selected argument)
+    Tuple elements -> foldr
+      (combineOccurrences . occurrencesOf selected)
+      Unused
+      elements
+    Hole{} -> Unused
+    Let pattern binding body -> combineOccurrences
+      (occurrencesOf selected binding)
+      (underPatterns [pattern] body)
+    Case scrutinee alternatives -> foldr
+      (combineOccurrences . occurrenceInAlternative)
+      (occurrencesOf selected scrutinee)
+      alternatives
+   where
+    underPatterns patterns body
+      | selected `elem` map identity (concatMap patternLocals patterns) =
+          Unused
+      | otherwise = occurrencesOf selected body
+
+    occurrenceInAlternative (pattern, body) = underPatterns [pattern] body
 
 -- | How module qualifiers are emitted.
 --

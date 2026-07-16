@@ -2795,6 +2795,34 @@ generatedTests = testGroup "generated syntax"
             (Let Wildcard replacement $ Case (Hole 3)
               [(Wildcard, replacement)])
       fillExpressionHole 1 replacement expression @?= expected
+  , testCase "simplify by projected identity without capture" $ do
+      let global spelling = Global $ right $ mkIdentifier spelling
+          binder identity annotation = (identity, annotation)
+          xBinder = binder "x" "binder"
+          xUse = binder "x" "occurrence"
+          yBinder = binder "y" "binder"
+          yFree = binder "y" "free"
+          eta = Lambda [Bind xBinder]
+            $ Apply (global "function") (Local xUse)
+          captured = Let (Bind xBinder) (Local yFree)
+            $ Lambda [Bind yBinder] (Local xUse)
+          nestedPatternCapture = Let (Bind xBinder) (Local yFree)
+            $ Case (global "scrutinee")
+                [ (TuplePattern [As yBinder Wildcard], Local xUse) ]
+          shadowed = Let (Bind xBinder) (global "discarded")
+            $ Lambda [Bind xUse] (Local xBinder)
+          inlined = Let (Bind xBinder) (global "value")
+            $ Apply (global "consume") (Local xUse)
+          usedTwice = Let (Bind xBinder) (global "shared")
+            $ Tuple [Local xUse, Local xBinder]
+      simplifyExpressionBy fst eta @?= global "function"
+      simplifyExpressionBy fst captured @?= captured
+      simplifyExpressionBy fst nestedPatternCapture @?= nestedPatternCapture
+      simplifyExpressionBy fst shadowed @?=
+        Lambda [Bind xUse] (Local xBinder)
+      simplifyExpressionBy fst inlined @?=
+        Apply (global "consume") (global "value")
+      simplifyExpressionBy fst usedTwice @?= usedTwice
   , testCase "render local hints with fallback, reservations, and policy" $ do
       let namespace = right $ mkModuleName "Data.List"
           mapping = right $ mkQualifiedIdentifier namespace "map"

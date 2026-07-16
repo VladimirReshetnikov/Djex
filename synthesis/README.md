@@ -109,6 +109,10 @@ identities so allocation and backend completeness checks share one traversal.
 `fillExpressionHole` replaces one selected identity throughout a partial tree
 without recursively consuming holes in the inserted replacement, allowing an
 incremental engine to publish newly allocated work safely.
+`simplifyExpressionBy` owns scope-aware let elimination, capture-safe
+single-use inlining, and eta reduction for synthesis terms. A backend supplies
+only its local-identity projection, so annotations remain intact while binder
+comparison, shadowing, and occurrence saturation use the stable identity.
 `functionClauseExpression` recovers the expression denoted
 by a clause, retaining its argument patterns as a leading lambda while leaving
 a patternless value body unchanged. The renderer allocates stable Haskell

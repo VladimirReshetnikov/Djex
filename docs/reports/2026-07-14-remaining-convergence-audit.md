@@ -1022,6 +1022,30 @@ Exference coverage constructs every historical expression form, verifies the
 exact shared tree, and fixes type-derived local-name hints across pattern,
 lambda, let, and occurrence sites.
 
+## Post-fold generated simplification ownership
+
+**Completed on 2026-07-15:** once Exference's typed expression became an
+annotated shared generated tree, its standalone 180-line simplifier was a
+second traversal of that exact shape. Nothing in unused-let removal,
+single-use substitution, free-variable capture checks, saturated occurrence
+classification, or eta reduction depended on Exference types. The only
+backend policy was that annotations do not participate in local identity.
+
+The foundation now owns `simplifyExpressionBy`, parameterized by the projection
+from a backend local payload to its stable ordered identity. It preserves the
+payload while respecting every shared pattern binder, tuple element, let
+scope, and case alternative. The private occurrence summary saturates at
+zero/one/many rather than retaining an overflowable exact count. Exference's
+annotated wrapper supplies its numeric projection directly; the historical
+`ExpressionSimplify` module is an eleven-line compatibility re-export, and the
+live engine no longer imports it.
+
+Foundation regressions distinguish payload equality from projected identity
+and pin eta reduction, capture rejection, lexical shadowing, and multiple-use
+retention. Exference's existing simplifier and independent-checker suite pins
+the complete old behavior over lambdas, variable lets, constructor lets, and
+case branches.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

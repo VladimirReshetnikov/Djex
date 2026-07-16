@@ -441,7 +441,11 @@ constructors are bundled bidirectional compatibility patterns over that tree.
 Erasing annotations is therefore a functor projection rather than a recursive
 backend-to-shared conversion. Incremental hole filling likewise lives in the
 shared generated-syntax module and is regression-tested independently of
-Exference's search policy.
+Exference's search policy. Capture-safe let cleanup and eta reduction operate
+on that same shared shape, parameterized only by Exference's projection from
+an annotated local to its stable numeric identity; the historical
+`ExpressionSimplify` module is now a compatibility re-export rather than a
+second traversal authority.
 Candidate selection and rendering remain presentation policies outside both
 session operations. The shared `Selection` module now
 provides first, global-best, streaming-all, batch-lookahead, and preferred-tier

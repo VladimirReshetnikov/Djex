@@ -27,6 +27,7 @@ module Language.Haskell.Exference.Core.Expression
   , qualificationFromLevel
   , showExpression
   , fillExprHole
+  , simplifyExpression
   , allocateExpressionNames
   )
 where
@@ -307,3 +308,9 @@ fillExprHole variable (Expression replacement) (Expression expression) =
     (AnnotatedLocal variable Nothing)
     replacement
     expression
+
+-- | Apply the shared capture-safe generated-term simplifier while comparing
+-- annotated locals solely by Exference's stable numeric identity.
+simplifyExpression :: Expression -> Expression
+simplifyExpression (Expression expression) = Expression
+  $ Generated.simplifyExpressionBy annotatedIdentity expression

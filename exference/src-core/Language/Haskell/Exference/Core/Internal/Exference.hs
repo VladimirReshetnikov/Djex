@@ -58,7 +58,6 @@ import Language.Haskell.Exference.Core.Internal.Candidate
   , typeVariableHintsWithPlan
   )
 import Language.Haskell.Exference.Core.ExpressionCheck
-import Language.Haskell.Exference.Core.ExpressionSimplify
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding

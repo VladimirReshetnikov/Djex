@@ -48,6 +48,7 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
 import Language.Haskell.Synthesis.Count (saturatingNaturalToInt)
+import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import Language.Haskell.Synthesis.Name
 import Numeric.Natural (Natural)
 import Text.PrettyPrint.HughesPJ
@@ -361,10 +362,10 @@ validateLocalName spelling = case mkIdentifier spelling of
         (InvalidIdentifier spelling)
 
 freshName :: Set String -> Bool -> String -> String
-freshName used hasHole candidate
-  | any (`Set.member` used) (localSpellings hasHole candidate) =
-      freshName used hasHole $ candidate ++ "'"
-  | otherwise = candidate
+freshName used hasHole = Fresh.selectFreshBy conflicts (++ "'") used
+ where
+  conflicts spelling reserved = any (`Set.member` reserved)
+    $ localSpellings hasHole spelling
 
 -- The base spelling participates even when every occurrence is a hole: it is
 -- the stable identity allocated to that local and must remain distinct from

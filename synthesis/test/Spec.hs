@@ -164,7 +164,13 @@ collectionTests = testGroup "collections"
 
 freshTests :: TestTree
 freshTests = testGroup "fresh allocation"
-  [ testCase "skip reserved values and publish the selected candidate" $ do
+  [ testCase "select without owning the reservation store" $ do
+      selectFresh (++ "'") (Set.fromList ["a", "a'"]) "a" @?= "a''"
+      let conflicts spelling reserved = any (`Set.member` reserved)
+            [spelling, '_' : spelling]
+      selectFreshBy conflicts (++ "'")
+          (Set.fromList ["a", "_a'"]) "a" @?= "a''"
+  , testCase "skip reserved values and publish the selected candidate" $ do
       let step suffix = ("v" ++ show suffix, suffix + 1 :: Natural)
           reserved = Set.fromList ["v0", "v1"]
       allocateFresh step reserved 0 @?=

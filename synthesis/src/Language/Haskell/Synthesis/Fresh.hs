@@ -1,13 +1,15 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | Collision-free allocation from deterministic candidate generators.
+-- | Collision-free selection and allocation from deterministic candidates.
 --
 -- Backends retain ownership of their name domains and candidate order. This
--- module owns the common operation of advancing past reserved candidates,
--- publishing the chosen value in the reservation set, and returning the
--- generator's continuation state.
+-- module owns the common operation of advancing past reserved candidates.
+-- Stateful allocation additionally publishes the chosen value in the
+-- reservation set and returns the generator's continuation state.
 module Language.Haskell.Synthesis.Fresh
-  ( allocateFresh
+  ( selectFresh
+  , selectFreshBy
+  , allocateFresh
   , allocateFreshMaybe
   , allocateFreshBy
   , allocateFreshMaybeBy
@@ -15,6 +17,34 @@ module Language.Haskell.Synthesis.Fresh
 
 import qualified Data.Set as Set
 import Data.Void (absurd)
+
+-- | Select the first unused value from a deterministic successor chain.
+--
+-- Use this when the caller already owns reservation updates or merely needs
+-- one collision-free presentation spelling. 'allocateFresh' is the stateful
+-- counterpart that publishes the selected value in the returned set.
+selectFresh
+  :: Ord value
+  => (value -> value)
+  -> Set.Set value
+  -> value
+  -> value
+selectFresh = selectFreshBy Set.member
+
+-- | Container-polymorphic counterpart of 'selectFresh'.
+--
+-- The successor must not cycle entirely within the reserved identities.
+selectFreshBy
+  :: (value -> reservation -> Bool)
+  -> (value -> value)
+  -> reservation
+  -> value
+  -> value
+selectFreshBy member next reserved initial = selected
+ where
+  (selected, _, _) = allocateFreshBy member keepReserved step reserved initial
+  keepReserved _ = id
+  step candidate = (candidate, next candidate)
 
 -- | Select the first unused value from a total candidate generator.
 --

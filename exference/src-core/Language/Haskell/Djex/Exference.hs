@@ -134,6 +134,7 @@ import Language.Haskell.Synthesis.Generated
   , renderOptionsWithLocalNameHints
   )
 import Language.Haskell.Synthesis.Environment (Environment)
+import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , inventoryEnvironment
@@ -387,9 +388,7 @@ residualTypeVariableNames candidate variables = fst
 -- Appending a prime preserves the lexical class of both historical fallback
 -- forms. The finite set of rendered variables guarantees termination.
 freshFallback :: Set.Set String -> String -> String
-freshFallback used preferred
-  | Set.member preferred used = freshFallback used $ preferred ++ "'"
-  | otherwise = preferred
+freshFallback = Fresh.selectFresh (++ "'")
 
 candidateTypeVariableFallback :: ExferenceTypeVariable -> String
 candidateTypeVariableFallback variable = case variable of

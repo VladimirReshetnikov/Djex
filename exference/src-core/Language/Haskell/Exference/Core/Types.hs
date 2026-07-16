@@ -86,6 +86,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as L
 
 import Language.Haskell.Exference.Core.Internal.Closure ( closure )
+import Language.Haskell.Exference.Core.Internal.SourceNames
+  ( preferredSourceTypeVariableNames )
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( freshSynthesisVariable )
 import Language.Haskell.Exference.Core.Name
@@ -643,10 +645,7 @@ sourceVariableName
   -> String
 sourceVariableName sourceNames = renderVariable
  where
-  preferredNames = IntMap.fromListWith min
-    [ (identifier, spelling)
-    | (spelling, identifier) <- M.toList sourceNames
-    ]
+  preferredNames = preferredSourceTypeVariableNames $ M.toList sourceNames
   -- This raw compatibility map predates tagged variables and has only one
   -- numeric key space. Stable candidate hints use separate tagged keys; this
   -- renderer is the intentional legacy boundary where the tag is erased.

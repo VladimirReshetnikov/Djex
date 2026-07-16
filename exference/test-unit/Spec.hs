@@ -5228,15 +5228,19 @@ tests = testGroup "Exference"
             Left (SourceTypeVariableHintOutOfScope "rigid" 7)
       , testCase "validate every alias before deterministic collapse" $ do
           let goal = TypeArrow (TypeVar 7) (TypeVar 7)
+              sourceNames = Map.fromList [("zeta", 7), ("alpha", 7)]
           mkExferenceSourceTypeVariableHints goal
               (Map.fromList [("alpha", 7), ("where", 7)]) @?=
             Left (InvalidSourceTypeVariableSpelling "where"
               $ SharedName.ReservedIdentifier "where")
           aliases <- expectRight $ mkExferenceSourceTypeVariableHints goal
-            $ Map.fromList [("zeta", 7), ("alpha", 7)]
+            sourceNames
           preferred <- expectRight $ mkExferenceSourceTypeVariableHints goal
             $ Map.singleton "alpha" 7
           aliases @?= preferred
+          Map.lookup (SharedType.FlexibleVariable 7)
+              (typeVariableHints goal sourceNames) @?= Just "alpha"
+          showHsType sourceNames (TypeVar 7) @?= "alpha"
           targetName <- expectRight $ SharedName.mkIdentifier "hinted"
           target <- expectRight $ Generated.mkDefinitionName targetName
           let input = identityInput {input_goalType = goal}

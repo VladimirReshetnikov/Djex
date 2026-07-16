@@ -30,6 +30,8 @@ import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
 import Language.Haskell.Exference.Core.FunctionBinding (EnvDictionary (..))
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( flexibleIdentifiers )
+import Language.Haskell.Exference.Core.Internal.SourceNames
+  ( preferredSourceTypeVariableNames )
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( RigidInstantiationPlan
   , mkRigidInstantiationContext
@@ -117,10 +119,7 @@ mkExferenceSourceTypeVariableHints sourceType sourceNames = do
   validSpellings <- traverse validateSpelling $ Map.toAscList sourceNames
   inScopeSpellings <- traverse requireInScope validSpellings
   pure $! force $ ExferenceSourceTypeVariableHints canonicalSourceType
-    $ IntMap.fromListWith min
-      [ (variable, spelling)
-      | (spelling, variable) <- inScopeSpellings
-      ]
+    $ preferredSourceTypeVariableNames inScopeSpellings
  where
   canonicalSourceType = SharedType.canonicalizeType sourceType
   sourceVariables = flexibleIdentifiers canonicalSourceType
@@ -366,7 +365,9 @@ compatibilityFlexibleTypeVariableHints
   :: TypeVarIndex
   -> ExferenceTypeVariableHints
 compatibilityFlexibleTypeVariableHints =
-  foldr insertFlexible Map.empty . Map.toAscList
- where
-  insertFlexible (sourceName, variable) = Map.insert
-    (SharedType.FlexibleVariable variable) sourceName
+  Map.fromList
+    . map (\(variable, sourceName) ->
+        (SharedType.FlexibleVariable variable, sourceName))
+    . IntMap.toAscList
+    . preferredSourceTypeVariableNames
+    . Map.toList

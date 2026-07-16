@@ -342,11 +342,14 @@ recursion metadata is attached to that Inventory without resealing it or
 repeating kind inference. The historical flat `SourceEnvironment` projection
 is derived on demand from the witness; only legacy synonym spellings remain as
 frontend presentation data. Erasing annotations for a stable session shares
-the same prepared synonym table and backend during sealing. The sealed session
-then retains only the shared inventory/synonym witness, its policy-adjusted
-checked search environment, and a fully materialized structured omission
-summary; the complete unfiltered backend-bearing wrapper is released. HSE
-query parsing derives known types and class arities
+the same prepared synonym table and backend during sealing. That wrapper
+exposes one foundation witness and one backend projection: the synthesis
+foundation remains the sole owner of the Inventory and normalized-synonym
+projections, rather than Exference mirroring them through neutral aliases. The
+sealed session then retains only the shared inventory/synonym witness, its
+policy-adjusted checked search environment, and a fully materialized structured
+omission summary; the complete unfiltered backend-bearing wrapper is released.
+HSE query parsing derives known types and class arities
 from the witness's shared inventory rather than retaining parallel type/class
 caches; neither an HSE source environment nor its legacy synonym map survives
 sealing.

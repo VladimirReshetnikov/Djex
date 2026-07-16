@@ -132,12 +132,6 @@ projectionSignatures =
   (CoreTypes.qClassEnv_inflatedConstraints
     :: CoreTypes.QueryClassEnv
     -> Set.Set CoreTypes.HsConstraint) `seq`
-  (Declaration.preparedSynthesisInventory
-    :: Declaration.PreparedSynthesisInventory ()
-    -> Inventory.Inventory CoreTypes.SynthesisVariable ()) `seq`
-  (Declaration.preparedSynthesisTypeSynonyms
-    :: Declaration.PreparedSynthesisInventory ()
-    -> TypeSynonym.TypeSynonyms CoreTypes.SynthesisVariable) `seq`
   (Declaration.preparedSynthesisWitness
     :: Declaration.PreparedSynthesisInventory ()
     -> TypeSynonym.PreparedInventory CoreTypes.SynthesisVariable ()) `seq`

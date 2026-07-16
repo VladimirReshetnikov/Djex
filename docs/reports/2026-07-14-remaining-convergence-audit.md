@@ -1347,6 +1347,25 @@ generic and shared-type precedence scales. At a four-line/28-token threshold,
 the remaining detector reports are import/export lists and module headers, not
 duplicated executable traversals.
 
+## Exference prepared-projection collapse
+
+**Completed on 2026-07-16:** Exference's backend-bearing prepared wrapper still
+mirrored the synthesis foundation's Inventory and synonym-table projections,
+then repeated that API under a `Neutral` vocabulary for the `()` specialization.
+Those aliases were merger scaffolding rather than a distinct abstraction: all
+of them exposed the same two fields already owned by the opaque shared
+`PreparedInventory` witness.
+
+`PreparedSynthesisInventory` now exposes exactly one shared-witness projection
+and one Exference-backend projection. Callers obtain the Inventory and its exact
+normalized synonym table through the foundation witness, and write the erased
+form explicitly as `PreparedSynthesisInventory ()`. The zero-cost
+`projectNeutralSynthesisInventory` alias likewise gave way to the polymorphic
+`projectSynthesisInventory`. This removes seven synonymous entrances while
+preserving the opaque pairing invariant: neither the source frontend nor a
+session caller can combine an Inventory, synonym table, and backend prepared
+from different declarations.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

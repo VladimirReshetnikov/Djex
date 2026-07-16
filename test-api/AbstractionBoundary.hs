@@ -46,8 +46,6 @@ import qualified Language.Haskell.Exference.Core as ExferenceCore
 import Language.Haskell.Exference.Core.Declaration
   ( PreparedSynthesisInventory
   , preparedSynthesisBackend
-  , preparedSynthesisInventory
-  , preparedSynthesisTypeSynonyms
   , preparedSynthesisWitness
   )
 import Language.Haskell.Exference.Core.FunctionBinding (EnvDictionary)
@@ -157,16 +155,6 @@ forbiddenConstructionAttempts =
       @(TypeSynonyms Int)
       "PreparedInventory.preparedTypeSynonyms"
   , noField
-      @"preparedSynthesisInventory"
-      @(PreparedSynthesisInventory ())
-      @(Inventory SynthesisVariable ())
-      "PreparedSynthesisInventory.preparedSynthesisInventory"
-  , noField
-      @"preparedSynthesisTypeSynonyms"
-      @(PreparedSynthesisInventory ())
-      @(TypeSynonyms SynthesisVariable)
-      "PreparedSynthesisInventory.preparedSynthesisTypeSynonyms"
-  , noField
       @"preparedSynthesisWitness"
       @(PreparedSynthesisInventory ())
       @(PreparedInventory SynthesisVariable ())
@@ -273,8 +261,6 @@ selectorNamesInScope =
   rigidInstantiations `seq`
   preparedInventory `seq`
   preparedTypeSynonyms `seq`
-  preparedSynthesisInventory `seq`
-  preparedSynthesisTypeSynonyms `seq`
   preparedSynthesisWitness `seq`
   preparedSynthesisBackend `seq`
   sClassEnv_tclasses `seq`

@@ -1996,9 +1996,9 @@ tests = testGroup "Exference"
           let unrelatedView =
                 [ (functionName binding, functionPenalty binding)
                 | binding <- environmentFunctions
-                    $ preparedNeutralBackend rightPrepared
+                    $ preparedSynthesisBackend rightPrepared
                 ]
-          case projectNeutralSynthesisInventory
+          case projectSynthesisInventory
               unrelatedView [] leftPrepared of
             Left failure -> failure @?= PreparedBindingNamesMismatch
               [name "right"] [name "left"]
@@ -2022,13 +2022,13 @@ tests = testGroup "Exference"
             ]
           prepared <- expectRight
             $ prepareNeutralSynthesisInventory inventory
-          projected <- expectRight $ projectNeutralSynthesisInventory
+          projected <- expectRight $ projectSynthesisInventory
             [ (name "MakeSecond", Penalty (-2.5))
             , (name "MakeFirst", Penalty 7.25)
             ]
             [name "Second", name "First"]
             prepared
-          let backend = preparedNeutralBackend projected
+          let backend = preparedSynthesisBackend projected
           map (\binding ->
               ( functionName binding
               , functionPenalty binding
@@ -2050,7 +2050,7 @@ tests = testGroup "Exference"
             ]
           prepared <- expectRight
             $ prepareNeutralSynthesisInventory inventory
-          case projectNeutralSynthesisInventory
+          case projectSynthesisInventory
               [(name "value", notANumber)] [] prepared of
             Left failure -> failure @?=
               InvalidPreparedBindingPenalty (name "value") notANumber
@@ -4416,7 +4416,7 @@ tests = testGroup "Exference"
               let projection = checkedSourceProjection checked
                   inventory = checkedSourceInventory checked
                   neutral = checkedSourcePreparedInventory checked
-                  backend = preparedNeutralBackend neutral
+                  backend = preparedSynthesisBackend neutral
                   shared = SharedInventory.inventoryEnvironment inventory
                   methodEntries =
                     [ (owner, binding)
@@ -4424,7 +4424,9 @@ tests = testGroup "Exference"
                         sourceBindings projection
                     , functionName binding == methodName
                     ]
-              preparedNeutralInventory neutral @?= fmap (const ()) inventory
+              SharedTypeSynonym.preparedInventory
+                  (preparedSynthesisWitness neutral) @?=
+                fmap (const ()) inventory
               environmentFunctions backend @?= sourceFunctions projection
               environmentDeconstructors backend @?=
                 sourceDeconstructors projection
@@ -4763,10 +4765,12 @@ tests = testGroup "Exference"
               let projection = checkedSourceProjection checked
                   annotated = checkedSourceInventory checked
                   neutral = checkedSourcePreparedInventory checked
-                  backend = preparedNeutralBackend neutral
+                  backend = preparedSynthesisBackend neutral
                   declarations = SharedEnvironment.typeDeclarationMap
                     $ SharedInventory.inventoryEnvironment annotated
-              preparedNeutralInventory neutral @?= fmap (const ()) annotated
+              SharedTypeSynonym.preparedInventory
+                  (preparedSynthesisWitness neutral) @?=
+                fmap (const ()) annotated
               environmentFunctions backend @?= sourceFunctions projection
               environmentDeconstructors backend @?=
                 sourceDeconstructors projection
@@ -6128,7 +6132,7 @@ lowerNeutralDeclarations declarations = do
     SharedKindInference.OpenKindInventory declarations
   prepared <- expectRight
     $ prepareNeutralSynthesisInventory inventory
-  pure $ preparedNeutralBackend prepared
+  pure $ preparedSynthesisBackend prepared
 
 name :: String -> QualifiedName
 name = validQualifiedName []

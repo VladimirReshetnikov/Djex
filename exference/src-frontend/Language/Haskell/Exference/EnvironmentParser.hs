@@ -89,6 +89,7 @@ import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 -- | One ordered source binding. Class methods retain their exactly qualified
 -- owning class while exposing the same flat function projection as the
@@ -140,13 +141,13 @@ data CheckedSourceEnvironment = CheckedSourceEnvironment
 -- | The exact annotated Inventory owned by the prepared source witness.
 checkedSourceInventory :: CheckedSourceEnvironment -> SynthesisInventory
 checkedSourceInventory (CheckedSourceEnvironment prepared _) =
-  preparedSynthesisInventory prepared
+  SharedTypeSynonym.preparedInventory $ preparedSynthesisWitness prepared
 
 -- | An annotation-free view for the stable core session. This shares the
 -- already prepared synonyms and backend; it never repeats lowering.
 checkedSourcePreparedInventory
   :: CheckedSourceEnvironment
-  -> PreparedNeutralSynthesisInventory
+  -> PreparedSynthesisInventory ()
 checkedSourcePreparedInventory (CheckedSourceEnvironment prepared _) =
   erasePreparedSynthesisAnnotations prepared
 
@@ -169,7 +170,8 @@ checkedSourceProjection (CheckedSourceEnvironment prepared synonyms) =
   backend = preparedSynthesisBackend prepared
   classes = environmentClasses backend
   shared = SharedInventory.inventoryEnvironment
-    $ preparedSynthesisInventory prepared
+    $ SharedTypeSynonym.preparedInventory
+    $ preparedSynthesisWitness prepared
   dataNames =
     [ name
     | SharedDeclaration.DataTypeDeclaration _ name _ _ <-

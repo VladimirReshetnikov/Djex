@@ -238,8 +238,12 @@ independently prepared dictionary. Alias-aware recursion metadata is attached
 to the sealed Inventory through a checked annotation-only adjustment, without
 rebuilding its indexes or repeating kind inference. `CheckedSourceEnvironment`
 stores only that witness and the historical synonym spellings; its flat source
-projection is derived on demand, and its annotation-free session view shares
-the already prepared synonyms and backend. Thus synonym expansion, forall
+projection is derived on demand. The wrapper exposes only
+`preparedSynthesisWitness` and `preparedSynthesisBackend`; Inventory and
+synonym-table access goes through the foundation witness, and the
+annotation-free session view is written explicitly as
+`PreparedSynthesisInventory ()`. It shares the already prepared synonyms and
+backend. Thus synonym expansion, forall
 freshness, class/instance normalization, and whole-inventory recursion
 classification have one implementation, while the checked Inventory still
 retains the source aliases needed by later queries.
@@ -538,7 +542,7 @@ source/declaration order. The adapter's expression and definition conveniences
 supply the retained local-name hints to the shared candidate renderer and
 expose the common `RenderError` directly.
 
-The session retains one neutral shared prepared-inventory witness, its
+The session retains one annotation-free shared prepared-inventory witness, its
 policy-filtered search environment, and a fully evaluated structured omission
 summary. The source wrapper and its complete unfiltered backend are consumed
 during sealing rather than retained beside that filtered view.

@@ -31,9 +31,9 @@ import GHC.Generics (Generic)
 import Language.Haskell.Exference.Core (mkExferenceEnvironment)
 import qualified Language.Haskell.Exference.Core as Core
 import Language.Haskell.Exference.Core.Declaration
-  ( PreparedNeutralSynthesisInventory
+  ( PreparedSynthesisInventory
   , prepareNeutralSynthesisInventory
-  , preparedNeutralBackend
+  , preparedSynthesisBackend
   , preparedSynthesisWitness
   )
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -135,17 +135,17 @@ sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
 sealPreparedExferenceSessionWithPolicy
   :: [Name]
   -> Map Name Penalty
-  -> PreparedNeutralSynthesisInventory
+  -> PreparedSynthesisInventory ()
   -> Either Diagnostic ExferenceSession
 sealPreparedExferenceSessionWithPolicy = sealPreparedEnvironment
 
 sealPreparedEnvironment
   :: [Name]
   -> Map Name Penalty
-  -> PreparedNeutralSynthesisInventory
+  -> PreparedSynthesisInventory ()
   -> Either Diagnostic ExferenceSession
 sealPreparedEnvironment exclusions overrides prepared = do
-  let backend = preparedNeutralBackend prepared
+  let backend = preparedSynthesisBackend prepared
   ratedFunctions <- applyRatingOverrides overrides
     $ environmentFunctions backend
   let excludedBindings = Set.fromList exclusions

@@ -10,20 +10,13 @@ module Language.Haskell.Exference.Core.Declaration
   , SynthesisInventory
   , NeutralSynthesisInventory
   , PreparedSynthesisInventory
-  , PreparedNeutralSynthesisInventory
   , SynthesisDeclarationError (..)
   , freshSynthesisVariable
   , prepareSynthesisInventory
   , prepareNeutralSynthesisInventory
   , projectSynthesisInventory
-  , projectNeutralSynthesisInventory
-  , preparedSynthesisInventory
-  , preparedSynthesisTypeSynonyms
   , preparedSynthesisWitness
   , preparedSynthesisBackend
-  , preparedNeutralInventory
-  , preparedNeutralTypeSynonyms
-  , preparedNeutralBackend
   , erasePreparedSynthesisAnnotations
   , deriveRecursiveDataMetadata
   , toSynthesisTypeSynonym
@@ -110,9 +103,6 @@ data PreparedSynthesisInventory annotation = PreparedSynthesisInventory
   (SharedTypeSynonym.PreparedInventory SynthesisVariable annotation)
   EnvDictionary
 
--- | The annotation-free prepared witness accepted by stable core sessions.
-type PreparedNeutralSynthesisInventory = PreparedSynthesisInventory ()
-
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError
   | InvalidSharedDeclaration
@@ -196,7 +186,7 @@ prepareInventory inventory = do
 -- | Compatibility specialization for annotation-free callers.
 prepareNeutralSynthesisInventory
   :: NeutralSynthesisInventory
-  -> Either SynthesisDeclarationError PreparedNeutralSynthesisInventory
+  -> Either SynthesisDeclarationError (PreparedSynthesisInventory ())
 prepareNeutralSynthesisInventory = prepareInventory
 
 -- | Reorder a canonical backend to match a source frontend and attach its
@@ -255,41 +245,12 @@ projectSynthesisInventory functionProjection dataProjection
       , environmentDeconstructors = deconstructors
       })
 
--- | Compatibility name retained for annotation-free callers. The operation is
--- actually annotation-polymorphic because it changes only backend order and
--- penalties.
-projectNeutralSynthesisInventory
-  :: [(QualifiedName, Penalty)]
-  -> [QualifiedName]
-  -> PreparedNeutralSynthesisInventory
-  -> Either SynthesisDeclarationError PreparedNeutralSynthesisInventory
-projectNeutralSynthesisInventory = projectSynthesisInventory
-
--- | The authoritative checked inventory owned by a prepared lowering.
-preparedSynthesisInventory
-  :: PreparedSynthesisInventory annotation
-  -> SharedInventory.Inventory SynthesisVariable annotation
-preparedSynthesisInventory
-    (PreparedSynthesisInventory prepared _) =
-  SharedTypeSynonym.preparedInventory prepared
-
--- | The authoritative checked inventory owned by a prepared lowering.
-preparedNeutralInventory
-  :: PreparedNeutralSynthesisInventory
-  -> NeutralSynthesisInventory
-preparedNeutralInventory = preparedSynthesisInventory
-
--- | The alias table prepared from the witness's own checked inventory.
-preparedSynthesisTypeSynonyms
-  :: PreparedSynthesisInventory annotation
-  -> SharedTypeSynonym.TypeSynonyms SynthesisVariable
-preparedSynthesisTypeSynonyms
-    (PreparedSynthesisInventory prepared _) =
-  SharedTypeSynonym.preparedTypeSynonyms prepared
-
 -- | The shared inventory/alias witness retained after the backend projection
--- has been consumed. Session sealing uses this projection so the complete
--- unfiltered search dictionary cannot remain live beside its filtered view.
+-- has been consumed. The foundation's 'SharedTypeSynonym.preparedInventory'
+-- and 'SharedTypeSynonym.preparedTypeSynonyms' are the sole projections from
+-- that witness; this wrapper does not duplicate them under backend-specific
+-- names. Session sealing uses the witness so the complete unfiltered search
+-- dictionary cannot remain live beside its filtered view.
 preparedSynthesisWitness
   :: PreparedSynthesisInventory annotation
   -> SharedTypeSynonym.PreparedInventory SynthesisVariable annotation
@@ -302,24 +263,12 @@ preparedSynthesisBackend
 preparedSynthesisBackend
     (PreparedSynthesisInventory _ backend) = backend
 
--- | Compatibility accessor specialized to an annotation-free witness.
-preparedNeutralTypeSynonyms
-  :: PreparedNeutralSynthesisInventory
-  -> SharedTypeSynonym.TypeSynonyms SynthesisVariable
-preparedNeutralTypeSynonyms = preparedSynthesisTypeSynonyms
-
--- | Compatibility accessor specialized to an annotation-free witness.
-preparedNeutralBackend
-  :: PreparedNeutralSynthesisInventory
-  -> EnvDictionary
-preparedNeutralBackend = preparedSynthesisBackend
-
 -- | Erase frontend annotations without rebuilding the inventory, synonym
 -- table, or projected backend. The resulting witness has exactly the same
 -- semantic declarations and kind assumptions.
 erasePreparedSynthesisAnnotations
   :: PreparedSynthesisInventory annotation
-  -> PreparedNeutralSynthesisInventory
+  -> PreparedSynthesisInventory ()
 erasePreparedSynthesisAnnotations
     (PreparedSynthesisInventory prepared backend) =
   PreparedSynthesisInventory (fmap (const ()) prepared) backend

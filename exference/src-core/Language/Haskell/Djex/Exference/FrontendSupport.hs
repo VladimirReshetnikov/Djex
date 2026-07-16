@@ -32,7 +32,7 @@ import Language.Haskell.Djex.Exference
 import qualified Language.Haskell.Djex.Exference.Internal.Request as Request
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Exference.Core.Declaration
-  ( PreparedNeutralSynthesisInventory )
+  ( PreparedSynthesisInventory )
 import qualified Language.Haskell.Exference.Core.Internal.VariableSupply
   as VariableSupply
 import Language.Haskell.Exference.Core.Types (TVarId)
@@ -51,7 +51,7 @@ import Language.Haskell.Synthesis.Query (QueryRequest)
 sealPreparedExferenceSessionWithPolicy
   :: [Name]
   -> Map Name Penalty
-  -> PreparedNeutralSynthesisInventory
+  -> PreparedSynthesisInventory ()
   -> Either Diagnostic ExferenceSession
 sealPreparedExferenceSessionWithPolicy exclusions overrides prepared =
   Session.sealPreparedExferenceSessionWithPolicy

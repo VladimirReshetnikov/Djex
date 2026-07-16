@@ -52,7 +52,7 @@ module Djinn.Core (
 
 import Control.Monad (foldM, unless)
 import Data.Bifunctor (first)
-import Data.List (intercalate, mapAccumL, nub, sortOn)
+import Data.List (intercalate, mapAccumL, sortOn)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Ratio ((%))
@@ -64,6 +64,7 @@ import Text.ParserCombinators.ReadP
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
@@ -1065,21 +1066,23 @@ searchPreparedFormula options prepared target form methodEnv = do
             -- before display names are restored and it is rendered.
             internalFailure "generated an invalid proof" $
                 mapM_ (checkProof internalEnv form) internalProofs
-            rendered <- internalFailure "cannot render generated proof" $
+            rawClauses <- internalFailure "cannot render generated proof" $
                 mapM (termToHClause name . restoreProofTerm proofEnv)
                     internalProofs
-            -- Preserve the historical stable ratio-then-count ordering over
-            -- raw clauses.  De-duplication intentionally follows sorting.
-            let scored clause = (candidateDetails clause, clause)
-                clauses = nub $
-                    if optionSorted options then
-                        map snd $ sortOn fst $ map scored rendered
-                    else
-                        rendered
             generatedClauses <- internalFailure
                 "cannot convert generated clause" $
-                mapM (toGeneratedClauseWithName target) clauses
-            let candidates = zipWith makeCandidate clauses generatedClauses
+                mapM (toGeneratedClauseWithName target) rawClauses
+            -- The checked shared clause is the stable output authority. Keep
+            -- the historical stable ratio-then-count ordering, then discard
+            -- structurally identical outputs without retaining HClause as a
+            -- parallel candidate representation.
+            let scored clause = (candidateDetails clause, clause)
+                clauses = SharedCollection.distinctOn id $
+                    if optionSorted options then
+                        map snd $ sortOn fst $ map scored generatedClauses
+                    else
+                        generatedClauses
+                candidates = map makeCandidate clauses
                 completion
                     | candidateLimitReached = SharedSearch.truncated
                         SharedSearch.CandidateLimitReached
@@ -1093,28 +1096,35 @@ searchPreparedFormula options prepared target form methodEnv = do
   where
     name = SharedGenerated.definitionSpelling target
 
-candidateDetails :: HClause -> DjinnCandidateDetails
+candidateDetails
+    :: SharedGenerated.FunctionClause HSymbol
+    -> DjinnCandidateDetails
 candidateDetails clause
     | total == 0 = DjinnCandidateDetails 0 0
     | otherwise = DjinnCandidateDetails
         (toInteger unused % toInteger total)
         total
   where
-    (unused, total) = List.foldl' countBinder (0, 0) $ getBinderVars clause
+    (unused, total) = List.foldl' countBinder (0, 0) $
+        SharedGenerated.functionClauseBindingSites clause
 
-    countBinder :: (Natural, Natural) -> HSymbol -> (Natural, Natural)
-    countBinder (!unusedCount, !totalCount) binder =
+    countBinder
+        :: (Natural, Natural)
+        -> Maybe HSymbol
+        -> (Natural, Natural)
+    countBinder (!unusedCount, !totalCount) binding =
         let !nextUnused =
-                if binder == "_" then unusedCount + 1 else unusedCount
+                case binding of
+                    Nothing -> unusedCount + 1
+                    Just _ -> unusedCount
             !nextTotal = totalCount + 1
         in (nextUnused, nextTotal)
 
 makeCandidate
-    :: HClause
-    -> SharedGenerated.FunctionClause HSymbol
+    :: SharedGenerated.FunctionClause HSymbol
     -> DjinnCandidate
-makeCandidate clause generated = SharedCandidate.Candidate {
-    SharedCandidate.candidateOutput = generated,
+makeCandidate clause = SharedCandidate.Candidate {
+    SharedCandidate.candidateOutput = clause,
     SharedCandidate.candidateResidualConstraints = [],
     SharedCandidate.candidateDetails = candidateDetails clause
     }

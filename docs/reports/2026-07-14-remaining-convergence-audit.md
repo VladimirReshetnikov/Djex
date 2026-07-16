@@ -1080,6 +1080,26 @@ scrutinees, and case-pattern binders—in exact order. Global-name and hole-only
 queries remain intentionally separate because those observations are not the
 generic local fold.
 
+## Djinn candidate-output authority
+
+**Completed on 2026-07-15:** Djinn's stable query path retained every converted
+proof twice: first as the historical recursive `HClause` compatibility tree,
+then as the checked shared `FunctionClause`. Ranking and de-duplication still
+consulted the former, while rendering and every public candidate consulted the
+latter. This made the two representations joint semantic authorities after the
+backend boundary had supposedly been crossed.
+
+The foundation now exposes structural binding-site observations for patterns,
+expressions, and complete clauses. They retain wildcards explicitly, unlike the
+generic local fold, so Djinn can compute its historical unused-binder fraction
+and exact binder count from the shared output. The core converts proofs at the
+boundary, sorts and de-duplicates checked shared clauses, and constructs each
+candidate from that single value. `HClause` remains available for the raw
+compatibility API and proof cleanup, but it no longer survives as parallel
+candidate state. Foundation coverage fixes binding-site order through clause,
+constructor/as, lambda/tuple, let, and case patterns; Djinn's existing
+multi-field payload regression continues to pin ranking and duplicate removal.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

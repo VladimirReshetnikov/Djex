@@ -29,6 +29,9 @@ module Language.Haskell.Synthesis.Generated
   , validateFunctionClauseSyntax
   , validateDefinitionName
   , functionClauseExpression
+  , patternBindingSites
+  , expressionBindingSites
+  , functionClauseBindingSites
   , fillExpressionHole
   , simplifyExpressionBy
   , expressionHoles
@@ -150,6 +153,45 @@ functionClauseExpression :: FunctionClause local -> Expression local
 functionClauseExpression (FunctionClause _ [] body) = body
 functionClauseExpression (FunctionClause _ patterns body) =
   Lambda patterns body
+
+-- | Observe every pattern binding site in source order.  A present value is
+-- an ordinary or as-pattern binder; 'Nothing' is a wildcard.  Unlike the
+-- derived 'Foldable' instance, this retains discarded sites, which synthesis
+-- backends may need when ranking how economically a candidate uses inputs.
+patternBindingSites :: Pattern local -> [Maybe local]
+patternBindingSites pattern = case pattern of
+  Bind local -> [Just local]
+  Wildcard -> [Nothing]
+  Constructor _ arguments -> concatMap patternBindingSites arguments
+  TuplePattern elements -> concatMap patternBindingSites elements
+  As local nested -> Just local : patternBindingSites nested
+
+-- | Observe binding sites introduced anywhere in an expression, in
+-- left-to-right structural order.  Ordinary local occurrences and holes are
+-- uses rather than binding sites and therefore do not contribute.
+expressionBindingSites :: Expression local -> [Maybe local]
+expressionBindingSites expression = case expression of
+  Local{} -> []
+  Global{} -> []
+  Lambda patterns body ->
+    concatMap patternBindingSites patterns ++ expressionBindingSites body
+  Apply function argument ->
+    expressionBindingSites function ++ expressionBindingSites argument
+  Tuple elements -> concatMap expressionBindingSites elements
+  Hole{} -> []
+  Let pattern binding body ->
+    patternBindingSites pattern ++ expressionBindingSites binding
+      ++ expressionBindingSites body
+  Case scrutinee alternatives ->
+    expressionBindingSites scrutinee ++ concat
+      [ patternBindingSites pattern ++ expressionBindingSites body
+      | (pattern, body) <- alternatives
+      ]
+
+-- | Observe all binding sites in a complete generated definition.
+functionClauseBindingSites :: FunctionClause local -> [Maybe local]
+functionClauseBindingSites (FunctionClause _ patterns body) =
+  concatMap patternBindingSites patterns ++ expressionBindingSites body
 
 -- | Replace every hole with the selected identity by one expression.
 --

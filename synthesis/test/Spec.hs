@@ -2922,6 +2922,31 @@ generatedTests = testGroup "generated syntax"
       functionClauseExpression valueClause @?= body
       functionClauseExpression functionClause @?=
         Lambda [Bind 0, Wildcard] body
+  , testCase "observe every generated binding site including wildcards" $ do
+      let target = right $ mkIdentifier "target"
+          checkedTarget = right $ mkDefinitionName target
+          constructor = right $ mkIdentifier "Pair"
+          clause = FunctionClause checkedTarget
+            [Bind (0 :: Int), Constructor constructor [Wildcard, As 1 $ Bind 2]] $
+            Lambda [TuplePattern [Bind 3, Wildcard]] $
+              Let (As 4 Wildcard) (Local 0) $
+                Case (Local 4)
+                  [ (Bind 5, Local 5)
+                  , (Wildcard, Local 0)
+                  ]
+      patternBindingSites (As (6 :: Int) $ TuplePattern [Wildcard, Bind 7])
+        @?= [Just 6, Nothing, Just 7]
+      expressionBindingSites (clauseBody clause) @?=
+        [ Just 3, Nothing
+        , Just 4, Nothing
+        , Just 5, Nothing
+        ]
+      functionClauseBindingSites clause @?=
+        [ Just 0, Nothing, Just 1, Just 2
+        , Just 3, Nothing
+        , Just 4, Nothing
+        , Just 5, Nothing
+        ]
   , testCase "validate every checked function-clause syntax layer" $ do
       let target = right $ mkIdentifier "target"
           checkedTarget = right $ mkDefinitionName target

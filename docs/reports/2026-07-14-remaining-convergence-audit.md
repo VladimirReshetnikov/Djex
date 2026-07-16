@@ -1260,6 +1260,30 @@ not import either frontend, and the existing source/service-provider boundaries
 remain. The gain is one installed library identity, one version contract, and
 one dependency spelling for the complete Djex API.
 
+## Shared generated lexical operations
+
+**Completed on 2026-07-16:** Djinn's proof lowerer still implemented a private
+recursive local substitution for reconstructed constructor payloads even
+though the shared generated simplifier contained the capture-aware version of
+the same operation. The private walk stopped at shadowing binders but relied on
+fresh-name discipline to avoid capture; that safety argument was not expressed
+in its type or failure path.
+
+The foundation now owns projected free-local analysis and capture-avoiding
+local substitution as public generated-tree operations. The simplifier and
+Djinn payload reconstruction consume the same implementation. Djinn reports an
+invariant failure if a replacement would capture a nested binder instead of
+silently changing the output program. Its unused-pattern cleanup now propagates
+lexically free `Set`s and removes lambda, let, and case binders at their actual
+scope boundaries rather than carrying an unscoped occurrence list whose safety
+depended on earlier alpha-renaming.
+
+The same pass removed Djinn's two recursive global-name walks. Both unqualified
+name reservation and escaped-proof-variable validation now filter the shared
+`expressionGlobals` observation. Foundation regressions pin free-variable
+scope, global order, shadowing, let-binding scope, and capture rejection; the
+existing Djinn payload and proof-rendering regressions pin backend behavior.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

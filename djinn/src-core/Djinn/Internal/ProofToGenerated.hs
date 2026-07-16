@@ -11,7 +11,7 @@ module Djinn.Internal.ProofToGenerated
 
 import Control.Monad (foldM, zipWithM)
 import Data.Foldable (toList)
-import Data.List (find, transpose, union, (\\))
+import Data.List (find, transpose, (\\))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
@@ -211,13 +211,19 @@ termToGeneratedExpression term = do
           Nothing -> Right $ replicate arity Generated.Wildcard
           Just pattern' -> unpackTuplePattern arity pattern'
         constructorName <- generatedName "pattern constructor" constructor
-        let payloadIsUsed = spelling `elem` expressionVariables convertedBody
+        let payloadIsUsed = spelling `Set.member`
+              Generated.expressionFreeLocalIdentitiesBy id convertedBody
             branchRefinements = filter ((/= spelling) . fst) refinements
         if payloadIsUsed
           then do
             let (patterns', fields) = payloadValues spelling patterns
                 reconstructed = tuple fields
-                body' = replaceVariable spelling reconstructed convertedBody
+            body' <- maybe
+              (Left $ "cannot reconstruct case payload " ++ show spelling
+                ++ " without capturing a nested binder")
+              Right
+              $ Generated.substituteExpressionLocalBy
+                  id spelling reconstructed convertedBody
             pure
               ( (Generated.Constructor constructorName patterns', body')
               , branchRefinements
@@ -344,48 +350,6 @@ alphaRenameTerm term = renamed
 patternVariables :: [Pattern] -> Set.Set HSymbol
 patternVariables = Set.fromList . concatMap toList
 
-replaceVariable :: HSymbol -> Expression -> Expression -> Expression
-replaceVariable target replacement = replace
- where
-  replace expression = case expression of
-    Generated.Lambda patterns body
-      | target `Set.member` patternVariables patterns -> expression
-      | otherwise -> Generated.Lambda patterns $ replace body
-    Generated.Apply function argument ->
-      Generated.Apply (replace function) (replace argument)
-    original@Generated.Global{} -> original
-    original@(Generated.Local variable)
-      | variable == target -> replacement
-      | otherwise -> original
-    Generated.Tuple expressions -> Generated.Tuple $ map replace expressions
-    original@Generated.Hole{} -> original
-    Generated.Let pattern' binding body -> Generated.Let pattern'
-      (replace binding)
-      (if target `Set.member` patternVariables [pattern']
-        then body else replace body)
-    Generated.Case scrutinee alternatives ->
-      Generated.Case (replace scrutinee) $ map replaceAlternative alternatives
-
-  replaceAlternative alternative@(pattern', body)
-    | target `Set.member` patternVariables [pattern'] = alternative
-    | otherwise = (pattern', replace body)
-
-expressionVariables :: Expression -> [HSymbol]
-expressionVariables expression = case expression of
-  Generated.Local variable -> [variable]
-  Generated.Global{} -> []
-  Generated.Lambda _ body -> expressionVariables body
-  Generated.Apply function argument ->
-    expressionVariables function `union` expressionVariables argument
-  Generated.Tuple expressions ->
-    foldr union [] $ map expressionVariables expressions
-  Generated.Hole{} -> []
-  Generated.Let _ binding body ->
-    expressionVariables binding `union` expressionVariables body
-  Generated.Case scrutinee alternatives -> foldr union
-    (expressionVariables scrutinee)
-    [expressionVariables body | (_, body) <- alternatives]
-
 fixSillyAsPatterns :: Expression -> Expression
 fixSillyAsPatterns = fixPatterns []
  where
@@ -453,42 +417,20 @@ niceNames expression = fmap rename expression
   rename variable = fromMaybe variable $ lookup variable substitutions
 
 unqualifiedValueGlobals :: Expression -> Set.Set HSymbol
-unqualifiedValueGlobals expression = case expression of
-  Generated.Local{} -> Set.empty
-  Generated.Global name
-    | Name.nameModule name == Nothing
-    , Name.nameLexicalClass name == Name.VariableLike
-    , Just spelling <- Name.nameSpelling name -> Set.singleton spelling
-    | otherwise -> Set.empty
-  Generated.Lambda _ body -> unqualifiedValueGlobals body
-  Generated.Apply function argument ->
-    unqualifiedValueGlobals function `Set.union`
-      unqualifiedValueGlobals argument
-  Generated.Tuple expressions -> Set.unions $ map unqualifiedValueGlobals expressions
-  Generated.Hole{} -> Set.empty
-  Generated.Let _ binding body ->
-    unqualifiedValueGlobals binding `Set.union` unqualifiedValueGlobals body
-  Generated.Case scrutinee alternatives ->
-    unqualifiedValueGlobals scrutinee `Set.union` Set.unions
-      [unqualifiedValueGlobals body | (_, body) <- alternatives]
+unqualifiedValueGlobals expression = Set.fromList
+  [ spelling
+  | name <- Generated.expressionGlobals expression
+  , Name.nameModule name == Nothing
+  , Name.nameLexicalClass name == Name.VariableLike
+  , Just spelling <- [Name.nameSpelling name]
+  ]
 
 freeValueSpellings :: Expression -> Set.Set HSymbol
-freeValueSpellings expression = case expression of
-  Generated.Local{} -> Set.empty
-  Generated.Global name
-    | Name.nameLexicalClass name == Name.VariableLike ->
-        Set.singleton $ renderProofSymbolName name
-    | otherwise -> Set.empty
-  Generated.Lambda _ body -> freeValueSpellings body
-  Generated.Apply function argument ->
-    freeValueSpellings function `Set.union` freeValueSpellings argument
-  Generated.Tuple expressions -> Set.unions $ map freeValueSpellings expressions
-  Generated.Hole{} -> Set.empty
-  Generated.Let _ binding body ->
-    freeValueSpellings binding `Set.union` freeValueSpellings body
-  Generated.Case scrutinee alternatives ->
-    freeValueSpellings scrutinee `Set.union` Set.unions
-      [freeValueSpellings body | (_, body) <- alternatives]
+freeValueSpellings expression = Set.fromList
+  [ renderProofSymbolName name
+  | name <- Generated.expressionGlobals expression
+  , Name.nameLexicalClass name == Name.VariableLike
+  ]
 
 caseExpression :: Expression -> [(Pattern, Expression)] -> Expression
 caseExpression scrutinee [] = Generated.Case scrutinee []
@@ -621,53 +563,61 @@ removeUnusedVariables expression = fst $ removeExpression expression
  where
   removeExpression original = case original of
     Generated.Lambda patterns body ->
-      let (body', variables) = removeExpression body
-      in (Generated.Lambda (map (removePattern variables) patterns) body',
-          variables)
+      let (body', freeInBody) = removeExpression body
+          binders = patternVariables patterns
+      in ( Generated.Lambda (map (removePattern freeInBody) patterns) body'
+         , freeInBody `Set.difference` binders
+         )
     Generated.Apply function argument ->
-      let (function', functionVariables) = removeExpression function
-          (argument', argumentVariables) = removeExpression argument
-      in (Generated.Apply function' argument',
-          functionVariables ++ argumentVariables)
+      let (function', freeInFunction) = removeExpression function
+          (argument', freeInArgument) = removeExpression argument
+      in ( Generated.Apply function' argument'
+         , freeInFunction `Set.union` freeInArgument
+         )
     Generated.Tuple expressions ->
-      let (expressions', variables) = unzip $ map removeExpression expressions
-      in (Generated.Tuple expressions', concat variables)
+      let (expressions', freeInElements) = unzip $ map removeExpression expressions
+      in (Generated.Tuple expressions', Set.unions freeInElements)
     Generated.Case scrutinee alternatives ->
-      let (scrutinee', scrutineeVariables) = removeExpression scrutinee
-          (alternatives', alternativeVariables) = unzip
-            [ let (body', variables) = removeExpression body
-              in ((removePattern variables pattern', body'), variables)
+      let (scrutinee', freeInScrutinee) = removeExpression scrutinee
+          (alternatives', freeInAlternatives) = unzip
+            [ let (body', freeInBody) = removeExpression body
+                  binders = patternVariables [pattern']
+              in ( (removePattern freeInBody pattern', body')
+                 , freeInBody `Set.difference` binders
+                 )
             | (pattern', body) <- alternatives
             ]
       in case alternatives' of
-        [(Generated.Wildcard, body)] -> (body, concat alternativeVariables)
+        [(Generated.Wildcard, body)] ->
+          (body, Set.unions freeInAlternatives)
         _ ->
           ( caseExpression scrutinee' alternatives'
-          , scrutineeVariables ++ concat alternativeVariables
+          , freeInScrutinee `Set.union` Set.unions freeInAlternatives
           )
     Generated.Let pattern' binding body ->
-      let (binding', bindingVariables) = removeExpression binding
-          (body', bodyVariables) = removeExpression body
-      in ( Generated.Let (removePattern bodyVariables pattern') binding' body'
-         , bindingVariables ++ bodyVariables
+      let (binding', freeInBinding) = removeExpression binding
+          (body', freeInBody) = removeExpression body
+          binders = patternVariables [pattern']
+      in ( Generated.Let (removePattern freeInBody pattern') binding' body'
+         , freeInBinding `Set.union` (freeInBody `Set.difference` binders)
          )
-    Generated.Local variable -> (original, [variable])
-    Generated.Global{} -> (original, [])
-    Generated.Hole{} -> (original, [])
+    Generated.Local variable -> (original, Set.singleton variable)
+    Generated.Global{} -> (original, Set.empty)
+    Generated.Hole{} -> (original, Set.empty)
 
-  removePattern variables pattern' = case pattern' of
+  removePattern freeInBody pattern' = case pattern' of
     original@(Generated.Bind variable)
-      | variable `elem` variables -> original
+      | variable `Set.member` freeInBody -> original
       | otherwise -> Generated.Wildcard
     Generated.Wildcard -> Generated.Wildcard
     Generated.Constructor name arguments ->
-      Generated.Constructor name $ map (removePattern variables) arguments
+      Generated.Constructor name $ map (removePattern freeInBody) arguments
     Generated.TuplePattern patterns ->
-      let patterns' = map (removePattern variables) patterns
+      let patterns' = map (removePattern freeInBody) patterns
       in if all (== Generated.Wildcard) patterns'
         then Generated.Wildcard
         else Generated.TuplePattern patterns'
     Generated.As variable nested
-      | variable `elem` variables ->
-          Generated.As variable $ removePattern variables nested
-      | otherwise -> removePattern variables nested
+      | variable `Set.member` freeInBody ->
+          Generated.As variable $ removePattern freeInBody nested
+      | otherwise -> removePattern freeInBody nested

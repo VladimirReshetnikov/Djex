@@ -109,6 +109,13 @@ identities so allocation and backend completeness checks share one traversal.
 `fillExpressionHole` replaces one selected identity throughout a partial tree
 without recursively consuming holes in the inserted replacement, allowing an
 incremental engine to publish newly allocated work safely.
+`expressionFreeLocalIdentitiesBy` computes lexical free locals through lambda,
+let, and case pattern scopes, while `expressionGlobals` provides the one
+structural observation of referenced names and pattern constructors.
+`substituteExpressionLocalBy` is the corresponding capture-avoiding local
+substitution boundary: shadowing stops replacement, and a backend receives
+`Nothing` when its payload would require freshening rather than risking silent
+capture.
 `simplifyExpressionBy` owns scope-aware let elimination, capture-safe
 single-use inlining, and eta reduction for synthesis terms. A backend supplies
 only its local-identity projection, so annotations remain intact while binder

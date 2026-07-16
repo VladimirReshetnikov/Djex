@@ -2802,6 +2802,32 @@ generatedTests = testGroup "generated syntax"
             (Let Wildcard replacement $ Case (Hole 3)
               [(Wildcard, replacement)])
       fillExpressionHole 1 replacement expression @?= expected
+  , testCase "observe free locals and substitute without capture" $ do
+      let bindingName = right $ mkIdentifier "binding"
+          constructorName = right $ mkIdentifier "Just"
+          global :: Expression Int
+          global = Global bindingName
+          expression = Lambda [Bind (0 :: Int)] $ Tuple
+            [ Local 0
+            , Local 1
+            , Let (Bind 1) (Local 1) (Local 1)
+            , Case (Local 2)
+                [ (Bind 2, Local 2)
+                , (Wildcard, Local 3)
+                ]
+            ]
+          shadowed = Lambda [Bind (1 :: Int)] $ Local 1
+          capture = Lambda [Bind (2 :: Int)] $ Local 1
+      expressionFreeLocalIdentitiesBy id expression @?=
+        Set.fromList [1, 2, 3]
+      expressionGlobals
+          (Lambda [Constructor constructorName []] global) @?=
+        [constructorName, bindingName]
+      substituteExpressionLocalBy id 1 global shadowed @?= Just shadowed
+      substituteExpressionLocalBy id 1 (Local 2) capture @?= Nothing
+      substituteExpressionLocalBy id 1 global
+          (Apply (Local 1) $ Let (Bind 1) (Local 1) (Local 1)) @?=
+        Just (Apply global $ Let (Bind 1) global (Local 1))
   , testCase "simplify by projected identity without capture" $ do
       let global spelling = Global $ right $ mkIdentifier spelling
           binder identity annotation = (identity, annotation)

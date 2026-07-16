@@ -32,7 +32,10 @@ module Language.Haskell.Synthesis.Generated
   , patternBindingSites
   , expressionBindingSites
   , functionClauseBindingSites
+  , expressionFreeLocalIdentitiesBy
+  , expressionGlobals
   , fillExpressionHole
+  , substituteExpressionLocalBy
   , simplifyExpressionBy
   , expressionHoles
   , expressionSizeNatural
@@ -193,6 +196,39 @@ functionClauseBindingSites :: FunctionClause local -> [Maybe local]
 functionClauseBindingSites (FunctionClause _ patterns body) =
   concatMap patternBindingSites patterns ++ expressionBindingSites body
 
+-- | Collect the projected identities of locals that occur free in an
+-- expression. Pattern binders scope only their corresponding body: a let
+-- pattern does not scope its binding expression, and case patterns do not
+-- scope the scrutinee.
+--
+-- Projecting first lets annotated backend locals share the same lexical
+-- identity without discarding their payloads from the generated tree.
+expressionFreeLocalIdentitiesBy
+  :: Ord identity
+  => (local -> identity)
+  -> Expression local
+  -> Set identity
+expressionFreeLocalIdentitiesBy identity = free
+ where
+  free expression = case expression of
+    Local local -> Set.singleton $ identity local
+    Global{} -> Set.empty
+    Lambda patterns body -> removePatternBinders patterns $ free body
+    Apply function argument -> free function `Set.union` free argument
+    Tuple elements -> Set.unions $ map free elements
+    Hole{} -> Set.empty
+    Let pattern binding body -> free binding `Set.union`
+      removePatternBinders [pattern] (free body)
+    Case scrutinee alternatives -> Set.unions
+      $ free scrutinee
+      : [ removePatternBinders [pattern] $ free body
+        | (pattern, body) <- alternatives
+        ]
+
+  removePatternBinders patterns freeIdentities =
+    foldr Set.delete freeIdentities
+      $ map identity $ concatMap patternLocals patterns
+
 -- | Replace every hole with the selected identity by one expression.
 --
 -- The replacement is inserted as a complete subtree rather than searched
@@ -219,6 +255,56 @@ fillExpressionHole selected replacement = fill
     Let pattern (fill binding) (fill body)
   fill (Case scrutinee alternatives) = Case (fill scrutinee)
     [(pattern, fill body) | (pattern, body) <- alternatives]
+
+-- | Capture-avoiding substitution of one projected local identity.
+--
+-- A binder equal to the selected identity shadows the substitution. If a
+-- different binder would capture a free local in the replacement, the
+-- operation returns 'Nothing' rather than silently changing the generated
+-- program. Backends retain responsibility for freshening their payloads when
+-- they want to recover from that case.
+substituteExpressionLocalBy
+  :: Ord identity
+  => (local -> identity)
+  -> identity
+  -> Expression local
+  -> Expression local
+  -> Maybe (Expression local)
+substituteExpressionLocalBy identity selected replacement = replace
+ where
+  replacementFree = expressionFreeLocalIdentitiesBy identity replacement
+
+  replace expression = case expression of
+    original@(Local local)
+      | identity local == selected -> Just replacement
+      | otherwise -> Just original
+    original@Global{} -> Just original
+    Lambda patterns body -> Lambda patterns <$> underPatterns patterns body
+    Apply function argument ->
+      Apply <$> replace function <*> replace argument
+    Tuple elements -> Tuple <$> traverse replace elements
+    original@Hole{} -> Just original
+    Let pattern binding body -> Let pattern
+      <$> replace binding
+      <*> underPatterns [pattern] body
+    Case scrutinee alternatives -> Case
+      <$> replace scrutinee
+      <*> traverse replaceAlternative alternatives
+
+  replaceAlternative (pattern, body) = do
+    replacedBody <- underPatterns [pattern] body
+    pure (pattern, replacedBody)
+
+  underPatterns patterns body
+    | selected `elem` binders = Just body
+    | binderCaptures binders body = Nothing
+    | otherwise = replace body
+   where
+    binders = map identity $ concatMap patternLocals patterns
+
+  binderCaptures binders body =
+    any (`Set.member` replacementFree) binders
+      && selected `Set.member` expressionFreeLocalIdentitiesBy identity body
 
 -- Exact totals are irrelevant to the simplifier: zero, one, and multiple
 -- occurrences are its only semantic cases. Saturating here also keeps the
@@ -258,7 +344,8 @@ simplifyExpressionBy identity = simplifyEta . simplifyLets
     Let pattern binding body -> case pattern of
       Bind local -> case occurrencesOf (identity local) body of
         Unused -> simplifyLets body
-        UsedOnce -> case replaceLocal (identity local) binding body of
+        UsedOnce -> case substituteExpressionLocalBy
+            identity (identity local) binding body of
           Just replaced -> simplifyLets replaced
           Nothing -> retainLet
         UsedMany -> retainLet
@@ -292,63 +379,6 @@ simplifyExpressionBy identity = simplifyEta . simplifyLets
       | identity binder == identity argument
       , occurrencesOf (identity binder) function == Unused -> function
     _ -> expression
-
-  replaceLocal selected replacement = replace
-   where
-    replacementFree = freeIdentities replacement
-
-    replace expression = case expression of
-      original@(Local local)
-        | identity local == selected -> Just replacement
-        | otherwise -> Just original
-      original@Global{} -> Just original
-      Lambda patterns body ->
-        Lambda patterns <$> underPatterns patterns body
-      Apply function argument ->
-        Apply <$> replace function <*> replace argument
-      Tuple elements -> Tuple <$> traverse replace elements
-      original@Hole{} -> Just original
-      Let pattern binding body -> Let pattern
-        <$> replace binding
-        <*> underPatterns [pattern] body
-      Case scrutinee alternatives -> Case
-        <$> replace scrutinee
-        <*> traverse replaceAlternative alternatives
-
-    replaceAlternative (pattern, body) = do
-      replacedBody <- underPatterns [pattern] body
-      pure (pattern, replacedBody)
-
-    underPatterns patterns body
-      | selected `elem` binders = Just body
-      | binderCaptures binders body = Nothing
-      | otherwise = replace body
-     where
-      binders = map identity $ concatMap patternLocals patterns
-
-    binderCaptures binders body =
-      any (`Set.member` replacementFree) binders
-        && occurrencesOf selected body /= Unused
-
-  freeIdentities expression = case expression of
-    Local local -> Set.singleton $ identity local
-    Global{} -> Set.empty
-    Lambda patterns body -> removePatternBinders patterns
-      $ freeIdentities body
-    Apply function argument ->
-      freeIdentities function `Set.union` freeIdentities argument
-    Tuple elements -> Set.unions $ map freeIdentities elements
-    Hole{} -> Set.empty
-    Let pattern binding body -> freeIdentities binding `Set.union`
-      removePatternBinders [pattern] (freeIdentities body)
-    Case scrutinee alternatives -> Set.unions
-      $ freeIdentities scrutinee
-      : [ removePatternBinders [pattern] $ freeIdentities body
-        | (pattern, body) <- alternatives
-        ]
-
-  removePatternBinders patterns free = foldr Set.delete free
-    $ map identity $ concatMap patternLocals patterns
 
   occurrencesOf selected expression = case expression of
     Local local
@@ -944,6 +974,8 @@ expressionHoles expression = case expression of
     expressionHoles scrutinee ++ concat
       [ expressionHoles body | (_, body) <- alternatives ]
 
+-- | Collect every referenced global and pattern constructor in left-to-right
+-- structural order, retaining duplicates.
 expressionGlobals :: Expression local -> [Name]
 expressionGlobals expression = case expression of
   Local{} -> []

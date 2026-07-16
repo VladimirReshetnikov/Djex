@@ -8,7 +8,7 @@
 module Djinn.Internal.HTypes(
         HKind(KStar, KArrow, KVar), HType(..), HSymbol,
         toSynthesisKind, fromSynthesisKind,
-        groundHKind, fromGroundHKind,
+        groundHKind, checkedGroundHKind, fromGroundHKind,
         prepareTypeFormulaTranslator, hTypeToFormula,
         pHSymbol, pHType, pHContext, pHConstraint,
         pHDataType, pHTAtom, pHKind,
@@ -18,6 +18,7 @@ module Djinn.Internal.HTypes(
         termToHExpr, termToHClause,
         getBinderVars
     ) where
+import Data.Bifunctor (first)
 import Data.List(find, transpose, union, (\\))
 import Data.Maybe(fromMaybe)
 import Control.Monad(foldM, zipWithM)
@@ -76,6 +77,14 @@ fromSynthesisKind = HKindRepresentation
 -- the bare identity, whereas 'Djinn.Core' renders it as @kN@.
 groundHKind :: HKind -> Either Int (SharedKind.Kind Void)
 groundHKind = SharedKind.groundKind . toSynthesisKind
+
+-- | Ground a kind using the bare unsolved-identity diagnostic preserved by
+-- Djinn's historical low-level checker and editable-environment API.
+checkedGroundHKind :: HKind -> Either String (SharedKind.Kind Void)
+checkedGroundHKind = first renderUnsolved . groundHKind
+  where
+    renderUnsolved variable =
+        "kind contains an unsolved variable: " ++ show variable
 
 -- | Lift a fully solved shared kind back into Djinn's identity domain.
 fromGroundHKind :: SharedKind.Kind Void -> HKind

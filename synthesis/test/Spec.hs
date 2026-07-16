@@ -143,6 +143,16 @@ collectionTests = testGroup "collections"
       case firstPresent [Just $ error "forced present payload"] of
         Just _ -> pure ()
         Nothing -> assertFailure "firstPresent discarded a present value"
+  , testCase "close a finite relation without revisiting cycles" $ do
+      let expand value = Map.findWithDefault Set.empty value $ Map.fromList
+            [ (1 :: Int, Set.fromList [2, 3])
+            , (2, Set.singleton 3)
+            , (3, Set.fromList [1, 4])
+            ]
+      transitiveClosure expand (Set.singleton 1) @?=
+        Set.fromList [1, 2, 3, 4]
+      transitiveClosure (const $ error "expanded an empty frontier") Set.empty
+        @?= (Set.empty :: Set.Set Int)
   , testCase "find the greatest present value in a finite collection" $ do
       maximumPresent
           ([Nothing, Just 3, Just 1, Nothing, Just 5] :: [Maybe Int])

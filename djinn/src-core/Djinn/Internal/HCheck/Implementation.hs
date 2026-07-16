@@ -147,13 +147,6 @@ synthesisAssumptions definitions = do
         <$> first show (SharedName.parseName sourceName)
         <*> checkedGroundHKind kind
 
-checkedGroundHKind :: HKind -> Either String SharedInference.GroundKind
-checkedGroundHKind = first renderUnsolved . groundHKind
-  where
-    -- The exposed raw checker historically reports only the integer identity.
-    renderUnsolved variable =
-        "kind contains an unsolved variable: " ++ show variable
-
 htCheckEnv :: [(HSymbol, ([HSymbol], HType, a))]
            -> Either String [(HSymbol, ([HSymbol], HType, HKind))]
 htCheckEnv = fmap fst . prepareKindEnvironment

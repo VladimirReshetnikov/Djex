@@ -32,6 +32,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( identifierSupplySize )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.SearchControl
+import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 
@@ -99,7 +100,7 @@ mergePriorityQueueAtCapacity capacity maximumSize queued newEntries =
     capacity maximumSize (Q.fromList queued) newEntries
 
 compatibilityPruningCount :: Natural -> Int
-compatibilityPruningCount = E.saturatingNaturalToInt
+compatibilityPruningCount = SharedCount.saturatingNaturalToInt
 
 -- | Exercise the historical binding-count projection without constructing an
 -- impossibly large search tree.

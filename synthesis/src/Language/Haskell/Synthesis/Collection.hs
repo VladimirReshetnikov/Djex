@@ -1,17 +1,19 @@
 {-# LANGUAGE BangPatterns #-}
 
--- | Stable deduplication and counter-free duplicate classification.
+-- | Finite collection policies shared by both synthesis backends.
 --
 -- Backends need several views of duplicate input: reusable membership checks,
 -- a stable set for sorted diagnostics, and the order in which values first
 -- become known duplicates.  t'DuplicateSummary' computes those views together
--- without a machine-sized occurrence count.
+-- without a machine-sized occurrence count. This module also owns finite
+-- relation closure so backend graphs share the same cycle-safe frontier rule.
 module Language.Haskell.Synthesis.Collection
   ( Multiplicity (..)
   , DuplicateSummary
   , distinctOn
   , firstPresent
   , maximumPresent
+  , transitiveClosure
   , firstDuplicate
   , summarizeDuplicates
   , multiplicityOf
@@ -59,6 +61,23 @@ maximumPresent = foldl' combine Nothing
   combine Nothing candidate = candidate
   combine current Nothing = current
   combine (Just current) (Just candidate) = Just $ max current candidate
+
+-- | Compute the finite transitive closure of a relation.
+--
+-- A separate frontier ensures that each discovered value is expanded once.
+-- In particular, cycles terminate as soon as they stop discovering values.
+transitiveClosure
+  :: Ord value
+  => (value -> Set.Set value)
+  -> Set.Set value
+  -> Set.Set value
+transitiveClosure expand initial = go initial initial
+ where
+  go !seen !frontier
+    | Set.null frontier = seen
+    | otherwise =
+        let discovered = foldMap expand frontier `Set.difference` seen
+        in go (seen `Set.union` discovered) discovered
 
 -- | Exact classification of a value relative to a summarized collection.
 data Multiplicity

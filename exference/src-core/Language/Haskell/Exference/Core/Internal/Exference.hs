@@ -36,7 +36,6 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , constraintsRelaxedAtStep
   , mergeQueueWithCapacity
   , naturalPruningReasons
-  , saturatingNaturalToInt
   , projectCompatibilityBindingUsages
   , typeComplexity
   , ExferenceInputError (..)
@@ -544,7 +543,7 @@ findEngineChunksWith allocators
       [ ( e
         , remainingConstraints
         , ExferenceStats n' d
-            $ saturatingNaturalToInt
+            $ SharedCount.saturatingNaturalToInt
             $ queueSizeNatural newNodes
         )
       | solution <- potentialSolutions
@@ -693,8 +692,8 @@ projectCompatibilityChunk chunk = ExferenceChunkElement
   metadata = engineMetadata chunk
   compatibilityStatus = SearchStatus
     compatibilityCompletion
-    (saturatingNaturalToInt $ exferenceQueuePruned metadata)
-    (saturatingNaturalToInt $ exferenceDepthPruned metadata)
+    (SharedCount.saturatingNaturalToInt $ exferenceQueuePruned metadata)
+    (SharedCount.saturatingNaturalToInt $ exferenceDepthPruned metadata)
   compatibilityCompletion = case engineProgress chunk of
     SharedSearch.Continuing -> SearchRunning
     SharedSearch.Completed SharedSearch.Finished -> SearchExhausted
@@ -1304,9 +1303,6 @@ maximumPQueueSize = fromIntegral (maxBound :: Int)
 
 queueSizeNatural :: Q.MaxPQueue priority value -> Natural
 queueSizeNatural = fromIntegral . Q.size
-
-saturatingNaturalToInt :: Natural -> Int
-saturatingNaturalToInt = SharedCount.saturatingNaturalToInt
 
 naturalPruningReasons
   :: Natural

@@ -901,6 +901,45 @@ store; parser-free boundary tests and the existing Exference negative,
 `maxBound`, rigid-plan, unifier, and search regressions cover the migrated
 policies.
 
+## Post-fold deterministic spelling consolidation
+
+**Completed on 2026-07-15:** generated local names and Exference residual
+type-variable fallbacks each retained a private recursive loop that appended
+primes until a spelling became collision-free. The shared fresh-allocation
+authority now distinguishes selection-only callers from stateful allocators:
+`selectFresh` handles ordinary `Set` reservations, while `selectFreshBy`
+retains custom collision identities such as the paired base and hole
+spellings emitted for one generated local. Both rendering paths delegate to
+that operation without pretending to own or return a reservation update.
+
+The same review found three encodings of Exference's source-alias rule.
+Legacy type rendering used `IntMap.fromListWith min`, checked hints repeated
+that construction after validation, and compatibility hints depended on a
+subtle right-fold overwrite order. One internal source-name authority now
+reverses the spelling-oriented frontend index and selects the
+lexicographically least spelling per ID. Checked construction still validates
+every alias before collapse, so a preferred valid spelling cannot conceal an
+invalid alternative. Regression coverage pins agreement among legacy
+rendering, compatibility hints, and opaque checked hints.
+
+## Post-fold residual helper ownership cleanup
+
+**Completed on 2026-07-15:** Exference's finite transitive closure was a
+backend-internal module despite expressing no backend policy. The common
+collection layer now owns the frontier-based operation; superclass constraint
+and instance inflation consume it directly, and the obsolete Exference module
+is deleted. Foundation tests pin cyclic closure and ensure an empty frontier
+does not invoke its expansion relation.
+
+Two smaller pass-through authorities disappeared in the same review. Djinn's
+raw kind checker and editable environment now share one compatibility
+grounding operation and its historical bare-variable diagnostic instead of
+copying it. Exference's engine and test seam call the common saturating
+`Natural`-to-`Int` projection directly rather than exporting an internal alias.
+The parser-free library consequently contains one fewer module, while its
+backend-specific closure relations, diagnostic contracts, and historical
+count projections remain unchanged.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

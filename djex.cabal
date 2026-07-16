@@ -190,7 +190,6 @@ Library
     Language.Haskell.Exference.Core.Internal.Unify
     Language.Haskell.Exference.Core.Internal.ConstraintSolver
     Language.Haskell.Exference.Core.Internal.Candidate
-    Language.Haskell.Exference.Core.Internal.Closure
     Language.Haskell.Exference.Core.Internal.ExferenceNode
     Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
     Language.Haskell.Exference.Core.Internal.Exference

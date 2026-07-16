@@ -733,13 +733,6 @@ renderSynonymExpansionError expansionError = case expansionError of
         " argument(s), but got " ++ show supplied
     _ -> show expansionError
 
-checkedGroundHKind :: HKind -> Either String SharedInference.GroundKind
-checkedGroundHKind = first renderUnsolved . groundHKind
-  where
-    -- Preserve the raw environment API's historical bare-identity spelling.
-    renderUnsolved variable =
-        "kind contains an unsolved variable: " ++ show variable
-
 synthesisDeclarations
     :: Environment
     -> Either SynthesisEnvironmentError [SynthesisDeclaration]

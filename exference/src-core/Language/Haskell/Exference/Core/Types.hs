@@ -85,7 +85,6 @@ import qualified Data.Map.Strict as M
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.List as L
 
-import Language.Haskell.Exference.Core.Internal.Closure ( closure )
 import Language.Haskell.Exference.Core.Internal.SourceNames
   ( preferredSourceTypeVariableNames )
 import Language.Haskell.Exference.Core.Internal.VariableSupply
@@ -683,7 +682,7 @@ inflateHsConstraints
   :: StaticClassEnv
   -> S.Set HsConstraint
   -> S.Set HsConstraint
-inflateHsConstraints environment = closure
+inflateHsConstraints environment = SharedCollection.transitiveClosure
   $ S.fromList . directSuperclasses environment
 
 -- | Add instance heads implied by superclass declarations.  Exact arity is
@@ -691,7 +690,9 @@ inflateHsConstraints environment = closure
 -- @zip@ even if this helper is called independently of 'mkStaticClassEnv'.
 inflateInstances :: StaticClassEnv -> [HsInstance] -> [HsInstance]
 inflateInstances environment =
-  S.toList . closure (S.fromList . superclasses) . S.fromList
+  S.toList
+    . SharedCollection.transitiveClosure (S.fromList . superclasses)
+    . S.fromList
  where
   superclasses (HsInstance prerequisites headConstraint) = map
     (HsInstance prerequisites) $ directSuperclasses environment headConstraint

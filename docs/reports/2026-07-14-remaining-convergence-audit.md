@@ -978,6 +978,26 @@ results, parameters, constraint arguments, datatype inputs, and constructor
 fields, while the existing rigid-boundary and search suites continue to prove
 that no namespace site was lost.
 
+## Post-fold scheduler invariant sealing
+
+**Completed on 2026-07-15:** Exference's priority queue was documented and
+populated as pending work, but its element type remained the unrestricted
+`SearchNode`. `stateStep` therefore re-inspected the node's goal sequence and
+called `error` when handed a solved node. The producer did partition solutions
+before queue insertion, but neither the queue nor the step function
+carried that proof; a local scheduling change could turn an internal drift into
+a process-terminating exception.
+
+The queue now stores a private `ScheduledNode` consisting of one extracted
+next goal and the state containing only its remaining goals. Generated nodes
+are classified once: empty goal sequences become candidate solutions, while
+nonempty sequences must cross that constructor before queueing. Rating
+temporarily restores the complete sequence, preserving historical priorities;
+execution consumes the already-proven head without a partial match. A focused
+mixed-frontier regression proves that an immediate solution is emitted rather
+than queued while a pending sibling retains its goal and produces a later
+candidate.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

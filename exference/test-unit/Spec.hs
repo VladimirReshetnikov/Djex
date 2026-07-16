@@ -2813,6 +2813,33 @@ tests = testGroup "Exference"
           constraintsRelaxedAtStep False 2 2 @?= True
           constraintsRelaxedAtStep False 2 3 @?= False
           constraintsRelaxedAtStep True 2 3 @?= True
+      , testCase "scheduler separates solutions from pending sibling work" $ do
+          let integer = TypeCons $ name "Int"
+              constantName = name "constant"
+              wrapperName = name "wrapper"
+              constant = FunctionBinding integer constantName 0 [] []
+              wrapper = FunctionBinding integer wrapperName 0 [] [integer]
+              input = identityInput
+                { input_goalType = integer
+                , input_envFuncs = [constant, wrapper]
+                , input_maxSteps = 3
+                }
+          chunks <- expectRight $ findExpressionsWithStatsEither input
+          case take 3 chunks of
+            [opened, solved, continued] -> do
+              -- forallify contributes the first pending root step.
+              assertBool "opening the root unexpectedly solved it"
+                $ null $ chunkElements opened
+              assertBool "the immediate solution entered the pending queue"
+                $ map (\(expression, _, _) -> expression)
+                    (chunkElements solved)
+                == [ExpName constantName]
+              assertBool "pending wrapper work lost its extracted goal"
+                $ map (\(expression, _, _) -> expression)
+                    (chunkElements continued)
+                == [ExpApply (ExpName wrapperName) (ExpName constantName)]
+            actual -> fail $ "expected three scheduler chunks, got "
+              ++ show (length actual)
       , testCase "known query constraints require their declared arity" $ do
           let cls = HsTypeClass (name "C") [0] []
               malformed = HsConstraint (name "C")

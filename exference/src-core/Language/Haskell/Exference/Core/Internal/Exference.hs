@@ -425,7 +425,12 @@ toGeneratedSearchBatchWithHints typeHints chunk = do
         $ mkExferenceGeneratedCandidate
             typeHints candidateExpression constraints statistics
 
-type RatedNodes = Q.MaxPQueue Priority SearchNode
+-- | A search node paired with the next goal already removed from its goal
+-- sequence. The queue can therefore contain only work that 'stateStep' may
+-- execute; solved nodes never have a representation here.
+data ScheduledNode = ScheduledNode !TGoal SearchNode
+
+type RatedNodes = Q.MaxPQueue Priority ScheduledNode
 data FindExpressionsState = FindExpressionsState
   { findSteps :: Int -- number of steps already performed
   , findQueuePruned :: !Natural
@@ -437,7 +442,7 @@ data FindExpressionsState = FindExpressionsState
 
 -- Keep the search trace productive by retaining the historical lazy state
 -- transformer. An empty priority queue terminates the unfold through Maybe.
-popBestNode :: StateT FindExpressionsState Maybe SearchNode
+popBestNode :: StateT FindExpressionsState Maybe ScheduledNode
 popBestNode = StateT $ \searchState -> do
   (node, remaining) <- Q.maxView $ findQueue searchState
   return (node, searchState { findQueue = remaining })
@@ -511,12 +516,12 @@ findEngineChunksWith allocators
     , findDepthPruned = 0
     , findIdentifierSpaceExhausted = False
     , findBindingUsages = M.empty
-    , findQueue = Q.singleton 0 rootSearchNode
+    , findQueue = Q.singleton 0 $ ScheduledNode rootGoal rootSearchNode
     }
   t = forallify rawType
+  rootGoal = TGoal (VarBinding 0 t) initialScopeId
   rootSearchNode = SearchNode
-    { nodeGoals           = Seq.singleton
-        (TGoal (VarBinding 0 t) initialScopeId)
+    { nodeGoals           = Seq.empty
     , nodeConstraintGoals = []
     , nodeProvidedScopes  = initialScopes
     , nodeVarUses         = IntMap.empty
@@ -617,7 +622,7 @@ findEngineChunksWith allocators
   helper :: FindExpressionsState -> Maybe (EngineChunk, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
   helper searchState = runStateT (do
-    s <- popBestNode
+    ScheduledNode nextGoal s <- popBestNode
     n' <- advanceStep
     let
       -- actual work happens in stateStep
@@ -631,14 +636,14 @@ findEngineChunksWith allocators
                     multiPM
                     relaxConstraints
                     heuristics
+                    nextGoal
       (rNodes, stepIdentifierSpaceExhausted) =
         foldr collectStepResult ([], False) stepResults
       (withinDepth, tooDeep) = partition depthAllowed rNodes
-      (potentialSolutions, futures) = partition
-        (Seq.null . nodeGoals) withinDepth
+      (potentialSolutions, futures) = classifySearchNodes withinDepth
       ratedNew =
         [ ( normalizePriority $ addPriority
-              (rateNode heuristics newS)
+              (rateNode heuristics $ restoreScheduledNode newS)
               (Priority $ 4.5 * f (fromIntegral n'))
           , newS)
         | newS <- futures
@@ -670,6 +675,25 @@ findEngineChunksWith allocators
       , findQueuePruned = findQueuePruned current + queueDiscarded
       }
     gets $ transformSolutions potentialSolutions) searchState
+
+-- Partition generated nodes while extracting the next goal from every future
+-- before it can enter the priority queue. This preserves the historical node
+-- order of 'partition' but makes the scheduler invariant structural.
+classifySearchNodes :: [SearchNode] -> ([SearchNode], [ScheduledNode])
+classifySearchNodes = foldr classify ([], [])
+ where
+  classify node (solutions, scheduled) = case Seq.viewl $ nodeGoals node of
+    Seq.EmptyL -> (node : solutions, scheduled)
+    nextGoal Seq.:< remainingGoals ->
+      ( solutions
+      , ScheduledNode nextGoal (node {nodeGoals = remainingGoals}) : scheduled
+      )
+
+-- Rating observes the complete pending goal sequence. Only execution consumes
+-- the extracted head.
+restoreScheduledNode :: ScheduledNode -> SearchNode
+restoreScheduledNode (ScheduledNode nextGoal node) = node
+  { nodeGoals = nextGoal Seq.<| nodeGoals node }
 
 -- | Historical status-bearing view of an already checked engine trace.
 findExpressions :: CheckedExferenceQuery -> [ExferenceChunkElement]
@@ -1375,19 +1399,13 @@ stateStep :: SearchAllocators
           -> Bool
           -> Bool
           -> ExferenceHeuristicsConfig
+          -> TGoal
           -> StateT SearchNode SearchBranches ()
-stateStep allocators multiPM allowConstrs h = do
+stateStep allocators multiPM allowConstrs h
+    (TGoal (VarBinding var goalType) scopeId) = do
   -- This paragraph is evil, and hopefully temporary. (Scoping issues make it necessary.)
   contxt <- gets nodeQueryClassEnv
   constraintGoals' <- gets nodeConstraintGoals
-
-  goalView <- gets $ Seq.viewl . nodeGoals
-  let (var, goalType, scopeId, remainingGoals) = case goalView of
-        TGoal (VarBinding goalVariable goal) currentScope Seq.:< remaining ->
-          (goalVariable, goal, currentScope, remaining)
-        Seq.EmptyL -> error
-          "Exference internal search invariant violated: scheduled solved node"
-  modify $ \node -> node { nodeGoals = remainingGoals }
 
   let
     -- if type is TypeArrow, transform to lambda expression.

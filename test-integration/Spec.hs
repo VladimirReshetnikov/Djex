@@ -551,6 +551,63 @@ tests = testGroup "Djex facade"
       _ <- firstExferenceCandidate =<< expectRight
         (runExferenceQuery session shared)
       pure ()
+  , testCase "apply distinct recursion policies to one shared analysis" $ do
+      intName <- expectRight $ parseName "Int"
+      aliasName <- expectRight $ parseName "Alias"
+      phantomName <- expectRight $ parseName "Phantom"
+      loopName <- expectRight $ parseName "Loop"
+      erasedName <- expectRight $ parseName "Erased"
+      mkLoopName <- expectRight $ parseName "MkLoop"
+      mkErasedName <- expectRight $ parseName "MkErased"
+      let nominal = TypeConstructor
+          apply name argument = TypeApplication (nominal name) argument
+          djinnPhantomDeclarations =
+            [ AbstractTypeDeclaration () intName ProperTypeKind
+            , TypeSynonymDeclaration () phantomName
+                [TypeParameter "a" Nothing] $ nominal intName
+            , DataTypeDeclaration () erasedName []
+                [DataConstructor () mkErasedName
+                  [apply phantomName $ nominal erasedName]]
+            ]
+          djinnRecursiveDeclarations =
+            [ TypeSynonymDeclaration () aliasName [] $ nominal loopName
+            , DataTypeDeclaration () loopName []
+                [DataConstructor () mkLoopName [nominal aliasName]]
+            ]
+      djinnPhantomEnvironment <- expectRight
+        (mkEnvironment djinnPhantomDeclarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      _ <- expectRight $ mkDjinnSession djinnPhantomEnvironment
+      djinnRecursiveEnvironment <- expectRight
+        (mkEnvironment djinnRecursiveDeclarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      case mkDjinnSession djinnRecursiveEnvironment of
+        Left failure -> diagnosticCode failure @?= Just "DJEX_DJINN_ENV"
+        Right _ -> fail "Djinn accepted alias-hidden datatype recursion"
+
+      let exferenceVariable = FlexibleVariable 0
+          exferenceDeclarations =
+            [ AbstractTypeDeclaration () intName ProperTypeKind
+            , TypeSynonymDeclaration () aliasName [] $ nominal loopName
+            , TypeSynonymDeclaration () phantomName
+                [TypeParameter exferenceVariable Nothing] $ nominal intName
+            , DataTypeDeclaration () loopName []
+                [DataConstructor () mkLoopName [nominal aliasName]]
+            , DataTypeDeclaration () erasedName []
+                [DataConstructor () mkErasedName
+                  [apply phantomName $ nominal erasedName]]
+            ]
+      exferenceEnvironment <- expectRight
+        (mkEnvironment exferenceDeclarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      exferenceSession <- expectRight $ mkExferenceSession exferenceEnvironment
+      case exferenceSessionOmissions exferenceSession of
+        [omission] -> do
+          omittedName omission @?= loopName
+          omittedReason omission @?=
+            RecursiveDataEliminationUnsupported
+        omissions -> fail $ "unexpected shared-recursion omissions: "
+          ++ show omissions
   , testCase "do not reuse erased hints for synonym-introduced binders" $ do
       innerName <- expectRight $ parseName "Fixture.Inner"
       phantomName <- expectRight $ parseName "Fixture.Phantom"

@@ -4,15 +4,15 @@
 --
 -- This module is the backend-neutral entry point. Checked Djinn and Exference
 -- session adapters share its query envelope and the common types needed to
--- inspect, select, diagnose, and render their results. The same parser-free
--- @djex@ dependency also exposes the lower-level search APIs for import
--- compatibility, while this module remains the curated entry point:
+-- inspect, select, diagnose, and render their results. The single @djex@
+-- library also exposes the lower-level search and compatibility APIs, while
+-- this module remains the curated entry point:
 --
 -- * "Djinn.Core" is the stable, validated Djinn API.
 -- * "Language.Haskell.Djex.Exference" is the checked, parser-neutral adapter.
 -- * "Language.Haskell.Exference.Core" is the lower-level search API.
--- * @Language.Haskell.Djex.Exference.HaskellSrc@ is the optional source-loader
---   and type-parser boundary from the @exference-frontend@ component.
+-- * @Language.Haskell.Djex.Exference.HaskellSrc@ is the checked HSE
+--   source-loader and type-parser boundary.
 -- * @Language.Haskell.Synthesis.*@ modules hold the shared neutral vocabulary.
 --
 -- Compatibility CLI modules and modules containing @.Internal.@ are not part

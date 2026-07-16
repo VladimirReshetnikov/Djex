@@ -160,19 +160,27 @@ prepareSynthesisInventory
   -> Either SynthesisDeclarationError
       (PreparedSynthesisInventory annotation)
 prepareSynthesisInventory inventory = do
-  prepared <- first SynonymPreparationError
-    $ SharedTypeSynonym.prepareInventory freshSynthesisVariable inventory
-  let synonyms = SharedTypeSynonym.preparedTypeSynonyms prepared
-  backend <- prepareSearchEnvironment synonyms
-    $ fmap (const ())
-    $ SharedInventory.inventoryEnvironment
-    $ SharedTypeSynonym.preparedInventory prepared
-  pure $ PreparedSynthesisInventory prepared backend
+  expansion <- first promoteExpansionError
+    $ SharedTypeSynonym.prepareInventoryExpansion
+        freshSynthesisVariable inventory
+  backend <- prepareSearchEnvironment expansion
+  let prepared =
+        SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
+  -- Evaluate the projection before storing it. Otherwise its thunk would keep
+  -- the transient expanded declarations alive through this long-lived wrapper.
+  prepared `seq` pure (PreparedSynthesisInventory prepared backend)
+ where
+  promoteExpansionError failure = case failure of
+    SharedTypeSynonym.InventorySynonymPreparationError cause ->
+      SynonymPreparationError cause
+    SharedTypeSynonym.InventoryDeclarationExpansionError
+        index subject cause ->
+      SynonymExpansionError index subject cause
 
 -- | Prepare the metadata-bearing Inventory produced by Exference's source
--- compatibility frontend. Alias-aware recursion is backend-derived and then
--- copied into the retained annotations so historical source projections see
--- the same classification as search.
+-- compatibility frontend. Alias-aware recursion is foundation-derived and
+-- then copied into the retained annotations so historical source projections
+-- see the same classification as search.
 prepareSourceSynthesisInventory
   :: SynthesisInventory
   -> Either SynthesisDeclarationError
@@ -307,31 +315,26 @@ deconstructorTypeName
 deconstructorTypeName declaration = fst
   <$> deconstructorHead (deconstructorInput declaration)
 
--- Keep the actual lowering private once the witness has been assembled:
--- accepting an independently prepared alias table here would allow a
--- mismatched table to turn an alias into a fictitious nominal constructor.
+-- Keep the actual lowering private once the shared transient witness has been
+-- assembled. Variable-ID normalization and Exference's recursive-elimination
+-- policy are backend concerns; alias expansion, declaration attribution, and
+-- the recursive graph are already fixed by that witness.
 prepareSearchEnvironment
-  :: SharedTypeSynonym.TypeSynonyms SynthesisVariable
-  -> SharedEnvironment.Environment SynthesisVariable Void ()
+  :: SharedTypeSynonym.PreparedInventoryExpansion
+      SynthesisVariable annotation
   -> Either SynthesisDeclarationError EnvDictionary
-prepareSearchEnvironment synonyms environment = do
-  expanded <- mapM expandOperationalDeclaration
-    $ zip [0 ..] $ SharedEnvironment.environmentDeclarations environment
-  let normalized = map normalizeDeclarationVariables expanded
-      recursiveNames = SharedDeclaration.recursiveDataTypeNames normalized
+prepareSearchEnvironment expansion = do
+  -- Renaming variables and erasing annotations cannot change a nominal
+  -- datatype edge, so the shared pre-normalization SCC set is exact here.
+  let normalized = map
+        (normalizeDeclarationVariables . fmap (const ()))
+        $ SharedTypeSynonym.inventoryExpansionDeclarations expansion
+      recursiveNames =
+        SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
   prepared <- mapM (prepareSearchDeclaration recursiveNames) normalized
   fmap fst $ lowerSynthesisDeclarations IncludeDerivedBindings
     fromSynthesisClassDeclarationWithMethods
     [declaration | Just declaration <- prepared]
- where
-  expandOperationalDeclaration (index, declaration) = case declaration of
-    SharedDeclaration.TypeSynonymDeclaration{} -> Right declaration
-    SharedDeclaration.AbstractTypeDeclaration{} -> Right declaration
-    _ -> first
-      (SynonymExpansionError index
-        $ SharedDeclaration.declarationSubjectName declaration)
-      $ SharedTypeSynonym.expandDeclarationTypeSynonyms
-          freshSynthesisVariable synonyms declaration
 
 type SearchSynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void ()

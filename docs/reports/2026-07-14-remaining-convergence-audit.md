@@ -1564,6 +1564,46 @@ case hoisting, clause round trips, and the empty-lambda barrier; Exference's
 frontend regression pins multi-group function rendering and collision-free
 parameter allocation.
 
+## Shared operational inventory expansion
+
+**Completed on 2026-07-16:** both backends still performed the same semantic
+preflight independently after building an exact `PreparedInventory`. Each
+walked source declarations, retained synonym declarations source-shaped,
+expanded every operational type through the prepared alias table, and derived
+the recursive datatype SCCs. Only the policy applied afterward was genuinely
+different: Djinn rejects recursive datatypes, while Exference retains them and
+omits their elimination rules.
+
+`Language.Haskell.Synthesis.TypeSynonym` now owns that complete transition as
+the opaque transient `PreparedInventoryExpansion`. One call prepares the exact
+Inventory/table pair, expands declarations left-to-right, records the first
+failure's zero-based index and nominal subject, and computes recursion from the
+same operationally alias-free stream. Whole-table preparation failures remain
+separate from operational use-site attribution because alias normalization
+begins in map-key order and follows dependencies rather than belonging to one
+use declaration. Synonym declarations retain their
+checked source bodies, and no traversal-wide allocator state is introduced:
+fresh binders restart at the existing per-type lexical boundaries.
+
+Djinn consumes the shared recursion set only to enforce its no-recursion
+policy, then builds formula definitions and ordered premises from the shared
+expanded stream. For source compatibility, its raw API projects either shared
+synonym phase back to the historical `InvalidSynthesisTypeSynonyms` constructor;
+Exference maps declaration expansion to its established indexed public error.
+Exference then normalizes its finite variable IDs and turns the shared recursion
+set into metadata. Both retain only the exact `PreparedInventory` and their
+derived backend indexes once sealing finishes, so the transient operationally
+expanded declaration copy cannot become a second session authority.
+
+Foundation regressions cover exact witness projection, source spelling and
+annotation order, alias-hidden and mutual recursion, phantom-erased apparent
+recursion, fresh-name restart within and across declarations, preparation
+versus operational error attribution, non-strict annotations, first-failure
+short-circuiting, and instance subjects. Backend tests retain their distinct
+recursion policies and public
+error mappings; an integration regression exercises the alias-hidden and
+phantom cases through both stable session constructors.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

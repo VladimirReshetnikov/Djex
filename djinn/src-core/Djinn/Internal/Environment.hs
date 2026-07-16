@@ -350,45 +350,34 @@ synthesisDeclarationOwner declaration = case declaration of
     SharedDeclaration.InstanceDeclaration{} -> Left $
         SynthesisEnvironmentDeclarationError InstanceDeclarationUnsupported
 
--- Expand aliases before classifying datatype recursion. Looking only at raw
--- fields can hide a real cycle through an alias or invent one in an argument
--- erased by a phantom alias, so both raw and neutral session construction must
--- share this exact preflight. Return the same prepared table retained by the
--- sealed environment together with the transient expanded declarations, so
--- formula definitions and premises do not repeat the same expansion.
+-- Use the foundation's single prepared-and-expanded view before applying
+-- Djinn's stricter no-recursive-datatypes policy. Keep projecting both shared
+-- synonym phases to the historical raw error constructor; Exference's public
+-- vocabulary already preserves the additional declaration attribution.
 prepareInventoryExpansion
     :: SynthesisInventory
     -> Either SynthesisEnvironmentError
         PreparedInventoryExpansion
 prepareInventoryExpansion inventory = do
-    prepared <- first InvalidSynthesisTypeSynonyms $
-        SharedTypeSynonym.prepareInventory
+    expansion <- first promoteExpansionError $
+        SharedTypeSynonym.prepareInventoryExpansion
             freshDjinnTypeVariable inventory
-    let synonyms = SharedTypeSynonym.preparedTypeSynonyms prepared
-    expandedDeclarations <- mapM (expandForRecursion synonyms)
-        (SharedEnvironment.environmentDeclarations $
-            SharedInventory.inventoryEnvironment inventory)
-    let recursiveNames = SharedDeclaration.recursiveDataTypeNames
-            expandedDeclarations
+    let recursiveNames =
+            SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
     if Set.null recursiveNames then
-        return $ PreparedInventoryExpansion prepared expandedDeclarations
+        return expansion
     else
         Left $ RecursiveSynthesisDataTypes $ Set.toAscList recursiveNames
   where
-    expandForRecursion synonyms declaration =
-        case declaration of
-            -- Preparation above has already normalized and validated every
-            -- synonym, including unused ones. Recursion classification ignores
-            -- synonym declarations, so retain their source shape instead of
-            -- materializing the same expansion a second time.
-            SharedDeclaration.TypeSynonymDeclaration{} -> Right declaration
-            _ -> first InvalidSynthesisTypeSynonyms $
-                SharedTypeSynonym.expandDeclarationTypeSynonyms
-                    freshDjinnTypeVariable synonyms declaration
+    promoteExpansionError failure = case failure of
+        SharedTypeSynonym.InventorySynonymPreparationError cause ->
+            InvalidSynthesisTypeSynonyms cause
+        SharedTypeSynonym.InventoryDeclarationExpansionError
+                _ _ cause ->
+            InvalidSynthesisTypeSynonyms cause
 
-data PreparedInventoryExpansion = PreparedInventoryExpansion
-    PreparedSynthesisInventory
-    [SharedDeclaration.Declaration HSymbol Void ()]
+type PreparedInventoryExpansion =
+    SharedTypeSynonym.PreparedInventoryExpansion HSymbol ()
 
 -- Build the formula-definition cache from the same transient declaration
 -- stream used for recursion classification. Synonyms retain their checked
@@ -470,8 +459,7 @@ sealPreparedEnvironment
     :: Environment
     -> PreparedInventoryExpansion
     -> Either SynthesisEnvironmentError PreparedEnvironment
-sealPreparedEnvironment (Environment types _ _)
-        (PreparedInventoryExpansion prepared expandedDeclarations) = do
+sealPreparedEnvironment (Environment types _ _) expansion = do
     compiler <- first InvalidSynthesisFormulaDefinitions $
         prepareSynthesisFormulaCompiler expandedDeclarations
     -- Moving an invariant translation failure from query execution to sealing
@@ -489,10 +477,16 @@ sealPreparedEnvironment (Environment types _ _)
     classIndex <- prepareSynthesisClassIndex inventory
     -- Force the derived index before the transient compatibility projection
     -- leaves scope; its field cannot retain the complete raw Environment thunk.
-    compiler `seq` classIndex `seq` kindCheck `seq`
+    -- Force the retained projection itself so it cannot keep the transient
+    -- expanded declaration product alive through an unevaluated selector.
+    prepared `seq` compiler `seq` classIndex `seq` kindCheck `seq`
         return (PreparedEnvironment
             prepared kindCheck classIndex premises compiler)
   where
+    prepared =
+        SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
+    expandedDeclarations =
+        SharedTypeSynonym.inventoryExpansionDeclarations expansion
     inventory = SharedTypeSynonym.preparedInventory prepared
 
     translateFunction compiler signature = do

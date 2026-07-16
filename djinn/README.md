@@ -81,7 +81,7 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 62 focused Tasty/HUnit regressions over parsing, type/kind representation and compatibility, declaration token boundaries, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 64 focused Tasty/HUnit regressions over parsing, type/kind representation and compatibility, declaration token boundaries, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-frontend-api-tests` | Three import checks proving that the single `djex` dependency exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn` together. |
 | `djinn-cli-tests` | Nineteen subprocess scenarios against the packaged executable, including EOF, explicit RTS tuning, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
@@ -515,9 +515,14 @@ shared superclass and instance semantics that Djinn does not implement.
 The opaque Djinn `Environment` itself now round-trips through
 `Language.Haskell.Synthesis.Environment`; reverse lowering preflights Djinn's
 stricter source subset, grounds and checks the neutral Inventory once, validates
-synonym saturation in every type-bearing declaration position, and classifies
-recursive datatypes only after aliases have been expanded. The resulting
-raw compatibility checker, synonym table, nominal class index, checked formula
+synonym saturation in every type-bearing declaration position, and consumes
+the foundation's transient prepared-expansion witness. That witness expands
+operational declarations in source order, attributes a failure to its exact
+declaration, and classifies recursive datatypes only from the same
+operationally alias-free stream. Djinn adds only its policy of rejecting a
+nonempty recursion set. The
+resulting raw compatibility checker, synonym table, nominal class index,
+checked formula
 translator, and ordered global proof premises are projections of that same
 Inventory rather than a second independently inferred environment. Native
 saturation is a `TypeSynonym` table operation; raw `HType` retains one separate
@@ -525,10 +530,11 @@ source-order view traversal solely to preserve its malformed-input diagnostics.
 Global assumptions are translated once while sealing; only a query goal and
 its instantiated class methods still vary per search. Historical raw search
 tables are reconstructed from the Inventory only for compatibility inspection,
-not retained in `PreparedEnvironment`. Raw
-`prepareEnvironment` applies that same expand-first recursion preflight, so a
-constructor-forged compatibility environment cannot bypass it while phantom
-aliases retain their alias-free meaning.
+not retained in `PreparedEnvironment`. The expanded declaration copy is
+likewise released after formula and premise sealing. Raw `prepareEnvironment`
+applies that same shared preflight, so a constructor-forged compatibility
+environment cannot bypass it while phantom aliases retain their alias-free
+meaning.
 Canonical `DjinnResult`s expose candidates through
 `batchCandidates . resultSearch`; every Djinn candidate has empty residual
 constraints and retains the unused-binder fraction and exact

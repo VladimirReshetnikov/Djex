@@ -244,9 +244,16 @@ their nominal heads; every projected shape still comes from the prepared
 witness. The unused intermediate entrance that accepted constructor penalties
 but could not retain class-method ownership has been removed; source sealing
 always uses the complete ownership-aware operation.
-One opaque annotated prepared value wraps the shared `PreparedInventory` and
-its backend lowering, keeping the checked Inventory, its exact synonym table,
-and that lowering inseparable; the retained frontend/core module seam
+Before backend lowering, the foundation's opaque transient
+`PreparedInventoryExpansion` prepares the exact alias table, expands
+operational declarations in source order, attributes the first failure to its
+owning declaration, and derives the recursive datatype set once. Exference
+then performs only its private variable-ID normalization and lowering, using
+that set to disable recursive elimination. One opaque annotated prepared value
+wraps the shared `PreparedInventory` and its backend lowering, keeping the
+checked Inventory, its exact synonym table, and that lowering inseparable; the
+expanded declaration copy is released after sealing. The retained
+frontend/core module seam
 accepts only exact-name order and finite rating metadata, never a second
 independently prepared dictionary. Alias-aware recursion metadata is attached
 to the sealed Inventory through a checked annotation-only adjustment, without
@@ -257,10 +264,10 @@ projection is derived on demand. The wrapper exposes only
 synonym-table access goes through the foundation witness, and the
 annotation-free session view is written explicitly as
 `PreparedSynthesisInventory ()`. It shares the already prepared synonyms and
-backend. Thus synonym expansion, forall
-freshness, class/instance normalization, and whole-inventory recursion
-classification have one implementation, while the checked Inventory still
-retains the source aliases needed by later queries.
+backend. Thus synonym expansion, forall freshness, declaration attribution,
+and whole-inventory recursion classification have one implementation;
+class/instance normalization remains an Exference lowering detail, while the
+checked Inventory still retains the source aliases needed by later queries.
 Its ordered binding field is now `sourceBindings :: [SourceBinding]`, where
 `SourceFunction` denotes an ordinary `FunctionBinding` and
 `SourceClassMethod QualifiedName` records the
@@ -313,9 +320,10 @@ tuples through arity 64, while the eager Exference search inventory deliberately
 materializes only arities 2 through 7: higher eager constructors would add a
 partial-application branch to every non-arrow goal. This operational cap is
 exported as `maximumBuiltInTupleArity` rather than repeated as a magic number.
-Recursive flags are derived after alias expansion across all loaded modules
-and appear in both the backend-derived projection and checked Inventory;
-caller-supplied or module-local preliminary bits are never authoritative.
+Recursive flags come from the shared alias-expanded inventory witness across
+all loaded modules and appear in both the backend-derived projection and
+checked Inventory; caller-supplied or module-local preliminary bits are never
+authoritative.
 Class-environment construction likewise rejects repeated instance heads before
 building its lookup index; each shipped primitive instance now has one owning
 module instead of a second shadow declaration in `Data.hs`.

@@ -11,12 +11,18 @@ module Language.Haskell.Synthesis.TypeSynonym
   ( FreshVariable
   , TypeSynonyms
   , PreparedInventory
+  , PreparedInventoryExpansion
   , SynonymExpansionError (..)
+  , InventoryExpansionError (..)
   , ElaborationPhase (..)
   , TypeElaborationError (..)
   , prepareInventory
   , preparedInventory
   , preparedTypeSynonyms
+  , prepareInventoryExpansion
+  , inventoryExpansionPreparedInventory
+  , inventoryExpansionDeclarations
+  , inventoryExpansionRecursiveDataTypeNames
   , adjustPreparedInventoryDataTypeAnnotations
   , prepareTypeSynonyms
   , checkTypeSynonymSaturation
@@ -36,6 +42,7 @@ import Control.Monad.Trans.State.Strict
   , get
   , put
   )
+import Data.Bifunctor (first)
 import Data.Foldable (toList)
 import Data.Functor.Identity (Identity (..))
 import Data.List.NonEmpty (NonEmpty (..))
@@ -43,6 +50,7 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Void (Void)
 import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint
@@ -55,6 +63,8 @@ import Language.Haskell.Synthesis.Declaration
   , Declaration (..)
   , TypeParameter (parameterVariable)
   , ValueSignature (ValueSignature)
+  , declarationSubjectName
+  , recursiveDataTypeNames
   )
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
@@ -121,6 +131,21 @@ data PreparedInventory variable annotation = PreparedInventory
   (TypeSynonyms variable)
   deriving (Functor)
 
+-- | One transient, alias-free operational view of an exact prepared
+-- inventory. The constructor is private so backends cannot combine an alias
+-- table, expanded declarations, and recursion classification derived from
+-- different source inventories.
+--
+-- Sessions should retain only 'inventoryExpansionPreparedInventory' and their
+-- own lowered indexes. Keeping this product separate from 'PreparedInventory'
+-- prevents every long-lived session from retaining a duplicate declaration
+-- tree.
+data PreparedInventoryExpansion variable annotation =
+  PreparedInventoryExpansion
+    (PreparedInventory variable annotation)
+    [Declaration variable Void annotation]
+    (Set Name)
+
 -- | The authoritative checked inventory owned by a prepared witness.
 preparedInventory
   :: PreparedInventory variable annotation
@@ -145,6 +170,20 @@ data SynonymExpansionError variable
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData variable => NFData (SynonymExpansionError variable)
+
+-- | Failures while preparing an inventory's complete alias table or expanding
+-- the first operational declaration that uses it. Preparation follows map-key
+-- order with dependency traversal and therefore has no single operational
+-- use-site; declaration failures preserve source order and subject.
+data InventoryExpansionError variable
+  = InventorySynonymPreparationError (SynonymExpansionError variable)
+  | InventoryDeclarationExpansionError
+      Int -- ^ Zero-based source declaration index.
+      Name -- ^ Nominal subject; the head class for an instance.
+      (SynonymExpansionError variable)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData variable => NFData (InventoryExpansionError variable)
 
 -- | Whether a structural or kind failure describes the source spelling or
 -- its alias-free elaboration.
@@ -173,6 +212,63 @@ prepareInventory
       (PreparedInventory variable annotation)
 prepareInventory fresh inventory = PreparedInventory inventory
   <$> prepareTypeSynonyms fresh inventory
+
+-- | Prepare the exact alias table, expand every operational declaration in
+-- source order, and classify recursive datatypes from that same alias-free
+-- stream. Synonym declarations stay source-shaped: preparation has already
+-- validated and normalized every definition, while recursion ignores their
+-- declaration bodies.
+--
+-- Each declaration is expanded independently. In particular, this function
+-- deliberately introduces no allocator state around the traversal; the
+-- lexical scopes and stable fresh-variable choices owned by
+-- 'expandDeclarationTypeSynonyms' must not leak between declarations.
+prepareInventoryExpansion
+  :: Ord variable
+  => FreshVariable variable
+  -> Inventory variable annotation
+  -> Either (InventoryExpansionError variable)
+      (PreparedInventoryExpansion variable annotation)
+prepareInventoryExpansion fresh inventory = do
+  prepared <- first InventorySynonymPreparationError
+    $ prepareInventory fresh inventory
+  let synonyms = preparedTypeSynonyms prepared
+      declarations = Environment.environmentDeclarations
+        $ inventoryEnvironment $ preparedInventory prepared
+  expanded <- mapM (expandOperationalDeclaration synonyms)
+    $ zip [0 ..] declarations
+  pure $ PreparedInventoryExpansion prepared expanded
+    $ recursiveDataTypeNames expanded
+ where
+  expandOperationalDeclaration synonyms (index, declaration) =
+    case declaration of
+      TypeSynonymDeclaration{} -> Right declaration
+      _ -> first
+        (InventoryDeclarationExpansionError index
+          $ declarationSubjectName declaration)
+        $ expandDeclarationTypeSynonyms fresh synonyms declaration
+
+-- | The exact prepared inventory from which the transient view was derived.
+inventoryExpansionPreparedInventory
+  :: PreparedInventoryExpansion variable annotation
+  -> PreparedInventory variable annotation
+inventoryExpansionPreparedInventory
+    (PreparedInventoryExpansion prepared _ _) = prepared
+
+-- | Source-ordered declarations with aliases expanded in every operational
+-- type position. Synonym declarations retain their checked source spelling.
+inventoryExpansionDeclarations
+  :: PreparedInventoryExpansion variable annotation
+  -> [Declaration variable Void annotation]
+inventoryExpansionDeclarations
+    (PreparedInventoryExpansion _ declarations _) = declarations
+
+-- | Recursive datatype names derived from the exact expanded declarations.
+inventoryExpansionRecursiveDataTypeNames
+  :: PreparedInventoryExpansion variable annotation
+  -> Set Name
+inventoryExpansionRecursiveDataTypeNames
+    (PreparedInventoryExpansion _ _ recursiveNames) = recursiveNames
 
 -- | Adjust derived top-level datatype metadata without rebuilding either the
 -- checked inventory indexes or its alias table.  Synonym definitions contain

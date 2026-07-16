@@ -2124,6 +2124,31 @@ tests = testGroup "Exference"
             @?= [True, True, True, False]
           map functionName (environmentFunctions environment) @?=
             map name ["MkLeft", "MkRight", "MkDirect", "MkErased"]
+      , testCase "unused synonym failures remain preparation errors" $ do
+          let variable = neutralVariable 0
+              identityName = neutralName "Identity"
+              higherName = neutralName "Higher"
+              badName = neutralName "UnusedBad"
+              identity = SharedDeclaration.TypeSynonymDeclaration ()
+                identityName [neutralParameter variable]
+                $ SharedType.TypeVariable variable
+              higher = SharedDeclaration.AbstractTypeDeclaration () higherName
+                $ SharedKind.FunctionKind
+                    (SharedKind.FunctionKind SharedKind.ProperTypeKind
+                      SharedKind.ProperTypeKind)
+                    SharedKind.ProperTypeKind
+              bad = SharedDeclaration.TypeSynonymDeclaration () badName []
+                $ SharedType.TypeApplication
+                    (SharedType.TypeConstructor higherName)
+                    (SharedType.TypeConstructor identityName)
+          inventory <- expectRight $ SharedInventory.mkInventory
+            SharedKindInference.OpenKindInventory [identity, higher, bad]
+          case prepareSynthesisInventory inventory of
+            Left failure -> failure @?=
+              SynonymPreparationError
+                (SharedTypeSynonym.UnsaturatedTypeSynonym
+                  identityName 1 0)
+            Right _ -> fail "an invalid unused synonym reached Exference"
       , testCase "synonym failures retain their owning declaration" $ do
           let aliasVariable = neutralVariable 0
               aliasName = neutralName "Alias"

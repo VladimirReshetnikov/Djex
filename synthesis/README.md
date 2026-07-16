@@ -229,6 +229,18 @@ the exact normalized synonym table derived from it, so backend sessions cannot
 recombine those authorities accidentally. Annotation-only mapping and
 name-aware datatype-metadata adjustment preserve that table without repeating
 allocator-sensitive synonym preparation.
+`prepareInventoryExpansion` adds a separate opaque, transient
+`PreparedInventoryExpansion`: it prepares that exact witness, retains synonym
+declarations in their checked source spelling, expands every other declaration
+left-to-right, and classifies datatype recursion from the resulting operational
+stream. Declaration failures carry their zero-based source index and nominal
+subject; whole-table preparation failures remain distinct from operational
+use-site attribution. Fresh allocation restarts at the same lexical boundaries
+as ordinary type expansion,
+so neither sibling fields nor later declarations can perturb one another.
+Backends consume the expanded stream and recursion set while sealing, then keep
+only the prepared Inventory and their derived indexes rather than a duplicate
+declaration tree.
 
 `Language.Haskell.Synthesis.TypeRender` renders that shared structure back to
 compact Haskell source while leaving tagged variable spellings to the caller.
@@ -253,9 +265,10 @@ diagnostic subject (the head class for an instance). Backend projections can
 therefore repack identities or attribute failures without rebuilding every
 declaration constructor privately.
 Its `recursiveDataTypeNames` query is the common whole-declaration SCC
-classifier. Callers invoke it only after synonym expansion; otherwise phantom
-aliases can invent edges and alias-mediated recursion can hide them. Backend
-adapters attach their own recursion metadata from that one nominal result.
+classifier. The prepared-expansion boundary enforces its alias-free
+precondition; otherwise phantom aliases could invent edges and alias-mediated
+recursion could hide them. Backend adapters apply their own policy to that one
+nominal result rather than repeating expansion or graph construction.
 
 `Language.Haskell.Synthesis.KindInference` owns the common kind unifier. It
 checks several types in one variable scope, gives class methods independent

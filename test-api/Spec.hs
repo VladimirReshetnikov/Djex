@@ -21,12 +21,14 @@ import Language.Haskell.Exference.Core.FunctionBinding
   )
 import qualified Language.Haskell.Exference.Core.RigidInstantiation as Rigid
 import qualified Language.Haskell.Exference.Core.Types as CoreTypes
+import qualified Language.Haskell.Synthesis.Declaration as SynthesisDeclaration
 import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.Generated (mkDefinitionName)
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
 import qualified Language.Haskell.Synthesis.KindInference as KindInference
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed)
+  , Name
   , mkIdentifier
   , tupleName
   )
@@ -77,6 +79,15 @@ projectionSignatures =
   (TypeSynonym.preparedTypeSynonyms
     :: TypeSynonym.PreparedInventory Int ()
     -> TypeSynonym.TypeSynonyms Int) `seq`
+  (TypeSynonym.inventoryExpansionPreparedInventory
+    :: TypeSynonym.PreparedInventoryExpansion Int ()
+    -> TypeSynonym.PreparedInventory Int ()) `seq`
+  (TypeSynonym.inventoryExpansionDeclarations
+    :: TypeSynonym.PreparedInventoryExpansion Int ()
+    -> [SynthesisDeclaration.Declaration Int Void ()]) `seq`
+  (TypeSynonym.inventoryExpansionRecursiveDataTypeNames
+    :: TypeSynonym.PreparedInventoryExpansion Int ()
+    -> Set.Set Name) `seq`
   (CoreTypes.sClassEnv_tclasses
     :: CoreTypes.StaticClassEnv
     -> Map.Map CoreTypes.QualifiedName CoreTypes.HsTypeClass) `seq`

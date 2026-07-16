@@ -66,6 +66,7 @@ import Language.Haskell.Exference.Core.Types
   , sClassEnv_tclasses
   )
 import Language.Haskell.Synthesis.Collection (DuplicateSummary)
+import Language.Haskell.Synthesis.Declaration (Declaration)
 import Language.Haskell.Synthesis.Diagnostic
   ( SourceLocation
   , SourcePosition
@@ -81,7 +82,11 @@ import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search (SearchBatch)
 import Language.Haskell.Synthesis.TypeSynonym
   ( PreparedInventory
+  , PreparedInventoryExpansion
   , TypeSynonyms
+  , inventoryExpansionDeclarations
+  , inventoryExpansionPreparedInventory
+  , inventoryExpansionRecursiveDataTypeNames
   , preparedInventory
   , preparedTypeSynonyms
   )
@@ -92,6 +97,8 @@ forbiddenConstructionAttempts =
   , noGeneric @(Inventory Int ()) "Inventory"
   , noGeneric @(TypeSynonyms Int) "TypeSynonyms"
   , noGeneric @(PreparedInventory Int ()) "PreparedInventory"
+  , noGeneric @(PreparedInventoryExpansion Int ())
+      "PreparedInventoryExpansion"
   , noGeneric @(QueryResult () ()) "QueryResult"
   , noGeneric @(CachedQuery () () ()) "CachedQuery"
   , noGeneric @DefinitionName "DefinitionName"
@@ -154,6 +161,21 @@ forbiddenConstructionAttempts =
       @(PreparedInventory Int ())
       @(TypeSynonyms Int)
       "PreparedInventory.preparedTypeSynonyms"
+  , noField
+      @"inventoryExpansionPreparedInventory"
+      @(PreparedInventoryExpansion Int ())
+      @(PreparedInventory Int ())
+      "PreparedInventoryExpansion.inventoryExpansionPreparedInventory"
+  , noField
+      @"inventoryExpansionDeclarations"
+      @(PreparedInventoryExpansion Int ())
+      @[Declaration Int Void ()]
+      "PreparedInventoryExpansion.inventoryExpansionDeclarations"
+  , noField
+      @"inventoryExpansionRecursiveDataTypeNames"
+      @(PreparedInventoryExpansion Int ())
+      @(Set.Set Name)
+      "PreparedInventoryExpansion.inventoryExpansionRecursiveDataTypeNames"
   , noField
       @"preparedSynthesisWitness"
       @(PreparedSynthesisInventory ())
@@ -261,6 +283,9 @@ selectorNamesInScope =
   rigidInstantiations `seq`
   preparedInventory `seq`
   preparedTypeSynonyms `seq`
+  inventoryExpansionPreparedInventory `seq`
+  inventoryExpansionDeclarations `seq`
+  inventoryExpansionRecursiveDataTypeNames `seq`
   preparedSynthesisWitness `seq`
   preparedSynthesisBackend `seq`
   sClassEnv_tclasses `seq`

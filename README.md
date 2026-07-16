@@ -268,9 +268,14 @@ protocol in their private request constructors; backend caches remain lazy.
 authoritative closed Inventory with Haskell 98 class-kind defaulting. Djinn's
 historical `Kind Int` remains only in its raw compatibility API; a surviving
 kind variable was never valid session state, so the stable path no longer
-weakens and re-grounds an already ground environment. An opaque shared
-`PreparedInventory` keeps that
-Inventory and its exact normalized synonym table inseparable; the mutable raw
+weakens and re-grounds an already ground environment. The foundation first
+builds an opaque transient `PreparedInventoryExpansion`: one operation prepares
+the exact synonym table, expands operational declarations in source order,
+and classifies recursion from that same operationally alias-free stream. An
+opaque shared
+`PreparedInventory` keeps the Inventory and its exact normalized synonym table
+inseparable after the transient stream has supplied Djinn's formula, premise,
+and no-recursion checks; the mutable raw
 `Djinn.Core.Environment` no longer crosses the
 curated facade or survives inside `PreparedEnvironment`. Synonyms are expanded
 for saturation and recursive datatype validation before ordered global
@@ -340,11 +345,12 @@ into the compatibility frontend. The source boundary tags class methods with
 their qualified owner, nests them under the common class declaration for
 validation, and lowers each rated selector exactly once into Exference's flat
 search inventory without changing source order. HSE aliases remain unexpanded
-through common Inventory kind checking; the same neutral lowering used by
-programmatic sessions then expands them capture-safely, normalizes classes and
-instances, and derives cross-module recursion before source ratings/order are
-reapplied. Source checking returns one opaque annotated witness which owns the
-checked Inventory, synonym table, and backend together; the frontend can
+through common Inventory kind checking; the same transient prepared-expansion
+witness used by Djinn then expands them capture-safely and derives cross-module
+recursion before Exference normalizes classes and instances and reapplies
+source ratings/order. Source checking returns one opaque annotated witness
+which owns the checked Inventory, synonym table, and backend together; the
+frontend can
 reorder the exact checked names and attach finite ratings, but cannot combine
 an inventory with an independently prepared search dictionary. Alias-aware
 recursion metadata is attached to that Inventory without resealing it or

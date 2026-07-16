@@ -1974,6 +1974,186 @@ synonymTests = testGroup "type synonyms"
       TypeSynonym.expandTypeSynonyms freshStringVariable
           (TypeSynonym.preparedTypeSynonyms prepared) applied @?=
         Right (SharedType.TypeVariable "x")
+  , testCase "prepare one source-ordered operational inventory view" $ do
+      let intName = right $ mkIdentifier "Int"
+          identityName = right $ mkIdentifier "Identity"
+          phantomName = right $ mkIdentifier "Phantom"
+          captureName = right $ mkIdentifier "Capture"
+          firstName = right $ mkIdentifier "first"
+          secondName = right $ mkIdentifier "second"
+          directName = right $ mkIdentifier "Direct"
+          erasedName = right $ mkIdentifier "Erased"
+          leftName = right $ mkIdentifier "LeftRec"
+          rightName = right $ mkIdentifier "RightRec"
+          pairName = right $ mkIdentifier "PairCapture"
+          parameter identifier =
+            Declaration.TypeParameter identifier Nothing
+          constructor annotation name fields =
+            Declaration.DataConstructor annotation name fields
+          apply name argument = SharedType.TypeApplication
+            (SharedType.TypeConstructor name) argument
+          typeVariable = SharedType.TypeVariable
+          nominal = SharedType.TypeConstructor
+          intDeclaration = Declaration.AbstractTypeDeclaration
+            1 intName synonymProper
+          identity = Declaration.TypeSynonymDeclaration 2 identityName
+            [parameter "a"] $ typeVariable "a"
+          phantom = Declaration.TypeSynonymDeclaration 3 phantomName
+            [parameter "a"] $ nominal intName
+          captureBody = SharedType.ForallType ["x"] []
+            $ SharedType.FunctionType
+                (typeVariable "a") (typeVariable "x")
+          capture = Declaration.TypeSynonymDeclaration 4 captureName
+            [parameter "a"] captureBody
+          captureUse = apply captureName $ typeVariable "x"
+          value annotation name valueType = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature annotation name valueType
+          firstValue = value 5 firstName captureUse
+          secondValue = value 6 secondName captureUse
+          direct = Declaration.DataTypeDeclaration 7 directName []
+            [constructor 70 (right $ mkIdentifier "MkDirect")
+              [apply identityName $ nominal directName]]
+          erased = Declaration.DataTypeDeclaration 8 erasedName []
+            [constructor 80 (right $ mkIdentifier "MkErased")
+              [apply phantomName $ nominal erasedName]]
+          leftRecursive = Declaration.DataTypeDeclaration 9 leftName []
+            [constructor 90 (right $ mkIdentifier "MkLeft")
+              [apply identityName $ nominal rightName]]
+          rightRecursive = Declaration.DataTypeDeclaration 10 rightName []
+            [constructor 100 (right $ mkIdentifier "MkRight")
+              [apply identityName $ nominal leftName]]
+          pairCapture = Declaration.DataTypeDeclaration 11 pairName
+            [parameter "x"]
+            [constructor 110 (right $ mkIdentifier "MkPairCapture")
+              [captureUse, captureUse]]
+          declarations :: [Declaration.Declaration String Void Int]
+          declarations =
+            [ intDeclaration, identity, phantom, capture
+            , firstValue, secondValue, direct, erased
+            , leftRecursive, rightRecursive, pairCapture
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory declarations
+          expansion = right $ TypeSynonym.prepareInventoryExpansion
+            freshStringVariable inventory
+          expandedCapture = SharedType.ForallType ["x'"] []
+            $ SharedType.FunctionType
+                (typeVariable "x") (typeVariable "x'")
+          expected =
+            [ intDeclaration, identity, phantom, capture
+            , value 5 firstName expandedCapture
+            , value 6 secondName expandedCapture
+            , Declaration.DataTypeDeclaration 7 directName []
+                [constructor 70 (right $ mkIdentifier "MkDirect")
+                  [nominal directName]]
+            , Declaration.DataTypeDeclaration 8 erasedName []
+                [constructor 80 (right $ mkIdentifier "MkErased")
+                  [nominal intName]]
+            , Declaration.DataTypeDeclaration 9 leftName []
+                [constructor 90 (right $ mkIdentifier "MkLeft")
+                  [nominal rightName]]
+            , Declaration.DataTypeDeclaration 10 rightName []
+                [constructor 100 (right $ mkIdentifier "MkRight")
+                  [nominal leftName]]
+            , Declaration.DataTypeDeclaration 11 pairName [parameter "x"]
+                [constructor 110 (right $ mkIdentifier "MkPairCapture")
+                  [expandedCapture, expandedCapture]]
+            ]
+          prepared =
+            TypeSynonym.inventoryExpansionPreparedInventory expansion
+      TypeSynonym.preparedInventory prepared @?= inventory
+      TypeSynonym.preparedTypeSynonyms prepared @?=
+        right (TypeSynonym.prepareTypeSynonyms
+          freshStringVariable inventory)
+      TypeSynonym.inventoryExpansionDeclarations expansion @?= expected
+      TypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion @?=
+        Set.fromList [directName, leftName, rightName]
+  , testCase "do not force declaration annotations while expanding" $ do
+      let intName = right $ mkIdentifier "Int"
+          valueName = right $ mkIdentifier "value"
+          poison :: Int
+          poison = error "inventory expansion forced an annotation"
+          declarations :: [Declaration.Declaration String Void Int]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration
+                poison intName synonymProper
+            , Declaration.ValueDeclaration
+                $ Declaration.ValueSignature poison valueName
+                $ SharedType.TypeConstructor intName
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory declarations
+      case TypeSynonym.prepareInventoryExpansion
+          freshStringVariable inventory of
+        Left failure -> fail $ "annotation-only inventory failed: "
+          ++ show failure
+        Right expansion ->
+          map Declaration.declarationSubjectName
+              (TypeSynonym.inventoryExpansionDeclarations expansion) @?=
+            [intName, valueName]
+  , testCase "stop at the first attributed operational failure" $ do
+      let aliasName = right $ mkIdentifier "Alias"
+          captureName = right $ mkIdentifier "Capture"
+          higherName = right $ mkIdentifier "Higher"
+          firstName = right $ mkIdentifier "firstBad"
+          laterName = right $ mkIdentifier "laterCapture"
+          alias = Declaration.TypeSynonymDeclaration () aliasName
+            [Declaration.TypeParameter "a" Nothing]
+            $ SharedType.TypeVariable "a"
+          capture = Declaration.TypeSynonymDeclaration () captureName
+            [Declaration.TypeParameter "a" Nothing]
+            $ SharedType.ForallType ["x"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "a")
+                (SharedType.TypeVariable "x")
+          higher = Declaration.AbstractTypeDeclaration () higherName
+            $ Kind.FunctionKind
+                (Kind.FunctionKind synonymProper synonymProper)
+                synonymProper
+          malformed name = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () name
+            $ SharedType.TypeApplication
+                (SharedType.TypeConstructor higherName)
+                (SharedType.TypeConstructor aliasName)
+          later = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () laterName
+            $ SharedType.TypeApplication
+                (SharedType.TypeConstructor captureName)
+                (SharedType.TypeVariable "x")
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory
+            [alias, capture, higher, malformed firstName, later]
+          poisonLaterExpansion reserved binder
+            | binder == "x" = error "later declaration was expanded"
+            | otherwise = freshStringVariable reserved binder
+          expected = TypeSynonym.InventoryDeclarationExpansionError
+            3 firstName
+            $ TypeSynonym.UnsaturatedTypeSynonym aliasName 1 0
+      case TypeSynonym.prepareInventoryExpansion
+          poisonLaterExpansion inventory of
+        Left failure -> failure @?= expected
+        Right _ -> fail "an unsaturated operational alias was prepared"
+  , testCase "attribute instance expansion failures to their class" $ do
+      let aliasName = right $ mkIdentifier "Alias"
+          className = right $ mkIdentifier "HigherClass"
+          alias = Declaration.TypeSynonymDeclaration () aliasName
+            [Declaration.TypeParameter "a" Nothing]
+            $ SharedType.TypeVariable "a"
+          typeClass = Declaration.ClassDeclaration () className
+            [Declaration.TypeParameter "f" $ Just
+              $ Kind.FunctionKind synonymProper synonymProper]
+            [] []
+          typeInstance = Declaration.InstanceDeclaration () [] []
+            $ Constraint className [SharedType.TypeConstructor aliasName]
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory [alias, typeClass, typeInstance]
+          expected = TypeSynonym.InventoryDeclarationExpansionError
+            2 className
+            $ TypeSynonym.UnsaturatedTypeSynonym aliasName 1 0
+      case TypeSynonym.prepareInventoryExpansion
+          freshStringVariable inventory of
+        Left failure -> failure @?= expected
+        Right _ -> fail "an unsaturated instance alias was prepared"
   , testCase "transform annotations without rebuilding prepared aliases" $ do
       let identityName = right $ mkIdentifier "Identity"
           typeName = right $ mkIdentifier "T"
@@ -2397,6 +2577,11 @@ synonymTests = testGroup "type synonyms"
       case TypeSynonym.prepareInventory freshStringVariable inventory of
         Left failure -> failure @?= expected
         Right _ -> fail "an invalid alias escaped prepared-inventory sealing"
+      case TypeSynonym.prepareInventoryExpansion
+          freshStringVariable inventory of
+        Left failure -> failure @?=
+          TypeSynonym.InventorySynonymPreparationError expected
+        Right _ -> fail "an invalid alias escaped inventory expansion"
   , testCase "reject aliases that compete with intrinsic constructors" $ do
       let declaration :: Declaration.Declaration String Void ()
           declaration = Declaration.TypeSynonymDeclaration () functionName

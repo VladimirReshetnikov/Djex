@@ -104,6 +104,8 @@ tests =
           testRawEnvironmentRecursionPreflight)
     , ("validate unused synonyms before recursion preflight",
           testPreparedSynonymValidationOwnership)
+    , ("preserve raw operational synonym errors",
+          testOperationalSynonymCompatibilityError)
     , ("separate synonym saturation from kind errors",
           testSynonymSaturationBoundary)
     , ("elaborate prepared query synonyms without changing compatibility views",
@@ -1859,6 +1861,30 @@ testPreparedSynonymValidationOwnership = do
         Left failure -> fail $ "unused bad synonym produced the wrong failure: " ++
             show failure
         Right _ -> fail "an unused bad synonym reached recursion preflight"
+
+-- The shared expansion error carries an index and subject, but the exported
+-- raw Djinn API historically projects both synonym phases to this constructor.
+testOperationalSynonymCompatibilityError :: IO ()
+testOperationalSynonymCompatibilityError = do
+    let proper = KStar
+        pairKind = KArrow proper $ KArrow proper proper
+        higherKind = KArrow pairKind proper
+        environment = RawEnvironment.Environment
+            [ ("Pair", (["a", "b"],
+                HTTuple [HTVar "a", HTVar "b"], pairKind))
+            , ("Higher", ([], HTAbstract "Higher" higherKind, higherKind))
+            ]
+            [("bad", HTApp (HTCon "Higher") $ HTCon "Pair")] []
+    case prepareEnvironment environment of
+        Left (InvalidSynthesisTypeSynonyms
+                (SharedTypeSynonym.UnsaturatedTypeSynonym
+                  name expected supplied)) -> do
+            assertEqual "the alias identity is retained" (sharedName "Pair") name
+            assertEqual "the declared arity is retained" 2 expected
+            assertEqual "the supplied arity is retained" 0 supplied
+        Left failure -> fail $
+            "operational alias produced the wrong raw failure: " ++ show failure
+        Right _ -> fail "an unsaturated value alias reached Djinn sealing"
 
 -- Grounding must recursively eliminate every unification variable.  Foo's
 -- inferred kind is reused after kind inference has reset its local IntMap;

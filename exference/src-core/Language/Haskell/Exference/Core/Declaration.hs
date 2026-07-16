@@ -26,6 +26,8 @@ module Language.Haskell.Exference.Core.Declaration
   , preparedNeutralBackend
   , erasePreparedSynthesisAnnotations
   , deriveRecursiveDataMetadata
+  , toSynthesisTypeSynonym
+  , fromSynthesisTypeSynonym
   , toSynthesisFunctionBinding
   , fromSynthesisFunctionBinding
   , toSynthesisClassDeclaration
@@ -917,6 +919,35 @@ validateShared
   -> Either SynthesisDeclarationError ()
 validateShared = either (Left . InvalidSharedDeclaration) Right
   . SharedDeclaration.validateDeclaration
+
+-- | Build a checked shared synonym declaration from Exference's historical
+-- type vocabulary.  Keeping this alongside the other declaration adapters
+-- makes the parser-free core the sole authority for which parameter shapes
+-- the compatibility model can represent.
+toSynthesisTypeSynonym
+  :: QualifiedName
+  -> [TVarId]
+  -> HsType
+  -> Either SynthesisDeclarationError SynthesisDeclaration
+toSynthesisTypeSynonym name parameters body = checked $ do
+  convertedBody <- convertedType body
+  Right $ SharedDeclaration.TypeSynonymDeclaration
+    NoDeclarationMetadata name (map flexibleParameter parameters) convertedBody
+
+-- | Lower a checked shared synonym to the lossless fields represented by the
+-- historical frontend record.  Explicit parameter kinds and rigid parameters
+-- are rejected here consistently with class and datatype lowering.
+fromSynthesisTypeSynonym
+  :: SynthesisDeclaration
+  -> Either SynthesisDeclarationError (QualifiedName, [TVarId], HsType)
+fromSynthesisTypeSynonym declaration = do
+  validateShared declaration
+  case declaration of
+    SharedDeclaration.TypeSynonymDeclaration _ name parameters body ->
+      (name,,)
+        <$> mapM plainFlexibleParameter parameters
+        <*> loweredType body
+    _ -> Left ExpectedTypeSynonymDeclaration
 
 convertedType
   :: HsType

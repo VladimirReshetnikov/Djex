@@ -1629,6 +1629,21 @@ tests = testGroup "Exference"
           tdecl_name lowered @?= tdecl_name declaration
           tdecl_params lowered @?= tdecl_params declaration
           tdecl_result lowered @?= tdecl_result declaration
+      , testCase "core type synonym lowering owns compatibility policy" $ do
+          let synonymName = toSynthesisName $ name "Alias"
+              variable = SharedType.FlexibleVariable 0
+              explicitParameter = SharedDeclaration.TypeParameter variable
+                $ Just SharedKind.ProperTypeKind
+              rigidParameter = SharedDeclaration.TypeParameter
+                (SharedType.RigidVariable 1) Nothing
+              synonym parameter = SharedDeclaration.TypeSynonymDeclaration
+                NoDeclarationMetadata synonymName [parameter]
+                (SharedType.TypeVariable
+                  $ SharedDeclaration.parameterVariable parameter)
+          fromSynthesisTypeSynonym (synonym explicitParameter) @?=
+            Left (ExplicitParameterKindUnsupported variable)
+          fromSynthesisTypeSynonym (synonym rigidParameter) @?=
+            Left (RigidDataParameter 1)
       , testCase "core environments round-trip without exporting inflated instances" $ do
           let cls = HsTypeClass (name "C") [0] []
               instanceDeclaration = HsInstance []

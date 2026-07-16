@@ -940,6 +940,22 @@ The parser-free library consequently contains one fewer module, while its
 backend-specific closure relations, diagnostic contracts, and historical
 count projections remain unchanged.
 
+## Post-fold synonym-adapter consolidation
+
+**Completed on 2026-07-15:** the Haskell-source frontend independently built,
+validated, and lowered shared type-synonym declarations even though the core
+declaration adapter already owned the identical compatibility restrictions for
+class and datatype parameters. In particular, both layers separately rejected
+explicit parameter kinds and rigid parameters with the same diagnostics.
+
+The parser-free declaration adapter now owns checked synonym construction and
+lossless field lowering alongside its value, class, instance, and datatype
+operations. The HSE layer merely wraps and unwraps its historical `HsTypeDecl`
+record. This leaves validation order, source type conversion, and parameter
+representability under one authority without moving HSE syntax or parser
+dependencies into the core. Regressions pin the shared round trip and the two
+lossy-parameter failures at that core boundary.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

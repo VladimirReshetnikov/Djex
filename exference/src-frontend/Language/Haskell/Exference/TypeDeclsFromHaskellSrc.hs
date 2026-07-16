@@ -82,40 +82,17 @@ uniqueTypeDeclMap declarations = M.fromList
 toSynthesisTypeDeclaration
   :: HsTypeDecl
   -> Either SynthesisDeclarationError SynthesisDeclaration
-toSynthesisTypeDeclaration declaration = do
-  body <- either (Left . DeclarationTypeConversionError) Right
-    $ toSynthesisType $ tdecl_result declaration
-  let shared = SharedDeclaration.TypeSynonymDeclaration
-        NoDeclarationMetadata
-        (tdecl_name declaration)
-        [ SharedDeclaration.TypeParameter
-            (SharedType.FlexibleVariable parameter) Nothing
-        | parameter <- tdecl_params declaration
-        ]
-        body
-  either (Left . InvalidSharedDeclaration) (const $ Right shared)
-    $ SharedDeclaration.validateDeclaration shared
+toSynthesisTypeDeclaration declaration = toSynthesisTypeSynonym
+  (tdecl_name declaration)
+  (tdecl_params declaration)
+  (tdecl_result declaration)
 
 fromSynthesisTypeDeclaration
   :: SynthesisDeclaration
   -> Either SynthesisDeclarationError HsTypeDecl
 fromSynthesisTypeDeclaration declaration = do
-  either (Left . InvalidSharedDeclaration) Right
-    $ SharedDeclaration.validateDeclaration declaration
-  case declaration of
-    SharedDeclaration.TypeSynonymDeclaration _ name parameters body ->
-      HsTypeDecl name
-        <$> mapM plainParameter parameters
-        <*> either (Left . DeclarationTypeConversionError) Right
-              (fromSynthesisType body)
-    _ -> Left ExpectedTypeSynonymDeclaration
- where
-  plainParameter parameter = case SharedDeclaration.parameterKind parameter of
-    Just _ -> Left $ ExplicitParameterKindUnsupported
-      $ SharedDeclaration.parameterVariable parameter
-    Nothing -> case SharedDeclaration.parameterVariable parameter of
-      SharedType.FlexibleVariable variable -> Right variable
-      SharedType.RigidVariable variable -> Left $ RigidDataParameter variable
+  (name, parameters, body) <- fromSynthesisTypeSynonym declaration
+  Right $ HsTypeDecl name parameters body
 
 applyTypeDecls :: Map QualifiedName (Either String HsTypeDecl)
                -> HsType 

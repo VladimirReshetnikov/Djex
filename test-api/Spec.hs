@@ -10,6 +10,7 @@ import Data.List (isInfixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
+import Numeric.Natural (Natural)
 
 import Djinn.Core (parseHType)
 import qualified Djinn.Internal.LJTFormula as LJT
@@ -84,6 +85,11 @@ projectionSignatures =
   (TypeSynonym.checkPreparedTypeSynonymSaturation
     :: TypeSynonym.PreparedInventory Int ()
     -> Type Int
+    -> Either (TypeSynonym.SynonymExpansionError Int) ()) `seq`
+  (TypeSynonym.checkPreparedTypeSynonymApplicationSaturation
+    :: TypeSynonym.PreparedInventory Int ()
+    -> Name
+    -> Natural
     -> Either (TypeSynonym.SynonymExpansionError Int) ()) `seq`
   (TypeSynonym.elaboratePreparedTypes
     :: TypeSynonym.FreshVariable Int

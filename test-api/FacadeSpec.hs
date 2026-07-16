@@ -186,9 +186,11 @@ facadeTests = testGroup "public Djex facade"
           fresh _ _ = Nothing
           goal :: ExferenceType
           goal = TypeVariable $ FlexibleVariable 0
-      assertBool "the facade did not reexport synonym elaboration"
-        $ isRight $ prepareTypeSynonyms fresh inventory
+      _ <- expectRight $ prepareTypeSynonyms fresh inventory
       prepared <- expectRight $ prepareInventory fresh inventory
+      unknown <- expectRight $ mkIdentifier "UnknownAlias"
+      checkPreparedTypeSynonymApplicationSaturation prepared unknown 0 @?=
+        Right ()
       checkPreparedTypeSynonymSaturation prepared goal @?= Right ()
       elaboratePreparedType fresh prepared ProperTypeKind goal @?= Right goal
       elaboratePreparedTypes fresh prepared [(ProperTypeKind, goal)] @?=

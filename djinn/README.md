@@ -386,8 +386,8 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn` (`src-frontend/Djinn.hs`) | CLI frontend: settings, command parser, and printing, built on `Djinn.Core`. |
 | `Djinn.Internal.REPL` | Haskeline loop and EOF handling. |
 | `Djinn.Internal.HCheck` | Pre-cache five-operation raw compatibility facade over shared kind inference. |
-| `Djinn.Internal.HCheck.Implementation` | Private raw-compatibility kind-check cache and trusted Inventory-assumption bridge. |
-| `Djinn.Internal.Environment` | Authoritative Inventory preparation plus native shared-type checking and private class, synonym, formula, and ordered global-premise indexes. |
+| `Djinn.Internal.HCheck.Implementation` | Private transient raw-compatibility checker plus the callback-based raw-tree worker used by sealed queries. |
+| `Djinn.Internal.Environment` | Authoritative prepared witness plus native shared-type checking and private class, formula, and ordered global-premise indexes. |
 | `Djinn.Internal.HIdentifier` | String-compatible parser adapter over the validated shared name and operator rules in `djex`. |
 | `Djinn.Internal.HTypes` | Shared kind/type compatibility views, type parser, raw formula adapter, and proof-term conversion/cleanup. Ordinary `HType` values own the shared type tree natively. |
 | `Djinn.Internal.Type` | Native shared-type validation/canonicalization plus checked projection to and from Djinn's historical source types. |
@@ -412,13 +412,16 @@ executable's `app/` source root contains only its launcher, so
 the executable cannot accidentally compile library modules as home modules.
 
 The exposed `Djinn.Internal.HCheck` deliberately retains only the five raw
-operations from Djinn's pre-cache checker surface. Its sealed compatibility
-cache pairs legacy synonym spellings/arities with kind assumptions derived
-from one exact Inventory, so its constructor and operations live in the
-package-private `Djinn.Internal.HCheck.Implementation` module. Native shared
-types instead preflight saturation against the Inventory's opaque shared
-synonym table and use its exact kind assumptions directly; neither path can
-assemble unrelated halves or depend on query-time cache structure.
+operations from Djinn's pre-cache checker surface. Editable raw-environment
+validation and each standalone operation prepare one transient compatibility
+checker containing legacy synonym spellings/arities and inferred kind
+assumptions. Sealed sessions do not retain that projection: their callback-based
+raw-tree walk asks the exact prepared witness about each constructor-headed
+application, then sends the complete converted batch to the Inventory's kind
+assumptions. Native shared types use the same witness directly. Thus both query
+paths have one semantic authority while the raw path preserves application-head,
+tuple, arrow, union, and whole-batch saturation order. The compatibility
+reporter then retains its historical first independently invalid source label.
 
 The REPL state stores only an opaque `DjinnSession`; every declaration or
 deletion produces and validates a fully resealed replacement before installing
@@ -520,13 +523,13 @@ the foundation's transient prepared-expansion witness. That witness expands
 operational declarations in source order, attributes a failure to its exact
 declaration, and classifies recursive datatypes only from the same
 operationally alias-free stream. Djinn adds only its policy of rejecting a
-nonempty recursion set. The
-resulting raw compatibility checker, synonym table, nominal class index,
-checked formula
-translator, and ordered global proof premises are projections of that same
-Inventory rather than a second independently inferred environment. Native
-saturation is a `TypeSynonym` table operation; raw `HType` retains one separate
-source-order view traversal solely to preserve its malformed-input diagnostics.
+nonempty recursion set. The resulting sealed state has four products: the
+opaque prepared Inventory/synonym witness, nominal class index, checked formula
+compiler, and ordered global proof premises. There is no session-retained raw
+kind checker or seal-time raw `Environment` projection. Native saturation is a
+prepared-witness `TypeSynonym` operation; raw `HType` retains one separate
+source-order traversal solely to preserve its malformed-input diagnostics,
+with individual alias-head facts supplied by that same witness.
 Global assumptions are translated once while sealing; only a query goal and
 its instantiated class methods still vary per search. Historical raw search
 tables are reconstructed from the Inventory only for compatibility inspection,
@@ -598,7 +601,7 @@ operational completion.
 The raw proof/search `Djinn.Internal.*` modules used by compatibility tests and
 research tooling remain exposed by `djex`, but their constructors can
 violate these invariants and carry no stability promise. The checked
-declaration/type and prepared-kind-check implementation modules, plus the
+declaration/type and raw kind-check implementation modules, plus the
 frontend-only Help and REPL modules, are deliberately not exposed. Raw formula
 translation is nevertheless
 total as a checked operation over finite inputs: `prepareTypeFormulaTranslator`

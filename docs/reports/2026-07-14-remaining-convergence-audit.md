@@ -215,7 +215,9 @@ also reprojects embedded kinds from the inferred inventory, fixing a split-brain
 bug in which a forged raw class parameter kind could override the inventory
 during context checking. `PreparedEnvironment` now contains the shared opaque
 Inventory/synonym witness and only its justified private class, ordered
-global-premise, kind, and formula caches. Global functions are translated once
+global-premise, and formula caches. A later 2026-07-16 cleanup removed the
+remaining sealed compatibility kind cache, making the witness itself the only
+kind and synonym authority. Global functions are translated once
 while sealing rather than once per query; instantiated class methods remain
 query-dependent. Transactional edits rebuild all caches before publishing the
 replacement session.
@@ -1673,9 +1675,45 @@ empty/singleton/ordered batches, and shared free-variable kind scope. Separate
 witnesses with the same alias name but
 different definitions elaborate independently, and both functor-erased and
 datatype-metadata-adjusted witnesses retain identical query semantics. Public
-facade signature and execution tests pin all three prepared operations;
+facade signature and execution tests pin all four prepared operations;
 existing Djinn, Exference, and cross-backend synonym/provenance regressions pin
 the unchanged adapter behavior.
+
+## Djinn sealed kind-authority consolidation
+
+**Completed on 2026-07-16:** Djinn's `PreparedEnvironment` still retained a
+`PreparedKindCheck` beside the exact shared prepared-inventory witness. The
+cache copied synonym spellings/arities into a string-keyed list and paired them
+with the same Inventory assumptions already owned by the witness. Constructing
+it also required a complete transient projection back to Djinn's raw
+`Environment`, although no other sealed-session operation consumed that
+projection.
+
+The shared synonym layer now uses one narrow application-head saturation worker
+and exposes it only through the opaque prepared witness. Djinn's existing raw
+`HType` traversal is parameterized by such a head check: it still visits
+application heads before arguments and preserves tuple, arrow, union, and
+whole-batch order, but its alias facts come from the sealed witness. Malformed
+raw constructor spellings are ignored only during alias lookup so later
+structural conversion retains ownership of their diagnostics. The complete
+converted batch is then checked once against the witness Inventory's kind
+assumptions, preserving shared free-variable scope and leaving overapplication
+to kind inference. Intrinsically non-negative arities now remain `Natural`
+through the shared head check and Djinn's transient raw checker; only the
+established `Int` fields of `UnsaturatedTypeSynonym` receive an explicit
+saturating compatibility projection.
+
+`PreparedEnvironment` consequently retains exactly four products: the opaque
+prepared Inventory/synonym witness, nominal class index, ordered global proof
+premises, and prepared formula compiler. Sealing no longer reconstructs a raw
+environment merely to discard it. `PreparedKindCheck` remains only where it
+still earns its shape: transient validation of the editable historical raw
+environment and the five-operation compatibility checker. Regressions pin
+nested declaration-node saturation, application-head precedence over malformed
+arguments, continued traversal past malformed non-alias names, later structural
+ownership of an otherwise unmasked malformed name, first-invalid-obligation
+reporting, overapplication as a kind error, class-arity precedence, arities
+beyond `Int`, and public facade signatures for the narrow witness operation.
 
 ## Validation gates for each stage
 

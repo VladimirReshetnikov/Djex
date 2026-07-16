@@ -96,6 +96,8 @@ forbiddenPreparedHCheckAttempts =
       HCheck.htCheckTypeKindPrepared `seq` ())
   , ("htCheckTypesKindsPrepared", "htCheckTypesKindsPrepared unexpectedly exposed",
       HCheck.htCheckTypesKindsPrepared `seq` ())
+  , ("htCheckTypesKindsWith", "htCheckTypesKindsWith unexpectedly exposed",
+      HCheck.htCheckTypesKindsWith `seq` ())
   , ("htInferClassKindsPrepared", "htInferClassKindsPrepared unexpectedly exposed",
       HCheck.htInferClassKindsPrepared `seq` ())
   , ("preparedEnvironmentKindCheck",

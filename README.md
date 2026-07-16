@@ -58,11 +58,14 @@ penalty-only environment entrance is gone. Djinn's `HKind` is a
 private-representation compatibility newtype over shared `Kind Int`; bundled
 patterns preserve `HKind(..)` imports and the historical `*`/`kN` rendering,
 while all kind bridging and grounding operate on the single shared tree.
-Prepared Djinn kind-check caches and their trusted Inventory bridge are private
-implementation details rather than authority exposed by the raw compatibility
-module. Djinn's LJT lowering likewise constructs and simplifies the shared
-generated `Expression`/`Pattern` tree directly; `HExpr` and `HPat` remain only
-as projections for historical low-level callers. Djinn's raw and native class
+Djinn's sealed sessions retain no parallel compatibility kind cache: raw
+queries preserve their historical `HType` traversal while consulting the exact
+prepared witness for alias heads and Inventory kind assumptions. Standalone raw
+HCheck calls and editable raw-environment validation use a transient
+compatibility checker, hidden behind the historical facade. Djinn's LJT lowering
+likewise constructs and simplifies the shared generated `Expression`/`Pattern`
+tree directly; `HExpr` and `HPat` remain only as projections for historical
+low-level callers. Djinn's raw and native class
 contexts also share one sealed class lookup and capture-avoiding method
 instantiation; the raw API projects only its final methods back to `HType`,
 and the obsolete internal raw substitution and class-index projections have
@@ -279,10 +282,12 @@ and no-recursion checks; the mutable raw
 `Djinn.Core.Environment` no longer crosses the
 curated facade or survives inside `PreparedEnvironment`. Synonyms are expanded
 for saturation and recursive datatype validation before ordered global
-assumptions are translated once into proof premises. Class lookup, kinds,
-synonyms, formula definitions, and those premises are private indexes of the
-same Inventory; historical raw declaration tables are derived only when a
-compatibility caller asks to display them. At query time Djinn elaborates the
+assumptions are translated once into proof premises. The sealed environment
+retains exactly the prepared Inventory/synonym witness, nominal class lookup,
+formula compiler, and those ordered premises; kinds and aliases are consumed
+through the witness rather than copied into backend caches. Historical raw
+declaration tables are derived only when a compatibility caller asks to display
+them. At query time Djinn elaborates the
 goal and all class arguments as one shared kind scope, instantiates class
 methods in that same shared type tree, and compiles the alias-free goal and
 methods directly into formulas through one representation-neutral prepared
@@ -497,10 +502,13 @@ lookahead policies over either backend's result envelope. `TypeRender` prints
 shared types and constraints from tagged variable-name hints without collapsing
 flexible and rigid identities.
 `TypeSynonym` prepares aliases from the retained neutral inventory and owns
-prepared-witness operations for minimum-saturation preflight, capture-avoiding
-expansion, and pre/post kind checks that both backend adapters share. The
-lower-level table operations remain compatibility and focused-testing seams;
-sealed backend paths no longer extract a table only to hand it back. Kind
+prepared-witness operations for whole-type and individual-application
+minimum-saturation preflight, capture-avoiding expansion, and pre/post kind
+checks that both backend adapters share. The narrow application operation lets
+Djinn retain its raw declaration-node traversal and diagnostic order without
+retaining a second string-keyed arity table. The lower-level table operations
+remain compatibility and focused-testing seams; sealed backend paths no longer
+extract a table only to hand it back. Kind
 inference is the single structural validator for each elaboration phase. Its
 batch operation preserves source order while assigning one kind to each free
 variable shared by a goal and its separate context arguments. The underlying

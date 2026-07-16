@@ -219,7 +219,12 @@ special type nodes.
 checked `Inventory` and expands them with simultaneous, capture-avoiding
 substitution. Its non-expanding saturation preflight consults that same opaque
 table, rejects partial applications in source order, and leaves legal
-overapplication to kind checking. Full elaboration rejects cycles and
+overapplication to kind checking. Whole-type and individual-application
+operations are both available through the opaque prepared witness, so a
+compatibility adapter can preserve its own syntax traversal without extracting
+or copying synonym arities. Application arities remain exact `Natural` counts;
+only the established machine-sized error payload applies an explicit saturating
+projection. Full elaboration rejects cycles and
 kind-checks both before and after expansion so a phantom parameter cannot
 erase an invalid argument; the kind checker is also the single structural
 validator for each phase. Backends provide only a fresh variable allocator

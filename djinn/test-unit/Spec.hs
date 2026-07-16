@@ -1124,6 +1124,8 @@ testPreparedFunctionPremises = do
         (RawEnvironment.preparedEnvironmentFunctionPremises nativePrepared)
     assertEqual "the compatibility projection changed the sealed declarations"
         environment (RawEnvironment.preparedEnvironmentSource prepared)
+    assertEqual "native preparation lost its on-demand raw projection"
+        environment (RawEnvironment.preparedEnvironmentSource nativePrepared)
     firstResult <- expectRight $ inhabitGeneratedPrepared
         defaultQueryOptions prepared [] "answer" alias
     secondResult <- expectRight $ inhabitGeneratedPrepared
@@ -1346,11 +1348,11 @@ testSynonymSaturationBoundary = do
 
     needle `notElemText` haystack = not $ needle `isInfixOf` haystack
 
--- Prepared sessions retain a shared synonym table for operational queries,
--- while the historical context-resolution surface continues to return the
--- caller's alias-bearing raw spelling. This distinction keeps requests and
--- compatibility inspection source-oriented without making proof-search atoms
--- depend on how an alias happened to be written.
+-- Prepared sessions retain an exact shared Inventory/synonym witness for
+-- operational queries, while the historical context-resolution surface
+-- continues to return the caller's alias-bearing raw spelling. This distinction
+-- keeps requests and compatibility inspection source-oriented without making
+-- proof-search atoms depend on how an alias happened to be written.
 testPreparedQuerySynonyms :: IO ()
 testPreparedQuerySynonyms = do
     let variable = HTVar "a"
@@ -1360,10 +1362,12 @@ testPreparedQuerySynonyms = do
         valueMethod valueType = HTArrow valueType valueType
     withIdentity <- expectRight $ declare
         (TypeSynonym "Identity" ["a"] variable) standardEnvironment
+    withFirst <- expectRight $ declare
+        (TypeSynonym "First" ["a", "b"] variable) withIdentity
     environment <- expectRight $ declare
         (ClassDecl "ValueAlias" ["x"]
             [("valueAlias", valueMethod $ HTVar "x")])
-        withIdentity
+        withFirst
     prepared <- expectShownRight $ prepareEnvironment environment
     sharedBool <- expectShownRight $ toSynthesisType boolType
     sharedVoid <- expectShownRight $ toSynthesisType voidType
@@ -1444,6 +1448,97 @@ testPreparedQuerySynonyms = do
             `isInfixOf` message
       Right _ -> fail
         "an unsaturated declaration-only query reached proof search"
+
+    -- The sealed adapter walks declaration-only raw nodes even though they
+    -- cannot cross the shared query boundary. This keeps the historical local
+    -- saturation failure ahead of the later projection failure.
+    let nestedDeclarationFailure = HTUnion
+            [("Only", [HTCon "Identity"])]
+    case inhabitGeneratedPrepared defaultQueryOptions prepared []
+        "nestedDeclarationFailure" nestedDeclarationFailure of
+      Left message -> assertBool
+        "raw declaration traversal lost nested synonym saturation"
+        $ "Type synonym Identity expects at least 1 argument(s), but got 0"
+            `isInfixOf` message
+      Right _ -> fail
+        "an unsaturated alias inside HTUnion reached projection"
+
+    -- Application heads are checked before their arguments. In particular,
+    -- a partial alias keeps its arity diagnostic even if the supplied argument
+    -- is not itself representable in the checked shared name vocabulary.
+    let partialHeadFailure = HTApp
+            (HTCon "First") (HTCon "not a type")
+    case inhabitGeneratedPrepared defaultQueryOptions prepared []
+        "partialHeadFailure" partialHeadFailure of
+      Left message -> assertBool
+        "a malformed argument overtook raw head saturation"
+        $ "Type synonym First expects at least 2 argument(s), but got 1"
+            `isInfixOf` message
+      Right _ -> fail
+        "a partial raw alias with a malformed argument reached proof search"
+
+    -- A malformed constructor is not a candidate alias name. Ignore it only
+    -- during this preflight walk so a later alias retains saturation
+    -- precedence; structural conversion still owns the malformed name when
+    -- no earlier compatibility rule fails.
+    let malformedBeforeAlias = HTTuple
+            [HTCon "not a type", HTCon "Identity"]
+    case inhabitGeneratedPrepared defaultQueryOptions prepared []
+        "malformedBeforeAlias" malformedBeforeAlias of
+      Left message -> assertBool
+        "raw name parsing stopped the saturation walk"
+        $ "Type synonym Identity expects at least 1 argument(s), but got 0"
+            `isInfixOf` message
+      Right _ -> fail
+        "a later unsaturated alias was hidden by raw name parsing"
+
+    -- Ignoring a malformed spelling during alias lookup delegates rather than
+    -- suppresses its error: with no later saturation failure, checked raw-type
+    -- conversion remains the diagnostic owner.
+    case inhabitGeneratedPrepared defaultQueryOptions prepared []
+        "malformedOnly" (HTCon "not a type") of
+      Left message -> assertBool "raw malformed-name ownership was lost"
+        $ "InvalidHTypeName" `isInfixOf` message
+      Right _ -> fail "a malformed raw constructor reached proof search"
+
+    -- The joint batch sees the later partial alias during saturation, then the
+    -- compatibility reporter retries each obligation to retain its precise
+    -- source label. The earlier malformed goal must therefore remain the
+    -- published failure rather than the context's joint-batch error.
+    case inhabitGeneratedPrepared defaultQueryOptions prepared
+        [context "ValueAlias" [HTCon "Identity"]]
+        "firstInvalidObligation" (HTCon "not a type") of
+      Left message -> do
+        assertBool "an earlier malformed goal lost batch precedence"
+            $ "InvalidHTypeName" `isInfixOf` message
+        assertBool "a later context saturation error escaped the reporter"
+            $ "Type synonym Identity" `notElemText` message
+      Right _ -> fail "two invalid raw obligations reached proof search"
+
+    -- Minimum saturation accepts extra arguments; the shared kind checker
+    -- remains responsible for rejecting this proper-result synonym as a
+    -- function. This is the raw PreparedEnvironment path, complementing the
+    -- stable source-query boundary above.
+    let overappliedIdentity = HTApp (identity boolType) voidType
+    case inhabitGeneratedPrepared defaultQueryOptions prepared []
+        "overappliedIdentity" overappliedIdentity of
+      Left message -> do
+        assertBool "raw prepared overapplication was called unsaturated"
+            $ "expects at least" `notElemText` message
+        assertBool "raw prepared overapplication skipped kind inference"
+            $ "KindMismatch" `isInfixOf` message
+      Right _ -> fail "an overapplied raw alias reached proof search"
+
+    -- Context lookup and exact class arity precede every inspection of the
+    -- goal tree, including an otherwise immediate alias-saturation failure.
+    case inhabitGeneratedPrepared defaultQueryOptions prepared
+        [context "ValueAlias" []]
+        "classArityFirst" (HTCon "Identity") of
+      Left message -> assertBool
+        "goal saturation overtook class arity"
+        $ "Class ValueAlias expects 1 type argument(s), but got 0"
+            `isInfixOf` message
+      Right _ -> fail "a bad raw class arity reached type checking"
 
     -- Raw callers historically resolve every context before inspecting the
     -- goal tree. Keep that observable order at the compatibility preflight:

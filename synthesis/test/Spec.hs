@@ -2276,9 +2276,20 @@ synonymTests = testGroup "type synonyms"
           tableCheck = TypeSynonym.checkTypeSynonymSaturation aliases
           witnessCheck =
             TypeSynonym.checkPreparedTypeSynonymSaturation prepared
+          witnessApplicationCheck =
+            TypeSynonym.checkPreparedTypeSynonymApplicationSaturation prepared
           assertCheck source result = do
             tableCheck source @?= result
             witnessCheck source @?= result
+          assertApplication name supplied result =
+            witnessApplicationCheck name supplied @?= result
+          beyondInt = fromIntegral (maxBound :: Int) + 1 :: Natural
+      assertApplication firstName 0 $ expected firstName 2 0
+      assertApplication firstName 1 $ expected firstName 2 1
+      assertApplication firstName 2 $ Right ()
+      assertApplication firstName 3 $ Right ()
+      assertApplication firstName beyondInt $ Right ()
+      assertApplication className 0 $ Right ()
       assertCheck first $ expected firstName 2 0
       assertCheck (apply (apply first second) variable) $
         expected secondName 1 0

@@ -39,10 +39,9 @@ import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck.Implementation
     ( PreparedKindCheck
     , htCheckTypePrepared
-    , htCheckTypesKindsPrepared
+    , htCheckTypesKindsWith
     , htInferClassKindsPrepared
     , prepareKindEnvironment
-    , prepareKindCheckWithAssumptions
     )
 import Djinn.Internal.HTypes
 import Djinn.Internal.LJTFormula (Formula, Symbol(..))
@@ -66,13 +65,12 @@ data Environment = Environment {
 
 -- | One authoritative shared inventory and the private proof-search indexes
 -- derived from it. The constructor is private, so cached class lookup,
--- translated global premises, the raw compatibility kind checker, synonyms,
--- and formula definitions cannot drift away from their declarations. Native
--- kind checks consume the Inventory assumptions and opaque synonym table
--- directly rather than this legacy string-keyed cache.
+-- translated global premises, synonyms, and formula definitions cannot drift
+-- away from their declarations. Raw compatibility queries retain their syntax
+-- traversal but consult the Inventory's assumptions and alias table directly;
+-- no second kind/synonym cache survives session sealing.
 data PreparedEnvironment = PreparedEnvironment
     PreparedSynthesisInventory
-    PreparedKindCheck
     (Map.Map SharedName.Name SynthesisClassDefinition)
     [(Symbol, Formula)]
     PreparedFormulaCompiler
@@ -179,23 +177,21 @@ prepareEnvironment
 prepareEnvironment environment = do
     declarations <- synthesisDeclarations environment
     inventory <- synthesisInventory declarations
-    sourceDeclarations <- mapM preflightDeclaration declarations
+    mapM_ preflightDeclaration declarations
     expansion <- prepareInventoryExpansion inventory
-    projected <- projectSynthesisEnvironment
-        (SharedInventory.inventoryKindAssumptions inventory)
-        sourceDeclarations
-    sealPreparedEnvironment projected expansion
+    sealPreparedEnvironment expansion
 
--- | Validate a neutral environment once, then derive Djinn's compatibility
--- projection from the resulting inventory. Conversion is deliberately split
--- into phases: every declaration first crosses Djinn's lexical/feature
--- boundary in source order; explicit kinds are then grounded without
--- rebuilding the environment; finally the shared kind assumptions become the
--- sole authority for every kind embedded in Djinn's raw representation.
+-- | Validate a neutral environment once and seal it without constructing a
+-- raw Djinn environment. Conversion is deliberately split into phases: every
+-- declaration first crosses Djinn's lexical/feature boundary in source order,
+-- then explicit kinds are grounded once before Inventory preparation. The
+-- historical raw projection is reconstructed from that Inventory only when a
+-- compatibility caller requests it.
 --
--- Synonym declarations stay in the authoritative Inventory. The synonym
--- table and formula translator are derived caches, while raw declaration
--- tables are reconstructed only for compatibility inspection. Aliases are
+-- Synonym declarations stay in the authoritative Inventory, whose prepared
+-- witness owns their exact table. The formula translator is a derived cache,
+-- while raw declaration tables are reconstructed only for compatibility
+-- inspection. Aliases are
 -- expanded across every declaration before sealing, both to enforce Haskell's
 -- saturation rule and to classify recursive datatypes by their actual
 -- (alias-free) fields.
@@ -203,14 +199,13 @@ prepareSynthesisEnvironment
     :: SynthesisEnvironment
     -> Either SynthesisEnvironmentError PreparedEnvironment
 prepareSynthesisEnvironment sourceEnvironment = do
-    sourceDeclarations <- mapM preflightDeclaration $
+    mapM_ preflightDeclaration $
         SharedEnvironment.environmentDeclarations sourceEnvironment
     groundedEnvironment <- first
         (InvalidSynthesisInventory .
             SharedInventory.UngroundedInventoryKind) $
         SharedEnvironment.groundEnvironmentKinds sourceEnvironment
-    prepareGroundSynthesisEnvironmentFrom
-        sourceDeclarations groundedEnvironment
+    prepareGroundSynthesisEnvironmentFrom groundedEnvironment
 
 -- | Seal the kind-ground neutral environment accepted by the stable Djex
 -- adapter. Unlike the raw compatibility entrance above, this path does not
@@ -219,26 +214,21 @@ prepareGroundSynthesisEnvironment
     :: SharedEnvironment.Environment HSymbol Void ()
     -> Either SynthesisEnvironmentError PreparedEnvironment
 prepareGroundSynthesisEnvironment sourceEnvironment = do
-    sourceDeclarations <- mapM preflightGroundDeclaration $
+    mapM_ preflightGroundDeclaration $
         SharedEnvironment.environmentDeclarations sourceEnvironment
-    prepareGroundSynthesisEnvironmentFrom
-        sourceDeclarations sourceEnvironment
+    prepareGroundSynthesisEnvironmentFrom sourceEnvironment
 
 prepareGroundSynthesisEnvironmentFrom
-    :: [(SynthesisDeclaration, Declaration)]
-    -> SharedEnvironment.Environment HSymbol Void ()
+    :: SharedEnvironment.Environment HSymbol Void ()
     -> Either SynthesisEnvironmentError PreparedEnvironment
-prepareGroundSynthesisEnvironmentFrom sourceDeclarations sourceEnvironment = do
+prepareGroundSynthesisEnvironmentFrom sourceEnvironment = do
     inventory <- first
         (InvalidSynthesisInventory . promoteVoidInventoryError) $
         SharedInventory.mkInventoryFromEnvironmentWithClassPolicy
             SharedInference.ClosedKindInventory
             SharedInference.DefaultClassKinds sourceEnvironment
     expansion <- prepareInventoryExpansion inventory
-    environment <- projectSynthesisEnvironment
-        (SharedInventory.inventoryKindAssumptions inventory)
-        sourceDeclarations
-    sealPreparedEnvironment environment expansion
+    sealPreparedEnvironment expansion
 
 -- | Apply one compatibility declaration directly to the shared environment,
 -- then seal the resulting session state before returning it.  Djinn's
@@ -456,10 +446,9 @@ synthesisFormulaTypeSymbol :: SharedName.Name -> Either String HSymbol
 synthesisFormulaTypeSymbol = first show . djinnTypeConstructorSymbol
 
 sealPreparedEnvironment
-    :: Environment
-    -> PreparedInventoryExpansion
+    :: PreparedInventoryExpansion
     -> Either SynthesisEnvironmentError PreparedEnvironment
-sealPreparedEnvironment (Environment types _ _) expansion = do
+sealPreparedEnvironment expansion = do
     compiler <- first InvalidSynthesisFormulaDefinitions $
         prepareSynthesisFormulaCompiler expandedDeclarations
     -- Moving an invariant translation failure from query execution to sealing
@@ -472,16 +461,12 @@ sealPreparedEnvironment (Environment types _ _) expansion = do
             | SharedDeclaration.ValueDeclaration signature <-
                 expandedDeclarations
             ]
-    let kindCheck = prepareKindCheckWithAssumptions types
-            $ SharedInventory.inventoryKindAssumptions inventory
     classIndex <- prepareSynthesisClassIndex inventory
-    -- Force the derived index before the transient compatibility projection
-    -- leaves scope; its field cannot retain the complete raw Environment thunk.
-    -- Force the retained projection itself so it cannot keep the transient
+    -- Force each retained projection so it cannot keep the transient
     -- expanded declaration product alive through an unevaluated selector.
-    prepared `seq` compiler `seq` classIndex `seq` kindCheck `seq`
+    prepared `seq` compiler `seq` classIndex `seq`
         return (PreparedEnvironment
-            prepared kindCheck classIndex premises compiler)
+            prepared classIndex premises compiler)
   where
     prepared =
         SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
@@ -542,7 +527,7 @@ preparedEnvironmentWitness
     :: PreparedEnvironment
     -> PreparedSynthesisInventory
 preparedEnvironmentWitness
-        (PreparedEnvironment prepared _ _ _ _) =
+        (PreparedEnvironment prepared _ _ _) =
     prepared
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
@@ -550,16 +535,34 @@ preparedEnvironmentInventory =
     SharedTypeSynonym.preparedInventory .
         preparedEnvironmentWitness
 
--- | Check a batch in the one kind scope sealed with this exact environment.
--- Keeping the cache behind this operation prevents callers from retaining or
--- pairing its private synonym arities and assumptions independently.
+preparedEnvironmentKindAssumptions
+    :: PreparedEnvironment
+    -> SharedInference.KindAssumptions
+preparedEnvironmentKindAssumptions =
+    SharedInventory.inventoryKindAssumptions .
+        preparedEnvironmentInventory
+
+-- | Check a raw batch in one kind scope against this exact sealed witness.
+-- The raw traversal preserves compatibility diagnostics, while synonym facts
+-- and kind assumptions remain owned by the shared prepared inventory.
 checkPreparedTypesKinds
     :: PreparedEnvironment
     -> [(HKind, HType)]
     -> Either String ()
-checkPreparedTypesKinds
-        (PreparedEnvironment _ kindCheck _ _ _) =
-    htCheckTypesKindsPrepared kindCheck
+checkPreparedTypesKinds prepared =
+    htCheckTypesKindsWith checkApplication assumptions
+  where
+    foundation = preparedEnvironmentWitness prepared
+    assumptions = preparedEnvironmentKindAssumptions prepared
+
+    checkApplication sourceName supplied =
+        case SharedName.parseName sourceName of
+            -- Malformed raw names are not aliases. Leave their diagnostic to
+            -- structural conversion after the complete saturation walk.
+            Left _ -> Right ()
+            Right name -> first renderSynonymExpansionError $
+                SharedTypeSynonym.checkPreparedTypeSynonymApplicationSaturation
+                    foundation name supplied
 
 -- | Native shared-type counterpart of 'checkPreparedTypesKinds'. It consumes
 -- the exact prepared Inventory without rebuilding a compatibility tree or a
@@ -574,8 +577,7 @@ checkPreparedSynthesisTypesKinds prepared expectedTypes = do
     first show $ SharedInference.checkTypesKinds assumptions obligations
   where
     foundation = preparedEnvironmentWitness prepared
-    assumptions = SharedInventory.inventoryKindAssumptions $
-        preparedEnvironmentInventory prepared
+    assumptions = preparedEnvironmentKindAssumptions prepared
 
     checkSaturation = first renderSynonymExpansionError .
         SharedTypeSynonym.checkPreparedTypeSynonymSaturation foundation
@@ -588,7 +590,7 @@ preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
     -> [(Symbol, Formula)]
 preparedEnvironmentFunctionPremises
-        (PreparedEnvironment _ _ _ premises _) = premises
+        (PreparedEnvironment _ _ premises _) = premises
 
 -- | Translate a checked shared type directly. Stable raw and native queries
 -- meet here after raw compatibility validation and use the exact same
@@ -600,7 +602,7 @@ preparedEnvironmentSynthesisFormulaTranslator
     -> SharedType.Type HSymbol
     -> Either String Formula
 preparedEnvironmentSynthesisFormulaTranslator
-        (PreparedEnvironment _ _ _ _ compiler) =
+        (PreparedEnvironment _ _ _ compiler) =
     compileSynthesisFormula compiler
 
 projectPreparedInventory
@@ -627,7 +629,7 @@ lookupPreparedSynthesisClass
         , [(SharedName.Name, SharedType.Type HSymbol)]
         )
 lookupPreparedSynthesisClass name
-        (PreparedEnvironment _ _ classes _ _) = Map.lookup name classes
+        (PreparedEnvironment _ classes _ _) = Map.lookup name classes
 
 -- | Elaborate native shared types in one free-variable kind scope through the
 -- exact prepared inventory.

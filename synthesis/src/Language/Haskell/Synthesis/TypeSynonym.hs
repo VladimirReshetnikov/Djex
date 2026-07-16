@@ -25,6 +25,7 @@ module Language.Haskell.Synthesis.TypeSynonym
   , inventoryExpansionRecursiveDataTypeNames
   , adjustPreparedInventoryDataTypeAnnotations
   , prepareTypeSynonyms
+  , checkPreparedTypeSynonymApplicationSaturation
   , checkTypeSynonymSaturation
   , checkPreparedTypeSynonymSaturation
   , expandTypeSynonymDefinitions
@@ -48,6 +49,7 @@ import Control.Monad.Trans.State.Strict
 import Data.Bifunctor (first)
 import Data.Foldable (toList)
 import Data.Functor.Identity (Identity (..))
+import Data.List (genericSplitAt)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -55,11 +57,16 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Constraint
   ( Constraint (Constraint)
   , constraintArguments
   , constraintClass
+  )
+import Language.Haskell.Synthesis.Count
+  ( naturalLength
+  , saturatingNaturalToInt
   )
 import Language.Haskell.Synthesis.Declaration
   ( DataConstructor (DataConstructor)
@@ -353,6 +360,49 @@ expandTypeSynonyms
   -> Either (SynonymExpansionError variable) (Type variable)
 expandTypeSynonyms = expandWithTable
 
+-- | Check the minimum saturation of one nominal application head. The
+-- supplied count is the complete application-spine arity; a bare constructor
+-- therefore supplies zero arguments. This narrow operation lets adapters
+-- preserve a compatibility syntax tree's traversal and failure order while
+-- consulting the authoritative alias table.
+checkTypeSynonymApplicationSaturation
+  :: TypeSynonyms variable
+  -> Name
+  -> Natural
+  -> Either (SynonymExpansionError variable) ()
+checkTypeSynonymApplicationSaturation table name supplied =
+  case Map.lookup name $ synonymDefinitions table of
+    Just definition
+      | supplied < expected -> Left
+          $ unsaturatedTypeSynonymError name expected supplied
+      where
+        expected = naturalLength $ definitionParameters definition
+    _ -> Right ()
+
+-- The established public error predates exact shared counts and retains
+-- machine-sized payloads. Keep that compatibility projection explicit and
+-- saturating at this single boundary.
+unsaturatedTypeSynonymError
+  :: Name
+  -> Natural
+  -> Natural
+  -> SynonymExpansionError variable
+unsaturatedTypeSynonymError name expected supplied =
+  UnsaturatedTypeSynonym name
+    (saturatingNaturalToInt expected)
+    (saturatingNaturalToInt supplied)
+
+-- | Check one nominal application head against the exact alias table sealed
+-- with a prepared inventory, without exposing or independently pairing that
+-- table.
+checkPreparedTypeSynonymApplicationSaturation
+  :: PreparedInventory variable annotation
+  -> Name
+  -> Natural
+  -> Either (SynonymExpansionError variable) ()
+checkPreparedTypeSynonymApplicationSaturation prepared =
+  checkTypeSynonymApplicationSaturation $ preparedTypeSynonyms prepared
+
 -- | Check Haskell's minimum-saturation rule without expanding any alias.
 --
 -- Keeping this operation on the opaque prepared table makes its definitions
@@ -369,7 +419,7 @@ checkTypeSynonymSaturation table = checkType
  where
   checkType application@TypeApplication{} = do
     let (headType, arguments) = applicationSpine application
-    checkHead headType $ length arguments
+    checkHead headType $ naturalLength arguments
     case headType of
       TypeConstructor{} -> pure ()
       _ -> checkType headType
@@ -385,13 +435,7 @@ checkTypeSynonymSaturation table = checkType
   checkHead (TypeConstructor name) supplied = checkName name supplied
   checkHead _ _ = pure ()
 
-  checkName name supplied = case Map.lookup name $ synonymDefinitions table of
-    Just definition
-      | supplied < expected -> Left
-          $ UnsaturatedTypeSynonym name expected supplied
-      where
-        expected = length $ definitionParameters definition
-    _ -> Right ()
+  checkName = checkTypeSynonymApplicationSaturation table
 
 -- | Check Haskell's minimum-saturation rule against the exact alias table
 -- sealed with a prepared inventory. This is the session-facing counterpart of
@@ -612,10 +656,10 @@ expandApplication
 expandApplication fresh table protected path headType arguments = case headType of
   TypeConstructor name
     | Just definition <- Map.lookup name $ synonymDefinitions table -> do
-        let expected = length $ definitionParameters definition
-            supplied = length arguments
+        let expected = naturalLength $ definitionParameters definition
+            supplied = naturalLength arguments
         when (supplied < expected) $ lift $ Left
-          $ UnsaturatedTypeSynonym name expected supplied
+          $ unsaturatedTypeSynonymError name expected supplied
         bodyPath <- case pushExpansionName name path of
           Left cycleNames -> lift $ Left $ RecursiveTypeSynonyms cycleNames
           Right extended -> pure extended
@@ -624,7 +668,7 @@ expandApplication fresh table protected path headType arguments = case headType 
         -- the historical error order for failures inside arguments.
         expandedArguments <- mapM
           (expand fresh table protected path) arguments
-        let (affected, trailing) = splitAt expected expandedArguments
+        let (affected, trailing) = genericSplitAt expected expandedArguments
             substitutions = Map.fromList
               $ zip (definitionParameters definition) affected
         -- Definitions have their own lexical identity namespace. Freshen its

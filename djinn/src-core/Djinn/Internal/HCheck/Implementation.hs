@@ -2,20 +2,20 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
--- | Implementation of Djinn's compatibility kind checker and the prepared
--- session operations used by the parser-free core.  The historical exposed
--- module deliberately re-exports only its original raw checking surface.
+-- | Implementation of Djinn's compatibility kind checker and the raw-tree
+-- worker used by sealed sessions. The historical exposed module deliberately
+-- re-exports only its original raw checking surface.
 module Djinn.Internal.HCheck.Implementation(
     PreparedKindCheck, prepareKindEnvironment,
-    prepareKindCheckWithAssumptions,
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
-    htCheckTypePrepared, htCheckTypeKindPrepared,
-    htCheckTypesKindsPrepared,
+    htCheckTypePrepared, htCheckTypesKindsWith,
     htInferClassKinds, htInferClassKindsPrepared
     ) where
 import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
+import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Count (naturalLength)
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -23,12 +23,13 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import Djinn.Internal.HTypes
 import Djinn.Internal.Type (toSynthesisType)
 
--- | The immutable part of Djinn's raw compatibility kind checker. It retains
--- only legacy synonym spellings/arities and the already-ground shared
--- assumptions, never the source declarations from which either was derived.
--- Native shared-type checks use their opaque 'TypeSynonyms' table directly.
+-- | The transient checker used by Djinn's standalone raw compatibility
+-- operations and editable-environment validation. It retains only legacy
+-- synonym spellings/arities and already-ground shared assumptions, never the
+-- declarations from which either was derived, and is not retained by sealed
+-- sessions.
 data PreparedKindCheck = PreparedKindCheck
-    [(HSymbol, Int)]
+    [(HSymbol, Natural)]
     SharedInference.KindAssumptions
 
 -- | Prepare a compatibility kind-checking scope from Djinn declarations.
@@ -38,26 +39,20 @@ prepareKindCheck
     -> Either String PreparedKindCheck
 prepareKindCheck definitions = do
     assumptions <- synthesisAssumptions definitions
-    return $ prepareKindCheckWithAssumptions definitions assumptions
+    return $ prepareKindCheckWithArities
+        (synonymArities definitions) assumptions
 
--- | Pair declarations with assumptions already inferred from their exact
--- shared inventory.  This is an internal trusted constructor: callers must
--- obtain the assumptions while sealing the same declarations.  Keeping the
--- t'PreparedKindCheck' constructor private prevents later query code from
--- assembling or changing such a pair.
-prepareKindCheckWithAssumptions
-    :: [(HSymbol, ([HSymbol], HType, HKind))]
+-- Force the derived list while the raw source declarations are transient. The
+-- checker retains names and arities, never deferred access to complete type
+-- definitions.
+prepareKindCheckWithArities
+    :: [(HSymbol, Natural)]
     -> SharedInference.KindAssumptions
     -> PreparedKindCheck
-prepareKindCheckWithAssumptions definitions assumptions =
+prepareKindCheckWithArities arities assumptions =
     forceSynonymArities arities `seq` PreparedKindCheck arities assumptions
-  where
-    -- Force the derived list while the source projection is transient. The
-    -- prepared checker then retains names and arities, never deferred access
-    -- to complete raw type definitions.
-    arities = synonymArities definitions
 
-forceSynonymArities :: [(HSymbol, Int)] -> ()
+forceSynonymArities :: [(HSymbol, Natural)] -> ()
 forceSynonymArities [] = ()
 forceSynonymArities ((name, arity) : rest) =
     name `seq` arity `seq` forceSynonymArities rest
@@ -93,8 +88,22 @@ htCheckTypesKindsPrepared :: PreparedKindCheck
                           -> [(HKind, HType)] -> Either String ()
 htCheckTypesKindsPrepared
         (PreparedKindCheck preparedSynonymArities assumptions)
-        expectedTypes = do
-    mapM_ (checkSynonymSaturationWith preparedSynonymArities . snd)
+        = htCheckTypesKindsWith
+            (checkSynonymApplicationWithArities preparedSynonymArities)
+            assumptions
+
+-- | Check a raw compatibility batch with caller-supplied synonym facts and
+-- kind assumptions. Sealed sessions supply their exact witness; the transient
+-- compatibility checker supplies its private arity cache. Saturation still
+-- traverses the original 'HType' tree before any structural conversion,
+-- preserving the historical first-failure order.
+htCheckTypesKindsWith
+    :: (HSymbol -> Natural -> Either String ())
+    -> SharedInference.KindAssumptions
+    -> [(HKind, HType)]
+    -> Either String ()
+htCheckTypesKindsWith checkSynonymApplication assumptions expectedTypes = do
+    mapM_ (checkSynonymSaturationWith checkSynonymApplication . snd)
         expectedTypes
     obligations <- mapM convertObligation expectedTypes
     checkSynthesisObligations assumptions obligations
@@ -128,7 +137,8 @@ htInferClassKindsPrepared :: PreparedKindCheck
 htInferClassKindsPrepared
         (PreparedKindCheck preparedSynonymArities assumptions)
         params methodTypes = do
-    mapM_ (checkSynonymSaturationWith preparedSynonymArities) methodTypes
+    mapM_ (checkSynonymSaturationWith
+        $ checkSynonymApplicationWithArities preparedSynonymArities) methodTypes
     convertedMethods <- mapM (first show . toSynthesisType) methodTypes
     inferred <- first show $ SharedInference.inferSharedVariableKinds
         assumptions params convertedMethods
@@ -164,7 +174,8 @@ prepareKindEnvironment
         )
 prepareKindEnvironment its = do
     let preparedSynonymArities = synonymArities its
-    mapM_ (checkSynonymSaturationWith preparedSynonymArities .
+    mapM_ (checkSynonymSaturationWith
+        (checkSynonymApplicationWithArities preparedSynonymArities) .
         declarationBody) its
     declarations <- mapM toKindDeclaration its
     inferred <- first show $
@@ -172,8 +183,8 @@ prepareKindEnvironment its = do
     checked <- mapM (attachKind inferred) its
     let assumptions = SharedInference.emptyKindAssumptions
             { SharedInference.typeConstructorKinds = inferred }
-    return
-        (checked, PreparedKindCheck preparedSynonymArities assumptions)
+    return (checked, prepareKindCheckWithArities
+        preparedSynonymArities assumptions)
   where
     declarationBody (_, (_, body, _)) = body
 
@@ -204,9 +215,11 @@ prepareKindEnvironment its = do
 -- Djinn's Haskell 98 subset every synonym result has kind @Type@, so they are
 -- rejected there as an ill-kinded application rather than misreported as an
 -- unsaturated synonym.
-synonymArities :: [(HSymbol, ([HSymbol], HType, a))] -> [(HSymbol, Int)]
+synonymArities
+    :: [(HSymbol, ([HSymbol], HType, a))]
+    -> [(HSymbol, Natural)]
 synonymArities definitions =
-    [(name, length parameters)
+    [(name, naturalLength parameters)
     | (name, (parameters, body, _)) <- definitions
     , isSynonymBody body]
   where
@@ -214,12 +227,27 @@ synonymArities definitions =
     isSynonymBody (HTAbstract _ _) = False
     isSynonymBody _ = True
 
-checkSynonymSaturationWith :: [(HSymbol, Int)] -> HType -> Either String ()
-checkSynonymSaturationWith arities = checkType
+checkSynonymApplicationWithArities
+    :: [(HSymbol, Natural)]
+    -> HSymbol
+    -> Natural
+    -> Either String ()
+checkSynonymApplicationWithArities arities name supplied =
+    case lookup name arities of
+        Just expected | supplied < expected -> Left $
+            "Type synonym " ++ name ++ " expects at least " ++
+            show expected ++ " argument(s), but got " ++ show supplied
+        _ -> Right ()
+
+checkSynonymSaturationWith
+    :: (HSymbol -> Natural -> Either String ())
+    -> HType
+    -> Either String ()
+checkSynonymSaturationWith checkApplication = checkType
   where
     checkType application@(HTApp _ _) = do
         let (headType, arguments) = splitApplication application
-        checkHead headType (length arguments)
+        checkHead headType (naturalLength arguments)
         case headType of
             HTCon _ -> return ()
             _ -> checkType headType
@@ -242,9 +270,4 @@ checkSynonymSaturationWith arities = checkType
     checkHead (HTCon name) supplied = checkName name supplied
     checkHead _ _ = Right ()
 
-    checkName name supplied =
-        case lookup name arities of
-            Just expected | supplied < expected -> Left $
-                "Type synonym " ++ name ++ " expects at least " ++
-                show expected ++ " argument(s), but got " ++ show supplied
-            _ -> Right ()
+    checkName = checkApplication

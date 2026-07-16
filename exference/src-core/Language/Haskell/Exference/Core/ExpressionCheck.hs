@@ -210,7 +210,7 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     $ qClassEnv_constraints classEnvironment
   mapM_ validateFunction functions
   mapM_ validateDeconstructor deconstructors
-  validateAnnotations expression
+  mapM_ (validateType . snd) $ expressionTypedLocals expression
  where
   validateType typeExpression = case toSynthesisType typeExpression of
     Left failure -> Left $ InvalidCheckType typeExpression failure
@@ -226,28 +226,6 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     mapM_ validateConstraint $ functionConstraints binding
 
   validateDeconstructor = mapM_ validateType . deconstructorBindingTypes
-
-  validateAnnotations annotated = case annotated of
-    ExpVar _ annotation -> validateType annotation
-    ExpName{} -> Right ()
-    ExpLambda _ annotation body ->
-      validateType annotation >> validateAnnotations body
-    ExpApply function argument ->
-      validateAnnotations function >> validateAnnotations argument
-    ExpHole{} -> Right ()
-    ExpLetMatch _ variables binding body ->
-      mapM_ (validateType . snd) variables
-        >> validateAnnotations binding
-        >> validateAnnotations body
-    ExpLet _ annotation binding body ->
-      validateType annotation
-        >> validateAnnotations binding
-        >> validateAnnotations body
-    ExpCaseMatch scrutinee alternatives ->
-      validateAnnotations scrutinee >> mapM_ validateAlternative alternatives
-
-  validateAlternative (_, variables, body) =
-    mapM_ (validateType . snd) variables >> validateAnnotations body
 
 throwCheck :: ExpressionCheckError -> Check a
 throwCheck = lift . Left
@@ -341,28 +319,5 @@ instantiateGoal plan goal
   instantiateFrom _ instantiated = instantiated
 
 expressionFlexibleIdentifiers :: Expression -> IntSet.IntSet
-expressionFlexibleIdentifiers expression = case expression of
-  ExpVar _ ty -> flexibleIdentifiers ty
-  ExpName{} -> IntSet.empty
-  ExpLambda _ ty body -> flexibleIdentifiers ty
-    `IntSet.union` expressionFlexibleIdentifiers body
-  ExpApply function argument -> expressionFlexibleIdentifiers function
-    `IntSet.union` expressionFlexibleIdentifiers argument
-  ExpHole{} -> IntSet.empty
-  ExpLetMatch _ variables binding body -> IntSet.unions
-    $ map (flexibleIdentifiers . snd) variables
-    ++ [ expressionFlexibleIdentifiers binding
-       , expressionFlexibleIdentifiers body
-       ]
-  ExpLet _ ty binding body -> IntSet.unions
-    [ flexibleIdentifiers ty
-    , expressionFlexibleIdentifiers binding
-    , expressionFlexibleIdentifiers body
-    ]
-  ExpCaseMatch scrutinee alternatives -> IntSet.unions
-    $ expressionFlexibleIdentifiers scrutinee
-    : [ IntSet.unions
-          $ map (flexibleIdentifiers . snd) variables
-          ++ [expressionFlexibleIdentifiers body]
-      | (_, variables, body) <- alternatives
-      ]
+expressionFlexibleIdentifiers =
+  foldMap (flexibleIdentifiers . snd) . expressionTypedLocals

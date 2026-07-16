@@ -445,7 +445,10 @@ Exference's search policy. Capture-safe let cleanup and eta reduction operate
 on that same shared shape, parameterized only by Exference's projection from
 an annotated local to its stable numeric identity; the historical
 `ExpressionSimplify` module is now a compatibility re-export rather than a
-second traversal authority.
+second traversal authority. The opaque wrapper also exposes one structural
+annotation observation derived from the shared tree's `Foldable` order; name
+hints, raw-input validation, and flexible-identifier reservation therefore no
+longer maintain separate copies of Exference's historical expression grammar.
 Candidate selection and rendering remain presentation policies outside both
 session operations. The shared `Selection` module now
 provides first, global-best, streaming-all, batch-lookahead, and preferred-tier

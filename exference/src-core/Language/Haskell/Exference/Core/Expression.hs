@@ -22,6 +22,7 @@ module Language.Haskell.Exference.Core.Expression
       )
   , ExpressionRenderError (..)
   , toGeneratedExpression
+  , expressionTypedLocals
   , expressionNameHints
   , renderExpression
   , qualificationFromLevel
@@ -283,7 +284,7 @@ expressionNameHints expression =
   Map.mapWithKey preferredVarName variableTypes
  where
   variableTypes = List.foldl' recordType Map.empty
-    $ variableObservations expression
+    $ expressionTypedLocals expression
 
   recordType types (variable, ty) = Map.alter update variable types
     where
@@ -292,12 +293,16 @@ expressionNameHints expression =
       update (Just TypeConstant{}) = Just ty
       update existing = existing
 
+-- | Every typed local binder and occurrence in structural order.
+--
 -- Derived 'Foldable' order for the shared tree is exactly Exference's former
 -- observation order: pattern binders precede their bodies, and let/case
 -- bindings precede the regions that consume them. Holes have no annotation
--- and are intentionally excluded.
-variableObservations :: Expression -> [(TVarId, HsType)]
-variableObservations (Expression expression) =
+-- and are intentionally excluded. Keeping this observation beside the opaque
+-- wrapper prevents validators and identifier collectors from reimplementing
+-- the shared expression grammar.
+expressionTypedLocals :: Expression -> [(TVarId, HsType)]
+expressionTypedLocals (Expression expression) =
   [ (variable, annotation)
   | AnnotatedLocal variable (Just annotation) <- toList expression
   ]

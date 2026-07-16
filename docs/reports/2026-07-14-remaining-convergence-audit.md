@@ -1046,6 +1046,24 @@ retention. Exference's existing simplifier and independent-checker suite pins
 the complete old behavior over lambdas, variable lets, constructor lets, and
 case branches.
 
+## Post-fold annotation traversal ownership
+
+**Completed on 2026-07-15:** Exference's opaque expression wrapper already
+used the shared generated tree's derived `Foldable` instance for type-derived
+local-name hints, but the independent checker still manually reimplemented all
+eight historical constructors twice. One traversal validated every annotation;
+another collected their flexible identifiers before allocating checker
+metavariables. Both were redundant shape authorities after the representation
+fold and could drift when shared generated syntax grows.
+
+`expressionTypedLocals` now exposes the wrapper's typed locals and occurrences
+in that same structural order, excluding untyped holes. Name hints, boundary
+validation, and flexible-ID reservation consume this one observation. A
+complete-shape regression fixes the exact binder/occurrence order across a
+constructor let, case, variable let, lambda, and application; this also proves
+that validation keeps its established first-error precedence while removing
+the two backend-local recursive walks.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

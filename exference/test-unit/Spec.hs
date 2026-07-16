@@ -64,6 +64,7 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..)
   , ExpressionRenderError (..)
+  , expressionTypedLocals
   , expressionNameHints
   , renderExpression
   , showExpression
@@ -5428,6 +5429,16 @@ tests = testGroup "Exference"
                     )
                   ])
           toGeneratedExpression expression @?= generated
+          expressionTypedLocals expression @?=
+            [ (1, integer)
+            , (1, integer)
+            , (2, boolean)
+            , (3, functionType)
+            , (4, boolean)
+            , (1, integer)
+            , (3, functionType)
+            , (2, boolean)
+            ]
           expressionNameHints expression @?= Map.fromList
             [(1, "i1"), (2, "b2"), (3, "f3"), (4, "b4")]
       , testCase "scope failures are reported before rendering" $

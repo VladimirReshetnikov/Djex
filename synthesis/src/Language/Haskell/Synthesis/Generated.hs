@@ -43,6 +43,7 @@ module Language.Haskell.Synthesis.Generated
 import Prelude hiding ((<>))
 
 import Control.DeepSeq (NFData (rnf))
+import Data.Foldable (toList)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -869,12 +870,7 @@ emittedIdentifier qualification name = case nameOccurrence name of
   _ -> Nothing
 
 patternLocals :: Pattern local -> [local]
-patternLocals pattern = case pattern of
-  Bind local -> [local]
-  Wildcard -> []
-  Constructor _ arguments -> concatMap patternLocals arguments
-  TuplePattern elements -> concatMap patternLocals elements
-  As local nested -> local : patternLocals nested
+patternLocals = toList
 
 patternGlobals :: Pattern local -> [Name]
 patternGlobals pattern = case pattern of
@@ -885,22 +881,7 @@ patternGlobals pattern = case pattern of
   As _ nested -> patternGlobals nested
 
 expressionLocals :: Expression local -> [local]
-expressionLocals expression = case expression of
-  Local local -> [local]
-  Global{} -> []
-  Lambda patterns body ->
-    concatMap patternLocals patterns ++ expressionLocals body
-  Apply function argument ->
-    expressionLocals function ++ expressionLocals argument
-  Tuple elements -> concatMap expressionLocals elements
-  Hole local -> [local]
-  Let pattern binding body ->
-    patternLocals pattern ++ expressionLocals binding ++ expressionLocals body
-  Case scrutinee alternatives ->
-    expressionLocals scrutinee ++ concat
-      [ patternLocals pattern ++ expressionLocals body
-      | (pattern, body) <- alternatives
-      ]
+expressionLocals = toList
 
 -- | Collect hole identities in left-to-right structural order, retaining
 -- duplicates. Patterns do not contain holes and therefore do not contribute

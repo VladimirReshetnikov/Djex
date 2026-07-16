@@ -1064,6 +1064,22 @@ constructor let, case, variable let, lambda, and application; this also proves
 that validation keeps its established first-error precedence while removing
 the two backend-local recursive walks.
 
+## Post-fold generated local collection
+
+**Completed on 2026-07-15:** the shared generated module itself still carried
+manual `patternLocals` and `expressionLocals` traversals beside the derived
+`Foldable` instances that define the same structural order. These private
+copies fed scope validation, local-name allocation, and the shared simplifier,
+so a future grammar addition could have reached backend annotation consumers
+while being silently omitted at a central safety boundary.
+
+Both local observations now delegate to `toList`. The focused foundation
+regression covers every generated local-bearing position—lambda and as-pattern
+binders, tuple-pattern binders, ordinary locals, holes, let patterns, case
+scrutinees, and case-pattern binders—in exact order. Global-name and hole-only
+queries remain intentionally separate because those observations are not the
+generic local fold.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

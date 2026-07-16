@@ -113,6 +113,10 @@ incremental engine to publish newly allocated work safely.
 single-use inlining, and eta reduction for synthesis terms. A backend supplies
 only its local-identity projection, so annotations remain intact while binder
 comparison, shadowing, and occurrence saturation use the stable identity.
+Local allocation and scope operations consume the generated pattern and
+expression types' derived `Foldable` order directly. This keeps binder,
+occurrence, and hole payload ordering attached to the canonical grammar rather
+than mirrored by another private recursive walk.
 `functionClauseExpression` recovers the expression denoted
 by a clause, retaining its argument patterns as a leading lambda while leaving
 a patternless value body unchanged. The renderer allocates stable Haskell

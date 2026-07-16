@@ -2729,11 +2729,18 @@ generatedTests = testGroup "generated syntax"
           (Lambda [Bind (0 :: Int)] $ Lambda [Bind 0] $ Local 0)
         @?= Left (DuplicatePatternBinder 0)
   , testCase "map, fold, traverse, and force every local occurrence" $ do
-      let expression = Lambda [Bind (1 :: Int)] (Local 1)
-      fmap (+ 10) expression @?= Lambda [Bind 11] (Local 11)
-      sum expression @?= 2
+      let constructor = right $ mkIdentifier "Just"
+          simple = Lambda [Bind (1 :: Int)] (Local 1)
+          expression = Lambda [Bind (1 :: Int)]
+            $ Let (As 2 $ TuplePattern [Bind 3, Wildcard])
+                (Tuple [Local 4, Hole 5])
+            $ Case (Local 6)
+                [ (Constructor constructor [Bind 7], Local 8) ]
+      fmap (+ 10) simple @?= Lambda [Bind 11] (Local 11)
+      toList expression @?= [1, 2, 3, 4, 5, 6, 7, 8]
+      sum expression @?= 36
       traverse (\local -> if local > 0 then Just (show local) else Nothing)
-          expression
+          simple
         @?= Just (Lambda [Bind "1"] (Local "1"))
       _ <- evaluate $ force expression
       pure ()

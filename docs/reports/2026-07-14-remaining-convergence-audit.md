@@ -1169,6 +1169,26 @@ prepared environment exposes only the native shared class lookup, eliminating
 42 lines of dead recursive/projection code and the associated partial failure
 site without changing either stable facade.
 
+## Unified Exference declaration lowering
+
+**Completed on 2026-07-15:** Exference's stable Inventory lowerer and its
+historical environment adapter each still matched the complete shared
+declaration grammar independently. Their output policies intentionally differ:
+the authoritative Inventory derives searchable constructor and class-method
+bindings from their owners, while a compatibility `EnvDictionary` already
+stores ordinary bindings explicitly and must not manufacture duplicates.
+Nevertheless, both passes owned declaration order, class/instance assembly,
+unsupported-declaration handling, and the six-constructor case tree.
+
+One private policy-directed lowerer now owns that traversal. Its
+`IncludeDerivedBindings` mode produces the canonical stable-session backend;
+`ExplicitBindingsOnly` preserves the legacy round-trip and returns class
+methods grouped by exact owner when requested. Existing regressions pin both
+sides: stable constructor/method/instance order and penalties, compatibility
+round-trips, method ownership, and frontend-only declaration rejection. This
+removes the parallel grammar walk without weakening the useful distinction
+between semantic Inventory ownership and compatibility storage policy.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

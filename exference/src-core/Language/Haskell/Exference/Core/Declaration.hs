@@ -379,12 +379,9 @@ lowerNeutralSynthesisEnvironment synonyms environment = do
   let normalized = map normalizeDeclarationVariables expanded
       recursiveNames = SharedDeclaration.recursiveDataTypeNames normalized
   prepared <- mapM (prepareSearchDeclaration recursiveNames) normalized
-  (functions, deconstructors, classes, instances) <- foldM lowerDeclaration
-    ([], [], [], []) [declaration | Just declaration <- prepared]
-  classEnvironment <- either (Left . ClassEnvironmentConversionError) Right
-    $ mkStaticClassEnv (reverse classes) (reverse instances)
-  pure $ EnvDictionary
-    (reverse functions) (reverse deconstructors) classEnvironment
+  fmap fst $ lowerSynthesisDeclarations IncludeDerivedBindings
+    fromSynthesisClassDeclarationWithMethods
+    [declaration | Just declaration <- prepared]
  where
   expandOperationalDeclaration (index, declaration) = case declaration of
     SharedDeclaration.TypeSynonymDeclaration{} -> Right declaration
@@ -394,43 +391,6 @@ lowerNeutralSynthesisEnvironment synonyms environment = do
         $ SharedDeclaration.declarationSubjectName declaration)
       $ SharedTypeSynonym.expandDeclarationTypeSynonyms
           freshSynthesisVariable synonyms declaration
-
-  lowerDeclaration
-      (functions, deconstructors, classes, instances) declaration =
-    case declaration of
-      SharedDeclaration.ValueDeclaration{} -> do
-        binding <- fromSynthesisFunctionBinding declaration
-        pure (binding : functions, deconstructors, classes, instances)
-      SharedDeclaration.DataTypeDeclaration{} -> do
-        (constructors, deconstructor) <-
-          fromSynthesisRatedDataDeclaration declaration
-        pure
-          ( reverse constructors ++ functions
-          , deconstructor : deconstructors
-          , classes
-          , instances
-          )
-      SharedDeclaration.ClassDeclaration{} -> do
-        (typeClass, methods) <-
-          fromSynthesisClassDeclarationWithMethods declaration
-        pure
-          ( reverse methods ++ functions
-          , deconstructors
-          , typeClass : classes
-          , instances
-          )
-      SharedDeclaration.InstanceDeclaration{} -> do
-        instanceDeclaration <- fromSynthesisInstanceDeclaration declaration
-        pure
-          ( functions
-          , deconstructors
-          , classes
-          , instanceDeclaration : instances
-          )
-      SharedDeclaration.TypeSynonymDeclaration{} -> pure
-        (functions, deconstructors, classes, instances)
-      SharedDeclaration.AbstractTypeDeclaration{} -> pure
-        (functions, deconstructors, classes, instances)
 
 type NeutralSynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void ()
@@ -851,16 +811,39 @@ fromSynthesisEnvironmentWithClassMethods
 fromSynthesisEnvironmentWithClassMethods =
   lowerSynthesisEnvironment fromSynthesisClassDeclarationWithMethods
 
+-- Stable inventory lowering derives constructor and class-method bindings
+-- from their owning declarations. Historical compatibility environments
+-- already store their ordinary bindings separately, so deriving them again
+-- would duplicate search entries and lose explicit source ordering.
+data BindingProjection
+  = IncludeDerivedBindings
+  | ExplicitBindingsOnly
+
 lowerSynthesisEnvironment
   :: (SynthesisDeclaration
       -> Either SynthesisDeclarationError (HsTypeClass, [FunctionBinding]))
   -> SynthesisEnvironment
   -> Either SynthesisDeclarationError
       (EnvDictionary, Map.Map QualifiedName [FunctionBinding])
-lowerSynthesisEnvironment convertClass environment = do
+lowerSynthesisEnvironment convertClass environment =
+  lowerSynthesisDeclarations ExplicitBindingsOnly convertClass
+    $ SharedEnvironment.environmentDeclarations environment
+
+-- Traverse the shared declaration grammar once for both lowering surfaces.
+-- The projection policy controls only ownership of derived search bindings;
+-- declaration order, validation, class assembly, and failure precedence stay
+-- common.
+lowerSynthesisDeclarations
+  :: BindingProjection
+  -> (SynthesisDeclaration
+      -> Either SynthesisDeclarationError (HsTypeClass, [FunctionBinding]))
+  -> [SynthesisDeclaration]
+  -> Either SynthesisDeclarationError
+      (EnvDictionary, Map.Map QualifiedName [FunctionBinding])
+lowerSynthesisDeclarations projection convertClass declarations = do
   (functions, deconstructors, classes, instances, methods) <- foldM collect
     ([], [], [], [], Map.empty)
-    $ SharedEnvironment.environmentDeclarations environment
+    declarations
   classEnvironment <- either (Left . ClassEnvironmentConversionError) Right
     $ mkStaticClassEnv (reverse classes) (reverse instances)
   Right
@@ -877,19 +860,30 @@ lowerSynthesisEnvironment convertClass environment = do
         Right
           ( binding : functions, deconstructors, classes, instances, methods)
       SharedDeclaration.DataTypeDeclaration{} -> do
-        deconstructor <- fromSynthesisDataDeclaration declaration
+        (constructors, deconstructor) <- case projection of
+          IncludeDerivedBindings ->
+            fromSynthesisRatedDataDeclaration declaration
+          ExplicitBindingsOnly ->
+            ([],) <$> fromSynthesisDataDeclaration declaration
         Right
-          ( functions, deconstructor : deconstructors, classes, instances
+          ( reverse constructors ++ functions
+          , deconstructor : deconstructors, classes, instances
           , methods
           )
       SharedDeclaration.ClassDeclaration{} -> do
         (classDeclaration, classMethods) <- convertClass declaration
-        let retainedMethods
-              | null classMethods = methods
-              | otherwise = Map.insert
-                  (tclass_name classDeclaration) classMethods methods
+        let (derivedMethods, retainedMethods) = case projection of
+              IncludeDerivedBindings -> (reverse classMethods, methods)
+              ExplicitBindingsOnly
+                | null classMethods -> ([], methods)
+                | otherwise ->
+                    ( []
+                    , Map.insert
+                        (tclass_name classDeclaration) classMethods methods
+                    )
         Right
-          ( functions, deconstructors, classDeclaration : classes, instances
+          ( derivedMethods ++ functions
+          , deconstructors, classDeclaration : classes, instances
           , retainedMethods
           )
       SharedDeclaration.InstanceDeclaration{} -> do

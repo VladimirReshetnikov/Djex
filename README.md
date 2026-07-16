@@ -62,7 +62,11 @@ Both engines now construct
 their stable `QueryResult` payloads in the core: Djinn preserves its richer
   logical evidence, while Exference derives evidence from each lazy candidate
   batch after one checked query preparation. Exference source checking and both
-  stable sessions now make their shared inventories authoritative; Djinn also
+  stable sessions now make their shared inventories authoritative. Exference's
+  stable and compatibility environment projections also share one declaration
+  traversal, with an explicit policy deciding whether constructor and class-
+  method bindings are derived or retained only from the compatibility input.
+  Djinn also
   seals its ordered global proof premises and class lookup from that Inventory
   without retaining raw backend tables. The parser-free fold then deleted the
   obsolete `synthesis`, `djinn-core`, and `exference-core` component identities

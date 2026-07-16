@@ -1189,6 +1189,32 @@ round-trips, method ownership, and frontend-only declaration rejection. This
 removes the parallel grammar walk without weakening the useful distinction
 between semantic Inventory ownership and compatibility storage policy.
 
+## Unified Djinn environment editing
+
+**Completed on 2026-07-15:** stable `DjinnSession` edits already replaced a
+declaration in the neutral shared environment and published only the fully
+resealed Inventory and proof indexes. `Djinn.Core.declare` and
+`removeDeclaration`, however, still implemented a second transaction over raw
+type/function/class association lists, repeating category replacement,
+deletion, namespace checks, whole-environment validation, and inferred-kind
+refresh before the next query sealed the same data again.
+
+The raw API now converts its opaque compatibility environment once, delegates
+to the stable shared editor, and projects `preparedEnvironmentSource` only on
+success. Its string error surface renders the structured edit failure directly;
+duplicate type/value names therefore use neutral wording rather than
+reconstructing a discarded raw candidate solely to recover category-specific
+phrasing. The explicitly exposed raw `validateEnvironment` operation retains
+its research-level diagnostics. Three now-unreferenced edit helpers were
+removed with the parallel mutation engine.
+
+The convergence also closed a real invariant hole: the canonical `()`
+declaration must remain representable while trusted built-ins cross the shared
+boundary, but that exception previously let the public shared editor install
+`()` in an arbitrary session. `ProtectedSynthesisUnitDeclaration` now rejects
+that edit before conversion; raw and stable regressions pin both declaration
+and deletion protection.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

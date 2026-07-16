@@ -57,7 +57,10 @@ as projections for historical low-level callers. Djinn's raw and native class
 contexts also share one sealed class lookup and capture-avoiding method
 instantiation; the raw API projects only its final methods back to `HType`,
 and the obsolete internal raw substitution and class-index projections have
-been removed.
+been removed. Raw `Djinn.Core` declaration edits likewise convert once to the
+shared environment, use the same checked transaction as stable sessions, and
+project the fully sealed result back only after success; the former parallel
+association-list mutation engine is gone.
 Both engines now construct
 their stable `QueryResult` payloads in the core: Djinn preserves its richer
   logical evidence, while Exference derives evidence from each lazy candidate

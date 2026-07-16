@@ -455,6 +455,9 @@ environmentEditFailure failure = case failure of
   Core.SynthesisDeclarationNotFound name -> contextualDiagnostic Error
     "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
     (name ++ " is not defined")
+  Core.ProtectedSynthesisUnitDeclaration -> contextualDiagnostic Error
+    "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
+    "() is a built-in type and cannot be declared"
   Core.ProtectedSynthesisUnit -> contextualDiagnostic Error
     "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
     "() is a built-in type and cannot be removed"

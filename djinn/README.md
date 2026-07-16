@@ -78,7 +78,7 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 60 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kind representation and compatibility, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | 61 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kind representation and compatibility, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
 | `djinn-frontend-api-tests` | Three import-boundary checks proving that a dependency on `djinn-frontend` alone exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn`. |
 | `djinn-cli-tests` | Nineteen subprocess scenarios against the packaged executable, including EOF, explicit RTS tuning, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
@@ -476,6 +476,11 @@ import surface.
 
 The essentials: `declare`/`removeDeclaration` grow and shrink an
 `Environment` (starting from `emptyEnvironment` or `standardEnvironment`);
+the raw environment is converted once and edited through the same shared
+transaction used by `DjinnSession`, then projected back only after the new
+Inventory and proof indexes seal successfully. Duplicate type/value names use
+the neutral shared diagnostic wording, while the raw `validateEnvironment`
+research boundary retains its more category-specific messages.
 `parseHType`/`parseContextualHType`/`parseHKind` parse with full-input
 validation; the contextual entry point owns the REPL's optional constraint
 grammar so checked clients need not import its internal `ReadP` parser.
@@ -536,8 +541,10 @@ kind-ground `DjinnEnvironment` directly and retains the exact shared
 `DjinnInventory` that validated its private proof indexes together with the
 exact prepared synonym table. The session no longer retains a second editable
 `DjinnEnvironment`; the grounded Inventory is weakened losslessly only when a
-raw compatibility edit begins, then the replacement is fully resealed before
-publication. The raw `Djinn.Core.Environment` therefore
+compatibility declaration edit begins, then the replacement is fully resealed
+before publication. `Djinn.Core` now uses that same transaction rather than
+mutating its historical association-list projection independently. The raw
+`Djinn.Core.Environment` therefore
 remains confined to compatibility inputs and the REPL parser;
 `standardDjinnSession` converts the checked built-in spelling once and then
 uses the same neutral `mkDjinnSession` path as caller-supplied environments,

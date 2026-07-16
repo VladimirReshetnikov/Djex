@@ -19,8 +19,7 @@ module Djinn.Internal.Environment (
     toSynthesisEnvironment, toSynthesisInventory,
     declareSynthesisEnvironment, removeSynthesisDeclaration,
     validateEnvironment,
-    replace, requireDistinct, requireUnusedName,
-    checkConstructors
+    requireDistinct
     ) where
 
 import Data.Bifunctor (first)
@@ -137,6 +136,7 @@ data SynthesisEnvironmentError
     | SynthesisClassKindArityMismatch SharedName.Name Int Int
     | UnresolvedSynthesisClassKind SharedName.Name HSymbol
     | SynthesisDeclarationNotFound HSymbol
+    | ProtectedSynthesisUnitDeclaration
     | ProtectedSynthesisUnit
     | DjinnEnvironmentValidationError String
     deriving (Eq, Show)
@@ -254,6 +254,12 @@ declareSynthesisEnvironment
     -> Either SynthesisEnvironmentError
         (SynthesisEnvironment, PreparedEnvironment)
 declareSynthesisEnvironment declaration sourceEnvironment = do
+    -- The canonical unit declaration is representable only so trusted raw
+    -- environments can cross the shared boundary. Public editing must not
+    -- use that representational exception to install grammar-level @()@.
+    if declaration == DataType "()" [] [("()", [])]
+        then Left ProtectedSynthesisUnitDeclaration
+        else Right ()
     sharedDeclaration <- first SynthesisEnvironmentDeclarationError $
         toSynthesisDeclaration declaration
     (group, owner) <- synthesisDeclarationOwner sharedDeclaration
@@ -932,10 +938,6 @@ withContext description result =
         Left message -> Left $ description ++ ": " ++ message
         Right value -> Right value
 
--- Add or overwrite one binding in an association list.
-replace :: HSymbol -> (HSymbol, a) -> [(HSymbol, a)] -> [(HSymbol, a)]
-replace name binding = (binding :) . filter ((/= name) . fst)
-
 requireDistinct :: String -> [HSymbol] -> Either String ()
 requireDistinct what names =
     case find (`Set.member` repeated) names of
@@ -947,30 +949,6 @@ requireDistinct what names =
     -- first.  The shared summary removes the former quadratic rescan.
     repeated = SharedCollection.repeatedValueSet
         $ SharedCollection.summarizeDuplicates names
-
-requireUnusedName :: String -> HSymbol -> [(HSymbol, a)] -> Either String ()
-requireUnusedName existingKind name definitions
-    | name `elem` map fst definitions =
-        Left $ name ++ " is already defined as a " ++ existingKind
-    | otherwise = Right ()
-
--- A data declaration may not reuse a constructor name, either within
--- itself or from another stored data type.
-checkConstructors :: HSymbol -> HType -> [TypeDefinition]
-                  -> Either String ()
-checkConstructors owner (HTUnion constructors) definitions = do
-    requireDistinct "data constructor" names
-    case [(constructor, typeName)
-            | (typeName, (_, HTUnion existing, _)) <- definitions
-            , typeName /= owner
-            , (constructor, _) <- existing
-            , constructor `elem` names] of
-        [] -> Right ()
-        (constructor, typeName):_ -> Left $
-            "Data constructor " ++ constructor ++
-            " is already defined by " ++ typeName
-  where names = map fst constructors
-checkConstructors _ _ _ = Right ()
 
 -- A class may not reuse a method name owned by another class.
 checkMethodNames :: HSymbol -> [Axiom] -> [ClassDefinition]

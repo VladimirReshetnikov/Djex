@@ -65,7 +65,9 @@ import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArity)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
+import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
@@ -199,104 +201,59 @@ trustedUnitEnvironment = do
 -- declaration.  The whole environment is revalidated transactionally:
 -- on 'Left' the original environment is still the one to use.
 declare :: Declaration -> Environment -> Either String Environment
-declare declaration environment =
-    case declaration of
-        TypeSynonym name params body ->
-            declareType name params body
-        DataType name params constructors -> do
-            mapM_ (requireName "data constructor"
-                (isDjinnDeclarationName DataConstructorOwner) . fst)
-                constructors
-            declareType name params (HTUnion constructors)
-        AbstractType name kind -> do
-            requireGroundKind kind
-            declareType name [] (HTAbstract name kind)
-        ClassDecl name params methods -> do
-            requireName "class"
-                (isDjinnDeclarationName ClassOwner) name
-            mapM_ (requireName "class parameter" isDjinnTypeVariable) params
-            mapM_ (requireName "method"
-                (isDjinnDeclarationName MethodOwner) . fst) methods
-            requireUnusedName "type" name (envTypes environment)
-            requireDistinct "class parameter" params
-            requireDistinct "method" (map fst methods)
-            let uncheckedParameters = [(param, KStar) | param <- params]
-                candidateClasses = replace name
-                    (name, (uncheckedParameters, methods))
-                    (envClasses environment)
-            (types, classes) <- validateEnvironment
-                (envTypes environment) (envFunctions environment)
-                candidateClasses
-            return Environment {
-                envTypes = types,
-                envFunctions = envFunctions environment,
-                envClasses = classes
-                }
-        Function name declaredType -> do
-            requireName "function"
-                (isDjinnDeclarationName FunctionOwner) name
-            let functions = replace name (name, declaredType)
-                    (envFunctions environment)
-            (types, classes) <- validateEnvironment
-                (envTypes environment) functions (envClasses environment)
-            return Environment {
-                envTypes = types,
-                envFunctions = functions,
-                envClasses = classes
-                }
-  where
-    declareType name params body = do
-        requireName "type constructor"
-            (isDjinnDeclarationName TypeOwner) name
-        mapM_ (requireName "type parameter" isDjinnTypeVariable) params
-        requireUnusedName "class" name (envClasses environment)
-        requireDistinct "type parameter" params
-        checkConstructors name body (envTypes environment)
-        (types, classes) <- validateEnvironment
-            (replace name (name, (params, body, KStar))
-                (envTypes environment))
-            (envFunctions environment) (envClasses environment)
-        return environment { envTypes = types, envClasses = classes }
+declare declaration = editEnvironment $ declareSynthesisEnvironment declaration
 
 -- | Remove a declaration by name, from whichever category holds it.
 -- Rejected if the name is not defined or if a remaining declaration
 -- depends on it; on 'Left' the environment is unchanged.
 removeDeclaration :: HSymbol -> Environment -> Either String Environment
-removeDeclaration name environment
-    -- Unlike an ordinary leaf declaration, the standard unit binding is the
-    -- trusted interpretation of grammar-level @()@ and public 'declare' cannot
-    -- recreate it.  Keep environments derived from 'standardEnvironment'
-    -- stable; callers wanting no built-ins can start from 'emptyEnvironment'.
-    | name == "()" && name `elem` map fst (envTypes environment) =
-        Left "() is a built-in type and cannot be removed"
-    | name `notElem` (map fst (envTypes environment) ++
-                      map fst (envFunctions environment) ++
-                      map fst (envClasses environment)) =
-        Left $ name ++ " is not defined"
-    | otherwise = do
-        let keep :: [(HSymbol, a)] -> [(HSymbol, a)]
-            keep = filter ((name /=) . fst)
-            candidateTypes = keep (envTypes environment)
-            candidateFunctions = keep (envFunctions environment)
-            candidateClasses = keep (envClasses environment)
-        (types, classes) <- validateEnvironment candidateTypes
-            candidateFunctions candidateClasses
-        return Environment {
-            envTypes = types,
-            envFunctions = candidateFunctions,
-            envClasses = classes
-            }
+removeDeclaration name = editEnvironment $ removeSynthesisDeclaration name
+
+-- Raw environments remain a compatibility view, not a second editable
+-- authority. Convert once, apply the same checked shared transaction used by
+-- stable sessions, and project the exact sealed result back only on success.
+editEnvironment
+    :: (SynthesisEnvironment
+        -> Either SynthesisEnvironmentError
+            (SynthesisEnvironment, PreparedEnvironment))
+    -> Environment
+    -> Either String Environment
+editEnvironment edit environment = do
+    source <- first renderEnvironmentEditFailure $
+        toSynthesisEnvironment environment
+    (_, prepared) <- first renderEnvironmentEditFailure $ edit source
+    return $ preparedEnvironmentSource prepared
+
+-- Keep the raw string API useful without reconstructing the discarded raw
+-- candidate merely to recover category-specific legacy wording. The shared
+-- structured error is now the one diagnostic authority for both session and
+-- compatibility edits.
+renderEnvironmentEditFailure :: SynthesisEnvironmentError -> String
+renderEnvironmentEditFailure failure = case failure of
+    InvalidSynthesisInventory
+            (SharedInventory.UngroundedInventoryKind variable) ->
+        "kind contains an unsolved variable: " ++ show (KVar variable)
+    SynthesisEnvironmentDeclarationError NonCanonicalUnitDeclaration ->
+        unitDeclarationMessage
+    ProtectedSynthesisUnitDeclaration ->
+        unitDeclarationMessage
+    InvalidSynthesisEnvironment
+            (SharedEnvironment.DuplicateValueDeclaration name) ->
+        "Value name is already declared: " ++ SharedName.renderCanonical name
+    InvalidSynthesisEnvironment
+            (SharedEnvironment.DuplicateTypeDeclaration name) ->
+        "Type name is already declared: " ++ SharedName.renderCanonical name
+    SynthesisDeclarationNotFound name -> name ++ " is not defined"
+    ProtectedSynthesisUnit -> "() is a built-in type and cannot be removed"
+    _ -> show failure
+
+unitDeclarationMessage :: String
+unitDeclarationMessage = "() is a built-in type and cannot be declared"
 
 requireName :: String -> (HSymbol -> Bool) -> HSymbol -> Either String ()
 requireName what valid name
     | valid name = Right ()
     | otherwise = Left $ show name ++ " is not a valid " ++ what ++ " name"
-
-requireGroundKind :: HKind -> Either String ()
-requireGroundKind kind = case groundHKind kind of
-    Right _ -> Right ()
-    Left variable -> Left $
-        "kind contains an unsolved variable: " ++ show (KVar variable)
 
 ------------------------------------------------------------------
 -- Queries

@@ -367,6 +367,17 @@ testCheckedDjinnSessionEditing = do
         ["first", "second"]
         (map fst $ Djex.djinnSessionFunctionDeclarations replaced)
 
+    case Djex.declareDjinnDeclaration
+        (DataType "()" [] [("()", [])]) initial of
+      Left failure -> do
+        assertEqual "unit declaration lost its diagnostic code"
+            (Just "DJEX_DJINN_ENV")
+            (SharedDiagnostic.diagnosticCode failure)
+        assertBool "unit declaration lost its protected-name explanation"
+            $ "cannot be declared" `isInfixOf`
+                unwords (SharedDiagnostic.diagnosticContext failure)
+      Right _ -> fail "the shared editor installed the protected unit"
+
     withoutSecond <- expectShownRight $
         Djex.removeDjinnDeclaration "second" replaced
     assertEqual "deletion reordered surviving functions"
@@ -2629,20 +2640,21 @@ testPrintedValueNamespace = do
     let bool = HTCon "Bool"
         selectable = ClassDecl "Selectable" ["a"]
             [("select", HTVar "a")]
-        conflict =
+        sharedConflict = "Value name is already declared: select"
+        rawConflict =
             "Function assumption select conflicts with method select " ++
             "of class Selectable"
 
     functionFirst <- expectRight $
         declare (Function "select" bool) standardEnvironment
     assertLeftMessage "a later class method must not shadow an assumption"
-        conflict (declare selectable functionFirst)
+        sharedConflict (declare selectable functionFirst)
 
     classFirst <- expectRight $ declare selectable standardEnvironment
     assertLeftMessage "a later assumption must not shadow a class selector"
-        conflict (declare (Function "select" bool) classFirst)
+        sharedConflict (declare (Function "select" bool) classFirst)
     assertLeftMessage "operator selectors share the same printed namespace"
-        "Function assumption (==) conflicts with method (==) of class Eq"
+        "Value name is already declared: (==)"
         (declare (Function "==" bool) standardEnvironment)
 
     -- Qualified references retain their qualification in generated code and
@@ -2667,7 +2679,7 @@ testPrintedValueNamespace = do
     -- The internal rebuilding boundary owns the invariant as well; it is not
     -- merely an ad-hoc check in the two public declaration branches.
     assertLeftMessage "raw environment validation rejects the same ambiguity"
-        conflict
+        rawConflict
         (validateEnvironment [] [("select", HTVar "a")]
             [("Selectable", ([("a", KStar)], [("select", HTVar "a")]))])
     assertLeftContains "raw validation rejects duplicate assumptions"
@@ -2692,6 +2704,7 @@ testPrintedValueNamespace = do
 testTrustedUnitDeclaration :: IO ()
 testTrustedUnitDeclaration = do
     let exactUnit = ([], HTUnion [("()", [])], KStar)
+        declarationFailure = "() is a built-in type and cannot be declared"
     assertEqual "the standard environment contains exactly the wired-in unit"
         (Just exactUnit) (lookup "()" $ typeDeclarations standardEnvironment)
 
@@ -2710,23 +2723,19 @@ testTrustedUnitDeclaration = do
 
     -- It is not, however, a user-definable ConId.  In particular, the exact
     -- standard declaration is private rather than a loophole in this rule.
-    assertLeftContains "a unit-named synonym is rejected"
-        "not a valid type constructor name"
+    assertLeftMessage "a unit-named synonym is rejected" declarationFailure
         (declare (TypeSynonym "()" [] $ HTCon "Bool") standardEnvironment)
-    assertLeftContains "a unit-named abstract type is rejected"
-        "not a valid type constructor name"
+    assertLeftMessage "a unit-named abstract type is rejected" declarationFailure
         (declare (AbstractType "()" KStar) standardEnvironment)
-    assertLeftContains "a unit-named data type is rejected"
-        "not a valid type constructor name"
+    assertLeftMessage "a unit-named data type is rejected" declarationFailure
         (declare (DataType "()" [] []) standardEnvironment)
-    assertLeftContains "even the exact built-in data declaration is private"
-        "not a valid data constructor name"
+    assertLeftMessage "even the exact built-in data declaration is private"
+        declarationFailure
         (declare (DataType "()" [] [("()", [])]) emptyEnvironment)
-    assertLeftContains "a unit-named class is rejected"
-        "not a valid class name"
+    assertLeftMessage "a unit-named class is rejected" declarationFailure
         (declare (ClassDecl "()" [] []) standardEnvironment)
-    assertLeftContains "the unit constructor cannot belong to another type"
-        "not a valid data constructor name"
+    assertLeftMessage "the unit constructor cannot belong to another type"
+        declarationFailure
         (declare (DataType "CounterfeitUnit" [] [("()", [])])
             standardEnvironment)
 

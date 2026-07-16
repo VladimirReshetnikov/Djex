@@ -368,7 +368,7 @@ type ExferenceGeneratedSearchBatch =
 -- and backend details stay in the shared candidate envelope.
 type ExferenceCandidate =
   SharedCandidate.Candidate
-    SynthesisType
+    HsType
     ExferenceCandidateDetails
     (SharedGenerated.FunctionClause TVarId)
 

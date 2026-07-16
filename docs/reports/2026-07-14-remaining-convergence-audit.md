@@ -1421,6 +1421,22 @@ checker calls the shared application-spine operation directly. This removes
 seventeen lines of false conversion structure without weakening malformed-type
 diagnostics or declaration validation.
 
+## Exference native type vocabulary collapse
+
+**Completed on 2026-07-16:** `SynthesisType` was introduced while Exference's
+candidate boundary was migrating to the synthesis foundation. After `HsType`
+itself became `Type (Variable Int)`, the new name was only an exact alias for
+the historical one. Its entire use remained confined to three Exference core
+modules, where candidate, constraint, and substitution signatures alternated
+between the two names without expressing different invariants.
+
+The merger-only alias is gone and those signatures now use `HsType` directly.
+`SynthesisVariable` remains useful because it names the tagged flexible/rigid
+variable domain, while `SynthesisTypeError` remains the real validation and
+canonicalization error vocabulary. Historical `HsType` pattern synonyms also
+continue to preserve source compatibility over the single shared recursive
+tree.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

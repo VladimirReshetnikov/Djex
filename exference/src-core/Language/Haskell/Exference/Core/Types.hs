@@ -19,7 +19,6 @@ module Language.Haskell.Exference.Core.Types
   , pattern TypeForallNative
   , HsTypeOffset (..)
   , SynthesisVariable
-  , SynthesisType
   , SynthesisTypeError (..)
   , toSynthesisType
   , fromSynthesisType
@@ -103,12 +102,11 @@ import GHC.Generics
 
 type TVarId = Int
 type SynthesisVariable = SharedType.Variable TVarId
-type SynthesisType = SharedType.Type SynthesisVariable
 
 -- | Exference now searches the same type tree used at the neutral Djex
 -- boundary.  The patterns below retain the historical constructor vocabulary
 -- without storing a second, recursively isomorphic representation.
-type HsType = SynthesisType
+type HsType = SharedType.Type SynthesisVariable
 
 pattern TypeVar :: TVarId -> HsType
 pattern TypeVar variable =
@@ -188,7 +186,7 @@ data HsSubstitutionError
       (SharedType.SubstitutionError SynthesisVariable)
   -- | Retained for source compatibility. Constraint substitution now uses the
   -- shared batch operation and cannot produce a synthetic projection failure.
-  | UnexpectedConstraintSubstitutionResult SynthesisType
+  | UnexpectedConstraintSubstitutionResult HsType
   deriving (Eq, Show, Generic)
 
 instance NFData HsSubstitutionError
@@ -196,19 +194,19 @@ instance NFData HsSubstitutionError
 -- | Validate and canonicalize a native Exference/shared type at the public
 -- boundary. Flexible and rigid IDs remain distinct, and saturated tuple
 -- constructors are stored structurally.
-toSynthesisType :: HsType -> Either SynthesisTypeError SynthesisType
+toSynthesisType :: HsType -> Either SynthesisTypeError HsType
 toSynthesisType = normalizeExferenceType
 
 -- | Validate and canonicalize a shared type for Exference search.  This is no
 -- longer a representational conversion: 'HsType' is the shared type.
 fromSynthesisType
-  :: SynthesisType
+  :: HsType
   -> Either SynthesisTypeError HsType
 fromSynthesisType = normalizeExferenceType
 
 normalizeExferenceType
-  :: SynthesisType
-  -> Either SynthesisTypeError SynthesisType
+  :: HsType
+  -> Either SynthesisTypeError HsType
 normalizeExferenceType source = do
   let canonical = SharedType.canonicalizeType source
   either (Left . InvalidSynthesisType) Right
@@ -224,7 +222,7 @@ normalizeExferenceType source = do
 -- values accepted by its native representation. Its result still enters
 -- canonical storage so saturated functions and tuples have one spelling.
 canonicalizeSubstitutionResult
-  :: SynthesisType
+  :: HsType
   -> HsType
 canonicalizeSubstitutionResult = SharedType.canonicalizeType
 
@@ -232,7 +230,7 @@ canonicalizeSubstitutionResult = SharedType.canonicalizeType
 -- forall binders.  Check every nested context and structural tuple explicitly
 -- now that callers can construct the shared representation directly.
 ensureFlexibleForallBinders
-  :: SynthesisType
+  :: HsType
   -> Either SynthesisTypeError ()
 ensureFlexibleForallBinders = traverse_ checkBinder
   . SharedType.typeBinderVariables
@@ -289,7 +287,7 @@ constraint_params = SharedConstraint.constraintArguments
 toSynthesisConstraint
   :: HsConstraint
   -> Either SynthesisTypeError
-       (SharedConstraint.Constraint SynthesisType)
+       HsConstraint
 toSynthesisConstraint constraint = do
   converted <- traverse toSynthesisType constraint
   either (Left . InvalidSynthesisConstraint) Right
@@ -301,7 +299,7 @@ toSynthesisConstraint constraint = do
 -- position by shared namespace validation; unboxed tuple types remain valid
 -- arguments.
 fromSynthesisConstraint
-  :: SharedConstraint.Constraint SynthesisType
+  :: HsConstraint
   -> Either SynthesisTypeError HsConstraint
 fromSynthesisConstraint constraint = do
   either (Left . InvalidSynthesisConstraint) Right
@@ -793,21 +791,21 @@ applySubsts substitutions = checkedSubstitution "applySubsts"
 
 substituteShared
   :: Substs
-  -> SynthesisType
-  -> Either HsSubstitutionError SynthesisType
+  -> HsType
+  -> Either HsSubstitutionError HsType
 substituteShared substitutions = first SharedSubstitutionFailure
   . SharedType.substituteTypeVariables
       freshSynthesisVariable S.empty (sharedSubstitutions substitutions)
 
 substituteSharedBatch
   :: Substs
-  -> [SynthesisType]
-  -> Either HsSubstitutionError [SynthesisType]
+  -> [HsType]
+  -> Either HsSubstitutionError [HsType]
 substituteSharedBatch substitutions = first SharedSubstitutionFailure
   . SharedType.substituteTypeVariablesBatch
       freshSynthesisVariable S.empty (sharedSubstitutions substitutions)
 
-sharedSubstitutions :: Substs -> M.Map SynthesisVariable SynthesisType
+sharedSubstitutions :: Substs -> M.Map SynthesisVariable HsType
 sharedSubstitutions substitutions = M.fromList
   [ (SharedType.FlexibleVariable variable, replacement)
   | (variable, replacement) <- IntMap.toList substitutions

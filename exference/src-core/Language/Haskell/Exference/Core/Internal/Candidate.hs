@@ -41,7 +41,6 @@ import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.Types
   ( HsConstraint
   , HsType
-  , SynthesisType
   , SynthesisTypeError
   , SynthesisVariable
   , TVarId
@@ -52,7 +51,6 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Score
   (Penalty, isFiniteScore, normalizePenalty)
 import Language.Haskell.Synthesis.Candidate (Candidate (..))
-import Language.Haskell.Synthesis.Constraint (Constraint)
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -210,7 +208,7 @@ data ExferenceCandidateError
 instance NFData ExferenceCandidateError
 
 type ExferenceGeneratedCandidate =
-  Candidate SynthesisType ExferenceCandidateDetails
+  Candidate HsType ExferenceCandidateDetails
     (Generated.Expression TVarId)
 
 -- | Check and erase one typed Exference result without losing residual
@@ -269,7 +267,7 @@ detachCandidate
   :: ExferenceTypeVariableHints
   -> Exference.Expression
   -> Generated.Expression TVarId
-  -> [Constraint SynthesisType]
+  -> [HsConstraint]
   -> ExferenceStats
   -> ExferenceGeneratedCandidate
 detachCandidate typeNames expression generated constraints statistics = force

@@ -76,6 +76,9 @@ the shared scope-aware simultaneous substitution primitive, including
 capture-avoiding alpha-renaming under foralls. That representation-level API
 remains total for native rigid-binder forms; checked search boundaries reject
 those unsupported binders before execution.
+The stable candidate, constraint, and substitution signatures call this native
+tree `HsType` directly. The short-lived merger synonym `SynthesisType` has been
+removed: it was exactly the same type, not a separate checked representation.
 Flexible classification, identity projection, selective renaming, and
 flexible-versus-rigid collection now use the shared tagged-variable operations;
 Exference retains only its finite `Int` allocation and backend-specific error

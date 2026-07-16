@@ -45,6 +45,7 @@ import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
 import HCheckCompatibility (hCheckCompatibilityTests)
 import HKindCompatibility (hKindCompatibilityTests)
+import HTypeCompatibility (hTypeCompatibilityTests)
 import qualified Language.Haskell.Djex.Djinn as Djex
 import Language.Haskell.Synthesis.Constraint
     (Constraint(..), constraintArguments, constraintArity, constraintClass)
@@ -70,6 +71,7 @@ main = defaultMain $ testGroup "Djinn unit tests" $
 tests :: [(String, Assertion)]
 tests =
     hKindCompatibilityTests ++
+    hTypeCompatibilityTests ++
     hCheckCompatibilityTests ++
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse and render through the checked Djinn adapter",
@@ -717,6 +719,10 @@ testSharedTypeAdapter = do
         (Right ()) (SharedType.validateType shared)
     assertEqual "the shared renderer preserves Djinn source syntax"
         (show source) (SharedTypeRender.renderType id shared)
+    assertEqual "ordinary Djinn types retain the native shared tree"
+        (Just shared) (hTypeSynthesisStructure source)
+    assertEqual "native shared trees wrap without recursive conversion"
+        (Just source) (fromHTypeSynthesisStructure shared)
     assertEqual "Djinn's source-type subset round-trips losslessly"
         (Right source) (fromSynthesisType shared)
     unit <- either (fail . show) pure $ toSynthesisType $ HTCon "()"
@@ -724,6 +730,21 @@ testSharedTypeAdapter = do
         (SharedType.TupleType SharedName.Boxed []) unit
     assertEqual "unit returns to Djinn's canonical constructor form"
         (Right $ HTCon "()") (fromSynthesisType unit)
+    assertBool "a caller-built empty tuple retains its historical constructor"
+        (HTTuple [] /= HTCon "()")
+    assertEqual "nested canonical units project as constructor atoms"
+        (Right $ HTTuple [HTCon "()", HTCon "()"])
+        (fromSynthesisType $ SharedType.TupleType SharedName.Boxed
+            [ SharedType.TupleType SharedName.Boxed []
+            , SharedType.TupleType SharedName.Boxed []
+            ])
+    let malformedConstructor = HTCon "not a type"
+    assertEqual "malformed compatibility names stay outside the shared tree"
+        Nothing (hTypeSynthesisStructure malformedConstructor)
+    assertBool "malformed compatibility names retain checked diagnostics" $
+        case toSynthesisType malformedConstructor of
+            Left (InvalidHTypeName "not a type" _) -> True
+            _ -> False
     assertEqual "declaration bodies cannot masquerade as source types"
         (Left $ DeclarationBodyIsNotSourceType $ HTUnion [])
         (toSynthesisType $ HTUnion [])

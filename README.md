@@ -286,11 +286,13 @@ point rather than importing an internal parser. Both `DjinnRequest` and
 `DjinnCandidate` expose `DjinnType = Type DjinnTypeVariable`; that shared type
 is checked and canonicalized once by `mkDjinnRequest`, which seals an opaque
 shared execution plan while retaining the caller's exact neutral query.
-Parsed raw types travel through a checked compatibility projection into the
-same shared IR; `djinnRequestQuery` recovers the exact stable source view. The
+Parsed `HType` values already store ordinary source types in that shared IR;
+the checked boundary validates and canonicalizes their native tree while
+retaining declaration-only and constructor-sensitive caller-built forms for
+compatibility diagnostics. `djinnRequestQuery` recovers the exact stable
+source view. The
 plan remains shared through environment-dependent kind checking, synonym
-elaboration, class-method instantiation, and formula compilation; no `HType`
-tree is reconstructed after compatibility ingress. The query
+elaboration, class-method instantiation, and formula compilation. The query
 returns shared candidates containing
 structured generated
 clauses, empty residual constraints, and Djinn's unused-binder ranking details

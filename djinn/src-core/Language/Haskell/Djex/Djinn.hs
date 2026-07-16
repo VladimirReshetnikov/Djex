@@ -410,7 +410,7 @@ parsedTypeFailure
   -> Diagnostic
 parsedTypeFailure provenance role failure = withRequestProvenance provenance
   $ contextualDiagnostic Error "DJEX_DJINN_PARSE"
-      "cannot project the parsed Djinn query type"
+      "cannot validate the parsed Djinn query type"
       (role ++ ": " ++ show failure)
 
 loweringFailure :: String -> Core.SynthesisTypeError -> Diagnostic

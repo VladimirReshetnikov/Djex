@@ -321,9 +321,9 @@ data ResolvedContext typeExpression = ResolvedContext {
     resolvedConstraint :: Constraint typeExpression,
     resolvedParameters :: [(HSymbol, HKind)],
     -- Keep sealed methods in the authoritative shared representation.  The
-    -- compatibility API projects only the final instantiated result, rather
-    -- than rebuilding HType before substitution and converting it back again
-    -- in stable queries.
+    -- compatibility API wraps only the final instantiated result, rather
+    -- than routing substitution through the historical HType patterns in
+    -- stable queries.
     resolvedMethods ::
         [(SharedName.Name, SharedType.Type HSymbol)]
     }
@@ -799,7 +799,7 @@ inhabitResultPrepared options prepared contexts target goal = do
 -- | Search a sealed Djinn environment while keeping the query in Djex's
 -- common type representation through validation, kind checking, synonym
 -- elaboration, class-method instantiation, and formula compilation. The
--- native path never reconstructs the historical 'HType' tree.
+-- native path never crosses even the zero-copy historical 'HType' view.
 inhabitSynthesisResultPrepared
     :: QueryOptions
     -> PreparedEnvironment

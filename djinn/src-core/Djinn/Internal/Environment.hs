@@ -81,8 +81,8 @@ data PreparedEnvironment = PreparedEnvironment
     PreparedFormulaCompiler
 
 -- The prepared class index stays in the authoritative shared type and name
--- vocabulary. Historical context APIs project it back to 'HType' only at
--- their compatibility edge; native queries never perform that round trip.
+-- vocabulary. Historical context APIs wrap final methods in 'HType' only at
+-- their compatibility edge; native queries never cross that view.
 type SynthesisClassDefinition =
     ( [(HSymbol, HKind)]
     , [(SharedName.Name, SharedType.Type HSymbol)]
@@ -617,9 +617,9 @@ preparedEnvironmentFormulaTranslator
         (PreparedEnvironment _ _ _ _ compiler) =
     compileFormula rawFormulaTypeView compiler
 
--- | Translate a checked shared type without constructing Djinn's historical
--- HType tree. Stable raw and native queries meet here after validation and use
--- the exact same prepared formula-definition cache.
+-- | Translate a checked shared type directly. Stable raw and native queries
+-- meet here after validation and use the exact same prepared
+-- formula-definition cache.
 preparedEnvironmentSynthesisFormulaTranslator
     :: PreparedEnvironment
     -> SharedType.Type HSymbol

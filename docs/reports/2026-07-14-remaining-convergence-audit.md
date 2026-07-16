@@ -1284,6 +1284,36 @@ name reservation and escaped-proof-variable validation now filter the shared
 scope, global order, shadowing, let-binding scope, and capture rejection; the
 existing Djinn payload and proof-rendering regressions pin backend behavior.
 
+## Djinn native compatibility types
+
+**Completed on 2026-07-16:** Djinn's stable request path had long retained
+`Type String`, but parser output and every raw compatibility call still began
+with a second recursively isomorphic `HType` tree. Valid raw types were rebuilt
+at `toSynthesisType`, and native results were recursively projected back even
+though Exference's historical `HsType` constructors had already become
+patterns over the shared representation.
+
+Ordinary `HType` values now store `Type String` natively. Bundled
+`HTApp`/`HTVar`/`HTCon`/`HTTuple`/`HTArrow` patterns preserve exhaustive
+`HType(..)` imports, construction, matching, parsing, rendering, and formula
+views. `toSynthesisType` validates and canonicalizes the retained tree in
+place; `fromSynthesisType` checks representability and wraps it without a
+recursive node-for-node conversion. Djinn and Exference therefore use the
+same native type-compatibility architecture.
+
+Two genuinely non-isomorphic declaration forms—datatype unions and opaque
+kinded bodies—remain in a small compatibility layer. The same layer retains
+constructor-sensitive caller-built forms: malformed names keep the historical
+public constructor total and checked boundaries return `InvalidHTypeName`
+rather than crashing, while the noncanonical `(->)` atom and an explicit empty
+`HTTuple` retain their exact old constructor identity. Compatibility equality
+is defined through the old
+constructor view, hiding storage provenance and projecting canonical nested
+unit tuples back to `HTCon "()"`; a directly constructed `HTTuple []` remains
+distinct as before. Focused regressions cover native storage, shared wrapping,
+nested unit equality, malformed-name fallback, all bundled imports, and the
+existing parser/rendering properties.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

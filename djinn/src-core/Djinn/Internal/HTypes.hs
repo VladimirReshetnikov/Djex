@@ -6,9 +6,12 @@
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.HTypes(
-        HKind(KStar, KArrow, KVar), HType(..), HSymbol,
+        HKind(KStar, KArrow, KVar),
+        HType(HTApp, HTVar, HTCon, HTTuple, HTArrow, HTUnion, HTAbstract),
+        HSymbol,
         toSynthesisKind, fromSynthesisKind,
         groundHKind, checkedGroundHKind, fromGroundHKind,
+        hTypeSynthesisStructure, fromHTypeSynthesisStructure,
         prepareTypeFormulaTranslator, hTypeToFormula,
         pHSymbol, pHType, pHContext, pHConstraint,
         pHDataType, pHTAtom, pHKind,
@@ -29,6 +32,7 @@ import Djinn.Internal.TypeFormula
 import Language.Haskell.Synthesis.Constraint (Constraint(..))
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 type HSymbol = String
 
@@ -92,15 +96,170 @@ instance Show HKind where
             showsPrec 1 from . showString " -> " . showsPrec 0 to
     showsPrec _ (KVar i) = showString "k" . shows i
 
+-- | Djinn's historical type vocabulary over the common Djex source-type
+-- tree. Ordinary source types store 'SharedType.Type' natively; the bundled
+-- patterns preserve @HType(..)@ construction and matching syntax. The two
+-- declaration-only forms stay outside that source tree, and a narrow
+-- compatibility layer retains constructor-sensitive caller-built values such
+-- as malformed names, the noncanonical @(->)@ atom, and an explicit empty
+-- 'HTTuple'.
+--
+-- Consequently parser output and every checked query avoid a second
+-- recursive type representation, while malformed raw values still reach the
+-- historical checked diagnostic instead of making a compatibility constructor
+-- partial.
 data HType
-        = HTApp HType HType
-        | HTVar HSymbol
-        | HTCon HSymbol
-        | HTTuple [HType]
-        | HTArrow HType HType
-        | HTUnion [(HSymbol, [HType])] -- Data declarations only; top-level.
-        | HTAbstract HSymbol HKind     -- Opaque constructor with a declared kind.
+        = HTypeSource (SharedType.Type HSymbol)
+        | HTypeCompatibility HTypeLayer
+
+data HTypeLayer
+        = HTypeApplicationLayer HType HType
+        | HTypeVariableLayer HSymbol
+        | HTypeConstructorLayer HSymbol
+        | HTypeTupleLayer [HType]
+        | HTypeArrowLayer HType HType
+        | HTypeUnionLayer [(HSymbol, [HType])]
+        | HTypeAbstractLayer HSymbol HKind
         deriving (Eq)
+
+-- Equality retains the historical constructor view rather than exposing
+-- whether a value arrived as an already-canonical shared tree. In particular,
+-- shared canonicalization stores unit as an empty boxed tuple, while Djinn's
+-- compatibility view has always projected that nested form back to @HTCon
+-- "()"@.
+instance Eq HType where
+    left == right = case (viewHType left, viewHType right) of
+        (Just leftView, Just rightView) -> leftView == rightView
+        _ -> False
+
+pattern HTApp :: HType -> HType -> HType
+pattern HTApp function argument <-
+    (viewHType -> Just (HTypeApplicationLayer function argument))
+  where
+    HTApp function argument = case
+            (hTypeSynthesisStructure function,
+             hTypeSynthesisStructure argument) of
+        (Just functionType, Just argumentType) -> HTypeSource $
+            SharedType.TypeApplication functionType argumentType
+        _ -> HTypeCompatibility $ HTypeApplicationLayer function argument
+
+pattern HTVar :: HSymbol -> HType
+pattern HTVar variable <-
+    (viewHType -> Just (HTypeVariableLayer variable))
+  where
+    HTVar variable = HTypeSource $ SharedType.TypeVariable variable
+
+pattern HTCon :: HSymbol -> HType
+pattern HTCon sourceName <-
+    (viewHType -> Just (HTypeConstructorLayer sourceName))
+  where
+    HTCon sourceName = case sharedConstructorName sourceName of
+        Just name -> HTypeSource $ SharedType.TypeConstructor name
+        Nothing -> HTypeCompatibility $ HTypeConstructorLayer sourceName
+
+pattern HTTuple :: [HType] -> HType
+pattern HTTuple elements <-
+    (viewHType -> Just (HTypeTupleLayer elements))
+  where
+    HTTuple [] = HTypeCompatibility $ HTypeTupleLayer []
+    HTTuple elements = case traverse hTypeSynthesisStructure elements of
+        Just elementTypes -> HTypeSource $
+            SharedType.TupleType SharedName.Boxed elementTypes
+        Nothing -> HTypeCompatibility $ HTypeTupleLayer elements
+
+pattern HTArrow :: HType -> HType -> HType
+pattern HTArrow parameter result <-
+    (viewHType -> Just (HTypeArrowLayer parameter result))
+  where
+    HTArrow parameter result = case
+            (hTypeSynthesisStructure parameter,
+             hTypeSynthesisStructure result) of
+        (Just parameterType, Just resultType) -> HTypeSource $
+            SharedType.FunctionType parameterType resultType
+        _ -> HTypeCompatibility $ HTypeArrowLayer parameter result
+
+pattern HTUnion :: [(HSymbol, [HType])] -> HType
+pattern HTUnion constructors <-
+    (viewHType -> Just (HTypeUnionLayer constructors))
+  where
+    HTUnion constructors = HTypeCompatibility $ HTypeUnionLayer constructors
+
+pattern HTAbstract :: HSymbol -> HKind -> HType
+pattern HTAbstract name kind <-
+    (viewHType -> Just (HTypeAbstractLayer name kind))
+  where
+    HTAbstract name kind = HTypeCompatibility $
+        HTypeAbstractLayer name kind
+
+{-# COMPLETE HTApp, HTVar, HTCon, HTTuple, HTArrow, HTUnion, HTAbstract #-}
+
+-- | Obtain the native shared structure of an ordinary compatibility type.
+-- Declaration-only and constructor-sensitive fallback forms return 'Nothing'.
+-- No validation is performed: raw Djinn boundaries retain their established
+-- diagnostic precedence.
+hTypeSynthesisStructure :: HType -> Maybe (SharedType.Type HSymbol)
+hTypeSynthesisStructure (HTypeSource source) = Just source
+hTypeSynthesisStructure _ = Nothing
+
+-- | Wrap a representable shared source type without rebuilding it. The
+-- shared tree may still be unchecked; this operation rejects only syntax that
+-- Djinn's historical 'HType' cannot express at all.
+fromHTypeSynthesisStructure
+    :: SharedType.Type HSymbol
+    -> Maybe HType
+fromHTypeSynthesisStructure source
+    | isRepresentable source = Just $ HTypeSource source
+    | otherwise = Nothing
+  where
+    isRepresentable typeExpression = case typeExpression of
+        SharedType.TypeVariable{} -> True
+        SharedType.TypeConstructor{} -> True
+        SharedType.TypeApplication function argument ->
+            isRepresentable function && isRepresentable argument
+        SharedType.FunctionType parameter result ->
+            isRepresentable parameter && isRepresentable result
+        SharedType.TupleType SharedName.Boxed elements ->
+            all isRepresentable elements
+        SharedType.TupleType SharedName.Unboxed _ -> False
+        SharedType.ForallType{} -> False
+
+viewHType :: HType -> Maybe HTypeLayer
+viewHType source = case source of
+    HTypeSource typeExpression -> case typeExpression of
+        SharedType.TypeVariable variable ->
+            Just $ HTypeVariableLayer variable
+        SharedType.TypeConstructor name ->
+            Just $ HTypeConstructorLayer $ djinnConstructorSpelling name
+        SharedType.TypeApplication function argument ->
+            Just $ HTypeApplicationLayer
+                (HTypeSource function)
+                (HTypeSource argument)
+        SharedType.FunctionType parameter result ->
+            Just $ HTypeArrowLayer
+                (HTypeSource parameter) (HTypeSource result)
+        SharedType.TupleType SharedName.Boxed [] ->
+            Just $ HTypeConstructorLayer "()"
+        SharedType.TupleType SharedName.Boxed elements ->
+            Just $ HTypeTupleLayer $ map HTypeSource elements
+        -- The private constructor can acquire neither form: every entrance
+        -- crosses 'fromHTypeSynthesisStructure' or a bundled pattern above.
+        SharedType.TupleType SharedName.Unboxed _ -> Nothing
+        SharedType.ForallType{} -> Nothing
+    HTypeCompatibility layer -> Just layer
+
+-- Preserve Djinn's historical spelling for the prefix arrow. The shared
+-- canonical spelling is @(->)@, but Djinn's parser and formula compiler have
+-- always stored @->@.
+djinnConstructorSpelling :: SharedName.Name -> HSymbol
+djinnConstructorSpelling name
+    | SharedName.nameSpecial name == Just SharedName.FunctionConstructor = "->"
+    | otherwise = SharedName.renderCanonical name
+
+sharedConstructorName :: HSymbol -> Maybe SharedName.Name
+sharedConstructorName "(->)" = Nothing
+sharedConstructorName sourceName = case SharedName.parseName sourceName of
+    Right name -> Just name
+    Left _ -> Nothing
 
 isHTUnion :: HType -> Bool
 isHTUnion (HTUnion _) = True

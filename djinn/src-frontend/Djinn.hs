@@ -323,9 +323,9 @@ makeDjinnResult s name contexts goal = do
             "Djinn targets must be unqualified value identifiers or operators"
             (SharedName.renderCanonical target)
         Right value -> Right value
-    sharedGoal <- projectCompatibilityType "goal" goal
+    sharedGoal <- checkCompatibilityType "goal" goal
     sharedContexts <- traverse
-        (traverse $ projectCompatibilityType "context argument") contexts
+        (traverse $ checkCompatibilityType "context argument") contexts
     request <- mkDjinnRequest QueryRequest {
         requestTarget = checkedTarget,
         requestGoal = sharedGoal,
@@ -340,18 +340,16 @@ makeDjinnResult s name contexts goal = do
         optionBudget = if budget s > 0 then Just (budget s) else Nothing
         }
 
--- REPL parsers still produce the historical raw types. Their grammar lies in
--- the lossless shared subset, but keep the bridge checked so future grammar
--- extensions cannot smuggle a declaration-only node into the stable session.
--- Once projected, the query stays shared through kind checking, synonym
--- elaboration, and class-method instantiation; only the alias-free formula
--- compiler input is reconstructed as 'HType'.
-projectCompatibilityType
+-- REPL parsers construct the historical patterns over the native shared type
+-- tree. Keep this boundary checked so future grammar extensions cannot smuggle
+-- a declaration-only node into the stable session; after validation the same
+-- tree stays shared through the complete query pipeline.
+checkCompatibilityType
     :: String -> HType -> Either Diagnostic.Diagnostic DjinnType
-projectCompatibilityType role source = case toSynthesisType source of
+checkCompatibilityType role source = case toSynthesisType source of
     Left failure -> Left $ Diagnostic.contextualDiagnostic
         Diagnostic.Error "DJEX_DJINN_QUERY"
-        "cannot project the parsed Djinn query type"
+        "cannot validate the parsed Djinn query type"
         (role ++ ": " ++ show failure)
     Right shared -> Right shared
 

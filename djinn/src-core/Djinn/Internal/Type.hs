@@ -1,5 +1,5 @@
--- | Lossless boundary between Djinn's legacy type/search representation and
--- the shared source-type vocabulary.
+-- | Checked boundary between Djinn's historical constructor vocabulary and
+-- the shared source-type vocabulary it now stores natively.
 module Djinn.Internal.Type
   ( SynthesisTypeError (..)
   , isDjinnTypeVariable
@@ -16,7 +16,12 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 
 import Djinn.Internal.HIdentifier (isQualifiedConId, isVarId)
-import Djinn.Internal.HTypes (HType (..), HSymbol)
+import Djinn.Internal.HTypes
+  ( HType (..)
+  , HSymbol
+  , fromHTypeSynthesisStructure
+  , hTypeSynthesisStructure
+  )
 
 data SynthesisTypeError
   = InvalidHTypeName HSymbol SharedName.NameError
@@ -45,9 +50,9 @@ checkedDjinnTypeVariable variable
 toSynthesisType
   :: HType
   -> Either SynthesisTypeError (SharedType.Type HSymbol)
-toSynthesisType source = do
-  converted <- convert source
-  normalizeSynthesisType converted
+toSynthesisType source = case hTypeSynthesisStructure source of
+  Just native -> normalizeSynthesisType native
+  Nothing -> convert source >>= normalizeSynthesisType
  where
   convert typeExpression = case typeExpression of
     HTVar variable -> SharedType.TypeVariable
@@ -85,9 +90,10 @@ toSynthesisType source = do
       Just _ -> False
       Nothing -> isQualifiedConId sourceName
 
--- | Validate and canonicalize a shared type without rebuilding it as the
--- historical 'HType' tree. This is the checked entrance used by Djex's native
--- Djinn query path; the raw conversion below remains a compatibility edge.
+-- | Validate and canonicalize a shared type. This is the checked entrance
+-- used by both Djex's native path and ordinary compatibility 'HType' values;
+-- only declaration forms and malformed raw spellings require the recursive
+-- fallback in 'toSynthesisType'.
 normalizeSynthesisType
   :: SharedType.Type HSymbol
   -> Either SynthesisTypeError (SharedType.Type HSymbol)
@@ -121,7 +127,14 @@ renderSynthesisType = SharedTypeRender.renderType id
 fromSynthesisType
   :: SharedType.Type HSymbol
   -> Either SynthesisTypeError HType
-fromSynthesisType source = normalizeSynthesisType source >>= convert
+fromSynthesisType source = do
+  normalized <- normalizeSynthesisType source
+  case fromHTypeSynthesisStructure normalized of
+    Just native -> Right native
+    -- 'normalizeSynthesisType' has already rejected both unsupported
+    -- alternatives, so retain the old checked projection as a defensive
+    -- total fallback rather than asserting that invariant with 'error'.
+    Nothing -> convert normalized
  where
   convert typeExpression = case typeExpression of
     SharedType.TypeVariable variable -> Right $ HTVar variable

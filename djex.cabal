@@ -274,6 +274,7 @@ Test-Suite djinn-tests
   Other-Modules:
     HCheckCompatibility
     HKindCompatibility
+    HTypeCompatibility
   Build-Depends:  djex
 
 Test-Suite djinn-property-tests

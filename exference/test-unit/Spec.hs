@@ -76,7 +76,15 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
+  , deconstructorBindingType
+  , deconstructorBindingTypes
+  , environmentBindingTypes
   , functionBindingFromType
+  , functionBindingSignature
+  , functionBindingType
+  , functionBindingTypes
+  , mapDeconstructorBindingTypes
+  , mapFunctionBindingTypes
   )
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( RigidInstantiationError (..)
@@ -887,6 +895,41 @@ tests = testGroup "Exference"
               (Penalty 2.5)
               [constraint]
               [TypeVar 7]
+      , testCase "binding type views cover every stored type once" $ do
+          let result = TypeCons $ name "Result"
+              parameter = TypeCons $ name "Parameter"
+              constrained = TypeCons $ name "Constrained"
+              replacement = TypeCons $ name "Replacement"
+              constraint = HsConstraint (name "C") [constrained]
+              binding = FunctionBinding result (name "binding") 1
+                [constraint] [parameter]
+              constructor = ConstructorBinding (name "Build")
+                [parameter, constrained]
+              deconstructor = DeconstructorBinding result
+                [constructor] False
+              environment = EnvDictionary
+                [binding] [deconstructor] emptyStaticClassEnv
+          functionBindingType binding @?=
+            TypeArrow parameter result
+          functionBindingSignature binding @?=
+            TypeForall [] [constraint] (TypeArrow parameter result)
+          functionBindingTypes binding @?=
+            [result, parameter, constrained]
+          functionBindingTypes
+              (mapFunctionBindingTypes (const replacement) binding) @?=
+            replicate 3 replacement
+          deconstructorBindingType deconstructor @?=
+            TypeArrow parameter (TypeArrow constrained result)
+          deconstructorBindingTypes deconstructor @?=
+            [result, parameter, constrained]
+          deconstructorBindingTypes
+              (mapDeconstructorBindingTypes
+                (const replacement) deconstructor) @?=
+            replicate 3 replacement
+          environmentBindingTypes environment @?=
+            [ result, parameter, constrained
+            , result, parameter, constrained
+            ]
       , testCase "function bindings preserve nested forall results" $ do
           function <- expectRight $ mkQualifiedName ["Fixture"] "rankN"
           cls <- expectRight $ mkQualifiedName ["Fixture"] "C"

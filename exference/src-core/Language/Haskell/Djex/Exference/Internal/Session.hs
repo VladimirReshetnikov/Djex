@@ -37,10 +37,11 @@ import Language.Haskell.Exference.Core.Declaration
   , preparedSynthesisWitness
   )
 import Language.Haskell.Exference.Core.FunctionBinding
-  ( ConstructorBinding (constructorFields)
-  , DeconstructorBinding (..)
+  ( DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
+  , deconstructorBindingTypes
+  , functionBindingTypes
   )
 import Language.Haskell.Exference.Core.Score
   ( Penalty
@@ -50,10 +51,7 @@ import Language.Haskell.Exference.Core.TypeUtils
   ( containsForall
   , typeConstructorHead
   )
-import Language.Haskell.Exference.Core.Types
-  ( SynthesisVariable
-  , constraint_params
-  )
+import Language.Haskell.Exference.Core.Types (SynthesisVariable)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , shownErrorDiagnostic
@@ -238,16 +236,11 @@ sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView
 
 functionSupported :: FunctionBinding -> Bool
-functionSupported binding = all (not . containsForall)
-  $ functionResult binding
-  : functionParameters binding
-  ++ concatMap constraint_params (functionConstraints binding)
+functionSupported = all (not . containsForall) . functionBindingTypes
 
 deconstructorSupported :: DeconstructorBinding -> Bool
 deconstructorSupported binding = not (deconstructorRecursive binding)
-  && all (not . containsForall)
-      (deconstructorInput binding
-        : concatMap constructorFields (deconstructorConstructors binding))
+  && all (not . containsForall) (deconstructorBindingTypes binding)
 
 deconstructorOmission :: DeconstructorBinding -> Maybe ExferenceOmission
 deconstructorOmission binding = do

@@ -165,11 +165,9 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
         [binding | binding <- functions, functionName binding == name] of
       [] -> throwCheck $ UnknownBinding name
       binding : _ -> do
-        let result = functionResult binding
-            constraints = functionConstraints binding
-            parameters = functionParameters binding
+        let constraints = functionConstraints binding
         (freshTypes, freshConstraints) <- freshenTypes
-          [SharedType.functionType parameters result] constraints
+          [functionBindingType binding] constraints
         freshType <- case freshTypes of
           [ty] -> pure ty
           _ -> throwCheck $ UnknownBinding name
@@ -227,12 +225,7 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     mapM_ validateType $ functionParameters binding
     mapM_ validateConstraint $ functionConstraints binding
 
-  validateDeconstructor deconstructor = do
-    validateType $ deconstructorInput deconstructor
-    mapM_ validateConstructor $ deconstructorConstructors deconstructor
-
-  validateConstructor constructor =
-    mapM_ validateType $ constructorFields constructor
+  validateDeconstructor = mapM_ validateType . deconstructorBindingTypes
 
   validateAnnotations annotated = case annotated of
     ExpVar _ annotation -> validateType annotation

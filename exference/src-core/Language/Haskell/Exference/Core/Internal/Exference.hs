@@ -1146,29 +1146,12 @@ canonicalizeEnvironment environment = environment
   }
 
 canonicalizeFunctionBinding :: FunctionBinding -> FunctionBinding
-canonicalizeFunctionBinding binding = binding
-  { functionResult = canonicalize $ functionResult binding
-  , functionConstraints = map canonicalizeConstraint
-      $ functionConstraints binding
-  , functionParameters = map canonicalize $ functionParameters binding
-  }
+canonicalizeFunctionBinding = mapFunctionBindingTypes canonicalize
 
 canonicalizeDeconstructorBinding
   :: DeconstructorBinding
   -> DeconstructorBinding
-canonicalizeDeconstructorBinding binding = binding
-  { deconstructorInput = canonicalize $ deconstructorInput binding
-  , deconstructorConstructors = map canonicalizeConstructorBinding
-      $ deconstructorConstructors binding
-  }
-
-canonicalizeConstructorBinding :: ConstructorBinding -> ConstructorBinding
-canonicalizeConstructorBinding binding = binding
-  { constructorFields = map canonicalize $ constructorFields binding
-  }
-
-canonicalizeConstraint :: HsConstraint -> HsConstraint
-canonicalizeConstraint = fmap canonicalize
+canonicalizeDeconstructorBinding = mapDeconstructorBindingTypes canonicalize
 
 canonicalize :: HsType -> HsType
 canonicalize = SharedType.canonicalizeType
@@ -1316,12 +1299,6 @@ naturalPruningReasons queuePruned depthPruned =
   | depthPruned > 0
   ]
 
-functionBindingType :: FunctionBinding -> HsType
-functionBindingType binding =
-  SharedType.functionType
-    (functionParameters binding)
-    (functionResult binding)
-
 heuristicFields :: ExferenceHeuristicsConfig -> [(String, Penalty)]
 heuristicFields config =
   [ ("goalVar", heuristics_goalVar config)
@@ -1338,12 +1315,6 @@ heuristicFields config =
   , ("unusedVar", heuristics_unusedVar config)
   , ("solutionLength", heuristics_solutionLength config)
   ]
-
-deconstructorBindingType :: DeconstructorBinding -> HsType
-deconstructorBindingType binding =
-  SharedType.functionType
-    (concatMap constructorFields $ deconstructorConstructors binding)
-    (deconstructorInput binding)
 
 rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority
 rateNode h s = priorityFromPenalty
@@ -1520,10 +1491,7 @@ stateStep allocators multiPM allowConstrs h = do
       binding <- lift . chooseBranches =<< gets nodeFunctions
       renaming <- builderFreshenTVarNamespace allocators
         $ IntSet.toAscList $ IntSet.unions
-        $ flexibleIdentifiers (functionResult binding)
-        : ( map flexibleIdentifiers (functionParameters binding)
-          ++ map constraintFlexibleIdentifiers (functionConstraints binding)
-          )
+        $ map flexibleIdentifiers $ functionBindingTypes binding
       let
         rename = renameFlexibleType renaming
         provType = rename $ functionResult binding
@@ -1782,14 +1750,9 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
             searchAllocateFlexibleNamespace
               allocators
               (IntSet.toAscList
-                $ deconstructorFlexibleIdentifiers deconstructor)
+                $ IntSet.unions
+                $ map flexibleIdentifiers
+                $ deconstructorBindingTypes deconstructor)
               supply
-
-          deconstructorFlexibleIdentifiers deconstructor = IntSet.unions
-            $ flexibleIdentifiers (deconstructorInput deconstructor)
-            : [ flexibleIdentifiers field
-              | constructor <- deconstructorConstructors deconstructor
-              , field <- constructorFields constructor
-              ]
   -- where
   --  (<&>) = flip (<$>)

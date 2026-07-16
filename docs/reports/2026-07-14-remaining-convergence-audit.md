@@ -956,6 +956,28 @@ representability under one authority without moving HSE syntax or parser
 dependencies into the core. Regressions pin the shared round trip and the two
 lossy-parameter failures at that core boundary.
 
+## Post-fold binding-type ownership cleanup
+
+**Completed on 2026-07-15:** Exference's flat `FunctionBinding` and
+`DeconstructorBinding` records remained the data authority, but their type
+shape did not. Declaration conversion reconstructed complete signatures,
+validation rebuilt synthetic application and elimination types, rigid-variable
+planning enumerated every stored type, session filtering repeated that
+enumeration, and canonicalization independently updated each type-bearing
+field. Search allocation maintained two further copies of the function and
+datatype namespace traversals.
+
+`Core.FunctionBinding` now owns the monotype and complete-signature views,
+the ordered complete type projections, and whole-record type transformations.
+Declaration lowering, independent checking, environment validation, rigid-ID
+planning, session capability filtering, canonicalization, and dynamic
+namespace allocation consume those operations directly. The constraint-only
+flexible-ID helper and the private canonicalization/type reconstruction copies
+are gone. A focused regression fixes the order and coverage contract for
+results, parameters, constraint arguments, datatype inputs, and constructor
+fields, while the existing rigid-boundary and search suites continue to prove
+that no namespace site was lost.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

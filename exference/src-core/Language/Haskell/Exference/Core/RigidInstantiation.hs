@@ -171,26 +171,13 @@ firstRigidForallBinder = SharedCollection.firstPresent
 
 environmentTypes :: EnvDictionary -> [HsType]
 environmentTypes environment =
-  concatMap functionTypes (environmentFunctions environment)
-  ++ concatMap deconstructorTypes (environmentDeconstructors environment)
+  environmentBindingTypes environment
   ++ concatMap (concatMap constraint_params . tclass_constraints)
       (Map.elems $ sClassEnv_tclasses classes)
   ++ concatMap instanceTypes
       (concat $ Map.elems $ sClassEnv_instances classes)
  where
   classes = environmentClasses environment
-
-  functionTypes binding =
-    functionResult binding
-      : functionParameters binding
-      ++ concatMap constraint_params (functionConstraints binding)
-
-  deconstructorTypes binding =
-    deconstructorInput binding
-      : [ field
-        | constructor <- deconstructorConstructors binding
-        , field <- constructorFields constructor
-        ]
 
   instanceTypes instanceDeclaration = concatMap constraint_params
     $ instance_head instanceDeclaration

@@ -7,7 +7,6 @@ module Language.Haskell.Exference.Core.Internal.FlexibleIds
   , allocateNamespace
   , allocateCanonicalIdentifiers
   , flexibleIdentifiers
-  , constraintFlexibleIdentifiers
   , renameFlexibleType
   , renameFlexibleConstraint
   ) where
@@ -92,9 +91,6 @@ allocateCanonicalIdentifiers rawRequested initialSupply = do
 flexibleIdentifiers :: HsType -> IntSet.IntSet
 flexibleIdentifiers = foldMap
   $ SharedType.foldFlexibleVariable IntSet.singleton
-
-constraintFlexibleIdentifiers :: HsConstraint -> IntSet.IntSet
-constraintFlexibleIdentifiers = foldMap flexibleIdentifiers
 
 -- This is a whole-namespace rename, not a substitution originating outside a
 -- lexical scope: binder declarations and their owned occurrences move

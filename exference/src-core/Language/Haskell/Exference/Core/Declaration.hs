@@ -540,10 +540,7 @@ valueSignature
 valueSignature binding = SharedDeclaration.ValueSignature
   (SearchPenaltyMetadata $ functionPenalty binding)
   (functionName binding)
-  <$> convertedType (TypeForall [] (functionConstraints binding)
-        $ SharedType.functionType
-            (functionParameters binding)
-            (functionResult binding))
+  <$> convertedType (functionBindingSignature binding)
 
 fromSynthesisFunctionBinding
   :: SynthesisDeclaration

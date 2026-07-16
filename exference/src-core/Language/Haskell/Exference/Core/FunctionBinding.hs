@@ -6,6 +6,14 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , EnvDictionary (..)
   , FunctionBinding (..)
   , functionBindingFromType
+  , functionBindingType
+  , functionBindingSignature
+  , functionBindingTypes
+  , deconstructorBindingType
+  , deconstructorBindingTypes
+  , environmentBindingTypes
+  , mapFunctionBindingTypes
+  , mapDeconstructorBindingTypes
   )
 where
 
@@ -15,6 +23,7 @@ import GHC.Generics (Generic)
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils (splitArrowResultParams)
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data FunctionBinding = FunctionBinding
   { functionResult :: HsType
@@ -45,6 +54,39 @@ functionBindingFromType name penalty signature = FunctionBinding
  where
   (result, parameters, _, constraints) = splitArrowResultParams signature
 
+-- | Reconstruct the monotype consumed when applying a search binding.
+functionBindingType :: FunctionBinding -> HsType
+functionBindingType binding = SharedType.functionType
+  (functionParameters binding) (functionResult binding)
+
+-- | Reconstruct the complete implicitly quantified source signature retained
+-- by the flat search record. Leading binder identities are intentionally not
+-- recovered: they were opened by 'functionBindingFromType', while their free
+-- occurrences remain available to the shared declaration checker.
+functionBindingSignature :: FunctionBinding -> HsType
+functionBindingSignature binding = TypeForall []
+  (functionConstraints binding) (functionBindingType binding)
+
+-- | Every independently stored type in a function binding, in historical
+-- result, parameter, then constraint-argument order.
+functionBindingTypes :: FunctionBinding -> [HsType]
+functionBindingTypes binding = functionResult binding
+  : functionParameters binding
+  ++ concatMap constraint_params (functionConstraints binding)
+
+-- | Transform every independently stored type in a function binding exactly
+-- once. This includes types nested in the separately stored constraints.
+mapFunctionBindingTypes
+  :: (HsType -> HsType)
+  -> FunctionBinding
+  -> FunctionBinding
+mapFunctionBindingTypes transform binding = binding
+  { functionResult = transform $ functionResult binding
+  , functionConstraints = map (fmap transform)
+      $ functionConstraints binding
+  , functionParameters = map transform $ functionParameters binding
+  }
+
 data ConstructorBinding = ConstructorBinding
   { constructorName :: QualifiedName
   , constructorFields :: [HsType]
@@ -62,6 +104,35 @@ data DeconstructorBinding = DeconstructorBinding
 
 instance NFData DeconstructorBinding
 
+-- | Reconstruct the synthetic elimination type used by validation. Fields of
+-- every constructor precede the datatype result in declaration order.
+deconstructorBindingType :: DeconstructorBinding -> HsType
+deconstructorBindingType binding = SharedType.functionType
+  (concatMap constructorFields $ deconstructorConstructors binding)
+  (deconstructorInput binding)
+
+-- | Every independently stored type in a deconstructor binding.
+deconstructorBindingTypes :: DeconstructorBinding -> [HsType]
+deconstructorBindingTypes binding = deconstructorInput binding
+  : [ field
+    | constructor <- deconstructorConstructors binding
+    , field <- constructorFields constructor
+    ]
+
+-- | Transform the datatype input and every constructor field exactly once.
+mapDeconstructorBindingTypes
+  :: (HsType -> HsType)
+  -> DeconstructorBinding
+  -> DeconstructorBinding
+mapDeconstructorBindingTypes transform binding = binding
+  { deconstructorInput = transform $ deconstructorInput binding
+  , deconstructorConstructors = map transformConstructor
+      $ deconstructorConstructors binding
+  }
+ where
+  transformConstructor constructor = constructor
+    { constructorFields = map transform $ constructorFields constructor }
+
 data EnvDictionary = EnvDictionary
   { environmentFunctions :: [FunctionBinding]
   , environmentDeconstructors :: [DeconstructorBinding]
@@ -70,3 +141,12 @@ data EnvDictionary = EnvDictionary
   deriving (Generic, Show)
 
 instance NFData EnvDictionary
+
+-- | Every independently stored search-capability type. Class and instance
+-- assumptions are deliberately excluded because they belong to
+-- 'StaticClassEnv', not to these binding records.
+environmentBindingTypes :: EnvDictionary -> [HsType]
+environmentBindingTypes environment =
+  concatMap functionBindingTypes (environmentFunctions environment)
+  ++ concatMap deconstructorBindingTypes
+      (environmentDeconstructors environment)

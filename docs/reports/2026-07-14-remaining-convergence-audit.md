@@ -1475,6 +1475,35 @@ node also stops exporting two private substitution workers and a one-field type
 alias. This removes twenty-four net production lines without weakening a
 public compatibility contract.
 
+## Shared generated pattern cleanup
+
+**Completed on 2026-07-16:** Djinn's native generated-output migration still
+left more than two hundred fifty lines of backend-private operations over the
+shared `Expression` and `Pattern` tree. It independently decomposed application
+spines, compared case bodies modulo binders, commuted common branch lambdas,
+normalized redundant as-patterns, and performed lexical unused-binder pruning.
+The shared renderer contained the same application walk, while the remaining
+operations described generated syntax rather than LJT proofs.
+
+`Language.Haskell.Synthesis.Generated` now owns those operations. Its
+alpha-equivalence follows a bidirectional binder correspondence through
+lambda, let, and case scopes, distinguishes free locals from same-spelled bound
+locals, and keeps hole identities exact. This is stronger than the former
+Djinn helper, whose whole-tree renaming was safe only because proof lowering
+had already made every binder globally unique. Pattern alias normalization
+masks outer renamings at nested pattern scopes, and unused-pattern pruning
+accepts an identity projection so annotated backend locals need not discard
+their payloads. A separate bottom-up smart-case pass retains that generic case
+cleanup without adding an `Ord` constraint to projection-based pruning.
+
+Djinn's proof lowerer now contains only proof-specific construction, payload
+recovery, case commuting, and final naming policy; its generic cleanup body is
+gone. Foundation regressions cover application order, free-versus-bound
+distinctions, reverse-correspondence shadowing, let and case binders, exact
+holes, alias normalization, alpha-equivalent branch collapse, and
+projected-identity pruning. Existing Djinn product, constructor, case, and
+rendering regressions pin the backend projection.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

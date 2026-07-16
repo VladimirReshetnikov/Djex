@@ -29,6 +29,7 @@ module Language.Haskell.Synthesis.Generated
   , validateFunctionClauseSyntax
   , validateDefinitionName
   , functionClauseExpression
+  , expressionApplicationSpine
   , patternBindingSites
   , expressionBindingSites
   , functionClauseBindingSites
@@ -36,6 +37,11 @@ module Language.Haskell.Synthesis.Generated
   , expressionGlobals
   , fillExpressionHole
   , substituteExpressionLocalBy
+  , alphaEquivalentExpression
+  , simplifyCaseExpression
+  , simplifyExpressionCases
+  , normalizeExpressionPatterns
+  , discardUnusedPatternBindingsBy
   , simplifyExpressionBy
   , expressionHoles
   , expressionSizeNatural
@@ -156,6 +162,21 @@ functionClauseExpression :: FunctionClause local -> Expression local
 functionClauseExpression (FunctionClause _ [] body) = body
 functionClauseExpression (FunctionClause _ patterns body) =
   Lambda patterns body
+
+-- | Decompose a left-associated expression application into its head and
+-- arguments in source order. A non-application has no arguments.
+--
+-- Keeping this structural observation beside the generated tree prevents
+-- renderers and backend cleanup passes from maintaining identical private
+-- application walks.
+expressionApplicationSpine
+  :: Expression local
+  -> (Expression local, [Expression local])
+expressionApplicationSpine = collect []
+ where
+  collect arguments (Apply function argument) =
+    collect (argument : arguments) function
+  collect arguments function = (function, arguments)
 
 -- | Observe every pattern binding site in source order.  A present value is
 -- an ordinary or as-pattern binder; 'Nothing' is a wildcard.  Unlike the
@@ -305,6 +326,359 @@ substituteExpressionLocalBy identity selected replacement = replace
   binderCaptures binders body =
     any (`Set.member` replacementFree) binders
       && selected `Set.member` expressionFreeLocalIdentitiesBy identity body
+
+-- | Compare generated expressions modulo the identities chosen at lexical
+-- binding sites.
+--
+-- Free locals and holes remain exact. Lambda, let, and case binders extend a
+-- bidirectional lexical correspondence only for their own bodies, so a free
+-- local cannot compare equal to a same-spelled bound local and nested scopes
+-- cannot leak renamings into siblings. Pattern constructors and shape remain
+-- structural rather than alpha-renamed.
+alphaEquivalentExpression
+  :: Ord local
+  => Expression local
+  -> Expression local
+  -> Bool
+alphaEquivalentExpression = equivalent [] []
+ where
+  equivalent forward reverseBindings left right = case (left, right) of
+    (Local leftLocal, Local rightLocal) ->
+      equivalentLocal forward reverseBindings leftLocal rightLocal
+    (Global leftName, Global rightName) -> leftName == rightName
+    (Lambda leftPatterns leftBody, Lambda rightPatterns rightBody) ->
+      underPatterns forward reverseBindings
+        leftPatterns rightPatterns leftBody rightBody
+    (Apply leftFunction leftArgument, Apply rightFunction rightArgument) ->
+      equivalent forward reverseBindings leftFunction rightFunction
+        && equivalent forward reverseBindings leftArgument rightArgument
+    (Tuple leftElements, Tuple rightElements) ->
+      equivalentList forward reverseBindings leftElements rightElements
+    (Hole leftLocal, Hole rightLocal) -> leftLocal == rightLocal
+    (Let leftPattern leftBinding leftBody,
+        Let rightPattern rightBinding rightBody) ->
+      equivalent forward reverseBindings leftBinding rightBinding
+        && underPatterns forward reverseBindings
+            [leftPattern] [rightPattern] leftBody rightBody
+    (Case leftScrutinee leftAlternatives,
+        Case rightScrutinee rightAlternatives) ->
+      equivalent forward reverseBindings leftScrutinee rightScrutinee
+        && equivalentAlternatives forward reverseBindings
+            leftAlternatives rightAlternatives
+    _ -> False
+
+  equivalentLocal forward reverseBindings left right = case lookup left forward of
+    Just corresponding -> corresponding == right
+      && lookup right reverseBindings == Just left
+    Nothing -> case lookup right reverseBindings of
+      Just _ -> False
+      Nothing -> left == right
+
+  equivalentList forward reverseBindings left right =
+    length left == length right
+      && and (zipWith (equivalent forward reverseBindings) left right)
+
+  equivalentAlternatives forward reverseBindings left right =
+    length left == length right
+      && and (zipWith equivalentAlternative left right)
+   where
+    equivalentAlternative
+        (leftPattern, leftBody) (rightPattern, rightBody) =
+      underPatterns forward reverseBindings
+        [leftPattern] [rightPattern] leftBody rightBody
+
+  underPatterns forward reverseBindings
+      leftPatterns rightPatterns leftBody rightBody =
+    case matchPatternLists leftPatterns rightPatterns of
+      Nothing -> False
+      Just bindings -> equivalent
+        (bindings ++ forward)
+        (map (\(left, right) -> (right, left)) bindings ++ reverseBindings)
+        leftBody
+        rightBody
+
+  matchPatternLists left right
+    | length left /= length right = Nothing
+    | otherwise = concat <$> sequence (zipWith matchPattern left right)
+
+  matchPattern left right = case (left, right) of
+    (Bind leftLocal, Bind rightLocal) ->
+      Just [(leftLocal, rightLocal)]
+    (Wildcard, Wildcard) -> Just []
+    (Constructor leftName leftArguments,
+        Constructor rightName rightArguments)
+      | leftName == rightName ->
+          matchPatternLists leftArguments rightArguments
+    (TuplePattern leftElements, TuplePattern rightElements) ->
+      matchPatternLists leftElements rightElements
+    (As leftLocal leftNested, As rightLocal rightNested) -> do
+      nested <- matchPattern leftNested rightNested
+      pure $ (leftLocal, rightLocal) : nested
+    _ -> Nothing
+
+-- | Construct a case expression while applying the total-term reductions used
+-- by synthesis output.
+--
+-- The operation removes identity cases and alpha-equivalent alternatives and
+-- commutes a common leading lambda prefix out of every branch. It is not a
+-- semantics-preserving Haskell optimization in the presence of bottoms or
+-- @seq@; callers use it only for independently checked total synthesis terms.
+simplifyCaseExpression
+  :: Ord local
+  => Expression local
+  -> [(Pattern local, Expression local)]
+  -> Expression local
+simplifyCaseExpression scrutinee [] = Case scrutinee []
+simplifyCaseExpression _ [(Constructor name [], expression)]
+  | nameSpecial name == Just (TupleConstructor Boxed 0) = expression
+simplifyCaseExpression scrutinee alternatives
+  | all (uncurry patternEqualsExpression) alternatives = scrutinee
+simplifyCaseExpression scrutinee [(pattern, Lambda patterns body)] =
+  lambda patterns $ simplifyCaseExpression scrutinee [(pattern, body)]
+simplifyCaseExpression scrutinee
+    alternatives@((_, firstExpression@Lambda{}) : rest)
+  | commonCount > 0 = lambda (map bindingPattern canonicalLocals)
+      $ simplifyCaseExpression scrutinee convertedAlternatives
+ where
+  commonCount = foldr (min . lambdaBinderCount . snd)
+    (lambdaBinderCount firstExpression) rest
+
+  convertedAlternatives =
+    [ let (used, remaining) = splitAt commonCount patterns
+          renamings =
+            [ (source, target)
+            | (Bind source, Just target) <- zip used canonicalLocals
+            , source /= target
+            ]
+      in (constructorPattern, lambda remaining
+            $ renameLocals renamings expression)
+    | (constructorPattern, Lambda patterns expression) <- alternatives
+    ]
+
+  binderColumns = List.transpose
+    [ take commonCount patterns
+    | (_, Lambda patterns _) <- alternatives
+    ]
+  canonicalLocals = map canonicalLocal binderColumns
+
+  canonicalLocal patterns = case [local | Bind local <- patterns] of
+    local : _ -> Just local
+    [] -> Nothing
+simplifyCaseExpression _ ((_, expression) : alternatives@(_ : _))
+  | all (alphaEquivalentExpression expression . snd) alternatives = expression
+simplifyCaseExpression scrutinee alternatives = Case scrutinee alternatives
+
+lambda :: [Pattern local] -> Expression local -> Expression local
+lambda [] expression = expression
+lambda patterns (Lambda morePatterns body) =
+  Lambda (patterns ++ morePatterns) body
+lambda patterns expression = Lambda patterns expression
+
+lambdaBinderCount :: Expression local -> Int
+lambdaBinderCount (Lambda patterns _) =
+  length $ takeWhile isVariablePattern patterns
+lambdaBinderCount _ = 0
+
+isVariablePattern :: Pattern local -> Bool
+isVariablePattern Bind{} = True
+isVariablePattern Wildcard = True
+isVariablePattern _ = False
+
+bindingPattern :: Maybe local -> Pattern local
+bindingPattern Nothing = Wildcard
+bindingPattern (Just local) = Bind local
+
+patternEqualsExpression
+  :: Eq local
+  => Pattern local
+  -> Expression local
+  -> Bool
+patternEqualsExpression (Bind local) (Local local') = local == local'
+patternEqualsExpression (Constructor name patterns) expression =
+  case expressionApplicationSpine expression of
+    (Global name', arguments) ->
+      name == name' && length patterns == length arguments
+        && and (zipWith patternEqualsExpression patterns arguments)
+    _ -> False
+patternEqualsExpression (TuplePattern patterns) (Tuple expressions) =
+  length patterns == length expressions
+    && and (zipWith patternEqualsExpression patterns expressions)
+patternEqualsExpression _ _ = False
+
+renameLocals :: Eq local => [(local, local)] -> Expression local -> Expression local
+renameLocals renamings = fmap $ \local ->
+  maybe local id $ lookup local renamings
+
+-- | Apply 'simplifyCaseExpression' bottom-up throughout a generated tree.
+simplifyExpressionCases
+  :: Ord local
+  => Expression local
+  -> Expression local
+simplifyExpressionCases expression = case expression of
+  original@Local{} -> original
+  original@Global{} -> original
+  Lambda patterns body -> Lambda patterns $ simplifyExpressionCases body
+  Apply function argument -> Apply
+    (simplifyExpressionCases function)
+    (simplifyExpressionCases argument)
+  Tuple elements -> Tuple $ map simplifyExpressionCases elements
+  original@Hole{} -> original
+  Let pattern binding body -> Let pattern
+    (simplifyExpressionCases binding)
+    (simplifyExpressionCases body)
+  Case scrutinee alternatives -> simplifyCaseExpression
+    (simplifyExpressionCases scrutinee)
+    [ (pattern, simplifyExpressionCases body)
+    | (pattern, body) <- alternatives
+    ]
+
+-- | Normalize aliases introduced by redundant as-patterns throughout one
+-- generated expression.
+--
+-- An as-pattern over a wildcard becomes an ordinary binder, while an alias of
+-- another binder keeps the nested binder and redirects uses of the alias to
+-- it. On trees accepted by 'validateExpressionScope', lexical renamings are
+-- masked by every nested pattern scope. A case whose alternatives bind nothing
+-- and have alpha-equivalent bodies collapses to its first body; like Djinn's
+-- historical cleanup, this transformation is intended for total synthesized
+-- terms.
+normalizeExpressionPatterns
+  :: Ord local
+  => Expression local
+  -> Expression local
+normalizeExpressionPatterns = normalize Map.empty
+ where
+  normalize renamings expression = case expression of
+    Local local -> Local $ Map.findWithDefault local local renamings
+    original@Global{} -> original
+    Lambda patterns body ->
+      let (normalizedPatterns, aliases) = normalizePatterns patterns
+      in Lambda normalizedPatterns
+        $ normalize (underPatterns renamings patterns aliases) body
+    Apply function argument ->
+      Apply (normalize renamings function) (normalize renamings argument)
+    Tuple elements -> Tuple $ map (normalize renamings) elements
+    original@Hole{} -> original
+    Let pattern binding body ->
+      let (normalizedPattern, aliases) = normalizePattern pattern
+      in Let normalizedPattern
+        (normalize renamings binding)
+        (normalize (underPatterns renamings [pattern] aliases) body)
+    Case scrutinee alternatives -> simplifyCaseExpression
+      (normalize renamings scrutinee)
+      (map (normalizeAlternative renamings) alternatives)
+
+  normalizeAlternative renamings (pattern, body) =
+    let (normalizedPattern, aliases) = normalizePattern pattern
+    in ( normalizedPattern
+       , normalize (underPatterns renamings [pattern] aliases) body
+       )
+
+  normalizePatterns patterns =
+    let normalized = map normalizePattern patterns
+    in (map fst normalized, Map.unions $ map snd normalized)
+
+  normalizePattern pattern = case pattern of
+    original@Bind{} -> (original, Map.empty)
+    Wildcard -> (Wildcard, Map.empty)
+    Constructor name arguments ->
+      let (normalized, aliases) = normalizePatterns arguments
+      in (Constructor name normalized, aliases)
+    TuplePattern elements ->
+      let (normalized, aliases) = normalizePatterns elements
+      in (TuplePattern normalized, aliases)
+    As local nested -> case normalizePattern nested of
+      (Wildcard, aliases) -> (Bind local, aliases)
+      (Bind nestedLocal, aliases) ->
+        (Bind nestedLocal, Map.insert local nestedLocal aliases)
+      (normalized, aliases) -> (As local normalized, aliases)
+
+  underPatterns outer patterns aliases = aliases `Map.union`
+    foldr Map.delete outer (concatMap patternLocals patterns)
+
+-- | Replace unused pattern binders with wildcards using a backend's stable
+-- local-identity projection.
+--
+-- The analysis is lexical: lambda binders scope only their body, let binders
+-- do not scope the binding expression, and case binders are local to their
+-- alternative. A tuple pattern collapses to a wildcard when none of its
+-- nested binders remains useful; constructor shapes remain intact so that
+-- alternatives stay distinguishable. A sole wildcard alternative likewise
+-- loses its now-unobserved case wrapper under the total-term assumption used
+-- by the synthesis cleanup pipeline.
+discardUnusedPatternBindingsBy
+  :: Ord identity
+  => (local -> identity)
+  -> Expression local
+  -> Expression local
+discardUnusedPatternBindingsBy identity expression = fst $ discard expression
+ where
+  discard original = case original of
+    Lambda patterns body ->
+      let (body', freeInBody) = discard body
+          binders = patternIdentities patterns
+      in ( Lambda (map (discardPattern freeInBody) patterns) body'
+         , freeInBody `Set.difference` binders
+         )
+    Apply function argument ->
+      let (function', freeInFunction) = discard function
+          (argument', freeInArgument) = discard argument
+      in ( Apply function' argument'
+         , freeInFunction `Set.union` freeInArgument
+         )
+    Tuple elements ->
+      let (elements', freeInElements) = unzip $ map discard elements
+      in (Tuple elements', Set.unions freeInElements)
+    Case scrutinee alternatives ->
+      let (scrutinee', freeInScrutinee) = discard scrutinee
+          (alternatives', freeInAlternatives) = unzip
+            [ let (body', freeInBody) = discard body
+                  binders = patternIdentities [pattern]
+              in ( (discardPattern freeInBody pattern, body')
+                 , freeInBody `Set.difference` binders
+                 )
+            | (pattern, body) <- alternatives
+            ]
+      in case alternatives' of
+        [(Wildcard, body)] ->
+          (body, Set.unions freeInAlternatives)
+        _ ->
+          ( Case scrutinee' alternatives'
+          , freeInScrutinee `Set.union` Set.unions freeInAlternatives
+          )
+    Let pattern binding body ->
+      let (binding', freeInBinding) = discard binding
+          (body', freeInBody) = discard body
+          binders = patternIdentities [pattern]
+      in ( Let (discardPattern freeInBody pattern) binding' body'
+         , freeInBinding `Set.union` (freeInBody `Set.difference` binders)
+         )
+    Local local -> (original, Set.singleton $ identity local)
+    Global{} -> (original, Set.empty)
+    Hole{} -> (original, Set.empty)
+
+  patternIdentities = Set.fromList
+    . map identity . concatMap patternLocals
+
+  discardPattern freeInBody pattern = case pattern of
+    original@(Bind local)
+      | identity local `Set.member` freeInBody -> original
+      | otherwise -> Wildcard
+    Wildcard -> Wildcard
+    Constructor name arguments ->
+      Constructor name $ map (discardPattern freeInBody) arguments
+    TuplePattern elements ->
+      let retained = map (discardPattern freeInBody) elements
+      in if all isWildcard retained
+        then Wildcard
+        else TuplePattern retained
+    As local nested
+      | identity local `Set.member` freeInBody ->
+          As local $ discardPattern freeInBody nested
+      | otherwise -> discardPattern freeInBody nested
+
+  isWildcard Wildcard = True
+  isWildcard _ = False
 
 -- Exact totals are irrelevant to the simplifier: zero, one, and multiple
 -- occurrences are its only semantic cases. Saturating here also keeps the
@@ -816,7 +1190,7 @@ ppApplication
   -> Expression local
   -> Doc
 ppApplication options names precedence expression =
-  case applicationSpine expression of
+  case expressionApplicationSpine expression of
     (Global name, arguments)
       | Just arity <- boxedTupleArity name
       , arity == length arguments ->
@@ -830,13 +1204,6 @@ ppApplication options names precedence expression =
     (function, arguments) -> parenthesize (precedence > 11) $
       sep $ ppExpression options names 11 function
         : map (ppExpression options names 12) arguments
-
-applicationSpine :: Expression local -> (Expression local, [Expression local])
-applicationSpine = collect []
-  where
-    collect arguments (Apply function argument) =
-      collect (argument : arguments) function
-    collect arguments function = (function, arguments)
 
 ppPattern
   :: Ord local

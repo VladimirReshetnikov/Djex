@@ -2828,6 +2828,87 @@ generatedTests = testGroup "generated syntax"
       substituteExpressionLocalBy id 1 global
           (Apply (Local 1) $ Let (Bind 1) (Local 1) (Local 1)) @?=
         Just (Apply global $ Let (Bind 1) global (Local 1))
+  , testCase "decompose applications and compare lexical alpha-equivalence" $ do
+      let function, first, second :: Expression Int
+          function = Global $ right $ mkIdentifier "function"
+          first = Global $ right $ mkIdentifier "first"
+          second = Global $ right $ mkIdentifier "second"
+          application :: Expression Int
+          application = Apply (Apply function first) second
+          leftExpression = Lambda [Bind (0 :: Int)]
+            $ Let (Bind 1) (Local 0)
+            $ Case (Local 1)
+                [(TuplePattern [Bind 2, Wildcard], Apply (Local 0) (Local 2))]
+          rightExpression = Lambda [Bind (10 :: Int)]
+            $ Let (Bind 11) (Local 10)
+            $ Case (Local 11)
+                [(TuplePattern [Bind 12, Wildcard],
+                    Apply (Local 10) (Local 12))]
+          freeVersusBound =
+            ( Lambda [Bind (0 :: Int)] $ Local 1
+            , Lambda [Bind 1] $ Local 1
+            )
+          boundHoles =
+            ( Lambda [Bind (0 :: Int)] $ Hole 0
+            , Lambda [Bind 1] $ Hole 1
+            )
+          shadowedCorrespondence =
+            ( Lambda [Bind (0 :: Int)] $ Lambda [Bind 1] $ Local 0
+            , Lambda [Bind 10] $ Lambda [Bind 10] $ Local 10
+            )
+      expressionApplicationSpine application @?=
+        (function, [first, second])
+      expressionApplicationSpine function @?= (function, [])
+      assertBool "renamed lambda, let, and case binders must correspond"
+        $ alphaEquivalentExpression leftExpression rightExpression
+      assertBool "a free local must not become a same-spelled bound local"
+        $ not $ uncurry alphaEquivalentExpression freeVersusBound
+      assertBool "hole identities are operational, not alpha-bound locals"
+        $ not $ uncurry alphaEquivalentExpression boundHoles
+      assertBool "a nested binder must shadow the reverse correspondence"
+        $ not $ uncurry alphaEquivalentExpression shadowedCorrespondence
+  , testCase "normalize aliases and alpha-equivalent unbound branches" $ do
+      let choose = Global $ right $ mkIdentifier "choose"
+          aliases = Lambda
+            [ As "whole" $ Bind "field"
+            , As "kept" Wildcard
+            ]
+            $ Tuple [Local "whole", Local "field", Local "kept"]
+          normalizedAliases = Lambda [Bind "field", Bind "kept"]
+            $ Tuple [Local "field", Local "field", Local "kept"]
+          branches = Case choose
+            [ (Wildcard, Lambda [Bind "left"] $ Local "left")
+            , (Wildcard, Lambda [Bind "right"] $ Local "right")
+            ]
+          shadowedAlias = Lambda [As "outer" $ Bind "canonical"]
+            $ Lambda [Bind "outer"] $ Local "outer"
+      normalizeExpressionPatterns aliases @?= normalizedAliases
+      normalizeExpressionPatterns branches @?=
+        Lambda [Bind "left"] (Local "left")
+      normalizeExpressionPatterns shadowedAlias @?=
+        Lambda [Bind "canonical"]
+          (Lambda [Bind "outer"] $ Local "outer")
+      simplifyCaseExpression choose
+          [(Bind "selected", Local "selected")] @?= choose
+      simplifyExpressionCases
+          (Lambda [Bind "container"]
+            $ Case (Local "container")
+                [(Bind "selected", Local "selected")]) @?=
+        Lambda [Bind "container"] (Local "container")
+  , testCase "discard unused pattern binders by projected identity" $ do
+      let xBinder = (0 :: Int, "binder")
+          xUse = (0, "occurrence")
+          yBinder = (1, "binder")
+          projected = Lambda [Bind xBinder, Bind yBinder] $ Local xUse
+          wholeProduct = Lambda
+            [As "whole" $ TuplePattern [Bind "left", Bind "right"]]
+            $ Local "whole"
+          cleanedProduct = discardUnusedPatternBindingsBy id
+            $ normalizeExpressionPatterns
+            $ discardUnusedPatternBindingsBy id wholeProduct
+      discardUnusedPatternBindingsBy fst projected @?=
+        Lambda [Bind xBinder, Wildcard] (Local xUse)
+      cleanedProduct @?= Lambda [Bind "whole"] (Local "whole")
   , testCase "simplify by projected identity without capture" $ do
       let global spelling = Global $ right $ mkIdentifier spelling
           binder identity annotation = (identity, annotation)

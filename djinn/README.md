@@ -664,12 +664,15 @@ the classical depth-first order.
 
 Each selected proof term is normalized (`nf`), checked against the requested
 formula by an independent unification-based type checker (`ProofCheck`),
-alpha-renamed so every binder is globally unique, converted to a small
-Haskell AST, cleaned up (case collapsing, unused-binder elision, eta
-reduction, nicer names), and erased into the shared generated-code tree. The
-shared boundary revalidates lexical scope, distinguishes locals from structural
-global names, reserves emitted globals during local-name allocation, and
-pretty-prints the final clause.
+alpha-renamed so every binder is globally unique, converted to a small shared
+Haskell AST, cleaned up (case collapsing, redundant-pattern and unused-binder
+elimination, eta reduction, nicer names), and retained in that shared
+generated-code tree. Generic application decomposition, lexical
+alpha-equivalence, pattern normalization, and projected-identity binder
+pruning are owned by the shared boundary rather than this backend. The same
+boundary revalidates lexical scope, distinguishes locals from structural global
+names, reserves emitted globals during local-name allocation, and pretty-prints
+the final clause.
 
 Two invariants make the back half of that pipeline safe, and both are worth
 knowing before editing the source:

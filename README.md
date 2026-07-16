@@ -476,6 +476,9 @@ second traversal authority. The opaque wrapper also exposes one structural
 annotation observation derived from the shared tree's `Foldable` order; name
 hints, raw-input validation, and flexible-identifier reservation therefore no
 longer maintain separate copies of Exference's historical expression grammar.
+Djinn's pattern alias normalization, unused-binder pruning, application-spine
+inspection, and case-body alpha-equivalence now use that same generated-syntax
+authority instead of private recursive walks.
 Candidate selection and rendering remain presentation policies outside both
 session operations. The shared `Selection` module now
 provides first, global-best, streaming-all, batch-lookahead, and preferred-tier

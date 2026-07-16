@@ -2,16 +2,15 @@
 --
 -- Djinn historically translated proofs through a second Haskell-shaped tree
 -- ('HExpr' and 'HPat').  That tree remains available as a compatibility view,
--- but the live backend now performs cleanup here so the checked shared tree is
--- its only generated-output authority.
+-- but the live backend now lowers directly into the shared tree and delegates
+-- generic lexical cleanup to that tree's owning module.
 module Djinn.Internal.ProofToGenerated
   ( termToGeneratedExpression
   , termToGeneratedClause
   ) where
 
 import Control.Monad (foldM, zipWithM)
-import Data.Foldable (toList)
-import Data.List (find, transpose, (\\))
+import Data.List ((\\))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
@@ -31,9 +30,11 @@ type Expression = Generated.Expression HSymbol
 termToGeneratedExpression :: Term -> Either String Expression
 termToGeneratedExpression term = do
   (expression, _) <- convert [] renamedTerm
-  let simplified = niceNames $ Generated.simplifyExpressionBy id $
-        removeUnusedVariables $ fixSillyAsPatterns $
-          removeUnusedVariables expression
+  let simplified = niceNames $ Generated.simplifyExpressionBy id
+        $ Generated.simplifyExpressionCases
+        $ Generated.discardUnusedPatternBindingsBy id
+        $ Generated.normalizeExpressionPatterns
+        $ Generated.discardUnusedPatternBindingsBy id expression
       allowed = Set.fromList $ map unSymbol $ freeVars term
       escaped = freeValueSpellings simplified `Set.difference` allowed
   if Set.null escaped
@@ -115,7 +116,8 @@ termToGeneratedExpression term = do
             (restExpressions, restRefinements) = unzip convertedRest
         pure
           ( foldl Generated.Apply
-              (caseExpression convertedScrutinee alternatives)
+              (Generated.simplifyCaseExpression
+                convertedScrutinee alternatives)
               restExpressions
           , scrutineeRefinements ++ concat alternativeRefinements
               ++ concat restRefinements
@@ -147,7 +149,7 @@ termToGeneratedExpression term = do
                   )
           _ -> pure
             ( foldl Generated.Apply
-                (caseExpression convertedScrutinee
+                (Generated.simplifyCaseExpression convertedScrutinee
                   [(tuplePattern patterns, body)])
                 argumentExpressions
             , handlerRefinements ++ scrutineeRefinements
@@ -347,65 +349,6 @@ alphaRenameTerm term = renamed
     (\suffix -> (Symbol $ "__djinn" ++ show suffix, suffix + 1))
     used next
 
-patternVariables :: [Pattern] -> Set.Set HSymbol
-patternVariables = Set.fromList . concatMap toList
-
-fixSillyAsPatterns :: Expression -> Expression
-fixSillyAsPatterns = fixPatterns []
- where
-  fixPatterns substitutions expression = case expression of
-    Generated.Lambda patterns body ->
-      let (patterns', renamings) = unzip $ map findSilly patterns
-      in Generated.Lambda patterns' $
-        fixPatterns (concat renamings ++ substitutions) body
-    Generated.Apply function argument -> Generated.Apply
-      (fixPatterns substitutions function)
-      (fixPatterns substitutions argument)
-    original@Generated.Global{} -> original
-    original@(Generated.Local variable) ->
-      maybe original Generated.Local $ lookup variable substitutions
-    Generated.Tuple expressions ->
-      Generated.Tuple $ map (fixPatterns substitutions) expressions
-    original@Generated.Hole{} -> original
-    Generated.Let pattern' binding body ->
-      let (pattern'', renamings) = findSilly pattern'
-      in Generated.Let pattern''
-        (fixPatterns substitutions binding)
-        (fixPatterns (renamings ++ substitutions) body)
-    Generated.Case scrutinee alternatives ->
-      collapseCase
-        (fixPatterns substitutions scrutinee)
-        (map (fixAlternative substitutions) alternatives)
-
-  fixAlternative substitutions (pattern', expression) =
-    let (pattern'', renamings) = findSilly pattern'
-    in (pattern'', fixPatterns (renamings ++ substitutions) expression)
-
-  findSilly original@Generated.Bind{} = (original, [])
-  findSilly Generated.Wildcard = (Generated.Wildcard, [])
-  findSilly (Generated.Constructor name arguments) =
-    let (arguments', renamings) = unzip $ map findSilly arguments
-    in (Generated.Constructor name arguments', concat renamings)
-  findSilly (Generated.TuplePattern patterns) =
-    let (patterns', renamings) = unzip $ map findSilly patterns
-    in (Generated.TuplePattern patterns', concat renamings)
-  findSilly (Generated.As variable pattern') = case findSilly pattern' of
-    (Generated.Wildcard, renamings) ->
-      (Generated.Bind variable, renamings)
-    (converted@(Generated.Bind variable'), renamings) ->
-      (converted, (variable, variable') : renamings)
-    (converted, renamings) ->
-      (Generated.As variable converted, renamings)
-
-  collapseCase scrutinee alternatives = case alternatives of
-    (pattern', expression) : rest
-      | null (toList pattern')
-      , all (sameUnboundExpression expression) rest -> expression
-    _ -> Generated.Case scrutinee alternatives
-
-  sameUnboundExpression expression (pattern', expression') =
-    null (toList pattern') && alphaEquivalent expression expression'
-
 niceNames :: Expression -> Expression
 niceNames expression = fmap rename expression
  where
@@ -431,193 +374,3 @@ freeValueSpellings expression = Set.fromList
   | name <- Generated.expressionGlobals expression
   , Name.nameLexicalClass name == Name.VariableLike
   ]
-
-caseExpression :: Expression -> [(Pattern, Expression)] -> Expression
-caseExpression scrutinee [] = Generated.Case scrutinee []
-caseExpression _ [(Generated.Constructor name [], expression)]
-  | Name.nameSpecial name == Just (Name.TupleConstructor Name.Boxed 0) =
-      expression
-caseExpression scrutinee alternatives
-  | all (uncurry patternEqualsExpression) alternatives = scrutinee
-caseExpression scrutinee [(pattern', Generated.Lambda patterns body)] =
-  lambda patterns $ caseExpression scrutinee [(pattern', body)]
-caseExpression scrutinee
-    alternatives@((_, firstExpression@Generated.Lambda{}) : rest)
-  | commonCount > 0 =
-      lambda (map bindingPattern canonicalNames) $
-        caseExpression scrutinee convertedAlternatives
- where
-  commonCount = foldr (min . lambdaBinderCount . snd)
-    (lambdaBinderCount firstExpression) rest
-  lambdaBinderCount (Generated.Lambda patterns _) =
-    length $ takeWhile isVariablePattern patterns
-  lambdaBinderCount _ = 0
-  isVariablePattern Generated.Bind{} = True
-  isVariablePattern Generated.Wildcard = True
-  isVariablePattern _ = False
-  convertedAlternatives =
-    [ let (used, remaining) = splitAt commonCount patterns
-          substitutions =
-            [ (source, target)
-            | (Generated.Bind source, target) <- zip used canonicalNames
-            , source /= target
-            ]
-      in (constructorPattern, lambda remaining $
-            substituteLocals substitutions expression)
-    | (constructorPattern, Generated.Lambda patterns expression) <- alternatives
-    ]
-  binderColumns = transpose
-    [take commonCount patterns | (_, Generated.Lambda patterns _) <- alternatives]
-  canonicalNames = map canonicalName binderColumns
-  canonicalName patterns = fromMaybe "_" $
-    find (/= "_") [name | Generated.Bind name <- patterns]
-caseExpression _ ((_, expression) : alternatives@(_ : _))
-  | all (alphaEquivalent expression . snd) alternatives = expression
-caseExpression scrutinee alternatives =
-  Generated.Case scrutinee alternatives
-
-bindingPattern :: HSymbol -> Pattern
-bindingPattern "_" = Generated.Wildcard
-bindingPattern variable = Generated.Bind variable
-
-patternEqualsExpression :: Pattern -> Expression -> Bool
-patternEqualsExpression (Generated.Bind variable)
-    (Generated.Local variable') = variable == variable'
-patternEqualsExpression (Generated.Constructor name patterns) expression =
-  case expressionSpine expression of
-    (Generated.Global name', arguments) ->
-      name == name' && length patterns == length arguments
-        && and (zipWith patternEqualsExpression patterns arguments)
-    _ -> False
-patternEqualsExpression (Generated.TuplePattern patterns)
-    (Generated.Tuple expressions) =
-  length patterns == length expressions
-    && and (zipWith patternEqualsExpression patterns expressions)
-patternEqualsExpression _ _ = False
-
-expressionSpine :: Expression -> (Expression, [Expression])
-expressionSpine = collect []
- where
-  collect arguments (Generated.Apply function argument) =
-    collect (argument : arguments) function
-  collect arguments function = (function, arguments)
-
-alphaEquivalent :: Expression -> Expression -> Bool
-alphaEquivalent left right
-  | left == right = True
-alphaEquivalent (Generated.Lambda leftPatterns leftBody)
-    (Generated.Lambda rightPatterns rightBody) =
-  case matchPattern
-      (Generated.TuplePattern leftPatterns)
-      (Generated.TuplePattern rightPatterns) of
-    Just substitutions ->
-      alphaEquivalent (substituteLocals substitutions leftBody) rightBody
-    Nothing -> False
-alphaEquivalent (Generated.Apply leftFunction leftArgument)
-    (Generated.Apply rightFunction rightArgument) =
-  alphaEquivalent leftFunction rightFunction
-    && alphaEquivalent leftArgument rightArgument
-alphaEquivalent (Generated.Global leftName) (Generated.Global rightName) =
-  leftName == rightName
-alphaEquivalent (Generated.Local leftVariable)
-    (Generated.Local rightVariable) = leftVariable == rightVariable
-alphaEquivalent (Generated.Tuple leftExpressions)
-    (Generated.Tuple rightExpressions) =
-  length leftExpressions == length rightExpressions
-    && and (zipWith alphaEquivalent leftExpressions rightExpressions)
-alphaEquivalent (Generated.Case leftScrutinee leftAlternatives)
-    (Generated.Case rightScrutinee rightAlternatives) =
-  length leftAlternatives == length rightAlternatives
-    && alphaEquivalent leftScrutinee rightScrutinee
-    && and (zipWith alphaEquivalent
-      [Generated.Lambda [pattern'] body
-      | (pattern', body) <- leftAlternatives]
-      [Generated.Lambda [pattern'] body
-      | (pattern', body) <- rightAlternatives])
-alphaEquivalent _ _ = False
-
-matchPattern :: Pattern -> Pattern -> Maybe [(HSymbol, HSymbol)]
-matchPattern (Generated.Bind left) (Generated.Bind right) =
-  Just [(left, right)]
-matchPattern Generated.Wildcard Generated.Wildcard = Just []
-matchPattern (Generated.Constructor leftName leftArguments)
-    (Generated.Constructor rightName rightArguments)
-  | leftName == rightName
-  , length leftArguments == length rightArguments =
-      concat <$> zipWithM matchPattern leftArguments rightArguments
-matchPattern (Generated.TuplePattern left)
-    (Generated.TuplePattern right)
-  | length left == length right = concat <$> zipWithM matchPattern left right
-matchPattern (Generated.As leftVariable leftPattern)
-    (Generated.As rightVariable rightPattern) = do
-  substitutions <- matchPattern leftPattern rightPattern
-  pure $ (leftVariable, rightVariable) : substitutions
-matchPattern _ _ = Nothing
-
-substituteLocals :: [(HSymbol, HSymbol)] -> Expression -> Expression
-substituteLocals substitutions = fmap $ \variable ->
-  fromMaybe variable $ lookup variable substitutions
-
-removeUnusedVariables :: Expression -> Expression
-removeUnusedVariables expression = fst $ removeExpression expression
- where
-  removeExpression original = case original of
-    Generated.Lambda patterns body ->
-      let (body', freeInBody) = removeExpression body
-          binders = patternVariables patterns
-      in ( Generated.Lambda (map (removePattern freeInBody) patterns) body'
-         , freeInBody `Set.difference` binders
-         )
-    Generated.Apply function argument ->
-      let (function', freeInFunction) = removeExpression function
-          (argument', freeInArgument) = removeExpression argument
-      in ( Generated.Apply function' argument'
-         , freeInFunction `Set.union` freeInArgument
-         )
-    Generated.Tuple expressions ->
-      let (expressions', freeInElements) = unzip $ map removeExpression expressions
-      in (Generated.Tuple expressions', Set.unions freeInElements)
-    Generated.Case scrutinee alternatives ->
-      let (scrutinee', freeInScrutinee) = removeExpression scrutinee
-          (alternatives', freeInAlternatives) = unzip
-            [ let (body', freeInBody) = removeExpression body
-                  binders = patternVariables [pattern']
-              in ( (removePattern freeInBody pattern', body')
-                 , freeInBody `Set.difference` binders
-                 )
-            | (pattern', body) <- alternatives
-            ]
-      in case alternatives' of
-        [(Generated.Wildcard, body)] ->
-          (body, Set.unions freeInAlternatives)
-        _ ->
-          ( caseExpression scrutinee' alternatives'
-          , freeInScrutinee `Set.union` Set.unions freeInAlternatives
-          )
-    Generated.Let pattern' binding body ->
-      let (binding', freeInBinding) = removeExpression binding
-          (body', freeInBody) = removeExpression body
-          binders = patternVariables [pattern']
-      in ( Generated.Let (removePattern freeInBody pattern') binding' body'
-         , freeInBinding `Set.union` (freeInBody `Set.difference` binders)
-         )
-    Generated.Local variable -> (original, Set.singleton variable)
-    Generated.Global{} -> (original, Set.empty)
-    Generated.Hole{} -> (original, Set.empty)
-
-  removePattern freeInBody pattern' = case pattern' of
-    original@(Generated.Bind variable)
-      | variable `Set.member` freeInBody -> original
-      | otherwise -> Generated.Wildcard
-    Generated.Wildcard -> Generated.Wildcard
-    Generated.Constructor name arguments ->
-      Generated.Constructor name $ map (removePattern freeInBody) arguments
-    Generated.TuplePattern patterns ->
-      let patterns' = map (removePattern freeInBody) patterns
-      in if all (== Generated.Wildcard) patterns'
-        then Generated.Wildcard
-        else Generated.TuplePattern patterns'
-    Generated.As variable nested
-      | variable `Set.member` freeInBody ->
-          Generated.As variable $ removePattern freeInBody nested
-      | otherwise -> removePattern freeInBody nested

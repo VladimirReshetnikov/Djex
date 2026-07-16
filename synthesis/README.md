@@ -116,6 +116,14 @@ structural observation of referenced names and pattern constructors.
 substitution boundary: shadowing stops replacement, and a backend receives
 `Nothing` when its payload would require freshening rather than risking silent
 capture.
+Application-spine decomposition, lexical alpha-equivalence, total-term smart
+case construction, redundant as-pattern normalization, and scope-aware
+unused-pattern pruning also live at this boundary. Alpha-equivalence keeps a
+bidirectional correspondence through lambda, let, and case scopes, so a free
+local cannot become equal to a same-spelled binder; holes remain exact
+operational identities. Pattern pruning accepts a backend identity projection
+just like the ordinary simplifier, preserving annotations while deciding
+binder use.
 `simplifyExpressionBy` owns scope-aware let elimination, capture-safe
 single-use inlining, and eta reduction for synthesis terms. A backend supplies
 only its local-identity projection, so annotations remain intact while binder

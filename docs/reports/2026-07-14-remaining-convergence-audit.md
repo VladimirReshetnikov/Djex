@@ -1151,6 +1151,24 @@ the former partial class-index adapter. Existing regressions pin alias
 preservation, inactive substitutions, multiple capture collisions, long prime
 chains, joint instance-kind scopes, and exact method output.
 
+## Retired Djinn raw substitution authority
+
+**Completed on 2026-07-15:** after raw and native context resolution converged,
+the recursive `getHTVars` and `substHT` operations in
+`Djinn.Internal.HTypes` had no remaining consumer. Keeping them exposed a
+second free-variable order and simultaneous-substitution interpretation beside
+the shared type operations, even though no backend path used that
+interpretation. The old raw prepared-class lookup was likewise unreferenced;
+it projected the sealed shared class index eagerly and called `error` if its
+private invariant ever failed.
+
+Those package-internal escape hatches are now removed. Compatibility context
+arguments cross the checked shared type boundary before the single method
+instantiator runs, and only its final methods project back to `HType`. The
+prepared environment exposes only the native shared class lookup, eliminating
+42 lines of dead recursive/projection code and the associated partial failure
+site without changing either stable facade.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

@@ -12,14 +12,13 @@ module Djinn.Internal.HTypes(
         prepareTypeFormulaTranslator, hTypeToFormula,
         pHSymbol, pHType, pHContext, pHConstraint,
         pHDataType, pHTAtom, pHKind,
-        prHSymbolOp, htNot, isHTUnion, getHTVars, substHT,
+        prHSymbolOp, htNot, isHTUnion,
         HClause, HPat, HExpr(HEVar), hPrClause, renderGeneratedClause,
         toGeneratedClause, toGeneratedClauseWithName,
         termToHExpr, termToHClause,
         getBinderVars
     ) where
 import Data.Bifunctor (first)
-import Data.List (union)
 import Data.Void (Void, absurd)
 import Text.ParserCombinators.ReadP
 import Djinn.Internal.Generated
@@ -225,15 +224,6 @@ pHKind = do
 pHKindA :: ReadP HKind
 pHKindA = (do schar '*'; return KStar) +++ pParen pHKind
 
-getHTVars :: HType -> [HSymbol]
-getHTVars (HTApp f a) = getHTVars f `union` getHTVars a
-getHTVars (HTVar v) = [v]
-getHTVars (HTCon _) = []
-getHTVars (HTTuple ts) = foldr union [] (map getHTVars ts)
-getHTVars (HTArrow f a) = getHTVars f `union` getHTVars a
-getHTVars (HTUnion ctss) = foldr union [] [ getHTVars t | (_, ts) <- ctss, t <- ts ]
-getHTVars (HTAbstract _ _) = []
-
 -------------------------------
 
 -- | Check a raw definition table once and return its checked formula
@@ -275,18 +265,6 @@ hTypeFormulaDefinition (name, (parameters, body, _)) = case body of
     HTAbstract abstractName _ ->
         FormulaAbstract name parameters abstractName
     _ -> FormulaAlias name parameters body
-
-substHT :: [(HSymbol, HType)] -> HType -> HType
-substHT r (HTApp f a) = hTApp (substHT r f) (substHT r a)
-substHT r t@(HTVar v) =
-    case lookup v r of
-    Nothing -> t
-    Just t' -> t'
-substHT _ t@(HTCon _) = t
-substHT r (HTTuple ts) = HTTuple (map (substHT r) ts)
-substHT r (HTArrow f a) = HTArrow (substHT r f) (substHT r a)
-substHT r (HTUnion ctss) = HTUnion [ (c, map (substHT r) ts) | (c, ts) <- ctss ]
-substHT _ t@(HTAbstract _ _) = t
 
 -- Keep the prefix spelling `(->) a b` in the same canonical form as `a -> b`.
 hTApp :: HType -> HType -> HType

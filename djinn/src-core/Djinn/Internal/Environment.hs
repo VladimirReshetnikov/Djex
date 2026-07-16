@@ -11,7 +11,7 @@ module Djinn.Internal.Environment (
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentFormulaTranslator,
     preparedEnvironmentSynthesisFormulaTranslator,
-    preparedEnvironmentFunctionPremises, lookupPreparedEnvironmentClass,
+    preparedEnvironmentFunctionPremises,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
     elaboratePreparedTypes, elaboratePreparedSynthesisTypes,
     SynthesisEnvironment, SynthesisInventory,
@@ -642,25 +642,9 @@ projectPreparedInventory prepared = do
     environment = SharedInventory.inventoryEnvironment inventory
     assumptions = SharedInventory.inventoryKindAssumptions inventory
 
-lookupPreparedEnvironmentClass
-    :: HSymbol
-    -> PreparedEnvironment
-    -> Maybe ([(HSymbol, HKind)], [Axiom])
-lookupPreparedEnvironmentClass sourceName prepared = do
-    name <- either (const Nothing) Just $ SharedName.parseName sourceName
-    (parameters, methods) <- lookupPreparedSynthesisClass name prepared
-    let projectMethod (methodName, methodType) = do
-            methodSymbol <- synthesisMethodSymbol methodName
-            projected <- first show $ fromSynthesisType methodType
-            return (methodSymbol, projected)
-    case mapM projectMethod methods of
-        Right projected -> Just (parameters, projected)
-        Left failure -> error $
-            "Djinn.Internal.Environment.lookupPreparedEnvironmentClass: " ++
-            "sealed class invariant failed: " ++ failure
-
 -- | Look up one class in the authoritative shared name/type index retained by
--- a sealed environment. The compatibility lookup above is its raw projection.
+-- a sealed environment. Raw compatibility callers project only their final
+-- instantiated methods; no second HType class index is retained or exposed.
 lookupPreparedSynthesisClass
     :: SharedName.Name
     -> PreparedEnvironment

@@ -123,7 +123,6 @@ Library
     Language.Haskell.Djex
     Language.Haskell.Djex.Djinn
     Language.Haskell.Djex.Exference
-    Language.Haskell.Djex.Exference.FrontendSupport
     Language.Haskell.Synthesis.Candidate
     Language.Haskell.Synthesis.Collection
     Language.Haskell.Synthesis.Count
@@ -195,8 +194,6 @@ Library
     Language.Haskell.Djex.Exference.Internal.Request
     Language.Haskell.Djex.Exference.Internal.Session
     Language.Haskell.Exference.Core.Internal.FlexibleIds
-    Language.Haskell.Exference.Core.Internal.Unify
-    Language.Haskell.Exference.Core.Internal.ConstraintSolver
     Language.Haskell.Exference.Core.Internal.Candidate
     Language.Haskell.Exference.Core.Internal.ExferenceNode
     Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder

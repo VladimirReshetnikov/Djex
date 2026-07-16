@@ -109,13 +109,13 @@ spellings are both forced at this boundary. Malformed maps therefore fail early 
 This mirrors Djinn's library-first organization while retaining the
 parser/source boundary at the module level.
 
-The source component crosses into core through the explicit parser-neutral
-`Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.
-It documents and wraps the four checked operations needed by source-adapter
-authors without exposing request, session, or allocator representations.
-Adapters import it directly from `djex`; the curated
-`Language.Haskell.Djex` facade does not re-export it. The
-request representation behind it remains a hidden module. Stable clients
+The bundled source modules and parser-neutral core now inhabit the same
+library. They meet directly at the hidden request, session, and finite-variable
+supply owners; the former `FrontendSupport` service-provider module was only a
+bridge between the retired Cabal components and has been removed. Stable
+clients use `Language.Haskell.Djex.Exference.HaskellSrc` for source loading and
+parsing or the neutral `Language.Haskell.Djex.Exference` API. The request
+representation remains hidden, so stable clients
 therefore see an opaque `ExferenceRequest` with one neutral smart constructor;
 the shared `CachedQuery` owns its strict complete source provenance, while
 its backend cache is exactly one opaque checked source-hint value. Neither

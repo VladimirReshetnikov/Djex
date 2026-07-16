@@ -7,7 +7,6 @@ import Control.Monad (forM_)
 import Data.Either (isRight)
 import Data.Foldable (toList)
 import Data.List (isInfixOf)
-import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
@@ -16,63 +15,27 @@ import Djinn.Core (parseHType)
 import qualified Djinn.Internal.LJTFormula as LJT
 import qualified Djinn.Internal.ProofEnv as ProofEnv
 import Language.Haskell.Djex.Exference
-import Language.Haskell.Djex.Exference.FrontendSupport
-  ( allocateFreshTypeVariableId
-  , mkExferenceRequestWithSourceInfo
-  , sealPreparedExferenceSessionWithPolicy
-  , validateExferenceTarget
-  )
-import Language.Haskell.Exference.Core.Declaration
-  ( prepareSynthesisInventory )
 import qualified Language.Haskell.Exference.Core.Declaration as Declaration
-import Language.Haskell.Exference.Core
-  ( ExferenceQuery (..)
-  , emptyExferenceSourceTypeVariableHints
-  , findQueryResultsInEnvironmentEither
-  , mkExferenceEnvironment
-  )
 import Language.Haskell.Exference.Core.FunctionBinding
   ( EnvDictionary (..)
   )
 import qualified Language.Haskell.Exference.Core.RigidInstantiation as Rigid
 import qualified Language.Haskell.Exference.Core.Types as CoreTypes
-import Language.Haskell.Synthesis.Candidate (candidateOutput)
-import Language.Haskell.Synthesis.Constraint (Constraint (..))
-import Language.Haskell.Synthesis.Diagnostic
-  ( Diagnostic
-  , diagnosticCode
-  , diagnosticSource
-  , diagnosticSpan
-  , sourceTextLocation
-  , sourceTextSpan
-  )
-import Language.Haskell.Synthesis.Generated (clauseName)
 import qualified Language.Haskell.Synthesis.Environment as Environment
-import Language.Haskell.Synthesis.Inventory
-  ( InventoryError
-  , mkInventory
-  )
+import Language.Haskell.Synthesis.Generated (mkDefinitionName)
 import qualified Language.Haskell.Synthesis.Inventory as Inventory
-import Language.Haskell.Synthesis.KindInference
-  ( KindInventoryPolicy (OpenKindInventory) )
 import qualified Language.Haskell.Synthesis.KindInference as KindInference
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed)
   , mkIdentifier
-  , mkOperator
   , tupleName
   )
 import Language.Haskell.Synthesis.Query
-  ( QueryRequest (..)
-  , resultSearch
-  )
+  ( QueryRequest (..) )
 import qualified Language.Haskell.Synthesis.Query as Query
-import Language.Haskell.Synthesis.Search (batchCandidates)
 import qualified Language.Haskell.Synthesis.Search as Search
 import Language.Haskell.Synthesis.Type
-  ( Type (FunctionType, TypeVariable)
-  , Variable (FlexibleVariable, RigidVariable)
-  )
+  ( Variable (RigidVariable) )
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit
@@ -177,140 +140,6 @@ main = defaultMain $ testGroup "Djex downstream API"
               (description ++ " raised an unrelated exception: " ++ message)
               isMissingDictionary
           Right () -> assertFailure description)
-  , testCase "the Exference frontend-support boundary is complete" $ do
-      inventory <- expectRight
-        (mkInventory OpenKindInventory []
-          :: Either
-              (InventoryError ExferenceTypeVariable Void)
-              ExferenceInventory)
-      prepared <- expectRight $ prepareSynthesisInventory inventory
-      session <- expectRight
-        $ sealPreparedExferenceSessionWithPolicy [] mempty prepared
-
-      allocateFreshTypeVariableId mempty @?= Just 0
-      allocateFreshTypeVariableId (IntSet.singleton maxBound) @?= Just 0
-      allocateFreshTypeVariableId
-          (IntSet.fromList [0, maxBound, minBound]) @?= Just 1
-
-      target <- expectRight $ mkOperator "<~>"
-      checkedTarget <- expectRight $ validateExferenceTarget target
-      let variable = FlexibleVariable 0
-          goal = FunctionType
-            (TypeVariable variable)
-            (TypeVariable variable)
-          options = defaultExferenceOptions
-            { exferenceMaximumSteps = 16 }
-      let source = "a -> a"
-          location = sourceTextLocation "djex-api" source
-      request <- expectRight
-        $ mkExferenceRequestWithSourceInfo mempty location QueryRequest
-          { requestTarget = checkedTarget
-          , requestGoal = goal
-          , requestContexts = []
-          , requestOptions = options
-          }
-      className <- expectRight $ mkIdentifier "C"
-      case mkExferenceRequestWithSourceInfo mempty location QueryRequest
-          { requestTarget = checkedTarget
-          , requestGoal = goal
-          , requestContexts =
-              [Constraint className [TypeVariable $ FlexibleVariable 1]]
-          , requestOptions = options
-          } of
-        Left failure -> do
-          diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
-          diagnosticSource failure @?= Just "djex-api"
-          diagnosticSpan failure @?= Just (sourceTextSpan source)
-        Right _ -> assertFailure
-          "the sourced SPI accepted an out-of-scope context variable"
-      case mkExferenceRequestWithSourceInfo
-          (Map.singleton "where" 0) location QueryRequest
-          { requestTarget = checkedTarget
-          , requestGoal = goal
-          , requestContexts = []
-          , requestOptions = options
-          } of
-        Left failure -> do
-          diagnosticCode failure @?= Just "DJEX_EXF_SOURCE_HINT"
-          diagnosticSource failure @?= Just "djex-api"
-          diagnosticSpan failure @?= Just (sourceTextSpan source)
-        Right _ -> assertFailure
-          "the sourced SPI accepted a reserved type-variable spelling"
-      results <- expectRight $ runExferenceQuery session request
-      backendGoal <- expectRight $ CoreTypes.fromSynthesisType goal
-      coreEnvironment <- expectRight $ mkExferenceEnvironment
-        $ EnvDictionary [] [] CoreTypes.emptyStaticClassEnv
-      direct <- expectRight $ findQueryResultsInEnvironmentEither
-        checkedTarget (emptyExferenceSourceTypeVariableHints backendGoal)
-        coreEnvironment ExferenceQuery
-          { queryGoalType = backendGoal
-          , queryExcludedBindings = mempty
-          , queryAllowUnused = exferenceAllowUnused options
-          , queryAllowConstraints =
-              exferenceAllowResidualConstraints options
-          , queryConstraintDeferralSteps =
-              exferenceConstraintDeferralSteps options
-          , queryMultiConstructorPatterns =
-              exferenceMultiConstructorPatterns options
-          , queryMaximumSteps = exferenceMaximumSteps options
-          , queryMaximumQueueSize = exferenceMaximumQueueSize options
-          , queryMaximumDepth = exferenceMaximumDepth options
-          , queryHeuristics = exferenceHeuristics options
-          }
-      results @?= direct
-      assertBool "the core-only adapter found no identity candidate"
-        $ any (not . null . batchCandidates . resultSearch) results
-      case concatMap (batchCandidates . resultSearch) results of
-        candidate : _ -> clauseName (candidateOutput candidate) @?=
-          checkedTarget
-        [] -> assertFailure "the direct result path found no identity"
-  , testCase "source-aware request sealing materializes source spans" $ do
-      targetName <- expectRight $ mkIdentifier "identity"
-      target <- expectRight $ validateExferenceTarget targetName
-      let variable = FlexibleVariable 0
-          goal = FunctionType
-            (TypeVariable variable)
-            (TypeVariable variable)
-          partialSource = 'a' : error "unforced adapter source tail"
-          location = sourceTextLocation "djex-api" partialSource
-          query = QueryRequest
-            { requestTarget = target
-            , requestGoal = goal
-            , requestContexts = []
-            , requestOptions = defaultExferenceOptions
-            }
-      result <- try $ evaluate $
-        mkExferenceRequestWithSourceInfo mempty location query
-      case result
-          :: Either
-              SomeException
-              (Either Diagnostic ExferenceRequest) of
-        Left _ -> pure ()
-        Right _ -> assertFailure
-          "the source-aware adapter retained a lazy source-span traversal"
-      let finiteLocation = sourceTextLocation "djex-api" "a -> a"
-          partialSpelling = 'a' : error "unforced source-hint tail"
-      hintResult <- try $ evaluate $
-        mkExferenceRequestWithSourceInfo
-          (Map.singleton partialSpelling 0) finiteLocation query
-      case hintResult
-          :: Either
-              SomeException
-              (Either Diagnostic ExferenceRequest) of
-        Left _ -> pure ()
-        Right _ -> assertFailure
-          "the source-aware adapter retained a lazy spelling validation"
-      let partialMap = Map.fromDistinctAscList
-            $ ("source", 0) : error "unforced source-hint map tail"
-      mapResult <- try $ evaluate $
-        mkExferenceRequestWithSourceInfo partialMap finiteLocation query
-      case mapResult
-          :: Either
-              SomeException
-              (Either Diagnostic ExferenceRequest) of
-        Left _ -> pure ()
-        Right _ -> assertFailure
-          "the source-aware adapter retained a lazy source-hint map"
   , testCase "the native shared type has honest compatibility views" $ do
       let rigidForall = CoreTypes.TypeForallNative
             [RigidVariable 7]
@@ -338,7 +167,7 @@ main = defaultMain $ testGroup "Djex downstream API"
         Right (CoreTypes.TypeTuple Boxed [first, second])
   , testCase "stable requests store canonical types and reject rigid binders" $ do
       targetName <- expectRight $ mkIdentifier "tupled"
-      target <- expectRight $ validateExferenceTarget targetName
+      target <- expectRight $ mkDefinitionName targetName
       pairName <- expectRight $ tupleName Boxed 2
       let first = CoreTypes.TypeVar 0
           second = CoreTypes.TypeConstant 1

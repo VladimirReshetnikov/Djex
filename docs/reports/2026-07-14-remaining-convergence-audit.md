@@ -1504,6 +1504,35 @@ holes, alias normalization, alpha-equivalent branch collapse, and
 projected-identity pruning. Existing Djinn product, constructor, case, and
 rendering regressions pin the backend projection.
 
+## Retired Exference component boundaries
+
+**Completed on 2026-07-16:** folding both frontends into the single `djex`
+library left three module boundaries whose only purpose had been crossing old
+Cabal components. The exposed
+`Language.Haskell.Djex.Exference.FrontendSupport` module forwarded prepared
+session sealing, sourced request construction, and target checking to their
+hidden owners, plus one line of finite-variable allocation. Its only
+production consumers were bundled source modules now compiled into the same
+library. Keeping it exposed falsely advertised a general source-adapter SPI and
+retained documentation for the deleted `exference-frontend` component.
+
+Those source modules now import the owning hidden request, session, and
+variable-supply modules directly, and the obsolete SPI and its boundary-only
+downstream tests are gone. The real public Haskell-source loader, request
+parser, compatibility session constructor, context-scope checks, provenance
+materialization, hint validation, and finite-ID behavior remain covered by the
+integration, foundation, and Exference regression suites.
+
+Two more exact forwarding pairs remained inside the Exference core:
+`Core.Unify` re-exported all of `Core.Internal.Unify`, and
+`Core.ConstraintSolver` re-exported all of
+`Core.Internal.ConstraintSolver`. Their implementations now live under the
+already-public canonical module names, internal consumers import those names,
+and the two private modules are deleted. This changes neither API nor search
+behavior; it removes three false boundaries, three module-list entries, and
+more than one hundred net source lines while leaving the historical
+compatibility modules that still own real syntax or diagnostics intact.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

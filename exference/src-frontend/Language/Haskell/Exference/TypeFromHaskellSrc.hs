@@ -38,7 +38,8 @@ import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
 
 import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
-import qualified Language.Haskell.Djex.Exference.FrontendSupport as Frontend
+import qualified Language.Haskell.Exference.Core.Internal.VariableSupply
+  as VariableSupply
 import Language.Haskell.Exference.Diagnostic
 import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map.Strict as M
@@ -332,8 +333,10 @@ getVar n = do
       identifier <- maybe
         (throwE "type-variable conversion namespace is exhausted")
         pure
-        $ Frontend.allocateFreshTypeVariableId
-        $ conversionReservedIds state
+        $ fst
+        <$> VariableSupply.allocateFreshIdentifier
+          (VariableSupply.supplyFromIdentifierSet
+            $ conversionReservedIds state)
       lift $ put state
         { conversionTypeVarIndex = M.insert key identifier variables
         , conversionReservedIds = IntSet.insert identifier

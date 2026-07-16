@@ -14,7 +14,7 @@ import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
-import Language.Haskell.Exference.Core.Internal.ConstraintSolver
+import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.RigidInstantiation

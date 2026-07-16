@@ -18,7 +18,7 @@ import Language.Haskell.Djex.Exference
       )
   , defaultExferenceSessionPolicy
   )
-import Language.Haskell.Djex.Exference.FrontendSupport
+import Language.Haskell.Djex.Exference.Internal.Session
   ( sealPreparedExferenceSessionWithPolicy
   )
 import Language.Haskell.Exference.EnvironmentParser

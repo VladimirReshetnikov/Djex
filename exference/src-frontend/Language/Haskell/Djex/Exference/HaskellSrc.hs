@@ -29,7 +29,7 @@ import Language.Haskell.Djex.Exference
   , exferenceSessionDiagnostics
   , exferenceSessionInventory
   )
-import qualified Language.Haskell.Djex.Exference.FrontendSupport as Frontend
+import qualified Language.Haskell.Djex.Exference.Internal.Request as Request
 import qualified Language.Haskell.Exference.Session as CompatibilitySession
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.EnvironmentParser
@@ -138,7 +138,7 @@ parseExferenceRequest
 parseExferenceRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
-  checkedTarget <- Frontend.validateExferenceTarget target
+  checkedTarget <- Request.validateExferenceTarget target
   parseExferenceRequestWithCheckedTarget
     session options checkedTarget sourceName source
 
@@ -178,5 +178,5 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
         , requestContexts = []
         , requestOptions = options
         }
-  Frontend.mkExferenceRequestWithSourceInfo
+  Request.mkExferenceRequestWithSourceInfo
     sourceVariables location query

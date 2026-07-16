@@ -398,13 +398,12 @@ rejects a hint value paired with any other query.
 Neither provenance nor hints affects equality/display or admits an unchecked
 construction path through the curated facade. The library's hidden
 `Language.Haskell.Djex.Exference.Internal.Request`
-representation owns that metadata. Source-adapter authors opt into the explicit parser-neutral
-`Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.
-Its checked wrappers also expose only the session vocabulary, prepared-session
-sealing, source-aware request construction, target preflight, and
-collision-safe variable allocation needed at that boundary. It is exposed
-directly by `djex`, but deliberately not re-exported by
-`Language.Haskell.Djex`.
+representation owns that metadata. The bundled Haskell-source adapters now
+live in the same library and call the hidden request, session, and variable
+supply owners directly. The former `FrontendSupport` service-provider module
+existed only to cross the retired core/frontend Cabal boundary and is no longer
+part of the public API; external clients use either the neutral stable adapter
+or `Language.Haskell.Djex.Exference.HaskellSrc`.
 HSE's normalized parse filename is also the filename retained for deferred
 diagnostics, so extensionless labels no longer change identity between parse
 and search phases; angle-bracket virtual-buffer names remain verbatim.

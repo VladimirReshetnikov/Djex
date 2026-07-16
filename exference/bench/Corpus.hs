@@ -14,6 +14,7 @@ module Corpus
 import Language.Haskell.Exference.Core
   ( ExferenceEnvironment
   , ExferenceQuery (..)
+  , defaultHeuristicsConfig
   , mkExferenceEnvironment
   )
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -38,8 +39,6 @@ import Language.Haskell.Exference.Core.Types
   , pattern TypeCons
   , pattern TypeVar
   )
-import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
-
 -- | How much of a lazy search trace a benchmark is intended to observe.
 -- The more specific first-candidate demands also guard the algorithmic route
 -- represented by their fixture.

@@ -24,7 +24,14 @@ import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
-import Language.Haskell.Exference.Diagnostic
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic
+  , Severity (Error)
+  , codedDiagnostic
+  , diagnostic
+  , sourceTextSpan
+  , withLocation
+  )
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
@@ -221,13 +228,13 @@ parseHaskellSrcType convert mode source = case P.parseTypeWithMode mode source o
   P.ParseFailed location message ->
     throwE
       $ withHaskellSrcLocation location
-      $ diagnostic message
+      $ diagnostic Error message
   P.ParseOk ty -> ExceptT $ first conversionDiagnostic
     <$> runExceptT (convert ty)
   where
     conversionDiagnostic message =
       withLocation (P.parseFilename mode) (sourceTextSpan source)
-      $ diagnostic message
+      $ diagnostic Error message
 
 -- | Parse, lower, and kind-check a query against the assumptions retained by
 -- the source inventory that will supply its search environment.
@@ -318,7 +325,7 @@ parseTypeWithResolverKinds assumptions resolver mn declarations mode source = do
 
   conversionDiagnostic message =
     withLocation (P.parseFilename mode) (sourceTextSpan source)
-    $ diagnostic message
+    $ diagnostic Error message
 
   kindDiagnostic message =
     withLocation (P.parseFilename mode) (sourceTextSpan source)

@@ -30,10 +30,11 @@ import Language.Haskell.Djex.Exference
   , exferenceSessionInventory
   )
 import qualified Language.Haskell.Djex.Exference.Internal.Request as Request
-import qualified Language.Haskell.Exference.Session as CompatibilitySession
+import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.EnvironmentParser
   ( LoadReport (..)
+  , checkedSourcePreparedInventory
   , environmentFromPath
   , environmentLoadErrorDiagnostics
   , haskellSrcExtsParseMode
@@ -114,7 +115,10 @@ loadExferenceSessionWithPolicy policy path = do
       , exferenceSessionLoadDiagnostics = sourceDiagnostics
       }
     Right checked -> case
-        CompatibilitySession.mkExferenceSessionWithPolicy policy checked of
+        Session.sealPreparedExferenceSessionWithPolicy
+          (exferenceExcludedBindings policy)
+          (exferenceRatingOverrides policy)
+          (checkedSourcePreparedInventory checked) of
       Left failure -> ExferenceSessionLoadReport
         { exferenceSessionLoadResult = Left
             $ NonEmpty.singleton failure

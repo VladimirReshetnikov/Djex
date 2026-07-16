@@ -42,6 +42,7 @@ import Language.Haskell.Exference.Core
   , SearchStatus (..)
   , SearchStatusError (..)
   , constraintsRelaxedAtStep
+  , defaultHeuristicsConfig
   , emptyExferenceSourceTypeVariableHints
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
@@ -146,6 +147,7 @@ import Language.Haskell.Exference.EnvironmentParser
 import Language.Haskell.Djex.Exference
   ( ExferenceOmission (..)
   , ExferenceOmissionReason (..)
+  , ExferenceOptions (exferenceHeuristics)
   , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
   , defaultExferenceOptions
@@ -203,7 +205,9 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
   , normalizeConvertedForalls
   , runConversionTWithState
   )
-import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig, emptyClassEnv)
+import Language.Haskell.Exference.SimpleDict (emptyClassEnv)
+import qualified Language.Haskell.Exference.SimpleDict as SimpleDict
+  ( defaultHeuristicsConfig )
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Name as SharedName
@@ -2298,7 +2302,30 @@ tests = testGroup "Exference"
             Right _ -> fail "a NaN rating override was accepted"
       ]
   , testGroup "sealed search environments"
-      [ testCase "sealed runners preserve complete legacy traces" $ do
+      [ testCase "share one heuristic default across core and compatibility APIs" $ do
+          let historicalDefault = ExferenceHeuristicsConfig
+                { heuristics_goalVar = Penalty 4.0
+                , heuristics_goalCons = Penalty 0.55
+                , heuristics_goalArrow = Penalty 5.0
+                , heuristics_goalApp = Penalty 1.9
+                , heuristics_stepProvidedGood = Penalty 0.2
+                , heuristics_stepProvidedBad = Penalty 5.0
+                , heuristics_stepEnvGood = Penalty 6.0
+                , heuristics_stepEnvBad = Penalty 22.0
+                , heuristics_tempUnusedVarPenalty = Penalty 5.0
+                , heuristics_tempMultiVarUsePenalty = Penalty 3.0
+                , heuristics_functionGoalTransform = Penalty 0.0
+                , heuristics_unusedVar = Penalty 20.0
+                , heuristics_solutionLength = Penalty 0.0153
+                }
+          assertEqual "historical parser-neutral profile"
+            historicalDefault defaultHeuristicsConfig
+          assertEqual "SimpleDict compatibility re-export"
+            defaultHeuristicsConfig SimpleDict.defaultHeuristicsConfig
+          assertEqual "stable checked options"
+            defaultHeuristicsConfig
+            (exferenceHeuristics defaultExferenceOptions)
+      , testCase "sealed runners preserve complete legacy traces" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
           let variable = TypeVar 0
               residualGoal = TypeForall [0]
@@ -3722,14 +3749,20 @@ tests = testGroup "Exference"
             $ convertModuleName malformedModule
                 (HSE.Ident HSE.noSrcSpan "value")
       , testCase "ratings reject a missing value" $
-          first diagnosticMessage (parseRatings "foo") @?= Left
-            "rating file ends with a name but no numeric rating"
+          first (\failure ->
+              (diagnosticSeverity failure, diagnosticMessage failure))
+            (parseRatings "foo") @?= Left
+              (Error, "rating file ends with a name but no numeric rating")
       , testCase "ratings reject a malformed number" $
-          first diagnosticMessage (parseRatings "foo nope")
-            @?= Left "invalid rating for foo: nope"
+          first (\failure ->
+              (diagnosticSeverity failure, diagnosticMessage failure))
+            (parseRatings "foo nope") @?= Left
+              (Error, "invalid rating for foo: nope")
       , testCase "ratings reject non-finite values" $
-          first diagnosticMessage (parseRatings "foo NaN")
-            @?= Left "rating for foo must be finite: NaN"
+          first (\failure ->
+              (diagnosticSeverity failure, diagnosticMessage failure))
+            (parseRatings "foo NaN") @?= Left
+              (Error, "rating for foo must be finite: NaN")
       , testCase "missing modules produce source-bearing read errors" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/missing-module.hs"

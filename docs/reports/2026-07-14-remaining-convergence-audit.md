@@ -1604,6 +1604,41 @@ recursion policies and public
 error mappings; an integration regression exercises the alias-hidden and
 phantom cases through both stable session constructors.
 
+## Exference implementation dependencies point inward
+
+**Completed on 2026-07-16:** several Exference implementation modules still
+reached their real owners through historical public facades. The stable
+`Language.Haskell.Djex.Exference.HaskellSrc` loader sealed through
+`Language.Haskell.Exference.Session`; frontend conversion modules imported the
+one-argument compatibility diagnostic constructor; `EnvironmentParser`
+imported the broad historical search facade solely for `Penalty`; and the
+stable request default came from `SimpleDict` even though it was a core search
+policy.
+
+The stable source loader now projects both session-policy fields and the
+annotation-erased prepared source witness itself, then calls the one private
+sealer directly. `Language.Haskell.Exference.Session` remains an independent
+public compatibility entrance for the historical CLI and callers that already
+own a `CheckedSourceEnvironment`; neither facade owns session state or retains
+parser data. Frontend implementation modules construct the shared diagnostic
+type directly with explicit `Error`, `Warning`, or `Info` severity, while the
+historical one-argument `Language.Haskell.Exference.Diagnostic` constructor
+remains available unchanged. `EnvironmentParser` now imports `Penalty` from
+its owning `Core.Score` module.
+
+Finally, `Language.Haskell.Exference.Core` owns the one parser-neutral
+`defaultHeuristicsConfig`. `SimpleDict` directly re-exports that binding, while
+stable defaults, core tests, and benchmarks import the owner. The historical
+CLI's separately tuned ranking profile remains intentionally distinct. Thus
+the public surfaces stay source-compatible while their dependency edges point
+inward to implementation owners rather than sideways through peer facades.
+
+Unit regressions pin error severity and the exact shared heuristic default.
+The frontend API suite imports and forces both stable loader operations and
+both historical session constructors independently; existing loader, policy,
+omission, CLI, and checked-source integration tests continue to pin their
+shared behavior.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

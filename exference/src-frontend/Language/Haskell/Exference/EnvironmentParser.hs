@@ -33,7 +33,6 @@ where
 
 
 
-import Language.Haskell.Exference
 import Language.Haskell.Exference.BindingsFromHaskellSrc
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
@@ -46,9 +45,18 @@ import Language.Haskell.Exference.HaskellSrcUtils
   )
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
+import Language.Haskell.Exference.Core.Score (Penalty (..))
 
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Diagnostic
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic (..)
+  , Severity (Error, Info, Warning)
+  , codedDiagnostic
+  , contextualDiagnostic
+  , diagnostic
+  , withCode
+  , withSource
+  )
 
 import Control.DeepSeq
 
@@ -323,19 +331,17 @@ structuredDiagnostic code message =
   contextualDiagnostic Error code message
 
 warningDiagnostic :: String -> Diagnostic
-warningDiagnostic message =
-  (diagnostic message) { diagnosticSeverity = Warning }
+warningDiagnostic = diagnostic Warning
 
 infoDiagnostic :: String -> Diagnostic
-infoDiagnostic message =
-  (diagnostic message) { diagnosticSeverity = Info }
+infoDiagnostic = diagnostic Info
 
 -- | Catch only filesystem failures, preserving asynchronous cancellation and
 -- programming exceptions.  The source path is structural diagnostic data, so
 -- callers never need to recover it from platform-specific exception text.
 captureIO :: FilePath -> IO value -> IO (Either Diagnostic value)
 captureIO path action = first
-  (withSource path . diagnostic . show) <$> tryIOError action
+  (withSource path . diagnostic Error . show) <$> tryIOError action
 
 -- | Force lazy text while the IOException boundary is still active.  Merely
 -- wrapping 'readFile' would let decoding and deferred reads escape later.
@@ -987,13 +993,13 @@ parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words
   where
     go [] = Right []
-    go [_] = Left $ diagnostic
+    go [_] = Left $ diagnostic Error
       "rating file ends with a name but no numeric rating"
     go (name : value : rest) = case readMaybe value :: Maybe Double of
-      Nothing -> Left $ diagnostic
+      Nothing -> Left $ diagnostic Error
         $ "invalid rating for " ++ name ++ ": " ++ value
       Just rating | isNaN rating || isInfinite rating ->
-        Left $ diagnostic
+        Left $ diagnostic Error
           $ "rating for " ++ name ++ " must be finite: " ++ value
       Just rating -> do
         qualifiedName <- parseQualifiedName name

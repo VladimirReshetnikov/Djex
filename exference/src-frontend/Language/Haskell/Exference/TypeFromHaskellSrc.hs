@@ -40,7 +40,11 @@ import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
 import qualified Language.Haskell.Exference.Core.Internal.VariableSupply
   as VariableSupply
-import Language.Haskell.Exference.Diagnostic
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic
+  , Severity (Error)
+  , diagnostic
+  )
 import Language.Haskell.Exference.HaskellSrcUtils
 import qualified Data.Map.Strict as M
 import qualified Data.IntSet as IntSet
@@ -442,7 +446,7 @@ parseQualifiedName input = either (invalid . SharedName.renderNameError) Right
   $ SharedName.parseName input
   where
     invalid :: String -> Either Diagnostic a
-    invalid message = Left $ diagnostic
+    invalid message = Left $ diagnostic Error
       $ "invalid qualified name " ++ show input ++ ": " ++ message
 
 convertConstraint

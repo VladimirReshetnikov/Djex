@@ -410,6 +410,12 @@ The first operation validates environment names, generated syntax, ratings,
 types, and class constraints once; the second validates only the goal,
 constraints, limits, and heuristics that vary per query.
 
+`Language.Haskell.Exference.Core.defaultHeuristicsConfig` owns the
+parser-neutral library default used by reusable and stable queries. The
+historical `Language.Haskell.Exference.SimpleDict` import path directly
+re-exports that same binding. The command-line frontend deliberately retains
+its distinct interactive ranking profile.
+
 The compatibility field labels map to the reusable API as follows:
 
 | `ExferenceInput` field | Reusable field |
@@ -562,10 +568,15 @@ Stable callers may construct the retained inventory through
 `mkExferenceSession` from a neutral `ExferenceEnvironment`. Source clients
 additionally import
 `Language.Haskell.Djex.Exference.HaskellSrc` and use `loadExferenceSession` for
-Haskell source directories. The raw
-`CheckedSourceEnvironment -> ExferenceSession` bridge lives separately in
-`Language.Haskell.Exference.Session`; no parser type is retained in a sealed
-session. `ExferenceSessionPolicy` supplies exact-name exclusions and finite,
+Haskell source directories. That source-facing module is an outward-only
+facade: after loading the checked prepared witness, it seals through the
+private session owner directly rather than routing stable construction back
+through a historical public adapter. `Language.Haskell.Exference.Session`
+remains a sibling compatibility entrance for callers that already own an
+opaque `CheckedSourceEnvironment`; both entrances consume the same
+annotation-erased prepared witness and converge only at the one private sealer.
+No parser type is retained in the resulting session.
+`ExferenceSessionPolicy` supplies exact-name exclusions and finite,
 signed rating overrides while the private search projection is built. Unknown
 override names and non-finite ratings fail explicitly, and overrides preserve
 source/declaration order. The adapter's expression and definition conveniences

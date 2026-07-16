@@ -1,33 +1,18 @@
--- | Parser-neutral defaults for Exference's historical API.
+-- | Historical import path for parser-neutral Exference defaults.
+-- 'defaultHeuristicsConfig' is owned by the core API and re-exported here;
+-- 'emptyClassEnv' remains the compatibility spelling for an empty class
+-- environment.
 module Language.Haskell.Exference.SimpleDict
   ( emptyClassEnv
   , defaultHeuristicsConfig
   )
 where
 
-import Language.Haskell.Exference.Core (ExferenceHeuristicsConfig (..))
+import Language.Haskell.Exference.Core (defaultHeuristicsConfig)
 import Language.Haskell.Exference.Core.Types
   ( StaticClassEnv
   , emptyStaticClassEnv
   )
-import Language.Haskell.Exference.Core.Score (Penalty (..))
 
 emptyClassEnv :: StaticClassEnv
 emptyClassEnv = emptyStaticClassEnv
-
-defaultHeuristicsConfig :: ExferenceHeuristicsConfig
-defaultHeuristicsConfig = ExferenceHeuristicsConfig
-  { heuristics_goalVar = Penalty 4.0
-  , heuristics_goalCons = Penalty 0.55
-  , heuristics_goalArrow = Penalty 5.0
-  , heuristics_goalApp = Penalty 1.9
-  , heuristics_stepProvidedGood = Penalty 0.2
-  , heuristics_stepProvidedBad = Penalty 5.0
-  , heuristics_stepEnvGood = Penalty 6.0
-  , heuristics_stepEnvBad = Penalty 22.0
-  , heuristics_tempUnusedVarPenalty = Penalty 5.0
-  , heuristics_tempMultiVarUsePenalty = Penalty 3.0
-  , heuristics_functionGoalTransform = Penalty 0.0
-  , heuristics_unusedVar = Penalty 20.0
-  , heuristics_solutionLength = Penalty 0.0153
-  }

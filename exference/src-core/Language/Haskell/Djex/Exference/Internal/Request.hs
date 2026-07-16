@@ -32,10 +32,10 @@ import Language.Haskell.Exference.Core
   , ExferenceSourceTypeVariableHintError
   , ExferenceSourceTypeVariableHints
   , Penalty
+  , defaultHeuristicsConfig
   , mkExferenceSourceTypeVariableHints
   )
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
-import Language.Haskell.Exference.SimpleDict (defaultHeuristicsConfig)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceLocation

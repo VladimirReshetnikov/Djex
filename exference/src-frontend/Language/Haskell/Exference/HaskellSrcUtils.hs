@@ -9,7 +9,14 @@ module Language.Haskell.Exference.HaskellSrcUtils
   )
 where
 
-import Language.Haskell.Exference.Diagnostic
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic
+  , mkSourcePosition
+  , mkSourceSpan
+  , withContext
+  , withLocation
+  , withSource
+  )
 import Language.Haskell.Exts.Syntax
 import Language.Haskell.Exts.SrcLoc (SrcLoc, SrcSpan)
 import qualified Language.Haskell.Exts.SrcLoc as HSE

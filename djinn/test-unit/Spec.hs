@@ -2804,6 +2804,39 @@ testGeneratedClauseBoundary = do
         "DuplicatePatternBinder \"value\""
         (DjinnGenerated.toGeneratedClause invalidDefinitionAndScope)
 
+    checkedProjection <- expectShownRight $ SharedGenerated.mkDefinitionName
+        $ sharedName "projected"
+    let just = sharedName "Just"
+        sharedProjection = SharedGenerated.FunctionClause checkedProjection
+            [SharedGenerated.As "whole" $
+                SharedGenerated.Constructor just
+                    [SharedGenerated.Bind "value"]]
+            (SharedGenerated.Case (SharedGenerated.Local "whole")
+                [ ( SharedGenerated.Constructor just
+                        [SharedGenerated.Bind "nested"]
+                  , SharedGenerated.Tuple
+                        [ SharedGenerated.Local "value"
+                        , SharedGenerated.Local "nested"
+                        ]
+                  )
+                ])
+    legacyProjection <- either fail return $
+        DjinnGenerated.fromGeneratedClause sharedProjection
+    assertEqual "legacy generated syntax is an on-demand lossless view"
+        (Right sharedProjection)
+        (DjinnGenerated.toGeneratedClauseWithName
+            checkedProjection legacyProjection)
+    assertLeftContains "legacy expressions reject shared holes explicitly"
+        "cannot represent generated holes"
+        (DjinnGenerated.fromGeneratedExpression $
+            SharedGenerated.Hole "missing")
+    assertLeftContains "legacy expressions reject shared lets explicitly"
+        "cannot represent generated lets"
+        (DjinnGenerated.fromGeneratedExpression $
+            SharedGenerated.Let (SharedGenerated.Bind "bound")
+                (SharedGenerated.Tuple [])
+                (SharedGenerated.Local "bound"))
+
     goals <- mapM (either fail return . parseHType)
         ["a -> a", "a -> b -> a"]
     reports <- mapM
@@ -2879,6 +2912,8 @@ testIdentifiers = do
         pParenthesizedVarOp "(⊕)"
     assertBool "Unicode operators retain their variable lexical class"
         (isVarOperator "⊕" && renderVarName "⊕" == "(⊕)")
+    assertEqual "proof symbols keep unqualified operators bare"
+        "⊕" (renderProofSymbolName $ sharedName "(⊕)")
     assertDoesNotParse "constructor operators are not term binding names"
         pParenthesizedVarOp "(:+:)"
     assertBool "constructor operators remain outside the variable namespace"
@@ -2906,6 +2941,8 @@ testIdentifiers = do
     assertBool "qualified operators are not reclassified as identifiers"
         (not (isQualifiedVarId "Data.(+)") &&
          renderVarName "Data.(+)" == "Data.(+)")
+    assertEqual "proof symbols keep qualified operators canonical"
+        "Data.(+)" (renderProofSymbolName $ sharedName "Data.(+)")
     assertDoesNotParse "reserved operators are invalid binding names"
         pParenthesizedVarOp "(->)"
     assertDoesNotParse "a line-comment introducer is not an operator name"

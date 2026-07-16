@@ -182,6 +182,7 @@ Library
   Other-Modules:
     Djinn.Internal.Declaration
     Djinn.Internal.HCheck.Implementation
+    Djinn.Internal.ProofToGenerated
     Djinn.Internal.Type
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Exference.Internal.Request

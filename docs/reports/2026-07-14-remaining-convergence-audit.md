@@ -1100,6 +1100,34 @@ candidate state. Foundation coverage fixes binding-site order through clause,
 constructor/as, lambda/tuple, let, and case patterns; Djinn's existing
 multi-field payload regression continues to pin ranking and duplicate removal.
 
+## Djinn generated-syntax representation fold
+
+**Completed on 2026-07-15:** making the shared clause authoritative still left
+Djinn's entire proof translation and cleanup pipeline operating over the
+historical recursive `HExpr`/`HPat` tree. Every stable query built that tree,
+ran binder elimination, as-pattern repair, alpha comparison and renaming, case
+normalization, and eta reduction over it, then recursively rebuilt the shared
+tree. Exference had already crossed this boundary and stored shared generated
+syntax natively.
+
+`Djinn.Internal.ProofToGenerated` now lowers LJT terms directly to structural
+shared names, `Expression String`, and `Pattern String`. Locals and globals are
+distinguished during lexical conversion; constructor applications are
+structural immediately; the common simplifier supplies eta reduction; and
+scope plus syntax validation happens before the expression can reach a stable
+candidate. The core consumes its checked `FunctionClause` directly.
+
+The 530-line conversion and cleanup authority has been removed from
+`Djinn.Internal.HTypes`. Historical `termToHExpr` and `termToHClause` calls now
+project the checked shared result on demand, while caller-constructed legacy
+trees still enter through the validating `toGeneratedClause` adapter. This
+preserves the research compatibility surface without making it backend state.
+The migration also uncovered a spelling distinction that string syntax had
+hidden: proof symbols store an unqualified operator as `==`, while shared
+prefix rendering is `(==)`. The new boundary compares proof-source spellings
+explicitly, retaining qualified operator identity without reporting valid
+assumptions as escaped globals.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

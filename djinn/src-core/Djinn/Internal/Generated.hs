@@ -1,9 +1,9 @@
--- | Djinn's proof-output cleanup tree and adapter to the shared renderer.
+-- | Djinn's historical proof-output view and adapters to shared syntax.
 --
--- The historical Haskell-shaped nodes remain useful while translating and
--- simplifying LJT proofs.  This module owns their final erasure into
--- 'Language.Haskell.Synthesis.Generated', keeping source types and proof
--- machinery out of the common output boundary.
+-- The Haskell-shaped nodes remain constructible for source compatibility,
+-- but live proof cleanup happens over 'Language.Haskell.Synthesis.Generated'.
+-- This module validates caller-built legacy trees on the way in and projects
+-- checked shared output back only when a compatibility caller requests it.
 module Djinn.Internal.Generated
   ( HClause (..)
   , HPat (..)
@@ -12,12 +12,15 @@ module Djinn.Internal.Generated
   , renderGeneratedClause
   , toGeneratedClause
   , toGeneratedClauseWithName
+  , fromGeneratedExpression
+  , fromGeneratedClause
   , getBinderVars
   , getBinderVarsHE
   , getBinderVarsHP
   ) where
 
 import qualified Data.Set as Set
+import Djinn.Internal.HIdentifier (renderProofSymbolName)
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
@@ -80,6 +83,59 @@ toGeneratedClauseWithName
   -> Either String (Generated.FunctionClause HSymbol)
 toGeneratedClauseWithName name (HClause _ patterns expression) =
   toGeneratedClauseWith (Right name) patterns expression
+
+-- | Reconstruct Djinn's historical output view on demand.  The stable proof
+-- path no longer stores this tree; unsupported shared forms fail explicitly
+-- rather than pretending that Djinn's old grammar contained holes or lets.
+fromGeneratedExpression
+  :: Generated.Expression HSymbol
+  -> Either String HExpr
+fromGeneratedExpression expression = case expression of
+  Generated.Local variable -> Right $ HEVar variable
+  Generated.Global name -> Right $
+    if SharedName.nameLexicalClass name == SharedName.ConstructorLike
+      then HECon $ renderProofSymbolName name
+      else HEVar $ renderProofSymbolName name
+  Generated.Lambda patterns body -> HELam
+    <$> mapM fromGeneratedPattern patterns
+    <*> fromGeneratedExpression body
+  Generated.Apply function argument -> HEApply
+    <$> fromGeneratedExpression function
+    <*> fromGeneratedExpression argument
+  Generated.Tuple elements -> HETuple <$> mapM fromGeneratedExpression elements
+  Generated.Hole{} -> Left $
+    "Djinn compatibility expressions cannot represent generated holes"
+  Generated.Let{} -> Left $
+    "Djinn compatibility expressions cannot represent generated lets"
+  Generated.Case scrutinee alternatives -> HECase
+    <$> fromGeneratedExpression scrutinee
+    <*> mapM fromAlternative alternatives
+ where
+  fromAlternative (pattern, body) = (,)
+    <$> fromGeneratedPattern pattern
+    <*> fromGeneratedExpression body
+
+-- | Project a checked shared definition into the legacy clause record.
+fromGeneratedClause
+  :: Generated.FunctionClause HSymbol
+  -> Either String HClause
+fromGeneratedClause (Generated.FunctionClause name patterns body) = HClause
+  (Generated.definitionSpelling name)
+  <$> mapM fromGeneratedPattern patterns
+  <*> fromGeneratedExpression body
+
+fromGeneratedPattern
+  :: Generated.Pattern HSymbol
+  -> Either String HPat
+fromGeneratedPattern pattern = case pattern of
+  Generated.Bind variable -> Right $ HPVar variable
+  Generated.Wildcard -> Right $ HPVar "_"
+  Generated.Constructor name arguments -> do
+    converted <- mapM fromGeneratedPattern arguments
+    Right $ foldl HPApply (HPCon $ renderProofSymbolName name) converted
+  Generated.TuplePattern elements ->
+    HPTuple <$> mapM fromGeneratedPattern elements
+  Generated.As variable nested -> HPAt variable <$> fromGeneratedPattern nested
 
 toGeneratedClauseWith
   :: Either String Generated.DefinitionName

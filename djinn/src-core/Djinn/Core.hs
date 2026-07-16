@@ -78,6 +78,7 @@ import Djinn.Internal.HTypes
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
+import Djinn.Internal.ProofToGenerated (termToGeneratedClause)
 import Djinn.Internal.Type
 
 ------------------------------------------------------------------
@@ -1011,7 +1012,8 @@ searchPreparedFormula
     -> [(Symbol, Formula)]
     -> Either DjinnQueryError DjinnResult
 searchPreparedFormula options prepared target form methodEnv = do
-    let externalEnv = preparedEnvironmentFunctionPremises prepared ++ methodEnv
+    let name = SharedGenerated.definitionSpelling target
+        externalEnv = preparedEnvironmentFunctionPremises prepared ++ methodEnv
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
         mode = (defaultSearchMode
@@ -1066,12 +1068,12 @@ searchPreparedFormula options prepared target form methodEnv = do
             -- before display names are restored and it is rendered.
             internalFailure "generated an invalid proof" $
                 mapM_ (checkProof internalEnv form) internalProofs
-            rawClauses <- internalFailure "cannot render generated proof" $
-                mapM (termToHClause name . restoreProofTerm proofEnv)
-                    internalProofs
             generatedClauses <- internalFailure
-                "cannot convert generated clause" $
-                mapM (toGeneratedClauseWithName target) rawClauses
+                "cannot construct generated clause" $
+                mapM
+                    (termToGeneratedClause target .
+                        restoreProofTerm proofEnv)
+                    internalProofs
             -- The checked shared clause is the stable output authority. Keep
             -- the historical stable ratio-then-count ordering, then discard
             -- structurally identical outputs without retaining HClause as a
@@ -1093,9 +1095,6 @@ searchPreparedFormula options prepared target form methodEnv = do
                 completion
                 candidates
                 SharedQuery.ValidatedCandidates
-  where
-    name = SharedGenerated.definitionSpelling target
-
 candidateDetails
     :: SharedGenerated.FunctionClause HSymbol
     -> DjinnCandidateDetails

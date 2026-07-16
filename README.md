@@ -51,7 +51,9 @@ patterns preserve `HKind(..)` imports and the historical `*`/`kN` rendering,
 while all kind bridging and grounding operate on the single shared tree.
 Prepared Djinn kind-check caches and their trusted Inventory bridge are private
 implementation details rather than authority exposed by the raw compatibility
-module. Both engines now construct
+module. Djinn's LJT lowering likewise constructs and simplifies the shared
+generated `Expression`/`Pattern` tree directly; `HExpr` and `HPat` remain only
+as projections for historical low-level callers. Both engines now construct
 their stable `QueryResult` payloads in the core: Djinn preserves its richer
   logical evidence, while Exference derives evidence from each lazy candidate
   batch after one checked query preparation. Exference source checking and both

@@ -6,7 +6,7 @@ module Djinn.Internal.HIdentifier (
     pVarId, pConId, pQualifiedVarId, pQualifiedConId,
     pParenthesizedVarOp,
     isVarId, isConId, isQualifiedVarId, isQualifiedConId,
-    isVarOperator, renderVarName,
+    isVarOperator, renderVarName, renderProofSymbolName,
     stripLineComments,
     schar, sstring, skeyword, pParen
     ) where
@@ -17,7 +17,7 @@ import Language.Haskell.Synthesis.Name (
     LexicalClass(..), Name,
     isIdentifierCharacter, isOperatorCharacter,
     mkIdentifier, mkOperator,
-    nameIdentifier, nameLexicalClass,
+    nameIdentifier, nameLexicalClass, nameModule, nameOperator,
     parseName, renderCanonical, renderPrefix)
 import Text.ParserCombinators.ReadP
 
@@ -103,6 +103,14 @@ renderVarName source =
         Nothing -> case variableOperator source of
             Just name -> renderPrefix name
             Nothing -> source
+
+-- | Recover Djinn's proof-symbol spelling from a structural name.
+-- Unqualified ordinary operators are stored bare; qualified operators and
+-- built-in syntax use the shared canonical form.
+renderProofSymbolName :: Name -> String
+renderProofSymbolName name = case (nameModule name, nameOperator name) of
+    (Nothing, Just spelling) -> spelling
+    _ -> renderCanonical name
 
 unqualifiedIdentifier :: LexicalClass -> String -> Maybe Name
 unqualifiedIdentifier expected source =

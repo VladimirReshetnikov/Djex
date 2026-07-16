@@ -1149,6 +1149,8 @@ testPreparedFormulaParity = do
             (DataType "Box" ["x"] [("MkBox", [HTVar "x"])])
             withEmpty
     prepared <- expectShownRight $ prepareEnvironment environment
+    rawFormula <- expectRight $ prepareTypeFormulaTranslator $
+        RawEnvironment.envTypes environment
 
     let atom name = PVar $ Symbol name
         pair = HTTuple [HTVar "a", HTVar "b"]
@@ -1188,7 +1190,7 @@ testPreparedFormulaParity = do
                   listPairFormula :-> emptyPairFormula)
             ]
 
-    mapM_ (assertFormulaParity prepared) cases
+    mapM_ (assertFormulaParity rawFormula prepared) cases
 
     target <- expectShownRight $ SharedGenerated.mkDefinitionName $
         sharedName "nativeUnit"
@@ -1210,15 +1212,14 @@ testPreparedFormulaParity = do
                     (SharedCandidate.candidateOutput candidate)
         [] -> fail "native unit query produced no candidate"
   where
-    assertFormulaParity prepared (description, raw, expected) = do
+    assertFormulaParity rawFormula prepared (description, raw, expected) = do
         shared <- expectShownRight $ toSynthesisType raw
-        rawFormula <- expectRight $
-            RawEnvironment.preparedEnvironmentFormulaTranslator prepared raw
+        compatibilityFormula <- expectRight $ rawFormula raw
         nativeFormula <- expectRight $
             RawEnvironment.preparedEnvironmentSynthesisFormulaTranslator
                 prepared shared
         assertEqual (description ++ ": raw formula changed")
-            expected rawFormula
+            expected compatibilityFormula
         assertEqual (description ++ ": shared formula changed")
             expected nativeFormula
 

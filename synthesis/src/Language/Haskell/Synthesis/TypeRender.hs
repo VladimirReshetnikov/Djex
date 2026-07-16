@@ -15,7 +15,10 @@ module Language.Haskell.Synthesis.TypeRender
 
 import Data.List (intercalate)
 
-import Language.Haskell.Synthesis.Constraint (Constraint (..))
+import Language.Haskell.Synthesis.Constraint
+  ( Constraint
+  , showsConstraintWith
+  )
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed, Unboxed)
   , SpecialName (ListConstructor)
@@ -44,14 +47,8 @@ showsConstraint
   -> Int
   -> Constraint (Type variable)
   -> ShowS
-showsConstraint variableName precedence (Constraint className arguments) =
-  showParen (precedence > 0 && not (null arguments))
-    $ showString (renderPrefix className)
-    . foldr showArgument id arguments
- where
-  showArgument argument rest = showChar ' '
-    . showsType variableName 2 argument
-    . rest
+showsConstraint variableName =
+  showsConstraintWith $ showsType variableName 2
 
 -- | Render a type at the supplied Haskell precedence.
 showsType

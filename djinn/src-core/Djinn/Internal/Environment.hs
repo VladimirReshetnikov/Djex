@@ -9,7 +9,6 @@ module Djinn.Internal.Environment (
     prepareGroundSynthesisEnvironment,
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
-    preparedEnvironmentFormulaTranslator,
     preparedEnvironmentSynthesisFormulaTranslator,
     preparedEnvironmentFunctionPremises,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
@@ -469,19 +468,6 @@ compileSynthesisFormula compiler =
 synthesisFormulaTypeSymbol :: SharedName.Name -> Either String HSymbol
 synthesisFormulaTypeSymbol = first show . djinnTypeConstructorSymbol
 
--- The compatibility operation below enters the same compiler through the raw
--- tree. Keeping this tiny view at the sealed boundary avoids retaining a raw
--- definition table or exposing package-private compiler types from HTypes.
-rawFormulaTypeView :: TypeView HType
-rawFormulaTypeView source = Right $ case source of
-    HTApp function argument -> TypeApplicationLayer function argument
-    HTVar variable -> TypeVariableLayer variable
-    HTCon name -> TypeConstructorLayer name
-    HTTuple types -> TypeTupleLayer types
-    HTArrow argument result -> TypeArrowLayer argument result
-    HTUnion constructors -> TypeUnionLayer constructors
-    HTAbstract name _ -> TypeAbstractLayer name
-
 sealPreparedEnvironment
     :: Environment
     -> PreparedInventoryExpansion
@@ -606,20 +592,11 @@ preparedEnvironmentFunctionPremises
 preparedEnvironmentFunctionPremises
         (PreparedEnvironment _ _ _ premises _) = premises
 
--- | The definition table is validated and compiled exactly once when the
--- environment is sealed. Individual queries retain only their source-local
--- expansion-path check; they never repeat whole-table SCC analysis.
-preparedEnvironmentFormulaTranslator
-    :: PreparedEnvironment
-    -> HType
-    -> Either String Formula
-preparedEnvironmentFormulaTranslator
-        (PreparedEnvironment _ _ _ _ compiler) =
-    compileFormula rawFormulaTypeView compiler
-
 -- | Translate a checked shared type directly. Stable raw and native queries
--- meet here after validation and use the exact same prepared
--- formula-definition cache.
+-- meet here after raw compatibility validation and use the exact same
+-- prepared formula-definition cache. The historical unchecked formula
+-- operation remains 'hTypeToFormula'; a sealed environment no longer exposes
+-- a second raw entrance that production query execution does not use.
 preparedEnvironmentSynthesisFormulaTranslator
     :: PreparedEnvironment
     -> SharedType.Type HSymbol

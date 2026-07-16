@@ -220,7 +220,11 @@ allocator-sensitive synonym preparation.
 `Language.Haskell.Synthesis.TypeRender` renders that shared structure back to
 compact Haskell source while leaving tagged variable spellings to the caller.
 This preserves frontend distinctions such as flexible and rigid variables
-that happen to reuse one numeric backend identity.
+that happen to reuse one numeric backend identity. Constraint rendering has
+one structural owner in `Language.Haskell.Synthesis.Constraint`:
+`showsConstraintWith` accepts the type layer's argument-position renderer, so
+the generic `Show` instance and the shared type renderer retain their own
+precedence policies without separately traversing class names and arguments.
 
 `Language.Haskell.Synthesis.Kind` and `.Declaration` provide the next source
 layer: kind variables/arrows, kinded type parameters, synonyms, data and

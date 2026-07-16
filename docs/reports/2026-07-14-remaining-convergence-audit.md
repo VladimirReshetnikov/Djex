@@ -1314,6 +1314,31 @@ distinct as before. Focused regressions cover native storage, shared wrapping,
 nested unit equality, malformed-name fallback, all bundled imports, and the
 existing parser/rendering properties.
 
+## Post-native residual traversal cleanup
+
+**Completed on 2026-07-16:** the native `HType` fold left one raw formula view
+in `Djinn.Internal.HTypes` for the historical unchecked formula API and an
+identical second view in `Djinn.Internal.Environment`. The latter served only
+a recently added parity-test hook: production raw queries already validate and
+lower ordinary types into the shared tree before using a sealed environment,
+and native formula compilation owns that environment's one prepared definition
+cache.
+
+The test-only `preparedEnvironmentFormulaTranslator` entrance and its duplicate
+view are gone. Formula parity now prepares the historical raw translator once
+through `prepareTypeFormulaTranslator`, its actual compatibility contract, and
+compares its explicit results with the sealed native compiler. This keeps the
+malformed prefix-arrow and unchecked expansion behavior covered without
+presenting a second raw entrance on `PreparedEnvironment`.
+
+The same production-source clone audit found the constraint rendering skeleton
+duplicated between the generic `Constraint` `Show` instance and `TypeRender`.
+`showsConstraintWith` now owns class-name and ordered-argument rendering once;
+each type layer supplies only its argument-position `ShowS`, preserving the
+generic and shared-type precedence scales. At a four-line/28-token threshold,
+the remaining detector reports are import/export lists and module headers, not
+duplicated executable traversals.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

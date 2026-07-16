@@ -13,6 +13,7 @@ module Language.Haskell.Synthesis.Constraint
   ( Constraint (..)
   , ConstraintError (..)
   , constraintArity
+  , showsConstraintWith
   , validateConstraintClassName
   , validateConstraint
   ) where
@@ -39,12 +40,7 @@ data Constraint ty = Constraint
 -- Render the familiar Haskell surface form.  Argument precedence ensures an
 -- application-shaped backend type supplies its own parentheses.
 instance Show ty => Show (Constraint ty) where
-  showsPrec precedence (Constraint className arguments) =
-    showParen (precedence > 0 && not (null arguments)) $
-      showString (renderPrefix className) . foldr showArgument id arguments
-    where
-      showArgument argument rest =
-        showChar ' ' . showsPrec 11 argument . rest
+  showsPrec = showsConstraintWith $ showsPrec 11
 
 instance NFData ty => NFData (Constraint ty) where
   rnf (Constraint className arguments) =
@@ -64,6 +60,24 @@ instance NFData ConstraintError where
 -- to the declaration environment and may differ for unknown-class policies.
 constraintArity :: Constraint ty -> Int
 constraintArity = length . constraintArguments
+
+-- | Render a constraint once its type layer has supplied the rendering of an
+-- argument position. This is the single structural renderer used by both the
+-- generic 'Show' instance and the shared source-type renderer; backend type
+-- precedence therefore remains a policy of the callback rather than a second
+-- constraint traversal.
+showsConstraintWith
+  :: (ty -> ShowS)
+  -> Int
+  -> Constraint ty
+  -> ShowS
+showsConstraintWith showArgument precedence
+    (Constraint className arguments) =
+  showParen (precedence > 0 && not (null arguments)) $
+    showString (renderPrefix className) . foldr renderArgument id arguments
+ where
+  renderArgument argument rest =
+    showChar ' ' . showArgument argument . rest
 
 -- | Validate a nominal class name without claiming that it is declared.
 -- Qualified constructor identifiers and constructor operators are accepted;

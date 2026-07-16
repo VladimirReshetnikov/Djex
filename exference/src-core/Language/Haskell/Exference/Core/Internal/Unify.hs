@@ -16,6 +16,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
+import Language.Haskell.Exference.Core.Internal.VariableSupply
+  ( checkedAddIdentifier
+  , supplyFromIdentifiers
+  )
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Type as SharedType
 

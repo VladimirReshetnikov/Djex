@@ -39,6 +39,8 @@ facadeTests = testGroup "public Djex facade"
       allocateFreshMaybe
           (\available -> if available then Nothing else Just ("v", True))
           (Set.singleton "v") False @?= Nothing
+      allocateFreshBy elem (:) candidate ["v0", "v2"] 0 @?=
+        ("v1", ["v1", "v0", "v2"], 2)
   , testCase "exports shared type inspection" $ do
       checkedName <- expectRight $ mkIdentifier "Box"
       let acceptBinder _ = Nothing :: Maybe String

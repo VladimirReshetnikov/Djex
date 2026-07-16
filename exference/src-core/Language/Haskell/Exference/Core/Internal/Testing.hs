@@ -28,7 +28,7 @@ import Language.Haskell.Exference.Core.Candidate
 import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Score (Penalty)
 import Language.Haskell.Exference.Core.Types (HsType)
-import Language.Haskell.Exference.Core.Internal.FlexibleIds
+import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( identifierSupplySize )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.SearchControl

@@ -23,7 +23,7 @@ import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.FunctionBinding
-import Language.Haskell.Exference.Core.Internal.FlexibleIds
+import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( IdentifierSupply
   , allocateFreshNonNegativeIdentifier
   , reserveIdentifiers

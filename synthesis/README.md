@@ -85,11 +85,14 @@ folds a finite collection and ignores absent values.
 
 `Language.Haskell.Synthesis.Fresh` owns deterministic collision-skipping for
 both unbounded and exhaustible candidate generators. It returns the selected
-value, the reservation set with that value published, and the generator state
-immediately after the selection without forcing that continuation. Djinn uses
-the total form for string and `Natural` namespaces; Exference supplies its
-finite tagged-`Int` traversal and retains its established non-negative-before-
-negative ordering and structured exhaustion policy.
+value, the reservation store with that value published, and the generator
+state immediately after the selection without forcing that continuation. Its
+ordinary entry points use `Set`; container-polymorphic forms let dense backend
+domains retain stores such as `IntSet` without a boxed conversion. Djinn uses
+the total form for string and `Natural` namespaces. Exference's single finite
+`Int` supply uses the polymorphic exhaustible form for search variables and
+rigid skolems, while its tagged declaration allocator retains the established
+non-negative-before-negative ordering and structured exhaustion policy.
 
 `Language.Haskell.Synthesis.Generated` is the common checked-output boundary.
 It separates backend-owned local identities from structural global `Name`s,

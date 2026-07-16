@@ -16,6 +16,7 @@ import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
+import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types

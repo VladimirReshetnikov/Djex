@@ -7,6 +7,7 @@ import Control.Monad (forM_)
 import Data.Either (isRight)
 import Data.Foldable (toList)
 import Data.List (isInfixOf)
+import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
@@ -193,6 +194,9 @@ main = defaultMain $ testGroup "Djex parser-free API"
         $ sealPreparedExferenceSessionWithPolicy [] mempty prepared
 
       allocateFreshTypeVariableId mempty @?= Just 0
+      allocateFreshTypeVariableId (IntSet.singleton maxBound) @?= Just 0
+      allocateFreshTypeVariableId
+          (IntSet.fromList [0, maxBound, minBound]) @?= Just 1
 
       target <- expectRight $ mkOperator "<~>"
       checkedTarget <- expectRight $ validateExferenceTarget target

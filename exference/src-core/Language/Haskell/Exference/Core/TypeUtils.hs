@@ -30,8 +30,9 @@ import qualified Data.Set as S
 import qualified Data.IntSet as IntSet
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  ( flexibleIdentifiers )
+import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( allocateFreshIdentifier
-  , flexibleIdentifiers
   , supplyFromIdentifierSet
   )
 import Language.Haskell.Exference.Core.Types

@@ -879,6 +879,28 @@ facade regressions pin reservation publication, continuation state, finite
 exhaustion, and continuation laziness; existing backend tests cover capture
 avoidance, proof-name restoration, negative identities, and `maxBound` gaps.
 
+**Follow-up completed on 2026-07-15:** Exference still kept a second raw-`Int`
+supply in `FlexibleIds` beneath the shared tagged-variable allocator. It
+independently owned reservation storage, greatest-plus-one policy, gap search,
+checked addition, rigid-skolem allocation, and finite exhaustion. The shared
+allocator now accepts caller-owned reservation stores as well as ordinary
+`Set`s, so specialized namespaces retain `IntSet` performance without copying
+into a boxed tree.
+
+`VariableSupply` is now Exference's only finite-domain authority. It owns the
+opaque `IntSet` supply, checked arithmetic, historical greatest-plus-one fast
+path, non-negative rigid policy, tagged declaration allocation, and one
+overflow-safe full-domain state machine. Every path delegates collision
+skipping and reservation publication to the common allocator. `FlexibleIds`
+has shrunk to the genuinely type-specific operations: flexible-variable
+collection, namespace renaming, and coordinated batch allocation. The old
+list-based gap walker and representation pattern matches are gone, and the
+complete namespace list remains only as a lazy compatibility view for finite
+declaration renumbering. Foundation tests exercise a specialized reservation
+store; parser-free boundary tests and the existing Exference negative,
+`maxBound`, rigid-plan, unifier, and search regressions cover the migrated
+policies.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

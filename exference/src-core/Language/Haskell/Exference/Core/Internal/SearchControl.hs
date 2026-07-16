@@ -25,10 +25,11 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT, throwE)
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
-  ( FlexibleIdSupply
-  , FlexibleRenaming
+  ( FlexibleRenaming
   , allocateNamespace
   )
+import Language.Haskell.Exference.Core.Internal.VariableSupply
+  ( FlexibleIdSupply )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Types (TVarId)
 

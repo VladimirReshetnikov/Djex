@@ -31,7 +31,7 @@ import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Score
-import Language.Haskell.Exference.Core.Internal.FlexibleIds
+import Language.Haskell.Exference.Core.Internal.VariableSupply
   (FlexibleIdSupply)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 

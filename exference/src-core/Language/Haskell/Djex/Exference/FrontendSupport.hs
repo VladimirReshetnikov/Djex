@@ -33,8 +33,8 @@ import qualified Language.Haskell.Djex.Exference.Internal.Request as Request
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Exference.Core.Declaration
   ( PreparedNeutralSynthesisInventory )
-import qualified Language.Haskell.Exference.Core.Internal.FlexibleIds
-  as FlexibleIds
+import qualified Language.Haskell.Exference.Core.Internal.VariableSupply
+  as VariableSupply
 import Language.Haskell.Exference.Core.Types (TVarId)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -78,10 +78,11 @@ mkExferenceRequestWithSourceInfo sourceVariables location query =
 validateExferenceTarget :: Name -> Either Diagnostic DefinitionName
 validateExferenceTarget = Request.validateExferenceTarget
 
--- | Allocate the first available type-variable identifier from an exact
--- parser-neutral namespace. Exhaustion returns 'Nothing'; sparse and boundary
--- identifiers never wrap or collide.
+-- | Allocate Exference's historical next type-variable identifier from an
+-- exact parser-neutral namespace: greatest-plus-one where representable, then
+-- a real gap at the boundary. Exhaustion returns 'Nothing'; sparse and
+-- boundary identifiers never wrap or collide.
 allocateFreshTypeVariableId :: IntSet.IntSet -> Maybe TVarId
 allocateFreshTypeVariableId reserved = fst
-  <$> FlexibleIds.allocateFreshIdentifier
-    (FlexibleIds.supplyFromIdentifierSet reserved)
+  <$> VariableSupply.allocateFreshIdentifier
+    (VariableSupply.supplyFromIdentifierSet reserved)

@@ -65,6 +65,7 @@ import Language.Haskell.Exference.Core.ExferenceStats
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
+import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.Internal.Unify
 import Language.Haskell.Exference.Core.Internal.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode

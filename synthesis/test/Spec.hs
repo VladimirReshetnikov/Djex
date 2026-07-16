@@ -5,6 +5,7 @@ import Control.Exception (SomeException, evaluate, try)
 import Control.Monad (forM_)
 import Data.Either (isLeft)
 import Data.Foldable (toList)
+import qualified Data.IntSet as IntSet
 import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
@@ -175,6 +176,13 @@ freshTests = testGroup "fresh allocation"
       allocateFreshMaybe step (Set.fromList [0, 1, 2]) 0 @?= Nothing
       allocateFreshMaybe step (Set.fromList [0, 1]) 0 @?=
         Just (2, Set.fromList [0, 1, 2], 3)
+  , testCase "retain a specialized reservation store" $ do
+      let step candidate
+            | candidate < (4 :: Int) = Just (candidate, candidate + 1)
+            | otherwise = Nothing
+          reserved = IntSet.fromList [0, 1, 3]
+      allocateFreshMaybeBy IntSet.member IntSet.insert step reserved 0 @?=
+        Just (2, IntSet.insert 2 reserved, 3)
   , testCase "leave a successful generator continuation lazy" $
       case allocateFreshMaybe lazyStep (Set.singleton "used") False of
         Just ("free", reserved, _) ->

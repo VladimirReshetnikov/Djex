@@ -51,7 +51,10 @@ the merger-only `SynthesisType` synonym no longer presents the same tree as a
 second vocabulary. Its declaration adapter
 uses one checked native type/constraint operation in both compatibility
 directions; it no longer maintains paired converted/lowered helpers or a
-private alias for the shared application-spine observation. Djinn's `HKind` is a
+private alias for the shared application-spine observation. Its opaque prepared
+projection is also the sole authority for reconciling source binding order and
+ratings; the frontend no longer repeats its exact-name preflight, and the unused
+penalty-only environment entrance is gone. Djinn's `HKind` is a
 private-representation compatibility newtype over shared `Kind Int`; bundled
 patterns preserve `HKind(..)` imports and the historical `*`/`kN` rendering,
 while all kind bridging and grounding operate on the single shared tree.

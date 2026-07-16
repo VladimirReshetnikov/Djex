@@ -1990,7 +1990,7 @@ tests = testGroup "Exference"
           prepared <- expectRight $ prepareSynthesisInventory inventory
           SharedTypeSynonym.preparedInventory
               (preparedSynthesisWitness prepared) @?= inventory
-      , testCase "prepared inventories reject an unrelated valid binding view" $ do
+      , testCase "prepared projections check bindings before source data heads" $ do
           let variable = neutralVariable 0
               identityType = SharedType.FunctionType
                 (SharedType.TypeVariable variable)
@@ -2010,12 +2010,23 @@ tests = testGroup "Exference"
                 | binding <- environmentFunctions
                     $ preparedSynthesisBackend rightPrepared
                 ]
+              malformedDeconstructor = DeconstructorBinding
+                (TypeVar 17) [] False
           case projectSynthesisInventory
-              unrelatedView [] leftPrepared of
+              unrelatedView [malformedDeconstructor] leftPrepared of
             Left failure -> failure @?= PreparedBindingNamesMismatch
               [name "right"] [name "left"]
             Right _ -> fail
               "an unrelated backend view was attached to a checked inventory"
+          let matchingView =
+                [ (functionName binding, functionPenalty binding)
+                | binding <- environmentFunctions
+                    $ preparedSynthesisBackend leftPrepared
+                ]
+          case projectSynthesisInventory
+              matchingView [malformedDeconstructor] leftPrepared of
+            Left failure -> failure @?= InvalidDeconstructorHead (TypeVar 17)
+            Right _ -> fail "a malformed source datatype head was projected"
       , testCase "prepared projections preserve exact order, ratings, and shapes" $ do
           let dataDeclaration
                 :: String
@@ -2034,11 +2045,14 @@ tests = testGroup "Exference"
             ]
           prepared <- expectRight
             $ prepareSynthesisInventory inventory
+          let orderedDeconstructors = reverse
+                $ environmentDeconstructors
+                $ preparedSynthesisBackend prepared
           projected <- expectRight $ projectSynthesisInventory
             [ (name "MakeSecond", Penalty (-2.5))
             , (name "MakeFirst", Penalty 7.25)
             ]
-            [name "Second", name "First"]
+            orderedDeconstructors
             prepared
           let backend = preparedSynthesisBackend projected
           map (\binding ->

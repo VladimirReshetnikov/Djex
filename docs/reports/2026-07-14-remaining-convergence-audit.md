@@ -1437,6 +1437,24 @@ canonicalization error vocabulary. Historical `HsType` pattern synonyms also
 continue to preserve source compatibility over the single shared recursive
 tree.
 
+## Exference prepared-projection preflight collapse
+
+**Completed on 2026-07-16:** the HSE compatibility frontend compared its
+ordered binding-name multiset with the canonical prepared backend immediately
+before `projectSynthesisInventory` performed the same comparison. The second
+check is the invariant-bearing one: it protects every caller of the opaque
+prepared witness, checks bindings before datatype projections, validates finite
+ratings, and reconstructs only the requested order. The frontend copy added no
+diagnostic or safety property.
+
+The frontend now contributes only its source ordering, constructor ordering,
+and heuristic ratings to that projection authority. The penalty-only
+`toSynthesisEnvironmentWithConstructorPenalties` wrapper is gone as well: it
+had no caller after source environments began preserving class-method ownership
+through the complete penalties-and-methods operation. This removes thirty-seven
+net production lines while retaining the method-free historical environment
+adapter and the ownership-aware reverse projection as genuine contracts.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

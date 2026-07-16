@@ -237,6 +237,13 @@ unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` seals and
 kind-checks that source graph once, then sends the checked Inventory through
 the parser-independent neutral lowerer. The resulting backend projection is
 reconciled by name with the original binding/deconstructor order and ratings.
+That exact multiset check lives only in the opaque core projection: the HSE
+frontend supplies presentation order and ratings without prevalidating the same
+binding names a second time. Its ordered deconstructor records contribute only
+their nominal heads; every projected shape still comes from the prepared
+witness. The unused intermediate entrance that accepted constructor penalties
+but could not retain class-method ownership has been removed; source sealing
+always uses the complete ownership-aware operation.
 One opaque annotated prepared value wraps the shared `PreparedInventory` and
 its backend lowering, keeping the checked Inventory, its exact synonym table,
 and that lowering inseparable; the retained frontend/core module seam

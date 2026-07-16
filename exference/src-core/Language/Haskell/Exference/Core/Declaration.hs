@@ -35,7 +35,6 @@ module Language.Haskell.Exference.Core.Declaration
   , toSynthesisRatedDataDeclaration
   , fromSynthesisRatedDataDeclaration
   , toSynthesisEnvironment
-  , toSynthesisEnvironmentWithConstructorPenalties
   , toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
   , fromSynthesisEnvironment
   , fromSynthesisEnvironmentWithClassMethods
@@ -182,13 +181,13 @@ prepareSourceSynthesisInventory inventory =
   prepareSynthesisInventory inventory >>= normalizePreparedDataMetadata
 
 -- | Reorder a canonical backend to match a source frontend and attach its
--- finite heuristic ratings.  Names are an exact inventory: callers may choose
--- order and ratings, but cannot replace types, constraints, classes,
--- instances, constructors, or datatype metadata with independently prepared
--- values.
+-- finite heuristic ratings. Function names and deconstructor heads form an
+-- exact inventory: callers may choose order and ratings, but the supplied
+-- records cannot replace types, constraints, classes, instances,
+-- constructors, or datatype metadata from the prepared witness.
 projectSynthesisInventory
   :: [(QualifiedName, Penalty)]
-  -> [QualifiedName]
+  -> [DeconstructorBinding]
   -> PreparedSynthesisInventory annotation
   -> Either SynthesisDeclarationError
       (PreparedSynthesisInventory annotation)
@@ -201,14 +200,15 @@ projectSynthesisInventory functionProjection dataProjection
     then pure ()
     else Left $ PreparedBindingNamesMismatch
       sourceBindingNames preparedBindingNames
+  sourceDataNames <- mapM deconstructorTypeName dataProjection
   preparedDataNames <- mapM deconstructorTypeName
     $ environmentDeconstructors backend
-  let sourceDataNames = sort dataProjection
+  let sortedSourceDataNames = sort sourceDataNames
       canonicalDataNames = sort preparedDataNames
-  if sourceDataNames == canonicalDataNames
+  if sortedSourceDataNames == canonicalDataNames
     then pure ()
     else Left $ PreparedDataTypeNamesMismatch
-      sourceDataNames canonicalDataNames
+      sortedSourceDataNames canonicalDataNames
   case find (not . isFiniteScore . snd) functionProjection of
     Just (name, penalty) -> Left $ InvalidPreparedBindingPenalty name penalty
     Nothing -> pure ()
@@ -226,11 +226,11 @@ projectSynthesisInventory functionProjection dataProjection
           sourceBindingNames preparedBindingNames
       projectDeconstructor name = maybe
         (Left $ PreparedDataTypeNamesMismatch
-          sourceDataNames canonicalDataNames)
+          sortedSourceDataNames canonicalDataNames)
         Right
         $ Map.lookup name deconstructorsByName
   functions <- mapM projectFunction functionProjection
-  deconstructors <- mapM projectDeconstructor dataProjection
+  deconstructors <- mapM projectDeconstructor sourceDataNames
   pure $ PreparedSynthesisInventory prepared
     (backend
       { environmentFunctions = functions
@@ -685,17 +685,6 @@ toSynthesisEnvironment
   -> Either SynthesisDeclarationError SynthesisEnvironment
 toSynthesisEnvironment =
   toSynthesisEnvironmentWith toSynthesisDataDeclaration Map.empty
-
--- | Seal a complete core environment without discarding constructor search
--- costs.  Keeping the common declaration assembly here prevents frontends
--- from maintaining a second class/instance/value conversion path.
-toSynthesisEnvironmentWithConstructorPenalties
-  :: Map.Map QualifiedName Penalty
-  -> EnvDictionary
-  -> Either SynthesisDeclarationError SynthesisEnvironment
-toSynthesisEnvironmentWithConstructorPenalties penalties =
-  toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
-    penalties Map.empty
 
 -- | Seal the frontend projection while nesting tagged class methods under
 -- their owning shared declarations.  The backend dictionary intentionally

@@ -46,7 +46,6 @@ import Language.Haskell.Exference.HaskellSrcUtils
   )
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
-import Language.Haskell.Exference.Core.TypeUtils (typeConstructorHead)
 
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Diagnostic
@@ -368,44 +367,19 @@ normalizeBackendProjection
   -> SourceEnvironment
   -> Either SynthesisDeclarationError
       (PreparedSynthesisInventory annotation)
-normalizeBackendProjection prepared environment = do
-  let sourceBindingNames = sort
-        $ map (functionName . sourceBindingFunction)
-        $ sourceBindings environment
-      preparedBindingNames = sort
-        $ map functionName
-        $ environmentFunctions
-        $ preparedSynthesisBackend prepared
-  -- Retain the historical error precedence for malformed compatibility
-  -- records: a binding-inventory mismatch is reported before attempting to
-  -- inspect datatype heads. The core projection repeats this cheap check so
-  -- its opaque witness remains safe for every caller, not only this frontend.
-  if sourceBindingNames == preparedBindingNames
-    then pure ()
-    else Left $ PreparedBindingNamesMismatch
-      sourceBindingNames preparedBindingNames
-  sourceDataNames <- mapM deconstructorTypeName
-    $ sourceDeconstructors environment
+normalizeBackendProjection prepared environment =
   projectSynthesisInventory
     [ (functionName binding, functionPenalty binding)
     | tagged <- sourceBindings environment
     , let binding = sourceBindingFunction tagged
     ]
-    sourceDataNames
+    (sourceDeconstructors environment)
     prepared
 
 ordinaryTypeName :: QualifiedName -> Bool
 ordinaryTypeName name = case SharedName.nameSpecial name of
   Nothing -> True
   Just _ -> False
-
-deconstructorTypeName
-  :: DeconstructorBinding
-  -> Either SynthesisDeclarationError QualifiedName
-deconstructorTypeName declaration = maybe
-  (Left $ InvalidDeconstructorHead $ deconstructorInput declaration)
-  Right
-  $ typeConstructorHead $ deconstructorInput declaration
 
 -- | Unique-only compatibility index used by the historical type elaborator.
 -- The ordered field remains authoritative so duplicate declarations reach the

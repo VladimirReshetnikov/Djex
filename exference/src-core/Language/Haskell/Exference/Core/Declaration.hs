@@ -441,7 +441,7 @@ valueSignature
 valueSignature binding = SharedDeclaration.ValueSignature
   (SearchPenaltyMetadata $ functionPenalty binding)
   (functionName binding)
-  <$> convertedType (functionBindingSignature binding)
+  <$> checkedType (functionBindingSignature binding)
 
 fromSynthesisFunctionBinding
   :: SynthesisDeclaration
@@ -455,7 +455,7 @@ fromSynthesisFunctionBinding declaration = do
         _ -> Left $ MissingSearchPenaltyMetadata
           $ SharedDeclaration.valueName signature
       let name = SharedDeclaration.valueName signature
-      functionType <- loweredType $ SharedDeclaration.valueType signature
+      functionType <- checkedType $ SharedDeclaration.valueType signature
       let (variables, constraints, body) = case functionType of
             TypeForall binders context nested -> (binders, context, nested)
             nested -> ([], [], nested)
@@ -484,7 +484,7 @@ toSynthesisClassDeclarationWithMethods declaration methods = checked $
   SharedDeclaration.ClassDeclaration NoDeclarationMetadata
     (tclass_name declaration)
     (map flexibleParameter $ tclass_params declaration)
-    <$> mapM convertedConstraint (tclass_constraints declaration)
+    <$> mapM checkedConstraint (tclass_constraints declaration)
     <*> mapM convertedMethod methods
  where
   expectedConstraint = classMethodConstraint declaration
@@ -506,7 +506,7 @@ fromSynthesisClassDeclaration declaration = do
     SharedDeclaration.ClassDeclaration _ name parameters superclasses methods
       | null methods -> HsTypeClass name
           <$> mapM plainFlexibleParameter parameters
-          <*> mapM loweredConstraint superclasses
+          <*> mapM checkedConstraint superclasses
       | otherwise -> Left $ ClassMethodsUnsupported
           $ map SharedDeclaration.valueName methods
     _ -> Left ExpectedClassDeclaration
@@ -524,7 +524,7 @@ fromSynthesisClassDeclarationWithMethods declaration = do
     SharedDeclaration.ClassDeclaration _ name parameters superclasses methods -> do
       typeClass <- HsTypeClass name
         <$> mapM plainFlexibleParameter parameters
-        <*> mapM loweredConstraint superclasses
+        <*> mapM checkedConstraint superclasses
       bindings <- mapM (lowerMethod $ classMethodConstraint typeClass) methods
       Right (typeClass, bindings)
     _ -> Left ExpectedClassDeclaration
@@ -554,9 +554,9 @@ toSynthesisInstanceDeclaration
   -> Either SynthesisDeclarationError SynthesisDeclaration
 toSynthesisInstanceDeclaration declaration = checked $
   do
-    prerequisites <- mapM convertedConstraint
+    prerequisites <- mapM checkedConstraint
       $ instance_constraints declaration
-    headConstraint <- convertedConstraint $ instance_head declaration
+    headConstraint <- checkedConstraint $ instance_head declaration
     -- HsInstance quantifies these variables implicitly. Materialize that
     -- binder set before crossing the explicit shared declaration boundary.
     let variables = Set.toAscList $ constraintVariables
@@ -574,8 +574,8 @@ fromSynthesisInstanceDeclaration declaration = do
       | Set.fromList variables == constraintVariables
           (headConstraint : prerequisites)
       , all SharedType.isFlexibleVariable variables -> HsInstance
-          <$> mapM loweredConstraint prerequisites
-          <*> loweredConstraint headConstraint
+          <$> mapM checkedConstraint prerequisites
+          <*> checkedConstraint headConstraint
       | otherwise -> Left $ NonImplicitInstanceForall variables
     _ -> Left ExpectedInstanceDeclaration
 
@@ -862,9 +862,9 @@ toSynthesisTypeSynonym
   -> HsType
   -> Either SynthesisDeclarationError SynthesisDeclaration
 toSynthesisTypeSynonym name parameters body = checked $ do
-  convertedBody <- convertedType body
+  checkedBody <- checkedType body
   Right $ SharedDeclaration.TypeSynonymDeclaration
-    NoDeclarationMetadata name (map flexibleParameter parameters) convertedBody
+    NoDeclarationMetadata name (map flexibleParameter parameters) checkedBody
 
 -- | Lower a checked shared synonym to the lossless fields represented by the
 -- historical frontend record.  Explicit parameter kinds and rigid parameters
@@ -878,37 +878,23 @@ fromSynthesisTypeSynonym declaration = do
     SharedDeclaration.TypeSynonymDeclaration _ name parameters body ->
       (name,,)
         <$> mapM plainFlexibleParameter parameters
-        <*> loweredType body
+        <*> checkedType body
     _ -> Left ExpectedTypeSynonymDeclaration
 
-convertedType
+checkedType
   :: HsType
-  -> Either SynthesisDeclarationError
-      (SharedType.Type SynthesisVariable)
-convertedType typeExpression = either
-  (Left . DeclarationTypeConversionError) Right
-  $ toSynthesisType typeExpression
-
-loweredType
-  :: SharedType.Type SynthesisVariable
   -> Either SynthesisDeclarationError HsType
-loweredType = convertedType
+checkedType = first DeclarationTypeConversionError . toSynthesisType
 
 constraintVariables
   :: [SharedConstraint.Constraint (SharedType.Type SynthesisVariable)]
   -> Set.Set SynthesisVariable
 constraintVariables = foldMap SharedType.constraintFreeVariables
 
-convertedConstraint
+checkedConstraint
   :: HsConstraint
-  -> Either SynthesisDeclarationError
-      (SharedConstraint.Constraint (SharedType.Type SynthesisVariable))
-convertedConstraint = traverse convertedType
-
-loweredConstraint
-  :: SharedConstraint.Constraint (SharedType.Type SynthesisVariable)
   -> Either SynthesisDeclarationError HsConstraint
-loweredConstraint = traverse loweredType
+checkedConstraint = traverse checkedType
 
 flexibleParameter
   :: TVarId
@@ -937,7 +923,7 @@ convertedConstructorWith
 convertedConstructorWith metadata constructor = SharedDeclaration.DataConstructor
   <$> metadata constructor
   <*> pure (constructorName constructor)
-  <*> mapM convertedType (constructorFields constructor)
+  <*> mapM checkedType (constructorFields constructor)
 
 loweredConstructor
   :: SharedDeclaration.DataConstructor
@@ -945,7 +931,7 @@ loweredConstructor
   -> Either SynthesisDeclarationError ConstructorBinding
 loweredConstructor constructor = ConstructorBinding
   (SharedDeclaration.constructorName constructor)
-  <$> mapM loweredType (SharedDeclaration.constructorFields constructor)
+  <$> mapM checkedType (SharedDeclaration.constructorFields constructor)
 
 loweredRatedConstructor
   :: HsType
@@ -985,12 +971,9 @@ deconstructorHead typeExpression = do
     name <- either (const $ Left $ InvalidDeconstructorHead typeExpression)
       Right $ SharedName.tupleName boxity $ length elements
     Right (name, elements)
-  nominalApplication body = case typeApplicationSpine body of
+  nominalApplication body = case SharedType.applicationSpine body of
     (TypeCons name, arguments) -> Right (name, arguments)
     _ -> Left $ InvalidDeconstructorHead typeExpression
 
   typeVariable (TypeVar variable) = Right variable
   typeVariable argument = Left $ NonVariableDataParameter argument
-
-typeApplicationSpine :: HsType -> (HsType, [HsType])
-typeApplicationSpine = SharedType.applicationSpine

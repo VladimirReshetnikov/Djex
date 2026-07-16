@@ -1404,6 +1404,23 @@ type/wrapper and private general worker are gone, and preparation, expansion,
 and freshening errors no longer pretend that ordinary shared Inventories form a
 second neutral representation.
 
+## Exference declaration native-check consolidation
+
+**Completed on 2026-07-16:** the declaration adapter still named separate
+`convertedType`/`loweredType` and `convertedConstraint`/`loweredConstraint`
+operations for its two historical directions. Native shared storage had made
+each pair the same fallible canonicalization, while the reverse type helper was
+literally the forward helper. A private `typeApplicationSpine` alias similarly
+only renamed the foundation observation.
+
+One `checkedType` and one `checkedConstraint` now own this trust boundary for
+functions, classes, instances, datatypes, and aliases in either direction.
+Constructor and declaration adapters remain directional because their record
+shapes and metadata policies genuinely differ. The nominal datatype-head
+checker calls the shared application-spine operation directly. This removes
+seventeen lines of false conversion structure without weakening malformed-type
+diagnostics or declaration validation.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

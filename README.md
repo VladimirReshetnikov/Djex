@@ -45,7 +45,10 @@ That report captures the starting point for the current work; its Priority 1
 native-vocabulary and Priority 2 result-envelope migrations are now complete.
 Exference's `HsType` is an alias for the shared `Type (Variable Int)`, with
 compatibility patterns over the native tree and one canonical structural
-representation for saturated functions and tuples. Djinn's `HKind` is a
+representation for saturated functions and tuples. Its declaration adapter
+uses one checked native type/constraint operation in both compatibility
+directions; it no longer maintains paired converted/lowered helpers or a
+private alias for the shared application-spine observation. Djinn's `HKind` is a
 private-representation compatibility newtype over shared `Kind Int`; bundled
 patterns preserve `HKind(..)` imports and the historical `*`/`kN` rendering,
 while all kind bridging and grounding operate on the single shared tree.

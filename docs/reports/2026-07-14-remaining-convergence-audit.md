@@ -1455,6 +1455,26 @@ through the complete penalties-and-methods operation. This removes thirty-seven
 net production lines while retaining the method-free historical environment
 adapter and the ownership-aware reverse projection as genuine contracts.
 
+## Residual single-consumer helper collapse
+
+**Completed on 2026-07-16:** the native Djinn kind and type migrations left
+two package-internal naming layers with one consumer each. `groundHKind` merely
+composed the shared kind projection and grounding operation before
+`checkedGroundHKind` added the only supported raw diagnostic.
+`isDjinnTypeVariable` merely renamed the shared-name-backed `isVarId` predicate
+before `checkedDjinnTypeVariable` attached the validation error. Both wrappers
+were introduced during the merge rather than inherited from Djinn's historical
+API.
+
+The checked operations now call their primitives directly while preserving the
+tested distinction between raw HCheck's bare numeric unsolved-kind detail and
+`Djinn.Core`'s rendered `kN` form. On the Exference side, the finite-identifier
+test seam no longer exposes a generated-batch path that had no test after the
+canonical `QueryResult` exhaustion regressions replaced it. Its hidden search
+node also stops exporting two private substitution workers and a one-field type
+alias. This removes twenty-four net production lines without weakening a
+public compatibility contract.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

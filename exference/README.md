@@ -614,6 +614,9 @@ multi-gigabyte heap for trivial invocations. Its obsolete Hood, search-tree,
 parallel-mode, and embedded manual-test machinery has been removed;
 deterministic regressions live in `exference-tests`, the frontend-import check,
 and the separate `exference-cli-tests` subprocess suite.
+The finite-identifier test seam likewise retains only its exercised raw
+compatibility-element path and canonical `QueryResult` path; the unconsumed
+generated-batch intermediate and private search-node export aliases are gone.
 
 ```console
 cabal run exference -- --first "a -> a"

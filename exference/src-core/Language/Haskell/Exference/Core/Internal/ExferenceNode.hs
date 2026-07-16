@@ -11,9 +11,6 @@ module Language.Haskell.Exference.Core.Internal.ExferenceNode
   , varPResult
   , varPParameters
   , VarBinding (..)
-  , VarUsageMap
-  , varBindingApplySubsts
-  , varPBindingApplySubsts
   , goalApplySubst
   , scopesApplySubsts
   , mkGoals
@@ -108,8 +105,6 @@ requireValidScopes = either
   (error . ("Exference internal scope invariant violated: " ++) . show)
   id
 
-type VarUsageMap = IntMap.IntMap Natural
-
 -- | An expression hole and the innermost lexical scope visible from it.
 data TGoal = TGoal
   { goalBinding :: VarBinding
@@ -133,7 +128,7 @@ data SearchNode = SearchNode
   { nodeGoals           :: Seq TGoal
   , nodeConstraintGoals :: [HsConstraint]
   , nodeProvidedScopes  :: Scopes
-  , nodeVarUses         :: VarUsageMap
+  , nodeVarUses         :: IntMap.IntMap Natural
   , nodeFunctions       :: [FunctionBinding]
   , nodeDeconstructors  :: [DeconstructorBinding]
   , nodeQueryClassEnv   :: QueryClassEnv

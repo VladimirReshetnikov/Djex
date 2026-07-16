@@ -6,7 +6,6 @@
 module Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
   , findExpressionsWithIdentifierCapacitiesEither
-  , findGeneratedSearchBatchesWithIdentifierCapacitiesEither
   , findQueryResultsWithIdentifierCapacitiesEither
   , attachQueryTargetForTesting
   , compatibilityPruningCount
@@ -54,15 +53,6 @@ findExpressionsWithIdentifierCapacitiesEither capacities input = do
   checked <- E.prepareExferenceInput input
   pure $ E.findExpressionsWithAllocators
     (finiteSearchAllocators capacities) checked
-
-findGeneratedSearchBatchesWithIdentifierCapacitiesEither
-  :: IdentifierCapacities
-  -> E.ExferenceInput
-  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatchesWithIdentifierCapacitiesEither capacities input = do
-  checked <- E.prepareExferenceInput input
-  pure $ E.findGeneratedSearchBatchesWithAllocators
-    (finiteSearchAllocators capacities) Map.empty checked
 
 -- | Exercise the canonical result path with bounded internal namespaces.
 -- Unlike the compatibility-input helpers above, this retains the checked

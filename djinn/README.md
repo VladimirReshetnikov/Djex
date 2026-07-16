@@ -24,6 +24,9 @@ while inventory sealing rejects any unsolved kind rather than allowing it into
 query elaboration. `HKind` now stores the shared `Kind Int` tree directly
 behind bundled compatibility patterns, retaining `HKind(..)` imports and
 Djinn's exact `*`/`kN` rendering without a second recursive representation.
+The checked raw-kind boundary invokes the shared grounding operation directly;
+the short-lived `groundHKind` passthrough no longer exposes the same operation
+without Djinn's required historical diagnostic.
 This compatibility is deliberately value-level: unlike the former data
 constructors, pattern synonyms cannot be promoted as `'KStar` or `'KArrow` by
 `DataKinds`. The stable `Djinn.Core` surface has always exposed `HKind`

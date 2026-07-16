@@ -10,7 +10,7 @@ module Djinn.Internal.HTypes(
         HType(HTApp, HTVar, HTCon, HTTuple, HTArrow, HTUnion, HTAbstract),
         HSymbol,
         toSynthesisKind, fromSynthesisKind,
-        groundHKind, checkedGroundHKind, fromGroundHKind,
+        checkedGroundHKind, fromGroundHKind,
         hTypeSynthesisStructure, fromHTypeSynthesisStructure,
         prepareTypeFormulaTranslator, hTypeToFormula,
         pHSymbol, pHType, pHContext, pHConstraint,
@@ -71,16 +71,11 @@ toSynthesisKind (HKindRepresentation kind) = kind
 fromSynthesisKind :: SharedKind.Kind Int -> HKind
 fromSynthesisKind = HKindRepresentation
 
--- | Eliminate inference variables while retaining the first unsolved identity.
--- Callers deliberately own its presentation: historical low-level checks show
--- the bare identity, whereas 'Djinn.Core' renders it as @kN@.
-groundHKind :: HKind -> Either Int (SharedKind.Kind Void)
-groundHKind = SharedKind.groundKind . toSynthesisKind
-
 -- | Ground a kind using the bare unsolved-identity diagnostic preserved by
 -- Djinn's historical low-level checker and editable-environment API.
 checkedGroundHKind :: HKind -> Either String (SharedKind.Kind Void)
-checkedGroundHKind = first renderUnsolved . groundHKind
+checkedGroundHKind = first renderUnsolved
+    . SharedKind.groundKind . toSynthesisKind
   where
     renderUnsolved variable =
         "kind contains an unsolved variable: " ++ show variable

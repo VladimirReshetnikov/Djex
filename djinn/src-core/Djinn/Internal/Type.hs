@@ -2,7 +2,6 @@
 -- the shared source-type vocabulary it now stores natively.
 module Djinn.Internal.Type
   ( SynthesisTypeError (..)
-  , isDjinnTypeVariable
   , checkedDjinnTypeVariable
   , djinnTypeConstructorSymbol
   , normalizeSynthesisType
@@ -34,17 +33,14 @@ data SynthesisTypeError
   | PartialTupleConstructorUnsupported SharedName.Boxity Int
   deriving (Eq, Show)
 
--- | Djinn's type variables are source-level unqualified @varid@s.  The
--- shared IR deliberately leaves its variable identity type abstract, so a
--- @String@-specialized adapter must reassert this backend invariant.
-isDjinnTypeVariable :: HSymbol -> Bool
-isDjinnTypeVariable = isVarId
-
+-- | Djinn's type variables are source-level unqualified @varid@s. The shared
+-- IR leaves variable identity abstract, so this String-specialized boundary
+-- reasserts that backend invariant.
 checkedDjinnTypeVariable
   :: HSymbol
   -> Either SynthesisTypeError HSymbol
 checkedDjinnTypeVariable variable
-  | isDjinnTypeVariable variable = Right variable
+  | isVarId variable = Right variable
   | otherwise = Left $ InvalidDjinnTypeVariable variable
 
 toSynthesisType

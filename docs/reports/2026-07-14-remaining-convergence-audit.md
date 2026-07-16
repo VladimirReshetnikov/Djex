@@ -1128,6 +1128,29 @@ prefix rendering is `(==)`. The new boundary compares proof-source spellings
 explicitly, retaining qualified operator identity without reporting valid
 assumptions as escaped globals.
 
+## Djinn class-context instantiation authority
+
+**Completed on 2026-07-15:** Djinn's prepared class index already retained
+method names and types in the shared vocabulary, but the historical context
+resolver immediately projected every method into `HType` and ran a second,
+recursive capture-avoiding substitution. Stable Djex queries independently
+instantiated the same sealed methods with the shared type substitution. The
+two implementations had to agree on first-occurrence variable order, active
+substitution images, fresh prime allocation, capture avoidance, and method
+scope; a change to either could silently make compatibility inspection differ
+from proof search.
+
+Raw and native constraints now share one polymorphic resolved-context record,
+one class lookup and arity check, and the same shared-tree method
+instantiation. The raw API keeps its `HType` arguments long enough to preserve
+historical kind diagnostics and projects only the final checked methods back
+to `HType`; it therefore still preserves unexpanded alias spellings. The old
+`instantiateMethod` recursive authority is gone, and a theoretically broken
+sealed projection is now returned as a descriptive `Left` instead of reaching
+the former partial class-index adapter. Existing regressions pin alias
+preservation, inactive substitutions, multiple capture collisions, long prime
+chains, joint instance-kind scopes, and exact method output.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

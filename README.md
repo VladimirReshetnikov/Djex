@@ -53,7 +53,10 @@ Prepared Djinn kind-check caches and their trusted Inventory bridge are private
 implementation details rather than authority exposed by the raw compatibility
 module. Djinn's LJT lowering likewise constructs and simplifies the shared
 generated `Expression`/`Pattern` tree directly; `HExpr` and `HPat` remain only
-as projections for historical low-level callers. Both engines now construct
+as projections for historical low-level callers. Djinn's raw and native class
+contexts also share one sealed class lookup and capture-avoiding method
+instantiation; the raw API projects only its final methods back to `HType`.
+Both engines now construct
 their stable `QueryResult` payloads in the core: Djinn preserves its richer
   logical evidence, while Exference derives evidence from each lazy candidate
   batch after one checked query preparation. Exference source checking and both

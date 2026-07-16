@@ -332,7 +332,7 @@ resolveContext environment context = do
 resolvePreparedContext
     :: PreparedEnvironment -> Context -> Either String [(HSymbol, HType)]
 resolvePreparedContext prepared context =
-    concat <$> resolveContexts prepared [] [context]
+    concat <$> resolveContexts prepared [context]
 
 -- | Resolve the methods of an instance target while checking the target and
 -- all prerequisite contexts in one kind-variable scope.  The returned methods
@@ -348,7 +348,7 @@ resolveInstanceMethods environment prerequisites target = do
 resolvePreparedInstanceMethods :: PreparedEnvironment -> [Context] -> Context
                                -> Either String [(HSymbol, HType)]
 resolvePreparedInstanceMethods prepared prerequisites target = do
-    resolved <- resolveContexts prepared [] (target : prerequisites)
+    resolved <- resolveContexts prepared (target : prerequisites)
     case resolved of
         targetMethods : _ -> Right targetMethods
         [] -> Left "internal error: instance target was not resolved"
@@ -360,37 +360,47 @@ prepareCompatibilityEnvironment = first show . prepareEnvironment
 -- The intermediate record keeps lookup/arity validation separate from the
 -- joint kind check and substitution.  In particular, every argument and the
 -- query goal must share one scope for their free type variables.
-data ResolvedContext = ResolvedContext {
-    resolvedConstraint :: Context,
+data ResolvedContext typeExpression = ResolvedContext {
+    resolvedConstraint :: Constraint typeExpression,
     resolvedParameters :: [(HSymbol, HKind)],
-    resolvedMethods :: [(HSymbol, HType)]
+    -- Keep sealed methods in the authoritative shared representation.  The
+    -- compatibility API projects only the final instantiated result, rather
+    -- than rebuilding HType before substitution and converting it back again
+    -- in stable queries.
+    resolvedMethods ::
+        [(SharedName.Name, SharedType.Type HSymbol)]
     }
 
-resolvedName :: ResolvedContext -> HSymbol
+resolvedName :: ResolvedContext typeExpression -> HSymbol
 resolvedName = SharedName.renderCanonical . constraintClass . resolvedConstraint
 
-resolvedArguments :: ResolvedContext -> [HType]
+resolvedArguments :: ResolvedContext typeExpression -> [typeExpression]
 resolvedArguments = constraintArguments . resolvedConstraint
 
-resolveContexts :: PreparedEnvironment -> [(String, HKind, HType)] -> [Context]
+resolveContexts :: PreparedEnvironment -> [Context]
                 -> Either String [[(HSymbol, HType)]]
-resolveContexts prepared additionalTypes contexts = do
-    resolved <- mapM (lookupContext prepared) contexts
-    checkKindObligations prepared $
-        additionalTypes ++ concatMap argumentObligations resolved
+resolveContexts prepared contexts = do
+    resolved <- mapM (lookupResolvedContext prepared) contexts
+    checkKindObligations prepared $ concatMap argumentObligations resolved
     mapM (instantiateContext prepared) resolved
 
 internalQueryFailure :: String -> Either DjinnQueryError value
 internalQueryFailure =
     Left . DjinnInternalQueryFailure . ("internal error: " ++)
 
-lookupContext :: PreparedEnvironment -> Context -> Either String ResolvedContext
-lookupContext prepared context = do
+-- Class lookup and arity validation are representation-independent.  Raw and
+-- native callers retain their input type tree in the polymorphic constraint;
+-- the sealed parameters and methods come from the same shared class index.
+lookupResolvedContext
+    :: PreparedEnvironment
+    -> Constraint typeExpression
+    -> Either String (ResolvedContext typeExpression)
+lookupResolvedContext prepared context = do
     -- Context is a shared, intentionally permissive syntax node.  Reassert
     -- Djinn's narrower class namespace even when a caller constructs that
     -- node directly instead of going through mkContext.
     requireName "class" (isDjinnDeclarationName ClassOwner) name
-    case lookupPreparedEnvironmentClass name prepared of
+    case lookupPreparedSynthesisClass (constraintClass context) prepared of
         Nothing -> Left $ "Class not found: " ++ name
         Just (params, methods)
             | length params == constraintArity context ->
@@ -405,7 +415,9 @@ lookupContext prepared context = do
   where
     name = SharedName.renderCanonical $ constraintClass context
 
-argumentObligations :: ResolvedContext -> [(String, HKind, HType)]
+argumentObligations
+    :: ResolvedContext HType
+    -> [(String, HKind, HType)]
 argumentObligations context =
     [ ("argument " ++ show argument ++ " of class " ++ resolvedName context,
        kind, argument)
@@ -439,60 +451,42 @@ checkKindObligationsWith check obligations =
                     intercalate ", " [label | (label, _, _) <- obligations] ++
                     ": " ++ jointError
 
-instantiateContext :: PreparedEnvironment -> ResolvedContext
+instantiateContext :: PreparedEnvironment -> ResolvedContext HType
                    -> Either String [(HSymbol, HType)]
 instantiateContext prepared context = do
-    let parameters = resolvedParameters context
-        arguments = resolvedArguments context
-        instantiated =
-            [ (methodName,
-               instantiateMethod parameters arguments methodType)
-            | (methodName, methodType) <- resolvedMethods context ]
+    arguments <- mapM projectArgument $ resolvedArguments context
+    instantiated <- mapM (instantiate arguments) $ resolvedMethods context
     -- Each method's non-class variables are implicitly quantified by that
     -- signature, not shared with identically spelled variables in sibling
     -- methods.  Checking one synthetic tuple would accidentally reunify them.
-    mapM_ checkMethod instantiated
-    return instantiated
+    mapM checkAndProject instantiated
   where
-    checkMethod (methodName, methodType) =
-        case checkPreparedTypesKinds prepared [(KStar, methodType)] of
+    parameters = resolvedParameters context
+
+    projectArgument source = first
+        (("internal checked context projection failed: " ++) . show) $
+        toSynthesisType source
+
+    instantiate arguments (methodName, methodType) = do
+        instantiated <- instantiateSynthesisMethod
+            parameters arguments methodType
+        methodSymbol <- synthesisMethodSymbol methodName
+        return (methodSymbol, instantiated)
+
+    checkAndProject (methodName, methodType) = do
+        case checkPreparedSynthesisTypesKinds
+                prepared [(KStar, methodType)] of
             Left message -> Left $
                 "method " ++ prHSymbolOp methodName ++ " of class " ++
                 resolvedName context ++ ": " ++ message
             Right () -> Right ()
-
--- Class parameters and method-local variables live in different implicit
--- quantifier scopes.  Before substituting class arguments, alpha-rename only
--- those locals that occur in an active substitution image.  Renaming every
--- local would unnecessarily sever Djinn's intentionally shallow matching of
--- a method-local spelling with the query goal (for example @return@'s @a@).
-instantiateMethod :: [(HSymbol, HKind)] -> [HType] -> HType -> HType
-instantiateMethod parameters arguments methodType =
-    substHT substitution $ substHT renamings methodType
-  where
-    parameterNames = map fst parameters
-    substitution = zip parameterNames arguments
-    methodVariables = getHTVars methodType
-    activeImages =
-        [ argument
-        | (parameter, argument) <- substitution
-        , parameter `elem` methodVariables
-        ]
-    imageVariables = Set.fromList $ concatMap getHTVars activeImages
-    localVariables =
-        filter (`notElem` parameterNames) methodVariables
-    capturedLocals =
-        filter (`Set.member` imageVariables) localVariables
-    initiallyUnavailable = Set.fromList $
-        parameterNames ++ methodVariables ++ concatMap getHTVars arguments
-    (_, renamings) = mapAccumL allocateRenaming
-        initiallyUnavailable capturedLocals
-
-    allocateRenaming unavailable variable =
-        let (fresh, unavailable', _) = Fresh.allocateFresh
-                (\candidate -> (candidate, candidate ++ "'"))
-                unavailable (variable ++ "'")
-        in (unavailable', (variable, HTVar fresh))
+        projected <- first
+            (\failure ->
+                "method " ++ prHSymbolOp methodName ++ " of class " ++
+                resolvedName context ++
+                ": sealed method projection failed: " ++ show failure)
+            $ fromSynthesisType methodType
+        return (methodName, projected)
 
 -- Native shared-type context resolution used by the Djex adapter. The raw
 -- 'Context' operations above remain exact compatibility projections; this
@@ -500,22 +494,8 @@ instantiateMethod parameters arguments methodType =
 -- through kind checking, synonym elaboration, and instantiation.
 type SynthesisContext = Constraint (SharedType.Type HSymbol)
 
-data ResolvedSynthesisContext = ResolvedSynthesisContext {
-    resolvedSynthesisConstraint :: SynthesisContext,
-    resolvedSynthesisParameters :: [(HSymbol, HKind)],
-    resolvedSynthesisMethods ::
-        [(SharedName.Name, SharedType.Type HSymbol)]
-    }
-
-resolvedSynthesisName :: ResolvedSynthesisContext -> HSymbol
-resolvedSynthesisName = SharedName.renderCanonical . constraintClass .
-    resolvedSynthesisConstraint
-
-resolvedSynthesisArguments
-    :: ResolvedSynthesisContext
-    -> [SharedType.Type HSymbol]
-resolvedSynthesisArguments = constraintArguments .
-    resolvedSynthesisConstraint
+type ResolvedSynthesisContext =
+    ResolvedContext (SharedType.Type HSymbol)
 
 resolveSynthesisQueryContexts
     :: PreparedEnvironment
@@ -527,7 +507,7 @@ resolveSynthesisQueryContexts
         )
 resolveSynthesisQueryContexts prepared goalObligation contexts = do
     resolved <- queryFailure $
-        mapM (lookupSynthesisContext prepared) contexts
+        mapM (lookupResolvedContext prepared) contexts
     let obligations = goalObligation :
             concatMap synthesisArgumentObligations resolved
     queryFailure $ checkSynthesisKindObligations prepared obligations
@@ -554,52 +534,29 @@ attachElaboratedSynthesisArguments [] [] = Right []
 attachElaboratedSynthesisArguments [] _ =
     internalQueryFailure "query elaboration returned extra context arguments"
 attachElaboratedSynthesisArguments (context : contexts) arguments = do
-    let arity = length $ resolvedSynthesisParameters context
+    let arity = length $ resolvedParameters context
         (current, remaining) = splitAt arity arguments
     if length current /= arity then
         internalQueryFailure "query elaboration dropped a context argument"
     else do
         rest <- attachElaboratedSynthesisArguments contexts remaining
-        let constraint = (resolvedSynthesisConstraint context) {
+        let constraint = (resolvedConstraint context) {
                 constraintArguments = current
                 }
-        return (context {resolvedSynthesisConstraint = constraint} : rest)
-
-lookupSynthesisContext
-    :: PreparedEnvironment
-    -> SynthesisContext
-    -> Either String ResolvedSynthesisContext
-lookupSynthesisContext prepared context = do
-    requireName "class" (isDjinnDeclarationName ClassOwner) sourceName
-    case lookupPreparedSynthesisClass (constraintClass context) prepared of
-        Nothing -> Left $ "Class not found: " ++ sourceName
-        Just (parameters, methods)
-            | length parameters == constraintArity context ->
-                Right ResolvedSynthesisContext {
-                    resolvedSynthesisConstraint = context,
-                    resolvedSynthesisParameters = parameters,
-                    resolvedSynthesisMethods = methods
-                    }
-            | otherwise -> Left $
-                "Class " ++ sourceName ++ " expects " ++
-                show (length parameters) ++
-                " type argument(s), but got " ++
-                show (constraintArity context)
-  where
-    sourceName = SharedName.renderCanonical $ constraintClass context
+        return (context {resolvedConstraint = constraint} : rest)
 
 synthesisArgumentObligations
     :: ResolvedSynthesisContext
     -> [(String, HKind, SharedType.Type HSymbol)]
 synthesisArgumentObligations context =
     [ ( "argument " ++ renderSynthesisType argument ++ " of class " ++
-          resolvedSynthesisName context
+          resolvedName context
       , kind
       , argument
       )
     | ((_, kind), argument) <- zip
-        (resolvedSynthesisParameters context)
-        (resolvedSynthesisArguments context)
+        (resolvedParameters context)
+        (resolvedArguments context)
     ]
 
 checkSynthesisKindObligations
@@ -616,11 +573,11 @@ instantiateSynthesisContext
     -> Either String [(HSymbol, SharedType.Type HSymbol)]
 instantiateSynthesisContext prepared context = do
     instantiated <- mapM instantiate $
-        resolvedSynthesisMethods context
+        resolvedMethods context
     mapM checkAndElaborate instantiated
   where
-    parameters = resolvedSynthesisParameters context
-    arguments = resolvedSynthesisArguments context
+    parameters = resolvedParameters context
+    arguments = resolvedArguments context
 
     instantiate (methodName, methodType) = do
         instantiated <- instantiateSynthesisMethod
@@ -643,11 +600,12 @@ instantiateSynthesisContext prepared context = do
 
     methodLabel methodName =
         "method " ++ prHSymbolOp methodName ++ " of class " ++
-        resolvedSynthesisName context ++ ": "
+        resolvedName context ++ ": "
 
 -- Preserve Djinn's implicit method-local quantifier semantics on the common
 -- tree. A local is renamed only when an active class-argument substitution
--- would otherwise capture its spelling, exactly as in 'instantiateMethod'.
+-- would otherwise capture its spelling. Both stable and compatibility
+-- context resolution use this single substitution implementation.
 instantiateSynthesisMethod
     :: [(HSymbol, HKind)]
     -> [SharedType.Type HSymbol]
@@ -982,7 +940,7 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
     -- The native worker repeats these cheap checks against the shared class
     -- index, then owns elaboration, method instantiation, and proof search.
     resolved <- first DjinnQueryFailure $
-        mapM (lookupContext prepared) contexts
+        mapM (lookupResolvedContext prepared) contexts
     first DjinnQueryFailure $ checkKindObligations prepared $
         ("goal type " ++ show goal, KStar, goal) :
         concatMap argumentObligations resolved

@@ -23,7 +23,7 @@ import Language.Haskell.Djex.Exference.FrontendSupport
   , validateExferenceTarget
   )
 import Language.Haskell.Exference.Core.Declaration
-  ( prepareNeutralSynthesisInventory )
+  ( prepareSynthesisInventory )
 import qualified Language.Haskell.Exference.Core.Declaration as Declaration
 import Language.Haskell.Exference.Core
   ( ExferenceQuery (..)
@@ -183,7 +183,7 @@ main = defaultMain $ testGroup "Djex downstream API"
           :: Either
               (InventoryError ExferenceTypeVariable Void)
               ExferenceInventory)
-      prepared <- expectRight $ prepareNeutralSynthesisInventory inventory
+      prepared <- expectRight $ prepareSynthesisInventory inventory
       session <- expectRight
         $ sealPreparedExferenceSessionWithPolicy [] mempty prepared
 

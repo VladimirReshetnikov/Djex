@@ -1384,6 +1384,26 @@ fallible `toSynthesisType`, `fromSynthesisType`, `toSynthesisConstraint`, and
 `fromSynthesisConstraint` operations remain because they own real validation
 and canonicalization policy.
 
+## Exference preparation vocabulary consolidation
+
+**Completed on 2026-07-16:** the prepared-projection collapse left its general
+annotation-preserving worker private while exporting a metadata-specific
+`prepareSynthesisInventory` and a unit-specialized
+`prepareNeutralSynthesisInventory`. The latter also required a
+`NeutralSynthesisInventory` alias even though its value was exactly the shared
+`Inventory SynthesisVariable ()`. This inverted the useful abstraction and
+kept merger terminology in the error vocabulary.
+
+`prepareSynthesisInventory` is now the single annotation-polymorphic operation
+that prepares the shared synonym witness and Exference search dictionary.
+Programmatic sessions and downstream callers use it directly. The source
+frontend uses the explicitly named `prepareSourceSynthesisInventory` refinement
+to attach alias-aware recursion to historical `DeclarationMetadata`; that is a
+real additional contract rather than an annotation specialization. The neutral
+type/wrapper and private general worker are gone, and preparation, expansion,
+and freshening errors no longer pretend that ordinary shared Inventories form a
+second neutral representation.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

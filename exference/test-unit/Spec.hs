@@ -1978,6 +1978,18 @@ tests = testGroup "Exference"
             , HsInstance [] $ HsConstraint (name "C")
                 [TypeCons $ name "Bool"]
             ]
+      , testCase "general preparation retains arbitrary annotations" $ do
+          let declaration
+                :: SharedDeclaration.Declaration
+                    SynthesisVariable Void String
+              declaration = SharedDeclaration.AbstractTypeDeclaration
+                "presentation metadata" (neutralName "Opaque")
+                SharedKind.ProperTypeKind
+          inventory <- expectRight $ SharedInventory.mkInventory
+            SharedKindInference.OpenKindInventory [declaration]
+          prepared <- expectRight $ prepareSynthesisInventory inventory
+          SharedTypeSynonym.preparedInventory
+              (preparedSynthesisWitness prepared) @?= inventory
       , testCase "prepared inventories reject an unrelated valid binding view" $ do
           let variable = neutralVariable 0
               identityType = SharedType.FunctionType
@@ -1990,9 +2002,9 @@ tests = testGroup "Exference"
           rightInventory <- expectRight $ SharedInventory.mkInventory
             SharedKindInference.OpenKindInventory [declaration "right"]
           leftPrepared <- expectRight
-            $ prepareNeutralSynthesisInventory leftInventory
+            $ prepareSynthesisInventory leftInventory
           rightPrepared <- expectRight
-            $ prepareNeutralSynthesisInventory rightInventory
+            $ prepareSynthesisInventory rightInventory
           let unrelatedView =
                 [ (functionName binding, functionPenalty binding)
                 | binding <- environmentFunctions
@@ -2021,7 +2033,7 @@ tests = testGroup "Exference"
             , dataDeclaration "Second" "MakeSecond"
             ]
           prepared <- expectRight
-            $ prepareNeutralSynthesisInventory inventory
+            $ prepareSynthesisInventory inventory
           projected <- expectRight $ projectSynthesisInventory
             [ (name "MakeSecond", Penalty (-2.5))
             , (name "MakeFirst", Penalty 7.25)
@@ -2049,7 +2061,7 @@ tests = testGroup "Exference"
                 $ SharedType.TypeConstructor $ neutralName "Int"
             ]
           prepared <- expectRight
-            $ prepareNeutralSynthesisInventory inventory
+            $ prepareSynthesisInventory inventory
           case projectSynthesisInventory
               [(name "value", notANumber)] [] prepared of
             Left failure -> failure @?=
@@ -2116,9 +2128,9 @@ tests = testGroup "Exference"
                     (SharedType.TypeConstructor aliasName)
           inventory <- expectRight $ SharedInventory.mkInventory
             SharedKindInference.OpenKindInventory [alias, higher, malformed]
-          case prepareNeutralSynthesisInventory inventory of
+          case prepareSynthesisInventory inventory of
             Left failure -> failure @?=
-              NeutralSynonymExpansionError 2 (neutralName "bad")
+              SynonymExpansionError 2 (neutralName "bad")
                 (SharedTypeSynonym.UnsaturatedTypeSynonym aliasName 1 0)
             Right _ -> fail "an unsaturated synonym reached Exference search"
       ]
@@ -6122,7 +6134,7 @@ lowerNeutralDeclarations declarations = do
   inventory <- expectRight $ SharedInventory.mkInventory
     SharedKindInference.OpenKindInventory declarations
   prepared <- expectRight
-    $ prepareNeutralSynthesisInventory inventory
+    $ prepareSynthesisInventory inventory
   pure $ preparedSynthesisBackend prepared
 
 name :: String -> QualifiedName

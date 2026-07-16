@@ -327,10 +327,14 @@ for compatibility callers. `Language.Haskell.Djex.Exference` can now seal the
 same reusable session either from this checked source inventory or directly
 from a parser-independent
 `ExferenceEnvironment = Environment ExferenceTypeVariable Void ()`. Both paths
-prepare the shared neutral inventory and synonym table, seal one core search
+use the annotation-polymorphic `prepareSynthesisInventory` boundary to prepare
+the shared inventory and synonym table, then seal one core search
 projection, and report unsupported rank-N or recursive-data elimination
 capabilities structurally; the source path preserves its historical ratings
-and equal-cost order. The CLI parses requests through that session; a
+and equal-cost order. Its explicit `prepareSourceSynthesisInventory` refinement
+also copies alias-aware recursion into the retained source annotations; there
+is no separate neutral Inventory type or preparation API. The CLI parses
+requests through that session; a
 query whose proper-type obligation conflicts with retained constructor or
 class kinds cannot reach heuristic search.
 

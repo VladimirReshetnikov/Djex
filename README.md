@@ -346,7 +346,12 @@ the same prepared synonym table and backend during sealing. That wrapper
 exposes one foundation witness and one backend projection: the synthesis
 foundation remains the sole owner of the Inventory and normalized-synonym
 projections, rather than Exference mirroring them through neutral aliases. The
-sealed session then retains only the shared inventory/synonym witness, its
+low-level declaration adapter likewise has one annotation-polymorphic
+`prepareSynthesisInventory` operation. The source frontend alone uses the
+explicit `prepareSourceSynthesisInventory` refinement that copies the
+alias-aware recursion classification into its historical annotations; ordinary
+stable sessions need no `NeutralSynthesisInventory` type or preparation alias.
+The sealed session then retains only the shared inventory/synonym witness, its
 policy-adjusted checked search environment, and a fully materialized structured
 omission summary; the complete unfiltered backend-bearing wrapper is released.
 HSE query parsing derives known types and class arities

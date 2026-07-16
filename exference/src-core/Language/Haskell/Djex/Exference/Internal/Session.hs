@@ -32,7 +32,7 @@ import Language.Haskell.Exference.Core (mkExferenceEnvironment)
 import qualified Language.Haskell.Exference.Core as Core
 import Language.Haskell.Exference.Core.Declaration
   ( PreparedSynthesisInventory
-  , prepareNeutralSynthesisInventory
+  , prepareSynthesisInventory
   , preparedSynthesisBackend
   , preparedSynthesisWitness
   )
@@ -111,12 +111,12 @@ data ExferenceSession = ExferenceSession
   , omissionView :: [ExferenceOmission]
   }
 
-type NeutralEnvironment = Environment SynthesisVariable Void ()
+type CoreEnvironment = Environment SynthesisVariable Void ()
 
 sealNeutralExferenceSessionWithPolicy
   :: [Name]
   -> Map Name Penalty
-  -> NeutralEnvironment
+  -> CoreEnvironment
   -> Either Diagnostic ExferenceSession
 sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
   inventory <- first
@@ -125,7 +125,7 @@ sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
         OpenKindInventory GeneralizeClassKinds environment
   prepared <- first
     (preparationFailure "cannot prepare the neutral Exference environment")
-    $ prepareNeutralSynthesisInventory inventory
+    $ prepareSynthesisInventory inventory
   sealPreparedEnvironment exclusions overrides prepared
 
 -- | Seal a prepared checked-source witness without retaining parser-specific

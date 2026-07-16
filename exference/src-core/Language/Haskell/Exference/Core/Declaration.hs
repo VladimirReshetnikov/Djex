@@ -8,12 +8,11 @@ module Language.Haskell.Exference.Core.Declaration
   , SynthesisDeclaration
   , SynthesisEnvironment
   , SynthesisInventory
-  , NeutralSynthesisInventory
   , PreparedSynthesisInventory
   , SynthesisDeclarationError (..)
   , freshSynthesisVariable
   , prepareSynthesisInventory
-  , prepareNeutralSynthesisInventory
+  , prepareSourceSynthesisInventory
   , projectSynthesisInventory
   , preparedSynthesisWitness
   , preparedSynthesisBackend
@@ -89,11 +88,6 @@ type SynthesisEnvironment = SharedEnvironment.Environment
 type SynthesisInventory = SharedInventory.Inventory
   SynthesisVariable DeclarationMetadata
 
--- | Annotation-free, already checked shared inventory accepted by the core
--- lowerer. Ratings and recursive-datatype flags are derived while lowering;
--- they are backend policy, not source declaration syntax.
-type NeutralSynthesisInventory = SharedInventory.Inventory SynthesisVariable ()
-
 -- | One checked inventory and the exact synonym table and backend lowering
 -- prepared from it. Keeping the constructor private prevents frontends from
 -- pairing a checked inventory with an unrelated search dictionary. The
@@ -150,44 +144,42 @@ data SynthesisDeclarationError
   | MismatchedConstructorFunctionBindings [SharedName.Name]
   | InvalidSourceEnvironmentKinds
       (SharedKindInference.KindInferenceError SynthesisVariable)
-  | NeutralSynonymExpansionError
+  | SynonymExpansionError
       Int -- ^ Zero-based source declaration index.
       SharedName.Name -- ^ Declaration name or instance class.
       (SharedTypeSynonym.SynonymExpansionError SynthesisVariable)
-  | NeutralSynonymPreparationError
+  | SynonymPreparationError
       (SharedTypeSynonym.SynonymExpansionError SynthesisVariable)
-  | NeutralVariableNamespaceExhausted SynthesisVariable
+  | VariableNamespaceExhausted SynthesisVariable
   deriving (Eq, Show)
 
--- | Lower an already checked inventory to Exference's search dictionary.
--- Type aliases and explicit kinds remain authoritative in that inventory;
--- annotations are frontend metadata and never participate in lowering.
+-- | Prepare an already checked shared inventory for Exference. Type aliases
+-- and explicit kinds remain authoritative in that inventory; annotations are
+-- retained in the shared witness but never participate in backend lowering.
 prepareSynthesisInventory
-  :: SynthesisInventory
-  -> Either SynthesisDeclarationError
-      (PreparedSynthesisInventory DeclarationMetadata)
-prepareSynthesisInventory inventory =
-  prepareInventory inventory >>= normalizePreparedDataMetadata
-
-prepareInventory
   :: SharedInventory.Inventory SynthesisVariable annotation
   -> Either SynthesisDeclarationError
       (PreparedSynthesisInventory annotation)
-prepareInventory inventory = do
-  prepared <- first NeutralSynonymPreparationError
+prepareSynthesisInventory inventory = do
+  prepared <- first SynonymPreparationError
     $ SharedTypeSynonym.prepareInventory freshSynthesisVariable inventory
   let synonyms = SharedTypeSynonym.preparedTypeSynonyms prepared
-  backend <- lowerNeutralSynthesisEnvironment synonyms
+  backend <- prepareSearchEnvironment synonyms
     $ fmap (const ())
     $ SharedInventory.inventoryEnvironment
     $ SharedTypeSynonym.preparedInventory prepared
   pure $ PreparedSynthesisInventory prepared backend
 
--- | Compatibility specialization for annotation-free callers.
-prepareNeutralSynthesisInventory
-  :: NeutralSynthesisInventory
-  -> Either SynthesisDeclarationError (PreparedSynthesisInventory ())
-prepareNeutralSynthesisInventory = prepareInventory
+-- | Prepare the metadata-bearing Inventory produced by Exference's source
+-- compatibility frontend. Alias-aware recursion is backend-derived and then
+-- copied into the retained annotations so historical source projections see
+-- the same classification as search.
+prepareSourceSynthesisInventory
+  :: SynthesisInventory
+  -> Either SynthesisDeclarationError
+      (PreparedSynthesisInventory DeclarationMetadata)
+prepareSourceSynthesisInventory inventory =
+  prepareSynthesisInventory inventory >>= normalizePreparedDataMetadata
 
 -- | Reorder a canonical backend to match a source frontend and attach its
 -- finite heuristic ratings.  Names are an exact inventory: callers may choose
@@ -318,11 +310,11 @@ deconstructorTypeName declaration = fst
 -- Keep the actual lowering private once the witness has been assembled:
 -- accepting an independently prepared alias table here would allow a
 -- mismatched table to turn an alias into a fictitious nominal constructor.
-lowerNeutralSynthesisEnvironment
+prepareSearchEnvironment
   :: SharedTypeSynonym.TypeSynonyms SynthesisVariable
   -> SharedEnvironment.Environment SynthesisVariable Void ()
   -> Either SynthesisDeclarationError EnvDictionary
-lowerNeutralSynthesisEnvironment synonyms environment = do
+prepareSearchEnvironment synonyms environment = do
   expanded <- mapM expandOperationalDeclaration
     $ zip [0 ..] $ SharedEnvironment.environmentDeclarations environment
   let normalized = map normalizeDeclarationVariables expanded
@@ -336,12 +328,12 @@ lowerNeutralSynthesisEnvironment synonyms environment = do
     SharedDeclaration.TypeSynonymDeclaration{} -> Right declaration
     SharedDeclaration.AbstractTypeDeclaration{} -> Right declaration
     _ -> first
-      (NeutralSynonymExpansionError index
+      (SynonymExpansionError index
         $ SharedDeclaration.declarationSubjectName declaration)
       $ SharedTypeSynonym.expandDeclarationTypeSynonyms
           freshSynthesisVariable synonyms declaration
 
-type NeutralSynthesisDeclaration = SharedDeclaration.Declaration
+type SearchSynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void ()
 
 -- Variable identities are local to a source declaration. Repacking flexible
@@ -349,8 +341,8 @@ type NeutralSynthesisDeclaration = SharedDeclaration.Declaration
 -- gives every method in a class the same coherent owner namespace. Parameters
 -- are visited first, followed by the declaration's remaining source order.
 normalizeDeclarationVariables
-  :: NeutralSynthesisDeclaration
-  -> NeutralSynthesisDeclaration
+  :: SearchSynthesisDeclaration
+  -> SearchSynthesisDeclaration
 normalizeDeclarationVariables declaration =
   SharedDeclaration.mapDeclarationTypeVariables renameVariable declaration
  where
@@ -366,7 +358,7 @@ normalizeDeclarationVariables declaration =
 
 prepareSearchDeclaration
   :: Set.Set SharedName.Name
-  -> NeutralSynthesisDeclaration
+  -> SearchSynthesisDeclaration
   -> Either SynthesisDeclarationError (Maybe SynthesisDeclaration)
 prepareSearchDeclaration recursiveNames declaration = case declaration of
   SharedDeclaration.TypeSynonymDeclaration{} -> Right Nothing
@@ -429,7 +421,7 @@ implicitizeExferenceForalls outerVariables source =
       DeclarationTypeConversionError $ InvalidSynthesisType
         $ SharedType.DuplicateForallVariable variable
     SharedType.TypeBinderFresheningError fresheningFailure ->
-      NeutralVariableNamespaceExhausted $ failedBinder fresheningFailure
+      VariableNamespaceExhausted $ failedBinder fresheningFailure
 
   failedBinder fresheningFailure = case fresheningFailure of
     SharedType.FreshVariableSupplyExhausted binder -> binder

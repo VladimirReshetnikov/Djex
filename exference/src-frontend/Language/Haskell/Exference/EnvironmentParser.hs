@@ -351,7 +351,7 @@ checkSourceEnvironment environment = do
   sourceInventory <- first InvalidSourceInventory
     $ toSynthesisSourceInventory environment
   prepared <- first InvalidSourceInventory
-    $ prepareSynthesisInventory sourceInventory
+    $ prepareSourceSynthesisInventory sourceInventory
   projected <- first InvalidSourceInventory
     $ normalizeBackendProjection prepared environment
   pure $ CheckedSourceEnvironment projected
@@ -844,7 +844,7 @@ parseModulesM inputs = do
       -- Inventory has checked the original applications.  Passing the empty
       -- compatibility map still performs all HSE name/shape conversion; the
       -- checked backend projection expands the retained synonym declarations
-      -- later through 'prepareSynthesisInventory'.
+      -- later through 'prepareSourceSynthesisInventory'.
       classResult <- lift
         $ loadClassEnvironment dataTypes M.empty modules
       loadedClasses <- either

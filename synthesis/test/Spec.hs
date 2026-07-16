@@ -3020,15 +3020,92 @@ generatedTests = testGroup "generated syntax"
           , "  Just select'' -> select''"
           , "  Nothing -> select'"
           ])
-  , testCase "recover clause expressions without discarding binders" $ do
+  , testCase "construct and decompose canonical lambda and clause spines" $ do
       let target = right $ mkIdentifier "target"
           checkedTarget = right $ mkDefinitionName target
           body = Local (0 :: Int)
           valueClause = FunctionClause checkedTarget [] body
           functionClause = FunctionClause checkedTarget [Bind 0, Wildcard] body
+          nested = Lambda [Bind 1] $ Lambda [Wildcard, Bind 2] body
+          emptyLambda = Lambda [] body
+          malformedCase = Case (Global target)
+            [(Wildcard, emptyLambda)]
+          promotedPatterns = [Bind 1, Wildcard, Bind 2]
       functionClauseExpression valueClause @?= body
       functionClauseExpression functionClause @?=
         Lambda [Bind 0, Wildcard] body
+      lambdaExpression [] nested @?= nested
+      lambdaExpression [Bind 3] nested @?=
+        Lambda (Bind 3 : promotedPatterns) body
+      expressionLambdaSpine nested @?= (promotedPatterns, body)
+      functionClauseFromExpression checkedTarget nested @?=
+        FunctionClause checkedTarget promotedPatterns body
+      functionClauseExpression
+          (FunctionClause checkedTarget [Bind 3] nested) @?=
+        Lambda (Bind 3 : promotedPatterns) body
+      expressionLambdaSpine emptyLambda @?= ([], emptyLambda)
+      lambdaExpression [Bind 3] emptyLambda @?=
+        Lambda [Bind 3] emptyLambda
+      let invalidClause = functionClauseFromExpression
+            checkedTarget emptyLambda
+      clausePatterns invalidClause @?= []
+      clauseBody invalidClause @?= emptyLambda
+      validateFunctionClauseSyntax FullyQualified invalidClause @?=
+        Left EmptyLambda
+      simplifyCaseExpression (Global target)
+          [(Wildcard, emptyLambda)] @?= malformedCase
+      validateExpressionSyntax malformedCase @?= Left EmptyLambda
+  , testCase "expose finite lambda and case prefixes lazily" $ do
+      let openSpine :: Expression Int
+          openSpine = Lambda [Bind 4]
+            $ error "forced the terminal lambda body"
+      take 1 (fst $ expressionLambdaSpine openSpine) @?= [Bind 4]
+      case lambdaExpression [Bind 3] openSpine of
+        Lambda patterns _ -> take 2 patterns @?= [Bind 3, Bind 4]
+        expression -> assertFailure $ "expected a lambda, got "
+          ++ show expression
+
+      let choose = Global $ right $ mkIdentifier "choose"
+          firstName = right $ mkIdentifier "first"
+          secondName = right $ mkIdentifier "second"
+          openAlternatives :: [(Pattern String, Expression String)]
+          openAlternatives =
+            (Wildcard, Global firstName)
+              : (Wildcard, Global secondName)
+              : error "forced an irrelevant case-alternative tail"
+      case simplifyCaseExpression choose openAlternatives of
+        Case _ alternatives -> take 2 alternatives @?=
+          [ (Wildcard, Global firstName)
+          , (Wildcard, Global secondName)
+          ]
+        expression -> assertFailure $ "expected a case, got "
+          ++ show expression
+  , testCase "hoist differently grouped leading lambda spines together" $ do
+      let choose = Global $ right $ mkIdentifier "choose"
+          leftName = right $ mkIdentifier "Left"
+          rightName = right $ mkIdentifier "Right"
+          payload = right $ mkIdentifier "Payload"
+          leftFirst = "leftFirst"
+          rightFirst = "rightFirst"
+          rightSecond = "rightSecond"
+          leftBody = Lambda [Bind leftFirst]
+            $ Lambda [Constructor payload []]
+            $ Local leftFirst
+          rightBody = Lambda [Bind rightFirst, Bind rightSecond]
+            $ Local rightSecond
+      simplifyCaseExpression choose
+          [ (Constructor leftName [], leftBody)
+          , (Constructor rightName [], rightBody)
+          ] @?=
+        Lambda [Bind leftFirst]
+          (Case choose
+            [ ( Constructor leftName []
+              , Lambda [Constructor payload []] $ Local leftFirst
+              )
+            , ( Constructor rightName []
+              , Lambda [Bind rightSecond] $ Local rightSecond
+              )
+            ])
   , testCase "observe every generated binding site including wildcards" $ do
       let target = right $ mkIdentifier "target"
           checkedTarget = right $ mkDefinitionName target

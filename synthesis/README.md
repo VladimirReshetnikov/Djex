@@ -116,9 +116,12 @@ structural observation of referenced names and pattern constructors.
 substitution boundary: shadowing stops replacement, and a backend receives
 `Nothing` when its payload would require freshening rather than risking silent
 capture.
-Application-spine decomposition, lexical alpha-equivalence, total-term smart
-case construction, redundant as-pattern normalization, and scope-aware
-unused-pattern pruning also live at this boundary. Alpha-equivalence keeps a
+Application- and leading-lambda-spine decomposition, canonical nonempty-lambda
+construction, lexical alpha-equivalence, total-term smart case construction,
+redundant as-pattern normalization, and scope-aware unused-pattern pruning also
+live at this boundary. The lambda operations flatten adjacent nonempty groups
+without treating caller-built `Lambda []` as an identity: an empty group is a
+malformed-syntax barrier retained for validation. Alpha-equivalence keeps a
 bidirectional correspondence through lambda, let, and case scopes, so a free
 local cannot become equal to a same-spelled binder; holes remain exact
 operational identities. Pattern pruning accepts a backend identity projection
@@ -132,9 +135,11 @@ Local allocation and scope operations consume the generated pattern and
 expression types' derived `Foldable` order directly. This keeps binder,
 occurrence, and hole payload ordering attached to the canonical grammar rather
 than mirrored by another private recursive walk.
-`functionClauseExpression` recovers the expression denoted
-by a clause, retaining its argument patterns as a leading lambda while leaving
-a patternless value body unchanged. The renderer allocates stable Haskell
+`functionClauseFromExpression` and `functionClauseExpression` are the paired
+expression/equation boundary: the former promotes a complete leading lambda
+spine to clause patterns, while the latter restores those binders and
+canonicalizes adjacent groups. A patternless value body remains unchanged. The
+renderer allocates stable Haskell
 variable spellings against globals and caller reservations, supports the three
 qualification policies needed by the existing frontends, and prints symbolic
 and tuple applications in Haskell form. Djinn's proof terms retain their

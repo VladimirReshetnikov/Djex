@@ -1533,6 +1533,37 @@ behavior; it removes three false boundaries, three module-list entries, and
 more than one hundred net source lines while leaving the historical
 compatibility modules that still own real syntax or diagnostics intact.
 
+## Shared leading-lambda and clause promotion
+
+**Completed on 2026-07-16:** generated-output handling still had three
+authorities for adjacent leading lambdas. The shared cleanup module had a
+private smart constructor, Djinn's proof lowerer had another plus manual clause
+splitting and arity unpacking, and Exference's Haskell-source renderer had its
+own recursive `promoteLeadingLambdas` walk. They agreed on ordinary trees but
+did not share a contract for malformed caller-built nodes.
+
+`Language.Haskell.Synthesis.Generated` now exposes the contract directly.
+`lambdaExpression` constructs one canonical nonempty group,
+`expressionLambdaSpine` returns every adjacent nonempty group in lexical order,
+and `functionClauseFromExpression` promotes that spine to a checked-name
+equation. `functionClauseExpression` is the inverse normalization boundary.
+Both backends and the shared smart-case cleanup consume those operations; this
+does not canonicalize Exference's live search structure or alter its structural
+ranking policy.
+
+An empty lambda is deliberately a barrier rather than an identity node. The
+unification exposed an existing cleanup bug: a singleton case alternative with
+`Lambda []` could lose the malformed node before syntax validation. Smart-case
+cleanup now preserves it, and expression-to-clause promotion likewise leaves it
+in the clause body for `EmptyLambda` to diagnose. Spine decomposition exposes
+its binder list lazily, Djinn groups consecutive proof lambdas before generated
+construction, and tuple-handler splitting forces only the requested prefix
+instead of measuring the entire list.
+Foundation regressions pin construction/decomposition laws, grouping-neutral
+case hoisting, clause round trips, and the empty-lambda barrier; Exference's
+frontend regression pins multi-group function rendering and collision-free
+parameter allocation.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

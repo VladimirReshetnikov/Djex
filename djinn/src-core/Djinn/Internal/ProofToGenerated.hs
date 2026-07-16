@@ -22,7 +22,6 @@ import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as Name
 
 type HSymbol = String
-type Pattern = Generated.Pattern HSymbol
 type Expression = Generated.Expression HSymbol
 
 -- | Convert and simplify one proof expression without constructing Djinn's
@@ -56,11 +55,18 @@ termToGeneratedExpression term = do
       then Right $ Generated.Local spelling
       else Generated.Global <$> generatedName "value" spelling
     pure (expression, [])
-  convert enclosing (Lam symbol body) = do
-    let spelling = unSymbol symbol
-    (convertedBody, refinements) <- convert (spelling : enclosing) body
-    pattern' <- convertVariable spelling refinements
-    pure (lambda [pattern'] convertedBody, refinements)
+  convert enclosing lambdaTerm@Lam{} = do
+    let (symbols, body) = termLambdaSpine lambdaTerm
+        spellings = map unSymbol symbols
+    (convertedBody, refinements) <-
+      convert (reverse spellings ++ enclosing) body
+    -- The old inside-out conversion diagnosed the innermost malformed
+    -- refinement first. Preserve that order while constructing the complete
+    -- generated binder group only once.
+    patterns <- reverse <$> mapM
+      (`convertVariable` refinements)
+      (reverse spellings)
+    pure (Generated.lambdaExpression patterns convertedBody, refinements)
   convert enclosing (Apply (Cinj (ConsDesc constructor arity) _) argument) = do
     (convertedArgument, refinements) <- convert enclosing argument
     (wrap, arguments) <- unpackTuple arity convertedArgument
@@ -75,6 +81,11 @@ termToGeneratedExpression term = do
     pure (Generated.Global unit, [])
   convert _ unsupported =
     Left $ "unsupported proof term: " ++ show unsupported
+
+  termLambdaSpine = collect []
+   where
+    collect symbols (Lam symbol body) = collect (symbol : symbols) body
+    collect symbols body = (reverse symbols, body)
 
   unpackTuple 0 _ = Right (id, [])
   unpackTuple 1 argument = Right (id, [argument])
@@ -264,13 +275,15 @@ termToGeneratedExpression term = do
       used next
 
   unpackLambda 0 expression = Right ([], expression)
-  unpackLambda arity (Generated.Lambda patterns body)
-    | length patterns >= arity =
-        let (used, remaining) = splitAt arity patterns
-        in Right (used, lambda remaining body)
-  unpackLambda arity expression = Left $
-    "tuple handler has shape " ++ show expression ++ ", expected "
-      ++ show arity ++ " lambda argument(s)"
+  unpackLambda arity expression =
+    if length used == arity
+      then Right (used, Generated.lambdaExpression remaining body)
+      else Left $
+        "tuple handler has shape " ++ show expression ++ ", expected "
+          ++ show arity ++ " lambda argument(s)"
+   where
+    (patterns, body) = Generated.expressionLambdaSpine expression
+    (used, remaining) = splitAt arity patterns
 
 -- | Construct and validate the shared clause used by the stable Djinn core.
 termToGeneratedClause
@@ -279,11 +292,7 @@ termToGeneratedClause
   -> Either String (Generated.FunctionClause HSymbol)
 termToGeneratedClause target term = do
   expression <- termToGeneratedExpression term
-  let (patterns, body) = case expression of
-        Generated.Lambda leadingPatterns leadingBody ->
-          (leadingPatterns, leadingBody)
-        _ -> ([], expression)
-      clause = Generated.FunctionClause target patterns body
+  let clause = Generated.functionClauseFromExpression target expression
   either (Left . show) Right $
     Generated.validateFunctionClauseScope clause
   either (Left . show) Right $
@@ -302,12 +311,6 @@ generatedName description source = case Name.parseName source of
 tuple :: [Expression] -> Expression
 tuple [expression] = expression
 tuple expressions = Generated.Tuple expressions
-
-lambda :: [Pattern] -> Expression -> Expression
-lambda [] expression = expression
-lambda patterns (Generated.Lambda morePatterns body) =
-  Generated.Lambda (patterns ++ morePatterns) body
-lambda patterns expression = Generated.Lambda patterns expression
 
 -- Names present before Haskell conversion. Extra binders introduced for
 -- constructor fields must avoid this complete set.

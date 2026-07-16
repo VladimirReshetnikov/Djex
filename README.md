@@ -478,6 +478,11 @@ longer maintain separate copies of Exference's historical expression grammar.
 Djinn's pattern alias normalization, unused-binder pruning, application-spine
 inspection, and case-body alpha-equivalence now use that same generated-syntax
 authority instead of private recursive walks.
+Leading-lambda construction and decomposition live there as well. Both
+backends now promote the complete nonempty lambda spine through the same
+expression-to-clause operation, and the inverse clause operation restores one
+canonical group. Caller-built `Lambda []` remains a validation error rather
+than being silently erased by conversion or smart-case cleanup.
 Candidate selection and rendering remain presentation policies outside both
 session operations. The shared `Selection` module now
 provides first, global-best, streaming-all, batch-lookahead, and preferred-tier

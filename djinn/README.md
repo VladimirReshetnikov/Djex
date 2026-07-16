@@ -667,12 +667,15 @@ formula by an independent unification-based type checker (`ProofCheck`),
 alpha-renamed so every binder is globally unique, converted to a small shared
 Haskell AST, cleaned up (case collapsing, redundant-pattern and unused-binder
 elimination, eta reduction, nicer names), and retained in that shared
-generated-code tree. Generic application decomposition, lexical
-alpha-equivalence, pattern normalization, and projected-identity binder
-pruning are owned by the shared boundary rather than this backend. The same
-boundary revalidates lexical scope, distinguishes locals from structural global
-names, reserves emitted globals during local-name allocation, and pretty-prints
-the final clause.
+generated-code tree. Generic application and leading-lambda decomposition,
+canonical lambda construction, expression-to-clause promotion, lexical
+alpha-equivalence, pattern normalization, and projected-identity binder pruning
+are owned by the shared boundary rather than this backend. Proof lowering no
+longer maintains its own lambda smart constructor or manually separates a
+finished expression into clause arguments and body. The same boundary
+revalidates lexical scope, distinguishes locals from structural global names,
+reserves emitted globals during local-name allocation, and pretty-prints the
+final clause.
 
 Two invariants make the back half of that pipeline safe, and both are worth
 knowing before editing the source:

@@ -439,7 +439,11 @@ second naming implementation. Its `expressionToHaskellSrc` and
 `functionToHaskellSrc` conveniences validate Exference expressions before
 conversion; the lower-level `generatedExpressionToHaskellSrc` and
 `generatedFunctionClauseToHaskellSrc` functions accept the shared output IR
-directly. The raw-name function convenience rejects invalid definitions before
+directly. Expression conversion decomposes the shared leading-lambda spine, and
+function conversion uses the same shared expression-to-clause promotion as
+Djinn rather than a frontend-private lambda walk. A malformed empty lambda is
+left visible to syntax validation instead of disappearing during promotion.
+The raw-name function convenience rejects invalid definitions before
 constructing a clause; shared clauses already carry an opaque checked
 `DefinitionName`. Every entry point reports free locals, malformed syntax, and
 globals that qualification would turn into accidental recursion instead of

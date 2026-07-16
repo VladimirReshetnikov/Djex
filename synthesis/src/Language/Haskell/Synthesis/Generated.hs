@@ -28,6 +28,9 @@ module Language.Haskell.Synthesis.Generated
   , validateExpressionSyntax
   , validateFunctionClauseSyntax
   , validateDefinitionName
+  , lambdaExpression
+  , expressionLambdaSpine
+  , functionClauseFromExpression
   , functionClauseExpression
   , expressionApplicationSpine
   , patternBindingSites
@@ -152,16 +155,62 @@ data FunctionClause local = FunctionClause
 
 instance NFData local => NFData (FunctionClause local)
 
+-- | Construct a nonempty lambda and merge it with the complete leading lambda
+-- spine of its body.
+--
+-- An empty binder list denotes the body itself rather than the invalid
+-- @Lambda [] body@ shape. Keeping this smart constructor beside the generated
+-- tree gives cleanup passes and backends one canonical grouping policy.
+lambdaExpression
+  :: [Pattern local]
+  -> Expression local
+  -> Expression local
+lambdaExpression [] expression = expression
+lambdaExpression patterns expression =
+  Lambda (patterns ++ morePatterns) body
+ where
+  ~(morePatterns, body) = expressionLambdaSpine expression
+
+-- | Peel the complete leading nonempty lambda spine into patterns in lexical
+-- order and its first non-lambda or malformed empty-lambda body.
+--
+-- A caller-built @Lambda [] body@ is a syntax error rather than an identity
+-- node, so it acts as a barrier and remains in the returned body for
+-- 'validateExpressionSyntax' to reject. Lambdas beneath any other expression
+-- constructor likewise remain untouched. The returned pair and binder list are
+-- lazy in the unconsumed spine, so a consumer can inspect a finite binder
+-- prefix without evaluating the terminal body.
+expressionLambdaSpine
+  :: Expression local
+  -> ([Pattern local], Expression local)
+expressionLambdaSpine expression@(Lambda [] _) = ([], expression)
+expressionLambdaSpine (Lambda patterns body) =
+  (patterns ++ morePatterns, finalBody)
+ where
+  ~(morePatterns, finalBody) = expressionLambdaSpine body
+expressionLambdaSpine body = ([], body)
+
+-- | Turn an expression into a top-level equation by promoting its complete
+-- leading lambda spine to clause patterns. A malformed empty lambda remains in
+-- the clause body so the ordinary syntax validator can still reject it.
+functionClauseFromExpression
+  :: DefinitionName
+  -> Expression local
+  -> FunctionClause local
+functionClauseFromExpression name expression =
+  let (patterns, body) = expressionLambdaSpine expression
+  in FunctionClause name patterns body
+
 -- | Recover the expression denoted by a top-level function equation.
 --
 -- Clause patterns are binders for the body, so expression-oriented consumers
 -- must retain them as a leading lambda.  A patternless value equation already
 -- denotes its body directly; in particular, this helper never manufactures
--- the syntactically invalid @Lambda [] body@ shape.
+-- the syntactically invalid @Lambda [] body@ shape. Any leading lambda in a
+-- patterned clause body is folded into the same canonical group.
 functionClauseExpression :: FunctionClause local -> Expression local
-functionClauseExpression (FunctionClause _ [] body) = body
 functionClauseExpression (FunctionClause _ patterns body) =
-  Lambda patterns body
+  lambdaExpression patterns body
 
 -- | Decompose a left-associated expression application into its head and
 -- arguments in source order. A non-application has no arguments.
@@ -433,15 +482,37 @@ simplifyCaseExpression _ [(Constructor name [], expression)]
   | nameSpecial name == Just (TupleConstructor Boxed 0) = expression
 simplifyCaseExpression scrutinee alternatives
   | all (uncurry patternEqualsExpression) alternatives = scrutinee
-simplifyCaseExpression scrutinee [(pattern, Lambda patterns body)] =
-  lambda patterns $ simplifyCaseExpression scrutinee [(pattern, body)]
+simplifyCaseExpression scrutinee [(pattern, expression)]
+  | (patterns@(_ : _), body) <- expressionLambdaSpine expression =
+      lambdaExpression patterns
+        $ simplifyCaseExpression scrutinee [(pattern, body)]
 simplifyCaseExpression scrutinee
-    alternatives@((_, firstExpression@Lambda{}) : rest)
-  | commonCount > 0 = lambda (map bindingPattern canonicalLocals)
+    alternatives@(_ : _)
+  | commonCount > 0 = lambdaExpression (map bindingPattern canonicalLocals)
       $ simplifyCaseExpression scrutinee convertedAlternatives
  where
-  commonCount = foldr (min . lambdaBinderCount . snd)
-    (lambdaBinderCount firstExpression) rest
+  commonCount = case decomposedAlternatives of
+    [] -> 0
+    first : rest -> commonBinderCount (availableBinderCount first) rest
+
+  -- Generated alternatives can be a lazy search product. Once one branch has
+  -- no hoistable binder, neither its remaining spine nor later alternatives
+  -- can change the zero common prefix.
+  commonBinderCount 0 _ = 0
+  commonBinderCount count [] = count
+  commonBinderCount count (alternative : rest) =
+    commonBinderCount
+      (min count $ availableBinderCount alternative)
+      rest
+
+  decomposedAlternatives =
+    [ (constructorPattern, patterns, body)
+    | (constructorPattern, expression) <- alternatives
+    , let (patterns, body) = expressionLambdaSpine expression
+    ]
+
+  availableBinderCount (_, patterns, _) =
+    length $ takeWhile isVariablePattern patterns
 
   convertedAlternatives =
     [ let (used, remaining) = splitAt commonCount patterns
@@ -450,14 +521,14 @@ simplifyCaseExpression scrutinee
             | (Bind source, Just target) <- zip used canonicalLocals
             , source /= target
             ]
-      in (constructorPattern, lambda remaining
+      in (constructorPattern, lambdaExpression remaining
             $ renameLocals renamings expression)
-    | (constructorPattern, Lambda patterns expression) <- alternatives
+    | (constructorPattern, patterns, expression) <- decomposedAlternatives
     ]
 
   binderColumns = List.transpose
     [ take commonCount patterns
-    | (_, Lambda patterns _) <- alternatives
+    | (_, patterns, _) <- decomposedAlternatives
     ]
   canonicalLocals = map canonicalLocal binderColumns
 
@@ -467,17 +538,6 @@ simplifyCaseExpression scrutinee
 simplifyCaseExpression _ ((_, expression) : alternatives@(_ : _))
   | all (alphaEquivalentExpression expression . snd) alternatives = expression
 simplifyCaseExpression scrutinee alternatives = Case scrutinee alternatives
-
-lambda :: [Pattern local] -> Expression local -> Expression local
-lambda [] expression = expression
-lambda patterns (Lambda morePatterns body) =
-  Lambda (patterns ++ morePatterns) body
-lambda patterns expression = Lambda patterns expression
-
-lambdaBinderCount :: Expression local -> Int
-lambdaBinderCount (Lambda patterns _) =
-  length $ takeWhile isVariablePattern patterns
-lambdaBinderCount _ = 0
 
 isVariablePattern :: Pattern local -> Bool
 isVariablePattern Bind{} = True

@@ -108,18 +108,16 @@ functionToHaskellSrc
 functionToHaskellSrc qualification functionName expression = do
   first toExpressionRenderError
     $ first HaskellSrcScopeError
-    $ Generated.validateExpressionScope
-    $ Generated.Lambda patterns body
+    $ Generated.validateExpressionScope generated
   checkedName <- first (toExpressionRenderError . HaskellSrcSyntaxError)
     $ Generated.mkDefinitionName functionName
   first toExpressionRenderError
     $ convertCheckedFunctionClause options
-    $ Generated.FunctionClause checkedName patterns body
+    $ Generated.functionClauseFromExpression checkedName generated
  where
   policy = E.qualificationFromLevel qualification
   options = expressionRenderOptions policy expression
   generated = E.toGeneratedExpression expression
-  (patterns, body) = promoteLeadingLambdas generated
 
 expressionRenderOptions
   :: Generated.Qualification
@@ -144,20 +142,11 @@ convertRootExpression
   -> Generated.Expression local
   -> Conversion local HsExp
 convertRootExpression qualification expression =
-  case promoteLeadingLambdas expression of
+  case Generated.expressionLambdaSpine expression of
     ([], body) -> convertInternal qualification 0 body
     (patterns, body) -> Lambda noLoc
       <$> mapM (convertPattern qualification) patterns
       <*> convertInternal qualification 0 body
-
-promoteLeadingLambdas
-  :: Generated.Expression local
-  -> ([Generated.Pattern local], Generated.Expression local)
-promoteLeadingLambdas = collect []
- where
-  collect groups (Generated.Lambda patterns body) =
-    collect (patterns : groups) body
-  collect groups body = (concat $ reverse groups, body)
 
 convertFunctionClause
   :: Ord local

@@ -120,6 +120,8 @@ tests =
     , ("do not capture a caller-supplied proof symbol", testCallerSymbolCapture)
     , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
     , ("preserve residual application after Csplit", testCsplitResidualArguments)
+    , ("preserve residual handler lambdas after Csplit",
+          testCsplitResidualHandlerLambda)
     , ("preserve a whole product through Csplit", testCsplitProductIdentity)
     , ("bind unary constructor fields without tuple parentheses",
           testUnaryConstructorPattern)
@@ -2128,6 +2130,20 @@ testCsplitResidualArguments = do
     assertContains "Csplit should still render its tuple case" "case pair of" rendered
     assertWordsSuffix "Csplit residual arguments must retain left-to-right order"
         ["arg1", "arg2"] rendered
+
+testCsplitResidualHandlerLambda :: IO ()
+testCsplitResidualHandlerLambda = do
+    let field = Symbol "field"
+        argument = Symbol "argument"
+        handler = Lam field $ Lam argument $
+            applys (Var $ Symbol "combine") [Var field, Var argument]
+        term = applys (Csplit 1)
+            [handler, Var $ Symbol "payload"]
+    assertRendered "Csplit consumes only its requested handler prefix"
+        ("f a =\n" ++
+          "  case payload of\n" ++
+          "  b -> combine b a")
+        "f" term
 
 -- If a split handler returns the original product, its component patterns are
 -- unused but the as-binder is not.  Simplifying @pair@_@ to @_@ used to emit a

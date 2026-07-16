@@ -5883,15 +5883,20 @@ tests = testGroup "Exference"
               ++ show rendered
       , testCase "function conversion reserves its declaration name" $ do
           target <- expectRight $ SharedName.mkIdentifier "a"
-          let expression = ExpLambda 1 (TypeVar 0) (ExpVar 1 $ TypeVar 0)
+          let expression = ExpLambda 1 (TypeVar 0)
+                $ ExpLambda 2 (TypeVar 1)
+                $ ExpVar 1 $ TypeVar 0
           case functionToHaskellSrc 0 target expression of
             Right (HSE.FunBind _
                 [HSE.Match _ (HSE.Ident _ function)
-                  [HSE.PVar _ (HSE.Ident _ parameter)]
+                  [ HSE.PVar _ (HSE.Ident _ parameter)
+                    , HSE.PVar _ (HSE.Ident _ secondParameter)
+                    ]
                   (HSE.UnGuardedRhs _
                     (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ body)))) Nothing]) -> do
                 function @?= "a"
                 parameter @?= "a'"
+                secondParameter @?= "b"
                 body @?= parameter
             result -> fail $ "capturing function render: " ++ show result
       , testCase "checked functions reject definition capture" $ do

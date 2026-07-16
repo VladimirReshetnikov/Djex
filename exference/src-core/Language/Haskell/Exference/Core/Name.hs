@@ -19,8 +19,6 @@ module Language.Haskell.Exference.Core.Name
   , QualifiedNameError (..)
   , mkQualifiedName
   , mkBoxedTupleName
-  , fromSynthesisName
-  , toSynthesisName
   , qualifiedNameModule
   , qualifiedNameOccurrence
   , qualifiedNameOperator
@@ -131,16 +129,6 @@ mkQualifiedName modules source =
 mkBoxedTupleName :: Int -> Either QualifiedNameError QualifiedName
 mkBoxedTupleName arity =
   mapLeft InvalidQualifiedName $ Shared.tupleName Shared.Boxed arity
-
--- | Historical conversion retained as an identity compatibility shim.
-fromSynthesisName
-  :: Shared.Name
-  -> Either QualifiedNameError QualifiedName
-fromSynthesisName = Right
-
--- | Recover the shared, parser-independent representation.
-toSynthesisName :: QualifiedName -> Shared.Name
-toSynthesisName = id
 
 qualifiedNameModule :: QualifiedName -> Maybe Shared.ModuleName
 qualifiedNameModule = Shared.nameModule

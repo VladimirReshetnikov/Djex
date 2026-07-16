@@ -90,22 +90,23 @@ single djex library (foundation + both cores + both compatibility frontends)
 **Completed on 2026-07-14:** `QualifiedName`, `HsConstraint`, and `HsType` now
 use the shared `Name`, `Constraint`, and `Type (Variable Int)` values directly.
 Historical constructor spellings survive as explicit compatibility patterns;
-the structural conversion functions are identity shims, and checked adapters
-only validate and canonicalize. This removed all three duplicate source-type
+no structural conversion functions remain, and checked adapters only validate
+and canonicalize. This removed all three duplicate source-type
 representations without collapsing the useful component dependency checks at
 that stage; the later fold retains only frontend dependency-isolation checks.
 
 At audit time `Language.Haskell.Exference.Core.Types` defined three pieces of a
 second source-type model beside `Language.Haskell.Synthesis`: a `QualifiedName`
 wrapper, the recursive `HsType`, and a duplicate `HsConstraint`. The first
-stage removed the name and constraint representations, including every
-production `toSynthesisName` / `fromSynthesisName` call. The completed type
-stage then replaced the recursive `HsType` tree with the shared type directly.
+stage removed the name and constraint representations. The completed type
+stage then replaced the recursive `HsType` tree with the shared type directly;
+the later native-boundary cleanup retired the now-unused identity projection
+names themselves.
 
 The migration reached the search core, stable request/session storage,
 generated candidates, residual constraints, rendering hints, class
 environments, and the HSE compatibility frontend. Production code no longer
-uses the old total structural-conversion shims; only named validation and
+has total structural-conversion shims; only named validation and
 canonicalization boundaries remain.
 
 The migration proceeded in five compile-checked stages:
@@ -1365,6 +1366,23 @@ form explicitly as `PreparedSynthesisInventory ()`. The zero-cost
 preserving the opaque pairing invariant: neither the source frontend nor a
 session caller can combine an Inventory, synonym table, and backend prepared
 from different declarations.
+
+## Exference native-identity boundary cleanup
+
+**Completed on 2026-07-16:** after Exference adopted the foundation's `Name`,
+`Constraint`, and `Type (Variable Int)` values natively, four migration helpers
+continued to advertise conversions which did no work. `toSynthesisName` and
+`toSynthesisTypeStructure` were `id`; `fromSynthesisName` was unconditional
+`Right`; and `toSynthesisConstraintStructure` was another identity. None had a
+production caller, and none belonged to the historical pre-Djex Exference API.
+
+The four entrances are gone. Compatibility tests and source-loader regressions
+now pass `QualifiedName`, `HsType`, and `HsConstraint` directly wherever the
+foundation value is required, providing compile-time evidence that there is
+one representation rather than exercising a fictitious round trip. The
+fallible `toSynthesisType`, `fromSynthesisType`, `toSynthesisConstraint`, and
+`fromSynthesisConstraint` operations remain because they own real validation
+and canonicalization policy.
 
 ## Validation gates for each stage
 

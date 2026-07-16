@@ -21,7 +21,6 @@ module Language.Haskell.Exference.Core.Types
   , SynthesisVariable
   , SynthesisType
   , SynthesisTypeError (..)
-  , toSynthesisTypeStructure
   , toSynthesisType
   , fromSynthesisType
   , Subst (..)
@@ -33,7 +32,6 @@ module Language.Haskell.Exference.Core.Types
   , pattern HsConstraint
   , constraint_tclass
   , constraint_params
-  , toSynthesisConstraintStructure
   , toSynthesisConstraint
   , fromSynthesisConstraint
   , ConstraintSite (..)
@@ -195,12 +193,6 @@ data HsSubstitutionError
 
 instance NFData HsSubstitutionError
 
--- | Identity compatibility shim for code that previously projected
--- Exference's private tree into the shared tree.  It deliberately performs no
--- validation; public inputs should normally cross 'toSynthesisType' instead.
-toSynthesisTypeStructure :: HsType -> SynthesisType
-toSynthesisTypeStructure = id
-
 -- | Validate and canonicalize a native Exference/shared type at the public
 -- boundary. Flexible and rigid IDs remain distinct, and saturated tuple
 -- constructors are stored structurally.
@@ -291,13 +283,6 @@ constraint_tclass = SharedConstraint.constraintClass
 
 constraint_params :: HsConstraint -> [HsType]
 constraint_params = SharedConstraint.constraintArguments
-
--- | Identity compatibility shim for the former structural constraint
--- projection. It performs no validation.
-toSynthesisConstraintStructure
-  :: HsConstraint
-  -> SharedConstraint.Constraint SynthesisType
-toSynthesisConstraintStructure = id
 
 -- | Validate and canonicalize both the nominal class identity and every type
 -- argument of a native shared constraint.

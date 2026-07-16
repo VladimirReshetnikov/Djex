@@ -268,10 +268,10 @@ tests = testGroup "Exference"
                 ]
           shared <- expectRight $ toSynthesisConstraint constraint
           shared @?= SharedConstraint.Constraint
-            (toSynthesisName $ name "C")
+            (name "C")
             [ SharedType.TypeApplication
                 (SharedType.TypeConstructor
-                  $ toSynthesisName $ name "Maybe")
+                  $ name "Maybe")
                 (SharedType.TypeVariable
                   $ SharedType.FlexibleVariable 0)
             , SharedType.TypeVariable $ SharedType.RigidVariable 1
@@ -279,7 +279,7 @@ tests = testGroup "Exference"
           fromSynthesisConstraint shared @?= Right constraint
       , testCase "shared constraint conversion validates class identity" $ do
           let invalid = HsConstraint (name "notAClass") [TypeVar 0]
-              sharedName = toSynthesisName $ name "notAClass"
+              sharedName = name "notAClass"
           toSynthesisConstraint invalid @?= Left
             (InvalidSynthesisConstraint
               $ SharedConstraint.InvalidConstraintClass sharedName)
@@ -1544,7 +1544,7 @@ tests = testGroup "Exference"
           toSynthesisType source @?= Left
             (InvalidSynthesisType $ SharedType.InvalidTypeConstraint
               $ SharedConstraint.InvalidConstraintClass
-              $ toSynthesisName invalidName)
+              invalidName)
       , testCase "shared rigid forall binders are rejected" $ do
           let malformed = SharedType.ForallType
                 [SharedType.RigidVariable 4] []
@@ -1588,7 +1588,7 @@ tests = testGroup "Exference"
           case shared of
             SharedDeclaration.ClassDeclaration _ _ _ _ [signature] -> do
               SharedDeclaration.valueName signature @?=
-                toSynthesisName methodName
+                methodName
               SharedDeclaration.valueAnnotation signature @?=
                 SearchPenaltyMetadata (Penalty 2.5)
             _ -> fail "class-method adapter returned another declaration shape"
@@ -1663,7 +1663,7 @@ tests = testGroup "Exference"
             @?= Left (MissingConstructorPenalty missing)
           shared <- expectRight $ toSynthesisDataDeclaration declaration
           fromSynthesisRatedDataDeclaration shared @?= Left
-            (MissingSearchPenaltyMetadata $ toSynthesisName $ name "Nothing")
+            (MissingSearchPenaltyMetadata $ name "Nothing")
       , testCase "frontend type synonyms use the same declaration IR" $ do
           let declaration = HsTypeDecl (name "Pair") [0, 1]
                 $ TypeApp
@@ -1675,7 +1675,7 @@ tests = testGroup "Exference"
           tdecl_params lowered @?= tdecl_params declaration
           tdecl_result lowered @?= tdecl_result declaration
       , testCase "core type synonym lowering owns compatibility policy" $ do
-          let synonymName = toSynthesisName $ name "Alias"
+          let synonymName = name "Alias"
               variable = SharedType.FlexibleVariable 0
               explicitParameter = SharedDeclaration.TypeParameter variable
                 $ Just SharedKind.ProperTypeKind
@@ -1705,9 +1705,9 @@ tests = testGroup "Exference"
           let source = EnvDictionary [function] [deconstructor] classes
           shared <- expectRight $ toSynthesisEnvironment source
           Map.keys (SharedEnvironment.valueSignatureMap shared)
-            @?= [toSynthesisName $ name "answer"]
+            @?= [name "answer"]
           Map.keys (SharedEnvironment.classDeclarationMap shared)
-            @?= [toSynthesisName $ name "C"]
+            @?= [name "C"]
           Map.size (SharedEnvironment.instanceDeclarationMap shared) @?= 1
           lowered <- expectRight $ fromSynthesisEnvironment shared
           environmentFunctions lowered @?= [function]
@@ -1736,17 +1736,17 @@ tests = testGroup "Exference"
                 (Map.singleton className [method, secondMethod])
                 (EnvDictionary [ordinary] [] classes)
           Set.fromList (Map.keys $ SharedEnvironment.valueSignatureMap shared)
-            @?= Set.fromList (map (toSynthesisName . functionName)
+            @?= Set.fromList (map functionName
               [method, secondMethod, ordinary])
-          case Map.lookup (toSynthesisName className)
+          case Map.lookup className
               (SharedEnvironment.classDeclarationMap shared) of
             Just (SharedDeclaration.ClassDeclaration _ _ _ _ methods) ->
               map SharedDeclaration.valueName methods @?=
-                map (toSynthesisName . functionName) [method, secondMethod]
+                map functionName [method, secondMethod]
             declaration -> fail $ "nested class missing: " ++ show declaration
           case fromSynthesisEnvironment shared of
             Left failure -> failure @?= ClassMethodsUnsupported
-              (map (toSynthesisName . functionName) [method, secondMethod])
+              (map functionName [method, secondMethod])
             Right _ -> fail "legacy lowering erased class-method ownership"
           (lowered, loweredMethods) <- expectRight
             $ fromSynthesisEnvironmentWithClassMethods shared
@@ -1759,10 +1759,10 @@ tests = testGroup "Exference"
                 Map.empty loweredMethods lowered
           raised @?= shared
       , testCase "core lowering rejects frontend-only declarations" $ do
-          let synonymName = toSynthesisName $ name "Alias"
+          let synonymName = name "Alias"
               synonym = SharedDeclaration.TypeSynonymDeclaration
                 NoDeclarationMetadata synonymName []
-                (SharedType.TypeConstructor $ toSynthesisName $ name "Int")
+                (SharedType.TypeConstructor $ name "Int")
           shared <- expectRight $ SharedEnvironment.mkEnvironment [synonym]
           case fromSynthesisEnvironment shared of
             Left (UnsupportedCoreEnvironmentDeclaration actual) ->
@@ -1773,13 +1773,13 @@ tests = testGroup "Exference"
           let parameter = SharedDeclaration.TypeParameter
                 (SharedType.FlexibleVariable 0) Nothing
               method = SharedDeclaration.ValueSignature
-                NoDeclarationMetadata (toSynthesisName $ name "method")
+                NoDeclarationMetadata (name "method")
                 (SharedType.TypeVariable $ SharedType.FlexibleVariable 0)
               sharedClass = SharedDeclaration.ClassDeclaration
-                NoDeclarationMetadata (toSynthesisName $ name "C")
+                NoDeclarationMetadata (name "C")
                 [parameter] [] [method]
           fromSynthesisClassDeclaration sharedClass @?=
-            Left (ClassMethodsUnsupported [toSynthesisName $ name "method"])
+            Left (ClassMethodsUnsupported [name "method"])
           toSynthesisDataDeclaration
               (DeconstructorBinding
                 (TypeApp (TypeCons $ name "T") (TypeCons $ name "Int"))
@@ -1789,7 +1789,7 @@ tests = testGroup "Exference"
               sharedInstance = SharedDeclaration.InstanceDeclaration
                 NoDeclarationMetadata [unused] []
                 (SharedConstraint.Constraint
-                  (toSynthesisName $ name "C") [])
+                  (name "C") [])
           fromSynthesisInstanceDeclaration sharedInstance @?=
             Left (NonImplicitInstanceForall [unused])
       ]
@@ -2182,7 +2182,7 @@ tests = testGroup "Exference"
                 Right _ -> fail "the core accepted a checked rank-N projection"
               session <- expectRight
                 $ ExferenceSession.mkExferenceSession checked
-              case find ((== toSynthesisName function) . omittedName)
+              case find ((== function) . omittedName)
                   $ exferenceSessionOmissions session of
                 Just omission -> omittedReason omission @?=
                   UnsupportedNestedForall
@@ -2404,7 +2404,7 @@ tests = testGroup "Exference"
                 (\clause ->
                   Generated.clauseName clause == target
                     && Generated.clauseBody clause
-                      == Generated.Global (toSynthesisName retainedName))
+                      == Generated.Global retainedName)
                 outputs
           assertBool "candidate evidence was not derived from the payload"
             $ all
@@ -2799,7 +2799,7 @@ tests = testGroup "Exference"
             { input_envDeconsS = [invalid] } @?= Left
               (InvalidGeneratedConstructor invalidName
                 $ Generated.InvalidConstructorPattern
-                $ toSynthesisName invalidName)
+                invalidName)
 
           let malformedCons = DeconstructorBinding
                 (TypeApp (TypeCons ListCon) $ TypeVar 0)
@@ -3490,18 +3490,10 @@ tests = testGroup "Exference"
             , ([], "`map`")
             , (["Data"], "Data.map")
             ]
-      , testCase "shared conversion admits the complete shared name domain" $ do
+      , testCase "native alias admits the complete shared name domain" $ do
           shared <- expectRight $ SharedName.tupleName SharedName.Unboxed 2
-          fromSynthesisName shared @?= Right shared
           CompatibilityImport.legacyConstructorView shared @?=
             "unboxed-tuple:2"
-      , testCase "identity shims round-trip legacy name forms" $ do
-          operator <- expectRight $ mkQualifiedName ["Data", "Function"] "."
-          tuple <- expectRight $ mkBoxedTupleName 3
-          mapM_ (\qualifiedName ->
-              fromSynthesisName (toSynthesisName qualifiedName)
-                @?= Right qualifiedName)
-            [operator, tuple, ListCon, Cons, validQualifiedName [] "->"]
       , testCase "Eq, Ord, Show, and NFData observe one value" $ do
           value <- expectRight $ mkQualifiedName ["Data", "List"] "map"
           value @?= value
@@ -4380,7 +4372,7 @@ tests = testGroup "Exference"
             $ toSynthesisSourceEnvironment sourceEnvironment
           stringName <- expectRight
             $ mkQualifiedName ["Data", "String"] "String"
-          case Map.lookup (toSynthesisName stringName)
+          case Map.lookup stringName
               (SharedEnvironment.typeDeclarationMap shared) of
             Just SharedDeclaration.TypeSynonymDeclaration{} -> pure ()
             declaration -> fail $
@@ -4454,11 +4446,11 @@ tests = testGroup "Exference"
                 Just (SourceFunction _) -> pure ()
                 entry -> fail $ "ordinary binding acquired class ownership: "
                   ++ show entry
-              case Map.lookup (toSynthesisName className)
+              case Map.lookup className
                   (SharedEnvironment.classDeclarationMap shared) of
                 Just (SharedDeclaration.ClassDeclaration _ _ _ _ [method]) -> do
                   SharedDeclaration.valueName method @?=
-                    toSynthesisName methodName
+                    methodName
                   SharedDeclaration.valueAnnotation method @?=
                     SearchPenaltyMetadata (Penalty 2.5)
                   loweredMethod <- expectRight $ fromSynthesisFunctionBinding
@@ -4468,7 +4460,7 @@ tests = testGroup "Exference"
                 declaration -> fail $ "shared class lost its method: "
                   ++ show declaration
               (SharedDeclaration.valueAnnotation <$> Map.lookup
-                  (toSynthesisName methodName)
+                  methodName
                   (SharedEnvironment.valueSignatureMap shared)) @?=
                 Just (SearchPenaltyMetadata $ Penalty 2.5)
       , testCase "type-synonym phantom parameters use adjacent fresh IDs" $ do
@@ -4523,7 +4515,7 @@ tests = testGroup "Exference"
             , "bad :: Phantom Higher"
             ]) $ \modulePath -> do
               LoadReport result _ <- environmentFromModule modulePath
-              badName <- toSynthesisName <$> expectRight
+              badName <- expectRight
                 (mkQualifiedName ["PhantomKind"] "bad")
               case result of
                 Left (InvalidSourceInventory
@@ -4630,9 +4622,9 @@ tests = testGroup "Exference"
             ]) $ \modulePath -> do
               LoadReport result _ <- environmentFromModule modulePath
               checked <- expectRight result
-              phantomName <- toSynthesisName <$> expectRight
+              phantomName <- expectRight
                 (mkQualifiedName ["AliasBoundary"] "Phantom")
-              goodName <- toSynthesisName <$> expectRight
+              goodName <- expectRight
                 (mkQualifiedName ["AliasBoundary"] "good")
               intName <- expectRight $ SharedName.mkIdentifier "Int"
               let inventoryEnvironment = SharedInventory.inventoryEnvironment
@@ -4647,11 +4639,10 @@ tests = testGroup "Exference"
                   SharedType.typeConstructors
                     (SharedDeclaration.valueType signature)
                 Nothing -> fail "the checked inventory lost AliasBoundary.good"
-              case find ((== goodName) . toSynthesisName . functionName)
+              case find ((== goodName) . functionName)
                   projected of
-                Just binding -> toSynthesisTypeStructure
-                    (functionResult binding) @?=
-                      SharedType.TypeConstructor intName
+                Just binding -> functionResult binding @?=
+                  SharedType.TypeConstructor intName
                 Nothing -> fail "the backend projection lost AliasBoundary.good"
       , testCase "post-inventory alias expansion avoids class binder capture" $
           withTemporaryFile (unlines
@@ -4715,7 +4706,7 @@ tests = testGroup "Exference"
                 $ SharedInventory.inventoryEnvironment
                 $ checkedSourceInventory checked
               recursion nameValue = case Map.lookup
-                  (toSynthesisName nameValue) declarations of
+                  nameValue declarations of
                 Just (SharedDeclaration.DataTypeDeclaration
                     (RecursiveDataMetadata recursive) _ _ _) -> Just recursive
                 _ -> Nothing
@@ -4775,7 +4766,7 @@ tests = testGroup "Exference"
               environmentDeconstructors backend @?=
                 sourceDeconstructors projection
               environmentClasses backend @?= sourceClasses projection
-              case Map.lookup (toSynthesisName loopName) declarations of
+              case Map.lookup loopName declarations of
                 Just (SharedDeclaration.DataTypeDeclaration
                     (RecursiveDataMetadata recursive) _ _ _) ->
                       recursive @?= True
@@ -4808,7 +4799,7 @@ tests = testGroup "Exference"
           toSynthesisSourceInventory environment @?= Left
             (InvalidSharedEnvironment
               $ SharedEnvironment.DuplicateTypeDeclaration
-              $ toSynthesisName aliasName)
+              aliasName)
       , testCase "source inventories require every constructor function" $ do
           let missing = map name ["Just", "Nothing"]
               environment = maybeLikeSourceEnvironment
@@ -4818,7 +4809,7 @@ tests = testGroup "Exference"
                 }
           toSynthesisSourceInventory environment @?= Left
             (MissingConstructorFunctionBindings
-              $ map toSynthesisName missing)
+              missing)
       , testCase "source inventories reject duplicate constructor functions" $ do
           let duplicate = map name ["Just", "Nothing"]
               result = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
@@ -4834,7 +4825,7 @@ tests = testGroup "Exference"
                 }
           toSynthesisSourceInventory environment @?= Left
             (DuplicateConstructorFunctionBindings
-              $ map toSynthesisName duplicate)
+              duplicate)
       , testCase "duplicate tagged methods reach shared validation" $ do
           let className = name "C"
               methodName = name "method"
@@ -4854,7 +4845,7 @@ tests = testGroup "Exference"
           toSynthesisSourceInventory environment @?= Left
             (InvalidSharedDeclaration
               $ SharedDeclaration.DuplicateMethodName
-              $ toSynthesisName methodName)
+              methodName)
       , testCase "source inventories reject orphan constructor functions" $ do
           let orphans = map name ["Another", "Orphan"]
               result = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
@@ -4865,7 +4856,7 @@ tests = testGroup "Exference"
                     ] ++ sourceFunctions maybeLikeSourceEnvironment
                 }
           toSynthesisSourceInventory environment @?= Left
-            (OrphanConstructorBindings $ map toSynthesisName orphans)
+            (OrphanConstructorBindings orphans)
       , testCase "source inventories reject mismatched constructor shapes" $ do
           let mismatched = map name ["Just", "Nothing"]
               changeShape binding
@@ -4880,7 +4871,7 @@ tests = testGroup "Exference"
                 }
           toSynthesisSourceInventory environment @?= Left
             (MismatchedConstructorFunctionBindings
-              $ map toSynthesisName mismatched)
+              mismatched)
       , testCase "source inventories retain constructor and value penalties" $ do
           inventory <- expectRight
             $ toSynthesisSourceInventory maybeLikeSourceEnvironment
@@ -4889,11 +4880,11 @@ tests = testGroup "Exference"
               values = SharedEnvironment.valueSignatureMap shared
               constructorPenalty constructor =
                 SharedDeclaration.constructorAnnotation
-                  <$> Map.lookup (toSynthesisName $ name constructor)
+                  <$> Map.lookup (name constructor)
                     constructors
               valuePenalty value =
                 SharedDeclaration.valueAnnotation
-                  <$> Map.lookup (toSynthesisName $ name value) values
+                  <$> Map.lookup (name value) values
           constructorPenalty "Nothing" @?=
             Just (SearchPenaltyMetadata $ Penalty 1.25)
           constructorPenalty "Just" @?=
@@ -4913,7 +4904,7 @@ tests = testGroup "Exference"
             $ not $ Map.null $ SharedEnvironment.valueSignatureMap shared
           maybeName <- expectRight
             $ mkQualifiedName ["Data", "Maybe"] "Maybe"
-          Map.lookup (toSynthesisName maybeName)
+          Map.lookup maybeName
               (SharedKindInference.typeConstructorKinds
                 $ SharedInventory.inventoryKindAssumptions inventory) @?=
             Just (SharedKind.FunctionKind
@@ -4928,7 +4919,7 @@ tests = testGroup "Exference"
                 $ checkedSourceInventory checkedEnvironment
               constructorPenalty constructor =
                 SharedDeclaration.constructorAnnotation
-                  <$> Map.lookup (toSynthesisName constructor) constructors
+                  <$> Map.lookup constructor constructors
           mapM_ (\(constructor, expectedPenalty) ->
               constructorPenalty constructor @?=
                 Just (SearchPenaltyMetadata expectedPenalty))
@@ -4961,7 +4952,7 @@ tests = testGroup "Exference"
           toSynthesisSourceEnvironment environment @?= Left
             (InvalidSourceEnvironmentKinds
               (SharedKindInference.DeclarationKindError
-                (toSynthesisName badName)
+                badName
                 (SharedKindInference.KindMismatch proper
                   $ SharedKind.FunctionKind proper proper)))
       , testCase "loader names unknown type constructors precisely" $ do
@@ -5397,7 +5388,7 @@ tests = testGroup "Exference"
           toGeneratedExpression expression @?=
             Generated.Lambda [Generated.Bind 1]
               (Generated.Apply
-                (Generated.Global $ toSynthesisName $ name "id")
+                (Generated.Global $ name "id")
                 (Generated.Local 1))
       , testCase "typed compatibility patterns share the complete generated shape" $ do
           let integer = TypeCons $ name "Int"
@@ -5418,11 +5409,11 @@ tests = testGroup "Exference"
                       )
                     ]
               generated = Generated.Let
-                (Generated.Constructor (toSynthesisName box)
+                (Generated.Constructor box
                   [Generated.Bind 1])
-                (Generated.Global $ toSynthesisName source)
+                (Generated.Global source)
                 (Generated.Case (Generated.Local 1)
-                  [ ( Generated.Constructor (toSynthesisName just)
+                  [ ( Generated.Constructor just
                         [Generated.Bind 2]
                     , Generated.Let (Generated.Bind 3)
                         (Generated.Lambda [Generated.Bind 4]
@@ -5475,8 +5466,8 @@ tests = testGroup "Exference"
                 Generated.Lambda [Generated.Bind 1] (Generated.Local 1)
               SharedCandidate.candidateResidualConstraints generatedCandidate
                 @?= [SharedConstraint.Constraint
-                  (toSynthesisName $ name "Eq")
-                  [SharedType.TypeConstructor $ toSynthesisName $ name "Int"]]
+                  (name "Eq")
+                  [SharedType.TypeConstructor $ name "Int"]]
               let details = SharedCandidate.candidateDetails generatedCandidate
               exferenceCandidateStats details @?= statistics
               exferenceLocalNameHints details @?= Map.singleton 1 "a"
@@ -5561,7 +5552,7 @@ tests = testGroup "Exference"
               $ InvalidCandidateType
               $ InvalidSynthesisConstraint
               $ SharedConstraint.InvalidConstraintClass
-              $ toSynthesisName invalidClass)
+              invalidClass)
       , testCase "compatibility candidates reject non-finite metrics" $ do
           let invalid = Penalty $ 0 / 0
               chunk = ExferenceChunkElement
@@ -5614,7 +5605,7 @@ tests = testGroup "Exference"
             (InvalidCandidate
               $ InvalidCandidateSyntax
               $ Generated.InvalidConstructorPattern
-              $ toSynthesisName invalidName)
+              invalidName)
           let arrowName = validQualifiedName [] "->"
               arrowChunk = ExferenceChunkElement
                 (SearchStatus SearchExhausted 0 0)
@@ -5883,7 +5874,7 @@ tests = testGroup "Exference"
           case functionToHaskellSrc 0 target $ ExpName global of
             Left failure -> failure @?= ExpressionSyntaxError
               (Generated.GlobalDefinitionCapture target
-                (toSynthesisName global) Generated.Unqualified)
+                global Generated.Unqualified)
             Right rendered -> fail $ "checked conversion created recursion: "
               ++ show rendered
       , testCase "compatibility functions validate raw definitions once" $ do
@@ -6107,7 +6098,7 @@ tests = testGroup "Exference"
   ]
 
 neutralName :: String -> SharedName.Name
-neutralName = toSynthesisName . name
+neutralName = name
 
 neutralVariable :: Int -> SynthesisVariable
 neutralVariable = SharedType.FlexibleVariable

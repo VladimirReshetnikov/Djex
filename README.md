@@ -220,9 +220,9 @@ while the exhaustive `TypeForallNative` exposes every shared binder. Checked
 Exference boundaries canonicalize saturated function and tuple applications
 to structural `FunctionType` and `TupleType` values and reject rigid forall
 binders, which the search engine cannot instantiate as source quantifiers.
-The old structural conversion functions remain identity compatibility shims;
-the checked conversion names now serve only as validation and canonicalization
-boundaries.
+The merger's total structural conversion shims are gone: `HsType` and
+`HsConstraint` already are the shared values, while the checked conversion
+names remain only as validation and canonicalization boundaries.
 
 `Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
 evidence, and search-batch shape without pretending that both engines accept

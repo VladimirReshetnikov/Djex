@@ -173,9 +173,10 @@ part of the module's `COMPLETE` set. The now-impossible
 `UnsupportedSpecialName`, `UnsupportedSynthesisName`, and
 `DeclarationNameConversionError` alternatives have consequently been removed.
 
-`toSynthesisTypeStructure` and `toSynthesisConstraintStructure` remain as total
-identity shims for source compatibility. `toSynthesisType` and
-`fromSynthesisType` now both canonicalize and validate the native value, and
+There is no longer a structural conversion API: `QualifiedName`, `HsType`, and
+`HsConstraint` already are the shared values, so the merger-only identity
+projections would falsely imply a representation boundary. `toSynthesisType`
+and `fromSynthesisType` both canonicalize and validate the native value, and
 both reject rigid forall binders rather than weakening them during lowering.
 The checked constraint operations validate the class namespace and normalize
 their argument types without reconstructing the outer constraint. Because

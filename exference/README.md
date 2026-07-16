@@ -36,8 +36,8 @@ than pretending to provide a second supported toolchain. Run these commands
 from the repository root or `djex/`:
 
 ```console
-cabal build djex:lib:djex djex:lib:exference-frontend djex:exe:exference
-cabal test djex-parser-free-api-tests exference-frontend-api-tests exference-tests exference-cli-tests --test-show-details=direct
+cabal build djex:lib:djex djex:exe:exference
+cabal test djex-api-tests exference-frontend-api-tests exference-tests exference-cli-tests --test-show-details=direct
 ```
 
 The former top-level `exference/` package is now the `djex/exference/` source
@@ -50,10 +50,10 @@ as a historical compatibility audit, but its proposed merge boundary predates
 the unified Djex package.
 
 `src-core/` is Exference's parser-independent contribution, compiled into the
-same `djex` library as the shared foundation and Djinn core. That library's
-external dependency set is `base`, `containers`, `deepseq`, `pqueue`, `pretty`,
-and `transformers`; it has no HSE, filesystem, process, or executable
-dependency.
+same `djex` library as the shared foundation, Djinn, and both compatibility
+frontends. Parser independence remains a Haskell module/source-layer property;
+the single Cabal library deliberately owns the union of core and frontend
+dependencies.
 It uses `transformers` directly: expression checking has strict state, while
 the branching search deliberately retains lazy `StateT`.  Its hidden search
 state uses ordinary record selectors and explicit updates, keeping the engine
@@ -78,16 +78,13 @@ flexible-versus-rigid collection now use the shared tagged-variable operations;
 Exference retains only its finite `Int` allocation and backend-specific error
 policies.
 
-The public named `exference-frontend` library is rooted at `src-frontend/`;
-it contains the `haskell-src-exts` frontend and environment loader and
-preserves the historical core import paths through Cabal reexports. It also
-owns the public `Language.Haskell.Exference.CLI` compatibility entry point;
-the executable's `app/` root contains only a six-line launcher. The stable
-`Language.Haskell.Djex.Exference` adapter now lives in `djex`; the
-frontend adds `Language.Haskell.Djex.Exference.HaskellSrc` for directory loading
-and Haskell type parsing. The curated `Language.Haskell.Djex` module re-exports
-the neutral adapter together with the shared synthesis vocabulary without
-acquiring HSE or filesystem dependencies.
+The `src-frontend/` root contains the `haskell-src-exts` frontend, environment
+loader, public `Language.Haskell.Exference.CLI` compatibility entry point, and
+`Language.Haskell.Djex.Exference.HaskellSrc` source adapter. These modules now
+live in the same library as `Language.Haskell.Djex.Exference`; the executable's
+`app/` root remains only a six-line launcher. The curated
+`Language.Haskell.Djex` module still re-exports the neutral adapter rather than
+the source-loading extension.
 Source conversion exposes its concrete `ConversionT` stack, with errors inside
 lazy state so caught failures retain earlier variable allocations. Its opaque
 inventory separates source-spelling hints from the exact reserved-ID set: this
@@ -103,16 +100,15 @@ retains that exact canonical goal as a scope witness, and fully detaches the
 resulting opaque variable-to-spelling map while sealing. Accepted and rejected
 spellings are both forced at this boundary. Malformed maps therefore fail early as source-located
 `DJEX_EXF_SOURCE_HINT` diagnostics rather than reaching candidate rendering.
-This mirrors Djinn's library-first organization and lets future shared
-frontends depend on the search engine without inheriting source-parser,
-filesystem, or process dependencies.
+This mirrors Djinn's library-first organization while retaining the
+parser/source boundary at the module level.
 
 The source component crosses into core through the explicit parser-neutral
 `Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.
 It documents and wraps the four checked operations needed by source-adapter
 authors without exposing request, session, or allocator representations.
-Adapters import it directly from `djex`; neither the curated
-`Language.Haskell.Djex` facade nor `exference-frontend` re-exports it. The
+Adapters import it directly from `djex`; the curated
+`Language.Haskell.Djex` facade does not re-export it. The
 request representation behind it remains a hidden module. Stable clients
 therefore see an opaque `ExferenceRequest` with one neutral smart constructor;
 the shared `CachedQuery` owns its strict complete source provenance, while
@@ -236,7 +232,7 @@ the parser-independent neutral lowerer. The resulting backend projection is
 reconciled by name with the original binding/deconstructor order and ratings.
 One opaque annotated prepared value wraps the shared `PreparedInventory` and
 its backend lowering, keeping the checked Inventory, its exact synonym table,
-and that lowering inseparable; the retained frontend/parser-free seam
+and that lowering inseparable; the retained frontend/core module seam
 accepts only exact-name order and finite rating metadata, never a second
 independently prepared dictionary. Alias-aware recursion metadata is attached
 to the sealed Inventory through a checked annotation-only adjustment, without

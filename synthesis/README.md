@@ -1,7 +1,7 @@
 # Haskell Synthesis
 
-The `synthesis/src` area of the parser-free `djex` library is the parser- and
-backend-independent foundation for Djinn and Exference. It was formerly the
+The `synthesis/src` area of the `djex` library is the parser- and backend-
+independent foundation for Djinn and Exference. It was formerly the
 standalone `haskell-synthesis` package and then a named Djex sublibrary. Its
 layers define validated Haskell names, structured diagnostics, non-recursive
 class constraints parameterized
@@ -283,7 +283,7 @@ sessions retain: engine-specific dictionaries and indexes are derived
 projections of its Inventory and exact synonym table, not competing sources of
 truth.
 
-Build the parser-free library or run the focused foundation suite from the
+Build the library or run the focused foundation suite from the
 repository root or `djex/`:
 
 ```console

@@ -1,11 +1,11 @@
 Cabal-Version: 3.0
 Name:          djex
-Version:       2026.7.14
+Version:       2026.7.16
 Synopsis:      Haskell expression synthesis with Djinn and Exference backends
 Description:
   Djex combines the Djinn intuitionistic theorem prover and the Exference
   heuristic polymorphic-expression search engine behind a shared,
-  parser-independent synthesis foundation.
+  parser-independent synthesis foundation and one library contract.
 Category:      Language
 License:       BSD-3-Clause
 License-Files:
@@ -104,25 +104,20 @@ common cli-test
   import:        tasty-hunit-test, directory-dep
   Build-Depends: process >= 1.6 && < 1.7
 
--- Compatibility frontends build on the complete parser-independent Djex
--- library. Keep terminal and parser packages local to the frontend that uses
--- them; ordinary @djex@ clients therefore acquire neither dependency family.
-common compatibility-frontend
-  import:        build-settings, transformers-dep
-  Build-Depends: djex
-
--- The one parser-independent Djex library. The shared synthesis vocabulary,
--- both checked adapters, and both search engines deliberately share one Cabal
--- boundary; the directory split below records provenance, not package-level
--- ownership. Source loading and interactive compatibility APIs remain in the
--- two named frontend libraries.
+-- The single Djex library. The directory split records implementation
+-- provenance and keeps parser-independent modules honest at the Haskell import
+-- level; it is no longer a second package-component architecture. Clients get
+-- the shared foundation, both engines, source loading, and both compatibility
+-- APIs through one dependency and one version contract.
 Library
-  import:           build-settings, containers-dep, deepseq-dep, transformers-dep
+  import:           build-settings, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep
   Hs-Source-Dirs:
     src
     synthesis/src
     djinn/src-core
+    djinn/src-frontend
     exference/src-core
+    exference/src-frontend
 
   Exposed-Modules:
     Language.Haskell.Djex
@@ -158,6 +153,7 @@ Library
     Djinn.Internal.LJTFormula
     Djinn.Internal.ProofCheck
     Djinn.Internal.ProofEnv
+    Djinn
     Language.Haskell.Exference
     Language.Haskell.Exference.Diagnostic
     Language.Haskell.Exference.SimpleDict
@@ -178,11 +174,22 @@ Library
     Language.Haskell.Exference.Core.Score
     Language.Haskell.Exference.Core.Internal.Scope
     Language.Haskell.Exference.Core.Internal.Testing
+    Language.Haskell.Djex.Exference.HaskellSrc
+    Language.Haskell.Exference.CLI
+    Language.Haskell.Exference.ExpressionToHaskellSrc
+    Language.Haskell.Exference.TypeFromHaskellSrc
+    Language.Haskell.Exference.TypeDeclsFromHaskellSrc
+    Language.Haskell.Exference.BindingsFromHaskellSrc
+    Language.Haskell.Exference.ClassEnvFromHaskellSrc
+    Language.Haskell.Exference.EnvironmentParser
+    Language.Haskell.Exference.Session
 
   Other-Modules:
     Djinn.Internal.Declaration
     Djinn.Internal.HCheck.Implementation
+    Djinn.Internal.Help
     Djinn.Internal.ProofToGenerated
+    Djinn.Internal.REPL
     Djinn.Internal.Type
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Exference.Internal.Request
@@ -197,14 +204,20 @@ Library
     Language.Haskell.Exference.Core.Internal.SearchControl
     Language.Haskell.Exference.Core.Internal.SourceNames
     Language.Haskell.Exference.Core.Internal.VariableSupply
+    Language.Haskell.Exference.HaskellSrcUtils
+    Paths_djex
+
+  Autogen-Modules: Paths_djex
 
   Build-Depends:
+    filepath >= 1.4 && < 1.6,
+    haskeline >= 0.8 && < 0.9,
     pqueue >= 1.3.1 && < 1.8,
     pretty >= 1.1 && < 1.2
 
--- The merged one-shot command consumes the checked parser-free facade plus
--- the explicit Exference Haskell-source adapter. The historical executables
--- below remain available for their REPL and legacy compatibility contracts.
+-- The merged one-shot command consumes the checked facade plus the explicit
+-- Exference Haskell-source adapter from the same library. The historical
+-- executables below remain available for their compatibility contracts.
 Executable djex
   import:         search-executable
   Main-Is:        Main.hs
@@ -213,9 +226,7 @@ Executable djex
     Djex.Driver
     Paths_djex
   Autogen-Modules: Paths_djex
-  Build-Depends:
-    djex,
-    djex:exference-frontend
+  Build-Depends:    djex
 
 Test-Suite djex-tests
   import:         tasty-hunit-test, containers-dep
@@ -223,10 +234,8 @@ Test-Suite djex-tests
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-integration
   -- This integration suite deliberately crosses the stable facade, both raw
-  -- search APIs, and the HSE compatibility frontend.
-  Build-Depends:
-    djex,
-    djex:exference-frontend
+  -- search APIs, and the HSE compatibility API.
+  Build-Depends:    djex
 
 Test-Suite djex-cli-tests
   import:         cli-test
@@ -242,41 +251,20 @@ Test-Suite synthesis-tests
   Hs-Source-Dirs:   synthesis/test
   Build-Depends:    djex
 
--- Compatibility frontend for the historical Djinn library.  Cabal component
--- names are package-wide, so this cannot share the `djinn` executable's name.
-Library djinn-frontend
-  import:           compatibility-frontend
-  Visibility:       public
-  Hs-Source-Dirs:   djinn/src-frontend
-
-  Build-Depends:
-    haskeline >= 0.8 && < 0.9
-
-  Exposed-Modules: Djinn
-  Reexported-Modules:
-    Djinn.Core,
-    Language.Haskell.Djex.Djinn
-
-  Other-Modules:
-    Djinn.Internal.Help
-    Djinn.Internal.REPL
-    Paths_djex
-  Autogen-Modules: Paths_djex
-
--- A compatibility dependency must expose both the historical core facade and
--- the checked Djex adapter without requiring a second direct dependency.
+-- The one library exposes the historical Djinn facade, its core API, and the
+-- checked adapter together.
 Test-Suite djinn-frontend-api-tests
   import:         tasty-hunit-test
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: djinn/test-frontend-api
-  Build-Depends:  djex:djinn-frontend
+  Build-Depends:  djex
 
 Executable djinn
   import:         search-executable
   Main-Is:        Main.hs
   Hs-Source-Dirs: djinn/app
-  Build-Depends:  djex:djinn-frontend
+  Build-Depends:  djex
 
 Test-Suite djinn-tests
   import:         tasty-hunit-test, containers-dep
@@ -310,14 +298,14 @@ Test-Suite djinn-cli-tests
   Hs-Source-Dirs: djinn/test-cli
   Build-Tool-Depends: djex:djinn
 
--- This suite depends only on the parser-neutral main library. It exercises the
--- curated facade and both lower-level engines while the main-library stanza
--- above keeps HSE and filesystem dependencies out of that surface.
-Test-Suite djex-parser-free-api-tests
+-- Exercise the curated facade and both lower-level engines through the single
+-- downstream library dependency. AbstractionBoundary additionally pins the
+-- opaque-constructor contract with deliberately rejected compile probes.
+Test-Suite djex-api-tests
   import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
-  Hs-Source-Dirs: test-parser-free-api
+  Hs-Source-Dirs: test-api
   Other-Modules:
     AbstractionBoundary
     ExferencePatternImports
@@ -332,68 +320,20 @@ Benchmark exference-bench
   Hs-Source-Dirs: exference/bench
   Build-Depends:  djex
 
--- Compatibility frontend for the historical Exference library.  Cabal
--- component names are package-wide, so this cannot share the `exference`
--- executable's name.
-Library exference-frontend
-  import:         compatibility-frontend, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep
-  Visibility:     public
-  Hs-Source-Dirs: exference/src-frontend
-
-  Exposed-Modules:
-    Language.Haskell.Djex.Exference.HaskellSrc
-    Language.Haskell.Exference.CLI
-    Language.Haskell.Exference.ExpressionToHaskellSrc
-    Language.Haskell.Exference.TypeFromHaskellSrc
-    Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-    Language.Haskell.Exference.BindingsFromHaskellSrc
-    Language.Haskell.Exference.ClassEnvFromHaskellSrc
-    Language.Haskell.Exference.EnvironmentParser
-    Language.Haskell.Exference.Session
-
-  Reexported-Modules:
-    Language.Haskell.Djex.Exference,
-    Language.Haskell.Exference,
-    Language.Haskell.Exference.Diagnostic,
-    Language.Haskell.Exference.SimpleDict,
-    Language.Haskell.Exference.Core,
-    Language.Haskell.Exference.Core.Name,
-    Language.Haskell.Exference.Core.Types,
-    Language.Haskell.Exference.Core.TypeUtils,
-    Language.Haskell.Exference.Core.RigidInstantiation,
-    Language.Haskell.Exference.Core.ExferenceStats,
-    Language.Haskell.Exference.Core.Candidate,
-    Language.Haskell.Exference.Core.ConstraintSolver,
-    Language.Haskell.Exference.Core.Declaration,
-    Language.Haskell.Exference.Core.Unify,
-    Language.Haskell.Exference.Core.Expression,
-    Language.Haskell.Exference.Core.ExpressionCheck,
-    Language.Haskell.Exference.Core.ExpressionSimplify,
-    Language.Haskell.Exference.Core.FunctionBinding,
-    Language.Haskell.Exference.Core.Score
-
-  Other-Modules:
-    Language.Haskell.Exference.HaskellSrcUtils
-    Paths_djex
-  Autogen-Modules: Paths_djex
-
-  Build-Depends:
-    filepath >= 1.4 && < 1.6
-
--- Keep the compatibility command implementation in the frontend component;
--- the executable below is deliberately only a launcher for this public API.
+-- The single library exposes the historical Exference source APIs and the
+-- checked adapter together; the executable remains only a launcher.
 Test-Suite exference-frontend-api-tests
   import:         tasty-hunit-test
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: exference/test-frontend-api
-  Build-Depends:  djex:exference-frontend
+  Build-Depends:  djex
 
 Executable exference
   import:         search-executable
   Main-Is:        Main.hs
   Hs-Source-Dirs: exference/app
-  Build-Depends:  djex:exference-frontend
+  Build-Depends:  djex
 
 Test-Suite exference-tests
   import:          tasty-hunit-test, containers-dep, deepseq-dep, directory-dep, haskell-src-exts-dep, transformers-dep
@@ -406,9 +346,7 @@ Test-Suite exference-tests
     DeprecatedCompatibility
   Autogen-Modules: Paths_djex
 
-  Build-Depends:
-    djex:exference-frontend,
-    djex
+  Build-Depends:    djex
 
 Test-Suite exference-cli-tests
   import:         cli-test

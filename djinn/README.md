@@ -6,12 +6,12 @@ and uses a terminating proof search for intuitionistic propositional logic to
 construct a proof term. Each candidate is independently type-checked, converted
 through a total error-reporting boundary, simplified, and printed as Haskell.
 
-This directory contains the Djinn backend of Djex `2026.7.14`, based on a
+This directory contains the Djinn backend of Djex `2026.7.16`, based on a
 reviewed local fork of
 [`djinn-2025.2.21`](https://hackage.haskell.org/package/djinn-2025.2.21), based on
 the [upstream `augustss/djinn` repository](https://github.com/augustss/djinn).
-Djex's date version records the source-breaking checked facade and parser-free
-component fold; the original one-line import note has been expanded here
+Djex's date version records the source-breaking checked facade and single-
+library component fold; the original one-line import note has been expanded here
 because upstream ships its user guide inside the executable rather than as a
 README.
 
@@ -43,17 +43,17 @@ the repository root
 or `djex/`:
 
 ```console
-cabal build djex:lib:djex djex:lib:djinn-frontend djex:exe:djinn
+cabal build djex:lib:djex djex:exe:djinn
 cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-tests
 cabal run djinn
 ```
 
 The former top-level `djinn/` package is now the `djex/djinn/` source tree and
-has no independent package or project file. Library dependencies migrate to
-`djex` or, for the historical REPL API, `djex:djinn-frontend`;
-package-generated code imports
-`Paths_djex` rather than `Paths_djinn`. The complete component and filesystem
-migration is documented in the [Djex guide](../README.md).
+has no independent package or project file. Every library dependency,
+including the historical REPL API, migrates to plain `djex`;
+package-generated code imports `Paths_djex` rather than `Paths_djinn`. The
+complete component and filesystem migration is documented in the
+[Djex guide](../README.md).
 
 Djinn can also execute one or more command files non-interactively:
 
@@ -80,7 +80,7 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 | --- | --- |
 | `djinn-tests` | 61 focused Tasty/HUnit regressions over parsing, declaration token boundaries, kind representation and compatibility, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
-| `djinn-frontend-api-tests` | Three import-boundary checks proving that a dependency on `djinn-frontend` alone exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn`. |
+| `djinn-frontend-api-tests` | Three import checks proving that the single `djex` dependency exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn` together. |
 | `djinn-cli-tests` | Nineteen subprocess scenarios against the packaged executable, including EOF, explicit RTS tuning, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
@@ -91,15 +91,12 @@ cabal test djinn-property-tests --test-show-details=direct
 cabal test djinn-tests --test-options='-p /nominal empty/'
 ```
 
-The proof/search engine lives in `djinn/src-core` as part of the single
-parser-free `djex` library. The public `djinn-frontend` sublibrary is a
-separate compatibility/CLI facade that
-re-exports both `Djinn.Core` and the checked
-`Language.Haskell.Djex.Djinn` adapter; the executable depends only on that
-facade. The `djex` library exposes `Djinn.Core` and the formerly public
-research modules for import compatibility, while its curated
-`Language.Haskell.Djex` module re-exports only the checked adapter. The REPL and
-Haskeline remain confined to `djinn-frontend`. HPC coverage is available for
+The proof/search engine lives in `djinn/src-core`; the historical API and REPL
+live in `djinn/src-frontend`. Both roots now compile into the single `djex`
+library, which exposes `Djinn`, `Djinn.Core`, the checked
+`Language.Haskell.Djex.Djinn` adapter, and the formerly public research modules.
+Its curated `Language.Haskell.Djex` module still re-exports only the checked
+adapter. HPC coverage is available for
 the in-process unit and property suites:
 
 ```console
@@ -402,16 +399,14 @@ scanning when a file name itself begins with `+` or `-`.
 | `Djinn.Internal.Help` | Extended in-program help. |
 
 `Djinn.Core`, `Language.Haskell.Djex.Djinn`, and the proof, type, environment,
-and validation modules under `src-core/` compile into the parser-free `djex`
-library. The checked declaration and type adapters are exported by
+and validation modules under `src-core/` compile into `djex`. The checked
+declaration and type adapters are exported by
 `Djinn.Core`; their `Djinn.Internal.Declaration` and `Djinn.Internal.Type`
 implementation modules remain private. `Djinn`,
 `Djinn.Internal.Help`, and `Djinn.Internal.REPL` live under `src-frontend/` in the
-named `djinn-frontend` component; Help and REPL are private implementation
-modules, while the component re-exports both stable core entry modules. The
+same library; Help and REPL are private implementation modules. The
 executable's `app/` source root contains only its launcher, so
-neither the frontend nor executable can accidentally compile core modules as
-home modules.
+the executable cannot accidentally compile library modules as home modules.
 
 The exposed `Djinn.Internal.HCheck` deliberately retains only the five raw
 operations from Djinn's pre-cache checker surface. Its sealed compatibility

@@ -156,9 +156,9 @@ projectionSignatures =
   ()
 
 main :: IO ()
-main = defaultMain $ testGroup "Djex parser-free API"
+main = defaultMain $ testGroup "Djex downstream API"
   [ facadeTests
-  , testCase "both engines are available from one parser-free dependency" $
+  , testCase "both engines are available from one dependency" $
       assertBool "the Djinn parser was unavailable from djex"
         $ isRight $ parseHType "a -> a"
   , testCase "abstraction-boundary controls can obtain public dictionaries" $
@@ -207,7 +207,7 @@ main = defaultMain $ testGroup "Djex parser-free API"
           options = defaultExferenceOptions
             { exferenceMaximumSteps = 16 }
       let source = "a -> a"
-          location = sourceTextLocation "parser-free-api" source
+          location = sourceTextLocation "djex-api" source
       request <- expectRight
         $ mkExferenceRequestWithSourceInfo mempty location QueryRequest
           { requestTarget = checkedTarget
@@ -225,7 +225,7 @@ main = defaultMain $ testGroup "Djex parser-free API"
           } of
         Left failure -> do
           diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
-          diagnosticSource failure @?= Just "parser-free-api"
+          diagnosticSource failure @?= Just "djex-api"
           diagnosticSpan failure @?= Just (sourceTextSpan source)
         Right _ -> assertFailure
           "the sourced SPI accepted an out-of-scope context variable"
@@ -238,7 +238,7 @@ main = defaultMain $ testGroup "Djex parser-free API"
           } of
         Left failure -> do
           diagnosticCode failure @?= Just "DJEX_EXF_SOURCE_HINT"
-          diagnosticSource failure @?= Just "parser-free-api"
+          diagnosticSource failure @?= Just "djex-api"
           diagnosticSpan failure @?= Just (sourceTextSpan source)
         Right _ -> assertFailure
           "the sourced SPI accepted a reserved type-variable spelling"
@@ -278,7 +278,7 @@ main = defaultMain $ testGroup "Djex parser-free API"
             (TypeVariable variable)
             (TypeVariable variable)
           partialSource = 'a' : error "unforced adapter source tail"
-          location = sourceTextLocation "parser-free-api" partialSource
+          location = sourceTextLocation "djex-api" partialSource
           query = QueryRequest
             { requestTarget = target
             , requestGoal = goal
@@ -294,7 +294,7 @@ main = defaultMain $ testGroup "Djex parser-free API"
         Left _ -> pure ()
         Right _ -> assertFailure
           "the source-aware adapter retained a lazy source-span traversal"
-      let finiteLocation = sourceTextLocation "parser-free-api" "a -> a"
+      let finiteLocation = sourceTextLocation "djex-api" "a -> a"
           partialSpelling = 'a' : error "unforced source-hint tail"
       hintResult <- try $ evaluate $
         mkExferenceRequestWithSourceInfo

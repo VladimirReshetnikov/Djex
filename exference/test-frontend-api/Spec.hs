@@ -10,6 +10,6 @@ main :: IO ()
 main = defaultMain $ testGroup "Exference frontend import surface"
   [ testCase "owns the compatibility CLI entry point" $
       CLI.main `seq` pure ()
-  , testCase "reexports the merged parser-free API" $
+  , testCase "exposes the merged core API" $
       defaultExferenceOptions `seq` findExpressions `seq` pure ()
   ]

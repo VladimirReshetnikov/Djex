@@ -2,16 +2,17 @@
 
 Djex is the codename for the synthesis tool being formed by merging Djinn and
 Exference. The name contracts **Dj**inn and Exference's **ex**. It is one Cabal
-package: both independently testable engines and their neutral foundation now
-share a version, source distribution, data-file layout, and build graph while
-their duplicated frontend, validation, environment, search-envelope, and
-generated-output infrastructure is progressively consolidated.
+package with one library: both independently testable engines, compatibility
+frontends, and their neutral foundation share a version, dependency contract,
+source distribution, data-file layout, and build graph while duplicated
+validation, environment, search-envelope, and generated-output infrastructure
+is progressively consolidated.
 
 ## Components
 
-- The unnamed `djex` library is the complete parser-independent product. Its
-  `src/`, `synthesis/src/`, `djinn/src-core/`, and `exference/src-core/` source
-  roots compile into one unit with one dependency closure.
+- The unnamed `djex` library is the complete product. Its `src/`,
+  `synthesis/src/`, both `src-core/` roots, and both `src-frontend/` roots
+  compile into one unit with one dependency closure.
   `Language.Haskell.Djex` is the curated neutral entry point;
   `Language.Haskell.Djex.Djinn` and
   `Language.Haskell.Djex.Exference` run both engines through the shared
@@ -20,26 +21,25 @@ generated-output infrastructure is progressively consolidated.
 - `synthesis/` is the neutral foundation source area: validated names, types,
   kinds, declarations, environments, diagnostics, collision-free allocation,
   generated output, and operational search status.
-- `djinn/` contributes the LJT proof engine and checked adapter to `djex`, plus
-  the named `djinn-frontend` compatibility/REPL library. The frontend
-  re-exports both `Djinn.Core` and `Language.Haskell.Djex.Djinn`.
-- `exference/` contributes the heuristic search engine and checked adapter to
-  `djex`, plus the named `exference-frontend` Haskell-source/environment-loader
-  library. The frontend also owns `Language.Haskell.Exference.CLI`; the
-  executable component is only its six-line launcher.
+- `djinn/` contributes the LJT proof engine, checked adapter, historical
+  `Djinn` API, and Haskeline REPL to that library.
+- `exference/` contributes the heuristic search engine, checked adapter,
+  Haskell-source/environment loader, and historical CLI API. The executable
+  component remains only its six-line launcher.
 
 The `djex` executable is the merged one-shot frontend and selects either checked
 backend explicitly. The historical `djinn` and `exference` executable names
 remain available for their REPL and compatibility contracts. The package also
-retains facade coverage inside its parser-free API suite, plus the integration,
+retains facade coverage inside its downstream API suite, plus the integration,
 backend, property, CLI, and benchmark suites; this preserves differential
 testing while the two engines continue converging.
 
-The parser-free package is now genuinely one library rather than a facade over
-three separately compiled internal units. Only the two compatibility
-frontends remain named libraries, preserving useful Haskeline and HSE
-dependency isolation. The current duplication audit and the ordered path to
-this state are recorded
+The package is now genuinely one library rather than a facade over five
+separately compiled internal units. The final frontend fold deliberately trades
+Haskeline/HSE dependency isolation for the requested single dependency and
+version contract; parser-independent module boundaries remain visible in the
+source graph. The current duplication audit and the ordered path to this state
+are recorded
 in [the 2026-07-14 remaining-convergence audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
 That report captures the starting point for the current work; its Priority 1
 native-vocabulary and Priority 2 result-envelope migrations are now complete.
@@ -71,9 +71,10 @@ their stable `QueryResult` payloads in the core: Djinn preserves its richer
   method bindings are derived or retained only from the compatibility input.
   Djinn also
   seals its ordered global proof premises and class lookup from that Inventory
-  without retaining raw backend tables. The parser-free fold then deleted the
-  obsolete `synthesis`, `djinn-core`, and `exference-core` component identities
-  without changing their Haskell module names.
+  without retaining raw backend tables. The component folds then deleted the
+  obsolete `synthesis`, `djinn-core`, `exference-core`, `djinn-frontend`, and
+  `exference-frontend` library identities without changing their Haskell
+  module names.
 
 ## Dependency migration
 
@@ -85,24 +86,17 @@ identities. Existing Cabal dependencies migrate as follows:
 | `haskell-synthesis` | `djex` |
 | `djex:synthesis` | `djex` |
 | `djinn:djinn-core` or `djex:djinn-core` | `djex` |
-| unnamed `djinn` library | `djex:djinn-frontend` |
+| unnamed `djinn` library or `djex:djinn-frontend` | `djex` |
 | `exference:exference-core` or `djex:exference-core` | `djex` |
-| unnamed `exference` library | `djex:exference-frontend` |
+| unnamed `exference` library or `djex:exference-frontend` | `djex` |
 
-New parser-free clients use one unnamed `djex` dependency for the curated
-facade, shared synthesis vocabulary, checked adapters, and lower-level engine
-modules. Source-loading or REPL clients add `djex:exference-frontend` or
-`djex:djinn-frontend` explicitly. Build-tool dependencies for the historical
-commands remain
-`djex:djinn` and `djex:exference`; their executable names are unchanged.
-The parser-free library has no `haskell-src-exts`, `directory`, `filepath`, or
-`haskeline` dependency.
-
-Both compatibility components re-export their stable checked adapter:
-`djinn-frontend` provides `Language.Haskell.Djex.Djinn`, and
-`exference-frontend` provides `Language.Haskell.Djex.Exference` alongside its
-source-loading extension. Clients therefore do not need a redundant direct
-dependency on `djex` merely to name the adapter through a frontend dependency.
+All library clients use one unnamed `djex` dependency for the curated facade,
+shared synthesis vocabulary, checked adapters, lower-level engines, source
+loading, and the historical REPL API. Build-tool dependencies for the commands
+remain `djex:djinn` and `djex:exference`; their executable names are unchanged.
+The one library consequently has the union of core and frontend dependencies:
+`haskell-src-exts`, `directory`, `filepath`, and `haskeline` now share the same
+versioned component contract as the engines that consume their output.
 
 The filesystem and Cabal-project migration is equally deliberate:
 
@@ -111,7 +105,7 @@ The filesystem and Cabal-project migration is equally deliberate:
 - both backend trees follow the same live layout: `src-core/`,
   `src-frontend/`, `app/`, and one explicit directory per test suite. The
   package root similarly uses `src/`, `app/`, `test-integration/`,
-  `test-parser-free-api/` (including the curated-facade import guard), and
+  `test-api/` (including the curated-facade import guard), and
   `test-cli/`;
 - their separate package descriptions and project files have been replaced by
   `djex/djex.cabal`; the repository-root `cabal.project` is the single solver
@@ -165,7 +159,7 @@ replace the ordinary latest-compatible build plan.
 Useful component and compatibility-executable targets include:
 
 ```console
-cabal build djex:lib:djex djex:lib:djinn-frontend djex:lib:exference-frontend
+cabal build djex:lib:djex
 cabal run exe:djex -- djinn --render expression "a -> a"
 cabal run exe:djex -- exference --select first "a -> a"
 cabal run djinn
@@ -250,8 +244,8 @@ the shared environment, inventory, synonym table, and result envelope, as well
 as the corresponding rigid-instantiation, class-index, scope, and proof-state
 witnesses in the backends. Hiding a constructor alone is insufficient because
 `Generic.to` can rebuild its representation and GHC record update needs an
-exported field label, not the constructor. The parser-free downstream API suite
-keeps both reconstruction routes closed.
+exported field label, not the constructor. The downstream API suite keeps both
+reconstruction routes closed.
 `CachedQuery` separately owns a strict `RequestProvenance` and the adapter's
 lazy derived cache. Parsed requests materialize their complete neutral
 `SourceLocation` while sealing, avoiding retention of the input buffer;
@@ -383,15 +377,15 @@ therefore retarget surviving hints to the elaborated goal without confusing an
 erased phantom argument with an unrelated same-numbered binder, and core search
 rejects a hint value paired with any other query.
 Neither provenance nor hints affects equality/display or admits an unchecked
-construction path through the curated facade. The parser-free
-library's hidden `Language.Haskell.Djex.Exference.Internal.Request`
+construction path through the curated facade. The library's hidden
+`Language.Haskell.Djex.Exference.Internal.Request`
 representation owns that metadata. Source-adapter authors opt into the explicit parser-neutral
 `Language.Haskell.Djex.Exference.FrontendSupport` service-provider interface.
 Its checked wrappers also expose only the session vocabulary, prepared-session
 sealing, source-aware request construction, target preflight, and
 collision-safe variable allocation needed at that boundary. It is exposed
 directly by `djex`, but deliberately not re-exported by
-`Language.Haskell.Djex` or the frontend library.
+`Language.Haskell.Djex`.
 HSE's normalized parse filename is also the filename retained for deferred
 diagnostics, so extensionless labels no longer change identity between parse
 and search phases; angle-bracket virtual-buffer names remain verbatim.
@@ -434,8 +428,8 @@ Programmatic clients need only the neutral adapter:
 import Language.Haskell.Djex.Exference
 ```
 
-Clients that load directories or parse Haskell type text add the frontend
-component and its explicit source boundary:
+Clients that load directories or parse Haskell type text import the explicit
+source boundary from the same dependency:
 
 ```haskell
 import Language.Haskell.Djex.Exference
@@ -487,7 +481,7 @@ functions and tuples. Unary unboxed tuples remain structural because Haskell
 has no corresponding unary tuple constructor.
 
 The `exference` compatibility executable is a six-line launcher for
-`Language.Haskell.Exference.CLI` in the frontend component. That module is the
+`Language.Haskell.Exference.CLI` in the library. That module is the
 compatibility orchestrator at this boundary: it loads and seals one session,
 parses every requested type through `parseExferenceRequest`, selects shared
 candidates, and renders their generated expression bodies. Exact nominal

@@ -63,7 +63,7 @@ testGlobalInformation = do
 
   (versionExit, versionOutput, versionErrors) <- runDjex ["--version"]
   assertEqual "version exit" ExitSuccess versionExit
-  assertContains "version output" "djex version 2026.7.14" versionOutput
+  assertContains "version output" "djex version 2026.7.16" versionOutput
   assertEqual "version stderr" "" versionErrors
 
 testRtsOptions :: Assertion
@@ -72,7 +72,7 @@ testRtsOptions = do
     runDjex ["+RTS", "-K64m", "-RTS", "--version"]
   assertEqual "RTS-tuned version exit" ExitSuccess exitCode
   assertContains "application ran after RTS parsing"
-    "djex version 2026.7.14" output
+    "djex version 2026.7.16" output
   assertEqual "RTS-tuned version stderr" "" errors
 
 testBackendHelp :: Assertion

@@ -381,6 +381,39 @@ tests = testGroup "Djex facade"
           exferenceResultBindingUsages result @?=
             exferenceBatchBindingUsages metadata
         [] -> fail "Exference found no identity candidate"
+  , testCase "preserve exact Exference requests behind one canonical plan" $ do
+      environment <- expectRight
+        (mkEnvironment [] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      targetName <- expectRight $ mkIdentifier "exactIdentity"
+      target <- expectRight $ mkDefinitionName targetName
+      arrow <- expectRight $ parseName "(->)"
+      let variable = TypeVariable $ FlexibleVariable 0
+          exactGoal = TypeApplication
+            (TypeApplication (TypeConstructor arrow) variable)
+            variable
+          canonicalGoal = FunctionType variable variable
+          query goal = QueryRequest
+            { requestTarget = target
+            , requestGoal = goal
+            , requestContexts = []
+            , requestOptions = defaultExferenceOptions
+                {exferenceMaximumSteps = 32}
+            }
+      exactRequest <- expectRight $ mkExferenceRequest $ query exactGoal
+      canonicalRequest <- expectRight
+        $ mkExferenceRequest $ query canonicalGoal
+      exferenceRequestQuery exactRequest @?= query exactGoal
+      exferenceRequestQuery canonicalRequest @?= query canonicalGoal
+      assertBool "exact request spellings collapsed in equality"
+        $ exactRequest /= canonicalRequest
+      exactResults <- expectRight $ runExferenceQuery session exactRequest
+      canonicalResults <- expectRight
+        $ runExferenceQuery session canonicalRequest
+      exactResults @?= canonicalResults
+      assertBool "the shared canonical request plan found no identity"
+        $ any (not . null . batchCandidates . resultSearch) exactResults
   , testCase "hide Exference provenance while retaining source spellings" $ do
       environment <- expectRight
         (mkEnvironment [] :: Either

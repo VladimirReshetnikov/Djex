@@ -118,8 +118,11 @@ parsing or the neutral `Language.Haskell.Djex.Exference` API. The request
 representation remains hidden, so stable clients
 therefore see an opaque `ExferenceRequest` with one neutral smart constructor;
 the shared `CachedQuery` owns its strict complete source provenance, while
-its backend cache is exactly one opaque checked source-hint value. Neither
-provenance nor hints participate in request equality or display; sealing
+its backend cache is exactly one opaque checked source-hint value. The neutral
+slot preserves the caller's exact `QueryRequest`, matching Djinn, while the
+hint witness retains the canonical contextual goal consumed by execution.
+Neither provenance nor that private plan participates in request equality or
+display; sealing
 materializes both the complete location and every accepted spelling, so a
 reusable request retains neither its source buffer nor the raw parser map.
 Its compatibility parser still accepts a raw shared `Name`, but converts it to

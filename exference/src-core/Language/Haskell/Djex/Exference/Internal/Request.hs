@@ -36,6 +36,9 @@ import Language.Haskell.Exference.Core
   , mkExferenceSourceTypeVariableHints
   )
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
+import Language.Haskell.Exference.Core.Internal.Candidate
+  ( sourceTypeVariableHintGoal
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceLocation
@@ -141,7 +144,12 @@ mkExferenceRequestWithProvenance sourceVariables provenance query =
     let contextualGoal = requestContextualType canonicalQuery
     sourceHints <- first sourceHintFailure
       $ mkExferenceSourceTypeVariableHints contextualGoal sourceVariables
-    pure (canonicalQuery, sourceHints))
+    -- Publish the caller's exact neutral request while retaining the
+    -- canonical contextual goal inside the opaque hint witness. This matches
+    -- Djinn's exact-request/private-plan contract: equality and display
+    -- describe the supplied request, whereas execution consumes only the
+    -- checked cache derived from it.
+    pure (query, sourceHints))
 
 -- Store exactly the canonical native representation that the checked
 -- Exference core consumes.  Normalizing each context argument separately
@@ -172,7 +180,8 @@ withExferenceRequestProvenance (ExferenceRequest query) =
   withCachedQueryProvenance query
 
 requestContextualGoal :: ExferenceRequest -> ExferenceType
-requestContextualGoal = requestContextualType . exferenceRequestQuery
+requestContextualGoal = sourceTypeVariableHintGoal
+  . requestSourceTypeVariableHints
 
 validateRequest
   :: QueryRequest ExferenceType ExferenceOptions

@@ -12,6 +12,7 @@ module Language.Haskell.Exference.Core.Internal.Candidate
   , emptyExferenceSourceTypeVariableHints
   , mkExferenceSourceTypeVariableHints
   , retargetExferenceSourceTypeVariableHints
+  , sourceTypeVariableHintGoal
   , validateExferenceTypeVariableSpelling
   , typeVariableHints
   , typeVariableHintsWithPlan
@@ -355,6 +356,12 @@ checkedFlexibleTypeVariableHints
     | (variable, sourceName) <- IntMap.toAscList sourceNames
     ]
 
+-- | Recover the canonical goal sealed into a checked source-hint witness.
+--
+-- This projection is exported only from the hidden implementation module so
+-- the checked request can use the witness as its private execution plan. The
+-- public core still cannot inspect the witness or pair its spellings with a
+-- different goal.
 sourceTypeVariableHintGoal :: ExferenceSourceTypeVariableHints -> HsType
 sourceTypeVariableHintGoal (ExferenceSourceTypeVariableHints sourceType _) =
   sourceType

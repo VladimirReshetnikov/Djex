@@ -395,8 +395,12 @@ and then elimination order.
 `ExferenceRequest` is opaque in the same operational sense as `DjinnRequest`:
 the stable adapter exposes only `mkExferenceRequest` and
 `exferenceRequestQuery`. Source locations and parsed variable spellings are
-private presentation data. The common `CachedQuery` owns the strict location
-separately from an opaque backend-specific variable-to-spelling value. The
+private presentation data. Like Djinn, Exference publishes the caller's exact
+neutral request through projection, equality, and display, while execution
+uses only the canonical contextual goal retained in its private plan. The
+common `CachedQuery` owns the strict location separately from an opaque
+backend-specific variable-to-spelling value; that checked hint witness also
+owns the canonical contextual goal, so query execution does not rebuild it. The
 source SPI validates every raw alias as a non-wildcard variable identifier,
 bounds its ID to the complete contextual goal, collapses aliases
 deterministically, retains the exact canonical goal as a scope witness, and
@@ -406,7 +410,7 @@ namespace, including through nested and zero-argument aliases. The adapter can
 therefore retarget surviving hints to the elaborated goal without confusing an
 erased phantom argument with an unrelated same-numbered binder, and core search
 rejects a hint value paired with any other query.
-Neither provenance nor hints affects equality/display or admits an unchecked
+Neither provenance nor the private canonical plan affects equality/display or admits an unchecked
 construction path through the curated facade. The library's hidden
 `Language.Haskell.Djex.Exference.Internal.Request`
 representation owns that metadata. The bundled Haskell-source adapters now

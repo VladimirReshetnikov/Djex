@@ -1715,6 +1715,34 @@ ownership of an otherwise unmasked malformed name, first-invalid-obligation
 reporting, overapplication as a kind error, class-arity precedence, arities
 beyond `Int`, and public facade signatures for the narrow witness operation.
 
+## Exact-request and private-plan alignment
+
+**Completed on 2026-07-16:** the two stable request adapters shared the same
+opaque `CachedQuery` protocol but gave its visible neutral slot different
+meanings. Djinn published the caller's exact `QueryRequest` and cached a
+canonical execution plan; Exference published its canonicalized request and
+cached only source-name hints. As a result, saturated function and tuple
+constructor spellings disappeared from Exference projection, equality, and
+display even though they remained observable through the parallel Djinn API.
+Exference also reconstructed the contextual type from that published request
+at every execution despite its opaque hint witness already owning the exact
+canonical contextual goal as a scope invariant.
+
+Exference now follows Djinn's contract. Sealing validates and canonicalizes a
+private copy, validates source hints against its contextual form, and publishes
+the original request unchanged. The hidden request module reads the execution
+goal back from the opaque hint witness; no public accessor weakens that
+witness. Thus projection, equality, and display describe exactly what the
+caller supplied, while search, kind checking, synonym elaboration, context
+scoping, and rendering hints consume only the checked canonical plan. Parsed
+requests are unaffected because their source converter already constructs the
+canonical shared tree.
+
+Regression coverage pins exact noncanonical projection and display, distinct
+equality for differently spelled requests, rejection of rigid binders, and
+identical result traces for exact and canonical spellings through one sealed
+session.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

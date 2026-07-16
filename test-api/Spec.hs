@@ -199,7 +199,7 @@ main = defaultMain $ testGroup "Djex downstream API"
             second
       CoreTypes.toSynthesisType application @?=
         Right (CoreTypes.TypeTuple Boxed [first, second])
-  , testCase "stable requests store canonical types and reject rigid binders" $ do
+  , testCase "stable requests preserve exact types and reject rigid binders" $ do
       targetName <- expectRight $ mkIdentifier "tupled"
       target <- expectRight $ mkDefinitionName targetName
       pairName <- expectRight $ tupleName Boxed 2
@@ -215,8 +215,14 @@ main = defaultMain $ testGroup "Djex downstream API"
             , requestOptions = defaultExferenceOptions
             }
       checked <- expectRight $ mkExferenceRequest $ request application
-      requestGoal (exferenceRequestQuery checked) @?=
-        CoreTypes.TypeTuple Boxed [first, second]
+      exferenceRequestQuery checked @?= request application
+      let canonical = CoreTypes.TypeTuple Boxed [first, second]
+      canonicalChecked <- expectRight $ mkExferenceRequest $ request canonical
+      assertBool
+        "differently spelled exact Exference requests compared equal"
+        $ checked /= canonicalChecked
+      show checked @?= show (request application)
+      show canonicalChecked @?= show (request canonical)
       case mkExferenceRequest $ request $ CoreTypes.TypeForallNative
           [RigidVariable 2] [] first of
         Left _ -> pure ()

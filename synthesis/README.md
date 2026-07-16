@@ -63,8 +63,10 @@ diagnostic contract without making parser metadata part of the synthesis
 request. Its site-aware request traversal visits the goal first, then each
 context's arguments and complete-context hook before the next context. Djinn
 and Exference therefore share normalization order without giving up
-backend-specific class validation or diagnostic wording. Cache and provenance
-differences remain intentionally invisible to `Eq` and `Show`.
+backend-specific class validation or diagnostic wording. Both adapters retain
+the exact supplied neutral request in the visible slot and keep canonical
+execution values only in the cache. Cache and provenance differences remain
+intentionally invisible to `Eq` and `Show`.
 
 `Language.Haskell.Synthesis.Count` keeps intrinsically non-negative totals in
 `Natural`, with a strict collection count and one explicit saturating boundary

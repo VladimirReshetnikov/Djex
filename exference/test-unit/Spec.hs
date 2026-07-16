@@ -64,6 +64,7 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Expression
   ( Expression (..)
   , ExpressionRenderError (..)
+  , expressionNameHints
   , renderExpression
   , showExpression
   , toGeneratedExpression
@@ -5393,6 +5394,42 @@ tests = testGroup "Exference"
               (Generated.Apply
                 (Generated.Global $ toSynthesisName $ name "id")
                 (Generated.Local 1))
+      , testCase "typed compatibility patterns share the complete generated shape" $ do
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              functionType = TypeArrow boolean integer
+              box = name "Box"
+              just = name "Just"
+              source = name "source"
+              expression = ExpLetMatch box [(1, integer)] (ExpName source)
+                $ ExpCaseMatch (ExpVar 1 integer)
+                    [ ( just
+                      , [(2, boolean)]
+                      , ExpLet 3 functionType
+                          (ExpLambda 4 boolean $ ExpVar 1 integer)
+                          (ExpApply
+                            (ExpVar 3 functionType)
+                            (ExpVar 2 boolean))
+                      )
+                    ]
+              generated = Generated.Let
+                (Generated.Constructor (toSynthesisName box)
+                  [Generated.Bind 1])
+                (Generated.Global $ toSynthesisName source)
+                (Generated.Case (Generated.Local 1)
+                  [ ( Generated.Constructor (toSynthesisName just)
+                        [Generated.Bind 2]
+                    , Generated.Let (Generated.Bind 3)
+                        (Generated.Lambda [Generated.Bind 4]
+                          $ Generated.Local 1)
+                        (Generated.Apply
+                          (Generated.Local 3)
+                          (Generated.Local 2))
+                    )
+                  ])
+          toGeneratedExpression expression @?= generated
+          expressionNameHints expression @?= Map.fromList
+            [(1, "i1"), (2, "b2"), (3, "f3"), (4, "b4")]
       , testCase "scope failures are reported before rendering" $
           let partial = ExpVar 7 $ TypeVar 0
           in do

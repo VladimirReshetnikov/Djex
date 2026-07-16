@@ -2783,6 +2783,18 @@ generatedTests = testGroup "generated syntax"
               , (Bind 5, Tuple [Hole 2, Hole 5])
               ])
       expressionHoles expression @?= [1, 2, 3, 4, 2, 5]
+  , testCase "fill one hole identity without traversing its replacement" $ do
+      let replacement = Apply (Global $ right $ mkIdentifier "build")
+            (Hole (1 :: Int))
+          expression = Lambda [Bind 0] $ Apply
+            (Tuple [Hole 1, Hole 2])
+            (Let Wildcard (Hole 1) $ Case (Hole 3)
+              [(Wildcard, Hole 1)])
+          expected = Lambda [Bind 0] $ Apply
+            (Tuple [replacement, Hole 2])
+            (Let Wildcard replacement $ Case (Hole 3)
+              [(Wildcard, replacement)])
+      fillExpressionHole 1 replacement expression @?= expected
   , testCase "render local hints with fallback, reservations, and policy" $ do
       let namespace = right $ mkModuleName "Data.List"
           mapping = right $ mkQualifiedIdentifier namespace "map"

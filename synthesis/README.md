@@ -106,14 +106,19 @@ patterns, as-patterns, and function clauses. Its independent scope checker
 rejects free locals, repeated binders in one pattern, and identity reuse in an
 overlapping scope. `expressionHoles` retains structural order and duplicate
 identities so allocation and backend completeness checks share one traversal.
+`fillExpressionHole` replaces one selected identity throughout a partial tree
+without recursively consuming holes in the inserted replacement, allowing an
+incremental engine to publish newly allocated work safely.
 `functionClauseExpression` recovers the expression denoted
 by a clause, retaining its argument patterns as a leading lambda while leaving
 a patternless value body unchanged. The renderer allocates stable Haskell
 variable spellings against globals and caller reservations, supports the three
 qualification policies needed by the existing frontends, and prints symbolic
-and tuple applications in Haskell form. Search/proof terms keep their private
-types and annotations; backends erase them into this tree only after their own
-checks.
+and tuple applications in Haskell form. Djinn's proof terms retain their
+private representation and erase into this tree after proof checking.
+Exference uses this tree during search as well, carrying checker-only type
+annotations in its private local payload and erasing them by functor mapping at
+the stable candidate boundary.
 
 `Language.Haskell.Synthesis.Search` distinguishes a finished exploration from
 one truncated by step, choice-point, candidate, queue, or depth limits, and

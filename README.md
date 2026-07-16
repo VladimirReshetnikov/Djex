@@ -434,7 +434,14 @@ trace. Each generated expression is wrapped in a target-bearing shared
 target through result projection. The shared candidate expression/definition
 renderers own the common clause projection and return `RenderError` directly;
 each backend adapter contributes only its local-name hints and qualification
-options.
+options. Exference's live search tree is now the same shared `Generated.Expression`
+shape as those candidates. Its checker-specific type annotations inhabit a
+private local payload, while the historical `ExpVar`/`ExpLambda`/`ExpLet`/case
+constructors are bundled bidirectional compatibility patterns over that tree.
+Erasing annotations is therefore a functor projection rather than a recursive
+backend-to-shared conversion. Incremental hole filling likewise lives in the
+shared generated-syntax module and is regression-tested independently of
+Exference's search policy.
 Candidate selection and rendering remain presentation policies outside both
 session operations. The shared `Selection` module now
 provides first, global-best, streaming-all, batch-lookahead, and preferred-tier

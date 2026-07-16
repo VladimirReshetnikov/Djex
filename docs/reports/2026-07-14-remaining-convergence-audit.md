@@ -998,6 +998,30 @@ mixed-frontier regression proves that an immediate solution is emitted rather
 than queued while a pending sibling retains its goal and produces a later
 candidate.
 
+## Post-fold generated-expression ownership
+
+**Completed on 2026-07-15:** Exference retained a second recursive generated
+term tree after both backends had already converged on the foundation's
+`Generated.Expression` candidate boundary. Its constructors differed only by
+type annotations on local binders and occurrences. Conversion recursively
+rebuilt every lambda, application, let pattern, and case alternative; hole
+filling independently repeated the same traversal.
+
+Exference's `Expression` is now a private newtype over the shared generated
+tree. Search/checker annotations travel in its local payload, and the complete
+historical constructor surface is preserved as bundled bidirectional patterns,
+including `Expression(..)` imports. Stable projection merely maps annotated
+locals to their identities. The foundation now owns hole replacement for all
+generated syntax, with an explicit contract that inserted replacement trees
+are not traversed. Compatibility simplification and independent checking keep
+their typed views without retaining another recursive syntax authority.
+
+Foundation coverage pins hole replacement through tuples, lets, and cases and
+proves that fresh holes inside a replacement are not consumed recursively.
+Exference coverage constructs every historical expression form, verifies the
+exact shared tree, and fixes type-derived local-name hints across pattern,
+lambda, let, and occurrence sites.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

@@ -29,6 +29,7 @@ module Language.Haskell.Synthesis.Generated
   , validateFunctionClauseSyntax
   , validateDefinitionName
   , functionClauseExpression
+  , fillExpressionHole
   , expressionHoles
   , expressionSizeNatural
   , expressionSize
@@ -147,6 +148,33 @@ functionClauseExpression :: FunctionClause local -> Expression local
 functionClauseExpression (FunctionClause _ [] body) = body
 functionClauseExpression (FunctionClause _ patterns body) =
   Lambda patterns body
+
+-- | Replace every hole with the selected identity by one expression.
+--
+-- The replacement is inserted as a complete subtree rather than searched
+-- recursively. This is the operation needed by incremental synthesis engines:
+-- a newly constructed fragment may itself contain fresh holes, but none of
+-- those can denote the hole that has just been discharged.
+fillExpressionHole
+  :: Eq local
+  => local
+  -> Expression local
+  -> Expression local
+  -> Expression local
+fillExpressionHole selected replacement = fill
+ where
+  fill original@(Hole local)
+    | local == selected = replacement
+    | otherwise = original
+  fill original@Local{} = original
+  fill original@Global{} = original
+  fill (Lambda patterns body) = Lambda patterns $ fill body
+  fill (Apply function argument) = Apply (fill function) (fill argument)
+  fill (Tuple elements) = Tuple $ map fill elements
+  fill (Let pattern binding body) =
+    Let pattern (fill binding) (fill body)
+  fill (Case scrutinee alternatives) = Case (fill scrutinee)
+    [(pattern, fill body) | (pattern, body) <- alternatives]
 
 -- | How module qualifiers are emitted.
 --

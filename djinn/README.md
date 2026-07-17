@@ -6,7 +6,7 @@ and uses a terminating proof search for intuitionistic propositional logic to
 construct a proof term. Each candidate is independently type-checked, converted
 through a total error-reporting boundary, simplified, and printed as Haskell.
 
-This directory contains the Djinn backend of Djex `2026.7.16`, based on a
+This directory contains the Djinn backend of Djex `2026.7.17`, based on a
 reviewed local fork of
 [`djinn-2025.2.21`](https://hackage.haskell.org/package/djinn-2025.2.21), based on
 the [upstream `augustss/djinn` repository](https://github.com/augustss/djinn).

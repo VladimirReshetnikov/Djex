@@ -1773,8 +1773,9 @@ tests = testGroup "Exference"
                 map functionName [method, secondMethod]
             declaration -> fail $ "nested class missing: " ++ show declaration
           case fromSynthesisEnvironment shared of
-            Left failure -> failure @?= ClassMethodsUnsupported
-              (map functionName [method, secondMethod])
+            Left failure -> failure @?=
+              SynthesisEnvironmentDeclarationError (ClassMethodsUnsupported
+                $ map functionName [method, secondMethod])
             Right _ -> fail "legacy lowering erased class-method ownership"
           (lowered, loweredMethods) <- expectRight
             $ fromSynthesisEnvironmentWithClassMethods shared
@@ -2053,7 +2054,8 @@ tests = testGroup "Exference"
                 ]
           case projectSynthesisInventory
               matchingView [malformedDeconstructor] leftPrepared of
-            Left failure -> failure @?= InvalidDeconstructorHead (TypeVar 17)
+            Left failure -> failure @?= SynthesisEnvironmentDeclarationError
+              (InvalidDeconstructorHead $ TypeVar 17)
             Right _ -> fail "a malformed source datatype head was projected"
       , testCase "prepared projections preserve exact order, ratings, and shapes" $ do
           let dataDeclaration
@@ -3937,10 +3939,13 @@ tests = testGroup "Exference"
                   , "could not construct Exference's built-in source environment"
                   , "built-in detail"
                   )
-                , ( InvalidSourceInventory ExpectedValueDeclaration
+                , ( InvalidSourceInventory
+                      $ SynthesisEnvironmentDeclarationError
+                        ExpectedValueDeclaration
                   , "EXF_SOURCE_INVENTORY"
                   , "the source environment failed shared inventory validation"
-                  , show ExpectedValueDeclaration
+                  , show (SynthesisEnvironmentDeclarationError
+                      ExpectedValueDeclaration)
                   )
                 ]
           mapM_ (\(failure, code, message, detail) -> case
@@ -5040,9 +5045,9 @@ tests = testGroup "Exference"
                 , sourceTypeSynonyms = []
                 }
           toSynthesisSourceInventory environment @?= Left
-            (InvalidSharedDeclaration
-              $ SharedDeclaration.DuplicateMethodName
-              methodName)
+            (SynthesisEnvironmentDeclarationError
+              $ InvalidSharedDeclaration
+              $ SharedDeclaration.DuplicateMethodName methodName)
       , testCase "source inventories reject orphan constructor functions" $ do
           let orphans = map name ["Another", "Orphan"]
               result = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)

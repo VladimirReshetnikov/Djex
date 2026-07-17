@@ -264,7 +264,7 @@ data EnvironmentLoadError
   | ClassEnvironmentLoadFailure ClassEnvironmentLoadError
   | BindingDeclarationErrors (NonEmpty String)
   | BuiltInEnvironmentErrors (NonEmpty String)
-  | InvalidSourceInventory SynthesisDeclarationError
+  | InvalidSourceInventory SynthesisEnvironmentError
   deriving (Eq, Show)
 
 -- | Project every fatal loader phase into the shared diagnostic vocabulary.
@@ -375,7 +375,7 @@ checkSourceEnvironment environment = do
 normalizeBackendProjection
   :: PreparedSynthesisInventory annotation
   -> SourceEnvironment
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory annotation)
 normalizeBackendProjection prepared environment =
   projectSynthesisInventory
@@ -403,7 +403,7 @@ sourceTypeSynonymMap = uniqueTypeDeclMap . sourceTypeSynonyms
 -- the HSE modules or a parallel tuple field.
 toSynthesisSourceEnvironment
   :: SourceEnvironment
-  -> Either SynthesisDeclarationError SynthesisEnvironment
+  -> Either SynthesisEnvironmentError SynthesisEnvironment
 toSynthesisSourceEnvironment environment =
   SharedInventory.inventoryEnvironment
     <$> toSynthesisSourceInventory environment
@@ -413,7 +413,7 @@ toSynthesisSourceEnvironment environment =
 -- declarations.
 toSynthesisSourceInventory
   :: SourceEnvironment
-  -> Either SynthesisDeclarationError SynthesisInventory
+  -> Either SynthesisEnvironmentError SynthesisInventory
 toSynthesisSourceInventory environment = do
   let functions = sourceFunctions environment
       constructorDefinitions = M.fromListWith (++)
@@ -484,7 +484,8 @@ toSynthesisSourceInventory environment = do
     then pure ()
     else Left $ MismatchedConstructorFunctionBindings
       mismatchedFunctions
-  synonyms <- mapM toSynthesisTypeDeclaration
+  synonyms <- first SynthesisEnvironmentDeclarationError
+    $ mapM toSynthesisTypeDeclaration
     $ sourceTypeSynonyms environment
   core <- toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
     constructorPenalties classMethods $ EnvDictionary
@@ -497,7 +498,7 @@ toSynthesisSourceInventory environment = do
 
 sealSynthesisInventory
   :: [SynthesisDeclaration]
-  -> Either SynthesisDeclarationError SynthesisInventory
+  -> Either SynthesisEnvironmentError SynthesisInventory
 sealSynthesisInventory declarations =
   case SharedInventory.mkInventory
       SharedKindInference.OpenKindInventory declarations of

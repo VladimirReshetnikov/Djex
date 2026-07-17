@@ -10,6 +10,7 @@ module Language.Haskell.Exference.Core.Declaration
   , SynthesisInventory
   , PreparedSynthesisInventory
   , SynthesisDeclarationError (..)
+  , SynthesisEnvironmentError (..)
   , freshSynthesisVariable
   , prepareSynthesisInventory
   , prepareSourceSynthesisInventory
@@ -95,6 +96,10 @@ data PreparedSynthesisInventory annotation = PreparedSynthesisInventory
   (SharedTypeSynonym.PreparedInventory SynthesisVariable annotation)
   EnvDictionary
 
+-- | Per-declaration conversion failures. Whole-environment, inventory, and
+-- projection failures live in 'SynthesisEnvironmentError', which nests this
+-- vocabulary exactly as Djinn's environment adapter nests its declaration
+-- errors.
 data SynthesisDeclarationError
   = DeclarationTypeConversionError SynthesisTypeError
   | InvalidSharedDeclaration
@@ -113,6 +118,20 @@ data SynthesisDeclarationError
   | MissingClassMethodConstraint QualifiedName
   | MismatchedClassMethodConstraint
       QualifiedName HsConstraint HsConstraint
+  | ExplicitParameterKindUnsupported SynthesisVariable
+  | InvalidDeconstructorHead HsType
+  | NonVariableDataParameter HsType
+  | RigidDataParameter TVarId
+  | DeconstructorForallMismatch [TVarId] [TVarId]
+  | VariableNamespaceExhausted SynthesisVariable
+  deriving (Eq, Show)
+
+-- | Whole-environment, inventory, and projection failures. Declaration-level
+-- failures cross into environment operations through exactly one
+-- 'SynthesisEnvironmentDeclarationError' boundary per operation, so failure
+-- precedence within each phase is unchanged by the split.
+data SynthesisEnvironmentError
+  = SynthesisEnvironmentDeclarationError SynthesisDeclarationError
   | UnknownClassMethodOwner QualifiedName
   | PreparedBindingNamesMismatch
       [QualifiedName] -- ^ Ordered source multiset.
@@ -122,11 +141,6 @@ data SynthesisDeclarationError
       [QualifiedName] -- ^ Ordered prepared-backend multiset.
   | InvalidPreparedBindingPenalty QualifiedName Penalty
   | PreparedDataMetadataMissing SharedName.Name
-  | ExplicitParameterKindUnsupported SynthesisVariable
-  | InvalidDeconstructorHead HsType
-  | NonVariableDataParameter HsType
-  | RigidDataParameter TVarId
-  | DeconstructorForallMismatch [TVarId] [TVarId]
   | InvalidSharedEnvironment
       (SharedEnvironment.EnvironmentError SynthesisVariable)
   | ClassEnvironmentConversionError ClassEnvError
@@ -143,7 +157,6 @@ data SynthesisDeclarationError
       (SharedTypeSynonym.SynonymExpansionError SynthesisVariable)
   | SynonymPreparationError
       (SharedTypeSynonym.SynonymExpansionError SynthesisVariable)
-  | VariableNamespaceExhausted SynthesisVariable
   deriving (Eq, Show)
 
 -- | Prepare an already checked shared inventory for Exference. Type aliases
@@ -151,7 +164,7 @@ data SynthesisDeclarationError
 -- retained in the shared witness but never participate in backend lowering.
 prepareSynthesisInventory
   :: SharedInventory.Inventory SynthesisVariable annotation
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory annotation)
 prepareSynthesisInventory inventory = do
   expansion <- first promoteExpansionError
@@ -177,7 +190,7 @@ prepareSynthesisInventory inventory = do
 -- see the same classification as search.
 prepareSourceSynthesisInventory
   :: SynthesisInventory
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory DeclarationMetadata)
 prepareSourceSynthesisInventory inventory =
   prepareSynthesisInventory inventory >>= normalizePreparedDataMetadata
@@ -191,7 +204,7 @@ projectSynthesisInventory
   :: [(QualifiedName, Penalty)]
   -> [DeconstructorBinding]
   -> PreparedSynthesisInventory annotation
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory annotation)
 projectSynthesisInventory functionProjection dataProjection
     (PreparedSynthesisInventory prepared backend) = do
@@ -202,8 +215,10 @@ projectSynthesisInventory functionProjection dataProjection
     then pure ()
     else Left $ PreparedBindingNamesMismatch
       sourceBindingNames preparedBindingNames
-  sourceDataNames <- mapM deconstructorTypeName dataProjection
-  preparedDataNames <- mapM deconstructorTypeName
+  sourceDataNames <- first SynthesisEnvironmentDeclarationError
+    $ mapM deconstructorTypeName dataProjection
+  preparedDataNames <- first SynthesisEnvironmentDeclarationError
+    $ mapM deconstructorTypeName
     $ environmentDeconstructors backend
   let sortedSourceDataNames = sort sourceDataNames
       canonicalDataNames = sort preparedDataNames
@@ -274,7 +289,7 @@ erasePreparedSynthesisAnnotations
 -- deconstructor; abstract types deliberately have none.
 normalizePreparedDataMetadata
   :: PreparedSynthesisInventory DeclarationMetadata
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory DeclarationMetadata)
 normalizePreparedDataMetadata
     (PreparedSynthesisInventory prepared backend) = do
@@ -290,7 +305,8 @@ normalizePreparedDataMetadata
   pure $ PreparedSynthesisInventory adjusted backend
  where
   entry deconstructor = do
-    name <- deconstructorTypeName deconstructor
+    name <- first SynthesisEnvironmentDeclarationError
+      $ deconstructorTypeName deconstructor
     pure (name, deconstructorRecursive deconstructor)
 
   requireMetadata metadata declaration = case declaration of
@@ -318,7 +334,7 @@ deconstructorTypeName declaration = fst
 prepareSearchEnvironment
   :: SharedTypeSynonym.PreparedInventoryExpansion
       SynthesisVariable annotation
-  -> Either SynthesisDeclarationError EnvDictionary
+  -> Either SynthesisEnvironmentError EnvDictionary
 prepareSearchEnvironment expansion = do
   -- Renaming variables and erasing annotations cannot change a nominal
   -- datatype edge, so the shared pre-normalization SCC set is exact here.
@@ -327,7 +343,8 @@ prepareSearchEnvironment expansion = do
         $ SharedTypeSynonym.inventoryExpansionDeclarations expansion
       recursiveNames =
         SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
-  prepared <- mapM (prepareSearchDeclaration recursiveNames) normalized
+  prepared <- first SynthesisEnvironmentDeclarationError
+    $ mapM (prepareSearchDeclaration recursiveNames) normalized
   fmap fst $ lowerSynthesisDeclarations IncludeDerivedBindings
     fromSynthesisClassDeclarationWithMethods
     [declaration | Just declaration <- prepared]
@@ -681,7 +698,7 @@ fromSynthesisRatedDataDeclaration declaration = do
 
 toSynthesisEnvironment
   :: EnvDictionary
-  -> Either SynthesisDeclarationError SynthesisEnvironment
+  -> Either SynthesisEnvironmentError SynthesisEnvironment
 toSynthesisEnvironment =
   toSynthesisEnvironmentWith toSynthesisDataDeclaration Map.empty
 
@@ -693,7 +710,7 @@ toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
   :: Map.Map QualifiedName Penalty
   -> Map.Map QualifiedName [FunctionBinding]
   -> EnvDictionary
-  -> Either SynthesisDeclarationError SynthesisEnvironment
+  -> Either SynthesisEnvironmentError SynthesisEnvironment
 toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods
     penalties methods =
   toSynthesisEnvironmentWith
@@ -704,13 +721,13 @@ toSynthesisEnvironmentWith
       -> Either SynthesisDeclarationError SynthesisDeclaration)
   -> Map.Map QualifiedName [FunctionBinding]
   -> EnvDictionary
-  -> Either SynthesisDeclarationError SynthesisEnvironment
+  -> Either SynthesisEnvironmentError SynthesisEnvironment
 toSynthesisEnvironmentWith convertDataDeclaration methods environment = do
   let classes = sClassEnv_tclasses $ environmentClasses environment
   case Set.toAscList $ Map.keysSet methods `Set.difference` Map.keysSet classes of
     owner : _ -> Left $ UnknownClassMethodOwner owner
     [] -> pure ()
-  declarations <- sequence $
+  declarations <- first SynthesisEnvironmentDeclarationError $ sequence $
     map toSynthesisFunctionBinding (environmentFunctions environment) ++
     map convertDataDeclaration (environmentDeconstructors environment) ++
     [ toSynthesisClassDeclarationWithMethods declaration
@@ -724,7 +741,7 @@ toSynthesisEnvironmentWith convertDataDeclaration methods environment = do
 
 fromSynthesisEnvironment
   :: SynthesisEnvironment
-  -> Either SynthesisDeclarationError EnvDictionary
+  -> Either SynthesisEnvironmentError EnvDictionary
 fromSynthesisEnvironment = fmap fst . lowerSynthesisEnvironment
   (fmap (, []) . fromSynthesisClassDeclaration)
 
@@ -735,7 +752,7 @@ fromSynthesisEnvironment = fmap fst . lowerSynthesisEnvironment
 -- 'fromSynthesisEnvironment', which rejects method-bearing classes.
 fromSynthesisEnvironmentWithClassMethods
   :: SynthesisEnvironment
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (EnvDictionary, Map.Map QualifiedName [FunctionBinding])
 fromSynthesisEnvironmentWithClassMethods =
   lowerSynthesisEnvironment fromSynthesisClassDeclarationWithMethods
@@ -752,7 +769,7 @@ lowerSynthesisEnvironment
   :: (SynthesisDeclaration
       -> Either SynthesisDeclarationError (HsTypeClass, [FunctionBinding]))
   -> SynthesisEnvironment
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (EnvDictionary, Map.Map QualifiedName [FunctionBinding])
 lowerSynthesisEnvironment convertClass environment =
   lowerSynthesisDeclarations ExplicitBindingsOnly convertClass
@@ -767,7 +784,7 @@ lowerSynthesisDeclarations
   -> (SynthesisDeclaration
       -> Either SynthesisDeclarationError (HsTypeClass, [FunctionBinding]))
   -> [SynthesisDeclaration]
-  -> Either SynthesisDeclarationError
+  -> Either SynthesisEnvironmentError
       (EnvDictionary, Map.Map QualifiedName [FunctionBinding])
 lowerSynthesisDeclarations projection convertClass declarations = do
   (functions, deconstructors, classes, instances, methods) <- foldM collect
@@ -785,11 +802,11 @@ lowerSynthesisDeclarations projection convertClass declarations = do
       declaration =
     case declaration of
       SharedDeclaration.ValueDeclaration{} -> do
-        binding <- fromSynthesisFunctionBinding declaration
+        binding <- declarationLevel $ fromSynthesisFunctionBinding declaration
         Right
           ( binding : functions, deconstructors, classes, instances, methods)
       SharedDeclaration.DataTypeDeclaration{} -> do
-        (constructors, deconstructor) <- case projection of
+        (constructors, deconstructor) <- declarationLevel $ case projection of
           IncludeDerivedBindings ->
             fromSynthesisRatedDataDeclaration declaration
           ExplicitBindingsOnly ->
@@ -800,7 +817,8 @@ lowerSynthesisDeclarations projection convertClass declarations = do
           , methods
           )
       SharedDeclaration.ClassDeclaration{} -> do
-        (classDeclaration, classMethods) <- convertClass declaration
+        (classDeclaration, classMethods) <- declarationLevel
+          $ convertClass declaration
         let (derivedMethods, retainedMethods) = case projection of
               IncludeDerivedBindings -> (reverse classMethods, methods)
               ExplicitBindingsOnly
@@ -816,7 +834,8 @@ lowerSynthesisDeclarations projection convertClass declarations = do
           , retainedMethods
           )
       SharedDeclaration.InstanceDeclaration{} -> do
-        instanceDeclaration <- fromSynthesisInstanceDeclaration declaration
+        instanceDeclaration <- declarationLevel
+          $ fromSynthesisInstanceDeclaration declaration
         Right
           ( functions, deconstructors, classes
           , instanceDeclaration : instances, methods
@@ -825,6 +844,11 @@ lowerSynthesisDeclarations projection convertClass declarations = do
         Left $ UnsupportedCoreEnvironmentDeclaration name
       SharedDeclaration.AbstractTypeDeclaration _ name _ ->
         Left $ UnsupportedCoreEnvironmentDeclaration name
+
+  declarationLevel
+    :: Either SynthesisDeclarationError result
+    -> Either SynthesisEnvironmentError result
+  declarationLevel = first SynthesisEnvironmentDeclarationError
 
 checked
   :: Either SynthesisDeclarationError SynthesisDeclaration

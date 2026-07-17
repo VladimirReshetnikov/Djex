@@ -48,7 +48,7 @@ testRtsOptions :: Assertion
 testRtsOptions = do
   output <- runExference ["+RTS", "-K64m", "-RTS", "--version"]
   assertContains "application ran after RTS parsing"
-    "exference version 2026.7.16" output
+    "exference version 2026.7.17" output
 
 -- This is deliberately an end-to-end default-environment test. The shipped
 -- ratings include negative bonuses; applying the non-negative heuristic policy
@@ -292,7 +292,7 @@ testParsedDatatypePatternMatch =
 testVersion :: Assertion
 testVersion = do
   output <- runExference ["--version"]
-  assertContains "version should be reported" "exference version 2026.7.16" output
+  assertContains "version should be reported" "exference version 2026.7.17" output
   assertBool "version mode should not parse environment files"
     (not $ "environment warning:" `isInfixOf` output)
 

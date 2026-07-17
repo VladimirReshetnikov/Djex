@@ -1,6 +1,6 @@
 Cabal-Version: 3.0
 Name:          djex
-Version:       2026.7.16
+Version:       2026.7.17
 Synopsis:      Haskell expression synthesis with Djinn and Exference backends
 Description:
   Djex combines the Djinn intuitionistic theorem prover and the Exference

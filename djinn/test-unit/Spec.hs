@@ -82,6 +82,8 @@ tests =
           testCheckedDjinnSessionEditing)
     , ("invalidate prepared Djinn caches transactionally",
           testCheckedDjinnCacheInvalidation)
+    , ("agree between ground and weakened edit transactions",
+          testGroundEditAgreement)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
@@ -438,6 +440,77 @@ testCheckedDjinnSessionEditing = do
     assertEqual "function replacement retained a stale prepared premise"
         []
         (SharedSearch.batchCandidates $ SharedQuery.resultSearch uninhabited)
+
+    -- The ground editor rejects an unsolved kind variable at the entrance
+    -- with the same error value the weakened path produced during resealing.
+    case Djex.declareDjinnDeclaration (AbstractType "Mystery" (KVar 0)) initial of
+      Left failure -> do
+        assertEqual "ungrounded kinds lost the environment diagnostic code"
+            (Just "DJEX_DJINN_ENV")
+            (SharedDiagnostic.diagnosticCode failure)
+        assertBool "ungrounded kinds lost the historical unsolved-kind text"
+            $ "kind contains an unsolved variable: k0" `isInfixOf`
+                unwords (SharedDiagnostic.diagnosticContext failure)
+      Right _ -> fail "the ground editor accepted an unsolved kind variable"
+
+-- The stable adapter now edits the sealed ground environment directly while
+-- the raw compatibility API still weakens kinds to Int and re-grounds during
+-- resealing. Pin that the two transactions cannot drift by running the same
+-- edits through both and comparing every observable projection, including
+-- failure values.
+testGroundEditAgreement :: IO ()
+testGroundEditAgreement = do
+    initial <- expectShownRight Djex.standardDjinnSession
+    let groundEnv = Djex.djinnSessionEnvironment initial
+        weakened = SharedEnvironment.mapEnvironmentKindVariables
+            absurd groundEnv
+        agreeDeclare label declaration = agree label
+            (RawEnvironment.declareGroundSynthesisEnvironment
+                declaration groundEnv)
+            (RawEnvironment.declareSynthesisEnvironment declaration weakened)
+        agreeRemove label name = agree label
+            (RawEnvironment.removeGroundSynthesisDeclaration name groundEnv)
+            (RawEnvironment.removeSynthesisDeclaration name weakened)
+        agree label groundResult weakenedResult =
+            case (groundResult, weakenedResult) of
+                (Left groundFailure, Left weakenedFailure) -> assertEqual
+                    (label ++ ": failure values diverged")
+                    weakenedFailure groundFailure
+                (Right (groundCandidate, groundPrepared),
+                 Right (weakenedCandidate, weakenedPrepared)) -> do
+                    assertEqual (label ++ ": edited environments diverged")
+                        weakenedCandidate
+                        (SharedEnvironment.mapEnvironmentKindVariables absurd
+                            groundCandidate)
+                    assertEqual (label ++ ": raw projections diverged")
+                        (RawEnvironment.preparedEnvironmentSource
+                            weakenedPrepared)
+                        (RawEnvironment.preparedEnvironmentSource
+                            groundPrepared)
+                    assertEqual (label ++ ": sealed inventories diverged")
+                        (SharedInventory.inventoryEnvironment
+                            $ RawEnvironment.preparedEnvironmentInventory
+                                weakenedPrepared)
+                        (SharedInventory.inventoryEnvironment
+                            $ RawEnvironment.preparedEnvironmentInventory
+                                groundPrepared)
+                (Left failure, Right _) -> fail $ label
+                    ++ ": only the ground transaction failed: " ++ show failure
+                (Right _, Left failure) -> fail $ label
+                    ++ ": only the weakened transaction failed: "
+                    ++ show failure
+    agreeDeclare "declare a function"
+        $ Function "probe" $ HTArrow (HTVar "a") (HTVar "a")
+    agreeDeclare "declare a synonym"
+        $ TypeSynonym "Probe" ["a"] $ HTVar "a"
+    agreeDeclare "declare a class" $ ClassDecl "Probeable" ["a"]
+        [("probeOut", HTVar "a")]
+    agreeDeclare "reject the protected unit" $ DataType "()" [] [("()", [])]
+    agreeDeclare "reject an unsolved kind"
+        $ AbstractType "Mystery" $ KVar 0
+    agreeRemove "remove a standalone datatype" "Either"
+    agreeRemove "reject removing the unit" "()"
+    agreeRemove "reject removing a missing name" "missing"
 
 testCheckedDjinnCacheInvalidation :: IO ()
 testCheckedDjinnCacheInvalidation = do

@@ -44,7 +44,7 @@ module Language.Haskell.Djex.Djinn
   ) where
 
 import Data.Bifunctor (first)
-import Data.Void (Void, absurd)
+import Data.Void (Void)
 
 import Djinn.Core
   ( DjinnCandidateDetails (..)
@@ -56,8 +56,6 @@ import Djinn.Core
   , PreparedEnvironment
   , QueryOptions (..)
   , defaultQueryOptions
-  , declareSynthesisEnvironment
-  , removeSynthesisDeclaration
   , preparedEnvironmentSource
   , preparedEnvironmentInventory
   , resolvePreparedInstanceMethods
@@ -193,15 +191,16 @@ djinnSessionInventory (DjinnSession prepared) =
   preparedEnvironmentInventory prepared
 
 -- | Apply one historical declaration to the authoritative shared environment
--- and publish the replacement session only after complete validation.
+-- and publish the replacement session only after complete validation. The
+-- sealed ground environment is edited directly: kinds are never weakened
+-- merely to be re-grounded during resealing.
 declareDjinnDeclaration
   :: Declaration
   -> DjinnSession
   -> Either Diagnostic DjinnSession
 declareDjinnDeclaration declaration session = do
   (_, prepared) <- first environmentEditFailure
-    $ declareSynthesisEnvironment declaration
-    $ SharedEnvironment.mapEnvironmentKindVariables absurd
+    $ RawEnvironment.declareGroundSynthesisEnvironment declaration
     $ djinnSessionEnvironment session
   pure $ DjinnSession prepared
 
@@ -212,8 +211,7 @@ removeDjinnDeclaration
   -> Either Diagnostic DjinnSession
 removeDjinnDeclaration name session = do
   (_, prepared) <- first environmentEditFailure
-    $ removeSynthesisDeclaration name
-    $ SharedEnvironment.mapEnvironmentKindVariables absurd
+    $ RawEnvironment.removeGroundSynthesisDeclaration name
     $ djinnSessionEnvironment session
   pure $ DjinnSession prepared
 

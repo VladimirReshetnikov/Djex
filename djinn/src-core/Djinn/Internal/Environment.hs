@@ -17,6 +17,7 @@ module Djinn.Internal.Environment (
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
     declareSynthesisEnvironment, removeSynthesisDeclaration,
+    declareGroundSynthesisEnvironment, removeGroundSynthesisDeclaration,
     validateEnvironment
     ) where
 
@@ -231,22 +232,66 @@ prepareGroundSynthesisEnvironmentFrom sourceEnvironment = do
 -- | Apply one compatibility declaration directly to the shared environment,
 -- then seal the resulting session state before returning it.  Djinn's
 -- historical association lists put replacements first within each category;
--- encode that policy here rather than round-tripping through those lists and
--- accidentally making them the editable authority again.
+-- 'declareSharedDeclaration' encodes that policy rather than round-tripping
+-- through those lists and accidentally making them the editable authority
+-- again.
 declareSynthesisEnvironment
     :: Declaration
     -> SynthesisEnvironment
     -> Either SynthesisEnvironmentError
         (SynthesisEnvironment, PreparedEnvironment)
 declareSynthesisEnvironment declaration sourceEnvironment = do
-    -- The canonical unit declaration is representable only so trusted raw
-    -- environments can cross the shared boundary. Public editing must not
-    -- use that representational exception to install grammar-level @()@.
+    sharedDeclaration <- checkedEditDeclaration declaration
+    declareSharedDeclaration
+        sharedDeclaration prepareSynthesisEnvironment sourceEnvironment
+
+-- | Ground-kinded counterpart of 'declareSynthesisEnvironment' for the
+-- stable adapter: the session's sealed @Void@-kinded environment is edited
+-- directly, so kinds are never weakened merely to be re-grounded during
+-- resealing. Only the one new declaration crosses the grounding boundary,
+-- and an unsolved kind variable in it is rejected with the same error value
+-- the resealing path would have produced.
+declareGroundSynthesisEnvironment
+    :: Declaration
+    -> SharedEnvironment.Environment HSymbol Void ()
+    -> Either SynthesisEnvironmentError
+        (SharedEnvironment.Environment HSymbol Void (), PreparedEnvironment)
+declareGroundSynthesisEnvironment declaration sourceEnvironment = do
+    sharedDeclaration <- checkedEditDeclaration declaration
+    groundDeclaration <- first
+        (InvalidSynthesisInventory . SharedInventory.UngroundedInventoryKind)
+        $ SharedDeclaration.groundDeclarationKinds sharedDeclaration
+    declareSharedDeclaration
+        groundDeclaration prepareGroundSynthesisEnvironment sourceEnvironment
+
+-- The unit guard and lexical conversion shared by both declare entrances.
+-- The canonical unit declaration is representable only so trusted raw
+-- environments can cross the shared boundary; public editing must not use
+-- that representational exception to install grammar-level @()@.
+checkedEditDeclaration
+    :: Declaration
+    -> Either SynthesisEnvironmentError SynthesisDeclaration
+checkedEditDeclaration declaration = do
     if declaration == canonicalUnitDeclaration
         then Left ProtectedSynthesisUnitDeclaration
         else Right ()
-    sharedDeclaration <- first SynthesisEnvironmentDeclarationError $
+    first SynthesisEnvironmentDeclarationError $
         toSynthesisDeclaration declaration
+
+-- The kind-polymorphic replacement transaction. Both public entrances share
+-- this exact body, so the replacement-first-within-category policy cannot
+-- drift between the raw and ground paths; only the resealing operation is
+-- entrance-specific.
+declareSharedDeclaration
+    :: SharedDeclaration.Declaration HSymbol kindVariable ()
+    -> (SharedEnvironment.Environment HSymbol kindVariable ()
+        -> Either SynthesisEnvironmentError PreparedEnvironment)
+    -> SharedEnvironment.Environment HSymbol kindVariable ()
+    -> Either SynthesisEnvironmentError
+        ( SharedEnvironment.Environment HSymbol kindVariable ()
+        , PreparedEnvironment
+        )
+declareSharedDeclaration sharedDeclaration reseal sourceEnvironment = do
     (group, owner) <- synthesisDeclarationOwner sharedDeclaration
     categorized <- mapM categorize $
         SharedEnvironment.environmentDeclarations sourceEnvironment
@@ -274,7 +319,7 @@ declareSynthesisEnvironment declaration sourceEnvironment = do
                 sharedDeclaration : declarations SynthesisClassDeclaration
     candidate <- first InvalidSynthesisEnvironment $
         SharedEnvironment.mkEnvironment withReplacement
-    prepared <- prepareSynthesisEnvironment candidate
+    prepared <- reseal candidate
     return (candidate, prepared)
   where
     categorize candidate = do
@@ -289,7 +334,30 @@ removeSynthesisDeclaration
     -> SynthesisEnvironment
     -> Either SynthesisEnvironmentError
         (SynthesisEnvironment, PreparedEnvironment)
-removeSynthesisDeclaration sourceName sourceEnvironment = do
+removeSynthesisDeclaration sourceName =
+    removeSharedDeclaration sourceName prepareSynthesisEnvironment
+
+-- | Ground-kinded counterpart of 'removeSynthesisDeclaration' for the stable
+-- adapter. Removal introduces no kinds, so the ground path needs no
+-- conversion at all.
+removeGroundSynthesisDeclaration
+    :: HSymbol
+    -> SharedEnvironment.Environment HSymbol Void ()
+    -> Either SynthesisEnvironmentError
+        (SharedEnvironment.Environment HSymbol Void (), PreparedEnvironment)
+removeGroundSynthesisDeclaration sourceName =
+    removeSharedDeclaration sourceName prepareGroundSynthesisEnvironment
+
+removeSharedDeclaration
+    :: HSymbol
+    -> (SharedEnvironment.Environment HSymbol kindVariable ()
+        -> Either SynthesisEnvironmentError PreparedEnvironment)
+    -> SharedEnvironment.Environment HSymbol kindVariable ()
+    -> Either SynthesisEnvironmentError
+        ( SharedEnvironment.Environment HSymbol kindVariable ()
+        , PreparedEnvironment
+        )
+removeSharedDeclaration sourceName reseal sourceEnvironment = do
     owner <- case SharedName.parseName sourceName of
         Left _ -> Left $ SynthesisDeclarationNotFound sourceName
         Right name -> Right name
@@ -307,7 +375,7 @@ removeSynthesisDeclaration sourceName sourceEnvironment = do
                 | (declaration, candidateOwner) <- declarations
                 , candidateOwner /= owner
                 ]
-        prepared <- prepareSynthesisEnvironment candidate
+        prepared <- reseal candidate
         return (candidate, prepared)
   where
     attachOwner declaration = do
@@ -321,7 +389,7 @@ data SynthesisDeclarationGroup
     deriving (Eq)
 
 synthesisDeclarationOwner
-    :: SynthesisDeclaration
+    :: SharedDeclaration.Declaration HSymbol kindVariable annotation
     -> Either SynthesisEnvironmentError
         (SynthesisDeclarationGroup, SharedName.Name)
 synthesisDeclarationOwner declaration = case declaration of

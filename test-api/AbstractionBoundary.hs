@@ -65,7 +65,9 @@ import Language.Haskell.Exference.Core.Types
   , sClassEnv_instances
   , sClassEnv_tclasses
   )
+import Language.Haskell.Synthesis.Class
 import Language.Haskell.Synthesis.Collection (DuplicateSummary)
+import Language.Haskell.Synthesis.Constraint (Constraint)
 import Language.Haskell.Synthesis.Declaration (Declaration)
 import Language.Haskell.Synthesis.Diagnostic
   ( SourceLocation
@@ -76,10 +78,11 @@ import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Inventory
 import Language.Haskell.Synthesis.KindInference
-  ( KindAssumptions )
+  ( GroundKind, KindAssumptions )
 import Language.Haskell.Synthesis.Name (ModuleName, Name)
 import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search (SearchBatch)
+import Language.Haskell.Synthesis.Type (Type)
 import Language.Haskell.Synthesis.TypeSynonym
   ( PreparedInventory
   , PreparedInventoryExpansion
@@ -95,6 +98,9 @@ forbiddenConstructionAttempts :: [(String, ())]
 forbiddenConstructionAttempts =
   [ noGeneric @(Environment Int Void ()) "Environment"
   , noGeneric @(Inventory Int ()) "Inventory"
+  , noGeneric @(PreparedClassIndex Int) "PreparedClassIndex"
+  , noGeneric @(PreparedClass Int) "PreparedClass"
+  , noGeneric @(PreparedInstance Int) "PreparedInstance"
   , noGeneric @(TypeSynonyms Int) "TypeSynonyms"
   , noGeneric @(PreparedInventory Int ()) "PreparedInventory"
   , noGeneric @(PreparedInventoryExpansion Int ())
@@ -136,6 +142,21 @@ forbiddenConstructionAttempts =
       @(Inventory Int ())
       @KindAssumptions
       "Inventory.inventoryKindAssumptions"
+  , noField
+      @"preparedClasses"
+      @(PreparedClassIndex Int)
+      @[PreparedClass Int]
+      "PreparedClassIndex.preparedClasses"
+  , noField
+      @"preparedClassParameters"
+      @(PreparedClass Int)
+      @[(Int, Maybe GroundKind)]
+      "PreparedClass.preparedClassParameters"
+  , noField
+      @"preparedInstanceHead"
+      @(PreparedInstance Int)
+      @(Constraint (Type Int))
+      "PreparedInstance.preparedInstanceHead"
   , noField
       @"resultEvidence"
       @(QueryResult () ())

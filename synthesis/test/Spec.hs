@@ -13,6 +13,7 @@ import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Candidate
+import qualified Language.Haskell.Synthesis.Class as Class
 import Language.Haskell.Synthesis.Collection
 import Language.Haskell.Synthesis.Count
 import Language.Haskell.Synthesis.Constraint
@@ -47,6 +48,7 @@ main = defaultMain tests
 tests :: TestTree
 tests = testGroup "Djex synthesis foundation"
   [ candidateTests
+  , classTests
   , collectionTests
   , freshTests
   , constraintTests
@@ -904,6 +906,170 @@ kindInferenceTests = testGroup "kind inference"
   proper :: KindInference.GroundKind
   proper = Kind.ProperTypeKind
   arrow = Kind.FunctionKind
+
+classTests :: TestTree
+classTests = testGroup "prepared classes"
+  [ testCase "pair declared classes, kinds, methods, and instances exactly" $ do
+      let integerName = right $ mkIdentifier "Int"
+          zedName = right $ mkIdentifier "Zed"
+          alphaName = right $ mkIdentifier "Alpha"
+          derivedName = right $ mkIdentifier "Derived"
+          markerName = right $ mkIdentifier "Marker"
+          applyName = right $ mkIdentifier "apply"
+          identityName = right $ mkIdentifier "identity"
+          variable = SharedType.TypeVariable
+          integer = SharedType.TypeConstructor integerName
+          application = SharedType.TypeApplication (variable "f") integer
+          alphaConstraint = Constraint alphaName [variable "a"]
+          derivedConstraint = Constraint derivedName [variable "a"]
+          applyType = SharedType.FunctionType application integer
+          identityType = SharedType.FunctionType
+            (variable "a") (variable "a")
+          declarations ::
+            [Declaration.Declaration String Int String]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration
+                "integer" integerName Kind.ProperTypeKind
+            , Declaration.ClassDeclaration "zed" zedName
+                [Declaration.TypeParameter "f" Nothing] []
+                [Declaration.ValueSignature "apply method" applyName applyType]
+            , Declaration.ClassDeclaration "alpha" alphaName
+                [Declaration.TypeParameter "a" Nothing] []
+                [ Declaration.ValueSignature
+                    "identity method" identityName identityType
+                ]
+            , Declaration.ClassDeclaration "derived" derivedName
+                [Declaration.TypeParameter "a" Nothing]
+                [alphaConstraint] []
+            , Declaration.ClassDeclaration "marker" markerName
+                [Declaration.TypeParameter "phantom" Nothing] [] []
+            , Declaration.InstanceDeclaration "derived instance" ["a"]
+                [alphaConstraint] derivedConstraint
+            , Declaration.InstanceDeclaration "alpha instance" [] []
+                (Constraint alphaName [integer])
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.ClosedKindInventory declarations
+          index = Class.prepareClassIndex inventory
+          classes = Class.preparedClasses index
+          instances = Class.preparedExplicitInstances index
+          higherKind = Kind.FunctionKind
+            Kind.ProperTypeKind Kind.ProperTypeKind :: Kind.Kind Void
+      map Class.preparedClassName classes @?=
+        [zedName, alphaName, derivedName, markerName]
+      Class.preparedClassParameters
+          (right $ maybeToEither $ Class.lookupPreparedClass zedName index) @?=
+        [("f", Just higherKind)]
+      Class.preparedClassParameters
+          (right $ maybeToEither $ Class.lookupPreparedClass markerName index) @?=
+        [("phantom", Nothing)]
+      Class.preparedClassMethods
+          (right $ maybeToEither $ Class.lookupPreparedClass alphaName index) @?=
+        [(identityName, identityType)]
+      Class.preparedClassSuperclasses
+          (right $ maybeToEither $ Class.lookupPreparedClass derivedName index) @?=
+        [alphaConstraint]
+      Class.lookupPreparedClass (right $ mkIdentifier "Missing") index @?=
+        Nothing
+      map Class.preparedInstanceBinders instances @?= [["a"], []]
+      map Class.preparedInstancePrerequisites instances @?=
+        [[alphaConstraint], []]
+      map Class.preparedInstanceHead instances @?=
+        [derivedConstraint, Constraint alphaName [integer]]
+      Class.prepareClassIndex (fmap length inventory) @?= index
+      let defaulted = right $ Inventory.mkInventoryWithClassPolicy
+            KindInference.ClosedKindInventory KindInference.DefaultClassKinds
+            declarations
+          defaultedMarker = right $ maybeToEither
+            $ Class.lookupPreparedClass markerName
+            $ Class.prepareClassIndex defaulted
+      Class.preparedClassParameters defaultedMarker @?=
+        [("phantom", Just Kind.ProperTypeKind)]
+  , testCase "do not manufacture declarations for open external classes" $ do
+      let externalName = right $ mkIdentifier "External"
+          externalTypeName = right $ mkIdentifier "ExternalType"
+          valueName = right $ mkIdentifier "externalIdentity"
+          variable = SharedType.TypeVariable "a"
+          constrained = SharedType.ForallType ["a"]
+            [Constraint externalName [variable]]
+            $ SharedType.FunctionType variable variable
+          valueDeclaration :: Declaration.Declaration String Int ()
+          valueDeclaration = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () valueName constrained
+          externalHead = Constraint externalName
+            [SharedType.TypeConstructor externalTypeName]
+          instanceDeclaration = Declaration.InstanceDeclaration
+            () [] [] externalHead
+          inventory = right $ Inventory.mkInventory
+            KindInference.OpenKindInventory
+            [valueDeclaration, instanceDeclaration]
+          index = Class.prepareClassIndex inventory
+      Class.preparedClasses index @?= []
+      Class.lookupPreparedClass externalName index @?= Nothing
+      map Class.preparedInstanceHead
+          (Class.preparedExplicitInstances index) @?= [externalHead]
+  , testCase "retain source-shaped aliases and cyclic superclass facts" $ do
+      let aliasName = right $ mkIdentifier "Alias"
+          firstName = right $ mkIdentifier "First"
+          secondName = right $ mkIdentifier "Second"
+          methodName = right $ mkIdentifier "method"
+          variable = SharedType.TypeVariable "a"
+          firstConstraint = Constraint firstName [variable]
+          secondConstraint = Constraint secondName [variable]
+          aliased = SharedType.TypeApplication
+            (SharedType.TypeConstructor aliasName) variable
+          declarations :: [Declaration.Declaration String Int ()]
+          declarations =
+            [ Declaration.TypeSynonymDeclaration () aliasName
+                [Declaration.TypeParameter "a" Nothing] variable
+            , Declaration.ClassDeclaration () firstName
+                [Declaration.TypeParameter "a" Nothing]
+                [secondConstraint]
+                [Declaration.ValueSignature () methodName aliased]
+            , Declaration.ClassDeclaration () secondName
+                [Declaration.TypeParameter "a" Nothing]
+                [firstConstraint] []
+            ]
+          inventory = right $ Inventory.mkInventory
+            KindInference.ClosedKindInventory declarations
+          index = Class.prepareClassIndex inventory
+          firstClass = right $ maybeToEither
+            $ Class.lookupPreparedClass firstName index
+          secondClass = right $ maybeToEither
+            $ Class.lookupPreparedClass secondName index
+      Class.preparedClassSuperclasses firstClass @?= [secondConstraint]
+      Class.preparedClassSuperclasses secondClass @?= [firstConstraint]
+      Class.preparedClassMethods firstClass @?= [(methodName, aliased)]
+  , testCase "forcing a semantic class index ignores source annotations" $ do
+      let integerName = right $ mkIdentifier "Int"
+          className = right $ mkIdentifier "C"
+          methodName = right $ mkIdentifier "method"
+          variable = SharedType.TypeVariable "a"
+          declarations ::
+            [Declaration.Declaration String Int String]
+          declarations =
+            [ Declaration.AbstractTypeDeclaration
+                (error "forced type annotation") integerName Kind.ProperTypeKind
+            , Declaration.ClassDeclaration
+                (error "forced class annotation") className
+                [Declaration.TypeParameter "a" Nothing] []
+                [ Declaration.ValueSignature
+                    (error "forced method annotation") methodName
+                    $ SharedType.FunctionType variable variable
+                ]
+            , Declaration.InstanceDeclaration
+                (error "forced instance annotation") [] []
+                $ Constraint className
+                    [SharedType.TypeConstructor integerName]
+            ]
+          inventory = right $ Inventory.mkInventoryWithClassPolicy
+            KindInference.ClosedKindInventory KindInference.DefaultClassKinds
+            declarations
+      _ <- evaluate $ force $ Class.prepareClassIndex inventory
+      pure ()
+  ]
+ where
+  maybeToEither = maybe (Left "prepared class lookup failed") Right
 
 environmentTests :: TestTree
 environmentTests = testGroup "environments"

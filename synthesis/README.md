@@ -333,6 +333,15 @@ sessions retain: engine-specific dictionaries and indexes are derived
 projections of its Inventory and exact synonym table, not competing sources of
 truth.
 
+`Language.Haskell.Synthesis.Class` prepares the Inventory's declared classes,
+final parameter kinds, and explicit instances as one opaque annotation-free
+index. Nominal lookup and source-order enumeration therefore share one
+authority, while generalized `Nothing` kinds and exact binder, superclass,
+method, prerequisite, and head spelling remain visible. The index deliberately
+does not expand aliases, invent external declarations, reject superclass
+cycles, or compute backend instance closure; those are elaboration and search
+policies rather than nominal inventory facts.
+
 Build the library or run the focused foundation suite from the
 repository root or `djex/`:
 

@@ -26,6 +26,7 @@ import Data.List (find)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
+import qualified Language.Haskell.Synthesis.Class as SharedClass
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -71,13 +72,12 @@ data Environment = Environment {
 -- no second kind/synonym cache survives session sealing.
 data PreparedEnvironment = PreparedEnvironment
     PreparedSynthesisInventory
-    (Map.Map SharedName.Name SynthesisClassDefinition)
+    (SharedClass.PreparedClassIndex HSymbol)
     [(Symbol, Formula)]
     PreparedFormulaCompiler
 
--- The prepared class index stays in the authoritative shared type and name
--- vocabulary. Historical context APIs wrap final methods in 'HType' only at
--- their compatibility edge; native queries never cross that view.
+-- Historical context APIs wrap final methods in 'HType' only at their
+-- compatibility edge; native queries never cross this projection.
 type SynthesisClassDefinition =
     ( [(HSymbol, HKind)]
     , [(SharedName.Name, SharedType.Type HSymbol)]
@@ -461,7 +461,12 @@ sealPreparedEnvironment expansion = do
             | SharedDeclaration.ValueDeclaration signature <-
                 expandedDeclarations
             ]
-    classIndex <- prepareSynthesisClassIndex inventory
+    let classIndex = SharedClass.prepareClassIndex inventory
+    -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
+    -- ground kind. Check that backend-specific requirement at sealing while
+    -- retaining the neutral index's generalized-kind vocabulary.
+    mapM_ (fmap (const ()) . projectPreparedSynthesisClass) $
+        SharedClass.preparedClasses classIndex
     -- Force each retained projection so it cannot keep the transient
     -- expanded declaration product alive through an unevaluated selector.
     prepared `seq` compiler `seq` classIndex `seq`
@@ -482,34 +487,20 @@ sealPreparedEnvironment expansion = do
                 SharedDeclaration.valueType signature
         return (Symbol name, formula)
 
-prepareSynthesisClassIndex
-    :: SynthesisInventory
-    -> Either SynthesisEnvironmentError
-        (Map.Map SharedName.Name SynthesisClassDefinition)
-prepareSynthesisClassIndex inventory =
-    Map.fromList `fmap` mapM prepareClass
-        [ (name, parameters, methods)
-        | SharedDeclaration.ClassDeclaration
-              _ name parameters _ methods <- declarations
-        ]
+projectPreparedSynthesisClass
+    :: SharedClass.PreparedClass HSymbol
+    -> Either SynthesisEnvironmentError SynthesisClassDefinition
+projectPreparedSynthesisClass preparedClass = do
+    parameters <- mapM projectParameter $
+        SharedClass.preparedClassParameters preparedClass
+    return (parameters, SharedClass.preparedClassMethods preparedClass)
   where
-    declarations = SharedEnvironment.environmentDeclarations $
-        SharedInventory.inventoryEnvironment inventory
-    assumptions = SharedInventory.inventoryKindAssumptions inventory
+    className = SharedClass.preparedClassName preparedClass
 
-    prepareClass (name, parameters, methods) = do
-        let parameterNames = map SharedDeclaration.parameterVariable parameters
-        kinds <- requiredClassKinds assumptions name parameterNames
-        return
-            ( name
-            , ( zip parameterNames kinds
-              , [ ( SharedDeclaration.valueName method
-                  , SharedDeclaration.valueType method
-                  )
-                | method <- methods
-                ]
-              )
-            )
+    projectParameter (parameter, Nothing) = Left $
+        UnresolvedSynthesisClassKind className parameter
+    projectParameter (parameter, Just kind) =
+        Right (parameter, fromGroundHKind kind)
 
 -- | Reconstruct the historical raw declaration tables on demand. The
 -- inventory is opaque and can enter t'PreparedEnvironment' only after Djinn's
@@ -629,7 +620,13 @@ lookupPreparedSynthesisClass
         , [(SharedName.Name, SharedType.Type HSymbol)]
         )
 lookupPreparedSynthesisClass name
-        (PreparedEnvironment _ classes _ _) = Map.lookup name classes
+        (PreparedEnvironment _ classes _ _) = do
+    preparedClass <- SharedClass.lookupPreparedClass name classes
+    case projectPreparedSynthesisClass preparedClass of
+        Right projected -> Just projected
+        Left failure -> error $
+            "Djinn.Internal.Environment.lookupPreparedSynthesisClass: " ++
+            "sealed class-index invariant failed: " ++ show failure
 
 -- | Elaborate native shared types in one free-variable kind scope through the
 -- exact prepared inventory.

@@ -31,6 +31,15 @@ facadeTests = testGroup "public Djex facade"
         , Just "present"
         , Just 5
         )
+  , testCase "exports the prepared class authority" $ do
+      inventory <- expectRight
+        ( mkInventory ClosedKindInventory []
+          :: Either (InventoryError String Void) (Inventory String ())
+        )
+      let index :: PreparedClassIndex String
+          index = prepareClassIndex inventory
+      preparedClasses index @?= []
+      preparedExplicitInstances index @?= []
   , testCase "exports shared collision-free allocation" $ do
       let candidate suffix = ("v" ++ show suffix, suffix + 1 :: Int)
           reserved = Set.fromList ["v0", "v1"]

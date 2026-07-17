@@ -286,9 +286,11 @@ and no-recursion checks; the mutable raw
 curated facade or survives inside `PreparedEnvironment`. Synonyms are expanded
 for saturation and recursive datatype validation before ordered global
 assumptions are translated once into proof premises. The sealed environment
-retains exactly the prepared Inventory/synonym witness, nominal class lookup,
-formula compiler, and those ordered premises; kinds and aliases are consumed
-through the witness rather than copied into backend caches. Historical raw
+retains exactly the prepared Inventory/synonym witness, the foundation's
+annotation-free prepared class index, formula compiler, and those ordered
+premises. Final class kinds and source-shaped methods now come from the same
+shared authority used by other backends; aliases remain consumed through the
+witness rather than copied into backend caches. Historical raw
 declaration tables are derived only when a compatibility caller asks to display
 them. At query time Djinn elaborates the
 goal and all class arguments as one shared kind scope, instantiates class

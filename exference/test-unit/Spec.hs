@@ -1554,6 +1554,13 @@ tests = testGroup "Exference"
                 [SharedType.RigidVariable 4] []
                 (SharedType.TypeVariable $ SharedType.RigidVariable 4)
           fromSynthesisType malformed @?= Left (RigidForallBinder 4)
+      , testCase "shared binder errors precede rigid-binder rejection" $ do
+          let duplicate = SharedType.RigidVariable 4
+              malformed = SharedType.ForallType [duplicate, duplicate] []
+                $ SharedType.TypeVariable duplicate
+          fromSynthesisType malformed @?= Left
+            (InvalidSynthesisType
+              $ SharedType.DuplicateForallVariable duplicate)
       ]
   , testGroup "shared declarations"
       [ testCase "function bindings preserve penalties and constraints" $ do

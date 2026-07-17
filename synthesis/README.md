@@ -199,7 +199,11 @@ tree: variables (optionally flexible/rigid), structural names, application,
 functions, boxed or unboxed tuples, and explicit foralls with shared
 constraints. It canonicalizes saturated function and tuple constructors and
 exposes the inverse constructor-application view used by higher-kinded
-unification without changing that structural storage convention. It
+unification without changing that structural storage convention. Its checked
+`normalizeType` boundary returns that canonical storage form only after the
+same source-ordered lexical, tuple-arity, constraint, and binder validation
+used by `validateType`; backend adapters no longer repeat or double-run this
+pair. It
 decomposes application and right-associated function spines in source order,
 quantifies a policy-selected free-variable namespace at one outer scope,
 capture-safely converts a leading explicit prenex chain into implicit fresh

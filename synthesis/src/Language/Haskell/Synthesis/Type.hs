@@ -25,6 +25,7 @@ module Language.Haskell.Synthesis.Type
   , SubstitutionError (..)
   , BinderNormalizationError (..)
   , canonicalizeType
+  , normalizeType
   , constructorApplicationForm
   , applyTypeArguments
   , applicationSpine
@@ -54,7 +55,7 @@ module Language.Haskell.Synthesis.Type
   ) where
 
 import Control.DeepSeq (NFData)
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, void)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
   ( StateT
@@ -802,37 +803,59 @@ allocateFreshBinder fresh binder = do
 allTypeVariables :: Ord variable => Type variable -> Set variable
 allTypeVariables = foldMap Set.singleton
 
+-- | Canonicalize and structurally validate a source type in one boundary.
+--
+-- Saturated function and tuple constructors are rewritten before validation,
+-- so the returned value has the shared storage form. Failures retain the
+-- source-order traversal used by 'validateType'.
+normalizeType
+  :: Ord variable
+  => Type variable
+  -> Either (TypeError variable) (Type variable)
+normalizeType source = do
+  let canonical = canonicalizeType source
+  validateCanonicalType canonical
+  pure canonical
+
+-- | Structurally validate a source type after applying the same
+-- canonicalization used by 'normalizeType'.
 validateType :: Ord variable => Type variable -> Either (TypeError variable) ()
-validateType source = validate $ canonicalizeType source
-  where
-    validate typeExpression = case typeExpression of
-      TypeVariable{} -> Right ()
-      TypeConstructor name
-        | validTypeConstructor name -> Right ()
-        | otherwise -> Left $ InvalidTypeConstructor name
-      TypeApplication function argument ->
-        validate function >> validate argument
-      FunctionType parameter result ->
-        validate parameter >> validate result
-      TupleType boxity elements -> do
-        unless (validTupleArity boxity $ length elements) $
-          Left $ InvalidTupleTypeArity boxity $ length elements
-        mapM_ validate elements
-      ForallType variables constraints body -> do
-        case firstDuplicate variables of
-          Just variable -> Left $ DuplicateForallVariable variable
-          Nothing -> Right ()
-        mapM_ validateForallConstraint constraints
-        validate body
+validateType = void . normalizeType
 
-    validateForallConstraint constraint = do
-      either (Left . InvalidTypeConstraint) Right $
-        validateConstraint constraint
-      mapM_ validate $ constraintArguments constraint
+-- The caller must supply a canonical type. Keeping this worker private makes
+-- 'normalizeType' the only public operation that can return a checked value.
+validateCanonicalType
+  :: Ord variable
+  => Type variable
+  -> Either (TypeError variable) ()
+validateCanonicalType typeExpression = case typeExpression of
+  TypeVariable{} -> Right ()
+  TypeConstructor name
+    | validTypeConstructor name -> Right ()
+    | otherwise -> Left $ InvalidTypeConstructor name
+  TypeApplication function argument ->
+    validateCanonicalType function >> validateCanonicalType argument
+  FunctionType parameter result ->
+    validateCanonicalType parameter >> validateCanonicalType result
+  TupleType boxity elements -> do
+    unless (validTupleArity boxity $ length elements) $
+      Left $ InvalidTupleTypeArity boxity $ length elements
+    mapM_ validateCanonicalType elements
+  ForallType variables constraints body -> do
+    case firstDuplicate variables of
+      Just variable -> Left $ DuplicateForallVariable variable
+      Nothing -> Right ()
+    mapM_ validateForallConstraint constraints
+    validateCanonicalType body
+ where
+  validateForallConstraint constraint = do
+    either (Left . InvalidTypeConstraint) Right $
+      validateConstraint constraint
+    mapM_ validateCanonicalType $ constraintArguments constraint
 
-    validTypeConstructor name =
-      nameLexicalClass name == ConstructorLike &&
-        nameSpecial name /= Just ConsConstructor
+  validTypeConstructor name =
+    nameLexicalClass name == ConstructorLike &&
+      nameSpecial name /= Just ConsConstructor
 
 validTupleArity :: Boxity -> Int -> Bool
 validTupleArity Boxed arity = withinBounds arity && arity /= 1

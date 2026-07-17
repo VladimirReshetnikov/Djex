@@ -94,9 +94,8 @@ normalizeSynthesisType
   :: SharedType.Type HSymbol
   -> Either SynthesisTypeError (SharedType.Type HSymbol)
 normalizeSynthesisType source = do
-  let canonical = SharedType.canonicalizeType source
-  either (Left . InvalidSynthesisType) Right
-    $ SharedType.validateType canonical
+  canonical <- either (Left . InvalidSynthesisType) Right
+    $ SharedType.normalizeType source
   validateSupported canonical
   return canonical
  where

@@ -74,6 +74,8 @@ facadeTests = testGroup "public Djex facade"
         @?= TypeApplication (TypeConstructor checkedName) (TypeVariable "a")
       functionType [TypeVariable "a"] (TypeVariable "b") @?=
         FunctionType (TypeVariable "a") (TypeVariable "b")
+      normalizeType typeExpression @?= Right typeExpression
+      validateType typeExpression @?= Right ()
       functionSpine typeExpression @?= ([], typeExpression)
       freeVariablesInFirstOccurrenceOrder typeExpression @?= []
       constraintFreeVariables

@@ -1535,6 +1535,34 @@ typeTests = testGroup "source types"
           (SharedType.TypeConstructor (right $ tupleName Unboxed 0)
             :: SharedType.Type String) @?=
         SharedType.TupleType Unboxed []
+  , testCase "normalize and validate through one canonical boundary" $ do
+      let a = SharedType.TypeVariable "a"
+          b = SharedType.TypeVariable "b"
+          arrowApplication = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor functionName) a) b
+          pairName = right $ tupleName Boxed 2
+          pairApplication = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor pairName) a) arrowApplication
+          normalized = SharedType.TupleType Boxed
+            [a, SharedType.FunctionType a b]
+          invalidValueName = right $ mkIdentifier "value"
+          twoFailures = SharedType.FunctionType
+            (SharedType.TupleType Boxed [a])
+            (SharedType.TypeConstructor invalidValueName)
+      SharedType.normalizeType pairApplication @?= Right normalized
+      SharedType.validateType pairApplication @?=
+        (() <$ SharedType.normalizeType pairApplication)
+      (SharedType.normalizeType pairApplication
+          >>= SharedType.normalizeType) @?= Right normalized
+      SharedType.normalizeType twoFailures @?=
+        Left (SharedType.InvalidTupleTypeArity Boxed 1)
+      SharedType.normalizeType
+          (SharedType.FunctionType
+            (SharedType.TupleType Boxed [a])
+            (error "normalization forced a suffix after the first failure"))
+        @?= Left (SharedType.InvalidTupleTypeArity Boxed 1)
   , testCase "expose intrinsic types as constructor applications" $ do
       let className = right $ mkIdentifier "C"
           a = SharedType.TypeVariable "a"

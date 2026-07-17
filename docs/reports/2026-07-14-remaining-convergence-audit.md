@@ -1743,6 +1743,32 @@ equality for differently spelled requests, rejection of rigid binders, and
 identical result traces for exact and canonical spellings through one sealed
 session.
 
+## Shared checked type normalization
+
+**Completed on 2026-07-16:** the native shared type migration left three
+copies of the same canonicalization boundary. Djinn's shared-type adapter,
+Exference's nominally bidirectional checked type operation, and Exference's
+unifier each called `canonicalizeType` and then `validateType`. The latter
+already canonicalized its argument, so the first two adapters and the unifier
+traversed every valid type twice merely to recover the canonical tree they had
+computed before validation.
+
+`Language.Haskell.Synthesis.Type.normalizeType` now owns that checked
+transition. It canonicalizes once, validates the canonical tree in the
+existing source order, and returns only that checked value. `validateType` is
+the result-erasing view of the same operation, so the two public boundaries
+cannot drift. Djinn then applies only its historical variable, constructor,
+forall, and unboxed-tuple restrictions; Exference applies only its rigid-forall
+binder restriction; the unifier changes to its constructor-application view
+only after common validation succeeds.
+
+Foundation regressions pin exact function/tuple normalization,
+normalize-versus-validate equivalence, idempotence, and first structural-error
+precedence. Existing backend conversion, rigid-binder, tuple, higher-kinded
+unification, and malformed-native-value suites continue to pin their distinct
+post-normalization policies, while the downstream facade suite fixes the new
+operation's public signature.
+
 ## Validation gates for each stage
 
 Every migration milestone should retain the current release-style gates:

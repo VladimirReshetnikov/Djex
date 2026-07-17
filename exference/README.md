@@ -185,8 +185,10 @@ part of the module's `COMPLETE` set. The now-impossible
 There is no longer a structural conversion API: `QualifiedName`, `HsType`, and
 `HsConstraint` already are the shared values, so the merger-only identity
 projections would falsely imply a representation boundary. `toSynthesisType`
-and `fromSynthesisType` both canonicalize and validate the native value, and
-both reject rigid forall binders rather than weakening them during lowering.
+and `fromSynthesisType` both call the foundation's single checked
+`normalizeType` boundary, then reject rigid forall binders rather than
+weakening them during lowering. The unifier consumes that same checked
+normalization before changing to its applicative higher-kinded view.
 The checked constraint operations validate the class namespace and normalize
 their argument types without reconstructing the outer constraint. Because
 `HsType` inherits the shared structural `Show` instance, diagnostics and other

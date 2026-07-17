@@ -756,6 +756,11 @@ testSharedTypeAdapter = do
         (Left SynthesisForallUnsupported)
         (fromSynthesisType $ SharedType.ForallType ["a"] []
             $ SharedType.TypeVariable "a")
+    assertEqual "shared binder errors precede Djinn's forall restriction"
+        (Left $ InvalidSynthesisType
+            $ SharedType.DuplicateForallVariable "a")
+        (fromSynthesisType $ SharedType.ForallType ["a", "a"] []
+            $ SharedType.TypeVariable "a")
     assertEqual "constructor-like strings cannot become Djinn type variables"
         (Left $ InvalidDjinnTypeVariable "A")
         (fromSynthesisType $ SharedType.TypeVariable "A")

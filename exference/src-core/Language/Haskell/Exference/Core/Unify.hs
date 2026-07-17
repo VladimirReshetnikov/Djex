@@ -73,11 +73,11 @@ unifyShared rawLeft rawRight = do
   taggedRight <- tagType LeftVariable right
   substitutions <- solveTagged (const True)
     [(taggedLeft, taggedRight)] Map.empty
+  let variables = Set.toAscList $ Set.union
+        (freeVars left)
+        (freeVars right)
   pure $ IntMap.fromList $ mapMaybe (project substitutions) variables
  where
-  variables = Set.toAscList $ Set.union
-    (freeVars $ SharedType.canonicalizeType rawLeft)
-    (freeVars $ SharedType.canonicalizeType rawRight)
   project substitutions variable =
     let resolved = untagTagged taggedIdentifier
           $ zonkTagged substitutions
@@ -127,11 +127,8 @@ type TaggedSubstitutions = Map.Map TaggedVariable TaggedType
 -- Quantifiers are rejected separately by 'tagType', including a forall nested
 -- in a tuple or application and a native forall with rigid binders.
 canonicalUnificationType :: HsType -> Maybe HsType
-canonicalUnificationType source = case SharedType.validateType canonical of
-  Left _ -> Nothing
-  Right () -> Just canonical
- where
-  canonical = SharedType.canonicalizeType source
+canonicalUnificationType = either (const Nothing) Just
+  . SharedType.normalizeType
 
 tagType :: (TVarId -> TaggedVariable) -> HsType -> Maybe TaggedType
 tagType side = tag . SharedType.constructorApplicationForm

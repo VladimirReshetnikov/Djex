@@ -232,6 +232,9 @@ while the exhaustive `TypeForallNative` exposes every shared binder. Checked
 Exference boundaries canonicalize saturated function and tuple applications
 to structural `FunctionType` and `TupleType` values and reject rigid forall
 binders, which the search engine cannot instantiate as source quantifiers.
+The shared `normalizeType` operation owns canonicalization plus structural
+validation for both backends and Exference unification; adapters add only
+their genuine variable/binder and source-vocabulary restrictions afterward.
 The merger's total structural conversion shims are gone: `HsType` and
 `HsConstraint` already are the shared values, while the checked conversion
 names remain only as validation and canonicalization boundaries.

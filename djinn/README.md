@@ -488,8 +488,9 @@ grammar so checked clients need not import its internal `ReadP` parser.
 Raw `HType` query entry points retain Djinn's historical class lookup, arity,
 kind, and synonym-saturation diagnostic preflight. Ordinary `HType` values now
 store the shared IR natively behind bundled compatibility patterns; the
-checked boundary validates and canonicalizes that tree before delegating to
-the native query worker.
+checked boundary uses the foundation's single `normalizeType` operation before
+applying Djinn's narrower variable, constructor, forall, and tuple policy and
+delegating to the native query worker.
 `inhabitResult` then runs formula translation, budgeted proof search,
 independent proof checking, and constructs the shared `QueryResult` directly
 without choosing a renderer or passing through a backend-owned report envelope.

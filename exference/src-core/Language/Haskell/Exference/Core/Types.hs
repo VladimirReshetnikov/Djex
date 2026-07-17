@@ -208,9 +208,8 @@ normalizeExferenceType
   :: HsType
   -> Either SynthesisTypeError HsType
 normalizeExferenceType source = do
-  let canonical = SharedType.canonicalizeType source
-  either (Left . InvalidSynthesisType) Right
-    $ SharedType.validateType canonical
+  canonical <- either (Left . InvalidSynthesisType) Right
+    $ SharedType.normalizeType source
   ensureFlexibleForallBinders canonical
   return canonical
 

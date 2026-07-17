@@ -1,6 +1,6 @@
 module Main (main) where
 
-import qualified Djex.Driver
+import qualified Language.Haskell.Djex.CLI as CLI
 
 main :: IO ()
-main = Djex.Driver.main
+main = CLI.main

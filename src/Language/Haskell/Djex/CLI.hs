@@ -1,4 +1,9 @@
-module Djex.Driver
+-- | The merged one-shot @djex@ command.
+--
+-- Living in the library keeps this frontend in-process testable and matches
+-- the two historical launchers, whose executables are equally thin wrappers
+-- over "Djinn" and "Language.Haskell.Exference.CLI".
+module Language.Haskell.Djex.CLI
   ( main
   , runArguments
   ) where

@@ -119,6 +119,7 @@ Library
 
   Exposed-Modules:
     Language.Haskell.Djex
+    Language.Haskell.Djex.CLI
     Language.Haskell.Djex.Djinn
     Language.Haskell.Djex.Exference
     Language.Haskell.Synthesis.Candidate
@@ -213,17 +214,13 @@ Library
     pqueue >= 1.3.1 && < 1.8,
     pretty >= 1.1 && < 1.2
 
--- The merged one-shot command consumes the checked facade plus the explicit
--- Exference Haskell-source adapter from the same library. The historical
--- executables below remain available for their compatibility contracts.
+-- The merged one-shot command is a launcher over the library's
+-- Language.Haskell.Djex.CLI, matching the two historical executables below,
+-- which remain available for their compatibility contracts.
 Executable djex
   import:         search-executable
   Main-Is:        Main.hs
   Hs-Source-Dirs: app
-  Other-Modules:
-    Djex.Driver
-    Paths_djex
-  Autogen-Modules: Paths_djex
   Build-Depends:    djex
 
 Test-Suite djex-tests

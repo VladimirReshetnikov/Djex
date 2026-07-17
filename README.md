@@ -492,6 +492,5 @@ Djex descends from two projects:
   `djex exference`. Its original license is preserved verbatim in
   [exference/LICENSE](exference/LICENSE).
 
-These credits are attribution, not endorsement: Djex is an independent
-project and is neither affiliated with nor endorsed by Lennart Augustsson,
+Djex is neither affiliated with nor endorsed by Lennart Augustsson,
 Lennart Spitzner, or the other upstream contributors.

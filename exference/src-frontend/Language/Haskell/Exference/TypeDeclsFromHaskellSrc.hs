@@ -11,7 +11,6 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , parseType
   , parseTypeWithKinds
   , parseTypeWithInventory
-  , typeResolverFromInventory
   , toSynthesisTypeDeclaration
   , fromSynthesisTypeDeclaration
   )

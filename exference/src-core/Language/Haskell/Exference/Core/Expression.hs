@@ -29,7 +29,6 @@ module Language.Haskell.Exference.Core.Expression
   , showExpression
   , fillExprHole
   , simplifyExpression
-  , allocateExpressionNames
   )
 where
 
@@ -221,18 +220,6 @@ toGeneratedExpression (Expression expression) =
 
 annotatedIdentity :: AnnotatedLocal -> TVarId
 annotatedIdentity (AnnotatedLocal variable _) = variable
-
--- | Allocate names through the common renderer so the HSE compatibility
--- adapter and the parser-independent text renderer cannot drift apart.
-allocateExpressionNames
-  :: Generated.Qualification
-  -> [String]
-  -> Expression
-  -> Either Generated.RenderError (Map.Map TVarId String)
-allocateExpressionNames qualification reserved expression =
-  Generated.allocateLocalNames options $ toGeneratedExpression expression
- where
-  options = renderOptions qualification reserved expression
 
 renderExpression
   :: Generated.Qualification

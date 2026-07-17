@@ -14,9 +14,6 @@ module Djinn.Internal.Generated
   , toGeneratedClauseWithName
   , fromGeneratedExpression
   , fromGeneratedClause
-  , getBinderVars
-  , getBinderVarsHE
-  , getBinderVarsHP
   ) where
 
 import qualified Data.Set as Set
@@ -222,25 +219,9 @@ generatedName description source = case SharedName.parseName source of
     ++ show source ++ ": " ++ SharedName.renderNameError nameError
   Right name -> Right name
 
-getBinderVars :: HClause -> [HSymbol]
-getBinderVars (HClause _ patterns expression) =
-  concatMap getBinderVarsHP patterns ++ getBinderVarsHE expression
-
-getBinderVarsHE :: HExpr -> [HSymbol]
-getBinderVarsHE expression = case expression of
-  HELam patterns body ->
-    concatMap getBinderVarsHP patterns ++ getBinderVarsHE body
-  HEApply function argument ->
-    getBinderVarsHE function ++ getBinderVarsHE argument
-  HECon{} -> []
-  HEVar{} -> []
-  HETuple elements -> concatMap getBinderVarsHE elements
-  HECase scrutinee alternatives ->
-    getBinderVarsHE scrutinee ++ concat
-      [ getBinderVarsHP pattern ++ getBinderVarsHE body
-      | (pattern, body) <- alternatives
-      ]
-
+-- Binding-site observations over checked shared clauses live in
+-- 'Language.Haskell.Synthesis.Generated'; only the legacy-pattern binder
+-- collection below is still needed while converting a caller-built tree.
 getBinderVarsHP :: HPat -> [HSymbol]
 getBinderVarsHP pattern = case pattern of
   HPVar name -> [name]

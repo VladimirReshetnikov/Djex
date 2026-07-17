@@ -90,12 +90,6 @@ scopesApplySubsts :: Substs -> Scopes -> Scopes
 scopesApplySubsts substs =
   Scope.scopesMapBindings (varPBindingApplySubsts substs)
 
-{-
-scopesAddBinding :: ScopeId -> VarBinding -> Scopes -> Scopes
-scopesAddBinding sid binding scopes =
-  scopesAddPBinding sid (splitBinding binding) scopes
--}
-
 scopesAddPBinding :: ScopeId -> VarPBinding -> Scopes -> Scopes
 scopesAddPBinding sid binding =
   requireValidScopes . Scope.scopesAddBinding sid binding

@@ -18,8 +18,7 @@ module Djinn.Internal.HTypes(
         prHSymbolOp, htNot, isHTUnion,
         HClause, HPat, HExpr(HEVar), hPrClause, renderGeneratedClause,
         toGeneratedClause, toGeneratedClauseWithName,
-        termToHExpr, termToHClause,
-        getBinderVars
+        termToHExpr, termToHClause
     ) where
 import Data.Bifunctor (first)
 import Data.Void (Void, absurd)

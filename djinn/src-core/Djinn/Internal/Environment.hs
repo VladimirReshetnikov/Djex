@@ -17,8 +17,7 @@ module Djinn.Internal.Environment (
     SynthesisEnvironmentError(..),
     toSynthesisEnvironment, toSynthesisInventory,
     declareSynthesisEnvironment, removeSynthesisDeclaration,
-    validateEnvironment,
-    requireDistinct
+    validateEnvironment
     ) where
 
 import Data.Bifunctor (first)

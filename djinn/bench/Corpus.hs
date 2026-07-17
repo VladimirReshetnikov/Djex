@@ -6,8 +6,7 @@
 -- and tests can assert the corpus itself stays honest.
 --
 module Corpus (
-    Entry(..), corpus, AliasEntry(..), aliasPreparationCorpus,
-    atom, nots, implChain, pickOne, wideDisj, projection
+    Entry(..), corpus, AliasEntry(..), aliasPreparationCorpus
     ) where
 
 import Djinn.Internal.Environment (Environment(..), TypeDefinition)

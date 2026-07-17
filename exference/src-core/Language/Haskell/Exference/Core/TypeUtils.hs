@@ -1,16 +1,13 @@
 module Language.Haskell.Exference.Core.TypeUtils
   ( incVarIds
   , maximumFlexibleId
-  , maximumSubstitutionFlexibleId
   , largestId
-  , largestSubstsId
   , forallify
   , ConstraintSite (..)
   , ClassEnvError (..)
   , mkStaticClassEnv
   , validateConstraintInEnv
   , validateKnownConstraintInEnv
-  , constraintMapTypes
   , constraintContainsVariables
   , inflateInstances
   , ForallNormalizationError (..)
@@ -36,7 +33,6 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
   , supplyFromIdentifierSet
   )
 import Language.Haskell.Exference.Core.Types
-import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 
@@ -63,11 +59,6 @@ maximumFlexibleId typeExpression
  where
   identifiers = flexibleIdentifiers typeExpression
 
--- | The greatest flexible ID occurring in a substitution range.
-maximumSubstitutionFlexibleId :: Substs -> Maybe TVarId
-maximumSubstitutionFlexibleId = SharedCollection.maximumPresent
-  . fmap maximumFlexibleId
-
 -- | Compatibility projection for callers that historically used @-1@ as a
 -- ground sentinel.  It now returns the true maximum when variables exist,
 -- including a negative-only domain; use 'maximumFlexibleId' to distinguish a
@@ -75,15 +66,6 @@ maximumSubstitutionFlexibleId = SharedCollection.maximumPresent
 largestId :: HsType -> TVarId
 largestId = maybe (-1) id . maximumFlexibleId
 {-# DEPRECATED largestId "Use maximumFlexibleId; every Int is a valid TVarId." #-}
-
--- | Compatibility projection retaining the historical empty-map sentinel.
-largestSubstsId :: Substs -> TVarId
-largestSubstsId = maybe 0 id . maximumSubstitutionFlexibleId
-{-# DEPRECATED largestSubstsId
-  "Use maximumSubstitutionFlexibleId; every Int is a valid TVarId." #-}
-
-constraintMapTypes :: (HsType -> HsType) -> HsConstraint -> HsConstraint
-constraintMapTypes = fmap
 
 constraintContainsVariables :: HsConstraint -> Bool
 constraintContainsVariables =

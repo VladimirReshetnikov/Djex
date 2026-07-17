@@ -409,11 +409,15 @@ exposes both values in the same order.
 New core clients should split the old all-in-one `ExferenceInput` at its actual
 lifetime boundary. Construct an `EnvDictionary`, pass it once to
 `mkExferenceEnvironment`, and retain the resulting abstract
-`ExferenceEnvironment`. For each search, construct an `ExferenceQuery` and call
-`findGeneratedSearchBatchesInEnvironmentEither` (or its `WithHints` variant).
-The first operation validates environment names, generated syntax, ratings,
-types, and class constraints once; the second validates only the goal,
-constraints, limits, and heuristics that vary per query.
+`ExferenceEnvironment`. For each search, construct an `ExferenceQuery`, an
+exact checked `DefinitionName`, and opaque source type-name hints with
+`mkExferenceSourceTypeVariableHints`, then call
+`findQueryResultsInEnvironmentEither`. Environment construction validates
+names, generated syntax, ratings, types, and class constraints once; query
+execution validates only the goal, constraints, limits, and heuristics that
+vary per request, and verifies that its opaque source hints belong to that
+prepared goal. The checked target is excluded from the same request before
+search begins.
 
 `Language.Haskell.Exference.Core.defaultHeuristicsConfig` owns the
 parser-neutral library default used by reusable and stable queries. The
@@ -490,41 +494,31 @@ elaboration, lowering, and query-input failures. Search controls are supplied
 independently and therefore report `DJEX_EXF_OPTIONS` without falsely pointing
 at the type text.
 
-The older `findGeneratedSearchBatchesEither` and
-`findGeneratedSearchBatchesWithHintsEither` entry points remain core
-compatibility conveniences for callers that do not need the checked target or
-logical-evidence envelope. Their historical raw final-hint map and
-`typeVariableHints` helpers remain explicitly unchecked compatibility
-surfaces; canonical result search accepts only the opaque source form, and the
-stable residual renderer validates bounded copies, rejects partial/infinite or
-malformed names, deduplicates preferences, and freshens fallbacks before any
-such compatibility value reaches output. Expression and definition rendering
-applies the same bounded-copy rule to caller-built term-local hints while
-retaining structured lexical errors for finite bad names. All paths still
-project the engine trace lazily:
-candidate conversion never traverses the whole search. Every canonical result
-contains a shared `Candidate` whose output is the exact-target
+The canonical result API is the only shared candidate envelope exposed by the
+core. It accepts only the opaque, exact-goal-bound source-hint form and returns
+the checked target and logical evidence together with each lazy result batch.
+The stable residual renderer validates bounded hint copies, rejects
+partial/infinite or malformed names, deduplicates preferences, and freshens
+fallbacks. Expression and definition rendering applies the same bounded-copy
+rule to caller-built term-local hints while retaining structured lexical
+errors for finite bad names. Candidate projection never traverses the whole
+search. Every canonical result contains a shared `Candidate` whose output is
+the exact-target
 `FunctionClause`, together with fully shared residual constraints and
 `ExferenceCandidateDetails`. The details retain search statistics and both
 term-local and tagged flexible/rigid type-name hints, so erasing backend
 annotations does not degrade later rendering. Each demanded candidate is fully
-detached from its typed search tree; private engine chunks supply shared
-progress directly, with compatibility chunks as a sibling projection rather
-than the modern API reinterpreting legacy status.
-
-`toGeneratedSearchBatch` remains the checked adapter for caller-constructed
-status-bearing compatibility chunks. It rejects malformed generated syntax,
-invalid scope, unfinished holes, malformed constraints, contradictory status,
-and negative binding-use counts, while typed expressions stay available
-through the historical API.
-Each shared batch carries
+detached from its typed search tree, and private checked engine batches supply shared
+progress directly rather than passing through a public intermediate batch.
+Each canonical batch carries
 `ExferenceBatchMetadata`: exact `Natural` binding-use counts keyed by nominal
 `QualifiedName`, plus cumulative queue- and depth-pruning counts. Keeping the
 counts in metadata makes partial progress observable even though shared
 `Progress` records pruning reasons only when a search terminates. Historical
-status-bearing chunks retain their `Int` binding counts: engine totals saturate
-at that compatibility boundary, while caller-constructed negative counts are
-rejected before the chunk can enter the modern batch API.
+status-bearing chunks retain their `Int` binding counts and engine totals
+saturate at that compatibility boundary. Those raw chunks are an outward-only
+historical projection; they cannot enter or stand in for the canonical result
+API.
 
 Candidate metrics, candidate details, and batch metadata now each have one
 core-owned record and one storage representation. The polished stable names
@@ -613,12 +607,12 @@ validator also rejects negative step counts for delayed constraint solving,
 rather than accepting a setting whose threshold can never be reached. It checks
 every goal, binding, deconstructor, and explicit constraint argument through
 the shared type vocabulary, including rank-N occurrences in function contexts
-that the historical filter overlooked. The
-`toSearchProgress` projection maps those compatibility statuses to
-`Language.Haskell.Synthesis.Search`, retaining simultaneous queue and depth
-pruning reasons and rejecting malformed hand-constructed status values. It
-does not turn heuristic exhaustion into a logical uninhabitability claim. The
-historical list-returning entry points remain compatibility adapters (including
+that the historical filter overlooked. It is retained for historical clients
+that require raw expressions and compatibility status values; new core code
+should use `findQueryResultsInEnvironmentEither`, whose private checked engine batches
+provide exact shared progress without reinterpreting raw status. Neither API
+turns heuristic exhaustion into a logical uninhabitability claim. The
+historical list-returning entry points are compatibility adapters (including
 their “invalid input means no elements” convention): `findExpressions` exposes
 the raw result stream, and `findOneExpression` is simply its first element. The
 duplicated historical `SearchSelection` and rating/lookahead `find*`/`select*`

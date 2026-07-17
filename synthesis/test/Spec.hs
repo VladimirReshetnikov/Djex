@@ -2836,6 +2836,13 @@ searchTests = testGroup "search status"
           result = queryResultFromCandidates batch
       resultEvidence result @?= ValidatedCandidates
       take 1 (batchCandidates $ resultSearch result) @?= [1 :: Int]
+  , testCase "derived evidence leaves a mapped candidate head lazy" $ do
+      let batch :: SearchBatch () Int
+          batch = fmap
+            (\() -> error "queryResultFromCandidates forced the mapped head")
+            $ SearchBatch Continuing () [()]
+          result = queryResultFromCandidates batch
+      resultEvidence result @?= ValidatedCandidates
   ]
 
 selectionTests :: TestTree

@@ -31,32 +31,22 @@ import Language.Haskell.Exference.Core
   ( ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
   , ExferenceCandidateDetails (..)
-  , ExferenceCandidateError (..)
   , ExferenceEnvironment
   , ExferenceQuery (..)
-  , ExferenceProjectionError (..)
+  , ExferenceResult
   , ExferenceSourceTypeVariableHints
   , ExferenceSourceTypeVariableHintError (..)
   , ExferenceHeuristicsConfig (..)
   , SearchCompletion (..)
   , SearchStatus (..)
-  , SearchStatusError (..)
   , constraintsRelaxedAtStep
   , defaultHeuristicsConfig
   , emptyExferenceSourceTypeVariableHints
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
-  , findGeneratedSearchBatchesWithHintsEither
-  , findGeneratedSearchBatchesWithHintsInEnvironmentEither
   , findQueryResultsInEnvironmentEither
   , mkExferenceEnvironment
   , mkExferenceSourceTypeVariableHints
-  , toSearchProgress
-  , toSearchBatch
-  , toGeneratedSearchBatch
-  , toGeneratedSearchBatchWithHints
-  , typeVariableHints
-  , typeVariableHintsInEnvironment
   , validateExferenceQuery
   , validateExferenceInput
   )
@@ -99,13 +89,13 @@ import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
-  , attachQueryTargetForTesting
   , compatibilityBindingUsageCounts
   , compatibilityPruningCount
   , findExpressionsWithIdentifierCapacitiesEither
   , findQueryResultsWithIdentifierCapacitiesEither
   , mergePriorityQueueAtCapacity
   , pruningReasonsFromNaturalTotals
+  , queryProjectionStrictnessForTesting
   , typeComplexityForTesting
   )
 import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
@@ -2334,6 +2324,7 @@ tests = testGroup "Exference"
             (exferenceHeuristics defaultExferenceOptions)
       , testCase "sealed runners preserve complete legacy traces" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
+          target <- checkedIdentifierTarget "sealedTrace"
           let variable = TypeVar 0
               residualGoal = TypeForall [0]
                 [HsConstraint (name "External") [variable]]
@@ -2356,17 +2347,20 @@ tests = testGroup "Exference"
                     })
                 ]
           mapM_ (\(label, input) -> do
-              let hints = typeVariableHints (input_goalType input)
-                    $ Map.singleton "a" 0
-              legacy <- expectRight
-                $ findGeneratedSearchBatchesWithHintsEither hints input
-              sealed <- expectRight
-                $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
-                    hints environment (legacyInputQuery input)
-              assertEqual (label ++ " trace") legacy sealed)
+              sourceHints <- expectRight
+                $ mkExferenceSourceTypeVariableHints
+                    (input_goalType input) (Map.singleton "a" 0)
+              legacy <- expectRight $ findExpressionsWithStatsEither input
+              canonical <- expectRight $ findQueryResultsInEnvironmentEither
+                target sourceHints environment (legacyInputQuery input)
+              assertEqual (label ++ " batch count")
+                (length legacy) (length canonical)
+              sequence_ $ zipWith (assertSameBatch label target)
+                legacy canonical)
             variants
       , testCase "validators exactly project checked search preparation" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
+          target <- checkedIdentifierTarget "validatedPreparation"
           let query = legacyInputQuery identityInput
               invalidHeuristics = defaultHeuristicsConfig
                 {heuristics_goalVar = -1}
@@ -2381,10 +2375,14 @@ tests = testGroup "Exference"
                 , queryHeuristics = invalidHeuristics
                 }
               preparedInput input = ()
-                <$ findGeneratedSearchBatchesWithHintsEither Map.empty input
+                <$ findExpressionsWithStatsEither input
               preparedQuery value = ()
-                <$ findGeneratedSearchBatchesWithHintsInEnvironmentEither
-                    Map.empty environment value
+                <$ findQueryResultsInEnvironmentEither
+                    target
+                    (emptyExferenceSourceTypeVariableHints
+                      $ queryGoalType value)
+                    environment
+                    value
           validateExferenceInput identityInput @?=
             preparedInput identityInput
           validateExferenceInput invalidInput @?= preparedInput invalidInput
@@ -2535,23 +2533,24 @@ tests = testGroup "Exference"
               identity = ExpLambda 1 (TypeConstant 8)
                 $ ExpVar 1 $ TypeConstant 8
           environment <- expectRight $ sealLegacyEnvironment input
-          hints <- expectRight $ typeVariableHintsInEnvironment
-            environment query sourceNames
-          Map.lookup (SharedType.RigidVariable 8) hints @?= Just "source"
-          Map.lookup (SharedType.RigidVariable 0) hints @?= Nothing
+          sourceHints <- expectRight
+            $ mkExferenceSourceTypeVariableHints goal sourceNames
+          target <- checkedIdentifierTarget "rigidPlan"
           checkExpression (mkQueryClassEnv emptyClassEnv []) [seed] []
             goal [] identity @?= Right ()
-          batches <- expectRight
-            $ findGeneratedSearchBatchesWithHintsInEnvironmentEither
-                hints environment query
-          let candidates = concatMap SharedSearch.batchCandidates batches
+          results <- expectRight $ findQueryResultsInEnvironmentEither
+            target sourceHints environment query
+          let candidates = concatMap
+                (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+                results
           assertBool "C8 identity was filtered by live checking"
             $ not $ null candidates
           case candidates of
-            candidate : _ -> Map.lookup (SharedType.RigidVariable 8)
-                (exferenceTypeVariableHints
-                  $ SharedCandidate.candidateDetails candidate)
-              @?= Just "source"
+            candidate : _ -> do
+              let hints = exferenceTypeVariableHints
+                    $ SharedCandidate.candidateDetails candidate
+              Map.lookup (SharedType.RigidVariable 8) hints @?= Just "source"
+              Map.lookup (SharedType.RigidVariable 0) hints @?= Nothing
             [] -> fail "C8 search produced no candidate"
       , testCase "rigid planning handles negatives and leading forall chains" $ do
           let seed = FunctionBinding (TypeConstant (-3))
@@ -2671,16 +2670,21 @@ tests = testGroup "Exference"
             [] twoBinders
           rigidInstantiations penultimatePlan @?=
             [(0, maxBound), (1, 0)]
-          let boundarySearch =
-                findGeneratedSearchBatchesWithHintsInEnvironmentEither
-                  Map.empty penultimateEnvironment twoBinderQuery
+          target <- checkedIdentifierTarget "rigidBoundary"
+          let boundarySearch = findQueryResultsInEnvironmentEither
+                target
+                (emptyExferenceSourceTypeVariableHints twoBinders)
+                penultimateEnvironment
+                twoBinderQuery
           validateExferenceQuery penultimateEnvironment twoBinderQuery @?=
             (() <$ boundarySearch)
-          boundaryBatches <- expectRight boundarySearch
+          boundaryResults <- expectRight boundarySearch
           assertBool "the retained boundary plan produced no candidate"
             $ not
             $ null
-            $ concatMap SharedSearch.batchCandidates boundaryBatches
+            $ concatMap
+                (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+                boundaryResults
       , testCase "legacy validation preserves compound-error precedence" $ do
           let duplicateName = name "duplicate"
               binding = FunctionBinding (TypeVar 0) duplicateName 0 [] []
@@ -3065,9 +3069,6 @@ tests = testGroup "Exference"
       , testCase "step exhaustion is reported explicitly" $ do
           chunk <- onlyChunk $ identityInput {input_maxSteps = 1}
           searchCompletion (chunkStatus chunk) @?= SearchStepLimitReached
-          toSearchProgress (chunkStatus chunk) @?= Right
-            (SharedSearch.Completed $ SharedSearch.truncated
-              SharedSearch.StepLimitReached)
       , testCase "term identifier exhaustion truncates instead of colliding" $ do
           chunk <- lastCapacityChunk
             (IdentifierCapacities 0 100 100) identityInput
@@ -3251,18 +3252,29 @@ tests = testGroup "Exference"
               ++ showExpression expression
               ++ " with constraints " ++ show constraints
       , testCase "complete failure is distinguished from bounded search" $ do
-          chunk <- lastChunk $ identityInput
-            {input_goalType = TypeCons $ name "Void"}
+          let input = identityInput
+                {input_goalType = TypeCons $ name "Void"}
+          chunk <- lastChunk input
           assertBool "an uninhabited atomic goal produced an expression"
             $ null $ chunkElements chunk
           chunkStatus chunk @?= SearchStatus SearchExhausted 0 0
-          toSearchProgress (chunkStatus chunk) @?=
-            Right (SharedSearch.Completed SharedSearch.Finished)
-          case toSearchBatch chunk of
-            Left batchError -> fail $ show batchError
-            Right batch -> assertBool
-              "common batch unexpectedly gained candidates"
-              $ null $ SharedSearch.batchCandidates batch
+          target <- checkedIdentifierTarget "completeFailure"
+          environment <- expectRight $ sealLegacyEnvironment input
+          results <- expectRight $ findQueryResultsInEnvironmentEither
+            target
+            (emptyExferenceSourceTypeVariableHints $ input_goalType input)
+            environment
+            (legacyInputQuery input)
+          result <- case results of
+            [] -> fail "complete canonical search produced no result batch"
+            firstResult : remaining ->
+              pure $ lastElement firstResult remaining
+          let batch = SharedQuery.resultSearch result
+          SharedQuery.resultEvidence result @?= SharedQuery.NoEvidence
+          SharedSearch.batchProgress batch @?=
+            SharedSearch.Completed SharedSearch.Finished
+          assertBool "common result unexpectedly gained candidates"
+            $ null $ SharedSearch.batchCandidates batch
       , testCase "recursive scoped unification does not consume the step budget" $ do
           let variable = TypeVar 0
               applied constructor argument =
@@ -3295,51 +3307,10 @@ tests = testGroup "Exference"
           -- misclassify @H a ~ H (F a)@ as a cheap direct match and leave a
           -- checker-doomed node queued at the step limit.
           chunkStatus chunk @?= SearchStatus SearchPruned 0 2
-      , testCase "continuing batches retain cumulative pruning metadata" $ do
-          let binding = name "usedBinding"
-              chunk = ExferenceChunkElement
-                (SearchStatus SearchRunning 3 2)
-                (Map.singleton binding 4)
-                []
-          batch <- expectRight $ toSearchBatch chunk
-          SharedSearch.batchProgress batch @?= SharedSearch.Continuing
-          SharedSearch.batchMetadata batch @?= ExferenceBatchMetadata
-            { exferenceBindingUsages = Map.singleton binding 4
-            , exferenceQueuePruned = 3
-            , exferenceDepthPruned = 2
-            }
-      , testCase "compatibility binding usages are exact, checked, and lazy" $ do
-          let binding = name "usedBinding"
-              malformedStatus = ExferenceChunkElement
-                (SearchStatus SearchRunning (-1) 0)
-                (Map.singleton binding (-2))
-                (error "status validation forced compatibility candidates")
-              malformedUsage = ExferenceChunkElement
-                (SearchStatus SearchRunning 0 0)
-                (Map.singleton binding (-2))
-                (error "usage validation forced compatibility candidates")
-              maximumCount = maxBound :: Int
-              valid = ExferenceChunkElement
-                (SearchStatus SearchRunning 0 0)
-                (Map.singleton binding maximumCount)
-                (error "metadata projection forced compatibility candidates")
-          case toSearchBatch malformedStatus of
-            Left failure -> failure @?= NegativeQueuePruningCount (-1)
-            Right _ -> fail "a malformed compatibility status was accepted"
-          case toSearchBatch malformedUsage of
-            Left failure -> failure @?=
-              NegativeBindingUsageCount binding (-2)
-            Right _ -> fail "a negative binding-use count was accepted"
-          batch <- expectRight $ toSearchBatch valid
-          exferenceBindingUsages (SharedSearch.batchMetadata batch) @?=
-            Map.singleton binding (fromIntegral maximumCount :: Natural)
       , testCase "queue pruning is bounded and reported" $ do
           chunk <- onlyChunk $ identityInput {input_maxQueueSize = Just 0}
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchQueuePruned (chunkStatus chunk) @?= 1
-          toSearchProgress (chunkStatus chunk) @?= Right
-            (SharedSearch.Completed $ SharedSearch.truncated
-              $ SharedSearch.QueueLimitPruned 1)
       , testCase "queue representation overflow retains the best priorities" $ do
           let queued = [(2, 20)]
               generated = [(3, 30), (1, 10)]
@@ -3376,9 +3347,6 @@ tests = testGroup "Exference"
             }
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchDepthPruned (chunkStatus chunk) @?= 1
-          toSearchProgress (chunkStatus chunk) @?= Right
-            (SharedSearch.Completed $ SharedSearch.truncated
-              $ SharedSearch.DepthLimitPruned 1)
       , testCase "structural tuple ranking exactly preserves applications" $ do
           tupleConstructor <- expectRight $ SharedName.tupleName Boxed 3
           let elements =
@@ -3429,22 +3397,6 @@ tests = testGroup "Exference"
                 exference_complexityRating baseline + 2
             result -> fail $ "expected two identity candidates, got "
               ++ show result
-      , testCase "malformed compatibility statuses are rejected" $ do
-          toSearchProgress
-              (SearchStatus SearchIdentifierSpaceExhausted 2 3) @?=
-            Right (SharedSearch.Completed $ SharedSearch.Truncated
-              $ SharedSearch.IdentifierSpaceExhausted
-                :| [ SharedSearch.QueueLimitPruned 2
-                   , SharedSearch.DepthLimitPruned 3
-                   ])
-          toSearchProgress (SearchStatus SearchPruned 0 0) @?=
-            Left PrunedWithoutDiscardedNodes
-          toSearchProgress (SearchStatus SearchExhausted 1 0) @?=
-            Left (ExhaustedWithDiscardedNodes 1 0)
-          toSearchProgress (SearchStatus SearchExhausted 0 1) @?=
-            Left (ExhaustedWithDiscardedNodes 0 1)
-          toSearchProgress (SearchStatus SearchPruned (-1) 0) @?=
-            Left (NegativeQueuePruningCount (-1))
       , testCase "negative constraint-deferral steps are rejected" $
           validateExferenceInput identityInput
             { input_allowConstraintsStopStep = -1 } @?=
@@ -5411,8 +5363,6 @@ tests = testGroup "Exference"
           preferred <- expectRight $ mkExferenceSourceTypeVariableHints goal
             $ Map.singleton "alpha" 7
           aliases @?= preferred
-          Map.lookup (SharedType.FlexibleVariable 7)
-              (typeVariableHints goal sourceNames) @?= Just "alpha"
           showHsType sourceNames (TypeVar 7) @?= "alpha"
           targetName <- expectRight $ SharedName.mkIdentifier "hinted"
           target <- expectRight $ Generated.mkDefinitionName targetName
@@ -5539,176 +5489,69 @@ tests = testGroup "Exference"
             @?= Right "map"
           renderExpression Generated.FullyQualified (ExpName global)
             @?= Right "Data.List.map"
-      , testCase "search batches expose the same generated tree" $ do
-          let intType = TypeCons $ name "Int"
-              variable = TypeVar 0
-              expression = ExpLambda 1 variable (ExpVar 1 variable)
-              residual = HsConstraint (name "Eq") [intType]
-              statistics = ExferenceStats 1 (Penalty 0) 0
-              candidate = (expression, [residual], statistics)
-              chunk = ExferenceChunkElement
-                (SearchStatus SearchExhausted 0 0) Map.empty [candidate]
-              goal = TypeForall [0] [] variable
-              hints = typeVariableHints goal $ Map.singleton "source" 0
-          batch <- expectRight $ toGeneratedSearchBatchWithHints hints chunk
-          case SharedSearch.batchCandidates batch of
-            [generatedCandidate] -> do
-              SharedCandidate.candidateOutput generatedCandidate @?=
-                Generated.Lambda [Generated.Bind 1] (Generated.Local 1)
-              SharedCandidate.candidateResidualConstraints generatedCandidate
-                @?= [SharedConstraint.Constraint
-                  (name "Eq")
-                  [SharedType.TypeConstructor $ name "Int"]]
-              let details = SharedCandidate.candidateDetails generatedCandidate
-              exferenceCandidateStats details @?= statistics
-              exferenceLocalNameHints details @?= Map.singleton 1 "a"
-              exferenceTypeVariableHints details @?= Map.fromList
-                [ (SharedType.FlexibleVariable 0, "source")
-                , (SharedType.RigidVariable 0, "source")
-                ]
-            candidates -> fail $ "unexpected generated batch: "
-              ++ show (length candidates)
-      , testCase "validated generated search stays lazy and total" $ do
-          let hints = typeVariableHints (input_goalType identityInput)
-                $ Map.singleton "a" 0
-          batches <- expectRight
-            $ findGeneratedSearchBatchesWithHintsEither hints identityInput
-          assertBool "generated search produced no first batch"
-            $ not $ null $ take 1 batches
-          let candidates = concatMap SharedSearch.batchCandidates batches
-          assertBool "generated identity search produced no candidate"
+      , testCase "validated canonical search stays lazy and total" $ do
+          let goal = input_goalType identityInput
+          sourceHints <- expectRight $ mkExferenceSourceTypeVariableHints
+            goal $ Map.singleton "a" 0
+          target <- checkedIdentifierTarget "lazyIdentity"
+          environment <- expectRight $ sealLegacyEnvironment identityInput
+          results <- expectRight $ findQueryResultsInEnvironmentEither
+            target sourceHints environment (legacyInputQuery identityInput)
+          assertBool "canonical search produced no first batch"
+            $ not $ null $ take 1 results
+          let candidates = concatMap
+                (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+                results
+          assertBool "canonical identity search produced no candidate"
             $ not $ null candidates
           case candidates of
-            generatedCandidate : _ -> do
-              let details = SharedCandidate.candidateDetails generatedCandidate
+            candidate : _ -> do
+              let details = SharedCandidate.candidateDetails candidate
               Map.lookup (SharedType.RigidVariable 0)
                 (exferenceTypeVariableHints details) @?= Just "a"
-            [] -> fail "generated identity search produced no candidate"
-          case reverse batches of
-            terminal : _ -> SharedSearch.batchProgress terminal @?=
+            [] -> fail "canonical identity search produced no candidate"
+          case results of
+            [] -> fail "canonical identity search produced no terminal batch"
+            firstResult : remaining -> SharedSearch.batchProgress
+                (SharedQuery.resultSearch
+                  $ lastElement firstResult remaining) @?=
               SharedSearch.Completed SharedSearch.Finished
-            [] -> fail "generated identity search produced no terminal batch"
-      , testCase "target attachment leaves candidate heads and tails lazy" $ do
+      , testCase "query-result projection preserves its envelope lazily" $ do
           targetName <- expectRight $ SharedName.mkOperator "<~>"
           target <- expectRight $ Generated.mkDefinitionName targetName
-          let metadata = ExferenceBatchMetadata Map.empty 0 0
-              poisoned = SharedSearch.SearchBatch
-                SharedSearch.Continuing metadata
-                ( error "target attachment forced the candidate head"
-                : error "target attachment forced the candidate tail"
-                )
-              poisonedResult = attachQueryTargetForTesting target poisoned
-          SharedQuery.resultEvidence poisonedResult @?=
-            SharedQuery.ValidatedCandidates
-          SharedSearch.batchProgress (SharedQuery.resultSearch poisonedResult)
-            @?= SharedSearch.Continuing
-
-          let details = ExferenceCandidateDetails
-                (ExferenceStats 1 0 0) Map.empty Map.empty
-              candidate = SharedCandidate.Candidate
-                (Generated.Local 1) [] details
-              batch = SharedSearch.SearchBatch
-                SharedSearch.Continuing metadata
-                (candidate : error "target attachment forced the mapped tail")
-              result = attachQueryTargetForTesting target batch
-          case take 1 $ SharedSearch.batchCandidates
-              $ SharedQuery.resultSearch result of
-            [attached] -> SharedCandidate.candidateOutput attached @?=
-              Generated.FunctionClause target [] (Generated.Local 1)
-            _ -> fail "target attachment lost the first candidate"
+          let metadata = ExferenceBatchMetadata Map.empty 2 3
+              (hasValidatedEvidence, progress, observedMetadata,
+                observedTarget) =
+                  queryProjectionStrictnessForTesting target Map.empty
+          hasValidatedEvidence @?= True
+          progress @?= SharedSearch.Continuing
+          observedMetadata @?= metadata
+          observedTarget @?= target
       , testCase "type hints follow every leading forall layer" $ do
-          let goal = TypeForall [4] []
+          let function = TypeArrow (TypeVar 4) (TypeVar 9)
+              goal = TypeForall [4] []
                 $ TypeForall [9] []
-                $ TypeArrow (TypeVar 4) (TypeVar 9)
-              hints = typeVariableHints goal $ Map.fromList
+                $ TypeArrow function function
+              sourceNames = Map.fromList
                 [("inner", 9), ("outer", 4)]
-          hints @?= Map.fromList
-            [ (SharedType.FlexibleVariable 4, "outer")
-            , (SharedType.FlexibleVariable 9, "inner")
-            , (SharedType.RigidVariable 0, "outer")
-            , (SharedType.RigidVariable 1, "inner")
-            ]
-      , testCase "compatibility chunks check generated candidates" $ do
-          let invalidClass = name "notAClass"
-              chunk = ExferenceChunkElement
-                (SearchStatus SearchExhausted 0 0)
-                Map.empty
-                [ ( ExpName $ name "value"
-                  , [HsConstraint invalidClass [TypeVar 0]]
-                  , ExferenceStats 1 (Penalty 0) 0
-                  )
-                ]
-          toGeneratedSearchBatch chunk @?= Left
-            (InvalidCandidate
-              $ InvalidCandidateType
-              $ InvalidSynthesisConstraint
-              $ SharedConstraint.InvalidConstraintClass
-              invalidClass)
-      , testCase "compatibility candidates reject non-finite metrics" $ do
-          let invalid = Penalty $ 0 / 0
-              chunk = ExferenceChunkElement
-                (SearchStatus SearchExhausted 0 0)
-                Map.empty
-                [ ( ExpName $ name "value"
-                  , []
-                  , ExferenceStats 1 invalid 0
-                  )
-                ]
-          case toGeneratedSearchBatch chunk of
-            Left (InvalidCandidate
-                (InvalidCandidateComplexity (Penalty actual))) ->
-              assertBool "candidate error did not preserve NaN" $ isNaN actual
-            Left failure -> fail $ "unexpected candidate failure: " ++ show failure
-            Right _ -> fail "a non-finite candidate metric was accepted"
-      , testCase "compatibility candidates reject negative counters" $ do
-          let chunk statistics = ExferenceChunkElement
-                (SearchStatus SearchExhausted 0 0)
-                Map.empty
-                [(ExpName $ name "value", [], statistics)]
-          toGeneratedSearchBatch
-              (chunk $ ExferenceStats (-1) (Penalty 0) 0) @?=
-            Left (InvalidCandidate $ InvalidCandidateSteps (-1))
-          toGeneratedSearchBatch
-              (chunk $ ExferenceStats 1 (Penalty 0) (-1)) @?=
-            Left (InvalidCandidate $ InvalidCandidateFinalQueueSize (-1))
-      , testCase "compatibility candidates reject unbound locals and holes" $ do
-          let chunk expression = ExferenceChunkElement
-                (SearchStatus SearchExhausted 0 0)
-                Map.empty
-                [(expression, [], ExferenceStats 1 (Penalty 0) 0)]
-          toGeneratedSearchBatch (chunk $ ExpVar 7 $ TypeVar 0) @?=
-            Left (InvalidCandidate
-              $ InvalidCandidateScope
-              $ Generated.UnboundLocal 7)
-          toGeneratedSearchBatch
-              (chunk $ ExpApply (ExpHole 8) (ExpHole 9)) @?=
-            Left (InvalidCandidate $ IncompleteCandidate (8 :| [9]))
-      , testCase "compatibility candidates reject malformed syntax" $ do
-          let invalidName = name "notAConstructor"
-              expression = ExpLetMatch invalidName []
-                (ExpName $ name "value")
-                (ExpName $ name "value")
-              chunk = ExferenceChunkElement
-                (SearchStatus SearchExhausted 0 0)
-                Map.empty
-                [(expression, [], ExferenceStats 1 (Penalty 0) 0)]
-          toGeneratedSearchBatch chunk @?= Left
-            (InvalidCandidate
-              $ InvalidCandidateSyntax
-              $ Generated.InvalidConstructorPattern
-              invalidName)
-          let arrowName = validQualifiedName [] "->"
-              arrowChunk = ExferenceChunkElement
-                (SearchStatus SearchExhausted 0 0)
-                Map.empty
-                [( ExpName arrowName
-                 , []
-                 , ExferenceStats 1 (Penalty 0) 0
-                 )]
-          toGeneratedSearchBatch arrowChunk @?= Left
-            (InvalidCandidate
-              $ InvalidCandidateSyntax
-              $ Generated.InvalidGlobalExpression SharedName.functionName)
+              input = identityInput {input_goalType = goal}
+          sourceHints <- expectRight
+            $ mkExferenceSourceTypeVariableHints goal sourceNames
+          target <- checkedIdentifierTarget "nestedHints"
+          environment <- expectRight $ sealLegacyEnvironment input
+          results <- expectRight $ findQueryResultsInEnvironmentEither
+            target sourceHints environment (legacyInputQuery input)
+          case concatMap
+              (SharedSearch.batchCandidates . SharedQuery.resultSearch)
+              results of
+            candidate : _ -> exferenceTypeVariableHints
+                (SharedCandidate.candidateDetails candidate) @?= Map.fromList
+              [ (SharedType.FlexibleVariable 4, "outer")
+              , (SharedType.FlexibleVariable 9, "inner")
+              , (SharedType.RigidVariable 0, "outer")
+              , (SharedType.RigidVariable 1, "inner")
+              ]
+            [] -> fail "leading-forall hint search produced no identity"
       ]
   , testGroup "Haskell AST conversion"
       [ testCase "shared clauses preserve every generated pattern form" $ do
@@ -6444,6 +6287,94 @@ enableExtensions requested mode = mode
   { HSE.extensions = map HSE.EnableExtension requested
       ++ HSE.extensions mode
   }
+
+-- Compare the historical typed-chunk view with the canonical shared result
+-- produced from the same checked engine batch.  The historical counters are
+-- machine-sized, but these focused fixtures remain small enough for their
+-- projection back to exact Natural metadata to be lossless.
+assertSameBatch
+  :: String
+  -> Generated.DefinitionName
+  -> ExferenceChunkElement
+  -> ExferenceResult
+  -> IO ()
+assertSameBatch label target historical canonical = do
+  assertEqual (label ++ " progress") (historicalProgress status)
+    $ SharedSearch.batchProgress batch
+  assertEqual (label ++ " metadata") expectedMetadata
+    $ SharedSearch.batchMetadata batch
+  assertEqual (label ++ " candidates") expectedCandidates actualCandidates
+  assertEqual (label ++ " evidence") expectedEvidence
+    $ SharedQuery.resultEvidence canonical
+ where
+  status = chunkStatus historical
+  batch = SharedQuery.resultSearch canonical
+  expectedMetadata = ExferenceBatchMetadata
+    { exferenceBindingUsages = Map.map fromIntegral
+        $ chunkBindingUsages historical
+    , exferenceQueuePruned = fromIntegral $ searchQueuePruned status
+    , exferenceDepthPruned = fromIntegral $ searchDepthPruned status
+    }
+  expectedCandidates =
+    [ ( Generated.FunctionClause target [] $ toGeneratedExpression expression
+      , constraints
+      , statistics
+      , expressionNameHints expression
+      )
+    | (expression, constraints, statistics) <- chunkElements historical
+    ]
+  actualCandidates =
+    [ ( SharedCandidate.candidateOutput candidate
+      , SharedCandidate.candidateResidualConstraints candidate
+      , exferenceCandidateStats details
+      , exferenceLocalNameHints details
+      )
+    | candidate <- SharedSearch.batchCandidates batch
+    , let details = SharedCandidate.candidateDetails candidate
+    ]
+  expectedEvidence = case expectedCandidates of
+    [] -> SharedQuery.NoEvidence
+    _ : _ -> SharedQuery.ValidatedCandidates
+
+-- Independent oracle relating the retained historical completion record to
+-- the canonical shared progress emitted from the same private engine batch.
+-- Caller-built contradictory statuses have no conversion API after the
+-- transitional batch layer is retired; this helper sees engine output only.
+historicalProgress :: SearchStatus -> SharedSearch.Progress
+historicalProgress status
+  | queuePruned < 0 || depthPruned < 0 =
+      error "engine produced negative historical pruning metadata"
+  | otherwise = case searchCompletion status of
+      SearchRunning -> SharedSearch.Continuing
+      SearchExhausted
+        | null pruningReasons -> SharedSearch.Completed SharedSearch.Finished
+        | otherwise -> error
+            "engine marked a pruned historical search as exhausted"
+      SearchStepLimitReached -> SharedSearch.Completed
+        $ SharedSearch.Truncated
+        $ SharedSearch.StepLimitReached :| pruningReasons
+      SearchPruned -> case pruningReasons of
+        reason : remaining -> SharedSearch.Completed
+          $ SharedSearch.Truncated $ reason :| remaining
+        [] -> error "engine reported historical pruning without a reason"
+      SearchIdentifierSpaceExhausted -> SharedSearch.Completed
+        $ SharedSearch.Truncated
+        $ SharedSearch.IdentifierSpaceExhausted :| pruningReasons
+ where
+  queuePruned = searchQueuePruned status
+  depthPruned = searchDepthPruned status
+  pruningReasons =
+    [ SharedSearch.QueueLimitPruned $ fromIntegral queuePruned
+    | queuePruned > 0
+    ] ++
+    [ SharedSearch.DepthLimitPruned $ fromIntegral depthPruned
+    | depthPruned > 0
+    ]
+
+checkedIdentifierTarget :: String -> IO Generated.DefinitionName
+checkedIdentifierTarget spelling = do
+  targetName <- expectRight $ SharedName.mkIdentifier spelling
+  expectRight $ Generated.mkDefinitionName targetName
 
 legacyInputEnvironment :: ExferenceInput -> EnvDictionary
 legacyInputEnvironment input = EnvDictionary

@@ -7,29 +7,15 @@ module Language.Haskell.Exference
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
-  , ExferenceSearchBatch
-  , ExferenceGeneratedOutputElement
-  , ExferenceGeneratedSearchBatch
   , ExferenceCandidateDetails (..)
-  , ExferenceCandidateError (..)
   , ExferenceTypeVariableHints
-  , ExferenceGeneratedCandidate
-  , mkExferenceGeneratedCandidate
-  , typeVariableHints
-  , ExferenceProjectionError (..)
+  , ExferenceCandidate
   , ExferenceStats (..)
   , ExferenceInputError (..)
   , findExpressionsEither
   , findExpressionsWithStatsEither
-  , findGeneratedSearchBatchesEither
-  , findGeneratedSearchBatchesWithHintsEither
   , SearchCompletion (..)
   , SearchStatus (..)
-  , SearchStatusError (..)
-  , toSearchProgress
-  , toSearchBatch
-  , toGeneratedSearchBatch
-  , toGeneratedSearchBatchWithHints
   , Penalty (..)
   , Priority (..)
   )

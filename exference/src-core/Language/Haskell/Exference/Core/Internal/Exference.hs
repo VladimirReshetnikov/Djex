@@ -6,11 +6,9 @@
 module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findExpressionsWithAllocators
-  , findGeneratedSearchBatches
-  , findGeneratedSearchBatchesWithAllocators
   , findQueryResultsInEnvironmentEither
   , findQueryResultsWithAllocators
-  , attachQueryTarget
+  , queryProjectionStrictnessForTesting
   , prepareExferenceInput
   , prepareExferenceQuery
   , ExferenceHeuristicsConfig (..)
@@ -20,19 +18,10 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
-  , ExferenceSearchBatch
-  , ExferenceGeneratedOutputElement
-  , ExferenceGeneratedSearchBatch
   , ExferenceCandidate
   , ExferenceResult
-  , ExferenceProjectionError (..)
   , SearchCompletion (..)
   , SearchStatus (..)
-  , SearchStatusError (..)
-  , toSearchProgress
-  , toSearchBatch
-  , toGeneratedSearchBatch
-  , toGeneratedSearchBatchWithHints
   , constraintsRelaxedAtStep
   , mergeQueueWithCapacity
   , naturalPruningReasons
@@ -42,7 +31,6 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , mkExferenceEnvironment
   , validateExferenceQuery
   , validateExferenceInput
-  , typeVariableHintsInEnvironment
   )
 where
 
@@ -51,9 +39,11 @@ where
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
-import Language.Haskell.Exference.Core.Candidate
 import Language.Haskell.Exference.Core.Internal.Candidate
-  ( compatibilityTypeVariableHintsWithPlan
+  ( ExferenceCandidate
+  , ExferenceSourceTypeVariableHintError
+  , ExferenceSourceTypeVariableHints
+  , ExferenceTypeVariableHints
   , projectValidatedCandidate
   , typeVariableHintsWithPlan
   )
@@ -293,136 +283,29 @@ data SearchStatus = SearchStatus
   }
   deriving (Eq, Show)
 
-data SearchStatusError
-  = NegativeQueuePruningCount Int
-  | NegativeDepthPruningCount Int
-  | NegativeBindingUsageCount QualifiedName Int
-  | ExhaustedWithDiscardedNodes Int Int
-  | PrunedWithoutDiscardedNodes
-  deriving (Eq, Show)
-
--- | Project Exference's compatibility status into the common operational
--- vocabulary without turning heuristic exhaustion into a logical claim.
--- Queue and depth pruning remain separately visible even when a later step
--- limit is what stopped the retained frontier.
-toSearchProgress
-  :: SearchStatus
-  -> Either SearchStatusError SharedSearch.Progress
-toSearchProgress (SearchStatus completion queuePruned depthPruned)
-  | queuePruned < 0 = Left $ NegativeQueuePruningCount queuePruned
-  | depthPruned < 0 = Left $ NegativeDepthPruningCount depthPruned
-  | otherwise = case completion of
-      SearchRunning -> Right SharedSearch.Continuing
-      SearchExhausted
-        | queuePruned > 0 || depthPruned > 0 ->
-            Left $ ExhaustedWithDiscardedNodes queuePruned depthPruned
-        | otherwise -> Right $ SharedSearch.Completed SharedSearch.Finished
-      SearchStepLimitReached -> Right $ SharedSearch.Completed
-        $ SharedSearch.Truncated
-        $ SharedSearch.StepLimitReached :| pruningReasons
-      SearchPruned -> case pruningReasons of
-        reason : remaining -> Right $ SharedSearch.Completed
-          $ SharedSearch.Truncated $ reason :| remaining
-        [] -> Left PrunedWithoutDiscardedNodes
-      SearchIdentifierSpaceExhausted -> Right $ SharedSearch.Completed
-        $ SharedSearch.Truncated
-        $ SharedSearch.IdentifierSpaceExhausted :| pruningReasons
- where
-  pruningReasons =
-    [ SharedSearch.QueueLimitPruned $ fromIntegral queuePruned
-    | queuePruned > 0
-    ] ++
-    [ SharedSearch.DepthLimitPruned $ fromIntegral depthPruned
-    | depthPruned > 0
-    ]
-
 data ExferenceChunkElement = ExferenceChunkElement
   { chunkStatus :: SearchStatus
   -- Historical compatibility metadata remains machine-sized. Engine-produced
-  -- counts saturate here; caller-produced negative counts are rejected when
-  -- projected into the modern batch API.
+  -- counts saturate here. Canonical results retain exact totals independently.
   , chunkBindingUsages :: M.Map QualifiedName Int
   , chunkElements :: [ExferenceOutputElement]
   }
 
--- Internal chunks retain only the lossless shared progress and exact natural
--- metadata chosen by the engine. The historical machine-sized status is a
--- presentation projection and therefore cannot become a second authority.
-data EngineChunk = EngineChunk
-  { engineProgress :: SharedSearch.Progress
-  , engineMetadata :: ExferenceBatchMetadata
-  , engineCandidates :: [ExferenceOutputElement]
-  }
+-- Only independently checked search output can inhabit the engine batch.
+-- Keep the constructor private so the total canonical projector cannot be
+-- applied accidentally before type, scope, completeness, and syntax checks.
+data ValidatedEngineCandidate = ValidatedEngineCandidate
+  Expression [HsConstraint] ExferenceStats
 
-type ExferenceSearchBatch =
-  SharedSearch.SearchBatch ExferenceBatchMetadata ExferenceOutputElement
+-- The engine stores the lossless shared batch natively. Historical chunks are
+-- a saturating compatibility projection, never an intermediate authority for
+-- canonical query results.
+type EngineBatch =
+  SharedSearch.SearchBatch ExferenceBatchMetadata ValidatedEngineCandidate
 
-type ExferenceGeneratedOutputElement =
-  ExferenceGeneratedCandidate
-
-type ExferenceGeneratedSearchBatch =
-  SharedSearch.SearchBatch ExferenceBatchMetadata ExferenceGeneratedOutputElement
-
--- | The stable Exference payload: the checked expression is attached to the
--- exact definition name supplied by the caller, while residual constraints
--- and backend details stay in the shared candidate envelope.
-type ExferenceCandidate =
-  SharedCandidate.Candidate
-    HsType
-    ExferenceCandidateDetails
-    (SharedGenerated.FunctionClause TVarId)
-
--- | One Exference engine chunk in the backend-neutral query envelope.
+-- | One Exference engine batch in the backend-neutral query envelope.
 type ExferenceResult =
   SharedQuery.QueryResult ExferenceBatchMetadata ExferenceCandidate
-
-data ExferenceProjectionError
-  = InvalidSearchStatus SearchStatusError
-  | InvalidCandidate ExferenceCandidateError
-  deriving (Eq, Show)
-
-toSearchBatch
-  :: ExferenceChunkElement
-  -> Either SearchStatusError ExferenceSearchBatch
-toSearchBatch chunk = do
-  -- Preserve the established envelope-error precedence: malformed status
-  -- wins over binding metadata, and all metadata wins over candidate checks.
-  progress <- toSearchProgress $ chunkStatus chunk
-  metadata <- chunkMetadata chunk
-  pure $ SharedSearch.SearchBatch progress metadata $ chunkElements chunk
-
-chunkMetadata
-  :: ExferenceChunkElement
-  -> Either SearchStatusError ExferenceBatchMetadata
-chunkMetadata chunk = do
-  usages <- M.traverseWithKey exactUsage $ chunkBindingUsages chunk
-  pure $ ExferenceBatchMetadata
-    usages
-    (fromIntegral $ searchQueuePruned status)
-    (fromIntegral $ searchDepthPruned status)
- where
-  status = chunkStatus chunk
-  exactUsage binding count
-    | count < 0 = Left $ NegativeBindingUsageCount binding count
-    | otherwise = Right $ fromIntegral count
-
-toGeneratedSearchBatch
-  :: ExferenceChunkElement
-  -> Either ExferenceProjectionError ExferenceGeneratedSearchBatch
-toGeneratedSearchBatch = toGeneratedSearchBatchWithHints M.empty
-
-toGeneratedSearchBatchWithHints
-  :: ExferenceTypeVariableHints
-  -> ExferenceChunkElement
-  -> Either ExferenceProjectionError ExferenceGeneratedSearchBatch
-toGeneratedSearchBatchWithHints typeHints chunk = do
-  batch <- either (Left . InvalidSearchStatus) Right $ toSearchBatch chunk
-  traverse convertCandidate batch
-  where
-    convertCandidate (candidateExpression, constraints, statistics) =
-      either (Left . InvalidCandidate) Right
-        $ mkExferenceGeneratedCandidate
-            typeHints candidateExpression constraints statistics
 
 -- | A search node paired with the next goal already removed from its goal
 -- sequence. The queue can therefore contain only work that 'stateStep' may
@@ -476,11 +359,11 @@ recordBindingUsage node searchState = case nodeLastStepBinding node of
 --   - call stateStep repeatedly
 --   - convert stuff
 --   - consider some special abort conditions
-findEngineChunksWith
+findEngineBatchesWith
   :: SearchAllocators
   -> CheckedExferenceQuery
-  -> [EngineChunk]
-findEngineChunksWith allocators
+  -> [EngineBatch]
+findEngineBatchesWith allocators
     (CheckedExferenceQuery
       (ExferenceEnvironment EnvDictionary
       { environmentFunctions = allFunctions
@@ -536,20 +419,20 @@ findEngineChunksWith allocators
     , nodeDepth           = 0.0
     , nodeLastStepBinding = Nothing
     }
-  transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineChunk
-  transformSolutions potentialSolutions searchState = EngineChunk
+  transformSolutions :: [SearchNode] -> FindExpressionsState -> EngineBatch
+  transformSolutions potentialSolutions searchState = SharedSearch.SearchBatch
       progress
       (ExferenceBatchMetadata
         { exferenceBindingUsages = newBindingUsages
         , exferenceQueuePruned = totalQueuePruned
         , exferenceDepthPruned = totalDepthPruned
         })
-      [ ( e
-        , remainingConstraints
-        , ExferenceStats n' d
+      [ ValidatedEngineCandidate
+          e
+          remainingConstraints
+          (ExferenceStats n' d
             $ SharedCount.saturatingNaturalToInt
-            $ queueSizeNatural newNodes
-        )
+            $ queueSizeNatural newNodes)
       | solution <- potentialSolutions
       , let contxt = nodeQueryClassEnv solution
       , remainingConstraints <- maybeToList
@@ -618,7 +501,7 @@ findEngineChunksWith allocators
               Right () -> Just candidate
               Left _ -> firstChecked remainingCandidates
             Left _ -> firstChecked remainingCandidates
-  helper :: FindExpressionsState -> Maybe (EngineChunk, FindExpressionsState)
+  helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
   helper searchState = runStateT (do
     ScheduledNode nextGoal s <- popBestNode
@@ -703,21 +586,21 @@ findExpressionsWithAllocators
   -> CheckedExferenceQuery
   -> [ExferenceChunkElement]
 findExpressionsWithAllocators allocators' =
-  map projectCompatibilityChunk . findEngineChunksWith allocators'
+  map projectCompatibilityChunk . findEngineBatchesWith allocators'
 
-projectCompatibilityChunk :: EngineChunk -> ExferenceChunkElement
+projectCompatibilityChunk :: EngineBatch -> ExferenceChunkElement
 projectCompatibilityChunk chunk = ExferenceChunkElement
   compatibilityStatus
   (projectCompatibilityBindingUsages
     $ exferenceBindingUsages metadata)
-  (engineCandidates chunk)
+  (map projectCompatibilityCandidate $ SharedSearch.batchCandidates chunk)
  where
-  metadata = engineMetadata chunk
+  metadata = SharedSearch.batchMetadata chunk
   compatibilityStatus = SearchStatus
     compatibilityCompletion
     (SharedCount.saturatingNaturalToInt $ exferenceQueuePruned metadata)
     (SharedCount.saturatingNaturalToInt $ exferenceDepthPruned metadata)
-  compatibilityCompletion = case engineProgress chunk of
+  compatibilityCompletion = case SharedSearch.batchProgress chunk of
     SharedSearch.Continuing -> SearchRunning
     SharedSearch.Completed SharedSearch.Finished -> SearchExhausted
     SharedSearch.Completed (SharedSearch.Truncated reasons)
@@ -727,6 +610,10 @@ projectCompatibilityChunk chunk = ExferenceChunkElement
           SearchStepLimitReached
       | otherwise -> SearchPruned
 
+  projectCompatibilityCandidate
+    (ValidatedEngineCandidate expression constraints statistics) =
+      (expression, constraints, statistics)
+
 -- | Project exact engine totals into the historical chunk API without
 -- allowing a large count to wrap into a misleading non-positive value.
 projectCompatibilityBindingUsages
@@ -734,25 +621,6 @@ projectCompatibilityBindingUsages
   -> M.Map QualifiedName Int
 projectCompatibilityBindingUsages =
   M.map SharedCount.saturatingNaturalToInt
-
--- | Project the validated engine trace lazily.  Candidate conversion is total
--- here: input validation established the shared type invariants, and search
--- substitutions preserve them.  The fallible adapter above remains for
--- caller-constructed compatibility chunks.
-findGeneratedSearchBatches
-  :: ExferenceTypeVariableHints
-  -> CheckedExferenceQuery
-  -> [ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatches =
-  findGeneratedSearchBatchesWithAllocators defaultSearchAllocators
-
-findGeneratedSearchBatchesWithAllocators
-  :: SearchAllocators
-  -> ExferenceTypeVariableHints
-  -> CheckedExferenceQuery
-  -> [ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatchesWithAllocators allocators' typeHints =
-  map (projectGeneratedBatch typeHints) . findEngineChunksWith allocators'
 
 -- | Validate one query against a sealed environment, then expose its result
 -- trace lazily in the common query envelope.  The exact target is excluded
@@ -793,7 +661,7 @@ findQueryResultsWithAllocators allocators' target sourceHints environment query 
     $ typeVariableHintsWithPlan
         (queryGoalType checkedQuery) rigidPlan sourceHints
   pure $ map (projectQueryResult target typeHints)
-    $ findEngineChunksWith allocators' checked
+    $ findEngineBatchesWith allocators' checked
  where
   queryWithTargetExcluded = query
     { queryExcludedBindings = S.insert
@@ -807,46 +675,53 @@ findQueryResultsWithAllocators allocators' target sourceHints environment query 
 projectQueryResult
   :: SharedGenerated.DefinitionName
   -> ExferenceTypeVariableHints
-  -> EngineChunk
+  -> EngineBatch
   -> ExferenceResult
 projectQueryResult target typeHints =
-  attachQueryTarget target . projectGeneratedBatch typeHints
-
--- Attach the already checked request target without traversing the candidate
--- list. Keeping this boundary separate makes its non-forcing contract directly
--- testable without exposing private engine chunks.
-attachQueryTarget
-  :: SharedGenerated.DefinitionName
-  -> ExferenceGeneratedSearchBatch
-  -> ExferenceResult
-attachQueryTarget target =
   SharedQuery.queryResultFromCandidates
-    . fmap (fmap $ SharedGenerated.FunctionClause target [])
-
--- | Propagate frontend spellings through the exact rigid-variable plan of a
--- checked query. Validation happens first so this helper preserves the same
--- first-error precedence as the search entry point.
-typeVariableHintsInEnvironment
-  :: ExferenceEnvironment
-  -> ExferenceQuery
-  -> TypeVarIndex
-  -> Either ExferenceInputError ExferenceTypeVariableHints
-typeVariableHintsInEnvironment environment query sourceNames = do
-  CheckedExferenceQuery _ _ plan <- prepareExferenceQuery environment query
-  pure $ compatibilityTypeVariableHintsWithPlan plan sourceNames
-
-projectGeneratedBatch
-  :: ExferenceTypeVariableHints
-  -> EngineChunk
-  -> ExferenceGeneratedSearchBatch
-projectGeneratedBatch typeHints chunk = SharedSearch.SearchBatch
-  (engineProgress chunk)
-  (engineMetadata chunk)
-  (map projectCandidate $ engineCandidates chunk)
+    . fmap projectCandidate
  where
-  projectCandidate (candidateExpression, constraints, statistics) =
+  projectCandidate
+      (ValidatedEngineCandidate candidateExpression constraints statistics) =
     projectValidatedCandidate
-      typeHints candidateExpression constraints statistics
+      target typeHints candidateExpression constraints statistics
+
+-- | Closed strictness probe for the exposed internal regression module. It
+-- returns observations rather than accepting raw candidates, so even clients
+-- of that module cannot bypass the checked engine-candidate constructor.
+queryProjectionStrictnessForTesting
+  :: SharedGenerated.DefinitionName
+  -> ExferenceTypeVariableHints
+  -> ( Bool
+     , SharedSearch.Progress
+     , ExferenceBatchMetadata
+     , SharedGenerated.DefinitionName
+     )
+queryProjectionStrictnessForTesting target typeHints =
+  ( SharedQuery.resultEvidence poisonedResult
+      == SharedQuery.ValidatedCandidates
+  , SharedSearch.batchProgress $ SharedQuery.resultSearch poisonedResult
+  , SharedSearch.batchMetadata $ SharedQuery.resultSearch poisonedResult
+  , SharedGenerated.clauseName
+      $ SharedCandidate.candidateOutput firstCandidate
+  )
+ where
+  metadata = ExferenceBatchMetadata M.empty 2 3
+  poisonedResult = projectQueryResult target typeHints
+    $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
+      ( error "query projection forced a candidate head"
+      : error "query projection forced a candidate tail"
+      )
+  expression = ExpLambda 1 (TypeVar 0) (ExpVar 1 $ TypeVar 0)
+  validResult = projectQueryResult target typeHints
+    $ SharedSearch.SearchBatch SharedSearch.Continuing metadata
+      ( ValidatedEngineCandidate expression [] (ExferenceStats 1 0 0)
+      : error "query projection forced the mapped candidate tail"
+      )
+  firstCandidate = case SharedSearch.batchCandidates
+      $ SharedQuery.resultSearch validResult of
+    candidate : _ -> candidate
+    [] -> error "query projection lost a present candidate"
 
 constraintsRelaxedAtStep :: Bool -> Int -> Int -> Bool
 constraintsRelaxedAtStep allowConstraints stopStep currentStep =

@@ -7,7 +7,7 @@ module Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
   , findExpressionsWithIdentifierCapacitiesEither
   , findQueryResultsWithIdentifierCapacitiesEither
-  , attachQueryTargetForTesting
+  , queryProjectionStrictnessForTesting
   , compatibilityPruningCount
   , compatibilityBindingUsageCounts
   , mergePriorityQueueAtCapacity
@@ -23,7 +23,9 @@ import Numeric.Natural (Natural)
 
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
 import Language.Haskell.Exference.Core.Candidate
-  ( ExferenceSourceTypeVariableHints )
+  ( ExferenceSourceTypeVariableHints
+  , ExferenceTypeVariableHints
+  )
 import Language.Haskell.Exference.Core.Name (QualifiedName)
 import Language.Haskell.Exference.Core.Score (Penalty)
 import Language.Haskell.Exference.Core.Types (HsType)
@@ -67,13 +69,17 @@ findQueryResultsWithIdentifierCapacitiesEither
 findQueryResultsWithIdentifierCapacitiesEither capacities =
   E.findQueryResultsWithAllocators $ finiteSearchAllocators capacities
 
--- | Direct access to the final target-attachment boundary for poison-tail
--- tests. Production callers use 'E.findQueryResultsInEnvironmentEither'.
-attachQueryTargetForTesting
+-- | Closed observations from the final engine-to-query strictness probe.
+-- Production callers use 'E.findQueryResultsInEnvironmentEither'.
+queryProjectionStrictnessForTesting
   :: DefinitionName
-  -> E.ExferenceGeneratedSearchBatch
-  -> E.ExferenceResult
-attachQueryTargetForTesting = E.attachQueryTarget
+  -> ExferenceTypeVariableHints
+  -> ( Bool
+     , SharedSearch.Progress
+     , E.ExferenceBatchMetadata
+     , DefinitionName
+     )
+queryProjectionStrictnessForTesting = E.queryProjectionStrictnessForTesting
 
 -- | Exercise the queue representation boundary with tiny payloads rather
 -- than attempting to allocate an Int-sized frontier.

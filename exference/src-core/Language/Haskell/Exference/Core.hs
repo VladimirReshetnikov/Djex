@@ -3,10 +3,6 @@ module Language.Haskell.Exference.Core
   , findExpressionsChunked
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
-  , findGeneratedSearchBatchesEither
-  , findGeneratedSearchBatchesWithHintsEither
-  , findGeneratedSearchBatchesInEnvironmentEither
-  , findGeneratedSearchBatchesWithHintsInEnvironmentEither
   , E.findQueryResultsInEnvironmentEither
   , E.ExferenceHeuristicsConfig (..)
   , defaultHeuristicsConfig
@@ -16,30 +12,16 @@ module Language.Haskell.Exference.Core
   , E.ExferenceOutputElement
   , E.ExferenceChunkElement (..)
   , E.ExferenceBatchMetadata (..)
-  , E.ExferenceSearchBatch
-  , E.ExferenceGeneratedOutputElement
-  , E.ExferenceGeneratedSearchBatch
-  , E.ExferenceCandidate
+  , C.ExferenceCandidate
   , E.ExferenceResult
   , C.ExferenceCandidateDetails (..)
-  , C.ExferenceCandidateError (..)
   , C.ExferenceTypeVariableHints
   , C.ExferenceSourceTypeVariableHints
   , C.ExferenceSourceTypeVariableHintError (..)
-  , C.ExferenceGeneratedCandidate
-  , C.mkExferenceGeneratedCandidate
   , C.emptyExferenceSourceTypeVariableHints
   , C.mkExferenceSourceTypeVariableHints
-  , C.typeVariableHints
-  , E.typeVariableHintsInEnvironment
-  , E.ExferenceProjectionError (..)
   , E.SearchCompletion (..)
   , E.SearchStatus (..)
-  , E.SearchStatusError (..)
-  , E.toSearchProgress
-  , E.toSearchBatch
-  , E.toGeneratedSearchBatch
-  , E.toGeneratedSearchBatchWithHints
   , E.constraintsRelaxedAtStep
   , E.ExferenceInputError (..)
   , E.mkExferenceEnvironment
@@ -54,7 +36,6 @@ where
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
 import qualified Language.Haskell.Exference.Core.Candidate as C
 import qualified Language.Haskell.Exference.Core.Score as Score
-import qualified Data.Map.Strict as Map
 
 -- | Parser-neutral heuristic defaults for reusable core and stable queries.
 -- The historical command-line frontend intentionally keeps its own ranking
@@ -100,43 +81,6 @@ findExpressionsWithStatsEither
   :: E.ExferenceInput
   -> Either E.ExferenceInputError [E.ExferenceChunkElement]
 findExpressionsWithStatsEither = runSearch
-
--- | Validate the finite input eagerly, then expose the generated batch trace
--- lazily.  The empty hint map gives deterministic fallback names to one-shot
--- core callers; reusable frontends should seal an environment and use the
--- corresponding @InEnvironmentEither@ entry point below.
-findGeneratedSearchBatchesEither
-  :: E.ExferenceInput
-  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatchesEither =
-  findGeneratedSearchBatchesWithHintsEither Map.empty
-
-findGeneratedSearchBatchesWithHintsEither
-  :: C.ExferenceTypeVariableHints
-  -> E.ExferenceInput
-  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatchesWithHintsEither typeHints input = do
-  checked <- E.prepareExferenceInput input
-  pure $ E.findGeneratedSearchBatches typeHints checked
-
--- | Validate only a new query, then search a reusable sealed environment.
--- Environment validation happened once at 'E.mkExferenceEnvironment'.
-findGeneratedSearchBatchesInEnvironmentEither
-  :: E.ExferenceEnvironment
-  -> E.ExferenceQuery
-  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatchesInEnvironmentEither =
-  findGeneratedSearchBatchesWithHintsInEnvironmentEither Map.empty
-
-findGeneratedSearchBatchesWithHintsInEnvironmentEither
-  :: C.ExferenceTypeVariableHints
-  -> E.ExferenceEnvironment
-  -> E.ExferenceQuery
-  -> Either E.ExferenceInputError [E.ExferenceGeneratedSearchBatch]
-findGeneratedSearchBatchesWithHintsInEnvironmentEither
-    typeHints environment query = do
-  checked <- E.prepareExferenceQuery environment query
-  pure $ E.findGeneratedSearchBatches typeHints checked
 
 -- Keep validation at the public boundary and run it exactly once. The raw
 -- engine assumes a checked input; list-returning compatibility functions

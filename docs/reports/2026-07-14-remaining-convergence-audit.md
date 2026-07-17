@@ -166,17 +166,20 @@ statistics, candidate details, and batch metadata each retain one core-owned
 record; the stable polished names are zero-cost type aliases and bidirectional
 record-pattern views, not records copied field by field.
 
-`SearchCompletion`, `SearchStatus`, `ExferenceChunkElement`, and the checked
-status-to-progress conversions remain only at Exference's historical API edge.
-The canonical path projects private engine chunks straight into the common
-search and query envelopes, so retaining those source-compatible types does
-not retain a competing modern result model. Explicit imports of the stable
-record views migrate from `T(..)` to `T`, `pattern T`, and the used field
-selectors under `PatternSynonyms`; their pattern fields cannot be used by GHC
-record-update syntax, so updates match and reconstruct instead. This
-experimental representation migration also adopts the core records' derived
-`Show`, `Typeable`, generic, and ABI identities; dependants must recompile and
-must not treat the former derived `Show` text as a stable serialization.
+`SearchCompletion`, `SearchStatus`, and `ExferenceChunkElement` remain only at
+Exference's historical raw API edge. The public transitional ladder between
+those raw chunks and canonical results has been retired: the canonical path
+projects private checked engine batches straight into the common search and query
+envelopes. New core clients use `findQueryResultsInEnvironmentEither`; the raw
+expression/status endpoint remains solely for source compatibility. Retaining
+those historical types therefore does not retain a competing modern result
+model. Explicit imports of the stable record views migrate from `T(..)` to
+`T`, `pattern T`, and the used field selectors under `PatternSynonyms`; their
+pattern fields cannot be used by GHC record-update syntax, so updates match and
+reconstruct instead. This experimental representation migration also adopts
+the core records' derived `Show`, `Typeable`, generic, and ABI identities;
+dependants must recompile and must not treat the former derived `Show` text as a
+stable serialization.
 
 Regression coverage pins direct core/adapter equality, exact operator targets,
 target exclusion without excluding qualified homonyms, candidate-derived

@@ -2,55 +2,43 @@
 
 module Language.Haskell.Exference.Core.Internal.Candidate
   ( ExferenceCandidateDetails (..)
-  , ExferenceCandidateError (..)
   , ExferenceTypeVariableHints
   , ExferenceSourceTypeVariableHints
   , ExferenceSourceTypeVariableHintError (..)
-  , ExferenceGeneratedCandidate
-  , mkExferenceGeneratedCandidate
+  , ExferenceCandidate
   , projectValidatedCandidate
   , emptyExferenceSourceTypeVariableHints
   , mkExferenceSourceTypeVariableHints
   , retargetExferenceSourceTypeVariableHints
   , sourceTypeVariableHintGoal
   , validateExferenceTypeVariableSpelling
-  , typeVariableHints
   , typeVariableHintsWithPlan
-  , compatibilityTypeVariableHintsWithPlan
   ) where
 
 import Control.DeepSeq (NFData (rnf), force)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
 
 import qualified Language.Haskell.Exference.Core.Expression as Exference
 import Language.Haskell.Exference.Core.ExferenceStats (ExferenceStats (..))
-import Language.Haskell.Exference.Core.FunctionBinding (EnvDictionary (..))
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( flexibleIdentifiers )
 import Language.Haskell.Exference.Core.Internal.SourceNames
   ( preferredSourceTypeVariableNames )
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( RigidInstantiationPlan
-  , mkRigidInstantiationContext
-  , planRigidInstantiation
   , rigidInstantiations
   )
 import Language.Haskell.Exference.Core.Types
   ( HsConstraint
   , HsType
-  , SynthesisTypeError
   , SynthesisVariable
   , TVarId
   , TypeVarIndex
-  , emptyStaticClassEnv
-  , toSynthesisConstraint
   )
-import Language.Haskell.Exference.Core.Score
-  (Penalty, isFiniteScore, normalizePenalty)
+import Language.Haskell.Exference.Core.Score (normalizePenalty)
 import Language.Haskell.Synthesis.Candidate (Candidate (..))
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
@@ -196,83 +184,26 @@ data ExferenceCandidateDetails = ExferenceCandidateDetails
 
 instance NFData ExferenceCandidateDetails
 
-data ExferenceCandidateError
-  = InvalidCandidateSyntax Generated.RenderError
-  | InvalidCandidateScope (Generated.ScopeError TVarId)
-  | IncompleteCandidate (NonEmpty TVarId)
-  | InvalidCandidateType SynthesisTypeError
-  | InvalidCandidateSteps Int
-  | InvalidCandidateFinalQueueSize Int
-  | InvalidCandidateComplexity Penalty
-  deriving (Eq, Show, Generic)
-
-instance NFData ExferenceCandidateError
-
-type ExferenceGeneratedCandidate =
+-- | The canonical Exference payload carries the exact checked definition
+-- target rather than an intermediate expression-only candidate.
+type ExferenceCandidate =
   Candidate HsType ExferenceCandidateDetails
-    (Generated.Expression TVarId)
-
--- | Check and erase one typed Exference result without losing residual
--- obligations, search statistics, or renderer hints.
-mkExferenceGeneratedCandidate
-  :: ExferenceTypeVariableHints
-  -> Exference.Expression
-  -> [HsConstraint]
-  -> ExferenceStats
-  -> Either ExferenceCandidateError ExferenceGeneratedCandidate
-mkExferenceGeneratedCandidate typeNames expression constraints statistics = do
-  let generated = Exference.toGeneratedExpression expression
-  either (Left . InvalidCandidateSyntax) Right
-    $ Generated.validateExpressionSyntax generated
-  either (Left . InvalidCandidateScope) Right
-    $ Generated.validateExpressionScope generated
-  case Generated.expressionHoles generated of
-    firstHole : remainingHoles ->
-      Left $ IncompleteCandidate $ firstHole :| remainingHoles
-    [] -> pure ()
-  sharedConstraints <- either (Left . InvalidCandidateType) Right
-    $ traverse toSynthesisConstraint constraints
-  case exference_steps statistics of
-    steps
-      | steps < 0 -> Left $ InvalidCandidateSteps steps
-      | otherwise -> pure ()
-  case exference_finalSize statistics of
-    finalSize
-      | finalSize < 0 -> Left $ InvalidCandidateFinalQueueSize finalSize
-      | otherwise -> pure ()
-  case exference_complexityRating statistics of
-    complexity
-      | isFiniteScore complexity -> pure ()
-      | otherwise -> Left $ InvalidCandidateComplexity complexity
-  pure $ detachCandidate
-    typeNames expression generated sharedConstraints statistics
+    (Generated.FunctionClause TVarId)
 
 -- The engine calls this only after input, typing, scope, completeness, and
 -- generated-syntax checks.  Keeping it in an Internal module makes that
 -- precondition unavailable as an unchecked public escape hatch.
 projectValidatedCandidate
-  :: ExferenceTypeVariableHints
+  :: Generated.DefinitionName
+  -> ExferenceTypeVariableHints
   -> Exference.Expression
   -> [HsConstraint]
   -> ExferenceStats
-  -> ExferenceGeneratedCandidate
-projectValidatedCandidate typeNames expression constraints statistics =
-  detachCandidate
-    typeNames
-    expression
-    (Exference.toGeneratedExpression expression)
-    constraints
-    statistics
-
-detachCandidate
-  :: ExferenceTypeVariableHints
-  -> Exference.Expression
-  -> Generated.Expression TVarId
-  -> [HsConstraint]
-  -> ExferenceStats
-  -> ExferenceGeneratedCandidate
-detachCandidate typeNames expression generated constraints statistics = force
-  $ Candidate generated constraints ExferenceCandidateDetails
+  -> ExferenceCandidate
+projectValidatedCandidate target typeNames expression constraints statistics =
+  fmap (Generated.FunctionClause target []) $ force
+  $ Candidate (Exference.toGeneratedExpression expression)
+      constraints ExferenceCandidateDetails
       { exferenceCandidateStats = statistics
           { exference_complexityRating = normalizePenalty
               $ exference_complexityRating statistics
@@ -280,25 +211,6 @@ detachCandidate typeNames expression generated constraints statistics = force
       , exferenceLocalNameHints = Exference.expressionNameHints expression
       , exferenceTypeVariableHints = typeNames
       }
-
--- | Environment-free compatibility helper.  Its environment-aware companion
--- can account for an existing rigid variable changing the allocation plan,
--- but both retain their historical unchecked spelling-map contract.
---
--- If the finite identifier space is exhausted there can be no valid search;
--- retaining only flexible source hints keeps this convenience function total.
--- New request and result boundaries must instead construct
--- 'ExferenceSourceTypeVariableHints'.
-typeVariableHints :: HsType -> TypeVarIndex -> ExferenceTypeVariableHints
-typeVariableHints goal sourceNames = either
-  (const flexibleHints)
-  (`compatibilityTypeVariableHintsWithPlan` sourceNames)
-  rigidPlan
- where
-  flexibleHints = compatibilityFlexibleTypeVariableHints sourceNames
-  rigidPlan = planRigidInstantiation
-    (mkRigidInstantiationContext
-      $ EnvDictionary [] [] emptyStaticClassEnv) [] goal
 
 -- | Apply source spellings to the exact rigid-instantiation plan consumed by
 -- search and independent checking.  The opaque input guarantees that raw
@@ -320,17 +232,6 @@ typeVariableHintsWithPlan expectedGoal plan sourceNames
   hintedGoal = sourceTypeVariableHintGoal sourceNames
   canonicalExpectedGoal = force $ SharedType.canonicalizeType expectedGoal
   reject failure = Left $! force failure
-
--- | Preserve the historical unchecked spelling-map API where a public
--- compatibility helper still promises it.  New request and result paths must
--- use 'typeVariableHintsWithPlan' instead.
-compatibilityTypeVariableHintsWithPlan
-  :: RigidInstantiationPlan
-  -> TypeVarIndex
-  -> ExferenceTypeVariableHints
-compatibilityTypeVariableHintsWithPlan plan =
-  extendTypeVariableHintsWithPlan plan
-    . compatibilityFlexibleTypeVariableHints
 
 extendTypeVariableHintsWithPlan
   :: RigidInstantiationPlan
@@ -365,14 +266,3 @@ checkedFlexibleTypeVariableHints
 sourceTypeVariableHintGoal :: ExferenceSourceTypeVariableHints -> HsType
 sourceTypeVariableHintGoal (ExferenceSourceTypeVariableHints sourceType _) =
   sourceType
-
-compatibilityFlexibleTypeVariableHints
-  :: TypeVarIndex
-  -> ExferenceTypeVariableHints
-compatibilityFlexibleTypeVariableHints =
-  Map.fromList
-    . map (\(variable, sourceName) ->
-        (SharedType.FlexibleVariable variable, sourceName))
-    . IntMap.toAscList
-    . preferredSourceTypeVariableNames
-    . Map.toList

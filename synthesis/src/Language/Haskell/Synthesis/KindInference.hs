@@ -1,5 +1,9 @@
 {-# LANGUAGE DeriveGeneric #-}
 
+-- Derived from Djinn's kind inference in Djinn.Internal.HCheck,
+-- Copyright (c) 2005 Lennart Augustsson; rewritten and extended for the
+-- shared Djex foundation. See the top-level LICENSE for licensing details.
+
 -- | Backend-neutral kind checking for shared source types.
 --
 -- Inference variables are private to this module. Public assumptions and

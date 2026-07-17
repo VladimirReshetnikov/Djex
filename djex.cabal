@@ -9,13 +9,13 @@ Description:
 Category:      Language
 License:       BSD-3-Clause
 License-Files:
-  synthesis/LICENSE
+  LICENSE
   djinn/LICENSE
   exference/LICENSE
 Author:        Vladimir Reshetnikov, Lennart Augustsson, Lennart Spitzner, and contributors
 Maintainer:    Vladimir Reshetnikov
-Homepage:      https://github.com/VladimirReshetnikov/Haskell/tree/main/djex
-Bug-Reports:   https://github.com/VladimirReshetnikov/Haskell/issues
+Homepage:      https://github.com/VladimirReshetnikov/Djex
+Bug-Reports:   https://github.com/VladimirReshetnikov/Djex/issues
 Tested-With:   GHC == 9.12.4
 Stability:     experimental
 Copyright:
@@ -32,7 +32,6 @@ Extra-Source-Files:
   exference/README.md
   exference/docs/reports/*.md
   exference/docs/hcar/*.tex
-  exference/exference.pdf
   exference/notes.txt
 
 Data-Files:
@@ -41,8 +40,7 @@ Data-Files:
 
 source-repository head
   type:     git
-  location: https://github.com/VladimirReshetnikov/Haskell
-  subdir:   djex
+  location: https://github.com/VladimirReshetnikov/Djex
 
 common build-settings
   Default-Language: Haskell2010

@@ -569,3 +569,26 @@ Startup-file mode now carries
 aggregate failure status across later commands and `:clear`, accepts settings
 on either side of filenames, and rejects unknown or ambiguous option prefixes;
 interactive recovery remains unchanged.
+
+## License and credits
+
+Djex is distributed under the BSD-3-Clause license. The top-level
+[LICENSE](LICENSE) carries the copyright lines of everyone whose work the
+merged codebase contains.
+
+Djex descends from two projects, whose authors deserve the credit for the
+ideas and engines this tool is built on:
+
+- [Djinn](https://github.com/augustss/djinn) by Lennart Augustsson supplied
+  the intuitionistic proof engine behind `djex djinn`. Its LJT prover in turn
+  descends from Roy Dyckhoff's original Prolog implementation; the module
+  header of `Djinn.Internal.LJT` records the lineage. Djinn's original license
+  is preserved verbatim in [djinn/LICENSE](djinn/LICENSE).
+- [Exference](https://github.com/lspitzner/exference) by Lennart Spitzner
+  supplied the heuristic polymorphic-expression search engine behind
+  `djex exference`. Its original license is preserved verbatim in
+  [exference/LICENSE](exference/LICENSE).
+
+Both engine trees have been significantly rewritten during the merger, but
+they remain derivative works of their originals, so the upstream copyright
+notices above continue to apply alongside the top-level license.

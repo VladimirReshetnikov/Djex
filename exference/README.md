@@ -749,3 +749,11 @@ and avoid adding functions that
   the respective part of the algorithm.
 * *Exference* was used at least once to implement some typed hole in its own
   source code.
+
+## License and provenance
+
+The imported source is Copyright 2014–2017 Lennart Spitzner and is distributed
+under the BSD 3-Clause license in [`LICENSE`](LICENSE). Local changes retain
+that license. The imported source was cloned from:
+
+<https://github.com/lspitzner/exference>

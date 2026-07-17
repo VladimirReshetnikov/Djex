@@ -87,8 +87,14 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
     deconstructors goal expected expression = do
   validateCheckInputs classEnvironment functions deconstructors goal expected
     expression
-  checkedGoal <- instantiateGoal plan goal
+  (checkedGoal, openedConstraints) <- instantiateGoal plan goal
   let
+      -- Live search adds each opened forall layer's rigid-instantiated
+      -- constraints to its query assumptions in forallStep; an independent
+      -- caller checking a constrained goal must receive the same assumptions
+      -- or it would falsely reject search's own accepted results.
+      augmentedEnvironment =
+        addQueryClassEnv openedConstraints classEnvironment
       initialState = CheckState
         { checkFlexibleIds = supplyFromIdentifiers $ IntSet.toAscList
             $ IntSet.union
@@ -103,11 +109,15 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
   let substitutions = checkSubstitutions finalState
       inferredConstraints = map (snd . constraintApplySubsts substitutions)
         $ checkConstraints finalState
-      normalizedExpected = Set.toAscList $ Set.fromList expected
+      -- The inferred side is canonicalized whenever the unifier bound a
+      -- variable, so the caller-supplied side must be canonicalized too or a
+      -- semantically equal application-form spelling would fail comparison.
+      normalizedExpected = Set.toAscList $ Set.fromList
+        $ map (fmap SharedType.canonicalizeType) expected
   unresolved <- maybe
     (Left $ RefutableConstraints inferredConstraints)
     (Right . Set.toAscList . Set.fromList)
-    (filterUnresolved classEnvironment inferredConstraints)
+    (filterUnresolved augmentedEnvironment inferredConstraints)
   unless (unresolved == normalizedExpected)
     $ Left (ConstraintMismatch normalizedExpected unresolved)
   where
@@ -291,10 +301,13 @@ zonk ty = do
       canonical = SharedType.canonicalizeType applied
   if canonical == ty then pure canonical else zonk canonical
 
+-- | Open the goal's leading prenex chain exactly as live search does,
+-- returning the instantiated body together with every opened layer's
+-- rigid-instantiated constraints in outer-to-inner order.
 instantiateGoal
   :: RigidInstantiationPlan
   -> HsType
-  -> Either ExpressionCheckError HsType
+  -> Either ExpressionCheckError (HsType, [HsConstraint])
 instantiateGoal plan goal
   | plannedBinders /= actualBinders = Left
       $ RigidInstantiationPlanMismatch plannedBinders actualBinders
@@ -309,14 +322,20 @@ instantiateGoal plan goal
   -- Validation permits a chain of prenex quantifiers.  Search consumes one
   -- layer per step, so consume the same ordered segment for each layer.  A
   -- single IntMap for the whole chain would collapse legal shadowed IDs.
-  instantiateFrom remaining (TypeForall variables _ body) =
+  -- Outer substitutions rewrite the remaining body before the next layer
+  -- opens, so inner layers' constraints already carry them, exactly as in
+  -- the engine's forallStep.
+  instantiateFrom remaining (TypeForall variables constraints body) =
     let (current, rest) =
           splitRigidInstantiationLayer variables remaining
         substitutions = IntMap.fromList
           [(variable, TypeConstant rigid) | (variable, rigid) <- current]
-        instantiatedBody = snd $ applySubsts substitutions body
-    in instantiateFrom rest instantiatedBody
-  instantiateFrom _ instantiated = instantiated
+        layerConstraints = map
+          (snd . constraintApplySubsts substitutions) constraints
+        (instantiated, deeper) = instantiateFrom rest
+          $ snd $ applySubsts substitutions body
+    in (instantiated, layerConstraints ++ deeper)
+  instantiateFrom _ instantiated = (instantiated, [])
 
 expressionFlexibleIdentifiers :: Expression -> IntSet.IntSet
 expressionFlexibleIdentifiers =

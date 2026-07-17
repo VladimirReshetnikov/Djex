@@ -6077,6 +6077,53 @@ tests = testGroup "Exference"
               classEnvironment = mkQueryClassEnv staticClasses []
           checkExpression classEnvironment [] []
             (TypeArrow variable variable) [] identity @?= Right ()
+      , testCase "opens constrained goals with search's own assumptions" $ do
+          -- Regression: the public checker discarded each prenex layer's
+          -- constraints while opening the goal, so it falsely rejected
+          -- results that live search accepts for a constrained query.
+          let showConstraint = HsConstraint (name "Show") [TypeVar 0]
+              stringType = TypeCons $ name "String"
+              showBinding = FunctionBinding stringType (name "show") 0
+                [showConstraint] [TypeVar 0]
+              goal = TypeForall [0] [showConstraint]
+                $ TypeArrow (TypeVar 0) stringType
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass (name "Show") [0] []] []
+          let input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = [showBinding]
+                , input_envClasses = staticClasses
+                }
+          (expression, residual, _) <- maybe
+            (fail "constrained search found no solution") pure
+            $ findOneExpression input
+          residual @?= []
+          checkExpression (mkQueryClassEnv staticClasses []) [showBinding] []
+            goal [] expression @?= Right ()
+      , testCase "canonicalizes expected residual constraints" $ do
+          -- Regression: caller-supplied residual constraints were compared
+          -- without canonicalization, so a semantically equal
+          -- application-form tuple spelling failed the comparison against
+          -- the canonicalized inferred side.
+          pairName <- expectRight $ mkBoxedTupleName 2
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass (name "Show") [0] []] []
+          let firstType = TypeConstant 0
+              secondType = TypeConstant 1
+              structuralPair = TypeTuple Boxed [firstType, secondType]
+              applicationPair = TypeApp
+                (TypeApp (TypeCons pairName) firstType) secondType
+              stringType = TypeCons $ name "String"
+              showBinding = FunctionBinding stringType (name "show") 0
+                [HsConstraint (name "Show") [TypeVar 0]] [TypeVar 0]
+              pairBinding =
+                FunctionBinding structuralPair (name "pair") 0 [] []
+              expression = ExpApply (ExpName $ name "show")
+                (ExpName $ name "pair")
+              expected = [HsConstraint (name "Show") [applicationPair]]
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [showBinding, pairBinding] [] stringType expected expression
+            @?= Right ()
       , testCase "checks structural tuples against constructor applications" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           pairName <- expectRight $ mkBoxedTupleName 2

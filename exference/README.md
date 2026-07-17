@@ -424,7 +424,11 @@ search begins.
 parser-neutral library default used by reusable and stable queries. The
 historical `Language.Haskell.Exference.SimpleDict` import path directly
 re-exports that same binding. The command-line frontend deliberately retains
-its distinct interactive ranking profile.
+its distinct interactive ranking profile. The core and checked Djex facades
+also re-export one canonical `ExferenceOptions` type and
+`defaultExferenceOptions`; an `ExferenceQuery` stores that options value
+directly beside its goal and exact exclusions, so a stable request no longer
+copies eight controls into a parallel query record.
 
 The compatibility field labels map to the reusable API as follows:
 
@@ -435,14 +439,21 @@ The compatibility field labels map to the reusable API as follows:
 | `input_envClasses` | `EnvDictionary.environmentClasses` |
 | `input_goalType` | `ExferenceQuery.queryGoalType` |
 | no former field | `ExferenceQuery.queryExcludedBindings` |
-| `input_allowUnused` | `ExferenceQuery.queryAllowUnused` |
-| `input_allowConstraints` | `ExferenceQuery.queryAllowConstraints` |
-| `input_allowConstraintsStopStep` | `ExferenceQuery.queryConstraintDeferralSteps` |
-| `input_multiPM` | `ExferenceQuery.queryMultiConstructorPatterns` |
-| `input_maxSteps` | `ExferenceQuery.queryMaximumSteps` |
-| `input_maxQueueSize` | `ExferenceQuery.queryMaximumQueueSize` |
-| `input_maxDepth` | `ExferenceQuery.queryMaximumDepth` |
-| `input_heuristicsConfig` | `ExferenceQuery.queryHeuristics` |
+| `input_allowUnused` | `querySearchOptions.exferenceAllowUnused` |
+| `input_allowConstraints` | `querySearchOptions.exferenceAllowResidualConstraints` |
+| `input_allowConstraintsStopStep` | `querySearchOptions.exferenceConstraintDeferralSteps` |
+| `input_multiPM` | `querySearchOptions.exferenceMultiConstructorPatterns` |
+| `input_maxSteps` | `querySearchOptions.exferenceMaximumSteps` |
+| `input_maxQueueSize` | `querySearchOptions.exferenceMaximumQueueSize` |
+| `input_maxDepth` | `querySearchOptions.exferenceMaximumDepth` |
+| `input_heuristicsConfig` | `querySearchOptions.exferenceHeuristics` |
+
+Code written against the short-lived flat `ExferenceQuery.query*` control
+fields should move those construction and update expressions under the
+`querySearchOptions` field. The historical flat `ExferenceInput` constructor
+and record fields remain unchanged; its compatibility boundary performs the
+only necessary projection into `ExferenceOptions`, without changing validation
+or first-error precedence.
 
 `queryExcludedBindings` is a set of shared structural names, not rendered
 spellings. Exclusion is exact: hiding `Data.Function.fix` does not hide an

@@ -27,17 +27,16 @@ import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import Language.Haskell.Exference.Core
-  ( ExferenceHeuristicsConfig
-  , ExferenceSourceTypeVariableHintError
-  , ExferenceSourceTypeVariableHints
-  , Penalty
-  , defaultHeuristicsConfig
-  , mkExferenceSourceTypeVariableHints
+import Language.Haskell.Exference.Core.Internal.Options
+  ( ExferenceOptions (..)
+  , defaultExferenceOptions
   )
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.Core.Internal.Candidate
-  ( sourceTypeVariableHintGoal
+  ( ExferenceSourceTypeVariableHintError
+  , ExferenceSourceTypeVariableHints
+  , mkExferenceSourceTypeVariableHints
+  , sourceTypeVariableHintGoal
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -65,30 +64,6 @@ import Language.Haskell.Synthesis.Query
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type (Type)
-
-data ExferenceOptions = ExferenceOptions
-  { exferenceAllowUnused :: Bool
-  , exferenceAllowResidualConstraints :: Bool
-  , exferenceConstraintDeferralSteps :: Int
-  , exferenceMultiConstructorPatterns :: Bool
-  , exferenceMaximumSteps :: Int
-  , exferenceMaximumQueueSize :: Maybe Int
-  , exferenceMaximumDepth :: Maybe Penalty
-  , exferenceHeuristics :: ExferenceHeuristicsConfig
-  }
-  deriving (Eq, Show)
-
-defaultExferenceOptions :: ExferenceOptions
-defaultExferenceOptions = ExferenceOptions
-  { exferenceAllowUnused = False
-  , exferenceAllowResidualConstraints = False
-  , exferenceConstraintDeferralSteps = 8192
-  , exferenceMultiConstructorPatterns = False
-  , exferenceMaximumSteps = 65536
-  , exferenceMaximumQueueSize = Just 8192
-  , exferenceMaximumDepth = Nothing
-  , exferenceHeuristics = defaultHeuristicsConfig
-  }
 
 -- | Generated-expression binder identities used by Exference.
 type ExferenceLocal = Int

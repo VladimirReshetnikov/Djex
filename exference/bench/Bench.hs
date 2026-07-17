@@ -15,6 +15,7 @@ import Test.Tasty.Bench (Benchmark, bench, defaultMain, whnf)
 import Corpus
 import Language.Haskell.Exference.Core
   ( ExferenceCandidate
+  , ExferenceOptions (exferenceMaximumSteps)
   , ExferenceQuery (..)
   , ExferenceResult
   , emptyExferenceSourceTypeVariableHints
@@ -66,7 +67,7 @@ runEntry entry query = case
           then candidateDigest candidate
           else error $ label ++ ": ground instance left a residual constraint"
     BoundedNoCandidates -> boundedNoCandidateDigest
-      label (queryMaximumSteps query) results
+      label (exferenceMaximumSteps $ querySearchOptions query) results
  where
   label = entryName entry
 

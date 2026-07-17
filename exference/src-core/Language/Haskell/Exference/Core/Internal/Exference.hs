@@ -11,7 +11,6 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , queryProjectionStrictnessForTesting
   , prepareExferenceInput
   , prepareExferenceQuery
-  , ExferenceHeuristicsConfig (..)
   , ExferenceInput (..)
   , ExferenceEnvironment
   , ExferenceQuery (..)
@@ -59,6 +58,11 @@ import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 import Language.Haskell.Exference.Core.Internal.SearchControl
+import Language.Haskell.Exference.Core.Internal.Options
+  ( ExferenceHeuristicsConfig (..)
+  , ExferenceOptions (..)
+  , heuristicFields
+  )
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
@@ -89,23 +93,6 @@ import Control.Monad.Trans.State.Lazy
   ( StateT(..), gets, modify, state
   , execStateT, runStateT
   )
-
-data ExferenceHeuristicsConfig = ExferenceHeuristicsConfig
-  { heuristics_goalVar                :: Penalty
-  , heuristics_goalCons               :: Penalty
-  , heuristics_goalArrow              :: Penalty
-  , heuristics_goalApp                :: Penalty
-  , heuristics_stepProvidedGood       :: Penalty
-  , heuristics_stepProvidedBad        :: Penalty
-  , heuristics_stepEnvGood            :: Penalty
-  , heuristics_stepEnvBad             :: Penalty
-  , heuristics_tempUnusedVarPenalty   :: Penalty
-  , heuristics_tempMultiVarUsePenalty :: Penalty
-  , heuristics_functionGoalTransform  :: Penalty
-  , heuristics_unusedVar              :: Penalty
-  , heuristics_solutionLength         :: Penalty
-  }
-  deriving (Eq, Show)
 
 data ExferenceInput = ExferenceInput
   { input_goalType    :: HsType                 -- ^ try to find a expression
@@ -154,14 +141,8 @@ data ExferenceEnvironment = ExferenceEnvironment
 data ExferenceQuery = ExferenceQuery
   { queryGoalType :: HsType
   , queryExcludedBindings :: S.Set SynthesisName.Name
-  , queryAllowUnused :: Bool
-  , queryAllowConstraints :: Bool
-  , queryConstraintDeferralSteps :: Int
-  , queryMultiConstructorPatterns :: Bool
-  , queryMaximumSteps :: Int
-  , queryMaximumQueueSize :: Maybe Int
-  , queryMaximumDepth :: Maybe Penalty
-  , queryHeuristics :: ExferenceHeuristicsConfig
+  , querySearchOptions :: ExferenceOptions
+      -- ^ Exact grouped search policy retained from the checked request.
   }
   deriving (Eq, Show)
 
@@ -373,14 +354,16 @@ findEngineBatchesWith allocators
       ExferenceQuery
       { queryGoalType = rawType
       , queryExcludedBindings = excludedBindings
-      , queryAllowUnused = allowUnused
-      , queryAllowConstraints = allowConstraints
-      , queryConstraintDeferralSteps = allowConstraintsStopStep
-      , queryMultiConstructorPatterns = multiPM
-      , queryMaximumSteps = maxSteps
-      , queryMaximumQueueSize = maxQueueSize
-      , queryMaximumDepth = maxDepth
-      , queryHeuristics = heuristics
+      , querySearchOptions = ExferenceOptions
+          { exferenceAllowUnused = allowUnused
+          , exferenceAllowResidualConstraints = allowConstraints
+          , exferenceConstraintDeferralSteps = allowConstraintsStopStep
+          , exferenceMultiConstructorPatterns = multiPM
+          , exferenceMaximumSteps = maxSteps
+          , exferenceMaximumQueueSize = maxQueueSize
+          , exferenceMaximumDepth = maxDepth
+          , exferenceHeuristics = heuristics
+          }
       }
       rigidPlan) =
   unfoldr helper rootFindExpressionState
@@ -831,15 +814,20 @@ validateExferenceEnvironment environment = do
 validateQueryLimits
   :: ExferenceQuery
   -> Either ExferenceInputError ()
-validateQueryLimits query
-  | queryMaximumSteps query <= 0 =
-      Left $ InvalidMaxSteps $ queryMaximumSteps query
-  | queryConstraintDeferralSteps query < 0 =
+validateQueryLimits = validateOptionsLimits . querySearchOptions
+
+validateOptionsLimits
+  :: ExferenceOptions
+  -> Either ExferenceInputError ()
+validateOptionsLimits options
+  | exferenceMaximumSteps options <= 0 =
+      Left $ InvalidMaxSteps $ exferenceMaximumSteps options
+  | exferenceConstraintDeferralSteps options < 0 =
       Left $ InvalidConstraintDeferralSteps
-        $ queryConstraintDeferralSteps query
-  | Just limit <- queryMaximumQueueSize query, limit < 0 =
+        $ exferenceConstraintDeferralSteps options
+  | Just limit <- exferenceMaximumQueueSize options, limit < 0 =
       Left $ InvalidMaxQueueSize limit
-  | Just limit <- queryMaximumDepth query, not $ isFinitePenalty limit =
+  | Just limit <- exferenceMaximumDepth options, not $ isFinitePenalty limit =
       Left $ InvalidMaxDepth limit
   | otherwise = Right ()
 
@@ -865,9 +853,14 @@ validateEnvironmentDuplicates environment
 validateQueryHeuristics
   :: ExferenceQuery
   -> Either ExferenceInputError ()
-validateQueryHeuristics query
+validateQueryHeuristics = validateOptionsHeuristics . querySearchOptions
+
+validateOptionsHeuristics
+  :: ExferenceOptions
+  -> Either ExferenceInputError ()
+validateOptionsHeuristics options
   | Just (field, invalid) <- find (not . isFinitePenalty . snd)
-      (heuristicFields $ queryHeuristics query) =
+      (heuristicFields $ exferenceHeuristics options) =
       Left $ InvalidHeuristic field invalid
   | otherwise = Right ()
 
@@ -1017,14 +1010,21 @@ inputQuery :: ExferenceInput -> ExferenceQuery
 inputQuery input = ExferenceQuery
   { queryGoalType = input_goalType input
   , queryExcludedBindings = S.empty
-  , queryAllowUnused = input_allowUnused input
-  , queryAllowConstraints = input_allowConstraints input
-  , queryConstraintDeferralSteps = input_allowConstraintsStopStep input
-  , queryMultiConstructorPatterns = input_multiPM input
-  , queryMaximumSteps = input_maxSteps input
-  , queryMaximumQueueSize = input_maxQueueSize input
-  , queryMaximumDepth = input_maxDepth input
-  , queryHeuristics = input_heuristicsConfig input
+  , querySearchOptions = inputSearchOptions input
+  }
+
+-- This is the sole projection from the historical flat compatibility record.
+-- Every checked query after this boundary owns the canonical grouped value.
+inputSearchOptions :: ExferenceInput -> ExferenceOptions
+inputSearchOptions input = ExferenceOptions
+  { exferenceAllowUnused = input_allowUnused input
+  , exferenceAllowResidualConstraints = input_allowConstraints input
+  , exferenceConstraintDeferralSteps = input_allowConstraintsStopStep input
+  , exferenceMultiConstructorPatterns = input_multiPM input
+  , exferenceMaximumSteps = input_maxSteps input
+  , exferenceMaximumQueueSize = input_maxQueueSize input
+  , exferenceMaximumDepth = input_maxDepth input
+  , exferenceHeuristics = input_heuristicsConfig input
   }
 
 -- Checked values retain the same canonical representation that validation
@@ -1195,23 +1195,6 @@ naturalPruningReasons queuePruned depthPruned =
   ] ++
   [ SharedSearch.DepthLimitPruned depthPruned
   | depthPruned > 0
-  ]
-
-heuristicFields :: ExferenceHeuristicsConfig -> [(String, Penalty)]
-heuristicFields config =
-  [ ("goalVar", heuristics_goalVar config)
-  , ("goalCons", heuristics_goalCons config)
-  , ("goalArrow", heuristics_goalArrow config)
-  , ("goalApp", heuristics_goalApp config)
-  , ("stepProvidedGood", heuristics_stepProvidedGood config)
-  , ("stepProvidedBad", heuristics_stepProvidedBad config)
-  , ("stepEnvGood", heuristics_stepEnvGood config)
-  , ("stepEnvBad", heuristics_stepEnvBad config)
-  , ("tempUnusedVarPenalty", heuristics_tempUnusedVarPenalty config)
-  , ("tempMultiVarUsePenalty", heuristics_tempMultiVarUsePenalty config)
-  , ("functionGoalTransform", heuristics_functionGoalTransform config)
-  , ("unusedVar", heuristics_unusedVar config)
-  , ("solutionLength", heuristics_solutionLength config)
   ]
 
 rateNode :: ExferenceHeuristicsConfig -> SearchNode -> Priority

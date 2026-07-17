@@ -27,6 +27,8 @@ import Language.Haskell.Exference.Core.Candidate
   , ExferenceTypeVariableHints
   )
 import Language.Haskell.Exference.Core.Name (QualifiedName)
+import Language.Haskell.Exference.Core.Internal.Options
+  ( ExferenceHeuristicsConfig )
 import Language.Haskell.Exference.Core.Score (Penalty)
 import Language.Haskell.Exference.Core.Types (HsType)
 import Language.Haskell.Exference.Core.Internal.VariableSupply
@@ -114,7 +116,7 @@ pruningReasonsFromNaturalTotals = E.naturalPruningReasons
 -- | Compare native structural types with their historical engine spellings
 -- without exposing search-node internals to the regression suite.
 typeComplexityForTesting
-  :: E.ExferenceHeuristicsConfig
+  :: ExferenceHeuristicsConfig
   -> HsType
   -> Penalty
 typeComplexityForTesting = E.typeComplexity

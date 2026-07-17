@@ -503,14 +503,7 @@ searchQuery
 searchQuery goal options = ExferenceQuery
   { queryGoalType = goal
   , queryExcludedBindings = mempty
-  , queryAllowUnused = exferenceAllowUnused options
-  , queryAllowConstraints = exferenceAllowResidualConstraints options
-  , queryConstraintDeferralSteps = exferenceConstraintDeferralSteps options
-  , queryMultiConstructorPatterns = exferenceMultiConstructorPatterns options
-  , queryMaximumSteps = exferenceMaximumSteps options
-  , queryMaximumQueueSize = exferenceMaximumQueueSize options
-  , queryMaximumDepth = exferenceMaximumDepth options
-  , queryHeuristics = exferenceHeuristics options
+  , querySearchOptions = options
   }
 
 omissionDiagnostic :: ExferenceOmission -> Diagnostic

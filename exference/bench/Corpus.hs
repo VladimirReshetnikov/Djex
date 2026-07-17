@@ -13,8 +13,9 @@ module Corpus
 
 import Language.Haskell.Exference.Core
   ( ExferenceEnvironment
+  , ExferenceOptions (..)
   , ExferenceQuery (..)
-  , defaultHeuristicsConfig
+  , defaultExferenceOptions
   , mkExferenceEnvironment
   )
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -91,14 +92,12 @@ boundedQuery :: HsType -> Bool -> ExferenceQuery
 boundedQuery goal multiConstructorPatterns = ExferenceQuery
   { queryGoalType = goal
   , queryExcludedBindings = mempty
-  , queryAllowUnused = False
-  , queryAllowConstraints = False
-  , queryConstraintDeferralSteps = 0
-  , queryMultiConstructorPatterns = multiConstructorPatterns
-  , queryMaximumSteps = 100
-  , queryMaximumQueueSize = Just 2048
-  , queryMaximumDepth = Nothing
-  , queryHeuristics = defaultHeuristicsConfig
+  , querySearchOptions = defaultExferenceOptions
+      { exferenceConstraintDeferralSteps = 0
+      , exferenceMultiConstructorPatterns = multiConstructorPatterns
+      , exferenceMaximumSteps = 100
+      , exferenceMaximumQueueSize = Just 2048
+      }
   }
 
 identityType :: HsType

@@ -200,6 +200,7 @@ Library
     Language.Haskell.Exference.Core.Internal.ExferenceNode
     Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
     Language.Haskell.Exference.Core.Internal.Exference
+    Language.Haskell.Exference.Core.Internal.Options
     Language.Haskell.Exference.Core.Internal.SearchControl
     Language.Haskell.Exference.Core.Internal.SourceNames
     Language.Haskell.Exference.Core.Internal.VariableSupply

@@ -50,6 +50,7 @@ import Language.Haskell.Exference.Core
   , validateExferenceQuery
   , validateExferenceInput
   )
+import qualified Language.Haskell.Exference.Core as Core
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Expression
@@ -137,7 +138,7 @@ import Language.Haskell.Exference.EnvironmentParser
 import Language.Haskell.Djex.Exference
   ( ExferenceOmission (..)
   , ExferenceOmissionReason (..)
-  , ExferenceOptions (exferenceHeuristics)
+  , ExferenceOptions (..)
   , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
   , defaultExferenceOptions
@@ -2348,6 +2349,20 @@ tests = testGroup "Exference"
           assertEqual "stable checked options"
             defaultHeuristicsConfig
             (exferenceHeuristics defaultExferenceOptions)
+          assertEqual "complete stable search defaults"
+            (ExferenceOptions
+              { exferenceAllowUnused = False
+              , exferenceAllowResidualConstraints = False
+              , exferenceConstraintDeferralSteps = 8192
+              , exferenceMultiConstructorPatterns = False
+              , exferenceMaximumSteps = 65536
+              , exferenceMaximumQueueSize = Just 8192
+              , exferenceMaximumDepth = Nothing
+              , exferenceHeuristics = defaultHeuristicsConfig
+              })
+            defaultExferenceOptions
+          assertEqual "core/stable options re-export"
+            Core.defaultExferenceOptions defaultExferenceOptions
       , testCase "sealed runners preserve complete legacy traces" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
           target <- checkedIdentifierTarget "sealedTrace"
@@ -2396,10 +2411,12 @@ tests = testGroup "Exference"
                 { input_maxSteps = 0
                 , input_envFuncs = [duplicate, duplicate]
                 }
-              invalidQuery = query
-                { queryMaximumSteps = 0
-                , queryHeuristics = invalidHeuristics
-                }
+              invalidQuery = mapQueryOptions
+                (\options -> options
+                  { exferenceMaximumSteps = 0
+                  , exferenceHeuristics = invalidHeuristics
+                  })
+                query
               preparedInput input = ()
                 <$ findExpressionsWithStatsEither input
               preparedQuery value = ()
@@ -2424,23 +2441,37 @@ tests = testGroup "Exference"
               nestedGoal = TypeArrow polymorphic polymorphic
               invalidQueries =
                 [ ( "maximum steps"
-                  , query {queryMaximumSteps = 0}
+                  , mapQueryOptions
+                      (\options -> options {exferenceMaximumSteps = 0})
+                      query
                   , Left $ InvalidMaxSteps 0
                   )
                 , ( "constraint deferral"
-                  , query {queryConstraintDeferralSteps = -1}
+                  , mapQueryOptions
+                      (\options -> options
+                        {exferenceConstraintDeferralSteps = -1})
+                      query
                   , Left $ InvalidConstraintDeferralSteps (-1)
                   )
                 , ( "queue size"
-                  , query {queryMaximumQueueSize = Just (-1)}
+                  , mapQueryOptions
+                      (\options -> options
+                        {exferenceMaximumQueueSize = Just (-1)})
+                      query
                   , Left $ InvalidMaxQueueSize (-1)
                   )
                 , ( "search depth"
-                  , query {queryMaximumDepth = Just (-1)}
+                  , mapQueryOptions
+                      (\options -> options
+                        {exferenceMaximumDepth = Just (-1)})
+                      query
                   , Left $ InvalidMaxDepth (-1)
                   )
                 , ( "heuristics"
-                  , query {queryHeuristics = invalidHeuristics}
+                  , mapQueryOptions
+                      (\options -> options
+                        {exferenceHeuristics = invalidHeuristics})
+                      query
                   , Left $ InvalidHeuristic "goalVar" (-1)
                   )
                 , ( "nested forall"
@@ -2665,7 +2696,9 @@ tests = testGroup "Exference"
           let monomorphicQuery = legacyInputQuery maximalInput
               exhaustedQuery = monomorphicQuery
                 {queryGoalType = polymorphic}
-              invalidOptions = exhaustedQuery {queryMaximumSteps = 0}
+              invalidOptions = mapQueryOptions
+                (\options -> options {exferenceMaximumSteps = 0})
+                exhaustedQuery
           validateExferenceQuery maximalEnvironment monomorphicQuery @?= Right ()
           validateExferenceQuery maximalEnvironment exhaustedQuery @?= Right ()
           validateExferenceQuery maximalEnvironment invalidOptions @?=
@@ -2717,23 +2750,59 @@ tests = testGroup "Exference"
               polymorphic = TypeForall [1] [] $ TypeVar 1
               nestedGoal = TypeArrow polymorphic polymorphic
               invalidHeuristics = defaultHeuristicsConfig
-                {heuristics_goalVar = -1}
+                { heuristics_goalVar = -1
+                , heuristics_goalCons = -2
+                }
               compound = identityInput
                 { input_goalType = nestedGoal
                 , input_envFuncs = [binding, binding]
+                , input_allowConstraintsStopStep = -1
                 , input_maxSteps = 0
+                , input_maxQueueSize = Just (-1)
+                , input_maxDepth = Just (-1)
                 , input_heuristicsConfig = invalidHeuristics
                 }
           validateExferenceInput compound @?= Left (InvalidMaxSteps 0)
           validateExferenceInput compound {input_maxSteps = 20} @?=
+            Left (InvalidConstraintDeferralSteps (-1))
+          validateExferenceInput compound
+              { input_maxSteps = 20
+              , input_allowConstraintsStopStep = 0
+              } @?= Left (InvalidMaxQueueSize (-1))
+          validateExferenceInput compound
+              { input_maxSteps = 20
+              , input_allowConstraintsStopStep = 0
+              , input_maxQueueSize = Nothing
+              } @?= Left (InvalidMaxDepth (-1))
+          validateExferenceInput compound
+              { input_maxSteps = 20
+              , input_allowConstraintsStopStep = 0
+              , input_maxQueueSize = Nothing
+              , input_maxDepth = Nothing
+              } @?=
             Left (DuplicateFunctionNames [duplicateName])
           validateExferenceInput compound
               { input_envFuncs = [binding]
               , input_maxSteps = 20
+              , input_allowConstraintsStopStep = 0
+              , input_maxQueueSize = Nothing
+              , input_maxDepth = Nothing
               } @?= Left (InvalidHeuristic "goalVar" (-1))
           validateExferenceInput compound
               { input_envFuncs = [binding]
               , input_maxSteps = 20
+              , input_allowConstraintsStopStep = 0
+              , input_maxQueueSize = Nothing
+              , input_maxDepth = Nothing
+              , input_heuristicsConfig = invalidHeuristics
+                  {heuristics_goalVar = 0}
+              } @?= Left (InvalidHeuristic "goalCons" (-2))
+          validateExferenceInput compound
+              { input_envFuncs = [binding]
+              , input_maxSteps = 20
+              , input_allowConstraintsStopStep = 0
+              , input_maxQueueSize = Nothing
+              , input_maxDepth = Nothing
               , input_heuristicsConfig = defaultHeuristicsConfig
               } @?= Left (NestedForallInGoal nestedGoal)
       ]
@@ -6413,14 +6482,27 @@ legacyInputQuery :: ExferenceInput -> ExferenceQuery
 legacyInputQuery input = ExferenceQuery
   { queryGoalType = input_goalType input
   , queryExcludedBindings = Set.empty
-  , queryAllowUnused = input_allowUnused input
-  , queryAllowConstraints = input_allowConstraints input
-  , queryConstraintDeferralSteps = input_allowConstraintsStopStep input
-  , queryMultiConstructorPatterns = input_multiPM input
-  , queryMaximumSteps = input_maxSteps input
-  , queryMaximumQueueSize = input_maxQueueSize input
-  , queryMaximumDepth = input_maxDepth input
-  , queryHeuristics = input_heuristicsConfig input
+  , querySearchOptions = legacyInputOptions input
+  }
+
+legacyInputOptions :: ExferenceInput -> ExferenceOptions
+legacyInputOptions input = ExferenceOptions
+  { exferenceAllowUnused = input_allowUnused input
+  , exferenceAllowResidualConstraints = input_allowConstraints input
+  , exferenceConstraintDeferralSteps = input_allowConstraintsStopStep input
+  , exferenceMultiConstructorPatterns = input_multiPM input
+  , exferenceMaximumSteps = input_maxSteps input
+  , exferenceMaximumQueueSize = input_maxQueueSize input
+  , exferenceMaximumDepth = input_maxDepth input
+  , exferenceHeuristics = input_heuristicsConfig input
+  }
+
+mapQueryOptions
+  :: (ExferenceOptions -> ExferenceOptions)
+  -> ExferenceQuery
+  -> ExferenceQuery
+mapQueryOptions update query = query
+  { querySearchOptions = update $ querySearchOptions query
   }
 
 sealLegacyEnvironment

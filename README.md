@@ -452,7 +452,13 @@ witness, including its pre- and post-expansion kind checks, before lowering to
 the core search type. Thus the two request paths agree on aliases, cycles,
 saturation, and kinds without projecting a separately pairable synonym table.
 Query execution then validates only the varying search policy and returns a
-lazy sequence of shared result batches. `ExferenceEnvironment`, `ExferenceType`,
+lazy sequence of shared result batches. One dependency-leaf
+`ExferenceOptions` definition is re-exported by both the core and checked
+facades; the exact value in the neutral request is retained as
+`ExferenceQuery.querySearchOptions` rather than copied through eight parallel
+query fields. Only the historical flat `ExferenceInput` compatibility record
+needs a one-way projection, with its established validation order unchanged.
+`ExferenceEnvironment`, `ExferenceType`,
 `ExferenceTypeVariable`, `ExferenceLocal`, and `ExferenceInventory` make that
 complete surface nameable in the neutral IR. Session construction maps backend
 ratings out of the already-checked inventory without rebuilding its indexes or

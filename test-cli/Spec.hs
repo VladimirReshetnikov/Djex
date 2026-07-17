@@ -1,5 +1,6 @@
 module Main (main) where
 
+import CLIAssertions (assertContains)
 import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.Char (toLower)
@@ -375,11 +376,6 @@ withMissingPath action = do
   hClose handle
   removeFile path
   action path
-
-assertContains :: String -> String -> String -> Assertion
-assertContains message needle haystack = assertBool
-  (message ++ ": missing " ++ show needle)
-  (needle `isInfixOf` haystack)
 
 assertNoCallStack :: String -> Assertion
 assertNoCallStack output = assertBool "controlled failure exposed a CallStack" $

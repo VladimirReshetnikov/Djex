@@ -1,5 +1,6 @@
 module Main (main) where
 
+import CLIAssertions (assertContains, countOccurrences)
 import Control.Exception (bracket)
 import Data.List (intercalate, isInfixOf)
 import System.Directory (getTemporaryDirectory, removeFile)
@@ -400,22 +401,3 @@ withCommandFile contents action = bracket create removeFile action
         hClose handle
         return path
 
-assertContains :: String -> String -> String -> Assertion
-assertContains message needle haystack =
-    assertBool (message ++ ": missing " ++ show needle) $
-        needle `isInfixOf` haystack
-
-countOccurrences :: String -> String -> Int
-countOccurrences needle = count
-  where
-    count source =
-        case dropUntil needle source of
-            Nothing -> 0
-            Just rest -> 1 + count rest
-
-    dropUntil _ [] = Nothing
-    dropUntil target source@(_ : rest)
-        | target `isPrefixOf` source = Just $ drop (length target) source
-        | otherwise = dropUntil target rest
-
-    isPrefixOf prefix value = take (length prefix) value == prefix

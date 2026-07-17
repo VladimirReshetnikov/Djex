@@ -101,6 +101,9 @@ common tasty-hunit-test
 common cli-test
   import:        tasty-hunit-test, directory-dep
   Build-Depends: process >= 1.6 && < 1.7
+  -- Output assertions shared by the three CLI subprocess suites.
+  Hs-Source-Dirs: test-support
+  Other-Modules:  CLIAssertions
 
 -- The single Djex library. The directory split records implementation
 -- provenance and keeps parser-independent modules honest at the Haskell import

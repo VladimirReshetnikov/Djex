@@ -1,7 +1,8 @@
 module Main (main) where
 
+import CLIAssertions (assertContains, countOccurrences)
 import Control.Exception (bracket)
-import Data.List (isInfixOf, isPrefixOf)
+import Data.List (isInfixOf)
 import System.Directory
   (createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Exit (ExitCode (..))
@@ -312,16 +313,6 @@ runExferenceFailure arguments = do
     ExitSuccess -> fail "invalid exference invocation returned success"
   pure (output, errors)
 
-countOccurrences :: String -> String -> Int
-countOccurrences needle source
-  | null needle = 0
-  | otherwise = go source
- where
-  go remaining
-    | needle `isPrefixOf` remaining = 1 + go (drop (length needle) remaining)
-    | _ : rest <- remaining = go rest
-    | otherwise = 0
-
 withTemporaryEnvironment :: (FilePath -> IO a) -> IO a
 withTemporaryEnvironment action = do
   temporaryRoot <- getTemporaryDirectory
@@ -341,7 +332,3 @@ withMissingTemporaryEnvironment action = do
   removeFile path
   action path
 
-assertContains :: String -> String -> String -> Assertion
-assertContains message needle haystack = assertBool
-  (message ++ ": missing " ++ show needle)
-  (needle `isInfixOf` haystack)

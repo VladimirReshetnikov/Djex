@@ -193,6 +193,7 @@ Library
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Exference.Internal.Request
     Language.Haskell.Djex.Exference.Internal.Session
+    Language.Haskell.Synthesis.Internal.InstanceHead
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Candidate
     Language.Haskell.Exference.Core.Internal.ExferenceNode

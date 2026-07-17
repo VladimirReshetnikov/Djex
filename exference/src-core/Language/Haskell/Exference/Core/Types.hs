@@ -89,6 +89,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.Name
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
+import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import Language.Haskell.Synthesis.Name (Boxity (..))
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -399,9 +400,10 @@ mkStaticClassEnv
 mkStaticClassEnv sourceClasses sourceInstances = do
   classTable <- buildClassTable classes
   traverse_ (validateClass classTable) classes
-  case SharedCollection.repeatedValuesInFirstRepetitionOrder
-      $ SharedCollection.summarizeDuplicates
-      $ map instance_head instances of
+  case SharedEnvironment.repeatedInstanceHeadsInFirstRepetitionOrder
+      [ (implicitInstanceVariables declaration, instance_head declaration)
+      | declaration <- instances
+      ] of
     [] -> Right ()
     duplicates -> Left $ DuplicateInstanceHeads duplicates
   traverse_ (validateInstance classTable) instances
@@ -429,6 +431,13 @@ mkStaticClassEnv sourceClasses sourceInstances = do
     }
 
   canonicalizeConstraint = fmap SharedType.canonicalizeType
+
+  -- HsInstance quantifies every free variable implicitly. Keep this derivation
+  -- identical to toSynthesisInstanceDeclaration so the compatibility validator
+  -- and the shared inventory compare exactly the same alpha identities.
+  implicitInstanceVariables declaration = S.toAscList
+    $ foldMap SharedType.constraintFreeVariables
+    $ instance_head declaration : instance_constraints declaration
 
   buildClassTable = go M.empty
     where

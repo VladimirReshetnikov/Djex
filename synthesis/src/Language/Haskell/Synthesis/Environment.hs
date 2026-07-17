@@ -19,20 +19,24 @@ module Language.Haskell.Synthesis.Environment
   , dataConstructorMap
   , classDeclarationMap
   , instanceDeclarationMap
+  , repeatedInstanceHeadsInFirstRepetitionOrder
   ) where
 
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM)
-import Control.Monad.Trans.State.Strict (State, evalState, get, put)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import Data.Void (Void)
 import GHC.Generics (Generic)
-import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
+import Language.Haskell.Synthesis.Internal.InstanceHead
+  ( InstanceHeadKey
+  , instanceHeadKey
+  , repeatedInstanceHeadsInFirstRepetitionOrder
+  )
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Type
 
@@ -52,8 +56,7 @@ data Environment typeVariable kindVariable annotation = Environment
   , instancesByHead ::
       Map (Constraint (Type typeVariable))
         (Declaration typeVariable kindVariable annotation)
-  , canonicalInstanceHeads ::
-      Set (Constraint (Type (CanonicalInstanceVariable typeVariable)))
+  , canonicalInstanceHeads :: Set (InstanceHeadKey typeVariable)
   , occupiedValueNames :: Set Name
   }
   deriving (Eq, Show, Functor)
@@ -80,29 +83,6 @@ data EnvironmentError typeVariable
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData typeVariable => NFData (EnvironmentError typeVariable)
-
--- | Private alpha-normal form for variables in an instance head.  Bound
--- variables are identified by lexical scope and first occurrence within that
--- scope; genuinely free variables retain their source identity.  Source names
--- remain untouched everywhere else, including the public instance index and
--- duplicate diagnostics.
-data CanonicalInstanceVariable typeVariable
-  = CanonicalBoundVariable !Natural !Natural
-  | CanonicalFreeVariable typeVariable
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData typeVariable =>
-    NFData (CanonicalInstanceVariable typeVariable)
-
--- Scope and slot identities exist only while constructing a private
--- alpha-normal form. They use arbitrary-precision counters so sufficiently
--- deep or wide generated types cannot wrap and conflate distinct binders;
--- declaration indices and source-facing arities remain machine-sized.
-data CanonicalizationState typeVariable = CanonicalizationState
-  { canonicalVariableSlots :: Map (Natural, typeVariable) Natural
-  , nextCanonicalSlotByScope :: Map Natural Natural
-  , nextCanonicalScope :: !Natural
-  }
 
 mkEnvironment
   :: Ord typeVariable
@@ -285,92 +265,7 @@ insertInstance variables headConstraint declaration environment
           $ canonicalInstanceHeads environment
       }
  where
-  canonicalHead = canonicalizeInstanceHead variables headConstraint
-
-canonicalizeInstanceHead
-  :: Ord typeVariable
-  => [typeVariable]
-  -> Constraint (Type typeVariable)
-  -> Constraint (Type (CanonicalInstanceVariable typeVariable))
-canonicalizeInstanceHead variables headConstraint =
-  evalState (canonicalizeInstanceConstraint bindings headConstraint) initialState
- where
-  -- Instance binders form an implicit outer scope. Their declaration order is
-  -- not semantically significant, so slots are allocated when the head first
-  -- mentions each variable rather than from the binder list.
-  bindings = Map.fromList [(variable, 0) | variable <- variables]
-  initialState = CanonicalizationState Map.empty Map.empty 1
-
-canonicalizeInstanceConstraint
-  :: Ord typeVariable
-  => Map typeVariable Natural
-  -> Constraint (Type typeVariable)
-  -> State (CanonicalizationState typeVariable)
-      (Constraint (Type (CanonicalInstanceVariable typeVariable)))
-canonicalizeInstanceConstraint bindings constraint = Constraint
-  (constraintClass constraint)
-  <$> mapM (canonicalizeInstanceType bindings) (constraintArguments constraint)
-
-canonicalizeInstanceType
-  :: Ord typeVariable
-  => Map typeVariable Natural
-  -> Type typeVariable
-  -> State (CanonicalizationState typeVariable)
-      (Type (CanonicalInstanceVariable typeVariable))
-canonicalizeInstanceType bindings source = case source of
-  TypeVariable variable -> TypeVariable
-    <$> canonicalizeVariable bindings variable
-  TypeConstructor name -> pure $ TypeConstructor name
-  TypeApplication function argument -> TypeApplication
-    <$> canonicalizeInstanceType bindings function
-    <*> canonicalizeInstanceType bindings argument
-  FunctionType parameter result -> FunctionType
-    <$> canonicalizeInstanceType bindings parameter
-    <*> canonicalizeInstanceType bindings result
-  TupleType boxity elements -> TupleType boxity
-    <$> mapM (canonicalizeInstanceType bindings) elements
-  ForallType variables constraints body -> do
-    scope <- allocateCanonicalScope
-    let nestedBindings = Map.fromList
-          [(variable, scope) | variable <- variables] `Map.union` bindings
-    canonicalConstraints <- mapM
-      (canonicalizeInstanceConstraint nestedBindings) constraints
-    canonicalBody <- canonicalizeInstanceType nestedBindings body
-    pure $ ForallType
-      [ CanonicalBoundVariable scope slot
-      | (slot, _) <- zip [0 ..] variables
-      ] canonicalConstraints canonicalBody
-
-canonicalizeVariable
-  :: Ord typeVariable
-  => Map typeVariable Natural
-  -> typeVariable
-  -> State (CanonicalizationState typeVariable)
-      (CanonicalInstanceVariable typeVariable)
-canonicalizeVariable bindings variable = case Map.lookup variable bindings of
-  Nothing -> pure $ CanonicalFreeVariable variable
-  Just scope -> do
-    state <- get
-    case Map.lookup (scope, variable) $ canonicalVariableSlots state of
-      Just slot -> pure $ CanonicalBoundVariable scope slot
-      Nothing -> do
-        let slot = Map.findWithDefault 0 scope
-              $ nextCanonicalSlotByScope state
-        put state
-          { canonicalVariableSlots = Map.insert (scope, variable) slot
-              $ canonicalVariableSlots state
-          , nextCanonicalSlotByScope = Map.insert scope (slot + 1)
-              $ nextCanonicalSlotByScope state
-          }
-        pure $ CanonicalBoundVariable scope slot
-
-allocateCanonicalScope
-  :: State (CanonicalizationState typeVariable) Natural
-allocateCanonicalScope = do
-  state <- get
-  let scope = nextCanonicalScope state
-  put state { nextCanonicalScope = scope + 1 }
-  pure scope
+  canonicalHead = instanceHeadKey variables headConstraint
 
 environmentDeclarations
   :: Environment typeVariable kindVariable annotation

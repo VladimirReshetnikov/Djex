@@ -164,8 +164,9 @@ bidirectional compatibility pattern. Class declarations and instances live in
 sealed strict maps built by
 `mkStaticClassEnv`, which
 checks names, duplicate declarations/parameters, superclass variables and
-cycles, referenced classes, exact arities, and every native constraint-argument
-type before superclass inflation. Query-constraint closure and derived
+cycles, instance-head duplicates modulo alpha-renaming, referenced classes,
+exact arities, and every native constraint-argument type before superclass
+inflation. Query-constraint closure and derived
 instance-head indexing share one immediate-superclass instantiator, including
 its exact-arity guard and capture-safe parameter substitution.
 Query and binding inputs likewise reject wrong arities for known classes while

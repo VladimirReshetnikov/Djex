@@ -311,8 +311,10 @@ and builds deterministic type/class, value/method, constructor, and
 instance-head indexes. It rejects cross-declaration namespace collisions and
 duplicate instances modulo alpha-renaming of declaration and nested `forall`
 binders, while preserving the original source heads in its public index and
-diagnostics and preserving qualified-name identity. It does not pretend that
-an index is also a kind proof or a backend's resolution policy.
+diagnostics and preserving qualified-name identity. The comparison key stays
+private; compatibility validators reuse only the deterministic classifier that
+returns the first source repetition of each alpha-equivalence class. It does
+not pretend that an index is also a kind proof or a backend's resolution policy.
 `mapEnvironmentKindVariables` changes explicit kind-variable identities across
 every declaration-bearing view without rebuilding or revalidating those
 indexes; in particular, it losslessly weakens a grounded `Void` environment

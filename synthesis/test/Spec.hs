@@ -1133,6 +1133,41 @@ environmentTests = testGroup "environments"
         Left (Environment.DuplicateInstanceDeclaration renamedHead)
       _ <- evaluate $ force environment
       pure ()
+  , testCase "classify alpha repeats in first-repetition order" $ do
+      let classC = right $ mkIdentifier "C"
+          classD = right $ mkIdentifier "D"
+          variable = SharedType.TypeVariable
+          firstC = Constraint classC [variable "a"]
+          firstD = Constraint classD
+            [ SharedType.ForallType ["inner"] []
+                $ SharedType.FunctionType
+                    (variable "outer") (variable "inner")
+            ]
+          repeatedC = Constraint classC [variable "renamed"]
+          repeatedD = Constraint classD
+            [ SharedType.ForallType ["nested"] []
+                $ SharedType.FunctionType
+                    (variable "renamedOuter") (variable "nested")
+            ]
+          repeatedCAgain = Constraint classC [variable "third"]
+      Environment.repeatedInstanceHeadsInFirstRepetitionOrder
+          [ (["a"], firstC)
+          , (["outer"], firstD)
+          , (["renamed"], repeatedC)
+          , (["renamedOuter"], repeatedD)
+          , (["third"], repeatedCAgain)
+          ] @?= [repeatedC, repeatedD]
+  , testCase "distinguish bound instance variables from nominal free ones" $ do
+      let className = right $ mkIdentifier "C"
+          variable = SharedType.TypeVariable
+          sameSpelling = Constraint className [variable "same"]
+          anotherFree = Constraint className [variable "another"]
+      Environment.repeatedInstanceHeadsInFirstRepetitionOrder
+          [ (["same"], sameSpelling)
+          , ([], sameSpelling)
+          , ([], sameSpelling)
+          , ([], anotherFree)
+          ] @?= [sameSpelling]
   , testCase "ignore instance binder spelling and declaration order" $ do
       let className = right $ mkIdentifier "PairClass"
           variable = SharedType.TypeVariable

@@ -379,6 +379,32 @@ tests = testGroup "Exference"
                 [HsConstraint (name "C") [TypeVar 0]] headConstraint
           mkStaticClassEnv [cls] [firstInstance, secondInstance] @?=
             Left (DuplicateInstanceHeads [headConstraint])
+      , testCase "alpha-renamed instance heads report first repetitions" $ do
+          let classC = HsTypeClass (name "C") [0] []
+              classD = HsTypeClass (name "D") [0] []
+              firstC = HsConstraint (name "C") [TypeVar 1]
+              firstD = HsConstraint (name "D") [TypeVar 2]
+              repeatedC = HsConstraint (name "C") [TypeVar 8]
+              repeatedD = HsConstraint (name "D") [TypeVar 9]
+              repeatedCAgain = HsConstraint (name "C") [TypeVar 10]
+              instanceOf = HsInstance []
+          mkStaticClassEnv [classC, classD]
+              (map instanceOf
+                [firstC, firstD, repeatedC, repeatedD, repeatedCAgain]) @?=
+            Left (DuplicateInstanceHeads [repeatedC, repeatedD])
+      , testCase "duplicate instance identity respects nested forall scopes" $ do
+          let cls = HsTypeClass (name "C") [0] []
+              firstHead = HsConstraint (name "C")
+                [ TypeForall [0] []
+                    $ TypeArrow (TypeVar 1) (TypeVar 0)
+                ]
+              renamedHead = HsConstraint (name "C")
+                [ TypeForall [7] []
+                    $ TypeArrow (TypeVar 8) (TypeVar 7)
+                ]
+          mkStaticClassEnv [cls]
+              [HsInstance [] firstHead, HsInstance [] renamedHead] @?=
+            Left (DuplicateInstanceHeads [renamedHead])
       , testCase "class declarations require the constructor namespace" $ do
           let lowercase = HsTypeClass (name "className") [] []
               tupleName = validTupleName 2

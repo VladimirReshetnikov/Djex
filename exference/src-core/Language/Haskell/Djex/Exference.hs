@@ -86,6 +86,7 @@ import qualified Language.Haskell.Exference.Core.Candidate as CoreCandidate
 import qualified Language.Haskell.Exference.Core.ExferenceStats as CoreStats
 import Language.Haskell.Exference.Core.Types
   ( HsType
+  , defaultVariableName
   , fromSynthesisType
   , showVar
   )
@@ -148,9 +149,6 @@ import Language.Haskell.Synthesis.Query
   )
 import Language.Haskell.Synthesis.Search
   ( batchMetadata
-  )
-import Language.Haskell.Synthesis.Type
-  ( Variable (FlexibleVariable, RigidVariable)
   )
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 import Language.Haskell.Synthesis.TypeSynonym
@@ -322,7 +320,7 @@ renderExferenceResidualConstraints candidate =
   variables = foldMap (foldMap $ foldMap Set.singleton) constraints
   variableNames = residualTypeVariableNames candidate variables
   variableName variable = Map.findWithDefault
-    (candidateTypeVariableFallback variable) variable variableNames
+    (defaultVariableName variable) variable variableNames
 
 candidateRenderOptions
   :: Qualification
@@ -378,19 +376,14 @@ residualTypeVariableNames candidate variables = fst
   assignFallback state@(names, used) variable
     | Map.member variable acceptedHints = state
     | otherwise =
-        let spelling = freshFallback used
-              $ candidateTypeVariableFallback variable
+        let spelling = freshFallback used $ defaultVariableName variable
         in (Map.insert variable spelling names, Set.insert spelling used)
 
 -- Appending a prime preserves the lexical class of both historical fallback
--- forms. The finite set of rendered variables guarantees termination.
+-- forms (the legacy renderer's 'defaultVariableName' policy). The finite set
+-- of rendered variables guarantees termination.
 freshFallback :: Set.Set String -> String -> String
 freshFallback = Fresh.selectFresh (++ "'")
-
-candidateTypeVariableFallback :: ExferenceTypeVariable -> String
-candidateTypeVariableFallback variable = case variable of
-  FlexibleVariable identifier -> showVar identifier
-  RigidVariable identifier -> "C" ++ showVar identifier
 
 -- Haskell has no intrinsic identifier-length limit, but a pure renderer
 -- cannot prove that a caller-created lazy String is finite. A generous fixed

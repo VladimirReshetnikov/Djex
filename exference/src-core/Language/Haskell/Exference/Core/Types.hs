@@ -27,6 +27,7 @@ module Language.Haskell.Exference.Core.Types
   , HsSubstitutionError (..)
   , HsTypeClass (..)
   , HsInstance (..)
+  , instanceConstraintVariables
   , HsConstraint
   , pattern HsConstraint
   , constraint_tclass
@@ -58,6 +59,7 @@ module Language.Haskell.Exference.Core.Types
   -- , typeParser
   , containsVar
   , showVar
+  , defaultVariableName
   , preferredVarName
   , mkQueryClassEnv
   , addQueryClassEnv
@@ -262,6 +264,15 @@ data HsInstance = HsInstance
   }
   deriving (Eq, Show, Ord, Generic)
 
+-- | Every free variable of an instance's head and prerequisite constraints:
+-- the binder set 'HsInstance' quantifies implicitly. The compatibility class
+-- validator and the shared-declaration adapter both derive their alpha
+-- identities from this single operation so the two cannot drift.
+instanceConstraintVariables
+  :: [HsConstraint]
+  -> S.Set SynthesisVariable
+instanceConstraintVariables = foldMap SharedType.constraintFreeVariables
+
 -- | Exference constraints now use the shared nominal/traversable node
 -- directly. The historical constructor name remains as a bidirectional
 -- pattern, so existing engine code does not conceal another representation.
@@ -432,11 +443,8 @@ mkStaticClassEnv sourceClasses sourceInstances = do
 
   canonicalizeConstraint = fmap SharedType.canonicalizeType
 
-  -- HsInstance quantifies every free variable implicitly. Keep this derivation
-  -- identical to toSynthesisInstanceDeclaration so the compatibility validator
-  -- and the shared inventory compare exactly the same alpha identities.
   implicitInstanceVariables declaration = S.toAscList
-    $ foldMap SharedType.constraintFreeVariables
+    $ instanceConstraintVariables
     $ instance_head declaration : instance_constraints declaration
 
   buildClassTable = go M.empty

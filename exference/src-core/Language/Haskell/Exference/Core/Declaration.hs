@@ -49,7 +49,6 @@ import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
-import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
@@ -391,7 +390,7 @@ prepareSearchDeclaration recursiveNames declaration = case declaration of
       name (map eraseParameterKind parameters) superclasses preparedMethods
   SharedDeclaration.InstanceDeclaration _ _ prerequisites headConstraint ->
     pure $ Just $ SharedDeclaration.InstanceDeclaration NoDeclarationMetadata
-      (Set.toAscList $ constraintVariables $ headConstraint : prerequisites)
+      (Set.toAscList $ instanceConstraintVariables $ headConstraint : prerequisites)
       prerequisites headConstraint
  where
   eraseParameterKind parameter = SharedDeclaration.TypeParameter
@@ -564,7 +563,7 @@ toSynthesisInstanceDeclaration declaration = checked $
     headConstraint <- checkedConstraint $ instance_head declaration
     -- HsInstance quantifies these variables implicitly. Materialize that
     -- binder set before crossing the explicit shared declaration boundary.
-    let variables = Set.toAscList $ constraintVariables
+    let variables = Set.toAscList $ instanceConstraintVariables
           $ headConstraint : prerequisites
     Right $ SharedDeclaration.InstanceDeclaration NoDeclarationMetadata
       variables prerequisites headConstraint
@@ -576,7 +575,7 @@ fromSynthesisInstanceDeclaration declaration = do
   validateShared declaration
   case declaration of
     SharedDeclaration.InstanceDeclaration _ variables prerequisites headConstraint
-      | Set.fromList variables == constraintVariables
+      | Set.fromList variables == instanceConstraintVariables
           (headConstraint : prerequisites)
       , all SharedType.isFlexibleVariable variables -> HsInstance
           <$> mapM checkedConstraint prerequisites
@@ -879,11 +878,6 @@ checkedType
   :: HsType
   -> Either SynthesisDeclarationError HsType
 checkedType = first DeclarationTypeConversionError . toSynthesisType
-
-constraintVariables
-  :: [SharedConstraint.Constraint (SharedType.Type SynthesisVariable)]
-  -> Set.Set SynthesisVariable
-constraintVariables = foldMap SharedType.constraintFreeVariables
 
 checkedConstraint
   :: HsConstraint

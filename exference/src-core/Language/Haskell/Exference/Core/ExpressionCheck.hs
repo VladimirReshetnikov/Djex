@@ -10,6 +10,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT, gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Expression
@@ -96,7 +97,7 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
       augmentedEnvironment =
         addQueryClassEnv openedConstraints classEnvironment
       initialState = CheckState
-        { checkFlexibleIds = supplyFromIdentifiers $ IntSet.toAscList
+        { checkFlexibleIds = supplyFromIdentifierSet
             $ IntSet.union
                 (flexibleIdentifiers checkedGoal)
                 (expressionFlexibleIdentifiers expression)
@@ -176,11 +177,8 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
       [] -> throwCheck $ UnknownBinding name
       binding : _ -> do
         let constraints = functionConstraints binding
-        (freshTypes, freshConstraints) <- freshenTypes
-          [functionBindingType binding] constraints
-        freshType <- case freshTypes of
-          [ty] -> pure ty
-          _ -> throwCheck $ UnknownBinding name
+        (freshType :| _, freshConstraints) <- freshenTypes
+          (functionBindingType binding :| []) constraints
         modify' $ \current -> current
           { checkConstraints = freshConstraints ++ checkConstraints current }
         pure freshType
@@ -193,10 +191,7 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
         ] of
       [] -> throwCheck $ UnknownConstructor name
       (input, fields) : _ -> do
-        (freshTypes, _) <- freshenTypes (input : fields) []
-        (freshInput, freshFields) <- case freshTypes of
-          firstType : remainingTypes -> pure (firstType, remainingTypes)
-          [] -> throwCheck $ UnknownConstructor name
+        (freshInput :| freshFields, _) <- freshenTypes (input :| fields) []
         unifyTypes scrutineeType freshInput
         mapM zonk freshFields
 
@@ -249,7 +244,12 @@ freshTypeVariable = do
       modify' $ \current -> current {checkFlexibleIds = nextSupply}
       pure $ TypeVar variable
 
-freshenTypes :: [HsType] -> [HsConstraint] -> Check ([HsType], [HsConstraint])
+-- Substitution is applied pointwise, so the nonempty output shape is the
+-- input shape; callers destructure it without an impossible empty case.
+freshenTypes
+  :: NonEmpty HsType
+  -> [HsConstraint]
+  -> Check (NonEmpty HsType, [HsConstraint])
 freshenTypes types constraints = do
   let variables = Set.toAscList
         $ foldMap freeVars types
@@ -257,7 +257,7 @@ freshenTypes types constraints = do
   replacements <- mapM (const freshTypeVariable) variables
   let substitutions = IntMap.fromList $ zip variables replacements
   pure
-    ( map (snd . applySubsts substitutions) types
+    ( fmap (snd . applySubsts substitutions) types
     , map (snd . constraintApplySubsts substitutions) constraints
     )
 

@@ -631,7 +631,7 @@ helpText = "\
 \Caveat emptor: Treat the generated expression as a candidate.  It may\n\
 \need supporting declarations and still belongs in your compile/test loop.\n\
 \\n\
-\Send any comments and feedback to lennart@augustsson.net\n\
+\Send any comments and feedback to https://github.com/VladimirReshetnikov/Djex/issues\n\
 \\n\
 \Commands (may be abbreviated):\n\
 \"

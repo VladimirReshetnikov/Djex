@@ -1,174 +1,71 @@
 # Djex
 
-Djex is the codename for the synthesis tool being formed by merging Djinn and
-Exference. The name contracts **Dj**inn and Exference's **ex**. It is one Cabal
-package with one library: both independently testable engines, compatibility
-frontends, and their neutral foundation share a version, dependency contract,
-source distribution, data-file layout, and build graph while duplicated
-validation, environment, search-envelope, and generated-output infrastructure
-is progressively consolidated.
+Djex is a Haskell expression synthesizer formed by merging
+[Djinn](https://github.com/augustss/djinn) and
+[Exference](https://github.com/lspitzner/exference). Given a type, it
+generates a Haskell expression of that type. Djinn contributes a complete
+intuitionistic prover built on Dyckhoff's LJT calculus, so it terminates and
+can prove a type uninhabited; Exference contributes a heuristic search engine
+that supports type classes at the cost of guaranteed termination. Both
+engines, their compatibility frontends, and a shared parser-independent
+synthesis foundation compile into one Cabal package with a single library,
+version, and dependency contract.
 
 ## Components
 
-- The unnamed `djex` library is the complete product. Its `src/`,
-  `synthesis/src/`, both `src-core/` roots, and both `src-frontend/` roots
-  compile into one unit with one dependency closure.
+- The unnamed `djex` library is the complete product, compiled from `src/`,
+  `synthesis/src/`, both `src-core/` roots, and both `src-frontend/` roots.
   `Language.Haskell.Djex` is the curated neutral entry point;
-  `Language.Haskell.Djex.Djinn` and
-  `Language.Haskell.Djex.Exference` run both engines through the shared
-  query/evidence/search envelope. All modules formerly exposed by the three
-  parser-free sublibraries remain exposed by `djex` for import compatibility.
-- `synthesis/` is the neutral foundation source area: validated names, types,
-  kinds, declarations, environments, diagnostics, collision-free allocation,
+  `Language.Haskell.Djex.Djinn` and `Language.Haskell.Djex.Exference` run
+  both engines through the shared query/evidence/search envelope. All
+  modules formerly exposed by the three parser-free sublibraries remain
+  exposed for import compatibility.
+- `synthesis/` is the neutral foundation: validated names, types, kinds,
+  declarations, environments, diagnostics, collision-free allocation,
   generated output, and operational search status.
 - `djinn/` contributes the LJT proof engine, checked adapter, historical
-  `Djinn` API, and Haskeline REPL to that library.
+  `Djinn` API, and Haskeline REPL.
 - `exference/` contributes the heuristic search engine, checked adapter,
-  Haskell-source/environment loader, and historical CLI API. The executable
-  component remains only its six-line launcher.
+  Haskell-source/environment loader, and historical CLI API.
 
-The `djex` executable is the merged one-shot frontend and selects either checked
-backend explicitly. The historical `djinn` and `exference` executable names
-remain available for their REPL and compatibility contracts. The package also
-retains facade coverage inside its downstream API suite, plus the integration,
-backend, property, CLI, and benchmark suites; this preserves differential
-testing while the two engines continue converging.
-
-The package is now genuinely one library rather than a facade over five
-separately compiled internal units. The final frontend fold deliberately trades
-Haskeline/HSE dependency isolation for the requested single dependency and
-version contract; parser-independent module boundaries remain visible in the
-source graph. The current duplication audit and the ordered path to this state
-are recorded
-in [the 2026-07-14 remaining-convergence audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
-That report captures the starting point for the current work; its Priority 1
-native-vocabulary and Priority 2 result-envelope migrations are now complete.
-Exference's `HsType` is an alias for the shared `Type (Variable Int)`, with
-compatibility patterns over the native tree and one canonical structural
-representation for saturated functions and tuples. Stable candidates,
-constraints, and substitutions now name that historical native alias directly;
-the merger-only `SynthesisType` synonym no longer presents the same tree as a
-second vocabulary. Its declaration adapter
-uses one checked native type/constraint operation in both compatibility
-directions; it no longer maintains paired converted/lowered helpers or a
-private alias for the shared application-spine observation. Its opaque prepared
-projection is also the sole authority for reconciling source binding order and
-ratings; the frontend no longer repeats its exact-name preflight, and the unused
-penalty-only environment entrance is gone. Djinn's `HKind` is a
-private-representation compatibility newtype over shared `Kind Int`; bundled
-patterns preserve `HKind(..)` imports and the historical `*`/`kN` rendering,
-while all kind bridging and grounding operate on the single shared tree.
-Djinn's sealed sessions retain no parallel compatibility kind cache: raw
-queries preserve their historical `HType` traversal while consulting the exact
-prepared witness for alias heads and Inventory kind assumptions. Standalone raw
-HCheck calls and editable raw-environment validation use a transient
-compatibility checker, hidden behind the historical facade. Djinn's LJT lowering
-likewise constructs and simplifies the shared generated `Expression`/`Pattern`
-tree directly; `HExpr` and `HPat` remain only as projections for historical
-low-level callers. Djinn's raw and native class
-contexts also share one sealed class lookup and capture-avoiding method
-instantiation; the raw API projects only its final methods back to `HType`,
-and the obsolete internal raw substitution and class-index projections have
-been removed. Raw `Djinn.Core` declaration edits likewise convert once to the
-shared environment, use the same checked transaction as stable sessions, and
-project the fully sealed result back only after success; the former parallel
-association-list mutation engine is gone.
-Both engines now construct
-their stable `QueryResult` payloads in the core: Djinn preserves its richer
-  logical evidence, while Exference derives evidence from each lazy candidate
-  batch after one checked query preparation. Exference source checking and both
-  stable sessions now make their shared inventories authoritative. Exference's
-  stable and compatibility environment projections also share one declaration
-  traversal, with an explicit policy deciding whether constructor and class-
-  method bindings are derived or retained only from the compatibility input.
-  Djinn also
-  seals its ordered global proof premises and class lookup from that Inventory
-  without retaining raw backend tables. The component folds then deleted the
-  obsolete `synthesis`, `djinn-core`, `exference-core`, `djinn-frontend`, and
-  `exference-frontend` library identities without changing their Haskell
-  module names.
-
-## Dependency migration
-
-The single-package layout intentionally replaces the three former package
-identities. Existing Cabal dependencies migrate as follows:
-
-| Former dependency | Djex dependency |
-| --- | --- |
-| `haskell-synthesis` | `djex` |
-| `djex:synthesis` | `djex` |
-| `djinn:djinn-core` or `djex:djinn-core` | `djex` |
-| unnamed `djinn` library or `djex:djinn-frontend` | `djex` |
-| `exference:exference-core` or `djex:exference-core` | `djex` |
-| unnamed `exference` library or `djex:exference-frontend` | `djex` |
-
-All library clients use one unnamed `djex` dependency for the curated facade,
-shared synthesis vocabulary, checked adapters, lower-level engines, source
-loading, and the historical REPL API. Build-tool dependencies for the commands
-remain `djex:djinn` and `djex:exference`; their executable names are unchanged.
-The one library consequently has the union of core and frontend dependencies:
-`haskell-src-exts`, `directory`, `filepath`, and `haskeline` now share the same
-versioned component contract as the engines that consume their output.
-
-The filesystem and Cabal-project migration is equally deliberate:
-
-- the former top-level `synthesis/`, `djinn/`, and `exference/` trees now live
-  at `djex/synthesis/`, `djex/djinn/`, and `djex/exference/`;
-- both backend trees follow the same live layout: `src-core/`,
-  `src-frontend/`, `app/`, and one explicit directory per test suite. The
-  package root similarly uses `src/`, `app/`, `test-integration/`,
-  `test-api/` (including the curated-facade import guard), and
-  `test-cli/`;
-- their separate package descriptions and project files have been replaced by
-  `djex/djex.cabal`; the repository-root `cabal.project` is the single solver
-  root, and Cabal discovers it by walking to the parent when invoked here;
-- package-generated code must import `Paths_djex` instead of `Paths_djinn` or
-  `Paths_exference`; version discovery and installed-data lookup now belong to
-  Djex as a whole; and
-- Exference's installed environment is a Djex data directory. Use
-  `getDataFileName "exference/environment"` from `Paths_djex`, rather than
-  assuming either a checkout-relative path or the old package data root.
-
-The root Cabal project enables tests and benchmarks, so `cabal build all` and
-`cabal test all` exercise the same component graph whether invoked at the
-repository root or in `djex/`, with one solver plan and build cache.
+The `djex` executable is the merged one-shot frontend and selects either
+checked backend explicitly. The historical `djinn` and `exference`
+executable names remain available for their REPL and compatibility
+contracts. The single library deliberately trades Haskeline/HSE dependency
+isolation for one dependency and version contract; parser-independent module
+boundaries remain visible in the source graph. Integration, backend,
+property, CLI, API, and benchmark suites preserve differential testing while
+the two engines continue converging; the ordered path to the current
+single-library state is recorded in [the 2026-07-14 remaining-convergence
+audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
 
 ## Building
 
-The repository root contains the canonical Cabal project; Cabal discovers that
-parent project when commands start in this directory. From either location,
-build and test the complete graph:
+Build and test the complete graph from the repository root:
 
 ```console
 cabal build all
 cabal test all --test-show-details=direct
 ```
 
-The complete package graph is tested warning-clean on, and currently supports,
-GHC 9.12.4. It is the active toolchain because it has full Haskell Language
-Server support. `Tested-With: GHC == 9.12.4` states the exact compiler contract;
-the matching `base == 4.21.2.*` bound pins the library API line bundled with
-that toolchain. A `base` version is not itself a unique compiler identity, so
-both declarations are intentional.
-
-The project pins the Hackage index snapshot used by the solver, while
-`djex.cabal` retains explicit dependency ranges for library consumers and
-solver checks. Update that snapshot only as part of a dependency review;
-this keeps otherwise identical checkouts on one package universe without
-turning the package metadata into an application-style version lock.
+The package is tested warning-clean on GHC 9.12.4, the active toolchain
+because it has full Haskell Language Server support.
+`Tested-With: GHC == 9.12.4` states the exact compiler contract, and the
+matching `base == 4.21.2.*` bound pins the library API line bundled with
+that toolchain; a `base` version is not itself a unique compiler identity,
+so both declarations are intentional.
 
 The complete component graph and test matrix are also expected to work with
-the oldest dependency versions permitted by those ranges on the supported GHC:
+the oldest dependency versions permitted by the declared ranges. Use an
+isolated build directory so lower-bound validation cannot replace the
+ordinary latest-compatible build plan:
 
 ```console
 cabal build all --prefer-oldest --builddir=dist-newstyle-oldest
 cabal test all --prefer-oldest --builddir=dist-newstyle-oldest --test-show-details=direct
 ```
 
-Use an isolated build directory as above so lower-bound validation cannot
-replace the ordinary latest-compatible build plan.
-
-Useful component and compatibility-executable targets include:
+Useful component and compatibility-executable targets:
 
 ```console
 cabal build djex:lib:djex
@@ -180,17 +77,17 @@ cabal bench djinn-bench
 cabal bench exference-bench
 ```
 
-All three commands are serial and accept explicit caller-supplied `+RTS`
-resource tuning, for example `+RTS -K64m -RTS`. None starts one capability per
-core or inherits a fixed multi-gigabyte heap hint.
+All three executables are serial and accept explicit caller-supplied `+RTS`
+resource tuning, for example `+RTS -K64m -RTS`; none starts one capability
+per core or inherits a fixed multi-gigabyte heap hint.
 
 The Exference benchmark uses parser-free, explicitly step- and queue-bounded
-core fixtures. For an optimization-sensitive comparison of the search engine,
-build its whole local dependency graph consistently with
+core fixtures. For an optimization-sensitive comparison of the search
+engine, build its whole local dependency graph consistently with
 `cabal bench exference-bench --enable-optimization=2`.
 
-The backend subdirectories are source roots, not independent Cabal projects;
-run package commands from the repository root or from `djex/`.
+The backend subdirectories are source roots, not independent Cabal packages;
+run package commands from the repository root.
 
 ## Unified command
 
@@ -204,268 +101,248 @@ djex exference [OPTION...] TYPE
 Both subcommands share `--target`, `--select first|best|all`,
 `--render definition|expression`, and
 `--qualification none|identifiers|full`. Djinn additionally exposes its
-candidate limit and choice-point budget; Exference exposes its checked source
-environment, constraint/pattern policy, and step, queue, and depth bounds.
-Run `djex <backend> --help` for the exact backend-specific table.
+candidate limit and choice-point budget; Exference exposes its checked
+source environment, constraint/pattern policy, and step, queue, and depth
+bounds. Run `djex <backend> --help` for the exact backend-specific table.
 
-Generated Haskell alone is written to stdout. Loader messages, logical negative
-answers, undecided/truncated status, and structured diagnostics go to stderr.
-Help, version, successful synthesis, proof-backed uninhabitability, and bounded
-no-result searches exit 0; load/parse/search/render failures exit 1; malformed
-command lines exit 2. This keeps a valid negative answer distinct from a broken
-invocation and never mislabels an exhausted Exference heuristic search as a
-proof of uninhabitability.
+Generated Haskell alone is written to stdout. Loader messages, logical
+negative answers, undecided/truncated status, and structured diagnostics go
+to stderr. Help, version, successful synthesis, proof-backed
+uninhabitability, and bounded no-result searches exit 0;
+load/parse/search/render failures exit 1; malformed command lines exit 2. A
+valid negative answer therefore stays distinct from a broken invocation, and
+an exhausted Exference heuristic search is never mislabeled as a proof of
+uninhabitability.
 
 ## Query boundary
 
-Exference core names now are the shared synthesis `Name` itself; `QualifiedName`
-is a compatibility alias rather than another nominal wrapper. Compatibility views
-remain separately exported patterns (`QualifiedName`, `ListCon`, `TupleCon`,
-`UnboxedTupleCon`, and `Cons`), while ordinary names and boxed tuples are still
-constructed with `mkQualifiedName` and `mkBoxedTupleName` so malformed source
-spelling, qualification, or tuple arity receives a structured error. Exference
-constraints likewise are `Constraint HsType`, with `HsConstraint` retained as
-a compatibility pattern. `HsType` itself is now exactly the shared
-`Type (Variable Int)`. Its historical constructors survive as separately
-exported patterns; `TypeForall` preserves the old flexible-binder-only view,
-while the exhaustive `TypeForallNative` exposes every shared binder. Checked
-Exference boundaries canonicalize saturated function and tuple applications
-to structural `FunctionType` and `TupleType` values and reject rigid forall
-binders, which the search engine cannot instantiate as source quantifiers.
-The shared `normalizeType` operation owns canonicalization plus structural
-validation for both backends and Exference unification; adapters add only
-their genuine variable/binder and source-vocabulary restrictions afterward.
-The merger's total structural conversion shims are gone: `HsType` and
-`HsConstraint` already are the shared values, while the checked conversion
-names remain only as validation and canonicalization boundaries.
+### Shared query surface
 
-`Language.Haskell.Synthesis.Query` shares the target, goal, contexts, logical
-evidence, and search-batch shape without pretending that both engines accept
-the same types or options. Every `QueryRequest` carries an opaque
-`DefinitionName`, constructed once from a structural `Name`; it guarantees the
-target is an unqualified value identifier or operator other than the wildcard,
-so neither backend can defer or disagree about that shared output invariant.
-Raw-name parser helpers retain their compatibility signatures and perform this
-check before parsing, preserving usage-error precedence. Its `QueryResult`
-constructor is opaque:
-`mkQueryResult` checks that `ValidatedCandidates` accompanies exactly the
-nonempty batches, while `queryResultFromCandidates` derives that evidence for
-ordinary heuristic-search batches. Both checks inspect only the list spine's
-first constructor, so they do not sacrifice lazy candidate tails.
-Opaque invariant witnesses do not derive representation-producing classes such
-as `Generic`. Their exported observations are ordinary functions rather than
-record fields whenever record update could split checked state: this applies to
-the shared environment, inventory, synonym table, and result envelope, as well
-as the corresponding rigid-instantiation, class-index, scope, and proof-state
-witnesses in the backends. Hiding a constructor alone is insufficient because
-`Generic.to` can rebuild its representation and GHC record update needs an
-exported field label, not the constructor. The downstream API suite keeps both
-reconstruction routes closed.
+`Language.Haskell.Synthesis.Query` shares the target, goal, contexts,
+logical evidence, and search-batch shape without pretending that both
+engines accept the same types or options. Every `QueryRequest` carries an
+opaque `DefinitionName`, constructed once from a structural `Name`; it
+guarantees the target is an unqualified value identifier or operator other
+than the wildcard, so neither backend can defer or disagree about that
+shared output invariant. Raw-name parser helpers perform this check before
+parsing, preserving usage-error precedence. `QueryResult` is likewise
+opaque: `mkQueryResult` checks that `ValidatedCandidates` accompanies
+exactly the nonempty batches, `queryResultFromCandidates` derives that
+evidence for ordinary heuristic-search batches, and both checks inspect only
+the list spine's first constructor, preserving lazy candidate tails.
+
+Opaque invariant witnesses do not derive representation-producing classes
+such as `Generic`, and their exported observations are ordinary functions
+rather than record fields: `Generic.to` can rebuild a hidden representation
+and GHC record update needs only an exported field label, so either route
+would let checked state be reconstructed unchecked. This applies to the
+shared environment, inventory, synonym table, and result envelope, as well
+as the corresponding rigid-instantiation, class-index, scope, and
+proof-state witnesses in the backends.
+
 `CachedQuery` separately owns a strict `RequestProvenance` and the adapter's
 lazy derived cache. Parsed requests materialize their complete neutral
 `SourceLocation` while sealing, avoiding retention of the input buffer;
 programmatic requests carry an explicit source-free provenance. Equality and
-display continue to observe only the neutral request. Both adapters enter
+display observe only the neutral request. Both adapters enter
 `sealCachedQueryWithProvenance`, so validation failures receive the same
-source attribution and strictness contract without duplicating that subtle
-protocol in their private request constructors; backend caches remain lazy.
+source attribution and strictness contract; backend caches remain lazy.
+
+The one-import `Language.Haskell.Djex` surface reexports the complete
+neutral declaration, environment, inventory, kind-inference,
+synonym-elaboration, and type-rendering vocabulary. `DjinnEnvironment`,
+`DjinnInventory`, `DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make
+every Djinn adapter signature nameable without depending on a hidden backend
+alias, and both stable environment aliases use `Void` for explicit kind
+variables, making their common ground-kind contract visible in types.
+
+### Djinn sessions and requests
+
 `mkDjinnSession` lowers and seals the kind-ground neutral shared
 `DjinnEnvironment = Environment DjinnTypeVariable Void ()` through one
-authoritative closed Inventory with Haskell 98 class-kind defaulting. Djinn's
-historical `Kind Int` remains only in its raw compatibility API; a surviving
-kind variable was never valid session state, so the stable path no longer
-weakens and re-grounds an already ground environment. The foundation first
-builds an opaque transient `PreparedInventoryExpansion`: one operation prepares
-the exact synonym table, expands operational declarations in source order,
-and classifies recursion from that same operationally alias-free stream. An
-opaque shared
-`PreparedInventory` keeps the Inventory and its exact normalized synonym table
-inseparable after the transient stream has supplied Djinn's formula, premise,
-and no-recursion checks; the mutable raw
-`Djinn.Core.Environment` no longer crosses the
-curated facade or survives inside `PreparedEnvironment`. Synonyms are expanded
-for saturation and recursive datatype validation before ordered global
-assumptions are translated once into proof premises. The sealed environment
-retains exactly the prepared Inventory/synonym witness, the foundation's
-annotation-free prepared class index, formula compiler, and those ordered
-premises. Final class kinds and source-shaped methods now come from the same
-shared authority used by other backends; aliases remain consumed through the
-witness rather than copied into backend caches. Historical raw
-declaration tables are derived only when a compatibility caller asks to display
-them. At query time Djinn elaborates the
-goal and all class arguments as one shared kind scope, instantiates class
-methods in that same shared type tree, and compiles the alias-free goal and
-methods directly into formulas through one representation-neutral prepared
-definition cache; opaque
-requests still retain their exact session-independent source view. Invalid
-search controls now have a typed core failure and stable
-`DJEX_DJINN_OPTIONS` diagnostic; query-type provenance is attached only to
-source-derived input rejection, never to separately supplied options or an
-internal proof/result invariant.
-`standardDjinnSession` converts the historical built-in spelling once and then
-uses the same neutral `mkDjinnSession` path as every caller-supplied environment.
-`parseDjinnRequest` shares the compatibility frontend's optional class-context
-grammar through the full-consumption `Djinn.Core.parseContextualHType` entry
-point rather than importing an internal parser. Both `DjinnRequest` and
-`DjinnCandidate` expose `DjinnType = Type DjinnTypeVariable`; that shared type
-is checked and canonicalized once by `mkDjinnRequest`, which seals an opaque
-shared execution plan while retaining the caller's exact neutral query.
-Parsed `HType` values already store ordinary source types in that shared IR;
-the checked boundary validates and canonicalizes their native tree while
-retaining declaration-only and constructor-sensitive caller-built forms for
-compatibility diagnostics. `djinnRequestQuery` recovers the exact stable
-source view. The
-plan remains shared through environment-dependent kind checking, synonym
-elaboration, class-method instantiation, and formula compilation. The query
-returns shared candidates containing
-structured generated
-clauses, empty residual constraints, and Djinn's unused-binder ranking details
-in one terminal batch. A proof beyond `optionCutoff` produces
-`Truncated CandidateLimitReached` without forcing the proof-stream suffix.
-Proof-backed `ProvedUninhabitable`, target-reference evidence, and
+authoritative closed Inventory with Haskell 98 class-kind defaulting.
+Djinn's historical `Kind Int` survives only in its raw compatibility API,
+and its `HKind` is a private-representation compatibility newtype over the
+shared `Kind Int`: bundled patterns preserve `HKind(..)` imports and the
+historical `*`/`kN` rendering while all kind bridging and grounding operate
+on the single shared tree.
+
+The foundation first builds an opaque transient
+`PreparedInventoryExpansion`: one operation prepares the exact synonym
+table, expands operational declarations in source order, and classifies
+recursion from that same operationally alias-free stream. An opaque shared
+`PreparedInventory` then keeps the Inventory and its exact normalized
+synonym table inseparable after the transient stream has supplied Djinn's
+formula, premise, and no-recursion checks; the mutable raw
+`Djinn.Core.Environment` never crosses the curated facade. Synonyms are
+expanded for saturation and recursive datatype validation before ordered
+global assumptions are translated once into proof premises. The sealed
+environment retains exactly the prepared Inventory/synonym witness, the
+foundation's annotation-free prepared class index, formula compiler, and
+those ordered premises; historical raw declaration tables are derived only
+when a compatibility caller asks to display them.
+
+At query time Djinn elaborates the goal and all class arguments as one
+shared kind scope, instantiates class methods in that same shared type tree,
+and compiles the alias-free goal and methods directly into formulas through
+one representation-neutral prepared definition cache; opaque requests retain
+their exact session-independent source view. Invalid search controls have a
+typed core failure and stable `DJEX_DJINN_OPTIONS` diagnostic; query-type
+provenance is attached only to source-derived input rejection, never to
+separately supplied options or an internal proof/result invariant.
+`standardDjinnSession` converts the historical built-in spelling once and
+then uses the same neutral `mkDjinnSession` path as every caller-supplied
+environment, and `parseDjinnRequest` shares the compatibility frontend's
+optional class-context grammar through the full-consumption
+`Djinn.Core.parseContextualHType` entry point.
+
+Both `DjinnRequest` and `DjinnCandidate` expose
+`DjinnType = Type DjinnTypeVariable`; that shared type is checked and
+canonicalized once by `mkDjinnRequest`, which seals an opaque shared
+execution plan while retaining the caller's exact neutral query, and
+`djinnRequestQuery` recovers the exact stable source view. The plan stays
+shared through environment-dependent kind checking, synonym elaboration,
+class-method instantiation, and formula compilation. Queries return shared
+candidates containing structured generated clauses, empty residual
+constraints, and Djinn's unused-binder ranking details in one terminal
+batch. A proof beyond `optionCutoff` produces
+`Truncated CandidateLimitReached` without forcing the proof-stream suffix,
+and proof-backed `ProvedUninhabitable`, target-reference evidence, and
 budget-limited `NoEvidence` remain distinct from the batch's operational
 `Finished` or `Truncated` completion.
 
-The one-import `Language.Haskell.Djex` surface reexports the complete neutral
-declaration, environment, inventory, kind-inference, synonym-elaboration, and
-type-rendering vocabulary. `DjinnEnvironment`, `DjinnInventory`,
-`DjinnTypeVariable`, `DjinnLocal`, and `DjinnType` make every Djinn adapter
-signature nameable without depending on a hidden backend alias. Both stable
-environment aliases now use `Void` for explicit kind variables, making their
-common ground-kind contract visible in types. The historical
-REPL now derives the editable shared environment from the grounded Inventory,
-edits it transactionally, and publishes only the completely resealed opaque
-session; raw declarations are one-way parser inputs and private derived
-display/search views, not retained editable state.
-Exference now has the same stable construction boundary:
+### Exference sessions and requests
+
+Exference has the same stable construction boundary:
 `ExferenceEnvironment = Environment ExferenceTypeVariable Void ()`, and
-`mkExferenceSession` kind-checks and lowers that parser-independent environment
-directly. Its source loader is an additional frontend, not the definition of
-an Exference session.
+`mkExferenceSession` kind-checks and lowers that parser-independent
+environment directly; the source loader is an additional frontend, not the
+definition of an Exference session.
 
-`Language.Haskell.Djex.Exference.HaskellSrc.loadExferenceSession` and its
-policy-aware counterpart compute Exference's
-backend-supported projection once and turn a directory into the same opaque
-session, while translating every fatal loader phase into source-preserving
-`EXF_*` diagnostics. Stable callers therefore never handle a parser-specific
-checked environment. The explicitly named
-`Language.Haskell.Exference.Session` module retains the raw
-`CheckedSourceEnvironment` bridge for the historical CLI and clients that opt
-into the compatibility frontend. The source boundary tags class methods with
-their qualified owner, nests them under the common class declaration for
-validation, and lowers each rated selector exactly once into Exference's flat
-search inventory without changing source order. HSE aliases remain unexpanded
-through common Inventory kind checking; the same transient prepared-expansion
-witness used by Djinn then expands them capture-safely and derives cross-module
-recursion before Exference normalizes classes and instances and reapplies
-source ratings/order. Source checking returns one opaque annotated witness
-which owns the checked Inventory, synonym table, and backend together; the
-frontend can
-reorder the exact checked names and attach finite ratings, but cannot combine
-an inventory with an independently prepared search dictionary. Alias-aware
-recursion metadata is attached to that Inventory without resealing it or
-repeating kind inference. The historical flat `SourceEnvironment` projection
-is derived on demand from the witness; only legacy synonym spellings remain as
-frontend presentation data. Erasing annotations for a stable session shares
-the same prepared synonym table and backend during sealing. That wrapper
-exposes one foundation witness and one backend projection: the synthesis
-foundation remains the sole owner of the Inventory and normalized-synonym
-projections, rather than Exference mirroring them through neutral aliases. The
-low-level declaration adapter likewise has one annotation-polymorphic
-`prepareSynthesisInventory` operation. The source frontend alone uses the
-explicit `prepareSourceSynthesisInventory` refinement that copies the
-alias-aware recursion classification into its historical annotations; ordinary
-stable sessions need no `NeutralSynthesisInventory` type or preparation alias.
-The sealed session then retains only the shared inventory/synonym witness, its
-policy-adjusted checked search environment, and a fully materialized structured
-omission summary; the complete unfiltered backend-bearing wrapper is released.
-HSE query parsing derives known types and class arities
-from the witness's shared inventory rather than retaining parallel type/class
-caches; neither an HSE source environment nor its legacy synonym map survives
-sealing.
+Exference core names are the shared synthesis `Name` itself; `QualifiedName`
+is a compatibility alias, and the `QualifiedName`, `ListCon`, `TupleCon`,
+`UnboxedTupleCon`, and `Cons` views are separately exported patterns.
+Ordinary names and boxed tuples are constructed with `mkQualifiedName` and
+`mkBoxedTupleName`, so malformed source spelling, qualification, or tuple
+arity receives a structured error. Exference constraints are
+`Constraint HsType`, with `HsConstraint` retained as a compatibility
+pattern, and `HsType` is exactly the shared `Type (Variable Int)`: its
+historical constructors survive as separately exported patterns, where
+`TypeForall` preserves the flexible-binder-only view and
+`TypeForallNative` exposes every shared binder. Checked Exference
+boundaries canonicalize saturated function and tuple applications to
+structural `FunctionType` and `TupleType` values and reject rigid forall
+binders, which the search engine cannot instantiate as source quantifiers.
+The shared `normalizeType` operation owns canonicalization and structural
+validation for both backends and Exference unification; adapters add only
+their genuine variable/binder and source-vocabulary restrictions.
 
-`ExferenceSessionPolicy` applies exact structural-name exclusions and finite,
-signed rating overrides while the private search projection is sealed.
-Overrides neither reorder declarations nor leak into the annotation-erased
-public inventory. `exferenceSessionEnvironment` and
-`exferenceSessionInventory` expose the unchanged authoritative views in
-parallel with Djinn's stable session API. Unknown names and non-finite ratings
-are fatal structured diagnostics; exclusion wins when both policies mention
-the same binding.
-Unsupported rank-N introduction/elimination and recursive-data elimination
-capabilities remain visible as structured omissions and warning diagnostics
-instead of disappearing per query. Omission order follows introduction order
-and then elimination order.
-
-`ExferenceRequest` is opaque in the same operational sense as `DjinnRequest`:
-the stable adapter exposes only `mkExferenceRequest` and
-`exferenceRequestQuery`. Source locations and parsed variable spellings are
-private presentation data. Like Djinn, Exference publishes the caller's exact
-neutral request through projection, equality, and display, while execution
-uses only the canonical contextual goal retained in its private plan. The
-common `CachedQuery` owns the strict location separately from an opaque
-backend-specific variable-to-spelling value; that checked hint witness also
-owns the canonical contextual goal, so query execution does not rebuild it. The
+`ExferenceRequest` is opaque in the same operational sense as
+`DjinnRequest`: the stable adapter exposes only `mkExferenceRequest` and
+`exferenceRequestQuery`, and source locations and parsed variable spellings
+are private presentation data. Execution uses only the canonical contextual
+goal retained in the private plan, while projection, equality, and display
+publish the caller's exact neutral request. The common `CachedQuery` owns
+the strict location separately from an opaque backend-specific
+variable-to-spelling value; that checked hint witness also owns the
+canonical contextual goal, so query execution does not rebuild it. The
 source SPI validates every raw alias as a non-wildcard variable identifier,
 bounds its ID to the complete contextual goal, collapses aliases
 deterministically, retains the exact canonical goal as a scope witness, and
-detaches the map before returning. Shared synonym elaboration alpha-freshens
-every alias-introduced binder away from the complete original source
-namespace, including through nested and zero-argument aliases. The adapter can
-therefore retarget surviving hints to the elaborated goal without confusing an
-erased phantom argument with an unrelated same-numbered binder, and core search
-rejects a hint value paired with any other query.
-Neither provenance nor the private canonical plan affects equality/display or admits an unchecked
-construction path through the curated facade. The library's hidden
-`Language.Haskell.Djex.Exference.Internal.Request`
-representation owns that metadata. The bundled Haskell-source adapters now
-live in the same library and call the hidden request, session, and variable
-supply owners directly. The former `FrontendSupport` service-provider module
-existed only to cross the retired core/frontend Cabal boundary and is no longer
-part of the public API; external clients use either the neutral stable adapter
-or `Language.Haskell.Djex.Exference.HaskellSrc`.
-HSE's normalized parse filename is also the filename retained for deferred
-diagnostics, so extensionless labels no longer change identity between parse
-and search phases; angle-bracket virtual-buffer names remain verbatim.
+detaches the map before returning. Shared synonym elaboration
+alpha-freshens every alias-introduced binder away from the complete
+original source namespace, including through nested and zero-argument
+aliases, so the adapter can retarget surviving hints to the elaborated goal
+without confusing an erased phantom argument with an unrelated
+same-numbered binder — and core search rejects a hint value paired with any
+other query. The hidden
+`Language.Haskell.Djex.Exference.Internal.Request` representation owns that
+metadata; external clients use either the neutral stable adapter or
+`Language.Haskell.Djex.Exference.HaskellSrc`.
 
-The Haskell-source loader is likewise fail-closed at its vocabulary boundary:
-after parsing, but before constructing any partial inventory, it reports
-source-ordered `UnsupportedVocabularyOccurrence` values for type/data families,
-GADTs, datatype contexts, explicitly kinded parameters, existential or
-constrained constructors, derived or overlapping instances, functional
-dependencies, associated families and defaults, declaration splices, role
-annotations, and XML hybrid modules. Each occurrence carries the stable
-`EXF_UNSUPPORTED_VOCABULARY` diagnostic code and its exact source span.
-Ordinary positional, infix, record, strict, and unpacked datatype fields are
-lowered explicitly; record selectors become rated value bindings exactly once.
-Imports, fixities, ordinary value and method bodies, pattern vocabulary,
-default declarations, and operational pragmas remain accepted because they do
-not change the nominal type/class inventory. These forms are explicit current
-limitations rather than syntax that can silently disappear during loading.
+One dependency-leaf `ExferenceOptions` definition is re-exported by both
+the core and checked facades; the exact value in the neutral request is
+retained as `ExferenceQuery.querySearchOptions`, and only the historical
+flat `ExferenceInput` compatibility record needs a one-way projection with
+its established validation order unchanged. `ExferenceEnvironment`,
+`ExferenceType`, `ExferenceTypeVariable`, `ExferenceLocal`, and
+`ExferenceInventory` make that complete surface nameable in the neutral IR.
+Session construction maps backend ratings out of the already-checked
+inventory without rebuilding its indexes or kind assumptions, and stable
+candidate details and batch metadata are zero-copy public views of the
+exact core-owned values.
+
+### Loading Haskell source environments
+
+`Language.Haskell.Djex.Exference.HaskellSrc.loadExferenceSession` and its
+policy-aware counterpart compute Exference's backend-supported projection
+once and turn a directory into the same opaque session, translating every
+fatal loader phase into source-preserving `EXF_*` diagnostics; stable
+callers never handle a parser-specific checked environment. The explicitly
+named `Language.Haskell.Exference.Session` module retains the raw
+`CheckedSourceEnvironment` bridge for the historical CLI and clients that
+opt into the compatibility frontend.
+
+The source boundary tags class methods with their qualified owner, nests
+them under the common class declaration for validation, and lowers each
+rated selector exactly once into Exference's flat search inventory without
+changing source order. HSE aliases remain unexpanded through common
+Inventory kind checking; the same transient prepared-expansion witness used
+by Djinn then expands them capture-safely and derives cross-module
+recursion before Exference normalizes classes and instances and reapplies
+source ratings and order. Source checking returns one opaque annotated
+witness owning the checked Inventory, synonym table, and backend together;
+the frontend can reorder the exact checked names and attach finite ratings,
+but cannot combine an inventory with an independently prepared search
+dictionary. The synthesis foundation remains the sole owner of the
+Inventory and normalized-synonym projections, the historical flat
+`SourceEnvironment` projection is derived on demand from the witness, and
+the sealed session retains only the shared inventory/synonym witness, its
+policy-adjusted checked search environment, and a fully materialized
+structured omission summary. HSE query parsing derives known types and
+class arities from the witness's shared inventory; neither an HSE source
+environment nor its legacy synonym map survives sealing. HSE's normalized
+parse filename is also the filename retained for deferred diagnostics, so
+extensionless labels do not change identity between parse and search
+phases; angle-bracket virtual-buffer names remain verbatim.
+
+The loader is fail-closed at its vocabulary boundary: after parsing, but
+before constructing any partial inventory, it reports source-ordered
+`UnsupportedVocabularyOccurrence` values for type/data families, GADTs,
+datatype contexts, explicitly kinded parameters, existential or constrained
+constructors, derived or overlapping instances, functional dependencies,
+associated families and defaults, declaration splices, role annotations,
+and XML hybrid modules, each with the stable `EXF_UNSUPPORTED_VOCABULARY`
+diagnostic code and its exact source span. Ordinary positional, infix,
+record, strict, and unpacked datatype fields are lowered explicitly; record
+selectors become rated value bindings exactly once. Imports, fixities,
+ordinary value and method bodies, pattern vocabulary, default declarations,
+and operational pragmas remain accepted because they do not change the
+nominal type/class inventory. These forms are explicit current limitations
+rather than syntax that can silently disappear during loading.
+
+`ExferenceSessionPolicy` applies exact structural-name exclusions and
+finite, signed rating overrides while the private search projection is
+sealed. Overrides neither reorder declarations nor leak into the
+annotation-erased public inventory. `exferenceSessionEnvironment` and
+`exferenceSessionInventory` expose the unchanged authoritative views in
+parallel with Djinn's stable session API. Unknown names and non-finite
+ratings are fatal structured diagnostics, and exclusion wins when both
+policies mention the same binding. Unsupported rank-N
+introduction/elimination and recursive-data elimination capabilities remain
+visible as structured omissions and warning diagnostics instead of
+disappearing per query; omission order follows introduction order and then
+elimination order.
+
 `Language.Haskell.Djex.Exference.HaskellSrc.parseExferenceRequest` resolves
-Haskell syntax against the session's retained
-type names, classes, and kind assumptions. It deliberately does not use the
-legacy frontend synonym map. `runExferenceQuery` passes both parsed and
-programmatically constructed goals through the shared capture-avoiding
+Haskell syntax against the session's retained type names, classes, and kind
+assumptions. `runExferenceQuery` passes both parsed and programmatically
+constructed goals through the shared capture-avoiding
 `TypeSynonym.elaboratePreparedType` operation on the session's exact opaque
-witness, including its pre- and post-expansion kind checks, before lowering to
-the core search type. Thus the two request paths agree on aliases, cycles,
-saturation, and kinds without projecting a separately pairable synonym table.
-Query execution then validates only the varying search policy and returns a
-lazy sequence of shared result batches. One dependency-leaf
-`ExferenceOptions` definition is re-exported by both the core and checked
-facades; the exact value in the neutral request is retained as
-`ExferenceQuery.querySearchOptions` rather than copied through eight parallel
-query fields. Only the historical flat `ExferenceInput` compatibility record
-needs a one-way projection, with its established validation order unchanged.
-`ExferenceEnvironment`, `ExferenceType`,
-`ExferenceTypeVariable`, `ExferenceLocal`, and `ExferenceInventory` make that
-complete surface nameable in the neutral IR. Session construction maps backend
-ratings out of the already-checked inventory without rebuilding its indexes or
-kind assumptions. Stable candidate details and batch metadata are zero-copy
-public views of the exact core-owned values, so the curated facade exposes
-shared names, types, metrics, and rendering hints without maintaining a second
-set of records.
+witness, including its pre- and post-expansion kind checks, before lowering
+to the core search type, so the two request paths agree on aliases, cycles,
+saturation, and kinds. Query execution then validates only the varying
+search policy and returns a lazy sequence of shared result batches.
 
 Programmatic clients need only the neutral adapter:
 
@@ -473,122 +350,148 @@ Programmatic clients need only the neutral adapter:
 import Language.Haskell.Djex.Exference
 ```
 
-Clients that load directories or parse Haskell type text import the explicit
-source boundary from the same dependency:
+Clients that load directories or parse Haskell type text import the
+explicit source boundary from the same dependency:
 
 ```haskell
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.HaskellSrc
 ```
-Those batches preserve queue/depth pruning, nominal binding usage, residual
-constraints, statistics, and rendering hints without forcing the remaining
-trace. Each generated expression is wrapped in a target-bearing shared
-`FunctionClause` whose opaque `DefinitionName` preserves the checked request
-target through result projection. The shared candidate expression/definition
-renderers own the common clause projection and return `RenderError` directly;
-each backend adapter contributes only its local-name hints and qualification
-options. Exference's live search tree is now the same shared `Generated.Expression`
-shape as those candidates. Its checker-specific type annotations inhabit a
-private local payload, while the historical `ExpVar`/`ExpLambda`/`ExpLet`/case
-constructors are bundled bidirectional compatibility patterns over that tree.
-Erasing annotations is therefore a functor projection rather than a recursive
-backend-to-shared conversion. Incremental hole filling likewise lives in the
-shared generated-syntax module and is regression-tested independently of
-Exference's search policy. Capture-safe let cleanup and eta reduction operate
-on that same shared shape, parameterized only by Exference's projection from
-an annotated local to its stable numeric identity; the historical
-`ExpressionSimplify` module is now a compatibility re-export rather than a
-second traversal authority. The opaque wrapper also exposes one structural
-annotation observation derived from the shared tree's `Foldable` order; name
-hints, raw-input validation, and flexible-identifier reservation therefore no
-longer maintain separate copies of Exference's historical expression grammar.
-Djinn's pattern alias normalization, unused-binder pruning, application-spine
-inspection, and case-body alpha-equivalence now use that same generated-syntax
-authority instead of private recursive walks.
-Leading-lambda construction and decomposition live there as well. Both
-backends now promote the complete nonempty lambda spine through the same
-expression-to-clause operation, and the inverse clause operation restores one
-canonical group. Caller-built `Lambda []` remains a validation error rather
-than being silently erased by conversion or smart-case cleanup.
+
+### Generated output and rendering
+
+Result batches preserve queue/depth pruning, nominal binding usage,
+residual constraints, statistics, and rendering hints without forcing the
+remaining trace. Both engines construct their stable `QueryResult` payloads
+in the core: Djinn preserves its richer logical evidence, while Exference
+derives evidence from each lazy candidate batch after one checked query
+preparation. Each generated expression is wrapped in a target-bearing
+shared `FunctionClause` whose opaque `DefinitionName` preserves the checked
+request target through result projection. The shared candidate
+expression/definition renderers own the common clause projection and return
+`RenderError` directly; each backend adapter contributes only its
+local-name hints and qualification options.
+
+Exference's live search tree is the same shared `Generated.Expression`
+shape as those candidates: checker-specific type annotations inhabit a
+private local payload, the historical `ExpVar`/`ExpLambda`/`ExpLet`/case
+constructors are bundled bidirectional compatibility patterns over that
+tree, and erasing annotations is a functor projection rather than a
+recursive conversion. Djinn's LJT lowering constructs and simplifies that
+same shared generated `Expression`/`Pattern` tree directly; `HExpr` and
+`HPat` remain only as projections for historical low-level callers.
+Incremental hole filling, capture-safe let cleanup, and eta reduction live
+in the shared generated-syntax module, parameterized only by Exference's
+projection from an annotated local to its stable numeric identity. Djinn's
+pattern alias normalization, unused-binder pruning, application-spine
+inspection, and case-body alpha-equivalence use that same authority, as do
+leading-lambda construction and decomposition: both backends promote the
+complete nonempty lambda spine through the same expression-to-clause
+operation, the inverse clause operation restores one canonical group, and a
+caller-built `Lambda []` is a validation error rather than being silently
+erased.
+
 Candidate selection and rendering remain presentation policies outside both
-session operations. The shared `Selection` module now
-provides first, global-best, streaming-all, batch-lookahead, and preferred-tier
-lookahead policies over either backend's result envelope. `TypeRender` prints
-shared types and constraints from tagged variable-name hints without collapsing
-flexible and rigid identities.
-`TypeSynonym` prepares aliases from the retained neutral inventory and owns
-prepared-witness operations for whole-type and individual-application
-minimum-saturation preflight, capture-avoiding expansion, and pre/post kind
-checks that both backend adapters share. The narrow application operation lets
-Djinn retain its raw declaration-node traversal and diagnostic order without
-retaining a second string-keyed arity table. The lower-level table operations
-remain compatibility and focused-testing seams; sealed backend paths no longer
-extract a table only to hand it back. Kind
-inference is the single structural validator for each elaboration phase. Its
-batch operation preserves source order while assigning one kind to each free
-variable shared by a goal and its separate context arguments. The underlying
-shared type module now owns the
-scope-aware simultaneous substitution primitive used by synonym expansion and
-Exference's compatibility substitution API. Its batch form lets Exference
-substitute constraint arguments under one fresh namespace without encoding
-the list as a temporary unboxed tuple. Exference's backend-specific
-unifiers operate directly on the same native tree, canonicalize their inputs
-and projected substitutions, preserve flexible/rigid and left/right identity,
-and consume the foundation's one constructor-application view for structural
-functions and tuples. Unary unboxed tuples remain structural because Haskell
-has no corresponding unary tuple constructor.
+session operations. The shared `Selection` module provides first,
+global-best, streaming-all, batch-lookahead, and preferred-tier lookahead
+policies over either backend's result envelope. `TypeRender` prints shared
+types and constraints from tagged variable-name hints without collapsing
+flexible and rigid identities. `TypeSynonym` prepares aliases from the
+retained neutral inventory and owns prepared-witness operations for
+whole-type and individual-application minimum-saturation preflight,
+capture-avoiding expansion, and the pre/post kind checks both backend
+adapters share. Kind inference is the single structural validator for each
+elaboration phase; its batch operation preserves source order while
+assigning one kind to each free variable shared by a goal and its separate
+context arguments. The shared type module owns the scope-aware simultaneous
+substitution primitive used by synonym expansion and Exference's
+compatibility substitution API. Exference's backend-specific unifiers
+operate directly on the same native tree, canonicalize their inputs and
+projected substitutions, preserve flexible/rigid and left/right identity,
+and consume the foundation's one constructor-application view for
+structural functions and tuples; unary unboxed tuples remain structural
+because Haskell has no corresponding unary tuple constructor.
+
+### Compatibility executables
 
 The `exference` compatibility executable is a six-line launcher for
-`Language.Haskell.Exference.CLI` in the library. That module is the
-compatibility orchestrator at this boundary: it loads and seals one session,
-parses every requested type through `parseExferenceRequest`, selects shared
-candidates, and renders their generated expression bodies. Exact nominal
-session policy replaces its former occurrence-text filtering of recursion
-helpers. The compatibility command and `djex exference` now obtain that policy
-from the same frontend operation: both exclude `Data.Function.fix`,
-`Control.Monad.forever`, and `Control.Monad.Loops.iterateM_` by default, and
-both accept `--fix` as an explicit opt-in. The unrestricted programmatic
-session default is unchanged. Parse, kind, option, and search
-failures are structured diagnostics on stderr with failure exit status;
-repeated inputs are all processed and conflicting presentation modes are
-rejected. Its historical ranking vector remains an explicit compatibility
-profile. `--short` now adds backend-neutral structural expression size to the
-candidate cost instead of being a dead option.
+`Language.Haskell.Exference.CLI`, the compatibility orchestrator at this
+boundary: it loads and seals one session, parses every requested type
+through `parseExferenceRequest`, selects shared candidates, and renders
+their generated expression bodies. The compatibility command and
+`djex exference` obtain their session policy from the same frontend
+operation: both exclude `Data.Function.fix`, `Control.Monad.forever`, and
+`Control.Monad.Loops.iterateM_` by default, and both accept `--fix` as an
+explicit opt-in, while the unrestricted programmatic session default is
+unchanged. Parse, kind, option, and search failures are structured
+diagnostics on stderr with failure exit status; repeated inputs are all
+processed and conflicting presentation modes are rejected. The historical
+ranking vector remains an explicit compatibility profile, and `--short`
+adds backend-neutral structural expression size to the candidate cost.
 
-The `djinn` compatibility frontend likewise retains its declaration REPL while
+The `djinn` compatibility frontend retains its declaration REPL while
 storing only the exact sealed `DjinnSession`. Successful mutations edit its
-authoritative shared environment and publish a replacement session only after
-complete structural, kind, alias, recursion, and backend validation. Historical
-`:environment` ordering is derived on demand from the retained Inventory;
-instance-method lookup uses its prepared nominal class index, and type queries
-reuse the ordered global premise cache. None requires a separately retained or
-repeatedly sealed raw environment. Queries and instance methods consume shared
-evidence, progress, metadata, and `FunctionClause` output through
-`runDjinnQuery`.
-Startup-file mode now carries
-aggregate failure status across later commands and `:clear`, accepts settings
-on either side of filenames, and rejects unknown or ambiguous option prefixes;
-interactive recovery remains unchanged.
+authoritative shared environment and publish a replacement session only
+after complete structural, kind, alias, recursion, and backend validation.
+Historical `:environment` ordering is derived on demand from the retained
+Inventory, instance-method lookup uses its prepared nominal class index,
+and type queries reuse the ordered global premise cache. Queries and
+instance methods consume shared evidence, progress, metadata, and
+`FunctionClause` output through `runDjinnQuery`. Startup-file mode carries
+aggregate failure status across later commands and `:clear`, accepts
+settings on either side of filenames, and rejects unknown or ambiguous
+option prefixes; interactive recovery is unchanged.
+
+## Dependency migration
+
+The single-package layout replaces three former package identities.
+Existing Cabal dependencies migrate as follows:
+
+| Former dependency | Djex dependency |
+| --- | --- |
+| `haskell-synthesis` | `djex` |
+| `djex:synthesis` | `djex` |
+| `djinn:djinn-core` or `djex:djinn-core` | `djex` |
+| unnamed `djinn` library or `djex:djinn-frontend` | `djex` |
+| `exference:exference-core` or `djex:exference-core` | `djex` |
+| unnamed `exference` library or `djex:exference-frontend` | `djex` |
+
+All library clients use one unnamed `djex` dependency for the curated
+facade, shared synthesis vocabulary, checked adapters, lower-level engines,
+source loading, and the historical REPL API. Build-tool dependencies for
+the commands remain `djex:djinn` and `djex:exference`; the executable names
+are unchanged. The one library consequently has the union of core and
+frontend dependencies: `haskell-src-exts`, `directory`, `filepath`, and
+`haskeline` share the same versioned component contract as the engines that
+consume their output.
+
+Both backend trees follow the same layout — `src-core/`, `src-frontend/`,
+`app/`, and one explicit directory per test suite — while the package root
+uses `src/`, `app/`, `test-integration/`, `test-api/`, and `test-cli/`.
+
+Package-generated code imports `Paths_djex` instead of `Paths_djinn` or
+`Paths_exference`; version discovery and installed-data lookup belong to
+Djex as a whole. Exference's installed environment is a Djex data
+directory: use `getDataFileName "exference/environment"` from `Paths_djex`
+rather than assuming a checkout-relative path or the old package data root.
 
 ## License and credits
 
-Djex is distributed under the BSD-3-Clause license. The top-level
-[LICENSE](LICENSE) carries the copyright lines of everyone whose work the
-merged codebase contains.
+Djex is distributed under the BSD-3-Clause license; see
+[LICENSE](LICENSE).
 
-Djex descends from two projects, whose authors deserve the credit for the
-ideas and engines this tool is built on:
+Djex descends from two projects:
 
 - [Djinn](https://github.com/augustss/djinn) by Lennart Augustsson supplied
-  the intuitionistic proof engine behind `djex djinn`. Its LJT prover in turn
-  descends from Roy Dyckhoff's original Prolog implementation; the module
-  header of `Djinn.Internal.LJT` records the lineage. Djinn's original license
-  is preserved verbatim in [djinn/LICENSE](djinn/LICENSE).
+  the intuitionistic proof engine behind `djex djinn`. Its LJT prover in
+  turn descends from Roy Dyckhoff's original Prolog implementation; the
+  module header of `Djinn.Internal.LJT` records the lineage. Djinn's
+  original license is preserved verbatim in [djinn/LICENSE](djinn/LICENSE).
 - [Exference](https://github.com/lspitzner/exference) by Lennart Spitzner
   supplied the heuristic polymorphic-expression search engine behind
   `djex exference`. Its original license is preserved verbatim in
   [exference/LICENSE](exference/LICENSE).
 
-Both engine trees have been significantly rewritten during the merger, but
-they remain derivative works of their originals, so the upstream copyright
-notices above continue to apply alongside the top-level license.
+These credits are attribution, not endorsement: Djex is an independent
+project and is neither affiliated with nor endorsed by Lennart Augustsson,
+Lennart Spitzner, or the other upstream contributors.

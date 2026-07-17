@@ -5,8 +5,10 @@ module Djinn.Internal.Declaration
   , SynthesisDeclaration
   , DjinnDeclarationNameRole (..)
   , SynthesisDeclarationError (..)
+  , canonicalUnitDeclaration
   , isDjinnDeclarationName
   , djinnDeclarationSpelling
+  , djinnDeclarationSymbol
   , toSynthesisKind
   , fromSynthesisKind
   , toSynthesisDeclaration
@@ -157,7 +159,7 @@ fromSynthesisDeclaration declaration = do
   either (Left . InvalidSharedDeclaration) Right
     $ SharedDeclaration.validateDeclaration declaration
   case synthesisUnitStatus declaration of
-    CanonicalUnit -> Right $ DataType "()" [] [("()", [])]
+    CanonicalUnit -> Right canonicalUnitDeclaration
     NonCanonicalUnit -> Left NonCanonicalUnitDeclaration
     NoUnitOwnership -> convertDeclaration declaration
  where
@@ -206,11 +208,25 @@ fromSynthesisDeclaration declaration = do
     (Left . DeclarationTypeConversionError) Right .
     checkedDjinnTypeVariable
 
-  sharedSymbol role name =
-    case djinnDeclarationSpelling name of
-      Just spelling
-        | isDjinnDeclarationName role spelling -> Right spelling
-      _ -> Left $ UnsupportedDjinnDeclarationName role name
+  sharedSymbol role name = maybe
+    (Left $ UnsupportedDjinnDeclarationName role name) Right
+    $ djinnDeclarationSymbol role name
+
+-- | Project a validated shared name into the spelling Djinn's compatibility
+-- AST stores for the given declaration role, when one exists. Every checked
+-- name projection composes this single authority with its own error wording.
+djinnDeclarationSymbol
+  :: DjinnDeclarationNameRole
+  -> SharedName.Name
+  -> Maybe HSymbol
+djinnDeclarationSymbol role name = case djinnDeclarationSpelling name of
+  Just spelling | isDjinnDeclarationName role spelling -> Just spelling
+  _ -> Nothing
+
+-- | The one canonical unit declaration that trusted built-in paths install;
+-- every other declaration owning @()@ is rejected before conversion.
+canonicalUnitDeclaration :: Declaration
+canonicalUnitDeclaration = DataType "()" [] [("()", [])]
 
 -- Symbolic value names are stored without prefix parentheses in Djinn's
 -- compatibility AST.  Identifiers use their canonical (possibly qualified)
@@ -226,7 +242,7 @@ data UnitStatus = NoUnitOwnership | CanonicalUnit | NonCanonicalUnit
 
 djinnUnitStatus :: Declaration -> UnitStatus
 djinnUnitStatus declaration
-  | declaration == DataType "()" [] [("()", [])] = CanonicalUnit
+  | declaration == canonicalUnitDeclaration = CanonicalUnit
   | ownsUnit = NonCanonicalUnit
   | otherwise = NoUnitOwnership
   where

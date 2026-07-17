@@ -29,7 +29,6 @@ import qualified Language.Haskell.Synthesis.Class as SharedClass
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
-import Language.Haskell.Synthesis.Fresh (allocateFresh)
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
@@ -48,6 +47,7 @@ import Djinn.Internal.LJTFormula (Formula, Symbol(..))
 import Djinn.Internal.TypeFormula
 import Djinn.Internal.Type
     ( djinnTypeConstructorSymbol
+    , freshPrimedVariable
     , normalizeSynthesisType
     )
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -92,20 +92,19 @@ synthesisMethodSymbol = synthesisValueSymbol MethodOwner "class method"
 
 -- Identifiers retain their canonical qualification; operators use the bare
 -- spelling stored in Djinn's proof namespace. Qualified operators and every
--- other name form are outside the compatibility declaration grammar.
+-- other name form are outside the compatibility declaration grammar; the
+-- role-aware projection itself is owned by the declaration adapter.
 synthesisValueSymbol
     :: DjinnDeclarationNameRole
     -> String
     -> SharedName.Name
     -> Either String HSymbol
-synthesisValueSymbol role description name =
-    case djinnDeclarationSpelling name of
-        Just spelling
-            | isDjinnDeclarationName role spelling -> Right spelling
-        _ -> Left $
-            "sealed " ++ description ++
-                " name is not a Djinn value symbol: " ++
-                SharedName.renderCanonical name
+synthesisValueSymbol role description name = maybe
+    (Left $ "sealed " ++ description ++
+        " name is not a Djinn value symbol: " ++
+        SharedName.renderCanonical name)
+    Right
+    $ djinnDeclarationSymbol role name
 
 type SynthesisEnvironment =
     SharedEnvironment.Environment HSymbol Int ()
@@ -243,7 +242,7 @@ declareSynthesisEnvironment declaration sourceEnvironment = do
     -- The canonical unit declaration is representable only so trusted raw
     -- environments can cross the shared boundary. Public editing must not
     -- use that representational exception to install grammar-level @()@.
-    if declaration == DataType "()" [] [("()", [])]
+    if declaration == canonicalUnitDeclaration
         then Left ProtectedSynthesisUnitDeclaration
         else Right ()
     sharedDeclaration <- first SynthesisEnvironmentDeclarationError $
@@ -787,11 +786,8 @@ requiredClassKinds assumptions name parameters =
 
 freshDjinnTypeVariable
     :: SharedTypeSynonym.FreshVariable HSymbol
-freshDjinnTypeVariable reserved variable = Just fresh
-  where
-    (fresh, _, _) = allocateFresh
-        (\candidate -> (candidate, candidate ++ "'"))
-        reserved (variable ++ "'")
+freshDjinnTypeVariable reserved variable =
+    Just $ fst $ freshPrimedVariable reserved variable
 
 -- The Environment-native constructor cannot encounter an ungrounded kind,
 -- but its error parameter remembers the already-erased input type. Retag the

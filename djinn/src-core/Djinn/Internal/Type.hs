@@ -4,12 +4,16 @@ module Djinn.Internal.Type
   ( SynthesisTypeError (..)
   , checkedDjinnTypeVariable
   , djinnTypeConstructorSymbol
+  , freshPrimedVariable
   , normalizeSynthesisType
   , renderSynthesisType
   , toSynthesisType
   , fromSynthesisType
   ) where
 
+import qualified Data.Set as Set
+
+import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
@@ -168,3 +172,16 @@ djinnTypeConstructorSymbol name = case SharedName.nameSpecial name of
          Right spelling
        else
          Left $ UnsupportedDjinnTypeConstructorName name
+
+-- | The historical primed fresh-spelling policy shared by Djinn's type,
+-- synonym, and method namespaces: prime the source spelling until it avoids
+-- every reserved name, publishing the chosen spelling for later allocations.
+freshPrimedVariable
+  :: Set.Set HSymbol
+  -> HSymbol
+  -> (HSymbol, Set.Set HSymbol)
+freshPrimedVariable reserved variable = (fresh, reserved')
+ where
+  (fresh, reserved', _) = Fresh.allocateFresh
+    (\candidate -> (candidate, candidate ++ "'"))
+    reserved (variable ++ "'")

@@ -36,7 +36,7 @@ module Djinn.Core (
     toSynthesisEnvironment, toSynthesisInventory,
     fromSynthesisEnvironment,
     declareSynthesisEnvironment, removeSynthesisDeclaration,
-    declare, removeDeclaration,
+    declare, removeDeclaration, renderEnvironmentEditFailure,
     typeDeclarations, functionDeclarations, classDeclarations,
     -- * Queries
     Context, mkContext, resolveContext, resolveInstanceMethods,
@@ -66,7 +66,6 @@ import Language.Haskell.Synthesis.Constraint
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
-import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
@@ -224,10 +223,10 @@ editEnvironment edit environment = do
     (_, prepared) <- first renderEnvironmentEditFailure $ edit source
     return $ preparedEnvironmentSource prepared
 
--- Keep the raw string API useful without reconstructing the discarded raw
--- candidate merely to recover category-specific legacy wording. The shared
--- structured error is now the one diagnostic authority for both session and
--- compatibility edits.
+-- | Keep the raw string API useful without reconstructing the discarded raw
+-- candidate merely to recover category-specific legacy wording. This is the
+-- one rendering authority for edit failures: the raw string API and the
+-- stable adapter's structured diagnostics both consume it.
 renderEnvironmentEditFailure :: SynthesisEnvironmentError -> String
 renderEnvironmentEditFailure failure = case failure of
     InvalidSynthesisInventory
@@ -412,38 +411,16 @@ instantiateContext :: PreparedEnvironment -> ResolvedContext HType
                    -> Either String [(HSymbol, HType)]
 instantiateContext prepared context = do
     arguments <- mapM projectArgument $ resolvedArguments context
-    instantiated <- mapM (instantiate arguments) $ resolvedMethods context
-    -- Each method's non-class variables are implicitly quantified by that
-    -- signature, not shared with identically spelled variables in sibling
-    -- methods.  Checking one synthetic tuple would accidentally reunify them.
-    mapM checkAndProject instantiated
+    instantiateContextMethods prepared context arguments project
   where
-    parameters = resolvedParameters context
-
     projectArgument source = first
         (("internal checked context projection failed: " ++) . show) $
         toSynthesisType source
 
-    instantiate arguments (methodName, methodType) = do
-        instantiated <- instantiateSynthesisMethod
-            parameters arguments methodType
-        methodSymbol <- synthesisMethodSymbol methodName
-        return (methodSymbol, instantiated)
-
-    checkAndProject (methodName, methodType) = do
-        case checkPreparedSynthesisTypesKinds
-                prepared [(KStar, methodType)] of
-            Left message -> Left $
-                "method " ++ prHSymbolOp methodName ++ " of class " ++
-                resolvedName context ++ ": " ++ message
-            Right () -> Right ()
-        projected <- first
-            (\failure ->
-                "method " ++ prHSymbolOp methodName ++ " of class " ++
-                resolvedName context ++
-                ": sealed method projection failed: " ++ show failure)
-            $ fromSynthesisType methodType
-        return (methodName, projected)
+    project label methodType = first
+        (\failure -> label ++ "sealed method projection failed: "
+            ++ show failure)
+        $ fromSynthesisType methodType
 
 -- Native shared-type context resolution used by the Djex adapter. The raw
 -- 'Context' operations above remain exact compatibility projections; this
@@ -528,35 +505,51 @@ instantiateSynthesisContext
     :: PreparedEnvironment
     -> ResolvedSynthesisContext
     -> Either String [(HSymbol, SharedType.Type HSymbol)]
-instantiateSynthesisContext prepared context = do
-    instantiated <- mapM instantiate $
-        resolvedMethods context
-    mapM checkAndElaborate instantiated
+instantiateSynthesisContext prepared context =
+    instantiateContextMethods prepared context
+        (resolvedArguments context) elaborate
   where
-    parameters = resolvedParameters context
-    arguments = resolvedArguments context
+    elaborate label methodType = case elaboratePreparedSynthesisTypes
+            prepared [(KStar, methodType)] of
+        Right [elaborated] -> Right elaborated
+        Right _ -> Left $
+            label ++ "internal elaboration changed the method batch shape"
+        Left message -> Left $ label ++ message
 
+-- Shared instantiate-and-kind-check step for one resolved context. Each
+-- method's non-class variables are implicitly quantified by that signature,
+-- not shared with identically spelled variables in sibling methods; checking
+-- one synthetic tuple would accidentally reunify them. The raw path
+-- afterwards projects each checked method back to 'HType', while the native
+-- path elaborates its synonyms; both attach the same historical
+-- method-of-class label to their failures.
+instantiateContextMethods
+    :: PreparedEnvironment
+    -> ResolvedContext argument
+    -> [SharedType.Type HSymbol]
+    -> (String -> SharedType.Type HSymbol -> Either String result)
+    -> Either String [(HSymbol, result)]
+instantiateContextMethods prepared context arguments finalize = do
+    instantiated <- mapM instantiate $ resolvedMethods context
+    mapM checkAndFinalize instantiated
+  where
     instantiate (methodName, methodType) = do
-        instantiated <- instantiateSynthesisMethod
-            parameters arguments methodType
+        instantiatedType <- instantiateSynthesisMethod
+            (resolvedParameters context) arguments methodType
         methodSymbol <- synthesisMethodSymbol methodName
-        return (methodSymbol, instantiated)
+        return (methodSymbol, instantiatedType)
 
-    checkAndElaborate (methodName, methodType) = do
+    checkAndFinalize (methodSymbol, methodType) = do
+        let label = methodLabel methodSymbol
         case checkPreparedSynthesisTypesKinds
                 prepared [(KStar, methodType)] of
-            Left message -> Left $ methodLabel methodName ++ message
+            Left message -> Left $ label ++ message
             Right () -> Right ()
-        case elaboratePreparedSynthesisTypes
-                prepared [(KStar, methodType)] of
-            Right [elaborated] -> Right (methodName, elaborated)
-            Right _ -> Left $
-                methodLabel methodName ++
-                "internal elaboration changed the method batch shape"
-            Left message -> Left $ methodLabel methodName ++ message
+        result <- finalize label methodType
+        return (methodSymbol, result)
 
-    methodLabel methodName =
-        "method " ++ prHSymbolOp methodName ++ " of class " ++
+    methodLabel methodSymbol =
+        "method " ++ prHSymbolOp methodSymbol ++ " of class " ++
         resolvedName context ++ ": "
 
 -- Preserve Djinn's implicit method-local quantifier semantics on the common
@@ -592,9 +585,7 @@ instantiateSynthesisMethod parameters arguments methodType = do
         initiallyUnavailable capturedLocals
 
     allocateRenaming unavailable variable =
-        let (fresh, unavailable', _) = Fresh.allocateFresh
-                (\candidate -> (candidate, candidate ++ "'"))
-                unavailable (variable ++ "'")
+        let (fresh, unavailable') = freshPrimedVariable unavailable variable
         in ( unavailable'
            , (variable, SharedType.TypeVariable fresh)
            )
@@ -603,11 +594,8 @@ instantiateSynthesisMethod parameters arguments methodType = do
         SharedType.substituteTypeVariables freshTypeVariable Set.empty
             (Map.fromList replacements)
 
-    freshTypeVariable unavailable variable = Just fresh
-      where
-        (fresh, _, _) = Fresh.allocateFresh
-            (\candidate -> (candidate, candidate ++ "'"))
-            unavailable (variable ++ "'")
+    freshTypeVariable unavailable variable =
+        Just $ fst $ freshPrimedVariable unavailable variable
 
 data QueryOptions = QueryOptions {
     -- | Collect alternative solutions beyond the first.

@@ -448,21 +448,14 @@ djinnQueryFailure provenance failure = case failure of
     "Djinn produced inconsistent logical evidence"
     invariant
 
+-- The legacy wording lives in the core's single edit-failure renderer, so
+-- the raw string API and these structured diagnostics cannot drift apart.
 environmentEditFailure
   :: Core.SynthesisEnvironmentError
   -> Diagnostic
-environmentEditFailure failure = case failure of
-  Core.SynthesisDeclarationNotFound name -> contextualDiagnostic Error
-    "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
-    (name ++ " is not defined")
-  Core.ProtectedSynthesisUnitDeclaration -> contextualDiagnostic Error
-    "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
-    "() is a built-in type and cannot be declared"
-  Core.ProtectedSynthesisUnit -> contextualDiagnostic Error
-    "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
-    "() is a built-in type and cannot be removed"
-  _ -> shownErrorDiagnostic "DJEX_DJINN_ENV"
-    "cannot update the shared Djinn environment" failure
+environmentEditFailure = contextualDiagnostic Error
+  "DJEX_DJINN_ENV" "cannot update the shared Djinn environment"
+  . Core.renderEnvironmentEditFailure
 
 instanceResolutionFailure :: String -> Diagnostic
 instanceResolutionFailure = contextualDiagnostic Error

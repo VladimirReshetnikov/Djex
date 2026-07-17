@@ -336,6 +336,26 @@ alphaRenameTerm term = evalState
           used next
     in (fresh, (used', next'))
 
+-- | Bake Djinn's historical @a@..@z@ then @x1@.. display names into the
+-- stored candidate tree.
+--
+-- This is deliberately a pre-storage canonicalization, not a rendering
+-- preference, and must not migrate to the shared render-time allocator:
+--
+-- * the spellings ARE the public stored-tree contract — 'candidateOutput',
+--   the 'HClause' compatibility view, and every identity-preference render
+--   site (REPL, CLI, @hPrClause@) observe them directly;
+-- * candidate de-duplication in "Djinn.Core" compares checked shared clauses
+--   structurally, so alpha-equivalent proofs collapse only because this pass
+--   canonicalizes their binder spellings first;
+-- * the collision set is intentionally qualification-independent
+--   ('unqualifiedValueGlobals' rather than the renderer's
+--   qualification-sensitive emitted set), so one candidate has one spelling
+--   regardless of the render options later applied to it.
+--
+-- Exference makes the opposite choice — search-native locals stored, name
+-- hints supplied at render time — because its locals are 'Int's with no
+-- historical stored spelling. Both policies are correct for their contracts.
 niceNames :: Expression -> Expression
 niceNames expression = fmap rename expression
  where

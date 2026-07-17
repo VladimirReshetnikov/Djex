@@ -980,7 +980,10 @@ searchPreparedFormula options prepared target form methodEnv = do
             -- The checked shared clause is the stable output authority. Keep
             -- the historical stable ratio-then-count ordering, then discard
             -- structurally identical outputs without retaining HClause as a
-            -- parallel candidate representation.
+            -- parallel candidate representation. This structural dedup works
+            -- only because proof lowering already baked canonical display
+            -- names into every clause (see niceNames): alpha-equivalent
+            -- proofs arrive spelled identically.
             let scored clause = (candidateDetails clause, clause)
                 clauses = SharedCollection.distinctOn id $
                     if optionSorted options then

@@ -40,6 +40,7 @@ import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
   ( contextConstraints
   , splitDeclHead
+  , splitInstRule
   , withHaskellSrcLocation
   , withHaskellSrcSpan
   )
@@ -223,6 +224,9 @@ data UnsupportedVocabularyForm
   | DerivingClause
   | DataTypeContext
   | KindedDataBinder
+  | KindedClassBinder
+  | KindedSynonymBinder
+  | KindedInstanceBinder
   | ExistentialConstructor
   | ConstrainedConstructor
   | FunctionalDependency
@@ -626,25 +630,39 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       one RoleAnnotation location
     HSE.DataDecl _ _ context rawHead constructors derivings ->
       maybe [] (unsupportedContext DataTypeContext) context
-        ++ concatMap unsupportedDataBinder (snd $ splitDeclHead rawHead)
+        ++ concatMap (unsupportedBinder KindedDataBinder)
+            (snd $ splitDeclHead rawHead)
         ++ concatMap unsupportedConstructor constructors
         ++ concatMap unsupportedDeriving derivings
-    HSE.ClassDecl _ _ _ dependencies declarations ->
-      concatMap unsupportedDependency dependencies
+    -- The parse mode accepts kind signatures (TypeFamilies implies
+    -- KindSignatures in HSE), so class, synonym, and explicit instance
+    -- binders must cross the same boundary as datatype binders; otherwise
+    -- they would only fail later in an extractor with a span-free string.
+    HSE.TypeDecl _ rawHead _ ->
+      concatMap (unsupportedBinder KindedSynonymBinder)
+        (snd $ splitDeclHead rawHead)
+    HSE.ClassDecl _ _ rawHead dependencies declarations ->
+      concatMap (unsupportedBinder KindedClassBinder)
+          (snd $ splitDeclHead rawHead)
+        ++ concatMap unsupportedDependency dependencies
         ++ concatMap unsupportedClassDecl (maybe [] id declarations)
-    HSE.InstDecl _ overlap _ declarations ->
+    HSE.InstDecl _ overlap rule declarations ->
       maybe [] unsupportedOverlap overlap
+        ++ concatMap (unsupportedBinder KindedInstanceBinder)
+            (maybe [] (maybe [] id . instRuleVariables) (splitInstRule rule))
         ++ concatMap unsupportedInstanceDecl (maybe [] id declarations)
     _ -> []
+
+  instRuleVariables (variables, _, _, _) = variables
 
   unsupportedDeriving (HSE.Deriving location _ _) =
     one DerivingClause location
 
   -- The common inventory has a place for parameter kinds, but Exference's
   -- current type-variable index does not. Reject these declarations before
-  -- either projection can observe a differently shaped data constructor.
-  unsupportedDataBinder binder = case binder of
-    HSE.KindedVar location _ _ -> one KindedDataBinder location
+  -- either projection can observe a differently shaped head.
+  unsupportedBinder form binder = case binder of
+    HSE.KindedVar location _ _ -> one form location
     HSE.UnkindedVar _ _ -> []
 
   unsupportedConstructor
@@ -731,6 +749,9 @@ unsupportedVocabularyDescription form = case form of
   DerivingClause -> "derived class instances"
   DataTypeContext -> "datatype context"
   KindedDataBinder -> "explicitly kinded datatype parameter"
+  KindedClassBinder -> "explicitly kinded class parameter"
+  KindedSynonymBinder -> "explicitly kinded type-synonym parameter"
+  KindedInstanceBinder -> "explicitly kinded instance variable"
   ExistentialConstructor -> "constructor with existential type variables"
   ConstrainedConstructor -> "constructor context"
   FunctionalDependency -> "class functional dependency"

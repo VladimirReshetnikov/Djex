@@ -4193,6 +4193,28 @@ tests = testGroup "Exference"
               , "data T = T deriving (Eq)"
               , DerivingClause
               )
+            -- Regression: kinded binders on class, synonym, and explicit
+            -- instance heads parse (TypeFamilies implies KindSignatures in
+            -- HSE) but previously bypassed this boundary and failed later in
+            -- an extractor with a span-free string.
+            , ( "kinded class binder"
+              , [HSE.KindSignatures]
+              , ["{-# LANGUAGE KindSignatures #-}"]
+              , "class Wrap (f :: * -> *)"
+              , KindedClassBinder
+              )
+            , ( "kinded synonym binder"
+              , [HSE.KindSignatures]
+              , ["{-# LANGUAGE KindSignatures #-}"]
+              , "type T (a :: *) = a"
+              , KindedSynonymBinder
+              )
+            , ( "kinded instance binder"
+              , [HSE.ExplicitForAll, HSE.KindSignatures]
+              , ["{-# LANGUAGE ExplicitForAll, KindSignatures #-}"]
+              , "instance forall (a :: *). C a"
+              , KindedInstanceBinder
+              )
             ]
       , testCase "module and declaration vocabulary retain source order" $ do
           occurrences <- unsupportedFromSourceWith [HSE.PatternSynonyms]
@@ -4220,9 +4242,12 @@ tests = testGroup "Exference"
               LoadReport result diagnostics <- parseModules
                 [(haskellSrcExtsParseMode modulePath, modulePath)]
               occurrences <- expectUnsupportedVocabulary result
+              -- The kinded synonym binder is now itself a vocabulary
+              -- occurrence, so both boundaries report before any private
+              -- declaration reaches the inventory.
               map unsupportedVocabularyForm occurrences @?=
-                [ExplicitExportList]
-              map occurrenceStartLine occurrences @?= [Just 2]
+                [ExplicitExportList, KindedSynonymBinder]
+              map occurrenceStartLine occurrences @?= [Just 2, Just 4]
               assertBool
                 ("partial inventory summaries escaped: " ++ show diagnostics)
                 $ not $ any (isLoaderSummary . diagnosticMessage) diagnostics
@@ -4382,7 +4407,11 @@ tests = testGroup "Exference"
             , "type family F a"
             , "type Bad (a :: *) = a"
             ]
-          map unsupportedVocabularyForm occurrences @?= [OpenTypeFamily]
+          -- The kinded synonym binder previously failed only during a later
+          -- extraction phase; it is now itself a located vocabulary
+          -- occurrence reported alongside the type family.
+          map unsupportedVocabularyForm occurrences @?=
+            [OpenTypeFamily, KindedSynonymBinder]
       , testCase "benign non-vocabulary declarations remain accepted" $
           withTemporaryFile (unlines
             [ "{-# LANGUAGE InstanceSigs, PatternSynonyms #-}"

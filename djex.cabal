@@ -179,6 +179,7 @@ Library
     Language.Haskell.Djex.Exference.HaskellSrc
     Language.Haskell.Exference.CLI
     Language.Haskell.Exference.ExpressionToHaskellSrc
+    Language.Haskell.Exference.ExtractionError
     Language.Haskell.Exference.TypeFromHaskellSrc
     Language.Haskell.Exference.TypeDeclsFromHaskellSrc
     Language.Haskell.Exference.BindingsFromHaskellSrc

@@ -37,6 +37,7 @@ import Language.Haskell.Exference.BindingsFromHaskellSrc
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
+import Language.Haskell.Exference.ExtractionError
 import Language.Haskell.Exference.HaskellSrcUtils
   ( contextConstraints
   , splitDeclHead
@@ -259,10 +260,13 @@ data EnvironmentLoadError
   | ModuleParseErrors (NonEmpty Diagnostic)
   | UnsupportedSourceVocabulary
       (NonEmpty UnsupportedVocabularyOccurrence)
-  | DataTypeNameError String
-  | TypeDeclarationErrors (NonEmpty String)
+  | DataTypeNameError ExtractionError
+  | TypeDeclarationErrors (NonEmpty ExtractionError)
   | ClassEnvironmentLoadFailure ClassEnvironmentLoadError
-  | BindingDeclarationErrors (NonEmpty String)
+  | BindingDeclarationErrors (NonEmpty ExtractionError)
+  -- Built-in environment failures come from the hard-coded constructor
+  -- table, which has no source location even in principle; they keep the
+  -- bare string channel deliberately.
   | BuiltInEnvironmentErrors (NonEmpty String)
   | InvalidSourceInventory SynthesisEnvironmentError
   deriving (Eq, Show)
@@ -282,17 +286,17 @@ environmentLoadErrorDiagnostics failure = case failure of
   ModuleParseErrors values -> fmap (withCode "EXF_MODULE_PARSE") values
   UnsupportedSourceVocabulary occurrences ->
     fmap unsupportedVocabularyDiagnostic occurrences
-  DataTypeNameError detail -> oneDiagnostic
+  DataTypeNameError detail -> locatedDiagnostic
     "EXF_DATA_TYPE_NAME"
     "could not extract source data-type names"
-    detail
-  TypeDeclarationErrors errors -> diagnostics
+    detail NonEmpty.:| []
+  TypeDeclarationErrors errors -> locatedDiagnostics
     "EXF_TYPE_DECLARATION"
     "could not load a source type declaration"
     errors
   ClassEnvironmentLoadFailure classFailure ->
     classEnvironmentLoadErrorDiagnostics classFailure
-  BindingDeclarationErrors errors -> diagnostics
+  BindingDeclarationErrors errors -> locatedDiagnostics
     "EXF_BINDING_DECLARATION"
     "could not load a source binding declaration"
     errors
@@ -308,16 +312,17 @@ environmentLoadErrorDiagnostics failure = case failure of
   diagnostics code message = fmap $ structuredDiagnostic code message
   oneDiagnostic code message detail =
     structuredDiagnostic code message detail NonEmpty.:| []
+  locatedDiagnostics code message = fmap $ locatedDiagnostic code message
 
 classEnvironmentLoadErrorDiagnostics
   :: ClassEnvironmentLoadError
   -> NonEmpty Diagnostic
 classEnvironmentLoadErrorDiagnostics failure = case failure of
-  ClassDeclarationErrors errors -> diagnostics
+  ClassDeclarationErrors errors -> locatedDiagnostics
     "EXF_CLASS_DECLARATION"
     "could not load a source class declaration"
     errors
-  InstanceDeclarationErrors errors -> diagnostics
+  InstanceDeclarationErrors errors -> locatedDiagnostics
     "EXF_INSTANCE_DECLARATION"
     "could not load a source instance declaration"
     errors
@@ -326,13 +331,20 @@ classEnvironmentLoadErrorDiagnostics failure = case failure of
     "the source class environment failed nominal validation"
     (show classFailure)
  where
-  diagnostics code message = fmap $ structuredDiagnostic code message
+  locatedDiagnostics code message = fmap $ locatedDiagnostic code message
   oneDiagnostic code message detail =
     structuredDiagnostic code message detail NonEmpty.:| []
 
 structuredDiagnostic :: String -> String -> String -> Diagnostic
 structuredDiagnostic code message =
   contextualDiagnostic Error code message
+
+-- One extraction failure rendered with its historical message and, when the
+-- parse tree provided one, the owning declaration's source location.
+locatedDiagnostic :: String -> String -> ExtractionError -> Diagnostic
+locatedDiagnostic code message failure = withExtractionLocation failure
+  $ structuredDiagnostic code message
+  $ extractionErrorMessage failure
 
 warningDiagnostic :: String -> Diagnostic
 warningDiagnostic = diagnostic Warning
@@ -833,14 +845,13 @@ parseModulesM inputs = do
           throwE $ UnsupportedSourceVocabulary occurrences
         Nothing -> pure ()
 
-      dataTypes <- case getDataTypes modules of
-        Left conversionError ->
-          let message =
-                "could not extract data-type names: " ++ conversionError
-          in throwE $ DataTypeNameError message
+      dataTypes <- case getDataTypesLocated modules of
+        Left conversionError -> throwE $ DataTypeNameError
+          $ mapExtractionMessage
+              ("could not extract data-type names: " ++) conversionError
         Right result -> pure result
 
-      typeDeclarationResults <- lift $ getTypeDecls dataTypes modules
+      typeDeclarationResults <- lift $ getTypeDeclsLocated dataTypes modules
       let typeDeclarationErrors = lefts typeDeclarationResults
       case NonEmpty.nonEmpty typeDeclarationErrors of
         Just errors -> throwE $ TypeDeclarationErrors errors
@@ -994,15 +1005,16 @@ parseModulesM inputs = do
                   -> [QualifiedName]
                   -> TypeDeclMap
                   -> Module SrcSpanInfo
-                  -> [Either String ClassMethodDeclaration]
+                  -> [Either ExtractionError ClassMethodDeclaration]
                   -> Loader
                        ( [SourceBinding]
                        , [DeconstructorBinding]
-                       , [String]
+                       , [ExtractionError]
                        )
     hExtractBinds cntxt ds tDeclMap modul methodResults = do
-      eFromData <- getDataConss (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
-      eDecls <- getDecls ds (sClassEnv_tclasses cntxt) tDeclMap [modul]
+      eFromData <- getDataConssLocated
+        (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
+      eDecls <- getDeclsLocated ds (sClassEnv_tclasses cntxt) tDeclMap [modul]
       let errors = lefts eFromData ++ lefts eDecls ++ lefts methodResults
       let (binds1s, deconss) = unzip $ rights eFromData
           binds2 = rights eDecls

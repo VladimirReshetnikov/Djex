@@ -2,8 +2,11 @@
 
 module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
+  , getDeclsLocated
   , getDataConss
+  , getDataConssLocated
   , getDataTypes
+  , getDataTypesLocated
   )
 where
 
@@ -20,9 +23,11 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.HaskellSrcUtils
+import Language.Haskell.Exference.ExtractionError
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Control.Monad (foldM)
+import Data.Bifunctor (first)
 import Control.Monad.Trans.Except
 import qualified Data.Map.Strict as M
 import Data.Maybe ( fromMaybe, maybeToList )
@@ -46,13 +51,28 @@ getDecls
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m [Either String FunctionBinding]
-getDecls ds tcs tDeclMap modules = fmap (>>= either (return.Left) (map Right))
-                                $ sequence
-                                $ do
+getDecls ds tcs tDeclMap = fmap (map (first extractionErrorMessage))
+  . getDeclsLocated ds tcs tDeclMap
+
+-- | Located core of 'getDecls': every failure carries the owning
+-- signature's source span. The string entry point is its exact message
+-- projection.
+getDeclsLocated
+  :: Monad m
+  => [QualifiedName]
+  -> M.Map QualifiedName HsTypeClass
+  -> TypeDeclMap
+  -> [Module SrcSpanInfo]
+  -> m [Either ExtractionError FunctionBinding]
+getDeclsLocated ds tcs tDeclMap modules =
+  fmap (>>= either (return.Left) (map Right))
+    $ sequence
+    $ do
   modul <- modules
   (mn, decls) <- maybeToList $ moduleNameAndDecls modul
   d <- decls
-  return $ runExceptT $ transformDecl tcs ds mn tDeclMap d
+  return $ fmap (first $ extractionErrorAt $ ann d)
+    $ runExceptT $ transformDecl tcs ds mn tDeclMap d
 
 transformDecl
   :: Monad m
@@ -99,11 +119,24 @@ getDataConss
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m [Either String ([FunctionBinding], DeconstructorBinding)]
-getDataConss tcs ds tDeclMap modules =
+getDataConss tcs ds tDeclMap = fmap (map (first extractionErrorMessage))
+  . getDataConssLocated tcs ds tDeclMap
+
+-- | Located core of 'getDataConss': every failure carries the owning data
+-- declaration's source span. The string entry point is its exact message
+-- projection.
+getDataConssLocated
+  :: Monad m
+  => M.Map QualifiedName HsTypeClass
+  -> [QualifiedName]
+  -> TypeDeclMap
+  -> [Module SrcSpanInfo]
+  -> m [Either ExtractionError ([FunctionBinding], DeconstructorBinding)]
+getDataConssLocated tcs ds tDeclMap modules =
   fmap markRecursiveDeconstructors $ sequence $ do
   modul <- modules
   (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
-  DataDecl _ _ context rawHead conss _ <- decls
+  declaration@(DataDecl _ _ context rawHead conss _) <- decls
   let (name, params) = splitDeclHead rawHead
   let
     rTypeM :: Monad m => ConversionT String m HsType
@@ -205,7 +238,8 @@ getDataConss tcs ds tDeclMap modules =
                    ]
                    False
                )
-  return $ fmap (either (Left . addConsMsg) Right)
+  return $ fmap
+      (either (Left . extractionErrorAt (ann declaration) . addConsMsg) Right)
     $ runExceptT $ runConversionT emptyConvData convAction
 
 -- | HSE retains strictness and unpack annotations in the field's 'Type' node.
@@ -240,8 +274,8 @@ deduplicateRecordSelectors selectors = reverse . snd <$> foldM step
 -- | Annotate recursion only after conversion: failures retain their original
 -- positions and cannot create phantom vertices in the datatype graph.
 markRecursiveDeconstructors
-  :: [Either String ([FunctionBinding], DeconstructorBinding)]
-  -> [Either String ([FunctionBinding], DeconstructorBinding)]
+  :: [Either failure ([FunctionBinding], DeconstructorBinding)]
+  -> [Either failure ([FunctionBinding], DeconstructorBinding)]
 markRecursiveDeconstructors converted = map mark converted
  where
   classified = deriveRecursiveDataMetadata
@@ -268,8 +302,18 @@ markRecursiveDeconstructors converted = map mark converted
 getDataTypes
   :: [Module SrcSpanInfo]
   -> Either String [QualifiedName]
-getDataTypes modules = mapM (uncurry convertModuleName) $ d1 ++ d2
+getDataTypes = first extractionErrorMessage . getDataTypesLocated
+
+-- | Located core of 'getDataTypes': a malformed head name is reported at the
+-- name's own source span. The string entry point is its exact message
+-- projection.
+getDataTypesLocated
+  :: [Module SrcSpanInfo]
+  -> Either ExtractionError [QualifiedName]
+getDataTypesLocated modules = mapM convert $ d1 ++ d2
  where
+  convert (moduleName, name) = first (extractionErrorAt $ ann name)
+    $ convertModuleName moduleName name
   d1 = do
     modul <- modules
     (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul

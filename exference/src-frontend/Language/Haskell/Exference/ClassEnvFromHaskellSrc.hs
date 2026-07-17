@@ -11,7 +11,7 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Lazy (evalStateT, get)
 import Control.Monad.Trans.Except (runExceptT, throwE, withExceptT)
 import Data.Either (lefts, rights)
-import Data.Bifunctor (first)
+import Data.Bifunctor (bimap, first)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Maybe (fromMaybe, maybeToList)
@@ -26,6 +26,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils (forallify)
 import Language.Haskell.Exference.Core.Declaration
   (addClassMethodConstraint, classMethodConstraint)
+import Language.Haskell.Exference.ExtractionError
 import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
@@ -38,6 +39,7 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 -- constructing a recursive graph of class values.
 data RawTypeClass = RawTypeClass
   { rawClassName :: QualifiedName
+  , rawClassSpan :: SrcSpanInfo
   , rawClassModule :: ModuleName SrcSpanInfo
   , rawClassVariables :: [TyVarBind SrcSpanInfo]
   , rawClassContext :: Maybe (Context SrcSpanInfo)
@@ -57,8 +59,8 @@ data ClassMethodDeclaration = ClassMethodDeclaration
 -- explicitly prevents an observed-but-invalid class or instance from being
 -- erased and later reinterpreted as an unknown external declaration.
 data ClassEnvironmentLoadError
-  = ClassDeclarationErrors (NonEmpty String)
-  | InstanceDeclarationErrors (NonEmpty String)
+  = ClassDeclarationErrors (NonEmpty ExtractionError)
+  | InstanceDeclarationErrors (NonEmpty ExtractionError)
   | InvalidClassEnvironment ClassEnvError
   deriving (Eq, Show)
 
@@ -70,7 +72,7 @@ data LoadedClassEnvironment = LoadedClassEnvironment
   { loadedStaticClassEnvironment :: StaticClassEnv
   , loadedSourceInstanceCount :: Natural
   , loadedClassMethodsByModule
-      :: [[Either String ClassMethodDeclaration]]
+      :: [[Either ExtractionError ClassMethodDeclaration]]
   }
   deriving (Eq, Show)
 
@@ -117,7 +119,9 @@ getTypeClasses
   => [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> m ([Either String HsTypeClass], [[Either String RawTypeClass]])
+  -> m ( [Either ExtractionError HsTypeClass]
+       , [[Either ExtractionError RawTypeClass]]
+       )
 getTypeClasses dataTypes typeDeclarations modules = do
   let rawDeclarationsByModule = map rawTypeClasses modules
       namedDeclarationsByModule = map rights rawDeclarationsByModule
@@ -131,7 +135,19 @@ getTypeClasses dataTypes typeDeclarations modules = do
         [ name
         | (name, _ : _ : _) <- Map.toAscList declarationsByName
         ]
-      duplicateErrors = map (Left . duplicateClassMessage) duplicateNames
+      -- A duplicate is reported at the first declaration of that name in
+      -- source order; fromListWith combines new-then-old, so keeping the old
+      -- entry is an explicit first-occurrence choice.
+      firstOccurrenceSpans = Map.fromListWith (\_ old -> old)
+        [ (rawClassName rawClass, rawClassSpan rawClass)
+        | rawClass <- namedDeclarations
+        ]
+      duplicateErrors =
+        [ Left $ maybe extractionError extractionErrorAt
+            (Map.lookup name firstOccurrenceSpans)
+            (duplicateClassMessage name)
+        | name <- duplicateNames
+        ]
       uniqueDeclarations =
         [ rawClass
         | [rawClass] <- Map.elems declarationsByName
@@ -144,7 +160,8 @@ getTypeClasses dataTypes typeDeclarations modules = do
     result <- runExceptT $ runConversionT emptyConversionState $ do
       parameters <- mapM tyVarTransform $ rawClassVariables rawClass
       pure $ HsTypeClass (rawClassName rawClass) parameters []
-    pure $ (,) rawClass <$> result
+    pure $ bimap (extractionErrorAt $ rawClassSpan rawClass)
+      ((,) rawClass) result
   let headerErrors = [Left errorMessage | Left errorMessage <- headerResults]
       successfulHeaders = rights headerResults
       headers = Map.fromList
@@ -156,15 +173,16 @@ getTypeClasses dataTypes typeDeclarations modules = do
   -- superclass context.  Thus parameter IDs follow declaration order even if
   -- superclasses mention those variables in a different order (or not at all).
   elaborated <- forM successfulHeaders $ \(rawClass, _) ->
-    runExceptT $ runConversionT emptyConversionState $ do
-      parameters <- mapM tyVarTransform $ rawClassVariables rawClass
-      superclasses <- mapM
-        (convertClassConstraint headers
-          (Just $ rawClassModule rawClass)
-          dataTypes
-          typeDeclarations)
-        (contextConstraints $ rawClassContext rawClass)
-      pure $ HsTypeClass (rawClassName rawClass) parameters superclasses
+    fmap (first $ extractionErrorAt $ rawClassSpan rawClass)
+      $ runExceptT $ runConversionT emptyConversionState $ do
+        parameters <- mapM tyVarTransform $ rawClassVariables rawClass
+        superclasses <- mapM
+          (convertClassConstraint headers
+            (Just $ rawClassModule rawClass)
+            dataTypes
+            typeDeclarations)
+          (contextConstraints $ rawClassContext rawClass)
+        pure $ HsTypeClass (rawClassName rawClass) parameters superclasses
 
   pure
     ( invalidNames ++ duplicateErrors ++ headerErrors ++ elaborated
@@ -175,16 +193,17 @@ getTypeClasses dataTypes typeDeclarations modules = do
 
 rawTypeClasses
   :: Module SrcSpanInfo
-  -> [Either String RawTypeClass]
+  -> [Either ExtractionError RawTypeClass]
 rawTypeClasses modul = do
   (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
-  ClassDecl _ context rawHead _ maybeClassDecls <- declarations
+  ClassDecl declSpan context rawHead _ maybeClassDecls <- declarations
   let (syntaxName, variables) = splitDeclHead rawHead
   pure $ case convertModuleName moduleName syntaxName of
-    Left conversionError ->
-      Left $ "invalid type-class name: " ++ conversionError
+    Left conversionError -> Left $ extractionErrorAt declSpan
+      $ "invalid type-class name: " ++ conversionError
     Right checkedName -> Right RawTypeClass
       { rawClassName = checkedName
+      , rawClassSpan = declSpan
       , rawClassModule = moduleName
       , rawClassVariables = variables
       , rawClassContext = context
@@ -196,8 +215,8 @@ getClassMethodsFromRaw
   => Map.Map QualifiedName HsTypeClass
   -> [QualifiedName]
   -> TypeDeclMap
-  -> [[Either String RawTypeClass]]
-  -> m [[Either String ClassMethodDeclaration]]
+  -> [[Either ExtractionError RawTypeClass]]
+  -> m [[Either ExtractionError ClassMethodDeclaration]]
 getClassMethodsFromRaw classes dataTypes typeDeclarations =
   mapM $ fmap concat . mapM elaborate
  where
@@ -211,32 +230,47 @@ elaborateRawClass
   -> [QualifiedName]
   -> TypeDeclMap
   -> RawTypeClass
-  -> m [Either String ClassMethodDeclaration]
+  -> m [Either ExtractionError ClassMethodDeclaration]
 elaborateRawClass classes dataTypes typeDeclarations rawClass =
   case Map.lookup (rawClassName rawClass) classes of
     Nothing -> pure
-      [Left $ "unknown type class: " ++ show (rawClassName rawClass)]
+      [ Left $ classError
+          $ "unknown type class: " ++ show (rawClassName rawClass)
+      ]
     Just typeClass -> flip evalStateT emptyConvData $ do
       parameterResult <- runExceptT
         $ mapM tyVarTransform $ rawClassVariables rawClass
       case parameterResult of
-        Left failure -> pure [Left failure]
+        Left failure -> pure [Left $ classError failure]
         Right parameters -> do
           let ownerConstraint = classMethodConstraint typeClass
               expectedOwner = HsConstraint (rawClassName rawClass)
                 $ map TypeVar parameters
           if ownerConstraint /= expectedOwner
             then pure
-              [Left "class parameter allocation disagrees with its header"]
+              [ Left $ classError
+                  "class parameter allocation disagrees with its header"
+              ]
             else do
+              -- Method failures are located at their own class-body
+              -- declaration rather than the whole class head.
               results <- mapM
-                (runExceptT . transformClassDeclaration ownerConstraint)
+                (\bodyDeclaration ->
+                  fmap (first $ extractionErrorAt $ ann bodyDeclaration)
+                    $ runExceptT
+                    $ transformClassDeclaration ownerConstraint
+                        bodyDeclaration)
                 $ rawClassDeclarations rawClass
               let prefix = "class method for "
                     ++ unqualifiedClassName (rawClassName rawClass) ++ ": "
               pure $ concatMap
-                (either (pure . Left . (prefix ++)) (map Right)) results
+                (either
+                  (pure . Left . mapExtractionMessage (prefix ++))
+                  (map Right))
+                results
  where
+  classError = extractionErrorAt $ rawClassSpan rawClass
+
   transformClassDeclaration owner (ClsDecl _ declaration) =
     transformMethodDeclaration owner declaration
   transformClassDeclaration _ _ = pure []
@@ -262,14 +296,15 @@ getInstances
   -> [QualifiedName]
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
-  -> m [Either String HsInstance]
+  -> m [Either ExtractionError HsInstance]
 getInstances classes dataTypes typeDeclarations modules = sequence $ do
   modul <- modules
   (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
-  InstDecl _ _ rule _ <- declarations
+  declaration@(InstDecl _ _ rule _) <- declarations
   (explicitVariables, context, syntaxName, argumentSyntax) <-
     maybeToList $ splitInstRule rule
-  pure $ runExceptT $ runConversionT emptyConvData $ do
+  pure $ fmap (first $ extractionErrorAt $ ann declaration)
+    $ runExceptT $ runConversionT emptyConvData $ do
     explicitIds <- case explicitVariables of
       Nothing -> pure Nothing
       Just variables -> do

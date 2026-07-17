@@ -6,6 +6,7 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , uniqueTypeDeclMap
   , applyTypeDecls
   , getTypeDecls
+  , getTypeDeclsLocated
   , convertType
   , convertTypeInternal
   , parseType
@@ -23,6 +24,7 @@ import qualified Language.Haskell.Exference.Core.TypeUtils as TypeUtils
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
+import Language.Haskell.Exference.ExtractionError
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
@@ -140,13 +142,26 @@ getTypeDecls :: Monad m
              => [QualifiedName]
              -> [Module SrcSpanInfo]
              -> m [Either String HsTypeDecl]
-getTypeDecls ds modules = do
+getTypeDecls ds = fmap (map (first extractionErrorMessage))
+  . getTypeDeclsLocated ds
+
+-- | Located core of 'getTypeDecls': every failure carries its owning
+-- declaration's source span. The string entry point above is its exact
+-- message projection, so the historical diagnostics cannot drift.
+getTypeDeclsLocated :: Monad m
+                    => [QualifiedName]
+                    -> [Module SrcSpanInfo]
+                    -> m [Either ExtractionError HsTypeDecl]
+getTypeDeclsLocated ds modules = do
   rawList <- sequence $ do
     modul <- modules
     (mn, decls) <- maybeToList $ moduleNameAndDecls modul
-    TypeDecl _ rawHead rawTy <- decls
+    TypeDecl declSpan rawHead rawTy <- decls
     let (name, rawVars) = splitDeclHead rawHead
-    pure $ fmap (bimap (("when parsing type declaration "++show name++": ")++) id)
+    pure $ fmap (bimap
+          (extractionErrorAt declSpan
+            . (("when parsing type declaration "++show name++": ")++))
+          ((,) declSpan))
          $ runExceptT
          $ runConversionT emptyConvData
          $ do
@@ -162,15 +177,18 @@ getTypeDecls ds modules = do
         (IntSet.fromList vars) ty
       pure $ HsTypeDecl qname vars normalized
   let validDeclarations = rights rawList
-      declarationMap = M.map Right $ uniqueTypeDeclMap validDeclarations
+      declarationMap = M.map Right
+        $ uniqueTypeDeclMap $ map snd validDeclarations
       -- Validate every reachable expansion now so the compatibility loader
       -- retains its historical cycle and saturation diagnostics.  Keep the
       -- raw declaration, however: the shared Inventory must see applications
       -- before phantom parameters can erase kind errors, and its backend
       -- lowering will perform the one authoritative expansion afterwards.
-      validate declaration = applyTypeDecls declarationMap
-        (tdecl_result declaration) >> pure declaration
-  return $ [ e | e@(Left _) <- rawList ] ++ map validate validDeclarations
+      validate (declSpan, declaration) =
+        first (extractionErrorAt declSpan)
+          (applyTypeDecls declarationMap $ tdecl_result declaration)
+          >> pure declaration
+  return $ [ Left e | Left e <- rawList ] ++ map validate validDeclarations
 
 convertType :: Monad m
             => Map QualifiedName HsTypeClass

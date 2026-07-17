@@ -10,6 +10,7 @@ import Data.Either (rights)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.List (find, isInfixOf, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty ((:|)))
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -170,6 +171,10 @@ import Language.Haskell.Exference.ExpressionToHaskellSrc
   )
 import Language.Haskell.Exference.BindingsFromHaskellSrc
   (getDataConss, getDataTypes, getDecls)
+import Language.Haskell.Exference.ExtractionError
+  ( ExtractionError (..)
+  , extractionError
+  )
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( HsTypeDecl (..)
   , applyTypeDecls
@@ -470,14 +475,25 @@ tests = testGroup "Exference"
                 ]
               unary = "class C a where"
               binary = "class C a b where"
-              expected = Left $ ClassDeclarationErrors
-                ("duplicate type class: C (M.C)" :| [])
+              expected = "duplicate type class: C (M.C)"
+              -- The duplicate is attributed to the first declaration of the
+              -- name in source order: line 2 in either declaration order.
+              check label result = case result of
+                Left (ClassDeclarationErrors (failure :| [])) -> do
+                  assertEqual (label ++ " message") expected
+                    $ extractionErrorMessage failure
+                  case extractionErrorLocation failure of
+                    Nothing -> fail $ label ++ " lost its source location"
+                    Just location -> do
+                      locationSource location @?= "qualified-class-test.hs"
+                      sourceLine (sourceStart $ locationSpan location) @?= 2
+                other -> fail $ label ++ ": unexpected result: " ++ show other
           forwardResult <- classEnvironmentFromSources
             [source unary binary]
           reverseResult <- classEnvironmentFromSources
             [source binary unary]
-          forwardResult @?= expected
-          reverseResult @?= expected
+          check "forward duplicate" forwardResult
+          check "reverse duplicate" reverseResult
       , testCase "superclass arity is checked against the class table" $ do
           let binary = HsTypeClass (name "Binary") [0, 1] []
               derived = HsTypeClass (name "Derived") [0]
@@ -500,7 +516,8 @@ tests = testGroup "Exference"
             ]
           case result of
             Left (ClassDeclarationErrors (firstError :| remaining)) -> do
-              let errors = firstError : remaining
+              let errors = map extractionErrorMessage
+                    $ firstError : remaining
               assertBool ("missing too-few diagnostic: " ++ show errors)
                 $ expectedTooFew `elem` errors
               assertBool ("missing too-many diagnostic: " ++ show errors)
@@ -533,7 +550,8 @@ tests = testGroup "Exference"
             ]
           case result of
             Left (InstanceDeclarationErrors (firstError :| remaining)) ->
-              let errors = firstError : remaining
+              let errors = map extractionErrorMessage
+                    $ firstError : remaining
               in assertBool
                   ("missing explicit-forall diagnostic: " ++ show errors)
                   $ any ("outside its explicit forall" `isInfixOf`) errors
@@ -545,8 +563,17 @@ tests = testGroup "Exference"
                 , "instance forall a a. Missing a"
                 ]
             ]
-          result @?= Left (InstanceDeclarationErrors
-            ("duplicate explicitly quantified instance variable" :| []))
+          case result of
+            Left (InstanceDeclarationErrors (failure :| [])) -> do
+              extractionErrorMessage failure @?=
+                "duplicate explicitly quantified instance variable"
+              -- The failing instance declaration sits on line 2.
+              case extractionErrorLocation failure of
+                Nothing -> fail "instance rejection lost its source location"
+                Just location ->
+                  sourceLine (sourceStart $ locationSpan location) @?= 2
+            other -> fail $ "unexpected duplicate-binder result: "
+              ++ show other
       , testCase "instance-head arity is checked against the class table" $ do
           let cls = HsTypeClass (name "C") [0, 1] []
               tooMany = HsInstance [] $ HsConstraint (name "C")
@@ -2204,7 +2231,38 @@ tests = testGroup "Exference"
             Right _ -> fail "an unsaturated synonym reached Exference search"
       ]
   , testGroup "session rating policy"
-      [ testCase "HSE sessions report built-in recursive list elimination" $
+      [ testCase "loader diagnostics carry extraction source spans" $
+          withTemporaryFile (unlines
+            [ "module Located where"
+            , "identity :: a -> a"
+            , "type Loop = Loop"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- environmentFromModule modulePath
+              failure <- case result of
+                Left (TypeDeclarationErrors (failure :| [])) -> pure failure
+                Left other -> fail
+                  $ "cyclic synonym failed in the wrong phase: " ++ show other
+                Right _ -> fail "a cyclic synonym environment was accepted"
+              assertBool "historical message text changed"
+                $ "cyclic type synonym" `isInfixOf`
+                    extractionErrorMessage failure
+              -- The failure is attributed to the synonym declaration itself:
+              -- line 3 of the loaded module, in the loaded file.
+              location <- maybe
+                (fail "extraction failure lost its source location") pure
+                $ extractionErrorLocation failure
+              locationSource location @?= modulePath
+              sourceLine (sourceStart $ locationSpan location) @?= 3
+              case NonEmpty.toList $ environmentLoadErrorDiagnostics
+                  $ TypeDeclarationErrors $ failure :| [] of
+                [rendered] -> do
+                  diagnosticCode rendered @?= Just "EXF_TYPE_DECLARATION"
+                  diagnosticSource rendered @?= Just modulePath
+                  fmap (sourceLine . sourceStart) (diagnosticSpan rendered)
+                    @?= Just 3
+                rendered -> fail
+                  $ "unexpected rendered diagnostics: " ++ show rendered
+      , testCase "HSE sessions report built-in recursive list elimination" $
           withTemporaryFile (unlines
             [ "module Omissions where"
             , "identity :: a -> a"
@@ -3901,24 +3959,27 @@ tests = testGroup "Exference"
       , testCase "legacy string loader phases receive structured diagnostics" $ do
           className <- expectRight $ mkQualifiedName ["Fixture"] "Class"
           let cases =
-                [ ( DataTypeNameError "name detail"
+                [ ( DataTypeNameError $ extractionError "name detail"
                   , "EXF_DATA_TYPE_NAME"
                   , "could not extract source data-type names"
                   , "name detail"
                   )
-                , ( TypeDeclarationErrors $ "type detail" :| []
+                , ( TypeDeclarationErrors
+                      $ extractionError "type detail" :| []
                   , "EXF_TYPE_DECLARATION"
                   , "could not load a source type declaration"
                   , "type detail"
                   )
                 , ( ClassEnvironmentLoadFailure
-                      $ ClassDeclarationErrors $ "class detail" :| []
+                      $ ClassDeclarationErrors
+                      $ extractionError "class detail" :| []
                   , "EXF_CLASS_DECLARATION"
                   , "could not load a source class declaration"
                   , "class detail"
                   )
                 , ( ClassEnvironmentLoadFailure
-                      $ InstanceDeclarationErrors $ "instance detail" :| []
+                      $ InstanceDeclarationErrors
+                      $ extractionError "instance detail" :| []
                   , "EXF_INSTANCE_DECLARATION"
                   , "could not load a source instance declaration"
                   , "instance detail"
@@ -3929,7 +3990,8 @@ tests = testGroup "Exference"
                   , "the source class environment failed nominal validation"
                   , show $ InvalidClassName className
                   )
-                , ( BindingDeclarationErrors $ "binding detail" :| []
+                , ( BindingDeclarationErrors
+                      $ extractionError "binding detail" :| []
                   , "EXF_BINDING_DECLARATION"
                   , "could not load a source binding declaration"
                   , "binding detail"

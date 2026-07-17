@@ -7,6 +7,7 @@ import Data.Char(isAlpha, isDigit, isSpace)
 import Data.List(isPrefixOf, intercalate)
 import Data.Version(showVersion)
 import Text.ParserCombinators.ReadP
+import Control.Exception(evaluate)
 import Control.Monad(when)
 import System.Exit(exitWith, ExitCode(..))
 import System.Environment(getArgs)
@@ -415,8 +416,15 @@ contextPrefix contexts = showContexts contexts ++ " => "
 
 loadFile :: State -> String -> IO (Bool, State)
 loadFile s name = do
+    -- Force the complete file before running any command. With a lazy read,
+    -- a decode or device error surfacing mid-file would abort evalCmds after
+    -- earlier commands had already printed their results, silently rolling
+    -- the session back to the pre-load state; batch semantics are otherwise
+    -- incremental, so reporting the read error up front keeps printed output
+    -- and surviving state in agreement.
     result <- tryIOError $ do
         file <- readFile name
+        _ <- evaluate $ length file
         evalCmds s $ lines $ stripLineComments file
     case result of
         Left err -> do

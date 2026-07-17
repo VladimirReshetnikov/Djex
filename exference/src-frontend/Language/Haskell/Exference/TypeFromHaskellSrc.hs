@@ -22,7 +22,6 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   -- , ConversionMonad
   , parseQualifiedName
   , tyVarTransform
-  , convertConstraint
   , validateConstraintArity
   , haskellSrcExtsParseMode
   , findInvalidNames
@@ -448,16 +447,6 @@ parseQualifiedName input = either (invalid . SharedName.renderNameError) Right
     invalid :: String -> Either Diagnostic a
     invalid message = Left $ diagnostic Error
       $ "invalid qualified name " ++ show input ++ ": " ++ message
-
-convertConstraint
-  :: Monad m
-  => M.Map T.QualifiedName T.HsTypeClass
-  -> Maybe (ModuleName SrcSpanInfo)
-  -> [T.QualifiedName]
-  -> Asst SrcSpanInfo
-  -> ConversionT String m T.HsConstraint
-convertConstraint tcs defModuleName ds = convertConstraintWithResolver
-  (legacyTypeResolver tcs ds) defModuleName
 
 -- | Convert a source constraint using only known class identities and their
 -- declared arities. Unknown external classes remain representable, exactly as

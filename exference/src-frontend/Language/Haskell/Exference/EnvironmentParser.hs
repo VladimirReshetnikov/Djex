@@ -774,11 +774,16 @@ unsupportedVocabularyDescription form = case form of
 parseModules
   :: [(ParseMode, FilePath)]
   -> IO (LoadReport SourceEnvironment)
-parseModules inputs = do
-  (result, diagnostics) <- runWriterT $ parseModulesM inputs
-  pure $ LoadReport result diagnostics
+parseModules = runLoader . parseModulesM
 
 type Loader = WriterT [Diagnostic] IO
+
+-- Every public IO entry point shares this one projection from a loader
+-- action to its result and accumulated diagnostics.
+runLoader
+  :: Loader (Either EnvironmentLoadError value)
+  -> IO (LoadReport value)
+runLoader action = uncurry LoadReport <$> runWriterT action
 
 parseModulesM
   :: [(ParseMode, FilePath)]
@@ -1090,10 +1095,7 @@ applyRatings ratings environment =
 environmentFromModule
   :: FilePath
   -> IO (LoadReport CheckedSourceEnvironment)
-environmentFromModule modulePath = do
-  (result, diagnostics) <- runWriterT
-    $ environmentFromModuleM modulePath
-  pure $ LoadReport result diagnostics
+environmentFromModule = runLoader . environmentFromModuleM
 
 environmentFromModuleM
   :: FilePath
@@ -1109,10 +1111,8 @@ environmentFromModuleAndRatings
   :: FilePath
   -> FilePath
   -> IO (LoadReport CheckedSourceEnvironment)
-environmentFromModuleAndRatings modulePath ratingPath = do
-  (result, diagnostics) <- runWriterT
-    $ environmentFromModuleAndRatingsM modulePath ratingPath
-  pure $ LoadReport result diagnostics
+environmentFromModuleAndRatings modulePath ratingPath = runLoader
+  $ environmentFromModuleAndRatingsM modulePath ratingPath
 
 environmentFromModuleAndRatingsM
   :: FilePath
@@ -1136,9 +1136,7 @@ environmentFromModuleAndRatingsM modulePath ratingPath = do
 environmentFromPath
   :: FilePath
   -> IO (LoadReport CheckedSourceEnvironment)
-environmentFromPath path = do
-  (result, diagnostics) <- runWriterT $ environmentFromPathM path
-  pure $ LoadReport result diagnostics
+environmentFromPath = runLoader . environmentFromPathM
 
 environmentFromPathM
   :: FilePath

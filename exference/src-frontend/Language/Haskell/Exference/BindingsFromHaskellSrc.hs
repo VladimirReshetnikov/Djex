@@ -115,8 +115,7 @@ getDataConss tcs ds tDeclMap modules =
       :: Monad m
       => TyVarBind SrcSpanInfo
       -> ConversionT String m HsType
-    pTransform (KindedVar _ _ _) = throwE "kinded type variable"
-    pTransform (UnkindedVar _ n) = TypeVar <$> getVar n
+    pTransform binder = TypeVar <$> tyVarTransform binder
   --let
   --  tTransform (UnBangedTy t) = convertTypeInternal t
   --  tTransform x              = lift $ left $ "unknown Type: " ++ show x

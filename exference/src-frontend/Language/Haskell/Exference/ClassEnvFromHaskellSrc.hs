@@ -279,21 +279,15 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
           _ : _ -> throwE "duplicate explicitly quantified instance variable"
           [] -> pure ()
         pure $ Just $ Set.fromList ids
-    className <- either throwE pure
-      $ convertQName (Just moduleName) (Map.keys classes) syntaxName
-    case Map.lookup className classes of
-      Nothing -> throwE $ "unknown type class: " ++ show className
-      Just _ -> pure ()
+    -- The head's class is resolved before prerequisites so an unknown head
+    -- keeps diagnostic precedence over a malformed prerequisite.
+    className <- resolveKnownClass classes (Just moduleName) syntaxName
     prerequisites <- mapM
       (convertClassConstraint classes (Just moduleName)
         dataTypes typeDeclarations)
       (contextConstraints context)
-    arguments <- mapM
-      (convertTypeInternal classes (Just moduleName)
-        dataTypes typeDeclarations)
-      argumentSyntax
-    either throwE pure
-      $ validateConstraintArity classes className (length arguments)
+    headConstraint <- checkedClassApplication classes (Just moduleName)
+      dataTypes typeDeclarations className argumentSyntax
     case explicitIds of
       Nothing -> pure ()
       Just declaredIds -> do
@@ -303,7 +297,7 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
         when (not $ Set.null undeclared) $ throwE
           $ "instance uses variables outside its explicit forall: "
           ++ show (Set.toAscList undeclared)
-    pure $ HsInstance prerequisites $ HsConstraint className arguments
+    pure $ HsInstance prerequisites headConstraint
 
 -- | Convert a class application against the complete closed class inventory.
 -- Both superclass edges and instance prerequisites must name a declaration;
@@ -322,23 +316,53 @@ convertClassConstraint classes defaultModule dataTypes
     (throwE $ "invalid class constraint: " ++ prettyPrint classType)
     pure
     (splitClassApplication classType)
-  className <- either throwE pure
-    $ convertQName defaultModule (Map.keys classes) syntaxName
-  case Map.lookup className classes of
-    Nothing -> throwE $ "unknown type class: " ++ show className
-    _ -> pure ()
-  arguments <- mapM
-    (convertTypeInternal classes defaultModule dataTypes typeDeclarations)
-    argumentSyntax
-  either throwE pure
-    $ validateConstraintArity classes className (length arguments)
-  pure $ HsConstraint className arguments
+  className <- resolveKnownClass classes defaultModule syntaxName
+  checkedClassApplication classes defaultModule dataTypes
+    typeDeclarations className argumentSyntax
 convertClassConstraint classes defaultModule dataTypes
     typeDeclarations (ParenA _ constraint) =
   convertClassConstraint classes defaultModule dataTypes
     typeDeclarations constraint
 convertClassConstraint _ _ _ _ constraint =
   throwE $ "unknown class constraint: " ++ show constraint
+
+-- Closed-world class-name resolution shared by superclass edges, instance
+-- prerequisites, and instance heads. The signature frontend's open-world
+-- resolver conversion deliberately stays separate: unknown external classes
+-- remain representable there.
+resolveKnownClass
+  :: Monad m
+  => Map.Map QualifiedName HsTypeClass
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> QName SrcSpanInfo
+  -> ConversionT String m QualifiedName
+resolveKnownClass classes defaultModule syntaxName = do
+  className <- either throwE pure
+    $ convertQName defaultModule (Map.keys classes) syntaxName
+  case Map.lookup className classes of
+    Nothing -> throwE $ "unknown type class: " ++ show className
+    _ -> pure ()
+  pure className
+
+-- Argument conversion, arity validation, and construction for one resolved
+-- class application, shared by constraint conversion and instance heads.
+checkedClassApplication
+  :: Monad m
+  => Map.Map QualifiedName HsTypeClass
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> [QualifiedName]
+  -> TypeDeclMap
+  -> QualifiedName
+  -> [Type SrcSpanInfo]
+  -> ConversionT String m HsConstraint
+checkedClassApplication classes defaultModule dataTypes typeDeclarations
+    className argumentSyntax = do
+  arguments <- mapM
+    (convertTypeInternal classes defaultModule dataTypes typeDeclarations)
+    argumentSyntax
+  either throwE pure
+    $ validateConstraintArity classes className (length arguments)
+  pure $ HsConstraint className arguments
 
 duplicateClassMessage :: QualifiedName -> String
 duplicateClassMessage name =

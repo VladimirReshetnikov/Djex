@@ -68,6 +68,7 @@ import Control.Exception
   , fromException
   , tryJust
   )
+import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -77,7 +78,6 @@ import System.IO.Unsafe (unsafePerformIO)
 
 import Language.Haskell.Exference.Core
   ( ExferenceHeuristicsConfig (..)
-  , ExferenceInputError (..)
   , ExferenceQuery (..)
   , Penalty (..)
   )
@@ -432,31 +432,28 @@ runExferenceQuery session request = do
       target = requestTarget query
       sharedGoal = requestContextualGoal request
       requestDiagnostic = withExferenceRequestProvenance request
-  elaboratedGoal <- either
-    (Left . requestDiagnostic . elaborationFailure)
-    Right
+  elaboratedGoal <- first (requestDiagnostic . elaborationFailure)
     $ Session.elaborateSessionGoal session sharedGoal
-  backendGoal <- either
-    (Left . requestDiagnostic . shownErrorDiagnostic
+  backendGoal <- first
+    (requestDiagnostic . shownErrorDiagnostic
       "DJEX_EXF_LOWER"
       "Exference rejected the shared query type"
     )
-    Right
     $ fromSynthesisType elaboratedGoal
   let sourceHints = retargetExferenceSourceTypeVariableHints
         elaboratedGoal $ requestSourceTypeVariableHints request
   -- The direct result boundary owns exact target exclusion and result naming,
   -- so query validation and rigid-instantiation planning happen only once.
+  -- Option failures stay source-free like Djinn's: separately supplied
+  -- options never carry type-source provenance.
   let input = searchQuery backendGoal
         $ requestOptions query
       searchFailure failure
-        | optionFailure failure = shownErrorDiagnostic
+        | Core.isExferenceOptionError failure = shownErrorDiagnostic
             "DJEX_EXF_OPTIONS" "invalid Exference search options" failure
         | otherwise = requestDiagnostic $ shownErrorDiagnostic
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
-  either
-    (Left . searchFailure)
-    Right
+  first searchFailure
     $ Core.findQueryResultsInEnvironmentEither
         target
         sourceHints
@@ -479,15 +476,6 @@ elaborationFailure failure = case failure of
     "DJEX_EXF_QUERY"
     "Exference rejected the shared query type"
     failure
-
-optionFailure :: ExferenceInputError -> Bool
-optionFailure failure = case failure of
-  InvalidMaxSteps{} -> True
-  InvalidConstraintDeferralSteps{} -> True
-  InvalidMaxQueueSize{} -> True
-  InvalidMaxDepth{} -> True
-  InvalidHeuristic{} -> True
-  _ -> False
 
 searchQuery
   :: HsType

@@ -40,7 +40,9 @@ import Language.Haskell.Exference.Core.Internal.Candidate
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
+  , Severity (Error)
   , SourceLocation
+  , contextualDiagnostic
   , shownErrorDiagnostic
   )
 import Language.Haskell.Synthesis.Generated
@@ -55,6 +57,7 @@ import Language.Haskell.Synthesis.Query
   ( CachedQuery
   , QueryRequest (..)
   , RequestProvenance (..)
+  , RequestTypeSite (..)
   , cachedQueryCache
   , cachedQueryRequest
   , sealCachedQueryWithProvenance
@@ -129,12 +132,26 @@ mkExferenceRequestWithProvenance sourceVariables provenance query =
 -- Store exactly the canonical native representation that the checked
 -- Exference core consumes.  Normalizing each context argument separately
 -- also rejects rigid forall binders before contexts are inserted into the
--- contextual goal by the shared query envelope.
+-- contextual goal by the shared query envelope.  Failures keep the shared
+-- goal-versus-context site role, matching Djinn's request diagnostics.
 normalizeRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic (QueryRequest ExferenceType ExferenceOptions)
-normalizeRequest = first invalidRequest
-  . traverseRequestTypes (const toSynthesisType) pure
+normalizeRequest = traverseRequestTypes
+  (\site -> first (invalidRequestType site) . toSynthesisType)
+  pure
+
+invalidRequestType
+  :: Show failure
+  => RequestTypeSite
+  -> failure
+  -> Diagnostic
+invalidRequestType site failure = contextualDiagnostic Error
+  "DJEX_EXF_REQUEST" "invalid shared Exference request"
+  (siteRole site ++ ": " ++ show failure)
+ where
+  siteRole RequestGoal = "goal"
+  siteRole RequestContextArgument = "context"
 
 exferenceRequestQuery
   :: ExferenceRequest

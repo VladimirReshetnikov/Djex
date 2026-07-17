@@ -151,6 +151,12 @@ sealPreparedEnvironment exclusions overrides prepared = do
   let backend = preparedSynthesisBackend prepared
   ratedFunctions <- applyRatingOverrides overrides
     $ environmentFunctions backend
+  -- Policy validation is deliberately asymmetric. A rating override that
+  -- names an unavailable binding is rejected: it claims to change search
+  -- behavior, so silently ignoring it would hide a typo. An exclusion only
+  -- removes a capability, and the command frontends pass fixed structural
+  -- names (for example Data.Function.fix) whether or not the loaded
+  -- environment defines them, so an unknown exclusion is a harmless no-op.
   let excludedBindings = Set.fromList exclusions
       functionExcluded binding = Set.member
         (functionName binding) excludedBindings

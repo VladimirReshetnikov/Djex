@@ -27,6 +27,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , projectCompatibilityBindingUsages
   , typeComplexity
   , ExferenceInputError (..)
+  , isExferenceOptionError
   , mkExferenceEnvironment
   , validateExferenceQuery
   , validateExferenceInput
@@ -181,6 +182,35 @@ data ExferenceInputError
   | RigidIdentifierExhaustion RigidInstantiationError
   | InvalidSourceTypeVariableHints ExferenceSourceTypeVariableHintError
   deriving (Eq)
+
+-- | Whether a rejected input failed on its search options rather than the
+-- query or environment. Living beside the type with a complete case, this
+-- classification cannot silently drift when a constructor is added; the
+-- stable adapter uses it to keep option failures source-free, mirroring
+-- Djinn's structural options/query error split.
+isExferenceOptionError :: ExferenceInputError -> Bool
+isExferenceOptionError failure = case failure of
+  NestedForallInGoal{} -> False
+  NestedForallInBinding{} -> False
+  NestedForallInDeconstructor{} -> False
+  NestedForallInConstraint{} -> False
+  InvalidInputType{} -> False
+  DeconstructorInputWithoutNominalHead{} -> False
+  UnsupportedDeconstructorTypeHead{} -> False
+  UnboundDeconstructorFieldVariables{} -> False
+  InvalidGeneratedBinding{} -> False
+  InvalidGeneratedConstructor{} -> False
+  DuplicateFunctionNames{} -> False
+  DuplicateDeconstructorNames{} -> False
+  DuplicateConstructorNames{} -> False
+  InvalidClassConstraint{} -> False
+  InvalidMaxSteps{} -> True
+  InvalidConstraintDeferralSteps{} -> True
+  InvalidMaxQueueSize{} -> True
+  InvalidMaxDepth{} -> True
+  InvalidHeuristic{} -> True
+  RigidIdentifierExhaustion{} -> False
+  InvalidSourceTypeVariableHints{} -> False
 
 instance Show ExferenceInputError where
   showsPrec precedence failure = showParen (precedence > 10)

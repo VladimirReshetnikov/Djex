@@ -26,6 +26,7 @@ module Language.Haskell.Exference.Core
   , E.SearchStatus (..)
   , E.constraintsRelaxedAtStep
   , E.ExferenceInputError (..)
+  , E.isExferenceOptionError
   , E.mkExferenceEnvironment
   , E.validateExferenceQuery
   , E.validateExferenceInput

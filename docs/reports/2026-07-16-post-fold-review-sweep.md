@@ -99,23 +99,37 @@ the library warning-clean under the release `ghc-options`.
 
 ## Deliberately deferred
 
+Every item below was resolved on 2026-07-17; see
+[the deferred-item resolution report](2026-07-17-deferred-item-resolution.md).
+
 - **Djinn display naming.** `niceNames` bakes `a`..`z` spellings into
   the tree while Exference defers to the shared render-time allocator.
   Unifying them risks the exact historical output pinned across the
   Djinn suites and deserves its own carefully-tested pass.
+  *Resolved as kept architecture: the baked spellings are the public
+  stored-tree contract and structural candidate dedup depends on them;
+  the invariant is now documented at both sites.*
 - **Exference error-taxonomy split.** `SynthesisDeclarationError`
   remains one broad vocabulary where Djinn separates declaration from
   environment errors; splitting it changes a public type.
+  *Completed: `SynthesisEnvironmentError` now nests the declaration
+  vocabulary exactly as Djinn's environment adapter does; the package
+  version advanced to 2026.7.17.*
 - **Extraction-phase error channel.** The HSE extraction phases still
   report span-free `Either String` values pinned into
   `EnvironmentLoadError`'s `NonEmpty String` constructors. The concrete
   boundary hole (kinded binders) is fixed; migrating the whole channel
   to located diagnostics is a larger contract change.
+  *Completed: `ExtractionError` carries each failure's declaration
+  span; the string entry points remain exact message projections.*
 - **Ground edit transaction.** `declareDjinnDeclaration` weakens the
   sealed ground environment to `Int` kinds to reuse the raw editor,
   which re-grounds it. A ground-typed editor entrance would mirror
   `prepareGroundSynthesisEnvironment` but touches the transactional
   plumbing.
+  *Completed: the edit transaction is kind-polymorphic with ground
+  entrances, pinned against the weakened path by an agreement suite.*
 - **Session bridge overlap.** `loadExferenceSessionWithPolicy` repeats
   four lines of `Language.Haskell.Exference.Session`; this is the
   recorded dependencies-point-inward decision, not an oversight.
+  *Confirmed as the standing architecture decision; no change.*

@@ -36,6 +36,8 @@ module Language.Haskell.Djex.Djinn
   , djinnRequestQuery
   , parseDjinnRequest
   , parseDjinnRequestWithCheckedTarget
+  , validateDjinnTarget
+  , validateDjinnQueryType
   , runDjinnQuery
   , renderDjinnCandidateExpression
   , renderDjinnCandidateDefinition
@@ -304,7 +306,7 @@ parseDjinnRequest
 parseDjinnRequest session options target sourceName source = do
   -- Preserve command-boundary precedence: an invalid output name is a usage
   -- error even when the source text is also malformed.
-  checkedTarget <- checkDefinitionTarget target
+  checkedTarget <- validateDjinnTarget target
   parseDjinnRequestWithCheckedTarget
     session options checkedTarget sourceName source
 
@@ -408,10 +410,25 @@ parsedTypeFailure
   -> String
   -> Core.SynthesisTypeError
   -> Diagnostic
-parsedTypeFailure provenance role failure = withRequestProvenance provenance
-  $ contextualDiagnostic Error "DJEX_DJINN_PARSE"
-      "cannot validate the parsed Djinn query type"
-      (role ++ ": " ++ show failure)
+parsedTypeFailure provenance role =
+  withRequestProvenance provenance . parsedTypeDiagnostic role
+
+parsedTypeDiagnostic :: String -> Core.SynthesisTypeError -> Diagnostic
+parsedTypeDiagnostic role failure = contextualDiagnostic Error
+  "DJEX_DJINN_PARSE" "cannot validate the parsed Djinn query type"
+  (role ++ ": " ++ show failure)
+
+-- | Validate one compatibility-parsed raw type into the shared query
+-- vocabulary. The Haskeline REPL and this adapter's own string parser share
+-- this boundary, so a declaration-only or malformed node receives the same
+-- diagnostic on either path; only the adapter's parser additionally attaches
+-- request provenance.
+validateDjinnQueryType
+  :: String
+  -> Core.HType
+  -> Either Diagnostic DjinnType
+validateDjinnQueryType role =
+  first (parsedTypeDiagnostic role) . Core.toSynthesisType
 
 loweringFailure :: String -> Core.SynthesisTypeError -> Diagnostic
 loweringFailure role failure = contextualDiagnostic Error "DJEX_DJINN_LOWER"
@@ -422,8 +439,11 @@ contextLoweringFailure failure = contextualDiagnostic Error
   "DJEX_DJINN_LOWER" "cannot lower the shared query to Djinn"
   ("context: " ++ failure)
 
-checkDefinitionTarget :: Name -> Either Diagnostic DefinitionName
-checkDefinitionTarget target = case mkDefinitionName target of
+-- | Check the source-level name of a Djinn result definition. Frontends use
+-- this before parsing so command-usage errors retain precedence over
+-- malformed source text, mirroring 'validateExferenceTarget'.
+validateDjinnTarget :: Name -> Either Diagnostic DefinitionName
+validateDjinnTarget target = case mkDefinitionName target of
   Right checked -> Right checked
   Left _ -> Left $ contextualDiagnostic Error "DJEX_DJINN_TARGET"
       "Djinn targets must be unqualified value identifiers or operators"

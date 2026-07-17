@@ -21,7 +21,6 @@ import Djinn.Internal.HIdentifier
 import Djinn.Internal.Help
 import Language.Haskell.Djex.Djinn
 import qualified Language.Haskell.Synthesis.Diagnostic as Diagnostic
-import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import Language.Haskell.Synthesis.Query
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
@@ -148,12 +147,8 @@ exit _ = putStrLn "Bye."
 -- validates before anything enters the environment.
 type RawClassDef = (HSymbol, ([HSymbol], [Method]))
 
--- Kind checking replaces this placeholder with the inferred kind.
-rawType :: [HSymbol] -> HType -> ([HSymbol], HType, HKind)
-rawType params body = (params, body, KStar)
-
 data Cmd = Help Bool | Quit | Add HSymbol HType | Query HSymbol [Context] HType | Del HSymbol | Load HSymbol | Noop | Env |
-           Type (HSymbol, ([HSymbol], HType, HKind)) | Set (State -> State) | Clear | Class RawClassDef |
+           Type HSymbol [HSymbol] HType | Set (State -> State) | Clear | Class RawClassDef |
            QueryInstance [Context] Context
 
 pCmd :: ReadP Cmd
@@ -213,7 +208,7 @@ runCmd s Env = do
     mapM_ (putStrLn . showClass)
         (reverse $ djinnSessionClassDeclarations $ djinnSession s)
     return (False, s)
-runCmd s (Type (name, (params, body, _))) =
+runCmd s (Type name params body) =
     updateSession s . declareDjinnDeclaration $
         case body of
             HTUnion constructors -> DataType name params constructors
@@ -222,7 +217,7 @@ runCmd s (Type (name, (params, body, _))) =
 runCmd s (Set f) =
     return (False, f s)
 runCmd s (Query i ctx g) =
-    query True s i ctx g
+    query s i ctx g
 runCmd s (Class (name, (params, methods))) =
     updateSession s $ declareDjinnDeclaration $
         ClassDecl name params methods
@@ -296,13 +291,13 @@ installSession state session =
 markFailed :: State -> State
 markFailed state = state { commandFailed = True }
 
-query :: Bool -> State -> String -> [Context] -> HType -> IO (Bool, State)
-query prType s i ctx g = do
+query :: State -> String -> [Context] -> HType -> IO (Bool, State)
+query s i ctx g = do
     case makeDjinnResult s i ctx g of
         Left failure -> do
             putStrLn $ "Error: " ++ commandDiagnostic failure
             return (False, markFailed s)
-        Right result -> case formatDjinnResult prType s i ctx g result of
+        Right result -> case formatDjinnResult True s i ctx g result of
             Left message -> do
                 putStrLn $ "Error: " ++ message
                 return (False, markFailed s)
@@ -318,15 +313,10 @@ makeDjinnResult s name contexts goal = do
             "DJEX_DJINN_TARGET" "cannot convert the parsed Djinn target"
             failure
         Right value -> Right value
-    checkedTarget <- case Generated.mkDefinitionName target of
-        Left _ -> Left $ Diagnostic.contextualDiagnostic
-            Diagnostic.Error "DJEX_DJINN_TARGET"
-            "Djinn targets must be unqualified value identifiers or operators"
-            (SharedName.renderCanonical target)
-        Right value -> Right value
-    sharedGoal <- checkCompatibilityType "goal" goal
+    checkedTarget <- validateDjinnTarget target
+    sharedGoal <- validateDjinnQueryType "goal" goal
     sharedContexts <- traverse
-        (traverse $ checkCompatibilityType "context argument") contexts
+        (traverse $ validateDjinnQueryType "context argument") contexts
     request <- mkDjinnRequest QueryRequest {
         requestTarget = checkedTarget,
         requestGoal = sharedGoal,
@@ -340,19 +330,6 @@ makeDjinnResult s name contexts goal = do
         optionCutoff = cutOff s,
         optionBudget = if budget s > 0 then Just (budget s) else Nothing
         }
-
--- REPL parsers construct the historical patterns over the native shared type
--- tree. Keep this boundary checked so future grammar extensions cannot smuggle
--- a declaration-only node into the stable session; after validation the same
--- tree stays shared through the complete query pipeline.
-checkCompatibilityType
-    :: String -> HType -> Either Diagnostic.Diagnostic DjinnType
-checkCompatibilityType role source = case toSynthesisType source of
-    Left failure -> Left $ Diagnostic.contextualDiagnostic
-        Diagnostic.Error "DJEX_DJINN_QUERY"
-        "cannot validate the parsed Djinn query type"
-        (role ++ ": " ++ show failure)
-    Right shared -> Right shared
 
 formatDjinnResult :: Bool -> State -> String -> [Context] -> HType
                   -> DjinnResult -> Either String [String]
@@ -553,12 +530,12 @@ pType = do
     do args <- many (pHSymbol False)
        schar '='
        t <- pHType
-       return $ Type (syn, rawType args t)
+       return $ Type syn args t
      +++
       do
        sstring "::"
        k <- pHKind
-       return $ Type (syn, rawType [] (HTAbstract syn k))
+       return $ Type syn [] (HTAbstract syn k)
 
 pData :: ReadP Cmd
 pData = do
@@ -569,10 +546,10 @@ pData = do
        t <- pHDataType
        case t of
            HTUnion [] -> pfail
-           _ -> return $ Type (syn, rawType args t)
+           _ -> return $ Type syn args t
       +++
      do
-       return $ Type (syn, rawType args (HTUnion []))
+       return $ Type syn args (HTUnion [])
 
 pClass :: ReadP Cmd
 pClass = do

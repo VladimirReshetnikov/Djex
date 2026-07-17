@@ -47,15 +47,16 @@ checkProof :: [(Symbol, Formula)] -> Formula -> Term -> Either String ()
 checkProof environment expected term =
     evalStateT check initialState
   where
+    -- Successful unification with the goal grounds every metavariable
+    -- reachable from the inferred type, because 'fromFormula expected' never
+    -- contains one; only pending injection and empty-eliminator constraints
+    -- can still fail afterwards.
     check = do
         ensureUniqueEnvironment environment
         actual <- infer (map (\ (symbol, formula) ->
             (symbol, fromFormula formula)) environment) term
         unify actual (fromFormula expected)
         solveConstraints
-        checked <- zonk actual
-        unless (isGround checked) $
-            failCheck $ "proof type remains ambiguous: " ++ showProofType checked
 
 ensureUniqueEnvironment :: [(Symbol, Formula)] -> Check ()
 ensureUniqueEnvironment environment =
@@ -217,16 +218,6 @@ prune proofType@(Meta index) = do
             return replacement'
 prune proofType = return proofType
 
-zonk :: ProofType -> Check ProofType
-zonk proofType = do
-    proofType' <- prune proofType
-    case proofType' of
-        Product elements -> Product <$> mapM zonk elements
-        Sum alternatives -> Sum <$> mapM (traverse zonk) alternatives
-        argument :~> result -> (:~>) <$> zonk argument <*> zonk result
-        -- Meta, EmptyType, and Atom are leaves after pruning.
-        _ -> return proofType'
-
 solveConstraints :: Check ()
 solveConstraints = do
     pending <- gets constraints
@@ -287,14 +278,6 @@ solveConstraint constraint =
                 EmptyType _ -> return True
                 _ -> failCheck $ "empty eliminator received " ++
                     showProofType input'
-
-isGround :: ProofType -> Bool
-isGround (Meta _) = False
-isGround (Product elements) = all isGround elements
-isGround (Sum alternatives) = all (isGround . snd) alternatives
-isGround (EmptyType _) = True
-isGround (argument :~> result) = isGround argument && isGround result
-isGround (Atom _) = True
 
 fromFormula :: Formula -> ProofType
 fromFormula (Conj formulas) = Product (map fromFormula formulas)

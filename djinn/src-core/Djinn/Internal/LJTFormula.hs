@@ -5,10 +5,13 @@
 module Djinn.Internal.LJTFormula (
     Symbol(..), Formula(..), (<->), (&), (|:), fnot, false, true,
     formulaSymbols,
-    ConsDesc(..), Term(..), applys, freeVars
+    ConsDesc(..), Term(..), applys, freeVars, freshenTermBinders
     ) where
 
-import Data.List (union, (\\))
+import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
+
+import Language.Haskell.Synthesis.Collection (distinctOn)
 
 infixr 2 :->
 infix  2 <->
@@ -119,9 +122,30 @@ instance Show Term where
 applys :: Term -> [Term] -> Term
 applys = foldl Apply
 
+-- | Free variables in first-occurrence order, each reported once.
 freeVars :: Term -> [Symbol]
-freeVars (Var s) = [s]
-freeVars (Lam s e) = freeVars e \\ [s]
-freeVars (Apply f a) = freeVars f `union` freeVars a
-freeVars (Xsel _ _ e) = freeVars e
-freeVars _ = []
+freeVars = distinctOn id . occurrences Set.empty
+  where
+    occurrences bound term = case term of
+        Var s | Set.member s bound -> []
+              | otherwise -> [s]
+        Lam s e -> occurrences (Set.insert s bound) e
+        Apply f a -> occurrences bound f ++ occurrences bound a
+        Xsel _ _ e -> occurrences bound e
+        _ -> []
+
+-- | Rename every lambda binder to a fresh symbol from the supplied
+-- allocator, renaming occurrences through ordinary shadowing while leaving
+-- free variables intact. The prover copies substituted proof fragments
+-- through this traversal so binders stay globally unique, and generated
+-- output lowering freshens complete proofs with the same operation.
+freshenTermBinders :: Monad m => m Symbol -> Term -> m Term
+freshenTermBinders freshSymbol = go []
+  where
+    go renamings (Var s) = return $ Var $ fromMaybe s $ lookup s renamings
+    go renamings (Lam s body) = do
+        s' <- freshSymbol
+        Lam s' <$> go ((s, s') : renamings) body
+    go renamings (Apply f a) = Apply <$> go renamings f <*> go renamings a
+    go renamings (Xsel i n e) = Xsel i n <$> go renamings e
+    go _ t = return t

@@ -296,12 +296,8 @@ lowerApplication definitions path source =
             case lookupFormulaDefinition name definitions of
                 Just (parameters, body)
                     | length parameters == length arguments -> do
-                        rejectActiveExpansion definitions path name origin
-                        let replacements = firstExpansionSubstitutions $
-                                zip parameters $
-                                    map (ExpansionArgument path) arguments
-                            expanded = substituteExpansion replacements $
-                                instantiateDefinitionOrigins origin name body
+                        expanded <- expandDefinitionStep definitions path
+                            name origin parameters body arguments
                         case expanded of
                             ExpansionUnion [] -> do
                                 normalized <- normalizeExpansionAliases
@@ -358,6 +354,27 @@ firstExpansionSubstitutions
     -> LazyMap.Map String ExpansionType
 firstExpansionSubstitutions =
     foldr (uncurry LazyMap.insert) LazyMap.empty
+
+-- One checked definition-expansion step: reject an active expansion cycle,
+-- then instantiate the definition body with argument markers anchored at the
+-- current path. Logical lowering and the alias fold both continue with the
+-- result at @pushExpansion name origin path@, so the two consumers cannot
+-- drift in substitution or provenance semantics.
+expandDefinitionStep
+    :: PreparedFormulaCompiler
+    -> ExpansionPath
+    -> String
+    -> ExpansionOrigin
+    -> [String]
+    -> ExpansionType
+    -> [ExpansionType]
+    -> Either String ExpansionType
+expandDefinitionStep definitions path name origin parameters body arguments = do
+    rejectActiveExpansion definitions path name origin
+    let replacements = firstExpansionSubstitutions $
+            zip parameters $ map (ExpansionArgument path) arguments
+    return $ substituteExpansion replacements $
+        instantiateDefinitionOrigins origin name body
 
 rejectActiveExpansion
     :: PreparedFormulaCompiler
@@ -427,12 +444,8 @@ foldExpansionAliases definitions algebra path source = case source of
                 Just (parameters, body)
                     | length parameters == length arguments &&
                       formulaDefinitionIsAlias name definitions -> do
-                        rejectActiveExpansion definitions path name origin
-                        let replacements = firstExpansionSubstitutions $
-                                zip parameters $
-                                    map (ExpansionArgument path) arguments
-                            expanded = substituteExpansion replacements $
-                                instantiateDefinitionOrigins origin name body
+                        expanded <- expandDefinitionStep definitions path
+                            name origin parameters body arguments
                         foldExpansionAliases definitions algebra
                             (pushExpansion name origin path) expanded
                 _ -> do

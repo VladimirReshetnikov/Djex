@@ -10,6 +10,7 @@ module Djinn.Internal.ProofToGenerated
   ) where
 
 import Control.Monad (foldM, zipWithM)
+import Control.Monad.Trans.State.Strict (evalState, state)
 import Data.List ((\\))
 import Data.Maybe (catMaybes, fromMaybe)
 import qualified Data.Set as Set
@@ -322,35 +323,18 @@ termNames proofTerm = case proofTerm of
   Xsel _ _ expression -> termNames expression
   _ -> Set.empty
 
+-- The shared traversal owns the grammar walk; only the "__djinn" spelling
+-- policy and the reservation of the term's free names remain local.
 alphaRenameTerm :: Term -> Term
-alphaRenameTerm term = renamed
+alphaRenameTerm term = evalState
+    (freshenTermBinders freshBinder term)
+    (Set.fromList $ freeVars term, 1 :: Natural)
  where
-  (renamed, _, _) =
-    rename [] (Set.fromList $ freeVars term) (1 :: Natural) term
-
-  rename environment used next proofTerm = case proofTerm of
-    Var symbol ->
-      (Var $ fromMaybe symbol $ lookup symbol environment, used, next)
-    Lam binder body ->
-      let (fresh, used', next') = freshBinder used next
-          (body', used'', next'') =
-            rename ((binder, fresh) : environment) used' next' body
-      in (Lam fresh body', used'', next'')
-    Apply function argument ->
-      let (function', used', next') =
-            rename environment used next function
-          (argument', used'', next'') =
-            rename environment used' next' argument
-      in (Apply function' argument', used'', next'')
-    Xsel index arity expression ->
-      let (expression', used', next') =
-            rename environment used next expression
-      in (Xsel index arity expression', used', next')
-    _ -> (proofTerm, used, next)
-
-  freshBinder used next = allocateFresh
-    (\suffix -> (Symbol $ "__djinn" ++ show suffix, suffix + 1))
-    used next
+  freshBinder = state $ \(used, next) ->
+    let (fresh, used', next') = allocateFresh
+          (\suffix -> (Symbol $ "__djinn" ++ show suffix, suffix + 1))
+          used next
+    in (fresh, (used', next'))
 
 niceNames :: Expression -> Expression
 niceNames expression = fmap rename expression

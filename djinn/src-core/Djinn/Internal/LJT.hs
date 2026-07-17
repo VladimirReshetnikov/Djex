@@ -109,13 +109,14 @@ type Proof = Term
 
 -- The proof search gives every binder a globally fresh symbol (including with
 -- respect to caller-supplied symbols).  Substitution can therefore stay small:
--- only ordinary shadowing needs an explicit check.  A replacement is copied so
--- that its binders remain globally unique at every occurrence.
+-- only ordinary shadowing needs an explicit check.  A replacement is copied
+-- through the shared binder-freshening traversal so that its binders remain
+-- globally unique at every occurrence.
 subst :: Term -> Symbol -> Term -> P Term
 subst replacement variable = substitute
   where
     substitute t@(Var s)
-        | variable == s = copy [] replacement
+        | variable == s = freshenTermBinders (newSym "c") replacement
         | otherwise = return t
     substitute t@(Lam s body)
         | variable == s = return t
@@ -123,15 +124,6 @@ subst replacement variable = substitute
     substitute (Apply f a) = Apply <$> substitute f <*> substitute a
     substitute (Xsel i n e) = Xsel i n <$> substitute e
     substitute t = return t
-
-copy :: [(Symbol, Symbol)] -> Term -> P Term
-copy renamings (Var s) = return $ Var $ fromMaybe s $ lookup s renamings
-copy renamings (Lam s body) = do
-    s' <- newSym "c"
-    Lam s' <$> copy ((s, s') : renamings) body
-copy renamings (Apply f a) = Apply <$> copy renamings f <*> copy renamings a
-copy renamings (Xsel i n e) = Xsel i n <$> copy renamings e
-copy _ t = return t
 
 ------------------------------
 

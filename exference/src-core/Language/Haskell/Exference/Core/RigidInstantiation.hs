@@ -72,7 +72,7 @@ mkRigidInstantiationContext environment = RigidInstantiationContext
   (supplyFromIdentifiers $ concatMap rigidIdentifiersInType types)
   (SharedCollection.firstPresent $ map firstRigidForallBinder types)
  where
-  types = environmentTypes environment
+  types = completeEnvironmentTypes environment
 
 -- | Quantified flexible binder IDs paired with their fresh rigid IDs, in the
 -- exact lexical order in which Exference opens the leading forall chain.
@@ -169,8 +169,12 @@ firstRigidForallBinder = SharedCollection.firstPresent
   . map SharedType.rigidVariableIdentity
   . SharedType.typeBinderVariables
 
-environmentTypes :: EnvDictionary -> [HsType]
-environmentTypes environment =
+-- Every type stored anywhere in the environment, including class superclass
+-- and instance constraint arguments: the rigid namespace must account for
+-- rigid identities wherever they occur, unlike the search-input validator's
+-- binding-monotype slice.
+completeEnvironmentTypes :: EnvDictionary -> [HsType]
+completeEnvironmentTypes environment =
   environmentBindingTypes environment
   ++ concatMap (concatMap constraint_params . tclass_constraints)
       (Map.elems $ sClassEnv_tclasses classes)

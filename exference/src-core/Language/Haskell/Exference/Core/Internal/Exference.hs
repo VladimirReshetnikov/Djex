@@ -730,7 +730,7 @@ prepareExferenceInput input = do
   validateBindingClassConstraints environment
   validateInputTypes
     $ [queryGoalType query]
-    ++ environmentTypes environment
+    ++ environmentBindingMonotypes environment
     ++ concatMap (constraint_params . snd) allConstraints
   validateEnvironmentDeconstructors environment
   let canonicalEnvironment = canonicalizeEnvironment environment
@@ -805,7 +805,7 @@ validateExferenceEnvironment environment = do
   validateConstraintForalls constraints
   validateBindingClassConstraints environment
   validateInputTypes
-    $ environmentTypes environment
+    $ environmentBindingMonotypes environment
     ++ concatMap (constraint_params . snd) constraints
   validateEnvironmentDeconstructors environment
  where
@@ -1096,8 +1096,11 @@ firstInvalidGeneratedBinding environment = listToMaybe
       $ SharedGenerated.Global name]
   ]
 
-environmentTypes :: EnvDictionary -> [HsType]
-environmentTypes environment =
+-- Binding monotypes only: constraint argument types are validated beside
+-- their sites through 'environmentConstraints', unlike the rigid planner's
+-- complete environment scan.
+environmentBindingMonotypes :: EnvDictionary -> [HsType]
+environmentBindingMonotypes environment =
   map functionBindingType (environmentFunctions environment)
   ++ map deconstructorBindingType (environmentDeconstructors environment)
 
@@ -1171,13 +1174,18 @@ limitQueue
   -> Q.MaxPQueue priority value
   -> (Q.MaxPQueue priority value, Natural)
 limitQueue Nothing queue = (queue, 0)
-limitQueue (Just maximumSize) queue =
-  let entries = Q.toDescList queue
-      retentionLimit = max 0 maximumSize
-      retained = take retentionLimit entries
-      queueSize = Q.size queue
-      retainedSize = min retentionLimit queueSize
-  in (Q.fromList retained, fromIntegral $ queueSize - retainedSize)
+limitQueue (Just maximumSize) queue
+  -- A queue already within its bound is returned untouched; rebuilding it
+  -- from a sorted list on every step would make each search step cost
+  -- O(n log n) whenever a maximum size is configured.
+  | queueSize <= retentionLimit = (queue, 0)
+  | otherwise =
+      ( Q.fromList $ take retentionLimit $ Q.toDescList queue
+      , fromIntegral $ queueSize - retentionLimit
+      )
+ where
+  retentionLimit = max 0 maximumSize
+  queueSize = Q.size queue
 
 maximumPQueueSize :: Natural
 maximumPQueueSize = fromIntegral (maxBound :: Int)

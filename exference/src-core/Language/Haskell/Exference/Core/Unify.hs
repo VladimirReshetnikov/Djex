@@ -76,21 +76,9 @@ unifyShared rawLeft rawRight = do
   let variables = Set.toAscList $ Set.union
         (freeVars left)
         (freeVars right)
-  pure $ IntMap.fromList $ mapMaybe (project substitutions) variables
- where
-  project substitutions variable =
-    let resolved = untagTagged taggedIdentifier
-          $ zonkTagged substitutions
-          $ TaggedVar
-          $ LeftVariable variable
-    in if resolved == TypeVar variable
-       then Nothing
-       else Just (variable, resolved)
-  -- 'RightVariable' cannot be produced by this entry point, but keeping the
-  -- projection total makes that solver invariant local and explicit.
-  taggedIdentifier tagged = case tagged of
-    LeftVariable variable -> variable
-    RightVariable variable -> variable
+  pure $ IntMap.fromList $ mapMaybe
+    (projectVariableBinding plainIdentifier substitutions LeftVariable)
+    variables
 
 {-# INLINE unifyOffset #-}
 unifyOffset :: HsType -> HsTypeOffset -> Maybe (Substs, Substs)
@@ -240,23 +228,44 @@ projectTagged left right substitutions = do
   let
       canonicalRight variable = IntMap.findWithDefault variable variable
         rightCanonical
-      project side variable =
-        let resolved = untagTagged externalIdentifier
-              $ zonkTagged substitutions
-              $ TaggedVar $ side variable
-        in if resolved == TypeVar variable
-           then Nothing
-           else Just (variable, resolved)
+      -- Unlike the plain projection, right-side identities untag through
+      -- their freshly allocated canonical spellings.
       externalIdentifier tagged = case tagged of
         LeftVariable variable -> variable
         RightVariable variable -> canonicalRight variable
+      project side = mapMaybe
+        $ projectVariableBinding externalIdentifier substitutions side
   pure
-    ( IntMap.fromList $ mapMaybe (project LeftVariable) leftVariables
-    , IntMap.fromList $ mapMaybe (project RightVariable) rightVariables
+    ( IntMap.fromList $ project LeftVariable leftVariables
+    , IntMap.fromList $ project RightVariable rightVariables
     )
  where
   leftVariables = Set.toAscList $ freeVars left
   rightVariables = Set.toAscList $ freeVars right
+
+-- Resolve one source-side variable through the solved substitutions and
+-- retain a binding only when it resolved to something other than itself.
+projectVariableBinding
+  :: (TaggedVariable -> TVarId)
+  -> TaggedSubstitutions
+  -> (TVarId -> TaggedVariable)
+  -> TVarId
+  -> Maybe (TVarId, HsType)
+projectVariableBinding identifier substitutions side variable =
+  let resolved = untagTagged identifier
+        $ zonkTagged substitutions
+        $ TaggedVar $ side variable
+  in if resolved == TypeVar variable
+     then Nothing
+     else Just (variable, resolved)
+
+-- Both solver tags project to their numeric identity. Entry points that can
+-- only produce one tag still use this total projection, keeping the solver
+-- invariant local and explicit.
+plainIdentifier :: TaggedVariable -> TVarId
+plainIdentifier tagged = case tagged of
+  LeftVariable variable -> variable
+  RightVariable variable -> variable
 
 untagTagged :: (TaggedVariable -> TVarId) -> TaggedType -> HsType
 untagTagged variableIdentifier = SharedType.canonicalizeType . convert
@@ -306,20 +315,12 @@ projectRightSubstitutions
   -> TaggedSubstitutions
   -> Substs
 projectRightSubstitutions equations substitutions = IntMap.fromList
-  $ mapMaybe project rightVariables
+  $ mapMaybe
+      (projectVariableBinding plainIdentifier substitutions RightVariable)
+      rightVariables
  where
   rightVariables = Set.toAscList $ foldMap
     (\(TypeEq _ right) -> freeVars right) equations
-  project variable =
-    let resolved = untagTagged externalIdentifier
-          $ zonkTagged substitutions
-          $ TaggedVar $ RightVariable variable
-    in if resolved == TypeVar variable
-       then Nothing
-       else Just (variable, resolved)
-  externalIdentifier tagged = case tagged of
-    LeftVariable variable -> variable
-    RightVariable variable -> variable
 
 {-# INLINE unifyRightOffset #-}
 unifyRightOffset :: HsType -> HsTypeOffset -> Maybe Substs

@@ -114,11 +114,6 @@ data SynthesisDeclarationError
   | MismatchedClassMethodConstraint
       QualifiedName HsConstraint HsConstraint
   | UnknownClassMethodOwner QualifiedName
-  | MissingClassMethodBindings [QualifiedName]
-  | DuplicateClassMethodBindings [QualifiedName]
-  | OrphanClassMethodBindings [QualifiedName]
-  | MismatchedClassMethodOwners
-      [(QualifiedName, QualifiedName, QualifiedName)]
   | PreparedBindingNamesMismatch
       [QualifiedName] -- ^ Ordered source multiset.
       [QualifiedName] -- ^ Ordered prepared-backend multiset.

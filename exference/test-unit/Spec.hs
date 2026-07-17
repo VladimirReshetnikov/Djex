@@ -3370,6 +3370,36 @@ tests = testGroup "Exference"
             SharedSearch.Completed SharedSearch.Finished
           assertBool "common result unexpectedly gained candidates"
             $ null $ SharedSearch.batchCandidates batch
+      , testCase "partial-application lets retain the remaining arrow type" $ do
+          -- Regression: the search annotated a partially applied let binding
+          -- with the applier's final result type instead of the remaining
+          -- arrow type, so the independent checker rejected -- and the search
+          -- silently discarded -- every solution reusing the shared partial
+          -- application, such as @let v = f a in h (v b) (v b)@ below.
+          let atom spelling = TypeCons $ name spelling
+              partialInput = identityInput
+                { input_goalType = atom "C"
+                , input_envFuncs =
+                    [ FunctionBinding (atom "I") (name "f") 0 []
+                        [atom "A", atom "B"]
+                    , FunctionBinding (atom "C") (name "h") 0 []
+                        [atom "I", atom "I"]
+                    , FunctionBinding (atom "A") (name "a") 0 [] []
+                    , FunctionBinding (atom "B") (name "b") 0 [] []
+                    ]
+                , input_maxSteps = 16384
+                }
+              isArrowType (TypeArrow _ _) = True
+              isArrowType _ = False
+              sharesPartialApplication expression = any (isArrowType . snd)
+                $ expressionTypedLocals expression
+              solutions =
+                [ expression
+                | chunk <- findExpressionsWithStats partialInput
+                , (expression, _, _) <- chunkElements chunk
+                ]
+          assertBool "no emitted solution shared a partially applied binding"
+            $ any sharesPartialApplication solutions
       , testCase "recursive scoped unification does not consume the step budget" $ do
           let variable = TypeVar 0
               applied constructor argument =

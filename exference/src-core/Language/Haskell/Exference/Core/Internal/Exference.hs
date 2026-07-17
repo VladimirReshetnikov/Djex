@@ -1410,7 +1410,12 @@ stateStep allocators multiPM allowConstrs h
           modify $ \node -> node
             { nodeExpression = fillExprHole var (ExpLet
                 vResult
-                provided
+                -- The let binds a one-argument application, so its type keeps
+                -- the remaining parameters. The scope entry below records the
+                -- same arrow type; annotating with the bare result type would
+                -- make the independent checker reject every candidate that
+                -- retains this let.
+                (SharedType.functionType ds provided)
                 (ExpApply coreExp $ ExpHole vParam)
                 (ExpHole var))
                 (nodeExpression node)

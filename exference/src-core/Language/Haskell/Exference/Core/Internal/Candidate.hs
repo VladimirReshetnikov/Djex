@@ -201,7 +201,7 @@ projectValidatedCandidate
   -> ExferenceStats
   -> ExferenceCandidate
 projectValidatedCandidate target typeNames expression constraints statistics =
-  fmap (Generated.FunctionClause target []) $ force
+  fmap (Generated.functionClauseFromExpression target) $ force
   $ Candidate (Exference.toGeneratedExpression expression)
       constraints ExferenceCandidateDetails
       { exferenceCandidateStats = statistics

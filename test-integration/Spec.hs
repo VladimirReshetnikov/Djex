@@ -369,11 +369,14 @@ tests = testGroup "Djex facade"
           resultEvidence result @?= ValidatedCandidates
           case batchCandidates $ resultSearch result of
             candidate : _ -> case candidateOutput candidate of
-              FunctionClause actualTarget patterns _ -> do
+              FunctionClause actualTarget patterns body -> do
                 actualTarget @?=
                   requestTarget (exferenceRequestQuery request)
                 definitionName actualTarget @?= target
-                patterns @?= []
+                case (patterns, body) of
+                  ([Bind binder], Local occurrence) -> binder @?= occurrence
+                  _ -> fail $ "identity lambda was not promoted to a clause: "
+                    ++ show (patterns, body)
                 exferenceCandidateMetrics candidate @?=
                   exferenceCandidateStatistics (candidateDetails candidate)
             [] -> fail "Exference reported candidate evidence without a candidate"

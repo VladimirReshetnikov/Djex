@@ -6943,7 +6943,8 @@ assertSameBatch label target historical canonical = do
     , exferenceDepthPruned = fromIntegral $ searchDepthPruned status
     }
   expectedCandidates =
-    [ ( Generated.FunctionClause target [] $ toGeneratedExpression expression
+    [ ( Generated.functionClauseFromExpression target
+          $ toGeneratedExpression expression
       , constraints
       , statistics
       , expressionNameHints expression

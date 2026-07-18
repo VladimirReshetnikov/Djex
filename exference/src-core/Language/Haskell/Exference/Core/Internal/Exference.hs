@@ -7,6 +7,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   ( findExpressions
   , findExpressionsWithAllocators
   , findQueryResultsInEnvironmentEither
+  , findQueryResultsInEnvironmentWithCheckedOptions
   , findQueryResultsWithAllocators
   , queryProjectionStrictnessForTesting
   , prepareExferenceInput
@@ -14,6 +15,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInput (..)
   , ExferenceEnvironment
   , ExferenceQuery (..)
+  , CheckedExferenceOptions
   , ExferenceOutputElement
   , ExferenceChunkElement (..)
   , ExferenceBatchMetadata (..)
@@ -29,6 +31,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInputError (..)
   , isExferenceOptionError
   , mkExferenceEnvironment
+  , checkExferenceOptions
   , validateExferenceOptions
   , validateExferenceQuery
   , validateExferenceInput
@@ -146,6 +149,12 @@ data ExferenceQuery = ExferenceQuery
       -- ^ Exact grouped search policy retained from the checked request.
   }
   deriving (Eq, Show)
+
+-- | Search controls that crossed their complete validation boundary.  The
+-- constructor stays private even inside the package: checked adapters can
+-- preserve option-before-elaboration diagnostics without giving preparation
+-- a second authority over the same fields.
+data CheckedExferenceOptions = CheckedExferenceOptions !ExferenceOptions
 
 -- | A query sealed together with the exact environment and rigid-variable
 -- plan against which it was validated.  Keeping this artifact private makes
@@ -654,6 +663,21 @@ findQueryResultsInEnvironmentEither
 findQueryResultsInEnvironmentEither =
   findQueryResultsWithAllocators defaultSearchAllocators
 
+-- | Run a query whose options were checked before adapter-specific work.
+-- The witness is authoritative: replacing the query field also means this
+-- entrance cannot accidentally inspect or trust a second, unchecked copy.
+-- This operation is exported only from the Cabal-private implementation
+-- module and therefore does not weaken the public checked core boundary.
+findQueryResultsInEnvironmentWithCheckedOptions
+  :: SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceResult]
+findQueryResultsInEnvironmentWithCheckedOptions =
+  findQueryResultsWithCheckedOptionsAndAllocators defaultSearchAllocators
+
 -- The allocator-parametric form is an internal test seam for exercising
 -- finite identifier exhaustion.  Keeping preparation here guarantees that
 -- production and those tests share the exact one-validation result path.
@@ -665,8 +689,23 @@ findQueryResultsWithAllocators
   -> ExferenceQuery
   -> Either ExferenceInputError [ExferenceResult]
 findQueryResultsWithAllocators allocators' target sourceHints environment query = do
+  checkedOptions <- checkExferenceOptions $ querySearchOptions query
+  findQueryResultsWithCheckedOptionsAndAllocators
+    allocators' target sourceHints environment query checkedOptions
+
+findQueryResultsWithCheckedOptionsAndAllocators
+  :: SearchAllocators
+  -> SharedGenerated.DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> ExferenceEnvironment
+  -> ExferenceQuery
+  -> CheckedExferenceOptions
+  -> Either ExferenceInputError [ExferenceResult]
+findQueryResultsWithCheckedOptionsAndAllocators
+    allocators' target sourceHints environment query checkedOptions = do
   checked@(CheckedExferenceQuery _ checkedQuery rigidPlan) <-
-    prepareExferenceQuery environment queryWithTargetExcluded
+    prepareExferenceQueryWithCheckedOptions
+      environment checkedOptions queryWithTargetExcluded
   -- The opaque value is paired with the exact canonical goal for which its
   -- spelling scope was checked. Stable adapters retarget it only while
   -- performing origin-safe synonym elaboration; direct core callers cannot
@@ -807,9 +846,21 @@ prepareExferenceQuery
   :: ExferenceEnvironment
   -> ExferenceQuery
   -> Either ExferenceInputError CheckedExferenceQuery
-prepareExferenceQuery sealed@(ExferenceEnvironment environment rigidContext)
-    query = do
-  validateExferenceOptions $ querySearchOptions query
+prepareExferenceQuery sealed query = do
+  checkedOptions <- checkExferenceOptions $ querySearchOptions query
+  prepareExferenceQueryWithCheckedOptions sealed checkedOptions query
+
+-- The checked options replace rather than merely justify the public record
+-- field. Thus even a future internal caller cannot validate one value and
+-- make search consume another.
+prepareExferenceQueryWithCheckedOptions
+  :: ExferenceEnvironment
+  -> CheckedExferenceOptions
+  -> ExferenceQuery
+  -> Either ExferenceInputError CheckedExferenceQuery
+prepareExferenceQueryWithCheckedOptions
+    sealed@(ExferenceEnvironment environment rigidContext)
+    (CheckedExferenceOptions options) uncheckedQuery = do
   validateQueryInputWidths environment query
   validateQueryForall query
   validateConstraintForalls constraints
@@ -821,6 +872,7 @@ prepareExferenceQuery sealed@(ExferenceEnvironment environment rigidContext)
   rigidPlan <- prepareRigidInstantiation rigidContext canonicalQuery
   pure $ CheckedExferenceQuery sealed canonicalQuery rigidPlan
  where
+  query = uncheckedQuery {querySearchOptions = options}
   constraints = queryConstraints query
 
 -- | Compatibility projection retaining the established validation API.
@@ -838,9 +890,18 @@ validateExferenceQuery environment query =
 validateExferenceOptions
   :: ExferenceOptions
   -> Either ExferenceInputError ()
-validateExferenceOptions options = do
+validateExferenceOptions options = () <$ checkExferenceOptions options
+
+-- | Validate every search-control field once and retain the exact accepted
+-- record for later preparation. This remains package-private; public core
+-- callers continue through 'validateExferenceOptions' or a checked search.
+checkExferenceOptions
+  :: ExferenceOptions
+  -> Either ExferenceInputError CheckedExferenceOptions
+checkExferenceOptions options = do
   validateOptionsLimits options
   validateOptionsHeuristics options
+  pure $ CheckedExferenceOptions options
 
 validateExferenceEnvironment
   :: EnvDictionary

@@ -16,6 +16,10 @@ facadeTests = testGroup "public Djex facade"
   , testCase "exports the shared name vocabulary" $
       assertBool "qualified name was rejected" $
         isRight $ parseName "Data.Function.fix"
+  , testCase "exports shared qualification helpers" $ do
+      value <- expectRight $ parseName "Data.Function.fix"
+      renderNamePrefix FullyQualified value @?= "Data.Function.fix"
+      emittedIdentifier Unqualified value @?= Just "fix"
   , testCase "exports shared collection observations" $
       ( multiplicityOf "value" (summarizeDuplicates ["value", "value"])
       , firstDuplicate ["first", "second", "first"]

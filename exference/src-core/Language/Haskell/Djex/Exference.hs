@@ -129,8 +129,7 @@ import Language.Haskell.Djex.Exference.Internal.Request
   , defaultExferenceOptions
   , exferenceRequestQuery
   , mkExferenceRequest
-  , requestContextualGoal
-  , requestSourceTypeVariableHints
+  , prepareExferenceRequestContexts
   , withExferenceRequestProvenance
   )
 import Language.Haskell.Synthesis.Candidate
@@ -525,15 +524,17 @@ runExferenceQuery
 runExferenceQuery session request = do
   let query = exferenceRequestQuery request
       target = requestTarget query
-      sharedGoal = requestContextualGoal request
       requestDiagnostic = withExferenceRequestProvenance request
       optionFailure = shownErrorDiagnostic
         "DJEX_EXF_OPTIONS" "invalid Exference search options"
   -- Options are session-independent request policy. Check them before goal
   -- elaboration so reusing a request against an incompatible session cannot
   -- give a malformed option source provenance or a synonym/kind diagnostic.
-  first optionFailure
-    $ CoreInternal.validateExferenceOptions $ requestOptions query
+  checkedOptions <- first optionFailure
+    $ CoreInternal.checkExferenceOptions $ requestOptions query
+  (sharedGoal, checkedSourceHints) <-
+    prepareExferenceRequestContexts
+      (Session.sessionClassArity session) request
   elaboratedGoal <- first (requestDiagnostic . elaborationFailure)
     $ Session.elaborateSessionGoal session sharedGoal
   backendGoal <- first
@@ -543,7 +544,7 @@ runExferenceQuery session request = do
     )
     $ fromSynthesisType elaboratedGoal
   let sourceHints = retargetExferenceSourceTypeVariableHints
-        elaboratedGoal $ requestSourceTypeVariableHints request
+        elaboratedGoal checkedSourceHints
   -- The direct result boundary owns exact target exclusion and result naming,
   -- so query validation and rigid-instantiation planning happen only once.
   -- Option failures stay source-free like Djinn's: separately supplied
@@ -555,11 +556,12 @@ runExferenceQuery session request = do
         | otherwise = requestDiagnostic $ shownErrorDiagnostic
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
   first searchFailure
-    $ Core.findQueryResultsInEnvironmentEither
+    $ CoreInternal.findQueryResultsInEnvironmentWithCheckedOptions
         target
         sourceHints
         (Session.sessionSearchEnvironment session)
         input
+        checkedOptions
 
 elaborationFailure
   :: TypeElaborationError ExferenceTypeVariable

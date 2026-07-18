@@ -17,8 +17,7 @@ module Language.Haskell.Djex.Exference.Internal.Request
   , mkExferenceRequest
   , mkExferenceRequestWithSourceInfo
   , exferenceRequestQuery
-  , requestContextualGoal
-  , requestSourceTypeVariableHints
+  , prepareExferenceRequestContexts
   , withExferenceRequestProvenance
   , validateExferenceTarget
   ) where
@@ -35,8 +34,9 @@ import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.Core.Internal.Candidate
   ( ExferenceSourceTypeVariableHintError
   , ExferenceSourceTypeVariableHints
-  , mkExferenceSourceTypeVariableHints
-  , sourceTypeVariableHintGoal
+  , ExferenceSourceTypeVariableNames
+  , bindExferenceSourceTypeVariableHints
+  , mkExferenceSourceTypeVariableNames
   )
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import Language.Haskell.Synthesis.Diagnostic
@@ -59,13 +59,19 @@ import Language.Haskell.Synthesis.Query
   , cachedQueryRequest
   , requestTypeSiteLabel
   , sealCachedQueryWithProvenance
-  , traverseRequestTypes
   , requestContextualType
+  , traverseRequestContextsWithKnownArity
   , validateRequestTarget
   , withCachedQueryProvenance
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type (Type)
+import Language.Haskell.Synthesis.KindInference
+  ( KindInferenceError (ClassArityMismatch) )
+import Language.Haskell.Synthesis.TypeSynonym
+  ( ElaborationPhase (BeforeExpansion)
+  , TypeElaborationError (IllKindedType)
+  )
 
 -- | Generated-expression binder identities used by Exference.
 type ExferenceLocal = Int
@@ -84,20 +90,20 @@ type ExferenceType = Type ExferenceTypeVariable
 -- of the stable request value. Location provenance is owned separately by the
 -- shared envelope, which gives both adapters the same query-only equality and
 -- display contract.
-newtype ExferenceRequest = ExferenceRequest
-  (CachedQuery
-    ExferenceType
-    ExferenceOptions
-    ExferenceSourceTypeVariableHints)
-  deriving (Eq, Show)
-    via (CachedQuery
-      ExferenceType
-      ExferenceOptions
-      ExferenceSourceTypeVariableHints)
+data ExferenceRequestPlan = ExferenceRequestPlan
+  { plannedGoal :: ExferenceType
+  , plannedSourceTypeVariableNames :: ExferenceSourceTypeVariableNames
+  }
 
--- | Validate and seal a programmatic request. The goal and every context are
--- normalized in request order, and any diagnostic is intentionally
--- source-less.
+newtype ExferenceRequest = ExferenceRequest
+  (CachedQuery ExferenceType ExferenceOptions ExferenceRequestPlan)
+  deriving (Eq, Show)
+    via (CachedQuery ExferenceType ExferenceOptions ExferenceRequestPlan)
+
+-- | Validate and seal a programmatic request. The goal and every context
+-- class name are checked in request order, and any diagnostic is
+-- intentionally source-less. Context argument spines remain deferred until a
+-- session can supply their known class arities.
 mkExferenceRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ExferenceRequest
@@ -123,34 +129,29 @@ mkExferenceRequestWithProvenance
   -> Either Diagnostic ExferenceRequest
 mkExferenceRequestWithProvenance sourceVariables provenance query =
   ExferenceRequest <$> sealCachedQueryWithProvenance provenance (do
-    canonicalQuery <- normalizeRequest query
-    validateRequest canonicalQuery
-    let contextualGoal = requestContextualType canonicalQuery
-    sourceHints <- first sourceHintFailure
-      $ mkExferenceSourceTypeVariableHints contextualGoal sourceVariables
-    -- Publish the caller's exact neutral request while retaining the
-    -- canonical contextual goal inside the opaque hint witness. This matches
-    -- Djinn's exact-request/private-plan contract: equality and display
-    -- describe the supplied request, whereas execution consumes only the
-    -- checked cache derived from it.
-    pure (query, sourceHints))
+    canonicalGoal <- normalizeRequestType RequestGoal $ requestGoal query
+    mapM_ validateRequestConstraint $ requestContexts query
+    sourceNames <- first sourceHintFailure
+      $ mkExferenceSourceTypeVariableNames sourceVariables
+    -- Publish the caller's exact neutral request while retaining only the
+    -- canonical goal and detached checked spellings. This matches Djinn's
+    -- exact-request/private-plan contract: equality and display describe the
+    -- supplied request, whereas execution consumes only cache data derived
+    -- from it.
+    pure (query, ExferenceRequestPlan canonicalGoal sourceNames))
 
 -- Store exactly the canonical native representation that the checked
--- Exference core consumes.  Normalizing each context argument separately
--- also rejects rigid forall binders before contexts are inserted into the
--- contextual goal by the shared query envelope.  Failures keep the shared
--- goal-versus-context site role, matching Djinn's request diagnostics.
-normalizeRequest
-  :: QueryRequest ExferenceType ExferenceOptions
-  -> Either Diagnostic (QueryRequest ExferenceType ExferenceOptions)
-normalizeRequest = traverseRequestTypes
-  (\site -> first (invalidRequestType site) . toSynthesisType)
-  validateRequestConstraint
+-- Exference core consumes. Context arguments take this same path later, once
+-- their owning session has bounded each class application.
+normalizeRequestType
+  :: RequestTypeSite
+  -> ExferenceType
+  -> Either Diagnostic ExferenceType
+normalizeRequestType site = first (invalidRequestType site) . toSynthesisType
 
--- Type arguments have just crossed the checked native-type boundary. Finish
--- each complete constraint here, before traversing the next context, so the
--- shared request traversal's source-order failure contract is not weakened by
--- a later whole-request validation pass.
+-- Validate the nominal header without inspecting its argument spine. The
+-- same check finishes a session-bounded normalized constraint before the next
+-- context is entered.
 validateRequestConstraint
   :: SharedConstraint.Constraint ExferenceType
   -> Either Diagnostic (SharedConstraint.Constraint ExferenceType)
@@ -174,12 +175,6 @@ exferenceRequestQuery
   -> QueryRequest ExferenceType ExferenceOptions
 exferenceRequestQuery (ExferenceRequest query) = cachedQueryRequest query
 
-requestSourceTypeVariableHints
-  :: ExferenceRequest
-  -> ExferenceSourceTypeVariableHints
-requestSourceTypeVariableHints (ExferenceRequest query) =
-  cachedQueryCache query
-
 withExferenceRequestProvenance
   :: ExferenceRequest
   -> Diagnostic
@@ -187,9 +182,43 @@ withExferenceRequestProvenance
 withExferenceRequestProvenance (ExferenceRequest query) =
   withCachedQueryProvenance query
 
-requestContextualGoal :: ExferenceRequest -> ExferenceType
-requestContextualGoal = sourceTypeVariableHintGoal
-  . requestSourceTypeVariableHints
+-- | Normalize and scope-check the deferred context arguments against the
+-- class arities known by one session, then bind detached source spellings to
+-- the resulting contextual goal.
+--
+-- Known arity is checked before entering an argument spine. An over-applied
+-- or cyclic list therefore produces the same kind diagnostic after a bounded
+-- observation, while finite unknown external constraints retain Exference's
+-- open-world elaboration policy.
+prepareExferenceRequestContexts
+  :: (Name -> Maybe Int)
+  -> ExferenceRequest
+  -> Either Diagnostic
+       (ExferenceType, ExferenceSourceTypeVariableHints)
+prepareExferenceRequestContexts lookupClassArity request =
+  first (withExferenceRequestProvenance request) $ do
+    let query = exferenceRequestQuery request
+        plan = exferenceRequestPlan request
+    contexts <- traverseRequestContextsWithKnownArity
+      lookupClassArity contextArityFailure normalizeRequestType
+      validateRequestConstraint $ requestContexts query
+    let canonicalQuery = query
+          { requestGoal = plannedGoal plan
+          , requestContexts = contexts
+          }
+    validateRequest canonicalQuery
+    let contextualGoal = requestContextualType canonicalQuery
+    sourceHints <- first sourceHintFailure
+      $ bindExferenceSourceTypeVariableHints contextualGoal
+      $ plannedSourceTypeVariableNames plan
+    pure (contextualGoal, sourceHints)
+
+contextArityFailure :: Name -> Int -> Int -> Diagnostic
+contextArityFailure name expected actual = shownErrorDiagnostic
+  "DJEX_EXF_KIND" "Exference rejected the query kind"
+  (IllKindedType BeforeExpansion
+    (ClassArityMismatch name expected actual)
+      :: TypeElaborationError ExferenceTypeVariable)
 
 validateRequest
   :: QueryRequest ExferenceType ExferenceOptions
@@ -226,6 +255,9 @@ inScopeContextVariables
   -> Set.Set ExferenceTypeVariable
 inScopeContextVariables goal = SharedType.freeVariables goal
   `Set.union` Set.fromList (SharedType.leadingForallVariables goal)
+
+exferenceRequestPlan :: ExferenceRequest -> ExferenceRequestPlan
+exferenceRequestPlan (ExferenceRequest query) = cachedQueryCache query
 
 -- | Check the source-level name of an Exference result definition.
 -- Frontends use this before parsing so command-usage errors retain precedence

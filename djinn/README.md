@@ -581,8 +581,12 @@ neutral `QueryRequest` followed by `mkDjinnRequest`, and use
 `djinnRequestQuery` when they need to inspect that original value. Sealing
 receives the request's already checked shared `DefinitionName`, checks Djinn's
 narrower class-name namespace, retains that target in the original
-`QueryRequest`, and caches only a canonical shared goal and shared context
-arguments. The raw-`Name` parser helper constructs
+`QueryRequest`, and caches only a canonical shared goal. Exact context
+arguments remain in the neutral request until execution, when the selected
+session resolves the class and checks its declared arity before entering the
+argument spine. A cyclic or over-applied known-class spine therefore produces
+a bounded query diagnostic without imposing a global maximum class arity.
+The raw-`Name` parser helper constructs
 that checked target before parsing so target diagnostics retain precedence;
 search-option validation and all environment-dependent class and kind checks
 still occur when the request is run. One request can therefore elaborate the

@@ -8,6 +8,7 @@ module Language.Haskell.Exference.Core.Internal.Testing
   , findExpressionsWithIdentifierCapacitiesEither
   , findQueryResultsWithIdentifierCapacitiesEither
   , queryProjectionStrictnessForTesting
+  , singleOptionValidationStrictnessForTesting
   , compatibilityPruningCount
   , compatibilityBindingUsageCounts
   , mergePriorityQueueAtCapacity
@@ -82,6 +83,26 @@ queryProjectionStrictnessForTesting
      , DefinitionName
      )
 queryProjectionStrictnessForTesting = E.queryProjectionStrictnessForTesting
+
+-- | Check options, poison the original public query field, and enter the
+-- package-private checked-options runner. Success proves that preparation
+-- consumes the retained witness instead of evaluating the options again.
+singleOptionValidationStrictnessForTesting
+  :: DefinitionName
+  -> ExferenceSourceTypeVariableHints
+  -> E.ExferenceEnvironment
+  -> E.ExferenceQuery
+  -> Either E.ExferenceInputError ()
+singleOptionValidationStrictnessForTesting
+    target sourceHints environment query = do
+  checkedOptions <- E.checkExferenceOptions $ E.querySearchOptions query
+  () <$ E.findQueryResultsInEnvironmentWithCheckedOptions
+    target sourceHints environment poisonedQuery checkedOptions
+ where
+  poisonedQuery = query
+    { E.querySearchOptions =
+        error "checked Exference options were evaluated a second time"
+    }
 
 -- | Exercise the queue representation boundary with tiny payloads rather
 -- than attempting to allocate an Int-sized frontier.

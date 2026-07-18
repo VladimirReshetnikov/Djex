@@ -247,12 +247,15 @@ sealing a complete neutral `Environment`; only the historical REPL imports the
 private raw declaration snapshot, edit, and instance-method helpers.
 
 Both `DjinnRequest` and `DjinnCandidate` expose
-`DjinnType = Type DjinnTypeVariable`; that shared type is checked and
-canonicalized once by `mkDjinnRequest`, which seals an opaque shared
-execution plan while retaining the caller's exact neutral query, and
-`djinnRequestQuery` recovers the exact stable source view. The plan stays
-shared through environment-dependent kind checking, synonym elaboration,
-class-method instantiation, and formula compilation. Queries return shared
+`DjinnType = Type DjinnTypeVariable`. `mkDjinnRequest` checks and canonicalizes
+the goal, validates each context class header without entering its argument
+spine, and seals an opaque shared execution plan while retaining the caller's
+exact neutral query; `djinnRequestQuery` recovers that stable source view.
+Execution resolves each class in the selected session and checks its finite
+arity before normalizing the arguments, so known cyclic spines terminate
+without a global class-width limit. The plan stays shared through
+environment-dependent kind checking, synonym elaboration, class-method
+instantiation, and formula compilation. Queries return shared
 candidates containing structured generated clauses, empty residual
 constraints, and Djinn's unused-binder ranking details in one terminal
 batch. A proof beyond `optionCutoff` produces
@@ -290,16 +293,20 @@ their genuine variable/binder and source-vocabulary restrictions.
 `ExferenceRequest` is opaque in the same operational sense as
 `DjinnRequest`: the stable adapter exposes only `mkExferenceRequest` and
 `exferenceRequestQuery`, and source locations and parsed variable spellings
-are private presentation data. Execution uses only the canonical contextual
-goal retained in the private plan, while projection, equality, and display
-publish the caller's exact neutral request. The common `CachedQuery` owns
-the strict location separately from an opaque backend-specific
-variable-to-spelling value; that checked hint witness also owns the
-canonical contextual goal, so query execution does not rebuild it. The
-source SPI validates every raw alias as a non-wildcard variable identifier,
-bounds its ID to the complete contextual goal, collapses aliases
-deterministically, retains the exact canonical goal as a scope witness, and
-detaches the map before returning. Shared synonym elaboration
+are private presentation data. The private plan retains the canonical goal
+and a detached, lexically checked spelling index, while projection, equality,
+and display publish the caller's exact neutral request. Context argument
+normalization is intentionally deferred: when a request is run, the session's
+known class arity bounds each argument spine before traversal, without a
+global class-arity limit. The adapter then checks context scope, builds the
+canonical contextual goal, and binds the detached spellings to it. This makes
+caller-built cyclic spines for known classes terminate with a structured kind
+diagnostic while preserving ordinary finite external constraints. The common
+`CachedQuery` owns the strict location separately from that opaque plan. The
+source SPI validates every raw alias as a non-wildcard variable identifier
+and detaches the map while sealing; contextual scope and deterministic alias
+collapse occur once the session-bounded goal is available. Shared synonym
+elaboration
 alpha-freshens every alias-introduced binder away from the complete
 original source namespace, including through nested and zero-argument
 aliases, so the adapter can retarget surviving hints to the elaborated goal

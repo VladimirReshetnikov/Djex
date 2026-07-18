@@ -56,7 +56,6 @@ import Language.Haskell.Synthesis.Query
   , cachedQueryRequest
   , requestTypeSiteLabel
   , sealCachedQueryWithProvenance
-  , traverseRequestTypes
   , validateRequestTarget
   , withCachedQueryProvenance
   , withRequestProvenance
@@ -85,7 +84,6 @@ type DjinnType = Type DjinnTypeVariable
 -- reusable request never retains a second recursive type representation.
 data DjinnRequestPlan = DjinnRequestPlan
   { plannedGoal :: DjinnType
-  , plannedContexts :: [Constraint DjinnType]
   }
 
 -- | A checked query whose exact neutral spelling and canonical shared plan
@@ -97,9 +95,12 @@ newtype DjinnRequest = DjinnRequest
     via (CachedQuery DjinnType QueryOptions DjinnRequestPlan)
 
 -- | Check the session-independent portion of a neutral Djinn query.
--- Goal and context arguments are canonicalized once into a shared plan, while
--- 'djinnRequestQuery' retains the caller's exact neutral value. Search options
--- and all environment-dependent kind, class, and synonym checks deliberately
+-- The goal is canonicalized once into a shared plan, while
+-- 'djinnRequestQuery' retains the caller's exact neutral value. Context class
+-- names are checked here, but their argument spines are deliberately deferred:
+-- only a session's declared class arity can bound a cyclic caller-built list
+-- without imposing an arbitrary library-wide maximum. Search options and all
+-- environment-dependent kind, class, synonym, and context-argument checks
 -- remain the responsibility of the facade's query worker. A request can
 -- therefore run against another compatible session without retaining the
 -- first session's alias meanings.
@@ -115,14 +116,12 @@ mkDjinnRequestWithProvenance
   -> Either Diagnostic DjinnRequest
 mkDjinnRequestWithProvenance provenance query = DjinnRequest <$>
   sealCachedQueryWithProvenance provenance (do
-    normalized <- traverseRequestTypes
-      normalizeRequestType validateRequestContext query
+    normalizedGoal <- normalizeRequestType RequestGoal $ requestGoal query
+    mapM_ validateRequestContext $ requestContexts query
     pure
       ( query
       , DjinnRequestPlan
-        { plannedGoal = requestGoal normalized
-        , plannedContexts = requestContexts normalized
-        }
+        { plannedGoal = normalizedGoal }
       ))
 
 -- | Recover the exact neutral query from which this checked request was
@@ -136,9 +135,11 @@ djinnRequestQuery (DjinnRequest query) = cachedQueryRequest query
 requestPlanGoal :: DjinnRequest -> DjinnType
 requestPlanGoal = plannedGoal . djinnRequestPlan
 
--- | Recover the canonical contexts consumed by the private query worker.
+-- | Recover the exact contexts consumed by the private query worker.
+-- The core resolves their classes and checks the known arity before entering
+-- an argument spine, then normalizes the finite arguments for execution.
 requestPlanContexts :: DjinnRequest -> [Constraint DjinnType]
-requestPlanContexts = plannedContexts . djinnRequestPlan
+requestPlanContexts = requestContexts . djinnRequestQuery
 
 -- | Attach a request's sealed provenance to a diagnostic.
 withDjinnRequestProvenance

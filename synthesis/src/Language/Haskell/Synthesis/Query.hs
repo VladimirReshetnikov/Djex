@@ -16,6 +16,7 @@ module Language.Haskell.Synthesis.Query
   , RequestTypeSite (..)
   , requestTypeSiteLabel
   , traverseRequestTypes
+  , traverseRequestContextsWithKnownArity
   , requestContextualType
   , RequestProvenance (..)
   , withRequestProvenance
@@ -40,7 +41,10 @@ import Control.DeepSeq (NFData (rnf))
 import Data.Bifunctor (first)
 import GHC.Generics (Generic)
 
-import Language.Haskell.Synthesis.Constraint (Constraint)
+import Language.Haskell.Synthesis.Constraint
+  ( Constraint
+  , validateKnownConstraintArityWith
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceLocation
@@ -117,6 +121,11 @@ requestTypeSiteLabel RequestContextArgument = "context"
 -- rebuilding requests during normalization. In particular, ordinary
 -- left-biased monads such as 'Either' observe goal failures before the
 -- context list, and a context-level failure before any later context.
+--
+-- This general traversal assumes that every context argument spine is
+-- finite. Stable request constructors receiving caller-built lazy values
+-- should defer those spines until an environment can use
+-- 'traverseRequestContextsWithKnownArity' instead.
 traverseRequestTypes
   :: Monad effect
   => (RequestTypeSite -> source -> effect target)
@@ -131,6 +140,33 @@ traverseRequestTypes transform finishContext request = QueryRequest
         >>= finishContext)
       (requestContexts request)
   <*> pure (requestOptions request)
+
+-- | Traverse context arguments only after checking every class whose arity
+-- is known to the supplied environment.
+--
+-- A known argument spine is observed through at most one cell beyond its
+-- declared width before any element is entered. This makes a session's class
+-- table the structural bound for cyclic and over-applied caller-built lists;
+-- no library-wide maximum class arity is imposed. Unknown classes retain the
+-- caller's existing open-world policy and therefore require an ordinary
+-- finite argument spine.
+--
+-- Contexts and arguments retain source order. The complete-context callback
+-- runs after its arguments and before the next context, matching
+-- 'traverseRequestTypes'.
+traverseRequestContextsWithKnownArity
+  :: (Name -> Maybe Int)
+  -> (Name -> Int -> Int -> error)
+  -> (RequestTypeSite -> source -> Either error target)
+  -> (Constraint target -> Either error (Constraint target))
+  -> [Constraint source]
+  -> Either error [Constraint target]
+traverseRequestContextsWithKnownArity lookupArity arityFailure transform
+    finishContext = traverse traverseContext
+ where
+  traverseContext context = do
+    validateKnownConstraintArityWith lookupArity arityFailure context
+    traverse (transform RequestContextArgument) context >>= finishContext
 
 -- | Whether a checked request came from an in-memory API value or a complete
 -- source location.

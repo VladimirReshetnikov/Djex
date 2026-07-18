@@ -44,7 +44,6 @@ import Language.Haskell.Exference.Core
   , constraintsRelaxedAtStep
   , defaultHeuristicsConfig
   , emptyExferenceSourceTypeVariableHints
-  , findExpressionsWithStats
   , findExpressionsWithStatsEither
   , findQueryResultsInEnvironmentEither
   , mkExferenceEnvironment
@@ -105,6 +104,7 @@ import Language.Haskell.Exference.Core.Internal.Testing
   , mergePriorityQueueAtCapacity
   , pruningReasonsFromNaturalTotals
   , queryProjectionStrictnessForTesting
+  , singleOptionValidationStrictnessForTesting
   , typeComplexityForTesting
   )
 import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
@@ -117,7 +117,11 @@ import Language.Haskell.Exference
   , Penalty (..)
   , findExpressionsEither
   )
-import DeprecatedCompatibility (findOneExpression, largestId)
+import DeprecatedCompatibility
+  ( findExpressionsWithStats
+  , findOneExpression
+  , largestId
+  )
 import Language.Haskell.Exference.EnvironmentParser
   ( EnvironmentLoadError (..)
   , LoadReport (..)
@@ -2837,6 +2841,14 @@ tests = testGroup "Exference"
           validateExferenceQuery environment query @?= preparedQuery query
           validateExferenceQuery environment invalidQuery @?=
             preparedQuery invalidQuery
+      , testCase "prepared queries consume one validated options witness" $ do
+          environment <- expectRight $ sealLegacyEnvironment identityInput
+          target <- checkedIdentifierTarget "singleOptionValidation"
+          let query = legacyInputQuery identityInput
+              sourceHints = emptyExferenceSourceTypeVariableHints
+                $ queryGoalType query
+          singleOptionValidationStrictnessForTesting
+            target sourceHints environment query @?= Right ()
       , testCase "query options validate against one sealed environment" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
           let query = legacyInputQuery identityInput
@@ -3495,6 +3507,9 @@ tests = testGroup "Exference"
           case findExpressionsWithStatsEither input of
             Left actual -> actual @?= NestedForallInGoal goal
             Right _ -> fail "the checked chunk API discarded validation failure"
+          case Core.findExpressionsChunkedEither input of
+            Left actual -> actual @?= NestedForallInGoal goal
+            Right _ -> fail "the checked grouped API discarded validation failure"
           let nestedConstraint = HsConstraint (name "Inner") [TypeVar 1]
               outerConstraint = HsConstraint (name "Outer")
                 [TypeForall [1] [nestedConstraint] $ TypeVar 1]
@@ -4046,10 +4061,19 @@ tests = testGroup "Exference"
                 exference_complexityRating baseline + 2
             result -> fail $ "expected two identity candidates, got "
               ++ show result
-      , testCase "negative constraint-deferral steps are rejected" $
-          validateExferenceInput identityInput
-            { input_allowConstraintsStopStep = -1 } @?=
-              Left (InvalidConstraintDeferralSteps (-1))
+      , testCase "negative constraint-deferral steps are rejected" $ do
+          let invalid = identityInput
+                { input_allowConstraintsStopStep = -1 }
+              expected = InvalidConstraintDeferralSteps (-1)
+              assertFailure description result = case result of
+                Left actual -> actual @?= expected
+                Right _ -> fail $ description ++ " discarded validation failure"
+          validateExferenceInput invalid @?= Left expected
+          assertFailure "the checked flat API" $ findExpressionsEither invalid
+          assertFailure "the checked grouped API"
+            $ Core.findExpressionsChunkedEither invalid
+          assertFailure "the checked status API"
+            $ findExpressionsWithStatsEither invalid
       , testCase "non-finite heuristic inputs are rejected" $ do
           let config = defaultHeuristicsConfig
                 {heuristics_goalVar = Penalty (0 / 0)}

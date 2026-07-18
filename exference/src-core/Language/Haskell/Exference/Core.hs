@@ -1,6 +1,7 @@
 module Language.Haskell.Exference.Core
   ( findExpressions
   , findExpressionsChunked
+  , findExpressionsChunkedEither
   , findExpressionsWithStats
   , findExpressionsWithStatsEither
   , E.findQueryResultsInEnvironmentEither
@@ -41,6 +42,13 @@ import qualified Language.Haskell.Exference.Core.Internal.Options as O
 import qualified Language.Haskell.Exference.Core.Candidate as C
 import qualified Language.Haskell.Exference.Core.Score as Score
 
+-- These compatibility projections predate the checked error boundary and
+-- make malformed input observationally identical to a valid empty search.
+-- Retain them for source compatibility, but direct every new caller to an
+-- 'Either'-returning operation.
+{-# DEPRECATED findExpressions, findExpressionsChunked, findExpressionsWithStats
+  "These compatibility functions discard ExferenceInputError; use findExpressionsEither or findExpressionsWithStatsEither." #-}
+
 findExpressions :: E.ExferenceInput -> [E.ExferenceOutputElement]
 findExpressions = either (const []) id . findExpressionsEither
 
@@ -53,7 +61,14 @@ findExpressionsEither input = do
 
 findExpressionsChunked :: E.ExferenceInput
                    -> [[E.ExferenceOutputElement]]
-findExpressionsChunked = either (const []) (map E.chunkElements) . runSearch
+findExpressionsChunked = either (const []) id . findExpressionsChunkedEither
+
+-- | Validate an input and retain the historical chunk grouping without
+-- erasing the exact 'E.ExferenceInputError'.
+findExpressionsChunkedEither
+  :: E.ExferenceInput
+  -> Either E.ExferenceInputError [[E.ExferenceOutputElement]]
+findExpressionsChunkedEither = fmap (map E.chunkElements) . runSearch
 
 findExpressionsWithStats :: E.ExferenceInput
                          -> [E.ExferenceChunkElement]

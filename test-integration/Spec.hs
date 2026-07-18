@@ -13,6 +13,7 @@ import Control.Exception
 import Data.Either (isRight)
 import Data.List (isInfixOf, nub)
 import qualified Data.Map.Strict as Map
+import System.Timeout (timeout)
 import Djinn.Core
   ( Context
   , Declaration (ClassDecl, DataType, Function, TypeSynonym)
@@ -200,6 +201,31 @@ tests = testGroup "Djex facade"
         Left _ -> pure ()
         Right _ -> fail
           "the Djinn adapter retained lazy provenance past request sealing"
+  , testCase "defer cyclic Djinn context spines to session arity" $ do
+      session <- sealDjinnEnvironment standardEnvironment
+      targetName <- expectRight $ mkIdentifier "cyclicDjinnContext"
+      target <- expectRight $ mkDefinitionName targetName
+      className <- expectRight $ mkIdentifier "Eq"
+      let argument = TypeVariable "a"
+          arguments = argument : arguments
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = argument
+            , requestContexts = [Constraint className arguments]
+            , requestOptions = defaultQueryOptions
+            }
+      sealed <- expectWithin "Djinn request sealing" $ evaluate
+        $ mkDjinnRequest query
+      request <- expectRight sealed
+      result <- expectWithin "Djinn context arity validation" $ evaluate
+        $ runDjinnQuery session request
+      case result of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_DJINN_QUERY"
+          assertBool "Djinn lost the bounded arity failure"
+            $ any ("expects 1 type argument(s), but got 2" `isInfixOf`)
+            $ diagnosticContext failure
+        Right _ -> fail "Djinn accepted a cyclic unary-class argument spine"
   , testCase "classify Djinn options without attributing type source" $ do
       session <- sealDjinnEnvironment standardEnvironment
       target <- expectRight $ mkIdentifier "invalidOptions"
@@ -803,10 +829,38 @@ tests = testGroup "Djex facade"
             , requestContexts = [Constraint className [variable 1]]
             , requestOptions = defaultExferenceOptions
             }
-      case mkExferenceRequest query of
+      session <- exferenceSessionWithUnaryClass className
+      request <- expectRight $ mkExferenceRequest query
+      case runExferenceQuery session request of
         Left failure ->
           diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
         Right _ -> fail "Exference accepted an out-of-scope context variable"
+  , testCase "defer cyclic Exference context spines to session arity" $ do
+      targetName <- expectRight $ mkIdentifier "cyclicExferenceContext"
+      target <- expectRight $ mkDefinitionName targetName
+      className <- expectRight $ mkIdentifier "C"
+      session <- exferenceSessionWithUnaryClass className
+      let argument = TypeVariable $ FlexibleVariable 0
+          arguments = argument : arguments
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = argument
+            , requestContexts = [Constraint className arguments]
+            , requestOptions = defaultExferenceOptions
+            }
+      sealed <- expectWithin "Exference request sealing" $ evaluate
+        $ mkExferenceRequest query
+      request <- expectRight sealed
+      result <- expectWithin "Exference context arity validation" $ evaluate
+        $ runExferenceQuery session request
+      case result of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_EXF_KIND"
+          assertBool "Exference lost the bounded arity failure"
+            $ any ("ClassArityMismatch" `isInfixOf`)
+            $ diagnosticContext failure
+        Right _ -> fail
+          "Exference accepted a cyclic unary-class argument spine"
   , testCase "validate Exference contexts in source order" $ do
       target <- expectRight $ mkIdentifier "orderedContexts"
       checkedTarget <- expectRight $ mkDefinitionName target
@@ -842,7 +896,9 @@ tests = testGroup "Djex facade"
             , requestContexts = [Constraint className [variable 1]]
             , requestOptions = defaultExferenceOptions
             }
-      case mkExferenceRequest query of
+      session <- exferenceSessionWithUnaryClass className
+      request <- expectRight $ mkExferenceRequest query
+      case runExferenceQuery session request of
         Left failure ->
           diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
         Right _ -> fail "Exference accepted a context beneath a nested forall"
@@ -1295,6 +1351,23 @@ sealDjinnEnvironment environment = do
   shared <- expectRight $ toSynthesisEnvironment environment
   grounded <- expectRight $ groundEnvironmentKinds shared
   expectRight $ mkDjinnSession grounded
+
+exferenceSessionWithUnaryClass :: Name -> IO ExferenceSession
+exferenceSessionWithUnaryClass className = do
+  let parameter = FlexibleVariable 0
+      declaration = ClassDeclaration () className
+        [TypeParameter parameter Nothing] [] []
+  environment <- expectRight
+    (mkEnvironment [declaration] :: Either
+      (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+  expectRight $ mkExferenceSession environment
+
+expectWithin :: String -> IO value -> IO value
+expectWithin label action = do
+  result <- timeout 2000000 action
+  case result of
+    Just value -> pure value
+    Nothing -> fail $ label ++ " did not terminate"
 
 emptyExferenceCandidateDetails :: ExferenceCandidateDetails
 emptyExferenceCandidateDetails = ExferenceCandidateDetails

@@ -107,13 +107,15 @@ through sparse and `maxBound` namespaces. Together with direct reader and
 strict-writer transformers, this also keeps the frontend independent of `mtl`.
 That raw spelling-oriented index remains a parser/compatibility value. The
 checked request boundary validates every alias as a non-wildcard identifier in
-Exference's enabled Haskell type grammar (including its extension keywords),
-requires its ID to occur flexibly in the complete
-contextual goal, collapses aliases to the lexicographically least spelling,
-retains that exact canonical goal as a scope witness, and fully detaches the
-resulting opaque variable-to-spelling map while sealing. Accepted and rejected
-spellings are both forced at this boundary. Malformed maps therefore fail early as source-located
-`DJEX_EXF_SOURCE_HINT` diagnostics rather than reaching candidate rendering.
+Exference's enabled Haskell type grammar (including its extension keywords)
+and fully detaches and forces the spelling entries while sealing. Context
+arguments remain untouched until a session can use the owning class's known
+arity as a structural bound. After that bounded normalization, execution
+checks contextual scope, collapses aliases to the lexicographically least
+spelling, and binds the opaque hints to the exact canonical contextual goal.
+Malformed spellings therefore fail early as source-located
+`DJEX_EXF_SOURCE_HINT` diagnostics, while scope failures retain the same
+provenance at the session-aware boundary rather than reaching rendering.
 This mirrors Djinn's library-first organization while retaining the
 parser/source boundary at the module level.
 
@@ -126,9 +128,10 @@ parsing or the neutral `Language.Haskell.Djex.Exference` API. The request
 representation remains hidden, so stable clients
 therefore see an opaque `ExferenceRequest` with one neutral smart constructor;
 the shared `CachedQuery` owns its strict complete source provenance, while
-its backend cache is exactly one opaque checked source-hint value. The neutral
-slot preserves the caller's exact `QueryRequest`, matching Djinn, while the
-hint witness retains the canonical contextual goal consumed by execution.
+its backend cache is an opaque canonical-goal and detached-spelling plan. The
+neutral slot preserves the caller's exact `QueryRequest`, matching Djinn.
+Execution bounds known class argument spines from the selected session before
+building the canonical contextual goal and its checked source-hint witness.
 Neither provenance nor that private plan participates in request equality or
 display; sealing
 materializes both the complete location and every accepted spelling, so a
@@ -179,6 +182,13 @@ instance-head indexing share one immediate-superclass instantiator, including
 its exact-arity guard and capture-safe parameter substitution.
 Query and binding inputs likewise reject wrong arities for known classes while
 retaining unknown classes as explicit external constraints.
+
+Stable programmatic requests validate the goal and context class headers while
+sealing, but defer context arguments until execution. A session-known class
+provides the exact traversal bound, so a cyclic or over-applied argument list
+fails after observing at most one cell beyond the declaration width; no
+arbitrary maximum class arity is imposed. Finite unknown external constraints
+retain the existing open-world policy.
 
 Exact compatibility imports must now name the aliases and patterns separately
 and enable `PatternSynonyms`, for example `QualifiedName, pattern QualifiedName`
@@ -447,7 +457,10 @@ names, generated syntax, ratings, types, and class constraints once; query
 execution validates only the goal, constraints, limits, and heuristics that
 vary per request, and verifies that its opaque source hints belong to that
 prepared goal. The checked target is excluded from the same request before
-search begins.
+search begins. The stable `runExferenceQuery` checks options before context
+preparation and elaboration, then carries a private checked-options witness
+into core query preparation so search controls have one validation authority
+and one evaluation.
 
 `Language.Haskell.Exference.Core.defaultHeuristicsConfig` owns the
 parser-neutral library default used by reusable and stable queries. The
@@ -663,9 +676,13 @@ that require raw expressions and compatibility status values; new core code
 should use `findQueryResultsInEnvironmentEither`, whose private checked engine batches
 provide exact shared progress without reinterpreting raw status. Neither API
 turns heuristic exhaustion into a logical uninhabitability claim. The
-historical list-returning entry points are compatibility adapters (including
-their “invalid input means no elements” convention): `findExpressions` exposes
-the raw result stream, and `findOneExpression` is simply its first element. The
+historical list-returning entry points are deprecated compatibility adapters
+(including their “invalid input means no elements” convention): core
+`findExpressions`, `findExpressionsChunked`, and `findExpressionsWithStats`
+all erase `ExferenceInputError`, while the older facade's `findOneExpression`
+is simply the first element of that lossy stream. Use `findExpressionsEither`,
+`findExpressionsChunkedEither`, or `findExpressionsWithStatsEither` when the
+raw core API is unavoidable. The
 duplicated historical `SearchSelection` and rating/lookahead `find*`/`select*`
 presentation family has been retired. Callers should construct a checked
 session and execute requests with

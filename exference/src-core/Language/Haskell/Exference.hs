@@ -39,7 +39,7 @@ import Language.Haskell.Exference.Core.ExferenceStats
   "Use Language.Haskell.Djex.Exference.runExferenceQuery; apply Language.Haskell.Synthesis.Selection.selectQueryResults when selecting results." #-}
 
 findExpressions :: ExferenceInput -> [ExferenceOutputElement]
-findExpressions = Core.findExpressions
+findExpressions = either (const []) id . Core.findExpressionsEither
 
 -- | Return the first raw search result, without applying a presentation
 -- policy or comparing candidate ratings.

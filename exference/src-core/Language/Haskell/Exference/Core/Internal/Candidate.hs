@@ -3,11 +3,14 @@
 module Language.Haskell.Exference.Core.Internal.Candidate
   ( ExferenceCandidateDetails (..)
   , ExferenceTypeVariableHints
+  , ExferenceSourceTypeVariableNames
   , ExferenceSourceTypeVariableHints
   , ExferenceSourceTypeVariableHintError (..)
   , ExferenceCandidate
   , projectValidatedCandidate
   , emptyExferenceSourceTypeVariableHints
+  , mkExferenceSourceTypeVariableNames
+  , bindExferenceSourceTypeVariableHints
   , mkExferenceSourceTypeVariableHints
   , retargetExferenceSourceTypeVariableHints
   , sourceTypeVariableHintGoal
@@ -45,6 +48,18 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 type ExferenceTypeVariableHints = Map.Map SynthesisVariable String
+
+-- | Detached, lexically checked frontend spellings in source-map order.
+--
+-- Request sealing owns this intermediate witness because a programmatic
+-- context cannot be bound to a canonical contextual goal until a session has
+-- supplied the owning classes' arities. The original spelling-keyed map is
+-- not retained, and every lazy 'String' has been materialized.
+newtype ExferenceSourceTypeVariableNames = ExferenceSourceTypeVariableNames
+  [(String, TVarId)]
+
+instance NFData ExferenceSourceTypeVariableNames where
+  rnf (ExferenceSourceTypeVariableNames sourceNames) = rnf sourceNames
 
 -- | Checked source spellings paired with their canonical source goal.
 --
@@ -102,15 +117,23 @@ mkExferenceSourceTypeVariableHints
   -> TypeVarIndex
   -> Either ExferenceSourceTypeVariableHintError
        ExferenceSourceTypeVariableHints
-mkExferenceSourceTypeVariableHints sourceType sourceNames = do
-  validSpellings <- traverse validateSpelling $ Map.toAscList sourceNames
-  inScopeSpellings <- traverse requireInScope validSpellings
-  pure $! force $ ExferenceSourceTypeVariableHints canonicalSourceType
-    $ preferredSourceTypeVariableNames inScopeSpellings
- where
-  canonicalSourceType = SharedType.canonicalizeType sourceType
-  sourceVariables = flexibleIdentifiers canonicalSourceType
+mkExferenceSourceTypeVariableHints sourceType sourceNames =
+  mkExferenceSourceTypeVariableNames sourceNames
+    >>= bindExferenceSourceTypeVariableHints sourceType
 
+-- | Validate and detach a frontend spelling index without choosing the goal
+-- that brings its variables into scope.
+--
+-- Entries remain in the source map's spelling order so a later scope check
+-- reports the same first failure as 'mkExferenceSourceTypeVariableHints'.
+mkExferenceSourceTypeVariableNames
+  :: TypeVarIndex
+  -> Either ExferenceSourceTypeVariableHintError
+       ExferenceSourceTypeVariableNames
+mkExferenceSourceTypeVariableNames sourceNames = do
+  validSpellings <- traverse validateSpelling $ Map.toAscList sourceNames
+  pure $! force $ ExferenceSourceTypeVariableNames validSpellings
+ where
   validateSpelling (lazySpelling, variable)
     | spelling == "_" = reject WildcardSourceTypeVariableSpelling
     | otherwise = case validateExferenceTypeVariableSpelling spelling of
@@ -122,6 +145,26 @@ mkExferenceSourceTypeVariableHints sourceType sourceNames = do
     -- branch. Otherwise an invalid first character could leave a lazy tail
     -- hidden in a nominally checked diagnostic.
     spelling = force lazySpelling
+
+  reject failure = Left $! force failure
+
+-- | Bind detached spellings to one checked source goal.
+--
+-- Scope validation deliberately precedes alias collapse: an out-of-scope
+-- alias cannot be hidden by another spelling for the same integer identity.
+bindExferenceSourceTypeVariableHints
+  :: HsType
+  -> ExferenceSourceTypeVariableNames
+  -> Either ExferenceSourceTypeVariableHintError
+       ExferenceSourceTypeVariableHints
+bindExferenceSourceTypeVariableHints sourceType
+    (ExferenceSourceTypeVariableNames sourceNames) = do
+  inScopeSpellings <- traverse requireInScope sourceNames
+  pure $! force $ ExferenceSourceTypeVariableHints canonicalSourceType
+    $ preferredSourceTypeVariableNames inScopeSpellings
+ where
+  canonicalSourceType = SharedType.canonicalizeType sourceType
+  sourceVariables = flexibleIdentifiers canonicalSourceType
 
   requireInScope entry@(spelling, variable)
     | IntSet.member variable sourceVariables = Right entry

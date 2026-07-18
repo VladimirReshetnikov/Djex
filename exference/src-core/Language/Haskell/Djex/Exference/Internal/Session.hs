@@ -19,6 +19,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , sealNeutralExferenceSessionWithPolicy
   , sealPreparedExferenceSessionWithPolicy
   , sessionSearchEnvironment
+  , sessionClassArity
   , elaborateSessionGoal
   , exferenceSessionInventory
   , sessionOmissions
@@ -66,10 +67,12 @@ import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Environment (Environment)
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
+  , inventoryKindAssumptions
   , mkInventoryFromEnvironmentWithClassPolicy
   )
 import Language.Haskell.Synthesis.KindInference
   ( ClassKindPolicy (GeneralizeClassKinds)
+  , KindAssumptions (classParameterKinds)
   , KindInventoryPolicy (OpenKindInventory)
   )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
@@ -272,6 +275,14 @@ applyRatingOverrides overrides bindings = do
 
 sessionSearchEnvironment :: ExferenceSession -> Core.ExferenceEnvironment
 sessionSearchEnvironment = searchView
+
+-- | Look up the exact argument width inferred for a declared or external
+-- class retained by this session. Query preparation uses this finite width
+-- before entering a caller-built constraint argument spine.
+sessionClassArity :: ExferenceSession -> Name -> Maybe Int
+sessionClassArity session name = length <$> Map.lookup name
+  (classParameterKinds $ inventoryKindAssumptions
+    $ preparedInventory $ preparedView session)
 
 -- | Elaborate a proper query type through the exact alias and kind witness
 -- retained by this session. Request provenance and diagnostic presentation

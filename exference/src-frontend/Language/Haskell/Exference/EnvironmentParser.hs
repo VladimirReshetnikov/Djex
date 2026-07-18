@@ -463,8 +463,9 @@ toSynthesisSourceInventory environment = do
         | (name, [(result, parameters)]) <-
             M.toAscList constructorDefinitions
         , [binding] <- [M.findWithDefault [] name constructorFunctionGroups]
-        , functionResult binding /= result
-            || functionParameters binding /= parameters
+        , canonicalType (functionResult binding) /= canonicalType result
+            || map canonicalType (functionParameters binding)
+                /= map canonicalType parameters
             || not (null $ functionConstraints binding)
         ]
       constructorPenalties = M.fromList
@@ -507,6 +508,12 @@ toSynthesisSourceInventory environment = do
   let declarations =
         synonyms ++ SharedEnvironment.environmentDeclarations core
   sealSynthesisInventory declarations
+ where
+  -- Compatibility callers can construct the shared type through either its
+  -- structural arrow/tuple forms or the equivalent saturated constructor
+  -- applications. The checked declaration boundary stores only the former,
+  -- so constructor reconciliation must compare the same canonical view.
+  canonicalType = SharedType.canonicalizeType
 
 sealSynthesisInventory
   :: [SynthesisDeclaration]

@@ -59,6 +59,7 @@ import Data.Void (Void)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Synthesis.Collection (firstDuplicate)
 import Language.Haskell.Synthesis.Constraint
   ( Constraint (Constraint)
   , constraintArguments
@@ -173,6 +174,8 @@ preparedTypeSynonyms (PreparedInventory _ synonyms) = synonyms
 -- | Failures specific to alias preparation, hygiene, or substitution.
 data SynonymExpansionError variable
   = IntrinsicTypeSynonym Name
+  | DuplicateTypeSynonymParameter Name variable
+    -- ^ Synonym and first parameter encountered for a second time.
   | UnsaturatedTypeSynonym Name Int Int
     -- ^ Synonym, declared arity, supplied arity.
   | RecursiveTypeSynonyms (NonEmpty Name)
@@ -331,8 +334,10 @@ prepareTypeSynonyms fresh inventory = do
 -- | Expand against finite raw definitions while a parser adapter is still
 -- assembling its checked inventory. Only aliases reachable from the source
 -- are inspected, so an independently reported invalid declaration does not
--- mask conversion of unrelated syntax. Callers that already have an
--- 'Inventory' should use 'prepareTypeSynonyms' and 'expandTypeSynonyms'.
+-- mask conversion of unrelated syntax. A reached definition's parameters are
+-- checked for duplicates before its application arity or substitution is
+-- considered. Callers that already have an 'Inventory' should use
+-- 'prepareTypeSynonyms' and 'expandTypeSynonyms'.
 expandTypeSynonymDefinitions
   :: Ord variable
   => FreshVariable variable
@@ -656,6 +661,10 @@ expandApplication
 expandApplication fresh table protected path headType arguments = case headType of
   TypeConstructor name
     | Just definition <- Map.lookup name $ synonymDefinitions table -> do
+        case firstDuplicate $ definitionParameters definition of
+          Just duplicate -> lift $ Left
+            $ DuplicateTypeSynonymParameter name duplicate
+          Nothing -> pure ()
         let expected = naturalLength $ definitionParameters definition
             supplied = naturalLength arguments
         when (supplied < expected) $ lift $ Left

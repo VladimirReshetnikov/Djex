@@ -63,7 +63,7 @@ Djinn converts its historical raw syntax at its compatibility boundary.
 | `Language.Haskell.Synthesis.Environment` | Seals declaration order, cross-declaration namespaces, and type/value/constructor/class/instance indexes. |
 | `Language.Haskell.Synthesis.KindInference` | Kind checking and inference for types and whole environments, including open/closed inventories and class-kind finalization policy. |
 | `Language.Haskell.Synthesis.Inventory` | Pairs one grounded `Environment` with the kind assumptions inferred from it. |
-| `Language.Haskell.Synthesis.TypeSynonym` | Prepares exact synonym tables, checks saturation, expands capture-safely, and performs pre/post-expansion kind checks. |
+| `Language.Haskell.Synthesis.TypeSynonym` | Prepares exact synonym tables, rejects repeated raw parameters when reached, checks saturation, expands capture-safely, and performs pre/post-expansion kind checks. |
 | `Language.Haskell.Synthesis.Class` | Provides an opaque source-order view of declared classes, final parameter kinds, methods, and explicit instances from an `Inventory`. |
 
 `PreparedInventory` is the long-lived session authority: it keeps an Inventory
@@ -105,8 +105,10 @@ qualification from becoming generated Haskell.
 | `Language.Haskell.Synthesis.Fresh` | Deterministic collision-skipping selection and allocation for total or exhaustible generators and caller-owned reservation stores. |
 
 The private `Language.Haskell.Synthesis.Internal.InstanceHead` module owns the
-alpha-normal comparison key used to detect duplicate instance heads. Public
-diagnostics retain the original source head rather than exposing that key.
+canonical, alpha-normal comparison key used to detect duplicate instance
+heads. Saturated function and tuple applications share that key with their
+structural forms, while public indexes and diagnostics retain the original
+source head rather than exposing or substituting the private key.
 
 ## Invariant conventions
 

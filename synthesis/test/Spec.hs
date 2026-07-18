@@ -1423,6 +1423,55 @@ environmentTests = testGroup "environments"
         Left (Environment.DuplicateInstanceDeclaration renamedHead)
       _ <- evaluate $ force environment
       pure ()
+  , testCase "reject canonical function instance-head duplicates" $ do
+      let className = right $ mkIdentifier "FunctionClass"
+          variable = SharedType.TypeVariable
+          structuralType = SharedType.FunctionType
+            (variable "a") (variable "b")
+          constructorType = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor functionName)
+              $ variable "a")
+            $ variable "b"
+          structuralHead = Constraint className [structuralType]
+          constructorHead = Constraint className [constructorType]
+          structural = environmentInstance className ["a", "b"]
+            $ constraintArguments structuralHead
+          constructor = environmentInstance className ["a", "b"]
+            $ constraintArguments constructorHead
+          environment = right $ Environment.mkEnvironment [structural]
+      Map.keys (Environment.instanceDeclarationMap environment) @?=
+        [structuralHead]
+      Environment.mkEnvironment [structural, constructor] @?=
+        Left (Environment.DuplicateInstanceDeclaration constructorHead)
+      Environment.repeatedInstanceHeadsInFirstRepetitionOrder
+          [(["a", "b"], structuralHead), (["a", "b"], constructorHead)]
+        @?= [constructorHead]
+  , testCase "reject canonical tuple instance-head duplicates" $ do
+      let className = right $ mkIdentifier "TupleClass"
+          variable = SharedType.TypeVariable
+          pairName = right $ tupleName Boxed 2
+          structuralType = SharedType.TupleType Boxed
+            [variable "a", variable "b"]
+          constructorType = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor pairName)
+              $ variable "a")
+            $ variable "b"
+          structuralHead = Constraint className [structuralType]
+          constructorHead = Constraint className [constructorType]
+          structural = environmentInstance className ["a", "b"]
+            $ constraintArguments structuralHead
+          constructor = environmentInstance className ["a", "b"]
+            $ constraintArguments constructorHead
+          environment = right $ Environment.mkEnvironment [structural]
+      Map.keys (Environment.instanceDeclarationMap environment) @?=
+        [structuralHead]
+      Environment.mkEnvironment [structural, constructor] @?=
+        Left (Environment.DuplicateInstanceDeclaration constructorHead)
+      Environment.repeatedInstanceHeadsInFirstRepetitionOrder
+          [(["a", "b"], structuralHead), (["a", "b"], constructorHead)]
+        @?= [constructorHead]
   , testCase "classify alpha repeats in first-repetition order" $ do
       let classC = right $ mkIdentifier "C"
           classD = right $ mkIdentifier "D"
@@ -2832,6 +2881,37 @@ synonymTests = testGroup "type synonyms"
           $ SharedType.FunctionType
               (SharedType.TypeVariable "q")
               (SharedType.TypeVariable "q'"))
+  , testCase "reject duplicate parameters in reached raw aliases first" $ do
+      let aliasName = right $ mkIdentifier "Duplicate"
+          intName = right $ mkIdentifier "Int"
+          boolName = right $ mkIdentifier "Bool"
+          definitions = Map.singleton aliasName
+            ( ["a", "b", "a", "b"]
+            , SharedType.TypeVariable "a"
+            )
+          expected = Left
+            $ TypeSynonym.DuplicateTypeSynonymParameter aliasName "a"
+          saturated = foldl SharedType.TypeApplication
+            (SharedType.TypeConstructor aliasName)
+            [ SharedType.TypeConstructor intName
+            , SharedType.TypeConstructor boolName
+            , SharedType.TypeConstructor boolName
+            , SharedType.TypeConstructor intName
+            ]
+      -- Binder validation precedes both arity checking and the substitution
+      -- whose map would otherwise silently select one repeated parameter.
+      TypeSynonym.expandTypeSynonymDefinitions freshStringVariable definitions
+          (SharedType.TypeConstructor aliasName) @?= expected
+      TypeSynonym.expandTypeSynonymDefinitions freshStringVariable definitions
+          saturated @?= expected
+  , testCase "leave malformed unreachable raw aliases uninspected" $ do
+      let aliasName = right $ mkIdentifier "UnusedDuplicate"
+          intName = right $ mkIdentifier "Int"
+          definitions = Map.singleton aliasName
+            (["a", "a"], SharedType.TypeVariable "a")
+          source = SharedType.TypeConstructor intName
+      TypeSynonym.expandTypeSynonymDefinitions freshStringVariable definitions
+          source @?= Right source
   , testCase "report the exact direct synonym cycle path" $ do
       let aliasName = right $ mkIdentifier "Direct"
           definitions = Map.singleton aliasName

@@ -127,6 +127,10 @@ applyTypeDecls declarations source = do
   renderExpansionError failure = case failure of
     SharedTypeSynonym.IntrinsicTypeSynonym name ->
       "intrinsic type synonym: " ++ show name
+    SharedTypeSynonym.DuplicateTypeSynonymParameter name variable ->
+      "duplicate parameter "
+        ++ show (SharedType.variableIdentity variable)
+        ++ " for type declaration " ++ show name
     SharedTypeSynonym.UnsaturatedTypeSynonym name _ _ ->
       "wrong number of parameters for type declaration " ++ show name
     SharedTypeSynonym.RecursiveTypeSynonyms names ->

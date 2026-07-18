@@ -340,8 +340,10 @@ Constructor signatures duplicated in Exference's search-function list are
 represented only by their datatype declarations at this boundary; list, unit,
 and tuple constructors
 have explicit intrinsic datatype records, so `(:)` never masquerades as an
-ordinary value. Constructor shape and search penalty are then lowered back
-from that checked inventory rather than trusted from a parallel raw record.
+ordinary value. Reconciliation canonicalizes structural and saturated
+function/tuple spellings before comparing the compatibility records.
+Constructor shape and search penalty are then lowered back from that checked
+inventory rather than trusted from a parallel raw record.
 The default source environment derives its flat constructor functions from
 those same ordered datatype records. Shared names and types represent boxed
 tuples through arity 64, while the eager Exference search inventory deliberately

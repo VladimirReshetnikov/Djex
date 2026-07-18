@@ -1780,6 +1780,21 @@ tests = testGroup "Exference"
               declaration = HsTypeDecl alias [0] (TypeVar 0)
           applyTypeDecls (Map.singleton alias $ Right declaration) (TypeCons alias)
             @?= Left "wrong number of parameters for type declaration Alias"
+      , testCase "raw synonym parameters are distinct when reached" $ do
+          let alias = name "Duplicate"
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              declaration = HsTypeDecl alias [0, 1, 0, 1] (TypeVar 0)
+              declarations = Map.singleton alias $ Right declaration
+              saturated = foldl TypeApp (TypeCons alias)
+                [integer, boolean, boolean, integer]
+              expected = Left
+                "duplicate parameter 0 for type declaration Duplicate"
+          -- The duplicate beats both the bare application's arity failure and
+          -- the saturated application's historically lossy substitution.
+          applyTypeDecls declarations (TypeCons alias) @?= expected
+          applyTypeDecls declarations saturated @?= expected
+          applyTypeDecls declarations integer @?= Right integer
       , testCase "legacy synonym adaptation avoids forall capture" $ do
           let alias = name "Capture"
               typeClass = name "C"
@@ -5667,6 +5682,50 @@ tests = testGroup "Exference"
           toSynthesisSourceInventory environment @?= Left
             (MismatchedConstructorFunctionBindings
               mismatched)
+      , testCase "constructor reconciliation uses canonical type shapes" $ do
+          let variable = TypeVar 0
+              constructorApplication constructor arguments = foldl TypeApp
+                (TypeCons constructor) arguments
+              spellings =
+                [ ( TypeArrow variable variable
+                  , constructorApplication SharedName.functionName
+                      [variable, variable]
+                  )
+                , ( TypeTuple Boxed [variable, variable]
+                  , constructorApplication (validTupleName 2)
+                      [variable, variable]
+                  )
+                ]
+              justName = name "Just"
+              withField field environment = environment
+                { sourceDeconstructors =
+                    [ deconstructor
+                        { deconstructorConstructors =
+                            [ if constructorName constructor == justName
+                                then constructor { constructorFields = [field] }
+                                else constructor
+                            | constructor <- deconstructorConstructors deconstructor
+                            ]
+                        }
+                    | deconstructor <- sourceDeconstructors environment
+                    ]
+                }
+              withParameter parameter environment = environment
+                { sourceBindings =
+                    [ case binding of
+                        SourceFunction function
+                          | functionName function == justName ->
+                              SourceFunction function
+                                { functionParameters = [parameter] }
+                        _ -> binding
+                    | binding <- sourceBindings environment
+                    ]
+                }
+          forM_ spellings $ \(structural, constructorBacked) -> do
+            let environment = withParameter constructorBacked
+                  $ withField structural maybeLikeSourceEnvironment
+            _ <- expectRight $ toSynthesisSourceInventory environment
+            pure ()
       , testCase "source inventories retain constructor and value penalties" $ do
           inventory <- expectRight
             $ toSynthesisSourceInventory maybeLikeSourceEnvironment

@@ -50,7 +50,10 @@ data CanonicalizationState typeVariable = CanonicalizationState
   }
 
 -- | Construct the private comparison identity for one explicitly scoped
--- instance head.  The order of the implicit outer binders is immaterial.
+-- instance head. Saturated function and tuple constructor applications are
+-- normalized before alpha identities are assigned, while the caller's source
+-- head remains available for storage and diagnostics. The order of the
+-- implicit outer binders is immaterial.
 instanceHeadKey
   :: Ord typeVariable
   => [typeVariable]
@@ -58,6 +61,7 @@ instanceHeadKey
   -> InstanceHeadKey typeVariable
 instanceHeadKey variables = InstanceHeadKey
   . canonicalizeInstanceHead variables
+  . fmap canonicalizeType
 
 -- | Return the source head that first repeats each alpha-equivalence class.
 -- Results follow first-repetition order, and a class repeated three or more

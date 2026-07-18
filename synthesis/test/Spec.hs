@@ -213,7 +213,10 @@ freshTests = testGroup "fresh allocation"
 
 queryTests :: TestTree
 queryTests = testGroup "queries"
-  [ testCase "traverse request types in diagnostic order" $ do
+  [ testCase "label every request type site uniformly" $
+      map requestTypeSiteLabel [minBound .. maxBound] @?=
+        ["goal", "context"]
+  , testCase "traverse request types in diagnostic order" $ do
       let target = right $ mkDefinitionName $ right $ mkIdentifier "result"
           firstClass = right $ mkIdentifier "First"
           secondClass = right $ mkIdentifier "Second"

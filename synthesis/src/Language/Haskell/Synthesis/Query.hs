@@ -13,6 +13,7 @@
 module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
   , RequestTypeSite (..)
+  , requestTypeSiteLabel
   , traverseRequestTypes
   , requestContextualType
   , RequestProvenance (..)
@@ -81,6 +82,11 @@ data RequestTypeSite
   deriving (Bounded, Enum, Eq, Ord, Show, Generic)
 
 instance NFData RequestTypeSite
+
+-- | Stable diagnostic wording for each shared request-type role.
+requestTypeSiteLabel :: RequestTypeSite -> String
+requestTypeSiteLabel RequestGoal = "goal"
+requestTypeSiteLabel RequestContextArgument = "context"
 
 -- | Traverse the goal followed by every explicit context argument in source
 -- order, without changing the checked target or search options. The second

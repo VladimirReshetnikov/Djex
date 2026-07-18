@@ -61,6 +61,7 @@ import Language.Haskell.Synthesis.Query
   , RequestTypeSite (..)
   , cachedQueryCache
   , cachedQueryRequest
+  , requestTypeSiteLabel
   , sealCachedQueryWithProvenance
   , traverseRequestTypes
   , requestContextualType
@@ -168,10 +169,7 @@ invalidRequestType
   -> Diagnostic
 invalidRequestType site failure = contextualDiagnostic Error
   "DJEX_EXF_REQUEST" "invalid shared Exference request"
-  (siteRole site ++ ": " ++ show failure)
- where
-  siteRole RequestGoal = "goal"
-  siteRole RequestContextArgument = "context"
+  (requestTypeSiteLabel site ++ ": " ++ show failure)
 
 -- | Recover the exact neutral query supplied when the request was sealed.
 exferenceRequestQuery

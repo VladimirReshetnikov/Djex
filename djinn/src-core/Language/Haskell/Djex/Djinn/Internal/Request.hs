@@ -56,6 +56,7 @@ import Language.Haskell.Synthesis.Query
   , RequestTypeSite (..)
   , cachedQueryCache
   , cachedQueryRequest
+  , requestTypeSiteLabel
   , sealCachedQueryWithProvenance
   , traverseRequestTypes
   , withCachedQueryProvenance
@@ -186,12 +187,9 @@ normalizeRequestType
   :: RequestTypeSite
   -> DjinnType
   -> Either Diagnostic DjinnType
-normalizeRequestType site = first (loweringFailure $ siteRole site)
+normalizeRequestType site = first
+  (loweringFailure $ requestTypeSiteLabel site)
   . Core.normalizeSynthesisType
-
-siteRole :: RequestTypeSite -> String
-siteRole RequestGoal = "goal"
-siteRole RequestContextArgument = "context"
 
 -- Constraint is intentionally a more permissive neutral node than Djinn's
 -- historical grammar. Validate its name with the core smart constructor so a

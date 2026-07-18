@@ -201,19 +201,26 @@ renderDjinn
   :: CommonOptions
   -> DjinnCandidate
   -> Either RenderError String
-renderDjinn options = case commonRenderMode options of
-  RenderDefinition -> renderDjinnCandidateDefinition qualification
-  RenderExpression -> renderDjinnCandidateExpression qualification
- where
-  qualification = commonQualification options
+renderDjinn = renderCandidate
+  renderDjinnCandidateDefinition renderDjinnCandidateExpression
 
 renderExference
   :: CommonOptions
   -> ExferenceCandidate
   -> Either RenderError String
-renderExference options = case commonRenderMode options of
-  RenderDefinition -> renderExferenceCandidateDefinition qualification
-  RenderExpression -> renderExferenceCandidateExpression qualification
+renderExference = renderCandidate
+  renderExferenceCandidateDefinition renderExferenceCandidateExpression
+
+renderCandidate
+  :: (Qualification -> candidate -> Either RenderError String)
+  -> (Qualification -> candidate -> Either RenderError String)
+  -> CommonOptions
+  -> candidate
+  -> Either RenderError String
+renderCandidate definitionRenderer expressionRenderer options =
+  case commonRenderMode options of
+    RenderDefinition -> definitionRenderer qualification
+    RenderExpression -> expressionRenderer qualification
  where
   qualification = commonQualification options
 

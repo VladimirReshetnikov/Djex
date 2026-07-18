@@ -78,10 +78,8 @@ tests =
           testCheckedDjinnAdapter)
     , ("reuse canonical shared Djinn request plans across sessions",
           testCheckedDjinnRequestReuse)
-    , ("edit checked Djinn sessions through the shared environment",
-          testCheckedDjinnSessionEditing)
-    , ("invalidate prepared Djinn caches transactionally",
-          testCheckedDjinnCacheInvalidation)
+    , ("rebuild immutable Djinn session indexes from neutral environments",
+          testCheckedDjinnSessionRebuilding)
     , ("agree between ground and weakened edit transactions",
           testGroundEditAgreement)
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
@@ -326,10 +324,11 @@ testCheckedDjinnAdapter = do
 testCheckedDjinnRequestReuse :: IO ()
 testCheckedDjinnRequestReuse = do
     initial <- expectShownRight Djex.standardDjinnSession
-    boolSession <- expectShownRight $ Djex.declareDjinnDeclaration
-        (TypeSynonym "Selected" [] $ HTCon "Bool") initial
-    voidSession <- expectShownRight $ Djex.declareDjinnDeclaration
-        (TypeSynonym "Selected" [] $ HTCon "Void") initial
+    let selected body = SharedDeclaration.TypeSynonymDeclaration ()
+            (sharedName "Selected") []
+            (SharedType.TypeConstructor $ sharedName body)
+    boolSession <- sealDjinnSessionFrom initial [selected "Bool"]
+    voidSession <- sealDjinnSessionFrom initial [selected "Void"]
     target <- expectShownRight $ SharedName.mkIdentifier "selectedValue"
     checkedTarget <- expectShownRight $ SharedGenerated.mkDefinitionName target
     let query = SharedQuery.QueryRequest
@@ -354,125 +353,22 @@ testCheckedDjinnRequestReuse = do
 expectShownRight :: Show failure => Either failure value -> IO value
 expectShownRight = either (fail . show) return
 
-testCheckedDjinnSessionEditing :: IO ()
-testCheckedDjinnSessionEditing = do
-    initial <- expectShownRight Djex.standardDjinnSession
-    let declarationSnapshot =
-            Djex.djinnSessionDeclarationSnapshot initial
-    assertEqual "the combined compatibility projection changed type declarations"
-        (Djex.djinnSnapshotTypeDeclarations declarationSnapshot)
-        (Djex.djinnSessionTypeDeclarations initial)
-    assertEqual "the combined compatibility projection changed function declarations"
-        (Djex.djinnSnapshotFunctionDeclarations declarationSnapshot)
-        (Djex.djinnSessionFunctionDeclarations initial)
-    assertEqual "the combined compatibility projection changed class declarations"
-        (Djex.djinnSnapshotClassDeclarations declarationSnapshot)
-        (Djex.djinnSessionClassDeclarations initial)
-    first <- expectShownRight $ Djex.declareDjinnDeclaration
-        (Function "first" $ HTCon "Bool") initial
-    second <- expectShownRight $ Djex.declareDjinnDeclaration
-        (Function "second" $ HTCon "Bool") first
-    replaced <- expectShownRight $ Djex.declareDjinnDeclaration
-        (Function "first" $ HTArrow (HTCon "Bool") (HTCon "Bool"))
-        second
-    assertEqual "replacement lost newest-first function search order"
-        ["first", "second"]
-        (map fst $ Djex.djinnSessionFunctionDeclarations replaced)
+-- | Build a fresh immutable checked session from the exact neutral source of
+-- another session plus additional declarations. Curated callers use this
+-- route instead of the raw declaration editor retained by the historical REPL.
+sealDjinnSessionFrom
+    :: Djex.DjinnSession
+    -> [SharedDeclaration.Declaration String Void ()]
+    -> IO Djex.DjinnSession
+sealDjinnSessionFrom initial additions = do
+    environment <- expectShownRight $ SharedEnvironment.mkEnvironment $
+        SharedEnvironment.environmentDeclarations
+            (Djex.djinnSessionEnvironment initial) ++ additions
+    expectShownRight $ Djex.mkDjinnSession environment
 
-    case Djex.declareDjinnDeclaration
-        (TypeSynonym "Bad" ["a"] $ HTVar "b") replaced of
-      Left failure -> assertEqual
-        "failed edits did not use the structured environment boundary"
-        (Just "DJEX_DJINN_ENV")
-        (SharedDiagnostic.diagnosticCode failure)
-      Right _ -> fail "an invalid synonym committed to the checked session"
-    assertEqual "a failed edit changed the prior session"
-        ["first", "second"]
-        (map fst $ Djex.djinnSessionFunctionDeclarations replaced)
-
-    case Djex.declareDjinnDeclaration
-        (DataType "()" [] [("()", [])]) initial of
-      Left failure -> do
-        assertEqual "unit declaration lost its diagnostic code"
-            (Just "DJEX_DJINN_ENV")
-            (SharedDiagnostic.diagnosticCode failure)
-        assertBool "unit declaration lost its protected-name explanation"
-            $ "cannot be declared" `isInfixOf`
-                unwords (SharedDiagnostic.diagnosticContext failure)
-      Right _ -> fail "the shared editor installed the protected unit"
-
-    withoutSecond <- expectShownRight $
-        Djex.removeDjinnDeclaration "second" replaced
-    assertEqual "deletion reordered surviving functions"
-        ["first"]
-        (map fst $ Djex.djinnSessionFunctionDeclarations withoutSecond)
-
-    withBase <- expectShownRight $ Djex.declareDjinnDeclaration
-        (AbstractType "Base" KStar) withoutSecond
-    withAlias <- expectShownRight $ Djex.declareDjinnDeclaration
-        (TypeSynonym "UsesBase" [] $ HTCon "Base") withBase
-    case Djex.removeDjinnDeclaration "Base" withAlias of
-      Left failure -> assertEqual "dependent deletion lost its diagnostic code"
-        (Just "DJEX_DJINN_ENV")
-        (SharedDiagnostic.diagnosticCode failure)
-      Right _ -> fail "deletion committed while a surviving alias depended on it"
-
-    case Djex.removeDjinnDeclaration "()" initial of
-      Left failure -> do
-        assertEqual "unit deletion lost its diagnostic code"
-            (Just "DJEX_DJINN_ENV")
-            (SharedDiagnostic.diagnosticCode failure)
-        assertBool "unit deletion lost its compatibility explanation"
-            $ "built-in type" `isInfixOf`
-                unwords (SharedDiagnostic.diagnosticContext failure)
-      Right _ -> fail "the shared editor removed the canonical unit"
-
-    equality <- either fail pure $
-        mkContext "Eq" [HTCon "Bool"]
-    methods <- expectShownRight $
-        Djex.resolveDjinnInstanceMethods initial [] equality
-    assertEqual "session-level instance lookup changed class method order"
-        ["=="] (map fst methods)
-
-    withTokenType <- expectShownRight $ Djex.declareDjinnDeclaration
-        (AbstractType "Token" KStar) initial
-    withTokenValue <- expectShownRight $ Djex.declareDjinnDeclaration
-        (Function "token" $ HTCon "Token") withTokenType
-    target <- expectShownRight $ SharedName.mkIdentifier "answer"
-    request <- expectShownRight $ Djex.parseDjinnRequest
-        withTokenValue defaultQueryOptions target "premise-cache.djinn" "Token"
-    inhabited <- expectShownRight $
-        Djex.runDjinnQuery withTokenValue request
-    assertBool "a newly sealed global premise was unavailable to proof search"
-        $ not $ null $ SharedSearch.batchCandidates
-        $ SharedQuery.resultSearch inhabited
-
-    withoutTokenValue <- expectShownRight $ Djex.declareDjinnDeclaration
-        (Function "token" $ HTArrow (HTCon "Token") (HTCon "Token"))
-        withTokenValue
-    uninhabited <- expectShownRight $
-        Djex.runDjinnQuery withoutTokenValue request
-    assertEqual "function replacement retained a stale prepared premise"
-        []
-        (SharedSearch.batchCandidates $ SharedQuery.resultSearch uninhabited)
-
-    -- The ground editor rejects an unsolved kind variable at the entrance
-    -- with the same error value the weakened path produced during resealing.
-    case Djex.declareDjinnDeclaration (AbstractType "Mystery" (KVar 0)) initial of
-      Left failure -> do
-        assertEqual "ungrounded kinds lost the environment diagnostic code"
-            (Just "DJEX_DJINN_ENV")
-            (SharedDiagnostic.diagnosticCode failure)
-        assertBool "ungrounded kinds lost the historical unsolved-kind text"
-            $ "kind contains an unsolved variable: k0" `isInfixOf`
-                unwords (SharedDiagnostic.diagnosticContext failure)
-      Right _ -> fail "the ground editor accepted an unsolved kind variable"
-
--- The stable adapter now edits the sealed ground environment directly while
--- the raw compatibility API still weakens kinds to Int and re-grounds during
--- resealing. Pin that the two transactions cannot drift by running the same
--- edits through both and comparing every observable projection, including
--- failure values.
+-- The historical editor has ground and kind-weakened entrances. Pin that
+-- these compatibility transactions cannot drift even though neither is part
+-- of the immutable curated session API.
 testGroundEditAgreement :: IO ()
 testGroundEditAgreement = do
     initial <- expectShownRight Djex.standardDjinnSession
@@ -527,65 +423,79 @@ testGroundEditAgreement = do
     agreeRemove "reject removing the unit" "()"
     agreeRemove "reject removing a missing name" "missing"
 
-testCheckedDjinnCacheInvalidation :: IO ()
-testCheckedDjinnCacheInvalidation = do
+testCheckedDjinnSessionRebuilding :: IO ()
+testCheckedDjinnSessionRebuilding = do
     initial <- expectShownRight Djex.standardDjinnSession
-    withA <- expectShownRight $ Djex.declareDjinnDeclaration
-        (AbstractType "A" KStar) initial
-    withAB <- expectShownRight $ Djex.declareDjinnDeclaration
-        (AbstractType "B" KStar) withA
-    withAlias <- expectShownRight $ Djex.declareDjinnDeclaration
-        (TypeSynonym "Selected" [] $ HTCon "A") withAB
-    withSelected <- expectShownRight $ Djex.declareDjinnDeclaration
-        (Function "selected" $ HTCon "Selected") withAlias
+    let proper = SharedKind.ProperTypeKind
+        constructor name = SharedType.TypeConstructor $ sharedName name
+        abstract name = SharedDeclaration.AbstractTypeDeclaration ()
+            (sharedName name) proper
+        selected destination = SharedDeclaration.TypeSynonymDeclaration ()
+            (sharedName "Selected") [] (constructor destination)
+        selectedValue = SharedDeclaration.ValueDeclaration $
+            SharedDeclaration.ValueSignature () (sharedName "selected")
+                (constructor "Selected")
+    selectedA <- sealDjinnSessionFrom initial
+        [abstract "A", abstract "B", selected "A", selectedValue]
+    selectedB <- sealDjinnSessionFrom initial
+        [abstract "A", abstract "B", selected "B", selectedValue]
     targetA <- expectShownRight $ SharedName.mkIdentifier "answerA"
     requestA <- expectShownRight $ Djex.parseDjinnRequest
-        withSelected defaultQueryOptions targetA "synonym-cache.djinn" "A"
+        selectedA defaultQueryOptions targetA "synonym-cache.djinn" "A"
     beforeReplacement <- expectShownRight $
-        Djex.runDjinnQuery withSelected requestA
+        Djex.runDjinnQuery selectedA requestA
     assertBool "the alias-backed premise did not initially prove A"
         $ hasCandidates beforeReplacement
 
-    retargeted <- expectShownRight $ Djex.declareDjinnDeclaration
-        (TypeSynonym "Selected" [] $ HTCon "B") withSelected
-    staleA <- expectShownRight $ Djex.runDjinnQuery retargeted requestA
-    assertBool "synonym replacement retained the old global formula"
+    staleA <- expectShownRight $ Djex.runDjinnQuery selectedB requestA
+    assertBool "a rebuilt session retained another session's alias formula"
         $ not $ hasCandidates staleA
     targetB <- expectShownRight $ SharedName.mkIdentifier "answerB"
     requestB <- expectShownRight $ Djex.parseDjinnRequest
-        retargeted defaultQueryOptions targetB "synonym-cache.djinn" "B"
-    freshB <- expectShownRight $ Djex.runDjinnQuery retargeted requestB
-    assertBool "synonym replacement did not rebuild the global formula"
+        selectedB defaultQueryOptions targetB "synonym-cache.djinn" "B"
+    freshB <- expectShownRight $ Djex.runDjinnQuery selectedB requestB
+    assertBool "a fresh session did not compile its own alias formula"
         $ hasCandidates freshB
 
-    withOldClass <- expectShownRight $ Djex.declareDjinnDeclaration
-        (ClassDecl "Selectable" ["a"] [("oldMethod", HTVar "a")])
-        initial
-    selectedBool <- either fail pure $
-        mkContext "Selectable" [HTCon "Bool"]
-    oldMethods <- expectShownRight $ Djex.resolveDjinnInstanceMethods
-        withOldClass [] selectedBool
-    assertEqual "the initial class index lost its method"
-        ["oldMethod"] (map fst oldMethods)
-
-    withNewClass <- expectShownRight $ Djex.declareDjinnDeclaration
-        (ClassDecl "Selectable" ["a"] [("newMethod", HTVar "a")])
-        withOldClass
-    newMethods <- expectShownRight $ Djex.resolveDjinnInstanceMethods
-        withNewClass [] selectedBool
-    assertEqual "class replacement retained a stale method index"
-        ["newMethod"] (map fst newMethods)
-    withoutClass <- expectShownRight $
-        Djex.removeDjinnDeclaration "Selectable" withNewClass
-    case Djex.resolveDjinnInstanceMethods withoutClass [] selectedBool of
-        Left failure -> assertBool "class deletion lost its lookup diagnostic"
+    let selectable method = SharedDeclaration.ClassDeclaration ()
+            (sharedName "Selectable")
+            [SharedDeclaration.TypeParameter "a" Nothing]
+            []
+            [ SharedDeclaration.ValueSignature () (sharedName method)
+                (SharedType.TypeVariable "a")
+            ]
+    oldClass <- sealDjinnSessionFrom initial
+        [abstract "Marker", selectable "oldMethod"]
+    newClass <- sealDjinnSessionFrom initial
+        [abstract "Marker", selectable "newMethod"]
+    withoutClass <- sealDjinnSessionFrom initial [abstract "Marker"]
+    target <- expectShownRight $ SharedName.mkIdentifier "selectedBool"
+    checkedTarget <- expectShownRight $ SharedGenerated.mkDefinitionName target
+    let classRequestSource = SharedQuery.QueryRequest
+            { SharedQuery.requestTarget = checkedTarget
+            , SharedQuery.requestGoal = constructor "Marker"
+            , SharedQuery.requestContexts =
+                [Constraint (sharedName "Selectable") [constructor "Marker"]]
+            , SharedQuery.requestOptions = defaultQueryOptions
+            }
+    classRequest <- expectShownRight $ Djex.mkDjinnRequest classRequestSource
+    oldResult <- expectShownRight $ Djex.runDjinnQuery oldClass classRequest
+    newResult <- expectShownRight $ Djex.runDjinnQuery newClass classRequest
+    assertEqual "the first sealed class index lost its method"
+        ["oldMethod"] (renderedExpressions oldResult)
+    assertEqual "a fresh session retained another session's class method"
+        ["newMethod"] (renderedExpressions newResult)
+    case Djex.runDjinnQuery withoutClass classRequest of
+      Left failure -> assertBool "an absent class lost its lookup diagnostic"
             $ "Class not found: Selectable" `isInfixOf`
                 unwords (SharedDiagnostic.diagnosticContext failure)
-        Right methods -> fail $ "class deletion retained methods: " ++
-            show methods
+      Right result -> fail $ "an absent class produced a result: " ++ show result
   where
     hasCandidates = not . null . SharedSearch.batchCandidates .
         SharedQuery.resultSearch
+    renderedExpressions = map (either show id
+        . Djex.renderDjinnCandidateExpression SharedGenerated.Unqualified)
+        . SharedSearch.batchCandidates . SharedQuery.resultSearch
 
 -- The library facade must make invalid environments unrepresentable and
 -- report search results honestly.

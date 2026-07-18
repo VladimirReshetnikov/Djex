@@ -550,10 +550,12 @@ The default `djex` library additionally exposes
 `Language.Haskell.Djex.Djinn`: `mkDjinnSession` lowers a neutral
 kind-ground `DjinnEnvironment` directly and retains the exact shared
 `DjinnInventory` that validated its private proof indexes together with the
-exact prepared synonym table. The session no longer retains a second editable
-`DjinnEnvironment`; the grounded Inventory is weakened losslessly only when a
-compatibility declaration edit begins, then the replacement is fully resealed
-before publication. `Djinn.Core` now uses that same transaction rather than
+exact prepared synonym table. The curated session is immutable, just like an
+Exference session: callers construct and seal a replacement neutral
+`Environment` instead of passing historical declarations or contexts through
+the adapter. The compatibility REPL privately weakens the grounded Inventory
+only when a raw declaration edit begins, then fully reseals the replacement
+before publication. `Djinn.Core` uses that same transaction rather than
 mutating its historical association-list projection independently. The raw
 `Djinn.Core.Environment` therefore
 remains confined to compatibility inputs and the REPL parser;

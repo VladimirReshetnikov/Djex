@@ -20,9 +20,6 @@ module Language.Haskell.Djex.Djinn.Internal.Session
   , djinnSnapshotClassDeclarations
   , declareDjinnDeclaration
   , removeDjinnDeclaration
-  , djinnSessionTypeDeclarations
-  , djinnSessionFunctionDeclarations
-  , djinnSessionClassDeclarations
   , resolveDjinnInstanceMethods
   , sessionPreparedEnvironment
   ) where
@@ -170,33 +167,6 @@ removeDjinnDeclaration name session = do
     $ RawEnvironment.removeGroundSynthesisDeclaration name
     $ djinnSessionEnvironment session
   pure $ DjinnSession prepared
-
--- The following projections keep the compatibility frontend's exact display
--- and instance-generation behavior without making it retain a raw Environment.
--- Display views are reconstructed from the authoritative Inventory on demand;
--- instance lookup separately uses the sealed nominal class index.
-
--- | Reconstruct only the historical type-declaration compatibility view.
-djinnSessionTypeDeclarations
-  :: DjinnSession
-  -> [(Core.HSymbol, ([Core.HSymbol], Core.HType, Core.HKind))]
-djinnSessionTypeDeclarations =
-  djinnSnapshotTypeDeclarations . djinnSessionDeclarationSnapshot
-
--- | Reconstruct only the historical value-declaration compatibility view.
-djinnSessionFunctionDeclarations
-  :: DjinnSession
-  -> [(Core.HSymbol, Core.HType)]
-djinnSessionFunctionDeclarations =
-  djinnSnapshotFunctionDeclarations . djinnSessionDeclarationSnapshot
-
--- | Reconstruct only the historical class-declaration compatibility view.
-djinnSessionClassDeclarations
-  :: DjinnSession
-  -> [(Core.HSymbol,
-      ([(Core.HSymbol, Core.HKind)], [(Core.HSymbol, Core.HType)]))]
-djinnSessionClassDeclarations =
-  djinnSnapshotClassDeclarations . djinnSessionDeclarationSnapshot
 
 -- | Check one historical instance head and instantiate its declared methods.
 resolveDjinnInstanceMethods

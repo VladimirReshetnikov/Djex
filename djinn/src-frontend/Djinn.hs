@@ -20,6 +20,10 @@ import Djinn.Internal.HTypes
 import Djinn.Internal.HIdentifier
 import Djinn.Internal.Help
 import Language.Haskell.Djex.Djinn
+import qualified Language.Haskell.Djex.Djinn.Internal.Request
+    as CompatibilityRequest
+import qualified Language.Haskell.Djex.Djinn.Internal.Session
+    as CompatibilitySession
 import qualified Language.Haskell.Synthesis.Diagnostic as Diagnostic
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import Language.Haskell.Synthesis.Query
@@ -183,11 +187,11 @@ runCmd s Quit =
     return (True, s)
 runCmd s (Load f) = loadFile s f
 runCmd s (Add i t) = updateSession s $
-    declareDjinnDeclaration (Function i t)
+    CompatibilitySession.declareDjinnDeclaration (Function i t)
 runCmd s Clear =
     return (False, startState { commandFailed = commandFailed s })
 runCmd s (Del i) =
-    case removeDjinnDeclaration i (djinnSession s) of
+    case CompatibilitySession.removeDjinnDeclaration i (djinnSession s) of
         Left failure -> do
             putStrLn $ "Error: cannot delete " ++ i ++ ": " ++
                 Diagnostic.renderDiagnostic failure
@@ -195,7 +199,8 @@ runCmd s (Del i) =
         Right session -> installSession s session
 runCmd s Env = do
     let declarationSnapshot =
-            djinnSessionDeclarationSnapshot $ djinnSession s
+            CompatibilitySession.djinnSessionDeclarationSnapshot $
+                djinnSession s
         showType (i, (_, HTAbstract _ kind, _)) =
             "type " ++ i ++ " :: " ++ show kind
         showType (i, (vs, t, _)) =
@@ -204,14 +209,17 @@ runCmd s Env = do
         showd (HTUnion []) = ""
         showd t = " = " ++ show t
     mapM_ (putStrLn . showType)
-        (reverse $ djinnSnapshotTypeDeclarations declarationSnapshot)
+        (reverse $ CompatibilitySession.djinnSnapshotTypeDeclarations
+            declarationSnapshot)
     mapM_ (\ (i, t) -> putStrLn $ prHSymbolOp i ++ " :: " ++ show t)
-        (reverse $ djinnSnapshotFunctionDeclarations declarationSnapshot)
+        (reverse $ CompatibilitySession.djinnSnapshotFunctionDeclarations
+            declarationSnapshot)
     mapM_ (putStrLn . showClass)
-        (reverse $ djinnSnapshotClassDeclarations declarationSnapshot)
+        (reverse $ CompatibilitySession.djinnSnapshotClassDeclarations
+            declarationSnapshot)
     return (False, s)
 runCmd s (Type name params body) =
-    updateSession s . declareDjinnDeclaration $
+    updateSession s . CompatibilitySession.declareDjinnDeclaration $
         case body of
             HTUnion constructors -> DataType name params constructors
             HTAbstract _ kind -> AbstractType name kind
@@ -221,10 +229,11 @@ runCmd s (Set f) =
 runCmd s (Query i ctx g) =
     query s i ctx g
 runCmd s (Class (name, (params, methods))) =
-    updateSession s $ declareDjinnDeclaration $
+    updateSession s $ CompatibilitySession.declareDjinnDeclaration $
         ClassDecl name params methods
 runCmd s (QueryInstance ctx target) =
-    case resolveDjinnInstanceMethods (djinnSession s) ctx target of
+    case CompatibilitySession.resolveDjinnInstanceMethods
+            (djinnSession s) ctx target of
         Left failure -> do
             putStrLn $ "Error: " ++ commandDiagnostic failure
             return (False, markFailed s)
@@ -316,9 +325,10 @@ makeDjinnResult s name contexts goal = do
             failure
         Right value -> Right value
     checkedTarget <- validateDjinnTarget target
-    sharedGoal <- validateDjinnQueryType "goal" goal
+    sharedGoal <- CompatibilityRequest.validateDjinnQueryType "goal" goal
     sharedContexts <- traverse
-        (traverse $ validateDjinnQueryType "context argument") contexts
+        (traverse $ CompatibilityRequest.validateDjinnQueryType
+            "context argument") contexts
     request <- mkDjinnRequest QueryRequest {
         requestTarget = checkedTarget,
         requestGoal = sharedGoal,

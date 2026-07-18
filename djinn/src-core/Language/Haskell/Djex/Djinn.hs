@@ -4,43 +4,42 @@
 -- shared inventory together with every private search index derived from it.
 -- Queries use the shared source-type vocabulary while retaining Djinn's
 -- proof-search options and backend-specific evidence.
+--
+-- The curated session is immutable, matching the Exference adapter: change a
+-- declaration by constructing a replacement neutral 'DjinnEnvironment' and
+-- sealing it with 'mkDjinnSession'. Raw declaration edits, declaration-table
+-- snapshots, and instance-method projection remain compatibility frontend
+-- implementation details and do not cross this module.
 module Language.Haskell.Djex.Djinn
-  ( DjinnSession
+  ( -- * Sessions
+    DjinnSession
   , DjinnEnvironment
   , DjinnInventory
+  , mkDjinnSession
+  , standardDjinnSession
+  , djinnSessionEnvironment
+  , djinnSessionInventory
+
+    -- * Requests
   , DjinnTypeVariable
   , DjinnLocal
   , DjinnType
   , QueryOptions (..)
   , defaultQueryOptions
-  , DjinnCandidate
-  , DjinnCandidateDetails (..)
-  , Qualification (..)
-  , RenderError (..)
-  , DjinnQueryMetadata (..)
-  , DjinnDeclarationSnapshot
   , DjinnRequest
-  , DjinnResult
-  , mkDjinnSession
-  , standardDjinnSession
-  , djinnSessionEnvironment
-  , djinnSessionInventory
-  , djinnSessionDeclarationSnapshot
-  , djinnSnapshotTypeDeclarations
-  , djinnSnapshotFunctionDeclarations
-  , djinnSnapshotClassDeclarations
-  , declareDjinnDeclaration
-  , removeDjinnDeclaration
-  , djinnSessionTypeDeclarations
-  , djinnSessionFunctionDeclarations
-  , djinnSessionClassDeclarations
-  , resolveDjinnInstanceMethods
   , mkDjinnRequest
   , djinnRequestQuery
   , parseDjinnRequest
   , parseDjinnRequestWithCheckedTarget
   , validateDjinnTarget
-  , validateDjinnQueryType
+
+    -- * Results
+  , DjinnCandidate
+  , DjinnCandidateDetails (..)
+  , Qualification (..)
+  , RenderError (..)
+  , DjinnQueryMetadata (..)
+  , DjinnResult
   , runDjinnQuery
   , renderDjinnCandidateExpression
   , renderDjinnCandidateDefinition
@@ -63,28 +62,16 @@ import Language.Haskell.Djex.Djinn.Internal.Request
   , defaultQueryOptions
   , djinnRequestQuery
   , mkDjinnRequest
-  , validateDjinnQueryType
   , validateDjinnTarget
   )
 import qualified Language.Haskell.Djex.Djinn.Internal.Request as Request
 import Language.Haskell.Djex.Djinn.Internal.Session
-  ( DjinnDeclarationSnapshot
-  , DjinnEnvironment
+  ( DjinnEnvironment
   , DjinnInventory
   , DjinnSession
-  , declareDjinnDeclaration
-  , djinnSessionClassDeclarations
-  , djinnSessionDeclarationSnapshot
   , djinnSessionEnvironment
-  , djinnSessionFunctionDeclarations
   , djinnSessionInventory
-  , djinnSessionTypeDeclarations
-  , djinnSnapshotClassDeclarations
-  , djinnSnapshotFunctionDeclarations
-  , djinnSnapshotTypeDeclarations
   , mkDjinnSession
-  , removeDjinnDeclaration
-  , resolveDjinnInstanceMethods
   , standardDjinnSession
   )
 import qualified Language.Haskell.Djex.Djinn.Internal.Session as Session

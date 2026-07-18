@@ -690,6 +690,10 @@ any / the right solution. Some common current limitations are:
   documents its naming and validation rules. Additions welcome!
 - Pattern matching on multiple-constructor data types is disabled by default;
   an experimental opt-in is described below;
+- Nonrecursive empty datatypes are always eligible for elimination, independent
+  of the multiple-constructor flag. A value of an empty datatype can therefore
+  satisfy any result type through an empty `case`; rendered source uses
+  `case value of {}` and requires GHC's `EmptyCase` extension;
 - Recursive datatypes remain valid input, but recursive deconstructors are
   currently omitted from search with a structured
   `RecursiveDataEliminationUnsupported` warning rather than risking an

@@ -81,6 +81,19 @@ Opaque values intentionally use smart constructors and ordinary projection
 functions instead of exported record fields or `Generic` representations when
 record update or `GHC.Generics.to` could bypass an invariant.
 
+Both checked adapters use the same ownership split:
+
+| Layer | Responsibility |
+| --- | --- |
+| Public backend facade | Parse requests, run the backend, translate failures, and render candidates. |
+| Private `Internal.Request` owner | Seal the exact neutral request together with canonical execution data and diagnostic provenance. |
+| Private `Internal.Session` owner | Seal the authoritative inventory together with every backend index derived from it; publish replacements only after transactional validation. |
+| Backend core | Execute proof or heuristic search without owning the public integration contract. |
+
+The private owners are Cabal `Other-Modules`. Keeping them separate from the
+facades makes the two adapters uniform without conflating their search
+semantics or exposing their cached plans.
+
 ## What remains backend-specific
 
 Uniform architecture does not mean identical semantics:
@@ -141,8 +154,9 @@ compatibility inventory.
 
 Modules in Cabal's `Other-Modules` are implementation details even when their
 filesystem path contains a historically public namespace. Examples include the
-private Exference checked-request/session owners and Djinn's formula and REPL
-workers. Downstream code cannot import them through a `djex` dependency.
+private checked-request/session owners for both adapters and Djinn's formula
+and REPL workers. Downstream code cannot import them through a `djex`
+dependency.
 
 ## Test boundaries
 

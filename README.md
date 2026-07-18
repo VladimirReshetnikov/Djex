@@ -55,9 +55,9 @@ contracts. The single library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
 boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
-the two engines continue converging; the ordered path to the current
-single-library state is recorded in [the 2026-07-14 remaining-convergence
-audit](docs/reports/2026-07-14-remaining-convergence-audit.md).
+the two engines continue converging. The latest whole-tree findings,
+architectural decisions, and retained semantic differences are recorded in
+[the final convergence review](docs/reports/2026-07-17-final-convergence-review.md).
 
 ## Building
 

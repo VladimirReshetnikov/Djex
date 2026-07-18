@@ -10,9 +10,16 @@ import System.Process (readProcessWithExitCode)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 
+import Language.Haskell.Djex.Djinn
+    ( QueryOptions (..)
+    , defaultQueryOptions
+    )
+
 main :: IO ()
 main = defaultMain $ testGroup "Djinn CLI integration"
     [ testCase "EOF exits a successful session" testEof
+    , testCase "startup settings follow the library query defaults"
+        testDefaultSettings
     , testCase "explicit RTS tuning reaches the application" testRtsOptions
     , testCase "same-named assumptions cannot become recursion"
         testSelfReference
@@ -47,6 +54,21 @@ main = defaultMain $ testGroup "Djinn CLI integration"
     , testCase "logical negative results are successful batch answers"
         testNegativeBatchResult
     ]
+
+testDefaultSettings :: Assertion
+testDefaultSettings = do
+    output <- runSession [":help", ":quit"]
+    let defaults = defaultQueryOptions
+        setting enabled name = (if enabled then "+" else "-") ++ name
+        defaultBudget = maybe 0 id $ optionBudget defaults
+    assertContains "multi follows the public default"
+        (setting (optionAlternatives defaults) "multi") output
+    assertContains "sorting follows the public default"
+        (setting (optionSorted defaults) "sorted") output
+    assertContains "candidate cutoff follows the public default"
+        ("cutoff=" ++ show (optionCutoff defaults)) output
+    assertContains "choice budget follows the public default"
+        ("budget=" ++ show defaultBudget) output
 
 testRtsOptions :: Assertion
 testRtsOptions = do
@@ -400,4 +422,3 @@ withCommandFile contents action = bracket create removeFile action
         hPutStr handle contents
         hClose handle
         return path
-

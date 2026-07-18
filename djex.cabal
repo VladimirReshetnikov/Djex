@@ -303,6 +303,7 @@ Test-Suite djinn-cli-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        CLISpec.hs
   Hs-Source-Dirs: djinn/test-cli
+  Build-Depends:  djex
   Build-Tool-Depends: djex:djinn
 
 -- Exercise the curated facade and both lower-level engines through the single
@@ -360,4 +361,5 @@ Test-Suite exference-cli-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        CLISpec.hs
   Hs-Source-Dirs: exference/test-cli
+  Build-Depends:  djex
   Build-Tool-Depends: djex:exference

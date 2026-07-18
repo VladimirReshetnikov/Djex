@@ -115,13 +115,15 @@ data State = State {
 startState :: State
 startState = State {
     djinnSession = standardSession,
-    multi = False,
-    sorted = True,
+    multi = optionAlternatives defaults,
+    sorted = optionSorted defaults,
     debug = False,
-    cutOff = 200,
-    budget = 0,
+    cutOff = optionCutoff defaults,
+    budget = maybe unlimitedBudget id $ optionBudget defaults,
     commandFailed = False
     }
+  where
+    defaults = defaultQueryOptions
 
 standardSession :: DjinnSession
 standardSession = case standardDjinnSession of
@@ -336,11 +338,13 @@ makeDjinnResult s name contexts goal = do
         requestOptions = queryOptions
         }
     runDjinnQuery (djinnSession s) request
-  where queryOptions = QueryOptions {
+  where queryOptions = defaultQueryOptions {
         optionAlternatives = multi s,
         optionSorted = sorted s,
         optionCutoff = cutOff s,
-        optionBudget = if budget s > 0 then Just (budget s) else Nothing
+        optionBudget = if budget s > unlimitedBudget
+            then Just (budget s)
+            else Nothing
         }
 
 formatDjinnResult :: Bool -> State -> String -> [Context] -> HType
@@ -639,4 +643,10 @@ getSettings s = unlines $ [
     "Current settings" ] ++ [ "    " ++ (if gett s then "+" else "-") ++ name ++ replicate (10 - length name) ' ' ++ descr |
                               (name, descr, gett, _set) <- options ] ++
     [ "    cutoff=" ++ show (cutOff s) ++ " maximum number of solutions generated",
-      "    budget=" ++ show (budget s) ++ " search-step budget, 0 = unlimited" ]
+      "    budget=" ++ show (budget s) ++ " choice-point budget, " ++
+          show unlimitedBudget ++ " = unlimited" ]
+
+-- The historical REPL represents the core's 'Nothing' budget with a numeric
+-- setting so @:set budget=0@ can retain its original spelling.
+unlimitedBudget :: Integer
+unlimitedBudget = 0

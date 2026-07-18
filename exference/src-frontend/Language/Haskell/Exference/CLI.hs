@@ -149,6 +149,7 @@ options =
 
 fullUsageInfo :: String
 fullUsageInfo = usageInfo "Usage: exference [OPTION...] [HSTYPE...]" options
+  ++ "\n" ++ searchDefaultsInfo
 
 mainOpts :: [String] -> Either String ([Flag], [String])
 mainOpts arguments = case getOpt (ReturnInOrder Input) options arguments of
@@ -240,14 +241,44 @@ runQuery verbosity flags session target source = do
   presentResults verbosity flags results
 
 optionsFor :: [Flag] -> ExferenceOptions
-optionsFor flags = defaultExferenceOptions
-  { exferenceAllowUnused = Unused `elem` flags
-  , exferenceAllowResidualConstraints = Constraints `elem` flags
-  , exferenceMultiConstructorPatterns = PatternMatchMC `elem` flags
+optionsFor flags = cliSearchDefaults
+  { exferenceAllowUnused = enabled exferenceAllowUnused Unused
+  , exferenceAllowResidualConstraints =
+      enabled exferenceAllowResidualConstraints Constraints
+  , exferenceMultiConstructorPatterns =
+      enabled exferenceMultiConstructorPatterns PatternMatchMC
   , exferenceHeuristics = if Shortest `elem` flags
       then cliHeuristicsConfig
-      else cliHeuristicsConfig {heuristics_solutionLength = 0}
+      else exferenceHeuristics cliSearchDefaults
   }
+ where
+  enabled project flag = project cliSearchDefaults || flag `elem` flags
+
+-- Keep Exference's historical ranking profile while inheriting every
+-- non-ranking search default from the public backend policy. In particular, a
+-- future limit change now reaches this compatibility command without a second
+-- literal or record constructor to update.
+cliSearchDefaults :: ExferenceOptions
+cliSearchDefaults = defaultExferenceOptions
+  { exferenceHeuristics =
+      cliHeuristicsConfig {heuristics_solutionLength = 0}
+  }
+
+searchDefaultsInfo :: String
+searchDefaultsInfo = unlines
+  [ "Search limits inherited from the library defaults:"
+  , "  constraint deferral steps: "
+      ++ show (exferenceConstraintDeferralSteps cliSearchDefaults)
+  , "  maximum search steps: "
+      ++ show (exferenceMaximumSteps cliSearchDefaults)
+  , "  maximum queue size: "
+      ++ renderBounded (exferenceMaximumQueueSize cliSearchDefaults)
+  , "  maximum search depth: "
+      ++ renderBounded (exferenceMaximumDepth cliSearchDefaults)
+  ]
+
+renderBounded :: Show value => Maybe value -> String
+renderBounded = maybe "unbounded" show
 
 prefersConstraintFreeFallback :: [Flag] -> Bool
 prefersConstraintFreeFallback flags = not $ any (`elem` flags)

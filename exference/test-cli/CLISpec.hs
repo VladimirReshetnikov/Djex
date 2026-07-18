@@ -12,6 +12,11 @@ import System.Process (readProcessWithExitCode)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertEqual, testCase)
 
+import Language.Haskell.Djex.Exference
+  ( ExferenceOptions (..)
+  , defaultExferenceOptions
+  )
+
 main :: IO ()
 main = defaultMain $ testGroup "Exference CLI integration"
   [ testCase "no arguments print help" testHelp
@@ -45,8 +50,23 @@ testHelp :: Assertion
 testHelp = do
   output <- runExference []
   assertContains "help should describe invocation" "Usage: exference" output
+  assertContains "constraint deferral follows the public default"
+    ("constraint deferral steps: "
+      ++ show (exferenceConstraintDeferralSteps defaultExferenceOptions)) output
+  assertContains "maximum steps follow the public default"
+    ("maximum search steps: "
+      ++ show (exferenceMaximumSteps defaultExferenceOptions)) output
+  assertContains "maximum queue size follows the public default"
+    ("maximum queue size: "
+      ++ renderBounded (exferenceMaximumQueueSize defaultExferenceOptions)) output
+  assertContains "maximum depth follows the public default"
+    ("maximum search depth: "
+      ++ renderBounded (exferenceMaximumDepth defaultExferenceOptions)) output
   assertBool "the removed embedded test mode must stay absent"
     (not $ "--tests" `isInfixOf` output)
+
+renderBounded :: Show value => Maybe value -> String
+renderBounded = maybe "unbounded" show
 
 testRtsOptions :: Assertion
 testRtsOptions = do

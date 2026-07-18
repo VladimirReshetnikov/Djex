@@ -28,6 +28,7 @@ import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data ExpressionCheckError
@@ -49,6 +50,9 @@ data ExpressionCheckError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
   | InvalidCheckClassConstraint ClassEnvError
   | InvalidCheckEnvironmentBindings EnvironmentDuplicateError
+  | InvalidCheckEnvironmentSyntax EnvironmentSyntaxError
+  | InvalidCheckExpressionScope (SharedGenerated.ScopeError TVarId)
+  | InvalidCheckExpressionSyntax SharedGenerated.RenderError
   | InvalidCheckDeconstructor DeconstructorValidationError
   deriving (Eq, Show)
 
@@ -253,6 +257,9 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
   case validateEnvironmentBindingIdentities rawEnvironment of
     Left failure -> Left $ InvalidCheckEnvironmentBindings failure
     Right () -> Right ()
+  case validateEnvironmentBindingSyntax rawEnvironment of
+    Left failure -> Left $ InvalidCheckEnvironmentSyntax failure
+    Right () -> Right ()
   validateType goal
   validateClassConstraints QueryConstraint $ typeConstraints goal
   mapM_ (validateConstraint QueryConstraint) expected
@@ -266,6 +273,13 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     Nothing -> Right ()
     Just quantified -> Left $ UnsupportedNestedForall quantified
   mapM_ validateDeconstructor deconstructors
+  let generated = toGeneratedExpression expression
+  case SharedGenerated.validateExpressionScope generated of
+    Left failure -> Left $ InvalidCheckExpressionScope failure
+    Right () -> Right ()
+  case SharedGenerated.validateExpressionSyntax generated of
+    Left failure -> Left $ InvalidCheckExpressionSyntax failure
+    Right () -> Right ()
  where
   rawEnvironment = EnvDictionary
     functions deconstructors $ qClassEnv_env classEnvironment

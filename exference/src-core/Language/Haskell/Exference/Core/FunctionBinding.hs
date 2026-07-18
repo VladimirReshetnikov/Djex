@@ -5,6 +5,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
   , EnvironmentDuplicateError (..)
+  , EnvironmentSyntaxError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
   , functionBindingFromType
@@ -18,6 +19,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , mapFunctionBindingTypes
   , mapDeconstructorBindingTypes
   , validateEnvironmentBindingIdentities
+  , validateEnvironmentBindingSyntax
   , validateDeconstructorBinding
   )
 where
@@ -26,6 +28,7 @@ import Control.DeepSeq (NFData (..))
 import Data.Foldable (traverse_)
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
+import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
@@ -38,6 +41,7 @@ import Language.Haskell.Exference.Core.TypeUtils
   , typeConstructorHead
   )
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -216,6 +220,18 @@ data EnvironmentDuplicateError
 
 instance NFData EnvironmentDuplicateError
 
+-- | A global name whose generated expression or pattern cannot be emitted as
+-- valid Haskell. Keeping this policy beside 'EnvDictionary' makes raw checker
+-- inputs obey the same lexical contract as search-environment sealing.
+data EnvironmentSyntaxError
+  = InvalidFunctionBindingSyntax
+      QualifiedName SharedGenerated.RenderError
+  | InvalidConstructorBindingSyntax
+      QualifiedName SharedGenerated.RenderError
+  deriving (Eq, Generic, Show)
+
+instance NFData EnvironmentSyntaxError
+
 -- | Require every name used for environment lookup to be unambiguous.
 --
 -- The ordering is part of the checked-boundary contract: datatype heads are
@@ -244,6 +260,42 @@ validateEnvironmentBindingIdentities environment
   repeated = Set.toAscList
     . SharedCollection.repeatedValueSet
     . SharedCollection.summarizeDuplicates
+
+-- | Validate every environment name through the shared generated-syntax
+-- boundary. Function names are checked before constructor patterns to retain
+-- the live search boundary's established error ordering.
+validateEnvironmentBindingSyntax
+  :: EnvDictionary
+  -> Either EnvironmentSyntaxError ()
+validateEnvironmentBindingSyntax environment =
+  case firstInvalidFunction of
+    Just (name, failure) -> Left
+      $ InvalidFunctionBindingSyntax name failure
+    Nothing -> case firstInvalidConstructor of
+      Just (name, failure) -> Left
+        $ InvalidConstructorBindingSyntax name failure
+      Nothing -> Right ()
+ where
+  firstInvalidFunction = listToMaybe
+    [ (name, failure)
+    | binding <- environmentFunctions environment
+    , let name = functionName binding
+    , Left failure <- [SharedGenerated.validateExpressionSyntax
+        $ SharedGenerated.Global name]
+    ]
+
+  firstInvalidConstructor = listToMaybe
+    [ (name, failure)
+    | deconstructor <- environmentDeconstructors environment
+    , constructor <- deconstructorConstructors deconstructor
+    , let name = constructorName constructor
+          patternProbe = SharedGenerated.Constructor name
+            (SharedGenerated.Wildcard <$ constructorFields constructor)
+          expressionProbe = SharedGenerated.Lambda [patternProbe]
+            $ SharedGenerated.Hole ()
+    , Left failure <-
+        [SharedGenerated.validateExpressionSyntax expressionProbe]
+    ]
 
 -- | Every independently stored search-capability type. Class and instance
 -- assumptions are deliberately excluded because they belong to

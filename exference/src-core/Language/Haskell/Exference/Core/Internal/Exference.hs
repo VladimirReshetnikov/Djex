@@ -898,12 +898,12 @@ validateEnvironmentRatingsAndSyntax environment
   | Just binding <- find (not . isFiniteScore . functionPenalty)
       (environmentFunctions environment) = Left $ InvalidHeuristic
         (show $ functionName binding) (functionPenalty binding)
-  | Just (binding, syntaxError) <- firstInvalidGeneratedBinding environment =
-      Left $ InvalidGeneratedBinding binding syntaxError
-  | Just (constructor, syntaxError) <-
-      firstInvalidGeneratedConstructor environment =
-      Left $ InvalidGeneratedConstructor constructor syntaxError
-  | otherwise = Right ()
+  | otherwise = case validateEnvironmentBindingSyntax environment of
+      Left (InvalidFunctionBindingSyntax name syntaxError) ->
+        Left $ InvalidGeneratedBinding name syntaxError
+      Left (InvalidConstructorBindingSyntax name syntaxError) ->
+        Left $ InvalidGeneratedConstructor name syntaxError
+      Right () -> Right ()
 
 validateQueryForall
   :: ExferenceQuery
@@ -1061,32 +1061,6 @@ canonicalizeDeconstructorBinding = mapDeconstructorBindingTypes canonicalize
 
 canonicalize :: HsType -> HsType
 canonicalize = SharedType.canonicalizeType
-
-firstInvalidGeneratedConstructor
-  :: EnvDictionary
-  -> Maybe (QualifiedName, SharedGenerated.RenderError)
-firstInvalidGeneratedConstructor environment = listToMaybe
-  [ (name, syntaxError)
-  | deconstructor <- environmentDeconstructors environment
-  , constructor <- deconstructorConstructors deconstructor
-  , let name = constructorName constructor
-        generatedPattern = SharedGenerated.Constructor name
-          (SharedGenerated.Wildcard <$ constructorFields constructor)
-        probe = SharedGenerated.Lambda [generatedPattern]
-          $ SharedGenerated.Hole ()
-  , Left syntaxError <- [SharedGenerated.validateExpressionSyntax probe]
-  ]
-
-firstInvalidGeneratedBinding
-  :: EnvDictionary
-  -> Maybe (QualifiedName, SharedGenerated.RenderError)
-firstInvalidGeneratedBinding environment = listToMaybe
-  [ (name, syntaxError)
-  | binding <- environmentFunctions environment
-  , let name = functionName binding
-  , Left syntaxError <- [SharedGenerated.validateExpressionSyntax
-      $ SharedGenerated.Global name]
-  ]
 
 -- Binding monotypes only: constraint argument types are validated beside
 -- their sites through 'environmentConstraints', unlike the rigid planner's

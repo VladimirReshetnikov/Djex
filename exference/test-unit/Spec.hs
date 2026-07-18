@@ -72,6 +72,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
   , EnvironmentDuplicateError (..)
+  , EnvironmentSyntaxError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
   , deconstructorBindingType
@@ -6398,6 +6399,50 @@ tests = testGroup "Exference"
             (TypeArrow duplicateType duplicateType) [] expression @?= Left
               (InvalidCheckEnvironmentBindings
                 $ DuplicateDeconstructorIdentities [name "Duplicate"])
+      , testCase "rejects invalid unused environment names" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+              arrowName = validQualifiedName [] "->"
+              invalidFunction = FunctionBinding
+                integer arrowName 0 [] []
+              invalidConstructorName = name "notAConstructor"
+              invalidDeconstructor = DeconstructorBinding
+                (TypeCons $ name "Container")
+                [ConstructorBinding invalidConstructorName []] False
+              checked functions deconstructors = checkExpression
+                (mkQueryClassEnv staticClasses []) functions deconstructors
+                integer [] $ ExpName seedName
+          checked [invalidFunction, seed] [] @?= Left
+            (InvalidCheckEnvironmentSyntax
+              $ InvalidFunctionBindingSyntax arrowName
+              $ Generated.InvalidGlobalExpression SharedName.functionName)
+          checked [seed] [invalidDeconstructor] @?= Left
+            (InvalidCheckEnvironmentSyntax
+              $ InvalidConstructorBindingSyntax invalidConstructorName
+              $ Generated.InvalidConstructorPattern invalidConstructorName)
+      , testCase "rejects duplicate generated pattern binders" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              pairType = TypeCons $ name "Pair"
+              pairConstructor = name "Pair"
+              deconstructor = DeconstructorBinding pairType
+                [ConstructorBinding pairConstructor [integer, integer]] False
+              duplicateBinder = 2
+              expression = ExpLambda 1 pairType
+                $ ExpCaseMatch (ExpVar 1 pairType)
+                    [ ( pairConstructor
+                      , [ (duplicateBinder, integer)
+                        , (duplicateBinder, integer)
+                        ]
+                      , ExpVar duplicateBinder integer
+                      )
+                    ]
+          checkExpression (mkQueryClassEnv staticClasses []) []
+            [deconstructor] (TypeArrow pairType integer) [] expression @?=
+              Left (InvalidCheckExpressionScope
+                $ Generated.DuplicatePatternBinder duplicateBinder)
       , testCase "rejects unused nested-forall environment capabilities" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"

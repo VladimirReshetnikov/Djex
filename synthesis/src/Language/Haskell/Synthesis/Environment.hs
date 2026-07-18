@@ -33,7 +33,6 @@ import qualified Data.Set as Set
 import Data.Set (Set)
 import Data.Void (Void)
 import GHC.Generics (Generic)
-import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Internal.InstanceHead
@@ -284,14 +283,10 @@ preflightDeclarationWidths classArities index declaration =
       Right () -> validateKnownArity constraint
 
   validateKnownArity constraint =
-    case Map.lookup (constraintClass constraint) classArities of
-      Nothing -> Right ()
-      Just expected
-        | actual == expected -> Right ()
-        | otherwise -> Left $ EnvironmentConstraintArityMismatch index
-            (constraintClass constraint) expected actual
-       where
-        actual = observedListLength expected $ constraintArguments constraint
+    validateKnownConstraintArityWith
+      (`Map.lookup` classArities)
+      (EnvironmentConstraintArityMismatch index)
+      constraint
 
   invalidType = InvalidEnvironmentDeclaration index
     . InvalidDeclarationType

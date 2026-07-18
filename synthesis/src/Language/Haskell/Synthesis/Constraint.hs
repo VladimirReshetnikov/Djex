@@ -13,12 +13,14 @@ module Language.Haskell.Synthesis.Constraint
   ( Constraint (..)
   , ConstraintError (..)
   , constraintArity
+  , validateKnownConstraintArityWith
   , showsConstraintWith
   , validateConstraintClassName
   , validateConstraint
   ) where
 
 import Control.DeepSeq (NFData (rnf))
+import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Name
   ( LexicalClass (ConstructorLike)
   , Name
@@ -60,6 +62,27 @@ instance NFData ConstraintError where
 -- to the declaration environment and may differ for unknown-class policies.
 constraintArity :: Constraint ty -> Int
 constraintArity = length . constraintArguments
+
+-- | Validate a constraint against a caller-owned table of known class
+-- arities. Unknown classes are deliberately retained for the caller's later
+-- open- versus closed-world policy. A known argument spine is inspected only
+-- through its first impossible cell, so every adapter gets the same bounded
+-- behavior for cyclic and oversized caller-built lists.
+validateKnownConstraintArityWith
+  :: (Name -> Maybe Int)
+  -> (Name -> Int -> Int -> error)
+  -> Constraint ty
+  -> Either error ()
+validateKnownConstraintArityWith lookupArity arityFailure constraint =
+  case lookupArity name of
+    Nothing -> Right ()
+    Just expected
+      | actual == expected -> Right ()
+      | otherwise -> Left $ arityFailure name expected actual
+     where
+      actual = observedListLength expected $ constraintArguments constraint
+ where
+  name = constraintClass constraint
 
 -- | Render a constraint once its type layer has supplied the rendering of an
 -- argument position. This is the single structural renderer used by both the

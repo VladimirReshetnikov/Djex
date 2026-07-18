@@ -3994,6 +3994,21 @@ constraintTests = testGroup "constraints"
       constraintArity constraint @?= 2
       show constraint @?= "Eq \"a\" \"b\""
       show (Constraint equality [] :: Constraint ()) @?= "Eq"
+  , testCase "bound known arities without inspecting unknown constraints" $ do
+      let equality = right $ mkIdentifier "Eq"
+          external = right $ mkIdentifier "External"
+          mismatch name expected actual = (name, expected, actual)
+          overapplied = Constraint equality
+            $ "a" : "b" : error "known arity forced an impossible tail"
+          unknown = Constraint external
+            (error "unknown arity forced its arguments" :: [String])
+          lookupArity name
+            | name == equality = Just 1
+            | otherwise = Nothing
+      validateKnownConstraintArityWith lookupArity mismatch overapplied @?=
+        Left (equality, 1, 2)
+      validateKnownConstraintArityWith lookupArity mismatch unknown @?=
+        Right ()
   , testCase "qualified classes remain nominally distinct" $ do
       let moduleA = right $ mkModuleName "A"
           moduleB = right $ mkModuleName "B"

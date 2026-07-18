@@ -668,10 +668,11 @@ validateKnownConstraintArityInEnv
   -> HsConstraint
   -> Either ClassEnvError ()
 validateKnownConstraintArityInEnv environment site constraint =
-  case M.lookup (constraint_tclass constraint)
-      (sClassEnv_tclasses environment) of
-    Nothing -> Right ()
-    Just declaration -> validateConstraintArity site constraint declaration
+  SharedConstraint.validateKnownConstraintArityWith
+    (\name -> length . tclass_params <$> M.lookup name
+      (sClassEnv_tclasses environment))
+    (ConstraintArityMismatch site)
+    constraint
 
 validateConstraintInTable
   :: M.Map QualifiedName HsTypeClass
@@ -693,14 +694,12 @@ validateConstraintArity
   -> HsTypeClass
   -> Either ClassEnvError ()
 validateConstraintArity site constraint declaration
-  | expected /= actual = Left $
-      ConstraintArityMismatch site name expected actual
-  | otherwise = Right ()
+  = SharedConstraint.validateKnownConstraintArityWith
+      (const $ Just expected)
+      (ConstraintArityMismatch site)
+      constraint
   where
-    name = constraint_tclass constraint
     expected = length $ tclass_params declaration
-    actual = SharedCollection.observedListLength expected
-      $ constraint_params constraint
 
 validateConstraintClass :: HsConstraint -> Either ClassEnvError ()
 validateConstraintClass constraint =

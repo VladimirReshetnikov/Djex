@@ -25,7 +25,7 @@ module Language.Haskell.Synthesis.KindInference
   , inferDeclarationKindsWithClassPolicy
   ) where
 
-import Control.Monad (foldM, unless, zipWithM_)
+import Control.Monad (foldM, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
   ( StateT (..)
@@ -43,9 +43,7 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection
-  ( firstDuplicate
-  , observedListLength
-  )
+  ( firstDuplicate )
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -603,17 +601,10 @@ preflightInferenceType assumptions = validateTypeWidthsWith
  where
   validateKnownArity constraint = case validateConstraint constraint of
     Left _ -> Right ()
-    Right () -> case Map.lookup (constraintClass constraint)
-        $ classParameterKinds assumptions of
-      Nothing -> Right ()
-      Just parameters
-        | actual == expected -> Right ()
-        | otherwise -> Left $ ClassArityMismatch
-            (constraintClass constraint) expected actual
-       where
-        expected = length parameters
-        actual = observedListLength expected
-          $ constraintArguments constraint
+    Right () -> validateKnownConstraintArityWith
+      (\name -> length <$> Map.lookup name (classParameterKinds assumptions))
+      ClassArityMismatch
+      constraint
 
 -- | Infer an acyclic declaration graph in dependency order. Rejecting every
 -- recursive SCC is an explicit compatibility policy shared by Djinn's legacy
@@ -732,11 +723,10 @@ checkConstraint assumptions variables constraint = do
     Just kinds -> pure kinds
     Nothing -> lift $ Left $ UnknownClass $ constraintClass constraint
   let arguments = constraintArguments constraint
-      expected = length parameterKinds
-      actual = observedListLength expected arguments
-  unless (expected == actual) $ lift $ Left $
-    ClassArityMismatch (constraintClass constraint)
-      expected actual
+  lift $ validateKnownConstraintArityWith
+    (const $ Just $ length parameterKinds)
+    ClassArityMismatch
+    constraint
   zipWithM_ checkArgument parameterKinds arguments
  where
   checkArgument expected argument = do

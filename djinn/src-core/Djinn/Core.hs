@@ -62,7 +62,7 @@ import Text.ParserCombinators.ReadP
     (ReadP, option, readP_to_S, skipSpaces)
 
 import Language.Haskell.Synthesis.Constraint
-    (Constraint(..))
+    (Constraint(..), validateKnownConstraintArityWith)
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
@@ -358,19 +358,18 @@ lookupResolvedContext prepared context = do
     requireName "class" (isDjinnDeclarationName ClassOwner) name
     case lookupPreparedSynthesisClass (constraintClass context) prepared of
         Nothing -> Left $ "Class not found: " ++ name
-        Just (params, methods) ->
-            let expected = length params
-                actual = SharedCollection.observedListLength expected
-                    $ constraintArguments context
-            in if expected == actual then
-                Right ResolvedContext {
-                    resolvedConstraint = context,
-                    resolvedParameters = params,
-                    resolvedMethods = methods
-                    }
-            else Left $
-                "Class " ++ name ++ " expects " ++ show expected ++
-                " type argument(s), but got " ++ show actual
+        Just (params, methods) -> do
+            validateKnownConstraintArityWith
+                (const $ Just $ length params)
+                (\_ expected actual ->
+                    "Class " ++ name ++ " expects " ++ show expected ++
+                    " type argument(s), but got " ++ show actual)
+                context
+            Right ResolvedContext {
+                resolvedConstraint = context,
+                resolvedParameters = params,
+                resolvedMethods = methods
+                }
   where
     name = SharedName.renderCanonical $ constraintClass context
 

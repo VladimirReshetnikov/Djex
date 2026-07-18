@@ -482,15 +482,22 @@ simplifyCaseExpression _ [(Constructor name [], expression)]
   | nameSpecial name == Just (TupleConstructor Boxed 0) = expression
 simplifyCaseExpression scrutinee alternatives
   | all (uncurry patternEqualsExpression) alternatives = scrutinee
-simplifyCaseExpression scrutinee [(pattern, expression)]
-  | (patterns@(_ : _), body) <- expressionLambdaSpine expression =
-      lambdaExpression patterns
-        $ simplifyCaseExpression scrutinee [(pattern, body)]
+simplifyCaseExpression scrutinee alternatives@[(pattern, expression)]
+  | (patterns@(_ : _), body) <- expressionLambdaSpine expression
+  , let simplified = lambdaExpression patterns
+          $ simplifyCaseExpression scrutinee [(pattern, body)]
+  , rewritePreservesScope original simplified = simplified
+ where
+  original = Case scrutinee alternatives
 simplifyCaseExpression scrutinee
     alternatives@(_ : _)
-  | commonCount > 0 = lambdaExpression (map bindingPattern canonicalLocals)
-      $ simplifyCaseExpression scrutinee convertedAlternatives
+  | commonCount > 0
+  , rewritePreservesScope original simplified = simplified
  where
+  original = Case scrutinee alternatives
+  simplified = lambdaExpression (map bindingPattern canonicalLocals)
+    $ simplifyCaseExpression scrutinee convertedAlternatives
+
   commonCount = case decomposedAlternatives of
     [] -> 0
     first : rest -> commonBinderCount (availableBinderCount first) rest
@@ -521,8 +528,9 @@ simplifyCaseExpression scrutinee
             | (Bind source, Just target) <- zip used canonicalLocals
             , source /= target
             ]
-      in (constructorPattern, lambdaExpression remaining
-            $ renameLocals renamings expression)
+      in ( constructorPattern
+         , renameLocals renamings $ lambdaExpression remaining expression
+         )
     | (constructorPattern, patterns, expression) <- decomposedAlternatives
     ]
 
@@ -535,8 +543,10 @@ simplifyCaseExpression scrutinee
   canonicalLocal patterns = case [local | Bind local <- patterns] of
     local : _ -> Just local
     [] -> Nothing
-simplifyCaseExpression _ ((_, expression) : alternatives@(_ : _))
-  | all (alphaEquivalentExpression expression . snd) alternatives = expression
+simplifyCaseExpression scrutinee
+    alternatives@((_, expression) : remaining@(_ : _))
+  | all (alphaEquivalentExpression expression . snd) remaining
+  , rewritePreservesScope (Case scrutinee alternatives) expression = expression
 simplifyCaseExpression scrutinee alternatives = Case scrutinee alternatives
 
 isVariablePattern :: Pattern local -> Bool
@@ -565,9 +575,51 @@ patternEqualsExpression (TuplePattern patterns) (Tuple expressions) =
     && and (zipWith patternEqualsExpression patterns expressions)
 patternEqualsExpression _ _ = False
 
-renameLocals :: Eq local => [(local, local)] -> Expression local -> Expression local
-renameLocals renamings = fmap $ \local ->
-  maybe local id $ lookup local renamings
+-- Rename only lexical occurrences, simultaneously. Patterns introduce new
+-- scopes rather than occurrences, and holes are exact synthesis identities;
+-- neither may be changed as a side effect of alpha-renaming a hoisted lambda.
+renameLocals
+  :: Ord local
+  => [(local, local)]
+  -> Expression local
+  -> Expression local
+renameLocals renamings = rename $ Map.fromList renamings
+ where
+  rename replacements expression = case expression of
+    Local local -> Local $ Map.findWithDefault local local replacements
+    original@Global{} -> original
+    Lambda patterns body -> Lambda patterns
+      $ rename (underPatterns replacements patterns) body
+    Apply function argument -> Apply
+      (rename replacements function) (rename replacements argument)
+    Tuple elements -> Tuple $ map (rename replacements) elements
+    original@Hole{} -> original
+    Let pattern binding body -> Let pattern
+      (rename replacements binding)
+      (rename (underPatterns replacements [pattern]) body)
+    Case scrutinee alternatives -> Case
+      (rename replacements scrutinee)
+      [ (pattern, rename (underPatterns replacements [pattern]) body)
+      | (pattern, body) <- alternatives
+      ]
+
+  underPatterns replacements patterns = foldr Map.delete replacements
+    $ concatMap patternLocals patterns
+
+-- Validate a tentative local rewrite in the lexical context that can contain
+-- the original fragment. Closing exactly its free locals admits legitimate
+-- outer references while detecting newly free, captured, or duplicate locals.
+-- The shared scope validator remains the single authority for those rules.
+rewritePreservesScope
+  :: Ord local
+  => Expression local
+  -> Expression local
+  -> Bool
+rewritePreservesScope original rewritten =
+  validateExpressionScope closed == Right ()
+ where
+  freeLocals = Set.toAscList $ expressionFreeLocalIdentitiesBy id original
+  closed = lambdaExpression (map Bind freeLocals) rewritten
 
 -- | Apply 'simplifyCaseExpression' bottom-up throughout a generated tree.
 simplifyExpressionCases

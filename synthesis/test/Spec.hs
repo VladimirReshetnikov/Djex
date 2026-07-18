@@ -3617,6 +3617,74 @@ generatedTests = testGroup "generated syntax"
               , Lambda [Bind rightSecond] $ Local rightSecond
               )
             ])
+  , testCase "case simplification preserves lexical scope" $ do
+      let choose = Global (right $ mkIdentifier "choose") :: Expression Int
+          leftName = right $ mkIdentifier "Left"
+          rightName = right $ mkIdentifier "Right"
+          value = Global $ right $ mkIdentifier "value"
+          use = Global $ right $ mkIdentifier "use"
+          nestedBinderCollision = Case choose
+            [ ( Constructor leftName []
+              , Lambda [Bind 1] $ Local 1
+              )
+            , ( Constructor rightName []
+              , Lambda [Bind 2] $ Lambda [Bind 1] $ Local 2
+              )
+            ]
+          duplicateCanonicalColumns = Case choose
+            [ ( Constructor leftName []
+              , Lambda [Bind 1, Wildcard] $ Local 1
+              )
+            , ( Constructor rightName []
+              , Lambda [Wildcard, Bind 1] $ Local 1
+              )
+            ]
+          singletonScrutineeCollision = Case
+            (Lambda [Bind 1] $ Local 1)
+            [(Wildcard, Lambda [Bind 1] $ Local 1)]
+          casePatternCollision = Case choose
+            [ (Bind 1, Lambda [Wildcard] value)
+            , (Wildcard, Lambda [Bind 1] $ Local 1)
+            ]
+          caseBinderEscape = Case choose
+            [ (Bind 1, Apply use $ Local 1)
+            , (Bind 1, Apply use $ Local 1)
+            ]
+          fixtures =
+            [ ("nested branch binder", nestedBinderCollision)
+            , ("duplicate canonical columns", duplicateCanonicalColumns)
+            , ("singleton scrutinee binder", singletonScrutineeCollision)
+            , ("case-pattern binder", casePatternCollision)
+            , ("collapsed case binder", caseBinderEscape)
+            ]
+      fixtures `forM_` \(label, source) -> do
+        validateExpressionScope source @?= Right ()
+        validateExpressionSyntax source @?= Right ()
+        let simplified = simplifyExpressionCases source
+        case validateExpressionScope simplified of
+          Right () -> pure ()
+          Left failure -> assertFailure $ label
+            ++ " simplification corrupted scope: " ++ show failure
+        validateExpressionSyntax simplified @?= Right ()
+        simplified @?= source
+  , testCase "case lambda hoisting preserves hole identities" $ do
+      let choose = Global (right $ mkIdentifier "choose") :: Expression Int
+          leftName = right $ mkIdentifier "Left"
+          rightName = right $ mkIdentifier "Right"
+          source = Case choose
+            [ (Constructor leftName [], Lambda [Bind 1] $ Hole 1)
+            , (Constructor rightName [], Lambda [Bind 2] $ Hole 2)
+            ]
+          expected = Lambda [Bind 1] $ Case choose
+            [ (Constructor leftName [], Hole 1)
+            , (Constructor rightName [], Hole 2)
+            ]
+          simplified = simplifyExpressionCases source
+      validateExpressionScope source @?= Right ()
+      validateExpressionScope simplified @?= Right ()
+      expressionHoles source @?= [1, 2]
+      expressionHoles simplified @?= [1, 2]
+      simplified @?= expected
   , testCase "observe every generated binding site including wildcards" $ do
       let target = right $ mkIdentifier "target"
           checkedTarget = right $ mkDefinitionName target

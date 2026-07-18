@@ -1053,6 +1053,27 @@ tests = testGroup "Djex facade"
         Left (GlobalDefinitionCapture target sharedGlobal Unqualified)
       renderExferenceCandidateDefinition FullyQualified candidate @?=
         Right "result = Fixture.result"
+  , testCase "reject caller-forged candidate scope in both stable adapters" $ do
+      target <- expectRight $ mkIdentifier "result"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      let djinnCandidate :: DjinnCandidate
+          djinnCandidate = Candidate
+            (FunctionClause checkedTarget [] $ Local "free")
+            []
+            (DjinnCandidateDetails 0 0)
+          exferenceCandidate :: ExferenceCandidate
+          exferenceCandidate = Candidate
+            (FunctionClause checkedTarget [Bind 0, Bind 0] $ Local 0)
+            []
+            emptyExferenceCandidateDetails
+      renderDjinnCandidateExpression Unqualified djinnCandidate @?=
+        Left UnboundLocalIdentity
+      renderDjinnCandidateDefinition Unqualified djinnCandidate @?=
+        Left UnboundLocalIdentity
+      renderExferenceCandidateExpression Unqualified exferenceCandidate @?=
+        Left DuplicateLocalBinderIdentity
+      renderExferenceCandidateDefinition Unqualified exferenceCandidate @?=
+        Left DuplicateLocalBinderIdentity
   , testCase "preserve Exference clause binders in expression rendering" $ do
       target <- expectRight $ mkIdentifier "result"
       checkedTarget <- expectRight $ mkDefinitionName target

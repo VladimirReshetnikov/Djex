@@ -1,7 +1,10 @@
 --
 -- Independent type checking for LJT proof terms.
 --
-module Djinn.Internal.ProofCheck (checkProof) where
+module Djinn.Internal.ProofCheck (
+    checkProofEnvironment,
+    checkProof
+    ) where
 
 import Control.Monad (replicateM, unless, when)
 import Control.Monad.Trans.Class (lift)
@@ -58,12 +61,19 @@ checkProof environment expected term =
         unify actual (fromFormula expected)
         solveConstraints
 
-ensureUniqueEnvironment :: [(Symbol, Formula)] -> Check ()
-ensureUniqueEnvironment environment =
+-- | Reject an ambiguous external proof environment before either search or
+-- independent checking gives its first occurrence precedence.  Proof binders
+-- may still shadow outer identities normally; this check applies only to the
+-- caller-supplied assumption list.
+checkProofEnvironment :: [(Symbol, Formula)] -> Either String ()
+checkProofEnvironment environment =
     case firstDuplicate $ map fst environment of
-        Nothing -> return ()
-        Just symbol -> failCheck $
+        Nothing -> Right ()
+        Just symbol -> Left $
             "duplicate proof identity in environment: " ++ show symbol
+
+ensureUniqueEnvironment :: [(Symbol, Formula)] -> Check ()
+ensureUniqueEnvironment = lift . checkProofEnvironment
 
 infer :: Environment -> Term -> Check ProofType
 infer environment term =

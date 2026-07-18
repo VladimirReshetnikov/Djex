@@ -21,7 +21,7 @@
 module Djinn.Internal.LJT (
     module Djinn.Internal.LJTFormula, provable, prove, Proof,
     SearchMode(..), Strategy(..), SearchOutcome(..),
-    defaultSearchMode, proveWithMode
+    defaultSearchMode, proveWithMode, proveWithModeChecked
     ) where
 
 import Control.Applicative (Alternative(empty, (<|>)))
@@ -34,6 +34,7 @@ import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Fresh (allocateFresh)
 import Djinn.Internal.LJTFormula
+import Djinn.Internal.ProofCheck (checkProofEnvironment)
 
 -- Whether local proof-search cuts should retain their alternative paths.
 type MoreSolutions = Bool
@@ -78,9 +79,17 @@ data SearchOutcome = SearchOutcome {
 provable :: Formula -> Bool
 provable = not . null . prove False []
 
+-- | Historical unchecked proof search.  Duplicate assumption identities are
+-- resolved by association-list order and make the resulting free proof
+-- variables ambiguous.  New callers that accept an environment should use
+-- 'proveWithModeChecked'; this compatibility entry remains available to code
+-- that already owns the identity invariant.
 prove :: MoreSolutions -> [(Symbol, Formula)] -> Formula -> [Proof]
 prove more env = searchProofs . proveWithMode (defaultSearchMode more) env
 
+-- | Historical mode-aware search without boundary validation.  Prefer
+-- 'proveWithModeChecked' unless the caller has already assigned unique proof
+-- identities.
 proveWithMode :: SearchMode -> [(Symbol, Formula)] -> Formula -> SearchOutcome
 proveWithMode mode env goal =
     SearchOutcome proofs exhausted remaining
@@ -93,6 +102,19 @@ proveWithMode mode env goal =
     -- variables and keeps the atom introduced for disjunction genuinely fresh.
     reservedSymbols =
         map fst env ++ concatMap (formulaSymbols . snd) env ++ formulaSymbols goal
+
+-- | Search after checking that every external assumption has a unique proof
+-- identity.  This is the canonical raw LJT entry: it uses the same validator
+-- and diagnostic as the independent proof checker.  The returned
+-- proof stream remains lazy once the finite environment boundary is accepted.
+proveWithModeChecked
+    :: SearchMode
+    -> [(Symbol, Formula)]
+    -> Formula
+    -> Either String SearchOutcome
+proveWithModeChecked mode environment goal = do
+    checkProofEnvironment environment
+    return $ proveWithMode mode environment goal
 
 -- Fold the environment into the goal as premises, prove the resulting
 -- implication, then apply the proof to the environment variables and

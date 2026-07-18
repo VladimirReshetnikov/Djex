@@ -5,7 +5,9 @@
 --
 -- This layer owns cross-declaration namespaces and indexes. Kind inference,
 -- dependency cycles, unknown-name policy, and backend class/instance semantics
--- are deliberately separate checks layered over this stable inventory.
+-- are deliberately separate checks layered over this stable inventory. The
+-- one class-aware structural rule here is declared arity: it bounds otherwise
+-- raw constraint spines before any recursive type traversal.
 module Language.Haskell.Synthesis.Environment
   ( Environment
   , EnvironmentError (..)
@@ -24,12 +26,14 @@ module Language.Haskell.Synthesis.Environment
 
 import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM)
+import qualified Data.Map.Lazy as LazyMap
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import Data.Void (Void)
 import GHC.Generics (Generic)
+import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Internal.InstanceHead
@@ -77,6 +81,11 @@ instance
 
 data EnvironmentError typeVariable
   = InvalidEnvironmentDeclaration Int (DeclarationError typeVariable)
+  | EnvironmentConstraintArityMismatch
+      Int -- ^ Zero-based declaration index.
+      Name
+      Int -- ^ Declared class arity.
+      Int -- ^ Observed arity, saturated one past the declared arity.
   | DuplicateTypeDeclaration Name
   | DuplicateValueDeclaration Name
   | DuplicateInstanceDeclaration (Constraint (Type typeVariable))
@@ -91,6 +100,8 @@ mkEnvironment
       (Environment typeVariable kindVariable annotation)
 mkEnvironment declarations = foldM insert emptyEnvironment
   $ zip [0 ..] declarations
+ where
+  insert = insertDeclaration $ knownClassArities declarations
 
 -- | Ground every explicit kind while preserving the environment's validated
 -- declaration order and indexes. The source-ordered declaration pass fixes
@@ -172,13 +183,15 @@ emptyEnvironment :: Environment typeVariable kindVariable annotation
 emptyEnvironment = Environment [] Map.empty Map.empty Map.empty
   Map.empty Map.empty Set.empty Set.empty
 
-insert
+insertDeclaration
   :: Ord typeVariable
-  => Environment typeVariable kindVariable annotation
+  => Map Name Int
+  -> Environment typeVariable kindVariable annotation
   -> (Int, Declaration typeVariable kindVariable annotation)
   -> Either (EnvironmentError typeVariable)
       (Environment typeVariable kindVariable annotation)
-insert environment (index, declaration) = do
+insertDeclaration classArities environment (index, declaration) = do
+  preflightDeclarationWidths classArities index declaration
   either (Left . InvalidEnvironmentDeclaration index) Right
     $ validateDeclaration declaration
   indexed <- case declaration of
@@ -199,6 +212,89 @@ insert environment (index, declaration) = do
       insertInstance variables headConstraint declaration environment
   Right indexed
     { reversedDeclarations = declaration : reversedDeclarations indexed }
+
+-- | Record the arity of every class that owns its type-namespace name.
+--
+-- The first declaration at a type name remains authoritative so the normal
+-- insertion pass still reports a later duplicate before treating that later
+-- declaration as an available class. Lazy map insertion deliberately does
+-- not force a parameter spine merely while collecting the table.
+knownClassArities
+  :: [Declaration typeVariable kindVariable annotation]
+  -> Map Name Int
+knownClassArities = snd . foldl' collect (Set.empty, Map.empty)
+ where
+  collect (occupied, arities) declaration = case declaration of
+    TypeSynonymDeclaration _ name _ _ -> occupy name Nothing
+    DataTypeDeclaration _ name _ _ -> occupy name Nothing
+    AbstractTypeDeclaration _ name _ -> occupy name Nothing
+    ClassDeclaration _ name parameters _ _ ->
+      occupy name $ Just $ length parameters
+    ValueDeclaration{} -> (occupied, arities)
+    InstanceDeclaration{} -> (occupied, arities)
+   where
+    occupy name arity
+      | name `Set.member` occupied = (occupied, arities)
+      | otherwise =
+          ( Set.insert name occupied
+          , maybe arities (\value -> LazyMap.insert name value arities) arity
+          )
+
+-- | Bound every declared-class constraint before ordinary validation walks
+-- its raw argument spine. This is a termination boundary as well as an arity
+-- check: a cyclic or overlong spine is observed only through the first
+-- impossible cell. Type traversal then applies the same rule recursively and
+-- bounds tuple spines before 'validateDeclaration' canonicalizes them.
+preflightDeclarationWidths
+  :: Map Name Int
+  -> Int
+  -> Declaration typeVariable kindVariable annotation
+  -> Either (EnvironmentError typeVariable) ()
+preflightDeclarationWidths classArities index declaration =
+  case declaration of
+    TypeSynonymDeclaration _ _ _ body -> preflightType body
+    DataTypeDeclaration _ _ _ constructors ->
+      mapM_ (mapM_ preflightType . constructorFields) constructors
+    AbstractTypeDeclaration{} -> Right ()
+    ValueDeclaration signature -> preflightType $ valueType signature
+    ClassDeclaration _ _ _ superclasses methods -> do
+      mapM_ preflightConstraint superclasses
+      mapM_ (preflightType . valueType) methods
+    InstanceDeclaration _ _ prerequisites headConstraint -> do
+      mapM_ preflightConstraint prerequisites
+      preflightConstraint headConstraint
+ where
+  preflightType = validateTypeWidthsWith invalidType validateTypeConstraint
+
+  -- Direct declaration constraints have a declaration-level class-name
+  -- diagnostic. Leave a malformed name to that validator without entering
+  -- its possibly cyclic argument spine.
+  preflightConstraint constraint =
+    case validateConstraintClassName $ constraintClass constraint of
+      Left _ -> Right ()
+      Right () -> do
+        validateKnownArity constraint
+        mapM_ preflightType $ constraintArguments constraint
+
+  -- A forall constraint instead owns the corresponding 'TypeError', so its
+  -- lexical failure can be returned immediately before width inspection.
+  validateTypeConstraint constraint =
+    case validateConstraint constraint of
+      Left failure -> Left $ invalidType $ InvalidTypeConstraint failure
+      Right () -> validateKnownArity constraint
+
+  validateKnownArity constraint =
+    case Map.lookup (constraintClass constraint) classArities of
+      Nothing -> Right ()
+      Just expected
+        | actual == expected -> Right ()
+        | otherwise -> Left $ EnvironmentConstraintArityMismatch index
+            (constraintClass constraint) expected actual
+       where
+        actual = observedListLength expected $ constraintArguments constraint
+
+  invalidType = InvalidEnvironmentDeclaration index
+    . InvalidDeclarationType
 
 insertType
   :: Name

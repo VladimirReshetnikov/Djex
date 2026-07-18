@@ -928,9 +928,10 @@ searchPreparedFormula options prepared target form methodEnv = do
                     (optionAlternatives options || optionSorted options)) {
             searchBudget = optionBudget options
             }
-        outcome = proveWithMode mode internalEnv form
         internalFailure what = first $
             DjinnInternalQueryFailure . ((what ++ ": ") ++)
+    outcome <- internalFailure "invalid proof-search environment" $
+        proveWithModeChecked mode internalEnv form
     case searchProofs outcome of
         [] -> do
             failure <-
@@ -950,8 +951,9 @@ searchPreparedFormula options prepared target form methodEnv = do
                             searchAlternatives = False,
                             searchBudget = remainingSearchBudget outcome
                             }
-                        diagnosticOutcome =
-                            proveWithMode diagnosticMode diagnosticEnv form
+                    diagnosticOutcome <- internalFailure
+                        "invalid diagnostic proof-search environment" $
+                        proveWithModeChecked diagnosticMode diagnosticEnv form
                     case searchProofs diagnosticOutcome of
                         diagnosticProof : _ -> do
                             internalFailure

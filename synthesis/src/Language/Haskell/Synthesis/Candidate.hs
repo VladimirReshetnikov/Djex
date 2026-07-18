@@ -22,10 +22,15 @@ import Language.Haskell.Synthesis.Constraint (Constraint)
 import Language.Haskell.Synthesis.Generated
   ( FunctionClause
   , RenderError
+      ( DuplicateLocalBinderIdentity
+      , UnboundLocalIdentity
+      )
   , RenderOptions
+  , ScopeError (..)
   , functionClauseExpression
   , renderExpression
   , renderFunctionClause
+  , validateFunctionClauseScope
   )
 
 -- | One generated output and the obligations and details attached to it.
@@ -55,20 +60,46 @@ instance (NFData ty, NFData details, NFData output) =>
 --
 -- Clause patterns become leading lambda patterns, while a patternless value
 -- clause renders as its body.  Backends remain responsible for choosing local
--- name preferences and qualification through 'RenderOptions'.
+-- name preferences and qualification through 'RenderOptions'. The exported
+-- 'Candidate' constructor remains available for source compatibility, so this
+-- boundary rejects caller-built outputs with free local identities or reused
+-- binder identities before they can be presented as checked source.
 renderCandidateExpression
   :: Ord local
   => RenderOptions local
   -> Candidate ty details (FunctionClause local)
   -> Either RenderError String
-renderCandidateExpression options =
-  renderExpression options . functionClauseExpression . candidateOutput
+renderCandidateExpression options candidate = do
+  validateCandidateScope candidate
+  renderExpression options
+    $ functionClauseExpression $ candidateOutput candidate
 
 -- | Render a candidate as its complete top-level function equation.
+--
+-- Scope is checked here as well as in 'renderCandidateExpression': candidates
+-- are inspectable public records, not an opaque proof that their generated
+-- output came from a backend.
 renderCandidateDefinition
   :: Ord local
   => RenderOptions local
   -> Candidate ty details (FunctionClause local)
   -> Either RenderError String
-renderCandidateDefinition options =
-  renderFunctionClause options . candidateOutput
+renderCandidateDefinition options candidate = do
+  validateCandidateScope candidate
+  renderFunctionClause options $ candidateOutput candidate
+
+validateCandidateScope
+  :: Ord local
+  => Candidate ty details (FunctionClause local)
+  -> Either RenderError ()
+validateCandidateScope = either (Left . renderScopeError) Right
+  . validateFunctionClauseScope
+  . candidateOutput
+
+-- Render errors deliberately do not carry the backend-specific local identity
+-- type. Clients that need the offending identity can inspect 'candidateOutput'
+-- with 'validateFunctionClauseScope' before rendering.
+renderScopeError :: ScopeError local -> RenderError
+renderScopeError scopeError = case scopeError of
+  UnboundLocal{} -> UnboundLocalIdentity
+  DuplicatePatternBinder{} -> DuplicateLocalBinderIdentity

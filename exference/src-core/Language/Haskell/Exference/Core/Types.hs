@@ -345,6 +345,8 @@ data ClassEnvError
       Int -- ^ Zero-based argument index.
       SynthesisTypeError
   | DuplicateInstanceHeads [HsConstraint]
+  | ExpandingInstancePrerequisite HsConstraint HsConstraint
+    -- ^ Instance head and a prerequisite that can increase a ground goal.
   | SuperclassCycle [QualifiedName]
   deriving (Eq, Ord)
 
@@ -372,11 +374,15 @@ renderClassEnvError failure = case failure of
     [show site, show name, show index, show typeFailure]
   DuplicateInstanceHeads constraints -> constructor
     "DuplicateInstanceHeads" [sourceConstraintList constraints]
+  ExpandingInstancePrerequisite headConstraint prerequisite -> constructor
+    "ExpandingInstancePrerequisite"
+    [sourceConstraint headConstraint, sourceConstraint prerequisite]
   SuperclassCycle names -> constructor "SuperclassCycle" [show names]
  where
   constructor name fields = unwords $ name : fields
+  sourceConstraint = showHsConstraint M.empty
   sourceConstraintList constraints = "[" ++ L.intercalate ","
-    (map (showHsConstraint M.empty) constraints) ++ "]"
+    (map sourceConstraint constraints) ++ "]"
 
 -- Positional fields are deliberate.  Exported record labels would let a
 -- downstream caller update the declarations or either derived index and
@@ -411,9 +417,9 @@ mkStaticClassEnv
   -> Either ClassEnvError StaticClassEnv
 mkStaticClassEnv sourceClasses sourceInstances = do
   classTable <- buildClassTable classes
+  traverse_ (preflightClass classTable) classes
   traverse_ (validateClass classTable) classes
-  let arityEnvironment = StaticClassEnv classTable [] M.empty
-  traverse_ (validateInstanceArities arityEnvironment) instances
+  traverse_ (preflightInstance classTable) instances
   case SharedEnvironment.repeatedInstanceHeadsInFirstRepetitionOrder
       [ (implicitInstanceVariables declaration, instance_head declaration)
       | declaration <- instances
@@ -424,6 +430,7 @@ mkStaticClassEnv sourceClasses sourceInstances = do
   validateSuperclassGraph classTable
   let declarations = StaticClassEnv classTable [] M.empty
       allInstances = inflateInstances declarations instances
+  traverse_ validateInstanceTermination allInstances
   return $ StaticClassEnv classTable instances $ indexInstances allInstances
  where
   -- Canonicalization is total, so normalizing before validation does not
@@ -433,14 +440,33 @@ mkStaticClassEnv sourceClasses sourceInstances = do
   classes = map canonicalizeClass sourceClasses
   instances = map canonicalizeInstance sourceInstances
 
-  validateInstanceArities environment declaration = do
-    validateKnownConstraintArityInEnv environment InstanceHead
-      $ instance_head declaration
-    traverse_ (validateKnownConstraintArityInEnv environment
-      $ InstancePrerequisite
-      $ constraint_tclass
-      $ instance_head declaration)
+  -- Inspect every bounded-width component before duplicate-head analysis,
+  -- which computes free variables and therefore assumes a finite type tree.
+  -- The callback also rejects unknown nested forall constraints without
+  -- forcing their raw argument spines.
+  preflightClass table declaration = traverse_
+    (preflightConstraint table $ ClassSuperclass $ tclass_name declaration)
+    $ tclass_constraints declaration
+
+  preflightInstance table declaration = do
+    preflightConstraint table InstanceHead $ instance_head declaration
+    traverse_
+      (preflightConstraint table $ InstancePrerequisite
+        $ constraint_tclass
+        $ instance_head declaration)
       $ instance_constraints declaration
+
+  preflightConstraint table site constraint = do
+    validateConstraintHeader table site constraint
+    traverse_ preflightArgument
+      $ zip [0 ..] $ constraint_params constraint
+   where
+    className = constraint_tclass constraint
+    preflightArgument (index, argument) = SharedType.validateTypeWidthsWith
+      (InvalidConstraintArgument site className index
+        . InvalidSynthesisType)
+      (validateConstraintHeader table site)
+      argument
 
   canonicalizeClass declaration = declaration
     { tclass_constraints = map canonicalizeConstraint
@@ -501,6 +527,29 @@ mkStaticClassEnv sourceClasses sourceInstances = do
       (validateConstraintInTable table $ InstancePrerequisite headName)
       (instance_constraints instanceDeclaration)
 
+  -- Exact or size-preserving cycles are safe because the solver remembers
+  -- constraints already on the current proof path. An expanding edge is not:
+  -- @C [a] => C a@ turns a finite ground query into an infinite sequence of
+  -- ever-larger constraints. These two Paterson-style checks make every
+  -- instantiated prerequisite structurally non-increasing. Checking the
+  -- superclass-inflated instances is essential because projection from a
+  -- multi-parameter class can remove head arguments.
+  validateInstanceTermination instanceDeclaration = traverse_
+    validatePrerequisite $ instance_constraints instanceDeclaration
+   where
+    headConstraint = instance_head instanceDeclaration
+    (headSize, headOccurrences) = constraintTerminationMeasure headConstraint
+    validatePrerequisite prerequisite
+      | prerequisiteSize <= headSize
+      , all noMoreFrequent $ M.toList prerequisiteOccurrences = Right ()
+      | otherwise = Left
+          $ ExpandingInstancePrerequisite headConstraint prerequisite
+     where
+      (prerequisiteSize, prerequisiteOccurrences) =
+        constraintTerminationMeasure prerequisite
+      noMoreFrequent (variable, count) = count <= M.findWithDefault 0
+        variable headOccurrences
+
   validateSuperclassGraph table = case
     [ map tclass_name declarations
     | CyclicSCC declarations <- stronglyConnComp
@@ -517,6 +566,68 @@ mkStaticClassEnv sourceClasses sourceInstances = do
       ( constraint_tclass $ instance_head instanceDeclaration
       , [instanceDeclaration]
       ))
+
+-- | Structural size and free flexible-variable multiplicity used by the
+-- instance termination check. Counts are unbounded 'Integer's so sealing a
+-- very large but finite program cannot wrap around into an unsafe result.
+constraintTerminationMeasure
+  :: HsConstraint
+  -> (Integer, M.Map TVarId Integer)
+constraintTerminationMeasure = measureConstraint S.empty
+ where
+  measureConstraint bound (HsConstraint _ arguments) = L.foldl'
+    (combineMeasure bound) (1, M.empty) arguments
+
+  combineMeasure bound accumulated typeExpression =
+    addMeasures accumulated $ measureType bound typeExpression
+
+  measureType bound typeExpression = case typeExpression of
+    SharedType.TypeVariable variable ->
+      ( 1
+      , case SharedType.flexibleVariableIdentity variable of
+          Just identifier
+            | variable `S.notMember` bound -> M.singleton identifier 1
+          _ -> M.empty
+      )
+    SharedType.TypeConstructor{} -> (1, M.empty)
+    SharedType.TypeApplication function argument -> addMeasures
+      (1, M.empty)
+      $ addMeasures (measureType bound function) (measureType bound argument)
+    SharedType.FunctionType parameter result -> addMeasures
+      (1, M.empty)
+      $ addMeasures (measureType bound parameter) (measureType bound result)
+    SharedType.TupleType _ elements -> L.foldl'
+      (combineMeasure bound) (1, M.empty) elements
+    SharedType.ForallType binders constraints body ->
+      let nextBound = S.fromList binders `S.union` bound
+          binderMeasure = L.foldl'
+            (\measure _ -> addMeasures measure (1, M.empty))
+            (1, M.empty)
+            binders
+          constraintMeasure = L.foldl'
+            (\measure constraint -> addMeasures measure
+              $ measureConstraint nextBound constraint)
+            binderMeasure
+            constraints
+      in addMeasures constraintMeasure $ measureType nextBound body
+
+  addMeasures (leftSize, leftOccurrences) (rightSize, rightOccurrences) =
+    ( leftSize + rightSize
+    , M.unionWith (+) leftOccurrences rightOccurrences
+    )
+
+validateConstraintHeader
+  :: M.Map QualifiedName HsTypeClass
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ClassEnvError ()
+validateConstraintHeader table site constraint = do
+  validateConstraintClass constraint
+  case M.lookup name table of
+    Nothing -> Left $ UnknownConstraintClass site name
+    Just declaration -> validateConstraintArity site constraint declaration
+ where
+  name = constraint_tclass constraint
 
 -- | Strict closed-world validation: the class must be declared and supplied
 -- exactly its declared number of parameters.

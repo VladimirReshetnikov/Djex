@@ -123,6 +123,8 @@ tests =
     , ("reject non-theorems", testNonTheorems)
     , ("honor search budgets and strategies", testSearchModes)
     , ("use an assumption as its named proof", testNamedAssumption)
+    , ("reject ambiguous raw proof environments",
+          testCheckedProofSearchEnvironment)
     , ("do not capture a caller-supplied proof symbol", testCallerSymbolCapture)
     , ("keep disjunction continuation atoms fresh", testContinuationAtomCapture)
     , ("preserve residual application after Csplit", testCsplitResidualArguments)
@@ -2326,6 +2328,31 @@ testNamedAssumption = do
     let assumption = Symbol "givenA"
     assertEqual "proof search should preserve the assumption's term symbol"
         [Var assumption] (prove False [(assumption, atomA)] atomA)
+
+testCheckedProofSearchEnvironment :: IO ()
+testCheckedProofSearchEnvironment = do
+    let duplicate = Symbol "given"
+        environment = [(duplicate, atomA), (duplicate, atomB)]
+        mode = defaultSearchMode False
+        checked = fmap (const ()) $
+            proveWithModeChecked mode environment atomA
+    assertEqual "search and proof checking share the duplicate diagnostic"
+        (checkProof environment atomA $ Var duplicate)
+        checked
+    assertEqual "the checked boundary reports the ambiguous identity"
+        (Left "duplicate proof identity in environment: given")
+        checked
+    case proveWithModeChecked mode [(duplicate, atomA)] atomA of
+        Left failure -> fail $
+            "a unique proof environment was rejected: " ++ failure
+        Right outcome ->
+            assertEqual "checked search preserves ordinary proof results"
+                [Var duplicate] (searchProofs outcome)
+    -- Keep the historical unchecked API source- and behavior-compatible for
+    -- callers that deliberately own its association-list invariant.
+    assertEqual "historical search retains first-match compatibility"
+        [Var duplicate]
+        (prove False environment atomA)
 
 -- The generated binder for b must not reuse x2.  Reuse changed the intended
 -- constant function into the ill-typed identity `f a = a` during rendering.

@@ -269,6 +269,21 @@ tests = testGroup "Exference"
           Set.size (inflateHsConstraints environment $ Set.singleton malformed)
             @?= 1
           length (inflateInstances environment [malformedInstance]) @?= 1
+      , testCase "instance preflight bounds nested tuple spines" $ do
+          let className = name "Unary"
+              unary = HsTypeClass className [0] []
+              integer = TypeCons $ name "Int"
+              oversizedTuple = TypeTuple Boxed $ repeat integer
+              malformedInstance = HsInstance []
+                $ HsConstraint className [oversizedTuple]
+          case mkStaticClassEnv [unary] [malformedInstance] of
+            Left (InvalidConstraintArgument
+                InstanceHead actualClass 0
+                (InvalidSynthesisType
+                  (SharedType.InvalidTupleTypeArity Boxed actualArity))) -> do
+              actualClass @?= className
+              actualArity @?= SharedName.maximumTupleArity + 1
+            result -> fail $ "nested tuple preflight returned: " ++ show result
       , testCase "checked search boundaries preflight cyclic class arities" $ do
           let className = name "Unary"
               unary = HsTypeClass className [0] []
@@ -798,6 +813,47 @@ tests = testGroup "Exference"
           let environment = mkQueryClassEnv staticEnvironment []
           isPossible environment [query] @?= Just [query]
           filterUnresolved environment [query] @?= Just [query]
+      , testCase "expanding instance prerequisites are rejected" $ do
+          let className = name "C"
+              cls = HsTypeClass className [0] []
+              headConstraint = HsConstraint className [TypeVar 0]
+              prerequisite = HsConstraint className
+                [TypeApp (TypeCons SharedName.listName) (TypeVar 0)]
+              growingInstance = HsInstance [prerequisite] headConstraint
+          mkStaticClassEnv [cls] [growingInstance] @?= Left
+            (ExpandingInstancePrerequisite headConstraint prerequisite)
+      , testCase "shrinking instance prerequisites resolve normally" $ do
+          let className = name "C"
+              cls = HsTypeClass className [0] []
+              integer = TypeCons $ name "Int"
+              variableConstraint = HsConstraint className [TypeVar 0]
+              listVariableConstraint = HsConstraint className
+                [TypeApp (TypeCons SharedName.listName) (TypeVar 0)]
+              integerConstraint = HsConstraint className [integer]
+              listIntegerConstraint = HsConstraint className
+                [TypeApp (TypeCons SharedName.listName) integer]
+              baseInstance = HsInstance [] integerConstraint
+              shrinkingInstance = HsInstance
+                [variableConstraint] listVariableConstraint
+          staticEnvironment <- expectRight $ mkStaticClassEnv [cls]
+            [baseInstance, shrinkingInstance]
+          let environment = mkQueryClassEnv staticEnvironment []
+          isPossible environment [listIntegerConstraint] @?= Just []
+          filterUnresolved environment [listIntegerConstraint] @?= Just []
+      , testCase "termination is checked after superclass inflation" $ do
+          let baseName = name "Base"
+              needName = name "Need"
+              derivedName = name "Derived"
+              base = HsTypeClass baseName [0] []
+              need = HsTypeClass needName [0, 1] []
+              derived = HsTypeClass derivedName [0, 1]
+                [HsConstraint baseName [TypeVar 0]]
+              sourceHead = HsConstraint derivedName [TypeVar 0, TypeVar 1]
+              prerequisite = HsConstraint needName [TypeVar 0, TypeVar 1]
+              sourceInstance = HsInstance [prerequisite] sourceHead
+              inflatedHead = HsConstraint baseName [TypeVar 0]
+          mkStaticClassEnv [base, need, derived] [sourceInstance] @?= Left
+            (ExpandingInstancePrerequisite inflatedHead prerequisite)
       ]
   , testGroup "Haskell source bindings"
       [ testCase "headerless signatures belong to the implicit Main module" $ do

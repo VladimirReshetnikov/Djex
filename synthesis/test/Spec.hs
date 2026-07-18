@@ -123,6 +123,25 @@ candidateTests = testGroup "candidates"
             { renderQualification = Unqualified }
       renderCandidateDefinition options candidate @?=
         Left (GlobalDefinitionCapture target global Unqualified)
+  , testCase "reject forged candidate scope at both render boundaries" $ do
+      let target = right $ mkIdentifier "result"
+          checkedTarget = right $ mkDefinitionName target
+          candidate :: FunctionClause Int
+            -> Candidate String () (FunctionClause Int)
+          candidate output = Candidate output [] ()
+          unbound = candidate
+            $ FunctionClause checkedTarget [] $ Local 0
+          duplicate = candidate
+            $ FunctionClause checkedTarget [Bind 0, Bind 0] $ Local 0
+          options = defaultRenderOptions $ \local -> "a" ++ show local
+      renderCandidateExpression options unbound @?=
+        Left UnboundLocalIdentity
+      renderCandidateDefinition options unbound @?=
+        Left UnboundLocalIdentity
+      renderCandidateExpression options duplicate @?=
+        Left DuplicateLocalBinderIdentity
+      renderCandidateDefinition options duplicate @?=
+        Left DuplicateLocalBinderIdentity
   ]
 
 collectionTests :: TestTree
@@ -1286,6 +1305,68 @@ environmentTests = testGroup "environments"
         [valueName, methodName]
       Map.keys (Environment.dataConstructorMap environment) @?=
         [constructorName]
+  , testCase "preflight known superclass and instance constraint widths" $ do
+      let className = right $ mkIdentifier "C"
+          derivedName = right $ mkIdentifier "D"
+          parameter = Declaration.TypeParameter "a" Nothing
+          variable = SharedType.TypeVariable "a"
+          baseClass :: Declaration.Declaration String Int ()
+          baseClass = Declaration.ClassDeclaration () className
+            [parameter] [] []
+          derived :: [SharedType.Type String]
+            -> Declaration.Declaration String Int ()
+          derived arguments = Declaration.ClassDeclaration () derivedName
+            [parameter] [Constraint className arguments] []
+          instanceWith
+            :: [Constraint (SharedType.Type String)]
+            -> [SharedType.Type String]
+            -> Declaration.Declaration String Int ()
+          instanceWith prerequisites arguments =
+            Declaration.InstanceDeclaration () ["a"] prerequisites
+              $ Constraint className arguments
+          expected = Left $ Environment.EnvironmentConstraintArityMismatch
+            1 className 1 2
+          finiteOverapplication =
+            variable : variable : error "forced known superclass tail"
+          cyclicArguments = let arguments = variable : arguments in arguments
+      Environment.mkEnvironment
+          [baseClass, derived finiteOverapplication] @?= expected
+      Environment.mkEnvironment
+          [baseClass, instanceWith [] cyclicArguments] @?= expected
+      Environment.mkEnvironment
+          [ baseClass
+          , instanceWith [Constraint className cyclicArguments] [variable]
+          ] @?= expected
+  , testCase "preflight nested tuple widths in instance constraints" $ do
+      let className = right $ mkIdentifier "C"
+          parameter = Declaration.TypeParameter "a" Nothing
+          variable = SharedType.TypeVariable "a"
+          baseClass :: Declaration.Declaration String Int ()
+          baseClass = Declaration.ClassDeclaration () className
+            [parameter] [] []
+          cyclicElements = let elements = variable : elements in elements
+          malformedTuple = SharedType.TupleType Unboxed cyclicElements
+          instanceDeclaration :: Declaration.Declaration String Int ()
+          instanceDeclaration = Declaration.InstanceDeclaration () ["a"]
+            [Constraint className [malformedTuple]]
+            $ Constraint className [variable]
+      Environment.mkEnvironment [baseClass, instanceDeclaration] @?= Left
+        (Environment.InvalidEnvironmentDeclaration 1
+          $ Declaration.InvalidDeclarationType
+          $ SharedType.InvalidTupleTypeArity Unboxed
+          $ maximumTupleArity + 1)
+  , testCase "retain class-name errors before cyclic constraint arguments" $ do
+      let declaredName = right $ mkIdentifier "C"
+          invalidName = right $ mkIdentifier "constraint"
+          variable = SharedType.TypeVariable "a"
+          cyclicArguments = let arguments = variable : arguments in arguments
+          declaration :: Declaration.Declaration String Int ()
+          declaration = Declaration.ClassDeclaration () declaredName
+            [Declaration.TypeParameter "a" Nothing]
+            [Constraint invalidName cyclicArguments] []
+      Environment.mkEnvironment [declaration] @?= Left
+        (Environment.InvalidEnvironmentDeclaration 0
+          $ Declaration.InvalidClassName invalidName)
   , testCase "reject duplicate type, value, and instance declarations" $ do
       let typeName = right $ mkIdentifier "T"
           valueName = right $ mkIdentifier "value"

@@ -948,6 +948,11 @@ renderOptionsWithLocalNameHints qualification hints fallback reserved =
 data RenderError
   = InvalidLocalName String NameError
   | LocalNameIsWildcard
+  -- Candidate rendering found a local with no enclosing binding site. The
+  -- backend-specific identity remains available through 'ScopeError'.
+  | UnboundLocalIdentity
+  -- Candidate rendering found one identity at multiple binding sites.
+  | DuplicateLocalBinderIdentity
   | InvalidGlobalExpression Name
   | InvalidTupleExpressionArity Int
   | InvalidTuplePatternArity Int

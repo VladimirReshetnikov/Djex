@@ -232,9 +232,9 @@ prepareGroundSynthesisEnvironmentFrom sourceEnvironment = do
 -- | Apply one compatibility declaration directly to the shared environment,
 -- then seal the resulting session state before returning it.  Djinn's
 -- historical association lists put replacements first within each category;
--- 'declareSharedDeclaration' encodes that policy rather than round-tripping
--- through those lists and accidentally making them the editable authority
--- again.
+-- The private @declareSharedDeclaration@ helper encodes that policy rather
+-- than round-tripping through those lists and accidentally making them the
+-- editable authority again.
 declareSynthesisEnvironment
     :: Declaration
     -> SynthesisEnvironment

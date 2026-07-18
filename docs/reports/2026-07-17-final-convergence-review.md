@@ -34,7 +34,10 @@ own semantics.
    eliminators. Search now emits a structured empty case, charges exactly one
    scrutinee use, and creates no unreachable branch goals. The independent
    checker separately verifies that an empty case's scrutinee unifies with a
-   declared empty deconstructor and backtracks from an unchanged state.
+   declared empty deconstructor and backtracks from an unchanged state. Because
+   no field or branch type escapes, empty elimination also leaves the flexible
+   identifier supply untouched instead of spuriously truncating a bounded
+   search.
 4. **The checker and live search disagreed about deconstructor validity.** The
    raw checker validated the component types but could accept a headless or
    function-headed deconstructor and thereby certify a pattern match that

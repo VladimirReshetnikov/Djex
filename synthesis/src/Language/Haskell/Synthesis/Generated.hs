@@ -956,6 +956,9 @@ data RenderError
   | EmptyLambda
   | InvalidFunctionName Name
   | GlobalDefinitionCapture Name Name Qualification
+  | UnexpectedResidualConstraints
+    -- ^ A backend that produces only closed terms received a caller-built
+    -- candidate carrying at least one unresolved obligation.
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData RenderError

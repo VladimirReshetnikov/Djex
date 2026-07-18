@@ -76,6 +76,8 @@ tests =
     [ ("parse prefix function constructor", testPrefixArrowParsing)
     , ("parse and render through the checked Djinn adapter",
           testCheckedDjinnAdapter)
+    , ("reject residual constraints at the Djinn rendering boundary",
+          testDjinnResidualRendering)
     , ("reuse canonical shared Djinn request plans across sessions",
           testCheckedDjinnRequestReuse)
     , ("rebuild immutable Djinn session indexes from neutral environments",
@@ -322,6 +324,30 @@ testCheckedDjinnAdapter = do
     -- the field projected through the opaque request boundary.
     assertEqualReversed actual expected = assertEqual "parsed request field"
         expected actual
+
+testDjinnResidualRendering :: IO ()
+testDjinnResidualRendering = do
+    target <- expectShownRight $ SharedName.mkIdentifier "identity"
+    checkedTarget <- expectShownRight $
+        SharedGenerated.mkDefinitionName target
+    let output = SharedGenerated.FunctionClause checkedTarget
+            [SharedGenerated.Bind "value"]
+            (SharedGenerated.Local "value")
+        residual = Constraint (sharedName "Eq")
+            [SharedType.TypeVariable "a"]
+        candidate = SharedCandidate.Candidate
+            { SharedCandidate.candidateOutput = output
+            , SharedCandidate.candidateResidualConstraints = [residual]
+            , SharedCandidate.candidateDetails = DjinnCandidateDetails 0 0
+            }
+    assertEqual "the expression renderer presented an open Djinn candidate"
+        (Left SharedGenerated.UnexpectedResidualConstraints)
+        (Djex.renderDjinnCandidateExpression
+            SharedGenerated.Unqualified candidate)
+    assertEqual "the definition renderer presented an open Djinn candidate"
+        (Left SharedGenerated.UnexpectedResidualConstraints)
+        (Djex.renderDjinnCandidateDefinition
+            SharedGenerated.Unqualified candidate)
 
 testCheckedDjinnRequestReuse :: IO ()
 testCheckedDjinnRequestReuse = do

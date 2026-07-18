@@ -122,6 +122,33 @@ facadeTests = testGroup "public Djex facade"
       renderFunctionClause (defaultRenderOptions id)
           (FunctionClause checkedTarget [Bind "value"] $ Local "value") @?=
         Right "identity value = value"
+  , testCase "rejects residual constraints at the Djinn render boundary" $ do
+      target <- expectRight $ mkIdentifier "identity"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      className <- expectRight $ mkIdentifier "Eq"
+      let residual = Constraint className [TypeVariable "a"]
+          candidateWith output = Candidate output [residual]
+            (DjinnCandidateDetails 0 0) :: DjinnCandidate
+          validCandidate = candidateWith
+            $ FunctionClause checkedTarget [Bind "value"] $ Local "value"
+          invalidCandidate = candidateWith
+            $ FunctionClause checkedTarget [] $ Local "free"
+          invalidNameCandidate = candidateWith
+            $ FunctionClause checkedTarget [Bind "case"] $ Local "case"
+      renderDjinnCandidateExpression Unqualified validCandidate @?=
+        Left UnexpectedResidualConstraints
+      renderDjinnCandidateDefinition Unqualified validCandidate @?=
+        Left UnexpectedResidualConstraints
+      -- Generated-code errors remain primary when both public record halves
+      -- are caller-forged.
+      renderDjinnCandidateExpression Unqualified invalidCandidate @?=
+        Left UnboundLocalIdentity
+      renderDjinnCandidateDefinition Unqualified invalidCandidate @?=
+        Left UnboundLocalIdentity
+      renderDjinnCandidateExpression Unqualified invalidNameCandidate @?=
+        Left (InvalidLocalName "case" $ ReservedIdentifier "case")
+      renderDjinnCandidateDefinition Unqualified invalidNameCandidate @?=
+        Left (InvalidLocalName "case" $ ReservedIdentifier "case")
   , testCase "exports checked Exference options" $
       exferenceMaximumSteps defaultExferenceOptions @?= 65536
   , testCase "exports explicit Exference record-pattern views" $

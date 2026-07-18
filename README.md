@@ -455,7 +455,10 @@ hints and qualification options. Because the public `Candidate` constructor
 remains available for compatibility, both stable renderers first validate the
 complete clause scope. A caller-forged free local or duplicate pattern-binder
 identity is rejected rather than rendered as if it were checked backend
-output.
+output. Djinn then enforces its stronger closed-term invariant: a public
+candidate with any residual obligation fails with
+`UnexpectedResidualConstraints`. Clause scope and lexical failures retain
+precedence when both parts of a candidate are forged.
 
 Exference's live search tree is the same shared `Generated.Expression`
 shape as those candidates: checker-specific type annotations inhabit a

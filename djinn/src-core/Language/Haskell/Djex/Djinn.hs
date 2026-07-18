@@ -76,7 +76,8 @@ import Language.Haskell.Djex.Djinn.Internal.Session
   )
 import qualified Language.Haskell.Djex.Djinn.Internal.Session as Session
 import Language.Haskell.Synthesis.Candidate
-  ( renderCandidateDefinition
+  ( candidateResidualConstraints
+  , renderCandidateDefinition
   , renderCandidateExpression
   )
 import Language.Haskell.Synthesis.Diagnostic
@@ -173,20 +174,40 @@ runDjinnQuery session request = do
     Right result -> Right result
 
 -- | Render only a Djinn candidate's generated expression.
+--
+-- Genuine Djinn results are closed and therefore have no residual
+-- constraints. Because the compatibility 'Candidate' constructor is public,
+-- this boundary also rejects a caller-built candidate that attaches an
+-- obligation. Generated-syntax validation deliberately runs first, preserving
+-- the existing scope and lexical error precedence when both parts are forged.
 renderDjinnCandidateExpression
   :: Qualification
   -> DjinnCandidate
   -> Either RenderError String
-renderDjinnCandidateExpression qualification =
-  renderCandidateExpression $ candidateRenderOptions qualification
+renderDjinnCandidateExpression qualification candidate = do
+  rendered <- renderCandidateExpression
+    (candidateRenderOptions qualification) candidate
+  validateClosedDjinnCandidate candidate
+  pure rendered
 
 -- | Render a complete definition using the target retained by the candidate.
+-- Scope and lexical failures take precedence over
+-- 'UnexpectedResidualConstraints', as in 'renderDjinnCandidateExpression'.
 renderDjinnCandidateDefinition
   :: Qualification
   -> DjinnCandidate
   -> Either RenderError String
-renderDjinnCandidateDefinition qualification =
-  renderCandidateDefinition $ candidateRenderOptions qualification
+renderDjinnCandidateDefinition qualification candidate = do
+  rendered <- renderCandidateDefinition
+    (candidateRenderOptions qualification) candidate
+  validateClosedDjinnCandidate candidate
+  pure rendered
+
+validateClosedDjinnCandidate :: DjinnCandidate -> Either RenderError ()
+validateClosedDjinnCandidate candidate = case
+    candidateResidualConstraints candidate of
+  [] -> Right ()
+  _ : _ -> Left UnexpectedResidualConstraints
 
 candidateRenderOptions :: Qualification -> RenderOptions DjinnLocal
 candidateRenderOptions qualification =

@@ -612,7 +612,11 @@ the candidate payload before either can escape. The definition/expression
 renderers consume
 canonical candidates through the shared rendering pipeline and return
 its `RenderError` directly, without conflating logical evidence with
-operational completion.
+operational completion. The stable adapter also distrusts the public
+`Candidate` constructor: after clause validation, either renderer reports
+`UnexpectedResidualConstraints` rather than presenting a caller-forged open
+candidate as a closed Djinn result. Running clause validation first preserves
+the established scope and lexical error precedence.
 The raw proof/search `Djinn.Internal.*` modules used by compatibility tests and
 research tooling remain exposed by `djex`, but their constructors can
 violate these invariants and carry no stability promise. The checked

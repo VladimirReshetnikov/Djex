@@ -259,7 +259,10 @@ local naming remain part of that shared rendering boundary. In particular,
 `Candidate` keeps a public constructor for compatibility, so the stable
 expression and definition helpers validate the complete clause on every call;
 caller-forged free local identities and duplicate pattern-binder identities
-produce `RenderError` instead of unchecked Haskell text.
+produce `RenderError` instead of unchecked Haskell text. Djinn's helpers then
+reject any nonempty residual list with `UnexpectedResidualConstraints`, since
+every genuine Djinn result is closed. Generated-clause failures deliberately
+take precedence if a caller forges both the output and residual fields.
 
 ## Import guidance
 

@@ -52,8 +52,10 @@ import Language.Haskell.Synthesis.Kind
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Type
 
+-- | A kind whose variable alternative is statically uninhabited.
 type GroundKind = Kind Void
 
+-- | The nominal kind facts inferred from one complete environment.
 data KindAssumptions = KindAssumptions
   { typeConstructorKinds :: Map Name GroundKind
   -- | 'Nothing' denotes a generalized kind parameter, as used by modern
@@ -64,9 +66,12 @@ data KindAssumptions = KindAssumptions
   }
   deriving (Eq, Show, Generic)
 
+-- | No known type constructors or classes.
 emptyKindAssumptions :: KindAssumptions
 emptyKindAssumptions = KindAssumptions Map.empty Map.empty
 
+-- | Whether undeclared nominal types and classes are rejected or inferred as
+-- external assumptions while checking an inventory.
 data KindInventoryPolicy
   = ClosedKindInventory
   | OpenKindInventory
@@ -92,6 +97,8 @@ data TypeKindDeclaration variable
   | DeclaredTypeKind Name GroundKind
   deriving (Eq, Ord, Show, Generic)
 
+-- | A malformed kind obligation, unresolved nominal reference, or
+-- incompatible set of inferred kinds.
 data KindInferenceError variable
   = DuplicateSharedVariable variable
   | DuplicateTypeConstructor Name
@@ -194,6 +201,8 @@ inferDeclarationKinds
   -> Either (KindInferenceError variable) KindAssumptions
 inferDeclarationKinds = inferDeclarationKindsWith ClosedKindInventory
 
+-- | Infer an environment with an explicit open- versus closed-inventory
+-- policy and generalized class parameters.
 inferDeclarationKindsWith
   :: Ord variable
   => KindInventoryPolicy
@@ -202,6 +211,11 @@ inferDeclarationKindsWith
 inferDeclarationKindsWith policy =
   inferDeclarationKindsWithClassPolicy policy GeneralizeClassKinds
 
+-- | Fully configurable environment kind inference.
+--
+-- Structural validity and namespace uniqueness are already guaranteed by the
+-- opaque 'Environment'; this operation owns dependency analysis, nominal
+-- resolution, unification, and class-kind finalization.
 inferDeclarationKindsWithClassPolicy
   :: Ord variable
   => KindInventoryPolicy

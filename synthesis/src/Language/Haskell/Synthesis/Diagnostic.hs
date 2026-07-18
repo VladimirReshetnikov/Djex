@@ -35,6 +35,7 @@ import Control.DeepSeq (NFData (rnf))
 import Data.List (intercalate)
 import qualified Data.List as List
 
+-- | Presentation severity, ordered from errors through informational notes.
 data Severity = Error | Warning | Info
   deriving (Eq, Ord, Show, Enum, Bounded)
 
@@ -68,15 +69,19 @@ data SourceLocationError
 
 -- Ordinary functions, rather than exported record labels, keep record-update
 -- syntax from bypassing the smart constructors.
+-- | One-based line number.
 sourceLine :: SourcePosition -> Int
 sourceLine (SourcePosition line _) = line
 
+-- | One-based column number.
 sourceColumn :: SourcePosition -> Int
 sourceColumn (SourcePosition _ column) = column
 
+-- | Inclusive start of a half-open span.
 sourceStart :: SourceSpan -> SourcePosition
 sourceStart (SourceSpan start _) = start
 
+-- | Exclusive end of a half-open span.
 sourceEnd :: SourceSpan -> SourcePosition
 sourceEnd (SourceSpan _ end) = end
 
@@ -84,9 +89,11 @@ sourceEnd (SourceSpan _ end) = end
 sourceLocation :: FilePath -> SourceSpan -> SourceLocation
 sourceLocation = SourceLocation
 
+-- | Source name retained by a complete location.
 locationSource :: SourceLocation -> FilePath
 locationSource (SourceLocation source _) = source
 
+-- | Validated span retained by a complete location.
 locationSpan :: SourceLocation -> SourceSpan
 locationSpan (SourceLocation _ span') = span'
 
@@ -108,6 +115,11 @@ instance Show SourceSpan where
       . shows end
       . showString "}"
 
+-- | A structured compiler-style diagnostic.
+--
+-- Codes are stable machine-facing classifications. Context entries retain
+-- explanatory detail in production order and render on indented lines below
+-- the primary message.
 data Diagnostic = Diagnostic
   { diagnosticSeverity :: !Severity
   , diagnosticCode :: Maybe String
@@ -196,12 +208,15 @@ shownErrorDiagnostic
 shownErrorDiagnostic code message detail =
   contextualDiagnostic Error code message (show detail)
 
+-- | Replace or attach the machine-readable diagnostic code.
 withCode :: String -> Diagnostic -> Diagnostic
 withCode code value = value { diagnosticCode = Just code }
 
+-- | Replace or attach a source name without changing the optional span.
 withSource :: FilePath -> Diagnostic -> Diagnostic
 withSource source value = value { diagnosticSource = Just source }
 
+-- | Replace or attach a span without changing the optional source name.
 withSpan :: SourceSpan -> Diagnostic -> Diagnostic
 withSpan span' value = value { diagnosticSpan = Just span' }
 

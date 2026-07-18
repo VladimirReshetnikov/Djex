@@ -121,5 +121,6 @@ data SearchBatch metadata candidate = SearchBatch
 instance (NFData metadata, NFData candidate) =>
     NFData (SearchBatch metadata candidate)
 
+-- | Construct a truncated completion with one reason.
 truncated :: TruncationReason -> Completion
 truncated reason = Truncated (reason :| [])

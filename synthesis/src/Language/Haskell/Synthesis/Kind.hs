@@ -3,6 +3,11 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 
+-- | The shared, backend-neutral kind tree.
+--
+-- The variable parameter lets frontends retain unresolved kind variables while
+-- editing declarations. Checked inventories use @'Kind' 'Void'@ so an
+-- unresolved variable cannot survive sealing.
 module Language.Haskell.Synthesis.Kind
   ( Kind (..)
   , freeKindVariables
@@ -15,6 +20,7 @@ import Data.Set (Set)
 import Data.Void (Void)
 import GHC.Generics (Generic)
 
+-- | A proper-type kind, a frontend-owned kind variable, or a kind arrow.
 data Kind variable
   = ProperTypeKind
   | KindVariable variable
@@ -23,6 +29,7 @@ data Kind variable
 
 instance NFData variable => NFData (Kind variable)
 
+-- | Collect every variable occurring in a kind.
 freeKindVariables :: Ord variable => Kind variable -> Set variable
 freeKindVariables kind = case kind of
   ProperTypeKind -> Set.empty

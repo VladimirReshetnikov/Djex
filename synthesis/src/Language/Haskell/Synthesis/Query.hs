@@ -316,9 +316,11 @@ instance (NFData metadata, NFData candidate) =>
 -- These are ordinary projections rather than record fields. Otherwise a
 -- downstream record update could bypass 'mkQueryResult' even though the
 -- 'QueryResult' constructor is hidden.
+-- | Recover the backend-independent logical claim attached to a result.
 resultEvidence :: QueryResult metadata candidate -> QueryEvidence
 resultEvidence (QueryResult evidence _) = evidence
 
+-- | Recover operational progress, metadata, and candidates.
 resultSearch
   :: QueryResult metadata candidate
   -> SearchBatch metadata candidate

@@ -46,6 +46,9 @@ import Language.Haskell.Synthesis.Type
 -- 'Generic' is intentionally absent: although the constructor is private,
 -- 'GHC.Generics.to' would otherwise let downstream callers rebuild mutually
 -- inconsistent declaration indexes.
+-- | A declaration stream sealed together with all deterministic name indexes.
+--
+-- The constructor is hidden so the source order and lookup maps cannot drift.
 data Environment typeVariable kindVariable annotation = Environment
   { reversedDeclarations ::
       [Declaration typeVariable kindVariable annotation]
@@ -78,6 +81,8 @@ instance
     rnf canonicalHeads `seq`
     rnf occupiedNames
 
+-- | A declaration-local failure or a conflict discovered while indexing the
+-- complete environment.
 data EnvironmentError typeVariable
   = InvalidEnvironmentDeclaration Int (DeclarationError typeVariable)
   | EnvironmentConstraintArityMismatch
@@ -92,6 +97,9 @@ data EnvironmentError typeVariable
 
 instance NFData typeVariable => NFData (EnvironmentError typeVariable)
 
+-- | Validate declarations in source order and construct their coherent
+-- indexes. The first failure is returned with its declaration index when
+-- applicable.
 mkEnvironment
   :: Ord typeVariable
   => [Declaration typeVariable kindVariable annotation]
@@ -358,31 +366,37 @@ insertInstance variables headConstraint declaration environment
  where
   canonicalHead = instanceHeadKey variables headConstraint
 
+-- | Recover declarations in their original source order.
 environmentDeclarations
   :: Environment typeVariable kindVariable annotation
   -> [Declaration typeVariable kindVariable annotation]
 environmentDeclarations = reverse . reversedDeclarations
 
+-- | Look up type synonyms, datatypes, and abstract types by exact name.
 typeDeclarationMap
   :: Environment typeVariable kindVariable annotation
   -> Map Name (Declaration typeVariable kindVariable annotation)
 typeDeclarationMap = typeDeclarationsByName
 
+-- | Look up top-level values and class methods by exact name.
 valueSignatureMap
   :: Environment typeVariable kindVariable annotation
   -> Map Name (ValueSignature typeVariable annotation)
 valueSignatureMap = valuesByName
 
+-- | Look up datatype constructors by exact name.
 dataConstructorMap
   :: Environment typeVariable kindVariable annotation
   -> Map Name (DataConstructor typeVariable annotation)
 dataConstructorMap = constructorsByName
 
+-- | Look up class declarations by exact name.
 classDeclarationMap
   :: Environment typeVariable kindVariable annotation
   -> Map Name (Declaration typeVariable kindVariable annotation)
 classDeclarationMap = classesByName
 
+-- | Look up explicit instances by their exact source head.
 instanceDeclarationMap
   :: Environment typeVariable kindVariable annotation
   -> Map (Constraint (Type typeVariable))

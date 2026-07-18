@@ -27,6 +27,8 @@ import qualified Language.Haskell.Synthesis.Environment as Environment
 import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Name (Name)
 
+-- | A coherent pair of one sealed environment and the kind assumptions
+-- inferred from exactly that environment.
 data Inventory typeVariable annotation = Inventory
   (Environment typeVariable Void annotation)
   KindAssumptions
@@ -35,20 +37,25 @@ data Inventory typeVariable annotation = Inventory
 -- Ordinary projections, rather than record fields, are deliberate. A record
 -- update does not require the hidden constructor to be in scope and would let
 -- callers pair an environment with unrelated inferred assumptions.
+-- | Recover the authoritative declaration environment.
 inventoryEnvironment
   :: Inventory typeVariable annotation
   -> Environment typeVariable Void annotation
 inventoryEnvironment (Inventory environment _) = environment
 
+-- | Recover the assumptions inferred while sealing the inventory.
 inventoryKindAssumptions :: Inventory typeVariable annotation -> KindAssumptions
 inventoryKindAssumptions (Inventory _ assumptions) = assumptions
 
+-- | The phase at which inventory construction failed.
 data InventoryError typeVariable kindVariable
   = InvalidInventoryEnvironment (EnvironmentError typeVariable)
   | UngroundedInventoryKind kindVariable
   | InvalidInventoryKinds (KindInferenceError typeVariable)
   deriving (Eq, Ord, Show, Generic)
 
+-- | Validate, ground, and kind-check a declaration list using generalized
+-- class kinds.
 mkInventory
   :: Ord typeVariable
   => KindInventoryPolicy

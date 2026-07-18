@@ -915,6 +915,7 @@ data RenderOptions local = RenderOptions
   , reservedLocalNames :: [String]
   }
 
+-- | Fully qualified rendering with no explicit reservations.
 defaultRenderOptions :: (local -> String) -> RenderOptions local
 defaultRenderOptions preference = RenderOptions
   { renderQualification = FullyQualified
@@ -965,6 +966,8 @@ data RenderError
 
 instance NFData RenderError
 
+-- | A local identity that is unbound or introduced more than once at one
+-- pattern binding site.
 data ScopeError local
   = UnboundLocal local
   | DuplicatePatternBinder local
@@ -979,6 +982,7 @@ validateExpressionScope
   -> Either (ScopeError local) ()
 validateExpressionScope = validateExpression Set.empty
 
+-- | Check all pattern binders and local uses in a complete function clause.
 validateFunctionClauseScope
   :: Ord local
   => FunctionClause local
@@ -1061,6 +1065,9 @@ allocateLocalNames options expression =
     (Set.fromList $ expressionHoles expression)
     (expressionGlobals expression)
 
+-- | Allocate collision-free local spellings for a complete function clause.
+-- The definition name and every emitted global participate in collision
+-- avoidance under the selected qualification policy.
 allocateClauseLocalNames
   :: Ord local
   => RenderOptions local
@@ -1130,6 +1137,7 @@ localSpellings hasHole spelling
   | hasHole = [spelling, '_' : spelling]
   | otherwise = [spelling]
 
+-- | Validate and render a generated expression as Haskell source.
 renderExpression
   :: Ord local
   => RenderOptions local
@@ -1140,6 +1148,7 @@ renderExpression options expression = do
   names <- allocateLocalNames options expression
   Right $ renderStyle style $ ppExpression options names 0 expression
 
+-- | Validate and render a generated top-level equation as Haskell source.
 renderFunctionClause
   :: Ord local
   => RenderOptions local
@@ -1154,6 +1163,8 @@ renderFunctionClause options clause@(FunctionClause name patterns body) = do
         sep (map (ppPattern options names 10) patterns) <+> text "="
     , nest 2 $ ppExpression options names 0 body
     ]
+
+-- | Validate Haskell syntax constraints that are independent of local scope.
 validateExpressionSyntax :: Expression local -> Either RenderError ()
 validateExpressionSyntax expression = case expression of
   Local{} -> Right ()

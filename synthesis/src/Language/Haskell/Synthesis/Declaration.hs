@@ -35,6 +35,7 @@ import Language.Haskell.Synthesis.Kind
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Type
 
+-- | One declared type parameter and its optional explicit kind.
 data TypeParameter typeVariable kindVariable = TypeParameter
   { parameterVariable :: typeVariable
   , parameterKind :: Maybe (Kind kindVariable)
@@ -44,6 +45,7 @@ data TypeParameter typeVariable kindVariable = TypeParameter
 instance (NFData typeVariable, NFData kindVariable) =>
     NFData (TypeParameter typeVariable kindVariable)
 
+-- | One constructor belonging to a shared datatype declaration.
 data DataConstructor typeVariable annotation = DataConstructor
   { constructorAnnotation :: annotation
   , constructorName :: Name
@@ -54,6 +56,7 @@ data DataConstructor typeVariable annotation = DataConstructor
 instance (NFData typeVariable, NFData annotation) =>
     NFData (DataConstructor typeVariable annotation)
 
+-- | A named value or class method and its source type.
 data ValueSignature typeVariable annotation = ValueSignature
   { valueAnnotation :: annotation
   , valueName :: Name
@@ -64,6 +67,10 @@ data ValueSignature typeVariable annotation = ValueSignature
 instance (NFData typeVariable, NFData annotation) =>
     NFData (ValueSignature typeVariable annotation)
 
+-- | Source declarations understood by both checked backends.
+--
+-- Annotations are deliberately opaque to the foundation; frontends commonly
+-- use them for locations or ratings and can erase them after reporting.
 data Declaration typeVariable kindVariable annotation
   = TypeSynonymDeclaration
       annotation Name [TypeParameter typeVariable kindVariable]
@@ -87,6 +94,10 @@ instance
     (NFData typeVariable, NFData kindVariable, NFData annotation) =>
     NFData (Declaration typeVariable kindVariable annotation)
 
+-- | A structural or lexical failure within one declaration.
+--
+-- Cross-declaration namespace conflicts belong to
+-- 'Language.Haskell.Synthesis.Environment.EnvironmentError'.
 data DeclarationError typeVariable
   = InvalidDeclaredTypeName Name
   | InvalidDeclaredValueName Name
@@ -145,6 +156,11 @@ declarationTypeVariables declaration = case declaration of
   parameterVariables = map parameterVariable
   constraintVariables = concatMap toList . constraintArguments
 
+-- | Validate one declaration without consulting any surrounding inventory.
+--
+-- The check covers lexical roles, duplicate binders and members, type syntax,
+-- and variables escaping the declaration scope. It deliberately does not
+-- perform kind inference or resolve nominal references.
 validateDeclaration
   :: Ord typeVariable
   => Declaration typeVariable kindVariable annotation

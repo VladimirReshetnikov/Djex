@@ -890,7 +890,42 @@ validateEnvironment definitions axioms classes = do
         prepareKindEnvironment definitions
     mapM_ (checkAxiom prepared) axioms
     refreshed <- mapM (checkClass prepared) classes
+    -- Preserve the compatibility checker's established error order by
+    -- running its kind-dependent phases first.  The final shared preflight
+    -- then seals the namespaces that those historical phases do not index:
+    -- constructors across datatypes, constructors within one datatype, and
+    -- the common type/class owner namespace.  Reusing the same environment
+    -- constructor as the stable API prevents the two entrances from growing
+    -- different structural rules.
+    checkSharedDeclarationStructure checked axioms refreshed
     return (checked, refreshed)
+
+checkSharedDeclarationStructure
+    :: [TypeDefinition] -> [Axiom] -> [ClassDefinition] -> Either String ()
+checkSharedDeclarationStructure definitions axioms classes =
+    case toSynthesisEnvironment Environment
+            { envTypes = definitions
+            , envFunctions = axioms
+            , envClasses = classes
+            } of
+        Left failure -> Left $ renderSharedStructureFailure failure
+        Right _ -> Right ()
+
+-- Keep the two namespace collisions that callers can act on consistent with
+-- the public editing API.  Less common declaration-local failures retain
+-- their structured rendering rather than duplicating the shared validator's
+-- complete diagnostic vocabulary here.
+renderSharedStructureFailure :: SynthesisEnvironmentError -> String
+renderSharedStructureFailure failure = case failure of
+    InvalidSynthesisEnvironment
+            (SharedEnvironment.DuplicateTypeDeclaration name) ->
+        "Type name is already declared: " ++
+            SharedName.renderCanonical name
+    InvalidSynthesisEnvironment
+            (SharedEnvironment.DuplicateValueDeclaration name) ->
+        "Value name is already declared: " ++
+            SharedName.renderCanonical name
+    _ -> show failure
 
 -- Function assumptions and class selectors are both printed as term-level
 -- references in generated Haskell.  Consequently an unqualified assumption

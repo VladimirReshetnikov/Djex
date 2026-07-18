@@ -2857,6 +2857,33 @@ testEnvironmentValidation = do
         "method firstMethod of class BrokenClass:"
         (validateEnvironment [] [] [invalidClass])
 
+    -- The raw rebuilding boundary must seal the same declaration namespaces
+    -- as the shared environment used by public editing.  These malformed
+    -- environments used to survive because kind inference indexes only type
+    -- constructors and the legacy value preflight indexes only functions and
+    -- methods.
+    assertLeftContains "one datatype cannot repeat a constructor"
+        "DuplicateConstructorName"
+        (validateEnvironment
+            [("Repeated", ([],
+                HTUnion [("RepeatedValue", []), ("RepeatedValue", [])],
+                KStar))]
+            [] [])
+    assertLeftMessage "constructors are unique across datatype owners"
+        "Value name is already declared: SharedConstructor"
+        (validateEnvironment
+            [ ("FirstOwner", ([], HTUnion [("SharedConstructor", [])],
+                KStar))
+            , ("SecondOwner", ([], HTUnion [("SharedConstructor", [])],
+                KStar))
+            ]
+            [] [])
+    assertLeftMessage "types and classes share their owner namespace"
+        "Type name is already declared: SharedOwner"
+        (validateEnvironment
+            [("SharedOwner", ([], HTUnion [("OnlyConstructor", [])], KStar))]
+            [] [("SharedOwner", ([], []))])
+
 testPrintedValueNamespace :: IO ()
 testPrintedValueNamespace = do
     let bool = HTCon "Bool"

@@ -382,6 +382,10 @@ testGroundEditAgreement = do
         agreeRemove label name = agree label
             (RawEnvironment.removeGroundSynthesisDeclaration name groundEnv)
             (RawEnvironment.removeSynthesisDeclaration name weakened)
+        assertProtectedUnit label result = case result of
+            Left ProtectedSynthesisUnit -> return ()
+            Left failure -> fail $ label ++ ": wrong failure: " ++ show failure
+            Right _ -> fail $ label ++ ": unit deletion unexpectedly succeeded"
         agree label groundResult weakenedResult =
             case (groundResult, weakenedResult) of
                 (Left groundFailure, Left weakenedFailure) -> assertEqual
@@ -421,6 +425,9 @@ testGroundEditAgreement = do
         $ AbstractType "Mystery" $ KVar 0
     agreeRemove "remove a standalone datatype" "Either"
     agreeRemove "reject removing the unit" "()"
+    agreeRemove "reject removing whitespace-normalized unit" " () "
+    assertProtectedUnit "ground whitespace-normalized unit protection"
+        $ RawEnvironment.removeGroundSynthesisDeclaration " () " groundEnv
     agreeRemove "reject removing a missing name" "missing"
 
 testCheckedDjinnSessionRebuilding :: IO ()
@@ -2956,6 +2963,9 @@ testTrustedUnitDeclaration = do
     assertLeftMessage "the trusted unit cannot be deleted and recreated"
         "() is a built-in type and cannot be removed"
         (removeDeclaration "()" standardEnvironment)
+    assertLeftMessage "unit protection follows the parsed structural name"
+        "() is a built-in type and cannot be removed"
+        (removeDeclaration " () " standardEnvironment)
 
 testScopeSafeRendering :: IO ()
 testScopeSafeRendering = do

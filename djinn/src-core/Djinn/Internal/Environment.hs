@@ -367,7 +367,12 @@ removeSharedDeclaration sourceName reseal sourceEnvironment = do
             (declaration, candidateOwner) <- declarations,
             candidateOwner == owner]
     if null matching then Left $ SynthesisDeclarationNotFound sourceName
-    else if sourceName == "()" then Left ProtectedSynthesisUnit
+    -- 'parseName' deliberately accepts surrounding whitespace. Protect the
+    -- declaration we actually resolved rather than only its canonical raw
+    -- spelling, or a caller could delete the wired-in unit with @" () "@.
+    else if SharedName.nameSpecial owner == Just
+            (SharedName.TupleConstructor SharedName.Boxed 0)
+        then Left ProtectedSynthesisUnit
     else do
         candidate <- first InvalidSynthesisEnvironment $
             SharedEnvironment.mkEnvironment

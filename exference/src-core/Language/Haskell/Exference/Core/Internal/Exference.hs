@@ -494,10 +494,11 @@ findEngineBatchesWith allocators
         | identifierSpaceExhausted
         ] ++
         naturalPruningReasons totalQueuePruned totalDepthPruned
-      -- Validate the exact tree returned to callers.  This used to check the
-      -- raw search result and let the CLI rewrite it afterwards, so a
-      -- simplifier bug could invalidate an already-approved candidate.  The
-      -- raw term remains a safe fallback, but it too must pass independently.
+      -- Validate the exact tree returned to callers. The independent checker
+      -- owns type reconstruction, local scope, and generated syntax together;
+      -- repeating one of those tree traversals here would let the two result
+      -- boundaries drift again. The raw term remains a safe fallback, but it
+      -- too must pass that complete checker independently.
       checkedSimplification contxt constraints rawExpression =
         firstChecked candidates
        where
@@ -509,10 +510,7 @@ findEngineBatchesWith allocators
         firstChecked (candidate : remainingCandidates) =
           case checkExpressionWithRigidInstantiation
               rigidPlan contxt funcs deconss' t constraints candidate of
-            Right () -> case SharedGenerated.validateExpressionSyntax
-                $ toGeneratedExpression candidate of
-              Right () -> Just candidate
-              Left _ -> firstChecked remainingCandidates
+            Right () -> Just candidate
             Left _ -> firstChecked remainingCandidates
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing

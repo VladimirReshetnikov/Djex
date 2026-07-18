@@ -49,6 +49,7 @@ data ExpressionCheckError
   | ConstraintMismatch [HsConstraint] [HsConstraint]
   | RigidInstantiationFailure RigidInstantiationError
   | RigidInstantiationPlanMismatch [TVarId] [TVarId]
+  | RigidInstantiationTargetCollision [TVarId]
   | FlexibleIdentifierSupplyExhausted
   | InvalidCheckType HsType SynthesisTypeError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
@@ -105,10 +106,12 @@ checkExpression classEnvironment functions deconstructors goal expected expressi
     functions deconstructors goal
   checkValidatedExpression context expected expression
 
--- | Check using the same precomputed forall-opening plan as live search.
--- Generated annotations, residual constraints, and the query assumptions in
--- the live 'QueryClassEnv' may already contain this plan's rigid variables, so
--- none of them may be mistaken for pre-existing input when checking a result.
+-- | Check using a precomputed forall-opening plan.
+--
+-- The class environment must describe the original query assumptions, before
+-- this plan's opened constraints are added. The checker rejects any target
+-- which collides with that environment, those assumptions, or the goal even
+-- when the plan's flexible binder IDs happen to match.
 checkExpressionWithRigidInstantiation
   :: RigidInstantiationPlan
   -> QueryClassEnv
@@ -122,13 +125,18 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
     deconstructors goal expected expression = do
   validateCheckInputs classEnvironment functions deconstructors goal expected
     expression
-  context <- prepareExpressionCheckContextUnchecked plan classEnvironment
+  context <- prepareValidatedExpressionCheckContext plan classEnvironment
     functions deconstructors goal
   checkValidatedExpression context expected expression
 
 -- | Validate the query-stable half of an independent expression check once.
--- The returned opaque context may safely check every candidate produced for
--- that exact environment, goal, and rigid-instantiation plan.
+--
+-- Supply the original query assumptions, not a class environment already
+-- augmented with the plan's opened constraints. The returned opaque context
+-- may safely check every candidate produced for that exact environment and
+-- goal: construction verifies the binder spine and proves every supplied rigid
+-- target fresh for those inputs. A safe plan made against a conservative
+-- environment superset remains valid.
 prepareExpressionCheckContext
   :: RigidInstantiationPlan
   -> QueryClassEnv
@@ -139,8 +147,33 @@ prepareExpressionCheckContext
 prepareExpressionCheckContext plan classEnvironment functions deconstructors
     goal = do
   validateCheckContextInputs classEnvironment functions deconstructors goal
-  prepareExpressionCheckContextUnchecked plan classEnvironment functions
+  prepareValidatedExpressionCheckContext plan classEnvironment functions
     deconstructors goal
+
+-- Raw public entrances have already established the complete fixed-input
+-- invariant before reaching this worker. Instantiate first so the historical
+-- binder-spine mismatch keeps precedence, then prove that none of the opaque
+-- plan's rigid targets collide with this environment or query. Requiring the
+-- locally minimal plan would be too strict: live search plans against a sealed
+-- environment before safely removing excluded capabilities.
+prepareValidatedExpressionCheckContext
+  :: RigidInstantiationPlan
+  -> QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> Either ExpressionCheckError ExpressionCheckContext
+prepareValidatedExpressionCheckContext plan classEnvironment functions
+    deconstructors goal = do
+  context <- prepareExpressionCheckContextUnchecked plan classEnvironment
+    functions deconstructors goal
+  let planningContext = mkRigidInstantiationContext $ EnvDictionary
+        functions deconstructors $ qClassEnv_env classEnvironment
+      collisions = rigidInstantiationTargetCollisions planningContext
+        (Set.toList $ qClassEnv_constraints classEnvironment) goal plan
+  unless (null collisions) $ Left
+    $ RigidInstantiationTargetCollision collisions
+  pure context
 
 -- | Validate and check only the residual constraints and generated tree that
 -- vary from candidate to candidate.
@@ -153,9 +186,10 @@ checkExpressionInContext context expected expression = do
   validateCheckCandidateInputs context expected expression
   checkValidatedExpression context expected expression
 
--- Raw public entrances have already performed their complete historical
--- validation order before reaching this constructor. The reusable entrance
--- establishes the fixed invariant in 'validateCheckContextInputs'.
+-- A standalone entrance either computed its own plan from these inputs or
+-- called 'prepareValidatedExpressionCheckContext'. Live search likewise keeps
+-- this unchecked constructor private and reaches it only through the validated
+-- reusable entrance.
 prepareExpressionCheckContextUnchecked
   :: RigidInstantiationPlan
   -> QueryClassEnv

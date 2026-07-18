@@ -13,6 +13,7 @@ module Language.Haskell.Exference.Core.RigidInstantiation
   , mkRigidInstantiationContext
   , RigidInstantiationPlan
   , rigidInstantiations
+  , rigidInstantiationTargetCollisions
   , planRigidInstantiation
   , splitRigidInstantiationLayer
   ) where
@@ -26,6 +27,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( IdentifierSupply
   , allocateFreshNonNegativeIdentifier
+  , identifierIsReserved
   , reserveIdentifiers
   , supplyFromIdentifiers
   )
@@ -89,6 +91,25 @@ instance NFData RigidInstantiationPlan where
 -- checked lexical pairing while the constructor remains hidden.
 rigidInstantiations :: RigidInstantiationPlan -> [(TVarId, TVarId)]
 rigidInstantiations (RigidInstantiationPlan instantiations) = instantiations
+
+-- | Rigid targets in a plan which are already occupied by an environment,
+-- query assumption, or goal occurrence.  A plan made against a conservative
+-- superset remains valid after capabilities are removed, so validation checks
+-- collision freedom rather than requiring the locally minimal allocation.
+rigidInstantiationTargetCollisions
+  :: RigidInstantiationContext
+  -> [HsConstraint]
+  -> HsType
+  -> RigidInstantiationPlan
+  -> [TVarId]
+rigidInstantiationTargetCollisions context extraConstraints goal plan =
+  filter (`identifierIsReserved` reserved) $ map snd
+    $ rigidInstantiations plan
+ where
+  queryTypes = goal : concatMap constraint_params extraConstraints
+  reserved = reserveIdentifiers
+    (concatMap rigidIdentifiersInType queryTypes)
+    (environmentRigidIdentifiers context)
 
 -- | Plan every rigid variable needed to open a goal.
 --

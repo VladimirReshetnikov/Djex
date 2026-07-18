@@ -124,56 +124,69 @@ getTypeClasses
        )
 getTypeClasses dataTypes typeDeclarations modules = do
   let rawDeclarationsByModule = map rawTypeClasses modules
-      namedDeclarationsByModule = map rights rawDeclarationsByModule
-      namedDeclarations = concat namedDeclarationsByModule
-      invalidNames = map Left $ concatMap lefts rawDeclarationsByModule
-      declarationsByName = Map.fromListWith (++)
-        [ (rawClassName rawClass, [rawClass])
-        | rawClass <- namedDeclarations
+      -- Number every declaration before the global nominal passes.  The maps
+      -- below still provide order-independent lookup, while these slots let us
+      -- project each result back to exact module/declaration source order.
+      declarationSlots = zip [0 :: Natural ..]
+        $ concat rawDeclarationsByModule
+      namedDeclarations =
+        [ (slot, rawClass)
+        | (slot, Right rawClass) <- declarationSlots
         ]
-      duplicateNames =
+      invalidNames = Map.fromList
+        [ (slot, Left failure)
+        | (slot, Left failure) <- declarationSlots
+        ]
+      -- fromListWith calls its combining function as new-then-old, so flip
+      -- keeps each occurrence list in source order.
+      declarationsByName = Map.fromListWith (flip (++))
+        [ (rawClassName rawClass, [(slot, rawClass)])
+        | (slot, rawClass) <- namedDeclarations
+        ]
+      duplicateNames = Set.fromList
         [ name
         | (name, _ : _ : _) <- Map.toAscList declarationsByName
         ]
-      -- A duplicate is reported at the first declaration of that name in
-      -- source order; fromListWith combines new-then-old, so keeping the old
-      -- entry is an explicit first-occurrence choice.
-      firstOccurrenceSpans = Map.fromListWith (\_ old -> old)
-        [ (rawClassName rawClass, rawClassSpan rawClass)
-        | rawClass <- namedDeclarations
-        ]
-      duplicateErrors =
-        [ Left $ maybe extractionError extractionErrorAt
-            (Map.lookup name firstOccurrenceSpans)
+      duplicateErrors = Map.fromList
+        [ (firstSlot, Left $ extractionErrorAt (rawClassSpan firstClass)
             (duplicateClassMessage name)
-        | name <- duplicateNames
+          )
+        | (name, (firstSlot, firstClass) : _ : _) <-
+            Map.toAscList declarationsByName
         ]
       uniqueDeclarations =
-        [ rawClass
-        | [rawClass] <- Map.elems declarationsByName
+        [ (slot, rawClass)
+        | (slot, rawClass) <- namedDeclarations
+        , Set.notMember (rawClassName rawClass) duplicateNames
         ]
 
   -- Pass one elaborates only class heads.  The resulting strict map provides
   -- nominal identity and arity information to every superclass conversion in
   -- pass two; no lazy-map fixed point is involved.
-  headerResults <- forM uniqueDeclarations $ \rawClass -> do
+  headerResults <- forM uniqueDeclarations $ \(slot, rawClass) -> do
     result <- runExceptT $ runConversionT emptyConversionState $ do
       parameters <- mapM tyVarTransform $ rawClassVariables rawClass
       pure $ HsTypeClass (rawClassName rawClass) parameters []
-    pure $ bimap (extractionErrorAt $ rawClassSpan rawClass)
-      ((,) rawClass) result
-  let headerErrors = [Left errorMessage | Left errorMessage <- headerResults]
-      successfulHeaders = rights headerResults
+    pure (slot, bimap (extractionErrorAt $ rawClassSpan rawClass)
+      ((,) rawClass) result)
+  let headerErrors = Map.fromList
+        [ (slot, Left errorMessage)
+        | (slot, Left errorMessage) <- headerResults
+        ]
+      successfulHeaders =
+        [ (slot, rawClass, header)
+        | (slot, Right (rawClass, header)) <- headerResults
+        ]
       headers = Map.fromList
         [ (tclass_name header, header)
-        | (_, header) <- successfulHeaders
+        | (_, _, header) <- successfulHeaders
         ]
 
   -- Pass two deliberately binds every head variable before touching the
   -- superclass context.  Thus parameter IDs follow declaration order even if
   -- superclasses mention those variables in a different order (or not at all).
-  elaborated <- forM successfulHeaders $ \(rawClass, _) ->
-    fmap (first $ extractionErrorAt $ rawClassSpan rawClass)
+  elaborated <- forM successfulHeaders $ \(slot, rawClass, _) -> do
+    result <- fmap (first $ extractionErrorAt $ rawClassSpan rawClass)
       $ runExceptT $ runConversionT emptyConversionState $ do
         parameters <- mapM tyVarTransform $ rawClassVariables rawClass
         superclasses <- mapM
@@ -183,11 +196,15 @@ getTypeClasses dataTypes typeDeclarations modules = do
             typeDeclarations)
           (contextConstraints $ rawClassContext rawClass)
         pure $ HsTypeClass (rawClassName rawClass) parameters superclasses
+    pure (slot, result)
 
-  pure
-    ( invalidNames ++ duplicateErrors ++ headerErrors ++ elaborated
-    , rawDeclarationsByModule
-    )
+  let resultsBySourceSlot = Map.unions
+        [ invalidNames
+        , duplicateErrors
+        , headerErrors
+        , Map.fromList elaborated
+        ]
+  pure (Map.elems resultsBySourceSlot, rawDeclarationsByModule)
  where
   emptyConversionState = emptyConvData
 

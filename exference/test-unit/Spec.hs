@@ -375,6 +375,17 @@ tests = testGroup "Exference"
           toSynthesisConstraint invalid @?= Left
             (InvalidSynthesisConstraint
               $ SharedConstraint.InvalidConstraintClass sharedName)
+      , testCase "native constraint aliases share validation precedence" $ do
+          let invalidClass = name "notAClass"
+              malformed = HsConstraint invalidClass
+                [TypeTuple Boxed [TypeVar 0]]
+              expected = Left $ InvalidSynthesisConstraint
+                $ SharedConstraint.InvalidConstraintClass invalidClass
+          -- Both native compatibility names describe the same boundary.  A
+          -- malformed argument must not make their diagnostics disagree about
+          -- the independently invalid class name.
+          toSynthesisConstraint malformed @?= expected
+          fromSynthesisConstraint malformed @?= expected
       , testCase "shared constraints reject unboxed class names" $ do
           unboxed <- expectRight $ SharedName.tupleName SharedName.Unboxed 2
           let expected = InvalidSynthesisConstraint
@@ -611,26 +622,39 @@ tests = testGroup "Exference"
             @?= Left (ConstraintArityMismatch
               (ClassSuperclass $ name "Derived") (name "Binary") 2 1)
       , testCase "frontend diagnoses too few and too many superclass arguments" $ do
-          let expectedTooFew =
-                "wrong number of parameters for type class C: expected 2, got 1"
-              expectedTooMany =
-                "wrong number of parameters for type class C: expected 2, got 3"
+          let expected =
+                [ ( "wrong number of parameters for type class C: "
+                      ++ "expected 2, got 3"
+                  , 3
+                  )
+                , ( "wrong number of parameters for type class C: "
+                      ++ "expected 2, got 1"
+                  , 4
+                  )
+                ]
           result <- classEnvironmentFromSources
             [ unlines
                 [ "module M where"
                 , "class C a b where"
-                , "class C a => TooFew a where"
-                , "class C a b a => TooMany a where"
+                -- Reverse nominal order: a Map-ordered elaboration would
+                -- incorrectly report A before Z.
+                , "class C a b a => Z a where"
+                , "class C a => A a where"
                 ]
             ]
           case result of
             Left (ClassDeclarationErrors (firstError :| remaining)) -> do
-              let errors = map extractionErrorMessage
-                    $ firstError : remaining
-              assertBool ("missing too-few diagnostic: " ++ show errors)
-                $ expectedTooFew `elem` errors
-              assertBool ("missing too-many diagnostic: " ++ show errors)
-                $ expectedTooMany `elem` errors
+              let failures = firstError : remaining
+                  summarize failure = do
+                    location <- extractionErrorLocation failure
+                    pure
+                      ( extractionErrorMessage failure
+                      , locationSource location
+                      , sourceLine $ sourceStart $ locationSpan location
+                      )
+              map summarize failures @?=
+                map (\(message, line) -> Just
+                  (message, "qualified-class-test.hs", line)) expected
             other -> fail $ "malformed superclasses were accepted: " ++ show other
       , testCase "frontend binds head variables before superclass arguments" $ do
           environment <- classEnvironmentFromSources
@@ -6574,6 +6598,44 @@ tests = testGroup "Exference"
             Left failure -> failure @?=
               RigidInstantiationPlanMismatch [9] [8]
             Right _ -> fail "a mismatched checker plan was accepted"
+      , testCase "rejects a checker plan allocated for another environment" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let goal = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              synthesizedName = name "f"
+              occupiedType = TypeConstant 0
+              functions =
+                [ FunctionBinding
+                    (TypeArrow occupiedType occupiedType)
+                    synthesizedName 0 [] []
+                ]
+              classEnvironment = mkQueryClassEnv staticClasses []
+              emptyEnvironment = EnvDictionary [] [] staticClasses
+              occupiedEnvironment = EnvDictionary functions [] staticClasses
+          foreignPlan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext emptyEnvironment) [] goal
+          rigidInstantiations foreignPlan @?= [(0, 0)]
+          case prepareExpressionCheckContext foreignPlan classEnvironment
+              functions [] goal of
+            Left failure -> failure @?=
+              RigidInstantiationTargetCollision [0]
+            Right _ -> fail "a foreign checker plan was accepted"
+          checkExpressionWithRigidInstantiation foreignPlan classEnvironment
+              functions [] goal [] (ExpName synthesizedName)
+            @?= Left (RigidInstantiationTargetCollision [0])
+
+          localPlan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext occupiedEnvironment) [] goal
+          rigidInstantiations localPlan @?= [(0, 1)]
+          case checkExpressionWithRigidInstantiation localPlan classEnvironment
+              functions [] goal [] (ExpName synthesizedName) of
+            Left TypeMismatch{} -> pure ()
+            result -> fail $ "a colliding binding passed the correct plan: "
+              ++ show result
+          let conservativeIdentity = ExpLambda 7 (TypeConstant 1)
+                $ ExpVar 7 (TypeConstant 1)
+          checkExpressionWithRigidInstantiation localPlan classEnvironment
+              [] [] goal [] conservativeIdentity @?= Right ()
       , testCase "preflights cyclic checker class and pattern arities" $ do
           let className = name "Unary"
               unary = HsTypeClass className [0] []

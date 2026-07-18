@@ -300,23 +300,26 @@ toSynthesisConstraint
   :: HsConstraint
   -> Either SynthesisTypeError
        HsConstraint
-toSynthesisConstraint constraint = do
-  converted <- traverse toSynthesisType constraint
-  either (Left . InvalidSynthesisConstraint) Right
-    $ SharedConstraint.validateConstraint converted
-  return converted
+toSynthesisConstraint = normalizeSynthesisConstraint
 
--- | Validate and canonicalize a shared constraint for Exference. Structural
--- names such as unboxed tuple constructors are rejected in the /class-name/
--- position by shared namespace validation; unboxed tuple types remain valid
--- arguments.
+-- | Validate and canonicalize a shared constraint for Exference. This is the
+-- same native boundary as 'toSynthesisConstraint'; the two compatibility
+-- directions retain one nominal-before-argument failure order now that no
+-- representation conversion separates them. Structural names such as tuple
+-- constructors are rejected in class position, while unboxed tuple types
+-- remain valid arguments.
 fromSynthesisConstraint
   :: HsConstraint
   -> Either SynthesisTypeError HsConstraint
-fromSynthesisConstraint constraint = do
+fromSynthesisConstraint = normalizeSynthesisConstraint
+
+normalizeSynthesisConstraint
+  :: HsConstraint
+  -> Either SynthesisTypeError HsConstraint
+normalizeSynthesisConstraint constraint = do
   either (Left . InvalidSynthesisConstraint) Right
     $ SharedConstraint.validateConstraint constraint
-  traverse fromSynthesisType constraint
+  traverse normalizeExferenceType constraint
 
 -- | Location of a constraint while validating a class environment or public
 -- search input.

@@ -1108,8 +1108,9 @@ validateExpressionSyntax expression = case expression of
     mapM_ validatePatternSyntax patterns >> validateExpressionSyntax body
   Apply function argument ->
     validateExpressionSyntax function >> validateExpressionSyntax argument
-  Tuple [_] -> Left $ InvalidTupleExpressionArity 1
-  Tuple elements -> mapM_ validateExpressionSyntax elements
+  Tuple elements -> do
+    validateTupleArity InvalidTupleExpressionArity elements
+    mapM_ validateExpressionSyntax elements
   Hole{} -> Right ()
   Let pattern binding body ->
     validatePatternSyntax pattern >>
@@ -1186,9 +1187,25 @@ validatePatternSyntax pattern = case pattern of
         Left $ InvalidConstructorPatternArity
           name expected (length arguments)
     | otherwise -> mapM_ validatePatternSyntax arguments
-  TuplePattern [_] -> Left $ InvalidTuplePatternArity 1
-  TuplePattern elements -> mapM_ validatePatternSyntax elements
+  TuplePattern elements -> do
+    validateTupleArity InvalidTuplePatternArity elements
+    mapM_ validatePatternSyntax elements
   As _ nested -> validatePatternSyntax nested
+
+-- Generated tuples are boxed and therefore share the exact representational
+-- arity limit owned by 'Name'. Inspect at most one element beyond that limit:
+-- once a tuple is known to be too wide, forcing an arbitrary or cyclic tail
+-- cannot improve the diagnostic. The reported arity is consequently the
+-- first invalid width for every oversized spine.
+validateTupleArity
+  :: (Int -> RenderError)
+  -> [element]
+  -> Either RenderError ()
+validateTupleArity failure elements
+  | observed == 1 || observed > maximumTupleArity = Left $ failure observed
+  | otherwise = Right ()
+ where
+  observed = length $ take (maximumTupleArity + 1) elements
 
 -- | Construct a checked generated top-level value name.
 mkDefinitionName :: Name -> Either RenderError DefinitionName

@@ -3705,6 +3705,20 @@ generatedTests = testGroup "generated syntax"
         Left (InvalidGlobalExpression functionName)
       renderExpression options (Tuple [Global variableName]) @?=
         Left (InvalidTupleExpressionArity 1)
+      let oversizedExpressions = replicate maximumTupleArity
+            (Global variableName)
+            ++ Global variableName
+            : error "forced oversized expression tuple tail"
+          oversizedPatterns = replicate maximumTupleArity Wildcard
+            ++ Wildcard
+            : error "forced oversized pattern tuple tail"
+      validateExpressionSyntax (Tuple oversizedExpressions) @?=
+        Left (InvalidTupleExpressionArity $ maximumTupleArity + 1)
+      renderExpression options (Tuple oversizedExpressions) @?=
+        Left (InvalidTupleExpressionArity $ maximumTupleArity + 1)
+      validateExpressionSyntax
+          (Lambda [TuplePattern oversizedPatterns] $ Global variableName)
+        @?= Left (InvalidTuplePatternArity $ maximumTupleArity + 1)
       renderExpression options
           (Lambda [Constructor variableName []] $ Global variableName)
         @?= Left (InvalidConstructorPattern variableName)

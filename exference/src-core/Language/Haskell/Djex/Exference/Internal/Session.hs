@@ -79,25 +79,38 @@ import Language.Haskell.Synthesis.TypeSynonym
   , preparedInventory
   )
 
+-- | The search capability removed for one declaration during session
+-- projection.
 data ExferenceOmissionCapability
   = BindingIntroduction
+    -- ^ Introducing a declared value as part of a generated expression.
   | DataElimination
+    -- ^ Eliminating a declared datatype through constructor matching.
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData ExferenceOmissionCapability
 
+-- | Why Exference could not or should not retain a search capability.
 data ExferenceOmissionReason
   = UnsupportedNestedForall
+    -- ^ The capability's type contains a nested universal quantifier.
   | RecursiveDataEliminationUnsupported
+    -- ^ Exference cannot safely eliminate this recursive datatype.
   | ExcludedByPolicy
+    -- ^ The session policy explicitly disabled this binding.
   deriving (Eq, Ord, Show, Generic)
 
 instance NFData ExferenceOmissionReason
 
+-- | One declaration capability omitted from the private search projection.
+-- The neutral inventory retained by the session is unchanged.
 data ExferenceOmission = ExferenceOmission
   { omittedName :: Name
+    -- ^ Exact nominal identity of the affected declaration.
   , omittedCapability :: ExferenceOmissionCapability
+    -- ^ Search operation that was removed.
   , omittedReason :: ExferenceOmissionReason
+    -- ^ Backend limitation or explicit policy decision behind the omission.
   }
   deriving (Eq, Ord, Show, Generic)
 

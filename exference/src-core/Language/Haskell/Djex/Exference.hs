@@ -8,24 +8,43 @@
 -- This module is parser-neutral; Haskell source loading lives behind the
 -- explicit "Language.Haskell.Djex.Exference.HaskellSrc" boundary in the same
 -- library.
+--
+-- The checked workflow is to seal an 'ExferenceEnvironment' with
+-- 'mkExferenceSession', construct an opaque 'ExferenceRequest', and pass both
+-- to 'runExferenceQuery'. The returned batches use Djex's shared query and
+-- search envelopes, while candidates, metrics, and rendering remain
+-- Exference-specific.
 module Language.Haskell.Djex.Exference
-  ( ExferenceSession
+  ( -- * Sessions
+    ExferenceSession
   , ExferenceEnvironment
+  , ExferenceInventory
   , ExferenceSessionPolicy (..)
   , defaultExferenceSessionPolicy
-  , ExferenceOptions (..)
-  , defaultExferenceOptions
-  , ExferenceHeuristicsConfig (..)
-  , Penalty (..)
-  , Qualification (..)
   , ExferenceOmission (..)
   , ExferenceOmissionCapability (..)
   , ExferenceOmissionReason (..)
+  , mkExferenceSession
+  , mkExferenceSessionWithPolicy
+  , exferenceSessionEnvironment
+  , exferenceSessionInventory
+  , exferenceSessionOmissions
+  , exferenceSessionDiagnostics
+
+    -- * Requests
   , ExferenceRequest
   , ExferenceLocal
   , ExferenceTypeVariable
   , ExferenceType
-  , ExferenceInventory
+  , ExferenceOptions (..)
+  , defaultExferenceOptions
+  , ExferenceHeuristicsConfig (..)
+  , Penalty (..)
+  , mkExferenceRequest
+  , exferenceRequestQuery
+
+    -- * Results
+  , ExferenceResult
   , ExferenceCandidate
   , ExferenceCandidateDetails
   , pattern ExferenceCandidateDetails
@@ -42,16 +61,8 @@ module Language.Haskell.Djex.Exference
   , exferenceBatchBindingUsages
   , exferenceBatchQueuePruned
   , exferenceBatchDepthPruned
+  , Qualification (..)
   , RenderError (..)
-  , ExferenceResult
-  , mkExferenceSession
-  , mkExferenceSessionWithPolicy
-  , exferenceSessionEnvironment
-  , exferenceSessionInventory
-  , exferenceSessionOmissions
-  , exferenceSessionDiagnostics
-  , mkExferenceRequest
-  , exferenceRequestQuery
   , runExferenceQuery
   , exferenceCandidateMetrics
   , exferenceResultBindingUsages
@@ -160,10 +171,16 @@ import Language.Haskell.Synthesis.TypeSynonym
 -- an unrelated qualified binding whose occurrence also happens to be @fix@.
 data ExferenceSessionPolicy = ExferenceSessionPolicy
   { exferenceExcludedBindings :: [Name]
+    -- ^ Exact binding names to remove from the search projection. Names not
+    -- present in the environment are harmless no-ops.
   , exferenceRatingOverrides :: Map.Map Name Penalty
+    -- ^ Finite replacement ratings for available bindings. An unavailable
+    -- name is rejected instead of being silently ignored.
   }
   deriving (Eq, Show)
 
+-- | Unrestricted session policy: retain every supported binding and its
+-- source rating.
 defaultExferenceSessionPolicy :: ExferenceSessionPolicy
 defaultExferenceSessionPolicy = ExferenceSessionPolicy
   { exferenceExcludedBindings = []
@@ -183,16 +200,31 @@ type ExferenceInventory = Inventory ExferenceTypeVariable ()
 -- supplies compatibility spellings for its historical public selectors.
 type ExferenceCandidate = Core.ExferenceCandidate
 
+-- | One checked Exference search batch in Djex's shared result envelope.
+-- Inspect its progress, candidates, and exact batch metadata through the
+-- selectors exported by "Language.Haskell.Synthesis.Query" and
+-- "Language.Haskell.Synthesis.Search".
 type ExferenceResult = Core.ExferenceResult
 
+-- | Per-candidate search measurements retained by the checked result.
 type ExferenceCandidateMetrics = CoreStats.ExferenceStats
 
+-- | Bidirectional record-pattern view of Exference's candidate measurements.
 pattern ExferenceCandidateMetrics
-  :: Int -> Penalty -> Int -> ExferenceCandidateMetrics
+  :: Int
+  -- ^ Search steps completed when the candidate was found.
+  -> Penalty
+  -- ^ Final heuristic complexity rating; lower values rank ahead.
+  -> Int
+  -- ^ Search-queue size immediately after the producing step.
+  -> ExferenceCandidateMetrics
 pattern ExferenceCandidateMetrics
-  { exferenceCandidateSteps
-  , exferenceCandidateComplexity
-  , exferenceCandidateFinalQueueSize
+  { -- | Search steps completed when the candidate was found.
+    exferenceCandidateSteps
+  , -- | Final heuristic complexity rating; lower values rank ahead.
+    exferenceCandidateComplexity
+  , -- | Search-queue size immediately after the producing step.
+    exferenceCandidateFinalQueueSize
   } = CoreStats.ExferenceStats
     { CoreStats.exference_steps = exferenceCandidateSteps
     , CoreStats.exference_complexityRating = exferenceCandidateComplexity
@@ -205,15 +237,23 @@ pattern ExferenceCandidateMetrics
 -- These names are a zero-cost view of the core-owned details record.
 type ExferenceCandidateDetails = CoreCandidate.ExferenceCandidateDetails
 
+-- | Bidirectional record-pattern view of candidate metrics and rendering
+-- hints. The hint maps are preferences, not semantic parts of the candidate.
 pattern ExferenceCandidateDetails
   :: ExferenceCandidateMetrics
+  -- ^ Operational measurements for this candidate.
   -> Map.Map ExferenceLocal String
+  -- ^ Preferred source spellings for generated term binders.
   -> Map.Map ExferenceTypeVariable String
+  -- ^ Preferred source spellings for residual type variables.
   -> ExferenceCandidateDetails
 pattern ExferenceCandidateDetails
-  { exferenceCandidateStatistics
-  , exferenceCandidateLocalNames
-  , exferenceCandidateTypeVariableNames
+  { -- | Operational measurements for this candidate.
+    exferenceCandidateStatistics
+  , -- | Preferred source spellings for generated term binders.
+    exferenceCandidateLocalNames
+  , -- | Preferred source spellings for residual type variables.
+    exferenceCandidateTypeVariableNames
   } = CoreCandidate.ExferenceCandidateDetails
     { CoreCandidate.exferenceCandidateStats = exferenceCandidateStatistics
     , CoreCandidate.exferenceLocalNameHints = exferenceCandidateLocalNames
@@ -228,15 +268,22 @@ pattern ExferenceCandidateDetails
 -- pattern keeps the stable vocabulary without copying the core-owned record.
 type ExferenceBatchMetadata = CoreStats.ExferenceBatchMetadata
 
+-- | Bidirectional record-pattern view of exact cumulative batch statistics.
 pattern ExferenceBatchMetadata
   :: Map.Map Name Natural
+  -- ^ Uses of source bindings observed through this batch.
   -> Natural
+  -- ^ Queue entries discarded through this batch.
   -> Natural
+  -- ^ Over-depth entries discarded through this batch.
   -> ExferenceBatchMetadata
 pattern ExferenceBatchMetadata
-  { exferenceBatchBindingUsages
-  , exferenceBatchQueuePruned
-  , exferenceBatchDepthPruned
+  { -- | Uses of source bindings observed through this batch.
+    exferenceBatchBindingUsages
+  , -- | Queue entries discarded through this batch.
+    exferenceBatchQueuePruned
+  , -- | Over-depth entries discarded through this batch.
+    exferenceBatchDepthPruned
   } = CoreStats.ExferenceBatchMetadata
     { CoreStats.exferenceBindingUsages = exferenceBatchBindingUsages
     , CoreStats.exferenceQueuePruned = exferenceBatchQueuePruned
@@ -268,21 +315,27 @@ mkExferenceSessionWithPolicy policy =
 -- | Recover the exact neutral declaration environment sealed into this
 -- session. Policy exclusions and rating overrides affect only Exference's
 -- private search projection; they never rewrite the authoritative source
--- environment, matching the @djinnSessionEnvironment@ projection.
+-- environment.
 exferenceSessionEnvironment :: ExferenceSession -> ExferenceEnvironment
 exferenceSessionEnvironment = inventoryEnvironment
   . exferenceSessionInventory
 
+-- | Recover the checked, annotation-free inventory sealed into the session.
 exferenceSessionInventory :: ExferenceSession -> ExferenceInventory
 exferenceSessionInventory = Session.exferenceSessionInventory
 
+-- | Capabilities omitted while projecting the neutral inventory into the
+-- Exference search environment, in deterministic projection order.
 exferenceSessionOmissions :: ExferenceSession -> [ExferenceOmission]
 exferenceSessionOmissions = Session.sessionOmissions
 
+-- | Render every session omission as a structured diagnostic. Unsupported
+-- capabilities are warnings; explicit policy exclusions are informational.
 exferenceSessionDiagnostics :: ExferenceSession -> [Diagnostic]
 exferenceSessionDiagnostics = map omissionDiagnostic
   . exferenceSessionOmissions
 
+-- | Recover the search measurements attached to a checked candidate.
 exferenceCandidateMetrics
   :: ExferenceCandidate
   -> ExferenceCandidateMetrics
@@ -293,6 +346,8 @@ exferenceResultBindingUsages :: ExferenceResult -> Map.Map Name Natural
 exferenceResultBindingUsages = exferenceBatchBindingUsages
   . batchMetadata . resultSearch
 
+-- | Render only the candidate's right-hand-side expression, honoring the
+-- requested qualification policy and its local-name hints.
 renderExferenceCandidateExpression
   :: Qualification
   -> ExferenceCandidate
@@ -301,6 +356,8 @@ renderExferenceCandidateExpression qualification candidate =
   renderCandidateExpression
     (candidateRenderOptions qualification candidate) candidate
 
+-- | Render the candidate as a complete top-level definition, honoring the
+-- requested qualification policy and its local-name hints.
 renderExferenceCandidateDefinition
   :: Qualification
   -> ExferenceCandidate
@@ -309,6 +366,9 @@ renderExferenceCandidateDefinition qualification candidate =
   renderCandidateDefinition
     (candidateRenderOptions qualification candidate) candidate
 
+-- | Render distinct residual constraints in structural order. Invalid,
+-- duplicate, or unavailable source type-variable hints receive deterministic
+-- fresh fallback names.
 renderExferenceResidualConstraints
   :: ExferenceCandidate
   -> [String]
@@ -423,6 +483,9 @@ safeBoundedHint source = unsafePerformIO $ do
 
 {-# NOINLINE safeBoundedHint #-}
 
+-- | Elaborate and lower the checked request against a sealed session, then
+-- return its lazy batch trace. Query, option, and lowering failures are
+-- reported before the 'Right' result is exposed.
 runExferenceQuery
   :: ExferenceSession
   -> ExferenceRequest

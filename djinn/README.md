@@ -518,6 +518,11 @@ instead of conflating those layers.
 `toSynthesisDeclaration` and `fromSynthesisDeclaration` likewise round-trip
 Djinn's synonyms, data/abstract types, classes, and assumptions while rejecting
 shared superclass and instance semantics that Djinn does not implement.
+The historical raw `TypeDefinition` tuple redundantly stores an abstract
+type's outer name and cached kind beside `HTAbstract`'s embedded name and
+declared kind. Every raw checking and shared-conversion entrance now applies
+one rule: the names must agree, abstract definitions cannot have parameters,
+and the embedded declared kind refreshes the compatibility cache.
 The opaque Djinn `Environment` itself now round-trips through
 `Language.Haskell.Synthesis.Environment`; reverse lowering preflights Djinn's
 stricter source subset, grounds and checks the neutral Inventory once, validates

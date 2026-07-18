@@ -87,6 +87,8 @@ tests =
     , ("round-trip shared source types", testSharedTypeAdapter)
     , ("round-trip shared declarations", testSharedDeclarationAdapter)
     , ("round-trip shared environments", testSharedEnvironmentAdapter)
+    , ("normalize raw abstract definitions at every environment boundary",
+          testRawAbstractDefinitionNormalization)
     , ("prepare neutral Djinn environments authoritatively",
           testNeutralDjinnPreparation)
     , ("cache prepared global premises in declaration order",
@@ -968,6 +970,97 @@ testSharedEnvironmentAdapter = do
     assertEqual "only canonical data () = () crosses the trusted unit path"
         [ ("()", ([], HTUnion [("()", [])], KStar)) ]
         (typeDeclarations loweredUnit)
+
+-- Raw compatibility type definitions predate 'Declaration' and redundantly
+-- encode an abstract type's name and kind.  Every entrance must resolve that
+-- redundancy identically instead of allowing its chosen projection to decide
+-- which half silently wins.
+testRawAbstractDefinitionNormalization :: IO ()
+testRawAbstractDefinitionNormalization = do
+    let higherKind = KArrow KStar KStar
+        nameMismatch =
+            ("Outer", ([], HTAbstract "Embedded" KStar, KStar))
+        parameterized =
+            ("Opaque", (["a"], HTAbstract "Opaque" KStar, KStar))
+        staleKind =
+            ("Opaque", ([], HTAbstract "Opaque" higherKind, KStar))
+        rawEnvironment definition = RawEnvironment.Environment
+            { RawEnvironment.envTypes = [definition]
+            , RawEnvironment.envFunctions = []
+            , RawEnvironment.envClasses = []
+            }
+        assertPreparedFailure description expected source =
+            case prepareEnvironment source of
+                Left actual -> assertEqual description expected actual
+                Right _ -> fail $ description ++ ": malformed source prepared"
+
+    assertEqual "the shared adapter rejects conflicting abstract names"
+        (Left $ SynthesisAbstractTypeNameMismatch "Outer" "Embedded")
+        (toSynthesisEnvironment $ rawEnvironment nameMismatch)
+    assertPreparedFailure
+        "shared preparation rejects the same conflicting abstract names"
+        (SynthesisAbstractTypeNameMismatch "Outer" "Embedded")
+        (rawEnvironment nameMismatch)
+    assertLeftContains
+        "raw environment validation rejects conflicting abstract names"
+        "embeds the conflicting name \"Embedded\""
+        (validateEnvironment [nameMismatch] [] [])
+    assertLeftContains "standalone HCheck rejects conflicting abstract names"
+        "embeds the conflicting name \"Embedded\""
+        (htCheckEnv [nameMismatch])
+    assertLeftContains "HCheck query preparation rejects conflicting names"
+        "embeds the conflicting name \"Embedded\""
+        (htCheckType [nameMismatch] $ HTCon "Outer")
+
+    assertEqual "the shared adapter rejects abstract parameters"
+        (Left $ SynthesisAbstractTypeParameters "Opaque" ["a"])
+        (toSynthesisEnvironment $ rawEnvironment parameterized)
+    assertPreparedFailure "shared preparation rejects abstract parameters"
+        (SynthesisAbstractTypeParameters "Opaque" ["a"])
+        (rawEnvironment parameterized)
+    assertLeftContains "raw validation rejects abstract parameters"
+        "cannot declare parameters: [\"a\"]"
+        (validateEnvironment [parameterized] [] [])
+    assertLeftContains "standalone HCheck rejects abstract parameters"
+        "cannot declare parameters: [\"a\"]"
+        (htCheckEnv [parameterized])
+    assertLeftContains "HCheck query preparation rejects abstract parameters"
+        "cannot declare parameters: [\"a\"]"
+        (htCheckType [parameterized] $ HTCon "Opaque")
+
+    shared <- expectShownRight
+        $ toSynthesisEnvironment $ rawEnvironment staleKind
+    case SharedEnvironment.environmentDeclarations shared of
+        [SharedDeclaration.AbstractTypeDeclaration _ name kind] -> do
+            assertEqual "abstract normalization changed its owner"
+                (sharedName "Opaque") name
+            assertEqual "the embedded abstract kind is authoritative"
+                (SharedKind.FunctionKind SharedKind.ProperTypeKind
+                    SharedKind.ProperTypeKind)
+                kind
+        declarations -> fail $
+            "unexpected normalized abstract declarations: " ++
+            show declarations
+
+    prepared <- expectShownRight $ prepareEnvironment $ rawEnvironment staleKind
+    assertEqual "preparation did not refresh the projected compatibility kind"
+        (Just ([], HTAbstract "Opaque" higherKind, higherKind))
+        (lookup "Opaque" $ typeDeclarations
+            $ RawEnvironment.preparedEnvironmentSource prepared)
+    (checked, _) <- expectRight $ validateEnvironment [staleKind] [] []
+    assertEqual "raw validation did not refresh the cached abstract kind"
+        (Just ([], HTAbstract "Opaque" higherKind, higherKind))
+        (lookup "Opaque" checked)
+    hchecked <- expectRight $ htCheckEnv [staleKind]
+    assertEqual "standalone HCheck did not refresh the cached abstract kind"
+        (Just ([], HTAbstract "Opaque" higherKind, higherKind))
+        (lookup "Opaque" hchecked)
+    assertRight "HCheck query preparation trusted the stale outer kind"
+        $ htCheckType
+            [ staleKind
+            , ("Atom", ([], HTAbstract "Atom" KStar, KStar))
+            ]
+            (HTApp (HTCon "Opaque") (HTCon "Atom"))
 
 -- The stable Djex boundary must preserve the neutral Environment as the
 -- authoritative declaration inventory. Historical raw tables are on-demand

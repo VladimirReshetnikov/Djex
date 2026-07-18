@@ -6,6 +6,7 @@
 -- worker used by sealed sessions. The historical exposed module deliberately
 -- re-exports only its original raw checking surface.
 module Djinn.Internal.HCheck.Implementation(
+    AbstractTypeDefinitionError(..), normalizeAbstractTypeDefinitionsWith,
     PreparedKindCheck, prepareKindEnvironment,
     htCheckEnv, htCheckType, htCheckTypeKind, htCheckTypesKinds,
     htCheckTypePrepared, htCheckTypesKindsWith,
@@ -23,6 +24,53 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import Djinn.Internal.HTypes
 import Djinn.Internal.Type (toSynthesisType)
 
+-- | Structural failures unique to the historical raw type-definition tuple.
+-- An abstract declaration redundantly stores its owner name inside 'HType',
+-- and, unlike data types and synonyms, has no parameter list of its own.
+data AbstractTypeDefinitionError
+    = AbstractTypeDefinitionNameMismatch HSymbol HSymbol
+    | AbstractTypeDefinitionHasParameters HSymbol [HSymbol]
+    deriving (Eq, Show)
+
+-- | Validate the redundant representation of abstract type definitions and
+-- choose how their cached outer kind is refreshed.  Shared-environment
+-- conversion installs the embedded declared kind immediately.  The legacy
+-- checker keeps its polymorphic cache only until its ordinary whole-table
+-- inference replaces every cached kind below.
+normalizeAbstractTypeDefinitionsWith
+    :: (cachedKind -> HKind -> cachedKind)
+    -> [(HSymbol, ([HSymbol], HType, cachedKind))]
+    -> Either AbstractTypeDefinitionError
+        [(HSymbol, ([HSymbol], HType, cachedKind))]
+normalizeAbstractTypeDefinitionsWith refreshKind = mapM normalize
+  where
+    normalize definition@(outerName, (parameters, body, cachedKind)) =
+        case body of
+            HTAbstract embeddedName embeddedKind
+                | outerName /= embeddedName -> Left $
+                    AbstractTypeDefinitionNameMismatch
+                        outerName embeddedName
+                | not (null parameters) -> Left $
+                    AbstractTypeDefinitionHasParameters
+                        outerName parameters
+                | otherwise -> Right
+                    ( outerName
+                    , ( []
+                      , HTAbstract embeddedName embeddedKind
+                      , refreshKind cachedKind embeddedKind
+                      )
+                    )
+            _ -> Right definition
+
+renderAbstractTypeDefinitionError :: AbstractTypeDefinitionError -> String
+renderAbstractTypeDefinitionError failure = case failure of
+    AbstractTypeDefinitionNameMismatch outerName embeddedName ->
+        "Abstract type definition " ++ show outerName ++
+        " embeds the conflicting name " ++ show embeddedName
+    AbstractTypeDefinitionHasParameters name parameters ->
+        "Abstract type definition " ++ show name ++
+        " cannot declare parameters: " ++ show parameters
+
 -- | The transient checker used by Djinn's standalone raw compatibility
 -- operations and editable-environment validation. It retains only legacy
 -- synonym spellings/arities and already-ground shared assumptions, never the
@@ -38,9 +86,12 @@ prepareKindCheck
     :: [(HSymbol, ([HSymbol], HType, HKind))]
     -> Either String PreparedKindCheck
 prepareKindCheck definitions = do
-    assumptions <- synthesisAssumptions definitions
+    normalized <- first renderAbstractTypeDefinitionError $
+        normalizeAbstractTypeDefinitionsWith
+            (\_ embeddedKind -> embeddedKind) definitions
+    assumptions <- synthesisAssumptions normalized
     return $ prepareKindCheckWithArities
-        (synonymArities definitions) assumptions
+        (synonymArities normalized) assumptions
 
 -- Force the derived list while the raw source declarations are transient. The
 -- checker retains names and arities, never deferred access to complete type
@@ -173,14 +224,16 @@ prepareKindEnvironment
         , PreparedKindCheck
         )
 prepareKindEnvironment its = do
-    let preparedSynonymArities = synonymArities its
+    normalized <- first renderAbstractTypeDefinitionError $
+        normalizeAbstractTypeDefinitionsWith const its
+    let preparedSynonymArities = synonymArities normalized
     mapM_ (checkSynonymSaturationWith
         (checkSynonymApplicationWithArities preparedSynonymArities) .
-        declarationBody) its
-    declarations <- mapM toKindDeclaration its
+        declarationBody) normalized
+    declarations <- mapM toKindDeclaration normalized
     inferred <- first show $
         SharedInference.inferAcyclicTypeConstructorKinds declarations
-    checked <- mapM (attachKind inferred) its
+    checked <- mapM (attachKind inferred) normalized
     let assumptions = SharedInference.emptyKindAssumptions
             { SharedInference.typeConstructorKinds = inferred }
     return (checked, prepareKindCheckWithArities

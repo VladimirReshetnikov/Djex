@@ -146,6 +146,10 @@ Uniform architecture does not mean identical semantics:
 - Djinn stores canonical historical binder spellings in lowered proof output.
   Exference stores numeric locals and applies checked spelling hints at render
   time. This difference is part of the existing observable contracts.
+- Djinn's raw abstract-type tuple is normalized before either legacy kind
+  checking or shared declaration conversion: its duplicated names must agree,
+  it cannot carry parameters, and the embedded declared kind refreshes the
+  outer compatibility cache.
 
 Logical evidence and operational completion are therefore separate. A result
 can contain validated candidates from a truncated search, and a finished

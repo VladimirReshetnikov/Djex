@@ -37,10 +37,12 @@ import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Djinn.Internal.Declaration
 import Djinn.Internal.HCheck.Implementation
-    ( PreparedKindCheck
+    ( AbstractTypeDefinitionError(..)
+    , PreparedKindCheck
     , htCheckTypePrepared
     , htCheckTypesKindsWith
     , htInferClassKindsPrepared
+    , normalizeAbstractTypeDefinitionsWith
     , prepareKindEnvironment
     )
 import Djinn.Internal.HTypes
@@ -129,6 +131,8 @@ data SynthesisEnvironmentError
     | MissingSynthesisClassKinds SharedName.Name
     | SynthesisClassKindArityMismatch SharedName.Name Int Int
     | UnresolvedSynthesisClassKind SharedName.Name HSymbol
+    | SynthesisAbstractTypeNameMismatch HSymbol HSymbol
+    | SynthesisAbstractTypeParameters HSymbol [HSymbol]
     | SynthesisDeclarationNotFound HSymbol
     | ProtectedSynthesisUnitDeclaration
     | ProtectedSynthesisUnit
@@ -743,9 +747,12 @@ renderSynonymExpansionError expansionError = case expansionError of
 synthesisDeclarations
     :: Environment
     -> Either SynthesisEnvironmentError [SynthesisDeclaration]
-synthesisDeclarations environment =
+synthesisDeclarations environment = do
+    normalizedTypes <- first abstractTypeDefinitionFailure $
+        normalizeAbstractTypeDefinitionsWith
+            (\_ embeddedKind -> embeddedKind) (envTypes environment)
     mapM convertedDeclaration $
-        map typeDeclaration (envTypes environment) ++
+        map typeDeclaration normalizedTypes ++
         [Function name functionType |
             (name, functionType) <- envFunctions environment] ++
         [ClassDecl name (map fst parameters) methods |
@@ -759,6 +766,12 @@ synthesisDeclarations environment =
     convertedDeclaration = either
         (Left . SynthesisEnvironmentDeclarationError) Right .
         toSynthesisDeclaration
+
+    abstractTypeDefinitionFailure failure = case failure of
+        AbstractTypeDefinitionNameMismatch outerName embeddedName ->
+            SynthesisAbstractTypeNameMismatch outerName embeddedName
+        AbstractTypeDefinitionHasParameters name parameters ->
+            SynthesisAbstractTypeParameters name parameters
 
 preflightDeclaration
     :: SynthesisDeclaration

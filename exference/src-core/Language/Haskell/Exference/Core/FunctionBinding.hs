@@ -84,10 +84,14 @@ functionBindingType binding = SharedType.functionType
 -- | Reconstruct the complete implicitly quantified source signature retained
 -- by the flat search record. Leading binder identities are intentionally not
 -- recovered: they were opened by 'functionBindingFromType', while their free
--- occurrences remain available to the shared declaration checker.
+-- occurrences remain available to the shared declaration checker. An
+-- unconstrained binding is returned as its monotype instead of manufacturing
+-- a structurally empty forall; a nonempty context still requires the forall
+-- node that owns it.
 functionBindingSignature :: FunctionBinding -> HsType
-functionBindingSignature binding = TypeForall []
-  (functionConstraints binding) (functionBindingType binding)
+functionBindingSignature binding = case functionConstraints binding of
+  [] -> functionBindingType binding
+  constraints -> TypeForall [] constraints $ functionBindingType binding
 
 -- | Every independently stored type in a function binding, in historical
 -- result, parameter, then constraint-argument order.

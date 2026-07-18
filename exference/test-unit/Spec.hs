@@ -1181,6 +1181,7 @@ tests = testGroup "Exference"
               constraint = HsConstraint (name "C") [constrained]
               binding = FunctionBinding result (name "binding") 1
                 [constraint] [parameter]
+              unconstrained = binding { functionConstraints = [] }
               constructor = ConstructorBinding (name "Build")
                 [parameter, constrained]
               deconstructor = DeconstructorBinding result
@@ -1191,6 +1192,8 @@ tests = testGroup "Exference"
             TypeArrow parameter result
           functionBindingSignature binding @?=
             TypeForall [] [constraint] (TypeArrow parameter result)
+          functionBindingSignature unconstrained @?=
+            TypeArrow parameter result
           functionBindingTypes binding @?=
             [result, parameter, constrained]
           functionBindingTypes
@@ -1218,10 +1221,18 @@ tests = testGroup "Exference"
               signature = TypeArrow integer nested
               binding = functionBindingFromType function 0 signature
           binding @?= FunctionBinding nested function 0 [] [integer]
+          functionBindingSignature binding @?= signature
           case mkExferenceEnvironment
               $ EnvDictionary [binding] [] emptyStaticClassEnv of
             Left failure -> failure @?= NestedForallInBinding function signature
             Right _ -> fail "a rank-N result reached an Exference environment"
+      , testCase "empty source foralls canonicalize to monotypes" $ do
+          function <- expectRight $ mkQualifiedName ["Fixture"] "identity"
+          let body = TypeArrow (TypeVar 0) (TypeVar 0)
+              explicitEmpty = TypeForall [] [] body
+              binding = functionBindingFromType function 0 explicitEmpty
+          binding @?= functionBindingFromType function 0 body
+          functionBindingSignature binding @?= body
       , testCase "function bindings preserve prenex lexical shadowing" $ do
           function <- expectRight $ mkQualifiedName ["Fixture"] "shadowed"
           outer <- expectRight $ mkQualifiedName ["Fixture"] "Outer"
@@ -1857,6 +1868,23 @@ tests = testGroup "Exference"
                 [constraint] [TypeArrow (TypeVar 0) (TypeVar 0)]
           shared <- expectRight $ toSynthesisFunctionBinding binding
           fromSynthesisFunctionBinding shared @?= Right binding
+      , testCase "unconstrained bindings use canonical shared monotypes" $ do
+          let function = name "identity"
+              body = TypeArrow (TypeVar 0) (TypeVar 0)
+              binding = FunctionBinding
+                (TypeVar 0) function (Penalty 1.5) [] [TypeVar 0]
+              compatibilityDeclaration = SharedDeclaration.ValueDeclaration
+                $ SharedDeclaration.ValueSignature
+                    (SearchPenaltyMetadata $ Penalty 1.5)
+                    function
+                    (TypeForall [] [] body)
+          shared <- expectRight $ toSynthesisFunctionBinding binding
+          case shared of
+            SharedDeclaration.ValueDeclaration signature ->
+              SharedDeclaration.valueType signature @?= body
+            _ -> fail "function adapter returned another declaration shape"
+          fromSynthesisFunctionBinding compatibilityDeclaration @?=
+            Right binding
       , testCase "classes and instances round-trip nominally" $ do
           let constraint = HsConstraint (name "C") [TypeVar 0]
               classDeclaration = HsTypeClass (name "C") [0] []
@@ -1889,6 +1917,8 @@ tests = testGroup "Exference"
                 methodName
               SharedDeclaration.valueAnnotation signature @?=
                 SearchPenaltyMetadata (Penalty 2.5)
+              SharedDeclaration.valueType signature @?=
+                TypeArrow (TypeVar 7) (TypeVar 7)
             _ -> fail "class-method adapter returned another declaration shape"
           fromSynthesisClassDeclarationWithMethods shared @?=
             Right (classDeclaration, [method])

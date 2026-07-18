@@ -227,6 +227,11 @@ explicit metadata. Class methods are nested under their shared class
 declaration with their rating intact; the implicit owner constraint required
 by Exference's flat search binding is derived from the class parameters,
 checked and removed while nesting, and restored exactly once while lowering.
+An unconstrained flat binding crosses this boundary as a plain monotype; the
+reverse adapter still accepts the historical explicit `TypeForall [] []`
+wrapper and canonicalizes it on the next shared projection. A nonempty
+constraint context retains its binderless `forall`, because that node owns the
+context.
 The older method-free class conversion still rejects a declaration containing
 methods instead of silently dropping them.
 The legacy `applyTypeDecls` entry point now adapts its finite raw definition

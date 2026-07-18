@@ -40,6 +40,7 @@ import Language.Haskell.Exference.EnvironmentParser
   ( LoadReport (..)
   , SourceEnvironment (..)
   , checkedSourceProjection
+  , environmentLoadErrorDiagnostics
   , environmentFromPath
   , sourceFunctions
   )
@@ -183,7 +184,10 @@ run flags inputs = do
   LoadReport environmentResult loaderDiagnostics <-
     environmentFromPath environmentPath
   checkedEnvironment <- case environmentResult of
-    Left failure -> fatal $ "could not load source environment: " ++ show failure
+    Left failure -> fatal $ intercalate "\n"
+      $ "could not load source environment:"
+      : map renderDiagnostic
+          (NonEmpty.toList $ environmentLoadErrorDiagnostics failure)
     Right value -> pure value
   when (verbosity > 0) $ forM_ loaderDiagnostics $ \value ->
     putStrLn $ "environment " ++ renderDiagnostic value

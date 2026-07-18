@@ -191,8 +191,12 @@ testMissingEnvironment = withMissingTemporaryEnvironment $ \environmentDirectory
     ExitSuccess -> fail "missing environment directory returned success"
   assertContains "directory failures should use the controlled loader diagnostic"
     "could not load source environment:" errors
-  assertContains "the typed directory failure should remain visible"
-    "EnvironmentDirectoryReadError" errors
+  assertContains "directory failures should retain their structured code"
+    "error [EXF_ENV_DIRECTORY_READ]:" errors
+  assertContains "directory failures should retain their source path"
+    (environmentDirectory ++ ": error [EXF_ENV_DIRECTORY_READ]:") errors
+  assertBool "the raw directory constructor leaked through the CLI"
+    (not $ "EnvironmentDirectoryReadError" `isInfixOf` errors)
   assertEqual "a missing environment must produce no synthesized output" "" output
   assertBool "a controlled directory failure must not expose a Haskell call stack"
     (not $ "CallStack" `isInfixOf` errors)
@@ -211,8 +215,14 @@ testInvalidEnvironment = withTemporaryEnvironment $ \environmentDirectory -> do
     ExitSuccess -> fail "invalid class environment returned success"
   assertContains "fatal class diagnostics belong on stderr"
     "could not load source environment:" errors
+  assertContains "class diagnostics retain code and declaration span"
+    (environmentDirectory
+      ++ "/Broken.hs:2:1: error [EXF_CLASS_DECLARATION]:"
+      ++ " could not load a source class declaration") errors
   assertContains "the duplicate class should remain visible"
     "duplicate type class: C (Broken.C)" errors
+  assertBool "the raw class loader constructor leaked through the CLI"
+    (not $ "ClassEnvironmentLoadFailure" `isInfixOf` errors)
   assertBool "a failed environment must never enter synthesis"
     (not $ "\\a -> a" `isInfixOf` output)
 
@@ -228,10 +238,22 @@ testInvalidSynonyms = withTemporaryEnvironment $ \environmentDirectory -> do
   case exitCode of
     ExitFailure _ -> pure ()
     ExitSuccess -> fail "cyclic synonym environment returned success"
-  assertContains "fatal synonym diagnostics belong on stderr"
-    "TypeDeclarationErrors" errors
+  assertEqual "the historical loader prefix should be printed once"
+    1 $ countOccurrences "could not load source environment:" errors
+  assertEqual "both synonym failures should remain accumulated"
+    2 $ countOccurrences "[EXF_TYPE_DECLARATION]" errors
+  assertContains "the first synonym failure retains its declaration span"
+    (environmentDirectory
+      ++ "/Broken.hs:2:1-11: error [EXF_TYPE_DECLARATION]:"
+      ++ " could not load a source type declaration") errors
+  assertContains "the second synonym failure retains its declaration span"
+    (environmentDirectory
+      ++ "/Broken.hs:3:1-11: error [EXF_TYPE_DECLARATION]:"
+      ++ " could not load a source type declaration") errors
   assertContains "the synonym cycle should remain visible"
     "cyclic type synonym" errors
+  assertBool "the raw synonym loader constructor leaked through the CLI"
+    (not $ "TypeDeclarationErrors" `isInfixOf` errors)
   assertBool "a failed environment must never enter synthesis"
     (not $ "\\a -> a" `isInfixOf` output)
 
@@ -246,8 +268,10 @@ testInvalidModule = withTemporaryEnvironment $ \environmentDirectory -> do
   case exitCode of
     ExitFailure _ -> pure ()
     ExitSuccess -> fail "malformed environment module returned success"
-  assertContains "fatal parser diagnostics belong on stderr"
-    "ModuleParseErrors" errors
+  assertContains "fatal parser diagnostics retain their structured code"
+    "error [EXF_MODULE_PARSE]:" errors
+  assertBool "the raw parser loader constructor leaked through the CLI"
+    (not $ "ModuleParseErrors" `isInfixOf` errors)
   assertBool "a failed environment must never enter synthesis"
     (not $ "\\a -> a" `isInfixOf` output)
 
@@ -264,9 +288,14 @@ testInvalidKinds = withTemporaryEnvironment $ \environmentDirectory -> do
     ExitFailure _ -> pure ()
     ExitSuccess -> fail "ill-kinded environment returned success"
   assertContains "shared inventory failure belongs on stderr"
-    "InvalidSourceInventory" errors
+    "error [EXF_SOURCE_INVENTORY]:"
+    errors
+  assertContains "shared inventory failure keeps its phase message"
+    "the source environment failed shared inventory validation" errors
   assertContains "the kind failure should remain visible"
     "KindMismatch" errors
+  assertBool "the raw inventory loader constructor leaked through the CLI"
+    (not $ "InvalidSourceInventory" `isInfixOf` errors)
   assertBool "an unchecked environment must never reach query parsing"
     (not $ "could not parse input type" `isInfixOf` output)
 
@@ -331,4 +360,3 @@ withMissingTemporaryEnvironment action = do
   hClose handle
   removeFile path
   action path
-

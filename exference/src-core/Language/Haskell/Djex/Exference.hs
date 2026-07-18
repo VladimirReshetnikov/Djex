@@ -95,6 +95,7 @@ import Language.Haskell.Exference.Core
 import qualified Language.Haskell.Exference.Core as Core
 import qualified Language.Haskell.Exference.Core.Candidate as CoreCandidate
 import qualified Language.Haskell.Exference.Core.ExferenceStats as CoreStats
+import qualified Language.Haskell.Exference.Core.Internal.Exference as CoreInternal
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , defaultVariableName
@@ -495,6 +496,13 @@ runExferenceQuery session request = do
       target = requestTarget query
       sharedGoal = requestContextualGoal request
       requestDiagnostic = withExferenceRequestProvenance request
+      optionFailure = shownErrorDiagnostic
+        "DJEX_EXF_OPTIONS" "invalid Exference search options"
+  -- Options are session-independent request policy. Check them before goal
+  -- elaboration so reusing a request against an incompatible session cannot
+  -- give a malformed option source provenance or a synonym/kind diagnostic.
+  first optionFailure
+    $ CoreInternal.validateExferenceOptions $ requestOptions query
   elaboratedGoal <- first (requestDiagnostic . elaborationFailure)
     $ Session.elaborateSessionGoal session sharedGoal
   backendGoal <- first
@@ -512,8 +520,7 @@ runExferenceQuery session request = do
   let input = searchQuery backendGoal
         $ requestOptions query
       searchFailure failure
-        | Core.isExferenceOptionError failure = shownErrorDiagnostic
-            "DJEX_EXF_OPTIONS" "invalid Exference search options" failure
+        | Core.isExferenceOptionError failure = optionFailure failure
         | otherwise = requestDiagnostic $ shownErrorDiagnostic
             "DJEX_EXF_QUERY" "Exference rejected the query" failure
   first searchFailure

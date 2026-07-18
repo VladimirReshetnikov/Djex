@@ -29,6 +29,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInputError (..)
   , isExferenceOptionError
   , mkExferenceEnvironment
+  , validateExferenceOptions
   , validateExferenceQuery
   , validateExferenceInput
   )
@@ -802,8 +803,7 @@ prepareExferenceQuery
   -> Either ExferenceInputError CheckedExferenceQuery
 prepareExferenceQuery sealed@(ExferenceEnvironment environment rigidContext)
     query = do
-  validateQueryLimits query
-  validateQueryHeuristics query
+  validateExferenceOptions $ querySearchOptions query
   validateQueryForall query
   validateConstraintForalls constraints
   validateQueryClassConstraints environment query
@@ -823,6 +823,17 @@ validateExferenceQuery
   -> Either ExferenceInputError ()
 validateExferenceQuery environment query =
   () <$ prepareExferenceQuery environment query
+
+-- | Validate only query-varying search controls, without inspecting a goal or
+-- environment. Checked adapters use this before session-dependent elaboration
+-- so an invalid independently supplied option cannot be mislabeled as a
+-- source-derived kind, synonym, or lowering failure.
+validateExferenceOptions
+  :: ExferenceOptions
+  -> Either ExferenceInputError ()
+validateExferenceOptions options = do
+  validateOptionsLimits options
+  validateOptionsHeuristics options
 
 validateExferenceEnvironment
   :: EnvDictionary

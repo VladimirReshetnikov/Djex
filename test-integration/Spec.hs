@@ -897,6 +897,24 @@ tests = testGroup "Djex facade"
       diagnosticSource programmaticFailure @?= Nothing
       diagnosticSpan programmaticFailure @?= Nothing
       parsedFailure @?= programmaticFailure
+      aliasName <- expectRight $ parseName "Fixture.Identity"
+      let variable = FlexibleVariable 0
+          alias = TypeSynonymDeclaration () aliasName
+            [TypeParameter variable Nothing] $ TypeVariable variable
+      aliasEnvironment <- expectRight
+        (mkEnvironment [alias] :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      aliasSession <- expectRight $ mkExferenceSession aliasEnvironment
+      incompatible <- expectRight $ parseExferenceRequest aliasSession
+        defaultExferenceOptions {exferenceMaximumSteps = 0}
+        target "invalid-options-alias" "Fixture.Identity a -> a"
+      incompatibleFailure <- case runExferenceQuery session incompatible of
+        Left failure -> pure failure
+        Right _ -> fail
+          "session elaboration hid invalid Exference options"
+      diagnosticCode incompatibleFailure @?= Just "DJEX_EXF_OPTIONS"
+      diagnosticSource incompatibleFailure @?= Nothing
+      diagnosticSpan incompatibleFailure @?= Nothing
   , testCase "preserve an Exference query filename extension" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked

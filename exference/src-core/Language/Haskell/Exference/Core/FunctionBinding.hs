@@ -4,6 +4,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
+  , EnvironmentDuplicateError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
   , functionBindingFromType
@@ -15,6 +16,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , environmentBindingTypes
   , mapFunctionBindingTypes
   , mapDeconstructorBindingTypes
+  , validateEnvironmentBindingIdentities
   , validateDeconstructorBinding
   )
 where
@@ -22,6 +24,7 @@ where
 import Control.DeepSeq (NFData (..))
 import Data.Foldable (traverse_)
 import qualified Data.IntSet as IntSet
+import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
@@ -32,6 +35,7 @@ import Language.Haskell.Exference.Core.TypeUtils
   ( splitArrowResultParams
   , typeConstructorHead
   )
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -193,6 +197,51 @@ data EnvDictionary = EnvDictionary
   deriving (Generic, Show)
 
 instance NFData EnvDictionary
+
+-- | An ambiguous identity in a raw search/checking environment.
+--
+-- Search and independent expression checking both look bindings up by name.
+-- Keeping the complete duplicate policy here prevents either consumer from
+-- silently choosing a different declaration when handed the same raw lists.
+data EnvironmentDuplicateError
+  = DuplicateDeconstructorIdentities [QualifiedName]
+    -- ^ More than one datatype eliminator has the same nominal input head.
+  | DuplicateConstructorIdentities [QualifiedName]
+    -- ^ A constructor name occurs in more than one alternative or datatype.
+  | DuplicateFunctionIdentities [QualifiedName]
+    -- ^ More than one value binding has the same global name.
+  deriving (Eq, Generic, Show)
+
+instance NFData EnvironmentDuplicateError
+
+-- | Require every name used for environment lookup to be unambiguous.
+--
+-- The ordering is part of the checked-boundary contract: datatype heads are
+-- considered before constructor names and functions, and each reported list
+-- is sorted. Deconstructors without a nominal head are left for
+-- 'validateDeconstructorBinding', which owns the more precise shape error.
+validateEnvironmentBindingIdentities
+  :: EnvDictionary
+  -> Either EnvironmentDuplicateError ()
+validateEnvironmentBindingIdentities environment
+  | duplicates@(_ : _) <- repeated
+      [ name
+      | deconstructor <- environmentDeconstructors environment
+      , Just name <- [typeConstructorHead $ deconstructorInput deconstructor]
+      ] = Left $ DuplicateDeconstructorIdentities duplicates
+  | duplicates@(_ : _) <- repeated
+      [ constructorName constructor
+      | deconstructor <- environmentDeconstructors environment
+      , constructor <- deconstructorConstructors deconstructor
+      ] = Left $ DuplicateConstructorIdentities duplicates
+  | duplicates@(_ : _) <- repeated
+      (map functionName $ environmentFunctions environment) =
+      Left $ DuplicateFunctionIdentities duplicates
+  | otherwise = Right ()
+ where
+  repeated = Set.toAscList
+    . SharedCollection.repeatedValueSet
+    . SharedCollection.summarizeDuplicates
 
 -- | Every independently stored search-capability type. Class and instance
 -- assumptions are deliberately excluded because they belong to

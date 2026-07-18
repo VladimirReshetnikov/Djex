@@ -64,7 +64,6 @@ import Language.Haskell.Exference.Core.Internal.Options
   , ExferenceOptions (..)
   , heuristicFields
   )
-import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
@@ -864,21 +863,16 @@ validateOptionsLimits options
 validateEnvironmentDuplicates
   :: EnvDictionary
   -> Either ExferenceInputError ()
-validateEnvironmentDuplicates environment
-  | duplicates@(_ : _) <- repeatedValues
-      [ name
-      | deconstructor <- environmentDeconstructors environment
-      , Just name <- [deconstructorTypeName deconstructor]
-      ] = Left $ DuplicateDeconstructorNames duplicates
-  | duplicates@(_ : _) <- repeatedValues
-      [ constructorName constructor
-      | deconstructor <- environmentDeconstructors environment
-      , constructor <- deconstructorConstructors deconstructor
-      ] = Left $ DuplicateConstructorNames duplicates
-  | duplicates@(_ : _) <- repeatedValues
-      (map functionName $ environmentFunctions environment) =
-      Left $ DuplicateFunctionNames duplicates
-  | otherwise = Right ()
+validateEnvironmentDuplicates environment = case
+    validateEnvironmentBindingIdentities environment of
+  Right () -> Right ()
+  Left failure -> Left $ case failure of
+    DuplicateDeconstructorIdentities names ->
+      DuplicateDeconstructorNames names
+    DuplicateConstructorIdentities names ->
+      DuplicateConstructorNames names
+    DuplicateFunctionIdentities names ->
+      DuplicateFunctionNames names
 
 validateQueryHeuristics
   :: ExferenceQuery
@@ -1067,22 +1061,6 @@ canonicalizeDeconstructorBinding = mapDeconstructorBindingTypes canonicalize
 
 canonicalize :: HsType -> HsType
 canonicalize = SharedType.canonicalizeType
-
--- Report the complete stable duplicate set.  Search explores every raw
--- binding while the independent checker historically selected the first one,
--- so accepting duplicates made both results and penalties list-order
--- dependent.
-repeatedValues :: Ord value => [value] -> [value]
-repeatedValues =
-  S.toAscList
-  . SharedCollection.repeatedValueSet
-  . SharedCollection.summarizeDuplicates
-
--- Duplicate detection deliberately precedes the dedicated deconstructor-shape
--- validation, preserving the public first-error order while projecting every
--- input that already exposes a nominal head.
-deconstructorTypeName :: DeconstructorBinding -> Maybe QualifiedName
-deconstructorTypeName = typeConstructorHead . deconstructorInput
 
 firstInvalidGeneratedConstructor
   :: EnvDictionary

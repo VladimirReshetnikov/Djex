@@ -70,6 +70,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
+  , EnvironmentDuplicateError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
   , deconstructorBindingType
@@ -6352,6 +6353,49 @@ tests = testGroup "Exference"
           checkExpression (mkQueryClassEnv staticClasses [external])
             [binding] [] integer [] (ExpName bindingName)
             @?= Right ()
+      , testCase "rejects duplicate function identities before lookup" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let duplicateName = name "ambiguous"
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              firstBinding = FunctionBinding integer duplicateName 0 [] []
+              secondBinding = FunctionBinding boolean duplicateName 0 [] []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [firstBinding, secondBinding] [] integer []
+            (ExpName duplicateName) @?= Left
+              (InvalidCheckEnvironmentBindings
+                $ DuplicateFunctionIdentities [duplicateName])
+      , testCase "rejects duplicate constructor identities before lookup" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let duplicateName = name "Ambiguous"
+              firstType = TypeCons $ name "First"
+              secondType = TypeCons $ name "Second"
+              firstDeconstructor = DeconstructorBinding firstType
+                [ConstructorBinding duplicateName []] False
+              secondDeconstructor = DeconstructorBinding secondType
+                [ConstructorBinding duplicateName []] False
+              expression = ExpLambda 1 firstType
+                $ ExpCaseMatch (ExpVar 1 firstType)
+                    [(duplicateName, [], ExpVar 1 firstType)]
+          checkExpression (mkQueryClassEnv staticClasses []) []
+            [firstDeconstructor, secondDeconstructor]
+            (TypeArrow firstType firstType) [] expression @?= Left
+              (InvalidCheckEnvironmentBindings
+                $ DuplicateConstructorIdentities [duplicateName])
+      , testCase "rejects duplicate datatype eliminator identities" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let duplicateType = TypeCons $ name "Duplicate"
+              firstDeconstructor = DeconstructorBinding duplicateType
+                [ConstructorBinding (name "First") []] False
+              secondDeconstructor = DeconstructorBinding duplicateType
+                [ConstructorBinding (name "Second") []] False
+              expression = ExpLambda 1 duplicateType
+                $ ExpVar 1 duplicateType
+          checkExpression (mkQueryClassEnv staticClasses []) []
+            [firstDeconstructor, secondDeconstructor]
+            (TypeArrow duplicateType duplicateType) [] expression @?= Left
+              (InvalidCheckEnvironmentBindings
+                $ DuplicateDeconstructorIdentities [name "Duplicate"])
       , testCase "empty cases require a matching empty deconstructor" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let emptyType = TypeCons $ name "Empty"

@@ -197,7 +197,10 @@ source-like output should call `showHsType` (and `showHsConstraint`) rather than
 relying on `show`.
 
 The independent generated-expression checker validates every reachable native
-type and constraint before inference. It uses the same higher-kinded view of
+type and constraint before inference. Its raw environment must also have
+unique function, constructor, and datatype-eliminator identities; the same
+validator runs during live search sealing, so neither path can resolve an
+ambiguous name by list order. The checker uses the same higher-kinded view of
 structural functions and tuples as search, while tuple complexity replays the
 historical left-associated constructor/application accumulation exactly so
 floating-point rounding and saturation cannot perturb queue order.

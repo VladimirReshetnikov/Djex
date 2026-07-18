@@ -1,3 +1,9 @@
+-- | Independent validation of Exference's typed generated expressions.
+--
+-- This module deliberately reconstructs types without trusting the search
+-- tree. Raw environments cross the same binding-identity and deconstructor
+-- checks as live search before any name lookup, so a successful check cannot
+-- depend on which duplicate declaration happened to appear first.
 module Language.Haskell.Exference.Core.ExpressionCheck
   ( ExpressionCheckError (..)
   , checkExpression
@@ -41,6 +47,7 @@ data ExpressionCheckError
   | InvalidCheckType HsType SynthesisTypeError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
   | InvalidCheckClassConstraint ClassEnvError
+  | InvalidCheckEnvironmentBindings EnvironmentDuplicateError
   | InvalidCheckDeconstructor DeconstructorValidationError
   deriving (Eq, Show)
 
@@ -242,6 +249,10 @@ validateCheckInputs
   -> Either ExpressionCheckError ()
 validateCheckInputs classEnvironment functions deconstructors goal expected
     expression = do
+  case validateEnvironmentBindingIdentities $ EnvDictionary
+      functions deconstructors $ qClassEnv_env classEnvironment of
+    Left failure -> Left $ InvalidCheckEnvironmentBindings failure
+    Right () -> Right ()
   validateType goal
   validateClassConstraints QueryConstraint $ typeConstraints goal
   mapM_ (validateConstraint QueryConstraint) expected

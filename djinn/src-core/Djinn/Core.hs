@@ -597,6 +597,8 @@ instantiateSynthesisMethod parameters arguments methodType = do
     freshTypeVariable unavailable variable =
         Just $ fst $ freshPrimedVariable unavailable variable
 
+-- | Search breadth, ranking, result-limit, and fuel controls for one Djinn
+-- query. Validation occurs at the checked query boundary before proof search.
 data QueryOptions = QueryOptions {
     -- | Collect alternative solutions beyond the first.
     optionAlternatives :: Bool,

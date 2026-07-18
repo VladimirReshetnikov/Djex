@@ -890,6 +890,8 @@ renderOptionsWithLocalNameHints qualification hints fallback reserved =
     , reservedLocalNames = reserved
     }
 
+-- | Structural or lexical reason a generated expression cannot be emitted as
+-- unambiguous Haskell source under the requested qualification policy.
 data RenderError
   = InvalidLocalName String NameError
   | LocalNameIsWildcard

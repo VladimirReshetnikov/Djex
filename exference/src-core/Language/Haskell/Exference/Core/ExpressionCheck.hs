@@ -6,6 +6,9 @@
 -- depend on which duplicate declaration happened to appear first.
 module Language.Haskell.Exference.Core.ExpressionCheck
   ( ExpressionCheckError (..)
+  , ExpressionCheckContext
+  , prepareExpressionCheckContext
+  , checkExpressionInContext
   , checkExpression
   , checkExpressionWithRigidInstantiation
   )
@@ -17,6 +20,7 @@ import Control.Monad.Trans.State.Strict (StateT (..), gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Expression
@@ -63,6 +67,17 @@ data CheckState = CheckState
   , checkConstraints :: [HsConstraint]
   }
 
+-- | Fixed, independently validated inputs for checking many candidates from
+-- one query. The constructor is hidden so candidate checking can rely on the
+-- cached goal instantiation and class assumptions without trusting a search
+-- node or repeatedly scanning the complete environment.
+data ExpressionCheckContext = ExpressionCheckContext
+  HsType
+  QueryClassEnv
+  [FunctionBinding]
+  [DeconstructorBinding]
+  (Map.Map QualifiedName Int)
+
 type VariableEnvironment = IntMap.IntMap HsType
 type Check a = StateT CheckState (Either ExpressionCheckError) a
 
@@ -86,8 +101,9 @@ checkExpression classEnvironment functions deconstructors goal expected expressi
           functions deconstructors $ qClassEnv_env classEnvironment)
         (Set.toList $ qClassEnv_constraints classEnvironment)
         goal
-  checkValidatedExpression plan classEnvironment functions
-    deconstructors goal expected expression
+  context <- prepareExpressionCheckContextUnchecked plan classEnvironment
+    functions deconstructors goal
+  checkValidatedExpression context expected expression
 
 -- | Check using the same precomputed forall-opening plan as live search.
 -- Generated annotations, residual constraints, and the query assumptions in
@@ -106,33 +122,71 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
     deconstructors goal expected expression = do
   validateCheckInputs classEnvironment functions deconstructors goal expected
     expression
-  checkValidatedExpression plan classEnvironment functions deconstructors goal
-    expected expression
+  context <- prepareExpressionCheckContextUnchecked plan classEnvironment
+    functions deconstructors goal
+  checkValidatedExpression context expected expression
+
+-- | Validate the query-stable half of an independent expression check once.
+-- The returned opaque context may safely check every candidate produced for
+-- that exact environment, goal, and rigid-instantiation plan.
+prepareExpressionCheckContext
+  :: RigidInstantiationPlan
+  -> QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> Either ExpressionCheckError ExpressionCheckContext
+prepareExpressionCheckContext plan classEnvironment functions deconstructors
+    goal = do
+  validateCheckContextInputs classEnvironment functions deconstructors goal
+  prepareExpressionCheckContextUnchecked plan classEnvironment functions
+    deconstructors goal
+
+-- | Validate and check only the residual constraints and generated tree that
+-- vary from candidate to candidate.
+checkExpressionInContext
+  :: ExpressionCheckContext
+  -> [HsConstraint]
+  -> Expression
+  -> Either ExpressionCheckError ()
+checkExpressionInContext context expected expression = do
+  validateCheckCandidateInputs context expected expression
+  checkValidatedExpression context expected expression
+
+-- Raw public entrances have already performed their complete historical
+-- validation order before reaching this constructor. The reusable entrance
+-- establishes the fixed invariant in 'validateCheckContextInputs'.
+prepareExpressionCheckContextUnchecked
+  :: RigidInstantiationPlan
+  -> QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> Either ExpressionCheckError ExpressionCheckContext
+prepareExpressionCheckContextUnchecked plan classEnvironment functions
+    deconstructors goal = do
+  (checkedGoal, openedConstraints) <- instantiateGoal plan goal
+  pure $ ExpressionCheckContext
+    checkedGoal
+    (addQueryClassEnv openedConstraints classEnvironment)
+    functions
+    deconstructors
+    (constructorArityIndex deconstructors)
 
 -- Both public entrances establish the complete raw-input invariant before
 -- reaching this worker. Keeping planning outside it lets live search supply
 -- its exact sealed plan without making the standalone entrance inspect
 -- malformed raw values before their typed checker diagnostics are selected.
 checkValidatedExpression
-  :: RigidInstantiationPlan
-  -> QueryClassEnv
-  -> [FunctionBinding]
-  -> [DeconstructorBinding]
-  -> HsType
+  :: ExpressionCheckContext
   -> [HsConstraint]
   -> Expression
   -> Either ExpressionCheckError ()
-checkValidatedExpression plan classEnvironment functions deconstructors goal
+checkValidatedExpression
+    (ExpressionCheckContext checkedGoal augmentedEnvironment
+      functions deconstructors _)
     expected expression = do
-  (checkedGoal, openedConstraints) <- instantiateGoal plan goal
-  let
-      -- Live search adds each opened forall layer's rigid-instantiated
-      -- constraints to its query assumptions in forallStep; an independent
-      -- caller checking a constrained goal must receive the same assumptions
-      -- or it would falsely reject search's own accepted results.
-      augmentedEnvironment =
-        addQueryClassEnv openedConstraints classEnvironment
-      initialState = CheckState
+  let initialState = CheckState
         { checkFlexibleIds = supplyFromIdentifierSet
             $ IntSet.union
                 (flexibleIdentifiers checkedGoal)
@@ -144,7 +198,11 @@ checkValidatedExpression plan classEnvironment functions deconstructors goal
     (infer IntMap.empty expression >>= (`unifyTypes` checkedGoal))
     initialState
   let substitutions = checkSubstitutions finalState
-      inferredConstraints = map (snd . constraintApplySubsts substitutions)
+      inferredConstraints = map
+        ( fmap SharedType.canonicalizeType
+        . snd
+        . constraintApplySubsts substitutions
+        )
         $ checkConstraints finalState
       -- The inferred side is canonicalized whenever the unifier bound a
       -- variable, so the caller-supplied side must be canonicalized too or a
@@ -177,9 +235,12 @@ checkValidatedExpression plan classEnvironment functions deconstructors goal
     infer variables (ExpLetMatch constructor patternVariables binding body) = do
       bindingType <- infer variables binding
       fieldTypes <- instantiateConstructor constructor bindingType
-      when (length patternVariables /= length fieldTypes)
+      let expectedArity = length fieldTypes
+          actualArity = SharedCollection.observedListLength
+            expectedArity patternVariables
+      when (actualArity /= expectedArity)
         $ throwCheck $ PatternArity constructor
-            (length fieldTypes) (length patternVariables)
+            expectedArity actualArity
       checkedVariables <- foldM addPatternVariable variables
         $ zip patternVariables fieldTypes
       infer checkedVariables body
@@ -206,9 +267,12 @@ checkValidatedExpression plan classEnvironment functions deconstructors goal
     checkAlternative variables scrutineeType resultType
         (constructor, patternVariables, body) = do
       fieldTypes <- instantiateConstructor constructor scrutineeType
-      when (length patternVariables /= length fieldTypes)
+      let expectedArity = length fieldTypes
+          actualArity = SharedCollection.observedListLength
+            expectedArity patternVariables
+      when (actualArity /= expectedArity)
         $ throwCheck $ PatternArity constructor
-            (length fieldTypes) (length patternVariables)
+            expectedArity actualArity
       checkedVariables <- foldM addPatternVariable variables
         $ zip patternVariables fieldTypes
       alternativeType <- infer checkedVariables body
@@ -275,28 +339,199 @@ validateCheckInputs
   -> Either ExpressionCheckError ()
 validateCheckInputs classEnvironment functions deconstructors goal expected
     expression = do
-  case validateEnvironmentBindingIdentities rawEnvironment of
-    Left failure -> Left $ InvalidCheckEnvironmentBindings failure
-    Right () -> Right ()
-  case validateEnvironmentBindingRatings rawEnvironment of
-    Left failure -> Left $ InvalidCheckEnvironmentRatings failure
-    Right () -> Right ()
-  case validateEnvironmentBindingSyntax rawEnvironment of
-    Left failure -> Left $ InvalidCheckEnvironmentSyntax failure
-    Right () -> Right ()
-  validateType goal
-  validateClassConstraints QueryConstraint $ typeConstraints goal
-  mapM_ (validateConstraint QueryConstraint) expected
-  mapM_ (validateConstraint QueryConstraint) $ Set.toAscList
+  validateCheckEnvironmentIdentity rawEnvironment
+  validateCheckEnvironmentRating rawEnvironment
+  validateCheckEnvironmentSyntax rawEnvironment
+  validateCheckType classEnvironment QueryConstraint goal
+  validateCheckClassConstraints classEnvironment QueryConstraint
+    $ typeConstraints goal
+  mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
+  mapM_ (validateCheckConstraint classEnvironment QueryConstraint)
+    $ Set.toAscList
     $ qClassEnv_constraints classEnvironment
-  mapM_ validateFunction functions
-  mapM_ validateDeconstructorTypes deconstructors
-  mapM_ (validateType . snd) $ expressionTypedLocals expression
+  mapM_ (validateCheckFunction classEnvironment) functions
+  mapM_ validateCheckDeconstructorTypes deconstructors
+  validateExpressionPatternArities
+    (constructorArityIndex deconstructors) expression
+  mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
+    $ expressionTypedLocals expression
   case firstUnsupportedForall rawEnvironment classEnvironment goal expected
       expression of
     Nothing -> Right ()
     Just quantified -> Left $ UnsupportedNestedForall quantified
-  mapM_ validateDeconstructor deconstructors
+  mapM_ validateCheckDeconstructor deconstructors
+  validateGeneratedExpression expression
+ where
+  rawEnvironment = EnvDictionary
+    functions deconstructors $ qClassEnv_env classEnvironment
+
+-- Fixed validation used by the reusable context. Unlike the compatibility
+-- entrances, candidate constraints and annotations are deliberately absent.
+validateCheckContextInputs
+  :: QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> Either ExpressionCheckError ()
+validateCheckContextInputs classEnvironment functions deconstructors goal = do
+  validateCheckEnvironmentIdentity rawEnvironment
+  validateCheckEnvironmentRating rawEnvironment
+  validateCheckEnvironmentSyntax rawEnvironment
+  validateCheckType classEnvironment QueryConstraint goal
+  validateCheckClassConstraints classEnvironment QueryConstraint
+    $ typeConstraints goal
+  mapM_ (validateCheckConstraint classEnvironment QueryConstraint)
+    $ Set.toAscList $ qClassEnv_constraints classEnvironment
+  mapM_ (validateCheckFunction classEnvironment) functions
+  mapM_ validateCheckDeconstructorTypes deconstructors
+  case firstUnsupportedForall rawEnvironment classEnvironment goal []
+      (ExpHole 0) of
+    Nothing -> Right ()
+    Just quantified -> Left $ UnsupportedNestedForall quantified
+  mapM_ validateCheckDeconstructor deconstructors
+ where
+  rawEnvironment = EnvDictionary
+    functions deconstructors $ qClassEnv_env classEnvironment
+
+validateCheckCandidateInputs
+  :: ExpressionCheckContext
+  -> [HsConstraint]
+  -> Expression
+  -> Either ExpressionCheckError ()
+validateCheckCandidateInputs
+    (ExpressionCheckContext _ classEnvironment _ _ constructorArities)
+    expected expression = do
+  mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
+  validateExpressionPatternArities constructorArities expression
+  mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
+    $ expressionTypedLocals expression
+  case firstCandidateForall expected expression of
+    Nothing -> Right ()
+    Just quantified -> Left $ UnsupportedNestedForall quantified
+  validateGeneratedExpression expression
+
+validateCheckEnvironmentIdentity
+  :: EnvDictionary
+  -> Either ExpressionCheckError ()
+validateCheckEnvironmentIdentity environment = case
+    validateEnvironmentBindingIdentities environment of
+  Left failure -> Left $ InvalidCheckEnvironmentBindings failure
+  Right () -> Right ()
+
+validateCheckEnvironmentRating
+  :: EnvDictionary
+  -> Either ExpressionCheckError ()
+validateCheckEnvironmentRating environment = case
+    validateEnvironmentBindingRatings environment of
+  Left failure -> Left $ InvalidCheckEnvironmentRatings failure
+  Right () -> Right ()
+
+validateCheckEnvironmentSyntax
+  :: EnvDictionary
+  -> Either ExpressionCheckError ()
+validateCheckEnvironmentSyntax environment = case
+    validateEnvironmentBindingSyntax environment of
+  Left failure -> Left $ InvalidCheckEnvironmentSyntax failure
+  Right () -> Right ()
+
+validateCheckType
+  :: QueryClassEnv
+  -> ConstraintSite
+  -> HsType
+  -> Either ExpressionCheckError ()
+validateCheckType classEnvironment site typeExpression = do
+  SharedType.validateTypeWidthsWith
+    (InvalidCheckType typeExpression . InvalidSynthesisType)
+    (validateCheckKnownArity classEnvironment site)
+    typeExpression
+  case toSynthesisType typeExpression of
+    Left failure -> Left $ InvalidCheckType typeExpression failure
+    Right _ -> Right ()
+
+validateCheckConstraint
+  :: QueryClassEnv
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ExpressionCheckError ()
+validateCheckConstraint classEnvironment site constraint = do
+  validateCheckKnownArity classEnvironment site constraint
+  case toSynthesisConstraint constraint of
+    Left failure -> Left $ InvalidCheckConstraint constraint failure
+    Right _ -> Right ()
+  validateCheckClassConstraint classEnvironment site constraint
+
+validateCheckKnownArity
+  :: QueryClassEnv
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ExpressionCheckError ()
+validateCheckKnownArity classEnvironment site constraint = either
+  (Left . InvalidCheckClassConstraint)
+  Right
+  $ validateKnownConstraintArityInEnv
+      (qClassEnv_env classEnvironment) site constraint
+
+validateCheckClassConstraint
+  :: QueryClassEnv
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ExpressionCheckError ()
+validateCheckClassConstraint classEnvironment site constraint = case
+    validateKnownConstraintInEnv
+      (qClassEnv_env classEnvironment) site constraint of
+  Left failure -> Left $ InvalidCheckClassConstraint failure
+  Right () -> Right ()
+
+validateCheckClassConstraints
+  :: QueryClassEnv
+  -> ConstraintSite
+  -> [HsConstraint]
+  -> Either ExpressionCheckError ()
+validateCheckClassConstraints classEnvironment site =
+  mapM_ $ validateCheckClassConstraint classEnvironment site
+
+validateCheckFunction
+  :: QueryClassEnv
+  -> FunctionBinding
+  -> Either ExpressionCheckError ()
+validateCheckFunction classEnvironment binding = do
+  validateCheckType classEnvironment site $ functionResult binding
+  mapM_ (validateCheckType classEnvironment site)
+    $ functionParameters binding
+  mapM_ (validateCheckConstraint classEnvironment site)
+    $ functionConstraints binding
+  validateCheckClassConstraints classEnvironment site
+    $ typeConstraints $ functionBindingType binding
+ where
+  site = BindingConstraint $ functionName binding
+
+validateCheckDeconstructorTypes
+  :: DeconstructorBinding
+  -> Either ExpressionCheckError ()
+validateCheckDeconstructorTypes = mapM_ validateType
+  . deconstructorBindingTypes
+ where
+  validateType typeExpression = do
+    SharedType.validateTypeWidthsWith
+      (InvalidCheckType typeExpression . InvalidSynthesisType)
+      (const $ Left $ UnsupportedNestedForall typeExpression)
+      typeExpression
+    case toSynthesisType typeExpression of
+      Left failure -> Left $ InvalidCheckType typeExpression failure
+      Right _ -> Right ()
+
+validateCheckDeconstructor
+  :: DeconstructorBinding
+  -> Either ExpressionCheckError ()
+validateCheckDeconstructor deconstructor = case
+    validateDeconstructorBinding deconstructor of
+  Left failure -> Left $ InvalidCheckDeconstructor failure
+  Right () -> Right ()
+
+validateGeneratedExpression
+  :: Expression
+  -> Either ExpressionCheckError ()
+validateGeneratedExpression expression = do
   let generated = toGeneratedExpression expression
   case SharedGenerated.validateExpressionScope generated of
     Left failure -> Left $ InvalidCheckExpressionScope failure
@@ -304,40 +539,67 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
   case SharedGenerated.validateExpressionSyntax generated of
     Left failure -> Left $ InvalidCheckExpressionSyntax failure
     Right () -> Right ()
+
+constructorArityIndex
+  :: [DeconstructorBinding]
+  -> Map.Map QualifiedName Int
+constructorArityIndex deconstructors = Map.fromList
+  [ (constructorName constructor, length $ constructorFields constructor)
+  | deconstructor <- deconstructors
+  , constructor <- deconstructorConstructors deconstructor
+  ]
+
+-- Inspect the erased shared tree directly. The historical ExpLetMatch and
+-- ExpCaseMatch pattern views must traverse every binder before matching and
+-- therefore cannot safely diagnose a cyclic malformed binder list.
+validateExpressionPatternArities
+  :: Map.Map QualifiedName Int
+  -> Expression
+  -> Either ExpressionCheckError ()
+validateExpressionPatternArities constructorArities = inspectExpression
+  . toGeneratedExpression
  where
-  rawEnvironment = EnvDictionary
-    functions deconstructors $ qClassEnv_env classEnvironment
+  inspectExpression generated = case generated of
+    SharedGenerated.Local{} -> Right ()
+    SharedGenerated.Global{} -> Right ()
+    SharedGenerated.Lambda patterns body ->
+      mapM_ inspectPattern patterns >> inspectExpression body
+    SharedGenerated.Apply function argument ->
+      inspectExpression function >> inspectExpression argument
+    SharedGenerated.Tuple elements -> mapM_ inspectExpression elements
+    SharedGenerated.Hole{} -> Right ()
+    SharedGenerated.Let pattern binding body ->
+      inspectPattern pattern >> inspectExpression binding
+        >> inspectExpression body
+    SharedGenerated.Case scrutinee alternatives -> do
+      inspectExpression scrutinee
+      mapM_ inspectAlternative alternatives
 
-  validateType typeExpression = case toSynthesisType typeExpression of
-    Left failure -> Left $ InvalidCheckType typeExpression failure
-    Right _ -> Right ()
+  inspectAlternative (pattern, body) =
+    inspectPattern pattern >> inspectExpression body
 
-  validateConstraint site constraint = do
-    case toSynthesisConstraint constraint of
-      Left failure -> Left $ InvalidCheckConstraint constraint failure
-      Right _ -> Right ()
-    validateClassConstraint site constraint
+  inspectPattern pattern = case pattern of
+    SharedGenerated.Bind{} -> Right ()
+    SharedGenerated.Wildcard -> Right ()
+    SharedGenerated.Constructor name arguments -> do
+      expected <- maybe (Left $ UnknownConstructor name) Right
+        $ Map.lookup name constructorArities
+      let actual = SharedCollection.observedListLength expected arguments
+      unless (actual == expected) $ Left $ PatternArity name expected actual
+      mapM_ inspectPattern arguments
+    SharedGenerated.TuplePattern elements -> mapM_ inspectPattern elements
+    SharedGenerated.As _ nested -> inspectPattern nested
 
-  validateClassConstraint site constraint = case validateKnownConstraintInEnv
-      (qClassEnv_env classEnvironment) site constraint of
-    Left failure -> Left $ InvalidCheckClassConstraint failure
-    Right () -> Right ()
-
-  validateClassConstraints site = mapM_ $ validateClassConstraint site
-
-  validateFunction binding = do
-    validateType $ functionResult binding
-    mapM_ validateType $ functionParameters binding
-    let site = BindingConstraint $ functionName binding
-    mapM_ (validateConstraint site) $ functionConstraints binding
-    validateClassConstraints site $ typeConstraints $ functionBindingType binding
-
-  validateDeconstructorTypes = mapM_ validateType . deconstructorBindingTypes
-
-  validateDeconstructor deconstructor = case
-      validateDeconstructorBinding deconstructor of
-    Left failure -> Left $ InvalidCheckDeconstructor failure
-    Right () -> Right ()
+firstCandidateForall :: [HsConstraint] -> Expression -> Maybe HsType
+firstCandidateForall expected expression = SharedCollection.firstPresent
+  [ firstConstraintForall expected
+  , firstTypeForall $ map snd $ expressionTypedLocals expression
+  ]
+ where
+  firstTypeForall = SharedCollection.firstPresent
+    . map SharedType.firstForallType
+  firstConstraintForall = firstTypeForall
+    . concatMap constraint_params
 
 -- Search supports a leading prenex query spine, but every environment binding,
 -- constraint argument, and generated local annotation must be a monotype.

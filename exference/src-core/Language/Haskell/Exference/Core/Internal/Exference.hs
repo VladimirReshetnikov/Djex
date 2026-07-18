@@ -405,6 +405,10 @@ findEngineBatchesWith allocators
   bindingAvailable binding = functionName binding
     `S.notMember` excludedBindings
 
+  rootClassEnvironment = mkQueryClassEnv sClassEnv []
+  preparedCheckContext = prepareExpressionCheckContext
+    rigidPlan rootClassEnvironment funcs deconss' t
+
   rootFindExpressionState = FindExpressionsState
     { findSteps = 0
     , findQueuePruned = 0
@@ -422,7 +426,7 @@ findEngineBatchesWith allocators
     , nodeVarUses         = IntMap.empty
     , nodeFunctions       = funcs
     , nodeDeconstructors  = deconss'
-    , nodeQueryClassEnv   = mkQueryClassEnv sClassEnv []
+    , nodeQueryClassEnv   = rootClassEnvironment
     , nodeExpression      = ExpHole 0
       -- The root goal and expression already own hole 0.
     , nodeNextVarId       = 1
@@ -461,7 +465,7 @@ findEngineBatchesWith allocators
       , allowUnused || unusedVarCount==0
       , rawExpression <- [nodeExpression solution]
       , e <- maybeToList $ checkedSimplification
-          contxt remainingConstraints rawExpression
+          remainingConstraints rawExpression
       , let d = normalizePenalty $ sumScores
               [ nodeDepth solution
               , multiplyScore (heuristics_unusedVar heuristics)
@@ -499,19 +503,20 @@ findEngineBatchesWith allocators
       -- repeating one of those tree traversals here would let the two result
       -- boundaries drift again. The raw term remains a safe fallback, but it
       -- too must pass that complete checker independently.
-      checkedSimplification contxt constraints rawExpression =
-        firstChecked candidates
+      checkedSimplification constraints rawExpression = case
+          preparedCheckContext of
+        Left _ -> Nothing
+        Right context -> firstChecked context candidates
        where
         simplified = simplifyExpression rawExpression
         candidates
           | simplified == rawExpression = [rawExpression]
           | otherwise = [simplified, rawExpression]
-        firstChecked [] = Nothing
-        firstChecked (candidate : remainingCandidates) =
-          case checkExpressionWithRigidInstantiation
-              rigidPlan contxt funcs deconss' t constraints candidate of
+        firstChecked _ [] = Nothing
+        firstChecked context (candidate : remainingCandidates) =
+          case checkExpressionInContext context constraints candidate of
             Right () -> Just candidate
-            Left _ -> firstChecked remainingCandidates
+            Left _ -> firstChecked context remainingCandidates
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
   helper searchState = runStateT (do
@@ -751,8 +756,11 @@ prepareExferenceInput input = do
   validateEnvironmentDuplicates environment
   validateQueryHeuristics query
   validateEnvironmentRatingsAndSyntax environment
+  validateQueryInputWidths environment query
   validateQueryForall query
+  validateEnvironmentMonotypeWidths environment
   validateEnvironmentForalls environment
+  validateEnvironmentConstraintWidths environment
   validateConstraintForalls allConstraints
   validateQueryClassConstraints environment query
   validateBindingClassConstraints environment
@@ -802,6 +810,7 @@ prepareExferenceQuery
 prepareExferenceQuery sealed@(ExferenceEnvironment environment rigidContext)
     query = do
   validateExferenceOptions $ querySearchOptions query
+  validateQueryInputWidths environment query
   validateQueryForall query
   validateConstraintForalls constraints
   validateQueryClassConstraints environment query
@@ -839,7 +848,9 @@ validateExferenceEnvironment
 validateExferenceEnvironment environment = do
   validateEnvironmentDuplicates environment
   validateEnvironmentRatingsAndSyntax environment
+  validateEnvironmentMonotypeWidths environment
   validateEnvironmentForalls environment
+  validateEnvironmentConstraintWidths environment
   validateConstraintForalls constraints
   validateBindingClassConstraints environment
   validateInputTypes
@@ -939,6 +950,84 @@ validateConstraintForalls constraints
       constraints =
       Left $ NestedForallInConstraint site constraint
   | otherwise = Right ()
+
+-- Width preflights run before forall discovery because both tuple elements and
+-- class arguments are public lazy lists. They own only the first impossible
+-- cell; complete native-type and class validation remains in the established
+-- later phases. A width error intentionally wins over an error hidden beyond
+-- that impossible cell, since discovering whether such a tail is finite would
+-- itself require the nontermination this boundary prevents.
+validateQueryInputWidths
+  :: EnvDictionary
+  -> ExferenceQuery
+  -> Either ExferenceInputError ()
+validateQueryInputWidths environment query = validateTypeInputWidths
+  environment QueryConstraint $ queryGoalType query
+
+validateEnvironmentMonotypeWidths
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateEnvironmentMonotypeWidths environment = do
+  traverse_ validateFunctionWidth $ environmentFunctions environment
+  traverse_ validateDeconstructorWidth $ environmentDeconstructors environment
+ where
+  validateFunctionWidth binding = validateTypeInputWidths environment
+    (BindingConstraint $ functionName binding)
+    $ functionBindingType binding
+
+  validateDeconstructorWidth binding = traverse_
+    (validateDeconstructorTypeWidth binding)
+    $ deconstructorBindingTypes binding
+
+  validateDeconstructorTypeWidth binding original =
+    SharedType.validateTypeWidthsWith
+      (InvalidInputType original . InvalidSynthesisType)
+      (const $ Left $ NestedForallInDeconstructor
+        $ deconstructorBindingType binding)
+      original
+
+validateEnvironmentConstraintWidths
+  :: EnvDictionary
+  -> Either ExferenceInputError ()
+validateEnvironmentConstraintWidths environment = traverse_
+  (uncurry $ validateConstraintInputWidths environment)
+  $ environmentConstraints environment
+
+validateConstraintInputWidths
+  :: EnvDictionary
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ExferenceInputError ()
+validateConstraintInputWidths environment site constraint = do
+  validateKnownArity environment site constraint
+  traverse_ validateArgument $ constraint_params constraint
+ where
+  validateArgument argument = SharedType.validateTypeWidthsWith
+    (InvalidInputType argument . InvalidSynthesisType)
+    (const $ Left $ NestedForallInConstraint site constraint)
+    argument
+
+validateTypeInputWidths
+  :: EnvDictionary
+  -> ConstraintSite
+  -> HsType
+  -> Either ExferenceInputError ()
+validateTypeInputWidths environment site original =
+  SharedType.validateTypeWidthsWith
+    (InvalidInputType original . InvalidSynthesisType)
+    (validateKnownArity environment site)
+    original
+
+validateKnownArity
+  :: EnvDictionary
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ExferenceInputError ()
+validateKnownArity environment site constraint = either
+  (Left . InvalidClassConstraint)
+  Right
+  $ validateKnownConstraintArityInEnv
+      (environmentClasses environment) site constraint
 
 validateQueryClassConstraints
   :: EnvDictionary

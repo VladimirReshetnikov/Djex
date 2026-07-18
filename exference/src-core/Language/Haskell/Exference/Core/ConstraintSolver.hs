@@ -19,6 +19,7 @@ import Language.Haskell.Exference.Core.Unify
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 -- | Reject refutable constraints and retain constraints whose variables make
 -- them undecidable at the current search node.
@@ -41,7 +42,7 @@ checkConstraints variableResult noEvidenceResult environment = solve Set.empty
   where
     solve visiting = fmap concat . traverse (resolve visiting)
 
-    resolve visiting constraint = case validateKnownConstraintInEnv
+    resolve visiting sourceConstraint = case validateKnownConstraintInEnv
         (qClassEnv_env environment) QueryConstraint constraint of
       Left _ -> Nothing
       Right ()
@@ -56,6 +57,7 @@ checkConstraints variableResult noEvidenceResult environment = solve Set.empty
               , noEvidenceResult constraint
               ]
       where
+        constraint = fmap SharedType.canonicalizeType sourceConstraint
         HsConstraint className parameters = constraint
         instances = Map.findWithDefault []
           className

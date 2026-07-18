@@ -261,12 +261,69 @@ tests = testGroup "Exference"
               malformed = HsConstraint (name "Unary") $ repeat argument
               malformedInstance = HsInstance [] malformed
           environment <- expectRight $ mkStaticClassEnv [unary] []
+          mkStaticClassEnv [unary] [malformedInstance] @?= Left
+            (ConstraintArityMismatch InstanceHead (name "Unary") 1 2)
           validateKnownConstraintInEnv environment QueryConstraint malformed
             @?= Left (ConstraintArityMismatch
               QueryConstraint (name "Unary") 1 2)
           Set.size (inflateHsConstraints environment $ Set.singleton malformed)
             @?= 1
           length (inflateInstances environment [malformedInstance]) @?= 1
+      , testCase "checked search boundaries preflight cyclic class arities" $ do
+          let className = name "Unary"
+              unary = HsTypeClass className [0] []
+              integer = TypeCons $ name "Int"
+              malformed = HsConstraint className $ repeat integer
+              bindingName = name "malformed"
+              binding = FunctionBinding integer bindingName 0 [malformed] []
+          classes <- expectRight $ mkStaticClassEnv [unary] []
+          case mkExferenceEnvironment (EnvDictionary [binding] [] classes) of
+            Left failure -> failure @?= InvalidClassConstraint
+              (ConstraintArityMismatch
+                (BindingConstraint bindingName) className 1 2)
+            Right _ -> fail "a cyclic binding constraint was accepted"
+          validateExferenceInput identityInput
+              { input_goalType = integer
+              , input_envFuncs = [binding]
+              , input_envClasses = classes
+              }
+            @?= Left (InvalidClassConstraint $ ConstraintArityMismatch
+              (BindingConstraint bindingName) className 1 2)
+          sealed <- expectRight
+            $ mkExferenceEnvironment $ EnvDictionary [] [] classes
+          let query = ExferenceQuery
+                { queryGoalType = TypeForall [] [malformed] integer
+                , queryExcludedBindings = Set.empty
+                , querySearchOptions = defaultExferenceOptions
+                }
+          case validateExferenceQuery sealed query of
+            Left failure -> failure @?= InvalidClassConstraint
+              (ConstraintArityMismatch QueryConstraint className 1 2)
+            Right _ -> fail "a cyclic query constraint was accepted"
+          case validateExferenceQuery sealed query
+              { querySearchOptions = defaultExferenceOptions
+                  { exferenceMaximumSteps = 0 }
+              } of
+            Left failure -> failure @?= InvalidMaxSteps 0
+            Right _ -> fail "an invalid step limit was accepted"
+      , testCase "checked search boundaries bound tuple-width preflights" $ do
+          classes <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              oversized = TypeTuple Boxed $ repeat integer
+              options = defaultExferenceOptions
+              query = ExferenceQuery oversized Set.empty options
+              expectTupleWidth result = case result of
+                Left (InvalidInputType _ (InvalidSynthesisType
+                    (SharedType.InvalidTupleTypeArity Boxed actual))) ->
+                  actual @?= SharedName.maximumTupleArity + 1
+                _ -> fail "tuple-width preflight returned an unexpected result"
+          sealed <- expectRight
+            $ mkExferenceEnvironment $ EnvDictionary [] [] classes
+          expectTupleWidth $ validateExferenceQuery sealed query
+          expectTupleWidth $ mkExferenceEnvironment $ EnvDictionary
+            [FunctionBinding oversized (name "wide") 0 [] []] [] classes
+          expectTupleWidth $ mkExferenceEnvironment $ EnvDictionary []
+            [DeconstructorBinding oversized [] False] classes
       , testCase "superclass cycles are rejected explicitly" $ do
           let classA = HsTypeClass (name "A") [0]
                 [HsConstraint (name "B") [TypeVar 0]]
@@ -350,6 +407,23 @@ tests = testGroup "Exference"
             [ HsConstraint (name "C") [TypeVar 1]
             , HsConstraint (name "C") [TypeVar 2]
             ]
+      , testCase "constraint solving canonicalizes both comparison sides" $ do
+          let className = name "C"
+              cls = HsTypeClass className [0] []
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              structural = HsConstraint className
+                [TypeArrow integer boolean]
+              application = HsConstraint className
+                [TypeApp (TypeApp (TypeCons SharedName.functionName) integer)
+                  boolean]
+          staticEnvironment <- expectRight $ mkStaticClassEnv [cls] []
+          filterUnresolved
+              (mkQueryClassEnv staticEnvironment [structural]) [application]
+            @?= Just []
+          filterUnresolved
+              (mkQueryClassEnv staticEnvironment []) [application]
+            @?= Just [structural]
       , testCase "low-level class inflation preserves native rigid binders" $ do
           let base = HsTypeClass (name "Base") [0] []
               derived = HsTypeClass (name "Derived") [0]
@@ -6329,6 +6403,61 @@ tests = testGroup "Exference"
               classEnvironment = mkQueryClassEnv staticClasses []
           checkExpression classEnvironment [] []
             (TypeArrow variable variable) [] identity @?= Right ()
+      , testCase "reuses one opaque context across checked candidates" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              goal = TypeArrow integer integer
+              classEnvironment = mkQueryClassEnv staticClasses []
+              environment = EnvDictionary [] [] staticClasses
+              identity local = ExpLambda local integer
+                $ ExpVar local integer
+          plan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext environment) [] goal
+          context <- expectRight $ prepareExpressionCheckContext plan
+            classEnvironment [] [] goal
+          checkExpressionInContext context [] (identity 1) @?= Right ()
+          checkExpressionInContext context [] (identity 2) @?= Right ()
+          mismatchedPlan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext environment) []
+            $ TypeForall [9] [] integer
+          case prepareExpressionCheckContext mismatchedPlan classEnvironment
+              [] [] (TypeForall [8] [] integer) of
+            Left failure -> failure @?=
+              RigidInstantiationPlanMismatch [9] [8]
+            Right _ -> fail "a mismatched checker plan was accepted"
+      , testCase "preflights cyclic checker class and pattern arities" $ do
+          let className = name "Unary"
+              unary = HsTypeClass className [0] []
+              integer = TypeCons $ name "Int"
+              malformedConstraint = HsConstraint className $ repeat integer
+          staticClasses <- expectRight $ mkStaticClassEnv [unary] []
+          let classEnvironment = mkQueryClassEnv staticClasses []
+              constrainedGoal = TypeForall [] [malformedConstraint] integer
+          checkExpression classEnvironment [] [] constrainedGoal []
+              (ExpName $ name "unused")
+            @?= Left (InvalidCheckClassConstraint $ ConstraintArityMismatch
+              QueryConstraint className 1 2)
+
+          let boxType = TypeCons $ name "Box"
+              constructor = name "MkBox"
+              deconstructor = DeconstructorBinding boxType
+                [ConstructorBinding constructor [integer]] False
+              boxValueName = name "boxValue"
+              integerValueName = name "integerValue"
+              functions =
+                [ FunctionBinding boxType boxValueName 0 [] []
+                , FunctionBinding integer integerValueName 0 [] []
+                ]
+              cyclicVariables = repeat (1, integer)
+              expected = Left $ PatternArity constructor 1 2
+              letExpression = ExpLetMatch constructor cyclicVariables
+                (ExpName boxValueName) (ExpName integerValueName)
+              caseExpression = ExpCaseMatch (ExpName boxValueName)
+                [(constructor, cyclicVariables, ExpName integerValueName)]
+          checkExpression classEnvironment functions [deconstructor]
+            integer [] letExpression @?= expected
+          checkExpression classEnvironment functions [deconstructor]
+            integer [] caseExpression @?= expected
       , testCase "opens constrained goals with search's own assumptions" $ do
           -- Regression: the public checker discarded each prenex layer's
           -- constraints while opening the goal, so it falsely rejected
@@ -6376,6 +6505,27 @@ tests = testGroup "Exference"
           checkExpression (mkQueryClassEnv staticClasses [])
             [showBinding, pairBinding] [] stringType expected expression
             @?= Right ()
+      , testCase "canonicalizes ground inferred constraints before solving" $ do
+          let className = name "C"
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              structural = HsConstraint className
+                [TypeArrow integer boolean]
+              application = HsConstraint className
+                [ TypeApp
+                    (TypeApp (TypeCons SharedName.functionName) integer)
+                    boolean
+                ]
+              bindingName = name "constrained"
+              binding = FunctionBinding integer bindingName 0
+                [application] []
+              expression = ExpName bindingName
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          checkExpression (mkQueryClassEnv staticClasses []) [binding] []
+            integer [structural] expression @?= Right ()
+          checkExpression (mkQueryClassEnv staticClasses [structural])
+            [binding] [] integer [] expression @?= Right ()
       , testCase "rejects malformed known query assumptions" $ do
           let className = name "C"
               malformed = HsConstraint className []

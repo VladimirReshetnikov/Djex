@@ -141,6 +141,7 @@ checkTypesKinds
   -> [(GroundKind, Type variable)]
   -> Either (KindInferenceError variable) ()
 checkTypesKinds assumptions obligations = do
+  mapM_ (preflightInferenceType assumptions . snd) obligations
   mapM_ (validateInferenceType . snd) obligations
   flip evalStateT initialState $ do
     variables <- allocateVariables $ Set.toAscList $ Set.unions
@@ -159,6 +160,7 @@ inferSharedVariableKinds
   -> [Type variable]
   -> Either (KindInferenceError variable) [(variable, GroundKind)]
 inferSharedVariableKinds assumptions sharedVariables types = do
+  mapM_ (preflightInferenceType assumptions) types
   mapM_ validateInferenceType types
   flip evalStateT initialState $ do
     case firstDuplicate sharedVariables of
@@ -586,6 +588,32 @@ validateInferenceType
   -> Either (KindInferenceError variable) ()
 validateInferenceType = either (Left . InvalidKindInferenceType) Right
   . validateType
+
+-- Known class widths must be observed before generic type validation enters
+-- their raw argument lists. Invalid or unknown class names retain the later
+-- full-validation/inference policy; only a declared finite arity is decided
+-- here. The first impossible cell is intentional: distinguishing every finite
+-- overapplication from an infinite one would itself require nontermination.
+preflightInferenceType
+  :: KindAssumptions
+  -> Type variable
+  -> Either (KindInferenceError variable) ()
+preflightInferenceType assumptions = validateTypeWidthsWith
+  InvalidKindInferenceType validateKnownArity
+ where
+  validateKnownArity constraint = case validateConstraint constraint of
+    Left _ -> Right ()
+    Right () -> case Map.lookup (constraintClass constraint)
+        $ classParameterKinds assumptions of
+      Nothing -> Right ()
+      Just parameters
+        | actual == expected -> Right ()
+        | otherwise -> Left $ ClassArityMismatch
+            (constraintClass constraint) expected actual
+       where
+        expected = length parameters
+        actual = observedListLength expected
+          $ constraintArguments constraint
 
 -- | Infer an acyclic declaration graph in dependency order. Rejecting every
 -- recursive SCC is an explicit compatibility policy shared by Djinn's legacy

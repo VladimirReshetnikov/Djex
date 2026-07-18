@@ -47,6 +47,7 @@ module Language.Haskell.Synthesis.Type
   , freshenTypeBindersAwayFrom
   , substituteTypeVariables
   , substituteTypeVariablesBatch
+  , validateTypeWidthsWith
   , validateType
   , freeVariablesInFirstOccurrenceOrder
   , freeVariables
@@ -822,6 +823,41 @@ normalizeType source = do
 -- canonicalization used by 'normalizeType'.
 validateType :: Ord variable => Type variable -> Either (TypeError variable) ()
 validateType = void . normalizeType
+
+-- | Preflight every finite-width type component before a full structural
+-- validation or analysis.
+--
+-- Tuple spines are observed only through the first unsupported arity. At each
+-- constraint, the caller's policy runs before its arguments are traversed;
+-- this lets a known finite class arity reject a cyclic argument list. The
+-- callback should check only properties that do not themselves require the
+-- complete argument spine. All other name, binder, and type validation stays
+-- with 'validateType'.
+validateTypeWidthsWith
+  :: (TypeError variable -> error)
+  -> (Constraint (Type variable) -> Either error ())
+  -> Type variable
+  -> Either error ()
+validateTypeWidthsWith mapTypeError validateConstraintWidth = inspect
+ where
+  inspect typeExpression = case typeExpression of
+    TypeVariable{} -> Right ()
+    TypeConstructor{} -> Right ()
+    TypeApplication function argument ->
+      inspect function >> inspect argument
+    FunctionType parameter result -> inspect parameter >> inspect result
+    TupleType boxity elements -> do
+      let arity = observedListLength maximumTupleArity elements
+      unless (validTupleArity boxity arity) $
+        Left $ mapTypeError $ InvalidTupleTypeArity boxity arity
+      mapM_ inspect elements
+    ForallType _ constraints body -> do
+      mapM_ inspectConstraint constraints
+      inspect body
+
+  inspectConstraint constraint = do
+    validateConstraintWidth constraint
+    mapM_ inspect $ constraintArguments constraint
 
 -- The caller must supply a canonical type. Keeping this worker private makes
 -- 'normalizeType' the only public operation that can return a checked value.

@@ -43,6 +43,7 @@ module Language.Haskell.Exference.Core.Types
   , emptyStaticClassEnv
   , mkStaticClassEnv
   , validateConstraintInEnv
+  , validateKnownConstraintArityInEnv
   , validateKnownConstraintInEnv
   , inflateInstances
   , QueryClassEnv
@@ -411,6 +412,8 @@ mkStaticClassEnv
 mkStaticClassEnv sourceClasses sourceInstances = do
   classTable <- buildClassTable classes
   traverse_ (validateClass classTable) classes
+  let arityEnvironment = StaticClassEnv classTable [] M.empty
+  traverse_ (validateInstanceArities arityEnvironment) instances
   case SharedEnvironment.repeatedInstanceHeadsInFirstRepetitionOrder
       [ (implicitInstanceVariables declaration, instance_head declaration)
       | declaration <- instances
@@ -429,6 +432,15 @@ mkStaticClassEnv sourceClasses sourceInstances = do
   -- the same structural function/tuple representation.
   classes = map canonicalizeClass sourceClasses
   instances = map canonicalizeInstance sourceInstances
+
+  validateInstanceArities environment declaration = do
+    validateKnownConstraintArityInEnv environment InstanceHead
+      $ instance_head declaration
+    traverse_ (validateKnownConstraintArityInEnv environment
+      $ InstancePrerequisite
+      $ constraint_tclass
+      $ instance_head declaration)
+      $ instance_constraints declaration
 
   canonicalizeClass declaration = declaration
     { tclass_constraints = map canonicalizeConstraint
@@ -526,11 +538,24 @@ validateKnownConstraintInEnv
   -> Either ClassEnvError ()
 validateKnownConstraintInEnv environment site constraint = do
   validateConstraintClass constraint
+  validateKnownConstraintArityInEnv environment site constraint
+  validateConstraintArguments site constraint
+
+-- | Check only the arity of a class declared in the supplied environment.
+-- Unknown external classes and class-name syntax remain the responsibility of
+-- the caller's full policy. This narrow preflight is useful before traversing
+-- raw constraint arguments: an already impossible known arity can be rejected
+-- after one cell beyond the declaration width, even for a cyclic list.
+validateKnownConstraintArityInEnv
+  :: StaticClassEnv
+  -> ConstraintSite
+  -> HsConstraint
+  -> Either ClassEnvError ()
+validateKnownConstraintArityInEnv environment site constraint =
   case M.lookup (constraint_tclass constraint)
       (sClassEnv_tclasses environment) of
-    Nothing -> validateConstraintArguments site constraint
+    Nothing -> Right ()
     Just declaration -> validateConstraintArity site constraint declaration
-      >> validateConstraintArguments site constraint
 
 validateConstraintInTable
   :: M.Map QualifiedName HsTypeClass

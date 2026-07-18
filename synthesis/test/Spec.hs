@@ -461,6 +461,20 @@ kindInferenceTests = testGroup "kind inference"
       KindInference.checkTypesKinds assumptions
           [(proper, constrained [variable])] @?=
         Left (KindInference.ClassArityMismatch className 0 1)
+  , testCase "preflight cyclic known-class argument spines" $ do
+      let className = right $ mkIdentifier "C"
+          variable = SharedType.TypeVariable "a"
+          source = SharedType.ForallType ["a"]
+            [Constraint className $ repeat variable] variable
+          assumptions = KindInference.emptyKindAssumptions
+            { KindInference.classParameterKinds =
+                Map.singleton className [Just proper]
+            }
+          expected = Left
+            (KindInference.ClassArityMismatch className 1 2)
+      KindInference.checkTypesKinds assumptions [(proper, source)] @?= expected
+      KindInference.inferSharedVariableKinds assumptions [] [source]
+        @?= expected
   , testCase "reject infinite kinds and accept intrinsic constructors" $ do
       let variable = SharedType.TypeVariable "a"
           selfApplication = SharedType.TypeApplication variable variable

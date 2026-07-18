@@ -40,7 +40,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | No | Yes |
-| Type-class participation | Declared methods as proof assumptions | Class/instance-aware heuristic search |
+| Type-class participation | Declared methods as proof assumptions | Class/instance-aware; accepted nominal resolution terminates |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
 Neither backend guesses the other's semantics. The merged command and library
@@ -61,6 +61,13 @@ Both checked adapters follow the same shape:
 Parsing and source loading return structured `Diagnostic` values. Use
 `renderDiagnostic` for compiler-shaped text, but retain the structure when an
 editor or service can present codes, spans, and context separately.
+
+The checked construction paths also bound width-bearing list spines before a
+complete traversal: known class arguments are observed only through the first
+extra cell, and tuples only through the first unsupported arity. This matters
+for programmatic callers because a cyclic lazy list is otherwise a valid input
+value. Such input returns a structured arity/type failure instead of making
+environment construction, kind inference, or a backend request hang.
 
 ## Djinn example
 
@@ -91,9 +98,13 @@ uninhabited, found that only a target self-reference works, or stopped at a
 budget.
 
 Use `mkDjinnSession` for a caller-built
-`Environment DjinnTypeVariable Void ()`. `declareDjinnDeclaration` and
-`removeDjinnDeclaration` provide transactional edits that reseal the session
-before publishing a replacement.
+`Environment DjinnTypeVariable Void ()`. Checked sessions are immutable. To
+change declarations, retain or recover the neutral environment, build the
+complete replacement with `mkEnvironment`, and seal a new session with
+`mkDjinnSession`. This is the same lifecycle as Exference and keeps historical
+Djinn `HType`, `HKind`, `Declaration`, and `Context` values out of the curated
+API. The `djinn` REPL retains its transactional raw-declaration editor solely
+inside the compatibility frontend.
 
 ## Exference example without a parser
 
@@ -133,6 +144,17 @@ separate presentation policy, so a caller can take the first candidate, retain
 all globally best candidates, use bounded lookahead, or stream every admissible
 candidate without changing search semantics.
 
+Class-environment construction rejects any groundable instance prerequisite
+that can grow its head by type-node count or by occurrences of a head variable,
+including rules produced by superclass inflation. For example,
+`C [a] => C a` is rejected because resolving `C Int` would grow forever.
+Shrinking rules and size-preserving cycles are accepted; path tracking closes
+the cycles, and a prerequisite with a variable absent from the head remains an
+unresolved obligation. This makes nominal resolution terminate for accepted
+finite ground constraints. Exference's surrounding ranked expression search
+still is not an inhabitation decision procedure, so keep its step, queue, and
+depth controls appropriate for the application.
+
 ## Loading an Exference source environment
 
 Import the explicit source boundary in addition to the neutral adapter:
@@ -155,6 +177,27 @@ Always inspect both report fields:
   session;
 - `exferenceSessionLoadDiagnostics` contains warnings and informational
   diagnostics produced while loading and sealing.
+
+Fatal source-loader phases use stable `EXF_*` codes. Read, parse, unsupported-
+vocabulary, and source-aware extraction failures retain the source spans
+available at those phases. A later neutral-inventory, sealing, or policy
+failure uses its `DJEX_EXF_*` code and may be source-free because no single
+token owns that whole-environment invariant.
+
+The loader rejects unsupported source meaning before building a partial
+inventory. The authoritative `UnsupportedVocabularyForm` list includes
+explicit module export lists, pattern-synonym signatures, and XML page/hybrid
+modules as well as the documented type-family, GADT, deriving, class, and
+instance limitations. Ordinary term patterns and pattern-value bodies remain
+accepted; do not interpret the pattern-synonym-signature restriction as a ban
+on ordinary pattern matching.
+
+With `loadExferenceSessionWithPolicy`, unknown exclusions are harmless no-ops.
+This lets a reusable policy exclude an optional binding absent from a particular
+environment. Rating overrides are stricter: every rating must be finite and
+every overridden name must still be available to search after exclusions and
+capability filtering, otherwise session sealing returns a fatal policy
+diagnostic.
 
 With a session, use
 `parseExferenceRequest session options target sourceName sourceText` so type
@@ -196,7 +239,11 @@ as obligation-free.
 For custom presentation, use `candidateOutput` to obtain the shared
 `FunctionClause` and the operations in
 `Language.Haskell.Synthesis.Generated`. Scope validation and collision-safe
-local naming remain part of that shared rendering boundary.
+local naming remain part of that shared rendering boundary. In particular,
+`Candidate` keeps a public constructor for compatibility, so the stable
+expression and definition helpers validate the complete clause on every call;
+caller-forged free local identities and duplicate pattern-binder identities
+produce `RenderError` instead of unchecked Haskell text.
 
 ## Import guidance
 
@@ -208,6 +255,10 @@ local naming remain part of that shared rendering boundary.
   neutral infrastructure.
 - Use historical `Djinn*` or `Language.Haskell.Exference*` modules only when
   maintaining a compatibility integration.
+
+`Language.Haskell.Djex.Djinn`, not `Djinn.Core`, is the curated checked Djinn
+facade. Import `Djinn.Core` only when a compatibility integration deliberately
+needs its historical representation and operations.
 
 See [the architecture guide](architecture.md) for the stability tiers and
 [the synthesis API map](../synthesis/README.md) for the neutral modules.

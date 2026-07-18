@@ -8,7 +8,9 @@
 -- library also exposes the lower-level search and compatibility APIs, while
 -- this module remains the curated entry point:
 --
--- * "Djinn.Core" is the stable, validated Djinn API.
+-- * "Language.Haskell.Djex.Djinn" is the checked, parser-neutral Djinn
+--   adapter.
+-- * "Djinn.Core" is the validated historical Djinn compatibility API.
 -- * "Language.Haskell.Djex.Exference" is the checked, parser-neutral adapter.
 -- * "Language.Haskell.Exference.Core" is the lower-level search API.
 -- * @Language.Haskell.Djex.Exference.HaskellSrc@ is the checked HSE

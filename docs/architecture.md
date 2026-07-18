@@ -75,7 +75,10 @@ The merger is organized around a few values that own invariants once:
   logical evidence, and candidate details remain typed backend parameters.
 - `Generated.Expression`, `Pattern`, and `FunctionClause` are the common output
   grammar. Scope checking, simplification, qualification, and Haskell rendering
-  happen at this boundary.
+  happen at this boundary. `Candidate` remains constructible for compatibility,
+  so the stable candidate renderers do not treat construction as proof of
+  validity: they reject a free local or duplicate pattern-binder identity before
+  rendering either an expression or a definition.
 
 Opaque values intentionally use smart constructors and ordinary projection
 functions instead of exported record fields or `Generic` representations when
@@ -94,6 +97,31 @@ The private owners are Cabal `Other-Modules`. Keeping them separate from the
 facades makes the two adapters uniform without conflating their search
 semantics or exposing their cached plans.
 
+## Finite structural boundaries
+
+The public syntax trees are intentionally ordinary Haskell values, including
+lazy lists. A smart constructor therefore must not call `length`, perform a
+complete fold, or canonicalize a child before it has established that every
+width-bearing spine is finite and within its semantic bound.
+
+The shared preflight operations use bounded observation:
+
+- a known class application inspects no more than its declared arity plus one
+  argument cell;
+- a tuple inspects no more than the supported maximum arity plus one element;
+- the same operation descends through nested type and `forall` constraints only
+  after validating each constraint header; and
+- environment construction performs this pass using a preliminary class-arity
+  table before duplicate, free-variable, kind, or canonicalization analyses.
+
+Djinn request/context validation, Exference request and independent-checker
+validation, shared kind inference, and Exference class/instance construction
+apply the same rule at their exposed boundaries. Thus a cyclic argument spine
+or an overlong/cyclic tuple receives the corresponding structured arity or type
+error without hanging an otherwise bounded operation. The later full traversal
+still owns semantic validation; the preflight establishes only the finite-width
+condition needed to run it safely.
+
 ## What remains backend-specific
 
 Uniform architecture does not mean identical semantics:
@@ -106,7 +134,15 @@ Uniform architecture does not mean identical semantics:
   Haskell expression exists.
 - Each backend retains its own class/instance operational policy, search state,
   scoring, and evidence. Shared class and inventory values describe source
-  facts; they do not prescribe resolution semantics.
+  facts; they do not prescribe resolution semantics. Exference's nominal
+  environment rejects a groundable prerequisite if it increases the instance
+  head's type-node measure or any head-variable occurrence count, including
+  after superclass inflation. This rules out growing chains such as
+  `C [a] => C a`; exact and size-preserving cycles terminate through the
+  solver's current-path constraint check, while prerequisites containing a
+  variable absent from the head remain unresolved. Instance resolution for an
+  accepted finite ground constraint therefore terminates even though the
+  enclosing heuristic expression search is not a decision procedure.
 - Djinn stores canonical historical binder spellings in lowered proof output.
   Exference stores numeric locals and applies checked spelling hints at render
   time. This difference is part of the existing observable contracts.
@@ -114,6 +150,33 @@ Uniform architecture does not mean identical semantics:
 Logical evidence and operational completion are therefore separate. A result
 can contain validated candidates from a truncated search, and a finished
 Exference search can still carry `NoEvidence`.
+
+## Haskell-source loading and session policy
+
+The Haskell-source frontend is an optional boundary around the same neutral
+Exference session constructor. Its diagnostics retain phase ownership:
+
+- directory, module-read, parse, unsupported-vocabulary, and extraction
+  failures use stable `EXF_*` codes; source-aware failures preserve the exact
+  source span supplied by that phase;
+- once a neutral inventory exists, shared preparation and policy errors use
+  `DJEX_EXF_*` codes and may have no single source location; and
+- warnings and omissions remain separate from the fatal load result in
+  `ExferenceSessionLoadReport`.
+
+The vocabulary scan is fail-closed. In addition to unsupported type/class
+features, it rejects explicit module export lists, pattern-synonym signatures,
+and XML page or hybrid modules rather than silently projecting only part of
+them. `UnsupportedVocabularyForm` is the authoritative list. Ordinary term
+patterns and pattern-value bodies are accepted, as are ordinary value/method
+bodies and other syntax that does not alter the nominal inventory.
+
+Session policy is intentionally asymmetric. Excluding a name that the prepared
+environment does not contain is a harmless no-op: an exclusion can only remove
+a capability. A rating override promises to affect search, so non-finite
+ratings and names unavailable after exclusions and capability filtering are
+fatal policy errors. Neither operation mutates or reorders the authoritative
+annotation-erased inventory.
 
 ## API and stability tiers
 
@@ -132,6 +195,14 @@ New code should start with:
 - `Language.Haskell.Djex.Exference.HaskellSrc` when loading Haskell source or
   parsing a Haskell type against an Exference session;
 - `Language.Haskell.Synthesis.*` for a focused import of one shared abstraction.
+
+In particular, `Language.Haskell.Djex.Djinn` is the curated checked Djinn
+facade. `Djinn.Core` belongs to the compatibility/research tier below; its
+historical types and mutable environment operations are not the neutral stable
+session boundary. Both checked backend sessions are immutable projections of a
+neutral `Environment`: applications replace declarations by sealing a newly
+validated environment. Only the historical `djinn` frontend imports its
+private raw declaration snapshot, edit, and instance-method operations.
 
 `Language.Haskell.Djex.CLI` is an explicit in-process command frontend. It is
 exposed so applications can invoke the merged command without spawning a

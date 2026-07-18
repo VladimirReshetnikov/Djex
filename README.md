@@ -5,8 +5,10 @@ Djex is a Haskell expression synthesizer formed by merging
 [Exference](https://github.com/lspitzner/exference). Given a type, it
 generates a Haskell expression of that type. Djinn contributes a complete
 intuitionistic prover built on Dyckhoff's LJT calculus, so it terminates and
-can prove a type uninhabited; Exference contributes a heuristic search engine
-that supports type classes at the cost of guaranteed termination. Both
+can prove a type uninhabited; Exference contributes a ranked heuristic search
+engine with type-class participation and explicit resource controls. Its
+nominal instance resolution terminates for accepted rules, but its broader
+expression search is not an inhabitation decision procedure. Both
 engines, their compatibility frontends, and a shared parser-independent
 synthesis foundation compile into one Cabal package with a single library,
 version, and dependency contract.
@@ -37,7 +39,10 @@ these tiers explicitly.
   `synthesis/src/`, both `src-core/` roots, and both `src-frontend/` roots.
   `Language.Haskell.Djex` is the curated neutral entry point;
   `Language.Haskell.Djex.Djinn` and `Language.Haskell.Djex.Exference` run
-  both engines through the shared query/evidence/search envelope. All
+  both engines through the shared query/evidence/search envelope. Their
+  sessions are immutable neutral-environment projections; historical Djinn
+  declaration edits and instance-method projections stay in its compatibility
+  frontend. All
   modules formerly exposed by the three parser-free sublibraries remain
   exposed for import compatibility.
 - `synthesis/` is the neutral foundation: validated names, types, kinds,
@@ -185,6 +190,17 @@ every Djinn adapter signature nameable without depending on a hidden backend
 alias, and both stable environment aliases use `Void` for explicit kind
 variables, making their common ground-kind contract visible in types.
 
+Checked boundaries preflight widths before any structural traversal that
+assumes a finite list spine. Known class applications observe at most the
+declared arity plus one cell, and tuple validation observes at most the shared
+maximum tuple arity plus one cell. Environment declarations, nested type
+constraints, kind inference, backend requests, and Exference's nominal class
+environment therefore reject cyclic or overlong argument and tuple spines
+with a structured arity/type failure instead of diverging while counting or
+canonicalizing them. Full name, binder, kind, and type validation follows this
+bounded preflight; the preflight is a denial-of-service boundary, not a
+substitute for those semantic checks.
+
 ### Djinn sessions and requests
 
 `mkDjinnSession` lowers and seals the kind-ground neutral shared
@@ -224,6 +240,11 @@ then uses the same neutral `mkDjinnSession` path as every caller-supplied
 environment, and `parseDjinnRequest` shares the compatibility frontend's
 optional class-context grammar through the full-consumption
 `Djinn.Core.parseContextualHType` entry point.
+
+Like the Exference adapter, the curated Djinn adapter publishes no mutable or
+raw-typed session operations. Callers replace declarations by constructing and
+sealing a complete neutral `Environment`; only the historical REPL imports the
+private raw declaration snapshot, edit, and instance-method helpers.
 
 Both `DjinnRequest` and `DjinnCandidate` expose
 `DjinnType = Type DjinnTypeVariable`; that shared type is checked and
@@ -301,14 +322,34 @@ inventory without rebuilding its indexes or kind assumptions, and stable
 candidate details and batch metadata are zero-copy public views of the
 exact core-owned values.
 
+The nominal class environment also enforces a termination condition before
+publishing its instance index. For every prerequisite whose variables can be
+grounded by matching the instance head, the prerequisite may not contain more
+type nodes than the head and may not use any head variable more often. The
+check also covers superclass-inflated rules. A rule such as
+`C [a] => C a` is rejected as `ExpandingInstancePrerequisite`, because it
+would turn `C Int` into an unbounded chain of larger goals. Shrinking rules are
+accepted; exact and size-preserving cycles are safe because resolution tracks
+the constraints on its current path. Prerequisites with variables absent from
+the head cannot be grounded by the match and remain unresolved rather than
+being recursively expanded. Consequently nominal resolution terminates for
+finite ground constraints accepted by this boundary. This guarantee is local
+to class resolution and does not turn Exference's expression enumeration into
+a proof of inhabitation or non-inhabitation.
+
 ### Loading Haskell source environments
 
 `Language.Haskell.Djex.Exference.HaskellSrc.loadExferenceSession` and its
 policy-aware counterpart compute Exference's backend-supported projection
-once and turn a directory into the same opaque session, translating every
-fatal loader phase into source-preserving `EXF_*` diagnostics; stable
-callers never handle a parser-specific checked environment. The explicitly
-named `Language.Haskell.Exference.Session` module retains the raw
+once and turn a directory into the same opaque session. Failures in the
+source-loader phases are reported with stable `EXF_*` codes; diagnostics that
+originate at a source-aware read, parse, vocabulary, or extraction boundary
+retain their exact spans. After the neutral inventory has been built, shared
+sealing and session-policy failures instead retain their `DJEX_EXF_*` codes
+and may be source-free, because they describe the complete prepared inventory
+rather than one source token. Stable callers never handle a parser-specific
+checked environment. The explicitly named
+`Language.Haskell.Exference.Session` module retains the raw
 `CheckedSourceEnvironment` bridge for the historical CLI and clients that
 opt into the compatibility frontend.
 
@@ -338,27 +379,32 @@ phases; angle-bracket virtual-buffer names remain verbatim.
 The loader is fail-closed at its vocabulary boundary: after parsing, but
 before constructing any partial inventory, it reports source-ordered
 `UnsupportedVocabularyOccurrence` values for type/data families, GADTs,
-datatype contexts, explicitly kinded parameters, existential or constrained
-constructors, derived or overlapping instances, functional dependencies,
-associated families and defaults, declaration splices, role annotations,
-and XML hybrid modules, each with the stable `EXF_UNSUPPORTED_VOCABULARY`
-diagnostic code and its exact source span. Ordinary positional, infix,
-record, strict, and unpacked datatype fields are lowered explicitly; record
-selectors become rated value bindings exactly once. Imports, fixities,
-ordinary value and method bodies, pattern vocabulary, default declarations,
-and operational pragmas remain accepted because they do not change the
-nominal type/class inventory. These forms are explicit current limitations
-rather than syntax that can silently disappear during loading.
+explicit module export lists, datatype contexts, explicitly kinded parameters,
+existential or constrained constructors, derived or overlapping instances,
+functional dependencies, associated families and defaults, pattern-synonym
+signatures, declaration splices, role annotations, and XML page or hybrid
+modules, each with the stable `EXF_UNSUPPORTED_VOCABULARY` diagnostic code and
+its exact source span. The exported `UnsupportedVocabularyForm` constructors
+are the authoritative exhaustive vocabulary for this rejection phase.
+Ordinary positional, infix, record, strict, and unpacked datatype fields are
+lowered explicitly; record selectors become rated value bindings exactly
+once. Imports, fixities, ordinary value and method bodies, ordinary term
+patterns and pattern-value bodies, default declarations, and operational
+pragmas remain accepted because they do not change the nominal type/class
+inventory. These forms are explicit current limitations rather than syntax
+that can silently disappear during loading.
 
 `ExferenceSessionPolicy` applies exact structural-name exclusions and
 finite, signed rating overrides while the private search projection is
 sealed. Overrides neither reorder declarations nor leak into the
 annotation-erased public inventory. `exferenceSessionEnvironment` and
 `exferenceSessionInventory` expose the unchanged authoritative views in
-parallel with Djinn's stable session API. Unknown names and non-finite
-ratings are fatal structured diagnostics. An override for an excluded or
-unsupported binding is likewise rejected because it cannot affect search.
-Unsupported rank-N
+parallel with Djinn's stable session API. An exclusion is a subtractive
+capability request, so an unknown excluded name is an intentional no-op; this
+also lets command defaults name optional recursion helpers without requiring
+every environment to define them. A rating override claims to change search,
+so a non-finite rating or a name unavailable after exclusion and capability
+filtering is a fatal structured diagnostic. Unsupported rank-N
 introduction/elimination and recursive-data elimination capabilities remain
 visible as structured omissions and warning diagnostics instead of
 disappearing per query; omission order follows introduction order and then
@@ -399,8 +445,12 @@ preparation. Each generated expression is wrapped in a target-bearing
 shared `FunctionClause` whose opaque `DefinitionName` preserves the checked
 request target through result projection. The shared candidate
 expression/definition renderers own the common clause projection and return
-`RenderError` directly; each backend adapter contributes only its
-local-name hints and qualification options.
+`RenderError` directly; each backend adapter contributes only its local-name
+hints and qualification options. Because the public `Candidate` constructor
+remains available for compatibility, both stable renderers first validate the
+complete clause scope. A caller-forged free local or duplicate pattern-binder
+identity is rejected rather than rendered as if it were checked backend
+output.
 
 Exference's live search tree is the same shared `Generated.Expression`
 shape as those candidates: checker-specific type annotations inhabit a

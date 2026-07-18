@@ -42,7 +42,10 @@ import Data.Void (Void, absurd)
 import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
-import Language.Haskell.Synthesis.Collection (firstDuplicate)
+import Language.Haskell.Synthesis.Collection
+  ( firstDuplicate
+  , observedListLength
+  )
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -701,9 +704,11 @@ checkConstraint assumptions variables constraint = do
     Just kinds -> pure kinds
     Nothing -> lift $ Left $ UnknownClass $ constraintClass constraint
   let arguments = constraintArguments constraint
-  unless (length parameterKinds == length arguments) $ lift $ Left $
+      expected = length parameterKinds
+      actual = observedListLength expected arguments
+  unless (expected == actual) $ lift $ Left $
     ClassArityMismatch (constraintClass constraint)
-      (length parameterKinds) (length arguments)
+      expected actual
   zipWithM_ checkArgument parameterKinds arguments
  where
   checkArgument expected argument = do

@@ -255,6 +255,18 @@ tests = testGroup "Exference"
           Set.map constraint_tclass
             (inflateHsConstraints environment constraints)
             @?= Set.fromList [name "A", name "B"]
+      , testCase "known class arity rejects cyclic argument spines finitely" $ do
+          let unary = HsTypeClass (name "Unary") [0] []
+              argument = TypeCons $ name "Int"
+              malformed = HsConstraint (name "Unary") $ repeat argument
+              malformedInstance = HsInstance [] malformed
+          environment <- expectRight $ mkStaticClassEnv [unary] []
+          validateKnownConstraintInEnv environment QueryConstraint malformed
+            @?= Left (ConstraintArityMismatch
+              QueryConstraint (name "Unary") 1 2)
+          Set.size (inflateHsConstraints environment $ Set.singleton malformed)
+            @?= 1
+          length (inflateInstances environment [malformedInstance]) @?= 1
       , testCase "superclass cycles are rejected explicitly" $ do
           let classA = HsTypeClass (name "A") [0]
                 [HsConstraint (name "B") [TypeVar 0]]

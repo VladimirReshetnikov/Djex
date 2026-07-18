@@ -13,6 +13,7 @@ module Djinn.Internal.Type
 
 import qualified Data.Set as Set
 
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -63,8 +64,13 @@ toSynthesisType source = case hTypeSynthesisStructure source of
       <$> convert function <*> convert argument
     HTArrow parameter result -> SharedType.FunctionType
       <$> convert parameter <*> convert result
-    HTTuple elements -> SharedType.TupleType SharedName.Boxed
-      <$> mapM convert elements
+    HTTuple elements -> do
+      let arity = SharedCollection.observedListLength
+            SharedName.maximumTupleArity elements
+      if arity == 1 || arity > SharedName.maximumTupleArity
+        then Left $ InvalidSynthesisType
+          $ SharedType.InvalidTupleTypeArity SharedName.Boxed arity
+        else SharedType.TupleType SharedName.Boxed <$> mapM convert elements
     declaration@HTUnion{} ->
       Left $ DeclarationBodyIsNotSourceType declaration
     declaration@HTAbstract{} ->

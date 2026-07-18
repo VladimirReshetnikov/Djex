@@ -10,6 +10,7 @@
 module Language.Haskell.Synthesis.Collection
   ( Multiplicity (..)
   , DuplicateSummary
+  , observedListLength
   , distinctOn
   , firstPresent
   , maximumPresent
@@ -22,6 +23,25 @@ module Language.Haskell.Synthesis.Collection
   ) where
 
 import qualified Data.Set as Set
+
+-- | Observe a list's exact length through a supplied finite bound.
+--
+-- A result at or below the nonnegative bound is exact. A result one greater
+-- means only that the list is wider; no later cell is inspected. This is the
+-- appropriate comparison primitive when a public raw value is checked
+-- against a finite tuple, constructor, or class arity, because a cyclic tail
+-- can then be rejected without attempting to traverse it. Negative bounds
+-- are treated as zero, and the result saturates at 'maxBound'.
+observedListLength :: Int -> [value] -> Int
+observedListLength maximumExpected = go 0
+ where
+  bound = max 0 maximumExpected
+
+  go !observed [] = observed
+  go !observed (_ : remaining)
+    | observed >= bound =
+        if observed == maxBound then maxBound else observed + 1
+    | otherwise = go (observed + 1) remaining
 
 -- | Keep the first value for each key, preserving source order.
 --

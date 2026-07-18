@@ -29,6 +29,7 @@ import Djinn.Internal.ProofToGenerated
 import Djinn.Internal.LJTFormula
 import Djinn.Internal.TypeFormula
 import Language.Haskell.Synthesis.Constraint (Constraint(..))
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -156,10 +157,15 @@ pattern HTTuple elements <-
     (viewHType -> Just (HTypeTupleLayer elements))
   where
     HTTuple [] = HTypeCompatibility $ HTypeTupleLayer []
-    HTTuple elements = case traverse hTypeSynthesisStructure elements of
-        Just elementTypes -> HTypeSource $
-            SharedType.TupleType SharedName.Boxed elementTypes
-        Nothing -> HTypeCompatibility $ HTypeTupleLayer elements
+    HTTuple elements
+        | SharedCollection.observedListLength
+            SharedName.maximumTupleArity elements
+            > SharedName.maximumTupleArity =
+                HTypeCompatibility $ HTypeTupleLayer elements
+        | otherwise = case traverse hTypeSynthesisStructure elements of
+            Just elementTypes -> HTypeSource $
+                SharedType.TupleType SharedName.Boxed elementTypes
+            Nothing -> HTypeCompatibility $ HTypeTupleLayer elements
 
 pattern HTArrow :: HType -> HType -> HType
 pattern HTArrow parameter result <-

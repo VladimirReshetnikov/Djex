@@ -558,7 +558,8 @@ validateConstraintArity site constraint declaration
   where
     name = constraint_tclass constraint
     expected = length $ tclass_params declaration
-    actual = length $ constraint_params constraint
+    actual = SharedCollection.observedListLength expected
+      $ constraint_params constraint
 
 validateConstraintClass :: HsConstraint -> Either ClassEnvError ()
 validateConstraintClass constraint =
@@ -705,7 +706,8 @@ directSuperclasses environment
     (HsConstraint className arguments) = case
   M.lookup className $ sClassEnv_tclasses environment of
     Just (HsTypeClass _ parameters constraints)
-      | length parameters == length arguments ->
+      | let expected = length parameters
+      , SharedCollection.observedListLength expected arguments == expected ->
           let substitutions = IntMap.fromList $ zip parameters arguments
           in map (snd . constraintApplySubsts substitutions) constraints
     _ -> []

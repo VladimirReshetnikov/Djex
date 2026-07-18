@@ -65,6 +65,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
+import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Count (saturatingNaturalToInt)
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import Language.Haskell.Synthesis.Name
@@ -1235,9 +1236,10 @@ validatePatternSyntax pattern = case pattern of
     | Just (TupleConstructor Unboxed _) <- nameSpecial name ->
         Left $ InvalidConstructorPattern name
     | Just expected <- patternConstructorArity name
-    , expected /= length arguments ->
+    , let observed = observedListLength expected arguments
+    , expected /= observed ->
         Left $ InvalidConstructorPatternArity
-          name expected (length arguments)
+          name expected observed
     | otherwise -> mapM_ validatePatternSyntax arguments
   TuplePattern elements -> do
     validateTupleArity InvalidTuplePatternArity elements
@@ -1257,7 +1259,7 @@ validateTupleArity failure elements
   | observed == 1 || observed > maximumTupleArity = Left $ failure observed
   | otherwise = Right ()
  where
-  observed = length $ take (maximumTupleArity + 1) elements
+  observed = observedListLength maximumTupleArity elements
 
 -- | Construct a checked generated top-level value name.
 mkDefinitionName :: Name -> Either RenderError DefinitionName

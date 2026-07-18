@@ -74,6 +74,7 @@ import Language.Haskell.Synthesis.Collection
   ( distinctOn
   , firstDuplicate
   , firstPresent
+  , observedListLength
   )
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Name
@@ -243,7 +244,7 @@ constructorApplicationForm source = case source of
     ]
   TupleType boxity elements ->
     let convertedElements = map constructorApplicationForm elements
-    in case tupleName boxity $ length elements of
+    in case tupleName boxity $ observedListLength maximumTupleArity elements of
       Right constructor -> applyConstructor constructor convertedElements
       Left _ -> TupleType boxity convertedElements
   ForallType variables constraints body -> ForallType variables
@@ -467,7 +468,7 @@ typeConstructorHead typeExpression = case typeExpression of
   TypeApplication function _ -> typeConstructorHead function
   TypeConstructor name -> Just name
   TupleType boxity elements -> either (const Nothing) Just
-    $ tupleName boxity $ length elements
+    $ tupleName boxity $ observedListLength maximumTupleArity elements
   _ -> Nothing
 
 rebuildApplication :: Type variable -> [Type variable] -> Type variable
@@ -838,8 +839,9 @@ validateCanonicalType typeExpression = case typeExpression of
   FunctionType parameter result ->
     validateCanonicalType parameter >> validateCanonicalType result
   TupleType boxity elements -> do
-    unless (validTupleArity boxity $ length elements) $
-      Left $ InvalidTupleTypeArity boxity $ length elements
+    let arity = observedListLength maximumTupleArity elements
+    unless (validTupleArity boxity arity) $
+      Left $ InvalidTupleTypeArity boxity arity
     mapM_ validateCanonicalType elements
   ForallType variables constraints body -> do
     case firstDuplicate variables of

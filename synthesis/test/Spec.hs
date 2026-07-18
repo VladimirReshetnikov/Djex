@@ -172,6 +172,13 @@ collectionTests = testGroup "collections"
       firstDuplicate ([1, 2, 1, error "forced duplicate suffix"] :: [Int])
         @?= Just 1
       firstDuplicate ([1, 2, 3] :: [Int]) @?= Nothing
+  , testCase "observe one list cell beyond a finite length bound" $ do
+      observedListLength 3 [1, 2 :: Int] @?= 2
+      observedListLength 3 [1, 2, 3 :: Int] @?= 3
+      observedListLength 3
+          ([1, 2, 3, 4 :: Int] ++ error "forced observed-length suffix")
+        @?= 4
+      observedListLength 3 (repeat ()) @?= 4
   ]
 
 freshTests :: TestTree
@@ -1796,6 +1803,23 @@ typeTests = testGroup "source types"
         quantifiedApplication
       SharedType.canonicalizeType
           (SharedType.constructorApplicationForm pair) @?= pair
+  , testCase "observe malformed tuple widths without forcing their tails" $ do
+      let element = SharedType.TypeVariable (0 :: Int)
+          oversized = replicate (maximumTupleArity + 1) element
+            ++ error "forced oversized type tuple tail"
+          cyclic = let elements = element : elements in elements
+          firstInvalid = maximumTupleArity + 1
+      SharedType.validateType (SharedType.TupleType Boxed oversized) @?=
+        Left (SharedType.InvalidTupleTypeArity Boxed firstInvalid)
+      SharedType.validateType (SharedType.TupleType Unboxed cyclic) @?=
+        Left (SharedType.InvalidTupleTypeArity Unboxed firstInvalid)
+      case SharedType.constructorApplicationForm
+          (SharedType.TupleType Boxed oversized) of
+        SharedType.TupleType Boxed _ -> pure ()
+        converted -> assertFailure $ "unexpected oversized tuple form: "
+          ++ show converted
+      SharedType.typeConstructorHead
+          (SharedType.TupleType Unboxed cyclic) @?= Nothing
   , testCase "construct and decompose application spines in source order" $ do
       let headType = SharedType.TypeVariable "f"
           first = SharedType.TypeVariable "a"
@@ -3806,6 +3830,17 @@ generatedTests = testGroup "generated syntax"
       renderExpression options
           (Lambda [Constructor consName [Bind 0]] $ Local 0)
         @?= Left (InvalidConstructorPatternArity consName 2 1)
+      let cyclicArguments = let arguments = Wildcard : arguments in arguments
+          oversizedArguments = replicate 3 Wildcard
+            ++ error "forced oversized constructor-pattern tail"
+      validateExpressionSyntax
+          (Lambda [Constructor consName cyclicArguments]
+            $ Global variableName)
+        @?= Left (InvalidConstructorPatternArity consName 2 3)
+      renderExpression options
+          (Lambda [Constructor consName oversizedArguments]
+            $ Global variableName)
+        @?= Left (InvalidConstructorPatternArity consName 2 3)
       renderExpression (defaultRenderOptions $ const "case")
           (Hole (0 :: Int)) @?=
         Left (InvalidLocalName "case" $ ReservedIdentifier "case")

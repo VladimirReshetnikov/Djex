@@ -97,6 +97,8 @@ tests =
           testPreparedFormulaParity)
     , ("project raw Djinn kinds from the authoritative inventory",
           testRawDjinnPreparationKinds)
+    , ("bound malformed Djinn context arity observation",
+          testBoundedContextArity)
     , ("normalize aliases inside opaque formula atoms", testOpaqueAliasAtoms)
     , ("reject every raw recursive type-expansion graph finitely",
           testRawTypeExpansionCycles)
@@ -845,6 +847,17 @@ testSharedTypeAdapter = do
             $ SharedType.DuplicateForallVariable "a")
         (fromSynthesisType $ SharedType.ForallType ["a", "a"] []
             $ SharedType.TypeVariable "a")
+    let oversizedTuple = HTTuple $ repeat $ HTVar "a"
+    case oversizedTuple of
+        HTTuple _ -> pure ()
+        _ -> fail "an oversized compatibility tuple did not construct"
+    assertEqual "oversized tuples stay outside the native unchecked fast path"
+        Nothing (hTypeSynthesisStructure oversizedTuple)
+    assertEqual "oversized compatibility tuples fail at the bounded arity"
+        (Left $ InvalidSynthesisType
+            $ SharedType.InvalidTupleTypeArity SharedName.Boxed
+                $ SharedName.maximumTupleArity + 1)
+        (toSynthesisType oversizedTuple)
     assertEqual "constructor-like strings cannot become Djinn type variables"
         (Left $ InvalidDjinnTypeVariable "A")
         (fromSynthesisType $ SharedType.TypeVariable "A")
@@ -1349,6 +1362,16 @@ testRawDjinnPreparationKinds = do
     markerMaybe <- either fail pure $ mkContext "Marker" [HTCon "Maybe"]
     assertLeft "a stale raw class kind overrode the shared inventory"
         $ resolvePreparedContext prepared markerMaybe
+
+testBoundedContextArity :: IO ()
+testBoundedContextArity = do
+    prepared <- expectShownRight $ prepareEnvironment standardEnvironment
+    let arguments = repeat $ HTVar "a"
+        malformed = Constraint (sharedName "Eq") arguments
+    case resolvePreparedContext prepared malformed of
+        Left message -> assertBool "context arity did not use its first failure"
+            $ "expects 1 type argument(s), but got 2" `isInfixOf` message
+        Right _ -> fail "an infinite known-class context was accepted"
 
 -- Saturation and kind checking own different failures. A partial synonym can
 -- be kind-compatible in a higher-kinded position, so the explicit arity guard

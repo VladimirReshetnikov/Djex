@@ -41,16 +41,20 @@ checkConstraints variableResult noEvidenceResult environment = solve Set.empty
   where
     solve visiting = fmap concat . traverse (resolve visiting)
 
-    resolve visiting constraint
-      | constraintContainsVariables constraint = variableResult constraint
-      | constraint `Set.member` qClassEnv_inflatedConstraints environment = Just []
-      | constraint `Set.member` visiting = Just [constraint]
-      | otherwise =
-          SharedCollection.firstPresent
-            [ bestResult
-                $ map (fromInstance $ Set.insert constraint visiting) instances
-            , noEvidenceResult constraint
-            ]
+    resolve visiting constraint = case validateKnownConstraintInEnv
+        (qClassEnv_env environment) QueryConstraint constraint of
+      Left _ -> Nothing
+      Right ()
+        | constraintContainsVariables constraint -> variableResult constraint
+        | constraint `Set.member` qClassEnv_inflatedConstraints environment ->
+            Just []
+        | constraint `Set.member` visiting -> Just [constraint]
+        | otherwise ->
+            SharedCollection.firstPresent
+              [ bestResult
+                  $ map (fromInstance $ Set.insert constraint visiting) instances
+              , noEvidenceResult constraint
+              ]
       where
         HsConstraint className parameters = constraint
         instances = Map.findWithDefault []
@@ -60,7 +64,9 @@ checkConstraints variableResult noEvidenceResult environment = solve Set.empty
         fromInstance nextVisiting
             (HsInstance prerequisites (HsConstraint instanceClass instanceParameters)) = do
           guard $ className == instanceClass
-          guard $ length parameters == length instanceParameters
+          let expected = length instanceParameters
+          guard $ SharedCollection.observedListLength expected parameters
+            == expected
           substitutions <- unifyRightEqs $ zipWith TypeEq parameters instanceParameters
           solve nextVisiting
             $ map (snd . constraintApplySubsts substitutions) prerequisites

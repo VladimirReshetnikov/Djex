@@ -56,6 +56,7 @@ checkProof environment expected term =
     -- can still fail afterwards.
     check = do
         ensureUniqueEnvironment environment
+        lift $ validateTermMetadata term
         actual <- infer (map (\ (symbol, formula) ->
             (symbol, fromFormula formula)) environment) term
         unify actual (fromFormula expected)
@@ -93,24 +94,22 @@ infer environment term =
             unify functionType (argumentType :~> resultType)
             return resultType
         Ctuple arity -> do
-            ensureNonNegative "tuple arity" arity
+            -- 'checkProof' validates all raw combinator metadata before
+            -- inference, so allocation can consume these finite counts
+            -- without repeating representation checks at every node.
             elements <- freshMetas arity
             return $ foldr (:~>) (Product elements) elements
         Csplit arity -> do
-            ensureNonNegative "split arity" arity
             elements <- freshMetas arity
             result <- freshMeta
             let handler = foldr (:~>) result elements
             return $ handler :~> Product elements :~> result
         Cinj constructor index -> do
-            ensureConstructor constructor
-            ensureNonNegative "injection index" index
             payload <- freshMeta
             result <- freshMeta
             addConstraint $ Injection result constructor index payload
             return $ payload :~> result
         Ccases constructors -> do
-            mapM_ ensureConstructor constructors
             -- Constructors already are the allocation plan; following that
             -- spine avoids a lossy list-length projection.
             branches <- mapM (const freshMeta) constructors
@@ -124,16 +123,6 @@ infer environment term =
                     handlers = map (:~> result) branches
                 return $ foldr (:~>) result (input : handlers)
         Xsel _ _ _ -> failCheck "legacy Xsel has no proof-type semantics"
-
-ensureConstructor :: ConsDesc -> Check ()
-ensureConstructor (ConsDesc name arity) = do
-    when (null name) $ failCheck "constructor descriptor has an empty name"
-    ensureNonNegative "constructor arity" arity
-
-ensureNonNegative :: String -> Int -> Check ()
-ensureNonNegative description value =
-    when (value < 0) $ failCheck $
-        description ++ " is negative: " ++ show value
 
 freshMeta :: Check ProofType
 freshMeta = do

@@ -5,7 +5,8 @@
 module Djinn.Internal.LJTFormula (
     Symbol(..), Formula(..), (<->), (&), (|:), fnot, false, true,
     formulaSymbols,
-    ConsDesc(..), Term(..), applys, freeVars, freshenTermBinders
+    ConsDesc(..), Term(..), applys, validateTermMetadata,
+    freeVars, freshenTermBinders
     ) where
 
 import Data.Maybe (fromMaybe)
@@ -121,6 +122,41 @@ instance Show Term where
 
 applys :: Term -> [Term] -> Term
 applys = foldl Apply
+
+-- | Validate the representation-local metadata of a raw proof term.
+--
+-- This boundary deliberately needs neither a proof environment nor an
+-- expected formula. It can therefore reject negative arities and injection
+-- indices before either independent checking or generated-code conversion
+-- interprets them. Whether a non-negative injection index exists in a
+-- particular sum remains a proof-type question owned by @checkProof@.
+validateTermMetadata :: Term -> Either String ()
+validateTermMetadata term = case term of
+    Var{} -> Right ()
+    Lam _ body -> validateTermMetadata body
+    Apply function argument ->
+        validateTermMetadata function >> validateTermMetadata argument
+    Ctuple arity -> validateNonNegative "tuple arity" arity
+    Csplit arity -> validateNonNegative "split arity" arity
+    Cinj constructor index -> do
+        validateConstructorMetadata constructor
+        validateNonNegative "injection index" index
+    Ccases constructors -> mapM_ validateConstructorMetadata constructors
+    -- The legacy selector has no proof-type or generated-code semantics. Its
+    -- owning consumer reports that unsupported node without inspecting fields
+    -- which cannot affect the result.
+    Xsel{} -> Right ()
+
+validateConstructorMetadata :: ConsDesc -> Either String ()
+validateConstructorMetadata (ConsDesc name arity)
+    | null name = Left "constructor descriptor has an empty name"
+    | otherwise = validateNonNegative "constructor arity" arity
+
+validateNonNegative :: String -> Int -> Either String ()
+validateNonNegative description value
+    | value < 0 = Left $
+        description ++ " is negative: " ++ show value
+    | otherwise = Right ()
 
 -- | Free variables in first-occurrence order, each reported once.
 freeVars :: Term -> [Symbol]

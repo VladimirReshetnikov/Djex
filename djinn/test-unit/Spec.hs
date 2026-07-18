@@ -2740,7 +2740,8 @@ testMalformedProofTerms = do
             Lam a $ Apply (Ctuple 1) (Var a))
     assertLeft "legacy selectors have no independently checkable semantics"
         (checkProof [(b, atomA)] atomA $ Xsel 0 1 (Var b))
-    assertLeft "an injection index must be in range"
+    assertLeftMessage "an injection index must be in range"
+        "injection index 2 is outside a sum with 2 alternatives"
         (checkProof [] (atomA :-> (atomA |: atomB)) $
             Lam a $ Apply (Cinj leftConstructor 2) (Var a))
 
@@ -3002,6 +3003,12 @@ testScopeSafeRendering = do
 
 testMalformedRendering :: IO ()
 testMalformedRendering = do
+    let source = Symbol "source"
+        payload = Symbol "payload"
+        negativeInjection = Apply
+            (Cinj (ConsDesc "Just" 1) (-1)) (Var payload)
+        negativeCase = applys (Ccases [ConsDesc "Just" (-1)])
+            [Var source, Lam payload $ Ctuple 0]
     assertLeft "legacy selectors should return a conversion error"
         (termToHExpr $ Xsel 0 1 $ Var $ Symbol "x")
     assertLeft "bare non-unit tuple combinators should not crash"
@@ -3009,6 +3016,28 @@ testMalformedRendering = do
     assertLeft "case alternatives must be lambdas"
         (termToHExpr $ applys (Ccases [ConsDesc "Only" 1])
             [Var $ Symbol "choice", Var $ Symbol "handler"])
+    assertLeftMessage "negative injection indices cannot disappear in lowering"
+        "injection index is negative: -1"
+        (termToHExpr negativeInjection)
+    assertLeftMessage "clause lowering shares injection metadata validation"
+        "injection index is negative: -1"
+        (termToHClause "badInjection" negativeInjection)
+    assertLeftMessage "negative case payload arities cannot become nullary"
+        "constructor arity is negative: -1"
+        (termToHExpr negativeCase)
+    assertLeftMessage "clause lowering shares case metadata validation"
+        "constructor arity is negative: -1"
+        (termToHClause "badCase" negativeCase)
+    assertLeftMessage "negative injection payload arities are rejected"
+        "constructor arity is negative: -1"
+        (termToHExpr $ Apply
+            (Cinj (ConsDesc "Just" (-1)) 0) (Var payload))
+    assertLeftMessage "negative tuple arities are rejected before conversion"
+        "tuple arity is negative: -1"
+        (termToHExpr $ Ctuple (-1))
+    assertLeftMessage "negative split arities are rejected before conversion"
+        "split arity is negative: -1"
+        (termToHExpr $ Csplit (-1))
 
 testGeneratedClauseBoundary :: IO ()
 testGeneratedClauseBoundary = do

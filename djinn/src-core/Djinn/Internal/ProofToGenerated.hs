@@ -32,6 +32,7 @@ type Expression = Generated.Expression HSymbol
 -- historical recursive output tree.
 termToGeneratedExpression :: Term -> Either String Expression
 termToGeneratedExpression term = do
+  validateTermMetadata term
   (expression, _) <- convert [] renamedTerm
   let simplified = niceNames $ Generated.simplifyExpressionBy id
         $ Generated.simplifyExpressionCases

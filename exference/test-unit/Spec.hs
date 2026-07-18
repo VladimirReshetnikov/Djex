@@ -3292,6 +3292,20 @@ tests = testGroup "Exference"
             SearchIdentifierSpaceExhausted
           assertBool "deconstructor exhaustion suppressed fallback search"
             $ not $ null $ chunkElements chunk
+      , testCase "empty elimination consumes no flexible identifier" $ do
+          let integer = TypeCons $ name "Int"
+              empty argument = TypeApp (TypeCons $ name "Empty") argument
+              deconstructor = DeconstructorBinding
+                (empty $ TypeVar 0) [] False
+              input = identityInput
+                { input_goalType = TypeArrow (empty integer) integer
+                , input_envDeconsS = [deconstructor]
+                }
+          chunk <- lastCapacityChunk
+            (IdentifierCapacities 100 0 100) input
+          chunkStatus chunk @?= SearchStatus SearchExhausted 0 0
+          assertBool "empty elimination required a non-escaping flexible ID"
+            $ not $ null $ chunkElements chunk
       , testCase "scope identifier collisions are operational truncations" $ do
           chunk <- lastCapacityChunk
             (IdentifierCapacities 100 100 1) identityInput

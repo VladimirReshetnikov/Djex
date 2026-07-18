@@ -1562,25 +1562,22 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
             -> Either
                 BranchTruncation
                 (Maybe (StateT SearchNode SearchBranches [TGoal]))
-          mapFunc supply deconstructor@(DeconstructorBinding matchParam
-                    [] False) =
-            case allocateDeconstructorNamespace supply deconstructor of
-              Nothing -> Left BranchIdentifierSpaceExhausted
-              Just (renaming, nextSupply) ->
-                let eliminateEmpty = do
-                      modify $ \node -> node
-                        {nodeFlexibleIds = nextSupply}
-                      -- An empty case evaluates its scrutinee once and has no
-                      -- branch goals. Recording that use is also what lets a
-                      -- strict no-unused-variable search retain the proof.
-                      builderRecordVarUse v
-                      modify $ \node -> node
-                        { nodeExpression = fillExprHole vid
-                            (ExpCaseMatch expVar [])
-                            (nodeExpression node) }
-                      pure []
-                in Right $ eliminateEmpty <$ unifyRight vtResult
-                  (renameFlexibleType renaming matchParam)
+          mapFunc _ (DeconstructorBinding matchParam [] False) =
+            let eliminateEmpty = do
+                  -- An empty case evaluates its scrutinee once and has no
+                  -- branch goals. Recording that use is also what lets a
+                  -- strict no-unused-variable search retain the proof.
+                  builderRecordVarUse v
+                  modify $ \node -> node
+                    { nodeExpression = fillExprHole vid
+                        (ExpCaseMatch expVar [])
+                        (nodeExpression node) }
+                  pure []
+            -- No deconstructor variable escapes an empty match. 'unifyRight'
+            -- already gives its right operand a disjoint tagged namespace, so
+            -- reserving persistent flexible IDs here could only introduce a
+            -- spurious identifier-space truncation.
+            in Right $ eliminateEmpty <$ unifyRight vtResult matchParam
           mapFunc supply deconstructor@(DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] False) =
             case allocateDeconstructorNamespace supply deconstructor of

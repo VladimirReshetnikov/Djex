@@ -3377,6 +3377,37 @@ tests = testGroup "Exference"
           -- two constructors.
           baselineUses @?= Just 1
           weightedUses @?= baselineUses
+      , testCase "empty datatypes eliminate through search, checking, and rendering" $ do
+          let emptyName = name "Empty"
+              genericEmpty = TypeApp (TypeCons emptyName) $ TypeVar 0
+              integer = TypeCons $ name "Int"
+              integerEmpty = TypeApp (TypeCons emptyName) integer
+              deconstructor = DeconstructorBinding genericEmpty [] False
+              goal = TypeArrow integerEmpty integer
+              input = identityInput
+                { input_goalType = goal
+                , input_envDeconsS = [deconstructor]
+                -- Keep the strict default: finding this proof also verifies
+                -- that the empty-case scrutinee was recorded as used.
+                }
+          (expression, constraints, _) <- maybe
+            (fail "empty datatype elimination produced no expression") pure
+            $ findOneExpression input
+          constraints @?= []
+          scrutinee <- case expression of
+            ExpLambda variable annotation
+                (ExpCaseMatch (ExpVar matched matchedAnnotation) []) -> do
+              annotation @?= integerEmpty
+              matched @?= variable
+              matchedAnnotation @?= integerEmpty
+              pure variable
+            _ -> fail $ "unexpected empty elimination: "
+              ++ showExpression expression
+          checkExpression (mkQueryClassEnv emptyClassEnv []) []
+            [deconstructor] goal [] expression @?= Right ()
+          let binder = preferredVarName scrutinee integerEmpty
+          renderExpression Generated.Unqualified expression @?= Right
+            ("\\" ++ binder ++ " -> case " ++ binder ++ " of {}")
       , testCase "single-constructor patterns retain substituted field types" $ do
           let integer = TypeCons $ name "Int"
               boxName = name "Box"
@@ -6284,6 +6315,26 @@ tests = testGroup "Exference"
           checkExpression (mkQueryClassEnv staticClasses [external])
             [binding] [] integer [] (ExpName bindingName)
             @?= Right ()
+      , testCase "empty cases require a matching empty deconstructor" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let emptyType = TypeCons $ name "Empty"
+              otherType = TypeCons $ name "Other"
+              integer = TypeCons $ name "Int"
+              goal = TypeArrow emptyType integer
+              expression = ExpLambda 1 emptyType
+                $ ExpCaseMatch (ExpVar 1 emptyType) []
+              mismatchedEmpty = DeconstructorBinding otherType [] False
+              matchingEmpty = DeconstructorBinding emptyType [] False
+              inhabited = DeconstructorBinding emptyType
+                [ConstructorBinding (name "NotEmpty") []] False
+              expected = Left
+                $ EmptyCaseWithoutMatchingDeconstructor emptyType
+          mapM_ (\deconstructors ->
+              checkExpression (mkQueryClassEnv staticClasses []) []
+                deconstructors goal [] expression @?= expected)
+            [[], [mismatchedEmpty], [inhabited]]
+          checkExpression (mkQueryClassEnv staticClasses []) []
+            [mismatchedEmpty, matchingEmpty] goal [] expression @?= Right ()
       , testCase "checks structural tuples against constructor applications" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           pairName <- expectRight $ mkBoxedTupleName 2

@@ -7,7 +7,7 @@ where
 
 import Control.Monad (foldM, unless, when)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.State.Strict (StateT, gets, modify', runStateT)
+import Control.Monad.Trans.State.Strict (StateT (..), gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
@@ -27,6 +27,7 @@ data ExpressionCheckError
   = UnknownVariable TVarId
   | UnknownBinding QualifiedName
   | UnknownConstructor QualifiedName
+  | EmptyCaseWithoutMatchingDeconstructor HsType
   | ExpressionHole TVarId
   | PatternArity QualifiedName Int Int
   | TypeMismatch HsType HsType
@@ -152,6 +153,12 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
       bindingType <- infer variables binding
       unifyTypes annotation bindingType
       infer (IntMap.insert variable annotation variables) body
+    infer variables (ExpCaseMatch scrutinee []) = do
+      scrutineeType <- infer variables scrutinee >>= zonk
+      matchEmptyDeconstructor scrutineeType
+      -- Empty elimination proves every result type. Keep that result fresh so
+      -- the surrounding expression, rather than the deconstructor, fixes it.
+      freshTypeVariable
     infer variables (ExpCaseMatch scrutinee alternatives) = do
       scrutineeType <- infer variables scrutinee
       resultType <- freshTypeVariable
@@ -195,6 +202,30 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
         (freshInput :| freshFields, _) <- freshenTypes (input :| fields) []
         unifyTypes scrutineeType freshInput
         mapM zonk freshFields
+
+    -- Trying declarations from one unchanged state gives empty datatypes the
+    -- same independent unification semantics as ordinary constructors while
+    -- allowing more than one empty datatype in a raw checker environment.
+    matchEmptyDeconstructor scrutineeType = StateT $ \initialState ->
+      tryDeconstructors initialState
+        [ deconstructor
+        | deconstructor <- deconstructors
+        , null $ deconstructorConstructors deconstructor
+        ]
+     where
+      tryDeconstructors _ [] = Left
+        $ EmptyCaseWithoutMatchingDeconstructor scrutineeType
+      tryDeconstructors initialState (deconstructor : remaining) =
+        case runStateT (instantiateEmpty deconstructor) initialState of
+          Right matched -> Right matched
+          Left FlexibleIdentifierSupplyExhausted ->
+            Left FlexibleIdentifierSupplyExhausted
+          Left _ -> tryDeconstructors initialState remaining
+
+      instantiateEmpty deconstructor = do
+        (freshInput :| _, _) <- freshenTypes
+          (deconstructorInput deconstructor :| []) []
+        unifyTypes scrutineeType freshInput
 
 -- The independent checker is also a public raw-input boundary. Validate every
 -- native type reachable from its arguments before equal malformed values can

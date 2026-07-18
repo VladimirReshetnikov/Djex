@@ -1579,6 +1579,25 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
                 BranchTruncation
                 (Maybe (StateT SearchNode SearchBranches [TGoal]))
           mapFunc supply deconstructor@(DeconstructorBinding matchParam
+                    [] False) =
+            case allocateDeconstructorNamespace supply deconstructor of
+              Nothing -> Left BranchIdentifierSpaceExhausted
+              Just (renaming, nextSupply) ->
+                let eliminateEmpty = do
+                      modify $ \node -> node
+                        {nodeFlexibleIds = nextSupply}
+                      -- An empty case evaluates its scrutinee once and has no
+                      -- branch goals. Recording that use is also what lets a
+                      -- strict no-unused-variable search retain the proof.
+                      builderRecordVarUse v
+                      modify $ \node -> node
+                        { nodeExpression = fillExprHole vid
+                            (ExpCaseMatch expVar [])
+                            (nodeExpression node) }
+                      pure []
+                in Right $ eliminateEmpty <$ unifyRight vtResult
+                  (renameFlexibleType renaming matchParam)
+          mapFunc supply deconstructor@(DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] False) =
             case allocateDeconstructorNamespace supply deconstructor of
               Nothing -> Left BranchIdentifierSpaceExhausted

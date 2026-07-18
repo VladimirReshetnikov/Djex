@@ -469,7 +469,7 @@ tests = testGroup "Djex facade"
           [ (FlexibleVariable 0, "source")
           , (RigidVariable 0, "source")
           ]
-      renderExferenceResidualConstraints candidate @?= ["C source"]
+      renderExferenceResidualConstraints candidate @?= Right ["C source"]
   , testCase "keep checked-HSE and neutral Exference sessions equivalent" $ do
       backendIdentityName <- expectRight
         $ mkQualifiedName ["Fixture"] "identity"
@@ -1117,7 +1117,7 @@ tests = testGroup "Djex facade"
             (FunctionClause checkedTarget [] $ Local 0)
             [Constraint className $ map TypeVariable variables]
             details
-          expected = ["C same a' b c d e a g h"]
+          expected = Right ["C same a' b c d e a g h"]
           candidateWithHint variable hint = Candidate
             (FunctionClause checkedTarget [] $ Local 0)
             [Constraint className [TypeVariable variable]]
@@ -1135,21 +1135,61 @@ tests = testGroup "Djex facade"
       let atLimit = replicate 4096 'x'
       renderExferenceResidualConstraints
           (candidateWithHint (FlexibleVariable 9) atLimit) @?=
-        ["C " ++ atLimit]
+        Right ["C " ++ atLimit]
       renderExferenceResidualConstraints
           (candidateWithHint (FlexibleVariable 10) $ replicate 4097 'x') @?=
-        ["C j"]
+        Right ["C j"]
       asyncResult <- try $ evaluate
         $ renderExferenceResidualConstraints
             (candidateWithHint (FlexibleVariable 11)
               $ 'x' : throw ThreadKilled)
-        == ["C k"]
+        == Right ["C k"]
       case asyncResult :: Either SomeException Bool of
         Left failure -> case fromException failure of
           Just ThreadKilled -> pure ()
           _ -> fail $ "residual rendering changed an asynchronous exception: "
             ++ show failure
         Right _ -> fail "residual rendering swallowed ThreadKilled"
+  , testCase "reject caller-forged Exference residual constraints in order" $ do
+      invalidClass <- expectRight $ mkIdentifier "notAClass"
+      validClass <- expectRight $ mkIdentifier "C"
+      target <- expectRight $ mkIdentifier "result"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      let variable = FlexibleVariable 0
+          validArgument = TypeVariable variable
+          candidate constraints = Candidate
+            (FunctionClause checkedTarget [] $ Tuple [])
+            constraints emptyExferenceCandidateDetails
+          invalidNestedType = ForallType []
+            [Constraint invalidClass []] validArgument
+          classFirst = candidate
+            [Constraint invalidClass $ error "unforced invalid-class arguments"]
+          argumentFirst = candidate
+            $ Constraint validClass [validArgument]
+            : Constraint validClass [validArgument, invalidNestedType]
+            : error "unforced residual-constraint tail"
+      renderExferenceResidualConstraints classFirst @?= Left
+        (InvalidResidualConstraintClass 0
+          $ InvalidConstraintClass invalidClass)
+      renderExferenceResidualConstraintsWithQualification
+          Unqualified argumentFirst @?= Left
+        (InvalidResidualConstraintArgument 1 1
+          $ InvalidTypeConstraint $ InvalidConstraintClass invalidClass)
+  , testCase "bound forged residual type validation at invalid tuple width" $ do
+      className <- expectRight $ mkIdentifier "C"
+      target <- expectRight $ mkIdentifier "result"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      let variable = FlexibleVariable 0
+          oversizedTuple = TupleType Boxed
+            $ replicate 65 (TypeVariable variable)
+            ++ error "unforced oversized-tuple tail"
+          candidate = Candidate
+            (FunctionClause checkedTarget [] $ Tuple [])
+            [Constraint className [oversizedTuple]]
+            emptyExferenceCandidateDetails
+      renderExferenceResidualConstraints candidate @?= Left
+        (InvalidResidualConstraintArgument 0 0
+          $ InvalidTupleTypeArity Boxed 65)
   , testCase "bound caller-created Exference local hints" $ do
       target <- expectRight $ mkIdentifier "result"
       checkedTarget <- expectRight $ mkDefinitionName target

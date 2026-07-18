@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 -- | Checked Exference sessions behind Djex's shared query envelope.
@@ -63,6 +64,7 @@ module Language.Haskell.Djex.Exference
   , exferenceBatchDepthPruned
   , Qualification (..)
   , RenderError (..)
+  , ExferenceResidualRenderError (..)
   , runExferenceQuery
   , exferenceCandidateMetrics
   , exferenceResultBindingUsages
@@ -72,7 +74,7 @@ module Language.Haskell.Djex.Exference
   , renderExferenceResidualConstraintsWithQualification
   ) where
 
-import Control.DeepSeq (force)
+import Control.DeepSeq (NFData, force)
 import Control.Exception
   ( SomeAsyncException
   , SomeException
@@ -84,6 +86,7 @@ import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -137,6 +140,7 @@ import Language.Haskell.Synthesis.Candidate
   , renderCandidateDefinition
   , renderCandidateExpression
   )
+import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Info, Warning)
@@ -162,6 +166,7 @@ import Language.Haskell.Synthesis.Query
 import Language.Haskell.Synthesis.Search
   ( batchMetadata
   )
+import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 import Language.Haskell.Synthesis.TypeSynonym
   ( TypeElaborationError (..)
@@ -335,25 +340,54 @@ renderExferenceCandidateDefinition qualification candidate =
   renderCandidateDefinition
     (candidateRenderOptions qualification candidate) candidate
 
--- | Render distinct residual constraints in structural order. Invalid,
--- duplicate, or unavailable source type-variable hints receive deterministic
--- fresh fallback names.  This compatibility entry point retains its original
--- fully qualified rendering.
+-- | A caller-built candidate contained an invalid residual obligation.
+--
+-- Constraint and argument positions are zero-based source-list indexes. Class
+-- identity is checked before any argument, and arguments are checked from
+-- left to right, so the first error is deterministic without sorting or
+-- deduplicating the caller's input first.
+data ExferenceResidualRenderError
+  = InvalidResidualConstraintClass
+      Natural
+      -- ^ Index of the residual constraint in the candidate.
+      SharedConstraint.ConstraintError
+      -- ^ Invalid nominal class identity.
+  | InvalidResidualConstraintArgument
+      Natural
+      -- ^ Index of the residual constraint in the candidate.
+      Natural
+      -- ^ Index of the invalid argument in that constraint.
+      (SharedType.TypeError ExferenceTypeVariable)
+      -- ^ Complete shared-type validation failure.
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ExferenceResidualRenderError
+
+-- | Validate and render distinct residual constraints in structural order.
+-- Invalid, duplicate, or unavailable source type-variable hints receive
+-- deterministic fresh fallback names. This entry point retains the historical
+-- fully qualified rendering policy, but now returns a structured error like
+-- the expression and definition renderers because the public @Candidate@
+-- constructor permits caller-built residuals.
 renderExferenceResidualConstraints
   :: ExferenceCandidate
-  -> [String]
+  -> Either ExferenceResidualRenderError [String]
 renderExferenceResidualConstraints =
   renderExferenceResidualConstraintsWithQualification FullyQualified
 
--- | Qualification-aware residual rendering for generated-output surfaces.
+-- | Validate and render residual obligations under one qualification policy.
 -- The class name and every constructor nested in its arguments follow the
--- same policy as the candidate term.
+-- same policy as the candidate term. Validation precedes sorting and
+-- deduplication, preserving the first failure in the candidate's original
+-- constraint and argument order.
 renderExferenceResidualConstraintsWithQualification
   :: Qualification
   -> ExferenceCandidate
-  -> [String]
-renderExferenceResidualConstraintsWithQualification qualification candidate =
-  map (SharedRender.renderConstraintWithQualification qualification variableName)
+  -> Either ExferenceResidualRenderError [String]
+renderExferenceResidualConstraintsWithQualification qualification candidate = do
+  validateResidualConstraints candidate
+  pure $ map
+    (SharedRender.renderConstraintWithQualification qualification variableName)
     constraints
  where
   constraints = Set.toAscList $ Set.fromList
@@ -362,6 +396,23 @@ renderExferenceResidualConstraintsWithQualification qualification candidate =
   variableNames = residualTypeVariableNames candidate variables
   variableName variable = Map.findWithDefault
     (defaultVariableName variable) variable variableNames
+
+validateResidualConstraints
+  :: ExferenceCandidate
+  -> Either ExferenceResidualRenderError ()
+validateResidualConstraints candidate = mapM_ validateIndexedConstraint
+  $ zip [0 ..] $ candidateResidualConstraints candidate
+ where
+  validateIndexedConstraint (constraintIndex, constraint) = do
+    first (InvalidResidualConstraintClass constraintIndex)
+      $ SharedConstraint.validateConstraint constraint
+    mapM_ (validateIndexedArgument constraintIndex)
+      $ zip [0 ..] $ SharedConstraint.constraintArguments constraint
+
+  validateIndexedArgument constraintIndex (argumentIndex, argument) =
+    first
+      (InvalidResidualConstraintArgument constraintIndex argumentIndex)
+      $ SharedType.validateType argument
 
 candidateRenderOptions
   :: Qualification

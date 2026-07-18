@@ -235,10 +235,22 @@ may retain residual class constraints; inspect
 `candidateResidualConstraints` or call
 `renderExferenceResidualConstraintsWithQualification` with the same policy used
 for the candidate rather than presenting the generated term as obligation-free.
-The compatibility helper `renderExferenceResidualConstraints` retains its
-historical fully qualified output. Both helpers use the candidate's validated
-type-variable hints, and the qualification-aware helper applies its policy to
-the class and to every constructor nested in the constraint arguments.
+`renderExferenceResidualConstraints` retains the historical fully qualified
+policy. Both helpers return
+`Either ExferenceResidualRenderError [String]`: they validate each nominal
+class and every complete shared type argument before sorting or deduplicating,
+then use the candidate's validated type-variable hints. The
+qualification-aware helper applies its policy to the class and to every
+constructor nested in the constraint arguments.
+
+The checked `Either` result intentionally replaces the earlier pure `[String]`
+signature. `Candidate` has a public compatibility constructor, so a pure
+renderer could otherwise present caller-forged malformed residuals as Haskell
+source. Failures carry zero-based constraint and argument positions and the
+shared structural error; validation reports the first class or argument error
+in the candidate's original order. Existing callers can migrate by handling
+the result alongside `renderExferenceCandidateExpression` or
+`renderExferenceCandidateDefinition`.
 
 For custom presentation, use `candidateOutput` to obtain the shared
 `FunctionClause` and the operations in

@@ -478,7 +478,13 @@ policies over either backend's result envelope. `TypeRender` prints shared
 types and constraints from tagged variable-name hints without collapsing
 flexible and rigid identities. Its qualification-aware entry points use the
 same identifier/operator policy as generated terms, so an Exference candidate
-and its residual obligations cannot disagree about module prefixes.
+and its residual obligations cannot disagree about module prefixes. The stable
+Exference residual renderers return
+`Either ExferenceResidualRenderError [String]`, validating caller-built class
+identities and every shared type
+argument before emitting text. This is an intentional source break from the
+former pure list result: the public compatibility `Candidate` constructor
+otherwise permits malformed obligations to bypass the checked query path.
 `TypeSynonym` prepares aliases from the
 retained neutral inventory and owns prepared-witness operations for
 whole-type and individual-application minimum-saturation preflight,

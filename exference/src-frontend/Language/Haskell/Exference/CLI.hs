@@ -327,7 +327,11 @@ printCandidate qualification candidate = do
     pure
     $ renderExferenceCandidateExpression qualification candidate
   putStrLn rendered
-  let constraints = renderExferenceResidualConstraintsWithQualification
+  constraints <- either
+    (fatal . ("cannot render checked search result constraints: " ++)
+      . show)
+    pure
+    $ renderExferenceResidualConstraintsWithQualification
         qualification candidate
   unless (null constraints) $ putStrLn
     $ "but only with additional constraints: "

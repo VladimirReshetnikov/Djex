@@ -160,6 +160,16 @@ facadeTests = testGroup "public Djex facade"
           candidateProjection
             :: ExferenceCandidate -> ExferenceCandidateDetails
           candidateProjection = candidateDetails
+          residualRendererProjection
+            :: ExferenceCandidate
+            -> Either ExferenceResidualRenderError [String]
+          residualRendererProjection = renderExferenceResidualConstraints
+          qualifiedResidualRendererProjection
+            :: Qualification
+            -> ExferenceCandidate
+            -> Either ExferenceResidualRenderError [String]
+          qualifiedResidualRendererProjection =
+            renderExferenceResidualConstraintsWithQualification
           metadataProjection
             :: ExferenceResult -> ExferenceBatchMetadata
           metadataProjection = batchMetadata . resultSearch
@@ -169,6 +179,8 @@ facadeTests = testGroup "public Djex facade"
         sessionEnvironmentProjection `seq`
         environmentProjection `seq`
         requestProjection `seq` candidateProjection `seq`
+        residualRendererProjection `seq`
+        qualifiedResidualRendererProjection `seq`
         metadataProjection `seq` pure ()
       mkDjinnRequest `seq` mkExferenceSession `seq`
         mkExferenceSessionWithPolicy `seq` pure ()

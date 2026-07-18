@@ -526,11 +526,17 @@ at the type text.
 The canonical result API is the only shared candidate envelope exposed by the
 core. It accepts only the opaque, exact-goal-bound source-hint form and returns
 the checked target and logical evidence together with each lazy result batch.
-The stable residual renderer validates bounded hint copies, rejects
-partial/infinite or malformed names, deduplicates preferences, and freshens
-fallbacks. Its qualification-aware entry point applies the generated term's
-exact identifier/operator policy to both class names and nested type names;
-the original no-policy helper remains fully qualified for compatibility.
+The stable residual renderers validate each class identity and every complete
+shared type argument in original candidate order before deduplicating or
+emitting source. They return `Either ExferenceResidualRenderError [String]`,
+whose failures retain zero-based constraint/argument positions and the shared
+structural error. This intentionally replaces the former unchecked pure-list
+signature: compatibility `Candidate` values can be caller-built even though
+canonical query results are checked. The renderers also validate bounded hint
+copies, reject partial/infinite or malformed names, deduplicate preferences,
+and freshen fallbacks. The qualification-aware entry point applies the
+generated term's exact identifier/operator policy to both class names and
+nested type names; the no-policy helper remains fully qualified.
 Expression and definition rendering applies the same bounded-copy
 rule to caller-built term-local hints while retaining structured lexical
 errors for finite bad names. Candidate projection never traverses the whole

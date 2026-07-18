@@ -11,6 +11,7 @@ module Language.Haskell.Djex.CLI
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
+import Data.Bifunctor (first)
 import Data.Foldable (toList)
 import Data.List (intercalate)
 import Data.Maybe (mapMaybe)
@@ -254,14 +255,21 @@ renderCandidate definitionRenderer expressionRenderer options =
 renderExferenceBlock
   :: CommonOptions
   -> ExferenceCandidate
-  -> Either RenderError String
+  -> Either ExferenceBlockRenderError String
 renderExferenceBlock options candidate = do
-  rendered <- renderExference options candidate
-  let constraints = renderExferenceResidualConstraintsWithQualification
+  rendered <- first ExferenceTermRenderError
+    $ renderExference options candidate
+  constraints <- first ExferenceConstraintRenderError
+    $ renderExferenceResidualConstraintsWithQualification
         (commonQualification options) candidate
   pure $ case constraints of
     [] -> rendered
     _ -> "-- requires: " ++ intercalate ", " constraints ++ "\n" ++ rendered
+
+data ExferenceBlockRenderError
+  = ExferenceTermRenderError RenderError
+  | ExferenceConstraintRenderError ExferenceResidualRenderError
+  deriving (Eq, Show)
 
 printCandidates :: [String] -> IO ()
 printCandidates [] = pure ()

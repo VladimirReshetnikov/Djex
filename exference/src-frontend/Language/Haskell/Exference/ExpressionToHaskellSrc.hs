@@ -20,6 +20,7 @@ import qualified Language.Haskell.Exference.Core.Expression as E
 import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Qualification as SharedQualification
 
 type HsExp = Exp SrcSpanInfo
 type HsDecl = Decl SrcSpanInfo
@@ -319,19 +320,16 @@ toQName qualification name = case SharedName.nameOccurrence name of
       (SharedName.TupleConstructor SharedName.Unboxed arity) ->
     Special noLoc (TupleCon noLoc Unboxed arity)
   SharedName.IdentifierOccurrence _ spelling ->
-    qualify False $ Ident noLoc spelling
+    qualify $ Ident noLoc spelling
   SharedName.OperatorOccurrence _ spelling ->
-    qualify True $ Symbol noLoc spelling
+    qualify $ Symbol noLoc spelling
  where
-  qualify symbolic syntaxName = case SharedName.nameModule name of
+  qualify syntaxName = case
+    SharedQualification.emittedNameModule qualification name of
     Nothing -> UnQual noLoc syntaxName
-    Just namespace
-      | qualification == Generated.Unqualified
-          || (qualification == Generated.QualifyIdentifiers && symbolic) ->
-            UnQual noLoc syntaxName
-      | otherwise -> Qual noLoc
-          (ModuleName noLoc $ SharedName.renderModuleName namespace)
-          syntaxName
+    Just namespace -> Qual noLoc
+      (ModuleName noLoc $ SharedName.renderModuleName namespace)
+      syntaxName
 
 isConstructor :: SharedName.Name -> Bool
 isConstructor = (== SharedName.ConstructorLike) . SharedName.nameLexicalClass

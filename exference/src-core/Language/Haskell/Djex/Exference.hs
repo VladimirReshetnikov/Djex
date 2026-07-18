@@ -69,6 +69,7 @@ module Language.Haskell.Djex.Exference
   , renderExferenceCandidateExpression
   , renderExferenceCandidateDefinition
   , renderExferenceResidualConstraints
+  , renderExferenceResidualConstraintsWithQualification
   ) where
 
 import Control.DeepSeq (force)
@@ -336,12 +337,24 @@ renderExferenceCandidateDefinition qualification candidate =
 
 -- | Render distinct residual constraints in structural order. Invalid,
 -- duplicate, or unavailable source type-variable hints receive deterministic
--- fresh fallback names.
+-- fresh fallback names.  This compatibility entry point retains its original
+-- fully qualified rendering.
 renderExferenceResidualConstraints
   :: ExferenceCandidate
   -> [String]
-renderExferenceResidualConstraints candidate =
-  map (SharedRender.renderConstraint variableName) constraints
+renderExferenceResidualConstraints =
+  renderExferenceResidualConstraintsWithQualification FullyQualified
+
+-- | Qualification-aware residual rendering for generated-output surfaces.
+-- The class name and every constructor nested in its arguments follow the
+-- same policy as the candidate term.
+renderExferenceResidualConstraintsWithQualification
+  :: Qualification
+  -> ExferenceCandidate
+  -> [String]
+renderExferenceResidualConstraintsWithQualification qualification candidate =
+  map (SharedRender.renderConstraintWithQualification qualification variableName)
+    constraints
  where
   constraints = Set.toAscList $ Set.fromList
     $ candidateResidualConstraints candidate

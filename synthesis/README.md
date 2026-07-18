@@ -45,10 +45,11 @@ derived projections of the shared authorities, not alternative source models.
 | Module | Responsibility |
 | --- | --- |
 | `Language.Haskell.Synthesis.Name` | Validated qualified identifiers, operators, and structural built-ins such as functions, lists, and tuples. Tuple constructors follow GHC's supported zero and 2-through-64 arities. |
+| `Language.Haskell.Synthesis.Qualification` | The shared unqualified, identifier-qualified, and fully qualified name-emission policy used by terms, types, constraints, and HSE compatibility output. |
 | `Language.Haskell.Synthesis.Kind` | Proper types, kind variables, and kind arrows. |
 | `Language.Haskell.Synthesis.Constraint` | Nominal class names applied to backend-neutral type arguments, with shared namespace validation and rendering. |
 | `Language.Haskell.Synthesis.Type` | The common variable/constructor/application/function/tuple/forall tree; canonicalization, validation, free-variable and binder queries, spines, and capture-avoiding substitution. |
-| `Language.Haskell.Synthesis.TypeRender` | Haskell-like rendering of the shared type tree with caller-supplied variable spellings. |
+| `Language.Haskell.Synthesis.TypeRender` | Haskell-like rendering of the shared type tree and constraints with caller-supplied variable spellings and optional shared qualification policy. The original entry points remain fully qualified. |
 | `Language.Haskell.Synthesis.Declaration` | Synonym, datatype, abstract type, value, class, and instance declarations plus declaration-local validation and recursion analysis. |
 
 `Type` is the native source tree used by both checked adapters. Exference's
@@ -83,7 +84,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Candidate` | Generated output with residual constraints and backend-owned details, plus common candidate renderers. |
 | `Language.Haskell.Synthesis.Selection` | First, best, lookahead-best, all, and preferred-tier policies over lazy result batches. |
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
-| `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, simplification, alpha-equivalence, substitution, qualification, and Haskell rendering. |
+| `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
 
 Logical evidence is independent of operational progress. A truncated search can
 return validated candidates; a finished heuristic search can return no logical

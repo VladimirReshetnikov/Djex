@@ -69,6 +69,12 @@ import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Count (saturatingNaturalToInt)
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import Language.Haskell.Synthesis.Name
+import Language.Haskell.Synthesis.Qualification
+  ( Qualification (..)
+  , emittedIdentifier
+  , renderNameInfix
+  , renderNamePrefix
+  )
 import Numeric.Natural (Natural)
 import Text.PrettyPrint.HughesPJ
   ( Doc
@@ -896,18 +902,6 @@ simplifyExpressionBy identity = simplifyEta . simplifyLets
 
     occurrenceInAlternative (pattern, body) = underPatterns [pattern] body
 
--- | How module qualifiers are emitted.
---
--- 'QualifyIdentifiers' matches Exference's middle policy: ordinary names keep
--- their modules, while symbolic names stay infix-friendly and unqualified.
-data Qualification
-  = Unqualified
-  | QualifyIdentifiers
-  | FullyQualified
-  deriving (Eq, Ord, Show, Enum, Bounded, Generic)
-
-instance NFData Qualification
-
 -- | Rendering choices that depend on a backend's local identity type.
 data RenderOptions local = RenderOptions
   { renderQualification :: Qualification
@@ -1415,47 +1409,6 @@ isPatternOperator name = case nameOccurrence name of
   OperatorOccurrence ConstructorLike _ -> True
   SpecialOccurrence ConsConstructor -> True
   _ -> False
-
-renderNamePrefix :: Qualification -> Name -> String
-renderNamePrefix qualification name = case nameOccurrence name of
-  IdentifierOccurrence _ spelling -> qualify OrdinaryIdentifier spelling
-  OperatorOccurrence _ spelling -> "(" ++ qualify SymbolicOperator spelling ++ ")"
-  SpecialOccurrence _ -> renderPrefix name
-  where
-    qualify form spelling = maybe "" ((++ ".") . renderModuleName)
-        (emittedModule qualification form name)
-      ++ spelling
-
-renderNameInfix :: Qualification -> Name -> String
-renderNameInfix qualification name = case nameOccurrence name of
-  IdentifierOccurrence _ spelling ->
-    "`" ++ qualify OrdinaryIdentifier spelling ++ "`"
-  OperatorOccurrence _ spelling -> qualify SymbolicOperator spelling
-  SpecialOccurrence ConsConstructor -> ":"
-  SpecialOccurrence FunctionConstructor -> "->"
-  SpecialOccurrence _ -> renderPrefix name
-  where
-    qualify form spelling = maybe "" ((++ ".") . renderModuleName)
-        (emittedModule qualification form name)
-      ++ spelling
-
-data NameForm = OrdinaryIdentifier | SymbolicOperator
-  deriving (Eq)
-
-emittedModule :: Qualification -> NameForm -> Name -> Maybe ModuleName
-emittedModule qualification form name = case qualification of
-  Unqualified -> Nothing
-  QualifyIdentifiers
-    | form == SymbolicOperator -> Nothing
-    | otherwise -> nameModule name
-  FullyQualified -> nameModule name
-
-emittedIdentifier :: Qualification -> Name -> Maybe String
-emittedIdentifier qualification name = case nameOccurrence name of
-  IdentifierOccurrence VariableLike spelling
-    | emittedModule qualification OrdinaryIdentifier name == Nothing ->
-        Just spelling
-  _ -> Nothing
 
 patternLocals :: Pattern local -> [local]
 patternLocals = toList

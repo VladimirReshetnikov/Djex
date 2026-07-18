@@ -476,7 +476,10 @@ session operations. The shared `Selection` module provides first,
 global-best, streaming-all, batch-lookahead, and preferred-tier lookahead
 policies over either backend's result envelope. `TypeRender` prints shared
 types and constraints from tagged variable-name hints without collapsing
-flexible and rigid identities. `TypeSynonym` prepares aliases from the
+flexible and rigid identities. Its qualification-aware entry points use the
+same identifier/operator policy as generated terms, so an Exference candidate
+and its residual obligations cannot disagree about module prefixes.
+`TypeSynonym` prepares aliases from the
 retained neutral inventory and owns prepared-witness operations for
 whole-type and individual-application minimum-saturation preflight,
 capture-avoiding expansion, and the pre/post kind checks both backend

@@ -36,6 +36,8 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "ill-kinded environments fail before queries" testInvalidKinds
   , testCase "parsed datatypes participate in pattern matching"
       testParsedDatatypePatternMatch
+  , testCase "qualification also applies to residual constraints"
+      testResidualConstraintQualification
   , testCase "version mode does not load the environment" testVersion
   ]
 
@@ -345,6 +347,43 @@ testParsedDatatypePatternMatch =
       "Box" output
     assertBool "the parsed datatype must not be silently omitted"
       (not $ "no results" `isInfixOf` output)
+
+testResidualConstraintQualification :: Assertion
+testResidualConstraintQualification =
+  withTemporaryEnvironment $ \environmentDirectory -> do
+    writeFile (environmentDirectory ++ "/Fixture.hs") $ unlines
+      [ "module Fixture where"
+      , "data Box a = Box a"
+      , "class C a"
+      , "(<+>) :: C (Box a) => Box a"
+      ]
+
+    unqualified <- search environmentDirectory []
+    assertContains "unqualified residual"
+      "but only with additional constraints: C (Box a)" unqualified
+    assertContains "unqualified operator" "(<+>)" unqualified
+    assertBool "unqualified output retained a module prefix" $
+      not $ "Fixture." `isInfixOf` unqualified
+
+    identifiers <- search environmentDirectory ["--somequalification"]
+    assertContains "identifier-qualified residual"
+      "but only with additional constraints: Fixture.C (Fixture.Box a)"
+      identifiers
+    assertContains "middle-policy operator" "(<+>)" identifiers
+    assertBool "middle qualification unexpectedly qualified an operator" $
+      not $ "Fixture.<+>" `isInfixOf` identifiers
+
+    fullyQualified <- search environmentDirectory ["--fullqualification"]
+    assertContains "fully qualified residual"
+      "but only with additional constraints: Fixture.C (Fixture.Box a)"
+      fullyQualified
+    assertContains "fully qualified operator" "(Fixture.<+>)" fullyQualified
+ where
+  search environmentDirectory qualificationFlags = runExference $
+    [ "--envdir", environmentDirectory
+    , "--first"
+    , "--allowConstraints"
+    ] ++ qualificationFlags ++ ["Fixture.Box a"]
 
 testVersion :: Assertion
 testVersion = do

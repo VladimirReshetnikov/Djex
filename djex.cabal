@@ -142,6 +142,7 @@ Library
     Language.Haskell.Synthesis.KindInference
     Language.Haskell.Synthesis.Inventory
     Language.Haskell.Synthesis.Name
+    Language.Haskell.Synthesis.Qualification
     Language.Haskell.Synthesis.Query
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection

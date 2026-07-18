@@ -9,36 +9,62 @@
 module Language.Haskell.Synthesis.TypeRender
   ( renderType
   , renderConstraint
+  , renderTypeWithQualification
+  , renderConstraintWithQualification
   , showsType
   , showsConstraint
+  , showsTypeWithQualification
+  , showsConstraintWithQualification
   ) where
 
 import Data.List (intercalate)
 
 import Language.Haskell.Synthesis.Constraint
   ( Constraint
-  , showsConstraintWith
+  , showsConstraintWithName
   )
 import Language.Haskell.Synthesis.Name
   ( Boxity (Boxed, Unboxed)
   , SpecialName (ListConstructor)
   , nameSpecial
-  , renderPrefix
+  )
+import Language.Haskell.Synthesis.Qualification
+  ( Qualification (FullyQualified)
+  , renderNamePrefix
   )
 import Language.Haskell.Synthesis.Type (Type (..))
 
 -- | Render a complete type in source form.
 renderType :: (variable -> String) -> Type variable -> String
-renderType variableName typeExpression =
-  showsType variableName 0 typeExpression ""
+renderType = renderTypeWithQualification FullyQualified
 
 -- | Render a complete class constraint in source form.
 renderConstraint
   :: (variable -> String)
   -> Constraint (Type variable)
   -> String
-renderConstraint variableName constraint =
-  showsConstraint variableName 0 constraint ""
+renderConstraint = renderConstraintWithQualification FullyQualified
+
+-- | Render a complete type using one qualification policy for every nominal
+-- constructor and nested constraint.
+renderTypeWithQualification
+  :: Qualification
+  -> (variable -> String)
+  -> Type variable
+  -> String
+renderTypeWithQualification qualification variableName typeExpression =
+  showsTypeWithQualification qualification variableName 0 typeExpression ""
+
+-- | Render a complete class constraint under the supplied qualification
+-- policy.  The class and all constructor names in its arguments use the same
+-- policy as generated terms.
+renderConstraintWithQualification
+  :: Qualification
+  -> (variable -> String)
+  -> Constraint (Type variable)
+  -> String
+renderConstraintWithQualification qualification variableName constraint =
+  showsConstraintWithQualification qualification variableName 0 constraint ""
 
 -- | Precedence-aware counterpart of 'renderConstraint' for compositional
 -- renderers and 'Show' instances.
@@ -47,8 +73,18 @@ showsConstraint
   -> Int
   -> Constraint (Type variable)
   -> ShowS
-showsConstraint variableName =
-  showsConstraintWith $ showsType variableName 2
+showsConstraint = showsConstraintWithQualification FullyQualified
+
+-- | Qualification-aware counterpart of 'showsConstraint'.
+showsConstraintWithQualification
+  :: Qualification
+  -> (variable -> String)
+  -> Int
+  -> Constraint (Type variable)
+  -> ShowS
+showsConstraintWithQualification qualification variableName =
+  showsConstraintWithName (renderNamePrefix qualification)
+    $ showsTypeWithQualification qualification variableName 2
 
 -- | Render a type at the supplied Haskell precedence.
 showsType
@@ -56,33 +92,46 @@ showsType
   -> Int
   -> Type variable
   -> ShowS
-showsType variableName precedence typeExpression = case typeExpression of
+showsType = showsTypeWithQualification FullyQualified
+
+-- | Render a type at the supplied Haskell precedence and qualification level.
+showsTypeWithQualification
+  :: Qualification
+  -> (variable -> String)
+  -> Int
+  -> Type variable
+  -> ShowS
+showsTypeWithQualification qualification variableName precedence typeExpression =
+  case typeExpression of
   TypeVariable variable -> showString $ variableName variable
   -- Lists have no dedicated 'Type' node. Parenthesize the higher-kinded
   -- constructor, sugar its first application, and let the generic case render
   -- any trailing overapplication as @[a] b@.
   TypeConstructor name
     | nameSpecial name == Just ListConstructor -> showString "([])"
-    | otherwise -> showString $ renderPrefix name
+    | otherwise -> showString $ renderNamePrefix qualification name
   TypeApplication (TypeConstructor name) argument
     | nameSpecial name == Just ListConstructor -> showChar '['
-      . showsType variableName 0 argument
+      . showsTypeWithQualification qualification variableName 0 argument
       . showChar ']'
   TypeApplication function argument -> showParen (precedence > 1)
-    $ showsType variableName 1 function
+    $ showsTypeWithQualification qualification variableName 1 function
     . showChar ' '
-    . showsType variableName 2 argument
+    . showsTypeWithQualification qualification variableName 2 argument
   FunctionType parameter result -> showParen (precedence > 0)
-    $ showsType variableName 1 parameter
+    $ showsTypeWithQualification qualification variableName 1 parameter
     . showString " -> "
-    . showsType variableName 0 result
+    . showsTypeWithQualification qualification variableName 0 result
   TupleType boxity elements -> showString $ renderTuple boxity
-    [showsType variableName 0 element "" | element <- elements]
-  ForallType [] [] body -> showsType variableName precedence body
+    [ showsTypeWithQualification qualification variableName 0 element ""
+    | element <- elements
+    ]
+  ForallType [] [] body ->
+    showsTypeWithQualification qualification variableName precedence body
   ForallType variables constraints body -> showParen (precedence > 0)
     $ renderBinders variables
     . renderContext constraints
-    . showsType variableName 0 body
+    . showsTypeWithQualification qualification variableName 0 body
  where
   renderBinders [] = id
   renderBinders variables = showString "forall "
@@ -92,7 +141,8 @@ showsType variableName precedence typeExpression = case typeExpression of
   renderContext [] = id
   renderContext constraints = showChar '('
     . showString (intercalate ", "
-        $ map (renderConstraint variableName) constraints)
+        $ map (renderConstraintWithQualification qualification variableName)
+            constraints)
     . showString ") => "
 
 renderTuple :: Boxity -> [String] -> String

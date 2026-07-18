@@ -233,8 +233,12 @@ The backend render helpers accept `Unqualified`, `QualifyIdentifiers`, or
 `FullyQualified` and return the common `RenderError` type. Exference candidates
 may retain residual class constraints; inspect
 `candidateResidualConstraints` or call
-`renderExferenceResidualConstraints` rather than presenting the generated term
-as obligation-free.
+`renderExferenceResidualConstraintsWithQualification` with the same policy used
+for the candidate rather than presenting the generated term as obligation-free.
+The compatibility helper `renderExferenceResidualConstraints` retains its
+historical fully qualified output. Both helpers use the candidate's validated
+type-variable hints, and the qualification-aware helper applies its policy to
+the class and to every constructor nested in the constraint arguments.
 
 For custom presentation, use `candidateOutput` to obtain the shared
 `FunctionClause` and the operations in

@@ -321,34 +321,43 @@ testResidualConstraintRendering :: Assertion
 testResidualConstraintRendering = withTemporaryEnvironment
     [("Fixture.hs", unlines
       [ "module Fixture where"
+      , "data Box a = Box a"
       , "class C a"
-      , "witness :: C a => a"
+      , "(<+>) :: C (Box a) => Box a"
       ])] $ \directory -> do
-  (exitCode, output, errors) <- runDjex
-    [ "exference", "--environment", directory
-    , "--select", "first"
-    , "--allow-constraints"
-    , "--max-steps", "2048"
-    , "a"
-    ]
-  assertEqual ("residual search stderr: " ++ errors) ExitSuccess exitCode
-  assertContains "residual comment" "-- requires:" output
-  assertContains "residual class" "Fixture.C" output
-  assertContains "residual candidate" "Fixture.witness" output
-  assertBool "residual constraints must not be detached as diagnostics" $
-    not $ "DJEX_EXF_RESIDUAL_CONSTRAINTS" `isInfixOf` errors
-
-  unqualified <- assertSuccess
-    [ "exference", "--environment", directory
-    , "--select", "first"
-    , "--allow-constraints"
-    , "--qualification", "none"
-    , "--max-steps", "2048"
-    , "a"
-    ]
-  assertContains "unqualified candidate" "witness" unqualified
+  unqualified <- search directory "none"
+  assertContains "unqualified residual"
+    "-- requires: C (Box a)" unqualified
+  assertContains "unqualified operator" "(<+>)" unqualified
   assertBool "none qualification retained a global module prefix" $
-    not $ "Fixture.witness" `isInfixOf` unqualified
+    not $ "Fixture." `isInfixOf` unqualified
+
+  identifiers <- search directory "identifiers"
+  assertContains "identifier-qualified residual"
+    "-- requires: Fixture.C (Fixture.Box a)" identifiers
+  assertContains "middle-policy operator" "(<+>)" identifiers
+  assertBool "middle qualification unexpectedly qualified an operator" $
+    not $ "Fixture.<+>" `isInfixOf` identifiers
+
+  fullyQualified <- search directory "full"
+  assertContains "fully qualified residual"
+    "-- requires: Fixture.C (Fixture.Box a)" fullyQualified
+  assertContains "fully qualified operator" "(Fixture.<+>)" fullyQualified
+ where
+  search directory qualification = do
+    (exitCode, output, errors) <- runDjex
+      [ "exference", "--environment", directory
+      , "--select", "first"
+      , "--allow-constraints"
+      , "--qualification", qualification
+      , "--render", "expression"
+      , "--max-steps", "2048"
+      , "Fixture.Box a"
+      ]
+    assertEqual ("residual search stderr: " ++ errors) ExitSuccess exitCode
+    assertBool "residual constraints must not be detached as diagnostics" $
+      not $ "DJEX_EXF_RESIDUAL_CONSTRAINTS" `isInfixOf` errors
+    pure output
 
 assertSuccess :: [String] -> IO String
 assertSuccess arguments = do

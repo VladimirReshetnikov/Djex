@@ -257,7 +257,8 @@ renderExferenceBlock
   -> Either RenderError String
 renderExferenceBlock options candidate = do
   rendered <- renderExference options candidate
-  let constraints = renderExferenceResidualConstraints candidate
+  let constraints = renderExferenceResidualConstraintsWithQualification
+        (commonQualification options) candidate
   pure $ case constraints of
     [] -> rendered
     _ -> "-- requires: " ++ intercalate ", " constraints ++ "\n" ++ rendered

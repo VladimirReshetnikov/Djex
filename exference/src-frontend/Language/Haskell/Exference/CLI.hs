@@ -327,7 +327,8 @@ printCandidate qualification candidate = do
     pure
     $ renderExferenceCandidateExpression qualification candidate
   putStrLn rendered
-  let constraints = renderExferenceResidualConstraints candidate
+  let constraints = renderExferenceResidualConstraintsWithQualification
+        qualification candidate
   unless (null constraints) $ putStrLn
     $ "but only with additional constraints: "
     ++ intercalate ", " constraints

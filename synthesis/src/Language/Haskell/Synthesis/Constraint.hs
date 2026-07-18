@@ -15,6 +15,7 @@ module Language.Haskell.Synthesis.Constraint
   , constraintArity
   , validateKnownConstraintArityWith
   , showsConstraintWith
+  , showsConstraintWithName
   , validateConstraintClassName
   , validateConstraint
   ) where
@@ -94,10 +95,21 @@ showsConstraintWith
   -> Int
   -> Constraint ty
   -> ShowS
-showsConstraintWith showArgument precedence
+showsConstraintWith = showsConstraintWithName renderPrefix
+
+-- | Generalized 'showsConstraintWith' for a surface that owns its class-name
+-- qualification policy.  Separating nominal and argument renderers keeps the
+-- constraint traversal shared without forcing either name policy on callers.
+showsConstraintWithName
+  :: (Name -> String)
+  -> (ty -> ShowS)
+  -> Int
+  -> Constraint ty
+  -> ShowS
+showsConstraintWithName showClassName showArgument precedence
     (Constraint className arguments) =
   showParen (precedence > 0 && not (null arguments)) $
-    showString (renderPrefix className) . foldr renderArgument id arguments
+    showString (showClassName className) . foldr renderArgument id arguments
  where
   renderArgument argument rest =
     showChar ' ' . showArgument argument . rest

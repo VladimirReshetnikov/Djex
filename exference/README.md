@@ -528,7 +528,10 @@ core. It accepts only the opaque, exact-goal-bound source-hint form and returns
 the checked target and logical evidence together with each lazy result batch.
 The stable residual renderer validates bounded hint copies, rejects
 partial/infinite or malformed names, deduplicates preferences, and freshens
-fallbacks. Expression and definition rendering applies the same bounded-copy
+fallbacks. Its qualification-aware entry point applies the generated term's
+exact identifier/operator policy to both class names and nested type names;
+the original no-policy helper remains fully qualified for compatibility.
+Expression and definition rendering applies the same bounded-copy
 rule to caller-built term-local hints while retaining structured lexical
 errors for finite bad names. Candidate projection never traverses the whole
 search. Every canonical result contains a shared `Candidate` whose output is

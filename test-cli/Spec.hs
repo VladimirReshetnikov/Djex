@@ -201,8 +201,7 @@ testExferenceRendering :: Assertion
 testExferenceRendering = do
   definition <- assertSuccess
     ["exference", "--select", "first", "a -> a"]
-  assertContains "Exference definition" "djexResult" definition
-  assertContains "Exference definition body" "\\a -> a" definition
+  assertEqual "Exference promoted definition" "djexResult a = a\n" definition
 
   expression <- assertSuccess
     [ "exference", "--select", "first"

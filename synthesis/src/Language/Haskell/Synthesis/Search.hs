@@ -15,13 +15,21 @@ module Language.Haskell.Synthesis.Search
   , Progress (..)
   , ObservedProgress (..)
   , observeProgress
+  , progressTruncationDiagnostic
   , SearchBatch (..)
   , truncated
   ) where
 
 import Control.DeepSeq (NFData)
+import Data.Foldable (toList)
+import Data.List (intercalate)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import GHC.Generics (Generic)
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic
+  , Severity (Warning)
+  , contextualDiagnostic
+  )
 import Numeric.Natural (Natural)
 
 -- | A distinct reason why unexplored work may remain.
@@ -85,6 +93,20 @@ observeProgress (Just Continuing) = ObservedContinuing
 observeProgress (Just (Completed Finished)) = ObservedFinished
 observeProgress (Just (Completed (Truncated reasons))) =
   ObservedTruncated reasons
+
+-- | Render the standard warning for an observed resource truncation.
+--
+-- Keeping this projection pure and beside 'Progress' gives every command
+-- frontend the same code, message, and complete ordered reason list. A
+-- truncated search may still contain valid candidates, so callers should
+-- emit this diagnostic independently of whether they printed any result.
+progressTruncationDiagnostic :: Maybe Progress -> Maybe Diagnostic
+progressTruncationDiagnostic progress = case observeProgress progress of
+  ObservedTruncated reasons -> Just
+    $ contextualDiagnostic Warning "DJEX_SEARCH_TRUNCATED"
+        "search stopped before exploring all remaining work"
+        (intercalate ", " $ map show $ toList reasons)
+  _ -> Nothing
 
 -- | Common envelope for a chunk of backend-owned candidates and metadata.
 -- The candidate parameter is last so ordinary 'fmap' transforms candidates

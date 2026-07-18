@@ -259,12 +259,7 @@ reportNoExferenceResult progress = emitDiagnostic
     _ -> "Exference found no candidate in the inspected search"
 
 reportTruncation :: Maybe Progress -> IO ()
-reportTruncation progress = case observeProgress progress of
-  ObservedTruncated reasons -> emitDiagnostic
-    $ contextualDiagnostic Warning "DJEX_SEARCH_TRUNCATED"
-        "search stopped before exploring all remaining work"
-        (intercalate ", " $ map show $ toList reasons)
-  _ -> pure ()
+reportTruncation = mapM_ emitDiagnostic . progressTruncationDiagnostic
 
 djinnQueryOptions :: DjinnOptions -> QueryOptions
 djinnQueryOptions options = defaultQueryOptions

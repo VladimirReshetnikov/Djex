@@ -653,8 +653,9 @@ Each returned batch uses the shared checked result boundary to derive
 batch records `NoEvidence` without conflating exhaustion with a proof.
 The shared `Selection` result preserves the last inspected progress alongside
 the selected candidates. The executable therefore validates and runs search
-once, then says when an empty result is conclusive versus when inhabitation
-remains undecided.
+once, reports resource truncation even when useful candidates were printed,
+and says when an empty result is conclusive versus when inhabitation remains
+undecided. A truncation warning does not change the successful process status.
 
 The `exference` executable is a normal build target again. Its implementation
 lives in `Language.Haskell.Exference.CLI`, making the executable component a

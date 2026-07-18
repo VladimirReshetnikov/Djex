@@ -60,6 +60,7 @@ import Language.Haskell.Synthesis.Search
   , batchCandidates
   , batchProgress
   , observeProgress
+  , progressTruncationDiagnostic
   )
 import Language.Haskell.Synthesis.Selection
   ( Selection (..)
@@ -259,11 +260,13 @@ presentResults verbosity flags results = if
       printAllResults qualification results
   | EnvUsage `elem` flags -> do
       when (verbosity > 0) $ putStrLn "[running complete search ..]"
-      let usages = maybe Map.empty exferenceResultBindingUsages
-            $ lastMaybe results
+      let finalResult = lastMaybe results
+          usages = maybe Map.empty exferenceResultBindingUsages finalResult
           highest = take 8 $ sortBy (flip $ comparing snd)
             $ Map.toList usages
       print [(show binding, count) | (binding, count) <- highest]
+      reportTruncation
+        $ batchProgress . resultSearch <$> finalResult
   | otherwise -> do
       when (verbosity > 0) $ putStrLn
         $ "[selecting " ++ selectionDescription flags ++ " ..]"
@@ -295,22 +298,29 @@ qualificationFor flags = case [level | QualificationLevel level <- flags] of
   _ : _ -> FullyQualified
 
 printSelection :: Qualification -> Selection ExferenceCandidate -> IO ()
-printSelection _ (Selection progress []) =
-  putStrLn $ noResultsMessage progress
-printSelection qualification (Selection _ candidates) =
-  mapM_ (printCandidate qualification) candidates
+printSelection qualification (Selection progress candidates) = do
+  case candidates of
+    [] -> putStrLn $ noResultsMessage progress
+    _ -> mapM_ (printCandidate qualification) candidates
+  reportTruncation progress
 
 printAllResults :: Qualification -> [ExferenceResult] -> IO ()
 printAllResults qualification = go Nothing False
  where
-  go progress foundAny [] = unless foundAny $
-    putStrLn $ noResultsMessage progress
+  go progress foundAny [] = do
+    unless foundAny $ putStrLn $ noResultsMessage progress
+    reportTruncation progress
   go _ foundAny (result : results) = do
     let batch = resultSearch result
         candidates = batchCandidates batch
     mapM_ (printCandidate qualification) candidates
     go (Just $ batchProgress batch)
       (foundAny || not (null candidates)) results
+
+reportTruncation :: Maybe Progress -> IO ()
+reportTruncation = mapM_
+  (hPutStrLn stderr . renderDiagnostic)
+  . progressTruncationDiagnostic
 
 printCandidate :: Qualification -> ExferenceCandidate -> IO ()
 printCandidate qualification candidate = do

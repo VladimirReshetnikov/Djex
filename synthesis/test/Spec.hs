@@ -2991,6 +2991,16 @@ searchTests = testGroup "search status"
       _ <- evaluate $ force completion
       completion @?= Truncated
         (QueueLimitPruned 7 :| [DepthLimitPruned 2])
+  , testCase "format truncation through one shared diagnostic" $ do
+      progressTruncationDiagnostic Nothing @?= Nothing
+      progressTruncationDiagnostic (Just Continuing) @?= Nothing
+      progressTruncationDiagnostic (Just $ Completed Finished) @?= Nothing
+      let reasons = QueueLimitPruned 7 :| [DepthLimitPruned 2]
+      progressTruncationDiagnostic
+          (Just $ Completed $ Truncated reasons) @?= Just
+        (contextualDiagnostic Warning "DJEX_SEARCH_TRUNCATED"
+          "search stopped before exploring all remaining work"
+          "QueueLimitPruned 7, DepthLimitPruned 2")
   , testCase "batch functor changes candidates only" $
       fmap (+ 1) (SearchBatch Continuing "stats" [1 :: Int, 2]) @?=
         SearchBatch Continuing "stats" [2, 3]

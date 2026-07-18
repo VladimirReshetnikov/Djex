@@ -57,7 +57,6 @@ import Language.Haskell.Synthesis.Search
   ( ObservedProgress (..)
   , Progress
   , TruncationReason (IdentifierSpaceExhausted, StepLimitReached)
-  , batchCandidates
   , batchProgress
   , observeProgress
   , progressTruncationDiagnostic
@@ -65,6 +64,7 @@ import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
   ( Selection (..)
   , SelectionMode (..)
+  , foldAllQueryResultsM
   , selectPreferredQueryResults
   , selectQueryResults
   )
@@ -305,17 +305,15 @@ printSelection qualification (Selection progress candidates) = do
   reportTruncation progress
 
 printAllResults :: Qualification -> [ExferenceResult] -> IO ()
-printAllResults qualification = go Nothing False
+printAllResults qualification results = do
+  (progress, foundAny) <- foldAllQueryResultsM
+    (const True) printOne False results
+  unless foundAny $ putStrLn $ noResultsMessage progress
+  reportTruncation progress
  where
-  go progress foundAny [] = do
-    unless foundAny $ putStrLn $ noResultsMessage progress
-    reportTruncation progress
-  go _ foundAny (result : results) = do
-    let batch = resultSearch result
-        candidates = batchCandidates batch
-    mapM_ (printCandidate qualification) candidates
-    go (Just $ batchProgress batch)
-      (foundAny || not (null candidates)) results
+  printOne _ candidate = do
+    printCandidate qualification candidate
+    pure True
 
 reportTruncation :: Maybe Progress -> IO ()
 reportTruncation = mapM_

@@ -13,11 +13,13 @@
 module Language.Haskell.Synthesis.Selection
   ( SelectionMode (..)
   , Selection (..)
+  , foldAllQueryResultsM
   , selectQueryResults
   , selectPreferredQueryResults
   ) where
 
 import Control.DeepSeq (NFData)
+import Control.Monad (foldM)
 import qualified Data.List as List
 import GHC.Generics (Generic)
 
@@ -69,6 +71,30 @@ data Selection candidate = Selection
     )
 
 instance NFData candidate => NFData (Selection candidate)
+
+-- | Consume every admissible candidate batch-by-batch in one monadic pass.
+--
+-- Unlike projecting 'SelectAll' and later demanding 'selectionProgress', this
+-- fold does not retain or retraverse the query-result root. The accumulator is
+-- threaded in encounter order and the returned progress belongs to the final
+-- inspected batch. A failing monad short-circuits without forcing the current
+-- candidate tail or any later result, which lets a streaming renderer stop at
+-- its first checked-output failure.
+foldAllQueryResultsM
+  :: Monad action
+  => (candidate -> Bool)
+  -> (state -> candidate -> action state)
+  -> state
+  -> [QueryResult metadata candidate]
+  -> action (Maybe Progress, state)
+foldAllQueryResultsM admissible consume = go Nothing
+ where
+  go progress state [] = pure (progress, state)
+  go _ state (result : results) = do
+    let batch = resultSearch result
+    nextState <- foldM consume state
+      $ filter admissible $ batchCandidates batch
+    go (Just $ batchProgress batch) nextState results
 
 -- | Apply a presentation policy to a lazy query-result trace.
 --

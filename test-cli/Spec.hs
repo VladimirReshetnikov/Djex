@@ -50,6 +50,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testExferenceParseFailure
   , testCase "Exference resource bounds retain successful status"
       testExferenceBounds
+  , testCase "Exference all-selection streams through terminal progress"
+      testExferenceStreamingSelection
   , testCase "residual constraints remain attached to generated code"
       testResidualConstraintRendering
   ]
@@ -296,6 +298,23 @@ testExferenceBounds = withTemporaryEnvironment [] $ \directory -> do
   assertContains "bounded Exference no-result diagnostic"
     "[DJEX_EXF_NO_RESULT]" errors
   assertContains "bounded Exference truncation diagnostic"
+    "[DJEX_SEARCH_TRUNCATED]" errors
+
+testExferenceStreamingSelection :: Assertion
+testExferenceStreamingSelection =
+    withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runDjex
+    [ "exference", "--environment", directory
+    , "--select", "all"
+    , "--max-steps", "5"
+    , "(a -> a) -> a -> a"
+    ]
+  assertEqual "streaming all-selection exit" ExitSuccess exitCode
+  assertEqual "streaming all-selection separators"
+    ( "djexResult f1 = f1\n\n-- or\n\n"
+      ++ "djexResult f1 b = f1 (f1 b)\n"
+    ) output
+  assertContains "streaming terminal truncation"
     "[DJEX_SEARCH_TRUNCATED]" errors
 
 testResidualConstraintRendering :: Assertion

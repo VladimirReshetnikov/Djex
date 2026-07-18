@@ -3125,6 +3125,27 @@ selectionTests = testGroup "result selection"
             , queryResult terminal []
             ]
       complete @?= Selection (Just terminal) [1, 3]
+  , testCase "monadic all-fold streams once and returns terminal progress" $ do
+      let terminal = Completed $ truncated StepLimitReached
+          results =
+            [ queryResult Continuing [1 :: Int, 2]
+            , queryResult terminal [3, 4]
+            ]
+          consume reversed candidate = Right (candidate : reversed)
+            :: Either String [Int]
+      foldAllQueryResultsM odd consume [] results @?=
+        Right (Just terminal, [3, 1])
+
+      let poisoned =
+            [ queryResult Continuing
+                [1 :: Int, 3, error "all-fold forced a failed candidate tail"]
+            , error "all-fold forced a result after failure"
+            ]
+          stop _ candidate
+            | candidate == 3 = Left "stop"
+            | otherwise = Right candidate
+      foldAllQueryResultsM (const True) stop 0 poisoned @?=
+        (Left "stop" :: Either String (Maybe Progress, Int))
   , testCase "best keeps every globally minimal admissible candidate" $ do
       let terminal = Completed $ truncated CandidateLimitReached
           results =

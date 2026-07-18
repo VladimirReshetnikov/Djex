@@ -9,6 +9,8 @@ module Language.Haskell.Djex.CLI
   ) where
 
 import Control.Monad (when)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Foldable (toList)
 import Data.List (intercalate)
 import Data.Maybe (mapMaybe)
@@ -22,7 +24,7 @@ import System.Console.GetOpt
   )
 import System.Environment (getArgs)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess), exitWith)
-import System.IO (hPutStrLn, stderr)
+import System.IO (hFlush, hPutStrLn, stderr, stdout)
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
@@ -180,6 +182,9 @@ presentDjinn options result = case traverse (renderDjinn options) candidates of
   progress = selectionProgress selection
 
 presentExference :: CommonOptions -> [ExferenceResult] -> IO ExitCode
+presentExference options results
+  | commonSelection options == SelectAll =
+      presentAllExference options results
 presentExference options results = case traverse
     (renderExferenceBlock options) candidates of
   Left failure -> renderFailure "DJEX_EXF_RENDER" failure
@@ -196,6 +201,25 @@ presentExference options results = case traverse
     results
   candidates = selectionCandidates selection
   progress = selectionProgress selection
+
+presentAllExference :: CommonOptions -> [ExferenceResult] -> IO ExitCode
+presentAllExference options results = do
+  outcome <- runExceptT $ foldAllQueryResultsM
+    (const True) printOne False results
+  case outcome of
+    Left failure -> renderFailure "DJEX_EXF_RENDER" failure
+    Right (progress, foundAny) -> do
+      when (not foundAny) $ reportNoExferenceResult progress
+      reportTruncation progress
+      pure ExitSuccess
+ where
+  printOne printed candidate = do
+    rendered <- ExceptT $ pure $ renderExferenceBlock options candidate
+    liftIO $ do
+      when printed $ putStrLn "\n-- or\n"
+      putStrLn rendered
+      hFlush stdout
+    pure True
 
 renderDjinn
   :: CommonOptions

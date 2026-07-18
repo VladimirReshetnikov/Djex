@@ -804,6 +804,27 @@ tests = testGroup "Djex facade"
         Left failure ->
           diagnosticCode failure @?= Just "DJEX_EXF_REQUEST"
         Right _ -> fail "Exference accepted an out-of-scope context variable"
+  , testCase "validate Exference contexts in source order" $ do
+      target <- expectRight $ mkIdentifier "orderedContexts"
+      checkedTarget <- expectRight $ mkDefinitionName target
+      invalidClass <- expectRight $ mkIdentifier "notAClass"
+      validClass <- expectRight $ mkIdentifier "C"
+      let variable = TypeVariable $ FlexibleVariable 0
+          invalidTuple = TupleType Boxed [variable]
+          query contexts = QueryRequest
+            { requestTarget = checkedTarget
+            , requestGoal = variable
+            , requestContexts = contexts
+            , requestOptions = defaultExferenceOptions
+            }
+          firstContext = Constraint invalidClass [variable]
+      firstFailure <- case mkExferenceRequest $ query [firstContext] of
+        Left failure -> pure failure
+        Right _ -> fail "Exference accepted an invalid context class"
+      case mkExferenceRequest $ query
+          [firstContext, Constraint validClass [invalidTuple]] of
+        Left failure -> failure @?= firstFailure
+        Right _ -> fail "a later context type hid an earlier class failure"
   , testCase "reject contexts bound only by a nested forall" $ do
       target <- expectRight $ mkIdentifier "nestedConstraint"
       checkedTarget <- expectRight $ mkDefinitionName target

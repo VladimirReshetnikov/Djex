@@ -38,6 +38,7 @@ import Language.Haskell.Exference.Core.Internal.Candidate
   , mkExferenceSourceTypeVariableHints
   , sourceTypeVariableHintGoal
   )
+import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
@@ -146,7 +147,19 @@ normalizeRequest
   -> Either Diagnostic (QueryRequest ExferenceType ExferenceOptions)
 normalizeRequest = traverseRequestTypes
   (\site -> first (invalidRequestType site) . toSynthesisType)
-  pure
+  validateRequestConstraint
+
+-- Type arguments have just crossed the checked native-type boundary. Finish
+-- each complete constraint here, before traversing the next context, so the
+-- shared request traversal's source-order failure contract is not weakened by
+-- a later whole-request validation pass.
+validateRequestConstraint
+  :: SharedConstraint.Constraint ExferenceType
+  -> Either Diagnostic (SharedConstraint.Constraint ExferenceType)
+validateRequestConstraint constraint = case
+    SharedConstraint.validateConstraint constraint of
+  Left failure -> Left $ invalidRequest failure
+  Right () -> Right constraint
 
 invalidRequestType
   :: Show failure
@@ -187,10 +200,6 @@ validateRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ()
 validateRequest query = do
-  either
-    (Left . invalidRequest)
-    Right
-    $ SharedType.validateType $ requestContextualType query
   let goalVariables = inScopeContextVariables $ requestGoal query
       contextVariables = foldMap SharedType.constraintFreeVariables
         $ requestContexts query

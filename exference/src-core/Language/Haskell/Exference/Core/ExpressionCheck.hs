@@ -27,6 +27,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data ExpressionCheckError
@@ -249,8 +250,7 @@ validateCheckInputs
   -> Either ExpressionCheckError ()
 validateCheckInputs classEnvironment functions deconstructors goal expected
     expression = do
-  case validateEnvironmentBindingIdentities $ EnvDictionary
-      functions deconstructors $ qClassEnv_env classEnvironment of
+  case validateEnvironmentBindingIdentities rawEnvironment of
     Left failure -> Left $ InvalidCheckEnvironmentBindings failure
     Right () -> Right ()
   validateType goal
@@ -261,8 +261,15 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
   mapM_ validateFunction functions
   mapM_ validateDeconstructorTypes deconstructors
   mapM_ (validateType . snd) $ expressionTypedLocals expression
+  case firstUnsupportedForall rawEnvironment classEnvironment goal expected
+      expression of
+    Nothing -> Right ()
+    Just quantified -> Left $ UnsupportedNestedForall quantified
   mapM_ validateDeconstructor deconstructors
  where
+  rawEnvironment = EnvDictionary
+    functions deconstructors $ qClassEnv_env classEnvironment
+
   validateType typeExpression = case toSynthesisType typeExpression of
     Left failure -> Left $ InvalidCheckType typeExpression failure
     Right _ -> Right ()
@@ -293,6 +300,37 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
       validateDeconstructorBinding deconstructor of
     Left failure -> Left $ InvalidCheckDeconstructor failure
     Right () -> Right ()
+
+-- Search supports a leading prenex query spine, but every environment binding,
+-- constraint argument, and generated local annotation must be a monotype.
+-- Inspect the complete raw environment even when the expression does not use
+-- a declaration: otherwise checking could certify a value for an environment
+-- that the search boundary itself cannot seal.
+firstUnsupportedForall
+  :: EnvDictionary
+  -> QueryClassEnv
+  -> HsType
+  -> [HsConstraint]
+  -> Expression
+  -> Maybe HsType
+firstUnsupportedForall environment classEnvironment goal expected expression =
+  SharedCollection.firstPresent
+    [ if containsNestedForall goal then Just goal else Nothing
+    , firstTypeForall $ map functionBindingType
+        $ environmentFunctions environment
+    , firstTypeForall $ map deconstructorBindingType
+        $ environmentDeconstructors environment
+    , firstConstraintForall $ map snd $ environmentConstraints environment
+    , firstConstraintForall expected
+    , firstConstraintForall $ Set.toAscList
+        $ qClassEnv_constraints classEnvironment
+    , firstTypeForall $ map snd $ expressionTypedLocals expression
+    ]
+ where
+  firstTypeForall = SharedCollection.firstPresent
+    . map SharedType.firstForallType
+  firstConstraintForall = firstTypeForall
+    . concatMap constraint_params
 
 throwCheck :: ExpressionCheckError -> Check a
 throwCheck = lift . Left

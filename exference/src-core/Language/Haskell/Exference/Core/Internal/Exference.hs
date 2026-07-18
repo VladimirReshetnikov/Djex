@@ -1102,31 +1102,6 @@ queryConstraints query =
   | constraint <- typeConstraints $ queryGoalType query
   ]
 
--- Associate every explicit constraint with the site already used by class
--- validation. StaticClassEnv is opaque, but its public observations let the
--- search boundary also check superclass and instance argument types rather
--- than assuming that nominal environment validation implies rank support.
-environmentConstraints :: EnvDictionary -> [(ConstraintSite, HsConstraint)]
-environmentConstraints environment =
-  [ (BindingConstraint $ functionName binding, constraint)
-  | binding <- environmentFunctions environment
-  , constraint <- functionConstraints binding
-  ] ++
-  [ (ClassSuperclass $ tclass_name declaration, constraint)
-  | declaration <- M.elems
-      $ sClassEnv_tclasses $ environmentClasses environment
-  , constraint <- tclass_constraints declaration
-  ] ++ concatMap instanceConstraints
-    (sClassEnv_explicitInstances $ environmentClasses environment)
- where
-  instanceConstraints instanceDeclaration =
-    (InstanceHead, instance_head instanceDeclaration)
-    : [ (InstancePrerequisite headName, prerequisite)
-      | prerequisite <- instance_constraints instanceDeclaration
-      ]
-   where
-    headName = constraint_tclass $ instance_head instanceDeclaration
-
 -- | Merge a generated frontier without ever overflowing pqueue's internal
 -- Int size. The ordinary branch deliberately retains the historical
 -- construction and tie behavior. The fallback is reachable in tests through

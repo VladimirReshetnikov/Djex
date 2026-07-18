@@ -14,6 +14,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , deconstructorBindingType
   , deconstructorBindingTypes
   , environmentBindingTypes
+  , environmentConstraints
   , mapFunctionBindingTypes
   , mapDeconstructorBindingTypes
   , validateEnvironmentBindingIdentities
@@ -24,6 +25,7 @@ where
 import Control.DeepSeq (NFData (..))
 import Data.Foldable (traverse_)
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
@@ -251,3 +253,34 @@ environmentBindingTypes environment =
   concatMap functionBindingTypes (environmentFunctions environment)
   ++ concatMap deconstructorBindingTypes
       (environmentDeconstructors environment)
+
+-- | Every explicit constraint in an environment, paired with the lookup site
+-- used by class validation and diagnostics.
+--
+-- Function constraints are followed by class superclasses and then instance
+-- heads/prerequisites. Keeping this projection beside 'EnvDictionary' gives
+-- search sealing and independent expression checking the same complete view;
+-- neither has to assume that nominal 'StaticClassEnv' validation also enforces
+-- its own rank restrictions.
+environmentConstraints
+  :: EnvDictionary
+  -> [(ConstraintSite, HsConstraint)]
+environmentConstraints environment =
+  [ (BindingConstraint $ functionName binding, constraint)
+  | binding <- environmentFunctions environment
+  , constraint <- functionConstraints binding
+  ] ++
+  [ (ClassSuperclass $ tclass_name declaration, constraint)
+  | declaration <- Map.elems
+      $ sClassEnv_tclasses $ environmentClasses environment
+  , constraint <- tclass_constraints declaration
+  ] ++ concatMap instanceConstraints
+    (sClassEnv_explicitInstances $ environmentClasses environment)
+ where
+  instanceConstraints instanceDeclaration =
+    (InstanceHead, instance_head instanceDeclaration)
+    : [ (InstancePrerequisite headName, prerequisite)
+      | prerequisite <- instance_constraints instanceDeclaration
+      ]
+   where
+    headName = constraint_tclass $ instance_head instanceDeclaration

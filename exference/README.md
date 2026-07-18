@@ -200,10 +200,13 @@ The independent generated-expression checker validates every reachable native
 type and constraint before inference. Its raw environment must also have
 unique function, constructor, and datatype-eliminator identities; the same
 validator runs during live search sealing, so neither path can resolve an
-ambiguous name by list order. The checker uses the same higher-kinded view of
-structural functions and tuples as search, while tuple complexity replays the
-historical left-associated constructor/application accumulation exactly so
-floating-point rounding and saturation cannot perturb queue order.
+ambiguous name by list order. Unsupported nested quantifiers are rejected
+across unused bindings, datatype fields, the complete class/instance
+environment, expected constraints, and generated annotations rather than only
+when inference happens to reach them. The checker uses the same higher-kinded
+view of structural functions and tuples as search, while tuple complexity
+replays the historical left-associated constructor/application accumulation
+exactly so floating-point rounding and saturation cannot perturb queue order.
 
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration

@@ -65,6 +65,7 @@ import Language.Haskell.Exference.Core.Expression
   )
 import Language.Haskell.Exference.Core.ExpressionCheck
   hiding (UnsupportedNestedForall)
+import qualified Language.Haskell.Exference.Core.ExpressionCheck as ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
@@ -76,6 +77,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , deconstructorBindingType
   , deconstructorBindingTypes
   , environmentBindingTypes
+  , environmentConstraints
   , functionBindingFromType
   , functionBindingSignature
   , functionBindingType
@@ -6396,6 +6398,48 @@ tests = testGroup "Exference"
             (TypeArrow duplicateType duplicateType) [] expression @?= Left
               (InvalidCheckEnvironmentBindings
                 $ DuplicateDeconstructorIdentities [name "Duplicate"])
+      , testCase "rejects unused nested-forall environment capabilities" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              polymorphic = TypeForall [0] [] $ TypeVar 0
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+              nestedName = name "nested"
+              nestedFunction = FunctionBinding
+                polymorphic nestedName 0 [] []
+              boxType = TypeApp (TypeCons $ name "Box") $ TypeVar 0
+              nestedDeconstructor = DeconstructorBinding boxType
+                [ConstructorBinding (name "Nested") [polymorphic]] False
+              checked functions deconstructors = checkExpression
+                (mkQueryClassEnv staticClasses []) functions deconstructors
+                integer [] $ ExpName seedName
+          checked [nestedFunction, seed] [] @?=
+            Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
+          checked [seed] [nestedDeconstructor] @?=
+            Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
+      , testCase "rejects nested foralls in the complete class environment" $ do
+          let className = name "C"
+              polymorphic = TypeForall [1] [] $ TypeVar 1
+              headConstraint = HsConstraint className [polymorphic]
+              instanceDeclaration = HsInstance [] headConstraint
+              integer = TypeCons $ name "Int"
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+          staticClasses <- expectRight $ mkStaticClassEnv
+            [HsTypeClass className [0] []] [instanceDeclaration]
+          map snd (environmentConstraints
+              $ EnvDictionary [] [] staticClasses) @?= [headConstraint]
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [seed] [] integer [] (ExpName seedName) @?=
+              Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
+      , testCase "rejects nested foralls in generated annotations" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let polymorphic = TypeForall [0] [] $ TypeVar 0
+              integer = TypeCons $ name "Int"
+              expression = ExpLambda 1 polymorphic $ ExpVar 1 polymorphic
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow integer integer) [] expression @?=
+              Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
       , testCase "empty cases require a matching empty deconstructor" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let emptyType = TypeCons $ name "Empty"

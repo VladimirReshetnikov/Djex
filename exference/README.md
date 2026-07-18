@@ -33,7 +33,7 @@ Cabal 3.16.1.0. Cabal is the maintained build path; the historical Stack file
 targeted LTS 5.18 and
 dependencies that no longer exist in this tree, so it has been removed rather
 than pretending to provide a second supported toolchain. Run these commands
-from the repository root or `djex/`:
+from the repository root:
 
 ```console
 cabal build djex:lib:djex djex:exe:exference

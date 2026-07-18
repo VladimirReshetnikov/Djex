@@ -1,0 +1,213 @@
+# Djex library quick start
+
+This guide uses the checked Djex APIs. Historical Djinn and Exference modules
+remain importable for compatibility, but new integrations should build around a
+sealed session, a checked request, and the shared result envelope.
+
+## Build and install
+
+Djex currently supports GHC 9.12.4. From the repository root:
+
+```console
+cabal build all
+cabal test all --test-show-details=direct
+```
+
+Run without installing:
+
+```console
+cabal run exe:djex -- djinn --render expression "a -> a"
+cabal run exe:djex -- exference --select first "a -> a"
+```
+
+Or install the three commands into Cabal's executable directory:
+
+```console
+cabal install exe:djex exe:djinn exe:exference
+```
+
+A downstream Cabal component needs one dependency:
+
+```cabal
+build-depends: djex
+```
+
+## Choose a backend
+
+| Requirement | Djinn | Exference |
+| --- | --- | --- |
+| Terminating unbudgeted search for the supported logic | Yes | No |
+| Proof-backed non-inhabitation result | Yes | No |
+| Ranked heuristic candidates | No | Yes |
+| Explicit prenex polymorphism | No | Yes |
+| Type-class participation | Declared methods as proof assumptions | Class/instance-aware heuristic search |
+| Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
+
+Neither backend guesses the other's semantics. The merged command and library
+make the selection explicit.
+
+## Common lifecycle
+
+Both checked adapters follow the same shape:
+
+1. Build or load a neutral declaration environment and seal a backend session.
+2. Parse or construct a `QueryRequest`, then cross the backend's smart
+   constructor to obtain an opaque checked request.
+3. Run the request against a session.
+4. Inspect `resultEvidence` independently from `batchProgress`.
+5. Select candidates with `selectQueryResults` and render them through the
+   backend convenience renderer or the shared generated-code renderer.
+
+Parsing and source loading return structured `Diagnostic` values. Use
+`renderDiagnostic` for compiler-shaped text, but retain the structure when an
+editor or service can present codes, spans, and context separately.
+
+## Djinn example
+
+This function uses the standard Djinn environment, parses the contextual Djinn
+type grammar, runs one checked query, and renders every returned candidate:
+
+```haskell
+import Data.Bifunctor (first)
+import Language.Haskell.Djex
+
+djinnDefinitions :: String -> Either String [String]
+djinnDefinitions source = do
+  session <- first renderDiagnostic standardDjinnSession
+  target <- first show $ mkIdentifier "result"
+  request <- first renderDiagnostic $
+    parseDjinnRequest
+      session defaultQueryOptions target "<memory>" source
+  result <- first renderDiagnostic $ runDjinnQuery session request
+  traverse
+    (first show . renderDjinnCandidateDefinition FullyQualified)
+    (batchCandidates $ resultSearch result)
+```
+
+For example, `djinnDefinitions "(a, b) -> (b, a)"` returns a checked definition
+for `result`. An empty candidate list must be interpreted together with
+`resultEvidence` and `batchProgress`: Djinn may have proved the goal
+uninhabited, found that only a target self-reference works, or stopped at a
+budget.
+
+Use `mkDjinnSession` for a caller-built
+`Environment DjinnTypeVariable Void ()`. `declareDjinnDeclaration` and
+`removeDjinnDeclaration` provide transactional edits that reseal the session
+before publishing a replacement.
+
+## Exference example without a parser
+
+The parser-neutral adapter accepts the same shared `Environment` and `Type`
+vocabulary. This example uses an empty environment and asks for the identity
+function:
+
+```haskell
+import Data.Bifunctor (first)
+import Language.Haskell.Djex
+
+exferenceDefinitions :: Either String [String]
+exferenceDefinitions = do
+  environment <- first show $ mkEnvironment []
+  session <- first renderDiagnostic $ mkExferenceSession environment
+  name <- first show $ mkIdentifier "result"
+  target <- first show $ mkDefinitionName name
+  let variable = FlexibleVariable 0
+      goal = FunctionType (TypeVariable variable) (TypeVariable variable)
+      query = QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+        }
+  request <- first renderDiagnostic $ mkExferenceRequest query
+  results <- first renderDiagnostic $ runExferenceQuery session request
+  let selected = selectQueryResults
+        SelectFirst (const ()) (const True) results
+  traverse
+    (first show . renderExferenceCandidateDefinition FullyQualified)
+    (selectionCandidates selected)
+```
+
+`runExferenceQuery` returns a lazy sequence of result batches. Selection is a
+separate presentation policy, so a caller can take the first candidate, retain
+all globally best candidates, use bounded lookahead, or stream every admissible
+candidate without changing search semantics.
+
+## Loading an Exference source environment
+
+Import the explicit source boundary in addition to the neutral adapter:
+
+```haskell
+import Language.Haskell.Djex.Exference
+import Language.Haskell.Djex.Exference.HaskellSrc
+```
+
+`loadExferenceSession directory` parses an explicit directory's Haskell modules
+and ratings, validates the complete shared inventory, and returns an
+`ExferenceSessionLoadReport`. `loadDefaultExferenceSession` does the same for
+Djex's installed environment; `defaultExferenceEnvironmentPath` exposes that
+resolved path when an application needs to display or inspect it. The
+policy-aware default loader is `loadDefaultExferenceSessionWithPolicy`.
+
+Always inspect both report fields:
+
+- `exferenceSessionLoadResult` contains either fatal diagnostics or the sealed
+  session;
+- `exferenceSessionLoadDiagnostics` contains warnings and informational
+  diagnostics produced while loading and sealing.
+
+With a session, use
+`parseExferenceRequest session options target sourceName sourceText` so type
+names, class arities, synonyms, source spellings, and later diagnostic spans all
+come from the same checked inventory.
+
+The `djex` and `exference` executables use the same default-path operation.
+Cabal's generated `Paths_djex` module remains private; applications do not need
+to import a package-specific generated module. From a source checkout, the
+bundled directory is `exference/environment`.
+
+## Reading results correctly
+
+`QueryEvidence` and `Progress` answer different questions:
+
+- `ValidatedCandidates` means the same result batch contains at least one
+  independently checked candidate.
+- `ProvedUninhabitable` is a logical Djinn conclusion, not an empty-list alias.
+- `RequiresTargetReference` means a safe nonrecursive definition was excluded.
+- `NoEvidence` makes no logical claim.
+- `Completed Finished` means the configured exploration ended normally.
+- `Completed (Truncated reasons)` records resource limits such as step,
+  candidate, choice-point, queue, depth, or identifier-space limits.
+- `Continuing` means more batches may follow.
+
+A truncated batch can still contain useful validated candidates. Conversely, a
+finished Exference batch with no candidates is not a proof of non-inhabitation.
+Frontends should preserve both dimensions.
+
+## Rendering and residual constraints
+
+The backend render helpers accept `Unqualified`, `QualifyIdentifiers`, or
+`FullyQualified` and return the common `RenderError` type. Exference candidates
+may retain residual class constraints; inspect
+`candidateResidualConstraints` or call
+`renderExferenceResidualConstraints` rather than presenting the generated term
+as obligation-free.
+
+For custom presentation, use `candidateOutput` to obtain the shared
+`FunctionClause` and the operations in
+`Language.Haskell.Synthesis.Generated`. Scope validation and collision-safe
+local naming remain part of that shared rendering boundary.
+
+## Import guidance
+
+- Start with `Language.Haskell.Djex` for a compact application or an API tour.
+- Prefer explicit `Language.Haskell.Djex.Djinn` and
+  `Language.Haskell.Djex.Exference` imports in larger modules to make backend
+  ownership obvious.
+- Import `Language.Haskell.Synthesis.*` modules directly when defining reusable
+  neutral infrastructure.
+- Use historical `Djinn*` or `Language.Haskell.Exference*` modules only when
+  maintaining a compatibility integration.
+
+See [the architecture guide](architecture.md) for the stability tiers and
+[the synthesis API map](../synthesis/README.md) for the neutral modules.

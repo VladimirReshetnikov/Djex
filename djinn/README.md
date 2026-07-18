@@ -42,8 +42,7 @@ the editable neutral environment only for transactional REPL edits.
 
 Djinn is part of the unified `djex` Cabal package and is tested with the
 supported GHC 9.12.4 toolchain using Cabal 3.16.1.0. Run these commands from
-the repository root
-or `djex/`:
+the repository root:
 
 ```console
 cabal build djex:lib:djex djex:exe:djinn
@@ -81,10 +80,10 @@ cabal test djinn-tests djinn-property-tests djinn-frontend-api-tests djinn-cli-t
 
 | Suite | Scope |
 | --- | --- |
-| `djinn-tests` | 64 focused Tasty/HUnit regressions over parsing, type/kind representation and compatibility, declaration token boundaries, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
+| `djinn-tests` | Focused Tasty/HUnit regressions over parsing, type/kind representation and compatibility, declaration token boundaries, the raw HCheck boundary, class signatures, neutral-environment sealing and cache invalidation, proof search/checking, budgets, rendering, declaration namespaces, built-ins, identifiers, and the `Djinn.Core` facade. |
 | `djinn-property-tests` | Four QuickCheck properties, 200 generated cases each (a floor; raise it with `--test-options='--quickcheck-tests=N'`), covering proof production/checking/rendering, arbitrary identity, budgeted-search honesty, and `HType` display/parser round-trips. |
-| `djinn-frontend-api-tests` | Three import checks proving that the single `djex` dependency exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn` together. |
-| `djinn-cli-tests` | Nineteen subprocess scenarios against the packaged executable, including EOF, explicit RTS tuning, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
+| `djinn-frontend-api-tests` | Import checks proving that the single `djex` dependency exposes `Djinn`, `Djinn.Core`, and `Language.Haskell.Djex.Djinn` together. |
+| `djinn-cli-tests` | Subprocess scenarios against the packaged executable, including EOF, explicit RTS tuning, diagnostics, parser recovery and token boundaries, missing startup files, mutation rollback, budget expiry, kind enforcement, atomic instance output, stateful query behavior, argument permutation, and aggregate batch status. |
 
 Each suite can be selected independently, and Tasty patterns can isolate one
 named test. For example:
@@ -98,8 +97,9 @@ The proof/search engine lives in `djinn/src-core`; the historical API and REPL
 live in `djinn/src-frontend`. Both roots now compile into the single `djex`
 library, which exposes `Djinn`, `Djinn.Core`, the checked
 `Language.Haskell.Djex.Djinn` adapter, and the formerly public research modules.
-Its curated `Language.Haskell.Djex` module still re-exports only the checked
-adapter. HPC coverage is available for
+Its curated `Language.Haskell.Djex` module re-exports the checked adapters and
+shared synthesis vocabulary; the Haskell-source extension remains an explicit
+import. HPC coverage is available for
 the in-process unit and property suites:
 
 ```console

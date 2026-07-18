@@ -11,6 +11,26 @@ engines, their compatibility frontends, and a shared parser-independent
 synthesis foundation compile into one Cabal package with a single library,
 version, and dependency contract.
 
+## Start here
+
+- To try the commands, continue with [Building](#building) and the
+  [unified-command guide](#unified-command).
+- To embed Djex, use the runnable
+  [library quick start and API guide](docs/library-api.md).
+- To understand ownership, dependency direction, and which modules are stable
+  checked surfaces versus compatibility or implementation APIs, read the
+  [architecture guide](docs/architecture.md).
+- For a concise map of the neutral modules, see the
+  [shared synthesis foundation](synthesis/README.md).
+
+New library code should start with `Language.Haskell.Djex`, a narrower checked
+backend adapter, or a focused `Language.Haskell.Synthesis.*` import. The package
+also exposes historical Djinn and Exference research modules for source
+compatibility; an exposed `.Internal.` module belongs to that compatibility
+tier, not to the curated stability boundary. Cabal `Other-Modules` remain
+private. Djex is currently marked experimental; the architecture guide records
+these tiers explicitly.
+
 ## Components
 
 - The unnamed `djex` library is the complete product, compiled from `src/`,
@@ -46,6 +66,13 @@ Build and test the complete graph from the repository root:
 ```console
 cabal build all
 cabal test all --test-show-details=direct
+```
+
+Install the merged command and both historical command names into Cabal's
+executable directory with:
+
+```console
+cabal install exe:djex exe:djinn exe:exference
 ```
 
 The package is tested warning-clean on GHC 9.12.4, the active toolchain
@@ -471,9 +498,11 @@ uses `src/`, `app/`, `test-integration/`, `test-api/`, and `test-cli/`.
 
 Package-generated code imports `Paths_djex` instead of `Paths_djinn` or
 `Paths_exference`; version discovery and installed-data lookup belong to
-Djex as a whole. Exference's installed environment is a Djex data
-directory: use `getDataFileName "exference/environment"` from `Paths_djex`
-rather than assuming a checkout-relative path or the old package data root.
+Djex as a whole. Exference's installed environment is a Djex data directory.
+Checked library clients use `defaultExferenceEnvironmentPath`,
+`loadDefaultExferenceSession`, or its policy-aware counterpart from
+`Language.Haskell.Djex.Exference.HaskellSrc`; Cabal's generated `Paths_djex`
+module remains a private packaging detail.
 
 ## License and credits
 

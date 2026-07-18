@@ -39,6 +39,7 @@ data ExpressionCheckError
   | FlexibleIdentifierSupplyExhausted
   | InvalidCheckType HsType SynthesisTypeError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
+  | InvalidCheckClassConstraint ClassEnvError
   deriving (Eq, Show)
 
 data CheckState = CheckState
@@ -210,8 +211,9 @@ validateCheckInputs
 validateCheckInputs classEnvironment functions deconstructors goal expected
     expression = do
   validateType goal
-  mapM_ validateConstraint expected
-  mapM_ validateConstraint $ Set.toAscList
+  validateClassConstraints QueryConstraint $ typeConstraints goal
+  mapM_ (validateConstraint QueryConstraint) expected
+  mapM_ (validateConstraint QueryConstraint) $ Set.toAscList
     $ qClassEnv_constraints classEnvironment
   mapM_ validateFunction functions
   mapM_ validateDeconstructor deconstructors
@@ -221,14 +223,25 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     Left failure -> Left $ InvalidCheckType typeExpression failure
     Right _ -> Right ()
 
-  validateConstraint constraint = case toSynthesisConstraint constraint of
-    Left failure -> Left $ InvalidCheckConstraint constraint failure
-    Right _ -> Right ()
+  validateConstraint site constraint = do
+    case toSynthesisConstraint constraint of
+      Left failure -> Left $ InvalidCheckConstraint constraint failure
+      Right _ -> Right ()
+    validateClassConstraint site constraint
+
+  validateClassConstraint site constraint = case validateKnownConstraintInEnv
+      (qClassEnv_env classEnvironment) site constraint of
+    Left failure -> Left $ InvalidCheckClassConstraint failure
+    Right () -> Right ()
+
+  validateClassConstraints site = mapM_ $ validateClassConstraint site
 
   validateFunction binding = do
     validateType $ functionResult binding
     mapM_ validateType $ functionParameters binding
-    mapM_ validateConstraint $ functionConstraints binding
+    let site = BindingConstraint $ functionName binding
+    mapM_ (validateConstraint site) $ functionConstraints binding
+    validateClassConstraints site $ typeConstraints $ functionBindingType binding
 
   validateDeconstructor = mapM_ validateType . deconstructorBindingTypes
 

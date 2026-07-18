@@ -6220,6 +6220,70 @@ tests = testGroup "Exference"
           checkExpression (mkQueryClassEnv staticClasses [])
             [showBinding, pairBinding] [] stringType expected expression
             @?= Right ()
+      , testCase "rejects malformed known query assumptions" $ do
+          let className = name "C"
+              malformed = HsConstraint className []
+              integer = TypeCons $ name "Int"
+              bindingName = name "constrained"
+              binding = FunctionBinding integer bindingName 0
+                [malformed] []
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          checkExpression (mkQueryClassEnv staticClasses [malformed])
+            [binding] [] integer [] (ExpName bindingName)
+            @?= Left (InvalidCheckClassConstraint
+              $ ConstraintArityMismatch QueryConstraint className 1 0)
+      , testCase "rejects malformed known binding constraints" $ do
+          let className = name "C"
+              malformed = HsConstraint className []
+              integer = TypeCons $ name "Int"
+              malformedName = name "malformed"
+              malformedBinding = FunctionBinding integer malformedName 0
+                [malformed] []
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [malformedBinding, seed] [] integer [] (ExpName seedName)
+            @?= Left (InvalidCheckClassConstraint
+              $ ConstraintArityMismatch
+                  (BindingConstraint malformedName) className 1 0)
+      , testCase "rejects malformed known goal constraints" $ do
+          let className = name "C"
+              malformed = HsConstraint className []
+              integer = TypeCons $ name "Int"
+              goal = TypeForall [] [malformed] integer
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [seed] [] goal [] (ExpName seedName)
+            @?= Left (InvalidCheckClassConstraint
+              $ ConstraintArityMismatch QueryConstraint className 1 0)
+      , testCase "rejects malformed known expected constraints" $ do
+          let className = name "C"
+              malformed = HsConstraint className []
+              integer = TypeCons $ name "Int"
+              bindingName = name "constrained"
+              binding = FunctionBinding integer bindingName 0
+                [malformed] []
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [binding] [] integer [malformed] (ExpName bindingName)
+            @?= Left (InvalidCheckClassConstraint
+              $ ConstraintArityMismatch QueryConstraint className 1 0)
+      , testCase "retains unknown classes as nominal constraints" $ do
+          let external = HsConstraint (name "External") []
+              integer = TypeCons $ name "Int"
+              bindingName = name "externalValue"
+              binding = FunctionBinding integer bindingName 0 [external] []
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          checkExpression (mkQueryClassEnv staticClasses [external])
+            [binding] [] integer [] (ExpName bindingName)
+            @?= Right ()
       , testCase "checks structural tuples against constructor applications" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           pairName <- expectRight $ mkBoxedTupleName 2

@@ -23,14 +23,16 @@ Copyright:
   Copyright (C) 2014-2017 Lennart Spitzner
   Copyright (c) 2026 Djex Contributors
 
-Extra-Source-Files:
+Extra-Doc-Files:
   README.md
   docs/*.md
-  docs/reports/*.md
   synthesis/README.md
   djinn/README.md
-  djinn/docs/reports/*.md
   exference/README.md
+
+Extra-Source-Files:
+  docs/reports/*.md
+  djinn/docs/reports/*.md
   exference/docs/reports/*.md
   exference/docs/hcar/*.tex
   exference/notes.txt

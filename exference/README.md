@@ -9,9 +9,12 @@ Output: `\b -> fmap (\g -> show (b g))`
 [Djinn](https://hackage.haskell.org/package/djinn) is a well known tool that
 does something similar; the main difference is that *Exference* supports a
 larger subset of the haskell type system - most prominently type classes. This
-comes at a cost, however: *Exference* makes no promise regarding termination.
-Where *Djinn* tells you "there are no solutions", exference will keep trying,
-sometimes stopping with "i could not find any solutions".
+comes at a cost, however: Exference is a bounded heuristic search rather than
+an inhabitation decision procedure. Every checked query has a positive step
+limit and terminates, and accepted nominal instance rules have a separate
+termination check. Exhausting those configured bounds without a candidate is
+still not a proof that the requested Haskell type is uninhabited; Djinn can
+make that stronger claim for the intuitionistic fragment its prover supports.
 
 ## References and environment
 

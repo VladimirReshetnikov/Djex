@@ -73,6 +73,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
   , EnvironmentDuplicateError (..)
+  , EnvironmentRatingError (..)
   , EnvironmentSyntaxError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
@@ -6458,6 +6459,34 @@ tests = testGroup "Exference"
             (InvalidCheckEnvironmentSyntax
               $ InvalidConstructorBindingSyntax invalidConstructorName
               $ Generated.InvalidConstructorPattern invalidConstructorName)
+      , testCase "shares signed-finite environment ratings with search" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+              invalidName = name "unusedInvalidRating"
+              invalidPenalty = Penalty $ 0 / 0
+              invalid = FunctionBinding
+                integer invalidName invalidPenalty [] []
+              checked binding = checkExpression
+                (mkQueryClassEnv staticClasses []) [seed, binding] []
+                integer [] $ ExpName seedName
+          case checked invalid of
+            Left (InvalidCheckEnvironmentRatings
+                (NonFiniteFunctionRating actualName (Penalty value))) -> do
+              actualName @?= invalidName
+              assertBool "checker rating failure lost NaN" $ isNaN value
+            result -> fail $ "checker accepted an unused non-finite rating: "
+              ++ show result
+          case mkExferenceEnvironment
+              $ EnvDictionary [seed, invalid] [] staticClasses of
+            Left (InvalidHeuristic field (Penalty value)) -> do
+              field @?= show invalidName
+              assertBool "search rating failure lost NaN" $ isNaN value
+            Left failure -> fail $ "unexpected search rating failure: "
+              ++ show failure
+            Right _ -> fail "search accepted a non-finite rating"
+          checked invalid {functionPenalty = Penalty (-3.5)} @?= Right ()
       , testCase "rejects duplicate generated pattern binders" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"

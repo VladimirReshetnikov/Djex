@@ -50,6 +50,7 @@ data ExpressionCheckError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
   | InvalidCheckClassConstraint ClassEnvError
   | InvalidCheckEnvironmentBindings EnvironmentDuplicateError
+  | InvalidCheckEnvironmentRatings EnvironmentRatingError
   | InvalidCheckEnvironmentSyntax EnvironmentSyntaxError
   | InvalidCheckExpressionScope (SharedGenerated.ScopeError TVarId)
   | InvalidCheckExpressionSyntax SharedGenerated.RenderError
@@ -276,6 +277,9 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     expression = do
   case validateEnvironmentBindingIdentities rawEnvironment of
     Left failure -> Left $ InvalidCheckEnvironmentBindings failure
+    Right () -> Right ()
+  case validateEnvironmentBindingRatings rawEnvironment of
+    Left failure -> Left $ InvalidCheckEnvironmentRatings failure
     Right () -> Right ()
   case validateEnvironmentBindingSyntax rawEnvironment of
     Left failure -> Left $ InvalidCheckEnvironmentSyntax failure

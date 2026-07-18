@@ -900,14 +900,11 @@ validateOptionsHeuristics options
 validateEnvironmentRatingsAndSyntax
   :: EnvDictionary
   -> Either ExferenceInputError ()
-validateEnvironmentRatingsAndSyntax environment
-  -- Historical function ratings are signed: negative values are bonuses.
-  -- Query heuristic penalties remain non-negative, but conflating the two
-  -- policies would make the shipped environment fail validation.
-  | Just binding <- find (not . isFiniteScore . functionPenalty)
-      (environmentFunctions environment) = Left $ InvalidHeuristic
-        (show $ functionName binding) (functionPenalty binding)
-  | otherwise = case validateEnvironmentBindingSyntax environment of
+validateEnvironmentRatingsAndSyntax environment =
+  case validateEnvironmentBindingRatings environment of
+    Left (NonFiniteFunctionRating name penalty) ->
+      Left $ InvalidHeuristic (show name) penalty
+    Right () -> case validateEnvironmentBindingSyntax environment of
       Left (InvalidFunctionBindingSyntax name syntaxError) ->
         Left $ InvalidGeneratedBinding name syntaxError
       Left (InvalidConstructorBindingSyntax name syntaxError) ->

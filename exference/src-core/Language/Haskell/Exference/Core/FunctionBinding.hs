@@ -5,6 +5,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , DeconstructorValidationError (..)
   , EnvironmentDuplicateError (..)
+  , EnvironmentRatingError (..)
   , EnvironmentSyntaxError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
@@ -19,6 +20,7 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , mapFunctionBindingTypes
   , mapDeconstructorBindingTypes
   , validateEnvironmentBindingIdentities
+  , validateEnvironmentBindingRatings
   , validateEnvironmentBindingSyntax
   , validateDeconstructorBinding
   )
@@ -232,6 +234,17 @@ data EnvironmentSyntaxError
 
 instance NFData EnvironmentSyntaxError
 
+-- | A non-finite search rating attached to a raw function capability.
+--
+-- Function ratings are deliberately signed: negative values are bonuses.
+-- Only NaN and infinities are invalid, because either would destroy the
+-- total ordering required by the search queue.
+data EnvironmentRatingError
+  = NonFiniteFunctionRating QualifiedName Penalty
+  deriving (Eq, Generic, Show)
+
+instance NFData EnvironmentRatingError
+
 -- | Require every name used for environment lookup to be unambiguous.
 --
 -- The ordering is part of the checked-boundary contract: datatype heads are
@@ -260,6 +273,19 @@ validateEnvironmentBindingIdentities environment
   repeated = Set.toAscList
     . SharedCollection.repeatedValueSet
     . SharedCollection.summarizeDuplicates
+
+-- | Require every raw function rating to be finite, in source order.
+validateEnvironmentBindingRatings
+  :: EnvDictionary
+  -> Either EnvironmentRatingError ()
+validateEnvironmentBindingRatings environment = case listToMaybe
+    [ NonFiniteFunctionRating (functionName binding)
+        (functionPenalty binding)
+    | binding <- environmentFunctions environment
+    , not $ isFiniteScore $ functionPenalty binding
+    ] of
+  Just failure -> Left failure
+  Nothing -> Right ()
 
 -- | Validate every environment name through the shared generated-syntax
 -- boundary. Function names are checked before constructor patterns to retain

@@ -4,7 +4,10 @@ Date: 2026-07-17
 
 The subsequent
 [checker-boundary follow-up](2026-07-17-checker-boundary-follow-up.md)
-records the raw Exference checker audit and the final release-gate results.
+records the raw Exference checker audit. The later
+[boundary and normalization audit](2026-07-17-boundary-normalization-audit.md)
+records the final compatibility-record, request, rendering, and canonical
+identity review.
 
 ## Scope and method
 

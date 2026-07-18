@@ -6611,6 +6611,18 @@ tests = testGroup "Exference"
               (InvalidCheckType goal
                 $ InvalidSynthesisType
                 $ SharedType.InvalidTupleTypeArity Boxed 1)
+      , testCase "validates raw inputs before rigid planning" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              invalidType = TypeForallNative
+                [SharedType.RigidVariable 4] [] integer
+              invalidBinding = FunctionBinding
+                invalidType (name "invalid") 0 [] []
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [invalidBinding, seed] [] integer [] (ExpName seedName) @?=
+              Left (InvalidCheckType invalidType $ RigidForallBinder 4)
       , testCase "fresh variables do not wrap onto boundary annotations" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let firstType = TypeConstant 0

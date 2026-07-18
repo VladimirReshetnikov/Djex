@@ -77,13 +77,15 @@ checkExpression
   -> Expression
   -> Either ExpressionCheckError ()
 checkExpression classEnvironment functions deconstructors goal expected expression = do
+  validateCheckInputs classEnvironment functions deconstructors goal expected
+    expression
   plan <- either (Left . RigidInstantiationFailure) Right
     $ planRigidInstantiation
         (mkRigidInstantiationContext $ EnvDictionary
           functions deconstructors $ qClassEnv_env classEnvironment)
         (Set.toList $ qClassEnv_constraints classEnvironment)
         goal
-  checkExpressionWithRigidInstantiation plan classEnvironment functions
+  checkValidatedExpression plan classEnvironment functions
     deconstructors goal expected expression
 
 -- | Check using the same precomputed forall-opening plan as live search.
@@ -103,6 +105,24 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
     deconstructors goal expected expression = do
   validateCheckInputs classEnvironment functions deconstructors goal expected
     expression
+  checkValidatedExpression plan classEnvironment functions deconstructors goal
+    expected expression
+
+-- Both public entrances establish the complete raw-input invariant before
+-- reaching this worker. Keeping planning outside it lets live search supply
+-- its exact sealed plan without making the standalone entrance inspect
+-- malformed raw values before their typed checker diagnostics are selected.
+checkValidatedExpression
+  :: RigidInstantiationPlan
+  -> QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> HsType
+  -> [HsConstraint]
+  -> Expression
+  -> Either ExpressionCheckError ()
+checkValidatedExpression plan classEnvironment functions deconstructors goal
+    expected expression = do
   (checkedGoal, openedConstraints) <- instantiateGoal plan goal
   let
       -- Live search adds each opened forall layer's rigid-instantiated

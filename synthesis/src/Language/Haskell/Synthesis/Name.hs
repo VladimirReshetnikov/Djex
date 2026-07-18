@@ -55,13 +55,21 @@ import Data.Char
 import Data.List (elemIndices, intercalate)
 
 -- | Whether a tuple constructor is lifted (ordinary) or unboxed.
-data Boxity = Boxed | Unboxed
+data Boxity
+  = Boxed
+    -- ^ An ordinary lifted tuple using parentheses.
+  | Unboxed
+    -- ^ An unboxed tuple using @\(# ... #\)@ syntax.
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | The lexical namespace selected by an occurrence's initial character.
 -- Keeping this classification in the validated value means clients never
 -- need to repeat the case/colon test over a raw spelling.
-data LexicalClass = VariableLike | ConstructorLike
+data LexicalClass
+  = VariableLike
+    -- ^ Lowercase identifier or non-colon-leading operator namespace.
+  | ConstructorLike
+    -- ^ Uppercase identifier, colon-leading operator, or structural name.
   deriving (Eq, Ord, Show, Enum, Bounded)
 
 -- | Built-in constructors whose identity is syntax, not an arbitrary string.
@@ -73,11 +81,16 @@ data LexicalClass = VariableLike | ConstructorLike
 -- @\(# value #\)@ and the distinct @MkSolo#@ constructor.
 data SpecialName
   = ListConstructor
+    -- ^ The structural @[]@ constructor.
   | ConsConstructor
+    -- ^ The structural list-cons constructor @(:)@.
   | FunctionConstructor
+    -- ^ The structural function constructor @(->)@.
   | TupleConstructor Boxity Int
+    -- ^ Tuple boxity and field arity.
   deriving (Eq, Ord, Show)
 
+-- | A non-empty dotted sequence of constructor-like module segments.
 newtype ModuleName = ModuleName [String]
   deriving (Eq, Ord)
 
@@ -86,6 +99,8 @@ data NamePart
   | OperatorPart LexicalClass String
   deriving (Eq, Ord)
 
+-- | A validated ordinary or structural Haskell name. The representation is
+-- opaque; use the smart constructors or 'parseName'.
 data Name
   = OrdinaryName (Maybe ModuleName) NamePart
   | BuiltInName SpecialName
@@ -96,22 +111,36 @@ data Name
 -- the only route into the validated abstraction.
 data Occurrence
   = IdentifierOccurrence LexicalClass String
+    -- ^ Identifier class and bare spelling.
   | OperatorOccurrence LexicalClass String
+    -- ^ Operator class and bare spelling, without contextual delimiters.
   | SpecialOccurrence SpecialName
+    -- ^ Built-in structural syntax.
   deriving (Eq, Ord, Show)
 
--- | Precise construction, parsing, and contextual-rendering failures.
+-- | Precise construction, parsing, and contextual-rendering failures. Error
+-- payloads retain the rejected input rather than a normalized approximation.
 data NameError
   = EmptyName
+    -- ^ An ordinary name spelling was empty.
   | EmptyModuleName
+    -- ^ A module name contained no segments.
   | InvalidIdentifier String
+    -- ^ The spelling is not a Haskell identifier.
   | ReservedIdentifier String
+    -- ^ The spelling is a reserved Haskell word.
   | InvalidOperator String
+    -- ^ The spelling contains a non-operator character.
   | ReservedOperator String
+    -- ^ The complete operator token is reserved syntax.
   | InvalidModuleSegment String
+    -- ^ A module component is not a constructor identifier.
   | InvalidTupleArity Boxity Int
+    -- ^ The tuple shape is unsupported by the target GHC.
   | NameHasNoInfixForm SpecialName
+    -- ^ Structural syntax such as a tuple cannot occupy an infix position.
   | InvalidNameSyntax String
+    -- ^ The complete parser input has no supported name form.
   deriving (Eq, Ord)
 
 -- | Maximum tuple constructor/type arity supported by the target GHC.
@@ -180,7 +209,8 @@ mkModuleName :: String -> Either NameError ModuleName
 mkModuleName "" = Left EmptyModuleName
 mkModuleName source = mkModuleNameSegments (splitOnDots source)
 
--- | Validate already separated module-name components.
+-- | Validate already separated module-name components. Every segment must be
+-- a constructor identifier, and the list itself must be non-empty.
 mkModuleNameSegments :: [String] -> Either NameError ModuleName
 mkModuleNameSegments [] = Left EmptyModuleName
 mkModuleNameSegments segments = do
@@ -191,22 +221,28 @@ mkModuleNameSegments segments = do
       | isConstructorIdentifier segment = Right ()
       | otherwise = Left (InvalidModuleSegment segment)
 
+-- | Recover validated module segments in source order.
 moduleNameSegments :: ModuleName -> [String]
 moduleNameSegments (ModuleName segments) = segments
 
+-- | Join validated module segments with dots.
 renderModuleName :: ModuleName -> String
 renderModuleName (ModuleName segments) = intercalate "." segments
 
+-- | Construct an unqualified ordinary identifier.
 mkIdentifier :: String -> Either NameError Name
 mkIdentifier = mkOrdinary Nothing IdentifierPart validateIdentifier
 
+-- | Construct an ordinary identifier under a validated module qualifier.
 mkQualifiedIdentifier :: ModuleName -> String -> Either NameError Name
 mkQualifiedIdentifier qualifier =
   mkOrdinary (Just qualifier) IdentifierPart validateIdentifier
 
+-- | Construct an unqualified ordinary operator.
 mkOperator :: String -> Either NameError Name
 mkOperator = mkOrdinary Nothing OperatorPart validateOperator
 
+-- | Construct an ordinary operator under a validated module qualifier.
 mkQualifiedOperator :: ModuleName -> String -> Either NameError Name
 mkQualifiedOperator qualifier =
   mkOrdinary (Just qualifier) OperatorPart validateOperator
@@ -228,22 +264,29 @@ specialName builtIn@(TupleConstructor boxity arity)
   | otherwise = Left (InvalidTupleArity boxity arity)
 specialName builtIn = Right (BuiltInName builtIn)
 
+-- | The structural list type/value constructor.
 listName :: Name
 listName = BuiltInName ListConstructor
 
+-- | The structural list-cons constructor.
 consName :: Name
 consName = BuiltInName ConsConstructor
 
+-- | The structural function type constructor.
 functionName :: Name
 functionName = BuiltInName FunctionConstructor
 
+-- | Construct a structural tuple name after checking its target-GHC arity.
 tupleName :: Boxity -> Int -> Either NameError Name
 tupleName boxity arity = specialName (TupleConstructor boxity arity)
 
+-- | Recover the qualifier of an ordinary name. Structural names are always
+-- unqualified.
 nameModule :: Name -> Maybe ModuleName
 nameModule (OrdinaryName qualifier _) = qualifier
 nameModule (BuiltInName _) = Nothing
 
+-- | Recover the validated unqualified occurrence view.
 nameOccurrence :: Name -> Occurrence
 nameOccurrence (OrdinaryName _ (IdentifierPart lexicalClass spelling)) =
   IdentifierOccurrence lexicalClass spelling
@@ -251,9 +294,11 @@ nameOccurrence (OrdinaryName _ (OperatorPart lexicalClass spelling)) =
   OperatorOccurrence lexicalClass spelling
 nameOccurrence (BuiltInName builtIn) = SpecialOccurrence builtIn
 
+-- | Classify a name in the Haskell value/type lexical namespace.
 nameLexicalClass :: Name -> LexicalClass
 nameLexicalClass = occurrenceLexicalClass . nameOccurrence
 
+-- | Classify an occurrence without reconstructing a 'Name'.
 occurrenceLexicalClass :: Occurrence -> LexicalClass
 occurrenceLexicalClass (IdentifierOccurrence lexicalClass _) = lexicalClass
 occurrenceLexicalClass (OperatorOccurrence lexicalClass _) = lexicalClass
@@ -268,14 +313,19 @@ nameSpelling (OrdinaryName _ (IdentifierPart _ spelling)) = Just spelling
 nameSpelling (OrdinaryName _ (OperatorPart _ spelling)) = Just spelling
 nameSpelling (BuiltInName _) = Nothing
 
+-- | Recover an ordinary identifier spelling, excluding operators and
+-- structural names.
 nameIdentifier :: Name -> Maybe String
 nameIdentifier (OrdinaryName _ (IdentifierPart _ spelling)) = Just spelling
 nameIdentifier _ = Nothing
 
+-- | Recover an ordinary operator spelling, excluding identifiers and
+-- structural names.
 nameOperator :: Name -> Maybe String
 nameOperator (OrdinaryName _ (OperatorPart _ spelling)) = Just spelling
 nameOperator _ = Nothing
 
+-- | Recover structural identity when the name denotes built-in syntax.
 nameSpecial :: Name -> Maybe SpecialName
 nameSpecial (BuiltInName builtIn) = Just builtIn
 nameSpecial _ = Nothing
@@ -462,6 +512,8 @@ renderSpecialPrefix (TupleConstructor boxity arity) =
   "<invalid " ++ boxityDescription boxity
     ++ " tuple constructor arity " ++ show arity ++ ">"
 
+-- | Explain a checked construction or parsing failure without discarding its
+-- rejected spelling or structural tuple details.
 renderNameError :: NameError -> String
 renderNameError EmptyName = "name is empty"
 renderNameError EmptyModuleName = "module name is empty"

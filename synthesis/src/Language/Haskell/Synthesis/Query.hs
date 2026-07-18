@@ -92,7 +92,7 @@ validateRequestTarget code summary target = case mkDefinitionName target of
   Left failure -> Left $ shownErrorDiagnostic code summary
     (renderCanonical target, failure)
 
--- | The role of one type visited inside a 'QueryRequest'.
+-- | The role of one type visited inside a t'QueryRequest'.
 --
 -- A backend can use this distinction to retain goal-versus-context diagnostic
 -- wording while sharing the envelope's traversal order.
@@ -136,8 +136,8 @@ traverseRequestTypes transform finishContext request = QueryRequest
 -- source location.
 --
 -- Provenance affects only diagnostics. It is deliberately separate from
--- 'QueryRequest', whose equality and display describe synthesis semantics.
--- The source constructor is strict so a 'SourceLocation' derived from a text
+-- t'QueryRequest', whose equality and display describe synthesis semantics.
+-- The source constructor is strict so a t'SourceLocation' derived from a text
 -- buffer is materialized while the request is sealed.
 data RequestProvenance
   = ProgrammaticRequest
@@ -195,7 +195,7 @@ mkCachedQueryWithProvenance provenance request =
 -- provenance, while successful programmatic requests remain source-less.
 -- The provenance is forced before inspecting the action so a sourced span is
 -- materialized at the sealing boundary instead of retaining the caller's
--- source buffer behind a lazy 'CachedQuery'.
+-- source buffer behind a lazy t'CachedQuery'.
 sealCachedQueryWithProvenance
   :: RequestProvenance
   -> Either Diagnostic (QueryRequest ty options, cache)

@@ -119,7 +119,7 @@ data DuplicateSummary value = DuplicateSummary
 
 -- | Return the value whose second occurrence is encountered first.
 --
--- Unlike a complete 'DuplicateSummary', this query short-circuits once its
+-- Unlike a complete t'DuplicateSummary', this query short-circuits once its
 -- answer is known and can therefore succeed on an infinite input.
 firstDuplicate :: Ord value => [value] -> Maybe value
 firstDuplicate = go Set.empty

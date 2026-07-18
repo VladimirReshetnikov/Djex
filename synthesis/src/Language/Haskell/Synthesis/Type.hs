@@ -85,7 +85,9 @@ import Language.Haskell.Synthesis.Name
 -- use their identity type directly as the parameter of 'Type'.
 data Variable identity
   = FlexibleVariable identity
+    -- ^ A variable which unification may instantiate.
   | RigidVariable identity
+    -- ^ A skolem or compatibility constant which unification must preserve.
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData identity => NFData (Variable identity)
@@ -146,25 +148,41 @@ foldRigidVariable transform variable = case variable of
   FlexibleVariable{} -> mempty
   RigidVariable identity -> transform identity
 
+-- | Shared source-type syntax. Applications are explicit and left-associated;
+-- saturated arrows and tuples also have structural forms so both backends can
+-- agree on their identity without recognizing constructor spellings.
 data Type variable
   = TypeVariable variable
+    -- ^ A backend-owned variable identity.
   | TypeConstructor Name
+    -- ^ A validated nominal or structural constructor.
   | TypeApplication (Type variable) (Type variable)
+    -- ^ Explicit type application.
   | FunctionType (Type variable) (Type variable)
+    -- ^ Saturated function parameter and result.
   | TupleType Boxity [Type variable]
+    -- ^ Saturated tuple elements in field order.
   | ForallType
       [variable]
       [Constraint (Type variable)]
       (Type variable)
+    -- ^ One explicit binder layer, its context, and body.
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData variable => NFData (Type variable)
 
+-- | Representation-local type failures independent of a declaration
+-- environment. Kind, synonym, and known-class-arity checks belong to their
+-- respective prepared environments.
 data TypeError variable
   = InvalidTypeConstructor Name
+    -- ^ Structural syntax occurred in an unsupported constructor position.
   | InvalidTupleTypeArity Boxity Int
+    -- ^ A tuple element count is unsupported by the target GHC.
   | DuplicateForallVariable variable
+    -- ^ One explicit binder layer repeats an identity.
   | InvalidTypeConstraint ConstraintError
+    -- ^ A forall context contains an invalid nominal class identity.
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData variable => NFData (TypeError variable)
@@ -180,7 +198,9 @@ type FreshVariableAllocator variable =
 -- second also records the invalid candidate returned by the allocator.
 data SubstitutionError variable
   = FreshVariableSupplyExhausted variable
+    -- ^ No replacement could be allocated for the source binder.
   | FreshVariableAlreadyReserved variable variable
+    -- ^ The allocator returned an identity already present in the reserved set.
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData variable => NFData (SubstitutionError variable)
@@ -192,8 +212,11 @@ instance NFData variable => NFData (SubstitutionError variable)
 -- freshening.
 data BinderNormalizationError variable rejection
   = RejectedTypeBinder rejection
+    -- ^ The backend does not permit this binder form.
   | DuplicateTypeBinder variable
+    -- ^ A single explicit binder list repeats an accepted identity.
   | TypeBinderFresheningError (SubstitutionError variable)
+    -- ^ A later scope could not be alpha-renamed safely.
   deriving (Eq, Ord, Show, Generic)
 
 instance

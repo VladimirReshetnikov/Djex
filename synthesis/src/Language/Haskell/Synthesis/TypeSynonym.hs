@@ -149,7 +149,7 @@ data PreparedInventory variable annotation = PreparedInventory
 -- different source inventories.
 --
 -- Sessions should retain only 'inventoryExpansionPreparedInventory' and their
--- own lowered indexes. Keeping this product separate from 'PreparedInventory'
+-- own lowered indexes. Keeping this product separate from t'PreparedInventory'
 -- prevents every long-lived session from retaining a duplicate declaration
 -- tree.
 data PreparedInventoryExpansion variable annotation =

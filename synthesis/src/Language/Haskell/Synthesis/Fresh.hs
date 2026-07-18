@@ -79,7 +79,7 @@ allocateFreshMaybe step reserved = either (const Nothing) Just
 --
 -- This is the container-polymorphic form of 'allocateFresh'. It lets a
 -- backend retain a specialized store such as @IntSet@ without rebuilding it
--- as a boxed 'Set'. The membership and insertion operations must describe
+-- as a boxed @Set@. The membership and insertion operations must describe
 -- the same notion of identity.
 allocateFreshBy
   :: (value -> reservation -> Bool)

@@ -36,7 +36,9 @@ import Language.Haskell.Synthesis.Name
 -- representations while sharing constraint identity and traversal.
 data Constraint ty = Constraint
   { constraintClass :: !Name
+    -- ^ Nominal class identity.
   , constraintArguments :: [ty]
+    -- ^ Type arguments in source application order.
   }
   deriving (Eq, Ord, Functor, Foldable, Traversable)
 
@@ -54,6 +56,7 @@ instance NFData ty => NFData (Constraint ty) where
 -- ordinary constructor namespace rather than a value or built-in namespace.
 data ConstraintError
   = InvalidConstraintClass Name
+    -- ^ The name does not occupy the ordinary constructor namespace.
   deriving (Eq, Ord, Show)
 
 instance NFData ConstraintError where

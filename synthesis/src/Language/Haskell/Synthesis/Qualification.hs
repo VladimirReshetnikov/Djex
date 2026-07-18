@@ -34,8 +34,11 @@ import Language.Haskell.Synthesis.Name
 -- their modules, while symbolic names remain unqualified.
 data Qualification
   = Unqualified
+    -- ^ Omit modules from ordinary identifiers and operators.
   | QualifyIdentifiers
+    -- ^ Qualify identifiers but keep symbolic operators unqualified.
   | FullyQualified
+    -- ^ Preserve every available ordinary-name module.
   deriving (Eq, Ord, Show, Enum, Bounded, Generic)
 
 instance NFData Qualification

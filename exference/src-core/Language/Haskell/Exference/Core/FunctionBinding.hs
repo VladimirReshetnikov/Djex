@@ -223,7 +223,7 @@ data EnvironmentDuplicateError
 instance NFData EnvironmentDuplicateError
 
 -- | A global name whose generated expression or pattern cannot be emitted as
--- valid Haskell. Keeping this policy beside 'EnvDictionary' makes raw checker
+-- valid Haskell. Keeping this policy beside t'EnvDictionary' makes raw checker
 -- inputs obey the same lexical contract as search-environment sealing.
 data EnvironmentSyntaxError
   = InvalidFunctionBindingSyntax
@@ -336,7 +336,7 @@ environmentBindingTypes environment =
 -- used by class validation and diagnostics.
 --
 -- Function constraints are followed by class superclasses and then instance
--- heads/prerequisites. Keeping this projection beside 'EnvDictionary' gives
+-- heads/prerequisites. Keeping this projection beside t'EnvDictionary' gives
 -- search sealing and independent expression checking the same complete view;
 -- neither has to assume that nominal 'StaticClassEnv' validation also enforces
 -- its own rank restrictions.

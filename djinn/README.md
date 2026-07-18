@@ -481,7 +481,9 @@ the raw environment is converted once and edited through the same shared
 transaction used by `DjinnSession`, then projected back only after the new
 Inventory and proof indexes seal successfully. Duplicate type/value names use
 the neutral shared diagnostic wording, while the raw `validateEnvironment`
-research boundary retains its more category-specific messages.
+research boundary retains its earlier category-specific messages before a
+final shared structural pass seals constructor uniqueness and the common
+type/class owner namespace.
 `parseHType`/`parseContextualHType`/`parseHKind` parse with full-input
 validation; the contextual entry point owns the REPL's optional constraint
 grammar so checked clients need not import its internal `ReadP` parser.

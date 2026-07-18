@@ -267,7 +267,7 @@ sourceTextSpan = SourceSpan (SourcePosition 1 1)
 
 -- | Name and eagerly span a complete source buffer.
 --
--- 'SourceLocation' is strict in the span, so evaluating this value traverses
+-- t'SourceLocation' is strict in the span, so evaluating this value traverses
 -- the buffer immediately instead of leaving that traversal inside a retained
 -- request cache.
 sourceTextLocation :: FilePath -> String -> SourceLocation

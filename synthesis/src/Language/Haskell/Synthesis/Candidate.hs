@@ -40,8 +40,11 @@ import Language.Haskell.Synthesis.Generated
 -- backend-specific details.
 data Candidate ty details output = Candidate
   { candidateOutput :: output
+    -- ^ Checked generated syntax or another backend-neutral output view.
   , candidateResidualConstraints :: [Constraint ty]
+    -- ^ Unresolved obligations required by this particular output.
   , candidateDetails :: details
+    -- ^ Backend-owned evidence, ranking inputs, or search statistics.
   }
   deriving
     ( Eq
@@ -61,9 +64,9 @@ instance (NFData ty, NFData details, NFData output) =>
 -- Clause patterns become leading lambda patterns, while a patternless value
 -- clause renders as its body.  Backends remain responsible for choosing local
 -- name preferences and qualification through 'RenderOptions'. The exported
--- 'Candidate' constructor remains available for source compatibility, so this
--- boundary rejects caller-built outputs with free local identities or reused
--- binder identities before they can be presented as checked source.
+-- The t'Candidate' constructor remains available for source compatibility, so
+-- this boundary rejects caller-built outputs with free local identities or
+-- reused binder identities before they can be presented as checked source.
 renderCandidateExpression
   :: Ord local
   => RenderOptions local

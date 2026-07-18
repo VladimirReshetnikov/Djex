@@ -925,7 +925,7 @@ applySubst substitution = checkedSubstitution "applySubst"
   . applySubstChecked substitution
 
 -- | Simultaneously substitute free flexible variables, alpha-renaming forall
--- binders when a replacement would otherwise be captured.  The 'Any' flag
+-- binders when a replacement would otherwise be captured.  The @Any@ flag
 -- retains Exference's historical operational meaning: it is true whenever a
 -- substitution key occurs free in the source, including an identity mapping.
 applySubstsChecked

@@ -1,7 +1,7 @@
 -- | Lower checked LJT proofs directly into Djex's shared generated syntax.
 --
 -- Djinn historically translated proofs through a second Haskell-shaped tree
--- ('HExpr' and 'HPat').  That tree remains available as a compatibility view,
+-- (@HExpr@ and @HPat@).  That tree remains available as a compatibility view,
 -- but the live backend now lowers directly into the shared tree and delegates
 -- generic lexical cleanup to that tree's owning module.
 module Djinn.Internal.ProofToGenerated

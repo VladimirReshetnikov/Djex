@@ -1,8 +1,8 @@
 -- | Exference's single authority for the complete finite 'Int' namespace.
 --
--- Search variables and rigid query skolems use an 'IntSet'-backed supply,
+-- Search variables and rigid query skolems use an @IntSet@-backed supply,
 -- while shared declaration and synonym operations use tagged variables in an
--- ordinary 'Set'. Both paths delegate collision skipping and reservation
+-- ordinary @Set@. Both paths delegate collision skipping and reservation
 -- publication to the common synthesis allocator and share the same
 -- overflow-safe full-domain state machine.
 module Language.Haskell.Exference.Core.Internal.VariableSupply
@@ -69,7 +69,7 @@ reserveIdentifiers identifiers (IdentifierSupply reserved) = IdentifierSupply
 
 -- | Allocate the historical next ID when that is representable. If the
 -- greatest ID is already 'maxBound', search the actual namespace instead of
--- wrapping. The shared allocator updates the 'IntSet' in place conceptually;
+-- wrapping. The shared allocator updates the @IntSet@ in place conceptually;
 -- no boxed-set conversion or enormous intermediate list is involved.
 allocateFreshIdentifier
   :: IdentifierSupply

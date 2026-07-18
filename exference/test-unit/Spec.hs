@@ -4254,6 +4254,83 @@ tests = testGroup "Exference"
               (diagnosticSeverity failure, diagnosticMessage failure))
             (parseRatings "foo NaN") @?= Left
               (Error, "rating for foo must be finite: NaN")
+      , testCase "mixed binding categories retain declaration source order" $
+          withTemporaryFile (unlines
+            [ "module OrderedBindings where"
+            , "ordinaryBefore, ordinaryPeer :: a -> a"
+            , "class Owner a where"
+            , "  method, methodPeer :: a -> a"
+            , "data Box a = Box a"
+            , "ordinaryAfter :: a -> a"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              environment <- expectRight result
+              ordinaryBefore <- expectRight
+                $ mkQualifiedName ["OrderedBindings"] "ordinaryBefore"
+              ordinaryPeer <- expectRight
+                $ mkQualifiedName ["OrderedBindings"] "ordinaryPeer"
+              owner <- expectRight
+                $ mkQualifiedName ["OrderedBindings"] "Owner"
+              method <- expectRight
+                $ mkQualifiedName ["OrderedBindings"] "method"
+              methodPeer <- expectRight
+                $ mkQualifiedName ["OrderedBindings"] "methodPeer"
+              box <- expectRight
+                $ mkQualifiedName ["OrderedBindings"] "Box"
+              ordinaryAfter <- expectRight
+                $ mkQualifiedName ["OrderedBindings"] "ordinaryAfter"
+              let expectedNames =
+                    [ ordinaryBefore, ordinaryPeer
+                    , method, methodPeer
+                    , box, ordinaryAfter
+                    ]
+                  sourceDeclarations = filter
+                    ((`elem` expectedNames)
+                      . functionName . sourceBindingFunction)
+                    $ sourceBindings environment
+              map (functionName . sourceBindingFunction) sourceDeclarations
+                @?= expectedNames
+              case sourceDeclarations of
+                [ SourceFunction _
+                  , SourceFunction _
+                  , SourceClassMethod firstOwner _
+                  , SourceClassMethod actualOwner _
+                  , SourceFunction _
+                  , SourceFunction _
+                  ] -> do
+                    firstOwner @?= owner
+                    actualOwner @?= owner
+                declarations -> fail $ "unexpected source binding tags: "
+                  ++ show declarations
+      , testCase "mixed binding errors retain declaration source order" $
+          withTemporaryFile (unlines
+            [ "{-# LANGUAGE TypeOperators #-}"
+            , "module OrderedBindingErrors where"
+            , "ordinaryBefore, ordinaryPeer :: Int :+: Bool"
+            , "class Owner a where"
+            , "  method :: Int :+: Bool"
+            , "data Broken = Broken (Int :+: Bool)"
+            , "ordinaryAfter :: Int :*: Bool"
+            ]) $ \modulePath -> do
+              LoadReport result _ <- parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              (failureGroup, failures) <- case result of
+                Left (BindingDeclarationErrors
+                    group@(firstFailure :| remaining)) ->
+                  pure (group, firstFailure : remaining)
+                Left failure -> fail $ "unexpected load failure: "
+                  ++ show failure
+                Right _ -> fail "malformed binding declarations were accepted"
+              let failureLine failure = do
+                    location <- extractionErrorLocation failure
+                    pure $ sourceLine $ sourceStart $ locationSpan location
+              map failureLine failures @?= map Just [3, 5, 6, 7]
+              let rendered = NonEmpty.toList
+                    $ environmentLoadErrorDiagnostics
+                    $ BindingDeclarationErrors failureGroup
+              map (fmap (sourceLine . sourceStart) . diagnosticSpan) rendered
+                @?= map Just [3, 5, 6, 7]
       , testCase "missing modules produce source-bearing read errors" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           let modulePath = environmentDirectory ++ "/missing-module.hs"

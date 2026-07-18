@@ -63,7 +63,7 @@ import Language.Haskell.Synthesis.Diagnostic
 import Control.DeepSeq
 
 import Control.Monad ( forM_, zipWithM )
-import Data.List ( sort, isSuffixOf )
+import Data.List ( sort, sortOn, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
@@ -864,14 +864,13 @@ parseModulesM inputs = do
       -- checked backend projection expands the retained synonym declarations
       -- later through 'prepareSourceSynthesisInventory'.
       classResult <- lift
-        $ loadClassEnvironment dataTypes M.empty modules
-      loadedClasses <- either
+        $ loadClassEnvironmentSourced dataTypes M.empty modules
+      (loadedClasses, methodsByModule) <- either
         (throwE . ClassEnvironmentLoadFailure)
         pure
         classResult
       let classEnvironment = loadedStaticClassEnvironment loadedClasses
           instanceCount = loadedSourceInstanceCount loadedClasses
-          methodsByModule = loadedClassMethodsByModule loadedClasses
 
       extracted <- lift $ zipWithM
         (hExtractBinds classEnvironment dataTypes M.empty)
@@ -1005,28 +1004,59 @@ parseModulesM inputs = do
                   -> [QualifiedName]
                   -> TypeDeclMap
                   -> Module SrcSpanInfo
-                  -> [Either ExtractionError ClassMethodDeclaration]
+                  -> [SourcedExtraction [ClassMethodDeclaration]]
                   -> Loader
                        ( [SourceBinding]
                        , [DeconstructorBinding]
                        , [ExtractionError]
                        )
     hExtractBinds cntxt ds tDeclMap modul methodResults = do
-      eFromData <- getDataConssLocated
-        (sClassEnv_tclasses cntxt) ds tDeclMap [modul]
-      eDecls <- getDeclsLocated ds (sClassEnv_tclasses cntxt) tDeclMap [modul]
-      let errors = lefts eFromData ++ lefts eDecls ++ lefts methodResults
-      let (binds1s, deconss) = unzip $ rights eFromData
-          binds2 = rights eDecls
-          methods =
-            [ SourceClassMethod owner binding
-            | ClassMethodDeclaration owner binding <- rights methodResults
-            ]
-      return
-        ( map SourceFunction (concat binds1s ++ binds2) ++ methods
-        , deconss
-        , errors
+      fromData <- getDataConssSourced
+        (sClassEnv_tclasses cntxt) ds tDeclMap modul
+      declarations <- getDeclsSourced
+        ds (sClassEnv_tclasses cntxt) tDeclMap modul
+      let ordered = sortOn orderedBindingSlot
+            $ map dataBindingExtraction fromData
+            ++ map ordinaryBindingExtraction declarations
+            ++ map methodBindingExtraction methodResults
+      pure
+        ( concatMap orderedSourceBindings ordered
+        , concatMap orderedDeconstructors ordered
+        , concatMap orderedBindingErrors ordered
         )
+
+data OrderedBindingExtraction = OrderedBindingExtraction
+  { orderedBindingSlot :: !SourceSlot
+  , orderedSourceBindings :: [SourceBinding]
+  , orderedDeconstructors :: [DeconstructorBinding]
+  , orderedBindingErrors :: [ExtractionError]
+  }
+
+dataBindingExtraction
+  :: SourcedExtraction ([FunctionBinding], DeconstructorBinding)
+  -> OrderedBindingExtraction
+dataBindingExtraction (SourcedExtraction slot result) = case result of
+  Left failure -> OrderedBindingExtraction slot [] [] [failure]
+  Right (bindings, deconstructor) -> OrderedBindingExtraction slot
+    (map SourceFunction bindings) [deconstructor] []
+
+ordinaryBindingExtraction
+  :: SourcedExtraction [FunctionBinding]
+  -> OrderedBindingExtraction
+ordinaryBindingExtraction (SourcedExtraction slot result) = case result of
+  Left failure -> OrderedBindingExtraction slot [] [] [failure]
+  Right bindings -> OrderedBindingExtraction slot
+    (map SourceFunction bindings) [] []
+
+methodBindingExtraction
+  :: SourcedExtraction [ClassMethodDeclaration]
+  -> OrderedBindingExtraction
+methodBindingExtraction (SourcedExtraction slot result) = case result of
+  Left failure -> OrderedBindingExtraction slot [] [] [failure]
+  Right methods -> OrderedBindingExtraction slot
+    [ SourceClassMethod owner binding
+    | ClassMethodDeclaration owner binding <- methods
+    ] [] []
 
 parseRatings :: String -> Either Diagnostic [(QualifiedName, Penalty)]
 parseRatings = go . words

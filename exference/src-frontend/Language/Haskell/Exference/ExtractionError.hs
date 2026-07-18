@@ -10,6 +10,9 @@
 -- messages stay owned by the loader's diagnostic adapter.
 module Language.Haskell.Exference.ExtractionError
   ( ExtractionError (..)
+  , SourceSlot (..)
+  , SourcedExtraction (..)
+  , flattenSourcedExtraction
   , extractionError
   , extractionErrorAt
   , mapExtractionMessage
@@ -19,6 +22,7 @@ module Language.Haskell.Exference.ExtractionError
 
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo)
 import qualified Language.Haskell.Exts.SrcLoc as HSE
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -34,6 +38,31 @@ data ExtractionError = ExtractionError
   , extractionErrorMessage :: String
   }
   deriving (Eq, Show)
+
+-- | A module-local declaration position. The first component identifies a
+-- top-level declaration; zero in the second component denotes that declaration
+-- itself, while positive values identify nested declarations in source order.
+-- This compact ordinal survives successful extraction, whose semantic value
+-- otherwise no longer carries an HSE source annotation.
+data SourceSlot = SourceSlot !Natural !Natural
+  deriving (Eq, Ord, Show)
+
+-- | One extraction result paired with its module-local source position.
+-- Successful multi-name signatures intentionally stay in one batch so source
+-- ordering never needs to reconstruct their cardinality downstream.
+data SourcedExtraction value = SourcedExtraction
+  { sourcedExtractionSlot :: !SourceSlot
+  , sourcedExtractionResult :: Either ExtractionError value
+  }
+  deriving (Eq, Show)
+
+-- | Recover the historical flat result stream from one source batch.
+flattenSourcedExtraction
+  :: SourcedExtraction [value]
+  -> [Either ExtractionError value]
+flattenSourcedExtraction sourced = case sourcedExtractionResult sourced of
+  Left failure -> [Left failure]
+  Right values -> map Right values
 
 -- | A failure with no representable source position. Genuinely locationless
 -- phases (for example the hard-coded built-in environment) and hand-built

@@ -3,6 +3,7 @@ module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   , ClassMethodDeclaration (..)
   , LoadedClassEnvironment (..)
   , loadClassEnvironment
+  , loadClassEnvironmentSourced
   )
 where
 
@@ -39,6 +40,7 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 -- constructing a recursive graph of class values.
 data RawTypeClass = RawTypeClass
   { rawClassName :: QualifiedName
+  , rawClassSlot :: SourceSlot
   , rawClassSpan :: SrcSpanInfo
   , rawClassModule :: ModuleName SrcSpanInfo
   , rawClassVariables :: [TyVarBind SrcSpanInfo]
@@ -86,7 +88,26 @@ loadClassEnvironment
   -> [Module SrcSpanInfo]
   -> m (Either ClassEnvironmentLoadError
       LoadedClassEnvironment)
-loadClassEnvironment dataTypes typeDeclarations modules = do
+loadClassEnvironment dataTypes typeDeclarations modules =
+  fmap (fmap fst)
+    $ loadClassEnvironmentSourced dataTypes typeDeclarations modules
+
+-- | Class loading with method extraction batches retained at their
+-- module-local declaration slots. The first component is the exact historical
+-- flat projection; the second is consumed by the complete source loader when
+-- merging methods with datatype and ordinary-signature extraction.
+loadClassEnvironmentSourced
+  :: Monad m
+  => [QualifiedName]
+  -> TypeDeclMap
+  -> [Module SrcSpanInfo]
+  -> m
+       ( Either ClassEnvironmentLoadError
+           ( LoadedClassEnvironment
+           , [[SourcedExtraction [ClassMethodDeclaration]]]
+           )
+       )
+loadClassEnvironmentSourced dataTypes typeDeclarations modules = do
   (classResults, rawClassesByModule) <-
     getTypeClasses dataTypes typeDeclarations modules
   case NonEmpty.nonEmpty $ lefts classResults of
@@ -106,13 +127,19 @@ loadClassEnvironment dataTypes typeDeclarations modules = do
               (mkStaticClassEnv (Map.elems classes) instances) of
             Left failure -> pure $ Left failure
             Right environment -> do
-              methods <- getClassMethodsFromRaw classes dataTypes
+              methodBatches <- getClassMethodsFromRaw classes dataTypes
                 typeDeclarations rawClassesByModule
-              pure $ Right LoadedClassEnvironment
-                { loadedStaticClassEnvironment = environment
-                , loadedSourceInstanceCount = SharedCount.naturalLength instances
-                , loadedClassMethodsByModule = methods
-                }
+              let methods = map
+                    (concatMap flattenSourcedExtraction) methodBatches
+              pure $ Right
+                ( LoadedClassEnvironment
+                    { loadedStaticClassEnvironment = environment
+                    , loadedSourceInstanceCount =
+                        SharedCount.naturalLength instances
+                    , loadedClassMethodsByModule = methods
+                    }
+                , methodBatches
+                )
 
 getTypeClasses
   :: Monad m
@@ -213,13 +240,15 @@ rawTypeClasses
   -> [Either ExtractionError RawTypeClass]
 rawTypeClasses modul = do
   (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
-  ClassDecl declSpan context rawHead _ maybeClassDecls <- declarations
+  (slot, ClassDecl declSpan context rawHead _ maybeClassDecls) <-
+    zip [0 :: Natural ..] declarations
   let (syntaxName, variables) = splitDeclHead rawHead
   pure $ case convertModuleName moduleName syntaxName of
     Left conversionError -> Left $ extractionErrorAt declSpan
       $ "invalid type-class name: " ++ conversionError
     Right checkedName -> Right RawTypeClass
       { rawClassName = checkedName
+      , rawClassSlot = SourceSlot slot 0
       , rawClassSpan = declSpan
       , rawClassModule = moduleName
       , rawClassVariables = variables
@@ -233,11 +262,14 @@ getClassMethodsFromRaw
   -> [QualifiedName]
   -> TypeDeclMap
   -> [[Either ExtractionError RawTypeClass]]
-  -> m [[Either ExtractionError ClassMethodDeclaration]]
+  -> m [[SourcedExtraction [ClassMethodDeclaration]]]
 getClassMethodsFromRaw classes dataTypes typeDeclarations =
   mapM $ fmap concat . mapM elaborate
  where
-  elaborate (Left failure) = pure [Left failure]
+  -- Invalid raw class names abort the earlier class-declaration phase, so this
+  -- branch is unreachable for a successful load. Retaining no invented slot
+  -- is preferable to assigning such a failure to another declaration.
+  elaborate (Left _) = pure []
   elaborate (Right rawClass) = elaborateRawClass
     classes dataTypes typeDeclarations rawClass
 
@@ -247,46 +279,55 @@ elaborateRawClass
   -> [QualifiedName]
   -> TypeDeclMap
   -> RawTypeClass
-  -> m [Either ExtractionError ClassMethodDeclaration]
+  -> m [SourcedExtraction [ClassMethodDeclaration]]
 elaborateRawClass classes dataTypes typeDeclarations rawClass =
   case Map.lookup (rawClassName rawClass) classes of
     Nothing -> pure
-      [ Left $ classError
+      [ classFailure
           $ "unknown type class: " ++ show (rawClassName rawClass)
       ]
     Just typeClass -> flip evalStateT emptyConvData $ do
       parameterResult <- runExceptT
         $ mapM tyVarTransform $ rawClassVariables rawClass
       case parameterResult of
-        Left failure -> pure [Left $ classError failure]
+        Left failure -> pure [classFailure failure]
         Right parameters -> do
           let ownerConstraint = classMethodConstraint typeClass
               expectedOwner = HsConstraint (rawClassName rawClass)
                 $ map TypeVar parameters
           if ownerConstraint /= expectedOwner
             then pure
-              [ Left $ classError
+              [ classFailure
                   "class parameter allocation disagrees with its header"
               ]
             else do
               -- Method failures are located at their own class-body
               -- declaration rather than the whole class head.
               results <- mapM
-                (\bodyDeclaration ->
-                  fmap (first $ extractionErrorAt $ ann bodyDeclaration)
+                (\(nestedSlot, bodyDeclaration) ->
+                  fmap (SourcedExtraction nestedSlot
+                    . first (extractionErrorAt $ ann bodyDeclaration))
                     $ runExceptT
                     $ transformClassDeclaration ownerConstraint
                         bodyDeclaration)
-                $ rawClassDeclarations rawClass
+                [ (SourceSlot topLevelSlot $ nestedIndex + 1, declaration)
+                | (nestedIndex, declaration) <-
+                    zip [0 :: Natural ..] $ rawClassDeclarations rawClass
+                ]
               let prefix = "class method for "
                     ++ unqualifiedClassName (rawClassName rawClass) ++ ": "
-              pure $ concatMap
-                (either
-                  (pure . Left . mapExtractionMessage (prefix ++))
-                  (map Right))
+              pure $ map
+                (\result -> result
+                  { sourcedExtractionResult = first
+                      (mapExtractionMessage (prefix ++))
+                      $ sourcedExtractionResult result
+                  })
                 results
  where
   classError = extractionErrorAt $ rawClassSpan rawClass
+  SourceSlot topLevelSlot _ = rawClassSlot rawClass
+  classFailure = SourcedExtraction (rawClassSlot rawClass)
+    . Left . classError
 
   transformClassDeclaration owner (ClsDecl _ declaration) =
     transformMethodDeclaration owner declaration

@@ -3,8 +3,10 @@
 module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
   , getDeclsLocated
+  , getDeclsSourced
   , getDataConss
   , getDataConssLocated
+  , getDataConssSourced
   , getDataTypes
   , getDataTypesLocated
   )
@@ -31,6 +33,7 @@ import Data.Bifunctor (first)
 import Control.Monad.Trans.Except
 import qualified Data.Map.Strict as M
 import Data.Maybe ( fromMaybe, maybeToList )
+import Numeric.Natural (Natural)
 
 
 
@@ -64,15 +67,33 @@ getDeclsLocated
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m [Either ExtractionError FunctionBinding]
-getDeclsLocated ds tcs tDeclMap modules =
-  fmap (>>= either (return.Left) (map Right))
-    $ sequence
-    $ do
-  modul <- modules
-  (mn, decls) <- maybeToList $ moduleNameAndDecls modul
-  d <- decls
-  return $ fmap (first $ extractionErrorAt $ ann d)
-    $ runExceptT $ transformDecl tcs ds mn tDeclMap d
+getDeclsLocated ds tcs tDeclMap modules = fmap
+  (concatMap flattenSourcedExtraction . concat)
+  $ mapM (getDeclsSourced ds tcs tDeclMap) modules
+
+-- | Extract ordinary signatures as module-local source batches. Keeping all
+-- names from one signature together makes its source position authoritative
+-- even when conversion produces several function bindings.
+getDeclsSourced
+  :: Monad m
+  => [QualifiedName]
+  -> M.Map QualifiedName HsTypeClass
+  -> TypeDeclMap
+  -> Module SrcSpanInfo
+  -> m [SourcedExtraction [FunctionBinding]]
+getDeclsSourced ds tcs tDeclMap modul = sequence $ do
+  (mn, declarations) <- maybeToList $ moduleNameAndDecls modul
+  (slot, declaration) <- zip [0 :: Natural ..] declarations
+  case declaration of
+    TypeSig{} -> extract slot mn declaration
+    ForImp{} -> extract slot mn declaration
+    _ -> []
+ where
+  extract slot moduleName declaration = pure $ do
+    result <- fmap (first $ extractionErrorAt $ ann declaration)
+      $ runExceptT
+      $ transformDecl tcs ds moduleName tDeclMap declaration
+    pure $ SourcedExtraction (SourceSlot slot 0) result
 
 transformDecl
   :: Monad m
@@ -132,11 +153,54 @@ getDataConssLocated
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m [Either ExtractionError ([FunctionBinding], DeconstructorBinding)]
-getDataConssLocated tcs ds tDeclMap modules =
-  fmap markRecursiveDeconstructors $ sequence $ do
-  modul <- modules
-  (moduleName, decls) <- maybeToList $ moduleNameAndDecls modul
-  declaration@(DataDecl _ _ context rawHead conss _) <- decls
+getDataConssLocated tcs ds tDeclMap modules = do
+  sourced <- concat <$> mapM (getDataConssSourced tcs ds tDeclMap) modules
+  pure $ markRecursiveDeconstructors
+    $ map sourcedExtractionResult sourced
+
+-- | Extract datatype constructor batches with their module-local top-level
+-- declaration slots. Recursive metadata is classified across the supplied
+-- module exactly as it was at the historical loader boundary.
+getDataConssSourced
+  :: Monad m
+  => M.Map QualifiedName HsTypeClass
+  -> [QualifiedName]
+  -> TypeDeclMap
+  -> Module SrcSpanInfo
+  -> m
+       [ SourcedExtraction
+           ([FunctionBinding], DeconstructorBinding)
+       ]
+getDataConssSourced tcs ds tDeclMap modul = do
+  sourced <- sequence $ do
+    (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
+    (slot, declaration@(DataDecl _ _ context rawHead conss _)) <-
+      zip [0 :: Natural ..] declarations
+    pure $ extractDataDeclaration tcs ds tDeclMap slot moduleName declaration
+      context rawHead conss
+  let marked = markRecursiveDeconstructors
+        $ map sourcedExtractionResult sourced
+  pure $ zipWith
+    (\entry result -> entry {sourcedExtractionResult = result})
+    sourced marked
+
+extractDataDeclaration
+  :: Monad m
+  => M.Map QualifiedName HsTypeClass
+  -> [QualifiedName]
+  -> TypeDeclMap
+  -> Natural
+  -> ModuleName SrcSpanInfo
+  -> Decl SrcSpanInfo
+  -> Maybe (Context SrcSpanInfo)
+  -> DeclHead SrcSpanInfo
+  -> [QualConDecl SrcSpanInfo]
+  -> m
+       ( SourcedExtraction
+           ([FunctionBinding], DeconstructorBinding)
+       )
+extractDataDeclaration tcs ds tDeclMap slot moduleName declaration context
+    rawHead conss = do
   let (name, params) = splitDeclHead rawHead
   let
     rTypeM :: Monad m => ConversionT String m HsType
@@ -238,9 +302,10 @@ getDataConssLocated tcs ds tDeclMap modules =
                    ]
                    False
                )
-  return $ fmap
+  result <- fmap
       (either (Left . extractionErrorAt (ann declaration) . addConsMsg) Right)
     $ runExceptT $ runConversionT emptyConvData convAction
+  pure $ SourcedExtraction (SourceSlot slot 0) result
 
 -- | HSE retains strictness and unpack annotations in the field's 'Type' node.
 -- They are operational metadata, so remove any outer wrappers before the

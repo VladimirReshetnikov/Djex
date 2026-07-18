@@ -986,39 +986,23 @@ validateInputTypes types = case listToMaybe
     Left $ InvalidInputType typeExpression typeError
   Nothing -> Right ()
 
--- A deconstructor is an elimination rule for one nominal datatype.  Search
--- unifies its input with arbitrary goals, so accepting a variable or function
--- here would manufacture a pattern match for a type that has no such data
--- constructor.  Constructor fields may mention only the datatype parameters:
--- fresh flexible IDs would otherwise act like undeclared existential types.
 validateEnvironmentDeconstructors
   :: EnvDictionary
   -> Either ExferenceInputError ()
 validateEnvironmentDeconstructors environment =
   traverse_ validateDeconstructor $ environmentDeconstructors environment
  where
-  validateDeconstructor deconstructor = do
-    headName <- case typeConstructorHead input of
-      Nothing -> Left $ DeconstructorInputWithoutNominalHead input
-      Just name
-        | SynthesisName.nameSpecial name
-            == Just SynthesisName.FunctionConstructor ->
-              Left $ UnsupportedDeconstructorTypeHead name
-        | otherwise -> Right name
-    traverse_ (validateConstructor headName parameters)
-      $ deconstructorConstructors deconstructor
-   where
-    input = deconstructorInput deconstructor
-    parameters = flexibleIdentifiers input
+  validateDeconstructor = either
+    (Left . projectDeconstructorFailure)
+    Right
+    . validateDeconstructorBinding
 
-  validateConstructor headName parameters constructor
-    | IntSet.null unbound = Right ()
-    | otherwise = Left $ UnboundDeconstructorFieldVariables
-        headName (constructorName constructor) $ IntSet.toAscList unbound
-   where
-    unbound = IntSet.unions
-      (map flexibleIdentifiers $ constructorFields constructor)
-      `IntSet.difference` parameters
+  projectDeconstructorFailure failure = case failure of
+    MissingDeconstructorNominalHead input ->
+      DeconstructorInputWithoutNominalHead input
+    FunctionDeconstructorHead name -> UnsupportedDeconstructorTypeHead name
+    UnboundDeconstructorFields typeName constructor variables ->
+      UnboundDeconstructorFieldVariables typeName constructor variables
 
 prepareRigidInstantiation
   :: RigidInstantiationContext

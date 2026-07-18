@@ -3,6 +3,7 @@
 module Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
+  , DeconstructorValidationError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
   , functionBindingFromType
@@ -14,15 +15,24 @@ module Language.Haskell.Exference.Core.FunctionBinding
   , environmentBindingTypes
   , mapFunctionBindingTypes
   , mapDeconstructorBindingTypes
+  , validateDeconstructorBinding
   )
 where
 
 import Control.DeepSeq (NFData (..))
+import Data.Foldable (traverse_)
+import qualified Data.IntSet as IntSet
 import GHC.Generics (Generic)
 
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  ( flexibleIdentifiers )
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.Types
-import Language.Haskell.Exference.Core.TypeUtils (splitArrowResultParams)
+import Language.Haskell.Exference.Core.TypeUtils
+  ( splitArrowResultParams
+  , typeConstructorHead
+  )
+import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
 data FunctionBinding = FunctionBinding
@@ -103,6 +113,48 @@ data DeconstructorBinding = DeconstructorBinding
   deriving (Eq, Generic, Show)
 
 instance NFData DeconstructorBinding
+
+-- | Structural failures that would let a deconstructor manufacture a pattern
+-- match for an unrelated nominal type or introduce undeclared existential
+-- field variables.
+data DeconstructorValidationError
+  = MissingDeconstructorNominalHead HsType
+  | FunctionDeconstructorHead QualifiedName
+  | UnboundDeconstructorFields
+      QualifiedName -- ^ Nominal datatype head.
+      QualifiedName -- ^ Constructor whose fields escape the parameter scope.
+      [TVarId]      -- ^ Escaping flexible IDs, in ascending order.
+  deriving (Eq, Generic, Show)
+
+instance NFData DeconstructorValidationError
+
+-- | Validate the elimination invariant shared by search-environment sealing
+-- and independent expression checking.
+validateDeconstructorBinding
+  :: DeconstructorBinding
+  -> Either DeconstructorValidationError ()
+validateDeconstructorBinding binding = do
+  headName <- case typeConstructorHead input of
+    Nothing -> Left $ MissingDeconstructorNominalHead input
+    Just name
+      | SynthesisName.nameSpecial name
+          == Just SynthesisName.FunctionConstructor ->
+            Left $ FunctionDeconstructorHead name
+      | otherwise -> Right name
+  traverse_ (validateConstructor headName parameters)
+    $ deconstructorConstructors binding
+ where
+  input = deconstructorInput binding
+  parameters = flexibleIdentifiers input
+
+  validateConstructor headName parameters' constructor
+    | IntSet.null unbound = Right ()
+    | otherwise = Left $ UnboundDeconstructorFields
+        headName (constructorName constructor) $ IntSet.toAscList unbound
+   where
+    unbound = IntSet.unions
+      (map flexibleIdentifiers $ constructorFields constructor)
+      `IntSet.difference` parameters'
 
 -- | Reconstruct the synthetic elimination type used by validation. Fields of
 -- every constructor precede the datatype result in declaration order.

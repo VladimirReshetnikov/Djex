@@ -69,6 +69,7 @@ import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
+  , DeconstructorValidationError (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
   , deconstructorBindingType
@@ -6357,6 +6358,68 @@ tests = testGroup "Exference"
             [[], [mismatchedEmpty], [inhabited]]
           checkExpression (mkQueryClassEnv staticClasses []) []
             [mismatchedEmpty, matchingEmpty] goal [] expression @?= Right ()
+      , testCase "rejects headless deconstructors before checking patterns" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              constructor = name "Bogus"
+              resultName = name "truth"
+              result = FunctionBinding boolean resultName 0 [] []
+              headless = DeconstructorBinding (TypeVar 0)
+                [ConstructorBinding constructor []] False
+              expression = ExpLambda 1 integer
+                $ ExpCaseMatch (ExpVar 1 integer)
+                    [(constructor, [], ExpName resultName)]
+          checkExpression (mkQueryClassEnv staticClasses []) [result]
+            [headless] (TypeArrow integer boolean) [] expression
+            @?= Left (InvalidCheckDeconstructor
+              $ MissingDeconstructorNominalHead $ TypeVar 0)
+      , testCase "rejects function-headed deconstructors" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              functionType = TypeApp
+                (TypeApp (TypeCons SharedName.functionName) integer) boolean
+              constructor = name "Function"
+              resultName = name "zero"
+              result = FunctionBinding integer resultName 0 [] []
+              functionHead = DeconstructorBinding functionType
+                [ConstructorBinding constructor []] False
+              expression = ExpLambda 1 functionType
+                $ ExpCaseMatch (ExpVar 1 functionType)
+                    [(constructor, [], ExpName resultName)]
+          checkExpression (mkQueryClassEnv staticClasses []) [result]
+            [functionHead] (TypeArrow functionType integer) [] expression
+            @?= Left (InvalidCheckDeconstructor
+              $ FunctionDeconstructorHead SharedName.functionName)
+      , testCase "rejects escaping deconstructor field variables" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let boxName = name "Box"
+              boxType = TypeApp (TypeCons boxName) $ TypeVar 0
+              constructor = name "MkBox"
+              escaping = DeconstructorBinding boxType
+                [ConstructorBinding constructor [TypeVar 1]] False
+              integer = TypeCons $ name "Int"
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+          checkExpression (mkQueryClassEnv staticClasses []) [seed]
+            [escaping] integer [] (ExpName seedName)
+            @?= Left (InvalidCheckDeconstructor
+              $ UnboundDeconstructorFields boxName constructor [1])
+      , testCase "deconstructor type errors precede nominal shape errors" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              headless = DeconstructorBinding (TypeVar 0) [] False
+              malformed = TypeTuple Boxed [integer]
+              malformedDeconstructor = DeconstructorBinding malformed [] False
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+          checkExpression (mkQueryClassEnv staticClasses []) [seed]
+            [headless, malformedDeconstructor]
+            integer [] (ExpName seedName) @?= Left
+              (InvalidCheckType malformed
+                $ InvalidSynthesisType
+                $ SharedType.InvalidTupleTypeArity Boxed 1)
       , testCase "checks structural tuples against constructor applications" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           pairName <- expectRight $ mkBoxedTupleName 2

@@ -41,6 +41,7 @@ data ExpressionCheckError
   | InvalidCheckType HsType SynthesisTypeError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
   | InvalidCheckClassConstraint ClassEnvError
+  | InvalidCheckDeconstructor DeconstructorValidationError
   deriving (Eq, Show)
 
 data CheckState = CheckState
@@ -247,8 +248,9 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
   mapM_ (validateConstraint QueryConstraint) $ Set.toAscList
     $ qClassEnv_constraints classEnvironment
   mapM_ validateFunction functions
-  mapM_ validateDeconstructor deconstructors
+  mapM_ validateDeconstructorTypes deconstructors
   mapM_ (validateType . snd) $ expressionTypedLocals expression
+  mapM_ validateDeconstructor deconstructors
  where
   validateType typeExpression = case toSynthesisType typeExpression of
     Left failure -> Left $ InvalidCheckType typeExpression failure
@@ -274,7 +276,12 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     mapM_ (validateConstraint site) $ functionConstraints binding
     validateClassConstraints site $ typeConstraints $ functionBindingType binding
 
-  validateDeconstructor = mapM_ validateType . deconstructorBindingTypes
+  validateDeconstructorTypes = mapM_ validateType . deconstructorBindingTypes
+
+  validateDeconstructor deconstructor = case
+      validateDeconstructorBinding deconstructor of
+    Left failure -> Left $ InvalidCheckDeconstructor failure
+    Right () -> Right ()
 
 throwCheck :: ExpressionCheckError -> Check a
 throwCheck = lift . Left

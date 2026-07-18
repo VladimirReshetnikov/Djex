@@ -538,6 +538,11 @@ kind checker or seal-time raw `Environment` projection. Native saturation is a
 prepared-witness `TypeSynonym` operation; raw `HType` retains one separate
 source-order traversal solely to preserve its malformed-input diagnostics,
 with individual alias-head facts supplied by that same witness.
+Even the trusted unit declaration used to bootstrap `standardEnvironment`
+now enters through this operational shared preparation path. The separate
+`validateEnvironment` function remains quarantined as a raw research
+compatibility boundary because its historical value/type/axiom/class error
+order is intentionally different from stable session preparation.
 Global assumptions are translated once while sealing; only a query goal and
 its instantiated class methods still vary per search. Historical raw search
 tables are reconstructed from the Inventory only for compatibility inspection,

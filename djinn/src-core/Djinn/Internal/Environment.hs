@@ -889,11 +889,12 @@ promoteVoidInventoryError failure = case failure of
     SharedInventory.InvalidInventoryKinds kindError ->
         SharedInventory.InvalidInventoryKinds kindError
 
--- Rebuild inferred kinds first, then check every declaration that depends
--- on them.  Class parameter kinds are re-inferred against the rebuilt type
--- graph, so they cannot go stale when a mentioned type changes.  Callers
--- update their state only with the returned environment, making deletion
--- and replacement atomic even when validation fails midway.
+-- | Preserve the historical raw research API's validation and diagnostic
+-- order. Stable edits and sessions use 'prepareEnvironment' instead; this
+-- compatibility boundary deliberately checks value namespaces before raw
+-- type inference, axioms, classes, and the final shared structural seal.
+-- Class parameter kinds and the outer kind caches are still refreshed in the
+-- returned projection.
 validateEnvironment ::
     [TypeDefinition] -> [Axiom] -> [ClassDefinition] ->
     Either String ([TypeDefinition], [ClassDefinition])

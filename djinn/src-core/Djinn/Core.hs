@@ -184,16 +184,15 @@ standardEnvironment =
 
 -- @()@ is a grammar-level special form, not a constructor identifier that a
 -- caller may repurpose.  Install exactly the standard nullary type and value
--- constructor through this private path; all public declarations continue
--- through the ordinary lexical checks below.
+-- constructor through this private path. Even this trusted constant crosses
+-- the operational shared preparation boundary; the historical raw validator
+-- remains only a compatibility surface with its own diagnostic ordering.
 trustedUnitEnvironment :: Either String Environment
-trustedUnitEnvironment = do
-    (types, classes) <- validateEnvironment
-        [("()", ([], HTUnion [("()", [])], KStar))] [] []
-    return Environment {
-        envTypes = types,
-        envFunctions = [],
-        envClasses = classes
+trustedUnitEnvironment = first show $
+    preparedEnvironmentSource <$> prepareEnvironment Environment
+        { envTypes = [("()", ([], HTUnion [("()", [])], KStar))]
+        , envFunctions = []
+        , envClasses = []
         }
 
 -- | Add (or overwrite, for the same name in the same category) one

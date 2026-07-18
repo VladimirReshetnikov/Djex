@@ -20,12 +20,17 @@ module Language.Haskell.Djex.Djinn
   , Qualification (..)
   , RenderError (..)
   , DjinnQueryMetadata (..)
+  , DjinnDeclarationSnapshot
   , DjinnRequest
   , DjinnResult
   , mkDjinnSession
   , standardDjinnSession
   , djinnSessionEnvironment
   , djinnSessionInventory
+  , djinnSessionDeclarationSnapshot
+  , djinnSnapshotTypeDeclarations
+  , djinnSnapshotFunctionDeclarations
+  , djinnSnapshotClassDeclarations
   , declareDjinnDeclaration
   , removeDjinnDeclaration
   , djinnSessionTypeDeclarations
@@ -137,6 +142,19 @@ type DjinnType = Type DjinnTypeVariable
 -- complete environment has been sealed transactionally.
 newtype DjinnSession = DjinnSession PreparedEnvironment
 
+-- | One coherent projection of the declaration tables retained for Djinn's
+-- compatibility frontend. The constructor is private so the stable adapter
+-- never exposes the historical raw 'Core.Environment'.
+data DjinnDeclarationSnapshot = DjinnDeclarationSnapshot
+  { snapshotTypeDeclarations
+      :: [(Core.HSymbol, ([Core.HSymbol], Core.HType, Core.HKind))]
+  , snapshotFunctionDeclarations
+      :: [(Core.HSymbol, Core.HType)]
+  , snapshotClassDeclarations
+      :: [(Core.HSymbol,
+          ([(Core.HSymbol, Core.HKind)], [(Core.HSymbol, Core.HType)]))]
+  }
+
 -- | The canonical shared query projection consumed by the proof core.
 --
 -- Keep this separate from the stable request: callers can recover their exact
@@ -190,6 +208,40 @@ djinnSessionInventory :: DjinnSession -> DjinnInventory
 djinnSessionInventory (DjinnSession prepared) =
   preparedEnvironmentInventory prepared
 
+-- | Reconstruct all historical declaration tables from the authoritative
+-- shared inventory in one compatibility projection. Bind this snapshot when
+-- several views are needed together: reconstructing the raw source traverses
+-- and validates the complete sealed declaration stream.
+djinnSessionDeclarationSnapshot
+  :: DjinnSession
+  -> DjinnDeclarationSnapshot
+djinnSessionDeclarationSnapshot (DjinnSession prepared) =
+  let compatibilityEnvironment = preparedEnvironmentSource prepared
+  in DjinnDeclarationSnapshot
+      { snapshotTypeDeclarations =
+          Core.typeDeclarations compatibilityEnvironment
+      , snapshotFunctionDeclarations =
+          Core.functionDeclarations compatibilityEnvironment
+      , snapshotClassDeclarations =
+          Core.classDeclarations compatibilityEnvironment
+      }
+
+djinnSnapshotTypeDeclarations
+  :: DjinnDeclarationSnapshot
+  -> [(Core.HSymbol, ([Core.HSymbol], Core.HType, Core.HKind))]
+djinnSnapshotTypeDeclarations = snapshotTypeDeclarations
+
+djinnSnapshotFunctionDeclarations
+  :: DjinnDeclarationSnapshot
+  -> [(Core.HSymbol, Core.HType)]
+djinnSnapshotFunctionDeclarations = snapshotFunctionDeclarations
+
+djinnSnapshotClassDeclarations
+  :: DjinnDeclarationSnapshot
+  -> [(Core.HSymbol,
+      ([(Core.HSymbol, Core.HKind)], [(Core.HSymbol, Core.HType)]))]
+djinnSnapshotClassDeclarations = snapshotClassDeclarations
+
 -- | Apply one historical declaration to the authoritative shared environment
 -- and publish the replacement session only after complete validation. The
 -- sealed ground environment is edited directly: kinds are never weakened
@@ -222,21 +274,21 @@ removeDjinnDeclaration name session = do
 djinnSessionTypeDeclarations
   :: DjinnSession
   -> [(Core.HSymbol, ([Core.HSymbol], Core.HType, Core.HKind))]
-djinnSessionTypeDeclarations (DjinnSession prepared) =
-  Core.typeDeclarations $ preparedEnvironmentSource prepared
+djinnSessionTypeDeclarations =
+  djinnSnapshotTypeDeclarations . djinnSessionDeclarationSnapshot
 
 djinnSessionFunctionDeclarations
   :: DjinnSession
   -> [(Core.HSymbol, Core.HType)]
-djinnSessionFunctionDeclarations (DjinnSession prepared) =
-  Core.functionDeclarations $ preparedEnvironmentSource prepared
+djinnSessionFunctionDeclarations =
+  djinnSnapshotFunctionDeclarations . djinnSessionDeclarationSnapshot
 
 djinnSessionClassDeclarations
   :: DjinnSession
   -> [(Core.HSymbol,
       ([(Core.HSymbol, Core.HKind)], [(Core.HSymbol, Core.HType)]))]
-djinnSessionClassDeclarations (DjinnSession prepared) =
-  Core.classDeclarations $ preparedEnvironmentSource prepared
+djinnSessionClassDeclarations =
+  djinnSnapshotClassDeclarations . djinnSessionDeclarationSnapshot
 
 resolveDjinnInstanceMethods
   :: DjinnSession

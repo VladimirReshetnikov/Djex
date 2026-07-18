@@ -194,7 +194,9 @@ runCmd s (Del i) =
             return (False, markFailed s)
         Right session -> installSession s session
 runCmd s Env = do
-    let showType (i, (_, HTAbstract _ kind, _)) =
+    let declarationSnapshot =
+            djinnSessionDeclarationSnapshot $ djinnSession s
+        showType (i, (_, HTAbstract _ kind, _)) =
             "type " ++ i ++ " :: " ++ show kind
         showType (i, (vs, t, _)) =
             tname t ++ " " ++ unwords (i:vs) ++ showd t
@@ -202,11 +204,11 @@ runCmd s Env = do
         showd (HTUnion []) = ""
         showd t = " = " ++ show t
     mapM_ (putStrLn . showType)
-        (reverse $ djinnSessionTypeDeclarations $ djinnSession s)
+        (reverse $ djinnSnapshotTypeDeclarations declarationSnapshot)
     mapM_ (\ (i, t) -> putStrLn $ prHSymbolOp i ++ " :: " ++ show t)
-        (reverse $ djinnSessionFunctionDeclarations $ djinnSession s)
+        (reverse $ djinnSnapshotFunctionDeclarations declarationSnapshot)
     mapM_ (putStrLn . showClass)
-        (reverse $ djinnSessionClassDeclarations $ djinnSession s)
+        (reverse $ djinnSnapshotClassDeclarations declarationSnapshot)
     return (False, s)
 runCmd s (Type name params body) =
     updateSession s . declareDjinnDeclaration $

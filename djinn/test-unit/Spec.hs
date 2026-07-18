@@ -353,6 +353,17 @@ expectShownRight = either (fail . show) return
 testCheckedDjinnSessionEditing :: IO ()
 testCheckedDjinnSessionEditing = do
     initial <- expectShownRight Djex.standardDjinnSession
+    let declarationSnapshot =
+            Djex.djinnSessionDeclarationSnapshot initial
+    assertEqual "the combined compatibility projection changed type declarations"
+        (Djex.djinnSnapshotTypeDeclarations declarationSnapshot)
+        (Djex.djinnSessionTypeDeclarations initial)
+    assertEqual "the combined compatibility projection changed function declarations"
+        (Djex.djinnSnapshotFunctionDeclarations declarationSnapshot)
+        (Djex.djinnSessionFunctionDeclarations initial)
+    assertEqual "the combined compatibility projection changed class declarations"
+        (Djex.djinnSnapshotClassDeclarations declarationSnapshot)
+        (Djex.djinnSessionClassDeclarations initial)
     first <- expectShownRight $ Djex.declareDjinnDeclaration
         (Function "first" $ HTCon "Bool") initial
     second <- expectShownRight $ Djex.declareDjinnDeclaration

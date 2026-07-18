@@ -13,9 +13,6 @@ module Language.Haskell.Exference.Session
 import Language.Haskell.Djex.Exference
   ( ExferenceSession
   , ExferenceSessionPolicy
-      ( exferenceExcludedBindings
-      , exferenceRatingOverrides
-      )
   , defaultExferenceSessionPolicy
   )
 import Language.Haskell.Djex.Exference.Internal.Session
@@ -39,6 +36,5 @@ mkExferenceSessionWithPolicy
   -> Either Diagnostic ExferenceSession
 mkExferenceSessionWithPolicy policy checked =
   sealPreparedExferenceSessionWithPolicy
-    (exferenceExcludedBindings policy)
-    (exferenceRatingOverrides policy)
+    policy
     (checkedSourcePreparedInventory checked)

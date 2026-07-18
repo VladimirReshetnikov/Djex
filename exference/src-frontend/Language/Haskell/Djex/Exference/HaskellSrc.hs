@@ -143,8 +143,7 @@ loadExferenceSessionWithPolicy policy path = do
       }
     Right checked -> case
         Session.sealPreparedExferenceSessionWithPolicy
-          (exferenceExcludedBindings policy)
-          (exferenceRatingOverrides policy)
+          policy
           (checkedSourcePreparedInventory checked) of
       Left failure -> ExferenceSessionLoadReport
         { exferenceSessionLoadResult = Left

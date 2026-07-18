@@ -83,7 +83,6 @@ import Data.Bifunctor (first)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Void (Void)
 import Numeric.Natural (Natural)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -107,10 +106,14 @@ import Language.Haskell.Exference.Core.Internal.Candidate
   , validateExferenceTypeVariableSpelling
   )
 import Language.Haskell.Djex.Exference.Internal.Session
-  ( ExferenceOmission (..)
+  ( ExferenceEnvironment
+  , ExferenceInventory
+  , ExferenceOmission (..)
   , ExferenceOmissionCapability (..)
   , ExferenceOmissionReason (..)
   , ExferenceSession
+  , ExferenceSessionPolicy (..)
+  , defaultExferenceSessionPolicy
   )
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Djex.Exference.Internal.Request
@@ -145,12 +148,8 @@ import Language.Haskell.Synthesis.Generated
   , RenderOptions
   , renderOptionsWithLocalNameHints
   )
-import Language.Haskell.Synthesis.Environment (Environment)
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
-import Language.Haskell.Synthesis.Inventory
-  ( Inventory
-  , inventoryEnvironment
-  )
+import Language.Haskell.Synthesis.Inventory (inventoryEnvironment)
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -166,37 +165,6 @@ import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 import Language.Haskell.Synthesis.TypeSynonym
   ( TypeElaborationError (..)
   )
-
--- | Environment capabilities disabled before a reusable session is sealed.
--- Names are structural and exact: excluding @Data.Function.fix@ never hides
--- an unrelated qualified binding whose occurrence also happens to be @fix@.
-data ExferenceSessionPolicy = ExferenceSessionPolicy
-  { exferenceExcludedBindings :: [Name]
-    -- ^ Exact binding names to remove from the search projection. Names not
-    -- present in the environment are harmless no-ops.
-  , exferenceRatingOverrides :: Map.Map Name Penalty
-    -- ^ Finite replacement ratings for supported, non-excluded bindings.
-    -- An override that cannot reach search is rejected instead of being
-    -- silently ignored.
-  }
-  deriving (Eq, Show)
-
--- | Unrestricted session policy: retain every supported binding and its
--- source rating.
-defaultExferenceSessionPolicy :: ExferenceSessionPolicy
-defaultExferenceSessionPolicy = ExferenceSessionPolicy
-  { exferenceExcludedBindings = []
-  , exferenceRatingOverrides = Map.empty
-  }
-
--- | The parser-independent declaration environment accepted by the stable
--- Exference adapter. Search ratings are session policy rather than source
--- semantics, so the neutral declarations carry no backend annotation.
-type ExferenceEnvironment = Environment ExferenceTypeVariable Void ()
-
--- | The annotation-erased neutral inventory retained by a stable session.
--- Search ratings remain in the private backend projection, where they belong.
-type ExferenceInventory = Inventory ExferenceTypeVariable ()
 
 -- | The result payload is owned by the search core.  This stable module only
 -- supplies compatibility spellings for its historical public selectors.
@@ -309,10 +277,8 @@ mkExferenceSessionWithPolicy
   :: ExferenceSessionPolicy
   -> ExferenceEnvironment
   -> Either Diagnostic ExferenceSession
-mkExferenceSessionWithPolicy policy =
+mkExferenceSessionWithPolicy =
   Session.sealNeutralExferenceSessionWithPolicy
-    (exferenceExcludedBindings policy)
-    (exferenceRatingOverrides policy)
 
 -- | Recover the exact neutral declaration environment sealed into this
 -- session. Policy exclusions and rating overrides affect only Exference's

@@ -1,5 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 
+{-# OPTIONS_HADDOCK not-home #-}
+
 -- | Private ownership of the parser-neutral Exference session invariant.
 --
 -- A session retains only parser-independent state.  The HSE compatibility
@@ -7,6 +9,10 @@
 -- synonym table, and core dictionary before policy is applied here.
 module Language.Haskell.Djex.Exference.Internal.Session
   ( ExferenceSession
+  , ExferenceEnvironment
+  , ExferenceInventory
+  , ExferenceSessionPolicy (..)
+  , defaultExferenceSessionPolicy
   , ExferenceOmission (..)
   , ExferenceOmissionCapability (..)
   , ExferenceOmissionReason (..)
@@ -127,14 +133,36 @@ data ExferenceSession = ExferenceSession
   , omissionView :: [ExferenceOmission]
   }
 
-type CoreEnvironment = Environment SynthesisVariable Void ()
+-- | The parser-independent declaration environment accepted by Exference.
+type ExferenceEnvironment = Environment SynthesisVariable Void ()
+
+-- | The annotation-erased neutral inventory retained by a session.
+type ExferenceInventory = Inventory SynthesisVariable ()
+
+-- | Policy applied once while projecting the authoritative inventory into
+-- Exference's supported search capabilities. Names are structural and exact:
+-- excluding @Data.Function.fix@ never hides an unrelated qualified @fix@.
+data ExferenceSessionPolicy = ExferenceSessionPolicy
+  { exferenceExcludedBindings :: [Name]
+    -- ^ Exact binding names to remove. Unknown exclusions are harmless no-ops.
+  , exferenceRatingOverrides :: Map Name Penalty
+    -- ^ Finite ratings for supported, non-excluded search bindings. An
+    -- override that cannot affect search is rejected.
+  }
+  deriving (Eq, Show)
+
+-- | Retain every supported binding and its source rating.
+defaultExferenceSessionPolicy :: ExferenceSessionPolicy
+defaultExferenceSessionPolicy = ExferenceSessionPolicy
+  { exferenceExcludedBindings = []
+  , exferenceRatingOverrides = Map.empty
+  }
 
 sealNeutralExferenceSessionWithPolicy
-  :: [Name]
-  -> Map Name Penalty
-  -> CoreEnvironment
+  :: ExferenceSessionPolicy
+  -> ExferenceEnvironment
   -> Either Diagnostic ExferenceSession
-sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
+sealNeutralExferenceSessionWithPolicy policy environment = do
   inventory <- first
     (preparationFailure "cannot validate the neutral Exference inventory")
     $ mkInventoryFromEnvironmentWithClassPolicy
@@ -142,25 +170,23 @@ sealNeutralExferenceSessionWithPolicy exclusions overrides environment = do
   prepared <- first
     (preparationFailure "cannot prepare the neutral Exference environment")
     $ prepareSynthesisInventory inventory
-  sealPreparedEnvironment exclusions overrides prepared
+  sealPreparedEnvironment policy prepared
 
 -- | Seal a prepared checked-source witness without retaining parser-specific
 -- representation. The opaque prepared inventory proves that the synonym
 -- table and rated, ordered backend are projections of the same neutral
 -- inventory; exposed source-frontend seams cannot recombine those views.
 sealPreparedExferenceSessionWithPolicy
-  :: [Name]
-  -> Map Name Penalty
+  :: ExferenceSessionPolicy
   -> PreparedSynthesisInventory ()
   -> Either Diagnostic ExferenceSession
 sealPreparedExferenceSessionWithPolicy = sealPreparedEnvironment
 
 sealPreparedEnvironment
-  :: [Name]
-  -> Map Name Penalty
+  :: ExferenceSessionPolicy
   -> PreparedSynthesisInventory ()
   -> Either Diagnostic ExferenceSession
-sealPreparedEnvironment exclusions overrides prepared = do
+sealPreparedEnvironment policy prepared = do
   let backend = preparedSynthesisBackend prepared
   -- Policy validation is deliberately asymmetric. A rating override that
   -- cannot reach the retained search projection is rejected: it claims to
@@ -169,7 +195,9 @@ sealPreparedEnvironment exclusions overrides prepared = do
   -- command frontends pass fixed structural names (for example
   -- Data.Function.fix) whether or not the environment defines them, so an
   -- unknown exclusion remains a harmless no-op.
-  let sourceFunctions = environmentFunctions backend
+  let exclusions = exferenceExcludedBindings policy
+      overrides = exferenceRatingOverrides policy
+      sourceFunctions = environmentFunctions backend
       excludedBindings = Set.fromList exclusions
       functionExcluded binding = Set.member
         (functionName binding) excludedBindings
@@ -257,7 +285,7 @@ elaborateSessionGoal session = elaboratePreparedType
 
 exferenceSessionInventory
   :: ExferenceSession
-  -> Inventory SynthesisVariable ()
+  -> ExferenceInventory
 exferenceSessionInventory = preparedInventory . preparedView
 
 sessionOmissions :: ExferenceSession -> [ExferenceOmission]

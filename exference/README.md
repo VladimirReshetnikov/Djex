@@ -27,7 +27,7 @@ sometimes stopping with "i could not find any solutions".
 
 ## Building from source
 
-Exference is part of the unified `djex` Cabal package. Its libraries and
+Exference is part of the unified `djex` Cabal package. Its library and
 deterministic test suites build with the supported GHC 9.12.4 toolchain using
 Cabal 3.16.1.0. Cabal is the maintained build path; the historical Stack file
 targeted LTS 5.18 and

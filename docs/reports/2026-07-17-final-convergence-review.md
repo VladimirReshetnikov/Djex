@@ -2,6 +2,10 @@
 
 Date: 2026-07-17
 
+The subsequent
+[checker-boundary follow-up](2026-07-17-checker-boundary-follow-up.md)
+records the raw Exference checker audit and the final release-gate results.
+
 ## Scope and method
 
 This pass started from a hard reset to `origin/main` and reviewed the merged

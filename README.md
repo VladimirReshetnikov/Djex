@@ -57,7 +57,9 @@ boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. The latest whole-tree findings,
 architectural decisions, and retained semantic differences are recorded in
-[the final convergence review](docs/reports/2026-07-17-final-convergence-review.md).
+[the final convergence review](docs/reports/2026-07-17-final-convergence-review.md);
+the subsequent raw-checker audit is recorded in the
+[checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md).
 
 ## Building
 

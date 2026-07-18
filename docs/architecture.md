@@ -179,4 +179,7 @@ cabal check
 ```
 
 See [the library API guide](library-api.md) for runnable examples and
-[the synthesis API map](../synthesis/README.md) for the shared modules.
+[the synthesis API map](../synthesis/README.md) for the shared modules. The
+[final convergence review](reports/2026-07-17-final-convergence-review.md) and
+[checker-boundary follow-up](reports/2026-07-17-checker-boundary-follow-up.md)
+record the latest comparative code-review findings and retained differences.

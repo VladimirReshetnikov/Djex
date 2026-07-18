@@ -4218,6 +4218,20 @@ tests = testGroup "Exference"
               result = runIdentity $ runExceptT
                 $ convertTypeNoDecl Map.empty Nothing [] quantified
           result @?= Left "duplicate explicitly quantified type variable 0"
+      , testCase "HSE tuple conversion bounds unchecked field spines" $ do
+          let oversizedElements =
+                replicate (SharedName.maximumTupleArity + 1)
+                  (error "forced an invalid tuple element")
+                ++ error "forced the oversized tuple tail"
+              boxed = HSE.TyTuple HSE.noSrcSpan HSE.Boxed oversizedElements
+              unboxed = HSE.TyTuple HSE.noSrcSpan HSE.Unboxed
+                $ error "forced unsupported unboxed tuple fields"
+              convert syntax = runIdentity $ runExceptT
+                $ convertTypeNoDecl Map.empty Nothing [] syntax
+          convert boxed @?= Left
+            ("invalid boxed tuple arity "
+              ++ show (SharedName.maximumTupleArity + 1))
+          convert unboxed @?= Left "unsupported unboxed tuple type"
       , testCase "failed conversion runners hide their final state" $ do
           let action :: ConversionT String Identity ()
               action = do

@@ -62,6 +62,7 @@ import Control.Monad.Trans.State.Lazy
   , runStateT
   )
 import Control.Monad.Trans.Except
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 
@@ -249,16 +250,20 @@ convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
   helper (TyFun _ a b)      = T.TypeArrow
                               <$> helper a
                               <*> helper b
-  helper tuple@(TyTuple _ Boxed ts)
-    | length ts >= 2 = do
+  helper (TyTuple _ Boxed ts)
+    | arity >= 2 && arity <= SharedName.maximumTupleArity = do
         tupleName <- either throwE pure $ qualifiedNameResult
-          $ T.mkBoxedTupleName (length ts)
+          $ T.mkBoxedTupleName arity
         SharedType.applyTypeArguments (T.TypeCons tupleName) <$> mapM helper ts
-    | otherwise = throwE $ "invalid boxed tuple arity " ++ show (length ts)
-        ++ " in " ++ prettyPrint tuple
-  helper tuple@(TyTuple _ Unboxed _)
-                            = throwE $ "unsupported unboxed tuple type: "
-                              ++ prettyPrint tuple
+    | otherwise = throwE $ "invalid boxed tuple arity " ++ show arity
+   where
+    -- HSE constructors are public, so callers can provide a cyclic or partial
+    -- element spine even though parsed source is finite. Observe only through
+    -- the first unsupported arity and do not pretty-print the malformed tree.
+    arity = SharedCollection.observedListLength
+      SharedName.maximumTupleArity ts
+  helper (TyTuple _ Unboxed _)
+                            = throwE "unsupported unboxed tuple type"
   helper (TyApp _ a b)      = T.TypeApp
                               <$> helper a
                               <*> helper b
@@ -283,7 +288,11 @@ convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
       <*> convertConstraintWithResolver resolver defModuleName
             `mapM` contextConstraints context
       <*> helper t
-  helper x                = throwE $ "unknown type element: " ++ show x -- TODO
+  -- Source loading rejects unsupported vocabulary with a located diagnostic
+  -- before conversion. This public low-level adapter can also receive a
+  -- caller-built partial HSE tree, so its fallback deliberately avoids
+  -- pretty-printing or showing the unchecked recursive payload.
+  helper _                = throwE "unsupported type syntax"
 
 -- HSE's spelling map deliberately remains the compatibility hint index, but
 -- one spelling can denote several lexically shadowing binders. Normalize only

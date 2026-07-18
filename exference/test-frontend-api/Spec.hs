@@ -2,7 +2,10 @@ module Main (main) where
 
 import Language.Haskell.Djex.Exference (defaultExferenceOptions)
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( loadExferenceSession
+  ( defaultExferenceEnvironmentPath
+  , loadDefaultExferenceSession
+  , loadDefaultExferenceSessionWithPolicy
+  , loadExferenceSession
   , loadExferenceSessionWithPolicy
   )
 import qualified Language.Haskell.Exference.CLI as CLI
@@ -16,6 +19,9 @@ main = defaultMain $ testGroup "Exference frontend import surface"
   [ testCase "owns the compatibility CLI entry point" $
       CLI.main `seq` pure ()
   , testCase "exposes the checked Haskell-source loader" $
+      defaultExferenceEnvironmentPath `seq`
+      loadDefaultExferenceSession `seq`
+      loadDefaultExferenceSessionWithPolicy `seq`
       loadExferenceSession `seq`
       loadExferenceSessionWithPolicy `seq`
       pure ()

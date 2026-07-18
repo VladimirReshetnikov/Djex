@@ -7,6 +7,9 @@
 module Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , exferenceCommandSessionPolicy
+  , defaultExferenceEnvironmentPath
+  , loadDefaultExferenceSession
+  , loadDefaultExferenceSessionWithPolicy
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
   , parseExferenceRequest
@@ -51,6 +54,7 @@ import Language.Haskell.Synthesis.Diagnostic
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Name (Name, parseName)
 import Language.Haskell.Synthesis.Query (QueryRequest (..))
+import Paths_djex (getDataFileName)
 
 -- | A fully sealed session or structured fatal diagnostics, paired with all
 -- non-fatal source-loader and backend-projection diagnostics in production
@@ -92,6 +96,29 @@ exferenceCommandSessionPolicy allowRecursionHelpers
     , "Control.Monad.forever"
     , "Control.Monad.Loops.iterateM_"
     ]
+
+-- | Locate the source environment installed as Djex package data.
+--
+-- Cabal's generated @Paths_djex@ module is private to this library. Keeping
+-- that detail behind the checked source facade gives downstream applications
+-- a supported path lookup without making them depend on generated internals
+-- or on the layout of a source checkout.
+defaultExferenceEnvironmentPath :: IO FilePath
+defaultExferenceEnvironmentPath =
+  getDataFileName "exference/environment"
+
+-- | Load Djex's installed Exference environment with the unrestricted
+-- programmatic session policy.
+loadDefaultExferenceSession :: IO ExferenceSessionLoadReport
+loadDefaultExferenceSession =
+  defaultExferenceEnvironmentPath >>= loadExferenceSession
+
+-- | Policy-aware counterpart of 'loadDefaultExferenceSession'.
+loadDefaultExferenceSessionWithPolicy
+  :: ExferenceSessionPolicy
+  -> IO ExferenceSessionLoadReport
+loadDefaultExferenceSessionWithPolicy policy =
+  defaultExferenceEnvironmentPath >>= loadExferenceSessionWithPolicy policy
 
 -- | Load a directory of source modules and ratings, validate its complete
 -- inventory, and seal an Exference session with the default policy.

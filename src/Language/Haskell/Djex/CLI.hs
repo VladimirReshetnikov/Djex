@@ -28,11 +28,12 @@ import Text.Read (readMaybe)
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
+  , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
   , loadExferenceSessionWithPolicy
   , parseExferenceRequestWithCheckedTarget
   )
-import Paths_djex (getDataFileName, version)
+import Paths_djex (version)
 
 data RenderMode = RenderDefinition | RenderExpression
   deriving (Eq, Show)
@@ -134,7 +135,7 @@ runExference options = case
   Right policy -> do
     environmentPath <- case exferenceEnvironment options of
       Just path -> pure path
-      Nothing -> getDataFileName "exference/environment"
+      Nothing -> defaultExferenceEnvironmentPath
     report <- loadExferenceSessionWithPolicy policy environmentPath
     -- The compatibility loader records progress counters as Info. A one-shot
     -- compiler-like command stays quiet on success while retaining warnings

@@ -25,7 +25,8 @@ import Text.Read (readMaybe)
 
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( exferenceCommandSessionPolicy
+  ( defaultExferenceEnvironmentPath
+  , exferenceCommandSessionPolicy
   , parseExferenceRequestWithCheckedTarget
   )
 import qualified Language.Haskell.Exference.Session as Session
@@ -66,7 +67,7 @@ import Language.Haskell.Synthesis.Selection
   , selectQueryResults
   )
 
-import Paths_djex (getDataFileName, version)
+import Paths_djex (version)
 
 data Flag
   = Verbose (Maybe String)
@@ -171,7 +172,7 @@ run :: [Flag] -> [String] -> IO ()
 run flags inputs = do
   verbosity <- either usageFailure pure $ parseVerbosity flags
   validateFlagCombinations flags inputs
-  defaultEnvironmentPath <- getDataFileName "exference/environment"
+  defaultEnvironmentPath <- defaultExferenceEnvironmentPath
   let environmentPath = case [path | EnvDir path <- flags] of
         [] -> defaultEnvironmentPath
         path : _ -> path

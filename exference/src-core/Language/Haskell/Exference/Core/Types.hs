@@ -346,7 +346,7 @@ data ClassEnvError
       SynthesisTypeError
   | DuplicateInstanceHeads [HsConstraint]
   | ExpandingInstancePrerequisite HsConstraint HsConstraint
-    -- ^ Instance head and a prerequisite that can increase a ground goal.
+    -- ^ Instance head and a groundable prerequisite that can increase a goal.
   | SuperclassCycle [QualifiedName]
   deriving (Eq, Ord)
 
@@ -540,6 +540,11 @@ mkStaticClassEnv sourceClasses sourceInstances = do
     headConstraint = instance_head instanceDeclaration
     (headSize, headOccurrences) = constraintTerminationMeasure headConstraint
     validatePrerequisite prerequisite
+      -- A variable absent from the head cannot be instantiated by matching
+      -- this rule. The solver classifies that prerequisite as variable-bearing
+      -- and stops before recursive resolution, so it poses no growth risk.
+      | not $ M.keysSet prerequisiteOccurrences
+          `S.isSubsetOf` M.keysSet headOccurrences = Right ()
       | prerequisiteSize <= headSize
       , all noMoreFrequent $ M.toList prerequisiteOccurrences = Right ()
       | otherwise = Left

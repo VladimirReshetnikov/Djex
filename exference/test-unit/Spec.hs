@@ -845,15 +845,34 @@ tests = testGroup "Exference"
               needName = name "Need"
               derivedName = name "Derived"
               base = HsTypeClass baseName [0] []
-              need = HsTypeClass needName [0, 1] []
-              derived = HsTypeClass derivedName [0, 1]
+              need = HsTypeClass needName [0] []
+              derived = HsTypeClass derivedName [0, 1, 2]
                 [HsConstraint baseName [TypeVar 0]]
-              sourceHead = HsConstraint derivedName [TypeVar 0, TypeVar 1]
-              prerequisite = HsConstraint needName [TypeVar 0, TypeVar 1]
+              sourceHead = HsConstraint derivedName
+                [TypeVar 0, TypeVar 1, TypeVar 2]
+              prerequisite = HsConstraint needName
+                [TypeApp (TypeCons SharedName.listName) (TypeVar 0)]
               sourceInstance = HsInstance [prerequisite] sourceHead
               inflatedHead = HsConstraint baseName [TypeVar 0]
           mkStaticClassEnv [base, need, derived] [sourceInstance] @?= Left
             (ExpandingInstancePrerequisite inflatedHead prerequisite)
+      , testCase "projected unbound prerequisites remain non-recursive" $ do
+          let baseName = name "Base"
+              needName = name "Need"
+              derivedName = name "Derived"
+              base = HsTypeClass baseName [0] []
+              need = HsTypeClass needName [0] []
+              derived = HsTypeClass derivedName [0, 1]
+                [HsConstraint baseName [TypeVar 0]]
+              prerequisite = HsConstraint needName [TypeVar 1]
+              sourceInstance = HsInstance [prerequisite]
+                $ HsConstraint derivedName [TypeVar 0, TypeVar 1]
+          staticEnvironment <- expectRight
+            $ mkStaticClassEnv [base, need, derived] [sourceInstance]
+          let query = HsConstraint baseName [TypeCons $ name "Int"]
+              environment = mkQueryClassEnv staticEnvironment []
+          isPossible environment [query] @?= Just [prerequisite]
+          filterUnresolved environment [query] @?= Just [query]
       ]
   , testGroup "Haskell source bindings"
       [ testCase "headerless signatures belong to the implicit Main module" $ do

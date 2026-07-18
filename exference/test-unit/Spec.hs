@@ -180,6 +180,7 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , applyTypeDecls
   , fromSynthesisTypeDeclaration
   , getTypeDecls
+  , getTypeDeclsLocated
   , parseType
   , parseTypeWithKinds
   , toSynthesisTypeDeclaration
@@ -4774,6 +4775,27 @@ tests = testGroup "Exference"
               tdecl_params flipped @?= [1, 0, 2]
               Set.size (Set.fromList $ tdecl_params flipped) @?= 3
             result -> fail $ "unexpected synonym declarations: " ++ show result
+      , testCase "type declaration errors retain mixed-phase source order" $ do
+          parsedModule <- expectParsedModule $ unlines
+            [ "module OrderedSynonymErrors where"
+            , "type Earlier = Earlier"
+            , "type Later = Int :+: Bool"
+            ]
+          typeNames <- expectRight $ getDataTypes [parsedModule]
+          let errors =
+                [ failure
+                | Left failure <- runIdentity
+                    $ getTypeDeclsLocated typeNames [parsedModule]
+                ]
+          case errors of
+            [earlier, later] -> do
+              assertBool "earlier semantic error was reordered"
+                $ "cyclic type synonym" `isInfixOf`
+                    extractionErrorMessage earlier
+              assertBool "later raw conversion error was reordered"
+                $ "infix operator" `isInfixOf`
+                    extractionErrorMessage later
+            _ -> fail $ "unexpected type declaration errors: " ++ show errors
       , testCase "type-synonym foralls shadow their head parameters" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "{-# LANGUAGE RankNTypes #-}"

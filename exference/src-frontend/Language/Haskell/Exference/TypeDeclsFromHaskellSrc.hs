@@ -188,7 +188,11 @@ getTypeDeclsLocated ds modules = do
         first (extractionErrorAt declSpan)
           (applyTypeDecls declarationMap $ tdecl_result declaration)
           >> pure declaration
-  return $ [ Left e | Left e <- rawList ] ++ map validate validDeclarations
+  -- Semantic validation needs the complete declaration map, but its results
+  -- still belong in the source slot of the raw declaration that produced
+  -- them. Grouping raw failures before validated declarations would invert a
+  -- later conversion error with an earlier cycle or saturation error.
+  return $ map (either Left validate) rawList
 
 convertType :: Monad m
             => Map QualifiedName HsTypeClass

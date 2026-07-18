@@ -113,9 +113,10 @@ loadClassEnvironmentSourced dataTypes typeDeclarations modules = do
   case NonEmpty.nonEmpty $ lefts classResults of
     Just classErrors -> pure $ Left $ ClassDeclarationErrors classErrors
     Nothing -> do
-      let classes = Map.fromList
+      let classDeclarations = rights classResults
+          classes = Map.fromList
             [ (tclass_name typeClass, typeClass)
-            | typeClass <- rights classResults
+            | typeClass <- classDeclarations
             ]
       instanceResults <- getInstances classes dataTypes typeDeclarations modules
       case NonEmpty.nonEmpty $ lefts instanceResults of
@@ -124,7 +125,7 @@ loadClassEnvironmentSourced dataTypes typeDeclarations modules = do
         Nothing -> do
           let instances = rights instanceResults
           case first InvalidClassEnvironment
-              (mkStaticClassEnv (Map.elems classes) instances) of
+              (mkStaticClassEnv classDeclarations instances) of
             Left failure -> pure $ Left failure
             Right environment -> do
               methodBatches <- getClassMethodsFromRaw classes dataTypes

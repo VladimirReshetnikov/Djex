@@ -411,17 +411,22 @@ sClassEnv_instances (StaticClassEnv _ _ instances) = instances
 emptyStaticClassEnv :: StaticClassEnv
 emptyStaticClassEnv = StaticClassEnv M.empty [] M.empty
 
--- | Validate and index a finite class environment.  Instance inflation runs
--- only after declarations, heads, prerequisites, arities, and the superclass
--- graph have been checked.
+-- | Validate and index a finite class environment. Class declaration failures
+-- follow input order even though superclass lookup supports forward
+-- references. Instance inflation runs only after declarations, heads,
+-- prerequisites, arities, and the superclass graph have been checked.
 mkStaticClassEnv
   :: [HsTypeClass]
   -> [HsInstance]
   -> Either ClassEnvError StaticClassEnv
 mkStaticClassEnv sourceClasses sourceInstances = do
-  classTable <- buildClassTable classes
-  traverse_ (preflightClass classTable) classes
-  traverse_ (validateClass classTable) classes
+  -- The lookup table must exist before validating any superclass so forward
+  -- references remain legal.  Building it is deliberately non-diagnostic:
+  -- declarations are then checked exactly once in caller order, preventing a
+  -- later duplicate or malformed superclass from hiding an earlier local
+  -- declaration error.
+  let classTable = buildFirstOccurrenceClassTable classes
+  validateClassesInSourceOrder classTable classes
   traverse_ (preflightInstance classTable) instances
   case SharedEnvironment.repeatedInstanceHeadsInFirstRepetitionOrder
       [ (implicitInstanceVariables declaration, instance_head declaration)
@@ -443,10 +448,10 @@ mkStaticClassEnv sourceClasses sourceInstances = do
   classes = map canonicalizeClass sourceClasses
   instances = map canonicalizeInstance sourceInstances
 
-  -- Inspect every bounded-width component before duplicate-head analysis,
-  -- which computes free variables and therefore assumes a finite type tree.
-  -- The callback also rejects unknown nested forall constraints without
-  -- forcing their raw argument spines.
+  -- Inspect every bounded-width component before analyses that compute free
+  -- variables and therefore assume a finite type tree. The callback also
+  -- rejects unknown nested forall constraints without forcing their raw
+  -- argument spines.
   preflightClass table declaration = traverse_
     (preflightConstraint table $ ClassSuperclass $ tclass_name declaration)
     $ tclass_constraints declaration
@@ -488,14 +493,23 @@ mkStaticClassEnv sourceClasses sourceInstances = do
     $ instanceConstraintVariables
     $ instance_head declaration : instance_constraints declaration
 
-  buildClassTable = go M.empty
+  buildFirstOccurrenceClassTable = L.foldl' insertFirst M.empty
     where
-      go table [] = Right table
-      go table (declaration : rest) = do
+      insertFirst table declaration =
+        M.insertWith (\_ firstDeclaration -> firstDeclaration)
+          (tclass_name declaration) declaration table
+
+  validateClassesInSourceOrder table = go S.empty
+    where
+      go _ [] = Right ()
+      go seen (declaration : rest) = do
         validateClassName name
-        if M.member name table
+        if name `S.member` seen
           then Left $ DuplicateClassDeclaration name
-          else go (M.insert name declaration table) rest
+          else do
+            preflightClass table declaration
+            validateClass table declaration
+            go (S.insert name seen) rest
         where
           name = tclass_name declaration
 

@@ -961,24 +961,31 @@ loweredRatedConstructor result constructor = do
 deconstructorHead
   :: HsType
   -> Either SynthesisDeclarationError (QualifiedName, [TVarId])
-deconstructorHead typeExpression = do
+deconstructorHead source = do
+  -- Deconstructor records are a public compatibility representation, so
+  -- their result type can be built without passing through the checked type
+  -- boundary first.  Validate and canonicalize the whole type before taking
+  -- apart its nominal head: besides preserving the shared type-error
+  -- vocabulary (for example duplicate forall binders), this bounds tuple
+  -- traversal before the code below ever asks for its arity.
+  typeExpression <- checkedType source
   (binders, body) <- case SharedType.splitLeadingForalls typeExpression of
     (nativeBinders, [], body) -> case traverse
         SharedType.flexibleVariableIdentity nativeBinders of
       Just binders -> Right (binders, body)
       Nothing -> Left $ InvalidDeconstructorHead typeExpression
     _ -> Left $ InvalidDeconstructorHead typeExpression
-  (name, arguments) <- nominalApplication body
+  (name, arguments) <- nominalApplication typeExpression body
   parameters <- mapM typeVariable arguments
   if null binders || Set.fromList binders == Set.fromList parameters
     then Right (name, parameters)
     else Left $ DeconstructorForallMismatch binders parameters
  where
-  nominalApplication (TypeTuple boxity elements) = do
+  nominalApplication typeExpression (TypeTuple boxity elements) = do
     name <- either (const $ Left $ InvalidDeconstructorHead typeExpression)
       Right $ SharedName.tupleName boxity $ length elements
     Right (name, elements)
-  nominalApplication body = case SharedType.applicationSpine body of
+  nominalApplication typeExpression body = case SharedType.applicationSpine body of
     (TypeCons name, arguments) -> Right (name, arguments)
     _ -> Left $ InvalidDeconstructorHead typeExpression
 

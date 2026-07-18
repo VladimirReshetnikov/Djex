@@ -543,6 +543,28 @@ tests = testGroup "Exference"
           let malformed = HsTypeClass (name "C") [0, 0] []
           mkStaticClassEnv [malformed] []
             @?= Left (DuplicateClassParameter (name "C") 0)
+      , testCase "class validation follows declaration order" $ do
+          let firstName = name "First"
+              firstMalformed = HsTypeClass firstName [0, 0] []
+              laterName = name "Later"
+              laterUnknownSuperclass = HsTypeClass laterName [0]
+                [HsConstraint (name "Missing") [TypeVar 0]]
+              laterValid = HsTypeClass laterName [0] []
+              laterDuplicate = HsTypeClass laterName [1] []
+              expected = Left $ DuplicateClassParameter firstName 0
+          -- Neither a global superclass preflight nor a whole-table duplicate
+          -- scan may select a failure after the first source declaration.
+          mkStaticClassEnv
+              [firstMalformed, laterUnknownSuperclass] [] @?= expected
+          mkStaticClassEnv
+              [firstMalformed, laterValid, laterDuplicate] [] @?= expected
+      , testCase "duplicate classes fail at their source occurrence" $ do
+          let repeatedName = name "Repeated"
+              repeated = HsTypeClass repeatedName [0] []
+              interveningName = name "Intervening"
+              intervening = HsTypeClass interveningName [0, 0] []
+          mkStaticClassEnv [repeated, intervening, repeated] [] @?=
+            Left (DuplicateClassParameter interveningName 0)
       , testCase "negative class parameters are rejected" $ do
           let malformed = HsTypeClass (name "C") [-1] []
           mkStaticClassEnv [malformed] []
@@ -656,6 +678,19 @@ tests = testGroup "Exference"
                 map (\(message, line) -> Just
                   (message, "qualified-class-test.hs", line)) expected
             other -> fail $ "malformed superclasses were accepted: " ++ show other
+      , testCase "frontend preserves source order for semantic class errors" $ do
+          result <- classEnvironmentFromSources
+            [ unlines
+                [ "module M where"
+                -- Reverse lexical order: passing Map.elems to the core would
+                -- incorrectly select A's duplicate parameter before Z's.
+                , "class Z a a where"
+                , "class A b b where"
+                ]
+            ]
+          zName <- expectRight $ mkQualifiedName ["M"] "Z"
+          result @?= Left (InvalidClassEnvironment
+            $ DuplicateClassParameter zName 0)
       , testCase "frontend binds head variables before superclass arguments" $ do
           environment <- classEnvironmentFromSources
             [ unlines
@@ -1872,6 +1907,43 @@ tests = testGroup "Exference"
                 ] True
           shared <- expectRight $ toSynthesisDataDeclaration declaration
           fromSynthesisDataDeclaration shared @?= Right declaration
+      , testCase "datatype heads bound poisoned and cyclic tuple spines" $ do
+          let integer = TypeCons $ name "Int"
+              observedWidth = SharedName.maximumTupleArity + 1
+              poisonousElements =
+                replicate observedWidth integer
+                  ++ error "oversized tuple tail was inspected"
+              poisonous = DeconstructorBinding
+                (TypeTuple Boxed poisonousElements) [] True
+              expectedWidthFailure = Left
+                $ DeclarationTypeConversionError
+                $ InvalidSynthesisType
+                $ SharedType.InvalidTupleTypeArity Boxed observedWidth
+          toSynthesisDataDeclaration poisonous @?= expectedWidthFailure
+
+          -- Recursion derivation is intentionally best-effort over legacy
+          -- records. A malformed head is omitted from its graph, but that
+          -- omission must still be finite for a cyclic raw list spine.
+          let cyclicElements = integer : cyclicElements
+              cyclic = DeconstructorBinding
+                (TypeTuple Boxed cyclicElements) [] True
+          case deriveRecursiveDataMetadata [cyclic] of
+            [classified] -> deconstructorRecursive classified @?= False
+            _ -> fail "recursion derivation changed the declaration count"
+      , testCase "datatype heads reject duplicate forall binders" $ do
+          let variable = SharedType.FlexibleVariable 0
+              typeName = name "Recursive"
+              applied = TypeApp (TypeCons typeName) (TypeVar 0)
+              malformedHead = TypeForall [0, 0] [] applied
+              declaration = DeconstructorBinding malformedHead
+                [ConstructorBinding (name "Recursive") [applied]] True
+              expectedFailure = Left
+                $ DeclarationTypeConversionError
+                $ InvalidSynthesisType
+                $ SharedType.DuplicateForallVariable variable
+          toSynthesisDataDeclaration declaration @?= expectedFailure
+          map deconstructorRecursive
+            (deriveRecursiveDataMetadata [declaration]) @?= [False]
       , testCase "rated data declarations preserve constructor penalties" $ do
           let input = TypeApp (TypeCons $ name "Maybe") (TypeVar 0)
               nothing = ConstructorBinding (name "Nothing") []

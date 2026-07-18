@@ -175,8 +175,9 @@ data ExferenceSessionPolicy = ExferenceSessionPolicy
     -- ^ Exact binding names to remove from the search projection. Names not
     -- present in the environment are harmless no-ops.
   , exferenceRatingOverrides :: Map.Map Name Penalty
-    -- ^ Finite replacement ratings for available bindings. An unavailable
-    -- name is rejected instead of being silently ignored.
+    -- ^ Finite replacement ratings for supported, non-excluded bindings.
+    -- An override that cannot reach search is rejected instead of being
+    -- silently ignored.
   }
   deriving (Eq, Show)
 

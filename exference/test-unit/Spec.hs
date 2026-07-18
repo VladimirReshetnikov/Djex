@@ -2334,6 +2334,21 @@ tests = testGroup "Exference"
                 Just omission -> omittedReason omission @?=
                   UnsupportedNestedForall
                 Nothing -> fail "the stable session did not report rank-N omission"
+              let overridePolicy = defaultExferenceSessionPolicy
+                    { exferenceRatingOverrides =
+                        Map.singleton function $ Penalty 1
+                    }
+              case ExferenceSession.mkExferenceSessionWithPolicy
+                  overridePolicy checked of
+                Left failure -> do
+                  diagnosticCode failure @?=
+                    Just "DJEX_EXF_POLICY_RATING"
+                  assertBool ("unexpected rank-N policy failure: "
+                      ++ show failure)
+                    $ "unavailable bindings" `isInfixOf`
+                        diagnosticMessage failure
+                Right _ -> fail
+                  "an override for an omitted rank-N binding was accepted"
       , testCase "HSE sessions accept finite signed overrides" $
           withTemporaryFile (unlines
             [ "module Ratings where"
@@ -2376,6 +2391,26 @@ tests = testGroup "Exference"
               assertBool ("unexpected policy failure: " ++ show failure)
                 $ "unavailable bindings" `isInfixOf` diagnosticMessage failure
             Right _ -> fail "an override for an unavailable binding was accepted"
+      , testCase "rating overrides reject excluded bindings" $ do
+          let identityName = neutralName "identity"
+              variableType = SharedType.TypeVariable $ neutralVariable 0
+              policy = defaultExferenceSessionPolicy
+                { exferenceExcludedBindings = [identityName]
+                , exferenceRatingOverrides =
+                    Map.singleton identityName $ Penalty 1
+                }
+          environment <- expectRight $ SharedEnvironment.mkEnvironment
+            [neutralValue identityName
+              $ SharedType.FunctionType variableType variableType]
+          case mkExferenceSessionWithPolicy policy environment of
+            Left failure -> do
+              diagnosticCode failure @?= Just "DJEX_EXF_POLICY_RATING"
+              assertBool ("unexpected excluded-rating failure: "
+                  ++ show failure)
+                $ "unavailable bindings" `isInfixOf`
+                    diagnosticMessage failure
+            Right _ -> fail
+              "an override for an excluded binding was accepted"
       , testCase "rating overrides reject NaN" $ do
           let identityName = neutralName "identity"
               variableType = SharedType.TypeVariable $ neutralVariable 0

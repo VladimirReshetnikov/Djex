@@ -3473,27 +3473,80 @@ tests = testGroup "Exference"
             $ all ((== target) . Generated.clauseName
                 . SharedCandidate.candidateOutput)
             $ SharedSearch.batchCandidates batch
-      , testCase "deconstructor namespace exhaustion retains fallback work" $ do
+      , testCase "generic deconstructors need no persistent flexible IDs" $ do
           let integer = TypeCons $ name "Int"
               box argument = TypeApp (TypeCons $ name "Box") argument
               deconstructor = DeconstructorBinding
                 (box $ TypeVar 0)
                 [ConstructorBinding (name "Box") [TypeVar 0]]
                 False
-              constant = FunctionBinding
-                integer (name "constant") 0 [] []
               input = identityInput
                 { input_goalType = TypeArrow (box integer) integer
-                , input_envFuncs = [constant]
                 , input_envDeconsS = [deconstructor]
-                , input_allowUnused = True
                 }
-          chunk <- lastCapacityChunk
-            (IdentifierCapacities 100 0 100) input
-          searchCompletion (chunkStatus chunk) @?=
-            SearchIdentifierSpaceExhausted
-          assertBool "deconstructor exhaustion suppressed fallback search"
-            $ not $ null $ chunkElements chunk
+              capacities = IdentifierCapacities 100 0 100
+              isBoxElimination candidate = case candidate of
+                ( ExpLambda scrutinee _
+                    (ExpLetMatch constructor [(field, annotation)]
+                      (ExpVar matchedScrutinee _)
+                      (ExpVar returnedField _))
+                  , []
+                  , _
+                  ) -> constructor == name "Box"
+                    && matchedScrutinee == scrutinee
+                    && returnedField == field
+                    && annotation == integer
+                _ -> False
+          chunks <- expectRight
+            $ findExpressionsWithIdentifierCapacitiesEither capacities input
+          finalChunk <- case chunks of
+            [] -> fail "generic Box elimination produced no search chunks"
+            initial : remaining -> pure $ lastElement initial remaining
+          chunkStatus finalChunk @?= SearchStatus SearchExhausted 0 0
+          assertBool "generic Box elimination consumed a flexible ID"
+            $ any isBoxElimination
+            $ concatMap chunkElements chunks
+      , testCase "multi-case deconstructors need no persistent flexible IDs" $ do
+          let integer = TypeCons $ name "Int"
+              choice argument = TypeApp
+                (TypeCons $ name "Choice") argument
+              genericChoice = choice $ TypeVar 0
+              integerChoice = choice integer
+              leftName = name "First"
+              rightName = name "Second"
+              deconstructor = DeconstructorBinding genericChoice
+                [ ConstructorBinding leftName [TypeVar 0]
+                , ConstructorBinding rightName [TypeVar 0]
+                ] False
+              input = identityInput
+                { input_goalType = TypeArrow integerChoice integer
+                , input_envDeconsS = [deconstructor]
+                , input_multiPM = True
+                , input_maxSteps = 200
+                }
+              capacities = IdentifierCapacities 100 0 100
+              returnsAnnotatedField (_, [(field, annotation)], body) =
+                annotation == integer && body == ExpVar field annotation
+              returnsAnnotatedField _ = False
+              isChoiceElimination candidate = case candidate of
+                ( ExpLambda scrutinee _
+                    (ExpCaseMatch (ExpVar matchedScrutinee _) alternatives)
+                  , []
+                  , _
+                  ) -> matchedScrutinee == scrutinee
+                    && map (\(constructor, _, _) -> constructor) alternatives
+                      == [leftName, rightName]
+                    && all returnsAnnotatedField alternatives
+                _ -> False
+          chunks <- expectRight
+            $ findExpressionsWithIdentifierCapacitiesEither capacities input
+          finalChunk <- case chunks of
+            [] -> fail "generic Choice elimination produced no search chunks"
+            initial : remaining -> pure $ lastElement initial remaining
+          chunkStatus finalChunk @?= SearchStatus SearchExhausted 0 0
+          assertBool "generic Choice elimination consumed a flexible ID"
+            $ any isChoiceElimination
+            $ concatMap chunkElements chunks
       , testCase "empty elimination consumes no flexible identifier" $ do
           let integer = TypeCons $ name "Int"
               empty argument = TypeApp (TypeCons $ name "Empty") argument
@@ -3655,6 +3708,27 @@ tests = testGroup "Exference"
               $ "unexpected Box deconstruction result: "
               ++ showExpression expression
               ++ " with constraints " ++ show constraints
+      , testCase "provided values consume supplied class evidence" $ do
+          let className = name "Evidence"
+              variable = TypeVar 0
+              assumption = HsConstraint className [variable]
+              goal = TypeForall [0] [assumption]
+                $ TypeArrow variable variable
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          let input = identityInput
+                { input_goalType = goal
+                , input_envClasses = staticClasses
+                }
+          case findOneExpression input of
+            Just (ExpLambda binder _ (ExpVar returned _), residual, _) -> do
+              returned @?= binder
+              residual @?= []
+            Nothing -> fail "supplied Evidence dictionary rejected identity"
+            Just (expression, residual, _) -> fail
+              $ "unexpected evidence-consuming result: "
+              ++ showExpression expression
+              ++ " with constraints " ++ show residual
       , testCase "complete failure is distinguished from bounded search" $ do
           let input = identityInput
                 {input_goalType = TypeCons $ name "Void"}

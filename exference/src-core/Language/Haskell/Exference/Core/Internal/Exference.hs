@@ -1388,13 +1388,15 @@ stateStep allocators multiPM allowConstrs h
         provId = varPVariable provided
         provType = varPResult provided
         dependencies = varPParameters provided
-        -- Scoped values are monotypes. Constraints introduced while partially
-        -- applying an environment function already live on the search node.
-        provConstrs = S.toList $ qClassEnv_constraints contxt
       byGenericUnify
         (Right (provId, SharedType.functionType dependencies provType))
         provType
-        provConstrs
+        -- Query constraints describe dictionaries supplied by the caller;
+        -- using a scoped value must not turn that evidence back into a proof
+        -- obligation. Any constraints from a partial environment-function
+        -- application were recorded on 'nodeConstraintGoals' when that
+        -- application was introduced.
+        []
         dependencies
         (heuristics_stepProvidedGood h)
         (heuristics_stepProvidedBad h)
@@ -1562,29 +1564,22 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
                 ++ show vtResult
       _ | not $ null vtParams -> defaultHandleRest
         | otherwise -> do
-            supply <- gets nodeFlexibleIds
-            selectDeconstructor supply =<< gets nodeDeconstructors
+            selectDeconstructor =<< gets nodeDeconstructors
          where
           -- Preserve the historical first-applicable deconstructor policy.
-          -- An unrepresentable namespace is different from a non-match: emit
-          -- a truncation event, then keep looking so viable sibling work is
-          -- not suppressed by this failed branch.
-          selectDeconstructor _ [] = defaultHandleRest
-          selectDeconstructor supply (deconstructor : remaining) =
-            case mapFunc supply deconstructor of
-              Left truncation ->
-                (lift $ truncateBranch truncation)
-                  <|> selectDeconstructor supply remaining
-              Right Nothing -> selectDeconstructor supply remaining
-              Right (Just action) -> action
+          selectDeconstructor [] = defaultHandleRest
+          selectDeconstructor (deconstructor : remaining) =
+            maybe (selectDeconstructor remaining) id $ mapFunc deconstructor
 
+          -- Sealing guarantees that every field variable occurs in the
+          -- datatype head. 'unifyRight' gives that head a temporary tagged
+          -- namespace and returns substitutions keyed by its original IDs,
+          -- so applying those substitutions directly to the validated fields
+          -- is both capture-safe and allocation-free.
           mapFunc
-            :: FlexibleIdSupply
-            -> DeconstructorBinding
-            -> Either
-                BranchTruncation
-                (Maybe (StateT SearchNode SearchBranches [TGoal]))
-          mapFunc _ (DeconstructorBinding matchParam [] False) =
+            :: DeconstructorBinding
+            -> Maybe (StateT SearchNode SearchBranches [TGoal])
+          mapFunc (DeconstructorBinding matchParam [] False) =
             let eliminateEmpty = do
                   -- An empty case evaluates its scrutinee once and has no
                   -- branch goals. Recording that use is also what lets a
@@ -1599,100 +1594,74 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
             -- already gives its right operand a disjoint tagged namespace, so
             -- reserving persistent flexible IDs here could only introduce a
             -- spurious identifier-space truncation.
-            in Right $ eliminateEmpty <$ unifyRight vtResult matchParam
-          mapFunc supply deconstructor@(DeconstructorBinding matchParam
+            in eliminateEmpty <$ unifyRight vtResult matchParam
+          mapFunc (DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] False) =
-            case allocateDeconstructorNamespace supply deconstructor of
-              Nothing -> Left BranchIdentifierSpaceExhausted
-              Just (renaming, nextSupply) ->
-                let resultTypes = map (renameFlexibleType renaming) matchRs
-                    mapFunc1 substs = do
-                      modify $ \node -> node {nodeFlexibleIds = nextSupply}
-                      vars <- forM matchRs $ \_ ->
-                        builderAllocVar allocators
-                      builderRecordVarUse v
-                      let newProvTypes =
-                            map (snd . applySubsts substs) resultTypes
-                          newBinds = zipWith
-                            (\x y -> splitBinding $ VarBinding x y)
-                            vars
-                            newProvTypes
-                          expr = ExpLetMatch matchId
-                            (zip vars newProvTypes)
-                            expVar
-                            (ExpHole vid)
-                      modify $ \node -> node
-                        { nodeExpression = fillExprHole vid expr
-                            $ nodeExpression node }
-                      addScopePatternMatch
-                        allocators
-                        multiPM
-                        goalType
-                        vid
-                        sid
-                        (reverse newBinds ++ bindingRest)
-                in Right $ fmap mapFunc1
-                  $ unifyRight vtResult
-                  $ renameFlexibleType renaming matchParam
-          mapFunc supply deconstructor@(DeconstructorBinding matchParam
+            fmap mapFunc1 $ unifyRight vtResult matchParam
+           where
+            mapFunc1 substs = do
+              vars <- forM matchRs $ \_ ->
+                builderAllocVar allocators
+              builderRecordVarUse v
+              let newProvTypes = map (snd . applySubsts substs) matchRs
+                  newBinds = zipWith
+                    (\x y -> splitBinding $ VarBinding x y)
+                    vars
+                    newProvTypes
+                  expr = ExpLetMatch matchId
+                    (zip vars newProvTypes)
+                    expVar
+                    (ExpHole vid)
+              modify $ \node -> node
+                { nodeExpression = fillExprHole vid expr
+                    $ nodeExpression node }
+              addScopePatternMatch
+                allocators
+                multiPM
+                goalType
+                vid
+                sid
+                (reverse newBinds ++ bindingRest)
+          mapFunc (DeconstructorBinding matchParam
               matchers@(_ : _) False)
-            | multiPM = case
-                allocateDeconstructorNamespace supply deconstructor of
-              Nothing -> Left BranchIdentifierSpaceExhausted
-              Just (renaming, nextSupply) ->
-                let mapFunc2 substs = do
-                      modify $ \node -> node {nodeFlexibleIds = nextSupply}
-                      -- The case expression evaluates its scrutinee once. Its
-                      -- alternatives do not constitute additional uses of
-                      -- that variable; charging one use per constructor
-                      -- biases the queue against datatypes merely for having
-                      -- more constructors.
-                      builderRecordVarUse v
-                      matchData <- matchers `forM` \matcher -> do
-                        let matchId = constructorName matcher
-                            matchRs = constructorFields matcher
-                        newSid <- builderAddScope allocators sid
-                        let resultTypes =
-                              map (renameFlexibleType renaming) matchRs
-                        vars <- forM matchRs $ \_ ->
-                          builderAllocVar allocators
-                        newVid <- builderAllocHole allocators
-                        let newProvTypes =
-                              map (snd . applySubsts substs) resultTypes
-                            newBinds = zipWith
-                              (\x y -> splitBinding $ VarBinding x y)
-                              vars
-                              newProvTypes
-                        return
-                          ( (matchId, zip vars newProvTypes, ExpHole newVid)
-                          , (newVid, reverse newBinds, newSid)
-                          )
-                      modify $ \node -> node
-                        { nodeExpression = fillExprHole vid
-                            (ExpCaseMatch expVar $ map fst matchData)
-                            (nodeExpression node) }
-                      fmap concat $ map snd matchData `forM`
-                        \(newVid, newBinds, newSid) ->
-                          addScopePatternMatch
-                            allocators
-                            multiPM
-                            goalType
-                            newVid
-                            newSid
-                            (newBinds ++ bindingRest)
-                in Right $ fmap mapFunc2
-                  $ unifyRight vtResult
-                  $ renameFlexibleType renaming matchParam
-          mapFunc _ _ = Right Nothing
+            | multiPM = fmap mapFunc2 $ unifyRight vtResult matchParam
+           where
+            mapFunc2 substs = do
+              -- The case expression evaluates its scrutinee once. Its
+              -- alternatives do not constitute additional uses of that
+              -- variable; charging one use per constructor biases the queue
+              -- against datatypes merely for having more constructors.
+              builderRecordVarUse v
+              matchData <- matchers `forM` \matcher -> do
+                let matchId = constructorName matcher
+                    matchRs = constructorFields matcher
+                newSid <- builderAddScope allocators sid
+                vars <- forM matchRs $ \_ ->
+                  builderAllocVar allocators
+                newVid <- builderAllocHole allocators
+                let newProvTypes = map (snd . applySubsts substs) matchRs
+                    newBinds = zipWith
+                      (\x y -> splitBinding $ VarBinding x y)
+                      vars
+                      newProvTypes
+                return
+                  ( (matchId, zip vars newProvTypes, ExpHole newVid)
+                  , (newVid, reverse newBinds, newSid)
+                  )
+              modify $ \node -> node
+                { nodeExpression = fillExprHole vid
+                    (ExpCaseMatch expVar $ map fst matchData)
+                    (nodeExpression node) }
+              fmap concat $ map snd matchData `forM`
+                \(newVid, newBinds, newSid) ->
+                  addScopePatternMatch
+                    allocators
+                    multiPM
+                    goalType
+                    newVid
+                    newSid
+                    (newBinds ++ bindingRest)
+          mapFunc _ = Nothing
             -- TODO: deconstructors for recursive data types.
-
-          allocateDeconstructorNamespace supply deconstructor =
-            searchAllocateFlexibleNamespace
-              allocators
-              (IntSet.toAscList
-                $ IntSet.unions
-                $ map flexibleIdentifiers
-                $ deconstructorBindingTypes deconstructor)
-              supply
   -- where
   --  (<&>) = flip (<$>)

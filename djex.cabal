@@ -247,6 +247,7 @@ Test-Suite djex-cli-tests
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-cli
+  Build-Depends:    djex
   Build-Tool-Depends: djex:djex
 
 Test-Suite synthesis-tests

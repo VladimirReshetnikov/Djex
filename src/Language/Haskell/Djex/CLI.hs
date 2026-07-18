@@ -308,8 +308,9 @@ parseDjinnOptions arguments = do
   (flags, source) <- parseOptions DjinnBackend arguments
   common <- parseCommonOptions flags source
   candidateLimit <- uniqueValue "--candidate-limit" candidateLimitValue
-    "200" flags >>= positiveInt "--candidate-limit"
-  rawBudget <- uniqueValue "--choice-budget" choiceBudgetValue "0" flags
+    (show defaultDjinnCandidateLimit) flags >>= positiveInt "--candidate-limit"
+  rawBudget <- uniqueValue "--choice-budget" choiceBudgetValue
+    defaultDjinnChoiceBudget flags
   budget <- nonNegativeInteger "--choice-budget" rawBudget
   pure DjinnOptions
     { djinnCommon = common
@@ -369,14 +370,14 @@ parseOptions selectedBackend arguments = case
 
 parseCommonOptions :: [Flag] -> String -> Either String CommonOptions
 parseCommonOptions flags source = do
-  rawTarget <- uniqueValue "--target" targetValue "djexResult" flags
+  rawTarget <- uniqueValue "--target" targetValue defaultTargetSpelling flags
   target <- checkedTarget rawTarget
-  selection <- uniqueValue "--select" selectionValue "best" flags
+  selection <- uniqueValue "--select" selectionValue defaultSelectionSpelling flags
     >>= selectionMode
-  renderMode <- uniqueValue "--render" renderValue "definition" flags
+  renderMode <- uniqueValue "--render" renderValue defaultRenderSpelling flags
     >>= checkedRenderMode
   qualification <- uniqueValue
-    "--qualification" qualificationValue "full" flags
+    "--qualification" qualificationValue defaultQualificationSpelling flags
     >>= checkedQualification
   pure CommonOptions
     { commonTarget = target
@@ -517,22 +518,24 @@ backendSpecificOptions selectedBackend = case selectedBackend of
 commonOptions :: [OptDescr Flag]
 commonOptions =
   [ Option [] ["target"] (ReqArg TargetFlag "NAME")
-      "generated definition name (default: djexResult)"
+      $ defaulted "generated definition name" defaultTargetSpelling
   , Option [] ["select"] (ReqArg SelectionFlag "first|best|all")
-      "candidate selection policy (default: best)"
+      $ defaulted "candidate selection policy" defaultSelectionSpelling
   , Option [] ["render"] (ReqArg RenderFlag "definition|expression")
-      "render a definition or expression (default: definition)"
+      $ defaulted "render a definition or expression" defaultRenderSpelling
   , Option [] ["qualification"]
       (ReqArg QualificationFlag "none|identifiers|full")
-      "name qualification policy (default: full)"
+      $ defaulted "name qualification policy" defaultQualificationSpelling
   ]
 
 djinnOptions :: [OptDescr Flag]
 djinnOptions =
   [ Option [] ["candidate-limit"] (ReqArg CandidateLimitFlag "N")
-      "positive proof-candidate limit (default: 200)"
+      $ defaulted "positive proof-candidate limit"
+          $ show defaultDjinnCandidateLimit
   , Option [] ["choice-budget"] (ReqArg ChoiceBudgetFlag "N")
-      "non-negative choice-point budget; 0 is unlimited (default: 0)"
+      $ defaulted "non-negative choice-point budget; 0 is unlimited"
+          defaultDjinnChoiceBudget
   ]
 
 exferenceOptions :: [OptDescr Flag]
@@ -545,19 +548,43 @@ exferenceOptions =
       "allow residual constraints"
   , Option [] ["constraint-deferral-steps"]
       (ReqArg ConstraintDeferralStepsFlag "N")
-      "non-negative constraint-deferral step count (default: 8192)"
+      $ defaulted "non-negative constraint-deferral step count"
+          $ show $ exferenceConstraintDeferralSteps defaultExferenceOptions
   , Option [] ["multi-constructor-patterns"]
       (NoArg MultiConstructorPatternsFlag)
       "allow matches on multi-constructor datatypes"
   , Option [] ["max-steps"] (ReqArg MaximumStepsFlag "N")
-      "positive search-step limit (default: 65536)"
+      $ defaulted "positive search-step limit"
+          $ show $ exferenceMaximumSteps defaultExferenceOptions
   , Option [] ["max-queue"] (ReqArg MaximumQueueFlag "N|unbounded")
-      "non-negative queue limit or unbounded (default: 8192)"
+      $ defaulted "non-negative queue limit or unbounded"
+          $ renderBounded $ exferenceMaximumQueueSize defaultExferenceOptions
   , Option [] ["max-depth"] (ReqArg MaximumDepthFlag "N|unbounded")
-      "non-negative search cost or unbounded (default: unbounded)"
+      $ defaulted "non-negative search cost or unbounded"
+          $ renderBounded $ exferenceMaximumDepth defaultExferenceOptions
   , Option [] ["fix"] (NoArg AllowFixFlag)
       "allow known nonterminating recursion helpers"
   ]
+
+-- Parser fallbacks and help text share these spellings. Backend-owned numeric
+-- defaults are projected directly from their public option records so changing
+-- a search policy cannot leave a stale command-line promise behind.
+defaultTargetSpelling, defaultSelectionSpelling, defaultRenderSpelling
+  , defaultQualificationSpelling, defaultDjinnChoiceBudget :: String
+defaultTargetSpelling = "djexResult"
+defaultSelectionSpelling = "best"
+defaultRenderSpelling = "definition"
+defaultQualificationSpelling = "full"
+defaultDjinnChoiceBudget = maybe "0" show $ optionBudget defaultQueryOptions
+
+defaultDjinnCandidateLimit :: Int
+defaultDjinnCandidateLimit = optionCutoff defaultQueryOptions
+
+defaulted :: String -> String -> String
+defaulted description value = description ++ " (default: " ++ value ++ ")"
+
+renderBounded :: Show value => Maybe value -> String
+renderBounded = maybe "unbounded" show
 
 fullUsage :: String
 fullUsage = intercalate "\n"

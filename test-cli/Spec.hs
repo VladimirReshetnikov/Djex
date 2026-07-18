@@ -21,6 +21,7 @@ import Test.Tasty.HUnit
   , assertEqual
   , testCase
   )
+import qualified Language.Haskell.Djex as Djex
 
 main :: IO ()
 main = defaultMain $ testGroup "Djex CLI integration"
@@ -62,6 +63,22 @@ testGlobalInformation = do
   assertEqual "help exit" ExitSuccess helpExit
   assertContains "global help" "djex djinn [OPTION...] TYPE" help
   assertContains "global help" "djex exference [OPTION...] TYPE" help
+  assertContains "Djinn default follows its public options"
+    ("positive proof-candidate limit (default: "
+      ++ show (Djex.optionCutoff Djex.defaultQueryOptions) ++ ")") help
+  assertContains "Djinn budget follows its public options"
+    ("non-negative choice-point budget; 0 is unlimited (default: "
+      ++ maybe "0" show (Djex.optionBudget Djex.defaultQueryOptions) ++ ")")
+    help
+  assertContains "Exference steps follow its public options"
+    ("positive search-step limit (default: "
+      ++ show (Djex.exferenceMaximumSteps Djex.defaultExferenceOptions) ++ ")")
+    help
+  assertContains "Exference queue follows its public options"
+    ("non-negative queue limit or unbounded (default: "
+      ++ maybe "unbounded" show
+          (Djex.exferenceMaximumQueueSize Djex.defaultExferenceOptions)
+      ++ ")") help
   assertEqual "help stderr" "" helpErrors
 
   (versionExit, versionOutput, versionErrors) <- runDjex ["--version"]

@@ -6,7 +6,7 @@ import Control.Monad (forM_)
 import Data.Either (isLeft)
 import Data.Foldable (toList)
 import qualified Data.IntSet as IntSet
-import Data.List (intercalate)
+import Data.List (intercalate, isInfixOf)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -242,6 +242,25 @@ queryTests = testGroup "queries"
   [ testCase "label every request type site uniformly" $
       map requestTypeSiteLabel [minBound .. maxBound] @?=
         ["goal", "context"]
+  , testCase "validate adapter targets through one diagnostic policy" $ do
+      let accepted = right $ mkIdentifier "result"
+          checked = right $ mkDefinitionName accepted
+          summary = "Backend targets must be definition names"
+      validateRequestTarget "TEST_TARGET" summary accepted @?=
+        Right checked
+      let qualifier = right $ mkModuleName "Fixture"
+          rejected = right $ mkQualifiedIdentifier qualifier "result"
+      case validateRequestTarget "TEST_TARGET" summary rejected of
+        Left failure -> do
+          diagnosticCode failure @?= Just "TEST_TARGET"
+          diagnosticMessage failure @?= summary
+          assertBool "target detail lost the rejected canonical spelling"
+            $ "Fixture.result" `isInfixOf`
+              unwords (diagnosticContext failure)
+          assertBool "target detail lost the shared render failure"
+            $ "InvalidFunctionName" `isInfixOf`
+              unwords (diagnosticContext failure)
+        Right _ -> assertFailure "a qualified definition target was accepted"
   , testCase "traverse request types in diagnostic order" $ do
       let target = right $ mkDefinitionName $ right $ mkIdentifier "result"
           firstClass = right $ mkIdentifier "First"

@@ -47,13 +47,9 @@ import Language.Haskell.Synthesis.Diagnostic
   , shownErrorDiagnostic
   )
 import Language.Haskell.Synthesis.Generated
-  ( DefinitionName
-  , mkDefinitionName
-  )
+  ( DefinitionName )
 import Language.Haskell.Synthesis.Name
-  ( Name
-  , renderCanonical
-  )
+  ( Name )
 import Language.Haskell.Synthesis.Query
   ( CachedQuery
   , QueryRequest (..)
@@ -65,6 +61,7 @@ import Language.Haskell.Synthesis.Query
   , sealCachedQueryWithProvenance
   , traverseRequestTypes
   , requestContextualType
+  , validateRequestTarget
   , withCachedQueryProvenance
   )
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -234,8 +231,5 @@ inScopeContextVariables goal = SharedType.freeVariables goal
 -- Frontends use this before parsing so command-usage errors retain precedence
 -- over malformed source text, and retain the checked value in the request.
 validateExferenceTarget :: Name -> Either Diagnostic DefinitionName
-validateExferenceTarget target = case mkDefinitionName target of
-  Right checked -> Right checked
-  Left failure -> Left $ shownErrorDiagnostic "DJEX_EXF_TARGET"
-    "Exference targets must be unqualified value identifiers or operators"
-    (renderCanonical target, failure)
+validateExferenceTarget = validateRequestTarget "DJEX_EXF_TARGET"
+  "Exference targets must be unqualified value identifiers or operators"

@@ -12,6 +12,7 @@
 -- participate in a common session API.
 module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
+  , validateRequestTarget
   , RequestTypeSite (..)
   , requestTypeSiteLabel
   , traverseRequestTypes
@@ -43,9 +44,14 @@ import Language.Haskell.Synthesis.Constraint (Constraint)
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceLocation
+  , shownErrorDiagnostic
   , withSourceLocation
   )
-import Language.Haskell.Synthesis.Generated (DefinitionName)
+import Language.Haskell.Synthesis.Generated
+  ( DefinitionName
+  , mkDefinitionName
+  )
+import Language.Haskell.Synthesis.Name (Name, renderCanonical)
 import Language.Haskell.Synthesis.Search
   ( SearchBatch
   , batchCandidates
@@ -71,6 +77,20 @@ data QueryRequest ty options = QueryRequest
 
 instance (NFData ty, NFData options) =>
     NFData (QueryRequest ty options)
+
+-- | Validate the shared generated-definition namespace and attach one
+-- adapter-specific code and summary to the common failure detail. Keeping the
+-- exact rejected spelling and 'RenderError' together prevents backend request
+-- boundaries from drifting in either accepted names or diagnostic context.
+validateRequestTarget
+  :: String
+  -> String
+  -> Name
+  -> Either Diagnostic DefinitionName
+validateRequestTarget code summary target = case mkDefinitionName target of
+  Right checked -> Right checked
+  Left failure -> Left $ shownErrorDiagnostic code summary
+    (renderCanonical target, failure)
 
 -- | The role of one type visited inside a 'QueryRequest'.
 --

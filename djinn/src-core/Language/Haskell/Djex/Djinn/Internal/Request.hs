@@ -42,9 +42,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , contextualDiagnostic
   )
 import Language.Haskell.Synthesis.Generated
-  ( DefinitionName
-  , mkDefinitionName
-  )
+  ( DefinitionName )
 import Language.Haskell.Synthesis.Name
   ( Name
   , renderCanonical
@@ -59,6 +57,7 @@ import Language.Haskell.Synthesis.Query
   , requestTypeSiteLabel
   , sealCachedQueryWithProvenance
   , traverseRequestTypes
+  , validateRequestTarget
   , withCachedQueryProvenance
   , withRequestProvenance
   )
@@ -174,11 +173,8 @@ validateDjinnQueryTypeWithProvenance provenance role =
 -- this before parsing so command-usage errors retain precedence over malformed
 -- source text, mirroring Exference's checked request boundary.
 validateDjinnTarget :: Name -> Either Diagnostic DefinitionName
-validateDjinnTarget target = case mkDefinitionName target of
-  Right checked -> Right checked
-  Left _ -> Left $ contextualDiagnostic Error "DJEX_DJINN_TARGET"
-      "Djinn targets must be unqualified value identifiers or operators"
-      (renderCanonical target)
+validateDjinnTarget = validateRequestTarget "DJEX_DJINN_TARGET"
+  "Djinn targets must be unqualified value identifiers or operators"
 
 djinnRequestPlan :: DjinnRequest -> DjinnRequestPlan
 djinnRequestPlan (DjinnRequest query) = cachedQueryCache query

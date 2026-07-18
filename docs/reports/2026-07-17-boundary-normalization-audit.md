@@ -131,3 +131,9 @@ cabal sdist
 
 Serial tests avoid a known Cabal executable-replacement race seen when two
 test-suite links target the same build tree concurrently.
+
+All six commands completed successfully on GHC 9.12.4. The serial run passed
+all eleven test suites, the strict build accepted the complete library and all
+three executables, `cabal check` reported no package errors or warnings,
+Haddock generated the library documentation, and `cabal sdist` produced
+`djex-2026.7.17.tar.gz`.

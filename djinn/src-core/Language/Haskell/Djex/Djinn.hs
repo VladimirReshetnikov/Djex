@@ -176,7 +176,8 @@ runDjinnQuery session request = do
 -- | Render only a Djinn candidate's generated expression.
 --
 -- Genuine Djinn results are closed and therefore have no residual
--- constraints. Because the compatibility 'Candidate' constructor is public,
+-- constraints. Because the compatibility
+-- 'Language.Haskell.Synthesis.Candidate.Candidate' constructor is public,
 -- this boundary also rejects a caller-built candidate that attaches an
 -- obligation. Generated-syntax validation deliberately runs first, preserving
 -- the existing scope and lexical error precedence when both parts are forged.

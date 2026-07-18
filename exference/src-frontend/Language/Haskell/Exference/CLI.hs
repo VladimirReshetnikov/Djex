@@ -415,14 +415,44 @@ validateFlagCombinations flags inputs = do
     [flag | flag@QualificationLevel{} <- flags]
   requireAtMostOne "environment directory"
     [flag | flag@EnvDir{} <- flags]
-  when (null inputs && any (`elem` flags)
-      [PrintAll, EnvUsage, FirstSol, Best, Constraints]) $
+  when (null inputs && any queryOnlyFlag flags) $
     usageFailure "a search or selection option requires an input type"
  where
   requireAtMostOne description selected = case selected of
     _ : _ : _ -> usageFailure $ "conflicting " ++ description ++ " options: "
-      ++ intercalate ", " (map show selected)
+      ++ intercalate ", " (map flagOption selected)
     _ -> pure ()
+
+  queryOnlyFlag flag = case flag of
+    PrintAll -> True
+    EnvUsage -> True
+    Shortest -> True
+    FirstSol -> True
+    Best -> True
+    Unused -> True
+    PatternMatchMC -> True
+    QualificationLevel{} -> True
+    Constraints -> True
+    _ -> False
+
+  flagOption flag = case flag of
+    Verbose{} -> "--verbose"
+    Version -> "--version"
+    Help -> "--help"
+    PrintEnv -> "--printenv"
+    EnvDir{} -> "--envdir"
+    Input{} -> "--input"
+    PrintAll -> "--all"
+    EnvUsage -> "--envUsage"
+    Shortest -> "--short"
+    FirstSol -> "--first"
+    Best -> "--best"
+    Unused -> "--allowUnused"
+    PatternMatchMC -> "--patternMatchMC"
+    QualificationLevel 1 -> "--somequalification"
+    QualificationLevel{} -> "--fullqualification"
+    Constraints -> "--allowConstraints"
+    AllowFix -> "--fix"
 
 lastMaybe :: [value] -> Maybe value
 lastMaybe = List.foldl' (\_ value -> Just value) Nothing

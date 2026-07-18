@@ -356,8 +356,9 @@ sealed. Overrides neither reorder declarations nor leak into the
 annotation-erased public inventory. `exferenceSessionEnvironment` and
 `exferenceSessionInventory` expose the unchanged authoritative views in
 parallel with Djinn's stable session API. Unknown names and non-finite
-ratings are fatal structured diagnostics, and exclusion wins when both
-policies mention the same binding. Unsupported rank-N
+ratings are fatal structured diagnostics. An override for an excluded or
+unsupported binding is likewise rejected because it cannot affect search.
+Unsupported rank-N
 introduction/elimination and recursive-data elimination capabilities remain
 visible as structured omissions and warning diagnostics instead of
 disappearing per query; omission order follows introduction order and then

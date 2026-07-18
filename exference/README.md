@@ -20,6 +20,11 @@ sometimes stopping with "i could not find any solutions".
 - The executable loads Djex's [packaged local environment](environment/) of
   functions, classes, instances, and ratings by default. Installed builds find
   it through Cabal rather than depending on a source checkout.
+- A custom `--envdir` is scanned non-recursively. Immediate `.hs` modules and
+  `.ratings` files are each processed in lexical filename order. Rating files
+  contain whitespace-separated `name finite-number` pairs; malformed files,
+  duplicate or unknown ratings, and missing ratings are diagnosed while
+  affected declarations keep their neutral rating.
 - Historical Exference releases advertised `exferenceBot` on Freenode's
   `#exference` channel. That bot is not a maintained interface to this tree;
   use the local executable for reproducible behavior against the packaged
@@ -598,8 +603,9 @@ annotation-erased prepared witness and converge only at the one private sealer.
 No parser type is retained in the resulting session.
 `ExferenceSessionPolicy` supplies exact-name exclusions and finite,
 signed rating overrides while the private search projection is built. Unknown
-override names and non-finite ratings fail explicitly, and overrides preserve
-source/declaration order. The adapter's expression and definition conveniences
+override names, overrides for omitted or excluded bindings, and non-finite
+ratings fail explicitly; accepted overrides preserve source/declaration order.
+The adapter's expression and definition conveniences
 supply the retained local-name hints to the shared candidate renderer and
 expose the common `RenderError` directly.
 
@@ -672,7 +678,7 @@ There are certain types of queries where *Exference* will not be able to find
 any / the right solution. Some common current limitations are:
 
 - By default, searches **only for solutions where all input is used up**, e.g.
-  `(a, b) -> a` will not find a solution (unless given `--allowunused` flag).
+  `(a, b) -> a` will not find a solution (unless given `--allowUnused` flag).
   Often this is the desired behaviour, consider queries such as
   `(a->b) -> [a] -> [b]` where a trivial solution would be `\_ _ -> []`.
   This also means that certain functions are not included in the environment,

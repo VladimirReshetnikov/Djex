@@ -2,6 +2,7 @@ module Main (main) where
 
 import CLIAssertions (assertContains, countOccurrences)
 import Control.Exception (bracket)
+import Control.Monad (forM_)
 import Data.List (isInfixOf)
 import System.Directory
   (createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
@@ -24,6 +25,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "repeated verbosity cannot overflow" testVerbosityOverflow
   , testCase "repeated inputs are all searched" testRepeatedInputs
   , testCase "conflicting selection modes are rejected" testConflictingModes
+  , testCase "query-only flags require an input type" testQueryFlagsNeedInput
   , testCase "short mode contributes structural expression cost" testShortMode
   , testCase "recursion helpers require explicit command opt-in"
       testRecursionPolicy
@@ -155,6 +157,32 @@ testConflictingModes = do
   assertEqual "conflicting mode stdout" "" output
   assertContains "conflicting modes should be explicit"
     "conflicting selection mode options" errors
+  assertContains "conflicts should use public option spellings"
+    "--first, --best" errors
+  assertBool "internal flag constructors leaked into the diagnostic"
+    $ not $ "FirstSol" `isInfixOf` errors
+
+testQueryFlagsNeedInput :: Assertion
+testQueryFlagsNeedInput = forM_ queryOnlyOptions $ \option -> do
+  (output, errors) <- runExferenceFailure [option]
+  assertEqual (option ++ " no-input stdout") "" output
+  assertContains (option ++ " should require a query")
+    "a search or selection option requires an input type" errors
+  assertEqual (option ++ " should print usage exactly once")
+    1 $ countOccurrences "Usage: exference" errors
+ where
+  queryOnlyOptions =
+    [ "--all"
+    , "--envUsage"
+    , "--short"
+    , "--first"
+    , "--best"
+    , "--allowUnused"
+    , "--patternMatchMC"
+    , "--fullqualification"
+    , "--somequalification"
+    , "--allowConstraints"
+    ]
 
 testShortMode :: Assertion
 testShortMode = do

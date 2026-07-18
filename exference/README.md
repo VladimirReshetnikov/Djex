@@ -255,7 +255,12 @@ and point location under the stable `EXF_MODULE_PARSE` code, with the native
 parser detail preserved as context. HSE locations cross the shared checked
 one-based, half-open span boundary explicitly; a malformed native location
 retains its source and becomes diagnostic context rather than causing a crash
-or forging an invalid span. Low-level `parseModules` keeps aliases
+or forging an invalid span. Binding extractors attach module-local source slots
+before erasing HSE annotations. Ordinary signatures and datatype declarations
+occupy top-level slots; class methods occupy nested slots, and every multi-name
+signature remains one success batch or one failure. The final stable merge
+therefore preserves exact cross-category binding and diagnostic order without
+reconstructing declaration cardinality. Low-level `parseModules` keeps aliases
 unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` seals and
 kind-checks that source graph once, then sends the checked Inventory through
 the parser-independent neutral lowerer. The resulting backend projection is

@@ -356,8 +356,13 @@ opt into the compatibility frontend.
 The source boundary tags class methods with their qualified owner, nests
 them under the common class declaration for validation, and lowers each
 rated selector exactly once into Exference's flat search inventory without
-changing source order. HSE aliases remain unexpanded through common
-Inventory kind checking; the same transient prepared-expansion witness used
+changing source order. Ordinary signatures, datatype batches, and nested
+class-method signatures retain compact module-local source slots while they
+are lowered; the loader stable-merges those batches, so successes and
+extraction failures remain interleaved exactly as written without replaying
+the HSE syntax or guessing multi-name signature cardinality. HSE aliases
+remain unexpanded through common Inventory kind checking; the same transient
+prepared-expansion witness used
 by Djinn then expands them capture-safely and derives cross-module
 recursion before Exference normalizes classes and instances and reapplies
 source ratings and order. Source checking returns one opaque annotated
@@ -481,8 +486,8 @@ same identifier/operator policy as generated terms, so an Exference candidate
 and its residual obligations cannot disagree about module prefixes. The stable
 Exference residual renderers return
 `Either ExferenceResidualRenderError [String]`, validating caller-built class
-identities and every shared type
-argument before emitting text. This is an intentional source break from the
+identities and every shared type argument before emitting text. This is an
+intentional source break from the
 former pure list result: the public compatibility `Candidate` constructor
 otherwise permits malformed obligations to bypass the checked query path.
 `TypeSynonym` prepares aliases from the

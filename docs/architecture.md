@@ -171,6 +171,13 @@ them. `UnsupportedVocabularyForm` is the authoritative list. Ordinary term
 patterns and pattern-value bodies are accepted, as are ordinary value/method
 bodies and other syntax that does not alter the nominal inventory.
 
+Successful extraction erases HSE annotations, so ordering metadata is captured
+before that boundary. Ordinary signatures, datatype batches, and nested class
+methods retain small module-local source slots; multi-name signatures stay in
+one batch. The loader performs one stable merge of those tagged results. It
+does not concatenate extractor categories or replay syntax to recover their
+cardinality, and failures use the same ordering path as successful bindings.
+
 Session policy is intentionally asymmetric. Excluding a name that the prepared
 environment does not contain is a harmless no-op: an exclusion can only remove
 a capability. A rating override promises to affect search, so non-finite

@@ -4,6 +4,7 @@ module Main (main) where
 
 import Control.DeepSeq (force)
 import Control.Exception (SomeException, bracket, evaluate, try)
+import Control.Monad (forM_)
 import Data.Monoid (Any (..))
 import Data.Bifunctor (first)
 import Data.Either (rights)
@@ -6007,6 +6008,41 @@ tests = testGroup "Exference"
               pure ()
             _ -> fail $ "constructor application used a variable operator: "
               ++ show expression
+      , testCase "infix conversion preserves either operand tree" $ do
+          let leftValue = Generated.Global $ name "LeftValue"
+              middleValue = Generated.Global $ name "MiddleValue"
+              rightValue = Generated.Global $ name "RightValue"
+              infixExpression left right = Generated.Apply
+                (Generated.Apply (Generated.Global $ name "<+>") left)
+                right
+              sources =
+                [ ( "left-nested infix"
+                  , infixExpression
+                      (infixExpression leftValue middleValue) rightValue
+                  )
+                , ( "left let"
+                  , infixExpression
+                      (Generated.Let (Generated.Bind (0 :: Int)) leftValue
+                        $ Generated.Local 0)
+                      rightValue
+                  )
+                , ( "left case"
+                  , infixExpression
+                      (Generated.Case leftValue
+                        [(Generated.Wildcard, middleValue)])
+                      rightValue
+                  )
+                ]
+              options = Generated.RenderOptions
+                Generated.Unqualified (const "bound") []
+          sources `forM_` \(label, source) -> do
+            converted <- expectRight
+              $ generatedExpressionToHaskellSrc options source
+            case HSE.parseExp $ HSE.prettyPrint converted of
+              HSE.ParseOk reparsed ->
+                assertEqual (label ++ " changed after pretty-printing")
+                  (fmap (const ()) converted) (fmap (const ()) reparsed)
+              failure -> fail $ label ++ " no longer parses: " ++ show failure
       , testCase "symbolic type constructors use a legal binder fallback" $ do
           symbolic <- expectRight $ mkQualifiedName [] ":+:"
           converted <- expectRight $ expressionToHaskellSrc 0

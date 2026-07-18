@@ -215,7 +215,10 @@ convertInternal qualification precedence application@Generated.Apply{} =
     defaultApplication (Generated.Global name) parameters
 
   infixApplication name left right = do
-    convertedLeft <- convertInternal qualification 1 left
+    -- Generated names do not carry a fixity declaration.  Parenthesize an
+    -- infix, lambda, let, or case on either side so pretty-printing and then
+    -- parsing cannot silently reassociate the original expression tree.
+    convertedLeft <- convertInternal qualification 2 left
     convertedRight <- convertInternal qualification 2 right
     pure $ parenthesize (precedence >= 2)
       $ InfixApp noLoc convertedLeft

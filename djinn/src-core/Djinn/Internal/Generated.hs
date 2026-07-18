@@ -17,7 +17,11 @@ module Djinn.Internal.Generated
   ) where
 
 import qualified Data.Set as Set
-import Djinn.Internal.HIdentifier (renderProofSymbolName)
+import Djinn.Internal.HIdentifier
+  ( generatedGlobalName
+  , generatedName
+  , renderProofSymbolName
+  )
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
@@ -171,10 +175,12 @@ convertExpression bound expression = case expression of
   HEApply function argument -> Generated.Apply
     <$> convertExpression bound function
     <*> convertExpression bound argument
-  HECon name -> Generated.Global <$> generatedName "constructor" name
+  HECon name -> Generated.Global <$>
+    generatedGlobalName SharedName.ConstructorLike "constructor" name
   HEVar name
     | name `Set.member` bound -> Right $ Generated.Local name
-    | otherwise -> Generated.Global <$> generatedName "value" name
+    | otherwise -> Generated.Global <$>
+        generatedGlobalName SharedName.VariableLike "value" name
   HETuple elements -> Generated.Tuple <$>
     mapM (convertExpression bound) elements
   HECase scrutinee alternatives -> Generated.Case
@@ -194,14 +200,17 @@ convertPattern pattern = case pattern of
   HPVar "_" -> Right Generated.Wildcard
   HPVar variable -> Right $ Generated.Bind variable
   HPCon constructor -> Generated.Constructor
-    <$> generatedName "pattern constructor" constructor <*> pure []
+    <$> generatedGlobalName SharedName.ConstructorLike
+      "pattern constructor" constructor
+    <*> pure []
   HPTuple elements -> Generated.TuplePattern <$> mapM convertPattern elements
   HPAt variable nested -> Generated.As variable <$> convertPattern nested
   HPApply{} -> do
     let (headPattern, arguments) = patternSpine pattern
     case headPattern of
       HPCon constructor -> Generated.Constructor
-        <$> generatedName "pattern constructor" constructor
+        <$> generatedGlobalName SharedName.ConstructorLike
+          "pattern constructor" constructor
         <*> mapM convertPattern arguments
       _ -> Left $ "generated pattern application has non-constructor head: "
         ++ show headPattern
@@ -212,12 +221,6 @@ patternSpine = collect []
     collect arguments (HPApply function argument) =
       collect (argument : arguments) function
     collect arguments function = (function, arguments)
-
-generatedName :: String -> HSymbol -> Either String SharedName.Name
-generatedName description source = case SharedName.parseName source of
-  Left nameError -> Left $ "invalid generated " ++ description ++ " "
-    ++ show source ++ ": " ++ SharedName.renderNameError nameError
-  Right name -> Right name
 
 -- Binding-site observations over checked shared clauses live in
 -- 'Language.Haskell.Synthesis.Generated'; only the legacy-pattern binder

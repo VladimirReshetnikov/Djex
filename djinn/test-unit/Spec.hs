@@ -3054,6 +3054,10 @@ testGeneratedClauseBoundary = do
         invalidDefinitionAndScope = DjinnGenerated.HClause "Result"
             [DjinnGenerated.HPVar "value", DjinnGenerated.HPVar "value"]
             (DjinnGenerated.HEVar "value")
+        lowercaseConstructor = DjinnGenerated.HClause "badConstructor" []
+            (DjinnGenerated.HECon "lower")
+        uppercaseFreeValue = DjinnGenerated.HClause "badValue" []
+            (DjinnGenerated.HEVar "Upper")
     assertLeftContains "tuple patterns cannot bind a local twice"
         "DuplicatePatternBinder \"value\""
         (DjinnGenerated.toGeneratedClause duplicateTupleBinder)
@@ -3066,6 +3070,20 @@ testGeneratedClauseBoundary = do
     assertLeftContains "scope errors retain precedence over definition syntax"
         "DuplicatePatternBinder \"value\""
         (DjinnGenerated.toGeneratedClause invalidDefinitionAndScope)
+    assertLeftContains "legacy constructor nodes retain their lexical role"
+        "expected a constructor-like name"
+        (DjinnGenerated.toGeneratedClause lowercaseConstructor)
+    assertLeftContains "legacy free-value nodes retain their lexical role"
+        "expected a variable-like name"
+        (DjinnGenerated.toGeneratedClause uppercaseFreeValue)
+    assertLeftContains "raw proof values cannot become constructors by spelling"
+        "expected a variable-like name"
+        (termToHExpr $ Var $ Symbol "Upper")
+    assertLeftContains
+        "raw proof constructors cannot become values by spelling"
+        "expected a constructor-like name"
+        (termToHExpr $
+            Apply (Cinj (ConsDesc "lower" 0) 0) (Ctuple 0))
 
     checkedProjection <- expectShownRight $ SharedGenerated.mkDefinitionName
         $ sharedName "projected"

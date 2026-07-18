@@ -17,7 +17,10 @@ import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
 import Djinn.Internal.LJTFormula
-import Djinn.Internal.HIdentifier (renderProofSymbolName)
+import Djinn.Internal.HIdentifier
+  ( generatedGlobalName
+  , renderProofSymbolName
+  )
 import Language.Haskell.Synthesis.Fresh (allocateFresh)
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as Name
@@ -54,7 +57,8 @@ termToGeneratedExpression term = do
     let spelling = unSymbol symbol
     expression <- if spelling `elem` enclosing
       then Right $ Generated.Local spelling
-      else Generated.Global <$> generatedName "value" spelling
+      else Generated.Global <$>
+        generatedGlobalName Name.VariableLike "value" spelling
     pure (expression, [])
   convert enclosing lambdaTerm@Lam{} = do
     let (symbols, body) = termLambdaSpine lambdaTerm
@@ -71,14 +75,15 @@ termToGeneratedExpression term = do
   convert enclosing (Apply (Cinj (ConsDesc constructor arity) _) argument) = do
     (convertedArgument, refinements) <- convert enclosing argument
     (wrap, arguments) <- unpackTuple arity convertedArgument
-    constructorName <- generatedName "constructor" constructor
+    constructorName <- generatedGlobalName
+      Name.ConstructorLike "constructor" constructor
     pure
       (wrap $ foldl Generated.Apply
         (Generated.Global constructorName) arguments, refinements)
   convert enclosing (Apply function argument) =
     convertApplication enclosing function [argument]
   convert _ (Ctuple 0) = do
-    unit <- generatedName "constructor" "()"
+    unit <- generatedGlobalName Name.ConstructorLike "constructor" "()"
     pure (Generated.Global unit, [])
   convert _ unsupported =
     Left $ "unsupported proof term: " ++ show unsupported
@@ -224,7 +229,8 @@ termToGeneratedExpression term = do
         patterns <- case payloadPattern of
           Nothing -> Right $ replicate arity Generated.Wildcard
           Just pattern' -> unpackTuplePattern arity pattern'
-        constructorName <- generatedName "pattern constructor" constructor
+        constructorName <- generatedGlobalName
+          Name.ConstructorLike "pattern constructor" constructor
         let payloadIsUsed = spelling `Set.member`
               Generated.expressionFreeLocalIdentitiesBy id convertedBody
             branchRefinements = filter ((/= spelling) . fst) refinements
@@ -302,12 +308,6 @@ termToGeneratedClause target term = do
 
 unSymbol :: Symbol -> HSymbol
 unSymbol (Symbol spelling) = spelling
-
-generatedName :: String -> HSymbol -> Either String Name.Name
-generatedName description source = case Name.parseName source of
-  Left nameError -> Left $ "invalid generated " ++ description ++ " "
-    ++ show source ++ ": " ++ Name.renderNameError nameError
-  Right name -> Right name
 
 tuple :: [Expression] -> Expression
 tuple [expression] = expression

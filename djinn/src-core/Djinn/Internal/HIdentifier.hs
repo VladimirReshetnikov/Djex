@@ -7,6 +7,7 @@ module Djinn.Internal.HIdentifier (
     pParenthesizedVarOp,
     isVarId, isConId, isQualifiedVarId, isQualifiedConId,
     isVarOperator, renderVarName, renderProofSymbolName,
+    generatedName, generatedGlobalName,
     stripLineComments,
     schar, sstring, skeyword, pParen
     ) where
@@ -18,7 +19,7 @@ import Language.Haskell.Synthesis.Name (
     isIdentifierCharacter, isOperatorCharacter,
     mkIdentifier, mkOperator,
     nameIdentifier, nameLexicalClass, nameModule, nameOperator,
-    parseName, renderCanonical, renderPrefix)
+    parseName, renderCanonical, renderNameError, renderPrefix)
 import Text.ParserCombinators.ReadP
 
 -- Match a single token after skipping leading white space.
@@ -111,6 +112,30 @@ renderProofSymbolName :: Name -> String
 renderProofSymbolName name = case (nameModule name, nameOperator name) of
     (Nothing, Just spelling) -> spelling
     _ -> renderCanonical name
+
+-- | Parse a global name at Djinn's generated-code boundary while retaining
+-- the historical, role-specific diagnostic prefix.
+generatedName :: String -> String -> Either String Name
+generatedName description source = case parseName source of
+    Left nameError -> Left $ "invalid generated " ++ description ++ " " ++
+        show source ++ ": " ++ renderNameError nameError
+    Right name -> Right name
+
+-- | Parse a generated global and require the lexical namespace promised by
+-- its source node.  Djinn's legacy tree distinguishes constructors from free
+-- values even though the shared generated expression uses one global node.
+generatedGlobalName
+    :: LexicalClass -> String -> String -> Either String Name
+generatedGlobalName expected description source = do
+    name <- generatedName description source
+    if nameLexicalClass name == expected then
+        Right name
+     else
+        Left $ "invalid generated " ++ description ++ " " ++ show source ++
+            ": expected " ++ expectedDescription expected
+  where
+    expectedDescription VariableLike = "a variable-like name"
+    expectedDescription ConstructorLike = "a constructor-like name"
 
 unqualifiedIdentifier :: LexicalClass -> String -> Maybe Name
 unqualifiedIdentifier expected source =

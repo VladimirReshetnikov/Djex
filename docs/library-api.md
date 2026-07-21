@@ -69,6 +69,16 @@ for programmatic callers because a cyclic lazy list is otherwise a valid input
 value. Such input returns a structured arity/type failure instead of making
 environment construction, kind inference, or a backend request hang.
 
+Construction and result consumption have intentionally different evaluation
+contracts. Finite declaration indexes and application spines are built
+strictly, so sealing a large environment or lowering a wide generated term
+does not leave a deferred fold behind. Result sequences remain lazy: taking
+the first admissible candidate does not inspect later batches, and a checked
+result does not force candidate payloads or tails merely to prove that its
+batch is nonempty. Keep the returned Exference result list lazy when streaming,
+but apply an explicit selection or fold when a global best candidate is
+required.
+
 ## Djinn example
 
 This function uses the standard Djinn environment, parses the contextual Djinn

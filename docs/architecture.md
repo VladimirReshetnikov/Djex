@@ -122,6 +122,30 @@ error without hanging an otherwise bounded operation. The later full traversal
 still owns semantic validation; the preflight establishes only the finite-width
 condition needed to run it safely.
 
+## Evaluation and streaming boundaries
+
+Strictness follows ownership rather than a blanket eager-or-lazy rule:
+
+- Finite declaration indexes and left-associated type, proof, expression, and
+  HSE application spines are accumulated strictly. Once one of these
+  operations is requested, it must consume the complete finite list before the
+  resulting index or outermost left-associated tree is useful; retaining
+  pending fold applications only increases residency.
+- A strict fold over a product is not sufficient by itself: it evaluates the
+  product constructor, not its fields. Multi-index builders explicitly force
+  each map/set summary while leaving payload values lazy when their boundary
+  requires it. The class-arity inventory, for example, materializes its map
+  structure without forcing parameter-list lengths until an arity is queried.
+- Search batches, candidate tails, adapter caches, and right-associated syntax
+  remain lazy where a caller can make progress from a prefix. `SelectFirst` and
+  `SelectAll` do not inspect later results, and checked query-result projection
+  does not force candidate payloads merely to establish that a batch is
+  nonempty.
+
+This contract lets frontends stream heuristic results without making already
+requested finite construction retain avoidable thunk chains. Wide-batch and
+wide-application regressions protect both sides of the boundary.
+
 ## What remains backend-specific
 
 Uniform architecture does not mean identical semantics:
@@ -262,6 +286,8 @@ cabal check
 
 See [the library API guide](library-api.md) for runnable examples and
 [the synthesis API map](../synthesis/README.md) for the shared modules. The
+[post-merge code review](reports/2026-07-21-post-merge-code-review.md) records
+the latest comparative findings and evaluation audit. The earlier
 [final convergence review](reports/2026-07-17-final-convergence-review.md) and
 [checker-boundary follow-up](reports/2026-07-17-checker-boundary-follow-up.md)
-record the latest comparative code-review findings and retained differences.
+record the preceding compatibility and raw-checker changes.

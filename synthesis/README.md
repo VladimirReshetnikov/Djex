@@ -122,8 +122,11 @@ source head rather than exposing or substituting the private key.
   compatibility API requires a bounded projection.
 - Parser locations are converted once to checked one-based, half-open shared
   spans; semantic requests do not carry parser ASTs.
+- Finite indexes and left-associated application spines use strict
+  accumulation; strict product accumulators force each index while preserving
+  intentionally lazy payload values.
 - Laziness is part of the search contract: constructors and selectors avoid
-  forcing uninspected result batches or candidate tails.
+  forcing uninspected result batches, candidate payloads, or candidate tails.
 
 ## Build and test
 

@@ -477,9 +477,9 @@ normalizedExpansionAlgebra :: ExpansionAlgebra ExpansionType
 normalizedExpansionAlgebra = ExpansionAlgebra
     { algebraVariable = ExpansionVar
     , algebraConstructorApplication = \name arguments ->
-        foldl expansionApp
+        foldl' expansionApp
             (ExpansionCon name $ QueryOrigin []) arguments
-    , algebraApplication = foldl expansionApp
+    , algebraApplication = foldl' expansionApp
     , algebraTuple = ExpansionTuple
     , algebraArrow = ExpansionArrow
     , algebraUnion = ExpansionUnion

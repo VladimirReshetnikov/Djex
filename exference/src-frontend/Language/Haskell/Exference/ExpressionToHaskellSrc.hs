@@ -200,7 +200,7 @@ convertInternal qualification precedence application@Generated.Apply{} =
     convertedFunction <- convertInternal qualification 2 functionExpression
     convertedParameters <- mapM (convertInternal qualification 3) parameters
     pure $ parenthesize (precedence >= 3)
-      $ foldl (App noLoc) convertedFunction convertedParameters
+      $ foldl' (App noLoc) convertedFunction convertedParameters
 
   specialApplication name parameters
     | SharedName.SpecialOccurrence

@@ -121,7 +121,7 @@ instance Show Term where
             showString ("sel_" ++ show i ++ "_" ++ show n ++ " ") . showsPrec 2 e
 
 applys :: Term -> [Term] -> Term
-applys = foldl Apply
+applys = foldl' Apply
 
 -- | Validate the representation-local metadata of a raw proof term.
 --

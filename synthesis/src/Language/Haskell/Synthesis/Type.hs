@@ -282,9 +282,10 @@ constructorApplicationForm source = case source of
 -- This is the raw left-associated constructor paired with 'applicationSpine';
 -- it deliberately does not canonicalize saturated function or tuple
 -- constructors. Use 'canonicalizeType' when the structural storage form is
--- required.
+-- required. The spine itself is built strictly so wide generated applications
+-- do not retain a chain of pending folds; argument payloads remain lazy.
 applyTypeArguments :: Type variable -> [Type variable] -> Type variable
-applyTypeArguments = foldl TypeApplication
+applyTypeArguments = foldl' TypeApplication
 
 -- | Decompose a left-associated type application into its head and arguments
 -- in source order. Non-application types have an empty argument list.

@@ -1993,6 +1993,14 @@ typeTests = testGroup "source types"
       SharedType.applicationSpine application @?=
         (headType, [first, second])
       SharedType.applicationSpine first @?= (first, [])
+  , testCase "construct a wide application spine without deferred folds" $ do
+      let width = 200000
+          headType = SharedType.TypeVariable (-1 :: Int)
+          arguments = map SharedType.TypeVariable [0 .. width - 1]
+          (actualHead, actualArguments) = SharedType.applicationSpine
+            $ SharedType.applyTypeArguments headType arguments
+      actualHead @?= headType
+      length actualArguments @?= width
   , testCase "inspect shared type structure in source order" $ do
       let outerClass = right $ mkIdentifier "Outer"
           innerClass = right $ mkIdentifier "Inner"

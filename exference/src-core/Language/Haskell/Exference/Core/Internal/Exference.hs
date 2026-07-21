@@ -1386,7 +1386,7 @@ stateStep allocators multiPM allowConstrs h
           newScopeId <- builderAddScope allocators scopeId
           modify $ \node -> node
             { nodeExpression = fillExprHole var
-                (foldl (\e (VarBinding v ty) -> ExpLambda v ty e)
+                (foldl' (\e (VarBinding v ty) -> ExpLambda v ty e)
                   (ExpHole nextId) ts)
                 (nodeExpression node)
             , nodeDepth = addScore (nodeDepth node)
@@ -1572,7 +1572,7 @@ stateStep allocators multiPM allowConstrs h
         builderApplySubst substs
         modify $ \node -> node
           { nodeExpression = fillExprHole var
-              (foldl ExpApply coreExp (map ExpHole vars))
+              (foldl' ExpApply coreExp (map ExpHole vars))
               (nodeExpression node)
           , nodeConstraintGoals = newConstraints
           , nodeDepth = addScore (nodeDepth node) depthModMatch

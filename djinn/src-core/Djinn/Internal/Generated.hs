@@ -133,7 +133,7 @@ fromGeneratedPattern pattern = case pattern of
   Generated.Wildcard -> Right $ HPVar "_"
   Generated.Constructor name arguments -> do
     converted <- mapM fromGeneratedPattern arguments
-    Right $ foldl HPApply (HPCon $ renderProofSymbolName name) converted
+    Right $ foldl' HPApply (HPCon $ renderProofSymbolName name) converted
   Generated.TuplePattern elements ->
     HPTuple <$> mapM fromGeneratedPattern elements
   Generated.As variable nested -> HPAt variable <$> fromGeneratedPattern nested

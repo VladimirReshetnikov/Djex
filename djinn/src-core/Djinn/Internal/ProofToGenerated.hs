@@ -79,7 +79,7 @@ termToGeneratedExpression term = do
     constructorName <- generatedGlobalName
       Name.ConstructorLike "constructor" constructor
     pure
-      (wrap $ foldl Generated.Apply
+      (wrap $ foldl' Generated.Apply
         (Generated.Global constructorName) arguments, refinements)
   convert enclosing (Apply function argument) =
     convertApplication enclosing function [argument]
@@ -133,7 +133,7 @@ termToGeneratedExpression term = do
               unzip convertedAlternatives
             (restExpressions, restRefinements) = unzip convertedRest
         pure
-          ( foldl Generated.Apply
+          ( foldl' Generated.Apply
               (Generated.simplifyCaseExpression
                 convertedScrutinee alternatives)
               restExpressions
@@ -166,7 +166,7 @@ termToGeneratedExpression term = do
                       : handlerRefinements ++ scrutineeRefinements
                   )
           _ -> pure
-            ( foldl Generated.Apply
+            ( foldl' Generated.Apply
                 (Generated.simplifyCaseExpression convertedScrutinee
                   [(tuplePattern patterns, body)])
                 argumentExpressions

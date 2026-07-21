@@ -100,13 +100,17 @@ The focused slices passed:
 - 68 Djinn unit tests; and
 - 402 Exference unit tests.
 
-The complete library and all three executables also build cleanly with:
+The final tree passed all eleven suites serially (867 named tests, including
+the QuickCheck property groups and their repeated trials). The complete
+library and all three executables also build cleanly with:
 
 ```console
 cabal build all --ghc-options='-Werror -Widentities -Wincomplete-patterns -Wincomplete-record-selectors'
 cabal check
+cabal test all -j1 --test-show-details=direct
+cabal haddock lib:djex --haddock-hyperlink-source
+cabal sdist
 ```
 
-The final handoff repeats all eleven suites serially and runs Haddock and source
-distribution generation so documentation and packaging are checked alongside
-the code.
+Haddock generated the complete library documentation, and `cabal sdist`
+produced `djex-2026.7.17.tar.gz`.

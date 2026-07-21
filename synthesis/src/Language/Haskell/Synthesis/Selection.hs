@@ -261,12 +261,7 @@ consider
   -> Maybe (rank, [candidate])
 consider rank admissible best candidate
   | not $ admissible candidate = best
-  | otherwise = case best of
-      Nothing -> Just (candidateRank, [candidate])
-      Just (bestRank, reversed) -> case compare candidateRank bestRank of
-        LT -> Just (candidateRank, [candidate])
-        EQ -> Just (bestRank, candidate : reversed)
-        GT -> best
+  | otherwise = addRanked candidateRank candidate best
  where
   candidateRank = rank candidate
 
@@ -288,16 +283,23 @@ bestTiersInBatch
   -> (candidate -> Bool)
   -> [candidate]
   -> (Maybe (rank, [candidate]), Maybe (rank, [candidate]))
-bestTiersInBatch rank admissible preferred = List.foldl' inspect (Nothing, Nothing)
+bestTiersInBatch rank admissible preferred =
+  List.foldl' inspect (Nothing, Nothing)
  where
   inspect tiers candidate
     | not $ admissible candidate = tiers
-    | preferred candidate = case tiers of
-        (fallback, preferredBest) ->
-          (fallback, addRanked (rank candidate) candidate preferredBest)
-    | otherwise = case tiers of
-        (fallback, preferredBest) ->
-          (addRanked (rank candidate) candidate fallback, preferredBest)
+    | preferred candidate = strictTiers fallback
+        $ addRanked (rank candidate) candidate preferredBest
+    | otherwise = strictTiers
+        (addRanked (rank candidate) candidate fallback) preferredBest
+   where
+    (fallback, preferredBest) = tiers
+
+  -- A strict fold over a pair forces only the pair constructor. Force both
+  -- summaries at each step as well, or a wide single batch can retain one
+  -- deferred ranking comparison per candidate until its tier is inspected.
+  strictTiers fallback preferredBest =
+    fallback `seq` preferredBest `seq` (fallback, preferredBest)
 
 addRanked
   :: Ord rank

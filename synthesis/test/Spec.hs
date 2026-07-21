@@ -3404,6 +3404,22 @@ selectionTests = testGroup "result selection"
             results
       selection @?= Selection (Just terminal)
         [(1, "first-best"), (1, "second-best")]
+  , testCase "preferred selection evaluates a wide mixed batch strictly" $ do
+      let width = 200000
+          candidates =
+            [ (index `mod` 17, even index)
+            | index <- [1 .. width :: Int]
+            ]
+          selection = selectPreferredQueryResults 0 fst
+            (const True) snd
+            [queryResult (Completed Finished) candidates]
+          expectedCount = length
+            [ ()
+            | (candidateRank, preferred) <- candidates
+            , preferred
+            , candidateRank == 0
+            ]
+      length (selectionCandidates selection) @?= expectedCount
   , testCase "empty selections retain the last inspected progress" $ do
       let terminal = Completed Finished
           results =

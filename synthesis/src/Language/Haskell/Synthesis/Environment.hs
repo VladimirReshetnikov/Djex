@@ -237,15 +237,21 @@ knownClassArities = snd . foldl' collect (Set.empty, Map.empty)
     AbstractTypeDeclaration _ name _ -> occupy name Nothing
     ClassDeclaration _ name parameters _ _ ->
       occupy name $ Just $ length parameters
-    ValueDeclaration{} -> (occupied, arities)
-    InstanceDeclaration{} -> (occupied, arities)
+    ValueDeclaration{} -> strictIndexes occupied arities
+    InstanceDeclaration{} -> strictIndexes occupied arities
    where
     occupy name arity
-      | name `Set.member` occupied = (occupied, arities)
+      | name `Set.member` occupied = strictIndexes occupied arities
       | otherwise =
-          ( Set.insert name occupied
-          , maybe arities (\value -> LazyMap.insert name value arities) arity
-          )
+          strictIndexes
+            (Set.insert name occupied)
+            (maybe arities (\value -> LazyMap.insert name value arities) arity)
+
+  -- 'foldl'' evaluates only the pair constructor. Force both indexes at each
+  -- step so a wide declaration inventory cannot retain a deferred insertion
+  -- chain. Lazy-map values remain lazy, as required by the bounded arity pass.
+  strictIndexes occupied arities =
+    occupied `seq` arities `seq` (occupied, arities)
 
 -- | Bound every declared-class constraint before ordinary validation walks
 -- its raw argument spine. This is a termination boundary as well as an arity

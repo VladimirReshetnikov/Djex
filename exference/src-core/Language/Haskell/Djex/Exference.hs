@@ -461,14 +461,23 @@ residualTypeVariableNames candidate variables = fst
       safeTypeVariableHint $ Map.lookup variable rawHints of
     Just spelling
       | Set.notMember spelling used ->
-          (Map.insert variable spelling names, Set.insert spelling used)
+          strictNameState
+            (Map.insert variable spelling names)
+            (Set.insert spelling used)
     _ -> state
 
   assignFallback state@(names, used) variable
     | Map.member variable acceptedHints = state
     | otherwise =
         let spelling = freshFallback used $ defaultVariableName variable
-        in (Map.insert variable spelling names, Set.insert spelling used)
+        in strictNameState
+          (Map.insert variable spelling names)
+          (Set.insert spelling used)
+
+  -- 'foldl'' forces only the pair constructor. Materialize both indexes on
+  -- every step so wide caller-built residuals cannot retain deferred map or
+  -- set updates until the final rendering pass.
+  strictNameState names used = names `seq` used `seq` (names, used)
 
 -- Appending a prime preserves the lexical class of both historical fallback
 -- forms (the legacy renderer's 'defaultVariableName' policy). The finite set

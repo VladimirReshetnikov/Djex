@@ -24,12 +24,13 @@ import Language.Haskell.Exts.SrcLoc (SrcSpanInfo)
 import qualified Language.Haskell.Exts.SrcLoc as HSE
 import Numeric.Natural (Natural)
 
+import Language.Haskell.Exference.HaskellSrcUtils
+  ( haskellSrcSpanLocation
+  , haskellSrcSpanStartLocation
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , SourceLocation
-  , mkSourcePosition
-  , mkSourceSpan
-  , sourceLocation
   , withOptionalLocation
   )
 
@@ -87,26 +88,12 @@ mapExtractionMessage transform failure =
 -- point at its start, otherwise no location. HSE promises positive ordered
 -- coordinates, so the fallbacks matter only for constructed parse trees.
 srcSpanInfoLocation :: SrcSpanInfo -> Maybe SourceLocation
-srcSpanInfoLocation info = case fullSpan of
-  Right span' -> Just $ sourceLocation source span'
-  Left _ -> case pointSpan of
-    Right span' -> Just $ sourceLocation source span'
-    Left _ -> Nothing
+srcSpanInfoLocation info = case haskellSrcSpanLocation nativeSpan of
+  Right location -> Just location
+  Left _ -> either (const Nothing) Just
+    $ haskellSrcSpanStartLocation nativeSpan
  where
   nativeSpan = HSE.srcInfoSpan info
-  source = HSE.srcSpanFilename nativeSpan
-  start = mkSourcePosition
-    (HSE.srcSpanStartLine nativeSpan)
-    (HSE.srcSpanStartColumn nativeSpan)
-  fullSpan = do
-    startPosition <- start
-    end <- mkSourcePosition
-      (HSE.srcSpanEndLine nativeSpan)
-      (HSE.srcSpanEndColumn nativeSpan)
-    mkSourceSpan startPosition end
-  pointSpan = do
-    startPosition <- start
-    mkSourceSpan startPosition startPosition
 
 -- | Attach the failure's location to a diagnostic, when one exists.
 withExtractionLocation :: ExtractionError -> Diagnostic -> Diagnostic

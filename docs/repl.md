@@ -127,10 +127,12 @@ settings, `:show` subjects, and paths where appropriate.
 | `:cd DIR` | Change the process working directory. |
 | `:compare TYPE` | Run one independently parsed query with both backends. |
 | `:djinn TYPE` | Run one Djinn query. |
+| `:download PACKAGE ...` (`:dl`) | Download packages and dependencies into Cabal's configured source cache. |
 | `:exference TYPE` | Run one Exference query. |
 | `:help [COMMAND]` (`:h`, `:?`) | Show the command summary or detailed command help. |
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
 | `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors and class methods. |
+| `:install PACKAGE ...` | Build and install library packages through Cabal. |
 | `import DECLARATION` | Append a Haskell import to the Exference prompt context. |
 | `:load [TARGET ...]` (`:l`) | Replace the Exference target set and load local dependencies. No targets clears it. |
 | `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the Exference prompt context. |
@@ -163,6 +165,64 @@ shows settings. The three workspace views answer different questions:
   dependency-first order, including modules found through imports.
 - `:show imports` lists the ordered prompt context that controls Exference
   name visibility and search.
+
+## Downloading and installing packages
+
+Package operations have both scriptable and interactive forms:
+
+```console
+djex download PACKAGE ...
+djex install PACKAGE ...
+```
+
+```text
+:download PACKAGE ...
+:dl PACKAGE ...
+:install PACKAGE ...
+```
+
+`download` invokes `cabal fetch -- PACKAGE ...`. Cabal resolves dependencies
+and places their source archives in its configured cache for later use.
+`install` invokes
+`cabal install --lib --ignore-project -- PACKAGE ...`: library mode is
+explicit, and the surrounding checkout's `cabal.project` cannot silently
+change the install plan. Cabal still applies its configured repositories,
+solver, compiler, store, and default GHC package environment. Calling
+`install` directly may download anything not already cached.
+
+REPL package targets use the same word, quoted-string, and whole `[String]`
+argument forms as source commands. Empty targets and control characters are
+rejected before Cabal starts. Djex uses a direct process argv, not a shell, and
+inserts `--` before every target; a value such as `"--dry-run"` is therefore a
+package target rather than an injected Cabal option. Cabal's stdout and stderr
+are streamed unchanged. `:d` is ambiguous between `:djinn` and `:download`,
+and `:in` is ambiguous between `:info` and `:install`; the exact `:i` alias
+continues to mean `:info`.
+
+These commands authorize external effects. Fetching uses the network according
+to Cabal's configuration. Installing a Haskell package can execute code shipped
+by that package through custom setup programs, hooks, preprocessors, compiler
+plugins, Template Haskell, and build tools; it can also update Cabal's store and
+default package environment. Hackage archive verification is not a build
+sandbox. Inspect and trust a package before running `install`, and use an
+operating-system sandbox when its build must not see credentials, the network,
+or unrelated writable files.
+
+Package-manager state and Djex source-workspace state are deliberately
+independent. Success or failure does not change the selected backend, search
+settings, last synthesis query, targets, loaded modules, or prompt imports.
+More importantly, `cabal install --lib` produces compiled package interfaces;
+Djex does not read the GHC package database or `.hi` files, so an installed
+module does not become available to `import`, `:module`, synthesis, or `:type`.
+To expose an API to Djex, acquire compatible `.hs`/`.lhs` source (often a small
+signature-stub environment is more practical than a package's complete source
+tree) and admit the appropriate source directory with `:load` or `:add`.
+
+The top-level forms return Cabal's exact exit status, return 1 if Cabal cannot
+be launched, and return 2 for malformed Djex arguments. Inside the REPL the
+same structured failure is recoverable: the prompt continues and a later
+`:quit` remains successful. Ctrl-C interrupts the child command and restores
+the preceding interactive state.
 
 ## Source targets and dependency loading
 
@@ -525,9 +585,9 @@ at the main prompt and `:quit` are successful exits.
 
 ## Diagnostics and process status
 
-Parse, validation, load, search, rendering, setting, script, and shell failures
-are rendered as structured Djex diagnostics, normally on stderr. They are
-recoverable inside a session: the prompt continues, and the eventual process
+Package, parse, validation, load, search, rendering, setting, script, and shell
+failures are rendered as structured Djex diagnostics, normally on stderr. They
+are recoverable inside a session: the prompt continues, and the eventual process
 status remains success when the user leaves with `:quit` or EOF. Both-mode
 failure isolation follows the same rule.
 
@@ -541,7 +601,8 @@ This differs from one-shot operation. `djex djinn ...` and
 negative/search-status messages to stderr, and return exit 1 for a query/load/
 render failure or exit 2 for malformed command arguments. Proof-backed
 negative results and bounded no-result searches remain successful one-shot
-outcomes.
+outcomes. Top-level package operations follow the exit-status contract in
+[Downloading and installing packages](#downloading-and-installing-packages).
 
 ## Embedding the REPL
 
@@ -572,8 +633,8 @@ engine; `BothBackends` selects both. `runRepl` returns an `ExitCode` instead of
 terminating the host process, which makes it suitable for an application
 launcher. It is still a terminal-oriented interface: it owns Haskeline input,
 stdout/stderr presentation, process working-directory changes, and requested
-shell commands. Applications needing custom transport or mutable caller-owned
-state should embed the checked adapters documented in
+shell and Cabal package commands. Applications needing custom transport or
+mutable caller-owned state should embed the checked adapters documented in
 [the library API guide](library-api.md) instead.
 
 ## Relationship to the historical frontends

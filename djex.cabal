@@ -126,6 +126,7 @@ Library
   Exposed-Modules:
     Language.Haskell.Djex
     Language.Haskell.Djex.CLI
+    Language.Haskell.Djex.REPL
     Language.Haskell.Djex.Djinn
     Language.Haskell.Djex.Exference
     Language.Haskell.Synthesis.Candidate
@@ -200,6 +201,8 @@ Library
     Djinn.Internal.Type
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Command
+    Language.Haskell.Djex.REPL.Command
+    Language.Haskell.Djex.REPL.Driver
     Language.Haskell.Djex.Djinn.Internal.Request
     Language.Haskell.Djex.Djinn.Internal.Session
     Language.Haskell.Djex.Exference.Internal.Request
@@ -223,7 +226,8 @@ Library
     filepath >= 1.4 && < 1.6,
     haskeline >= 0.8 && < 0.9,
     pqueue >= 1.3.1 && < 1.8,
-    pretty >= 1.1 && < 1.2
+    pretty >= 1.1 && < 1.2,
+    process >= 1.6 && < 1.7
 
 -- The merged one-shot command is a launcher over the library's
 -- Language.Haskell.Djex.CLI, matching the two historical executables below,

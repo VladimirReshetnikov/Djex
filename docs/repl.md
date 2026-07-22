@@ -48,7 +48,7 @@ A normal startup looks like:
 ```text
 Djex REPL <package-version>
 Djinn session ready (standard checked environment).
-Exference environment: /path/to/environment
+Exference environment: "/path/to/environment"
 Type :help for help.
 djex[djinn]>
 ```

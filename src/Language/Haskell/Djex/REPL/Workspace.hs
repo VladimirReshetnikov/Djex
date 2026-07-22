@@ -23,7 +23,6 @@ module Language.Haskell.Djex.REPL.Workspace
   , workspaceModuleSources
   , workspaceRatingFiles
   , workspaceRatingSources
-  , workspaceUnresolvedImports
   , workspaceUnresolvedImportsWithSources
   , workspaceModuleName
   , workspaceModulePath
@@ -34,7 +33,6 @@ module Language.Haskell.Djex.REPL.Workspace
   , workspaceTargetModuleFiles
   , workspaceTargetRatingFiles
   , workspaceTargetModuleName
-  , workspaceAutomaticTargetModule
   , workspaceAutomaticTargetModules
   ) where
 
@@ -248,14 +246,6 @@ workspaceRatingFiles = map fst . sourceWorkspaceRatings
 workspaceRatingSources :: SourceWorkspace -> [(FilePath, String)]
 workspaceRatingSources = sourceWorkspaceRatings
 
--- | Transitional source-free view of unresolved local imports. New diagnostic
--- consumers should use 'workspaceUnresolvedImportsWithSources'.
-workspaceUnresolvedImports :: SourceWorkspace -> [(String, String)]
-workspaceUnresolvedImports = map withoutSource
-  . workspaceUnresolvedImportsWithSources
- where
-  withoutSource (_, importer, imported) = (importer, imported)
-
 -- | Non-package imports for which dependency discovery found no local source
 -- module. Path/importer/imported triples retain dependency-first module order
 -- and source import order, making the source-workspace boundary and diagnostic
@@ -336,17 +326,6 @@ workspaceAutomaticTargetModules workspace = case
     target : _ -> targetContribution
       (modulesByPath $ sourceWorkspaceModules workspace) target
     [] -> []
-
--- | Transitional singular projection retained while callers move to
--- 'workspaceAutomaticTargetModules'. Directory targets can contribute more
--- than one module, so new code must use the plural accessor.
-workspaceAutomaticTargetModule
-  :: SourceWorkspace
-  -> Maybe (WorkspaceModule, Bool)
-workspaceAutomaticTargetModule workspace = case
-    workspaceAutomaticTargetModules workspace of
-  automatic : _ -> Just automatic
-  [] -> Nothing
 
 admitTargets
   :: [String]

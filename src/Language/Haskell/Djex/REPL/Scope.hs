@@ -27,6 +27,8 @@ module Language.Haskell.Djex.REPL.Scope
   , moduleNamesForBrowse
   ) where
 
+import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (StateT, get, modify, runStateT)
 import Data.Char (isSpace)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
@@ -45,7 +47,7 @@ import Language.Haskell.Djex.REPL.Command (ModuleChange (..))
 import Language.Haskell.Djex.REPL.Workspace
   ( SourceWorkspace
   , WorkspaceModule
-  , workspaceAutomaticTargetModule
+  , workspaceAutomaticTargetModules
   , workspaceModuleName
   , workspaceModulePath
   , workspaceModuleSyntax
@@ -148,10 +150,11 @@ resetScopeForWorkspace
   -> Either Diagnostic ReplScope
 resetScopeForWorkspace = scopeFromWorkspace
 
--- | Revalidate retained entries after @:reload@, @:add@, or @:unadd@. Entries
--- whose modules disappeared are pruned; the new automatic target is installed
--- only when nothing survived. Thus adding a target does not unexpectedly move
--- an established prompt context to the newly added module.
+-- | Revalidate retained entries after @:reload@. Entries whose modules
+-- disappeared are pruned, old automatic entries are replaced, and the fresh
+-- automatic context is appended after explicit entries. This mirrors GHCi:
+-- an explicit @M@ may coexist with automatic @*M@, while an already-explicit
+-- @*M@ suppresses an exact duplicate automatic entry.
 revalidateScope
   :: Inventory typeVariable annotation
   -> SourceWorkspace
@@ -159,11 +162,20 @@ revalidateScope
   -> Either Diagnostic ReplScope
 revalidateScope inventory workspace scope = do
   modules <- workspaceModuleMap workspace
-  let surviving = filter (entryIsLoaded modules) $ scopeEntries scope
-  entries <- if null surviving
-    then automaticEntries workspace
-    else Right surviving
-  compileScope inventory workspace entries
+  let surviving = filter (entryIsLoaded modules)
+        $ filter (not . isAutomaticEntry) $ scopeEntries scope
+  automatic <- automaticEntries workspace
+  compileScope inventory workspace
+    $ surviving ++ filter (not . alreadyExplicit surviving) automatic
+ where
+  isAutomaticEntry (ScopeModule AutomaticScope _ _) = True
+  isAutomaticEntry _ = False
+  alreadyExplicit entries (ScopeModule _ starred moduleName) = any
+    (sameModuleEntry starred moduleName) entries
+  alreadyExplicit _ _ = False
+  sameModuleEntry wantedStar wantedModule (ScopeModule _ starred moduleName) =
+    wantedStar == starred && wantedModule == moduleName
+  sameModuleEntry _ _ _ = False
 
 entryIsLoaded :: Map ModuleName WorkspaceModule -> ScopeEntry -> Bool
 entryIsLoaded modules entry = case entry of
@@ -220,8 +232,10 @@ moduleNamesForBrowse
 moduleNamesForBrowse inventory workspace starred source = do
   moduleName <- checkedModuleName source
   modules <- workspaceModuleMap workspace
-  target <- requireLoaded modules moduleName
-  view <- buildModuleView (symbolIndex inventory) modules [] target
+  _ <- requireLoaded modules moduleName
+  let index = symbolIndex inventory modules
+  views <- buildModuleViews index modules $ workspaceModules workspace
+  view <- requireModuleView views moduleName
   pure $ if starred then moduleViewSearchNames view else moduleViewExports view
 
 -- | Stable, human-readable import context for @:show imports@.
@@ -248,11 +262,12 @@ renderScopeModules = mapMaybe render . scopeEntries
     ++ SharedName.renderModuleName moduleName
 
 automaticEntries :: SourceWorkspace -> Either Diagnostic [ScopeEntry]
-automaticEntries workspace = case workspaceAutomaticTargetModule workspace of
-  Nothing -> Right []
-  Just (target, starred) -> do
+automaticEntries workspace = traverse automatic
+  $ workspaceAutomaticTargetModules workspace
+ where
+  automatic (target, starred) = do
     moduleName <- checkedModuleName $ workspaceModuleName target
-    Right [ScopeModule AutomaticScope starred moduleName]
+    Right $ ScopeModule AutomaticScope starred moduleName
 
 addModuleEntry :: [ScopeEntry] -> ScopeEntry -> [ScopeEntry]
 addModuleEntry entries incoming@(ScopeModule _ _ wanted) =
@@ -320,9 +335,10 @@ compileScope
   -> Either Diagnostic ReplScope
 compileScope inventory workspace entries = do
   modules <- workspaceModuleMap workspace
-  let index = symbolIndex inventory
-  contributions <- traverse (entryContribution index modules) entries
-  implicit <- implicitPreludeContribution index modules entries
+  let index = symbolIndex inventory modules
+  views <- buildModuleViews index modules $ workspaceModules workspace
+  contributions <- traverse (entryContribution index modules views) entries
+  implicit <- implicitPreludeContribution modules views entries
   let allContributions = maybe contributions (: contributions) implicit
       unqualified = ordNub
         $ concatMap contributionUnqualified allContributions
@@ -338,7 +354,6 @@ compileScope inventory workspace entries = do
       current = case starredModules of
         [moduleName] -> Just moduleName
         _ -> Nothing
-  validateAliases aliases
   pure ReplScope
     { replScopeEntries = entries
     , replScopeUnqualifiedNames = unqualified
@@ -359,12 +374,13 @@ data ScopeContribution = ScopeContribution
 entryContribution
   :: SymbolIndex
   -> Map ModuleName WorkspaceModule
+  -> Map ModuleName ModuleView
   -> ScopeEntry
   -> Either Diagnostic ScopeContribution
-entryContribution index modules entry = case entry of
+entryContribution index modules views entry = case entry of
   ScopeModule _ starred moduleName -> do
-    target <- requireLoaded modules moduleName
-    view <- buildModuleView index modules [] target
+    _ <- requireLoaded modules moduleName
+    view <- requireModuleView views moduleName
     pure $ if starred
       then ScopeContribution
         (moduleViewUnqualified view)
@@ -378,14 +394,10 @@ entryContribution index modules entry = case entry of
         []
   ScopeImport source -> do
     declaration <- parseImport source
-    case HSE.importPkg declaration of
-      Just packageName -> Left $ scopeDiagnostic "DJEX_REPL_IMPORT_PACKAGE"
-        "package-qualified imports are not supported by the source workspace"
-        $ "package " ++ show packageName
-      Nothing -> pure ()
+    rejectPackageImport declaration
     canonical <- importModuleName declaration
-    target <- requireLoaded modules canonical
-    imported <- buildModuleView index modules [] target
+    _ <- requireLoaded modules canonical
+    imported <- requireModuleView views canonical
     selected <- applyImportSpecs index (moduleViewExports imported)
       $ HSE.importSpecs declaration
     qualifier <- maybe (Right canonical) checkedHseModuleName
@@ -402,23 +414,25 @@ entryContribution index modules entry = case entry of
       , contributionAliases = aliases
       }
 
--- GHCi implicitly imports Prelude. Djex can reproduce that only when Prelude
--- is itself a loaded source module with checked declarations; it never turns
--- a same-named external/package inventory entry into prompt scope.
+-- GHCi implicitly imports Prelude only when no starred module supplies the
+-- prompt's complete source scope. Djex can reproduce that import only when
+-- Prelude is itself a loaded source module with checked declarations; it never
+-- turns a same-named external/package inventory entry into prompt scope.
 implicitPreludeContribution
-  :: SymbolIndex
-  -> Map ModuleName WorkspaceModule
+  :: Map ModuleName WorkspaceModule
+  -> Map ModuleName ModuleView
   -> [ScopeEntry]
   -> Either Diagnostic (Maybe ScopeContribution)
-implicitPreludeContribution index modules entries = case
+implicitPreludeContribution modules views entries = case
     SharedName.mkModuleName "Prelude" of
   Left _ -> pure Nothing
   Right prelude
+    | any isStarredModule entries -> pure Nothing
     | any (mentionsModule prelude) entries -> pure Nothing
     | otherwise -> case Map.lookup prelude modules of
         Nothing -> pure Nothing
-        Just target -> do
-          exports <- moduleViewExports <$> buildModuleView index modules [] target
+        Just _ -> do
+          exports <- moduleViewExports <$> requireModuleView views prelude
           pure $ if null exports
             then Nothing
             else Just ScopeContribution
@@ -428,6 +442,8 @@ implicitPreludeContribution index modules entries = case
               , contributionAliases = []
               }
  where
+  isStarredModule (ScopeModule _ True _) = True
+  isStarredModule _ = False
   mentionsModule wanted (ScopeModule _ _ candidate) = wanted == candidate
   mentionsModule wanted (ScopeImport source) = case parseImport source of
     Right declaration -> importModuleName declaration == Right wanted
@@ -452,13 +468,27 @@ requireLoaded modules moduleName = case Map.lookup moduleName modules of
   Nothing -> Left $ scopeDiagnostic "DJEX_REPL_MODULE_NOT_LOADED"
     "module is not loaded" $ SharedName.renderModuleName moduleName
 
+requireModuleView
+  :: Map ModuleName ModuleView
+  -> ModuleName
+  -> Either Diagnostic ModuleView
+requireModuleView views moduleName = case Map.lookup moduleName views of
+  Just view -> Right view
+  Nothing -> Left $ scopeDiagnostic "DJEX_REPL_SCOPE_INTERNAL"
+    "loaded module has no validated scope"
+    $ SharedName.renderModuleName moduleName
+
 -- Shared 'Name' deliberately identifies a canonical spelling, not GHC's
 -- separate type/value namespace entities. The role set recovers enough source
 -- information for @type@, @pattern@, constructors, and class methods, but a
 -- legal same-spelled type and constructor remain one exact shared identity.
 -- Filtering that identity more finely would require changing the common
 -- declaration model rather than guessing from syntax here.
-data SymbolRole = TypeSymbol | ValueSymbol | ConstructorSymbol
+data SymbolRole
+  = TypeSymbol
+  | BundledOwnerSymbol
+  | ValueSymbol
+  | ConstructorSymbol
   deriving (Eq, Ord, Show)
 
 data SymbolIndex = SymbolIndex
@@ -467,11 +497,16 @@ data SymbolIndex = SymbolIndex
   , symbolChildren :: Map Name [Name]
   }
 
-symbolIndex :: Inventory typeVariable annotation -> SymbolIndex
-symbolIndex inventory = foldl' addDeclaration emptyIndex
-  $ environmentDeclarations $ inventoryEnvironment inventory
+symbolIndex
+  :: Inventory typeVariable annotation
+  -> Map ModuleName WorkspaceModule
+  -> SymbolIndex
+symbolIndex inventory modules = foldl' addRecordFields declarationsIndex
+  $ Map.toList modules
  where
   emptyIndex = SymbolIndex Map.empty Map.empty Map.empty
+  declarationsIndex = foldl' addDeclaration emptyIndex
+    $ environmentDeclarations $ inventoryEnvironment inventory
 
   addDeclaration index declaration = case declaration of
     TypeSynonymDeclaration _ name _ _ -> add TypeSymbol name index
@@ -480,11 +515,13 @@ symbolIndex inventory = foldl' addDeclaration emptyIndex
     DataTypeDeclaration _ parent _ constructors ->
       addChildren parent (map constructorName constructors)
         $ foldl' (flip $ addRoles [ValueSymbol, ConstructorSymbol])
-            (add TypeSymbol parent index) $ map constructorName constructors
+            (addRoles [TypeSymbol, BundledOwnerSymbol] parent index)
+            $ map constructorName constructors
     ClassDeclaration _ parent _ _ methods ->
       addChildren parent (map valueName methods)
         $ foldl' (flip $ addRoles [ValueSymbol])
-            (add TypeSymbol parent index) $ map valueName methods
+            (addRoles [TypeSymbol, BundledOwnerSymbol] parent index)
+            $ map valueName methods
     InstanceDeclaration{} -> index
 
   add role = addRoles [role]
@@ -500,7 +537,67 @@ symbolIndex inventory = foldl' addDeclaration emptyIndex
     { symbolChildren = Map.insertWith appendOld parent children
         $ symbolChildren index
     }
+
+  -- The neutral declaration layer deliberately models record selectors as
+  -- ordinary values. Retain that backend-independent representation and use
+  -- the already parsed source snapshot only to recover the parent relation
+  -- needed by Haskell import/export forms such as @Record(..)@ and
+  -- @Record(field)@. Every parent and field is intersected with the checked
+  -- inventory, so rejected syntax can never leak into prompt scope.
+  addRecordFields index (moduleName, target) = foldl' addRecord index
+    $ recordFieldGroups $ workspaceModuleSyntax target
+   where
+    available = moduleSymbols index moduleName
+    matches role spelling =
+      [ name
+      | name <- available
+      , SharedName.nameSpelling name == Just spelling
+      , role `Set.member` Map.findWithDefault Set.empty name
+          (symbolRoles index)
+      ]
+    addRecord current (parentSpelling, fieldSpellings) = case
+        matches TypeSymbol parentSpelling of
+      [parent] -> addChildren parent
+        (ordNub $ concatMap (matches ValueSymbol) fieldSpellings) current
+      _ -> current
   appendOld new old = old ++ new
+
+recordFieldGroups
+  :: HSE.Module HSE.SrcSpanInfo
+  -> [(String, [String])]
+recordFieldGroups syntax = concatMap declarationGroups declarations
+ where
+  declarations = case syntax of
+    HSE.Module _ _ _ _ items -> items
+    HSE.XmlHybrid _ _ _ _ items _ _ _ _ -> items
+    HSE.XmlPage{} -> []
+
+  declarationGroups declaration = case declaration of
+    HSE.DataDecl _ _ _ headSyntax constructors _ ->
+      oneGroup headSyntax $ concatMap constructorFields constructors
+    HSE.GDataDecl _ _ _ headSyntax _ constructors _ ->
+      oneGroup headSyntax $ concatMap gadtFields constructors
+    _ -> []
+
+  oneGroup headSyntax fields = case ordNub fields of
+    [] -> []
+    names -> [(hseNameText $ declarationHeadName headSyntax, names)]
+
+  constructorFields (HSE.QualConDecl _ _ _ constructor) = case constructor of
+    HSE.RecDecl _ _ fields -> concatMap fieldNames fields
+    _ -> []
+
+  gadtFields (HSE.GadtDecl _ _ _ _ fields _) =
+    maybe [] (concatMap fieldNames) fields
+
+  fieldNames (HSE.FieldDecl _ names _) = map hseNameText names
+
+declarationHeadName :: HSE.DeclHead annotation -> HSE.Name annotation
+declarationHeadName headSyntax = case headSyntax of
+  HSE.DHead _ name -> name
+  HSE.DHInfix _ _ name -> name
+  HSE.DHParen _ nested -> declarationHeadName nested
+  HSE.DHApp _ nested _ -> declarationHeadName nested
 
 moduleSymbols :: SymbolIndex -> ModuleName -> [Name]
 moduleSymbols index moduleName = ordNub
@@ -528,47 +625,75 @@ data ImportView = ImportView
   , importViewNames :: [Name]
   }
 
-buildModuleView
+buildModuleViews
+  :: SymbolIndex
+  -> Map ModuleName WorkspaceModule
+  -> [WorkspaceModule]
+  -> Either Diagnostic (Map ModuleName ModuleView)
+buildModuleViews index modules targets = snd
+  <$> runStateT
+      (mapM_ (buildModuleViewCached index modules []) targets)
+      Map.empty
+
+type ModuleViewBuilder =
+  StateT (Map ModuleName ModuleView) (Either Diagnostic)
+
+-- Module views form a dependency DAG after Workspace has validated ordinary
+-- cycles. Memoizing completed nodes keeps a diamond-shaped import graph linear
+-- instead of recursively rebuilding the same export surface along every path.
+buildModuleViewCached
   :: SymbolIndex
   -> Map ModuleName WorkspaceModule
   -> [ModuleName]
   -> WorkspaceModule
-  -> Either Diagnostic ModuleView
-buildModuleView index modules stack target = do
-  moduleName <- checkedModuleName $ workspaceModuleName target
-  if moduleName `elem` stack
-    then Left $ withSource (workspaceModulePath target)
-      $ scopeDiagnostic "DJEX_REPL_IMPORT_CYCLE"
-          "cannot construct a scope through an import cycle"
-          $ intercalate " -> "
-          $ map SharedName.renderModuleName $ reverse $ moduleName : stack
-    else pure ()
-  (moduleHead, pragmas, declarations) <- moduleParts target
-  imports <- traverse (resolveSourceImport index modules $ moduleName : stack)
-    declarations
-  implicit <- sourceImplicitPrelude index modules (moduleName : stack)
-    moduleName pragmas declarations
-  let allImports = maybe imports (: imports) implicit
-      local = moduleSymbols index moduleName
-      unqualified = ordNub $ local ++ concat
-        [ importViewNames item
-        | item <- allImports
-        , not $ importViewIsQualified item
-        ]
-      search = ordNub $ local ++ concatMap importViewNames allImports
-      qualified = mergeQualified $ (moduleName, local) :
-        [ (importViewQualifier item, importViewNames item)
-        | item <- allImports
-        ]
-      aliases = ordNub
-        [ (importViewQualifier item, importViewCanonical item)
-        | item <- allImports
-        , importViewQualifier item /= importViewCanonical item
-        ]
-      provisional = ModuleView local unqualified search
-        qualified aliases []
-  exports <- resolveModuleExports index provisional allImports moduleHead
-  pure provisional {moduleViewExports = ordNub exports}
+  -> ModuleViewBuilder ModuleView
+buildModuleViewCached index modules stack target = do
+  moduleName <- lift $ checkedModuleName $ workspaceModuleName target
+  cached <- get
+  case Map.lookup moduleName cached of
+    Just view -> pure view
+    Nothing -> do
+      if moduleName `elem` stack
+        then lift $ Left $ withSource (workspaceModulePath target)
+          $ scopeDiagnostic "DJEX_REPL_IMPORT_CYCLE"
+              "cannot construct a scope through an import cycle"
+              $ intercalate " -> "
+              $ map SharedName.renderModuleName $ reverse $ moduleName : stack
+        else pure ()
+      (moduleHead, pragmas, sourceImports) <- lift $ moduleParts target
+      imports <- traverse
+        (resolveSourceImport index modules (workspaceModulePath target)
+          $ moduleName : stack)
+        sourceImports
+      implicit <- sourceImplicitPrelude index modules (moduleName : stack)
+        moduleName pragmas sourceImports
+      let allImports = maybe imports (: imports) implicit
+          local = moduleSymbols index moduleName
+          unqualified = ordNub $ local ++ concat
+            [ importViewNames item
+            | item <- allImports
+            , not $ importViewIsQualified item
+            ]
+          search = ordNub $ local ++ concatMap importViewNames allImports
+          qualified = mergeQualified $ (moduleName, local) :
+            [ (importViewQualifier item, importViewNames item)
+            | item <- allImports
+            ]
+          aliases = ordNub
+            [ (importViewQualifier item, importViewCanonical item)
+            | item <- allImports
+            , importViewQualifier item /= importViewCanonical item
+            ]
+          provisional = ModuleView local unqualified search
+            qualified aliases []
+      exports <- lift
+        $ atSource (workspaceModulePath target)
+        $ resolveModuleExports index provisional allImports moduleHead
+      let uniqueExports = ordNub exports
+      lift $ validateExportSurface index target uniqueExports
+      let completed = provisional {moduleViewExports = uniqueExports}
+      modify $ Map.insert moduleName completed
+      pure completed
 
 moduleParts
   :: WorkspaceModule
@@ -588,33 +713,51 @@ moduleParts target = case workspaceModuleSyntax target of
 resolveSourceImport
   :: SymbolIndex
   -> Map ModuleName WorkspaceModule
+  -> FilePath
   -> [ModuleName]
   -> HSE.ImportDecl HSE.SrcSpanInfo
-  -> Either Diagnostic ImportView
-resolveSourceImport index modules stack declaration = do
-  canonical <- importModuleName declaration
-  qualifier <- maybe (Right canonical) checkedHseModuleName
-    $ HSE.importAs declaration
+  -> ModuleViewBuilder ImportView
+resolveSourceImport index modules importerPath stack declaration = do
+  -- Package identity is not represented by the shared canonical Name. If a
+  -- local module has the same spelling as the package module, falling back to
+  -- that local inventory would silently bind the wrong declarations.
+  lift $ atSource importerPath $ rejectPackageImport declaration
+  canonical <- lift $ atSource importerPath $ importModuleName declaration
+  qualifier <- lift $ atSource importerPath
+    $ maybe (Right canonical) checkedHseModuleName $ HSE.importAs declaration
   available <- case Map.lookup canonical modules of
     Just target
       -- A SOURCE import is an interface edge used specifically to break a
       -- source cycle. Workspace does not load @.hs-boot@ files, so following
       -- the ordinary module here would recreate the cycle that SOURCE broke.
-      | not (HSE.importSrc declaration)
-      , HSE.importPkg declaration == Nothing ->
-          moduleViewExports <$> buildModuleView index modules stack target
+      | not (HSE.importSrc declaration) ->
+          moduleViewExports
+            <$> buildModuleViewCached index modules stack target
     Just _ -> pure $ moduleSymbols index canonical
-    -- Package and otherwise external imports have no Workspace syntax tree.
-    -- The checked inventory can still tell us which exact declarations exist,
-    -- but it cannot recover that package module's hidden export surface.
-    Nothing -> pure $ moduleSymbols index canonical
-  selected <- applyImportSpecs index available $ HSE.importSpecs declaration
+    -- This source-only session has no package database. An unresolved import
+    -- therefore contributes no declarations; the workspace warning explains
+    -- that boundary without manufacturing a package export surface.
+    Nothing -> pure []
+  selected <- lift $ atSource importerPath
+    $ applyImportSpecs index available $ HSE.importSpecs declaration
   pure ImportView
     { importViewCanonical = canonical
     , importViewQualifier = qualifier
     , importViewIsQualified = HSE.importQualified declaration
     , importViewNames = selected
     }
+
+rejectPackageImport
+  :: HSE.ImportDecl annotation
+  -> Either Diagnostic ()
+rejectPackageImport declaration = case HSE.importPkg declaration of
+  Just packageName -> Left $ scopeDiagnostic "DJEX_REPL_IMPORT_PACKAGE"
+    "package-qualified imports are not supported by the source workspace"
+    $ "package " ++ show packageName
+  Nothing -> Right ()
+
+atSource :: FilePath -> Either Diagnostic value -> Either Diagnostic value
+atSource source = either (Left . withSource source) Right
 
 sourceImplicitPrelude
   :: SymbolIndex
@@ -623,7 +766,7 @@ sourceImplicitPrelude
   -> ModuleName
   -> [HSE.ModulePragma HSE.SrcSpanInfo]
   -> [HSE.ImportDecl HSE.SrcSpanInfo]
-  -> Either Diagnostic (Maybe ImportView)
+  -> ModuleViewBuilder (Maybe ImportView)
 sourceImplicitPrelude index modules stack current pragmas imports = case
     SharedName.mkModuleName "Prelude" of
   Left _ -> pure Nothing
@@ -635,7 +778,7 @@ sourceImplicitPrelude index modules stack current pragmas imports = case
         Nothing -> pure Nothing
         Just target -> do
           available <- moduleViewExports
-            <$> buildModuleView index modules stack target
+            <$> buildModuleViewCached index modules stack target
           pure $ if null available then Nothing else Just ImportView
             { importViewCanonical = prelude
             , importViewQualifier = prelude
@@ -666,7 +809,7 @@ resolveModuleExports index view imports
     HSE.EAbs _ namespace qname -> selectQName index
       (namespaceRoles namespace) view qname $ HSE.prettyPrint spec
     HSE.EThingWith _ wildcard qname children -> do
-      parent <- selectQName index [TypeSymbol] view qname
+      parent <- selectQName index [BundledOwnerSymbol] view qname
         $ HSE.prettyPrint spec
       case parent of
         [oneParent] -> do
@@ -691,6 +834,56 @@ resolveModuleExports index view imports
         then Left $ scopeDiagnostic "DJEX_REPL_EXPORT_NOT_IN_SCOPE"
           "module re-export is not in scope" $ HSE.prettyPrint spec
         else Right $ ordNub $ concat matching
+
+-- Haskell has separate type and value export namespaces, but two different
+-- entities in the same namespace may not share one exported occurrence. This
+-- most often arises through two @module X@ re-exports whose aliases expose
+-- colliding declarations. Exact duplicate exports remain harmless.
+validateExportSurface
+  :: SymbolIndex
+  -> WorkspaceModule
+  -> [Name]
+  -> Either Diagnostic ()
+validateExportSurface index target exports = case firstConflict of
+  Nothing -> Right ()
+  Just (occurrence, left, right) -> Left
+    $ withSource (workspaceModulePath target)
+    $ scopeDiagnostic "DJEX_REPL_EXPORT_AMBIGUOUS"
+        "module export is ambiguous"
+        ( occurrence ++ " could denote "
+            ++ SharedName.renderCanonical left ++ " or "
+            ++ SharedName.renderCanonical right
+        )
+ where
+  groups = Map.elems $ Map.fromListWith appendOld
+    [ (occurrence, [name])
+    | name <- exports
+    , Just occurrence <- [SharedName.nameSpelling name]
+    ]
+  firstConflict = firstPair
+    [ (occurrence, left, right)
+    | names <- groups
+    , (left, right) <- unorderedPairs names
+    , left /= right
+    , sameNamespace left right
+    , Just occurrence <- [SharedName.nameSpelling left]
+    ]
+  firstPair [] = Nothing
+  firstPair (pair : _) = Just pair
+  unorderedPairs [] = []
+  unorderedPairs (name : names) =
+    [(name, other) | other <- names] ++ unorderedPairs names
+  sameNamespace left right = typeOverlap || valueOverlap
+   where
+    leftRoles = Map.findWithDefault Set.empty left $ symbolRoles index
+    rightRoles = Map.findWithDefault Set.empty right $ symbolRoles index
+    typeOverlap = TypeSymbol `Set.member` leftRoles
+      && TypeSymbol `Set.member` rightRoles
+    valueOverlap = hasValueRole leftRoles && hasValueRole rightRoles
+    hasValueRole = not . Set.null
+      . Set.intersection valueNamespaceRoles
+  valueNamespaceRoles = Set.fromList [ValueSymbol, ConstructorSymbol]
+  appendOld new old = old ++ new
 
 selectQName
   :: SymbolIndex
@@ -744,11 +937,13 @@ applyImportSpecs index available
       (namespaceRoles namespace) available (hseNameText name)
       $ HSE.prettyPrint spec
     HSE.IThingAll _ name -> do
-      parents <- selectUnique index [TypeSymbol] available (hseNameText name)
+      parents <- selectUnique index [BundledOwnerSymbol] available
+        (hseNameText name)
         $ HSE.prettyPrint spec
       pure $ parents ++ concatMap (availableChildren index available) parents
     HSE.IThingWith _ name children -> do
-      parents <- selectUnique index [TypeSymbol] available (hseNameText name)
+      parents <- selectUnique index [BundledOwnerSymbol] available
+        (hseNameText name)
         $ HSE.prettyPrint spec
       case parents of
         [parent] -> (parent :) <$> selectChildren index available parent children
@@ -815,25 +1010,6 @@ namespaceRoles namespace = case namespace of
   HSE.PatternNamespace _ -> [ConstructorSymbol]
   HSE.TypeNamespace _ -> [TypeSymbol]
   HSE.NoNamespace _ -> [TypeSymbol]
-
-validateAliases :: [(ModuleName, ModuleName)] -> Either Diagnostic ()
-validateAliases aliases = case conflicts of
-  [] -> Right ()
-  (alias, targets) : _ -> Left $ scopeDiagnostic
-    "DJEX_REPL_IMPORT_ALIAS_AMBIGUOUS" "module alias is ambiguous"
-    $ SharedName.renderModuleName alias ++ " denotes "
-    ++ intercalate ", " (map SharedName.renderModuleName targets)
- where
-  targetsByAlias = Map.fromListWith (++)
-    [ (alias, [target])
-    | (alias, target) <- aliases
-    ]
-  conflicts =
-    [ (alias, unique)
-    | (alias, targets) <- Map.toList targetsByAlias
-    , let unique = ordNub targets
-    , length unique > 1
-    ]
 
 mergeQualified :: [(ModuleName, [Name])] -> [(ModuleName, [Name])]
 mergeQualified = foldl' insert []

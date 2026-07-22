@@ -57,7 +57,7 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
-  , loadExferenceSessionFromFilesWithPolicy
+  , loadExferenceSessionFromSourcesWithPolicy
   )
 import Language.Haskell.Djex.REPL.Command
 import Language.Haskell.Djex.REPL.Driver
@@ -204,7 +204,7 @@ executeSource sourceName state history source = case parseReplInput source of
   Right (ReplQuery target typeSource) ->
     runQuery sourceName target typeSource state
   Right (ReplImport importSource) -> ContinueRepl
-    <$> addImportToScope importSource state
+    <$> addImportToScope sourceName importSource state
   Right (ReplCommand command) -> runCommand sourceName history command state
 
 runCommand
@@ -214,9 +214,10 @@ runCommand
   -> ReplState
   -> IO (ReplStep ReplState)
 runCommand sourceName history command state = case command of
+  AddEnvironment [] -> continue state
   AddEnvironment targets -> updateExferenceWorkspace
     (addWorkspaceTargetsFor state targets)
-    PreserveScope
+    ResetScope
     ("Added Exference targets: " ++ renderRequestedTargets targets)
     state >>= continue
   Browse selectedModule -> browseState selectedModule state >> continue state
@@ -264,9 +265,10 @@ runCommand sourceName history command state = case command of
   RunShell shellCommand -> runShellCommand shellCommand >> continue state
   SetOption source -> setOption source state >>= continue
   ShowState subject -> showState subject state >> continue state
+  UnaddEnvironment [] -> continue state
   UnaddEnvironment targets -> updateExferenceWorkspace
     (removeWorkspaceTargetsFor state targets)
-    PreserveScope
+    ResetScope
     ("Removed Exference targets: " ++ renderRequestedTargets targets)
     state >>= continue
   UnsetOption source -> unsetOption source state >>= continue
@@ -371,7 +373,7 @@ runShellCommand command = do
   onlyUserInterrupt UserInterrupt = Just ()
   onlyUserInterrupt _ = Nothing
 
-data ScopeRetention = ResetScope | PreserveScope
+data ScopeRetention = ResetScope | RefreshAutomaticScope
 
 loadExference :: [String] -> Bool -> IO LoadAttempt
 loadExference targets allowFix = do
@@ -394,11 +396,12 @@ attemptWorkspaceLoad allowFix retention previousScope workspace =
       emitDiagnostic failure
       pure $ failedLoadAttempt targets (Just workspace) [failure]
     Right policy -> do
-      report <- loadExferenceSessionFromFilesWithPolicy
+      report <- loadExferenceSessionFromSourcesWithPolicy
         policy
-        (workspaceModuleFiles workspace)
-        (workspaceRatingFiles workspace)
-      let advisory = exferenceSessionLoadDiagnostics report
+        (workspaceModuleSources workspace)
+        (workspaceRatingSources workspace)
+      let advisory = workspaceImportDiagnostics workspace
+            ++ exferenceSessionLoadDiagnostics report
           fatal = either toList (const [])
             $ exferenceSessionLoadResult report
           diagnostics = advisory ++ fatal
@@ -429,9 +432,25 @@ attemptWorkspaceLoad allowFix retention previousScope workspace =
  where
   targets = map workspaceTargetDisplay $ workspaceTargets workspace
   buildScope inventory = case (retention, previousScope) of
-    (PreserveScope, Just context) ->
+    (RefreshAutomaticScope, Just context) ->
       revalidateScope inventory workspace context
     _ -> scopeFromWorkspace inventory workspace
+
+-- A bare import that cannot be resolved beneath any admitted source root may
+-- intentionally refer to an installed package, but this source-only session
+-- has no package database from which to obtain its declarations. Make that
+-- boundary visible instead of silently omitting a dependency that the user
+-- expected to edit and reload.
+workspaceImportDiagnostics :: SourceWorkspace -> [Diagnostic]
+workspaceImportDiagnostics workspace =
+  [ withSource path
+      $ contextualDiagnostic Warning "DJEX_REPL_IMPORT_UNRESOLVED"
+          "source import has no loaded local module"
+          (importer ++ " imports " ++ imported
+            ++ "; declarations from that module are unavailable")
+  | (path, importer, imported) <-
+      workspaceUnresolvedImportsWithSources workspace
+  ]
 
 failedLoadAttempt
   :: [String]
@@ -528,7 +547,7 @@ reloadExferenceWorkspace state = reloadExferenceWorkspaceWithPolicy
 reloadExferenceWorkspaceWithPolicy :: Bool -> ReplState -> IO ReplState
 reloadExferenceWorkspaceWithPolicy allowFix state =
   updateExferenceWorkspaceWithPolicy allowFix
-    action PreserveScope
+    action RefreshAutomaticScope
       ("Loaded Exference environment: " ++ renderRequestedTargets
         (exferenceRuntimeRequestedTargets runtime))
       state
@@ -542,9 +561,12 @@ renderRequestedTargets :: [String] -> String
 renderRequestedTargets [] = "(no targets)"
 renderRequestedTargets targets = unwords $ map show targets
 
-addImportToScope :: String -> ReplState -> IO ReplState
-addImportToScope source = modifyExferenceScope $ \inventory workspace context ->
-  addScopeImport inventory workspace source context
+addImportToScope :: FilePath -> String -> ReplState -> IO ReplState
+addImportToScope sourceName source = modifyExferenceScope
+  $ \inventory workspace context -> case
+      addScopeImport inventory workspace source context of
+    Left failure -> Left $ withSource sourceName failure
+    Right next -> Right next
 
 changeModuleScope
   :: ModuleChange
@@ -1024,16 +1046,21 @@ resolveScopeName context source = case nameModule source of
   Nothing -> case nameSpecial source of
     Just _ -> Right source
     Nothing -> chooseUnqualified
-  Just qualifier -> case
-      [ canonical
-      | (alias, canonical) <- scopeQualifierAliases context
-      , alias == qualifier
-      ] of
-    [] -> Right source
-    [_] -> chooseAlias qualifier
-    modules -> Left $ "ambiguous module qualifier "
-      ++ renderModuleName qualifier ++ "; matches "
-      ++ intercalate ", " (map renderModuleName modules)
+  Just qualifier -> case qualifiedCandidates qualifier of
+    [name] -> Right name
+    _ : _ : _ -> Left $ "ambiguous qualified name "
+      ++ renderCanonical source ++ "; matches "
+      ++ intercalate ", " (map renderCanonical $ qualifiedCandidates qualifier)
+    [] -> case
+        [ canonical
+        | (alias, canonical) <- scopeQualifierAliases context
+        , alias == qualifier
+        ] of
+      [] -> Right source
+      [_] -> chooseAlias qualifier
+      modules -> Left $ "ambiguous module qualifier "
+        ++ renderModuleName qualifier ++ "; matches "
+        ++ intercalate ", " (map renderModuleName modules)
  where
   sameOccurrence candidate = nameOccurrence candidate == nameOccurrence source
   unqualified = filter sameOccurrence $ scopeUnqualifiedNames context
@@ -1046,17 +1073,19 @@ resolveScopeName context source = case nameModule source of
     names -> Left $ "ambiguous unqualified name " ++ renderCanonical source
       ++ "; matches " ++ intercalate ", " (map renderCanonical names)
   chooseAlias qualifier = case
-      [ name
-      | (written, admitted) <- scopeQualifiedNames context
-      , written == qualifier
-      , name <- admitted
-      , sameOccurrence name
-      ] of
+      qualifiedCandidates qualifier of
     [name] -> Right name
     [] -> Left $ "qualified name " ++ renderCanonical source
       ++ " is not in scope"
     names -> Left $ "ambiguous qualified name " ++ renderCanonical source
       ++ "; matches " ++ intercalate ", " (map renderCanonical names)
+  qualifiedCandidates qualifier =
+    [ name
+    | (written, admitted) <- scopeQualifiedNames context
+    , written == qualifier
+    , name <- admitted
+    , sameOccurrence name
+    ]
 
 forSelectedBackends :: ReplState -> (Backend -> IO ()) -> IO ()
 forSelectedBackends state action = case activeBackends state of

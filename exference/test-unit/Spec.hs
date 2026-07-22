@@ -139,6 +139,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , checkSourceEnvironment
   , environmentLoadErrorDiagnostics
   , environmentFromFiles
+  , environmentFromSources
   , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
@@ -166,6 +167,7 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSession
   , loadExferenceSessionFromFiles
   , loadExferenceSessionFromFilesWithPolicy
+  , loadExferenceSessionFromSources
   , loadExferenceSessionWithPolicy
   , parseExferenceRequest
   , parseExferenceRequestInScope
@@ -4658,6 +4660,55 @@ tests = testGroup "Exference"
               [ (secondName, Penalty 2.5)
               , (firstName, Penalty 1.5)
               ]
+      , testCase
+          "in-memory source loading retains paths, order, and ratings" $ do
+          let modulePath = "/virtual/SnapshotModule.hs"
+              ratingPath = "/virtual/SnapshotModule.ratings"
+              moduleSource = unlines
+                [ "module SnapshotModule where"
+                , "snapshotIdentity :: a -> a"
+                ]
+              ratingSource = "SnapshotModule.snapshotIdentity 4.25"
+          LoadReport result _ <- environmentFromSources
+            [(modulePath, moduleSource)] [(ratingPath, ratingSource)]
+          checked <- expectRight result
+          identityName <- expectRight
+            $ mkQualifiedName ["SnapshotModule"] "snapshotIdentity"
+          let matching = filter ((== identityName) . functionName)
+                $ sourceFunctions $ checkedSourceProjection checked
+          map functionPenalty matching @?= [Penalty 4.25]
+          ExferenceSessionLoadReport sessionResult _ <-
+            loadExferenceSessionFromSources
+              [(modulePath, moduleSource)] [(ratingPath, ratingSource)]
+          _ <- expectRight sessionResult
+          pure ()
+      , testCase "in-memory parse diagnostics retain path order" $ do
+          let modulePaths =
+                [ "/virtual/FirstBrokenSnapshot.hs"
+                , "/virtual/SecondBrokenSnapshot.hs"
+                ]
+          LoadReport result _ <- environmentFromSources
+            [ (path, "module BrokenSnapshot where\nbroken ::")
+            | path <- modulePaths
+            ] []
+          case result of
+            Left (ModuleParseErrors failures) ->
+              map diagnosticSource (NonEmpty.toList failures)
+                @?= map Just modulePaths
+            Left failure -> fail $ "unexpected source failure: " ++ show failure
+            Right _ -> fail "a malformed in-memory module was accepted"
+      , testCase "in-memory module parsing honors LANGUAGE pragmas" $ do
+          let modulePath = "/virtual/PackageImportSnapshot.hs"
+              moduleSource = unlines
+                [ "{-# LANGUAGE PackageImports #-}"
+                , "module PackageImportSnapshot where"
+                , "import \"base\" Data.Maybe"
+                , "snapshotIdentity :: a -> a"
+                ]
+          LoadReport result _ <- environmentFromSources
+            [(modulePath, moduleSource)] []
+          _ <- expectRight result
+          pure ()
       , testCase "explicit files accept no modules and order rating warnings" $
           do
             environmentDirectory <- getDataFileName "exference/environment"
@@ -5570,6 +5621,10 @@ tests = testGroup "Exference"
                 $ SharedName.mkModuleName "ScopedFirst"
               aliasModule <- expectRight
                 $ SharedName.mkModuleName "Alias"
+              reexportModule <- expectRight
+                $ SharedName.mkModuleName "Reexport"
+              valueOnlyName <- expectRight
+                $ SharedName.parseName "ValueOwner.Item"
               let scope current visible aliases = ExferenceQueryScope
                     { exferenceQueryCurrentModule = current
                     , exferenceQueryVisibleNames = visible
@@ -5626,6 +5681,40 @@ tests = testGroup "Exference"
                 "a name selected under a restricted qualifier"
                 firstName
                 (qualifiedScope [firstName])
+                "Alias.Item"
+              assertGoal
+                "a qualified re-export keeps its defining identity"
+                firstName
+                ExferenceQueryScope
+                  { exferenceQueryCurrentModule = Nothing
+                  , exferenceQueryVisibleNames = []
+                  , exferenceQueryModuleAliases = []
+                  , exferenceQueryQualifiedNames =
+                      [(reexportModule, [firstName])]
+                  }
+                "Reexport.Item"
+              assertGoal
+                "type lookup ignores a same-spelled admitted value"
+                firstName
+                ExferenceQueryScope
+                  { exferenceQueryCurrentModule = Nothing
+                  , exferenceQueryVisibleNames = []
+                  , exferenceQueryModuleAliases = []
+                  , exferenceQueryQualifiedNames =
+                      [(reexportModule, [firstName, valueOnlyName])]
+                  }
+                "Reexport.Item"
+              assertGoal
+                "an aliased re-export keeps its defining identity"
+                firstName
+                ExferenceQueryScope
+                  { exferenceQueryCurrentModule = Nothing
+                  , exferenceQueryVisibleNames = []
+                  , exferenceQueryModuleAliases =
+                      [(aliasModule, reexportModule)]
+                  , exferenceQueryQualifiedNames =
+                      [(aliasModule, [firstName])]
+                  }
                 "Alias.Item"
               assertRejected
                 "a name excluded from a restricted qualifier"

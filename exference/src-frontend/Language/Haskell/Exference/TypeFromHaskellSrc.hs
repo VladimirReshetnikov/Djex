@@ -505,21 +505,39 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
     knownCandidates = candidates allKnown
 
   resolveQualifiedAlias location writtenModule syntaxName raw =
-    case nub aliasTargets of
-      [] -> Right raw
-      [target]
-        | writtenModule `S.member` knownModules
-        , raw `elem` allKnown
-        , target /= writtenModule -> ambiguous [writtenModule, target]
-        | otherwise -> underScoped target
-      targets -> case
-          [ target
-          | target <- targets
-          , either (const False) (`elem` allKnown) $ underScoped target
-          ] of
-        [target] -> underScoped target
-        _ -> ambiguous targets
+    case qualifiedCandidates of
+      [candidate] -> Right candidate
+      _ : _ : _ -> Left $ "ambiguous qualified name " ++ show raw
+        ++ "; matches "
+        ++ intercalate ", " (map show qualifiedCandidates)
+      [] -> case nub aliasTargets of
+        [] -> Right raw
+        [target]
+          | writtenModule `S.member` knownModules
+          , raw `elem` allKnown
+          , target /= writtenModule -> ambiguous [writtenModule, target]
+          | otherwise -> underScoped target
+        targets -> case
+            [ target
+            | target <- targets
+            , either (const False) (`elem` allKnown) $ underScoped target
+            ] of
+          [target] -> underScoped target
+          _ -> ambiguous targets
    where
+    -- An exported entity keeps its defining canonical module. Looking only at
+    -- the import's module-level alias would turn a re-exported @B.T@ into the
+    -- unrelated external identity @A.T@ (or reject @X.T@ for @A as X@).
+    -- Prefer the exact admitted entity for this written qualifier/occurrence;
+    -- canonical qualifiers with no admitted match retain the documented
+    -- full-inventory escape behavior below.
+    qualifiedCandidates = case resolverQualifiedNames resolver of
+      Nothing -> []
+      Just admitted -> S.toAscList $ S.filter
+        (\candidate -> candidate `elem` allKnown
+          && T.qualifiedNameOccurrence candidate
+              == T.qualifiedNameOccurrence raw)
+        $ M.findWithDefault S.empty writtenModule admitted
     aliasTargets =
       [ target
       | (alias, target) <- resolverModuleAliases resolver

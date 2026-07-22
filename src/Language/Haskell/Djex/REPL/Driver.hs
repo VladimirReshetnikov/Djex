@@ -29,6 +29,7 @@ import System.Console.Haskeline.History (historyLines)
 
 import Language.Haskell.Djex.REPL.Command
   ( backendNames
+  , booleanSettingNames
   , commandNames
   , settingNames
   , showNames
@@ -58,14 +59,14 @@ runReplDriver historyPath initial prompt evaluate =
     ExitRepl final -> pure final
 
   step state = handleInterrupt interrupted $ withInterrupt $ do
+    -- Snapshot before reading the next line. On a terminal, Haskeline adds
+    -- that line to history inside 'getInputLine'; :history should describe
+    -- commands completed before itself, especially for ':history 1'.
+    history <- reverse . historyLines <$> getHistory
     input <- readLogicalInput $ prompt state
     case input of
       Nothing -> pure $ ExitRepl state
-      Just source -> do
-        -- Haskeline stores the newest entry first; user-facing history and
-        -- its line numbers follow the usual oldest-first REPL convention.
-        history <- reverse . historyLines <$> getHistory
-        liftIO $ evaluate state history source
+      Just source -> liftIO $ evaluate state history source
    where
     interrupted = do
       outputStrLn "Interrupted."
@@ -106,19 +107,11 @@ candidatesFor previous = case previous of
   [] -> commandNames
   [":backend"] -> backendNames
   [":set", "backend"] -> backendNames
-  [":set"] -> settingNames ++ map ('+' :) booleanSettings
-    ++ map ('-' :) booleanSettings
+  [":set"] -> settingNames ++ map ('+' :) booleanSettingNames
+    ++ map ('-' :) booleanSettingNames
   [":unset"] -> settingNames
   [":show"] -> showNames
   _ -> []
-
-booleanSettings :: [String]
-booleanSettings =
-  [ "allow-unused"
-  , "allow-constraints"
-  , "multi-constructor-patterns"
-  , "fix"
-  ]
 
 completingPath :: String -> Bool
 completingPath source = case words source of

@@ -15,7 +15,11 @@ module Language.Haskell.Djex.REPL
   ) where
 
 import Control.DeepSeq (force)
-import Control.Exception (evaluate)
+import Control.Exception
+  ( AsyncException (UserInterrupt)
+  , evaluate
+  , handleJust
+  )
 import Control.Monad (forM_, when)
 import Data.Char (isSpace, toLower)
 import Data.Foldable (toList)
@@ -28,9 +32,15 @@ import System.Directory
   , getCurrentDirectory
   , setCurrentDirectory
   )
-import System.Exit (ExitCode (ExitSuccess))
+import System.Exit (ExitCode (ExitFailure, ExitSuccess))
+import System.IO (IOMode (ReadMode), hGetContents, withFile)
 import System.IO.Error (tryIOError)
-import System.Process (callCommand)
+import System.Process
+  ( CreateProcess (delegate_ctlc)
+  , shell
+  , waitForProcess
+  , withCreateProcess
+  )
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
@@ -40,7 +50,6 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
   , loadExferenceSessionWithPolicy
-  , parseExferenceRequestWithCheckedTarget
   )
 import Language.Haskell.Djex.REPL.Command
 import Language.Haskell.Djex.REPL.Driver
@@ -123,11 +132,7 @@ runRepl options = case standardDjinnSession of
                 , djinnRuntimeSession = djinnSession
                 , exferenceRuntime = exference
                 , resultTarget = target
-                , presentation = PresentationOptions
-                    { presentationSelection = SelectFirst
-                    , presentationRenderMode = RenderDefinition
-                    , presentationQualification = FullyQualified
-                    }
+                , presentation = defaultInteractivePresentationOptions
                 , djinnSearchOptions = defaultQueryOptions
                 , exferenceSearchOptions = defaultExferenceOptions
                 , promptTemplate = "djex[%b]> "
@@ -147,12 +152,10 @@ runRepl options = case standardDjinnSession of
           pure ExitSuccess
 
 defaultTarget :: Either Diagnostic DefinitionName
-defaultTarget = do
-  name <- either (Left . targetFailure) Right $ parseName "djexResult"
-  either (Left . targetFailure) Right $ mkDefinitionName name
- where
-  targetFailure failure = shownErrorDiagnostic
+defaultTarget = case parseResultTarget defaultResultTargetSpelling of
+  Left failure -> Left $ contextualDiagnostic Error
     "DJEX_REPL_INTERNAL" "invalid built-in REPL result name" failure
+  Right target -> Right target
 
 renderPrompt :: ReplState -> String
 renderPrompt state = replace "%b" (replBackendName $ activeBackends state)
@@ -173,7 +176,8 @@ executeSource
   -> String
   -> IO (ReplStep ReplState)
 executeSource sourceName state history source = case parseReplInput source of
-  Left failure -> replFailure "DJEX_REPL_COMMAND" "invalid REPL command" failure
+  Left failure -> replFailure "DJEX_REPL_COMMAND" "invalid REPL command"
+    (sourceName ++ ": " ++ failure)
     >> pure (ContinueRepl state)
   Right ReplNoInput -> pure $ ContinueRepl state
   Right (ReplQuery target typeSource) ->
@@ -229,13 +233,8 @@ runCommand sourceName history command state = case command of
         "run a type query before using :" >> continue state
     Just (selected, typeSource) ->
       runResolvedQuery sourceName selected typeSource state
-  RunScript path -> runScript path state
-  RunShell shellCommand -> do
-    outcome <- tryIOError $ callCommand shellCommand
-    case outcome of
-      Left failure -> ioFailure "shell command failed" shellCommand failure
-      Right () -> pure ()
-    continue state
+  RunScript path -> runScript path history state
+  RunShell shellCommand -> runShellCommand shellCommand >> continue state
   SetOption source -> setOption source state >>= continue
   ShowState subject -> showState subject state >> continue state
   UnsetOption source -> unsetOption source state >>= continue
@@ -279,23 +278,14 @@ runResolvedQuery sourceName selected typeSource state = do
       ExferenceBackend -> runExferenceInteractive sourceName typeSource state
 
 runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()
-runDjinnInteractive sourceName typeSource state = case
-    parseDjinnRequestWithCheckedTarget
+runDjinnInteractive sourceName typeSource state = ignoreExit
+  $ executeDjinnCommand
+      (presentation state)
       (djinnRuntimeSession state)
-      queryOptions
+      (djinnSearchOptions state)
       (resultTarget state)
       sourceName
-      typeSource of
-  Left failure -> emitDiagnostic failure
-  Right request -> case runDjinnQuery (djinnRuntimeSession state) request of
-    Left failure -> emitDiagnostic failure
-    Right result -> ignoreExit $ presentDjinn (presentation state) result
- where
-  queryOptions = (djinnSearchOptions state)
-    { optionAlternatives = presentationSelection (presentation state)
-        /= SelectFirst
-    , optionSorted = False
-    }
+      typeSource
 
 runExferenceInteractive :: FilePath -> String -> ReplState -> IO ()
 runExferenceInteractive sourceName typeSource state = case
@@ -304,19 +294,38 @@ runExferenceInteractive sourceName typeSource state = case
     "Exference has no loaded environment"
     $ "use :load DIR; last attempted path: "
       ++ exferenceRuntimePath (exferenceRuntime state)
-  Just session -> case parseExferenceRequestWithCheckedTarget
-      session
-      (exferenceSearchOptions state)
-      (resultTarget state)
-      sourceName
-      typeSource of
-    Left failure -> emitDiagnostic failure
-    Right request -> case runExferenceQuery session request of
-      Left failure -> emitDiagnostic failure
-      Right results -> ignoreExit $ presentExference (presentation state) results
+  Just session -> ignoreExit $ executeExferenceCommand
+    (presentation state)
+    session
+    (exferenceSearchOptions state)
+    (resultTarget state)
+    sourceName
+    typeSource
 
 ignoreExit :: IO ExitCode -> IO ()
 ignoreExit action = action >> pure ()
+
+data ShellOutcome
+  = ShellCompleted ExitCode
+  | ShellInterrupted
+
+runShellCommand :: String -> IO ()
+runShellCommand command = do
+  outcome <- tryIOError $ handleJust onlyUserInterrupt
+    (const $ pure ShellInterrupted)
+    $ withCreateProcess ((shell command) {delegate_ctlc = True})
+      $ \_ _ _ process ->
+        ShellCompleted <$> waitForProcess process
+  case outcome of
+    Left failure -> ioFailure "cannot run shell command" command failure
+    Right ShellInterrupted -> putStrLn "Interrupted."
+    Right (ShellCompleted ExitSuccess) -> pure ()
+    Right (ShellCompleted (ExitFailure status)) -> replFailure
+      "DJEX_REPL_SHELL" "shell command failed"
+      $ command ++ ": exit status " ++ show status
+ where
+  onlyUserInterrupt UserInterrupt = Just ()
+  onlyUserInterrupt _ = Nothing
 
 loadExference :: FilePath -> Bool -> IO LoadAttempt
 loadExference requestedPath allowFix = do
@@ -386,180 +395,190 @@ setOption source state
   | null $ trim source = showSettings state >> pure state
   | otherwise = case settingInvocation source of
       Left failure -> settingFailure failure >> pure state
-      Right (name, value) -> applySetting name value state
+      Right (setting, value) -> applySetting setting value state
 
-applySetting :: String -> Maybe String -> ReplState -> IO ReplState
-applySetting name value state = case name of
-  "backend" -> withValue "backend" value $ \source ->
+applySetting :: ReplSetting -> Maybe String -> ReplState -> IO ReplState
+applySetting setting value state = case setting of
+  BackendSetting -> withValue setting $ \source ->
     case parseReplBackend source of
       Left failure -> reject failure
       Right selected -> pure state {activeBackends = selected}
-  "target" -> withValue "target" value $ \source -> case checkedTarget source of
+  TargetSetting -> withValue setting $ \source -> case checkedTarget source of
     Left failure -> reject failure
     Right target -> pure state {resultTarget = target}
-  "select" -> withValue "select" value $ \source -> case parseSelection source of
-    Left failure -> reject failure
-    Right selected -> pure state
-      { presentation = (presentation state)
-          { presentationSelection = selected }
-      }
-  "render" -> withValue "render" value $ \source -> case parseRenderMode source of
-    Left failure -> reject failure
-    Right mode -> pure state
-      { presentation = (presentation state)
-          { presentationRenderMode = mode }
-      }
-  "qualification" -> withValue "qualification" value $ \source ->
-    case parseQualification source of
+  SelectionSetting -> withValue setting $ \source ->
+    case parseSelectionMode (replSettingName setting) source of
+      Left failure -> reject failure
+      Right selected -> pure state
+        { presentation = (presentation state)
+            { presentationSelection = selected }
+        }
+  RenderingSetting -> withValue setting $ \source ->
+    case parseRenderMode (replSettingName setting) source of
+      Left failure -> reject failure
+      Right mode -> pure state
+        { presentation = (presentation state)
+            { presentationRenderMode = mode }
+        }
+  QualificationSetting -> withValue setting $ \source ->
+    case parseQualification (replSettingName setting) source of
       Left failure -> reject failure
       Right qualification -> pure state
         { presentation = (presentation state)
             { presentationQualification = qualification }
         }
-  "prompt" -> withValue "prompt" value $ \source -> pure state
-    { promptTemplate = decodeString source }
-  "candidate-limit" -> withValue "candidate-limit" value $ \source ->
-    case positiveInt "candidate-limit" source of
+  PromptSetting -> withValue setting $ \source -> pure state
+    {promptTemplate = decodeString source}
+  CandidateLimitSetting -> withValue setting $ \source ->
+    case positiveInt (replSettingName setting) source of
       Left failure -> reject failure
       Right limit -> pure state
         { djinnSearchOptions = (djinnSearchOptions state)
             { optionCutoff = limit }
         }
-  "choice-budget" -> withValue "choice-budget" value $ \source ->
-    case nonNegativeInteger "choice-budget" source of
+  ChoiceBudgetSetting -> withValue setting $ \source ->
+    case nonNegativeInteger (replSettingName setting) source of
       Left failure -> reject failure
       Right budget -> pure state
         { djinnSearchOptions = (djinnSearchOptions state)
             { optionBudget = if budget == 0 then Nothing else Just budget }
         }
-  "allow-unused" -> setExferenceBool name value state $ \enabled options ->
-    options {exferenceAllowUnused = enabled}
-  "allow-constraints" -> setExferenceBool name value state $ \enabled options ->
-    options {exferenceAllowResidualConstraints = enabled}
-  "multi-constructor-patterns" ->
-    setExferenceBool name value state $ \enabled options ->
-      options {exferenceMultiConstructorPatterns = enabled}
-  "constraint-deferral-steps" -> withValue name value $ \source ->
-    case nonNegativeInt name source of
+  AllowUnusedSetting -> setExferenceBool setting value state
+    $ \enabled options -> options {exferenceAllowUnused = enabled}
+  AllowConstraintsSetting -> setExferenceBool setting value state
+    $ \enabled options -> options
+        {exferenceAllowResidualConstraints = enabled}
+  MultiConstructorPatternsSetting -> setExferenceBool setting value state
+    $ \enabled options -> options
+        {exferenceMultiConstructorPatterns = enabled}
+  ConstraintDeferralStepsSetting -> withValue setting $ \source ->
+    case nonNegativeInt (replSettingName setting) source of
       Left failure -> reject failure
       Right count -> pure state
         { exferenceSearchOptions = (exferenceSearchOptions state)
             { exferenceConstraintDeferralSteps = count }
         }
-  "max-steps" -> withValue name value $ \source ->
-    case positiveInt name source of
+  MaximumStepsSetting -> withValue setting $ \source ->
+    case positiveInt (replSettingName setting) source of
       Left failure -> reject failure
       Right count -> pure state
         { exferenceSearchOptions = (exferenceSearchOptions state)
             { exferenceMaximumSteps = count }
         }
-  "max-queue" -> withValue name value $ \source ->
-    case boundedNonNegativeInt name source of
+  MaximumQueueSetting -> withValue setting $ \source ->
+    case boundedNonNegativeInt (replSettingName setting) source of
       Left failure -> reject failure
       Right count -> pure state
         { exferenceSearchOptions = (exferenceSearchOptions state)
             { exferenceMaximumQueueSize = count }
         }
-  "max-depth" -> withValue name value $ \source ->
-    case boundedPenalty name source of
+  MaximumDepthSetting -> withValue setting $ \source ->
+    case boundedPenalty (replSettingName setting) source of
       Left failure -> reject failure
       Right depth -> pure state
         { exferenceSearchOptions = (exferenceSearchOptions state)
             { exferenceMaximumDepth = depth }
         }
-  "fix" -> case parseBoolean name value of
+  FixSetting -> case parseBoolean (replSettingName setting) value of
     Left failure -> reject failure
     Right allowFix
       | allowFix == exferenceRuntimeAllowsFix (exferenceRuntime state) ->
           pure state
       | otherwise -> replaceExferenceEnvironment
           (exferenceRuntimePath $ exferenceRuntime state) allowFix state
-  _ -> reject $ "unknown setting " ++ show name
  where
   reject failure = settingFailure failure >> pure state
-  withValue setting supplied action = case supplied of
-    Nothing -> reject $ "setting " ++ setting ++ " requires a value"
+  withValue requiredSetting action = case value of
+    Nothing -> reject $ "setting " ++ replSettingName requiredSetting
+      ++ " requires a value"
     Just suppliedValue -> action suppliedValue
 
 setExferenceBool
-  :: String
+  :: ReplSetting
   -> Maybe String
   -> ReplState
   -> (Bool -> ExferenceOptions -> ExferenceOptions)
   -> IO ReplState
-setExferenceBool name value state update = case parseBoolean name value of
+setExferenceBool setting value state update = case
+    parseBoolean (replSettingName setting) value of
   Left failure -> settingFailure failure >> pure state
   Right enabled -> pure state
     { exferenceSearchOptions = update enabled $ exferenceSearchOptions state }
 
 unsetOption :: String -> ReplState -> IO ReplState
 unsetOption source state = case words $ map toLower $ trim source of
-  [name] -> reset name
+  [rawName] -> case parseReplSetting rawName of
+    Left failure -> settingFailure failure >> pure state
+    Right setting -> reset setting
   [] -> settingFailure "expected a setting name" >> pure state
   _ -> settingFailure "expected exactly one setting name" >> pure state
  where
-  reset name = case name of
-    "backend" -> pure state
+  reset setting = case setting of
+    BackendSetting -> pure state
       {activeBackends = replInitialBackend defaultReplOptions}
-    "target" -> case defaultTarget of
+    TargetSetting -> case defaultTarget of
       Left failure -> emitDiagnostic failure >> pure state
       Right target -> pure state {resultTarget = target}
-    "select" -> pure state
+    SelectionSetting -> pure state
       { presentation = (presentation state)
-          { presentationSelection = SelectFirst }
+          { presentationSelection = presentationSelection
+              defaultInteractivePresentationOptions }
       }
-    "render" -> pure state
+    RenderingSetting -> pure state
       { presentation = (presentation state)
-          { presentationRenderMode = RenderDefinition }
+          { presentationRenderMode = presentationRenderMode
+              defaultInteractivePresentationOptions }
       }
-    "qualification" -> pure state
+    QualificationSetting -> pure state
       { presentation = (presentation state)
-          { presentationQualification = FullyQualified }
+          { presentationQualification = presentationQualification
+              defaultInteractivePresentationOptions }
       }
-    "prompt" -> pure state {promptTemplate = "djex[%b]> "}
-    "candidate-limit" -> pure state
+    PromptSetting -> pure state {promptTemplate = "djex[%b]> "}
+    CandidateLimitSetting -> pure state
       { djinnSearchOptions = (djinnSearchOptions state)
           { optionCutoff = optionCutoff defaultQueryOptions }
       }
-    "choice-budget" -> pure state
+    ChoiceBudgetSetting -> pure state
       { djinnSearchOptions = (djinnSearchOptions state)
           { optionBudget = optionBudget defaultQueryOptions }
       }
-    "allow-unused" -> resetExference $ \defaults options -> options
+    AllowUnusedSetting -> resetExference $ \defaults options -> options
       {exferenceAllowUnused = exferenceAllowUnused defaults}
-    "allow-constraints" -> resetExference $ \defaults options -> options
+    AllowConstraintsSetting -> resetExference $ \defaults options -> options
       { exferenceAllowResidualConstraints =
           exferenceAllowResidualConstraints defaults }
-    "multi-constructor-patterns" -> resetExference $ \defaults options -> options
+    MultiConstructorPatternsSetting -> resetExference
+      $ \defaults options -> options
       { exferenceMultiConstructorPatterns =
           exferenceMultiConstructorPatterns defaults }
-    "constraint-deferral-steps" -> resetExference $ \defaults options -> options
+    ConstraintDeferralStepsSetting -> resetExference
+      $ \defaults options -> options
       { exferenceConstraintDeferralSteps =
           exferenceConstraintDeferralSteps defaults }
-    "max-steps" -> resetExference $ \defaults options -> options
+    MaximumStepsSetting -> resetExference $ \defaults options -> options
       {exferenceMaximumSteps = exferenceMaximumSteps defaults}
-    "max-queue" -> resetExference $ \defaults options -> options
+    MaximumQueueSetting -> resetExference $ \defaults options -> options
       {exferenceMaximumQueueSize = exferenceMaximumQueueSize defaults}
-    "max-depth" -> resetExference $ \defaults options -> options
+    MaximumDepthSetting -> resetExference $ \defaults options -> options
       {exferenceMaximumDepth = exferenceMaximumDepth defaults}
-    "fix"
+    FixSetting
       | exferenceRuntimeAllowsFix (exferenceRuntime state) ->
           replaceExferenceEnvironment
             (exferenceRuntimePath $ exferenceRuntime state) False state
       | otherwise -> pure state
-    _ -> settingFailure ("unknown setting " ++ show name) >> pure state
 
   resetExference update = pure state
     { exferenceSearchOptions = update defaultExferenceOptions
         $ exferenceSearchOptions state }
 
-settingInvocation :: String -> Either String (String, Maybe String)
+settingInvocation :: String -> Either String (ReplSetting, Maybe String)
 settingInvocation source = case trim source of
   sign : rest
     | sign `elem` "+-"
     , not (null rest)
     , all (not . isSpace) rest ->
-        Right (map toLower rest, Just $ if sign == '+' then "on" else "off")
+        checked rest $ Just $ if sign == '+' then "on" else "off"
   value -> case break (== '=') value of
     (name, '=' : settingValue) -> checked name $ Just $ trim settingValue
     _ -> case words value of
@@ -568,7 +587,9 @@ settingInvocation source = case trim source of
  where
   checked rawName value
     | null normalized = Left "expected a setting name"
-    | otherwise = Right (normalized, value)
+    | otherwise = do
+        setting <- parseReplSetting normalized
+        Right (setting, value)
    where
     normalized = map toLower $ trim rawName
 
@@ -588,60 +609,7 @@ parseBoolean name source = case fmap (map toLower . trim) source of
   _ -> Left $ "setting " ++ name ++ " must be on or off"
 
 checkedTarget :: String -> Either String DefinitionName
-checkedTarget source = do
-  name <- either (Left . renderNameError) Right $ parseName $ trim source
-  either (Left . show) Right $ mkDefinitionName name
-
-parseSelection :: String -> Either String SelectionMode
-parseSelection source = case map toLower $ trim source of
-  "first" -> Right SelectFirst
-  "best" -> Right SelectBest
-  "all" -> Right SelectAll
-  _ -> Left "select must be first, best, or all"
-
-parseRenderMode :: String -> Either String RenderMode
-parseRenderMode source = case map toLower $ trim source of
-  "definition" -> Right RenderDefinition
-  "expression" -> Right RenderExpression
-  _ -> Left "render must be definition or expression"
-
-parseQualification :: String -> Either String Qualification
-parseQualification source = case map toLower $ trim source of
-  "none" -> Right Unqualified
-  "identifiers" -> Right QualifyIdentifiers
-  "full" -> Right FullyQualified
-  _ -> Left "qualification must be none, identifiers, or full"
-
-positiveInt :: String -> String -> Either String Int
-positiveInt name = checkedInt 1 $ name ++ " must be a positive integer"
-
-nonNegativeInt :: String -> String -> Either String Int
-nonNegativeInt name = checkedInt 0 $ name ++ " must be a non-negative integer"
-
-checkedInt :: Integer -> String -> String -> Either String Int
-checkedInt lowerBound failure source = case readMaybe source :: Maybe Integer of
-  Just value
-    | value >= lowerBound
-    , value <= toInteger (maxBound :: Int) -> Right $ fromInteger value
-  _ -> Left failure
-
-nonNegativeInteger :: String -> String -> Either String Integer
-nonNegativeInteger name source = case readMaybe source of
-  Just value | value >= 0 -> Right value
-  _ -> Left $ name ++ " must be a non-negative integer"
-
-boundedNonNegativeInt :: String -> String -> Either String (Maybe Int)
-boundedNonNegativeInt _ source | map toLower (trim source) == "unbounded" =
-  Right Nothing
-boundedNonNegativeInt name source = Just <$> nonNegativeInt name source
-
-boundedPenalty :: String -> String -> Either String (Maybe Penalty)
-boundedPenalty _ source | map toLower (trim source) == "unbounded" = Right Nothing
-boundedPenalty name source = case readMaybe source of
-  Just value
-    | value >= 0
-    , not $ isNaN value || isInfinite value -> Right $ Just $ Penalty value
-  _ -> Left $ name ++ " must be a finite non-negative number or unbounded"
+checkedTarget = parseResultTarget . trim
 
 showState :: Maybe String -> ReplState -> IO ()
 showState Nothing = showSettings
@@ -657,57 +625,46 @@ showState (Just rawSubject) = case words $ map toLower $ trim rawSubject of
 
 showSettings :: ReplState -> IO ()
 showSettings state = putStr $ unlines
-  [ "backend = " ++ replBackendName (activeBackends state)
-  , "target = " ++ definitionSpelling (resultTarget state)
-  , "select = " ++ selectionName (presentationSelection $ presentation state)
-  , "render = " ++ renderModeName
-      (presentationRenderMode $ presentation state)
-  , "qualification = " ++ qualificationName
-      (presentationQualification $ presentation state)
-  , "prompt = " ++ show (promptTemplate state)
-  , "candidate-limit = " ++ show (optionCutoff $ djinnSearchOptions state)
-  , "choice-budget = " ++ maybe "0" show
-      (optionBudget $ djinnSearchOptions state)
-  , "allow-unused = " ++ booleanName
-      (exferenceAllowUnused $ exferenceSearchOptions state)
-  , "allow-constraints = " ++ booleanName
-      (exferenceAllowResidualConstraints $ exferenceSearchOptions state)
-  , "constraint-deferral-steps = " ++ show
-      (exferenceConstraintDeferralSteps $ exferenceSearchOptions state)
-  , "multi-constructor-patterns = " ++ booleanName
-      (exferenceMultiConstructorPatterns $ exferenceSearchOptions state)
-  , "max-steps = " ++ show
-      (exferenceMaximumSteps $ exferenceSearchOptions state)
-  , "max-queue = " ++ renderBounded
-      (exferenceMaximumQueueSize $ exferenceSearchOptions state)
-  , "max-depth = " ++ renderBounded
-      (exferenceMaximumDepth $ exferenceSearchOptions state)
-  , "fix = " ++ booleanName
-      (exferenceRuntimeAllowsFix $ exferenceRuntime state)
-  , "environment = " ++ exferenceRuntimePath (exferenceRuntime state)
-  ]
+  $ map render [minBound .. maxBound]
+  ++ ["environment = " ++ exferenceRuntimePath (exferenceRuntime state)]
+ where
+  render setting = replSettingName setting ++ " = "
+    ++ renderSettingValue state setting
 
-selectionName :: SelectionMode -> String
-selectionName SelectFirst = "first"
-selectionName SelectBest = "best"
-selectionName (SelectBestLookahead count) = "best-lookahead=" ++ show count
-selectionName SelectAll = "all"
-
-renderModeName :: RenderMode -> String
-renderModeName RenderDefinition = "definition"
-renderModeName RenderExpression = "expression"
-
-qualificationName :: Qualification -> String
-qualificationName Unqualified = "none"
-qualificationName QualifyIdentifiers = "identifiers"
-qualificationName FullyQualified = "full"
+renderSettingValue :: ReplState -> ReplSetting -> String
+renderSettingValue state setting = case setting of
+  BackendSetting -> replBackendName $ activeBackends state
+  TargetSetting -> definitionSpelling $ resultTarget state
+  SelectionSetting -> selectionModeName
+    $ presentationSelection $ presentation state
+  RenderingSetting -> renderModeName
+    $ presentationRenderMode $ presentation state
+  QualificationSetting -> qualificationName
+    $ presentationQualification $ presentation state
+  PromptSetting -> show $ promptTemplate state
+  CandidateLimitSetting -> show $ optionCutoff $ djinnSearchOptions state
+  ChoiceBudgetSetting -> maybe "0" show
+    $ optionBudget $ djinnSearchOptions state
+  AllowUnusedSetting -> booleanName
+    $ exferenceAllowUnused $ exferenceSearchOptions state
+  AllowConstraintsSetting -> booleanName
+    $ exferenceAllowResidualConstraints $ exferenceSearchOptions state
+  ConstraintDeferralStepsSetting -> show
+    $ exferenceConstraintDeferralSteps $ exferenceSearchOptions state
+  MultiConstructorPatternsSetting -> booleanName
+    $ exferenceMultiConstructorPatterns $ exferenceSearchOptions state
+  MaximumStepsSetting -> show
+    $ exferenceMaximumSteps $ exferenceSearchOptions state
+  MaximumQueueSetting -> renderBounded
+    $ exferenceMaximumQueueSize $ exferenceSearchOptions state
+  MaximumDepthSetting -> renderBounded
+    $ exferenceMaximumDepth $ exferenceSearchOptions state
+  FixSetting -> booleanName
+    $ exferenceRuntimeAllowsFix $ exferenceRuntime state
 
 booleanName :: Bool -> String
 booleanName True = "on"
 booleanName False = "off"
-
-renderBounded :: Show value => Maybe value -> String
-renderBounded = maybe "unbounded" show
 
 showBackends :: ReplState -> IO ()
 showBackends state = forM_ availableBackends $ \information ->
@@ -742,10 +699,12 @@ showOmissions state = case exferenceRuntimeSession $ exferenceRuntime state of
   Nothing -> putStrLn "Exference is unavailable."
   Just session -> case exferenceSessionOmissions session of
     [] -> putStrLn "No Exference capabilities were omitted."
-    omissions -> forM_ omissions $ \omission -> putStrLn
-      $ renderCanonical (omittedName omission) ++ ": "
-        ++ show (omittedCapability omission) ++ " ("
-        ++ show (omittedReason omission) ++ ")"
+    omissions -> mapM_ (putStrLn . renderOmission) omissions
+
+renderOmission :: ExferenceOmission -> String
+renderOmission omission = renderCanonical (omittedName omission) ++ ": "
+  ++ show (omittedCapability omission) ++ " ("
+  ++ show (omittedReason omission) ++ ")"
 
 showLoadDiagnostics :: ReplState -> IO ()
 showLoadDiagnostics state = case
@@ -761,8 +720,12 @@ browseState state = forSelectedBackends state $ \selectedBackend ->
     ExferenceBackend -> case exferenceRuntimeSession
         $ exferenceRuntime state of
       Nothing -> putStrLn "Exference is unavailable."
-      Just session -> browse "Exference" ExferenceType.defaultVariableName
-        $ exferenceSessionEnvironment session
+      Just session -> do
+        browse "Exference loaded declarations"
+          ExferenceType.defaultVariableName
+          $ exferenceSessionEnvironment session
+        when (not $ null $ exferenceSessionOmissions session) $ putStrLn
+          "-- Some loaded capabilities are not searchable; use :show omissions."
 
 showInfo :: ReplState -> String -> IO ()
 showInfo state source = case parseName $ trim source of
@@ -774,9 +737,16 @@ showInfo state source = case parseName $ trim source of
       ExferenceBackend -> case exferenceRuntimeSession
           $ exferenceRuntime state of
         Nothing -> putStrLn "Exference is unavailable."
-        Just session -> info
-          "Exference" ExferenceType.defaultVariableName name
-          $ exferenceSessionEnvironment session
+        Just session -> do
+          let environment = exferenceSessionEnvironment session
+              matchingNames = name : map declarationSubjectName
+                (matchingDeclarations name environment)
+          info "Exference loaded declarations"
+            ExferenceType.defaultVariableName name
+            environment
+          mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
+            $ filter ((`elem` matchingNames) . omittedName)
+            $ exferenceSessionOmissions session
 
 forSelectedBackends :: ReplState -> (Backend -> IO ()) -> IO ()
 forSelectedBackends state action = case activeBackends state of
@@ -803,11 +773,17 @@ info
   -> IO ()
 info label variableName name environment = do
   putStrLn $ "-- " ++ label
-  case filter (declarationDefines name)
-      $ environmentDeclarations environment of
+  case matchingDeclarations name environment of
     [] -> putStrLn $ "No declaration for " ++ renderCanonical name
     declarations -> mapM_ (putStrLn . renderDeclaration variableName)
       declarations
+
+matchingDeclarations
+  :: Name
+  -> Environment variable kind annotation
+  -> [Declaration variable kind annotation]
+matchingDeclarations name = filter (declarationDefines name)
+  . environmentDeclarations
 
 -- Constructors and class methods are usable search names even though the
 -- neutral environment indexes them beneath their owning declaration.
@@ -896,8 +872,8 @@ showHistory countSource history = case traverse parseCount countSource of
 takeLast :: Int -> [value] -> [value]
 takeLast count = reverse . take count . reverse
 
-runScript :: FilePath -> ReplState -> IO (ReplStep ReplState)
-runScript path state = do
+runScript :: FilePath -> [String] -> ReplState -> IO (ReplStep ReplState)
+runScript path history state = do
   resolved <- tryIOError $ canonicalizePath path
   case resolved of
     Left failure -> ioFailure "cannot resolve script" path failure
@@ -917,42 +893,51 @@ runScript path state = do
                   "invalid REPL script" (canonical ++ ": " ++ failure)
                 >> pure (ContinueRepl state)
               Right inputs -> runInputs canonical
-                state {scriptStack = canonical : scriptStack state} inputs
+                history state {scriptStack = canonical : scriptStack state} inputs
 
 runInputs
   :: FilePath
-  -> ReplState
   -> [String]
+  -> ReplState
+  -> [(Int, String)]
   -> IO (ReplStep ReplState)
-runInputs _ state [] = pure $ ContinueRepl state
+runInputs _ _ state [] = pure $ ContinueRepl state
   {scriptStack = drop 1 $ scriptStack state}
-runInputs sourceName state (source : remaining) = do
-  outcome <- executeSource sourceName state [] source
+runInputs sourceName history state ((lineNumber, source) : remaining) = do
+  outcome <- executeSource (scriptSourceName sourceName lineNumber)
+    state history source
   case outcome of
     ExitRepl final -> pure $ ExitRepl final
       {scriptStack = drop 1 $ scriptStack final}
-    ContinueRepl next -> runInputs sourceName next remaining
+    ContinueRepl next -> runInputs sourceName history next remaining
 
-scriptInputs :: [String] -> Either String [String]
-scriptInputs = go []
+scriptSourceName :: FilePath -> Int -> FilePath
+scriptSourceName path lineNumber = path ++ " (line " ++ show lineNumber ++ ")"
+
+scriptInputs :: [String] -> Either String [(Int, String)]
+scriptInputs = go 1 []
  where
-  go result [] = Right $ reverse result
-  go result (line : remaining)
-    | trimmed == ":{" = collect result [] remaining
-    | trimmed == ":}" = Left "unexpected :}"
-    | otherwise = go (line : result) remaining
+  go _ result [] = Right $ reverse result
+  go lineNumber result (line : remaining)
+    | trimmed == ":{" = collect lineNumber (lineNumber + 1)
+        result [] remaining
+    | trimmed == ":}" = Left $ "line " ++ show lineNumber
+        ++ ": unexpected :}"
+    | otherwise = go (lineNumber + 1) ((lineNumber, line) : result) remaining
    where
     trimmed = trim line
 
-  collect _ _ [] = Left "unterminated multiline input (expected :})"
-  collect result body (line : remaining)
-    | trim line == ":}" = go (unlines (reverse body) : result) remaining
-    | otherwise = collect result (line : body) remaining
+  collect startLine _ _ _ [] = Left $ "line " ++ show startLine
+    ++ ": unterminated multiline input (expected :})"
+  collect startLine lineNumber result body (line : remaining)
+    | trim line == ":}" = go (lineNumber + 1)
+        ((startLine, unlines $ reverse body) : result) remaining
+    | otherwise = collect startLine (lineNumber + 1)
+        result (line : body) remaining
 
 strictReadFile :: FilePath -> IO (Either IOError String)
-strictReadFile path = tryIOError $ do
-  source <- readFile path
-  evaluate $ force source
+strictReadFile path = tryIOError $ withFile path ReadMode $ \handle ->
+  hGetContents handle >>= evaluate . force
 
 resolveOptionalPath
   :: Maybe FilePath

@@ -10,11 +10,15 @@ module Language.Haskell.Djex.REPL.Command
   , ReplQueryTarget (..)
   , ReplInput (..)
   , ReplCommand (..)
+  , ReplSetting (..)
+  , replSettingName
+  , parseReplSetting
   , parseReplInput
   , parseReplBackend
   , commandNames
   , backendNames
   , settingNames
+  , booleanSettingNames
   , showNames
   , shortHelp
   , commandHelp
@@ -69,6 +73,53 @@ data ReplCommand
   | UnsetOption String
   | Version
   deriving (Eq, Show)
+
+-- | Every mutable REPL setting, in stable display and completion order.
+data ReplSetting
+  = BackendSetting
+  | TargetSetting
+  | SelectionSetting
+  | RenderingSetting
+  | QualificationSetting
+  | PromptSetting
+  | CandidateLimitSetting
+  | ChoiceBudgetSetting
+  | AllowUnusedSetting
+  | AllowConstraintsSetting
+  | ConstraintDeferralStepsSetting
+  | MultiConstructorPatternsSetting
+  | MaximumStepsSetting
+  | MaximumQueueSetting
+  | MaximumDepthSetting
+  | FixSetting
+  deriving (Bounded, Enum, Eq, Show)
+
+replSettingName :: ReplSetting -> String
+replSettingName setting = case setting of
+  BackendSetting -> "backend"
+  TargetSetting -> "target"
+  SelectionSetting -> "select"
+  RenderingSetting -> "render"
+  QualificationSetting -> "qualification"
+  PromptSetting -> "prompt"
+  CandidateLimitSetting -> "candidate-limit"
+  ChoiceBudgetSetting -> "choice-budget"
+  AllowUnusedSetting -> "allow-unused"
+  AllowConstraintsSetting -> "allow-constraints"
+  ConstraintDeferralStepsSetting -> "constraint-deferral-steps"
+  MultiConstructorPatternsSetting -> "multi-constructor-patterns"
+  MaximumStepsSetting -> "max-steps"
+  MaximumQueueSetting -> "max-queue"
+  MaximumDepthSetting -> "max-depth"
+  FixSetting -> "fix"
+
+parseReplSetting :: String -> Either String ReplSetting
+parseReplSetting source = case filter ((== normalized) . replSettingName)
+    [minBound .. maxBound] of
+  [setting] -> Right setting
+  _ -> Left $ "unknown setting " ++ show source
+ where
+  normalized = map toLower $ trim source
 
 data CommandDescriptor = CommandDescriptor
   { descriptorName :: String
@@ -204,23 +255,14 @@ backendNames :: [String]
 backendNames = ["djinn", "exference", "both"]
 
 settingNames :: [String]
-settingNames =
-  [ "backend"
-  , "target"
-  , "select"
-  , "render"
-  , "qualification"
-  , "prompt"
-  , "candidate-limit"
-  , "choice-budget"
-  , "allow-unused"
-  , "allow-constraints"
-  , "constraint-deferral-steps"
-  , "multi-constructor-patterns"
-  , "max-steps"
-  , "max-queue"
-  , "max-depth"
-  , "fix"
+settingNames = map replSettingName [minBound .. maxBound]
+
+booleanSettingNames :: [String]
+booleanSettingNames = map replSettingName
+  [ AllowUnusedSetting
+  , AllowConstraintsSetting
+  , MultiConstructorPatternsSetting
+  , FixSetting
   ]
 
 showNames :: [String]

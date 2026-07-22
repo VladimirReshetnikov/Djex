@@ -1,12 +1,31 @@
--- | Private presentation boundary shared by the one-shot command and REPL.
+-- | Private command policy shared by the one-shot command and REPL.
 --
--- Search sessions and request parsing remain frontend concerns. This module
--- owns the policy-neutral act of selecting, rendering, and reporting a checked
--- result so interactive and one-shot invocations cannot drift in output,
--- residual-constraint handling, or completion diagnostics.
+-- This module owns common option-value parsing plus checked query execution,
+-- selection, rendering, and reporting. Environment loading and exit policy
+-- remain frontend concerns because interactive replacement is transactional
+-- while one-shot loading is terminal.
 module Language.Haskell.Djex.Command
   ( RenderMode (..)
   , PresentationOptions (..)
+  , defaultOneShotPresentationOptions
+  , defaultInteractivePresentationOptions
+  , defaultResultTargetSpelling
+  , parseResultTarget
+  , parseSelectionMode
+  , parseRenderMode
+  , parseQualification
+  , positiveInt
+  , nonNegativeInt
+  , nonNegativeInteger
+  , boundedNonNegativeInt
+  , boundedPenalty
+  , selectionModeName
+  , renderModeName
+  , qualificationName
+  , renderBounded
+  , prepareDjinnQueryOptions
+  , executeDjinnCommand
+  , executeExferenceCommand
   , presentDjinn
   , presentExference
   , diagnosticFailure
@@ -18,11 +37,16 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Bifunctor (first)
+import Data.Char (isSpace, toLower)
 import Data.List (intercalate)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.IO (hFlush, hPutStrLn, stderr, stdout)
+import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
+import Language.Haskell.Djex.Exference.HaskellSrc
+  ( parseExferenceRequestWithCheckedTarget
+  )
 
 -- | Whether a candidate is presented as a complete binding or an expression.
 data RenderMode = RenderDefinition | RenderExpression
@@ -35,6 +59,161 @@ data PresentationOptions = PresentationOptions
   , presentationQualification :: Qualification
   }
   deriving (Eq, Show)
+
+-- | Selection and rendering defaults for deterministic one-shot commands.
+defaultOneShotPresentationOptions :: PresentationOptions
+defaultOneShotPresentationOptions = PresentationOptions
+  { presentationSelection = SelectBest
+  , presentationRenderMode = RenderDefinition
+  , presentationQualification = FullyQualified
+  }
+
+-- | Latency-oriented defaults for an interactive session.
+defaultInteractivePresentationOptions :: PresentationOptions
+defaultInteractivePresentationOptions = defaultOneShotPresentationOptions
+  {presentationSelection = SelectFirst}
+
+-- | Built-in generated binding name shared by both frontends.
+defaultResultTargetSpelling :: String
+defaultResultTargetSpelling = "djexResult"
+
+-- | Parse and validate a generated binding name without backend-specific work.
+parseResultTarget :: String -> Either String DefinitionName
+parseResultTarget source = do
+  name <- either (Left . renderNameError) Right $ parseName source
+  either (Left . show) Right $ mkDefinitionName name
+
+-- | Parse a candidate-selection setting with a caller-owned option name.
+parseSelectionMode :: String -> String -> Either String SelectionMode
+parseSelectionMode subject source = case normalize source of
+  "first" -> Right SelectFirst
+  "best" -> Right SelectBest
+  "all" -> Right SelectAll
+  _ -> Left $ subject ++ " must be first, best, or all"
+
+-- | Parse a result-rendering setting with a caller-owned option name.
+parseRenderMode :: String -> String -> Either String RenderMode
+parseRenderMode subject source = case normalize source of
+  "definition" -> Right RenderDefinition
+  "expression" -> Right RenderExpression
+  _ -> Left $ subject ++ " must be definition or expression"
+
+-- | Parse a shared name-qualification setting.
+parseQualification :: String -> String -> Either String Qualification
+parseQualification subject source = case normalize source of
+  "none" -> Right Unqualified
+  "identifiers" -> Right QualifyIdentifiers
+  "full" -> Right FullyQualified
+  _ -> Left $ subject ++ " must be none, identifiers, or full"
+
+-- Parse machine-sized values through Integer first. Reading an out-of-range
+-- literal directly as Int silently wraps modulo the host Int range.
+positiveInt :: String -> String -> Either String Int
+positiveInt subject = checkedInt 1
+  $ subject ++ " must be a positive integer"
+
+nonNegativeInt :: String -> String -> Either String Int
+nonNegativeInt subject = checkedInt 0
+  $ subject ++ " must be a non-negative integer"
+
+checkedInt :: Integer -> String -> String -> Either String Int
+checkedInt lowerBound failure source = case readMaybe $ trim source of
+  Just value
+    | value >= lowerBound
+    , value <= toInteger (maxBound :: Int) -> Right $ fromInteger value
+  _ -> Left failure
+
+nonNegativeInteger :: String -> String -> Either String Integer
+nonNegativeInteger subject source = case readMaybe $ trim source of
+  Just value | value >= 0 -> Right value
+  _ -> Left $ subject ++ " must be a non-negative integer"
+
+boundedNonNegativeInt :: String -> String -> Either String (Maybe Int)
+boundedNonNegativeInt _ source | normalize source == "unbounded" = Right Nothing
+boundedNonNegativeInt subject source = Just <$> nonNegativeInt subject source
+
+boundedPenalty :: String -> String -> Either String (Maybe Penalty)
+boundedPenalty _ source | normalize source == "unbounded" = Right Nothing
+boundedPenalty subject source = case readMaybe $ trim source of
+  Just value
+    | value >= 0
+    , not $ isNaN value || isInfinite value -> Right $ Just $ Penalty value
+  _ -> Left $ subject
+    ++ " must be a finite non-negative number or unbounded"
+
+selectionModeName :: SelectionMode -> String
+selectionModeName SelectFirst = "first"
+selectionModeName SelectBest = "best"
+selectionModeName (SelectBestLookahead count) = "best-lookahead=" ++ show count
+selectionModeName SelectAll = "all"
+
+renderModeName :: RenderMode -> String
+renderModeName RenderDefinition = "definition"
+renderModeName RenderExpression = "expression"
+
+qualificationName :: Qualification -> String
+qualificationName Unqualified = "none"
+qualificationName QualifyIdentifiers = "identifiers"
+qualificationName FullyQualified = "full"
+
+renderBounded :: Show value => Maybe value -> String
+renderBounded = maybe "unbounded" show
+
+-- | Apply presentation-driven proof enumeration without changing the caller's
+-- resource limits. Djinn never needs its historical internal sorting because
+-- the shared selection layer owns result ordering.
+prepareDjinnQueryOptions
+  :: PresentationOptions
+  -> QueryOptions
+  -> QueryOptions
+prepareDjinnQueryOptions presentation options = options
+  { optionAlternatives = presentationSelection presentation /= SelectFirst
+  , optionSorted = False
+  }
+
+-- | Parse, execute, and present one checked Djinn query.
+executeDjinnCommand
+  :: PresentationOptions
+  -> DjinnSession
+  -> QueryOptions
+  -> DefinitionName
+  -> FilePath
+  -> String
+  -> IO ExitCode
+executeDjinnCommand presentation session options target sourceName source =
+  case parseDjinnRequestWithCheckedTarget
+      session
+      (prepareDjinnQueryOptions presentation options)
+      target
+      sourceName
+      source of
+    Left failure -> diagnosticFailure failure
+    Right request -> case runDjinnQuery session request of
+      Left failure -> diagnosticFailure failure
+      Right result -> presentDjinn presentation result
+
+-- | Parse, execute, and present one checked Exference query.
+executeExferenceCommand
+  :: PresentationOptions
+  -> ExferenceSession
+  -> ExferenceOptions
+  -> DefinitionName
+  -> FilePath
+  -> String
+  -> IO ExitCode
+executeExferenceCommand presentation session options target sourceName source =
+  case parseExferenceRequestWithCheckedTarget
+      session options target sourceName source of
+    Left failure -> diagnosticFailure failure
+    Right request -> case runExferenceQuery session request of
+      Left failure -> diagnosticFailure failure
+      Right results -> presentExference presentation results
+
+normalize :: String -> String
+normalize = map toLower . trim
+
+trim :: String -> String
+trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
 -- | Select, render, and report one terminal Djinn result.
 presentDjinn :: PresentationOptions -> DjinnResult -> IO ExitCode

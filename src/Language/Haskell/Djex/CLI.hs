@@ -22,7 +22,6 @@ import System.Console.GetOpt
 import System.Environment (getArgs)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess), exitWith)
 import System.IO (hPutStrLn, stderr)
-import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
@@ -31,7 +30,6 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
   , loadExferenceSessionWithPolicy
-  , parseExferenceRequestWithCheckedTarget
   )
 import Language.Haskell.Djex.REPL
 import Language.Haskell.Djex.REPL.Command
@@ -62,9 +60,7 @@ data Flag
 
 data CommonOptions = CommonOptions
   { commonTarget :: DefinitionName
-  , commonSelection :: SelectionMode
-  , commonRenderMode :: RenderMode
-  , commonQualification :: Qualification
+  , commonPresentation :: PresentationOptions
   , commonInput :: String
   }
 
@@ -143,16 +139,13 @@ parseReplOptions arguments = case
 runDjinn :: DjinnOptions -> IO ExitCode
 runDjinn options = case standardDjinnSession of
   Left failure -> diagnosticFailure failure
-  Right session -> case parseDjinnRequestWithCheckedTarget
-      session
-      (djinnQueryOptions options)
-      (commonTarget common)
-      "<command-line>"
-      source of
-    Left failure -> diagnosticFailure failure
-    Right request -> case runDjinnQuery session request of
-      Left failure -> diagnosticFailure failure
-      Right result -> presentDjinn (presentationOptions common) result
+  Right session -> executeDjinnCommand
+    (commonPresentation common)
+    session
+    (djinnQueryOptions options)
+    (commonTarget common)
+    "<command-line>"
+    source
  where
   common = djinnCommon options
   source = commonInput common
@@ -176,36 +169,22 @@ runExference options = case
       Left failures -> do
         mapM_ emitDiagnostic $ toList failures
         pure runtimeFailure
-      Right session -> case parseExferenceRequestWithCheckedTarget
-          session
-          (exferenceSearchOptions options)
-          (commonTarget common)
-          "<command-line>"
-          source of
-        Left failure -> diagnosticFailure failure
-        Right request -> case runExferenceQuery session request of
-          Left failure -> diagnosticFailure failure
-          Right results -> presentExference (presentationOptions common) results
+      Right session -> executeExferenceCommand
+        (commonPresentation common)
+        session
+        (exferenceSearchOptions options)
+        (commonTarget common)
+        "<command-line>"
+        source
  where
   common = exferenceCommon options
   source = commonInput common
 
-presentationOptions :: CommonOptions -> PresentationOptions
-presentationOptions options = PresentationOptions
-  { presentationSelection = commonSelection options
-  , presentationRenderMode = commonRenderMode options
-  , presentationQualification = commonQualification options
-  }
-
 djinnQueryOptions :: DjinnOptions -> QueryOptions
 djinnQueryOptions options = defaultQueryOptions
-  { optionAlternatives = selection /= SelectFirst
-  , optionSorted = False
-  , optionCutoff = djinnCandidateLimit options
+  { optionCutoff = djinnCandidateLimit options
   , optionBudget = djinnChoiceBudget options
   }
- where
-  selection = commonSelection $ djinnCommon options
 
 parseDjinnOptions :: [String] -> Either String DjinnOptions
 parseDjinnOptions arguments = do
@@ -274,83 +253,30 @@ parseOptions selectedBackend arguments = case
 
 parseCommonOptions :: [Flag] -> String -> Either String CommonOptions
 parseCommonOptions flags source = do
-  rawTarget <- uniqueValue "--target" targetValue defaultTargetSpelling flags
+  rawTarget <- uniqueValue
+    "--target" targetValue defaultResultTargetSpelling flags
   target <- checkedTarget rawTarget
   selection <- uniqueValue "--select" selectionValue defaultSelectionSpelling flags
-    >>= selectionMode
+    >>= parseSelectionMode "--select"
   renderMode <- uniqueValue "--render" renderValue defaultRenderSpelling flags
-    >>= checkedRenderMode
+    >>= parseRenderMode "--render"
   qualification <- uniqueValue
     "--qualification" qualificationValue defaultQualificationSpelling flags
-    >>= checkedQualification
+    >>= parseQualification "--qualification"
   pure CommonOptions
     { commonTarget = target
-    , commonSelection = selection
-    , commonRenderMode = renderMode
-    , commonQualification = qualification
+    , commonPresentation = PresentationOptions
+        { presentationSelection = selection
+        , presentationRenderMode = renderMode
+        , presentationQualification = qualification
+        }
     , commonInput = source
     }
 
 checkedTarget :: String -> Either String DefinitionName
-checkedTarget source = case parseName source of
-  Left failure -> Left $ "invalid --target: " ++ renderNameError failure
-  Right target -> case mkDefinitionName target of
-    Left failure -> Left $ "invalid --target: " ++ show failure
-    Right checked -> Right checked
-
-selectionMode :: String -> Either String SelectionMode
-selectionMode source = case source of
-  "first" -> Right SelectFirst
-  "best" -> Right SelectBest
-  "all" -> Right SelectAll
-  _ -> Left "--select must be first, best, or all"
-
-checkedRenderMode :: String -> Either String RenderMode
-checkedRenderMode source = case source of
-  "definition" -> Right RenderDefinition
-  "expression" -> Right RenderExpression
-  _ -> Left "--render must be definition or expression"
-
-checkedQualification :: String -> Either String Qualification
-checkedQualification source = case source of
-  "none" -> Right Unqualified
-  "identifiers" -> Right QualifyIdentifiers
-  "full" -> Right FullyQualified
-  _ -> Left "--qualification must be none, identifiers, or full"
-
-positiveInt :: String -> String -> Either String Int
-positiveInt option = checkedInt 1
-  $ option ++ " must be a positive integer"
-
-nonNegativeInt :: String -> String -> Either String Int
-nonNegativeInt option = checkedInt 0
-  $ option ++ " must be a non-negative integer"
-
--- Parse through the unbounded representation before converting. Reading an
--- out-of-range literal directly as Int silently wraps modulo the Int range.
-checkedInt :: Integer -> String -> String -> Either String Int
-checkedInt lowerBound failure source = case readMaybe source :: Maybe Integer of
-  Just value
-    | value >= lowerBound
-    , value <= toInteger (maxBound :: Int) -> Right $ fromInteger value
-  _ -> Left failure
-
-nonNegativeInteger :: String -> String -> Either String Integer
-nonNegativeInteger option source = case readMaybe source of
-  Just value | value >= 0 -> Right value
-  _ -> Left $ option ++ " must be a non-negative integer"
-
-boundedNonNegativeInt :: String -> String -> Either String (Maybe Int)
-boundedNonNegativeInt _ "unbounded" = Right Nothing
-boundedNonNegativeInt option source = Just <$> nonNegativeInt option source
-
-boundedPenalty :: String -> String -> Either String (Maybe Penalty)
-boundedPenalty _ "unbounded" = Right Nothing
-boundedPenalty option source = case readMaybe source of
-  Just value
-    | value >= 0
-    , not $ isNaN value || isInfinite value -> Right $ Just $ Penalty value
-  _ -> Left $ option ++ " must be a finite non-negative number or unbounded"
+checkedTarget source = case parseResultTarget source of
+  Left failure -> Left $ "invalid --target: " ++ failure
+  Right target -> Right target
 
 uniqueValue
   :: String
@@ -430,7 +356,7 @@ backendSpecificOptions selectedBackend = case selectedBackend of
 commonOptions :: [OptDescr Flag]
 commonOptions =
   [ Option [] ["target"] (ReqArg TargetFlag "NAME")
-      $ defaulted "generated definition name" defaultTargetSpelling
+      $ defaulted "generated definition name" defaultResultTargetSpelling
   , Option [] ["select"] (ReqArg SelectionFlag "first|best|all")
       $ defaulted "candidate selection policy" defaultSelectionSpelling
   , Option [] ["render"] (ReqArg RenderFlag "definition|expression")
@@ -495,12 +421,14 @@ replOptionDescriptors =
 -- Parser fallbacks and help text share these spellings. Backend-owned numeric
 -- defaults are projected directly from their public option records so changing
 -- a search policy cannot leave a stale command-line promise behind.
-defaultTargetSpelling, defaultSelectionSpelling, defaultRenderSpelling
+defaultSelectionSpelling, defaultRenderSpelling
   , defaultQualificationSpelling, defaultDjinnChoiceBudget :: String
-defaultTargetSpelling = "djexResult"
-defaultSelectionSpelling = "best"
-defaultRenderSpelling = "definition"
-defaultQualificationSpelling = "full"
+defaultSelectionSpelling = selectionModeName
+  $ presentationSelection defaultOneShotPresentationOptions
+defaultRenderSpelling = renderModeName
+  $ presentationRenderMode defaultOneShotPresentationOptions
+defaultQualificationSpelling = qualificationName
+  $ presentationQualification defaultOneShotPresentationOptions
 defaultDjinnChoiceBudget = maybe "0" show $ optionBudget defaultQueryOptions
 
 defaultDjinnCandidateLimit :: Int
@@ -508,9 +436,6 @@ defaultDjinnCandidateLimit = optionCutoff defaultQueryOptions
 
 defaulted :: String -> String -> String
 defaulted description value = description ++ " (default: " ++ value ++ ")"
-
-renderBounded :: Show value => Maybe value -> String
-renderBounded = maybe "unbounded" show
 
 fullUsage :: String
 fullUsage = intercalate "\n"

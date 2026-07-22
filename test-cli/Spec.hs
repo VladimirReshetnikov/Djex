@@ -157,6 +157,7 @@ testReplInputRecovery = withTemporaryEnvironment [] $ \directory -> do
     , ":"
     , ":c ignored"
     , ":wat"
+    , ":! false"
     , "a -> a"
     ]
   assertEqual "recovering REPL exit" ExitSuccess exitCode
@@ -165,6 +166,7 @@ testReplInputRecovery = withTemporaryEnvironment [] $ \directory -> do
   assertContains "ambiguous abbreviation diagnostic"
     "ambiguous command :c" errors
   assertContains "unknown command diagnostic" "unknown command :wat" errors
+  assertContains "failed shell command diagnostic" "[DJEX_REPL_SHELL]" errors
   assertNoCallStack errors
 
 testReplBackendIsolation :: Assertion
@@ -229,16 +231,19 @@ testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do
   let script = directory ++ "/commands.djex"
       recursive = directory ++ "/recursive.djex"
+      broken = directory ++ "/broken.djex"
   writeFile script $ unlines
     [ ":set render expression"
     , ":backend exference"
     , "a -> a"
     ]
   writeFile recursive $ ":script " ++ show recursive ++ "\n"
+  writeFile broken $ unlines ["", ":wat"]
   (exitCode, output, errors) <- runRepl directory
     [ ":script " ++ show script
     , ":backend"
     , ":script " ++ show recursive
+    , ":script " ++ show broken
     , "a -> a"
     ]
   assertEqual "script REPL exit" ExitSuccess exitCode
@@ -247,18 +252,22 @@ testReplScripts = withTemporaryEnvironment [] $ \directory -> do
   assertContains "script setting persists" "exference\n" output
   assertContains "recursive script is rejected"
     "[DJEX_REPL_SCRIPT_CYCLE]" errors
+  assertContains "script command diagnostic keeps its source line"
+    (broken ++ " (line 2)") errors
 
 testReplHistory :: Assertion
 testReplHistory = withTemporaryEnvironment [] $ \directory -> do
   let history = directory ++ "/history"
+      script = directory ++ "/history.djex"
   -- Haskeline persists newest-first, matching 'historyLines'. The driver
   -- reverses that representation before assigning chronological line numbers.
   writeFile history "old-two\nold-one\n"
+  writeFile script ":history 1\n"
   (exitCode, output, errors) <- runDjexInput
     ["repl", "--environment", directory, "--history", history]
-    $ unlines [":set prompt \"\"", ":history 1", ":quit"]
+    $ unlines [":set prompt \"\"", ":script " ++ show script, ":quit"]
   assertEqual "history REPL exit" ExitSuccess exitCode
-  assertContains "latest history entry" "2  old-two" output
+  assertContains "script sees latest session history entry" "2  old-two" output
   assertBool "history selected the oldest entry" $
     not $ "1  old-one" `isInfixOf` output
   assertBool "history session emitted an error" $

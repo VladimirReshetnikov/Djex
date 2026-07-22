@@ -28,11 +28,16 @@ import Data.Maybe (fromMaybe)
 import Data.Version (showVersion)
 import Data.Void (Void, absurd)
 import System.Directory
-  ( canonicalizePath
+  ( Permissions (readable, searchable, writable)
+  , canonicalizePath
+  , doesDirectoryExist
+  , doesPathExist
+  , getPermissions
   , getCurrentDirectory
   , setCurrentDirectory
   )
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
+import System.FilePath (takeDirectory)
 import System.IO (IOMode (ReadMode), hGetContents, withFile)
 import System.IO.Error (tryIOError)
 import System.Process
@@ -945,10 +950,43 @@ resolveOptionalPath
 resolveOptionalPath Nothing = pure $ Right Nothing
 resolveOptionalPath (Just path) = do
   resolved <- tryIOError $ canonicalizePath path
-  pure $ case resolved of
-    Left failure -> Left $ ioDiagnostic
+  case resolved of
+    Left failure -> pure $ Left $ ioDiagnostic
       "cannot resolve REPL history file" path failure
-    Right canonical -> Right $ Just canonical
+    Right canonical -> do
+      validated <- tryIOError $ validateHistoryPath canonical
+      pure $ case validated of
+        Left failure -> Left $ ioDiagnostic
+          "cannot inspect REPL history file" canonical failure
+        Right result -> result
+
+validateHistoryPath :: FilePath -> IO (Either Diagnostic (Maybe FilePath))
+validateHistoryPath path = do
+  targetExists <- doesPathExist path
+  targetIsDirectory <- doesDirectoryExist path
+  if targetIsDirectory
+    then pure $ rejected "history path names a directory"
+    else if targetExists
+      then do
+        permissions <- getPermissions path
+        pure $ if readable permissions && writable permissions
+          then Right $ Just path
+          else rejected "history file must be readable and writable"
+      else validateParent
+ where
+  validateParent = do
+    let parent = takeDirectory path
+    parentExists <- doesDirectoryExist parent
+    if not parentExists
+      then pure $ rejected "history file parent directory does not exist"
+      else do
+        permissions <- getPermissions parent
+        pure $ if writable permissions && searchable permissions
+          then Right $ Just path
+          else rejected "history file parent directory is not writable"
+
+  rejected message = Left $ contextualDiagnostic Error
+    "DJEX_REPL_HISTORY_FILE" message path
 
 decodeString :: String -> String
 decodeString source = fromMaybe source $ readMaybe source

@@ -124,6 +124,22 @@ testReplDispatch = do
   assertUsageFailure ["repl", "unexpected"]
     "repl takes no positional arguments"
 
+  withMissingPath $ \missingParent -> do
+    (exitCode, output, errors) <- runDjex
+      ["repl", "--history", missingParent ++ "/history"]
+    assertEqual "missing history parent exit" (ExitFailure 1) exitCode
+    assertEqual "missing history parent stdout" "" output
+    assertContains "missing history parent diagnostic"
+      "[DJEX_REPL_HISTORY_FILE]" errors
+
+  withTemporaryEnvironment [] $ \directory -> do
+    (exitCode, output, errors) <- runDjex
+      ["repl", "--history", directory]
+    assertEqual "directory history target exit" (ExitFailure 1) exitCode
+    assertEqual "directory history target stdout" "" output
+    assertContains "directory history target diagnostic"
+      "history path names a directory" errors
+
 testReplSharedSession :: Assertion
 testReplSharedSession = withTemporaryEnvironment [] $ \directory -> do
   (exitCode, output, errors) <- runRepl directory

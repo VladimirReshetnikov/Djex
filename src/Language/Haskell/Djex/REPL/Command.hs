@@ -248,8 +248,11 @@ command
 command = CommandDescriptor
 
 commandNames :: [String]
-commandNames = map ((':' :) . descriptorName) commandDescriptors
+commandNames = concatMap completionNames commandDescriptors
   ++ [":!", ":{", ":}"]
+ where
+  completionNames descriptor = map (':' :)
+    $ descriptorName descriptor : descriptorAliases descriptor
 
 backendNames :: [String]
 backendNames = ["djinn", "exference", "both"]

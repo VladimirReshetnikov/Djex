@@ -5574,6 +5574,13 @@ tests = testGroup "Exference"
                     { exferenceQueryCurrentModule = current
                     , exferenceQueryVisibleNames = visible
                     , exferenceQueryModuleAliases = aliases
+                    , exferenceQueryQualifiedNames = []
+                    }
+                  qualifiedScope admitted = ExferenceQueryScope
+                    { exferenceQueryCurrentModule = Nothing
+                    , exferenceQueryVisibleNames = []
+                    , exferenceQueryModuleAliases = [(aliasModule, firstModule)]
+                    , exferenceQueryQualifiedNames = [(aliasModule, admitted)]
                     }
                   parseScoped selectedScope source =
                     parseExferenceRequestInScope
@@ -5614,6 +5621,16 @@ tests = testGroup "Exference"
                 "an interactive module alias"
                 firstName
                 (scope Nothing [] [(aliasModule, firstModule)])
+                "Alias.Item"
+              assertGoal
+                "a name selected under a restricted qualifier"
+                firstName
+                (qualifiedScope [firstName])
+                "Alias.Item"
+              assertRejected
+                "a name excluded from a restricted qualifier"
+                "is not in scope"
+                (qualifiedScope [])
                 "Alias.Item"
               assertGoal
                 "the current module's local declaration"

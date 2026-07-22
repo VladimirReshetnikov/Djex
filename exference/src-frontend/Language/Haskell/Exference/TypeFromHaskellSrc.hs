@@ -12,6 +12,7 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , TypeResolver (..)
   , legacyTypeResolver
   , scopeTypeResolver
+  , scopeTypeResolverWithQualifiedNames
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
   , convertTypeNoDeclWithResolver
@@ -97,6 +98,8 @@ data TypeResolver = TypeResolver
   , resolverUnqualifiedClassNames :: [T.QualifiedName]
   , resolverModuleAliases
       :: [(SharedName.ModuleName, SharedName.ModuleName)]
+  , resolverQualifiedNames
+      :: Maybe (M.Map SharedName.ModuleName (S.Set T.QualifiedName))
   }
   deriving (Eq, Show)
 
@@ -114,6 +117,7 @@ legacyTypeResolver classes typeNames = TypeResolver
   , resolverUnqualifiedTypeNames = typeNames
   , resolverUnqualifiedClassNames = M.keys classes
   , resolverModuleAliases = []
+  , resolverQualifiedNames = Nothing
   }
 
 -- | Restrict unqualified lookup and install interactive qualifier aliases
@@ -130,10 +134,28 @@ scopeTypeResolver visible aliases resolver = resolver
   , resolverUnqualifiedClassNames = retain
       $ M.keys $ resolverClassArities resolver
   , resolverModuleAliases = aliases
+  , resolverQualifiedNames = Nothing
   }
  where
   visibleSet = S.fromList visible
   retain = filter (`S.member` visibleSet)
+
+-- | Scoped lookup with an exact per-alias import surface. The ordinary
+-- 'scopeTypeResolver' remains permissive for existing callers; the REPL uses
+-- this form so @import qualified M as X (T)@ cannot expose @X.U@.
+scopeTypeResolverWithQualifiedNames
+  :: [T.QualifiedName]
+  -> [(SharedName.ModuleName, SharedName.ModuleName)]
+  -> [(SharedName.ModuleName, [T.QualifiedName])]
+  -> TypeResolver
+  -> TypeResolver
+scopeTypeResolverWithQualifiedNames visible aliases qualified resolver =
+  (scopeTypeResolver visible aliases resolver)
+    { resolverQualifiedNames = Just $ M.fromListWith S.union
+        [ (qualifier, S.fromList names)
+        | (qualifier, names) <- qualified
+        ]
+    }
 
 -- | An empty, collision-free source-conversion inventory.
 emptyConvData :: ConvData
@@ -489,13 +511,13 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
         | writtenModule `S.member` knownModules
         , raw `elem` allKnown
         , target /= writtenModule -> ambiguous [writtenModule, target]
-        | otherwise -> under target
+        | otherwise -> underScoped target
       targets -> case
           [ target
           | target <- targets
-          , either (const False) (`elem` allKnown) $ under target
+          , either (const False) (`elem` allKnown) $ underScoped target
           ] of
-        [target] -> under target
+        [target] -> underScoped target
         _ -> ambiguous targets
    where
     aliasTargets =
@@ -506,6 +528,13 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
     under target = convertModuleName
       (ModuleName location $ SharedName.renderModuleName target)
       syntaxName
+    underScoped target = do
+      canonical <- under target
+      case resolverQualifiedNames resolver of
+        Nothing -> Right canonical
+        Just admitted -> case M.lookup writtenModule admitted of
+          Just names | canonical `S.member` names -> Right canonical
+          _ -> Left $ "qualified name " ++ show raw ++ " is not in scope"
     ambiguous modules = Left $ "ambiguous module qualifier "
       ++ SharedName.renderModuleName writtenModule ++ "; matches "
       ++ intercalate ", " (map SharedName.renderModuleName modules)

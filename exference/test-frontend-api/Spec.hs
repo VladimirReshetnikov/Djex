@@ -31,7 +31,7 @@ main = defaultMain $ testGroup "Exference frontend import surface"
       loadExferenceSessionFromFiles `seq`
       loadExferenceSessionFromFilesWithPolicy `seq`
       loadExferenceSessionWithPolicy `seq`
-      ExferenceQueryScope Nothing [] [] `seq`
+      ExferenceQueryScope Nothing [] [] [] `seq`
       parseExferenceRequestInScope `seq`
       parseExferenceRequestWithCheckedTargetInScope `seq`
       pure ()

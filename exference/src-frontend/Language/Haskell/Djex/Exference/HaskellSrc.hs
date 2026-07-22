@@ -55,6 +55,7 @@ import Language.Haskell.Exference.EnvironmentParser
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   ( parseTypeWithInventory
   , parseTypeWithInventoryInScope
+  , parseTypeWithInventoryInQualifiedScope
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -92,6 +93,10 @@ data ExferenceQueryScope = ExferenceQueryScope
     -- ^ Exact canonical names admitted for unqualified query syntax.
   , exferenceQueryModuleAliases :: [(ModuleName, ModuleName)]
     -- ^ Prompt qualifier paired with its canonical loaded module.
+  , exferenceQueryQualifiedNames :: [(ModuleName, [Name])]
+    -- ^ Exact canonical names admitted through each written qualifier. An
+    -- empty outer list retains the permissive behavior of the original scoped
+    -- API; a present qualifier with an empty inner list admits no names.
   }
   deriving (Eq, Show)
 
@@ -290,13 +295,23 @@ parseCheckedRequest session options checkedTarget maybeScope sourceName source =
       inventory = exferenceSessionInventory session
       parsed = runIdentity $ runExceptT $ case maybeScope of
         Nothing -> parseTypeWithInventory inventory Nothing mode source
-        Just scope -> parseTypeWithInventoryInScope
-          inventory
-          (toHseModuleName <$> exferenceQueryCurrentModule scope)
-          (exferenceQueryVisibleNames scope)
-          (exferenceQueryModuleAliases scope)
-          mode
-          source
+        Just scope
+          | null $ exferenceQueryQualifiedNames scope ->
+              parseTypeWithInventoryInScope
+                inventory
+                (toHseModuleName <$> exferenceQueryCurrentModule scope)
+                (exferenceQueryVisibleNames scope)
+                (exferenceQueryModuleAliases scope)
+                mode
+                source
+          | otherwise -> parseTypeWithInventoryInQualifiedScope
+              inventory
+              (toHseModuleName <$> exferenceQueryCurrentModule scope)
+              (exferenceQueryVisibleNames scope)
+              (exferenceQueryModuleAliases scope)
+              (exferenceQueryQualifiedNames scope)
+              mode
+              source
   -- The HSE compatibility frontend predates structured diagnostic codes.
   -- Seal every failure at this boundary while preserving its exact message,
   -- source, and span.

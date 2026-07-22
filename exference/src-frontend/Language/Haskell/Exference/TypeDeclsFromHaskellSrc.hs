@@ -13,6 +13,7 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , parseTypeWithKinds
   , parseTypeWithInventory
   , parseTypeWithInventoryInScope
+  , parseTypeWithInventoryInQualifiedScope
   , toSynthesisTypeDeclaration
   , fromSynthesisTypeDeclaration
   )
@@ -316,6 +317,28 @@ parseTypeWithInventoryInScope inventory currentModule visible aliases =
     currentModule
     M.empty
 
+-- | Fully qualified interactive counterpart of
+-- 'parseTypeWithInventoryInScope'. In addition to restricting bare names, it
+-- records the exact canonical names admitted by every written import
+-- qualifier, so an alias cannot bypass an explicit list or @hiding@ clause.
+parseTypeWithInventoryInQualifiedScope
+  :: Monad m
+  => SharedInventory.Inventory typeVariable annotation
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> [QualifiedName]
+  -> [(SharedName.ModuleName, SharedName.ModuleName)]
+  -> [(SharedName.ModuleName, [QualifiedName])]
+  -> P.ParseMode
+  -> String
+  -> ExceptT Diagnostic m (HsType, TypeVarIndex)
+parseTypeWithInventoryInQualifiedScope inventory currentModule visible aliases
+    qualified = parseTypeWithResolverKinds
+  (SharedInventory.inventoryKindAssumptions inventory)
+  (scopeTypeResolverWithQualifiedNames visible aliases qualified
+    $ typeResolverFromInventory inventory)
+  currentModule
+  M.empty
+
 -- | Derive precisely the nominal information required by source-type lookup
 -- from the shared declaration environment. A class entry contributes only
 -- its declared arity; methods, superclasses, and backend solver indexes are
@@ -333,6 +356,7 @@ typeResolverFromInventory inventory = TypeResolver
   , resolverUnqualifiedClassNames = M.keys
       $ SharedEnvironment.classDeclarationMap environment
   , resolverModuleAliases = []
+  , resolverQualifiedNames = Nothing
   }
  where
   environment = SharedInventory.inventoryEnvironment inventory

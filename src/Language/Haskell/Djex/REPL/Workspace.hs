@@ -834,13 +834,25 @@ modulesByName = Map.fromList . map (\modul -> (parsedModuleName modul, modul))
 modulesByPath :: [WorkspaceModule] -> Map.Map FilePath WorkspaceModule
 modulesByPath = Map.fromList . map (\modul -> (parsedModulePath modul, modul))
 
+-- Derive hierarchical module roots only from explicit file/module targets.
+-- A directory target already owns one bounded lookup root. Its source list may
+-- contain a regular-file symlink whose canonical path is outside that root;
+-- treating every loaded module's canonical directory as another root would let
+-- imports beside that linked file escape the admitted directory transitively.
 sourceRoots :: [WorkspaceTarget] -> [WorkspaceModule] -> [FilePath]
 sourceRoots targets modules = stableNub
-  $ concatMap targetRoots targets ++ map moduleSourceRoot modules
+  $ concatMap targetRoots targets
  where
+  byPath = modulesByPath modules
+
   targetRoots target = case locatorKind locator of
     DirectoryTarget -> [locatorPath locator]
-    _ -> [locatorAdmissionRoot locator, takeDirectory $ locatorPath locator]
+    _ ->
+      [locatorAdmissionRoot locator, takeDirectory $ locatorPath locator]
+        ++ [ moduleSourceRoot modul
+           | path <- targetSourceFiles target
+           , Just modul <- [Map.lookup path byPath]
+           ]
    where
     locator = targetLocator target
 

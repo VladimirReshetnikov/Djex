@@ -261,9 +261,12 @@ Parent/child items such as `T(..)` and `C(method)` use the checked constructor
 and class-method groups; record selectors are bundled children of their owning
 datatype as well. Child imports such as `T(..)` or `T(child)` are rejected for
 type synonyms and abstract datatypes, which have no checked children to
-expose. `module M` re-exports retain the filters from the module's source
-import of `M`. Every loaded module's export surface is validated during the
-workspace transaction, including modules not selected by the prompt context.
+expose. Bundling provenance is retained across imports and re-exports:
+exporting `T` and `child` separately does not authorize a downstream
+`T(child)` import. `module M` re-exports retain the filters from the module's
+source import of `M`. Every loaded module's export surface is validated during
+the workspace transaction, including modules not selected by the prompt
+context.
 
 Scope controls unqualified lookup and the source bindings available to
 Exference search. A current `*MODULE` entry gives that module's local names
@@ -383,6 +386,9 @@ Djex's GHCi-shaped commands are a source-inventory frontend, not a compiler or
 linker:
 
 - only ordinary `.hs` and `.lhs` source modules are discovered;
+- `.hs-boot` interfaces are not loaded; a `{-# SOURCE #-}` edge breaks
+  dependency cycles but projects the checked implementation module's names
+  rather than a separate boot-file export surface;
 - there is no GHC package database lookup and no loading of `.hi`, `.o`, or
   shared-library code;
 - a bare `import` or `:module` can mention only a module already present in the

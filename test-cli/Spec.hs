@@ -62,8 +62,12 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSearchScope
   , testCase "REPL aliases retain canonical re-exports and defer ambiguity"
       testReplAliasesAndReexports
+  , testCase "REPL unresolved import lists remain advisory"
+      testReplUnresolvedImportList
   , testCase "REPL import lists preserve exported record selectors"
       testReplRecordSelectors
+  , testCase "REPL bundled imports respect abstract record exports"
+      testReplAbstractRecordExports
   , testCase "REPL source modules reject package-qualified local lookalikes"
       testReplSourcePackageImport
   , testCase "REPL symlink aliases cannot impersonate module names"
@@ -417,6 +421,7 @@ testReplDirectoryLinks = withReplModuleFixture $ \root -> do
   let empty = canonicalRoot </> "empty"
       linkRoot = canonicalRoot </> "directory-links"
       linkedFile = canonicalRoot </> "linked-file" </> "Linked.hs"
+      outsideSibling = canonicalRoot </> "linked-file" </> "OutsideSibling.hs"
       fileLink = linkRoot </> "Linked.hs"
       escapedDirectory = canonicalRoot </> "escaped-directory"
       escapeLink = linkRoot </> "Escape"
@@ -437,11 +442,28 @@ testReplDirectoryLinks = withReplModuleFixture $ \root -> do
     ("Linked (" ++ linkedFile ++ ")") output
   assertBool "directory symlink escaped the admitted source tree" $
     not $ "Escaped (" `isInfixOf` output
+  assertBool "file symlink widened dependency discovery outside the tree" $
+    not $ "OutsideSibling (" `isInfixOf` output
   assertContains "ordinary directory module enters automatic context"
     "import *Inside -- automatic" output
   assertContains "file symlink module enters automatic context"
     "import *Linked -- automatic" output
+  assertContains "outside sibling import remains advisory"
+    "[DJEX_REPL_IMPORT_UNRESOLVED]" errors
   assertNoCallStack errors
+
+  (fileExit, fileOutput, fileErrors) <- runRepl empty
+    [ ":load " ++ show linkedFile
+    , ":show modules"
+    ]
+  assertEqual "explicit linked-file target REPL exit" ExitSuccess fileExit
+  assertContains "explicit file target retains its hierarchical source root"
+    ( "OutsideSibling (" ++ outsideSibling ++ ")\n"
+      ++ "Linked (" ++ linkedFile ++ ")"
+    ) fileOutput
+  assertBool "explicit file target left its sibling unresolved" $
+    not $ "DJEX_REPL_IMPORT_UNRESOLVED" `isInfixOf` fileErrors
+  assertNoCallStack fileErrors
 
 testReplTargetMutation :: Assertion
 testReplTargetMutation = withReplModuleFixture $ \root -> do
@@ -733,6 +755,31 @@ testReplAliasesAndReexports = withReplModuleFixture $ \root -> do
     "ambiguous" $ map toLower overlapErrors
   assertNoCallStack overlapErrors
 
+testReplUnresolvedImportList :: Assertion
+testReplUnresolvedImportList = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      unresolved = canonicalRoot </> "unresolved" </> "UnresolvedList.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show unresolved
+    , ":show modules"
+    , ":show diagnostics"
+    ]
+  assertEqual "unresolved import-list REPL exit" ExitSuccess exitCode
+  assertContains "unresolved import list does not abort the load transaction"
+    "Loaded Exference environment:" output
+  assertContains "module with unresolved import list is committed"
+    "UnresolvedList (" output
+  assertBool "unresolved import list was treated as a fatal load error" $
+    not $ "Exference load failed" `isInfixOf` output
+  assertContains "unresolved import warning is retained by :show diagnostics"
+    "[DJEX_REPL_IMPORT_UNRESOLVED]" output
+  assertContains "unresolved import warning is emitted when loading"
+    "[DJEX_REPL_IMPORT_UNRESOLVED]" errors
+  assertBool "unresolved import list leaked a fatal item diagnostic" $
+    not $ "DJEX_REPL_IMPORT_NAME" `isInfixOf` errors
+  assertNoCallStack errors
+
 testReplRecordSelectors :: Assertion
 testReplRecordSelectors = withReplModuleFixture $ \root -> do
   canonicalRoot <- canonicalizePath root
@@ -758,6 +805,36 @@ testReplRecordSelectors = withReplModuleFixture $ \root -> do
     $ countOccurrences "RecordSurface.field" output
   assertContains "hiding a record field removes it from search"
     "[DJEX_EXF_NO_RESULT]" errors
+  assertNoCallStack errors
+
+testReplAbstractRecordExports :: Assertion
+testReplAbstractRecordExports = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      abstractRecord = canonicalRoot </> "abstract-record" </> "A.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show abstractRecord
+    , ":backend exference"
+    , ":set render expression"
+    , ":set max-steps 4"
+    , ":module"
+    , "import A (T(..))"
+    , ":show imports"
+    , "import A (T(field))"
+    , ":show imports"
+    , "import A (T, Field, field)"
+    , ":show imports"
+    , "T -> Field"
+    ]
+  assertEqual "abstract record-export REPL exit" ExitSuccess exitCode
+  assertEqual "bundled imports of an abstract type both roll back" 2
+    $ countOccurrences "(no imports)" output
+  assertContains "separately exported type and field can be imported explicitly"
+    "import A (T, Field, field)" output
+  assertContains "successful explicit import makes the selector searchable"
+    "A.field" output
+  assertBool "abstract bundled imports produced no structured diagnostics" $
+    countOccurrences "[DJEX_REPL_IMPORT_" errors >= 2
   assertNoCallStack errors
 
 testReplSourcePackageImport :: Assertion
@@ -1385,6 +1462,17 @@ withReplModuleFixture = withTemporaryEnvironment
       , "data Field = FieldConstructor"
       , "data Record = RecordConstructor { field :: Field }"
       ])
+  , ("unresolved/UnresolvedList.hs", unlines
+      [ "module UnresolvedList (Local, localValue) where"
+      , "import External (T)"
+      , "data Local = LocalConstructor"
+      , "localValue :: Local"
+      ])
+  , ("abstract-record/A.hs", unlines
+      [ "module A (T, Field, field) where"
+      , "data Field = FieldConstructor"
+      , "data T = MkT { field :: Field }"
+      ])
   , ("reexport/Origin.hs", unlines
       [ "module Origin (Item, itemValue) where"
       , "data Item = ItemConstructor"
@@ -1466,8 +1554,14 @@ withReplModuleFixture = withTemporaryEnvironment
       ])
   , ("linked-file/Linked.hs", unlines
       [ "module Linked (LinkedType, linkedValue) where"
+      , "import OutsideSibling"
       , "data LinkedType = LinkedConstructor"
       , "linkedValue :: LinkedType"
+      ])
+  , ("linked-file/OutsideSibling.hs", unlines
+      [ "module OutsideSibling (OutsideType, outsideValue) where"
+      , "data OutsideType = OutsideConstructor"
+      , "outsideValue :: OutsideType"
       ])
   , ("escaped-directory/Escaped.hs", unlines
       [ "module Escaped (EscapedType, escapedValue) where"

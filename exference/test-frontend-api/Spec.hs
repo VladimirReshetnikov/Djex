@@ -9,7 +9,7 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSessionWithPolicy
   )
 import qualified Language.Haskell.Exference.CLI as CLI
-import Language.Haskell.Exference.Core (findExpressions)
+import Language.Haskell.Exference.Core (findExpressionsEither)
 import qualified Language.Haskell.Exference.Session as Session
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (testCase)
@@ -30,5 +30,5 @@ main = defaultMain $ testGroup "Exference frontend import surface"
       Session.mkExferenceSessionWithPolicy `seq`
       pure ()
   , testCase "exposes the merged core API" $
-      defaultExferenceOptions `seq` findExpressions `seq` pure ()
+      defaultExferenceOptions `seq` findExpressionsEither `seq` pure ()
   ]

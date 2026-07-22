@@ -11,6 +11,7 @@ module Language.Haskell.Djex.REPL.Command
   , ReplInput (..)
   , ReplCommand (..)
   , ModuleChange (..)
+  , TypeDefaulting (..)
   , ReplSetting (..)
   , replSettingName
   , parseReplSetting
@@ -66,6 +67,7 @@ data ReplCommand
   | Help (Maybe String)
   | History (Maybe String)
   | InspectDeclaration String
+  | InspectType TypeDefaulting String
   | LoadEnvironment [FilePath]
   | Quit
   | ReloadEnvironment
@@ -87,6 +89,15 @@ data ModuleChange
   = ReplaceModules
   | AddModules
   | RemoveModules
+  deriving (Eq, Show)
+
+-- | Whether @:type@ applies its explicit numeric @+d@ defaulting request.
+-- Ordinary ambiguity defaulting remains part of inference in either mode;
+-- this flag additionally defaults eligible variables that occur in the
+-- reported result type.
+data TypeDefaulting
+  = PreserveTypeVariables
+  | DefaultTypeVariables
   deriving (Eq, Show)
 
 -- | Every mutable REPL setting, in stable display and completion order.
@@ -271,6 +282,9 @@ commandDescriptors =
       $ Right . ReplCommand . ShowState . optionalText
   , command "synth" ["sy"] "TYPE" "synthesize with the active backend(s)"
       $ fmap (ReplQuery ActiveBackends) . required "a type"
+  , command "type" ["t"] "[+d] EXPRESSION"
+      "infer the type of a Haskell expression in the current module scope"
+      $ fmap ReplCommand . parseTypeInspection
   , command "unadd" [] "[TARGET ...]"
       "remove module or file targets and reload their dependencies"
       $ fmap (ReplCommand . UnaddEnvironment) . commandArguments
@@ -398,6 +412,10 @@ commandHelp source = case token of
       , "  booleans also accept :set +NAME and :set -NAME"
       ]
     "show" -> ["  subjects: " ++ intercalate ", " showNames]
+    "type" ->
+      [ "  +d defaults eligible numeric type variables in the result"
+      , "  the obsolete +v mode is no longer accepted"
+      ]
     "unadd" -> targetDetails
     "unset" -> ["  restores a setting to its built-in default"]
     _ -> []
@@ -452,6 +470,17 @@ parseModuleChange source = do
         '-' : rest -> (RemoveModules, rest)
         _ -> (ReplaceModules, input)
   ChangeModules change <$> commandArguments argumentsSource
+
+parseTypeInspection :: String -> Either String ReplCommand
+parseTypeInspection source = case stripKeyword "+d" input of
+  Just expression -> InspectType DefaultTypeVariables
+    <$> required "a Haskell expression" expression
+  Nothing -> case stripKeyword "+v" input of
+    Just _ -> Left "`:type +v' has gone; use `:type' instead"
+    Nothing -> InspectType PreserveTypeVariables
+      <$> required "a Haskell expression" input
+ where
+  input = trim source
 
 -- | Parse the argument forms accepted by path- and module-oriented commands.
 --

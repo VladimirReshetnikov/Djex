@@ -204,6 +204,7 @@ Library
     Language.Haskell.Djex.REPL.Command
     Language.Haskell.Djex.REPL.Driver
     Language.Haskell.Djex.REPL.Scope
+    Language.Haskell.Djex.REPL.Type
     Language.Haskell.Djex.REPL.Workspace
     Language.Haskell.Djex.Djinn.Internal.Request
     Language.Haskell.Djex.Djinn.Internal.Session

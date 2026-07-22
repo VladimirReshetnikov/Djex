@@ -4,7 +4,7 @@ import CLIAssertions (assertContains, countOccurrences)
 import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.Char (toLower)
-import Data.List (isInfixOf)
+import Data.List (intercalate, isInfixOf)
 import System.Directory
   ( canonicalizePath
   , createDirectory
@@ -58,6 +58,12 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplModuleContexts
   , testCase "REPL imports and browsing honor explicit exports"
       testReplImportsAndBrowsing
+  , testCase "REPL :type parses expressions without replacing query history"
+      testReplTypeInference
+  , testCase "REPL :type resolves only terms in the current module scope"
+      testReplTypeScope
+  , testCase "REPL :type +d defaults eligible numeric result variables"
+      testReplTypeDefaulting
   , testCase "REPL Exference search is restricted to the prompt scope"
       testReplSearchScope
   , testCase "REPL aliases retain canonical re-exports and defer ambiguity"
@@ -635,6 +641,172 @@ testReplImportsAndBrowsing = withReplModuleFixture $ \root -> do
     $ countOccurrences "Surface.HiddenConstructor" output
   assertEqual "both browse modes include an exported binding" 2
     $ countOccurrences "Surface.publicValue" output
+  assertNoCallStack errors
+
+testReplTypeInference :: Assertion
+testReplTypeInference = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      typeSurface = canonicalRoot </> "type" </> "TypeSurface.hs"
+      oversizedTuple = "(" ++ intercalate "," (replicate 65 "Ground") ++ ")"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show typeSurface
+    , ":set qualification none"
+    , ":set render expression"
+    , "a -> a"
+    , ":t identity"
+    , ":ty (identity)"
+    , ":typ ((identity))"
+    , ":type (((identity)))"
+    , ":type \\x -> x"
+    , ":type identity identity"
+    , ":type \\x -> Pair x x"
+    , ":type \\(Wrapped x) -> x"
+    , ":type \\(%%) -> (%%)"
+    , ":type (identity,)"
+    , ":type \\case { Wrapped x -> x }"
+    , ":type (Ground :: Ground)"
+    , ":type \\(x :: Ground) -> x"
+    , ":type ((,) :: a -> b -> (a, a))"
+    , ":type (Ground :: a)"
+    , ":type (identity :: Wrapped)"
+    , ":type higher"
+    , ":type identity <.> identity <.> identity"
+    , ":type -identity <.> identity"
+    , ":type \\(x :*: y :*: zs) -> x"
+    , ":type " ++ oversizedTuple
+    , ":type"
+    , ":type +v identity"
+    , ":"
+    ]
+  assertEqual "type-inference REPL exit" ExitSuccess exitCode
+  forM_
+    [ "identity :: a -> a"
+    , "(identity) :: a -> a"
+    , "((identity)) :: a -> a"
+    , "(((identity))) :: a -> a"
+    ] $ \rendered -> assertContains
+      "alias and every unique type prefix dispatch identically" rendered output
+  assertContains "lambda inference" "\\x -> x :: a -> a" output
+  assertContains "polymorphic application inference"
+    "identity identity :: a -> a" output
+  assertContains "constructor application inference"
+    "\\x -> Pair x x :: a -> Pair a a" output
+  assertContains "constructor-pattern inference"
+    "\\(Wrapped x) -> x :: Wrapped a -> a" output
+  assertContains "symbolic pattern-variable inference"
+    "\\(%%) -> (%%) :: a -> a" output
+  assertContains "tuple-section inference"
+    "(identity,) :: a -> (b -> b, a)" output
+  assertContains "lambda-case inference"
+    "\\case { Wrapped x -> x } :: Wrapped a -> a" output
+  assertContains "ground expression annotation"
+    "(Ground :: Ground) :: Ground" output
+  assertContains "ground pattern annotation"
+    "\\(x :: Ground) -> x :: Ground -> Ground" output
+  assertEqual "unsound polymorphic annotations are rejected" 2
+    $ countOccurrences "[DJEX_REPL_TYPE_ANNOTATION_UNSUPPORTED]" errors
+  assertContains "ill-kinded ground annotations are rejected"
+    "[DJEX_REPL_TYPE_ANNOTATION]" errors
+  assertContains "higher-rank rendering keeps outer variables out of binders"
+    "higher :: (forall b. b -> b) -> a -> a" output
+  assertEqual "infix forms requiring unavailable fixities are rejected" 3
+    $ countOccurrences "[DJEX_REPL_TYPE_UNSUPPORTED]" errors
+  assertContains "oversized tuples are rejected before entering shared types"
+    "[DJEX_REPL_TYPE_TUPLE]" errors
+  assertEqual ":type does not replace the last synthesis query" 2
+    $ countOccurrences "\\a -> a" output
+  assertEqual "missing expression and obsolete mode are both command errors" 2
+    $ countOccurrences "[DJEX_REPL_COMMAND]" errors
+  assertContains "missing-expression diagnostic"
+    "expected a Haskell expression" errors
+  assertContains "obsolete +v diagnostic"
+    "`:type +v' has gone; use `:type' instead" errors
+  assertNoCallStack errors
+
+testReplTypeScope :: Assertion
+testReplTypeScope = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      typeSurface = canonicalRoot </> "type" </> "TypeSurface.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show typeSurface
+    , ":set qualification none"
+    , ":type Pair"
+    , ":type Wrapped"
+    , ":type convert"
+    , ":type (<.>)"
+    , ":module"
+    , "import qualified TypeSurface as T"
+    , ":type T.identity"
+    , ":type T.Pair"
+    , ":type T.convert"
+    , ":type +d T.number"
+    , ":type identity"
+    , ":type T.Convert"
+    ]
+  assertEqual "type-scope REPL exit" ExitSuccess exitCode
+  assertContains "same-spelled binary constructor has a term signature"
+    "Pair :: a -> b -> Pair a b" output
+  assertContains "same-spelled unary constructor has a term signature"
+    "Wrapped :: a -> Wrapped a" output
+  assertContains "class methods retain their implicit owner constraint"
+    "convert :: Convert a => a -> Wrapped a" output
+  assertContains "operator signatures are inspectable in prefix form"
+    "(<.>) :: (a -> b) -> a -> b" output
+  assertContains "qualified alias resolves an ordinary value"
+    "T.identity :: a -> a" output
+  assertContains "qualified alias resolves a constructor"
+    "T.Pair :: a -> b -> Pair a b" output
+  assertContains "qualified alias resolves a class method"
+    "T.convert :: Convert a => a -> Wrapped a" output
+  assertContains "defaulting distinguishes a user-defined Num class"
+    "T.number :: Num a => a" output
+  assertEqual "out-of-scope value and type-only occurrence are rejected" 2
+    $ countOccurrences "[DJEX_REPL_TYPE_SCOPE]" errors
+  assertContains "unqualified value is unavailable after clearing its module"
+    "identity" errors
+  assertContains "a class name is not accepted in the term namespace"
+    "Convert" errors
+  assertNoCallStack errors
+
+testReplTypeDefaulting :: Assertion
+testReplTypeDefaulting = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      prelude = canonicalRoot </> "type" </> "Prelude.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show prelude
+    , ":set qualification none"
+    , ":type 1"
+    , ":type +d 1"
+    , ":type 1.5"
+    , ":type +d 1.5"
+    , ":type [1,2..3]"
+    , ":type +d [1,2..3]"
+    , ":type [1,2.0]"
+    , ":type \\1 -> ()"
+    , ":type Text.Show.show 1"
+    ]
+  assertEqual "type-defaulting REPL exit" ExitSuccess exitCode
+  assertContains "ordinary integral literal remains polymorphic"
+    "1 :: Num a => a" output
+  assertContains "+d selects Integer for an integral literal"
+    "1 :: Integer" output
+  assertContains "ordinary fractional literal remains polymorphic"
+    "1.5 :: Fractional a => a" output
+  assertContains "+d selects Double for a fractional literal"
+    "1.5 :: Double" output
+  assertContains "enumeration inference is independent of method spellings"
+    "[1,2..3] :: (Enum a, Num a) => [a]" output
+  assertContains "+d defaults an enumerated element type"
+    "[1,2..3] :: [Integer]" output
+  assertContains "superclass-redundant constraints are removed"
+    "[1,2.0] :: Fractional a => [a]" output
+  assertContains "numeric patterns require equality"
+    "\\1 -> () :: (Eq a, Num a) => a -> ()" output
+  assertContains "ordinary defaulting tests loaded candidate evidence"
+    "Text.Show.show 1 :: Text" output
   assertNoCallStack errors
 
 testReplSearchScope :: Assertion
@@ -1461,6 +1633,51 @@ withReplModuleFixture = withTemporaryEnvironment
       [ "module RecordSurface (Record(field), Field) where"
       , "data Field = FieldConstructor"
       , "data Record = RecordConstructor { field :: Field }"
+      ])
+  , ("type/TypeSurface.hs", unlines
+      [ "module TypeSurface"
+      , "  (Pair(..), Wrapped(..), Ground(..), Chain(..), Convert(..), Num(..), higher, identity, (<.>)) where"
+      , "data Pair a b = Pair a b"
+      , "data Wrapped a = Wrapped a"
+      , "data Ground = Ground"
+      , "data Chain a = End | a :*: Chain a"
+      , "class Convert a where"
+      , "  convert :: a -> Wrapped a"
+      , "class Num a where"
+      , "  number :: a"
+      , "identity :: a -> a"
+      , "(<.>) :: (a -> b) -> a -> b"
+      , "higher :: (forall a. a -> a) -> b -> b"
+      ])
+  , ("type/Prelude.hs", unlines
+      [ "module Prelude where"
+      , "import Data.Eq (Eq)"
+      , "import Text.Show (Show)"
+      , "data Integer = Integer"
+      , "data Double = Double"
+      , "class Num a"
+      , "class Num a => Fractional a"
+      , "class Enum a"
+      , "instance Num Integer"
+      , "instance Num Double"
+      , "instance Fractional Double"
+      , "instance Enum Integer"
+      , "instance Enum Double"
+      , "instance Data.Eq.Eq Integer"
+      , "instance Data.Eq.Eq Double"
+      , "instance Text.Show.Show Double"
+      ])
+  , ("type/Data/Eq.hs", unlines
+      [ "{-# LANGUAGE NoImplicitPrelude #-}"
+      , "module Data.Eq where"
+      , "class Eq a"
+      ])
+  , ("type/Text/Show.hs", unlines
+      [ "{-# LANGUAGE NoImplicitPrelude #-}"
+      , "module Text.Show where"
+      , "data Text = Text"
+      , "class Show a where"
+      , "  show :: a -> Text"
       ])
   , ("unresolved/UnresolvedList.hs", unlines
       [ "module UnresolvedList (Local, localValue) where"

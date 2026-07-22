@@ -62,6 +62,7 @@ import Language.Haskell.Djex.Exference.HaskellSrc
 import Language.Haskell.Djex.REPL.Command
 import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Scope
+import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
 import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
@@ -247,6 +248,8 @@ runCommand sourceName history command state = case command of
     showHistory countSource history
     continue state
   InspectDeclaration nameSource -> showInfo state nameSource >> continue state
+  InspectType defaulting expression ->
+    showExpressionType sourceName defaulting expression state >> continue state
   LoadEnvironment targets -> updateExferenceWorkspace
     (loadWorkspace targets)
     ResetScope
@@ -350,6 +353,28 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
 
 ignoreExit :: IO ExitCode -> IO ()
 ignoreExit action = action >> pure ()
+
+showExpressionType
+  :: FilePath
+  -> TypeDefaulting
+  -> String
+  -> ReplState
+  -> IO ()
+showExpressionType sourceName defaulting expression state = case
+    ( exferenceRuntimeBaseSession runtime
+    , exferenceRuntimeScope runtime
+    ) of
+  (Just session, Just scope) -> case inferExpressionType
+      session scope (resultTarget state) defaulting sourceName expression of
+    Left failure -> emitDiagnostic failure
+    Right inferred -> putStrLn $ inferredExpressionSource inferred ++ " :: "
+      ++ renderInferredType
+          (presentationQualification $ presentation state) inferred
+  _ -> replFailure "DJEX_REPL_TYPE_UNAVAILABLE"
+    "type inference has no loaded source workspace"
+    "use :load TARGET before :type"
+ where
+  runtime = exferenceRuntime state
 
 data ShellOutcome
   = ShellCompleted ExitCode

@@ -21,6 +21,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , parseModules
   , environmentFromModule
   , environmentFromModuleAndRatings
+  , environmentFromFiles
   , environmentFromPath
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
@@ -211,6 +212,9 @@ data LoadReport a = LoadReport
 -- stable reason without pretending that accepted syntax was loaded.
 data UnsupportedVocabularyForm
   = ExplicitExportList
+    -- ^ Retained as a compatibility spelling, but no longer emitted. The
+    -- source loader keeps every declaration in the checked inventory while a
+    -- module-aware caller applies the export list to its visibility scope.
   | OpenTypeFamily
   | ClosedTypeFamily
   | DataFamily
@@ -601,9 +605,8 @@ unsupportedVocabularyOccurrences
 unsupportedVocabularyOccurrences = concatMap unsupportedModule
  where
   unsupportedModule modul = case modul of
-    HSE.Module _ moduleHead _ _ declarations ->
-      maybe [] unsupportedModuleHead moduleHead
-        ++ concatMap unsupportedDecl declarations
+    HSE.Module _ _ _ _ declarations ->
+      concatMap unsupportedDecl declarations
     -- An XML page is an executable module form, not an ordinary module with
     -- no declarations.  The declaration extractors deliberately return
     -- 'Nothing' for it, so accepting it here would manufacture an empty
@@ -616,12 +619,6 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
     -- or emitting a cascade for children we cannot load in context.
     HSE.XmlHybrid location _ _ _ _ _ _ _ _ ->
       [unsupportedOccurrence XmlHybridModule location]
-
-  unsupportedModuleHead (HSE.ModuleHead _ _ _ maybeExports) =
-    maybe [] unsupportedExports maybeExports
-
-  unsupportedExports (HSE.ExportSpecList location _) =
-    one ExplicitExportList location
 
   unsupportedDecl declaration = case declaration of
     HSE.TypeFamDecl location _ _ _ ->
@@ -1150,12 +1147,7 @@ environmentFromModule = runLoader . environmentFromModuleM
 environmentFromModuleM
   :: FilePath
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
-environmentFromModuleM modulePath = do
-  environmentResult <- parseModulesM
-    [(haskellSrcExtsParseMode modulePath, modulePath)]
-  case environmentResult of
-    Left failure -> pure $ Left failure
-    Right environment -> rateAndCheckEnvironment [] environment
+environmentFromModuleM modulePath = environmentFromFilesM [modulePath] []
 
 environmentFromModuleAndRatings
   :: FilePath
@@ -1168,19 +1160,42 @@ environmentFromModuleAndRatingsM
   :: FilePath
   -> FilePath
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
-environmentFromModuleAndRatingsM modulePath ratingPath = do
+environmentFromModuleAndRatingsM modulePath ratingPath =
+  environmentFromFilesM [modulePath] [ratingPath]
+
+-- | Load and seal an explicitly ordered collection of Haskell modules and
+-- rating files. Module read, parse, and extraction diagnostics retain the
+-- supplied module order; rating-file IO diagnostics retain the supplied
+-- rating order. An empty module collection is valid and produces the checked
+-- built-in constructor inventory.
+--
+-- This is the file-oriented foundation used by interactive module loading.
+-- It deliberately accepts paths rather than discovering dependencies: callers
+-- that own a module graph can resolve it once and pass its deterministic order
+-- here without copying sources into a temporary directory.
+environmentFromFiles
+  :: [FilePath]
+  -> [FilePath]
+  -> IO (LoadReport CheckedSourceEnvironment)
+environmentFromFiles modulePaths ratingPaths = runLoader
+  $ environmentFromFilesM modulePaths ratingPaths
+
+environmentFromFilesM
+  :: [FilePath]
+  -> [FilePath]
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
+environmentFromFilesM modulePaths ratingPaths = do
   environmentResult <- parseModulesM
-    [(haskellSrcExtsParseMode modulePath, modulePath)]
+    [ (haskellSrcExtsParseMode modulePath, modulePath)
+    | modulePath <- modulePaths
+    ]
   case environmentResult of
     Left failure -> pure $ Left failure
     Right environment -> do
-      ratingsResult <- lift $ ratingsFromFile ratingPath
-      ratings <- case ratingsResult of
-        Left failure -> do
-          tell [ratingFailureDiagnostic failure]
-          pure []
-        Right parsedRatings -> pure parsedRatings
-      rateAndCheckEnvironment ratings environment
+      ratingResults <- lift $ mapM ratingsFromFile ratingPaths
+      forM_ (lefts ratingResults)
+        $ tell . (: []) . ratingFailureDiagnostic
+      rateAndCheckEnvironment (concat $ rights ratingResults) environment
 
 
 environmentFromPath
@@ -1203,18 +1218,7 @@ environmentFromPathM p = do
             $ sort $ filter (".hs" `isSuffixOf`) files
           ratingPaths = map (p </>)
             $ sort $ filter (".ratings" `isSuffixOf`) files
-      environmentResult <- parseModulesM
-        [ (haskellSrcExtsParseMode modulePath, modulePath)
-        | modulePath <- modules
-        ]
-      case environmentResult of
-        Left failure -> pure $ Left failure
-        Right environment -> do
-          ratingResults <- lift $ mapM ratingsFromFile ratingPaths
-          forM_ (lefts ratingResults)
-            $ tell . (: []) . ratingFailureDiagnostic
-          let ratings = concat $ rights ratingResults
-          rateAndCheckEnvironment ratings environment
+      environmentFromFilesM modules ratingPaths
 
 rateAndCheckEnvironment
   :: [(QualifiedName, Penalty)]

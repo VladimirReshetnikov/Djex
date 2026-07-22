@@ -138,6 +138,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , checkedSourceProjection
   , checkSourceEnvironment
   , environmentLoadErrorDiagnostics
+  , environmentFromFiles
   , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
@@ -162,6 +163,8 @@ import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , loadExferenceSession
+  , loadExferenceSessionFromFiles
+  , loadExferenceSessionFromFilesWithPolicy
   , loadExferenceSessionWithPolicy
   , parseExferenceRequest
   )
@@ -4624,6 +4627,74 @@ tests = testGroup "Exference"
           assertBool ("missing policy diagnostic: " ++ show diagnostics)
             $ Just "DJEX_EXF_POLICY_OMISSION"
                 `elem` map diagnosticCode diagnostics
+      , testCase
+          "explicit file loading preserves module order and applies ratings" $
+          withTemporaryFile (unlines
+            [ "module ExplicitSecond where"
+            , "second :: a -> a"
+            ]) $ \secondPath ->
+          withTemporaryFile (unlines
+            [ "module ExplicitFirst where"
+            , "first :: a -> a"
+            ]) $ \firstPath ->
+          withTemporaryFile "ExplicitFirst.first 1.5" $ \firstRatingPath ->
+          withTemporaryFile "ExplicitSecond.second 2.5"
+              $ \secondRatingPath -> do
+            LoadReport result _ <- environmentFromFiles
+              [secondPath, firstPath]
+              [firstRatingPath, secondRatingPath]
+            checked <- expectRight result
+            secondName <- expectRight
+              $ mkQualifiedName ["ExplicitSecond"] "second"
+            firstName <- expectRight
+              $ mkQualifiedName ["ExplicitFirst"] "first"
+            let explicitBindings = filter
+                  ((`elem` [secondName, firstName]) . functionName)
+                  $ sourceFunctions $ checkedSourceProjection checked
+            map (\binding -> (functionName binding, functionPenalty binding))
+                explicitBindings @?=
+              [ (secondName, Penalty 2.5)
+              , (firstName, Penalty 1.5)
+              ]
+      , testCase "explicit files accept no modules and order rating warnings" $
+          do
+            environmentDirectory <- getDataFileName "exference/environment"
+            let secondMissing =
+                  environmentDirectory ++ "/second-missing.ratings"
+                firstMissing = environmentDirectory ++ "/first-missing.ratings"
+            LoadReport result diagnostics <- environmentFromFiles []
+              [secondMissing, firstMissing]
+            checked <- expectRight result
+            assertBool "the empty module set lost built-in constructors"
+              $ not $ null $ sourceFunctions $ checkedSourceProjection checked
+            map diagnosticSource
+                (filter ((== Warning) . diagnosticSeverity) diagnostics) @?=
+              [Just secondMissing, Just firstMissing]
+      , testCase "explicit file session loading applies policy" $
+          withTemporaryFile (unlines
+            [ "module ExplicitPolicy where"
+            , "hidden :: a -> a"
+            ]) $ \modulePath -> do
+              hiddenName <- expectRight
+                $ SharedName.parseName "ExplicitPolicy.hidden"
+              let policy = defaultExferenceSessionPolicy
+                    {exferenceExcludedBindings = [hiddenName]}
+              ExferenceSessionLoadReport result diagnostics <-
+                loadExferenceSessionFromFilesWithPolicy
+                  policy [modulePath] []
+              session <- expectRight result
+              map (\omission -> (omittedName omission, omittedReason omission))
+                  (filter ((== hiddenName) . omittedName)
+                    $ exferenceSessionOmissions session) @?=
+                [(hiddenName, ExcludedByPolicy)]
+              assertBool ("missing explicit-file policy diagnostic: "
+                  ++ show diagnostics)
+                $ Just "DJEX_EXF_POLICY_OMISSION"
+                    `elem` map diagnosticCode diagnostics
+              ExferenceSessionLoadReport emptyResult _ <-
+                loadExferenceSessionFromFiles [] []
+              _ <- expectRight emptyResult
+              pure ()
       , testCase "single-module loading seals neutral ratings" $
           withTemporaryFile (unlines
             [ "module Neutral where"
@@ -4862,7 +4933,7 @@ tests = testGroup "Exference"
               , KindedInstanceBinder
               )
             ]
-      , testCase "module and declaration vocabulary retain source order" $ do
+      , testCase "declaration vocabulary retains source order" $ do
           occurrences <- unsupportedFromSourceWith [HSE.PatternSynonyms]
             $ unlines
             [ "{-# LANGUAGE PatternSynonyms, TypeFamilies #-}"
@@ -4871,32 +4942,30 @@ tests = testGroup "Exference"
             , "type family F a"
             ]
           map unsupportedVocabularyForm occurrences @?=
-            [ ExplicitExportList
-            , PatternSynonymSignature
+            [ PatternSynonymSignature
             , OpenTypeFamily
             ]
           map occurrenceStartLine occurrences @?=
-            [Just 2, Just 3, Just 4]
-      , testCase
-          "explicit exports fail before private declarations reach inventory" $
+            [Just 3, Just 4]
+      , testCase "explicit exports retain the complete checked inventory" $
           withTemporaryFile (unlines
-            [ "{-# LANGUAGE KindSignatures #-}"
-            , "module Visibility (public) where"
+            [ "module Visibility (public) where"
             , "public, private :: Int"
-            , "type Bad (a :: *) = a"
             ]) $ \modulePath -> do
-              LoadReport result diagnostics <- parseModules
-                [(haskellSrcExtsParseMode modulePath, modulePath)]
-              occurrences <- expectUnsupportedVocabulary result
-              -- The kinded synonym binder is now itself a vocabulary
-              -- occurrence, so both boundaries report before any private
-              -- declaration reaches the inventory.
-              map unsupportedVocabularyForm occurrences @?=
-                [ExplicitExportList, KindedSynonymBinder]
-              map occurrenceStartLine occurrences @?= [Just 2, Just 4]
-              assertBool
-                ("partial inventory summaries escaped: " ++ show diagnostics)
-                $ not $ any (isLoaderSummary . diagnosticMessage) diagnostics
+              LoadReport result _ <- environmentFromModule modulePath
+              checked <- expectRight result
+              publicName <- expectRight
+                $ mkQualifiedName ["Visibility"] "public"
+              privateName <- expectRight
+                $ mkQualifiedName ["Visibility"] "private"
+              let declaredNames = map functionName
+                    $ sourceFunctions $ checkedSourceProjection checked
+              assertBool "the explicit export was not loaded"
+                $ publicName `elem` declaredNames
+              -- Export lists define an interactive visibility projection, not
+              -- the dependency-complete inventory needed to check the module.
+              assertBool "the loader prematurely discarded a private binding"
+                $ privateName `elem` declaredNames
       , testCase "class vocabulary modifiers retain nested source order" $ do
           occurrences <- unsupportedFromSourceWith [HSE.DefaultSignatures]
             $ unlines

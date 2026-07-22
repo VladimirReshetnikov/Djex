@@ -12,6 +12,8 @@ module Language.Haskell.Djex.Exference.HaskellSrc
   , loadDefaultExferenceSessionWithPolicy
   , loadExferenceSession
   , loadExferenceSessionWithPolicy
+  , loadExferenceSessionFromFiles
+  , loadExferenceSessionFromFilesWithPolicy
   , parseExferenceRequest
   , parseExferenceRequestWithCheckedTarget
   ) where
@@ -36,8 +38,11 @@ import qualified Language.Haskell.Djex.Exference.Internal.Request as Request
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
 import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.EnvironmentParser
-  ( LoadReport (..)
+  ( CheckedSourceEnvironment
+  , EnvironmentLoadError
+  , LoadReport (..)
   , checkedSourcePreparedInventory
+  , environmentFromFiles
   , environmentFromPath
   , environmentLoadErrorDiagnostics
   , haskellSrcExtsParseMode
@@ -135,7 +140,39 @@ loadExferenceSessionWithPolicy
   -> IO ExferenceSessionLoadReport
 loadExferenceSessionWithPolicy policy path = do
   LoadReport sourceResult sourceDiagnostics <- environmentFromPath path
-  pure $ case sourceResult of
+  pure $ sealSourceLoadReport policy sourceResult sourceDiagnostics
+
+-- | Load explicitly ordered Haskell module and rating files, validate their
+-- complete inventory, and seal an Exference session with the default policy.
+-- An empty module list is valid and retains Exference's built-in constructor
+-- inventory. Dependency discovery remains the caller's responsibility.
+loadExferenceSessionFromFiles
+  :: [FilePath]
+  -> [FilePath]
+  -> IO ExferenceSessionLoadReport
+loadExferenceSessionFromFiles = loadExferenceSessionFromFilesWithPolicy
+  defaultExferenceSessionPolicy
+
+-- | Policy-aware explicit-file counterpart of 'loadExferenceSessionWithPolicy'.
+-- Both path collections are consumed in caller order and use the same
+-- read/parse/rating/check/seal pipeline as directory loading.
+loadExferenceSessionFromFilesWithPolicy
+  :: ExferenceSessionPolicy
+  -> [FilePath]
+  -> [FilePath]
+  -> IO ExferenceSessionLoadReport
+loadExferenceSessionFromFilesWithPolicy policy modulePaths ratingPaths = do
+  LoadReport sourceResult sourceDiagnostics <-
+    environmentFromFiles modulePaths ratingPaths
+  pure $ sealSourceLoadReport policy sourceResult sourceDiagnostics
+
+sealSourceLoadReport
+  :: ExferenceSessionPolicy
+  -> Either EnvironmentLoadError CheckedSourceEnvironment
+  -> [Diagnostic]
+  -> ExferenceSessionLoadReport
+sealSourceLoadReport policy sourceResult sourceDiagnostics =
+  case sourceResult of
     Left failure -> ExferenceSessionLoadReport
       { exferenceSessionLoadResult = Left
           $ environmentLoadErrorDiagnostics failure

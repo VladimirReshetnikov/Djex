@@ -6,6 +6,8 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , loadDefaultExferenceSession
   , loadDefaultExferenceSessionWithPolicy
   , loadExferenceSession
+  , loadExferenceSessionFromFiles
+  , loadExferenceSessionFromFilesWithPolicy
   , loadExferenceSessionWithPolicy
   )
 import qualified Language.Haskell.Exference.CLI as CLI
@@ -23,6 +25,8 @@ main = defaultMain $ testGroup "Exference frontend import surface"
       loadDefaultExferenceSession `seq`
       loadDefaultExferenceSessionWithPolicy `seq`
       loadExferenceSession `seq`
+      loadExferenceSessionFromFiles `seq`
+      loadExferenceSessionFromFilesWithPolicy `seq`
       loadExferenceSessionWithPolicy `seq`
       pure ()
   , testCase "retains the checked-source compatibility session bridge" $

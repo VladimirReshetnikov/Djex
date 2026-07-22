@@ -80,6 +80,7 @@ import Language.Haskell.Synthesis.KindInference
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
 import Language.Haskell.Synthesis.Name
   ( Name
+  , nameSpecial
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Type (Type)
@@ -264,7 +265,7 @@ scopeExferenceSession
 scopeExferenceSession visible session = do
   let source = reusableSearchView session
       functions = filter
-        ((`Set.member` visible) . functionName)
+        (nameVisible . functionName)
         $ environmentFunctions source
       -- Exference eliminates a datatype as one exhaustive operation. Keeping
       -- it when only some constructors are imported would let synthesis emit
@@ -273,8 +274,15 @@ scopeExferenceSession visible session = do
       deconstructors = filter constructorsVisible
         $ environmentDeconstructors source
       constructorsVisible deconstructor = all
-        ((`Set.member` visible) . constructorName)
+        (nameVisible . constructorName)
         $ deconstructorConstructors deconstructor
+      -- Lists, tuples, unit, and the function constructor are syntax-level
+      -- identities. They have no importable defining module, so hiding every
+      -- source module must not make those constructors disappear from search.
+      nameVisible name = Set.member name visible
+        || case nameSpecial name of
+          Just _ -> True
+          Nothing -> False
       scoped = source
         { environmentFunctions = functions
         , environmentDeconstructors = deconstructors

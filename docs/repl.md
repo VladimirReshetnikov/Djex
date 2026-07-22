@@ -127,12 +127,12 @@ settings, `:show` subjects, and paths where appropriate.
 | `:cd DIR` | Change the process working directory. |
 | `:compare TYPE` | Run one independently parsed query with both backends. |
 | `:djinn TYPE` | Run one Djinn query. |
-| `:download PACKAGE ...` (`:dl`) | Download packages and dependencies into Cabal's configured source cache. |
+| `:download CABAL_TARGET ...` (`:dl`) | Ask Cabal to fetch targets and dependencies into its configured source cache. |
 | `:exference TYPE` | Run one Exference query. |
 | `:help [COMMAND]` (`:h`, `:?`) | Show the command summary or detailed command help. |
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
 | `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors and class methods. |
-| `:install PACKAGE ...` | Build and install library packages through Cabal. |
+| `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
 | `import DECLARATION` | Append a Haskell import to the Exference prompt context. |
 | `:load [TARGET ...]` (`:l`) | Replace the Exference target set and load local dependencies. No targets clears it. |
 | `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the Exference prompt context. |
@@ -171,58 +171,75 @@ shows settings. The three workspace views answer different questions:
 Package operations have both scriptable and interactive forms:
 
 ```console
-djex download PACKAGE ...
-djex install PACKAGE ...
+djex download CABAL_TARGET ...
+djex install [--lib] CABAL_TARGET ...
 ```
 
 ```text
-:download PACKAGE ...
-:dl PACKAGE ...
-:install PACKAGE ...
+:download CABAL_TARGET ...
+:dl CABAL_TARGET ...
+:install [--lib] CABAL_TARGET ...
 ```
 
-`download` invokes `cabal fetch -- PACKAGE ...`. Cabal resolves dependencies
-and places their source archives in its configured cache for later use.
-`install` invokes
-`cabal install --lib --ignore-project -- PACKAGE ...`: library mode is
-explicit, and the surrounding checkout's `cabal.project` cannot silently
-change the install plan. Cabal still applies its configured repositories,
-solver, compiler, store, and default GHC package environment. Calling
-`install` directly may download anything not already cached.
+`download` invokes `cabal fetch -- CABAL_TARGET ...`. Cabal resolves
+dependencies and fetches any needed source archives into its configured cache.
+Ordinary `install` invokes
+`cabal install --ignore-project -- CABAL_TARGET ...` and follows Cabal's
+executable-install semantics. A leading Djex-owned `--lib` instead invokes
+`cabal install --lib --ignore-project -- CABAL_TARGET ...` and selects Cabal's
+library mode. The surrounding checkout's `cabal.project` therefore cannot
+silently change either install plan. Cabal still applies its configured
+repositories, solver, compiler, store, executable directory, and default GHC
+package environment. Calling `install` directly may download anything not
+already cached.
 
-REPL package targets use the same word, quoted-string, and whole `[String]`
+REPL Cabal targets use the same word, quoted-string, and whole `[String]`
 argument forms as source commands. Empty targets and control characters are
 rejected before Cabal starts. Djex uses a direct process argv, not a shell, and
-inserts `--` before every target; a value such as `"--dry-run"` is therefore a
-package target rather than an injected Cabal option. Cabal's stdout and stderr
-are streamed unchanged. `:d` is ambiguous between `:djinn` and `:download`,
-and `:in` is ambiguous between `:info` and `:install`; the exact `:i` alias
-continues to mean `:info`.
+inserts `--` before every target. The only recognized install option is a
+leading `--lib`; write a leading `--` first to make even that spelling a target.
+Other option-shaped values such as `"--dry-run"` are targets rather than
+injected Cabal options. Cabal's stdout and stderr are streamed unchanged, while
+its stdin is closed so a child cannot consume later REPL or script input.
+Unrelated inherited file descriptors are also closed. `:d` is ambiguous
+between `:djinn` and `:download`, and `:in` is ambiguous between `:info` and
+`:install`; the exact `:i` alias continues to mean `:info`.
+
+`CABAL_TARGET` is intentionally broader than a Hackage package name. Cabal
+accepts repository package/version and component selectors, local package
+directories or `.cabal` files, local source archives, and source-archive URLs.
+Relative paths are resolved from the REPL's current directory. Repository
+security metadata protects repository-selected archives, but it does not
+authenticate an arbitrary local path or URL supplied as a target.
 
 These commands authorize external effects. Fetching uses the network according
 to Cabal's configuration. Installing a Haskell package can execute code shipped
-by that package through custom setup programs, hooks, preprocessors, compiler
+by that target through custom setup programs, hooks, preprocessors, compiler
 plugins, Template Haskell, and build tools; it can also update Cabal's store and
-default package environment. Hackage archive verification is not a build
-sandbox. Inspect and trust a package before running `install`, and use an
-operating-system sandbox when its build must not see credentials, the network,
-or unrelated writable files.
+executable or package environment. Hackage archive verification is not a build
+sandbox and may not apply to the selected target. Inspect and trust a target
+before running `install`, and use an operating-system sandbox when its build
+must not see credentials, the network, or unrelated writable files.
 
 Package-manager state and Djex source-workspace state are deliberately
 independent. Success or failure does not change the selected backend, search
 settings, last synthesis query, targets, loaded modules, or prompt imports.
-More importantly, `cabal install --lib` produces compiled package interfaces;
-Djex does not read the GHC package database or `.hi` files, so an installed
-module does not become available to `import`, `:module`, synthesis, or `:type`.
+More importantly, Cabal installation produces executables and/or compiled
+package interfaces; Djex does not read the GHC package database or `.hi` files,
+so an installed module does not become available to `import`, `:module`,
+synthesis, or `:type`.
 To expose an API to Djex, acquire compatible `.hs`/`.lhs` source (often a small
 signature-stub environment is more practical than a package's complete source
 tree) and admit the appropriate source directory with `:load` or `:add`.
 
-The top-level forms return Cabal's exact exit status, return 1 if Cabal cannot
-be launched, and return 2 for malformed Djex arguments. Inside the REPL the
-same structured failure is recoverable: the prompt continues and a later
-`:quit` remains successful. Ctrl-C interrupts the child command and restores
-the preceding interactive state.
+The top-level forms propagate ordinary Cabal exit codes, return 1 if Cabal
+cannot be launched, return 2 for malformed Djex arguments, and return 130 for
+an interrupt. Inside the REPL the same structured failure is recoverable: the
+prompt continues and a later `:quit` remains successful. Cabal runs in a
+dedicated process group; Ctrl-C requests group interruption, waits briefly for
+cleanup, then terminates Cabal if it has not exited. Windows job support extends
+that termination to descendants. A process that deliberately detaches from its
+group remains outside Djex's portable process-control boundary.
 
 ## Source targets and dependency loading
 
@@ -579,17 +596,18 @@ child process's output, and a launch or nonzero-exit failure becomes a REPL
 diagnostic. The shell runs as a child: a shell `cd` cannot change the REPL's
 working directory, so use `:cd` for that.
 
-Pressing Ctrl-C interrupts the current read, query, or command, prints
-`Interrupted.`, and returns to the prompt with the preceding REPL state. EOF
-at the main prompt and `:quit` are successful exits.
+Pressing Ctrl-C interrupts the current read, query, or ordinary command, prints
+`Interrupted.`, and returns to the prompt with the preceding REPL state. A
+package operation instead reports `DJEX_PACKAGE_INTERRUPTED` after its managed
+process-group cleanup. EOF at the main prompt and `:quit` are successful exits.
 
 ## Diagnostics and process status
 
 Package, parse, validation, load, search, rendering, setting, script, and shell
 failures are rendered as structured Djex diagnostics, normally on stderr. They
-are recoverable inside a session: the prompt continues, and the eventual process
-status remains success when the user leaves with `:quit` or EOF. Both-mode
-failure isolation follows the same rule.
+are recoverable inside a session: the prompt continues, and the eventual
+process status remains success when the user leaves with `:quit` or EOF.
+Both-mode failure isolation follows the same rule.
 
 Failures needed before the loop can exist, such as failure to build the
 standard Djinn session or validate a requested history path, make `runRepl`

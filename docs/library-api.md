@@ -19,8 +19,8 @@ Run without installing:
 cabal run exe:djex
 cabal run exe:djex -- djinn --render expression "a -> a"
 cabal run exe:djex -- exference --select first "a -> a"
-cabal run exe:djex -- download PACKAGE
-cabal run exe:djex -- install PACKAGE
+cabal run exe:djex -- download CABAL_TARGET
+cabal run exe:djex -- install [--lib] CABAL_TARGET
 ```
 
 Or install the three commands into Cabal's executable directory:
@@ -90,9 +90,10 @@ This API embeds a terminal frontend, not an abstract protocol: it reads through
 Haskeline, writes results and diagnostics to the process streams, can change
 the process working directory, and permits both `:!` shell commands and
 `:download`/`:install` Cabal effects. Package installation can execute
-package-supplied build code and does not add compiled modules to Djex's
-source-only inventory. Use the checked
-adapters below when an editor, service, or GUI needs to own input, output,
+target-supplied build code and does not add compiled modules to Djex's
+source-only inventory. Package children receive no REPL stdin or unrelated
+inherited file descriptors. Use the checked adapters below when an editor,
+service, or GUI needs to own input, output,
 authorization, or session persistence. The complete interactive contract,
 including commands, settings, transactional reloads, both-mode isolation, and
 the distinction from the historical Djinn REPL, is in the

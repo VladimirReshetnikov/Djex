@@ -200,10 +200,13 @@ rather than maintaining another command grammar.
 Private `Language.Haskell.Djex.Package` is the single process boundary for the
 top-level and REPL package commands. It validates the target-vector invariant,
 resolves Cabal from `PATH`, constructs fixed argv prefixes for `fetch` and
-project-independent `install --lib`, streams inherited process output, and
-normalizes launch, interrupt, and exit reporting. Targets follow an explicit
-`--` separator and never pass through a shell. The operation is intentionally
-outside `ReplState`: it can mutate Cabal's cache, store, and package environment
+project-independent `install`, with an explicit library mode, streams inherited
+process output, and normalizes launch, interrupt, and exit reporting. Targets
+follow an explicit `--` separator and never pass through a shell. Child stdin
+and unrelated file descriptors are closed. A dedicated process group plus
+Windows job support bounds ordinary descendant cleanup on interruption. The
+operation is intentionally outside `ReplState`: it can mutate Cabal's cache,
+store, and package environment
 but cannot mutate backend sessions, query history, or the source workspace.
 This also keeps the semantic boundary honest—Cabal installation does not turn
 compiled interfaces into neutral Djex declarations.
@@ -330,12 +333,14 @@ legacy environment compatibility form: it recursively contributes source and
 are discovered transitively. The workspace does not consult a GHC package
 database or load interface/object code.
 
-The package commands do not weaken this source-only invariant. `download`
-populates Cabal's source cache and `install` builds a library into Cabal's own
-store/environment; neither adds a workspace target. A caller that wants package
-vocabulary in synthesis must separately load compatible source or signature
-stubs. Package builds are arbitrary-code execution and remain an explicit
-frontend action, never an implicit consequence of parsing an import or query.
+The package commands do not weaken this source-only invariant. `download` asks
+Cabal to populate its source cache, while `install` builds executable
+components or, with `--lib`, a library into Cabal's own store and environment;
+neither adds a workspace target. A caller that wants package vocabulary in
+synthesis must separately load compatible source or signature stubs. Cabal
+targets include repository selectors, local sources, and archive URLs. Package
+builds are arbitrary-code execution and remain an explicit frontend action,
+never an implicit consequence of parsing an import or query.
 
 Every filesystem target is canonicalized at admission, so a later `:cd` cannot
 retarget `:reload`. The workspace parses the whole candidate graph, rejects

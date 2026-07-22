@@ -33,7 +33,9 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   )
 import Language.Haskell.Djex.Package
   ( PackageOperation (..)
+  , PackageInstallMode (..)
   , packageOperationName
+  , parsePackageInstall
   , runPackageOperation
   , validatePackageTargets
   )
@@ -111,9 +113,11 @@ runArguments arguments = case arguments of
   ["download", "-h"] ->
     putStrLn (packageUsage DownloadOperation) >> pure ExitSuccess
   ["install", "--help"] ->
-    putStrLn (packageUsage InstallOperation) >> pure ExitSuccess
+    putStrLn (packageUsage $ InstallOperation InstallExecutables)
+      >> pure ExitSuccess
   ["install", "-h"] ->
-    putStrLn (packageUsage InstallOperation) >> pure ExitSuccess
+    putStrLn (packageUsage $ InstallOperation InstallExecutables)
+      >> pure ExitSuccess
   ["repl", "--help"] -> putStrLn replUsage >> pure ExitSuccess
   ["repl", "-h"] -> putStrLn replUsage >> pure ExitSuccess
   [] -> runRepl defaultReplOptions
@@ -124,24 +128,33 @@ runArguments arguments = case arguments of
   "exference" : backendArguments ->
     runParsed (parseExferenceOptions backendArguments) runExference
   "download" : packageArguments ->
-    runPackageArguments DownloadOperation packageArguments
+    runDownloadArguments packageArguments
   "install" : packageArguments ->
-    runPackageArguments InstallOperation packageArguments
+    runInstallArguments packageArguments
   commandArgument : _ ->
     usageFailure $ "unknown command " ++ show commandArgument
 
 runParsed :: Either String options -> (options -> IO ExitCode) -> IO ExitCode
 runParsed parsed action = either usageFailure action parsed
 
-runPackageArguments :: PackageOperation -> [String] -> IO ExitCode
-runPackageArguments operation rawArguments = case
-    validatePackageTargets arguments of
-  Left failure -> usageFailure $ packageOperationName operation ++ ": " ++ failure
-  Right targets -> runPackageOperation operation targets
+runDownloadArguments :: [String] -> IO ExitCode
+runDownloadArguments rawArguments = case validatePackageTargets arguments of
+  Left failure -> packageUsageFailure DownloadOperation failure
+  Right targets -> runPackageOperation DownloadOperation targets
  where
   arguments = case rawArguments of
     "--" : targets -> targets
     targets -> targets
+
+runInstallArguments :: [String] -> IO ExitCode
+runInstallArguments arguments = case parsePackageInstall arguments of
+  Left failure -> packageUsageFailure
+    (InstallOperation InstallExecutables) failure
+  Right (mode, targets) -> runPackageOperation (InstallOperation mode) targets
+
+packageUsageFailure :: PackageOperation -> String -> IO ExitCode
+packageUsageFailure operation failure = usageFailure
+  $ packageOperationName operation ++ ": " ++ failure
 
 parseReplOptions :: [String] -> Either String ReplOptions
 parseReplOptions arguments = case
@@ -476,8 +489,8 @@ fullUsage = intercalate "\n"
   , "  djex repl [OPTION...]"
   , "  djex djinn [OPTION...] TYPE"
   , "  djex exference [OPTION...] TYPE"
-  , "  djex download PACKAGE ..."
-  , "  djex install PACKAGE ..."
+  , "  djex download CABAL_TARGET ..."
+  , "  djex install [--lib] CABAL_TARGET ..."
   , ""
   , usageInfo "REPL options:" replOptionDescriptors
   , usageInfo "Common options:" commonOptions
@@ -513,17 +526,19 @@ backendUsage selectedBackend = intercalate "\n"
 
 packageUsage :: PackageOperation -> String
 packageUsage operation = intercalate "\n"
-  [ "Usage: djex " ++ packageOperationName operation ++ " PACKAGE ..."
+  [ "Usage: djex " ++ packageOperationName operation ++ arguments operation
   , ""
   , summary operation
-  , "Package targets are passed after -- and cannot become Cabal options."
+  , "Cabal targets are passed after -- and cannot become Cabal options."
   , "This command does not load compiled package modules into the Djex REPL."
   ]
  where
   summary DownloadOperation =
-    "Download packages and dependencies into Cabal's configured source cache."
-  summary InstallOperation =
-    "Build and install library packages with cabal install --lib."
+    "Ask Cabal to fetch targets and dependencies into its configured source cache."
+  summary (InstallOperation _) =
+    "Build and install package executables, or libraries with --lib."
+  arguments DownloadOperation = " CABAL_TARGET ..."
+  arguments (InstallOperation _) = " [--lib] CABAL_TARGET ..."
 
 usageFailure :: String -> IO ExitCode
 usageFailure message = do

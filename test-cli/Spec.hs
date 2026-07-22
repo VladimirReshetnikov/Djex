@@ -11,6 +11,7 @@ import System.Directory
   , createDirectoryLink
   , createDirectoryIfMissing
   , createFileLink
+  , doesFileExist
   , findExecutable
   , getPermissions
   , getTemporaryDirectory
@@ -42,6 +43,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
   [ testCase "global help and version load no backend" testGlobalInformation
   , testCase "package commands delegate exact target argv to Cabal"
       testPackageCommands
+  , testCase "package subprocesses close stdin and inherit output streams"
+      testPackageProcessIO
   , testCase "package command validation and subprocess failures are exact"
       testPackageFailures
   , testCase "REPL dispatch validates startup options without loading"
@@ -143,8 +146,8 @@ testGlobalInformation = do
   assertEqual "help exit" ExitSuccess helpExit
   assertContains "global help" "djex djinn [OPTION...] TYPE" help
   assertContains "global help" "djex exference [OPTION...] TYPE" help
-  assertContains "global help" "djex download PACKAGE ..." help
-  assertContains "global help" "djex install PACKAGE ..." help
+  assertContains "global help" "djex download CABAL_TARGET ..." help
+  assertContains "global help" "djex install [--lib] CABAL_TARGET ..." help
   assertContains "Djinn default follows its public options"
     ("positive proof-candidate limit (default: "
       ++ show (Djex.optionCutoff Djex.defaultQueryOptions) ++ ")") help
@@ -174,7 +177,7 @@ testPackageCommands = withFakeCabal 0 $ \_ fakeBin calls -> do
     runDjex ["download", "--help"]
   assertEqual "download help exit" ExitSuccess downloadHelpExit
   assertContains "download help usage"
-    "Usage: djex download PACKAGE ..." downloadHelp
+    "Usage: djex download CABAL_TARGET ..." downloadHelp
   assertContains "download help documents argument separation"
     "passed after -- and cannot become Cabal options" downloadHelp
   assertEqual "download help stderr" "" downloadHelpErrors
@@ -183,9 +186,9 @@ testPackageCommands = withFakeCabal 0 $ \_ fakeBin calls -> do
     runDjex ["install", "-h"]
   assertEqual "install help exit" ExitSuccess installHelpExit
   assertContains "install help usage"
-    "Usage: djex install PACKAGE ..." installHelp
+    "Usage: djex install [--lib] CABAL_TARGET ..." installHelp
   assertContains "install help documents library mode"
-    "cabal install --lib" installHelp
+    "libraries with --lib" installHelp
   assertEqual "install help stderr" "" installHelpErrors
 
   (downloadExit, downloadOutput, downloadErrors) <- runDjexWithPackagePath
@@ -193,21 +196,35 @@ testPackageCommands = withFakeCabal 0 $ \_ fakeBin calls -> do
     ["download", "alpha-1.0", "--dry-run", "path with spaces"]
   assertEqual "download exit" ExitSuccess downloadExit
   assertContains "download success summary"
-    "Downloaded through Cabal: \"alpha-1.0\", \"--dry-run\", \"path with spaces\""
+    "Cabal fetch completed for: \"alpha-1.0\", \"--dry-run\", \"path with spaces\""
     downloadOutput
   assertEqual "download stderr" "" downloadErrors
 
   (installExit, installOutput, installErrors) <- runDjexWithPackagePath
     fakeBin calls
-    ["install", "--", "beta-2.0", "--project-file=trap"]
-  assertEqual "install exit" ExitSuccess installExit
-  assertContains "install success summary"
-    "Installed through Cabal: \"beta-2.0\", \"--project-file=trap\""
+    ["install", "beta-2.0", "--project-file=trap"]
+  assertEqual "default install exit" ExitSuccess installExit
+  assertContains "default install success summary"
+    "Cabal install completed for: \"beta-2.0\", \"--project-file=trap\""
     installOutput
-  assertEqual "install stderr" "" installErrors
+  assertEqual "default install stderr" "" installErrors
+
+  (libraryExit, libraryOutput, libraryErrors) <- runDjexWithPackagePath
+    fakeBin calls ["install", "--lib", "gamma-3.0"]
+  assertEqual "library install exit" ExitSuccess libraryExit
+  assertContains "library install success summary"
+    "Cabal install completed for: \"gamma-3.0\"" libraryOutput
+  assertEqual "library install stderr" "" libraryErrors
+
+  (escapedExit, escapedOutput, escapedErrors) <- runDjexWithPackagePath
+    fakeBin calls ["install", "--", "--lib"]
+  assertEqual "escaped --lib target exit" ExitSuccess escapedExit
+  assertContains "escaped --lib remains the reported target"
+    "Cabal install completed for: \"--lib\"" escapedOutput
+  assertEqual "escaped --lib stderr" "" escapedErrors
 
   recorded <- readFile calls
-  assertEqual "Cabal receives exact separated download and install argv"
+  assertEqual "Cabal receives exact default, library, and escaped install argv"
     (unlines
       [ "CALL"
       , "ARG:fetch"
@@ -217,11 +234,44 @@ testPackageCommands = withFakeCabal 0 $ \_ fakeBin calls -> do
       , "ARG:path with spaces"
       , "CALL"
       , "ARG:install"
-      , "ARG:--lib"
       , "ARG:--ignore-project"
       , "ARG:--"
       , "ARG:beta-2.0"
       , "ARG:--project-file=trap"
+      , "CALL"
+      , "ARG:install"
+      , "ARG:--lib"
+      , "ARG:--ignore-project"
+      , "ARG:--"
+      , "ARG:gamma-3.0"
+      , "CALL"
+      , "ARG:install"
+      , "ARG:--ignore-project"
+      , "ARG:--"
+      , "ARG:--lib"
+      ]) recorded
+
+testPackageProcessIO :: Assertion
+testPackageProcessIO = withFakeCabalExecutable fakeCabalIoSource
+    $ \_ fakeBin calls -> do
+  (exitCode, output, errors) <- runDjexInputWithPackagePath fakeBin calls
+    ["download", "stream-target"] "sentinel must not reach Cabal\n"
+  assertEqual "stream-observing fake Cabal exit" ExitSuccess exitCode
+  assertContains "Cabal child sees closed stdin" "FAKE_STDIN_EOF" output
+  assertBool "sentinel input leaked into the Cabal child" $
+    not $ "FAKE_STDIN_DATA" `isInfixOf` output
+  assertContains "fake Cabal stdout is inherited" "FAKE_STDOUT_MARKER" output
+  assertContains "Djex completion follows inherited child stdout"
+    "Cabal fetch completed for: \"stream-target\"" output
+  assertContains "fake Cabal stderr is inherited" "FAKE_STDERR_MARKER" errors
+  assertNoCallStack errors
+  recorded <- readFile calls
+  assertEqual "stream-observing fake receives the normal download argv"
+    (unlines
+      [ "CALL"
+      , "ARG:fetch"
+      , "ARG:--"
+      , "ARG:stream-target"
       ]) recorded
 
 testPackageFailures :: Assertion
@@ -230,6 +280,18 @@ testPackageFailures = do
     "download: expected at least one package target"
   assertUsageFailure ["install", "--"]
     "install: expected at least one package target"
+
+  withFakeCabal 0 $ \_ fakeBin calls -> do
+    (exitCode, output, errors) <- runDjexWithPackagePath fakeBin calls
+      ["download", "bad\npackage"]
+    assertEqual "control-character target exit" (ExitFailure 2) exitCode
+    assertEqual "control-character target stdout" "" output
+    assertContains "control-character target diagnostic"
+      "package targets must be nonempty and contain no control characters"
+      errors
+    launched <- doesFileExist calls
+    assertBool "control-character target launched Cabal" $ not launched
+    assertNoCallStack errors
 
   withFakeCabal 37 $ \_ fakeBin calls -> do
     (exitCode, output, errors) <- runDjexWithPackagePath fakeBin calls
@@ -261,6 +323,18 @@ testPackageFailures = do
       "cannot find `cabal' on PATH" errors
     assertNoCallStack errors
 
+  withFakeCabalExecutable missingInterpreterCabalSource
+      $ \_ fakeBin unusedLog -> do
+    (exitCode, output, errors) <- runDjexWithPackagePath fakeBin unusedLog
+      ["download", "broken-launch-target"]
+    assertEqual "missing interpreter exit" (ExitFailure 1) exitCode
+    assertEqual "missing interpreter stdout" "" output
+    assertContains "missing interpreter is a tool diagnostic"
+      "[DJEX_PACKAGE_TOOL]" errors
+    assertContains "located but unlaunchable Cabal is reported at launch"
+      "cannot run Cabal package command" errors
+    assertNoCallStack errors
+
 testReplPackageCommands :: Assertion
 testReplPackageCommands = withFakeCabal 19 $ \root fakeBin calls -> do
   (exitCode, output, errors) <- runDjexInputWithPackagePath fakeBin calls
@@ -276,18 +350,22 @@ testReplPackageCommands = withFakeCabal 19 $ \root fakeBin calls -> do
       , ":down --dry-run \"package with spaces\""
       , ":download"
       , ":ins --project-file=trap package-b"
+      , ":install --lib library-b"
+      , ":install -- --lib"
       , ":install"
       , ":"
       , ":quit"
       ]
   assertEqual "REPL survives package command failures" ExitSuccess exitCode
   assertContains "download help resolves a command prefix"
-    ":download PACKAGE ..." output
+    ":download CABAL_TARGET ..." output
   assertContains "download help reports its alias" "aliases: :dl" output
   assertContains "install help resolves a command prefix"
-    ":install PACKAGE ..." output
-  assertContains "install help documents isolated library mode"
-    "cabal install --lib outside the local project" output
+    ":install [--lib] CABAL_TARGET ..." output
+  assertContains "install help documents default executable mode"
+    "defaults to Cabal's executable mode; --lib installs libraries" output
+  assertContains "install help documents escaping the controlled option"
+    "a leading -- makes a following --lib an ordinary package target" output
   assertContains "exact :i alias still resolves to :info"
     "No declaration for definitelyMissing" output
   assertEqual "package commands and help do not replace query history" 2
@@ -298,9 +376,9 @@ testReplPackageCommands = withFakeCabal 19 $ \root fakeBin calls -> do
     "ambiguous command :in" errors
   assertEqual "both missing package-target commands are rejected" 2
     $ countOccurrences "expected at least one package target" errors
-  assertEqual "both Cabal failures are reported without leaving the REPL" 2
+  assertEqual "all Cabal failures are reported without leaving the REPL" 4
     $ countOccurrences "[DJEX_PACKAGE_COMMAND]" errors
-  assertEqual "REPL reports the fake Cabal status twice" 2
+  assertEqual "REPL reports every fake Cabal status" 4
     $ countOccurrences "exit status 19" errors
   assertNoCallStack errors
 
@@ -314,11 +392,21 @@ testReplPackageCommands = withFakeCabal 19 $ \root fakeBin calls -> do
       , "ARG:package with spaces"
       , "CALL"
       , "ARG:install"
-      , "ARG:--lib"
       , "ARG:--ignore-project"
       , "ARG:--"
       , "ARG:--project-file=trap"
       , "ARG:package-b"
+      , "CALL"
+      , "ARG:install"
+      , "ARG:--lib"
+      , "ARG:--ignore-project"
+      , "ARG:--"
+      , "ARG:library-b"
+      , "CALL"
+      , "ARG:install"
+      , "ARG:--ignore-project"
+      , "ARG:--"
+      , "ARG:--lib"
       ]) recorded
 
 testReplDispatch :: Assertion
@@ -1748,8 +1836,14 @@ withFakeCabal
   :: Int
   -> (FilePath -> FilePath -> FilePath -> IO result)
   -> IO result
-withFakeCabal status action = withTemporaryEnvironment
-    [("bin/cabal", fakeCabalSource status)] $ \root -> do
+withFakeCabal status = withFakeCabalExecutable $ fakeCabalSource status
+
+withFakeCabalExecutable
+  :: String
+  -> (FilePath -> FilePath -> FilePath -> IO result)
+  -> IO result
+withFakeCabalExecutable source action = withTemporaryEnvironment
+    [("bin/cabal", source)] $ \root -> do
   let executable = root </> "bin" </> "cabal"
       logPath = root </> "cabal-calls"
   permissions <- getPermissions executable
@@ -1761,13 +1855,35 @@ withFakeCabal status action = withTemporaryEnvironment
 -- by the fake executable. No external utility or network access is involved.
 fakeCabalSource :: Int -> String
 fakeCabalSource status = unlines
+  $ fakeCabalLogLines ++ ["exit " ++ show status]
+
+fakeCabalIoSource :: String
+fakeCabalIoSource = unlines $ fakeCabalLogLines ++
+  [ "if IFS= read -r input"
+  , "then"
+  , "  printf 'FAKE_STDIN_DATA:%s\\n' \"$input\""
+  , "else"
+  , "  printf 'FAKE_STDIN_EOF\\n'"
+  , "fi"
+  , "printf 'FAKE_STDOUT_MARKER\\n'"
+  , "printf 'FAKE_STDERR_MARKER\\n' >&2"
+  , "exit 0"
+  ]
+
+fakeCabalLogLines :: [String]
+fakeCabalLogLines =
   [ "#!/bin/sh"
   , "printf 'CALL\\n' >> \"$DJEX_FAKE_CABAL_LOG\""
   , "for argument"
   , "do"
   , "  printf 'ARG:%s\\n' \"$argument\" >> \"$DJEX_FAKE_CABAL_LOG\""
   , "done"
-  , "exit " ++ show status
+  ]
+
+missingInterpreterCabalSource :: String
+missingInterpreterCabalSource = unlines
+  [ "#!/djex-test-missing-interpreter"
+  , "exit 0"
   ]
 
 runRepl

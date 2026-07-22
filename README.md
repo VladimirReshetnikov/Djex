@@ -112,8 +112,8 @@ cabal run exe:djex
 cabal run exe:djex -- repl --backend both
 cabal run exe:djex -- djinn --render expression "a -> a"
 cabal run exe:djex -- exference --select first "a -> a"
-cabal run exe:djex -- download PACKAGE
-cabal run exe:djex -- install PACKAGE
+cabal run exe:djex -- download CABAL_TARGET
+cabal run exe:djex -- install [--lib] CABAL_TARGET
 cabal run djinn
 cabal run exference -- --first "a -> a"
 cabal bench djinn-bench
@@ -174,19 +174,23 @@ export visibility, commands, settings, defaults, and failure behavior.
 Djex can also delegate explicit package-manager work to Cabal:
 
 ```console
-djex download PACKAGE ...
-djex install PACKAGE ...
+djex download CABAL_TARGET ...
+djex install [--lib] CABAL_TARGET ...
 ```
 
 The same operations are available inside the shared REPL as `:download`
-(`:dl`) and `:install`. Downloading runs dependency-aware `cabal fetch` into
-Cabal's configured source cache. Installing runs project-independent
-`cabal install --lib`; Cabal may download dependencies, build arbitrary
-package-supplied code, update its store, and modify its default GHC package
-environment. Review package provenance before installing it.
+(`:dl`) and `:install`. Downloading asks dependency-aware `cabal fetch` to
+populate Cabal's configured source cache. Installing runs project-independent
+`cabal install`; it installs executable components by default, while `--lib`
+selects Cabal's library mode. Cabal may download dependencies, build arbitrary
+package-supplied code, update its store, executable directory, or default GHC
+package environment. Review target provenance before installing it.
 
-Package targets are separate process arguments after `--`, never shell text or
-Cabal options. A package-manager command does not change backend selection,
+Cabal targets are separate process arguments after `--`, never shell text or
+Cabal options; Djex recognizes only the leading install-mode option `--lib`.
+Targets may be repository package selectors, local package paths or archives,
+or archive URLs, so Hackage verification does not cover every accepted target.
+A package-manager command does not change backend selection,
 the last synthesis query, or the loaded source workspace. In particular,
 Cabal-installed `.hi` and object files do not become Djex declarations. Load
 compatible `.hs`/`.lhs` source or signature stubs with `:load`/`:add` when a
@@ -212,8 +216,9 @@ negative answers, undecided/truncated status, and structured diagnostics go
 to stderr. Help, version, successful synthesis, proof-backed
 uninhabitability, and bounded no-result searches exit 0;
 load/parse/search/render failures exit 1; malformed command lines exit 2.
-Package commands return Cabal's exact nonzero status, while failure to launch
-Cabal returns 1 and malformed package-command input returns 2. A
+Package commands propagate ordinary Cabal exit codes; failure to launch Cabal
+returns 1, malformed package-command input returns 2, and interrupt returns
+130. A
 valid negative answer therefore stays distinct from a broken invocation, and
 an exhausted Exference heuristic search is never mislabeled as a proof of
 uninhabitability.

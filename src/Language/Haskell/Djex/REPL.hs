@@ -256,8 +256,8 @@ runCommand sourceName history command state = case command of
   InspectDeclaration nameSource -> showInfo state nameSource >> continue state
   InspectType defaulting expression ->
     showExpressionType sourceName defaulting expression state >> continue state
-  InstallPackages packages ->
-    runPackageOperation InstallOperation packages >> continue state
+  InstallPackages mode packages ->
+    runPackageOperation (InstallOperation mode) packages >> continue state
   LoadEnvironment targets -> updateExferenceWorkspace
     (loadWorkspace targets)
     ResetScope

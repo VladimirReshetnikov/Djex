@@ -13,7 +13,10 @@ Djex is nevertheless not a GHCi-compatible evaluator. A bare line is a type
 that Djex should inhabit, not a Haskell expression to evaluate. Source modules
 provide checked type, data, class, instance, and signature information to
 Exference; their function bodies are not compiled or interpreted. The two
-synthesis engines also retain different parsers and search semantics.
+synthesis engines also retain different parsers and search semantics. The
+`:type` command is a read-only exception at the command boundary: it infers an
+expression's type from loaded signatures, but still never evaluates the
+expression or compiles a source body.
 
 Use the shared REPL when exploring or comparing types. Use the one-shot
 `djex djinn` and `djex exference` subcommands when a script needs generated
@@ -138,6 +141,7 @@ settings, `:show` subjects, and paths where appropriate.
 | `:set [OPTION [VALUE]]` (`:s`) | Show all settings, or change one. |
 | `:show [SUBJECT]` | Show settings, loaded-source state, or selected backend state. |
 | `:synth TYPE` (`:sy`) | Query the active backend(s). |
+| `:type [+d] EXPRESSION` (`:t`) | Infer an expression's type in the current loaded module scope without evaluating it. |
 | `:unadd [TARGET ...]` | Remove explicit Exference targets and reload the surviving dependency closure. |
 | `:unset OPTION` | Restore one built-in default. |
 | `:version` (`:v`) | Print the Djex package version. |
@@ -295,6 +299,77 @@ the whole context; `:show imports` is authoritative.
 
 Module context applies only to Exference. Djinn continues to parse and search
 its independent standard checked session, including when `both` is selected.
+
+## Inspecting expression types
+
+`:type EXPRESSION`, abbreviated `:t EXPRESSION`, parses a term-level Haskell
+expression, infers its type, and prints the trimmed source followed by `::` and
+the inferred type. It never runs the expression. For example, loaded `id` and
+`map` signatures permit queries such as:
+
+```text
+:t id
+:t \x -> id x
+:type map id
+:type +d 1
+```
+
+Name lookup uses the current loaded module context, including unqualified
+visibility, import aliases, explicit import lists, `hiding`, current-module
+precedence, and canonical loaded-module qualification. Only term declarations
+are candidates: ordinary value signatures, data constructors, and class
+methods contribute types; a same-spelled type or class name does not make a
+term available. A loaded source workspace is required.
+
+Type inspection reads the authoritative neutral declaration inventory behind
+the Exference runtime, not Exference's policy-filtered synthesis dictionary.
+It therefore does not depend on whether `djinn`, `exference`, or `both` is the
+active backend, and synthesis search controls do not change inference. The
+shared `qualification` setting does control how type constructors and
+constraints are printed.
+
+The supported expression subset covers names and constructors, applications,
+infix applications and sections, negation, lambdas, `if`, unguarded `case` and
+lambda-case expressions, tuples and tuple sections, lists, enumerations,
+parentheses, and ground expression type annotations. Ordinary character,
+string, integer, and fractional literals are supported. Lambda and case
+patterns may use variables, literals, prefix or infix constructors, tuples,
+lists, parentheses, as-patterns, wildcards, irrefutable patterns, ground
+pattern signatures, and bang patterns. A bare loaded name may retain and
+display a higher-rank signature, but applying a higher-rank value is not
+supported.
+
+Loaded fixity declarations are not retained by the neutral inventory. An
+unparenthesized chain of infix expressions or constructor patterns is therefore
+rejected instead of risking the wrong association; add explicit parentheses to
+state the intended tree. Negation immediately adjacent to an infix operator
+must be parenthesized for the same reason.
+
+Forms that require semantics outside this structural inferencer are rejected
+explicitly. These include `let` and local `where` declarations, guarded case
+alternatives, multi-way `if`, `do`/`mdo`, record construction, update, and
+patterns, comprehensions and parallel arrays, unboxed sums, overloaded labels,
+implicit parameters, visible type application, Template Haskell and
+quasiquotes, arrow and XML syntax, typed holes, primitive literals, and
+`n+k`, view, or regular patterns. Polymorphic expression and pattern
+annotations are also rejected until the inferencer has skolemization and
+context-entailment support. An unsupported form reports a structured diagnostic
+and leaves the session usable.
+
+Ordinary inference defaults an eligible numeric variable only when it remains
+in constraints but not in the reported result type. Consequently `:t 1`
+normally retains a `Num a => a` result, while an ambiguity used only internally
+may default. `:type +d EXPRESSION` additionally defaults eligible numeric
+variables that occur in the result. It tries the built-in candidates in
+order—currently `Integer`, then `Double`—and selects the first whose loaded
+instances satisfy every obligation. Only the canonical standard numeric
+classes participate; a user-defined class that happens to be named `Num` is
+not defaulted. This is intentionally narrower than GHCi's extended `+d`
+defaulting for nonnumeric interactive classes. The former GHCi `+v` spelling
+is deliberately rejected; plain `:type` already preserves eligible result
+variables. If no loaded default type can satisfy an ambiguity that is absent
+from the result type, inference reports that ambiguity instead of inventing
+evidence.
 
 ## Settings and defaults
 

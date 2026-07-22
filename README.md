@@ -148,6 +148,16 @@ commands, history, completion, and `:{`/`:}` input, but it is not a GHCi
 evaluator: bare input is a requested result type, not a Haskell expression,
 and each backend retains its own type grammar and semantics.
 
+`:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
+inspection command. It infers against term signatures in the current loaded
+module scope, regardless of the selected synthesis backend; the shared
+`qualification` setting controls rendering. Ordinary ambiguity defaulting is
+applied to eligible numeric variables, while `:type +d EXPRESSION`
+additionally defaults those that occur in the reported type. This is a
+documented expression subset, not a GHC evaluator; see the
+[shared REPL guide](docs/repl.md#inspecting-expression-types) for supported
+forms and diagnostics.
+
 The Exference half has a GHCi-shaped source workspace. `:load`, `:add`,
 `:unadd`, and `:reload` manage module/file targets and their local source
 dependencies; bare Haskell imports and `:module` manage the prompt scope;

@@ -161,8 +161,20 @@ complete replacement with `mkEnvironment`, and seal a new session with
 Djinn `HType`, `HKind`, `Declaration`, and `Context` values out of the curated
 API. The separate historical `djinn` executable retains its transactional
 raw-declaration editor solely inside the compatibility frontend. The shared
-`djex` REPL intentionally exposes read-only `:browse` and `:info` views instead
-of that legacy mutation language.
+`djex` REPL intentionally exposes read-only `:browse` and `:info` views, plus
+non-evaluating term inspection through `:type`, instead of that legacy
+mutation language.
+
+`:type` is a private REPL frontend over the authoritative neutral inventory
+retained by the Exference runtime. It derives callable signatures for ordinary
+values, data constructors, and class methods, resolves them in the current
+loaded module scope, and uses the prepared class environment to check residual
+constraints. It does not consume the policy-filtered Exference search
+dictionary and is not routed through the selected synthesis backend. Only the
+shared qualification policy affects its presentation. The command performs
+structural inference for the expression subset documented in the
+[REPL guide](repl.md#inspecting-expression-types); it neither evaluates terms
+nor infers types for loaded function bodies.
 
 ## Exference example without a parser
 

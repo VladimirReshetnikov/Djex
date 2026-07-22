@@ -197,13 +197,30 @@ rollback to the state preceding the interrupted input. Script execution feeds
 the same logical-input evaluator, including nested-script cycle detection,
 rather than maintaining another command grammar.
 
-The GHCi resemblance stops at interaction conventions. Bare input asks for an
-inhabitant of a type; it does not evaluate an expression or infer a type. The
-REPL has no GHCi module context, declaration evaluator, or `:type` contract.
-The historical `djinn` executable remains a separate compatibility REPL with
-its legacy declaration editor, while the historical `exference` executable
-remains one-shot. See [the shared REPL guide](repl.md) for the user-facing
-command and failure contract.
+Private `Language.Haskell.Djex.REPL.Type` implements the read-only `:type`
+boundary. It derives term schemes from the authoritative neutral declarations,
+including ordinary value signatures, data constructors, and class methods,
+and resolves them with the same namespace-aware module scope used by other
+REPL inspection. Constraint checking uses the class environment prepared from
+that complete inventory. It deliberately does not infer through Exference's
+policy-filtered synthesis dictionary, so backend selection and search settings
+cannot change the answer; qualification remains a presentation concern.
+
+The GHCi resemblance still stops short of evaluation. Bare input asks for an
+inhabitant of a type, while `:type` parses a term expression and performs
+structural inference without running it or compiling loaded function bodies.
+The inferencer covers common applications, operators, lambdas and patterns,
+conditionals, cases, tuples, lists, enumerations, literals, and annotations;
+forms requiring local-declaration generalization or richer GHC semantics fail
+with an explicit diagnostic. Annotations are currently restricted to ground
+types; polymorphic annotation checking requires skolemization and context
+entailment and is rejected rather than approximated. Because neutral
+declarations do not retain source fixities, unparenthesized infix chains are
+also rejected rather than associated speculatively. The historical `djinn`
+executable remains a separate compatibility REPL with its legacy declaration
+editor, while the historical `exference` executable remains one-shot. See
+[the shared REPL guide](repl.md#inspecting-expression-types) for the exact
+supported forms, defaulting behavior, and failure contract.
 
 ## What remains backend-specific
 

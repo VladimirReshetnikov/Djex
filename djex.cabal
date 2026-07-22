@@ -203,6 +203,7 @@ Library
     Language.Haskell.Djex.Command
     Language.Haskell.Djex.REPL.Command
     Language.Haskell.Djex.REPL.Driver
+    Language.Haskell.Djex.REPL.Workspace
     Language.Haskell.Djex.Djinn.Internal.Request
     Language.Haskell.Djex.Djinn.Internal.Session
     Language.Haskell.Djex.Exference.Internal.Request

@@ -442,6 +442,12 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
         Nothing -> Right raw
         Just writtenModule -> resolveQualifiedAlias
           location writtenModule syntaxName raw
+    UnQual _ syntaxName -> do
+      externalName <- convertName syntaxName
+      localName <- case defaultModule of
+        Nothing -> Right externalName
+        Just currentModule -> convertModuleName currentModule syntaxName
+      resolveScopedUnqualifiedName localName externalName
     _ -> convertQName defaultModule visible syntaxQName
  where
   allKnown = resolverTypeNames resolver
@@ -451,6 +457,30 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
     | name <- allKnown
     , Just moduleName <- [T.qualifiedNameModule name]
     ]
+
+  -- Open kind inference deliberately permits genuinely external names, but a
+  -- loaded declaration is not external merely because the prompt context hid
+  -- it. Check the complete inventory after scoped lookup so @:module@ and
+  -- explicit import lists cannot be bypassed by spelling a hidden type bare.
+  resolveScopedUnqualifiedName localName externalName =
+    case visibleCandidates of
+      _ | localName `elem` visibleCandidates -> Right localName
+      [] -> case knownCandidates of
+        [] -> Right externalName
+        _ -> Left $ "name " ++ show externalName ++ " is not in scope"
+          ++ "; loaded declarations include "
+          ++ intercalate ", " (map show knownCandidates)
+      [candidate] -> Right candidate
+      _ -> Left $ ambiguousUnqualifiedName externalName visibleCandidates
+   where
+    occurrence = T.qualifiedNameOccurrence externalName
+    candidates names = S.toAscList $ S.fromList
+      [ candidate
+      | candidate <- names
+      , T.qualifiedNameOccurrence candidate == occurrence
+      ]
+    visibleCandidates = candidates visible
+    knownCandidates = candidates allKnown
 
   resolveQualifiedAlias location writtenModule syntaxName raw =
     case nub aliasTargets of
@@ -497,8 +527,7 @@ resolveUnqualifiedName localName externalName knownNames
   | otherwise = case candidates of
       [] -> Right externalName
       [candidate] -> Right candidate
-      _ -> Left $ "ambiguous unqualified name " ++ show externalName
-        ++ "; matches " ++ intercalate ", " (map show candidates)
+      _ -> Left $ ambiguousUnqualifiedName externalName candidates
  where
   candidates = S.toAscList $ S.fromList
         [ candidate
@@ -506,6 +535,14 @@ resolveUnqualifiedName localName externalName knownNames
         , T.qualifiedNameOccurrence candidate
             == T.qualifiedNameOccurrence externalName
         ]
+
+ambiguousUnqualifiedName
+  :: T.QualifiedName
+  -> [T.QualifiedName]
+  -> String
+ambiguousUnqualifiedName externalName candidates =
+  "ambiguous unqualified name " ++ show externalName
+    ++ "; matches " ++ intercalate ", " (map show candidates)
 
 -- | Convert an HSE occurrence without trusting its publicly constructible
 -- payload. Parsed names are valid, while malformed hand-built syntax remains

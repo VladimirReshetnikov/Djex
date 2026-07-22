@@ -27,6 +27,11 @@ import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.ExtractionError
+import Language.Haskell.Exference.Internal.TypeParsing
+  ( parseHaskellSrcType
+  , parseTypeWithResolver
+  , typeResolverFromInventory
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
@@ -38,7 +43,6 @@ import Language.Haskell.Synthesis.Diagnostic
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
-import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Language.Haskell.Exts.Syntax hiding (TypeApp)
@@ -63,7 +67,6 @@ import qualified Data.List.NonEmpty as NonEmpty
 import Data.Map.Strict ( Map )
 import qualified Data.Map.Strict as M
 import qualified Data.IntSet as IntSet
-import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
@@ -246,24 +249,6 @@ parseType
 parseType tcs mn ds tDeclMap mode source = parseHaskellSrcType
   (convertType tcs mn ds tDeclMap) mode source
 
-parseHaskellSrcType
-  :: Monad m
-  => (Type SrcSpanInfo -> ExceptT String m result)
-  -> P.ParseMode
-  -> String
-  -> ExceptT Diagnostic m result
-parseHaskellSrcType convert mode source = case P.parseTypeWithMode mode source of
-  P.ParseFailed location message ->
-    throwE
-      $ withHaskellSrcLocation location
-      $ diagnostic Error message
-  P.ParseOk ty -> ExceptT $ first conversionDiagnostic
-    <$> runExceptT (convert ty)
-  where
-    conversionDiagnostic message =
-      withLocation (P.parseFilename mode) (sourceTextSpan source)
-      $ diagnostic Error message
-
 -- | Parse, lower, and kind-check a query against the assumptions retained by
 -- the source inventory that will supply its search environment.
 parseTypeWithKinds
@@ -339,32 +324,6 @@ parseTypeWithInventoryInQualifiedScope inventory currentModule visible aliases
   currentModule
   M.empty
 
--- | Derive precisely the nominal information required by source-type lookup
--- from the shared declaration environment. A class entry contributes only
--- its declared arity; methods, superclasses, and backend solver indexes are
--- irrelevant to parsing a query.
-typeResolverFromInventory
-  :: SharedInventory.Inventory typeVariable annotation
-  -> TypeResolver
-typeResolverFromInventory inventory = TypeResolver
-  { resolverTypeNames = M.keys
-      $ SharedEnvironment.typeDeclarationMap environment
-  , resolverClassArities = M.mapMaybe classArity
-      $ SharedEnvironment.classDeclarationMap environment
-  , resolverUnqualifiedTypeNames = M.keys
-      $ SharedEnvironment.typeDeclarationMap environment
-  , resolverUnqualifiedClassNames = M.keys
-      $ SharedEnvironment.classDeclarationMap environment
-  , resolverModuleAliases = []
-  , resolverQualifiedNames = Nothing
-  }
- where
-  environment = SharedInventory.inventoryEnvironment inventory
-  classArity declaration = case declaration of
-    SharedDeclaration.ClassDeclaration _ _ parameters _ _ ->
-      Just $ length parameters
-    _ -> Nothing
-
 parseTypeWithResolverKinds
   :: Monad m
   => SharedKindInference.KindAssumptions
@@ -375,8 +334,7 @@ parseTypeWithResolverKinds
   -> String
   -> ExceptT Diagnostic m (HsType, TypeVarIndex)
 parseTypeWithResolverKinds assumptions resolver mn declarations mode source = do
-  (rawType, variableIndex) <- parseHaskellSrcType
-    (convertTypeNoDeclWithResolver resolver mn) mode source
+  (rawType, variableIndex) <- parseTypeWithResolver resolver mn mode source
   -- Haskell synonym parameters are kind-checked even when their RHS does not
   -- mention them. Checking the raw application first prevents a phantom
   -- parameter from erasing an invalid higher-kinded argument.

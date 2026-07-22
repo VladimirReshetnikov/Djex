@@ -11,6 +11,7 @@ module Language.Haskell.Djex.REPL.Command
   , ReplInput (..)
   , ReplCommand (..)
   , ModuleChange (..)
+  , KindNormalization (..)
   , TypeDefaulting (..)
   , ReplSetting (..)
   , replSettingName
@@ -73,6 +74,7 @@ data ReplCommand
   | Help (Maybe String)
   | History (Maybe String)
   | InspectDeclaration String
+  | InspectKind KindNormalization String
   | InspectType TypeDefaulting String
   | InstallPackages PackageInstallMode [String]
   | LoadEnvironment [FilePath]
@@ -96,6 +98,15 @@ data ModuleChange
   = ReplaceModules
   | AddModules
   | RemoveModules
+  deriving (Eq, Show)
+
+-- | Whether @:kind@ also requests the type's normalized form.
+--
+-- The mode belongs to the command token: @:kind! T@ normalizes, while
+-- @:kind ! T@ inspects the ordinary type text @! T@.
+data KindNormalization
+  = PreserveTypeSynonyms
+  | NormalizeTypeSynonyms
   deriving (Eq, Show)
 
 -- | Whether @:type@ applies its explicit numeric @+d@ defaulting request.
@@ -182,8 +193,12 @@ parseColon source = do
   let (rawToken, rawArguments) = splitHead source
       (token, arguments) = normalizeAttachedModule rawToken rawArguments
       normalized = map toLower token
-  descriptor <- resolveCommand normalized
-  descriptorParser descriptor arguments
+  case attachedKindBangBase normalized of
+    Just _ -> ReplCommand . InspectKind NormalizeTypeSynonyms
+      <$> required "a Haskell type" arguments
+    Nothing -> do
+      descriptor <- resolveCommand normalized
+      descriptorParser descriptor arguments
 
 -- GHCi requires whitespace between the command name and its @+@/@-@ mode.
 -- Accepting the commonly written attached form costs no ambiguity because
@@ -196,6 +211,18 @@ normalizeAttachedModule token arguments = case map toLower token of
  where
   prependMode mode "" = [mode]
   prependMode mode rest = mode : ' ' : rest
+
+-- A trailing bang is a mode only when the preceding token already resolves to
+-- the sole @kind@ descriptor. This accepts @:k!@ and every unique prefix while
+-- keeping @:kind!T@ and bangs on unrelated commands ordinary unknown tokens.
+attachedKindBangBase :: String -> Maybe String
+attachedKindBangBase token = case reverse token of
+  '!' : reversedBase
+    | let base = reverse reversedBase
+    , not $ null base
+    , Right descriptor <- resolveCommand base
+    , descriptorName descriptor == "kind" -> Just base
+  _ -> Nothing
 
 resolveCommand :: String -> Either String CommandDescriptor
 resolveCommand token = case exactMatches of
@@ -274,6 +301,10 @@ commandDescriptors =
       "build and install package executables or libraries through Cabal"
       $ fmap (\(mode, targets) -> ReplCommand $ InstallPackages mode targets)
           . installArguments
+  , command "kind" ["k"] "TYPE"
+      "infer the kind of a Haskell type in the current module scope"
+      $ fmap (ReplCommand . InspectKind PreserveTypeSynonyms)
+          . required "a Haskell type"
   , command "load" ["l"] "[TARGET ...]"
       "replace the module or file targets and load their dependencies"
       $ fmap (ReplCommand . LoadEnvironment) . commandArguments
@@ -319,7 +350,7 @@ command = CommandDescriptor
 
 commandNames :: [String]
 commandNames = concatMap completionNames commandDescriptors
-  ++ [":!", ":{", ":}"]
+  ++ [":kind!", ":k!", ":!", ":{", ":}"]
  where
   completionNames descriptor = map (':' :)
     $ descriptorName descriptor : descriptorAliases descriptor
@@ -400,6 +431,8 @@ commandHelp source = case token of
     , ":}"
     , "  collect one logical input over multiple lines"
     ]
+  normalizeHelpToken value
+    | Just base <- attachedKindBangBase value = base
   normalizeHelpToken "module+" = "module"
   normalizeHelpToken "module-" = "module"
   normalizeHelpToken value = value
@@ -417,6 +450,11 @@ commandHelp source = case token of
       [ "  defaults to Cabal's executable mode; --lib installs libraries"
       , "  a leading -- makes a following --lib an ordinary package target"
       , "  installation is independent of the surrounding Cabal project"
+      ]
+    "kind" ->
+      [ "  append ! to the command or any accepted prefix to show normal form"
+      , "  uses the loaded module scope independently of backend selection"
+      , "  normal form expands saturated type synonyms, not type families"
       ]
     "load" ->
       [ "  accepts module names, file paths, quoted strings, or [String] syntax"
@@ -449,10 +487,14 @@ commandHelp source = case token of
     ]
 
 descriptorUsage :: CommandDescriptor -> String
-descriptorUsage descriptor = ':' : descriptorName descriptor
+descriptorUsage descriptor = ':' : usageName
   ++ case descriptorArguments descriptor of
     "" -> ""
     arguments -> " " ++ arguments
+ where
+  usageName
+    | descriptorName descriptor == "kind" = "kind[!]"
+    | otherwise = descriptorName descriptor
 
 noArguments :: ReplInput -> String -> Either String ReplInput
 noArguments result source

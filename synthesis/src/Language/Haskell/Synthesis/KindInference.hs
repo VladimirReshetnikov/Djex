@@ -6,11 +6,15 @@
 
 -- | Backend-neutral kind checking for shared source types.
 --
--- Inference variables are private to this module. Public assumptions and
--- results use 'GroundKind', whose uninhabited variable parameter makes an
--- accidentally unsolved kind unrepresentable.
+-- Inference variables are private to this module. Sealed assumptions use
+-- 'GroundKind', whose uninhabited variable parameter makes an accidentally
+-- unsolved inventory kind unrepresentable. Interactive type-expression
+-- inference instead returns a canonical 'InferredKind' so a genuine residual
+-- kind variable can be rendered without exposing the engine's allocation
+-- tokens.
 module Language.Haskell.Synthesis.KindInference
   ( GroundKind
+  , InferredKind
   , KindAssumptions (..)
   , KindInventoryPolicy (..)
   , ClassKindPolicy (..)
@@ -18,6 +22,8 @@ module Language.Haskell.Synthesis.KindInference
   , KindInferenceError (..)
   , emptyKindAssumptions
   , checkTypesKinds
+  , checkClassApplicationKinds
+  , inferTypeKind
   , inferSharedVariableKinds
   , inferAcyclicTypeConstructorKinds
   , inferDeclarationKinds
@@ -28,11 +34,14 @@ module Language.Haskell.Synthesis.KindInference
 import Control.Monad (foldM, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict
-  ( StateT (..)
+  ( State
+  , StateT (..)
+  , evalState
   , evalStateT
   , get
   , modify'
   )
+import qualified Control.Monad.Trans.State.Strict as State
 import Data.Graph (SCC (..), stronglyConnComp)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -43,7 +52,9 @@ import GHC.Generics (Generic)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Synthesis.Collection
-  ( firstDuplicate )
+  ( firstDuplicate
+  , observedListLength
+  )
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Environment (Environment)
@@ -54,6 +65,14 @@ import Language.Haskell.Synthesis.Type
 
 -- | A kind whose variable alternative is statically uninhabited.
 type GroundKind = Kind Void
+
+-- | A kind inferred for an interactive type expression.
+--
+-- Residual variables are numbered from zero in first-occurrence order.  The
+-- numbers are presentation-neutral identities, not the inference engine's
+-- private allocation tokens, so the result remains stable when unrelated
+-- implementation details allocate additional temporary variables.
+type InferredKind = Kind Natural
 
 -- | The nominal kind facts inferred from one complete environment.
 data KindAssumptions = KindAssumptions
@@ -153,6 +172,65 @@ checkTypesKinds assumptions obligations = do
       [freeVariables typeExpression | (_, typeExpression) <- obligations]
     mapM_ (checkObligation (toInferenceAssumptions assumptions) variables)
       obligations
+
+-- | Validate the supplied prefix of a class application and return its
+-- unapplied parameter kinds.
+--
+-- Every supplied argument is inferred in one scope, so repeated free type
+-- variables have one kind throughout the application. A fixed ('Just') class
+-- parameter constrains its argument to the declared kind; a generalized
+-- ('Nothing') parameter accepts any well-kinded argument without defaulting
+-- it. Supplying fewer arguments than the class arity is valid, while an
+-- overapplication is rejected after observing only the first impossible
+-- argument cell.
+checkClassApplicationKinds
+  :: Ord variable
+  => KindAssumptions
+  -> Name
+  -> [Type variable]
+  -> Either (KindInferenceError variable) [Maybe GroundKind]
+checkClassApplicationKinds assumptions className arguments = do
+  parameterKinds <- case Map.lookup className
+      $ classParameterKinds assumptions of
+    Just kinds -> Right kinds
+    Nothing -> Left $ UnknownClass className
+  let expected = length parameterKinds
+      supplied = observedListLength expected arguments
+  if supplied > expected
+    then Left $ ClassArityMismatch className expected supplied
+    else do
+      mapM_ (preflightInferenceType assumptions) arguments
+      mapM_ validateInferenceType arguments
+      flip evalStateT initialState $ do
+        variables <- allocateVariables $ Set.toAscList $ Set.unions
+          $ map freeVariables arguments
+        let inferredParameters = map (fmap fromGroundKind) parameterKinds
+        zipWithM_ (checkClassArgument
+          (toInferenceAssumptions assumptions) variables)
+          inferredParameters arguments
+      pure $ drop supplied parameterKinds
+
+-- | Infer the kind of one type without defaulting unconstrained kind
+-- variables to 'ProperTypeKind'.
+--
+-- This uses the same structural preflight, validation, nominal assumptions,
+-- and unification engine as 'checkTypesKinds'.  Residual variables in the
+-- result are canonicalized independently of private inference identities,
+-- making the operation suitable for deterministic interactive rendering.
+inferTypeKind
+  :: Ord variable
+  => KindAssumptions
+  -> Type variable
+  -> Either (KindInferenceError variable) InferredKind
+inferTypeKind assumptions typeExpression = do
+  preflightInferenceType assumptions typeExpression
+  validateInferenceType typeExpression
+  flip evalStateT initialState $ do
+    variables <- allocateVariables $ Set.toAscList
+      $ freeVariables typeExpression
+    inferred <- inferType (toInferenceAssumptions assumptions)
+      variables typeExpression
+    canonicalizeInferredKind <$> resolveKind inferred
 
 -- | Infer kinds for variables shared by several independently quantified
 -- types. Variables outside the supplied shared set are fresh in each type;
@@ -719,7 +797,14 @@ inferType assumptions variables typeExpression = case typeExpression of
     binderKinds <- allocateVariables binders
     let quantified = binderKinds `Map.union` variables
     mapM_ (checkConstraint assumptions quantified) constraints
-    inferType assumptions quantified body
+    bodyKind <- inferType assumptions quantified body
+    -- A qualified type is itself an ordinary value type: this IR does not
+    -- support constraints guarding a higher-kinded constructor. An explicit
+    -- context-free forall remains useful for kind-polymorphic inspection, so
+    -- it preserves the body's inferred kind.
+    case constraints of
+      [] -> pure bodyKind
+      _ -> unify bodyKind InferenceProper >> pure InferenceProper
  where
   checkProper nested = do
     kind <- inferType assumptions variables nested
@@ -741,11 +826,19 @@ checkConstraint assumptions variables constraint = do
     (const $ Just $ length parameterKinds)
     ClassArityMismatch
     constraint
-  zipWithM_ checkArgument parameterKinds arguments
- where
-  checkArgument expected argument = do
-    actual <- inferType assumptions variables argument
-    mapM_ (unify actual) expected
+  zipWithM_ (checkClassArgument assumptions variables)
+    parameterKinds arguments
+
+checkClassArgument
+  :: Ord variable
+  => InferenceAssumptions
+  -> Map variable InferenceKind
+  -> Maybe InferenceKind
+  -> Type variable
+  -> Inference variable ()
+checkClassArgument assumptions variables expected argument = do
+  actual <- inferType assumptions variables argument
+  mapM_ (unify actual) expected
 
 allocateVariables
   :: Ord variable
@@ -842,6 +935,30 @@ ground kind = do
       FunctionKind <$> ground parameter <*> ground result
     -- Haskell 98 defaults unconstrained kind variables to @*@.
     InferenceVariable _ -> pure ProperTypeKind
+
+-- Resolve substitutions without applying the compatibility default used by
+-- 'ground'.  Keeping this operation private prevents inference allocation
+-- tokens from becoming part of the public result contract.
+resolveKind :: InferenceKind -> Inference variable (Kind Natural)
+resolveKind kind = do
+  resolved <- follow kind
+  case resolved of
+    InferenceProper -> pure ProperTypeKind
+    InferenceFunction parameter result -> FunctionKind
+      <$> resolveKind parameter <*> resolveKind result
+    InferenceVariable variable -> pure $ KindVariable variable
+
+canonicalizeInferredKind :: Kind Natural -> InferredKind
+canonicalizeInferredKind source = flip evalState (Map.empty, 0)
+  $ traverse canonicalVariable source
+ where
+  canonicalVariable
+    :: Natural
+    -> State (Map Natural Natural, Natural) Natural
+  canonicalVariable variable = State.state $ \(variables, next) ->
+    case Map.lookup variable variables of
+      Just canonical -> (canonical, (variables, next))
+      Nothing -> (next, (Map.insert variable next variables, next + 1))
 
 fromGroundKind :: GroundKind -> InferenceKind
 fromGroundKind kind = case kind of

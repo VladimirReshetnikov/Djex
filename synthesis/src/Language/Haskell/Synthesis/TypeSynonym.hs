@@ -34,6 +34,7 @@ module Language.Haskell.Synthesis.TypeSynonym
   , elaboratePreparedTypes
   , elaborateType
   , elaboratePreparedType
+  , normalizePreparedTypeSynonyms
   , expandDeclarationTypeSynonyms
   ) where
 
@@ -520,6 +521,59 @@ elaboratePreparedType
   -> Either (TypeElaborationError variable) (Type variable)
 elaboratePreparedType fresh prepared =
   elaborateType fresh $ preparedTypeSynonyms prepared
+
+-- | Normalize aliases for interactive kind inspection.
+--
+-- Saturated aliases, including zero-parameter aliases, use the same checked,
+-- capture-avoiding expansion as 'elaboratePreparedType'.  The one additional
+-- form admitted here is an undersaturated alias at the head of the complete
+-- input, beneath any leading context-free forall layers: its head is retained
+-- and each supplied argument is normalized strictly.  Consequently, an
+-- undersaturated alias nested in an argument, constrained forall, function,
+-- tuple, or ordinary constructor application still fails.  This models the
+-- useful @:kind!@ distinction without weakening the strict saturation
+-- contract used by backend queries and declarations.
+--
+-- Kind inference is intentionally separate.  Callers must infer the source
+-- type before invoking this operation so an alias cannot erase an ill-kinded
+-- phantom argument, and may infer the result again as a defensive check.
+normalizePreparedTypeSynonyms
+  :: Ord variable
+  => FreshVariable variable
+  -> PreparedInventory variable annotation
+  -> Type variable
+  -> Either (SynonymExpansionError variable) (Type variable)
+normalizePreparedTypeSynonyms fresh prepared source = evalStateT
+  (normalizeOuter canonicalSource)
+  (synonymVariables table `Set.union` sourceVariables)
+ where
+  table = preparedTypeSynonyms prepared
+  canonicalSource = canonicalizeType source
+  sourceVariables = typeVariables canonicalSource
+
+  -- A context-free prenex binder does not change which constructor is the
+  -- complete input's operational head. Retain each layer verbatim around the
+  -- normalized body. Stopping at the first non-empty context is deliberate:
+  -- both aliases in that context and any partial alias below it remain subject
+  -- to the ordinary strict expansion contract.
+  normalizeOuter typeExpression = case typeExpression of
+    ForallType variables [] body -> ForallType variables []
+      <$> normalizeOuter body
+    _ -> case applicationSpine typeExpression of
+      (TypeConstructor name, arguments)
+        | Just definition <- Map.lookup name $ synonymDefinitions table
+        , naturalLength arguments < naturalLength
+            (definitionParameters definition) -> do
+            case firstDuplicate $ definitionParameters definition of
+              Just duplicate -> lift $ Left
+                $ DuplicateTypeSynonymParameter name duplicate
+              Nothing -> pure ()
+            normalizedArguments <- mapM
+              (expand fresh table sourceVariables emptyExpansionPath)
+              arguments
+            pure $ canonicalizeType
+              $ applyTypeArguments (TypeConstructor name) normalizedArguments
+      _ -> expand fresh table sourceVariables emptyExpansionPath typeExpression
 
 -- Preserve the caller's container shape so singleton elaboration can be total
 -- without extracting the head of a list whose length is known only by

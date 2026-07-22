@@ -440,7 +440,50 @@ queryTests = testGroup "queries"
 
 kindInferenceTests :: TestTree
 kindInferenceTests = testGroup "kind inference"
-  [ testCase "infer higher-kinded variables shared across types" $ do
+  [ testCase "infer expression kinds without defaulting residual variables" $ do
+      let maybeName = right $ mkIdentifier "Maybe"
+          eitherName = right $ mkIdentifier "Either"
+          intName = right $ mkIdentifier "Int"
+          assumptions = KindInference.emptyKindAssumptions
+            { KindInference.typeConstructorKinds = Map.fromList
+                [ (maybeName, arrow proper proper)
+                , (eitherName, arrow proper $ arrow proper proper)
+                , (intName, proper)
+                ]
+            }
+          constructor :: Name -> SharedType.Type String
+          constructor = SharedType.TypeConstructor
+          apply = SharedType.TypeApplication
+      KindInference.inferTypeKind assumptions (constructor maybeName) @?=
+        Right (arrow inferredProper inferredProper)
+      KindInference.inferTypeKind assumptions
+          (apply (constructor eitherName) $ constructor intName) @?=
+        Right (arrow inferredProper inferredProper)
+      KindInference.inferTypeKind assumptions
+          (SharedType.TypeVariable "a") @?=
+        Right (Kind.KindVariable 0)
+      -- The result kind is allocated after the kinds of both free variables,
+      -- but its public identity is canonical rather than leaking that order.
+      KindInference.inferTypeKind assumptions
+          (apply (SharedType.TypeVariable "f")
+            $ SharedType.TypeVariable "a") @?=
+        Right (Kind.KindVariable 0)
+  , testCase "kind inference retains infinite and mismatch failures" $ do
+      let maybeName = right $ mkIdentifier "Maybe"
+          assumptions = KindInference.emptyKindAssumptions
+            { KindInference.typeConstructorKinds =
+                Map.singleton maybeName $ arrow proper proper
+            }
+          variable = SharedType.TypeVariable "f"
+          constructor :: SharedType.Type String
+          constructor = SharedType.TypeConstructor maybeName
+          apply = SharedType.TypeApplication
+      KindInference.inferTypeKind assumptions (apply variable variable) @?=
+        Left KindInference.InfiniteKind
+      KindInference.inferTypeKind assumptions
+          (apply constructor constructor) @?=
+        Left (KindInference.KindMismatch proper $ arrow proper proper)
+  , testCase "infer higher-kinded variables shared across types" $ do
       let maybeName = right $ mkIdentifier "Maybe"
           intName = right $ mkIdentifier "Int"
           assumptions = KindInference.KindAssumptions
@@ -467,23 +510,72 @@ kindInferenceTests = testGroup "kind inference"
       KindInference.checkTypesKinds assumptions
           [(proper, variable), (proper, application)] @?=
         Left (KindInference.KindMismatch proper $ arrow proper proper)
+  , testCase "share free-variable kinds across partial class arguments" $ do
+      let intName = right $ mkIdentifier "Int"
+          mixedName = right $ mkIdentifier "Mixed"
+          generalizedName = right $ mkIdentifier "Generalized"
+          assumptions = KindInference.emptyKindAssumptions
+            { KindInference.typeConstructorKinds =
+                Map.singleton intName proper
+            , KindInference.classParameterKinds = Map.fromList
+                [ (mixedName, [Just proper, Nothing])
+                , (generalizedName, [Nothing, Nothing])
+                ]
+            }
+          variable name = SharedType.TypeVariable name
+          apply = SharedType.TypeApplication
+          intType :: SharedType.Type String
+          intType = SharedType.TypeConstructor intName
+      KindInference.checkClassApplicationKinds assumptions mixedName
+          [variable "f"] @?= Right [Nothing]
+      KindInference.checkClassApplicationKinds assumptions mixedName
+          [variable "f", apply (variable "f") intType] @?=
+        Left (KindInference.KindMismatch proper $ arrow proper proper)
+      KindInference.checkClassApplicationKinds assumptions generalizedName
+          [ apply (variable "f") $ variable "a"
+          , apply (variable "a") $ variable "f"
+          ] @?= Left KindInference.InfiniteKind
+      KindInference.checkClassApplicationKinds assumptions generalizedName
+          (repeat intType) @?=
+        Left (KindInference.ClassArityMismatch generalizedName 2 3)
   , testCase "use declared class parameter kinds in forall contexts" $ do
       let functorName = right $ mkIdentifier "Functor"
           assumptions = KindInference.emptyKindAssumptions
             { KindInference.classParameterKinds =
                 Map.singleton functorName [Just $ arrow proper proper]
             }
-          quantified = SharedType.ForallType ["f"]
+          quantified = SharedType.ForallType ["f", "a"]
             [Constraint functorName [SharedType.TypeVariable "f"]]
-            (SharedType.TypeVariable "f")
+            (SharedType.TypeApplication
+              (SharedType.TypeVariable "f")
+              (SharedType.TypeVariable "a"))
       KindInference.checkTypesKinds assumptions
-        [(arrow proper proper, quantified)] @?= Right ()
+        [(proper, quantified)] @?= Right ()
       let polymorphic = assumptions
             { KindInference.classParameterKinds =
                 Map.singleton functorName [Nothing]
             }
       KindInference.checkTypesKinds polymorphic
-        [(arrow proper proper, quantified)] @?= Right ()
+        [(proper, quantified)] @?= Right ()
+  , testCase "require qualified forall bodies to have proper kind" $ do
+      let className = right $ mkIdentifier "C"
+          constructorName = right $ mkIdentifier "Pair"
+          assumptions = KindInference.emptyKindAssumptions
+            { KindInference.typeConstructorKinds = Map.singleton
+                constructorName $ arrow proper proper
+            , KindInference.classParameterKinds =
+                Map.singleton className [Just proper]
+            }
+          variable = SharedType.TypeVariable "a"
+          constructor = SharedType.TypeConstructor constructorName
+          contextFree = SharedType.ForallType ["a"] [] constructor
+          qualified = SharedType.ForallType ["a"]
+            [Constraint className [variable]] constructor
+      KindInference.inferTypeKind assumptions contextFree @?=
+        Right (arrow inferredProper inferredProper)
+      KindInference.inferTypeKind assumptions qualified @?=
+        Left (KindInference.KindMismatch
+          (arrow proper proper) proper)
   , testCase "diagnose unknown classes and constraint arity" $ do
       let className = right $ mkIdentifier "C"
           variable = SharedType.TypeVariable "a"
@@ -963,10 +1055,12 @@ kindInferenceTests = testGroup "kind inference"
           KindInference.OpenKindInventory
           (sealedEnvironment declarations) @?=
         Left (KindInference.ClassArityMismatch externalClass 1 2)
-  ]
+ ]
  where
   proper :: KindInference.GroundKind
   proper = Kind.ProperTypeKind
+  inferredProper :: KindInference.InferredKind
+  inferredProper = Kind.ProperTypeKind
   arrow = Kind.FunctionKind
 
 classTests :: TestTree
@@ -2457,6 +2551,124 @@ synonymTests = testGroup "type synonyms"
       TypeSynonym.expandTypeSynonyms freshStringVariable
           (TypeSynonym.preparedTypeSynonyms prepared) applied @?=
         Right (SharedType.TypeVariable "x")
+  , testCase "normalize zero-arity and saturated aliases for kind inspection" $ do
+      let groundName = right $ mkIdentifier "Ground"
+          boxName = right $ mkIdentifier "Box"
+          zeroName = right $ mkIdentifier "Zero"
+          identityName = right $ mkIdentifier "Identity"
+          nominal :: Name -> SharedType.Type String
+          nominal = SharedType.TypeConstructor
+          apply = SharedType.TypeApplication
+          prepared = preparedSynonymInventory
+            [ Declaration.AbstractTypeDeclaration () groundName synonymProper
+            , Declaration.AbstractTypeDeclaration () boxName
+                $ Kind.FunctionKind synonymProper synonymProper
+            , Declaration.TypeSynonymDeclaration () zeroName []
+                $ nominal groundName
+            , Declaration.TypeSynonymDeclaration () identityName
+                [Declaration.TypeParameter "a" Nothing]
+                $ SharedType.TypeVariable "a"
+            ]
+          normalize = TypeSynonym.normalizePreparedTypeSynonyms
+            freshStringVariable prepared
+      normalize (nominal zeroName) @?= Right (nominal groundName)
+      normalize (apply (nominal identityName) $ nominal groundName) @?=
+        Right (nominal groundName)
+      normalize
+          (apply (nominal boxName)
+            $ apply (nominal identityName) $ nominal groundName) @?=
+        Right (apply (nominal boxName) $ nominal groundName)
+  , testCase "retain only an outer undersaturated alias while normalizing arguments" $ do
+      let groundName = right $ mkIdentifier "Ground"
+          boxName = right $ mkIdentifier "Box"
+          identityName = right $ mkIdentifier "Identity"
+          constName = right $ mkIdentifier "Const"
+          nominal :: Name -> SharedType.Type String
+          nominal = SharedType.TypeConstructor
+          apply = SharedType.TypeApplication
+          parameter name = Declaration.TypeParameter name Nothing
+          prepared = preparedSynonymInventory
+            [ Declaration.AbstractTypeDeclaration () groundName synonymProper
+            , Declaration.AbstractTypeDeclaration () boxName
+                $ Kind.FunctionKind synonymProper synonymProper
+            , Declaration.TypeSynonymDeclaration () identityName
+                [parameter "a"] $ SharedType.TypeVariable "a"
+            , Declaration.TypeSynonymDeclaration () constName
+                [parameter "a", parameter "b"]
+                $ SharedType.TypeVariable "a"
+            ]
+          normalize = TypeSynonym.normalizePreparedTypeSynonyms
+            freshStringVariable prepared
+          nestedIdentity = apply (nominal identityName) $ nominal groundName
+          partial = apply (nominal constName) nestedIdentity
+          normalizedPartial = apply (nominal constName) $ nominal groundName
+          nestedPartial = apply (nominal boxName) partial
+          saturationFailure = TypeSynonym.UnsaturatedTypeSynonym constName 2 1
+      normalize (nominal constName) @?= Right (nominal constName)
+      normalize partial @?= Right normalizedPartial
+      normalize nestedPartial @?= Left saturationFailure
+      -- Backend elaboration retains Haskell's ordinary strict saturation
+      -- rule; the exception belongs only to interactive kind normalization.
+      TypeSynonym.elaboratePreparedType freshStringVariable prepared
+          (Kind.FunctionKind synonymProper synonymProper) partial @?=
+        Left (TypeSynonym.SynonymExpansionFailed saturationFailure)
+  , testCase "retain outer partial aliases beneath context-free foralls" $ do
+      let constName = right $ mkIdentifier "Const"
+          identityName = right $ mkIdentifier "Identity"
+          className = right $ mkIdentifier "C"
+          nominal :: Name -> SharedType.Type String
+          nominal = SharedType.TypeConstructor
+          apply = SharedType.TypeApplication
+          variable = SharedType.TypeVariable
+          parameter name = Declaration.TypeParameter name Nothing
+          prepared = preparedSynonymInventory
+            [ Declaration.TypeSynonymDeclaration () identityName
+                [parameter "a"] $ variable "a"
+            , Declaration.TypeSynonymDeclaration () constName
+                [parameter "a", parameter "b"] $ variable "a"
+            ]
+          normalize = TypeSynonym.normalizePreparedTypeSynonyms
+            freshStringVariable prepared
+          partial = apply (nominal constName)
+            $ apply (nominal identityName) $ variable "a"
+          normalizedPartial = apply (nominal constName) $ variable "a"
+          prenex = SharedType.ForallType ["a"] [] partial
+          normalizedPrenex = SharedType.ForallType ["a"] [] normalizedPartial
+          nestedPrenex = SharedType.ForallType ["unused"] [] prenex
+          normalizedNested = SharedType.ForallType ["unused"] []
+            normalizedPrenex
+          constrained = SharedType.ForallType ["a"]
+            [Constraint className [variable "a"]] partial
+          saturationFailure = TypeSynonym.UnsaturatedTypeSynonym constName 2 1
+      normalize prenex @?= Right normalizedPrenex
+      normalize nestedPrenex @?= Right normalizedNested
+      normalize constrained @?= Left saturationFailure
+  , testCase "kind-check phantom arguments before alias normalization" $ do
+      let groundName = right $ mkIdentifier "Ground"
+          higherName = right $ mkIdentifier "Higher"
+          phantomName = right $ mkIdentifier "Phantom"
+          nominal :: Name -> SharedType.Type String
+          nominal = SharedType.TypeConstructor
+          apply = SharedType.TypeApplication
+          prepared = preparedSynonymInventory
+            [ Declaration.AbstractTypeDeclaration () groundName synonymProper
+            , Declaration.AbstractTypeDeclaration () higherName
+                $ Kind.FunctionKind synonymProper synonymProper
+            , Declaration.TypeSynonymDeclaration () phantomName
+                [Declaration.TypeParameter "ignored" Nothing]
+                $ nominal groundName
+            ]
+          inventory = TypeSynonym.preparedInventory prepared
+          assumptions = Inventory.inventoryKindAssumptions inventory
+          source = apply (nominal phantomName) $ nominal higherName
+      KindInference.inferTypeKind assumptions source @?=
+        Left (KindInference.KindMismatch synonymProper
+          $ Kind.FunctionKind synonymProper synonymProper)
+      -- Expansion itself would erase the phantom argument. The inference
+      -- assertion above pins the required :kind! phase ordering.
+      TypeSynonym.normalizePreparedTypeSynonyms
+          freshStringVariable prepared source @?=
+        Right (nominal groundName)
   , testCase "elaborate through each prepared inventory's exact aliases" $ do
       let aliasName = right $ mkIdentifier "Selected"
           boolName = right $ mkIdentifier "Bool"

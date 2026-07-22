@@ -22,6 +22,8 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , sessionSearchEnvironment
   , sessionClassArity
   , elaborateSessionGoal
+  , checkSessionTypeSynonymInspectionSaturation
+  , normalizeSessionTypeSynonyms
   , exferenceSessionInventory
   , sessionOmissions
   ) where
@@ -67,6 +69,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , shownErrorDiagnostic
   )
 import Language.Haskell.Synthesis.Environment (Environment)
+import Language.Haskell.Synthesis.Count (naturalLength)
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
   , inventoryKindAssumptions
@@ -83,11 +86,18 @@ import Language.Haskell.Synthesis.Name
   , nameSpecial
   , renderCanonical
   )
-import Language.Haskell.Synthesis.Type (Type)
+import Language.Haskell.Synthesis.Type
+  ( Type (ForallType, TypeConstructor)
+  , applicationSpine
+  )
 import Language.Haskell.Synthesis.TypeSynonym
   ( PreparedInventory
+  , SynonymExpansionError (UnsaturatedTypeSynonym)
   , TypeElaborationError
+  , checkPreparedTypeSynonymApplicationSaturation
+  , checkPreparedTypeSynonymSaturation
   , elaboratePreparedType
+  , normalizePreparedTypeSynonyms
   , preparedInventory
   )
 
@@ -342,6 +352,44 @@ elaborateSessionGoal
   -> Either (TypeElaborationError SynthesisVariable) (Type SynthesisVariable)
 elaborateSessionGoal session = elaboratePreparedType
   freshSynthesisVariable (preparedView session) ProperTypeKind
+
+-- | Validate the @:kind@ saturation rule without constructing an expanded
+-- normal form. The complete operational head beneath context-free prenex
+-- foralls may remain partial; every argument and all other positions retain
+-- ordinary strict Haskell synonym saturation. Keeping this distinct from
+-- normalization prevents a duplicating alias from imposing exponential work
+-- on a command that will not print the expanded tree.
+checkSessionTypeSynonymInspectionSaturation
+  :: ExferenceSession
+  -> Type SynthesisVariable
+  -> Either (SynonymExpansionError SynthesisVariable) ()
+checkSessionTypeSynonymInspectionSaturation session = checkOuter
+ where
+  prepared = preparedView session
+  checkOuter typeExpression = case typeExpression of
+    ForallType _ [] body -> checkOuter body
+    _ -> case applicationSpine typeExpression of
+      (TypeConstructor name, arguments) -> case
+          checkPreparedTypeSynonymApplicationSaturation
+            prepared name (naturalLength arguments) of
+        Left UnsaturatedTypeSynonym{} ->
+          mapM_ (checkPreparedTypeSynonymSaturation prepared) arguments
+        Left failure -> Left failure
+        Right () -> checkPreparedTypeSynonymSaturation prepared typeExpression
+      _ -> checkPreparedTypeSynonymSaturation prepared typeExpression
+
+-- | Normalize the type synonyms retained by this exact session without
+-- imposing a proper-type result kind. The operation is intentionally lenient
+-- only at the complete operational head beneath leading context-free forall
+-- layers, matching GHCi's @:kind!@ treatment of a partially applied synonym;
+-- nested and constrained unsaturated aliases remain invalid.
+normalizeSessionTypeSynonyms
+  :: ExferenceSession
+  -> Type SynthesisVariable
+  -> Either (SynonymExpansionError SynthesisVariable)
+      (Type SynthesisVariable)
+normalizeSessionTypeSynonyms session = normalizePreparedTypeSynonyms
+  freshSynthesisVariable $ preparedView session
 
 exferenceSessionInventory
   :: ExferenceSession

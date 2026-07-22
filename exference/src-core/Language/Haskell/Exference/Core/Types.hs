@@ -69,6 +69,7 @@ module Language.Haskell.Exference.Core.Types
   , showHsConstraint
   , TypeVarIndex
   , showHsType
+  , showHsTypeWithQualification
   )
 where
 
@@ -95,6 +96,7 @@ import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import Language.Haskell.Synthesis.Name (Boxity (..))
+import Language.Haskell.Synthesis.Qualification (Qualification (FullyQualified))
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 
@@ -775,8 +777,20 @@ instance NFData QueryClassEnv where
     rnf environment `seq` rnf constraints `seq` rnf inflatedConstraints
 
 showHsType :: TypeVarIndex -> HsType -> String
-showHsType sourceNames = SharedRender.renderType
-  (sourceVariableName sourceNames)
+showHsType = showHsTypeWithQualification FullyQualified
+
+-- | Render a parsed source type with its original variable-name hints and an
+-- explicit nominal qualification policy. Interactive kind normalization uses
+-- this to follow the same @:set qualification@ contract as generated terms and
+-- @:type@ results.
+showHsTypeWithQualification
+  :: Qualification
+  -> TypeVarIndex
+  -> HsType
+  -> String
+showHsTypeWithQualification qualification sourceNames =
+  SharedRender.renderTypeWithQualification qualification
+    $ sourceVariableName sourceNames
 
 -- instance Read HsType where
 --   readsPrec _ = maybeToList . parseType

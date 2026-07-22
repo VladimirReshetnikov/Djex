@@ -77,6 +77,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplModuleContexts
   , testCase "REPL imports and browsing honor explicit exports"
       testReplImportsAndBrowsing
+  , testCase "REPL :kind and :kind! inspect scoped type structure"
+      testReplKindInspection
   , testCase "REPL :type parses expressions without replacing query history"
       testReplTypeInference
   , testCase "REPL :type resolves only terms in the current module scope"
@@ -901,6 +903,207 @@ testReplImportsAndBrowsing = withReplModuleFixture $ \root -> do
   assertEqual "both browse modes include an exported binding" 2
     $ countOccurrences "Surface.publicValue" output
   assertNoCallStack errors
+
+testReplKindInspection :: Assertion
+testReplKindInspection = withReplKindFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      kindSurface = canonicalRoot </> "kind" </> "KindSurface.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show kindSurface
+    , ":set qualification none"
+    , ":set render expression"
+    , "a -> a"
+    , ":backend both"
+    , ":help k"
+    , ":help kind!"
+    -- Exact aliases win and every nonempty unique prefix remains available.
+    , ":k Pair"
+    , ":ki Pair Ground"
+    , ":kin Pair Ground Ground"
+    , ":kind Higher"
+    -- The attached bang mode follows the same prefix resolution.
+    , ":k! Alias Ground"
+    , ":ki! (Alias Ground)"
+    , ":kin! Nested Ground"
+    , ":kind! Ground"
+    -- An unsaturated outer synonym is a useful kind-level value and remains
+    -- unchanged; an unsaturated nested synonym is not a normal form.
+    , ":kind! Alias"
+    , ":kind! Higher Alias Ground"
+    -- Structural constructors and query-local kind variables do not require
+    -- declarations in the source module.
+    , ":kind []"
+    , ":kind! []"
+    , ":kind (,)"
+    , ":kind (->)"
+    , ":kind [Ground]"
+    , ":kind a"
+    , ":kind f a"
+    , ":kind forall a. Pair"
+    -- Classes occupy the type namespace but end in Constraint. Wholly
+    -- generalized parameters and declaration-constrained higher parameters
+    -- remain observably different.
+    , ":kind Convert"
+    , ":kind Convert Ground"
+    , ":kind Marker"
+    , ":kind Marker Pair"
+    , ":kind HigherClass"
+    , ":kind HigherClass Wrapped"
+    , ":kind forall a. Convert a"
+    , ":kind! forall a. Partial a"
+    -- Successful normalization obeys the shared qualification setting.
+    , ":set qualification full"
+    , ":kind! Alias Ground"
+    , ":set qualification none"
+    -- Parse, inference, normalization, and command failures are recoverable.
+    , ":kind ("
+    , ":kind Missing"
+    , ":kind Ground Ground"
+    , ":kind HigherClass Pair"
+    , ":kind Mixed f (f Ground)"
+    , ":kind General (f a) (a f)"
+    , ":kind f Convert"
+    , ":kind forall a. Convert a => Pair"
+    , ":kind! Phantom Pair"
+    -- Bang mode is recognized only when attached to the complete command
+    -- token, never when attached to the type or separated as an argument.
+    , ":kind ! Ground"
+    , ":kind!Ground"
+    , ":kind"
+    -- A constructor that has no same-spelled type must not leak into kind
+    -- lookup merely because the automatic module context exposes it.
+    , ":kind TermOnly"
+    -- Scope clearing, canonical qualification, and restricted aliases follow
+    -- the same source-workspace rules as synthesis and :type.
+    , ":module"
+    , ":kind Ground"
+    , ":kind KindSurface.Ground"
+    , "import qualified KindSurface as K (Pair, Alias, Convert, Marker)"
+    , ":kind K.Pair"
+    , ":kind K.Convert"
+    , ":kind K.Marker"
+    , ":kind K.Ground"
+    , ":backend djinn"
+    , ":"
+    ]
+  assertEqual "kind-inspection REPL exit" ExitSuccess exitCode
+
+  assertEqual "normal and bang help share one canonical usage" 2
+    $ countOccurrences ":kind[!] TYPE" output
+  assertEqual "normal and bang help report the exact alias" 2
+    $ countOccurrences "aliases: :k" output
+  assertEqual "help explains bang-prefix normalization" 2
+    $ countOccurrences
+        "append ! to the command or any accepted prefix to show normal form"
+        output
+
+  assertContains "exact :k alias inspects a constructor"
+    "Pair :: Type -> Type -> Type" output
+  assertContains "two-character prefix inspects a partial application"
+    "Pair Ground :: Type -> Type" output
+  assertContains "three-character prefix inspects a full application"
+    "Pair Ground Ground :: Type" output
+  assertContains "canonical command renders higher-kinded parameters"
+    "Higher :: (Type -> Type) -> Type -> Type" output
+
+  assertContains "bang alias expands a saturated synonym"
+    "= Pair Ground Ground" output
+  assertContains "bang prefix expands nested synonyms"
+    "= Pair Ground (Wrapped Ground)" output
+  assertContains "canonical bang mode prints even an unchanged normal form"
+    "= Ground" output
+  assertContains "outer partial synonym remains unexpanded" "= Alias" output
+  assertContains "full qualification reaches the normalized type"
+    "= KindSurface.Pair KindSurface.Ground KindSurface.Ground" output
+
+  assertContains "list constructor kind" "[] :: Type -> Type" output
+  assertContains "list normal form follows GHCi spelling" "= []" output
+  assertContains "tuple constructor kind"
+    "(,) :: Type -> Type -> Type" output
+  assertContains "function constructor kind"
+    "(->) :: Type -> Type -> Type" output
+  assertContains "saturated list kind" "[Ground] :: Type" output
+  assertContains "free type variable retains a generalized kind" "a :: k" output
+  assertContains "free higher-kinded application retains its result kind"
+    "f a :: k" output
+  assertContains "context-free forall retains a higher constructor kind"
+    "forall a. Pair :: Type -> Type -> Type" output
+
+  assertContains "ordinary class kind ends in Constraint"
+    "Convert :: Type -> Constraint" output
+  assertContains "saturated ordinary class has kind Constraint"
+    "Convert Ground :: Constraint" output
+  assertContains "unconstrained class parameter remains generalized"
+    "Marker :: k -> Constraint" output
+  assertContains "generalized class accepts a higher-kinded argument"
+    "Marker Pair :: Constraint" output
+  assertContains "method use fixes a higher class parameter kind"
+    "HigherClass :: (Type -> Type) -> Constraint" output
+  assertContains "fixed higher class accepts the matching constructor"
+    "HigherClass Wrapped :: Constraint" output
+  assertContains "context-free forall may wrap the inspected class head"
+    "forall a. Convert a :: Constraint" output
+  assertContains "leading forall permits an outer partial synonym"
+    "forall a. Partial a :: Type -> Type" output
+  assertContains "normalized presentation elides leading forall binders"
+    "= Partial a" output
+
+  assertContains "canonical loaded qualification bypasses an empty context"
+    "KindSurface.Ground :: Type" output
+  assertContains "restricted alias exposes a selected type"
+    "K.Pair :: Type -> Type -> Type" output
+  assertContains "restricted alias exposes a selected class"
+    "K.Convert :: Type -> Constraint" output
+  assertContains "restricted alias retains a generalized class kind"
+    "K.Marker :: k -> Constraint" output
+  forM_
+    [ "TermOnly ::"
+    , "K.Ground ::"
+    , "Higher Alias Ground ::"
+    , "Missing ::"
+    , "\nGround Ground ::"
+    , "HigherClass Pair ::"
+    , "Mixed f (f Ground) ::"
+    , "General (f a) (a f) ::"
+    , "f Convert ::"
+    , "forall a. Convert a => Pair ::"
+    , "Phantom Pair ::"
+    ] $ \unexpected -> assertBool
+      ("rejected kind input produced a result: " ++ unexpected)
+      $ not $ unexpected `isInfixOf` output
+
+  assertBool "kind inspection was incorrectly routed through both backends" $
+    not ("-- Djinn" `isInfixOf` output
+      || "-- Exference" `isInfixOf` output)
+  assertEqual ":kind commands do not replace the last synthesis query" 2
+    $ countOccurrences "\\a -> a" output
+
+  assertContains "malformed and out-of-scope types are parse failures"
+    "[DJEX_REPL_KIND_PARSE]" errors
+  assertContains "unknown and ill-kinded types are inference failures"
+    "[DJEX_REPL_KIND_INFERENCE]" errors
+  assertContains "nested unsaturated synonym is a normalization failure"
+    "[DJEX_REPL_KIND_NORMALIZE]" errors
+  assertContains "nested class forms explain the Constraint-kind boundary"
+    "supported only as the outer inspected head" errors
+  assertContains "missing kind argument remains a command failure"
+    "expected a Haskell type" errors
+  assertContains "bang attached to the type remains an unknown command"
+    "unknown command :kind!ground" errors
+  assertNoCallStack errors
+
+  withMissingPath $ \missing -> do
+    (missingExit, missingOutput, missingErrors) <- runDjexInput
+      ["repl", "--environment", missing]
+      $ unlines [":set prompt \"\"", ":kind Ground", ":quit"]
+    assertEqual "unavailable kind-inspection REPL exit"
+      ExitSuccess missingExit
+    assertBool "unavailable kind inspection emitted a result" $
+      not $ "Ground ::" `isInfixOf` missingOutput
+    assertContains "unavailable kind inspection is diagnosed distinctly"
+      "[DJEX_REPL_KIND_UNAVAILABLE]" missingErrors
+    assertNoCallStack missingErrors
 
 testReplTypeInference :: Assertion
 testReplTypeInference = withReplModuleFixture $ \root -> do
@@ -1893,6 +2096,38 @@ runRepl
 runRepl directory inputs = runDjexInput
   ["repl", "--environment", directory]
   $ unlines $ ":set prompt \"\"" : inputs ++ [":quit"]
+
+-- Keep kind inspection independent of the larger module-workspace fixture so
+-- its class and synonym declarations cannot alter unrelated search tests.
+withReplKindFixture :: (FilePath -> IO result) -> IO result
+withReplKindFixture = withTemporaryEnvironment
+  [ ("empty/.keep", "")
+  , ("kind/KindSurface.hs", unlines
+      [ "module KindSurface"
+      , "  ( Ground(..), Wrapped(..), Pair(..), Higher(..)"
+      , "  , Alias, Nested, Partial, Phantom"
+      , "  , Convert(..), Marker, HigherClass(..), Mixed(..), General"
+      , "  , Holder(..)"
+      , "  ) where"
+      , "data Ground = Ground"
+      , "data Wrapped a = Wrapped a"
+      , "data Pair a b = Pair a b"
+      , "data Higher f a = Higher (f a)"
+      , "type Alias a = Pair Ground a"
+      , "type Nested a = Alias (Wrapped a)"
+      , "type Partial a b = Pair a b"
+      , "type Phantom a = Ground"
+      , "class Convert a where"
+      , "  convert :: a -> Ground"
+      , "class Marker a"
+      , "class HigherClass f where"
+      , "  higherClass :: f a -> f a"
+      , "class Mixed a b where"
+      , "  mixed :: a -> Ground"
+      , "class General a b"
+      , "data Holder = TermOnly"
+      ])
+  ]
 
 withTemporaryEnvironment
   :: [(FilePath, String)]

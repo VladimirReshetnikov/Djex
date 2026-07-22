@@ -160,6 +160,15 @@ documented expression subset, not a GHC evaluator; see the
 [shared REPL guide](docs/repl.md#inspecting-expression-types) for supported
 forms and diagnostics.
 
+`:kind TYPE` (or `:k TYPE`) inspects type-level structure against that same
+loaded module scope and neutral declaration inventory. It retains genuinely
+generalized result kinds, prints class applications with a final `Constraint`,
+and is likewise independent of backend selection. Attach the bang to the
+command—`:kind! TYPE` or `:k! TYPE`—to add a second line with saturated type
+synonyms normalized. See
+[kind inspection](docs/repl.md#inspecting-type-kinds) for scope rules,
+qualification behavior, and the intentionally supported kind-language subset.
+
 The Exference half has a GHCi-shaped source workspace. `:load`, `:add`,
 `:unadd`, and `:reload` manage module/file targets and their local source
 dependencies; bare Haskell imports and `:module` manage the prompt scope;

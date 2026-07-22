@@ -220,9 +220,27 @@ that complete inventory. It deliberately does not infer through Exference's
 policy-filtered synthesis dictionary, so backend selection and search settings
 cannot change the answer; qualification remains a presentation concern.
 
+Private `Language.Haskell.Djex.REPL.Kind` implements the parallel read-only
+`:kind`/`:kind!` boundary. Scoped source conversion admits constructors,
+synonyms, and classes without prematurely requiring a `Type` result. The
+foundation's `inferTypeKind` reuses the ordinary checked kind engine but keeps
+canonical residual variables instead of applying Haskell-98 grounding.
+Saturated synonym normalization is delegated to the exact
+`PreparedInventory` retained by the Exference session; only a synonym at the
+complete operational head beneath context-free prenex foralls may remain
+undersaturated, and source and normalized forms are both kind-checked for
+`:kind!`. Plain `:kind` uses the corresponding non-expanding saturation check.
+The shared `Kind` tree remains the backend contract used by
+Djinn's closed compatibility patterns, so the REPL adds `Constraint` only to a
+private inspection/presentation kind. A class may be that complete head under
+the same context-free forall wrapper; nested Constraint-kinded class forms are
+rejected explicitly. Like `:type`, this path uses the neutral base session and
+module scope rather than the selected backend or filtered search projection.
+
 The GHCi resemblance still stops short of evaluation. Bare input asks for an
 inhabitant of a type, while `:type` parses a term expression and performs
-structural inference without running it or compiling loaded function bodies.
+structural inference without running it or compiling loaded function bodies;
+`:kind` inspects only the structural kind subset described above.
 The inferencer covers common applications, operators, lambdas and patterns,
 conditionals, cases, tuples, lists, enumerations, literals, and annotations;
 forms requiring local-declaration generalization or richer GHC semantics fail

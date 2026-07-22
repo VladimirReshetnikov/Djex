@@ -61,9 +61,9 @@ Djinn converts its historical raw syntax at its compatibility boundary.
 | Module | Responsibility |
 | --- | --- |
 | `Language.Haskell.Synthesis.Environment` | Seals declaration order, cross-declaration namespaces, and type/value/constructor/class/instance indexes. |
-| `Language.Haskell.Synthesis.KindInference` | Kind checking and inference for types and whole environments, including open/closed inventories and class-kind finalization policy. |
+| `Language.Haskell.Synthesis.KindInference` | Kind checking and inference for types and whole environments, including canonical residual kinds for inspection, open/closed inventories, and class-kind finalization policy. |
 | `Language.Haskell.Synthesis.Inventory` | Pairs one grounded `Environment` with the kind assumptions inferred from it. |
-| `Language.Haskell.Synthesis.TypeSynonym` | Prepares exact synonym tables, rejects repeated raw parameters when reached, checks saturation, expands capture-safely, and performs pre/post-expansion kind checks. |
+| `Language.Haskell.Synthesis.TypeSynonym` | Prepares exact synonym tables, rejects repeated raw parameters when reached, checks saturation, expands capture-safely, performs pre/post-expansion kind checks, and offers the deliberately outer-head-lenient normalization used by `:kind!`. |
 | `Language.Haskell.Synthesis.Class` | Provides an opaque source-order view of declared classes, final parameter kinds, methods, and explicit instances from an `Inventory`. |
 
 `PreparedInventory` is the long-lived session authority: it keeps an Inventory
@@ -71,6 +71,22 @@ and its exact normalized synonym table inseparable. The transient
 `PreparedInventoryExpansion` additionally supplies an alias-free operational
 declaration stream and datatype-recursion set while a backend is being sealed;
 backends do not retain that expanded declaration copy afterward.
+
+`inferTypeKind` shares the normal preflight, validation, assumptions, and
+unifier but does not apply the Haskell-98 `Type` default to a residual kind
+variable. Its `InferredKind` variables are renumbered from zero in structural
+first-occurrence order, so callers never observe private inference allocation
+tokens. `normalizePreparedTypeSynonyms` is intentionally separate from kind
+checking: it expands saturated aliases and permits only the complete input's
+operational synonym head beneath context-free prenex foralls to remain
+undersaturated. Interactive callers therefore check before normalization and
+may defensively check the result again.
+
+`checkClassApplicationKinds` validates a possibly partial class application
+and returns the unapplied parameter-kind suffix. All supplied arguments share
+one inference scope, including generalized parameters, so repeated source
+variables cannot acquire incompatible kinds merely because they occur in
+different class arguments.
 
 Shared class values describe source facts. Djinn and Exference intentionally
 retain different resolution and search policies.

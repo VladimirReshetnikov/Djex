@@ -168,9 +168,9 @@ complete replacement with `mkEnvironment`, and seal a new session with
 Djinn `HType`, `HKind`, `Declaration`, and `Context` values out of the curated
 API. The separate historical `djinn` executable retains its transactional
 raw-declaration editor solely inside the compatibility frontend. The shared
-`djex` REPL intentionally exposes read-only `:browse` and `:info` views, plus
-non-evaluating term inspection through `:type`, instead of that legacy
-mutation language.
+`djex` REPL intentionally exposes read-only `:browse` and `:info` views,
+non-evaluating term inspection through `:type`, and structural kind inspection
+through `:kind`/`:kind!`, instead of that legacy mutation language.
 
 `:type` is a private REPL frontend over the authoritative neutral inventory
 retained by the Exference runtime. It derives callable signatures for ordinary
@@ -182,6 +182,22 @@ shared qualification policy affects its presentation. The command performs
 structural inference for the expression subset documented in the
 [REPL guide](repl.md#inspecting-expression-types); it neither evaluates terms
 nor infers types for loaded function bodies.
+
+`:kind` is a sibling private REPL frontend over the same authoritative
+inventory and current module scope. The parser admits type constructors,
+synonyms, and class heads without forcing the result to `Type` first. Ordinary
+types then use `inferTypeKind`, whose `InferredKind` residual `Natural`
+variables are canonical presentation identities; the private REPL layer maps
+the inventory's class-parameter kinds to a final `Constraint`. `:kind!`
+normalizes synonyms through the session's exact `PreparedInventory` witness
+and checks the kind on both sides. Library code needing that narrow
+normalization rule can call
+`normalizePreparedTypeSynonyms`: saturated aliases expand normally, while only
+an undersaturated alias at the complete operational head beneath leading
+context-free forall binders is retained. This operation does not perform kind
+checking itself, so callers must validate the source before normalization, as
+the REPL does. The complete interactive behavior and limits are in the
+[REPL guide](repl.md#inspecting-type-kinds).
 
 ## Exference example without a parser
 

@@ -74,6 +74,17 @@ projectionSignatures =
   (Inventory.inventoryKindAssumptions
     :: Inventory.Inventory Int ()
     -> KindInference.KindAssumptions) `seq`
+  (KindInference.inferTypeKind
+    :: KindInference.KindAssumptions
+    -> Type Int
+    -> Either (KindInference.KindInferenceError Int)
+        KindInference.InferredKind) `seq`
+  (KindInference.checkClassApplicationKinds
+    :: KindInference.KindAssumptions
+    -> Name
+    -> [Type Int]
+    -> Either (KindInference.KindInferenceError Int)
+        [Maybe KindInference.GroundKind]) `seq`
   (Query.resultEvidence
     :: Query.QueryResult () ()
     -> Query.QueryEvidence) `seq`
@@ -109,6 +120,11 @@ projectionSignatures =
     -> KindInference.GroundKind
     -> Type Int
     -> Either (TypeSynonym.TypeElaborationError Int) (Type Int)) `seq`
+  (TypeSynonym.normalizePreparedTypeSynonyms
+    :: TypeSynonym.FreshVariable Int
+    -> TypeSynonym.PreparedInventory Int ()
+    -> Type Int
+    -> Either (TypeSynonym.SynonymExpansionError Int) (Type Int)) `seq`
   (TypeSynonym.inventoryExpansionPreparedInventory
     :: TypeSynonym.PreparedInventoryExpansion Int ()
     -> TypeSynonym.PreparedInventory Int ()) `seq`
@@ -136,6 +152,11 @@ projectionSignatures =
   (CoreTypes.qClassEnv_inflatedConstraints
     :: CoreTypes.QueryClassEnv
     -> Set.Set CoreTypes.HsConstraint) `seq`
+  (CoreTypes.showHsTypeWithQualification
+    :: Qualification
+    -> CoreTypes.TypeVarIndex
+    -> CoreTypes.HsType
+    -> String) `seq`
   (Declaration.preparedSynthesisWitness
     :: Declaration.PreparedSynthesisInventory ()
     -> TypeSynonym.PreparedInventory CoreTypes.SynthesisVariable ()) `seq`

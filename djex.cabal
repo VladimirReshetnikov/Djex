@@ -204,6 +204,7 @@ Library
     Language.Haskell.Djex.Package
     Language.Haskell.Djex.REPL.Command
     Language.Haskell.Djex.REPL.Driver
+    Language.Haskell.Djex.REPL.Kind
     Language.Haskell.Djex.REPL.Scope
     Language.Haskell.Djex.REPL.Type
     Language.Haskell.Djex.REPL.Workspace
@@ -222,6 +223,7 @@ Library
     Language.Haskell.Exference.Core.Internal.SourceNames
     Language.Haskell.Exference.Core.Internal.VariableSupply
     Language.Haskell.Exference.HaskellSrcUtils
+    Language.Haskell.Exference.Internal.TypeParsing
     Paths_djex
 
   Autogen-Modules: Paths_djex

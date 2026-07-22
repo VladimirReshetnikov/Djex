@@ -14,9 +14,10 @@ that Djex should inhabit, not a Haskell expression to evaluate. Source modules
 provide checked type, data, class, instance, and signature information to
 Exference; their function bodies are not compiled or interpreted. The two
 synthesis engines also retain different parsers and search semantics. The
-`:type` command is a read-only exception at the command boundary: it infers an
-expression's type from loaded signatures, but still never evaluates the
-expression or compiles a source body.
+`:type` and `:kind` commands are read-only exceptions at the command boundary.
+The first infers an expression's type from loaded signatures; the second
+inspects a type against the loaded kind inventory. Neither command evaluates
+an expression, compiles a source body, or invokes synthesis search.
 
 Use the shared REPL when exploring or comparing types. Use the one-shot
 `djex djinn` and `djex exference` subcommands when a script needs generated
@@ -134,6 +135,7 @@ settings, `:show` subjects, and paths where appropriate.
 | `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors and class methods. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
 | `import DECLARATION` | Append a Haskell import to the Exference prompt context. |
+| `:kind[!] TYPE` (`:k`) | Infer a type's kind in the current loaded module scope; attached `!` also shows its synonym-normalized form. |
 | `:load [TARGET ...]` (`:l`) | Replace the Exference target set and load local dependencies. No targets clears it. |
 | `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the Exference prompt context. |
 | `:pwd` | Print the process working directory. |
@@ -376,6 +378,66 @@ the whole context; `:show imports` is authoritative.
 
 Module context applies only to Exference. Djinn continues to parse and search
 its independent standard checked session, including when `both` is selected.
+
+## Inspecting type kinds
+
+`:kind TYPE`, abbreviated `:k TYPE`, parses a Haskell type in the current
+loaded module scope and reports its kind without running either synthesis
+backend. Djex spells the proper type kind `Type`, retains genuinely free kind
+variables, and displays a class head as a function ending in `Constraint`:
+
+```text
+:kind Maybe
+Maybe :: Type -> Type
+:kind Either Int
+Either Int :: Type -> Type
+:kind f a
+f a :: k
+:kind Functor
+Functor :: (Type -> Type) -> Constraint
+```
+
+The bang is part of the command token. `:kind! TYPE` and `:k! TYPE` add an
+`= TYPE` line whose saturated type synonyms have been expanded; `:kind ! TYPE`
+instead passes `! TYPE` to the ordinary type parser. The normalized line uses
+the current `qualification` setting and retains source variable spellings:
+
+```text
+-- Given type Text = [Char] in a loaded source module:
+:kind! Text
+Text :: Type
+= [Char]
+```
+
+Djex permits an undersaturated synonym only when that synonym is the complete
+input's operational head, matching the useful `:kind! Alias` case. Leading
+context-free `forall` binders may wrap that head and are omitted from the
+normalized presentation. Supplied arguments are still normalized, and an
+undersaturated synonym nested inside another argument, function, tuple,
+constrained forall, or non-head subtree is rejected. Kind checking happens
+before expansion, so a phantom synonym cannot erase an ill-kinded argument.
+Ordinary `:kind` performs the same saturation validation without constructing
+or printing an expanded tree.
+
+Lookup follows the same current-module precedence, unqualified visibility,
+canonical loaded-module qualification, import aliases, explicit lists, and
+`hiding` rules as synthesis and `:type`. Type constructors, synonyms, and
+classes participate; term declarations do not become type names. Lowercase
+spellings in type syntax remain ordinary free type variables. The command
+reads the authoritative neutral inventory behind the loaded Exference runtime,
+not its policy-filtered search dictionary, so changing `:backend` or search
+settings cannot change the answer. It also does not replace the last synthesis
+query repeated by `:`. A loaded source workspace is required.
+
+This is a structural Djex kind inspector, not GHC's complete kind checker.
+Type-family reduction, promoted types and DataKinds, explicit kind annotations,
+unboxed tuple kinds, and runtime-representation polymorphism are not supported.
+Synonym normalization does not reduce type families. `Constraint` is supported
+as the result of the whole inspected class application, optionally beneath
+leading context-free `forall` binders; nested Constraint-kinded class
+constructors are rejected explicitly. `Constraint` is not added to the shared
+synthesis kind tree. Parse, kind-inference, and normalization failures use
+distinct recoverable diagnostics and leave the session unchanged.
 
 ## Inspecting expression types
 

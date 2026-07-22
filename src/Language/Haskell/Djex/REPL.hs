@@ -28,7 +28,7 @@ import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Data.Version (showVersion)
-import Data.Void (Void, absurd)
+import Data.Void (Void)
 import System.Directory
   ( Permissions (readable, searchable, writable)
   , canonicalizePath
@@ -65,6 +65,7 @@ import Language.Haskell.Djex.Package
   )
 import Language.Haskell.Djex.REPL.Command
 import Language.Haskell.Djex.REPL.Driver
+import Language.Haskell.Djex.REPL.Kind
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
@@ -254,6 +255,8 @@ runCommand sourceName history command state = case command of
     showHistory countSource history
     continue state
   InspectDeclaration nameSource -> showInfo state nameSource >> continue state
+  InspectKind normalization typeSource ->
+    showTypeKind sourceName normalization typeSource state >> continue state
   InspectType defaulting expression ->
     showExpressionType sourceName defaulting expression state >> continue state
   InstallPackages mode packages ->
@@ -381,6 +384,29 @@ showExpressionType sourceName defaulting expression state = case
   _ -> replFailure "DJEX_REPL_TYPE_UNAVAILABLE"
     "type inference has no loaded source workspace"
     "use :load TARGET before :type"
+ where
+  runtime = exferenceRuntime state
+
+showTypeKind
+  :: FilePath
+  -> KindNormalization
+  -> String
+  -> ReplState
+  -> IO ()
+showTypeKind sourceName normalization typeSource state = case
+    ( exferenceRuntimeBaseSession runtime
+    , exferenceRuntimeScope runtime
+    ) of
+  (Just session, Just scope) -> case inspectKind
+      session scope sourceName normalization typeSource of
+    Left failure -> emitDiagnostic failure
+    Right inspection -> mapM_ putStrLn $ renderKindInspection
+      (presentationQualification $ presentation state)
+      normalization
+      inspection
+  _ -> replFailure "DJEX_REPL_KIND_UNAVAILABLE"
+    "kind inference has no loaded source workspace"
+    "use :load TARGET before :kind"
  where
   runtime = exferenceRuntime state
 
@@ -1179,7 +1205,7 @@ renderDeclaration variableName declaration = case declaration of
       [] -> ""
       _ -> " = " ++ intercalate " | " (map renderConstructor constructors)
   AbstractTypeDeclaration _ name kind ->
-    "type " ++ renderCanonical name ++ " :: " ++ renderKind kind
+    "type " ++ renderCanonical name ++ " :: " ++ renderGroundKind kind
   ValueDeclaration signature -> renderSignature signature
   ClassDeclaration _ name parameters superclasses methods ->
     "class " ++ contextPrefix superclasses
@@ -1196,7 +1222,7 @@ renderDeclaration variableName declaration = case declaration of
   renderParameter parameter = case parameterKind parameter of
     Nothing -> variableName $ parameterVariable parameter
     Just kind -> "(" ++ variableName (parameterVariable parameter)
-      ++ " :: " ++ renderKind kind ++ ")"
+      ++ " :: " ++ renderGroundKind kind ++ ")"
   headWithParameters name parameters = unwords
     $ renderCanonical name : map renderParameter parameters
   renderConstructor constructor = unwords
@@ -1209,17 +1235,6 @@ renderDeclaration variableName declaration = case declaration of
     [constraint] -> renderSharedConstraint constraint ++ " => "
     _ -> "(" ++ intercalate ", "
       (map renderSharedConstraint constraints) ++ ") => "
-
-renderKind :: Kind Void -> String
-renderKind kind = case kind of
-  ProperTypeKind -> "Type"
-  KindVariable impossible -> absurd impossible
-  FunctionKind parameter result -> renderKindParameter parameter
-    ++ " -> " ++ renderKind result
- where
-  renderKindParameter parameter@(FunctionKind _ _) =
-    "(" ++ renderKind parameter ++ ")"
-  renderKindParameter parameter = renderKind parameter
 
 showHistory :: Maybe String -> [String] -> IO ()
 showHistory countSource history = case traverse parseCount countSource of

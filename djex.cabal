@@ -229,7 +229,7 @@ Library
     pretty >= 1.1 && < 1.2,
     process >= 1.6 && < 1.7
 
--- The merged one-shot command is a launcher over the library's
+-- The shared interactive and one-shot command is a launcher over the library's
 -- Language.Haskell.Djex.CLI, matching the two historical executables below,
 -- which remain available for their compatibility contracts.
 Executable djex

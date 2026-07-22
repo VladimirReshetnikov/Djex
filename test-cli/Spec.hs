@@ -1,6 +1,6 @@
 module Main (main) where
 
-import CLIAssertions (assertContains)
+import CLIAssertions (assertContains, countOccurrences)
 import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.Char (toLower)
@@ -26,6 +26,22 @@ import qualified Language.Haskell.Djex as Djex
 main :: IO ()
 main = defaultMain $ testGroup "Djex CLI integration"
   [ testCase "global help and version load no backend" testGlobalInformation
+  , testCase "REPL dispatch validates startup options without loading"
+      testReplDispatch
+  , testCase "REPL keeps both backend sessions and settings alive"
+      testReplSharedSession
+  , testCase "REPL multiline, repeat, and command errors recover"
+      testReplInputRecovery
+  , testCase "REPL both mode isolates an unavailable backend"
+      testReplBackendIsolation
+  , testCase "REPL environment replacement is transactional"
+      testReplTransactionalLoad
+  , testCase "REPL fix policy rebuilds the Exference session"
+      testReplFixReload
+  , testCase "REPL scripts persist state and reject recursion"
+      testReplScripts
+  , testCase "REPL history preserves chronological numbering"
+      testReplHistory
   , testCase "explicit RTS tuning reaches the application" testRtsOptions
   , testCase "backend help loads no environment" testBackendHelp
   , testCase "usage errors have a distinct exit status" testUsageErrors
@@ -86,6 +102,168 @@ testGlobalInformation = do
   assertContains "version output" "djex version 2026.7.17" versionOutput
   assertEqual "version stderr" "" versionErrors
 
+testReplDispatch :: Assertion
+testReplDispatch = do
+  (helpExit, help, helpErrors) <- runDjex ["repl", "--help"]
+  assertEqual "REPL help exit" ExitSuccess helpExit
+  assertContains "REPL help usage" "Usage: djex repl [OPTION...]" help
+  assertContains "REPL backend startup option"
+    "--backend=djinn|exference|both" help
+  assertBool "REPL help must not initialize a session" $
+    not $ "Djex REPL" `isInfixOf` help
+  assertEqual "REPL help stderr" "" helpErrors
+
+  (bareExit, bareOutput, _) <- runDjex []
+  assertEqual "bare djex EOF exit" ExitSuccess bareExit
+  assertContains "bare djex starts the REPL" "Djex REPL 2026.7.17" bareOutput
+
+  assertUsageFailure ["repl", "--backend", "unknown"] "unknown backend"
+  assertUsageFailure
+    ["repl", "--backend", "djinn", "--backend", "both"]
+    "--backend may be specified only once"
+  assertUsageFailure ["repl", "unexpected"]
+    "repl takes no positional arguments"
+
+testReplSharedSession :: Assertion
+testReplSharedSession = withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":set render expression"
+    , "a -> a"
+    , ":backend exference"
+    , "a -> a"
+    , ":djinn a -> a"
+    , ":backend"
+    , ":compare a -> a"
+    ]
+  assertEqual "shared REPL exit" ExitSuccess exitCode
+  assertEqual "five independent identity results" 5
+    $ countOccurrences "\\a -> a" output
+  assertContains "backend switch" "Active backend: exference" output
+  assertContains "explicit Djinn query did not switch backend"
+    "exference\n" output
+  assertContains "comparison labels Djinn" "-- Djinn" output
+  assertContains "comparison labels Exference" "-- Exference" output
+  assertBool "successful shared session emitted an error" $
+    not $ "error" `isInfixOf` map toLower errors
+
+testReplInputRecovery :: Assertion
+testReplInputRecovery = withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":set render expression"
+    , ":{"
+    , "a"
+    , " -> a"
+    , ":}"
+    , ":"
+    , ":c ignored"
+    , ":wat"
+    , "a -> a"
+    ]
+  assertEqual "recovering REPL exit" ExitSuccess exitCode
+  assertEqual "multiline, repeat, and post-error results" 3
+    $ countOccurrences "\\a -> a" output
+  assertContains "ambiguous abbreviation diagnostic"
+    "ambiguous command :c" errors
+  assertContains "unknown command diagnostic" "unknown command :wat" errors
+  assertNoCallStack errors
+
+testReplBackendIsolation :: Assertion
+testReplBackendIsolation = withMissingPath $ \missing -> do
+  (exitCode, output, errors) <- runDjexInput
+    ["repl", "--backend", "both", "--environment", missing]
+    $ unlines [":set prompt \"\"", "a -> a", ":quit"]
+  assertEqual "isolated both-mode exit" ExitSuccess exitCode
+  assertContains "Djinn section survives" "-- Djinn" output
+  assertContains "Djinn result survives" "djexResult a = a" output
+  assertContains "Exference section is still attempted" "-- Exference" output
+  assertContains "missing environment diagnostic"
+    "[EXF_ENV_DIRECTORY_READ]" errors
+  assertContains "unavailable backend diagnostic"
+    "[DJEX_REPL_EXFERENCE_UNAVAILABLE]" errors
+
+testReplTransactionalLoad :: Assertion
+testReplTransactionalLoad = withTemporaryEnvironment [] $ \directory ->
+  withMissingPath $ \missing -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ ":backend exference"
+      , ":set render expression"
+      , ":load " ++ show missing
+      , "a -> a"
+      , ":cd /"
+      , ":reload"
+      , "a -> a"
+      , ":show environment"
+      ]
+    assertEqual "transactional load exit" ExitSuccess exitCode
+    assertContains "failed replacement retains the old session"
+      "retaining the previous session and settings" output
+    assertEqual "old session remains usable across failed load and cwd change" 2
+      $ countOccurrences "\\a -> a" output
+    assertContains "reload retains canonical environment path" directory output
+    assertContains "failed load reports missing source"
+      "[EXF_ENV_DIRECTORY_READ]" errors
+
+testReplFixReload :: Assertion
+testReplFixReload = withTemporaryEnvironment
+    [("Fix.hs", unlines
+      [ "module Data.Function where"
+      , "fix :: (a -> a) -> a"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend exference"
+    , ":set render expression"
+    , ":set max-steps 8"
+    , "a"
+    , ":set +fix"
+    , "a"
+    ]
+  assertEqual "fix reload exit" ExitSuccess exitCode
+  assertContains "policy change reloads the source environment"
+    "Loaded Exference environment:" output
+  assertEqual "fix is introduced only after opt-in" 1
+    $ countOccurrences "Data.Function.fix" output
+  assertContains "safe policy finds no unrestricted inhabitant first"
+    "[DJEX_EXF_NO_RESULT]" errors
+
+testReplScripts :: Assertion
+testReplScripts = withTemporaryEnvironment [] $ \directory -> do
+  let script = directory ++ "/commands.djex"
+      recursive = directory ++ "/recursive.djex"
+  writeFile script $ unlines
+    [ ":set render expression"
+    , ":backend exference"
+    , "a -> a"
+    ]
+  writeFile recursive $ ":script " ++ show recursive ++ "\n"
+  (exitCode, output, errors) <- runRepl directory
+    [ ":script " ++ show script
+    , ":backend"
+    , ":script " ++ show recursive
+    , "a -> a"
+    ]
+  assertEqual "script REPL exit" ExitSuccess exitCode
+  assertEqual "script and recovered interactive result" 2
+    $ countOccurrences "\\a -> a" output
+  assertContains "script setting persists" "exference\n" output
+  assertContains "recursive script is rejected"
+    "[DJEX_REPL_SCRIPT_CYCLE]" errors
+
+testReplHistory :: Assertion
+testReplHistory = withTemporaryEnvironment [] $ \directory -> do
+  let history = directory ++ "/history"
+  -- Haskeline persists newest-first, matching 'historyLines'. The driver
+  -- reverses that representation before assigning chronological line numbers.
+  writeFile history "old-two\nold-one\n"
+  (exitCode, output, errors) <- runDjexInput
+    ["repl", "--environment", directory, "--history", history]
+    $ unlines [":set prompt \"\"", ":history 1", ":quit"]
+  assertEqual "history REPL exit" ExitSuccess exitCode
+  assertContains "latest history entry" "2  old-two" output
+  assertBool "history selected the oldest entry" $
+    not $ "1  old-one" `isInfixOf` output
+  assertBool "history session emitted an error" $
+    not $ "error" `isInfixOf` map toLower errors
+
 testRtsOptions :: Assertion
 testRtsOptions = do
   (exitCode, output, errors) <-
@@ -106,8 +284,7 @@ testBackendHelp = do
 
 testUsageErrors :: Assertion
 testUsageErrors = do
-  assertUsageFailure [] "a backend is required"
-  assertUsageFailure ["unknown", "a -> a"] "unknown backend"
+  assertUsageFailure ["unknown", "a -> a"] "unknown command"
   assertUsageFailure ["djinn"] "exactly one input type is required"
   assertUsageFailure ["djinn", "a", "b"]
     "exactly one input type is required, but got 2"
@@ -394,7 +571,18 @@ assertUsageFailure arguments expected = do
   assertNoCallStack errors
 
 runDjex :: [String] -> IO (ExitCode, String, String)
-runDjex arguments = readProcessWithExitCode "djex" arguments ""
+runDjex arguments = runDjexInput arguments ""
+
+runDjexInput :: [String] -> String -> IO (ExitCode, String, String)
+runDjexInput = readProcessWithExitCode "djex"
+
+runRepl
+  :: FilePath
+  -> [String]
+  -> IO (ExitCode, String, String)
+runRepl directory inputs = runDjexInput
+  ["repl", "--environment", directory]
+  $ unlines $ ":set prompt \"\"" : inputs ++ [":quit"]
 
 withTemporaryEnvironment
   :: [(FilePath, String)]

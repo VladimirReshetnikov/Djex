@@ -16,12 +16,13 @@ module Language.Haskell.Djex.REPL
 
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
-import Control.Monad (forM_, unless, when)
+import Control.Monad (forM_, when)
 import Data.Char (isSpace, toLower)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
 import Data.Maybe (fromMaybe)
 import Data.Version (showVersion)
+import Data.Void (Void, absurd)
 import System.Directory
   ( canonicalizePath
   , getCurrentDirectory
@@ -71,7 +72,6 @@ defaultReplOptions = ReplOptions
 
 data ReplState = ReplState
   { activeBackends :: ReplBackend
-  , startupBackends :: ReplBackend
   , djinnRuntimeSession :: DjinnSession
   , exferenceRuntime :: ExferenceRuntime
   , resultTarget :: DefinitionName
@@ -105,46 +105,46 @@ runRepl options = case standardDjinnSession of
   Right djinnSession -> case defaultTarget of
     Left failure -> diagnosticFailure failure
     Right target -> do
-      requestedPath <- maybe defaultExferenceEnvironmentPath pure
-        $ replEnvironmentPath options
-      attempt <- loadExference requestedPath $ replAllowFix options
-      let exference = ExferenceRuntime
-            { exferenceRuntimePath = attemptedEnvironmentPath attempt
-            , exferenceRuntimeAllowsFix = replAllowFix options
-            , exferenceRuntimeSession = attemptedSession attempt
-            , exferenceRuntimeDiagnostics = attemptedDiagnostics attempt
-            }
-          initial = ReplState
-            { activeBackends = replInitialBackend options
-            , startupBackends = replInitialBackend options
-            , djinnRuntimeSession = djinnSession
-            , exferenceRuntime = exference
-            , resultTarget = target
-            , presentation = PresentationOptions
-                { presentationSelection = SelectFirst
-                , presentationRenderMode = RenderDefinition
-                , presentationQualification = FullyQualified
+      resolvedHistory <- resolveOptionalPath $ replHistoryFile options
+      case resolvedHistory of
+        Left failure -> diagnosticFailure failure
+        Right historyPath -> do
+          requestedPath <- maybe defaultExferenceEnvironmentPath pure
+            $ replEnvironmentPath options
+          attempt <- loadExference requestedPath $ replAllowFix options
+          let exference = ExferenceRuntime
+                { exferenceRuntimePath = attemptedEnvironmentPath attempt
+                , exferenceRuntimeAllowsFix = replAllowFix options
+                , exferenceRuntimeSession = attemptedSession attempt
+                , exferenceRuntimeDiagnostics = attemptedDiagnostics attempt
                 }
-            , djinnSearchOptions = defaultQueryOptions
-            , exferenceSearchOptions = defaultExferenceOptions
-            , promptTemplate = "djex[%b]> "
-            , lastQuery = Nothing
-            , scriptStack = []
-            }
-      putStrLn $ "Djex REPL " ++ showVersion version
-      putStrLn "Djinn session ready (standard checked environment)."
-      case attemptedSession attempt of
-        Just _ -> putStrLn $ "Exference environment: "
-          ++ attemptedEnvironmentPath attempt
-        Nothing -> putStrLn
-          "Exference is unavailable; use :load DIR after fixing its environment."
-      putStrLn "Type :help for help."
-      _ <- runReplDriver
-        (replHistoryFile options)
-        initial
-        renderPrompt
-        (executeSource "<interactive>")
-      pure ExitSuccess
+              initial = ReplState
+                { activeBackends = replInitialBackend options
+                , djinnRuntimeSession = djinnSession
+                , exferenceRuntime = exference
+                , resultTarget = target
+                , presentation = PresentationOptions
+                    { presentationSelection = SelectFirst
+                    , presentationRenderMode = RenderDefinition
+                    , presentationQualification = FullyQualified
+                    }
+                , djinnSearchOptions = defaultQueryOptions
+                , exferenceSearchOptions = defaultExferenceOptions
+                , promptTemplate = "djex[%b]> "
+                , lastQuery = Nothing
+                , scriptStack = []
+                }
+          putStrLn $ "Djex REPL " ++ showVersion version
+          putStrLn "Djinn session ready (standard checked environment)."
+          case attemptedSession attempt of
+            Just _ -> putStrLn $ "Exference environment: "
+              ++ attemptedEnvironmentPath attempt
+            Nothing -> putStrLn
+              "Exference is unavailable; use :load DIR after fixing its environment."
+          putStrLn "Type :help for help."
+          _ <- runReplDriver historyPath initial renderPrompt
+            $ executeSource "<interactive>"
+          pure ExitSuccess
 
 defaultTarget :: Either Diagnostic DefinitionName
 defaultTarget = do
@@ -213,13 +213,13 @@ runCommand sourceName history command state = case command of
     continue state
   InspectDeclaration nameSource -> showInfo state nameSource >> continue state
   LoadEnvironment path -> do
-    next <- replaceExferenceEnvironment False path
+    next <- replaceExferenceEnvironment path
       (exferenceRuntimeAllowsFix $ exferenceRuntime state) state
     continue next
   Quit -> pure $ ExitRepl state
   ReloadEnvironment -> do
     let runtime = exferenceRuntime state
-    next <- replaceExferenceEnvironment False
+    next <- replaceExferenceEnvironment
       (exferenceRuntimePath runtime)
       (exferenceRuntimeAllowsFix runtime)
       state
@@ -355,23 +355,22 @@ loadExference requestedPath allowFix = do
           }
 
 replaceExferenceEnvironment
-  :: Bool
-  -> FilePath
+  :: FilePath
   -> Bool
   -> ReplState
   -> IO ReplState
-replaceExferenceEnvironment quiet path allowFix state = do
+replaceExferenceEnvironment path allowFix state = do
   attempt <- loadExference path allowFix
   case attemptedSession attempt of
     Nothing -> do
-      unless quiet $ putStrLn
+      putStrLn
         "Exference load failed; retaining the previous session and settings."
       pure state
         { exferenceRuntime = (exferenceRuntime state)
             { exferenceRuntimeDiagnostics = attemptedDiagnostics attempt }
         }
     Just session -> do
-      unless quiet $ putStrLn $ "Loaded Exference environment: "
+      putStrLn $ "Loaded Exference environment: "
         ++ attemptedEnvironmentPath attempt
       pure state
         { exferenceRuntime = ExferenceRuntime
@@ -473,7 +472,7 @@ applySetting name value state = case name of
     Right allowFix
       | allowFix == exferenceRuntimeAllowsFix (exferenceRuntime state) ->
           pure state
-      | otherwise -> replaceExferenceEnvironment False
+      | otherwise -> replaceExferenceEnvironment
           (exferenceRuntimePath $ exferenceRuntime state) allowFix state
   _ -> reject $ "unknown setting " ++ show name
  where
@@ -500,7 +499,8 @@ unsetOption source state = case words $ map toLower $ trim source of
   _ -> settingFailure "expected exactly one setting name" >> pure state
  where
   reset name = case name of
-    "backend" -> pure state {activeBackends = startupBackends state}
+    "backend" -> pure state
+      {activeBackends = replInitialBackend defaultReplOptions}
     "target" -> case defaultTarget of
       Left failure -> emitDiagnostic failure >> pure state
       Right target -> pure state {resultTarget = target}
@@ -544,7 +544,7 @@ unsetOption source state = case words $ map toLower $ trim source of
       {exferenceMaximumDepth = exferenceMaximumDepth defaults}
     "fix"
       | exferenceRuntimeAllowsFix (exferenceRuntime state) ->
-          replaceExferenceEnvironment False
+          replaceExferenceEnvironment
             (exferenceRuntimePath $ exferenceRuntime state) False state
       | otherwise -> pure state
     _ -> settingFailure ("unknown setting " ++ show name) >> pure state
@@ -784,10 +784,9 @@ forSelectedBackends state action = case activeBackends state of
   BothBackends -> action DjinnBackend >> action ExferenceBackend
 
 browse
-  :: Show kind
-  => String
+  :: String
   -> (variable -> String)
-  -> Environment variable kind ()
+  -> Environment variable Void ()
   -> IO ()
 browse label variableName environment = do
   putStrLn $ "-- " ++ label
@@ -797,24 +796,36 @@ browse label variableName environment = do
       declarations
 
 info
-  :: Show kind
-  => String
+  :: String
   -> (variable -> String)
   -> Name
-  -> Environment variable kind ()
+  -> Environment variable Void ()
   -> IO ()
 info label variableName name environment = do
   putStrLn $ "-- " ++ label
-  case filter ((== name) . declarationSubjectName)
+  case filter (declarationDefines name)
       $ environmentDeclarations environment of
     [] -> putStrLn $ "No declaration for " ++ renderCanonical name
     declarations -> mapM_ (putStrLn . renderDeclaration variableName)
       declarations
 
+-- Constructors and class methods are usable search names even though the
+-- neutral environment indexes them beneath their owning declaration.
+declarationDefines
+  :: Name
+  -> Declaration variable kind annotation
+  -> Bool
+declarationDefines name declaration =
+  declarationSubjectName declaration == name || case declaration of
+    DataTypeDeclaration _ _ _ constructors ->
+      any ((== name) . constructorName) constructors
+    ClassDeclaration _ _ _ _ methods ->
+      any ((== name) . valueName) methods
+    _ -> False
+
 renderDeclaration
-  :: Show kind
-  => (variable -> String)
-  -> Declaration variable kind ()
+  :: (variable -> String)
+  -> Declaration variable Void ()
   -> String
 renderDeclaration variableName declaration = case declaration of
   TypeSynonymDeclaration _ name parameters body ->
@@ -825,7 +836,7 @@ renderDeclaration variableName declaration = case declaration of
       [] -> ""
       _ -> " = " ++ intercalate " | " (map renderConstructor constructors)
   AbstractTypeDeclaration _ name kind ->
-    "type " ++ renderCanonical name ++ " :: " ++ show kind
+    "type " ++ renderCanonical name ++ " :: " ++ renderKind kind
   ValueDeclaration signature -> renderSignature signature
   ClassDeclaration _ name parameters superclasses methods ->
     "class " ++ contextPrefix superclasses
@@ -839,7 +850,10 @@ renderDeclaration variableName declaration = case declaration of
   renderSharedType = renderTypeWithQualification FullyQualified variableName
   renderSharedConstraint = renderConstraintWithQualification
     FullyQualified variableName
-  renderParameter = variableName . parameterVariable
+  renderParameter parameter = case parameterKind parameter of
+    Nothing -> variableName $ parameterVariable parameter
+    Just kind -> "(" ++ variableName (parameterVariable parameter)
+      ++ " :: " ++ renderKind kind ++ ")"
   headWithParameters name parameters = unwords
     $ renderCanonical name : map renderParameter parameters
   renderConstructor constructor = unwords
@@ -852,6 +866,17 @@ renderDeclaration variableName declaration = case declaration of
     [constraint] -> renderSharedConstraint constraint ++ " => "
     _ -> "(" ++ intercalate ", "
       (map renderSharedConstraint constraints) ++ ") => "
+
+renderKind :: Kind Void -> String
+renderKind kind = case kind of
+  ProperTypeKind -> "Type"
+  KindVariable impossible -> absurd impossible
+  FunctionKind parameter result -> renderKindParameter parameter
+    ++ " -> " ++ renderKind result
+ where
+  renderKindParameter parameter@(FunctionKind _ _) =
+    "(" ++ renderKind parameter ++ ")"
+  renderKindParameter parameter = renderKind parameter
 
 showHistory :: Maybe String -> [String] -> IO ()
 showHistory countSource history = case traverse parseCount countSource of
@@ -928,6 +953,17 @@ strictReadFile :: FilePath -> IO (Either IOError String)
 strictReadFile path = tryIOError $ do
   source <- readFile path
   evaluate $ force source
+
+resolveOptionalPath
+  :: Maybe FilePath
+  -> IO (Either Diagnostic (Maybe FilePath))
+resolveOptionalPath Nothing = pure $ Right Nothing
+resolveOptionalPath (Just path) = do
+  resolved <- tryIOError $ canonicalizePath path
+  pure $ case resolved of
+    Left failure -> Left $ ioDiagnostic
+      "cannot resolve REPL history file" path failure
+    Right canonical -> Right $ Just canonical
 
 decodeString :: String -> String
 decodeString source = fromMaybe source $ readMaybe source

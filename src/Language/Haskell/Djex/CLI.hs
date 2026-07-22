@@ -1,4 +1,4 @@
--- | The merged one-shot @djex@ command.
+-- | The shared interactive and one-shot @djex@ command.
 --
 -- Living in the library keeps this frontend in-process testable and matches
 -- the two historical launchers, whose executables are equally thin wrappers
@@ -33,6 +33,11 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSessionWithPolicy
   , parseExferenceRequestWithCheckedTarget
   )
+import Language.Haskell.Djex.REPL
+import Language.Haskell.Djex.REPL.Command
+  ( parseReplBackend
+  , replBackendName
+  )
 import Paths_djex (version)
 
 data Flag
@@ -51,6 +56,8 @@ data Flag
   | MaximumQueueFlag String
   | MaximumDepthFlag String
   | AllowFixFlag
+  | ReplBackendFlag String
+  | HistoryFlag FilePath
   deriving (Eq, Show)
 
 data CommonOptions = CommonOptions
@@ -97,16 +104,41 @@ runArguments arguments = case arguments of
     putStrLn (backendUsage ExferenceBackend) >> pure ExitSuccess
   ["exference", "-h"] ->
     putStrLn (backendUsage ExferenceBackend) >> pure ExitSuccess
+  ["repl", "--help"] -> putStrLn replUsage >> pure ExitSuccess
+  ["repl", "-h"] -> putStrLn replUsage >> pure ExitSuccess
+  [] -> runRepl defaultReplOptions
+  "repl" : replArguments ->
+    runParsed (parseReplOptions replArguments) runRepl
   "djinn" : backendArguments ->
     runParsed (parseDjinnOptions backendArguments) runDjinn
   "exference" : backendArguments ->
     runParsed (parseExferenceOptions backendArguments) runExference
-  backendArgument : _ ->
-    usageFailure $ "unknown backend " ++ show backendArgument
-  [] -> usageFailure "a backend is required"
+  commandArgument : _ ->
+    usageFailure $ "unknown command " ++ show commandArgument
 
 runParsed :: Either String options -> (options -> IO ExitCode) -> IO ExitCode
 runParsed parsed action = either usageFailure action parsed
+
+parseReplOptions :: [String] -> Either String ReplOptions
+parseReplOptions arguments = case
+    getOpt Permute replOptionDescriptors arguments of
+  (flags, [], []) -> do
+    rawBackend <- uniqueValue "--backend" replBackendValue
+      (replBackendName $ replInitialBackend defaultReplOptions) flags
+    selectedBackend <- parseReplBackend rawBackend
+    environment <- optionalUniqueValue
+      "--environment" environmentValue flags
+    allowFix <- uniqueSwitch "--fix" (== AllowFixFlag) flags
+    history <- optionalUniqueValue "--history" historyValue flags
+    pure defaultReplOptions
+      { replInitialBackend = selectedBackend
+      , replEnvironmentPath = environment
+      , replAllowFix = allowFix
+      , replHistoryFile = history
+      }
+  (_, positional, []) -> Left $ "repl takes no positional arguments, but got "
+    ++ show (length positional)
+  (_, _, errors) -> Left $ concat errors
 
 runDjinn :: DjinnOptions -> IO ExitCode
 runDjinn options = case standardDjinnSession of
@@ -378,6 +410,14 @@ environmentValue :: Flag -> Maybe FilePath
 environmentValue (EnvironmentFlag value) = Just value
 environmentValue _ = Nothing
 
+replBackendValue :: Flag -> Maybe String
+replBackendValue (ReplBackendFlag value) = Just value
+replBackendValue _ = Nothing
+
+historyValue :: Flag -> Maybe FilePath
+historyValue (HistoryFlag value) = Just value
+historyValue _ = Nothing
+
 optionsFor :: Backend -> [OptDescr Flag]
 optionsFor selectedBackend =
   commonOptions ++ backendSpecificOptions selectedBackend
@@ -438,6 +478,20 @@ exferenceOptions =
       "allow known nonterminating recursion helpers"
   ]
 
+replOptionDescriptors :: [OptDescr Flag]
+replOptionDescriptors =
+  [ Option [] ["backend"]
+      (ReqArg ReplBackendFlag "djinn|exference|both")
+      $ defaulted "initial backend selection"
+          $ replBackendName $ replInitialBackend defaultReplOptions
+  , Option [] ["environment"] (ReqArg EnvironmentFlag "DIR")
+      "initial Exference source environment directory"
+  , Option [] ["fix"] (NoArg AllowFixFlag)
+      "retain known nonterminating Exference recursion helpers"
+  , Option [] ["history"] (ReqArg HistoryFlag "FILE")
+      "read and write persistent REPL history"
+  ]
+
 -- Parser fallbacks and help text share these spellings. Backend-owned numeric
 -- defaults are projected directly from their public option records so changing
 -- a search policy cannot leave a stale command-line promise behind.
@@ -460,17 +514,32 @@ renderBounded = maybe "unbounded" show
 
 fullUsage :: String
 fullUsage = intercalate "\n"
-  [ "Djex: checked Haskell expression synthesis with an explicit backend"
+  [ "Djex: checked Haskell expression synthesis with Djinn and Exference"
   , ""
   , "Usage:"
   , "  djex --help"
   , "  djex --version"
+  , "  djex"
+  , "  djex repl [OPTION...]"
   , "  djex djinn [OPTION...] TYPE"
   , "  djex exference [OPTION...] TYPE"
   , ""
+  , usageInfo "REPL options:" replOptionDescriptors
   , usageInfo "Common options:" commonOptions
   , usageInfo "Djinn options:" djinnOptions
   , usageInfo "Exference options:" exferenceOptions
+  ]
+
+replUsage :: String
+replUsage = intercalate "\n"
+  [ "Usage: djex repl [OPTION...]"
+  , "       djex"
+  , ""
+  , "Start a persistent GHCi-style synthesis session."
+  , "Bare type queries use the active backend selection; type :help inside"
+  , "the session for commands and settings."
+  , ""
+  , usageInfo "REPL options:" replOptionDescriptors
   ]
 
 backendUsage :: Backend -> String

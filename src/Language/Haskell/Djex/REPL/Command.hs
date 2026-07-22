@@ -143,7 +143,8 @@ commandDescriptors =
   [ command "backend" ["b"] "[djinn|exference|both]"
       "show or change the active backend selection"
       $ Right . ReplCommand . ChangeBackend . optionalText
-  , command "browse" [] "" "list declarations visible to active backends"
+  , command "browse" [] ""
+      "list declarations loaded by the active backends"
       $ noArguments $ ReplCommand Browse
   , command "cd" [] "DIR" "change the process working directory"
       $ fmap (ReplCommand . ChangeDirectory) . pathArgument "a directory"
@@ -250,18 +251,39 @@ shortHelp = unlines
     usage = descriptorUsage descriptor
 
 commandHelp :: String -> Either String String
-commandHelp source = do
-  let token = dropWhile (== ':') $ map toLower $ trim source
-  descriptor <- resolveCommand token
-  pure $ unlines
-    [ descriptorUsage descriptor
-    , "  " ++ descriptorSummary descriptor
-    , aliasLine descriptor
+commandHelp source = case token of
+  "!" -> Right $ unlines
+    [ ":! COMMAND"
+    , "  run one shell command without changing REPL state"
     ]
+  "{" -> Right multilineHelp
+  "}" -> Right multilineHelp
+  _ -> do
+    descriptor <- resolveCommand token
+    pure $ unlines
+      $ [descriptorUsage descriptor, "  " ++ descriptorSummary descriptor]
+      ++ aliasLines descriptor
+      ++ descriptorDetails descriptor
  where
-  aliasLine descriptor = case descriptorAliases descriptor of
-    [] -> ""
-    aliases -> "  aliases: " ++ intercalate ", " (map (':' :) aliases)
+  token = dropWhile (== ':') $ map toLower $ trim source
+  multilineHelp = unlines
+    [ ":{"
+    , "TYPE"
+    , ":}"
+    , "  collect a type query over multiple input lines"
+    ]
+  aliasLines descriptor = case descriptorAliases descriptor of
+    [] -> []
+    aliases -> ["  aliases: " ++ intercalate ", " (map (':' :) aliases)]
+  descriptorDetails descriptor = case descriptorName descriptor of
+    "backend" -> ["  choices: " ++ intercalate ", " backendNames]
+    "set" ->
+      [ "  settings: " ++ intercalate ", " settingNames
+      , "  booleans also accept :set +NAME and :set -NAME"
+      ]
+    "show" -> ["  subjects: " ++ intercalate ", " showNames]
+    "unset" -> ["  restores a setting to its built-in default"]
+    _ -> []
 
 descriptorUsage :: CommandDescriptor -> String
 descriptorUsage descriptor = ':' : descriptorName descriptor

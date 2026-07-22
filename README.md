@@ -16,7 +16,8 @@ version, and dependency contract.
 ## Start here
 
 - To try the commands, continue with [Building](#building) and the
-  [unified-command guide](#unified-command).
+  [unified-command guide](#unified-command), then see the complete
+  [shared REPL guide](docs/repl.md).
 - To embed Djex, use the runnable
   [library quick start and API guide](docs/library-api.md).
 - To understand ownership, dependency direction, and which modules are stable
@@ -49,14 +50,16 @@ these tiers explicitly.
   declarations, environments, diagnostics, collision-free allocation,
   generated output, and operational search status.
 - `djinn/` contributes the LJT proof engine, checked adapter, historical
-  `Djinn` API, and Haskeline REPL.
+  `Djinn` API, and compatibility Haskeline REPL.
 - `exference/` contributes the heuristic search engine, checked adapter,
   Haskell-source/environment loader, and historical CLI API.
 
-The `djex` executable is the merged one-shot frontend and selects either
-checked backend explicitly. The historical `djinn` and `exference`
-executable names remain available for their REPL and compatibility
-contracts. The single library deliberately trades Haskeline/HSE dependency
+The `djex` executable is the merged frontend. With no arguments (or the
+`repl` subcommand) it starts one persistent session that can query Djinn,
+Exference, or both; the `djinn` and `exference` subcommands retain explicit
+one-shot operation. The historical `djinn` and `exference` executable names
+remain available for their distinct compatibility contracts. The single
+library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
 boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
@@ -105,6 +108,8 @@ Useful component and compatibility-executable targets:
 
 ```console
 cabal build djex:lib:djex
+cabal run exe:djex
+cabal run exe:djex -- repl --backend both
 cabal run exe:djex -- djinn --render expression "a -> a"
 cabal run exe:djex -- exference --select first "a -> a"
 cabal run djinn
@@ -127,7 +132,25 @@ run package commands from the repository root.
 
 ## Unified command
 
-Djex never guesses which engine's semantics were intended:
+Start the shared interactive session with either equivalent form:
+
+```console
+djex
+djex repl [--backend djinn|exference|both] [--environment DIR] [--fix] [--history FILE]
+```
+
+The default prompt is `djex[djinn]>`. Entering a bare type synthesizes with
+the active backend selection; `:backend` changes that selection, while
+`:djinn TYPE`, `:exference TYPE`, and `:compare TYPE` select a backend for one
+query. Both-mode labels each engine's independent output and still runs the
+other engine if one rejects the type or fails. This resembles GHCi's colon
+commands, history, completion, and `:{`/`:}` input, but it is not a GHCi
+evaluator: bare input is a requested result type, not a Haskell expression,
+and each backend retains its own type grammar and semantics. See the
+[shared REPL guide](docs/repl.md) for all commands, settings, defaults, and
+failure behavior.
+
+For stateless invocation, select the backend explicitly:
 
 ```console
 djex djinn [OPTION...] TYPE
@@ -524,16 +547,18 @@ The `exference` compatibility executable is a six-line launcher for
 `Language.Haskell.Exference.CLI`, the compatibility orchestrator at this
 boundary: it loads and seals one session, parses every requested type
 through `parseExferenceRequest`, selects shared candidates, and renders
-their generated expression bodies. The compatibility command and
-`djex exference` obtain their session policy from the same frontend
-operation: both exclude `Data.Function.fix`, `Control.Monad.forever`, and
-`Control.Monad.Loops.iterateM_` by default, and both accept `--fix` as an
-explicit opt-in, while the unrestricted programmatic session default is
-unchanged. Parse, kind, option, and search failures are structured
-diagnostics on stderr with failure exit status; repeated inputs are all
-processed and conflicting presentation modes are rejected. The historical
-ranking vector remains an explicit compatibility profile, and `--short`
-adds backend-neutral structural expression size to the candidate cost.
+their generated expression bodies. The compatibility command,
+`djex exference`, and the shared `djex` REPL obtain their session policy from
+the same frontend operation. They exclude `Data.Function.fix`,
+`Control.Monad.forever`, and `Control.Monad.Loops.iterateM_` by default; the
+commands accept `--fix`, while the REPL also exposes `:set +fix`, as explicit
+opt-ins. The unrestricted programmatic session default is unchanged. Parse,
+kind, option, and search failures are structured diagnostics; one-shot
+failures have failure exit status, while an interactive diagnostic leaves the
+REPL available. Repeated compatibility-command inputs are all processed and
+conflicting presentation modes are rejected. The historical ranking vector
+remains an explicit compatibility profile, and `--short` adds backend-neutral
+structural expression size to the candidate cost.
 
 The `djinn` compatibility frontend retains its declaration REPL while
 storing only the exact sealed `DjinnSession`. Successful mutations edit its
@@ -562,14 +587,14 @@ Existing Cabal dependencies migrate as follows:
 | `exference:exference-core` or `djex:exference-core` | `djex` |
 | unnamed `exference` library or `djex:exference-frontend` | `djex` |
 
-All library clients use one unnamed `djex` dependency for the curated
-facade, shared synthesis vocabulary, checked adapters, lower-level engines,
-source loading, and the historical REPL API. Build-tool dependencies for
-the commands remain `djex:djinn` and `djex:exference`; the executable names
-are unchanged. The one library consequently has the union of core and
-frontend dependencies: `haskell-src-exts`, `directory`, `filepath`, and
-`haskeline` share the same versioned component contract as the engines that
-consume their output.
+All library clients use one unnamed `djex` dependency for the curated facade,
+shared synthesis vocabulary, checked adapters, lower-level engines, source
+loading, shared REPL launcher, and historical compatibility APIs. Build-tool
+dependencies for the commands remain `djex:djinn` and `djex:exference`; the
+executable names are unchanged. The one library consequently has the union of
+core and frontend dependencies: `haskell-src-exts`, `directory`, `filepath`,
+`haskeline`, and `process` share the same versioned component contract as the
+engines and frontends that consume their output.
 
 Both backend trees follow the same layout — `src-core/`, `src-frontend/`,
 `app/`, and one explicit directory per test suite — while the package root

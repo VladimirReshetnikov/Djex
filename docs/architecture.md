@@ -15,10 +15,10 @@ historical review notes rather than as the current API guide.
 | --- | --- |
 | `synthesis/src/` | Shared names, types, declarations, environments, kind inference, diagnostics, generated code, and query/result envelopes. |
 | `djinn/src-core/` | Djinn's checked adapter, logical translation, LJT proof search, and proof checking. |
-| `djinn/src-frontend/` | Historical `Djinn` API and Haskeline REPL. |
+| `djinn/src-frontend/` | Historical `Djinn` API and compatibility Haskeline REPL. |
 | `exference/src-core/` | Exference's checked adapter, class environment, heuristic search, unification, scoring, and independent expression checker. |
 | `exference/src-frontend/` | Haskell-source extraction, environment loading, and the historical Exference command API. |
-| `src/` | The `Language.Haskell.Djex` facade and merged `djex` command. |
+| `src/` | The `Language.Haskell.Djex` facade, shared REPL and result presentation, and merged `djex` command. |
 | `app/`, `djinn/app/`, `exference/app/` | Thin executable launchers. |
 
 All six source roots compile into the unnamed `djex` library. The directory
@@ -53,6 +53,9 @@ Haskell source / Djinn syntax
                      |
                      v
           shared validation and rendering
+                     |
+                     v
+       one-shot CLI or persistent shared REPL
 ```
 
 ## Shared authorities
@@ -146,6 +149,62 @@ This contract lets frontends stream heuristic results without making already
 requested finite construction retain avoidable thunk chains. Wide-batch and
 wide-application regressions protect both sides of the boundary.
 
+## Shared interactive frontend
+
+The `djex` executable starts a persistent REPL when invoked without arguments
+or with the `repl` subcommand. `Language.Haskell.Djex.REPL` exposes the same
+launcher in process. The interactive frontend and the one-shot subcommands use
+one private result-presentation operation, so selection, validation, rendering,
+residual constraints, evidence, truncation notices, and diagnostics cannot
+silently acquire two frontend interpretations.
+
+The REPL is a coordinator over two sessions, not a third synthesis engine and
+not a mutable union environment:
+
+```text
+REPL state
+  |-- immutable standard DjinnSession
+  |-- Exference runtime
+  |     |-- source directory and fix policy
+  |     |-- Maybe immutable ExferenceSession
+  |     `-- diagnostics from the latest load attempt
+  |-- active backend selection and last query
+  |-- shared target and presentation settings
+  `-- backend-specific search settings
+```
+
+Switching the active backend changes routing only. Both-mode invokes the
+checked parsers and runners independently, labels each result, and continues to
+the second backend when the first reports a diagnostic. This preserves the
+different environment variable types, type grammars, class semantics, search
+controls, and evidence described below. No cross-backend cache or unchecked
+conversion is introduced by sharing a prompt.
+
+The Exference runtime is deliberately richer than a bare session. Source
+ratings and command policy are not recoverable from its annotation-erased
+neutral environment, so `:load`, `:reload`, and `:set fix` return to the source
+directory and construct a complete candidate runtime. The new directory,
+policy, and sealed session are published together only on success. A failed
+initial load leaves Exference unavailable while Djinn remains useful; a failed
+replacement retains the preceding usable Exference runtime and records the new
+diagnostics for inspection.
+
+Private `Language.Haskell.Djex.REPL.Command` owns one descriptor table for
+parsing, unique-prefix resolution, help, and completion inventories. Private
+`Language.Haskell.Djex.REPL.Driver` owns the Haskeline loop, dynamic prompt,
+explicit multiline collection, optional persistent history, and Ctrl-C
+rollback to the state preceding the interrupted input. Script execution feeds
+the same logical-input evaluator, including nested-script cycle detection,
+rather than maintaining another command grammar.
+
+The GHCi resemblance stops at interaction conventions. Bare input asks for an
+inhabitant of a type; it does not evaluate an expression or infer a type. The
+REPL has no GHCi module context, declaration evaluator, or `:type` contract.
+The historical `djinn` executable remains a separate compatibility REPL with
+its legacy declaration editor, while the historical `exference` executable
+remains one-shot. See [the shared REPL guide](repl.md) for the user-facing
+command and failure contract.
+
 ## What remains backend-specific
 
 Uniform architecture does not mean identical semantics:
@@ -225,6 +284,8 @@ New code should start with:
 
 - `Language.Haskell.Djex` for the shared vocabulary, backend metadata, and both
   checked parser-neutral adapters;
+- `Language.Haskell.Djex.REPL` when an application wants to launch the shared
+  terminal session without spawning `djex`;
 - `Language.Haskell.Djex.Djinn` or
   `Language.Haskell.Djex.Exference` when a narrower import is clearer;
 - `Language.Haskell.Djex.Exference.HaskellSrc` when loading Haskell source or
@@ -239,9 +300,11 @@ neutral `Environment`: applications replace declarations by sealing a newly
 validated environment. Only the historical `djinn` frontend imports its
 private raw declaration snapshot, edit, and instance-method operations.
 
-`Language.Haskell.Djex.CLI` is an explicit in-process command frontend. It is
-exposed so applications can invoke the merged command without spawning a
-process, but it is not re-exported by the main facade.
+`Language.Haskell.Djex.CLI` is the in-process dispatcher for both the REPL and
+the explicit one-shot subcommands. `Language.Haskell.Djex.REPL` exposes the
+narrower interactive launcher and its startup options. Both are exposed so
+applications can invoke a frontend without spawning a process, but neither is
+re-exported by the main facade.
 
 ### Public compatibility and research API
 
@@ -260,9 +323,9 @@ compatibility inventory.
 
 Modules in Cabal's `Other-Modules` are implementation details even when their
 filesystem path contains a historically public namespace. Examples include the
-private checked-request/session owners for both adapters and Djinn's formula
-and REPL workers. Downstream code cannot import them through a `djex`
-dependency.
+private checked-request/session owners for both adapters, the shared REPL's
+command and Haskeline workers, and the historical Djinn formula and REPL
+workers. Downstream code cannot import them through a `djex` dependency.
 
 ## Test boundaries
 

@@ -16,6 +16,7 @@ cabal test all --test-show-details=direct
 Run without installing:
 
 ```console
+cabal run exe:djex
 cabal run exe:djex -- djinn --render expression "a -> a"
 cabal run exe:djex -- exference --select first "a -> a"
 ```
@@ -43,8 +44,53 @@ build-depends: djex
 | Type-class participation | Declared methods as proof assumptions | Class/instance-aware; accepted nominal resolution terminates |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
-Neither backend guesses the other's semantics. The merged command and library
-make the selection explicit.
+Neither backend guesses the other's semantics. One-shot commands and checked
+library calls select an engine explicitly; the shared REPL stores an explicit
+active selection that can be `djinn`, `exference`, or `both`.
+
+## Embed the shared terminal REPL
+
+Import the interactive launcher separately from the main facade:
+
+```haskell
+import Language.Haskell.Djex.REPL
+  ( ReplBackend (BothBackends)
+  , ReplOptions (..)
+  , defaultReplOptions
+  , runRepl
+  )
+import System.Exit (ExitCode)
+
+runProjectRepl :: IO ExitCode
+runProjectRepl = runRepl defaultReplOptions
+  { replInitialBackend = BothBackends
+  , replEnvironmentPath = Just "./environment"
+  , replAllowFix = False
+  , replHistoryFile = Just "./.djex-history"
+  }
+```
+
+`ReplBackend` also provides `OneBackend DjinnBackend` and
+`OneBackend ExferenceBackend`; import `Backend(..)` from
+`Language.Haskell.Djex` when constructing those values. `defaultReplOptions`
+starts on Djinn, loads the installed Exference environment with the
+command-safe no-fix policy, and keeps history only for the process lifetime.
+
+`runRepl` returns an `ExitCode` and does not terminate the host application.
+EOF and `:quit` are successful. Individual query, setting, shell, script, and
+environment-load diagnostics are recoverable and leave the loop running;
+failure before a usable loop can be constructed returns a failure status. An
+initial Exference load failure is recoverable because the independent standard
+Djinn session is still usable.
+
+This API embeds a terminal frontend, not an abstract protocol: it reads through
+Haskeline, writes results and diagnostics to the process streams, can change
+the process working directory, and permits `:!` shell commands. Use the checked
+adapters below when an editor, service, or GUI needs to own input, output,
+authorization, or session persistence. The complete interactive contract,
+including commands, settings, transactional reloads, both-mode isolation, and
+the distinction from the historical Djinn REPL, is in the
+[shared REPL guide](repl.md).
 
 ## Common lifecycle
 
@@ -113,8 +159,10 @@ change declarations, retain or recover the neutral environment, build the
 complete replacement with `mkEnvironment`, and seal a new session with
 `mkDjinnSession`. This is the same lifecycle as Exference and keeps historical
 Djinn `HType`, `HKind`, `Declaration`, and `Context` values out of the curated
-API. The `djinn` REPL retains its transactional raw-declaration editor solely
-inside the compatibility frontend.
+API. The separate historical `djinn` executable retains its transactional
+raw-declaration editor solely inside the compatibility frontend. The shared
+`djex` REPL intentionally exposes read-only `:browse` and `:info` views instead
+of that legacy mutation language.
 
 ## Exference example without a parser
 
@@ -289,5 +337,6 @@ take precedence if a caller forges both the output and residual fields.
 facade. Import `Djinn.Core` only when a compatibility integration deliberately
 needs its historical representation and operations.
 
-See [the architecture guide](architecture.md) for the stability tiers and
+See [the architecture guide](architecture.md) for the stability tiers,
+[the shared REPL guide](repl.md) for interactive use, and
 [the synthesis API map](../synthesis/README.md) for the neutral modules.

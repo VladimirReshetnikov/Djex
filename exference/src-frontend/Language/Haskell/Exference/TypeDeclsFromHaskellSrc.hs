@@ -12,6 +12,7 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , parseType
   , parseTypeWithKinds
   , parseTypeWithInventory
+  , parseTypeWithInventoryInScope
   , toSynthesisTypeDeclaration
   , fromSynthesisTypeDeclaration
   )
@@ -37,6 +38,7 @@ import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.Name as SharedName
 
 import Language.Haskell.Exts.Syntax hiding (TypeApp)
 import qualified Language.Haskell.Exts.Parser as P
@@ -294,6 +296,26 @@ parseTypeWithInventory inventory mn = parseTypeWithResolverKinds
   mn
   M.empty
 
+-- | Parse a query with GHCi-style prompt visibility. The complete inventory
+-- still supplies kinds and explicit qualified lookup, while only the supplied
+-- exact names participate in unqualified resolution. Qualifier aliases map a
+-- prompt spelling such as @M.T@ back to its canonical loaded module.
+parseTypeWithInventoryInScope
+  :: Monad m
+  => SharedInventory.Inventory typeVariable annotation
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> [QualifiedName]
+  -> [(SharedName.ModuleName, SharedName.ModuleName)]
+  -> P.ParseMode
+  -> String
+  -> ExceptT Diagnostic m (HsType, TypeVarIndex)
+parseTypeWithInventoryInScope inventory currentModule visible aliases =
+  parseTypeWithResolverKinds
+    (SharedInventory.inventoryKindAssumptions inventory)
+    (scopeTypeResolver visible aliases $ typeResolverFromInventory inventory)
+    currentModule
+    M.empty
+
 -- | Derive precisely the nominal information required by source-type lookup
 -- from the shared declaration environment. A class entry contributes only
 -- its declared arity; methods, superclasses, and backend solver indexes are
@@ -306,6 +328,11 @@ typeResolverFromInventory inventory = TypeResolver
       $ SharedEnvironment.typeDeclarationMap environment
   , resolverClassArities = M.mapMaybe classArity
       $ SharedEnvironment.classDeclarationMap environment
+  , resolverUnqualifiedTypeNames = M.keys
+      $ SharedEnvironment.typeDeclarationMap environment
+  , resolverUnqualifiedClassNames = M.keys
+      $ SharedEnvironment.classDeclarationMap environment
+  , resolverModuleAliases = []
   }
  where
   environment = SharedInventory.inventoryEnvironment inventory

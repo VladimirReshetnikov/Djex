@@ -11,6 +11,7 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , runConversionTWithState
   , TypeResolver (..)
   , legacyTypeResolver
+  , scopeTypeResolver
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
   , convertTypeNoDeclWithResolver
@@ -50,7 +51,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Set as S
 
 import Data.Maybe ( fromMaybe )
-import Data.List ( intercalate )
+import Data.List ( intercalate, nub )
 import System.FilePath ( (<.>), takeExtension )
 
 import Control.Monad.Trans.Class (lift)
@@ -92,6 +93,10 @@ data ConvData = ConvData
 data TypeResolver = TypeResolver
   { resolverTypeNames :: [T.QualifiedName]
   , resolverClassArities :: M.Map T.QualifiedName Int
+  , resolverUnqualifiedTypeNames :: [T.QualifiedName]
+  , resolverUnqualifiedClassNames :: [T.QualifiedName]
+  , resolverModuleAliases
+      :: [(SharedName.ModuleName, SharedName.ModuleName)]
   }
   deriving (Eq, Show)
 
@@ -106,7 +111,29 @@ legacyTypeResolver
 legacyTypeResolver classes typeNames = TypeResolver
   { resolverTypeNames = typeNames
   , resolverClassArities = length . T.tclass_params <$> classes
+  , resolverUnqualifiedTypeNames = typeNames
+  , resolverUnqualifiedClassNames = M.keys classes
+  , resolverModuleAliases = []
   }
+
+-- | Restrict unqualified lookup and install interactive qualifier aliases
+-- without narrowing the complete nominal inventory used for kind and class
+-- validation. Explicit canonical qualifiers therefore remain usable for every
+-- loaded module, as in GHCi, while bare occurrences obey the prompt context.
+scopeTypeResolver
+  :: [T.QualifiedName]
+  -> [(SharedName.ModuleName, SharedName.ModuleName)]
+  -> TypeResolver
+  -> TypeResolver
+scopeTypeResolver visible aliases resolver = resolver
+  { resolverUnqualifiedTypeNames = retain $ resolverTypeNames resolver
+  , resolverUnqualifiedClassNames = retain
+      $ M.keys $ resolverClassArities resolver
+  , resolverModuleAliases = aliases
+  }
+ where
+  visibleSet = S.fromList visible
+  retain = filter (`S.member` visibleSet)
 
 -- | An empty, collision-free source-conversion inventory.
 emptyConvData :: ConvData
@@ -272,8 +299,11 @@ convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
                               return $ T.TypeVar i
   helper (TyCon _ name)     = T.TypeCons
                           <$> either throwE pure
-                                (convertQName defModuleName
-                                  (resolverTypeNames resolver) name)
+                                (convertQNameWithResolver
+                                  resolver
+                                  (resolverUnqualifiedTypeNames resolver)
+                                  defModuleName
+                                  name)
   helper (TyList _ t)       =
     T.TypeApp (T.TypeCons SharedName.listName) <$> helper t
   helper (TyParen _ t)      = helper t
@@ -394,6 +424,62 @@ convertQName Nothing knownNames (UnQual _ syntaxName) = do
   unqualified <- convertName syntaxName
   resolveUnqualifiedName unqualified unqualified knownNames
 
+-- | Scoped counterpart of 'convertQName'. Unqualified candidates are chosen
+-- by the interactive context, while a written qualifier may name either its
+-- canonical loaded module or an alias introduced by an import declaration.
+-- The legacy function remains unchanged for compatibility callers.
+convertQNameWithResolver
+  :: TypeResolver
+  -> [T.QualifiedName]
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> QName SrcSpanInfo
+  -> Either String T.QualifiedName
+convertQNameWithResolver resolver visible defaultModule syntaxQName =
+  case syntaxQName of
+    Qual location written syntaxName -> do
+      raw <- convertModuleName written syntaxName
+      case T.qualifiedNameModule raw of
+        Nothing -> Right raw
+        Just writtenModule -> resolveQualifiedAlias
+          location writtenModule syntaxName raw
+    _ -> convertQName defaultModule visible syntaxQName
+ where
+  allKnown = resolverTypeNames resolver
+    ++ M.keys (resolverClassArities resolver)
+  knownModules = S.fromList
+    [ moduleName
+    | name <- allKnown
+    , Just moduleName <- [T.qualifiedNameModule name]
+    ]
+
+  resolveQualifiedAlias location writtenModule syntaxName raw =
+    case nub aliasTargets of
+      [] -> Right raw
+      [target]
+        | writtenModule `S.member` knownModules
+        , raw `elem` allKnown
+        , target /= writtenModule -> ambiguous [writtenModule, target]
+        | otherwise -> under target
+      targets -> case
+          [ target
+          | target <- targets
+          , either (const False) (`elem` allKnown) $ under target
+          ] of
+        [target] -> under target
+        _ -> ambiguous targets
+   where
+    aliasTargets =
+      [ target
+      | (alias, target) <- resolverModuleAliases resolver
+      , alias == writtenModule
+      ]
+    under target = convertModuleName
+      (ModuleName location $ SharedName.renderModuleName target)
+      syntaxName
+    ambiguous modules = Left $ "ambiguous module qualifier "
+      ++ SharedName.renderModuleName writtenModule ++ "; matches "
+      ++ intercalate ", " (map SharedName.renderModuleName modules)
+
 -- The historical environment modules intentionally omit their imports.  We
 -- can still model the useful part of Haskell name lookup without manufacturing
 -- recursive placeholder declarations: a declaration in the current module
@@ -472,8 +558,8 @@ convertConstraintWithResolver resolver defModuleName (TypeA _ classType) = do
     pure
     (splitClassApplication classType)
   name <- either throwE pure
-    $ convertQName defModuleName
-        (M.keys $ resolverClassArities resolver) qname
+    $ convertQNameWithResolver resolver
+        (resolverUnqualifiedClassNames resolver) defModuleName qname
   parameters <- mapM
     (convertTypeNoDeclInternalWithResolver resolver defModuleName) types
   either throwE pure $ validateConstraintArityMap

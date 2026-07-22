@@ -13,6 +13,7 @@ module Language.Haskell.Synthesis.Declaration
   , Declaration (..)
   , DeclarationError (..)
   , declarationSubjectName
+  , declarationTermSignatures
   , declarationTypeVariables
   , validateDeclaration
   , recursiveDataTypeNames
@@ -128,6 +129,45 @@ declarationSubjectName declaration = case declaration of
   ValueDeclaration signature -> valueName signature
   ClassDeclaration _ name _ _ _ -> name
   InstanceDeclaration _ _ _ headConstraint -> constraintClass headConstraint
+
+-- | Every term introduced by one declaration, with its complete callable
+-- type.  Keeping this derivation beside the declaration grammar gives
+-- browsers, interactive type inspection, and backend lowerings one authority
+-- for constructor results and the implicit owner constraint on class methods.
+--
+-- Record selectors and ordinary bindings already enter the neutral inventory
+-- as 'ValueDeclaration's. Type declarations and instances introduce no term
+-- names of their own.
+declarationTermSignatures
+  :: Declaration typeVariable kindVariable annotation
+  -> [ValueSignature typeVariable annotation]
+declarationTermSignatures declaration = case declaration of
+  ValueDeclaration signature -> [signature]
+  DataTypeDeclaration _ owner parameters constructors ->
+    map constructorSignature constructors
+   where
+    result = applyTypeArguments (TypeConstructor owner)
+      [ TypeVariable $ parameterVariable parameter
+      | parameter <- parameters
+      ]
+    constructorSignature constructor = ValueSignature
+      (constructorAnnotation constructor)
+      (constructorName constructor)
+      (functionType (constructorFields constructor) result)
+  ClassDeclaration _ owner parameters _ methods ->
+    map addOwnerConstraint methods
+   where
+    ownerConstraint = Constraint owner
+      [ TypeVariable $ parameterVariable parameter
+      | parameter <- parameters
+      ]
+    addOwnerConstraint signature = signature
+      { valueType = addConstraint ownerConstraint $ valueType signature }
+    addConstraint constraint typeExpression = case typeExpression of
+      ForallType variables constraints body ->
+        ForallType variables (constraint : constraints) body
+      _ -> ForallType [] [constraint] typeExpression
+  _ -> []
 
 -- | Every explicit type-variable occurrence in structural source order.
 -- Declaration parameters or instance binders precede the syntax they scope;

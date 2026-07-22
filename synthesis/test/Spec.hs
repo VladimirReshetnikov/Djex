@@ -1626,7 +1626,63 @@ environmentTests = testGroup "environments"
 
 declarationTests :: TestTree
 declarationTests = testGroup "declarations"
-  [ testCase "validate kinded data and class declarations" $ do
+  [ testCase "derive complete term signatures from neutral declarations" $ do
+      let maybeName = right $ mkIdentifier "Maybe"
+          justName = right $ mkIdentifier "Just"
+          equalityName = right $ mkIdentifier "Eq"
+          equalsName = right $ mkOperator "=="
+          valueName = right $ mkIdentifier "value"
+          parameter = Declaration.TypeParameter "a" Nothing
+          variable = SharedType.TypeVariable "a"
+          maybeType = SharedType.TypeApplication
+            (SharedType.TypeConstructor maybeName) variable
+          constructor = Declaration.DataTypeDeclaration () maybeName
+            [parameter]
+            [Declaration.DataConstructor () justName [variable]]
+          classDeclaration = Declaration.ClassDeclaration () equalityName
+            [parameter] []
+            [ Declaration.ValueSignature () equalsName
+                $ SharedType.FunctionType variable
+                $ SharedType.FunctionType variable variable
+            ]
+          value = Declaration.ValueDeclaration
+            $ Declaration.ValueSignature () valueName variable
+      Declaration.declarationTermSignatures constructor @?=
+        [ Declaration.ValueSignature () justName
+            $ SharedType.FunctionType variable maybeType
+        ]
+      Declaration.declarationTermSignatures classDeclaration @?=
+        [ Declaration.ValueSignature () equalsName
+            $ SharedType.ForallType []
+                [Constraint equalityName [variable]]
+            $ SharedType.FunctionType variable
+            $ SharedType.FunctionType variable variable
+        ]
+      Declaration.declarationTermSignatures value @?=
+        [Declaration.ValueSignature () valueName variable]
+      Declaration.declarationTermSignatures
+          (Declaration.AbstractTypeDeclaration () maybeName
+            Kind.ProperTypeKind :: Declaration.Declaration String Void ())
+        @?= []
+  , testCase "preserve method quantifiers while adding the owner constraint" $ do
+      let className = right $ mkIdentifier "Convert"
+          constraintName = right $ mkIdentifier "Show"
+          methodName = right $ mkIdentifier "convert"
+          parameter = Declaration.TypeParameter "a" Nothing
+          a = SharedType.TypeVariable "a"
+          b = SharedType.TypeVariable "b"
+          signature = SharedType.ForallType ["b"]
+            [Constraint constraintName [b]]
+            $ SharedType.FunctionType a b
+          declaration = Declaration.ClassDeclaration () className
+            [parameter] [] [Declaration.ValueSignature () methodName signature]
+      Declaration.declarationTermSignatures declaration @?=
+        [ Declaration.ValueSignature () methodName
+            $ SharedType.ForallType ["b"]
+                [Constraint className [a], Constraint constraintName [b]]
+            $ SharedType.FunctionType a b
+        ]
+  , testCase "validate kinded data and class declarations" $ do
       let maybeName = right $ mkIdentifier "Maybe"
           justName = right $ mkIdentifier "Just"
           nothingName = right $ mkIdentifier "Nothing"

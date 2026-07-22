@@ -6,6 +6,7 @@
 -- command boundary.
 module Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
+  , ExferenceQueryScope (..)
   , exferenceCommandSessionPolicy
   , defaultExferenceEnvironmentPath
   , loadDefaultExferenceSession
@@ -15,7 +16,9 @@ module Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSessionFromFiles
   , loadExferenceSessionFromFilesWithPolicy
   , parseExferenceRequest
+  , parseExferenceRequestInScope
   , parseExferenceRequestWithCheckedTarget
+  , parseExferenceRequestWithCheckedTargetInScope
   ) where
 
 import Control.Monad.Trans.Except (runExceptT)
@@ -24,6 +27,8 @@ import Data.Functor.Identity (runIdentity)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Language.Haskell.Exts.Parser as HSE
+import qualified Language.Haskell.Exts.SrcLoc as HSEL
+import qualified Language.Haskell.Exts.Syntax as HSES
 
 import Language.Haskell.Djex.Exference
   ( ExferenceOptions
@@ -48,7 +53,9 @@ import Language.Haskell.Exference.EnvironmentParser
   , haskellSrcExtsParseMode
   )
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-  ( parseTypeWithInventory )
+  ( parseTypeWithInventory
+  , parseTypeWithInventoryInScope
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , shownErrorDiagnostic
@@ -57,7 +64,12 @@ import Language.Haskell.Synthesis.Diagnostic
   , withSourceLocation
   )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
-import Language.Haskell.Synthesis.Name (Name, parseName)
+import Language.Haskell.Synthesis.Name
+  ( ModuleName
+  , Name
+  , parseName
+  , renderModuleName
+  )
 import Language.Haskell.Synthesis.Query (QueryRequest (..))
 import Paths_djex (getDataFileName)
 
@@ -69,6 +81,19 @@ data ExferenceSessionLoadReport = ExferenceSessionLoadReport
       :: Either (NonEmpty Diagnostic) ExferenceSession
   , exferenceSessionLoadDiagnostics :: [Diagnostic]
   }
+
+-- | Name-resolution state supplied by an interactive source workspace.
+-- Exact visible names control only unqualified lookup; every name in the
+-- sealed inventory remains available through its canonical qualifier.
+data ExferenceQueryScope = ExferenceQueryScope
+  { exferenceQueryCurrentModule :: Maybe ModuleName
+    -- ^ Optional full-top-level module whose local names take precedence.
+  , exferenceQueryVisibleNames :: [Name]
+    -- ^ Exact canonical names admitted for unqualified query syntax.
+  , exferenceQueryModuleAliases :: [(ModuleName, ModuleName)]
+    -- ^ Prompt qualifier paired with its canonical loaded module.
+  }
+  deriving (Eq, Show)
 
 -- | The exact session policy shared by the historical @exference@ command
 -- and the merged @djex exference@ command.  Programmatic sessions deliberately
@@ -209,6 +234,21 @@ parseExferenceRequest session options target sourceName source = do
   parseExferenceRequestWithCheckedTarget
     session options checkedTarget sourceName source
 
+-- | Scoped counterpart of 'parseExferenceRequest'. This is the source-level
+-- boundary used by the shared REPL after applying @import@ and @:module@.
+parseExferenceRequestInScope
+  :: ExferenceSession
+  -> ExferenceOptions
+  -> Name
+  -> ExferenceQueryScope
+  -> FilePath
+  -> String
+  -> Either Diagnostic ExferenceRequest
+parseExferenceRequestInScope session options target scope sourceName source = do
+  checkedTarget <- Request.validateExferenceTarget target
+  parseExferenceRequestWithCheckedTargetInScope
+    session options checkedTarget scope sourceName source
+
 -- | Parse a Haskell source type for a target already checked at an outer
 -- command boundary. The hidden 'DefinitionName' constructor makes repeating
 -- the backend-specific target preflight unnecessary.
@@ -220,14 +260,43 @@ parseExferenceRequestWithCheckedTarget
   -> String
   -> Either Diagnostic ExferenceRequest
 parseExferenceRequestWithCheckedTarget session options checkedTarget
-    sourceName source = do
+    sourceName source = parseCheckedRequest
+      session options checkedTarget Nothing sourceName source
+
+-- | Scoped counterpart of 'parseExferenceRequestWithCheckedTarget'.
+parseExferenceRequestWithCheckedTargetInScope
+  :: ExferenceSession
+  -> ExferenceOptions
+  -> DefinitionName
+  -> ExferenceQueryScope
+  -> FilePath
+  -> String
+  -> Either Diagnostic ExferenceRequest
+parseExferenceRequestWithCheckedTargetInScope session options checkedTarget
+    scope sourceName source = parseCheckedRequest
+      session options checkedTarget (Just scope) sourceName source
+
+parseCheckedRequest
+  :: ExferenceSession
+  -> ExferenceOptions
+  -> DefinitionName
+  -> Maybe ExferenceQueryScope
+  -> FilePath
+  -> String
+  -> Either Diagnostic ExferenceRequest
+parseCheckedRequest session options checkedTarget maybeScope sourceName source = do
   let mode = haskellSrcExtsParseMode sourceName
       location = sourceTextLocation (HSE.parseFilename mode) source
-      parsed = runIdentity $ runExceptT $ parseTypeWithInventory
-        (exferenceSessionInventory session)
-        Nothing
-        mode
-        source
+      inventory = exferenceSessionInventory session
+      parsed = runIdentity $ runExceptT $ case maybeScope of
+        Nothing -> parseTypeWithInventory inventory Nothing mode source
+        Just scope -> parseTypeWithInventoryInScope
+          inventory
+          (toHseModuleName <$> exferenceQueryCurrentModule scope)
+          (exferenceQueryVisibleNames scope)
+          (exferenceQueryModuleAliases scope)
+          mode
+          source
   -- The HSE compatibility frontend predates structured diagnostic codes.
   -- Seal every failure at this boundary while preserving its exact message,
   -- source, and span.
@@ -247,3 +316,6 @@ parseExferenceRequestWithCheckedTarget session options checkedTarget
         }
   Request.mkExferenceRequestWithSourceInfo
     sourceVariables location query
+ where
+  toHseModuleName moduleName = HSES.ModuleName HSEL.noSrcSpan
+    $ renderModuleName moduleName

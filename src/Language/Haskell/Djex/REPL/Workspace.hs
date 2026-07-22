@@ -20,9 +20,14 @@ module Language.Haskell.Djex.REPL.Workspace
   , workspaceLoadedModules
   , workspaceModules
   , workspaceModuleFiles
+  , workspaceModuleSources
   , workspaceRatingFiles
+  , workspaceRatingSources
+  , workspaceUnresolvedImports
+  , workspaceUnresolvedImportsWithSources
   , workspaceModuleName
   , workspaceModulePath
+  , workspaceModuleSource
   , workspaceModuleSyntax
   , workspaceTargetDisplay
   , workspaceTargetIsStarred
@@ -30,8 +35,11 @@ module Language.Haskell.Djex.REPL.Workspace
   , workspaceTargetRatingFiles
   , workspaceTargetModuleName
   , workspaceAutomaticTargetModule
+  , workspaceAutomaticTargetModules
   ) where
 
+import Control.DeepSeq (force)
+import Control.Exception (evaluate)
 import Data.Either (partitionEithers)
 import Data.List (intercalate, sort)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -46,6 +54,7 @@ import System.Directory
   , getCurrentDirectory
   , listDirectory
   , makeAbsolute
+  , pathIsSymbolicLink
   )
 import System.FilePath
   ( (<.>)
@@ -82,8 +91,8 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 data SourceWorkspace = SourceWorkspace
   { sourceWorkspaceTargets :: [WorkspaceTarget]
   , sourceWorkspaceModules :: [WorkspaceModule]
-  , sourceWorkspaceRatings :: [FilePath]
-  , sourceWorkspaceAutomatic :: Maybe (WorkspaceModule, Bool)
+  , sourceWorkspaceRatings :: [(FilePath, String)]
+  , sourceWorkspaceAutomaticTarget :: Maybe TargetKey
   }
 
 -- | One explicit @:load@ or @:add@ target.  A directory is one target even
@@ -91,6 +100,7 @@ data SourceWorkspace = SourceWorkspace
 data WorkspaceTarget = WorkspaceTarget
   { targetLocator :: TargetLocator
   , targetStarred :: Bool
+  , targetModuleExpectations :: [String]
   , targetModuleSpellings :: [String]
   , targetSourceFiles :: [FilePath]
   , targetRatings :: [FilePath]
@@ -101,6 +111,7 @@ data WorkspaceTarget = WorkspaceTarget
 data WorkspaceModule = WorkspaceModule
   { parsedModuleName :: String
   , parsedModulePath :: FilePath
+  , parsedModuleSource :: String
   , parsedModuleSyntax :: HSE.Module HSE.SrcSpanInfo
   , parsedModuleImports :: [WorkspaceImport]
   }
@@ -116,6 +127,8 @@ data TargetKind
   | ModuleNameTarget
   | DirectoryTarget
   deriving (Eq, Ord, Show)
+
+type TargetKey = (TargetKind, FilePath)
 
 -- All locator fields are total.  A module spelling is present only for a
 -- target admitted through its hierarchical module name; the admission root is
@@ -138,13 +151,17 @@ loadWorkspace arguments = do
   admitted <- admitTargets arguments
   case admitted of
     Left failures -> pure $ Left failures
-    Right targets -> buildWorkspace targets
+    Right targets -> buildWorkspace (map targetKey targets) targets
 
 -- | Re-read the canonical targets retained by a previous snapshot.
 reloadWorkspace
   :: SourceWorkspace
   -> IO (Either (NonEmpty Diagnostic) SourceWorkspace)
-reloadWorkspace = buildWorkspace . sourceWorkspaceTargets
+reloadWorkspace workspace = buildWorkspace preferences targets
+ where
+  targets = sourceWorkspaceTargets workspace
+  preferences = retainedAutomaticPreference workspace
+    ++ reverse (map targetKey targets)
 
 -- | Resolve and atomically add targets.  Re-adding the same canonical file or
 -- directory is idempotent; a later starred spelling upgrades the retained
@@ -158,8 +175,12 @@ addWorkspaceTargets workspace arguments = do
   admitted <- admitTargets arguments
   case admitted of
     Left failures -> pure $ Left failures
-    Right targets -> buildWorkspace $ mergeTargets
-      (sourceWorkspaceTargets workspace) targets
+    Right added -> do
+      let targets = mergeTargets (sourceWorkspaceTargets workspace) added
+          preferences = reverse (map targetKey added)
+            ++ retainedAutomaticPreference workspace
+            ++ reverse (map targetKey targets)
+      buildWorkspace preferences targets
 
 -- | Atomically remove explicit targets.  Arguments match a retained canonical
 -- target path or an admitted single-module spelling; dependency-only modules
@@ -174,11 +195,22 @@ removeWorkspaceTargets workspace arguments = do
     arguments
   case collectResults resolved of
     Left failures -> pure $ Left failures
-    Right keys -> buildWorkspace
-      [ target
-      | target <- sourceWorkspaceTargets workspace
-      , targetKey target `Set.notMember` Set.unions keys
-      ]
+    Right keys -> do
+      let removed = Set.unions keys
+          targets =
+            [ target
+            | target <- sourceWorkspaceTargets workspace
+            , targetKey target `Set.notMember` removed
+            ]
+          preferences = retainedAutomaticPreference workspace
+            ++ reverse (map targetKey targets)
+      buildWorkspace preferences targets
+
+retainedAutomaticPreference :: SourceWorkspace -> [TargetKey]
+retainedAutomaticPreference workspace = case
+    sourceWorkspaceAutomaticTarget workspace of
+  Just key -> [key]
+  Nothing -> []
 
 -- | Explicit targets in admission order.
 workspaceExplicitTargets :: SourceWorkspace -> [WorkspaceTarget]
@@ -200,15 +232,59 @@ workspaceModules = workspaceLoadedModules
 workspaceModuleFiles :: SourceWorkspace -> [FilePath]
 workspaceModuleFiles = map workspaceModulePath . workspaceLoadedModules
 
+-- | The exact, fully evaluated source texts parsed while constructing this
+-- workspace, in dependency-first session-loader order.
+workspaceModuleSources :: SourceWorkspace -> [(FilePath, String)]
+workspaceModuleSources = map snapshot . workspaceLoadedModules
+ where
+  snapshot modul = (workspaceModulePath modul, workspaceModuleSource modul)
+
 -- | Canonical rating files contributed by explicit directory targets.
 workspaceRatingFiles :: SourceWorkspace -> [FilePath]
-workspaceRatingFiles = sourceWorkspaceRatings
+workspaceRatingFiles = map fst . sourceWorkspaceRatings
+
+-- | Exact, fully evaluated rating texts read with the workspace snapshot, in
+-- deterministic target/directory order.
+workspaceRatingSources :: SourceWorkspace -> [(FilePath, String)]
+workspaceRatingSources = sourceWorkspaceRatings
+
+-- | Transitional source-free view of unresolved local imports. New diagnostic
+-- consumers should use 'workspaceUnresolvedImportsWithSources'.
+workspaceUnresolvedImports :: SourceWorkspace -> [(String, String)]
+workspaceUnresolvedImports = map withoutSource
+  . workspaceUnresolvedImportsWithSources
+ where
+  withoutSource (_, importer, imported) = (importer, imported)
+
+-- | Non-package imports for which dependency discovery found no local source
+-- module. Path/importer/imported triples retain dependency-first module order
+-- and source import order, making the source-workspace boundary and diagnostic
+-- provenance visible without exposing private graph metadata.
+workspaceUnresolvedImportsWithSources
+  :: SourceWorkspace
+  -> [(FilePath, String, String)]
+workspaceUnresolvedImportsWithSources workspace =
+  [ ( parsedModulePath modul
+    , parsedModuleName modul
+    , importedModuleName imported
+    )
+  | modul <- workspaceLoadedModules workspace
+  , imported <- parsedModuleImports modul
+  , not $ importedFromPackage imported
+  , importedModuleName imported `Set.notMember` loadedNames
+  ]
+ where
+  loadedNames = Set.fromList
+    $ map parsedModuleName $ workspaceLoadedModules workspace
 
 workspaceModuleName :: WorkspaceModule -> String
 workspaceModuleName = parsedModuleName
 
 workspaceModulePath :: WorkspaceModule -> FilePath
 workspaceModulePath = parsedModulePath
+
+workspaceModuleSource :: WorkspaceModule -> String
+workspaceModuleSource = parsedModuleSource
 
 workspaceModuleSyntax
   :: WorkspaceModule
@@ -243,15 +319,34 @@ workspaceTargetModuleName target = case targetModuleSpellings target of
   [name] | locatorKind (targetLocator target) /= DirectoryTarget -> Just name
   _ -> Nothing
 
--- | Most recent explicit source module eligible for GHCi's automatic context.
--- The accompanying flag is always 'True': Djex source-interprets every loaded
--- module, so its automatic context has the semantics of GHCi's @*M@ even when
--- the target was written without a leading star.  The original spelling
--- remains available through 'workspaceTargetIsStarred'.
+-- | Source modules supplied by the history-selected automatic target. A file
+-- or named-module target contributes one entry; Djex's directory extension
+-- contributes every source file in deterministic target order so the default
+-- environment remains fully searchable. The flags are always 'True': Djex
+-- source-interprets every loaded module, giving each entry GHCi's @*M@
+-- semantics regardless of the target's written star.
+workspaceAutomaticTargetModules
+  :: SourceWorkspace
+  -> [(WorkspaceModule, Bool)]
+workspaceAutomaticTargetModules workspace = case
+    sourceWorkspaceAutomaticTarget workspace of
+  Nothing -> []
+  Just key -> case filter ((== key) . targetKey)
+      $ sourceWorkspaceTargets workspace of
+    target : _ -> targetContribution
+      (modulesByPath $ sourceWorkspaceModules workspace) target
+    [] -> []
+
+-- | Transitional singular projection retained while callers move to
+-- 'workspaceAutomaticTargetModules'. Directory targets can contribute more
+-- than one module, so new code must use the plural accessor.
 workspaceAutomaticTargetModule
   :: SourceWorkspace
   -> Maybe (WorkspaceModule, Bool)
-workspaceAutomaticTargetModule = sourceWorkspaceAutomatic
+workspaceAutomaticTargetModule workspace = case
+    workspaceAutomaticTargetModules workspace of
+  automatic : _ -> Just automatic
+  [] -> Nothing
 
 admitTargets
   :: [String]
@@ -342,6 +437,7 @@ fileTarget root starred path = WorkspaceTarget
       , locatorAdmissionRoot = root
       }
   , targetStarred = starred
+  , targetModuleExpectations = []
   , targetModuleSpellings = []
   , targetSourceFiles = [path]
   , targetRatings = []
@@ -353,11 +449,10 @@ admitDirectory
   -> IO (Either (NonEmpty Diagnostic) WorkspaceTarget)
 admitDirectory starred source = do
   canonical <- canonicalPath "cannot resolve source directory" source
-  case canonical of
-    Left failures -> pure $ Left failures
-    Right path -> do
-      contents <- directoryContents path
-      pure $ fmap (directoryTarget starred path) contents
+  -- 'buildWorkspace' refreshes every admitted target immediately. Deferring
+  -- traversal until that common pass prevents a new directory from being
+  -- walked twice before its first immutable snapshot is returned.
+  pure $ fmap (\path -> directoryTarget starred path ([], [])) canonical
 
 directoryTarget
   :: Bool
@@ -372,6 +467,7 @@ directoryTarget starred path (sources, ratings) = WorkspaceTarget
       , locatorAdmissionRoot = path
       }
   , targetStarred = starred
+  , targetModuleExpectations = []
   , targetModuleSpellings = []
   , targetSourceFiles = sources
   , targetRatings = ratings
@@ -399,6 +495,7 @@ admitNamedModule root starred source = case checkedModuleName source of
             , locatorAdmissionRoot = root
             }
         , targetStarred = starred
+        , targetModuleExpectations = [source]
         , targetModuleSpellings = [source]
         , targetSourceFiles = [path]
         , targetRatings = []
@@ -425,10 +522,14 @@ canonicalPath summary path = do
 directoryContents
   :: FilePath
   -> IO (Either (NonEmpty Diagnostic) ([FilePath], [FilePath]))
-directoryContents root = go Set.empty root
+directoryContents root = do
+  result <- go Set.empty root
+  pure $ fmap finish result
  where
+  finish (_, sources, ratings) = (stableNub sources, stableNub ratings)
+
   go visited directory
-    | directory `Set.member` visited = pure $ Right ([], [])
+    | directory `Set.member` visited = pure $ Right (visited, [], [])
     | otherwise = do
         listed <- tryIOError $ listDirectory directory
         case listed of
@@ -438,18 +539,23 @@ directoryContents root = go Set.empty root
           Right entries -> walk (Set.insert directory visited)
             [] [] $ map (directory </>) $ sort entries
 
-  walk _ sources ratings [] = pure $ Right
-    (stableNub sources, stableNub ratings)
+  walk visited sources ratings [] = pure $ Right
+    (visited, sources, ratings)
   walk visited sources ratings (path : remaining) = do
     inspected <- tryIOError $ do
+      symbolic <- pathIsSymbolicLink path
       isDirectory <- doesDirectoryExist path
       isFile <- doesFileExist path
-      pure (isDirectory, isFile)
+      pure (symbolic, isDirectory, isFile)
     case inspected of
       Left failure -> pure $ singletonFailure
         "DJEX_REPL_TARGET_IO" "cannot inspect source-directory entry"
         path $ show failure
-      Right (True, _) -> do
+      -- Directory links are never part of an admitted tree. Besides keeping
+      -- traversal bounded by the canonical root, this makes cycles harmless.
+      -- Links to regular source/rating files remain valid explicit contents.
+      Right (True, True, _) -> walk visited sources ratings remaining
+      Right (_, True, _) -> do
         canonical <- canonicalPath "cannot resolve source subdirectory" path
         case canonical of
           Left failures -> pure $ Left failures
@@ -457,12 +563,12 @@ directoryContents root = go Set.empty root
             nested <- go visited directory
             case nested of
               Left failures -> pure $ Left failures
-              Right (nestedSources, nestedRatings) -> walk
-                (Set.insert directory visited)
+              Right (afterNested, nestedSources, nestedRatings) -> walk
+                afterNested
                 (sources ++ nestedSources)
                 (ratings ++ nestedRatings)
                 remaining
-      Right (_, True) -> do
+      Right (_, _, True) -> do
         canonical <- canonicalPath "cannot resolve source-directory file" path
         case canonical of
           Left failures -> pure $ Left failures
@@ -513,9 +619,10 @@ refreshTarget target = case locatorKind locator of
     {targetSourceFiles = sources, targetRatings = ratings}
 
 buildWorkspace
-  :: [WorkspaceTarget]
+  :: [TargetKey]
+  -> [WorkspaceTarget]
   -> IO (Either (NonEmpty Diagnostic) SourceWorkspace)
-buildWorkspace targets = do
+buildWorkspace automaticPreferences targets = do
   refreshedResults <- mapM refreshTarget targets
   case collectResults refreshedResults of
     Left failures -> pure $ Left failures
@@ -530,59 +637,91 @@ buildWorkspace targets = do
           Just failures -> pure $ Left failures
           Nothing -> do
             discovered <- discoverDependencies refreshed explicitModules
-            pure $ discovered >>= finishWorkspace refreshed sourcePaths
+            case discovered of
+              Left failures -> pure $ Left failures
+              Right modules -> finishWorkspace
+                automaticPreferences refreshed sourcePaths modules
 
 finishWorkspace
-  :: [WorkspaceTarget]
+  :: [TargetKey]
+  -> [WorkspaceTarget]
   -> [FilePath]
   -> [WorkspaceModule]
-  -> Either (NonEmpty Diagnostic) SourceWorkspace
-finishWorkspace targets explicitPaths discovered = do
-  ordered <- dependencyOrder explicitPaths discovered
-  let annotatedTargets = annotateTargets targets discovered
-      automatic = automaticTarget annotatedTargets discovered
-      ratings = stableNub $ concatMap targetRatings annotatedTargets
-  pure SourceWorkspace
-    { sourceWorkspaceTargets = annotatedTargets
-    , sourceWorkspaceModules = ordered
-    , sourceWorkspaceRatings = ratings
-    , sourceWorkspaceAutomatic = automatic
-    }
+  -> IO (Either (NonEmpty Diagnostic) SourceWorkspace)
+finishWorkspace automaticPreferences targets explicitPaths discovered = case
+    dependencyOrder explicitPaths discovered of
+  Left failures -> pure $ Left failures
+  Right ordered -> do
+    let annotatedTargets = annotateTargets targets discovered
+        automatic = automaticTargetKey
+          automaticPreferences annotatedTargets discovered
+        ratingPaths = stableNub $ concatMap targetRatings annotatedTargets
+    ratingResults <- mapM readRatingSnapshot ratingPaths
+    pure $ case collectResults ratingResults of
+      Left failures -> Left failures
+      Right ratings -> Right SourceWorkspace
+        { sourceWorkspaceTargets = annotatedTargets
+        , sourceWorkspaceModules = ordered
+        , sourceWorkspaceRatings = ratings
+        , sourceWorkspaceAutomaticTarget = automatic
+        }
 
 parseWorkspaceModule
   :: FilePath
   -> IO (Either (NonEmpty Diagnostic) WorkspaceModule)
 parseWorkspaceModule path = do
-  parsed <- tryIOError $ HSEFile.parseFileWithMode
-    (haskellSrcExtsParseMode path) path
-  pure $ case parsed of
+  loaded <- strictReadWorkspaceText path
+  pure $ case loaded of
     Left failure -> singletonFailure
       "DJEX_REPL_MODULE_READ" "cannot read source module" path $ show failure
-    Right parseResult -> case parseResult of
+    -- The file-content parser reads LANGUAGE pragmas from this same retained
+    -- text. Using the lower-level module parser here would silently drop
+    -- per-file extensions such as PackageImports.
+    Right source -> case HSEFile.parseFileContentsWithMode
+        (haskellSrcExtsParseMode path) source of
       HSE.ParseFailed location detail -> Left
         $ withHaskellSrcLocation location
             (workspaceFailure "DJEX_REPL_MODULE_PARSE"
               "could not parse source module" detail)
         :| []
-      HSE.ParseOk syntax -> workspaceModuleFromSyntax path syntax
+      HSE.ParseOk syntax -> workspaceModuleFromSyntax path source syntax
 
 workspaceModuleFromSyntax
   :: FilePath
+  -> String
   -> HSE.Module HSE.SrcSpanInfo
   -> Either (NonEmpty Diagnostic) WorkspaceModule
-workspaceModuleFromSyntax path syntax = case syntax of
+workspaceModuleFromSyntax path source syntax = case syntax of
   HSE.Module _ moduleHead _ imports _ -> do
     name <- declaredModuleName path moduleHead
     convertedImports <- traverse (workspaceImport path) imports
     pure WorkspaceModule
       { parsedModuleName = name
       , parsedModulePath = path
+      , parsedModuleSource = source
       , parsedModuleSyntax = syntax
       , parsedModuleImports = convertedImports
       }
   _ -> singletonFailure
     "DJEX_REPL_MODULE_FORM" "unsupported source module form" path
     "expected an ordinary Haskell module"
+
+readRatingSnapshot
+  :: FilePath
+  -> IO (Either (NonEmpty Diagnostic) (FilePath, String))
+readRatingSnapshot path = do
+  loaded <- strictReadWorkspaceText path
+  pure $ case loaded of
+    Left failure -> singletonFailure
+      "DJEX_REPL_RATING_READ" "cannot read rating file" path $ show failure
+    Right source -> Right (path, source)
+
+-- Keep lazy String IO entirely inside the IOException boundary. The returned
+-- text is therefore one immutable snapshot even if the file is edited before
+-- the Exference inventory is sealed.
+strictReadWorkspaceText :: FilePath -> IO (Either IOError String)
+strictReadWorkspaceText path = tryIOError
+  $ readFile path >>= evaluate . force
 
 declaredModuleName
   :: FilePath
@@ -638,8 +777,7 @@ targetModuleMismatchDiagnostics targets modules = NonEmpty.nonEmpty
       "resolved source has the wrong module name"
       $ expected ++ " was requested, but the file declares " ++ actual
   | target <- targets
-  , locatorKind (targetLocator target) == ModuleNameTarget
-  , Just expected <- [locatorModuleName $ targetLocator target]
+  , expected <- targetModuleExpectations target
   , path <- targetSourceFiles target
   , Just modul <- [Map.lookup path byPath]
   , let actual = parsedModuleName modul
@@ -675,31 +813,36 @@ discoverDependencies targets initial = go initial 0
         case resolved of
           Left failures -> pure $ Left failures
           Right Nothing -> pure $ Right modules
-          Right (Just path)
-            | path `Map.member` modulesByPath modules -> pure $ Right modules
-            | otherwise -> do
-                parsed <- parseWorkspaceModule path
-                pure $ parsed >>= \dependency ->
-                  if parsedModuleName dependency /= importedModuleName imported
-                    then singletonFailure
-                      "DJEX_REPL_MODULE_MISMATCH"
-                      "resolved source has the wrong module name"
-                      path
-                      ( importedModuleName imported ++ " was imported by "
-                          ++ parsedModuleName importer ++ ", but the file declares "
-                          ++ parsedModuleName dependency
-                      )
-                    else case Map.lookup (parsedModuleName dependency)
-                        $ modulesByName modules of
-                      Just original
-                        | parsedModulePath original /= parsedModulePath dependency ->
-                            singletonFailure
-                              "DJEX_REPL_MODULE_DUPLICATE"
-                              "duplicate source module"
-                              path
-                              (parsedModuleName dependency ++ " is also declared by "
-                                ++ parsedModulePath original)
-                      _ -> Right $ modules ++ [dependency]
+          Right (Just path) -> case Map.lookup path $ modulesByPath modules of
+            Just dependency -> pure $ modules
+              <$ validateDependency importer imported modules dependency
+            Nothing -> do
+              parsed <- parseWorkspaceModule path
+              pure $ parsed >>= \dependency -> do
+                validateDependency importer imported modules dependency
+                Right $ modules ++ [dependency]
+
+  validateDependency importer imported modules dependency
+    | parsedModuleName dependency /= importedModuleName imported =
+        singletonFailure
+          "DJEX_REPL_MODULE_MISMATCH"
+          "resolved source has the wrong module name"
+          (parsedModulePath dependency)
+          ( importedModuleName imported ++ " was imported by "
+              ++ parsedModuleName importer ++ ", but the file declares "
+              ++ parsedModuleName dependency
+          )
+    | otherwise = case Map.lookup (parsedModuleName dependency)
+        $ modulesByName modules of
+      Just original
+        | parsedModulePath original /= parsedModulePath dependency ->
+            singletonFailure
+              "DJEX_REPL_MODULE_DUPLICATE"
+              "duplicate source module"
+              (parsedModulePath dependency)
+              (parsedModuleName dependency ++ " is also declared by "
+                ++ parsedModulePath original)
+      _ -> Right ()
 
 moduleSegments :: String -> [String]
 moduleSegments source = case SharedName.mkModuleName source of
@@ -853,29 +996,39 @@ annotateTargets targets modules = map annotate targets
   byPath = modulesByPath modules
   annotate target
     | locatorKind (targetLocator target) == DirectoryTarget = target
+        {targetModuleSpellings = []}
     | [path] <- targetSourceFiles target
     , Just modul <- Map.lookup path byPath = target
         { targetModuleSpellings = stableNub
-            $ targetModuleSpellings target ++ [parsedModuleName modul]
+            $ targetModuleExpectations target ++ [parsedModuleName modul]
         }
     | otherwise = target
+        {targetModuleSpellings = targetModuleExpectations target}
 
-automaticTarget
-  :: [WorkspaceTarget]
+automaticTargetKey
+  :: [TargetKey]
+  -> [WorkspaceTarget]
   -> [WorkspaceModule]
-  -> Maybe (WorkspaceModule, Bool)
-automaticTarget targets modules = firstJust
-  [ fmap (\modul -> (modul, True)) $ Map.lookup path byPath
-  | target <- reverse targets
-  , path <- reverse $ targetSourceFiles target
-  ]
+  -> Maybe TargetKey
+automaticTargetKey preferences targets modules = firstContributing
+  $ stableNub preferences
  where
   byPath = modulesByPath modules
+  targetsByKey = Map.fromList [(targetKey target, target) | target <- targets]
+  firstContributing [] = Nothing
+  firstContributing (key : remaining) = case Map.lookup key targetsByKey of
+    Just target | not $ null $ targetContribution byPath target -> Just key
+    _ -> firstContributing remaining
 
-firstJust :: [Maybe value] -> Maybe value
-firstJust [] = Nothing
-firstJust (Just value : _) = Just value
-firstJust (Nothing : remaining) = firstJust remaining
+targetContribution
+  :: Map.Map FilePath WorkspaceModule
+  -> WorkspaceTarget
+  -> [(WorkspaceModule, Bool)]
+targetContribution byPath target =
+  [ (modul, True)
+  | path <- targetSourceFiles target
+  , Just modul <- [Map.lookup path byPath]
+  ]
 
 removalMatches
   :: [WorkspaceTarget]
@@ -931,8 +1084,12 @@ deduplicateTargets = foldl' insert []
     (before, existing : after) -> before ++ [merge existing candidate] ++ after
   merge existing candidate = existing
     { targetStarred = targetStarred existing || targetStarred candidate
+    , targetModuleExpectations = stableNub
+        $ targetModuleExpectations existing
+        ++ targetModuleExpectations candidate
     , targetModuleSpellings = stableNub
-        $ targetModuleSpellings existing ++ targetModuleSpellings candidate
+        $ targetModuleExpectations existing
+        ++ targetModuleExpectations candidate
     }
 
 mergeTargets :: [WorkspaceTarget] -> [WorkspaceTarget] -> [WorkspaceTarget]

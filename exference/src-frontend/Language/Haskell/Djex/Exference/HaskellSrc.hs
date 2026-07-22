@@ -15,6 +15,8 @@ module Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSessionWithPolicy
   , loadExferenceSessionFromFiles
   , loadExferenceSessionFromFilesWithPolicy
+  , loadExferenceSessionFromSources
+  , loadExferenceSessionFromSourcesWithPolicy
   , parseExferenceRequest
   , parseExferenceRequestInScope
   , parseExferenceRequestWithCheckedTarget
@@ -49,6 +51,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , checkedSourcePreparedInventory
   , environmentFromFiles
   , environmentFromPath
+  , environmentFromSources
   , environmentLoadErrorDiagnostics
   , haskellSrcExtsParseMode
   )
@@ -194,6 +197,29 @@ loadExferenceSessionFromFilesWithPolicy
 loadExferenceSessionFromFilesWithPolicy policy modulePaths ratingPaths = do
   LoadReport sourceResult sourceDiagnostics <-
     environmentFromFiles modulePaths ratingPaths
+  pure $ sealSourceLoadReport policy sourceResult sourceDiagnostics
+
+-- | Seal an Exference session from exact, explicitly ordered module and
+-- rating snapshots. Paths remain attached to parser and rating diagnostics;
+-- the filesystem is not consulted by this entry point.
+loadExferenceSessionFromSources
+  :: [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO ExferenceSessionLoadReport
+loadExferenceSessionFromSources = loadExferenceSessionFromSourcesWithPolicy
+  defaultExferenceSessionPolicy
+
+-- | Policy-aware counterpart of 'loadExferenceSessionFromSources'. The
+-- in-memory inputs enter the same parse/rate/check/seal pipeline used by the
+-- compatibility file loaders.
+loadExferenceSessionFromSourcesWithPolicy
+  :: ExferenceSessionPolicy
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO ExferenceSessionLoadReport
+loadExferenceSessionFromSourcesWithPolicy policy moduleSources ratingSources = do
+  LoadReport sourceResult sourceDiagnostics <-
+    environmentFromSources moduleSources ratingSources
   pure $ sealSourceLoadReport policy sourceResult sourceDiagnostics
 
 sealSourceLoadReport

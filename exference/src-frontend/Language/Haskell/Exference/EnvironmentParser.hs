@@ -19,9 +19,11 @@ module Language.Haskell.Exference.EnvironmentParser
   , EnvironmentLoadError (..)
   , environmentLoadErrorDiagnostics
   , parseModules
+  , parseModuleSources
   , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromFiles
+  , environmentFromSources
   , environmentFromPath
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
@@ -76,10 +78,10 @@ import Data.Bifunctor ( first )
 import System.FilePath ( (</>) )
 import System.IO.Error ( tryIOError )
 
+import Language.Haskell.Exts (parseFileContentsWithMode)
 import Language.Haskell.Exts.Syntax ( Module )
 import qualified Language.Haskell.Exts.Syntax as HSE
-import Language.Haskell.Exts.Parser ( parseModuleWithMode
-                                    , ParseResult (..)
+import Language.Haskell.Exts.Parser ( ParseResult (..)
                                     , ParseMode
                                     )
 import Language.Haskell.Exts.SrcLoc ( SrcSpanInfo )
@@ -793,6 +795,14 @@ parseModules
   -> IO (LoadReport SourceEnvironment)
 parseModules = runLoader . parseModulesM
 
+-- | Parse already-read module snapshots in caller order. Each path remains
+-- the parser filename and therefore the source attached to diagnostics; the
+-- text is consumed directly and is never reopened from the filesystem.
+parseModuleSources
+  :: [(FilePath, String)]
+  -> IO (LoadReport SourceEnvironment)
+parseModuleSources = runLoader . parseModuleSourcesM
+
 type Loader = WriterT [Diagnostic] IO
 
 -- Every public IO entry point shares this one projection from a loader
@@ -805,19 +815,46 @@ runLoader action = uncurry LoadReport <$> runWriterT action
 parseModulesM
   :: [(ParseMode, FilePath)]
   -> Loader (Either EnvironmentLoadError SourceEnvironment)
-parseModulesM inputs = do
+parseModulesM = parseModuleInputsM . map toFileInput
+ where
+  toFileInput (mode, path) = ModuleFileInput mode path
+
+parseModuleSourcesM
+  :: [(FilePath, String)]
+  -> Loader (Either EnvironmentLoadError SourceEnvironment)
+parseModuleSourcesM = parseModuleInputsM . map toSourceInput
+ where
+  toSourceInput (path, source) = ModuleSourceInput
+    (haskellSrcExtsParseMode path) source
+
+data ModuleInput
+  = ModuleFileInput ParseMode FilePath
+  | ModuleSourceInput ParseMode String
+
+-- File-backed and in-memory entry points converge before parsing, so source
+-- extraction, warning order, checked lowering, and sealing cannot drift.
+parseModuleInputsM
+  :: [ModuleInput]
+  -> Loader (Either EnvironmentLoadError SourceEnvironment)
+parseModuleInputsM inputs = do
   readResults <- lift $ mapM hRead inputs
   case NonEmpty.nonEmpty $ lefts readResults of
     Just errors -> pure $ Left $ ModuleReadErrors errors
     Nothing -> parseLoadedModules $ rights readResults
   where
     hRead
-      :: (ParseMode, FilePath)
+      :: ModuleInput
       -> IO (Either Diagnostic (ParseMode, String))
-    hRead (mode, path) = fmap ((,) mode) <$> readTextFile path
+    hRead input = case input of
+      ModuleFileInput mode path -> fmap ((,) mode) <$> readTextFile path
+      ModuleSourceInput mode source -> do
+        strictSource <- evaluate $ force source
+        pure $ Right (mode, strictSource)
 
     hParse :: (ParseMode, String) -> Either Diagnostic (Module SrcSpanInfo)
-    hParse (mode, content) = case parseModuleWithMode mode content of
+    -- Unlike the lower-level module parser, the file-content parser enables
+    -- LANGUAGE pragmas found in the supplied text without reopening its path.
+    hParse (mode, content) = case parseFileContentsWithMode mode content of
       ParseFailed location detail -> Left $ moduleParseDiagnostic location detail
       ParseOk modul -> Right modul
 
@@ -1083,6 +1120,11 @@ ratingsFromFile path = do
   contents <- readTextFile path
   pure $ contents >>= first (withSource path) . parseRatings
 
+ratingsFromSource
+  :: (FilePath, String)
+  -> Either Diagnostic [(QualifiedName, Penalty)]
+ratingsFromSource (path, source) = first (withSource path) $ parseRatings source
+
 ratingFailureDiagnostic :: Diagnostic -> Diagnostic
 ratingFailureDiagnostic failure = failure
   { diagnosticSeverity = Warning
@@ -1189,13 +1231,40 @@ environmentFromFilesM modulePaths ratingPaths = do
     [ (haskellSrcExtsParseMode modulePath, modulePath)
     | modulePath <- modulePaths
     ]
-  case environmentResult of
-    Left failure -> pure $ Left failure
-    Right environment -> do
-      ratingResults <- lift $ mapM ratingsFromFile ratingPaths
-      forM_ (lefts ratingResults)
-        $ tell . (: []) . ratingFailureDiagnostic
-      rateAndCheckEnvironment (concat $ rights ratingResults) environment
+  finishEnvironmentLoad environmentResult
+    $ lift $ mapM ratingsFromFile ratingPaths
+
+-- | Parse, rate, check, and seal exact in-memory source snapshots. Paths are
+-- retained solely as diagnostic/parser identities; neither modules nor
+-- ratings are reopened. This is the single-snapshot boundary used by the
+-- module-aware REPL.
+environmentFromSources
+  :: [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO (LoadReport CheckedSourceEnvironment)
+environmentFromSources moduleSources ratingSources = runLoader
+  $ environmentFromSourcesM moduleSources ratingSources
+
+environmentFromSourcesM
+  :: [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
+environmentFromSourcesM moduleSources ratingSources = do
+  environmentResult <- parseModuleSourcesM moduleSources
+  finishEnvironmentLoad environmentResult
+    $ pure $ map ratingsFromSource ratingSources
+
+finishEnvironmentLoad
+  :: Either EnvironmentLoadError SourceEnvironment
+  -> Loader [Either Diagnostic [(QualifiedName, Penalty)]]
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
+finishEnvironmentLoad environmentResult loadRatings = case environmentResult of
+  Left failure -> pure $ Left failure
+  Right environment -> do
+    ratingResults <- loadRatings
+    forM_ (lefts ratingResults)
+      $ tell . (: []) . ratingFailureDiagnostic
+    rateAndCheckEnvironment (concat $ rights ratingResults) environment
 
 
 environmentFromPath

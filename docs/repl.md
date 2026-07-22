@@ -185,13 +185,19 @@ the loader follows resolvable local, non-package imports transitively and loads
 the resulting graph dependency-first. Import cycles not broken by a
 `{-# SOURCE #-}` import are rejected. An imported module found at the expected
 hierarchical path must declare that module name, and two files may not declare
-the same module. These checks happen before the new workspace is published.
+the same module. A non-package import with no local source remains unresolved
+and is reported at the importing file by a
+`DJEX_REPL_IMPORT_UNRESOLVED` warning; it contributes no declarations to the
+session. These checks happen before the new workspace is published.
 
 Filesystem targets are canonicalized when admitted. `:reload` therefore keeps
 referring to the same files after `:cd`; it does not reinterpret the original
 relative spelling in the new directory. `:show targets` uses canonical paths
 for file and directory targets and retains the readable module spelling for a
-module-name target. Re-adding the same canonical target is idempotent.
+module-name target. Recursive directory expansion skips directory symlinks so
+it cannot escape or cycle outside the admitted tree; symlinks to regular
+source or rating files remain valid and are canonicalized. Re-adding the same
+canonical target is idempotent.
 `:unadd` removes explicit targets, not arbitrary dependency modules; remove
 the explicit targets that keep a dependency reachable if it should leave the
 closure.
@@ -200,18 +206,22 @@ The target commands affect state as follows:
 
 | Command | Target set | Prompt context after success |
 | --- | --- | --- |
-| `:load TARGET...` | Replace it. | Replace it with `*M` for the most recent explicit source module, or clear it when there is none. |
+| `:load TARGET...` | Replace it. | Replace it with starred entries for the first explicit target that contributes source modules, or clear it when there is none. |
 | `:load` | Clear it. | Clear it. |
-| `:add TARGET...` | Append new canonical targets. | Preserve a nonempty context; if it was empty, use the new automatic `*M` context. |
-| `:unadd TARGET...` | Remove matching explicit targets. | Preserve surviving entries, prune entries for unloaded modules, then use the automatic `*M` context only if nothing remains. |
-| `:reload` | Re-read the retained targets. | Preserve and prune as for `:unadd`, falling back to the automatic `*M` context if necessary. |
+| `:add TARGET...` | Append new canonical targets. | Replace it with starred entries for the last newly requested target that contributes source; retain the prior automatic target when none does. |
+| `:unadd TARGET...` | Remove matching explicit targets. | Replace it with starred entries for the retained automatic target when it survives, otherwise the most recently admitted surviving target. |
+| `:reload` | Re-read the retained targets. | Preserve and prune explicit context entries, then append fresh starred entries for the retained automatic target. |
 
-The latest source module contributed by the latest suitable explicit target is
-the automatic module. All Djex target modules are source-only, so automatic
-context uses the full-source-scope `*M` form even when the target was written
-without `*`. A leading `*` on a target is accepted and retained for GHCi-shaped
-syntax and display, but Djex has no compiled-versus-interpreted loading mode
-for it to select.
+Automatic-target choice is history-sensitive like GHCi: a fresh `:load` picks
+the first contributing target, `:add` picks the last newly requested
+contributing target, and reload/removal retain that choice while it survives.
+If removal deletes it, the most recently admitted contributing target becomes
+automatic. A file or module-name target contributes one module; a directory
+contributes all of its loaded source files in deterministic order. All Djex
+target modules are source-only, so automatic context uses full-source-scope
+`*M` entries even when the target was written without `*`. A leading `*` on a
+target is accepted and retained for GHCi-shaped syntax and display, but Djex
+has no compiled-versus-interpreted loading mode for it to select.
 
 ## Prompt module context
 
@@ -248,8 +258,12 @@ declarations plus names admitted by that module's own imports. Names from its
 qualified imports remain qualified. Explicit module export lists are therefore
 meaningful in the REPL rather than being rejected by the source loader.
 Parent/child items such as `T(..)` and `C(method)` use the checked constructor
-and class-method groups, and `module M` re-exports retain the filters from the
-module's source import of `M`.
+and class-method groups; record selectors are bundled children of their owning
+datatype as well. Child imports such as `T(..)` or `T(child)` are rejected for
+type synonyms and abstract datatypes, which have no checked children to
+expose. `module M` re-exports retain the filters from the module's source
+import of `M`. Every loaded module's export surface is validated during the
+workspace transaction, including modules not selected by the prompt context.
 
 Scope controls unqualified lookup and the source bindings available to
 Exference search. A current `*MODULE` entry gives that module's local names
@@ -346,6 +360,10 @@ available until a `:load` succeeds.
 `:load`, `:add`, `:unadd`, `:reload`, and a change to `fix` first resolve and
 parse every affected source, build the complete neutral inventory, apply
 ratings and session policy, derive the prompt scope, and seal the replacement.
+Each module and rating file is read strictly once per attempt. Dependency
+discovery, retained module syntax, export visibility, ratings, and the sealed
+inventory all consume that same immutable text snapshot, so an edit racing a
+load cannot publish a session assembled from two file versions.
 Only then are the target set, dependency closure, context, and searchable
 session published together. On failure the prior Exference session, targets,
 context, fix policy, and search settings remain active. The failed attempt's
@@ -373,11 +391,14 @@ linker:
   but ordinary function, method, and pattern-binding bodies are neither
   compiled nor used to infer missing signatures.
 
-Package-qualified imports and unresolved external imports do not make package
-contents available. Source that depends on external types or declarations must
-provide enough loaded source vocabulary for Exference's inventory checks, or
-loading fails with a structured diagnostic. No implicit package `Prelude` is
-added to a prompt context.
+An unresolved external import contributes no declarations: sessions contain
+only the workspace snapshots and structural built-ins. Package-qualified
+imports are rejected with `DJEX_REPL_IMPORT_PACKAGE`: the shared canonical
+name model cannot preserve package identity and must not silently bind a
+same-spelled local module. Source that depends on external types or
+declarations must provide enough loaded source vocabulary for Exference's
+inventory checks, or loading fails with a structured diagnostic. No implicit
+package `Prelude` is added to a prompt context.
 
 Explicit module export lists are accepted. The loader retains a complete
 module inventory so `*MODULE`, qualified parsing, and later context changes do

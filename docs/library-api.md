@@ -243,12 +243,43 @@ loadExferenceSessionFromFilesWithPolicy
   -> [FilePath]
   -> [FilePath]
   -> IO ExferenceSessionLoadReport
+
+loadExferenceSessionFromSources
+  :: [(FilePath, String)] -- already-read modules, in caller order
+  -> [(FilePath, String)] -- already-read ratings, in caller order
+  -> IO ExferenceSessionLoadReport
+
+loadExferenceSessionFromSourcesWithPolicy
+  :: ExferenceSessionPolicy
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO ExferenceSessionLoadReport
 ```
 
 These functions run the same read, parse, inventory, rating, and sealing
-pipeline as directory loading. They do not discover imports: the caller owns
-the complete ordered source closure. An empty module list is valid and retains
-Exference's built-in syntax-level constructor inventory.
+pipeline as directory loading. The `FromSources` variants never reopen their
+paths; paths are retained as parser filenames and diagnostic provenance. They
+are appropriate when a caller already owns an immutable filesystem snapshot.
+None of these functions discover imports: the caller owns the complete ordered
+source closure. An empty module list is valid and retains Exference's built-in
+syntax-level constructor inventory.
+
+Callers that need the checked source projection before session policy and
+sealing can use the corresponding lower-level boundary from
+`Language.Haskell.Exference.EnvironmentParser`:
+
+```haskell
+parseModuleSources
+  :: [(FilePath, String)]
+  -> IO (LoadReport SourceEnvironment)
+
+environmentFromSources
+  :: [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO (LoadReport CheckedSourceEnvironment)
+```
+
+These functions have the same ordered snapshot and diagnostic-path contract.
 
 Always inspect both report fields:
 

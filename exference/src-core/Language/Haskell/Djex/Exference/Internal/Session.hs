@@ -18,6 +18,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , ExferenceOmissionReason (..)
   , sealNeutralExferenceSessionWithPolicy
   , sealPreparedExferenceSessionWithPolicy
+  , scopeExferenceSession
   , sessionSearchEnvironment
   , sessionClassArity
   , elaborateSessionGoal
@@ -45,7 +46,8 @@ import Language.Haskell.Exference.Core.Declaration
   , preparedSynthesisWitness
   )
 import Language.Haskell.Exference.Core.FunctionBinding
-  ( DeconstructorBinding (..)
+  ( ConstructorBinding (..)
+  , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
   , deconstructorBindingTypes
@@ -127,11 +129,12 @@ instance NFData ExferenceOmission
 
 -- | All reusable session state is independent of the parser that supplied the
 -- declarations. The shared prepared inventory remains the authority for
--- declarations and synonyms, while only the policy-filtered search lowering
--- survives sealing. In particular, the complete backend-bearing frontend
--- witness is deliberately not retained here.
+-- declarations and synonyms. The policy-filtered backend lowering is retained
+-- solely so an interactive frontend can derive reversible search scopes; it
+-- is parser-independent and cannot add or replace declarations after sealing.
 data ExferenceSession = ExferenceSession
   { searchView :: Core.ExferenceEnvironment
+  , reusableSearchView :: EnvDictionary
   , preparedView :: PreparedInventory SynthesisVariable ()
   , omissionView :: [ExferenceOmission]
   }
@@ -235,6 +238,7 @@ sealPreparedEnvironment policy prepared = do
   let foundation = preparedSynthesisWitness prepared
       session = ExferenceSession
         { searchView = searchEnvironment
+        , reusableSearchView = supportedBackend
         , preparedView = foundation
         , omissionView = omissions
         }
@@ -243,6 +247,43 @@ sealPreparedEnvironment policy prepared = do
   -- comprehension could keep the unfiltered EnvDictionary reachable from an
   -- otherwise parser-neutral session.
   foundation `seq` (omissions `deepseq` pure session)
+
+-- | Rebuild only the query-facing search projection for an interactive
+-- scope. The complete checked inventory remains available for qualified type
+-- lookup, synonym elaboration, kinds, classes, and instances; only value
+-- introduction and datatype elimination are narrowed.
+--
+-- Reprojection always starts from the policy-filtered source view retained at
+-- session construction, rather than from the current projection. Repeated
+-- @import@ and @:module@ changes can therefore both remove and restore names
+-- without reparsing source or losing source ratings.
+scopeExferenceSession
+  :: Set.Set Name
+  -> ExferenceSession
+  -> Either Diagnostic ExferenceSession
+scopeExferenceSession visible session = do
+  let source = reusableSearchView session
+      functions = filter
+        ((`Set.member` visible) . functionName)
+        $ environmentFunctions source
+      -- Exference eliminates a datatype as one exhaustive operation. Keeping
+      -- it when only some constructors are imported would let synthesis emit
+      -- a constructor that is outside the interactive scope, or build an
+      -- incomplete case split. Require every constructor to be visible.
+      deconstructors = filter constructorsVisible
+        $ environmentDeconstructors source
+      constructorsVisible deconstructor = all
+        ((`Set.member` visible) . constructorName)
+        $ deconstructorConstructors deconstructor
+      scoped = source
+        { environmentFunctions = functions
+        , environmentDeconstructors = deconstructors
+        }
+  searchEnvironment <- first
+    (shownErrorDiagnostic "DJEX_EXF_SCOPE"
+      "cannot seal the interactive Exference scope")
+    $ mkExferenceEnvironment scoped
+  scoped `deepseq` pure session {searchView = searchEnvironment}
 
 applyRatingOverrides
   :: Map Name Penalty

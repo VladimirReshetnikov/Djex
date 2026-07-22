@@ -26,6 +26,7 @@ module Language.Haskell.Djex.Command
   , prepareDjinnQueryOptions
   , executeDjinnCommand
   , executeExferenceCommand
+  , executeExferenceCommandInScope
   , presentDjinn
   , presentExference
   , diagnosticFailure
@@ -45,7 +46,9 @@ import Text.Read (readMaybe)
 
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( parseExferenceRequestWithCheckedTarget
+  ( ExferenceQueryScope
+  , parseExferenceRequestWithCheckedTarget
+  , parseExferenceRequestWithCheckedTargetInScope
   )
 
 -- | Whether a candidate is presented as a complete binding or an expression.
@@ -204,6 +207,27 @@ executeExferenceCommand
 executeExferenceCommand presentation session options target sourceName source =
   case parseExferenceRequestWithCheckedTarget
       session options target sourceName source of
+    Left failure -> diagnosticFailure failure
+    Right request -> case runExferenceQuery session request of
+      Left failure -> diagnosticFailure failure
+      Right results -> presentExference presentation results
+
+-- | Parse, execute, and present an Exference query in an interactive module
+-- scope. The supplied session may already have its search dictionary narrowed;
+-- its complete inventory is still retained for qualified type elaboration.
+executeExferenceCommandInScope
+  :: PresentationOptions
+  -> ExferenceSession
+  -> ExferenceOptions
+  -> DefinitionName
+  -> ExferenceQueryScope
+  -> FilePath
+  -> String
+  -> IO ExitCode
+executeExferenceCommandInScope presentation session options target scope
+    sourceName source =
+  case parseExferenceRequestWithCheckedTargetInScope
+      session options target scope sourceName source of
     Left failure -> diagnosticFailure failure
     Right request -> case runExferenceQuery session request of
       Left failure -> diagnosticFailure failure

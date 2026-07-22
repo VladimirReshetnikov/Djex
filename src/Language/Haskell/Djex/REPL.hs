@@ -24,7 +24,9 @@ import Control.Monad (forM_, when)
 import Data.Char (isSpace, toLower)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
+import Data.List.NonEmpty (NonEmpty)
 import Data.Maybe (fromMaybe)
+import qualified Data.Set as Set
 import Data.Version (showVersion)
 import Data.Void (Void, absurd)
 import System.Directory
@@ -51,13 +53,18 @@ import Text.Read (readMaybe)
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( ExferenceSessionLoadReport (..)
+  ( ExferenceQueryScope (..)
+  , ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
-  , loadExferenceSessionWithPolicy
+  , loadExferenceSessionFromFilesWithPolicy
   )
 import Language.Haskell.Djex.REPL.Command
 import Language.Haskell.Djex.REPL.Driver
+import Language.Haskell.Djex.REPL.Scope
+import Language.Haskell.Djex.REPL.Workspace
+import qualified Language.Haskell.Djex.Exference.Internal.Session
+  as ExferenceSession
 import qualified Language.Haskell.Exference.Core.Types as ExferenceType
 import Paths_djex (version)
 
@@ -98,14 +105,20 @@ data ReplState = ReplState
   }
 
 data ExferenceRuntime = ExferenceRuntime
-  { exferenceRuntimePath :: FilePath
+  { exferenceRuntimeRequestedTargets :: [String]
+  , exferenceRuntimeWorkspace :: Maybe SourceWorkspace
+  , exferenceRuntimeScope :: Maybe ReplScope
   , exferenceRuntimeAllowsFix :: Bool
+  , exferenceRuntimeBaseSession :: Maybe ExferenceSession
   , exferenceRuntimeSession :: Maybe ExferenceSession
   , exferenceRuntimeDiagnostics :: [Diagnostic]
   }
 
 data LoadAttempt = LoadAttempt
-  { attemptedEnvironmentPath :: FilePath
+  { attemptedTargets :: [String]
+  , attemptedWorkspace :: Maybe SourceWorkspace
+  , attemptedScope :: Maybe ReplScope
+  , attemptedBaseSession :: Maybe ExferenceSession
   , attemptedSession :: Maybe ExferenceSession
   , attemptedDiagnostics :: [Diagnostic]
   }
@@ -125,10 +138,13 @@ runRepl options = case standardDjinnSession of
         Right historyPath -> do
           requestedPath <- maybe defaultExferenceEnvironmentPath pure
             $ replEnvironmentPath options
-          attempt <- loadExference requestedPath $ replAllowFix options
+          attempt <- loadExference [requestedPath] $ replAllowFix options
           let exference = ExferenceRuntime
-                { exferenceRuntimePath = attemptedEnvironmentPath attempt
+                { exferenceRuntimeRequestedTargets = attemptedTargets attempt
+                , exferenceRuntimeWorkspace = attemptedWorkspace attempt
+                , exferenceRuntimeScope = attemptedScope attempt
                 , exferenceRuntimeAllowsFix = replAllowFix options
+                , exferenceRuntimeBaseSession = attemptedBaseSession attempt
                 , exferenceRuntimeSession = attemptedSession attempt
                 , exferenceRuntimeDiagnostics = attemptedDiagnostics attempt
                 }
@@ -148,9 +164,9 @@ runRepl options = case standardDjinnSession of
           putStrLn "Djinn session ready (standard checked environment)."
           case attemptedSession attempt of
             Just _ -> putStrLn $ "Exference environment: "
-              ++ attemptedEnvironmentPath attempt
+              ++ renderRequestedTargets (attemptedTargets attempt)
             Nothing -> putStrLn
-              "Exference is unavailable; use :load DIR after fixing its environment."
+              "Exference is unavailable; use :load TARGET after fixing its workspace."
           putStrLn "Type :help for help."
           _ <- runReplDriver historyPath initial renderPrompt
             $ executeSource "<interactive>"
@@ -187,6 +203,8 @@ executeSource sourceName state history source = case parseReplInput source of
   Right ReplNoInput -> pure $ ContinueRepl state
   Right (ReplQuery target typeSource) ->
     runQuery sourceName target typeSource state
+  Right (ReplImport importSource) -> ContinueRepl
+    <$> addImportToScope importSource state
   Right (ReplCommand command) -> runCommand sourceName history command state
 
 runCommand
@@ -196,7 +214,12 @@ runCommand
   -> ReplState
   -> IO (ReplStep ReplState)
 runCommand sourceName history command state = case command of
-  Browse -> browseState state >> continue state
+  AddEnvironment targets -> updateExferenceWorkspace
+    (addWorkspaceTargetsFor state targets)
+    PreserveScope
+    ("Added Exference targets: " ++ renderRequestedTargets targets)
+    state >>= continue
+  Browse selectedModule -> browseState selectedModule state >> continue state
   ChangeBackend Nothing -> do
     putStrLn $ replBackendName $ activeBackends state
     continue state
@@ -211,6 +234,8 @@ runCommand sourceName history command state = case command of
       Left failure -> ioFailure "cannot change directory" path failure
         >> continue state
       Right () -> getCurrentDirectory >>= putStrLn >> continue state
+  ChangeModules change modules -> changeModuleScope change modules state
+    >>= continue
   CompareBackends typeSource ->
     runQuery sourceName (ExplicitBackends BothBackends) typeSource state
   Help Nothing -> putStr shortHelp >> continue state
@@ -221,17 +246,14 @@ runCommand sourceName history command state = case command of
     showHistory countSource history
     continue state
   InspectDeclaration nameSource -> showInfo state nameSource >> continue state
-  LoadEnvironment path -> do
-    next <- replaceExferenceEnvironment path
-      (exferenceRuntimeAllowsFix $ exferenceRuntime state) state
-    continue next
+  LoadEnvironment targets -> updateExferenceWorkspace
+    (loadWorkspace targets)
+    ResetScope
+    ("Loaded Exference environment: " ++ renderRequestedTargets targets)
+    state >>= continue
   Quit -> pure $ ExitRepl state
   ReloadEnvironment -> do
-    let runtime = exferenceRuntime state
-    next <- replaceExferenceEnvironment
-      (exferenceRuntimePath runtime)
-      (exferenceRuntimeAllowsFix runtime)
-      state
+    next <- reloadExferenceWorkspace state
     continue next
   RepeatQuery -> case lastQuery state of
     Nothing -> replFailure "DJEX_REPL_HISTORY" "no query to repeat"
@@ -242,6 +264,11 @@ runCommand sourceName history command state = case command of
   RunShell shellCommand -> runShellCommand shellCommand >> continue state
   SetOption source -> setOption source state >>= continue
   ShowState subject -> showState subject state >> continue state
+  UnaddEnvironment targets -> updateExferenceWorkspace
+    (removeWorkspaceTargetsFor state targets)
+    PreserveScope
+    ("Removed Exference targets: " ++ renderRequestedTargets targets)
+    state >>= continue
   UnsetOption source -> unsetOption source state >>= continue
   Version -> putStrLn ("djex version " ++ showVersion version) >> continue state
  where
@@ -293,19 +320,31 @@ runDjinnInteractive sourceName typeSource state = ignoreExit
       typeSource
 
 runExferenceInteractive :: FilePath -> String -> ReplState -> IO ()
-runExferenceInteractive sourceName typeSource state = case
-    exferenceRuntimeSession $ exferenceRuntime state of
-  Nothing -> replFailure "DJEX_REPL_EXFERENCE_UNAVAILABLE"
-    "Exference has no loaded environment"
-    $ "use :load DIR; last attempted path: "
-      ++ exferenceRuntimePath (exferenceRuntime state)
-  Just session -> ignoreExit $ executeExferenceCommand
-    (presentation state)
-    session
-    (exferenceSearchOptions state)
-    (resultTarget state)
-    sourceName
-    typeSource
+runExferenceInteractive sourceName typeSource state = case runtimeState of
+  (Just session, Just context) -> ignoreExit
+    $ executeExferenceCommandInScope
+        (presentation state)
+        session
+        (exferenceSearchOptions state)
+        (resultTarget state)
+        (queryScope context)
+        sourceName
+        typeSource
+  _ -> replFailure "DJEX_REPL_EXFERENCE_UNAVAILABLE"
+    "Exference has no loaded source workspace"
+    $ "use :load TARGET; last attempted targets: "
+      ++ renderRequestedTargets
+        (exferenceRuntimeRequestedTargets runtime)
+ where
+  runtime = exferenceRuntime state
+  runtimeState =
+    (exferenceRuntimeSession runtime, exferenceRuntimeScope runtime)
+  queryScope context = ExferenceQueryScope
+    { exferenceQueryCurrentModule = scopeCurrentModule context
+    , exferenceQueryVisibleNames = scopeUnqualifiedNames context
+    , exferenceQueryModuleAliases = scopeQualifierAliases context
+    , exferenceQueryQualifiedNames = scopeQualifiedNames context
+    }
 
 ignoreExit :: IO ExitCode -> IO ()
 ignoreExit action = action >> pure ()
@@ -332,68 +371,228 @@ runShellCommand command = do
   onlyUserInterrupt UserInterrupt = Just ()
   onlyUserInterrupt _ = Nothing
 
-loadExference :: FilePath -> Bool -> IO LoadAttempt
-loadExference requestedPath allowFix = do
-  resolved <- tryIOError $ canonicalizePath requestedPath
-  case resolved of
-    Left failure -> do
-      let loadFailure = ioDiagnostic
-            "cannot resolve Exference environment" requestedPath failure
-      emitDiagnostic loadFailure
-      pure LoadAttempt
-        { attemptedEnvironmentPath = requestedPath
-        , attemptedSession = Nothing
-        , attemptedDiagnostics = [loadFailure]
-        }
-    Right path -> case exferenceCommandSessionPolicy allowFix of
-      Left failure -> do
-        emitDiagnostic failure
-        pure LoadAttempt
-          { attemptedEnvironmentPath = path
-          , attemptedSession = Nothing
-          , attemptedDiagnostics = [failure]
-          }
-      Right policy -> do
-        report <- loadExferenceSessionWithPolicy policy path
-        let advisory = exferenceSessionLoadDiagnostics report
-            fatal = either toList (const [])
-              $ exferenceSessionLoadResult report
-            diagnostics = advisory ++ fatal
-        mapM_ emitDiagnostic $ filter ((/= Info) . diagnosticSeverity) advisory
-        mapM_ emitDiagnostic fatal
-        pure LoadAttempt
-          { attemptedEnvironmentPath = path
-          , attemptedSession = either (const Nothing) Just
-              $ exferenceSessionLoadResult report
-          , attemptedDiagnostics = diagnostics
-          }
+data ScopeRetention = ResetScope | PreserveScope
 
-replaceExferenceEnvironment
-  :: FilePath
-  -> Bool
+loadExference :: [String] -> Bool -> IO LoadAttempt
+loadExference targets allowFix = do
+  loaded <- loadWorkspace targets
+  case loaded of
+    Left failures -> do
+      mapM_ emitDiagnostic failures
+      pure $ failedLoadAttempt targets Nothing $ toList failures
+    Right workspace -> attemptWorkspaceLoad allowFix ResetScope Nothing workspace
+
+attemptWorkspaceLoad
+  :: Bool
+  -> ScopeRetention
+  -> Maybe ReplScope
+  -> SourceWorkspace
+  -> IO LoadAttempt
+attemptWorkspaceLoad allowFix retention previousScope workspace =
+  case exferenceCommandSessionPolicy allowFix of
+    Left failure -> do
+      emitDiagnostic failure
+      pure $ failedLoadAttempt targets (Just workspace) [failure]
+    Right policy -> do
+      report <- loadExferenceSessionFromFilesWithPolicy
+        policy
+        (workspaceModuleFiles workspace)
+        (workspaceRatingFiles workspace)
+      let advisory = exferenceSessionLoadDiagnostics report
+          fatal = either toList (const [])
+            $ exferenceSessionLoadResult report
+          diagnostics = advisory ++ fatal
+      mapM_ emitDiagnostic $ filter ((/= Info) . diagnosticSeverity) advisory
+      mapM_ emitDiagnostic fatal
+      case exferenceSessionLoadResult report of
+        Left _ -> pure $ failedLoadAttempt targets (Just workspace) diagnostics
+        Right baseSession -> case buildScope
+            (exferenceSessionInventory baseSession) of
+          Left failure -> do
+            emitDiagnostic failure
+            pure $ failedLoadAttempt targets (Just workspace)
+              $ diagnostics ++ [failure]
+          Right context -> case ExferenceSession.scopeExferenceSession
+              (Set.fromList $ scopeSearchNames context) baseSession of
+            Left failure -> do
+              emitDiagnostic failure
+              pure $ failedLoadAttempt targets (Just workspace)
+                $ diagnostics ++ [failure]
+            Right scopedSession -> pure LoadAttempt
+              { attemptedTargets = targets
+              , attemptedWorkspace = Just workspace
+              , attemptedScope = Just context
+              , attemptedBaseSession = Just baseSession
+              , attemptedSession = Just scopedSession
+              , attemptedDiagnostics = diagnostics
+              }
+ where
+  targets = map workspaceTargetDisplay $ workspaceTargets workspace
+  buildScope inventory = case (retention, previousScope) of
+    (PreserveScope, Just context) ->
+      revalidateScope inventory workspace context
+    _ -> scopeFromWorkspace inventory workspace
+
+failedLoadAttempt
+  :: [String]
+  -> Maybe SourceWorkspace
+  -> [Diagnostic]
+  -> LoadAttempt
+failedLoadAttempt targets workspace diagnostics = LoadAttempt
+  { attemptedTargets = targets
+  , attemptedWorkspace = workspace
+  , attemptedScope = Nothing
+  , attemptedBaseSession = Nothing
+  , attemptedSession = Nothing
+  , attemptedDiagnostics = diagnostics
+  }
+
+updateExferenceWorkspace
+  :: IO (Either (NonEmpty Diagnostic) SourceWorkspace)
+  -> ScopeRetention
+  -> String
   -> ReplState
   -> IO ReplState
-replaceExferenceEnvironment path allowFix state = do
-  attempt <- loadExference path allowFix
-  case attemptedSession attempt of
-    Nothing -> do
-      putStrLn
-        "Exference load failed; retaining the previous session and settings."
-      pure state
-        { exferenceRuntime = (exferenceRuntime state)
-            { exferenceRuntimeDiagnostics = attemptedDiagnostics attempt }
-        }
-    Just session -> do
-      putStrLn $ "Loaded Exference environment: "
-        ++ attemptedEnvironmentPath attempt
-      pure state
-        { exferenceRuntime = ExferenceRuntime
-            { exferenceRuntimePath = attemptedEnvironmentPath attempt
-            , exferenceRuntimeAllowsFix = allowFix
-            , exferenceRuntimeSession = Just session
-            , exferenceRuntimeDiagnostics = attemptedDiagnostics attempt
+updateExferenceWorkspace action retention successMessage state =
+  updateExferenceWorkspaceWithPolicy
+    (exferenceRuntimeAllowsFix $ exferenceRuntime state)
+    action retention successMessage state
+
+updateExferenceWorkspaceWithPolicy
+  :: Bool
+  -> IO (Either (NonEmpty Diagnostic) SourceWorkspace)
+  -> ScopeRetention
+  -> String
+  -> ReplState
+  -> IO ReplState
+updateExferenceWorkspaceWithPolicy allowFix action retention successMessage
+    state = do
+  workspaceResult <- action
+  case workspaceResult of
+    Left failures -> do
+      mapM_ emitDiagnostic failures
+      retainAfterFailure $ toList failures
+    Right workspace -> do
+      attempt <- attemptWorkspaceLoad allowFix retention
+        (exferenceRuntimeScope $ exferenceRuntime state) workspace
+      case attemptedSession attempt of
+        Nothing -> retainAfterFailure $ attemptedDiagnostics attempt
+        Just session -> do
+          putStrLn successMessage
+          pure state
+            { exferenceRuntime = ExferenceRuntime
+                { exferenceRuntimeRequestedTargets = attemptedTargets attempt
+                , exferenceRuntimeWorkspace = attemptedWorkspace attempt
+                , exferenceRuntimeScope = attemptedScope attempt
+                , exferenceRuntimeAllowsFix = allowFix
+                , exferenceRuntimeBaseSession = attemptedBaseSession attempt
+                , exferenceRuntimeSession = Just session
+                , exferenceRuntimeDiagnostics = attemptedDiagnostics attempt
+                }
             }
-        }
+ where
+  retainAfterFailure diagnostics = do
+    putStrLn
+      "Exference load failed; retaining the previous session and settings."
+    pure state
+      { exferenceRuntime = (exferenceRuntime state)
+          { exferenceRuntimeDiagnostics = diagnostics }
+      }
+
+addWorkspaceTargetsFor
+  :: ReplState
+  -> [String]
+  -> IO (Either (NonEmpty Diagnostic) SourceWorkspace)
+addWorkspaceTargetsFor state targets = case
+    exferenceRuntimeWorkspace $ exferenceRuntime state of
+  Nothing -> loadWorkspace targets
+  Just workspace -> addWorkspaceTargets workspace targets
+
+removeWorkspaceTargetsFor
+  :: ReplState
+  -> [String]
+  -> IO (Either (NonEmpty Diagnostic) SourceWorkspace)
+removeWorkspaceTargetsFor state targets = case
+    exferenceRuntimeWorkspace $ exferenceRuntime state of
+  Just workspace -> removeWorkspaceTargets workspace targets
+  Nothing -> do
+    empty <- loadWorkspace []
+    case empty of
+      Left failures -> pure $ Left failures
+      Right workspace -> removeWorkspaceTargets workspace targets
+
+reloadExferenceWorkspace :: ReplState -> IO ReplState
+reloadExferenceWorkspace state = reloadExferenceWorkspaceWithPolicy
+  (exferenceRuntimeAllowsFix $ exferenceRuntime state) state
+
+reloadExferenceWorkspaceWithPolicy :: Bool -> ReplState -> IO ReplState
+reloadExferenceWorkspaceWithPolicy allowFix state =
+  updateExferenceWorkspaceWithPolicy allowFix
+    action PreserveScope
+      ("Loaded Exference environment: " ++ renderRequestedTargets
+        (exferenceRuntimeRequestedTargets runtime))
+      state
+ where
+  runtime = exferenceRuntime state
+  action = case exferenceRuntimeWorkspace runtime of
+    Just workspace -> reloadWorkspace workspace
+    Nothing -> loadWorkspace $ exferenceRuntimeRequestedTargets runtime
+
+renderRequestedTargets :: [String] -> String
+renderRequestedTargets [] = "(no targets)"
+renderRequestedTargets targets = unwords $ map show targets
+
+addImportToScope :: String -> ReplState -> IO ReplState
+addImportToScope source = modifyExferenceScope $ \inventory workspace context ->
+  addScopeImport inventory workspace source context
+
+changeModuleScope
+  :: ModuleChange
+  -> [String]
+  -> ReplState
+  -> IO ReplState
+changeModuleScope change modules = modifyExferenceScope
+  $ \inventory workspace context ->
+      changeScopeModules inventory workspace change modules context
+
+-- Scope edits never reparse source and never mutate the retained base
+-- session. Reprojection starts from that policy-filtered base, so a later
+-- import can restore a binding hidden by an earlier context change.
+modifyExferenceScope
+  :: (ExferenceInventory
+      -> SourceWorkspace
+      -> ReplScope
+      -> Either Diagnostic ReplScope)
+  -> ReplState
+  -> IO ReplState
+modifyExferenceScope change state = case
+    ( exferenceRuntimeWorkspace runtime
+    , exferenceRuntimeBaseSession runtime
+    ) of
+  (Just workspace, Just baseSession) -> case initialScope workspace baseSession of
+    Left failure -> reject failure
+    Right context -> case change
+        (exferenceSessionInventory baseSession) workspace context of
+      Left failure -> reject failure
+      Right next -> case ExferenceSession.scopeExferenceSession
+          (Set.fromList $ scopeSearchNames next) baseSession of
+        Left failure -> reject failure
+        Right session -> pure state
+          { exferenceRuntime = runtime
+              { exferenceRuntimeScope = Just next
+              , exferenceRuntimeSession = Just session
+              }
+          }
+  _ -> replFailure "DJEX_REPL_MODULE" "no source workspace is loaded"
+      "use :load TARGET before changing imports or modules"
+    >> pure state
+ where
+  runtime = exferenceRuntime state
+  initialScope workspace baseSession = case exferenceRuntimeScope runtime of
+    Just context -> Right context
+    Nothing -> scopeFromWorkspace
+      (exferenceSessionInventory baseSession) workspace
+  reject failure = emitDiagnostic failure >> pure state
 
 setOption :: String -> ReplState -> IO ReplState
 setOption source state
@@ -489,8 +688,7 @@ applySetting setting value state = case setting of
     Right allowFix
       | allowFix == exferenceRuntimeAllowsFix (exferenceRuntime state) ->
           pure state
-      | otherwise -> replaceExferenceEnvironment
-          (exferenceRuntimePath $ exferenceRuntime state) allowFix state
+      | otherwise -> reloadExferenceWorkspaceWithPolicy allowFix state
  where
   reject failure = settingFailure failure >> pure state
   withValue requiredSetting action = case value of
@@ -569,8 +767,7 @@ unsetOption source state = case words $ map toLower $ trim source of
       {exferenceMaximumDepth = exferenceMaximumDepth defaults}
     FixSetting
       | exferenceRuntimeAllowsFix (exferenceRuntime state) ->
-          replaceExferenceEnvironment
-            (exferenceRuntimePath $ exferenceRuntime state) False state
+          reloadExferenceWorkspaceWithPolicy False state
       | otherwise -> pure state
 
   resetExference update = pure state
@@ -622,6 +819,9 @@ showState (Just rawSubject) = case words $ map toLower $ trim rawSubject of
   ["settings"] -> showSettings
   ["backends"] -> showBackends
   ["environment"] -> showEnvironmentSummary
+  ["imports"] -> showImports
+  ["modules"] -> showModules
+  ["targets"] -> showTargets
   ["omissions"] -> showOmissions
   ["diagnostics"] -> showLoadDiagnostics
   ["directory"] -> const $ getCurrentDirectory >>= putStrLn
@@ -631,7 +831,8 @@ showState (Just rawSubject) = case words $ map toLower $ trim rawSubject of
 showSettings :: ReplState -> IO ()
 showSettings state = putStr $ unlines
   $ map render [minBound .. maxBound]
-  ++ ["environment = " ++ exferenceRuntimePath (exferenceRuntime state)]
+  ++ ["targets = " ++ renderRequestedTargets
+        (exferenceRuntimeRequestedTargets $ exferenceRuntime state)]
  where
   render setting = replSettingName setting ++ " = "
     ++ renderSettingValue state setting
@@ -692,12 +893,36 @@ showEnvironmentSummary state = do
     ++ " declarations (standard checked environment)"
   let runtime = exferenceRuntime state
   putStrLn $ "Exference: " ++ case exferenceRuntimeSession runtime of
-    Nothing -> "unavailable (last attempted " ++ exferenceRuntimePath runtime
+    Nothing -> "unavailable (last attempted "
+      ++ renderRequestedTargets (exferenceRuntimeRequestedTargets runtime)
       ++ ")"
     Just session -> declarationCount (exferenceSessionEnvironment session)
-      ++ " declarations from " ++ exferenceRuntimePath runtime
+      ++ " declarations from "
+      ++ renderRequestedTargets (exferenceRuntimeRequestedTargets runtime)
  where
   declarationCount = show . length . environmentDeclarations
+
+showImports :: ReplState -> IO ()
+showImports state = case exferenceRuntimeScope $ exferenceRuntime state of
+  Nothing -> putStrLn "No Exference module context."
+  Just context -> case renderScopeImports context of
+    [] -> putStrLn "(no imports)"
+    imports -> mapM_ putStrLn imports
+
+showModules :: ReplState -> IO ()
+showModules state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
+  Nothing -> putStrLn "No Exference modules are loaded."
+  Just workspace -> case workspaceModules workspace of
+    [] -> putStrLn "(no modules loaded)"
+    modules -> forM_ modules $ \modul -> putStrLn
+      $ workspaceModuleName modul ++ " (" ++ workspaceModulePath modul ++ ")"
+
+showTargets :: ReplState -> IO ()
+showTargets state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
+  Nothing -> putStrLn "No Exference targets are loaded."
+  Just workspace -> case workspaceTargets workspace of
+    [] -> putStrLn "(no targets)"
+    targets -> mapM_ (putStrLn . workspaceTargetDisplay) targets
 
 showOmissions :: ReplState -> IO ()
 showOmissions state = case exferenceRuntimeSession $ exferenceRuntime state of
@@ -717,41 +942,121 @@ showLoadDiagnostics state = case
   [] -> putStrLn "No Exference load diagnostics."
   diagnostics -> mapM_ (putStrLn . renderDiagnostic) diagnostics
 
-browseState :: ReplState -> IO ()
-browseState state = forSelectedBackends state $ \selectedBackend ->
+browseState :: Maybe String -> ReplState -> IO ()
+browseState (Just reference) state = browseWorkspaceModule reference state
+browseState Nothing state = forSelectedBackends state $ \selectedBackend ->
   case selectedBackend of
     DjinnBackend -> browse "Djinn" id
       $ djinnSessionEnvironment $ djinnRuntimeSession state
-    ExferenceBackend -> case exferenceRuntimeSession
-        $ exferenceRuntime state of
-      Nothing -> putStrLn "Exference is unavailable."
-      Just session -> do
-        browse "Exference loaded declarations"
+    ExferenceBackend -> case
+        ( exferenceRuntimeBaseSession runtime
+        , exferenceRuntimeScope runtime
+        ) of
+      (Just session, Just context) -> do
+        browseNames "Exference current scope"
           ExferenceType.defaultVariableName
+          (scopeBrowseNames context)
           $ exferenceSessionEnvironment session
         when (not $ null $ exferenceSessionOmissions session) $ putStrLn
           "-- Some loaded capabilities are not searchable; use :show omissions."
+      _ -> putStrLn "Exference is unavailable."
+ where
+  runtime = exferenceRuntime state
+  scopeBrowseNames context = scopeUnqualifiedNames context ++
+    [ name
+    | name <- scopeSearchNames context
+        ++ concatMap snd (scopeQualifiedNames context)
+    , name `notElem` scopeUnqualifiedNames context
+    ]
+
+browseWorkspaceModule :: String -> ReplState -> IO ()
+browseWorkspaceModule reference state = case
+    ( exferenceRuntimeWorkspace runtime
+    , exferenceRuntimeBaseSession runtime
+    ) of
+  (Just workspace, Just session) -> case splitModuleStar reference of
+    (starred, moduleSource) -> case moduleNamesForBrowse
+        (exferenceSessionInventory session) workspace starred moduleSource of
+      Left failure -> emitDiagnostic failure
+      Right names -> browseNames
+        ("Exference module " ++ (if starred then "*" else "") ++ moduleSource)
+        ExferenceType.defaultVariableName names
+        $ exferenceSessionEnvironment session
+  _ -> replFailure "DJEX_REPL_MODULE" "no source workspace is loaded"
+    "use :load TARGET before browsing a module"
+ where
+  runtime = exferenceRuntime state
+
+splitModuleStar :: String -> (Bool, String)
+splitModuleStar ('*' : source) = (True, source)
+splitModuleStar source = (False, source)
 
 showInfo :: ReplState -> String -> IO ()
 showInfo state source = case parseName $ trim source of
   Left failure -> settingFailure (renderNameError failure)
-  Right name -> forSelectedBackends state $ \selectedBackend ->
+  Right parsedName -> forSelectedBackends state $ \selectedBackend ->
     case selectedBackend of
-      DjinnBackend -> info "Djinn" id name
+      DjinnBackend -> info "Djinn" id parsedName
         $ djinnSessionEnvironment $ djinnRuntimeSession state
-      ExferenceBackend -> case exferenceRuntimeSession
-          $ exferenceRuntime state of
-        Nothing -> putStrLn "Exference is unavailable."
-        Just session -> do
-          let environment = exferenceSessionEnvironment session
-              matchingNames = name : map declarationSubjectName
-                (matchingDeclarations name environment)
-          info "Exference loaded declarations"
-            ExferenceType.defaultVariableName name
-            environment
-          mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
-            $ filter ((`elem` matchingNames) . omittedName)
-            $ exferenceSessionOmissions session
+      ExferenceBackend -> case
+          ( exferenceRuntimeSession runtime
+          , exferenceRuntimeScope runtime
+          ) of
+        (Just session, Just context) -> case
+            resolveScopeName context parsedName of
+          Left failure -> settingFailure failure
+          Right name -> do
+            let environment = exferenceSessionEnvironment session
+                matchingNames = name : map declarationSubjectName
+                  (matchingDeclarations name environment)
+            info "Exference loaded declarations"
+              ExferenceType.defaultVariableName name
+              environment
+            mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
+              $ filter ((`elem` matchingNames) . omittedName)
+              $ exferenceSessionOmissions session
+        _ -> putStrLn "Exference is unavailable."
+ where
+  runtime = exferenceRuntime state
+
+resolveScopeName :: ReplScope -> Name -> Either String Name
+resolveScopeName context source = case nameModule source of
+  Nothing -> case nameSpecial source of
+    Just _ -> Right source
+    Nothing -> chooseUnqualified
+  Just qualifier -> case
+      [ canonical
+      | (alias, canonical) <- scopeQualifierAliases context
+      , alias == qualifier
+      ] of
+    [] -> Right source
+    [_] -> chooseAlias qualifier
+    modules -> Left $ "ambiguous module qualifier "
+      ++ renderModuleName qualifier ++ "; matches "
+      ++ intercalate ", " (map renderModuleName modules)
+ where
+  sameOccurrence candidate = nameOccurrence candidate == nameOccurrence source
+  unqualified = filter sameOccurrence $ scopeUnqualifiedNames context
+  local = case scopeCurrentModule context of
+    Nothing -> []
+    Just current -> filter ((== Just current) . nameModule) unqualified
+  chooseUnqualified = case if null local then unqualified else local of
+    [name] -> Right name
+    [] -> Left $ "name " ++ renderCanonical source ++ " is not in scope"
+    names -> Left $ "ambiguous unqualified name " ++ renderCanonical source
+      ++ "; matches " ++ intercalate ", " (map renderCanonical names)
+  chooseAlias qualifier = case
+      [ name
+      | (written, admitted) <- scopeQualifiedNames context
+      , written == qualifier
+      , name <- admitted
+      , sameOccurrence name
+      ] of
+    [name] -> Right name
+    [] -> Left $ "qualified name " ++ renderCanonical source
+      ++ " is not in scope"
+    names -> Left $ "ambiguous qualified name " ++ renderCanonical source
+      ++ "; matches " ++ intercalate ", " (map renderCanonical names)
 
 forSelectedBackends :: ReplState -> (Backend -> IO ()) -> IO ()
 forSelectedBackends state action = case activeBackends state of
@@ -769,6 +1074,32 @@ browse label variableName environment = do
     [] -> putStrLn "(no declarations)"
     declarations -> mapM_ (putStrLn . renderDeclaration variableName)
       declarations
+
+browseNames
+  :: String
+  -> (variable -> String)
+  -> [Name]
+  -> Environment variable Void ()
+  -> IO ()
+browseNames label variableName names environment = do
+  putStrLn $ "-- " ++ label
+  case filter definesVisible $ environmentDeclarations environment of
+    [] -> putStrLn "(no declarations)"
+    declarations -> mapM_ (putStrLn . renderVisibleDeclaration)
+      declarations
+ where
+  visible = Set.fromList names
+  definesVisible declaration = any (`declarationDefines` declaration)
+    $ Set.toList visible
+  renderVisibleDeclaration declaration = renderDeclaration variableName
+    $ case declaration of
+      DataTypeDeclaration annotation name parameters constructors ->
+        DataTypeDeclaration annotation name parameters
+          $ filter ((`Set.member` visible) . constructorName) constructors
+      ClassDeclaration annotation name parameters superclasses methods ->
+        ClassDeclaration annotation name parameters superclasses
+          $ filter ((`Set.member` visible) . valueName) methods
+      _ -> declaration
 
 info
   :: String

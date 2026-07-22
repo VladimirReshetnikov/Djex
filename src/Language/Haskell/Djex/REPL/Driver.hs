@@ -115,7 +115,8 @@ candidatesFor previous = case previous of
 
 completingPath :: String -> Bool
 completingPath source = case words source of
-  command : _ -> command `elem` [":load", ":l", ":script", ":cd"]
+  command : _ -> command `elem`
+    [":load", ":l", ":add", ":unadd", ":script", ":cd"]
   [] -> False
 
 trim :: String -> String

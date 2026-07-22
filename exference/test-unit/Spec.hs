@@ -161,12 +161,14 @@ import Language.Haskell.Djex.Exference
   , mkExferenceSessionWithPolicy
   )
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( ExferenceSessionLoadReport (..)
+  ( ExferenceQueryScope (..)
+  , ExferenceSessionLoadReport (..)
   , loadExferenceSession
   , loadExferenceSessionFromFiles
   , loadExferenceSessionFromFilesWithPolicy
   , loadExferenceSessionWithPolicy
   , parseExferenceRequest
+  , parseExferenceRequestInScope
   )
 import qualified Language.Haskell.Exference.Session as ExferenceSession
 import Language.Haskell.Exference.ClassEnvFromHaskellSrc
@@ -5547,6 +5549,87 @@ tests = testGroup "Exference"
                 Right requestWithBadArity -> fail
                   $ "inventory class arity was ignored: "
                   ++ show requestWithBadArity
+      , testCase "scoped queries enforce interactive module visibility" $
+          withTemporaryFile (unlines
+            [ "module ScopedFirst where"
+            , "data Item = FirstItem"
+            ]) $ \firstPath ->
+          withTemporaryFile (unlines
+            [ "module ScopedSecond where"
+            , "data Item = SecondItem"
+            ]) $ \secondPath -> do
+              ExferenceSessionLoadReport loaded _ <-
+                loadExferenceSessionFromFiles [firstPath, secondPath] []
+              session <- expectRight loaded
+              target <- expectRight $ SharedName.mkIdentifier "answer"
+              firstName <- expectRight
+                $ SharedName.parseName "ScopedFirst.Item"
+              secondName <- expectRight
+                $ SharedName.parseName "ScopedSecond.Item"
+              firstModule <- expectRight
+                $ SharedName.mkModuleName "ScopedFirst"
+              aliasModule <- expectRight
+                $ SharedName.mkModuleName "Alias"
+              let scope current visible aliases = ExferenceQueryScope
+                    { exferenceQueryCurrentModule = current
+                    , exferenceQueryVisibleNames = visible
+                    , exferenceQueryModuleAliases = aliases
+                    }
+                  parseScoped selectedScope source =
+                    parseExferenceRequestInScope
+                      session
+                      defaultExferenceOptions
+                      target
+                      selectedScope
+                      "scoped-query"
+                      source
+                  assertGoal label expected selectedScope source = case
+                      parseScoped selectedScope source of
+                    Left failure -> fail $ label ++ " failed: " ++ show failure
+                    Right request -> case
+                        SharedQuery.requestGoal
+                          $ exferenceRequestQuery request of
+                      SharedType.TypeConstructor actual ->
+                        assertEqual label expected actual
+                      actual -> fail $ label ++ " produced " ++ show actual
+                  assertRejected label expectedDetail selectedScope source =
+                    case parseScoped selectedScope source of
+                      Left failure -> do
+                        diagnosticCode failure @?= Just "DJEX_EXF_PARSE"
+                        assertBool (label ++ ": " ++ show failure)
+                          $ expectedDetail `isInfixOf` diagnosticMessage failure
+                      Right request -> fail
+                        $ label ++ " accepted " ++ show request
+              assertGoal
+                "the exact visible unqualified name"
+                firstName
+                (scope Nothing [firstName] [])
+                "Item"
+              assertGoal
+                "a hidden name's canonical qualifier"
+                secondName
+                (scope Nothing [firstName] [])
+                "ScopedSecond.Item"
+              assertGoal
+                "an interactive module alias"
+                firstName
+                (scope Nothing [] [(aliasModule, firstModule)])
+                "Alias.Item"
+              assertGoal
+                "the current module's local declaration"
+                firstName
+                (scope (Just firstModule) [secondName, firstName] [])
+                "Item"
+              assertRejected
+                "a loaded but hidden unqualified name"
+                "is not in scope"
+                (scope Nothing [] [])
+                "Item"
+              assertRejected
+                "two visible unqualified declarations"
+                "ambiguous unqualified name"
+                (scope Nothing [firstName, secondName] [])
+                "Item"
       , testCase "checked inventory retains aliases while projection expands" $
           withTemporaryFile (unlines
             [ "module AliasBoundary where"

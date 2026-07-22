@@ -2,13 +2,16 @@ module Main (main) where
 
 import Language.Haskell.Djex.Exference (defaultExferenceOptions)
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( defaultExferenceEnvironmentPath
+  ( ExferenceQueryScope (..)
+  , defaultExferenceEnvironmentPath
   , loadDefaultExferenceSession
   , loadDefaultExferenceSessionWithPolicy
   , loadExferenceSession
   , loadExferenceSessionFromFiles
   , loadExferenceSessionFromFilesWithPolicy
   , loadExferenceSessionWithPolicy
+  , parseExferenceRequestInScope
+  , parseExferenceRequestWithCheckedTargetInScope
   )
 import qualified Language.Haskell.Exference.CLI as CLI
 import Language.Haskell.Exference.Core (findExpressionsEither)
@@ -28,6 +31,9 @@ main = defaultMain $ testGroup "Exference frontend import surface"
       loadExferenceSessionFromFiles `seq`
       loadExferenceSessionFromFilesWithPolicy `seq`
       loadExferenceSessionWithPolicy `seq`
+      ExferenceQueryScope Nothing [] [] `seq`
+      parseExferenceRequestInScope `seq`
+      parseExferenceRequestWithCheckedTargetInScope `seq`
       pure ()
   , testCase "retains the checked-source compatibility session bridge" $
       Session.mkExferenceSession `seq`

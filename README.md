@@ -146,9 +146,18 @@ query. Both-mode labels each engine's independent output and still runs the
 other engine if one rejects the type or fails. This resembles GHCi's colon
 commands, history, completion, and `:{`/`:}` input, but it is not a GHCi
 evaluator: bare input is a requested result type, not a Haskell expression,
-and each backend retains its own type grammar and semantics. See the
-[shared REPL guide](docs/repl.md) for all commands, settings, defaults, and
-failure behavior.
+and each backend retains its own type grammar and semantics.
+
+The Exference half has a GHCi-shaped source workspace. `:load`, `:add`,
+`:unadd`, and `:reload` manage module/file targets and their local source
+dependencies; bare Haskell imports and `:module` manage the prompt scope;
+`:show targets`, `:show modules`, and `:show imports` expose the three distinct
+states. Loading and scope changes are transactional. This is source loading,
+not GHC compilation: Djex does not read the GHC package database or `.hi`
+files, and it consumes declarations and signatures without compiling or
+inferring function bodies. Djinn always retains its independent standard
+session. See the [shared REPL guide](docs/repl.md) for the target grammar,
+export visibility, commands, settings, defaults, and failure behavior.
 
 For stateless invocation, select the backend explicitly:
 
@@ -416,13 +425,20 @@ phases; angle-bracket virtual-buffer names remain verbatim.
 The loader is fail-closed at its vocabulary boundary: after parsing, but
 before constructing any partial inventory, it reports source-ordered
 `UnsupportedVocabularyOccurrence` values for type/data families, GADTs,
-explicit module export lists, datatype contexts, explicitly kinded parameters,
-existential or constrained constructors, derived or overlapping instances,
-functional dependencies, associated families and defaults, pattern-synonym
-signatures, declaration splices, role annotations, and XML page or hybrid
-modules, each with the stable `EXF_UNSUPPORTED_VOCABULARY` diagnostic code and
-its exact source span. The exported `UnsupportedVocabularyForm` constructors
-are the authoritative exhaustive vocabulary for this rejection phase.
+datatype contexts, explicitly kinded parameters, existential or constrained
+constructors, derived or overlapping instances, functional dependencies,
+associated families and defaults, pattern-synonym signatures, declaration
+splices, role annotations, and XML page or hybrid modules, each with the stable
+`EXF_UNSUPPORTED_VOCABULARY` diagnostic code and its exact source span. The
+exported `UnsupportedVocabularyForm` constructors are the authoritative
+compatibility vocabulary for this rejection phase; `ExplicitExportList`
+remains for source compatibility but is no longer emitted.
+
+Explicit module export lists are accepted. Source loading retains every local
+declaration in the authoritative inventory; a module-aware frontend separately
+projects that inventory through the export list for plain imports and keeps
+the full inventory for `*MODULE` scope and canonical qualified lookup. This
+inventory-versus-scope split avoids reparsing or losing private declarations.
 Ordinary positional, infix, record, strict, and unpacked datatype fields are
 lowered explicitly; record selectors become rated value bindings exactly
 once. Imports, fixities, ordinary value and method bodies, ordinary term

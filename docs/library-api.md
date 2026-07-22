@@ -229,6 +229,27 @@ Djex's installed environment; `defaultExferenceEnvironmentPath` exposes that
 resolved path when an application needs to display or inspect it. The
 policy-aware default loader is `loadDefaultExferenceSessionWithPolicy`.
 
+Module-aware callers that already own discovery and dependency ordering can
+use the explicit-file boundary:
+
+```haskell
+loadExferenceSessionFromFiles
+  :: [FilePath] -- Haskell modules, in caller order
+  -> [FilePath] -- rating files, in caller order
+  -> IO ExferenceSessionLoadReport
+
+loadExferenceSessionFromFilesWithPolicy
+  :: ExferenceSessionPolicy
+  -> [FilePath]
+  -> [FilePath]
+  -> IO ExferenceSessionLoadReport
+```
+
+These functions run the same read, parse, inventory, rating, and sealing
+pipeline as directory loading. They do not discover imports: the caller owns
+the complete ordered source closure. An empty module list is valid and retains
+Exference's built-in syntax-level constructor inventory.
+
 Always inspect both report fields:
 
 - `exferenceSessionLoadResult` contains either fatal diagnostics or the sealed
@@ -243,12 +264,20 @@ failure uses its `DJEX_EXF_*` code and may be source-free because no single
 token owns that whole-environment invariant.
 
 The loader rejects unsupported source meaning before building a partial
-inventory. The authoritative `UnsupportedVocabularyForm` list includes
-explicit module export lists, pattern-synonym signatures, and XML page/hybrid
-modules as well as the documented type-family, GADT, deriving, class, and
-instance limitations. Ordinary term patterns and pattern-value bodies remain
-accepted; do not interpret the pattern-synonym-signature restriction as a ban
-on ordinary pattern matching.
+inventory. The authoritative emitted `UnsupportedVocabularyForm` set includes
+pattern-synonym signatures and XML page/hybrid modules as well as the
+documented type-family, GADT, deriving, class, and instance limitations.
+Ordinary term patterns and pattern-value bodies remain accepted; do not
+interpret the pattern-synonym-signature restriction as a ban on ordinary
+pattern matching. `ExplicitExportList` is retained as a source-compatible
+constructor but is no longer emitted.
+
+Explicit module export lists are accepted. Loading deliberately retains both
+exported and private declarations in the checked inventory. A module-aware
+caller applies an export list when constructing its interactive visibility
+scope, while retaining the full inventory for `*MODULE` access and canonical
+qualified lookup. Directory and explicit-file loaders themselves build an
+inventory, not a prompt scope.
 
 With `loadExferenceSessionWithPolicy`, unknown exclusions are harmless no-ops.
 This lets a reusable policy exclude an optional binding absent from a particular
@@ -261,6 +290,30 @@ With a session, use
 `parseExferenceRequest session options target sourceName sourceText` so type
 names, class arities, synonyms, source spellings, and later diagnostic spans all
 come from the same checked inventory.
+
+An interactive source frontend should instead construct an
+`ExferenceQueryScope` and call `parseExferenceRequestInScope` (or the
+checked-target counterpart). Its fields have intentionally narrow meanings:
+
+- `exferenceQueryVisibleNames` is the exact set admitted for unqualified
+  lookup;
+- `exferenceQueryCurrentModule` gives one full-top-level module's local names
+  precedence;
+- `exferenceQueryModuleAliases` maps prompt qualifiers introduced by imports
+  to canonical loaded modules; and
+- `exferenceQueryQualifiedNames` optionally restricts each written qualifier
+  to an exact canonical-name set, allowing aliases to enforce explicit import
+  lists and `hiding`.
+
+Canonical qualification still resolves names from the complete sealed
+inventory when no written-qualifier restriction applies. An empty outer
+`exferenceQueryQualifiedNames` list preserves the original permissive scoped
+API behavior; a present qualifier paired with an empty name list admits
+nothing through that spelling. Scope is therefore a visibility projection
+over one checked inventory, not a second independently loaded environment. The
+shared REPL also narrows Exference's searchable binding projection to the same
+visible names while keeping the complete inventory for qualified type
+elaboration.
 
 The `djex` and `exference` executables use the same default-path operation.
 Cabal's generated `Paths_djex` module remains private; applications do not need

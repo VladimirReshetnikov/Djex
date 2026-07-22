@@ -252,11 +252,23 @@ Exference session constructor. Its diagnostics retain phase ownership:
   `ExferenceSessionLoadReport`.
 
 The vocabulary scan is fail-closed. In addition to unsupported type/class
-features, it rejects explicit module export lists, pattern-synonym signatures,
-and XML page or hybrid modules rather than silently projecting only part of
-them. `UnsupportedVocabularyForm` is the authoritative list. Ordinary term
-patterns and pattern-value bodies are accepted, as are ordinary value/method
-bodies and other syntax that does not alter the nominal inventory.
+features, it rejects pattern-synonym signatures and XML page or hybrid modules
+rather than silently projecting only part of them. `UnsupportedVocabularyForm`
+is the authoritative compatibility vocabulary; its `ExplicitExportList`
+constructor remains available to source clients but is no longer emitted.
+Ordinary term patterns and pattern-value bodies are accepted, as are ordinary
+value/method bodies and other syntax that does not alter the nominal
+inventory.
+
+Explicit module export lists are now an accepted visibility boundary. Source
+loading keeps every module-local declaration in the authoritative inventory,
+because private declarations may later be requested through a `*MODULE`
+context and because qualified parsing must use the same checked kind and
+synonym authority. A module-aware caller separately computes the exported or
+full-top-level name set and projects Exference's prompt scope and searchable
+binding dictionary from it. The projection retains the complete sealed
+inventory, so changing imports never splices together independently prepared
+environments or requires source reparsing.
 
 Successful extraction erases HSE annotations, so ordering metadata is captured
 before that boundary. Ordinary signatures, datatype batches, and nested class
@@ -271,6 +283,42 @@ a capability. A rating override promises to affect search, so non-finite
 ratings and names unavailable after exclusions and capability filtering are
 fatal policy errors. Neither operation mutates or reorders the authoritative
 annotation-erased inventory.
+
+## Shared REPL source workspace
+
+The shared REPL adds an immutable workspace owner in front of the Exference
+source boundary. It keeps three values separate:
+
+| State | Owner and invariant |
+| --- | --- |
+| Explicit targets | Canonical module/file/directory admissions in user order; changed by `:load`, `:add`, and `:unadd`. |
+| Loaded modules | Parsed local dependency closure in deterministic dependency-first order; rebuilt by every target operation and `:reload`. |
+| Prompt context | Ordered imports and plain/starred source-scope entries projected over loaded modules; changed by bare `import` and `:module`. |
+
+Module-name targets are resolved through hierarchical `.hs`/`.lhs` paths.
+File targets may declare an unrelated module name. A directory target is the
+legacy environment compatibility form: it recursively contributes source and
+`.ratings` files while remaining one explicit target. Resolvable local imports
+are discovered transitively. The workspace does not consult a GHC package
+database or load interface/object code.
+
+Every filesystem target is canonicalized at admission, so a later `:cd` cannot
+retarget `:reload`. The workspace parses the whole candidate graph, rejects
+duplicate modules, dependency files whose declaration disagrees with the
+imported name, and non-`SOURCE` cycles, orders the closure, loads and seals one
+Exference session, computes export-aware scope, and publishes the replacement
+only after every phase succeeds. Import and `:module` changes use the same
+publication discipline for the scoped session.
+
+The REPL then parses Exference types with `ExferenceQueryScope`: exact visible
+names govern unqualified lookup, one full-top-level current module gets local
+precedence, aliases map prompt qualifiers to canonical modules, and canonical
+qualified lookup still consults the complete sealed inventory. The searchable
+Exference environment is narrowed to the visible binding projection. Djinn is
+outside this flow and retains its independently prepared standard session.
+The scope projection is intentionally name-based: the shared structural
+`Name` has no Haskell namespace tag, so same-spelled type/value entities cannot
+be filtered independently at this boundary.
 
 ## API and stability tiers
 

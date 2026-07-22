@@ -31,6 +31,12 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , exferenceCommandSessionPolicy
   , loadExferenceSessionWithPolicy
   )
+import Language.Haskell.Djex.Package
+  ( PackageOperation (..)
+  , packageOperationName
+  , runPackageOperation
+  , validatePackageTargets
+  )
 import Language.Haskell.Djex.REPL
 import Language.Haskell.Djex.REPL.Command
   ( parseReplBackend
@@ -100,6 +106,14 @@ runArguments arguments = case arguments of
     putStrLn (backendUsage ExferenceBackend) >> pure ExitSuccess
   ["exference", "-h"] ->
     putStrLn (backendUsage ExferenceBackend) >> pure ExitSuccess
+  ["download", "--help"] ->
+    putStrLn (packageUsage DownloadOperation) >> pure ExitSuccess
+  ["download", "-h"] ->
+    putStrLn (packageUsage DownloadOperation) >> pure ExitSuccess
+  ["install", "--help"] ->
+    putStrLn (packageUsage InstallOperation) >> pure ExitSuccess
+  ["install", "-h"] ->
+    putStrLn (packageUsage InstallOperation) >> pure ExitSuccess
   ["repl", "--help"] -> putStrLn replUsage >> pure ExitSuccess
   ["repl", "-h"] -> putStrLn replUsage >> pure ExitSuccess
   [] -> runRepl defaultReplOptions
@@ -109,11 +123,25 @@ runArguments arguments = case arguments of
     runParsed (parseDjinnOptions backendArguments) runDjinn
   "exference" : backendArguments ->
     runParsed (parseExferenceOptions backendArguments) runExference
+  "download" : packageArguments ->
+    runPackageArguments DownloadOperation packageArguments
+  "install" : packageArguments ->
+    runPackageArguments InstallOperation packageArguments
   commandArgument : _ ->
     usageFailure $ "unknown command " ++ show commandArgument
 
 runParsed :: Either String options -> (options -> IO ExitCode) -> IO ExitCode
 runParsed parsed action = either usageFailure action parsed
+
+runPackageArguments :: PackageOperation -> [String] -> IO ExitCode
+runPackageArguments operation rawArguments = case
+    validatePackageTargets arguments of
+  Left failure -> usageFailure $ packageOperationName operation ++ ": " ++ failure
+  Right targets -> runPackageOperation operation targets
+ where
+  arguments = case rawArguments of
+    "--" : targets -> targets
+    targets -> targets
 
 parseReplOptions :: [String] -> Either String ReplOptions
 parseReplOptions arguments = case
@@ -448,6 +476,8 @@ fullUsage = intercalate "\n"
   , "  djex repl [OPTION...]"
   , "  djex djinn [OPTION...] TYPE"
   , "  djex exference [OPTION...] TYPE"
+  , "  djex download PACKAGE ..."
+  , "  djex install PACKAGE ..."
   , ""
   , usageInfo "REPL options:" replOptionDescriptors
   , usageInfo "Common options:" commonOptions
@@ -480,6 +510,20 @@ backendUsage selectedBackend = intercalate "\n"
     ExferenceBackend -> "exference"
   backendTitle = backendName $ backendInfo selectedBackend
   backendOptions = backendSpecificOptions selectedBackend
+
+packageUsage :: PackageOperation -> String
+packageUsage operation = intercalate "\n"
+  [ "Usage: djex " ++ packageOperationName operation ++ " PACKAGE ..."
+  , ""
+  , summary operation
+  , "Package targets are passed after -- and cannot become Cabal options."
+  , "This command does not load compiled package modules into the Djex REPL."
+  ]
+ where
+  summary DownloadOperation =
+    "Download packages and dependencies into Cabal's configured source cache."
+  summary InstallOperation =
+    "Build and install library packages with cabal install --lib."
 
 usageFailure :: String -> IO ExitCode
 usageFailure message = do

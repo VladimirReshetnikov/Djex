@@ -59,6 +59,10 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , exferenceCommandSessionPolicy
   , loadExferenceSessionFromSourcesWithPolicy
   )
+import Language.Haskell.Djex.Package
+  ( PackageOperation (DownloadOperation, InstallOperation)
+  , runPackageOperation
+  )
 import Language.Haskell.Djex.REPL.Command
 import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Scope
@@ -240,6 +244,8 @@ runCommand sourceName history command state = case command of
     >>= continue
   CompareBackends typeSource ->
     runQuery sourceName (ExplicitBackends BothBackends) typeSource state
+  DownloadPackages packages ->
+    runPackageOperation DownloadOperation packages >> continue state
   Help Nothing -> putStr shortHelp >> continue state
   Help (Just name) -> case commandHelp name of
     Left failure -> settingFailure failure >> continue state
@@ -250,6 +256,8 @@ runCommand sourceName history command state = case command of
   InspectDeclaration nameSource -> showInfo state nameSource >> continue state
   InspectType defaulting expression ->
     showExpressionType sourceName defaulting expression state >> continue state
+  InstallPackages packages ->
+    runPackageOperation InstallOperation packages >> continue state
   LoadEnvironment targets -> updateExferenceWorkspace
     (loadWorkspace targets)
     ResetScope

@@ -31,6 +31,7 @@ import Data.List (intercalate, isPrefixOf)
 import Text.Read (readMaybe)
 
 import Language.Haskell.Djex (Backend (..))
+import Language.Haskell.Djex.Package (validatePackageTargets)
 
 -- | Backend selection retained by the interactive frontend.
 data ReplBackend
@@ -64,10 +65,12 @@ data ReplCommand
   | ChangeDirectory FilePath
   | ChangeModules ModuleChange [String]
   | CompareBackends String
+  | DownloadPackages [String]
   | Help (Maybe String)
   | History (Maybe String)
   | InspectDeclaration String
   | InspectType TypeDefaulting String
+  | InstallPackages [String]
   | LoadEnvironment [FilePath]
   | Quit
   | ReloadEnvironment
@@ -251,6 +254,9 @@ commandDescriptors =
   , command "djinn" [] "TYPE" "synthesize once with Djinn"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend DjinnBackend)
           . required "a type"
+  , command "download" ["dl"] "PACKAGE ..."
+      "download packages and dependencies into Cabal's source cache"
+      $ fmap (ReplCommand . DownloadPackages) . packageArguments
   , command "exference" [] "TYPE" "synthesize once with Exference"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend ExferenceBackend)
           . required "a type"
@@ -260,6 +266,9 @@ commandDescriptors =
       $ Right . ReplCommand . History . optionalText
   , command "info" ["i"] "NAME" "inspect a declaration by exact name"
       $ fmap (ReplCommand . InspectDeclaration) . required "a declaration name"
+  , command "install" [] "PACKAGE ..."
+      "build and install library packages through Cabal"
+      $ fmap (ReplCommand . InstallPackages) . packageArguments
   , command "load" ["l"] "[TARGET ...]"
       "replace the module or file targets and load their dependencies"
       $ fmap (ReplCommand . LoadEnvironment) . commandArguments
@@ -398,6 +407,10 @@ commandHelp source = case token of
     "browse" ->
       [ "  prefix a loaded module with * to include non-exported declarations"
       ]
+    "download" -> packageDetails
+    "install" -> packageDetails ++
+      [ "  installs libraries with cabal install --lib outside the local project"
+      ]
     "load" ->
       [ "  accepts module names, file paths, quoted strings, or [String] syntax"
       , "  with no targets, unloads the current environment"
@@ -421,6 +434,11 @@ commandHelp source = case token of
     _ -> []
   targetDetails =
     [ "  accepts module names, file paths, quoted strings, or [String] syntax"
+    ]
+  packageDetails =
+    [ "  accepts Cabal package targets as words, quoted strings, or [String] syntax"
+    , "  target values are passed to Cabal as data, never as command options"
+    , "  this does not add compiled package modules to Djex's source workspace"
     ]
 
 descriptorUsage :: CommandDescriptor -> String
@@ -481,6 +499,11 @@ parseTypeInspection source = case stripKeyword "+d" input of
       <$> required "a Haskell expression" input
  where
   input = trim source
+
+packageArguments :: String -> Either String [String]
+packageArguments source = do
+  arguments <- commandArguments source
+  validatePackageTargets arguments
 
 -- | Parse the argument forms accepted by path- and module-oriented commands.
 --

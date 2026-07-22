@@ -6,7 +6,11 @@ import Control.Monad (forM_)
 import Data.Char (toLower)
 import Data.List (isInfixOf)
 import System.Directory
-  ( createDirectory
+  ( canonicalizePath
+  , createDirectory
+  , createDirectoryLink
+  , createDirectoryIfMissing
+  , createFileLink
   , getTemporaryDirectory
   , removeFile
   , removePathForcibly
@@ -36,6 +40,40 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplBackendIsolation
   , testCase "REPL environment replacement is transactional"
       testReplTransactionalLoad
+  , testCase "REPL source targets load canonically and dependency-first"
+      testReplWorkspaceTargets
+  , testCase "REPL default environment keeps its full automatic context"
+      testReplDefaultEnvironmentScope
+  , testCase "REPL reload refreshes derived module target spellings"
+      testReplReloadTargetSpelling
+  , testCase "REPL named symlink aliases retain every expectation"
+      testReplNamedSymlinkTargets
+  , testCase "REPL directory loading distinguishes file and directory links"
+      testReplDirectoryLinks
+  , testCase "REPL target additions and removals are atomic"
+      testReplTargetMutation
+  , testCase "REPL reload and target mutations rebuild GHCi contexts"
+      testReplScopeRetention
+  , testCase "REPL module contexts follow GHCi replacement semantics"
+      testReplModuleContexts
+  , testCase "REPL imports and browsing honor explicit exports"
+      testReplImportsAndBrowsing
+  , testCase "REPL Exference search is restricted to the prompt scope"
+      testReplSearchScope
+  , testCase "REPL aliases retain canonical re-exports and defer ambiguity"
+      testReplAliasesAndReexports
+  , testCase "REPL import lists preserve exported record selectors"
+      testReplRecordSelectors
+  , testCase "REPL source modules reject package-qualified local lookalikes"
+      testReplSourcePackageImport
+  , testCase "REPL symlink aliases cannot impersonate module names"
+      testReplSymlinkModuleMismatch
+  , testCase "REPL re-exports reject only same-namespace collisions"
+      testReplExportAmbiguity
+  , testCase "REPL bundled imports reject type-synonym wildcards"
+      testReplBundledOwners
+  , testCase "REPL import failures roll back without touching Djinn"
+      testReplImportRollback
   , testCase "REPL fix policy rebuilds the Exference session"
       testReplFixReload
   , testCase "REPL scripts persist state and reject recursion"
@@ -195,7 +233,7 @@ testReplBackendIsolation = withMissingPath $ \missing -> do
   assertContains "Djinn result survives" "djexResult a = a" output
   assertContains "Exference section is still attempted" "-- Exference" output
   assertContains "missing environment diagnostic"
-    "[EXF_ENV_DIRECTORY_READ]" errors
+    "[DJEX_REPL_TARGET_NOT_FOUND]" errors
   assertContains "unavailable backend diagnostic"
     "[DJEX_REPL_EXFERENCE_UNAVAILABLE]" errors
 
@@ -219,7 +257,657 @@ testReplTransactionalLoad = withTemporaryEnvironment [] $ \directory ->
       $ countOccurrences "\\a -> a" output
     assertContains "reload retains canonical environment path" directory output
     assertContains "failed load reports missing source"
-      "[EXF_ENV_DIRECTORY_READ]" errors
+      "[DJEX_REPL_TARGET_NOT_FOUND]" errors
+
+testReplWorkspaceTargets :: Assertion
+testReplWorkspaceTargets = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      named = canonicalRoot </> "named"
+      app = named </> "App.hs"
+      dependency = named </> "Lib" </> "Dep.hs"
+      directory = canonicalRoot </> "directory"
+      first = directory </> "Dir" </> "First.hs"
+      second = directory </> "Dir" </> "Second.hs"
+      namedModules = unlines
+        [ "Lib.Dep (" ++ dependency ++ ")"
+        , "App (" ++ app ++ ")"
+        ]
+      directoryModules = unlines
+        [ "Dir.First (" ++ first ++ ")"
+        , "Dir.Second (" ++ second ++ ")"
+        ]
+
+  -- A module-name target is resolved against the admission directory, while
+  -- reload retains its canonical file and dependency roots after :cd.
+  (namedExit, namedOutput, namedErrors) <- runRepl empty
+    [ ":cd " ++ show named
+    , ":load App"
+    , ":show targets"
+    , ":show modules"
+    , ":show imports"
+    , ":cd /"
+    , ":reload"
+    , ":show targets"
+    , ":show modules"
+    ]
+  assertEqual "named target REPL exit" ExitSuccess namedExit
+  assertEqual "module-name target survives canonical reload" 2
+    $ countOccurrences "App\n" namedOutput
+  assertEqual "module-name dependency order survives reload" 2
+    $ countOccurrences namedModules namedOutput
+  assertContains "last named target becomes the automatic starred module"
+    "import *App -- automatic" namedOutput
+  assertNoCallStack namedErrors
+
+  -- File and directory targets are displayed canonically. Replacing the
+  -- target set also replaces its dependency closure, and bare :load unloads.
+  (pathExit, pathOutput, pathErrors) <- runRepl empty
+    [ ":load " ++ show app
+    , ":show targets"
+    , ":show modules"
+    , ":load " ++ show directory
+    , ":show targets"
+    , ":show modules"
+    , ":show imports"
+    , ":load"
+    , ":show targets"
+    , ":show modules"
+    , ":show imports"
+    ]
+  assertEqual "path target REPL exit" ExitSuccess pathExit
+  assertContains "file target has canonical display" (app ++ "\n") pathOutput
+  assertContains "file target dependencies are ordered first"
+    namedModules pathOutput
+  assertContains "directory target has canonical display"
+    (directory ++ "\n") pathOutput
+  assertContains "directory dependencies are ordered first"
+    directoryModules pathOutput
+  assertContains "first directory module enters the automatic context"
+    "import *Dir.First -- automatic" pathOutput
+  assertContains "every directory module enters the automatic context"
+    "import *Dir.Second -- automatic" pathOutput
+  assertContains "bare load clears explicit targets" "(no targets)" pathOutput
+  assertContains "bare load clears their dependency closure"
+    "(no modules loaded)" pathOutput
+  assertContains "bare load clears the automatic context"
+    "(no imports)" pathOutput
+  assertNoCallStack pathErrors
+
+testReplDefaultEnvironmentScope :: Assertion
+testReplDefaultEnvironmentScope = do
+  (exitCode, output, errors) <- runDjexInput
+    ["repl", "--backend", "exference"] $ unlines
+      [ ":set prompt \"\""
+      , ":set render expression"
+      , ":set select best"
+      , ":set max-steps 16"
+      , "a -> Data.Maybe.Maybe a"
+      , ":quit"
+      ]
+  assertEqual "default environment REPL exit" ExitSuccess exitCode
+  -- The first bounded result is Applicative.pure rather than Just; either is
+  -- impossible in the historical broken state whose context held Data.Word
+  -- alone. Keeping the bound small makes this startup regression inexpensive.
+  assertContains
+    ("default directory context retains non-final modules: " ++ output ++ errors)
+    "Control.Applicative.pure" output
+  assertBool "default environment lost its searchable module context" $
+    not $ "DJEX_EXF_NO_RESULT" `isInfixOf` errors
+  assertNoCallStack errors
+
+testReplReloadTargetSpelling :: Assertion
+testReplReloadTargetSpelling = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      target = canonicalRoot </> "rename" </> "Target.hs"
+      replacement = canonicalRoot </> "rename" </> "After.source"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show target
+    , ":! cp " ++ show replacement ++ " " ++ show target
+    , ":reload"
+    , ":unadd Before"
+    , ":unadd After"
+    , ":show targets"
+    ]
+  assertEqual "renamed module reload REPL exit" ExitSuccess exitCode
+  assertContains "reload accepts the replacement module declaration"
+    "Loaded Exference environment:" output
+  assertEqual "stale derived module spelling is rejected once" 1
+    $ countOccurrences
+        "Exference load failed; retaining the previous session and settings."
+        output
+  assertContains "stale derived module spelling is no longer loaded"
+    "[DJEX_REPL_TARGET_NOT_LOADED]" errors
+  assertContains "fresh derived module spelling removes the file target"
+    "Removed Exference targets: \"After\"" output
+  assertContains "fresh module spelling leaves no target"
+    "(no targets)" output
+  assertNoCallStack errors
+
+testReplNamedSymlinkTargets :: Assertion
+testReplNamedSymlinkTargets = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      aliasRoot = canonicalRoot </> "named-alias"
+      original = aliasRoot </> "A.hs"
+      alias = aliasRoot </> "B.hs"
+  createFileLink original alias
+  (exitCode, output, errors) <- runRepl empty
+    [ ":cd " ++ show aliasRoot
+    , ":load A B"
+    , ":show modules"
+    ]
+  assertEqual "named symlink target REPL exit" ExitSuccess exitCode
+  assertContains "conflicting named aliases reject the target transaction"
+    "Exference load failed; retaining the previous session and settings."
+    output
+  assertContains "conflicting aliases retain the prior empty workspace"
+    "(no modules loaded)" output
+  assertContains "named alias mismatch has a structured diagnostic"
+    "[DJEX_REPL_MODULE_MISMATCH]" errors
+  assertContains "deduplication retains the second module expectation"
+    "B was requested" errors
+  assertContains "mismatch reports the canonical declaration" "declares A" errors
+  assertNoCallStack errors
+
+testReplDirectoryLinks :: Assertion
+testReplDirectoryLinks = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      linkRoot = canonicalRoot </> "directory-links"
+      linkedFile = canonicalRoot </> "linked-file" </> "Linked.hs"
+      fileLink = linkRoot </> "Linked.hs"
+      escapedDirectory = canonicalRoot </> "escaped-directory"
+      escapeLink = linkRoot </> "Escape"
+      cycleLink = linkRoot </> "Cycle"
+      inside = linkRoot </> "Inside.hs"
+  createFileLink linkedFile fileLink
+  createDirectoryLink escapedDirectory escapeLink
+  createDirectoryLink linkRoot cycleLink
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show linkRoot
+    , ":show modules"
+    , ":show imports"
+    ]
+  assertEqual "directory symlink REPL exit" ExitSuccess exitCode
+  assertContains "ordinary source file in directory is loaded"
+    ("Inside (" ++ inside ++ ")") output
+  assertContains "regular-file symlink is admitted canonically"
+    ("Linked (" ++ linkedFile ++ ")") output
+  assertBool "directory symlink escaped the admitted source tree" $
+    not $ "Escaped (" `isInfixOf` output
+  assertContains "ordinary directory module enters automatic context"
+    "import *Inside -- automatic" output
+  assertContains "file symlink module enters automatic context"
+    "import *Linked -- automatic" output
+  assertNoCallStack errors
+
+testReplTargetMutation :: Assertion
+testReplTargetMutation = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      app = canonicalRoot </> "named" </> "App.hs"
+      dependency = canonicalRoot </> "named" </> "Lib" </> "Dep.hs"
+      missing = canonicalRoot </> "missing.hs"
+      loadedModules = unlines
+        [ "Lib.Dep (" ++ dependency ++ ")"
+        , "App (" ++ app ++ ")"
+        ]
+
+  (removeExit, removeOutput, removeErrors) <- runRepl empty
+    [ ":load " ++ show app
+    , ":add " ++ show app
+    , ":show targets"
+    , ":unadd " ++ show app
+    , ":show targets"
+    , ":show modules"
+    ]
+  assertEqual "idempotent add REPL exit" ExitSuccess removeExit
+  assertEqual "adding one canonical target twice retains one target" 1
+    $ countOccurrences (app ++ "\n") removeOutput
+  assertContains "unadding the sole target empties target state"
+    "(no targets)" removeOutput
+  assertContains "unadding a target prunes dependency-only modules"
+    "(no modules loaded)" removeOutput
+  assertNoCallStack removeErrors
+
+  (failureExit, failureOutput, failureErrors) <- runRepl empty
+    [ ":load " ++ show app
+    , ":add " ++ show missing
+    , ":show targets"
+    , ":unadd " ++ show missing
+    , ":show targets"
+    , ":show modules"
+    ]
+  assertEqual "transactional target mutation exit" ExitSuccess failureExit
+  assertEqual "both failed mutations report retained state" 2
+    $ countOccurrences
+        "Exference load failed; retaining the previous session and settings."
+        failureOutput
+  assertEqual "failed additions and removals retain the canonical target" 2
+    $ countOccurrences (app ++ "\n") failureOutput
+  assertContains "failed mutations retain the dependency closure"
+    loadedModules failureOutput
+  assertContains "missing addition is structured"
+    "[DJEX_REPL_TARGET_NOT_FOUND]" failureErrors
+  assertContains "unknown removal is structured"
+    "[DJEX_REPL_TARGET_NOT_LOADED]" failureErrors
+  assertNoCallStack failureErrors
+
+testReplScopeRetention :: Assertion
+testReplScopeRetention = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      alpha = canonicalRoot </> "scope" </> "Alpha.hs"
+      beta = canonicalRoot </> "scope" </> "Beta.hs"
+      surface = canonicalRoot </> "scope" </> "Surface.hs"
+
+  (mutationExit, mutationOutput, mutationErrors) <- runRepl empty
+    [ ":load " ++ show alpha
+    , ":module Alpha"
+    , ":add"
+    , ":unadd"
+    , ":show imports"
+    , ":add " ++ show beta
+    , ":show imports"
+    , ":add " ++ show surface
+    , ":show imports"
+    , ":unadd " ++ show surface
+    , ":show imports"
+    , ":unadd " ++ show alpha
+    , ":show imports"
+    ]
+  assertEqual "scope-resetting mutation REPL exit" ExitSuccess mutationExit
+  assertEqual ":add selects its last newly contributing target" 1
+    $ countOccurrences "import *Surface -- automatic\n" mutationOutput
+  assertEqual ":unadd retains a surviving current target or falls back last" 3
+    $ countOccurrences "import *Beta -- automatic\n" mutationOutput
+  assertEqual "bare :add and :unadd preserve an explicit context" 1
+    $ countOccurrences "import Alpha\n" mutationOutput
+  assertNoCallStack mutationErrors
+
+  (reloadExit, reloadOutput, reloadErrors) <- runRepl empty
+    [ ":load " ++ show [alpha, beta]
+    , ":module Alpha"
+    , ":reload"
+    , ":show imports"
+    , ":module *Alpha"
+    , ":reload"
+    , ":show imports"
+    , ":module"
+    , "import Alpha"
+    , ":reload"
+    , ":show imports"
+    ]
+  assertEqual "scope-preserving reload REPL exit" ExitSuccess reloadExit
+  assertEqual "plain modules and imports coexist with fresh automatic scope" 2
+    $ countOccurrences
+        "import Alpha\nimport *Alpha -- automatic\n" reloadOutput
+  assertEqual "an exact explicit star suppresses the automatic duplicate" 1
+    $ countOccurrences "import *Alpha\n" reloadOutput
+  assertNoCallStack reloadErrors
+
+testReplModuleContexts :: Assertion
+testReplModuleContexts = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      alpha = canonicalRoot </> "scope" </> "Alpha.hs"
+      beta = canonicalRoot </> "scope" </> "Beta.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show [alpha, beta]
+    , ":show imports"
+    , ":module Alpha"
+    , ":module + Beta"
+    , ":show imports"
+    , ":module - Alpha"
+    , ":module+ *Alpha"
+    , ":show imports"
+    , ":module+"
+    , ":show imports"
+    ]
+  assertEqual "module context REPL exit" ExitSuccess exitCode
+  assertEqual "first explicit load target supplies one automatic context" 1
+    $ countOccurrences "import *Alpha -- automatic\n" output
+  assertEqual "replacement context is retained through addition" 1
+    $ countOccurrences "import Alpha\n" output
+  assertEqual "spaced addition and subtraction update the context" 3
+    $ countOccurrences "import Beta\n" output
+  assertEqual "attached :module+ accepts stars and an empty no-op" 2
+    $ countOccurrences "import *Alpha\n" output
+  assertNoCallStack errors
+
+testReplImportsAndBrowsing :: Assertion
+testReplImportsAndBrowsing = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      surface = canonicalRoot </> "scope" </> "Surface.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show surface
+    , ":module"
+    , "import Surface"
+    , "import qualified Surface"
+    , "import Surface as S"
+    , "import qualified Surface as Q (PublicType, publicValue)"
+    , "import Surface hiding (publicValue)"
+    , ":show imports"
+    , ":browse Surface"
+    , ":browse *Surface"
+    ]
+  assertEqual "import and browse REPL exit" ExitSuccess exitCode
+  forM_
+    [ "import Surface\n"
+    , "import qualified Surface\n"
+    , "import Surface as S\n"
+    , "import qualified Surface as Q (PublicType, publicValue)\n"
+    , "import Surface hiding (publicValue)\n"
+    ] $ \declaration -> assertContains
+      ("show imports retains " ++ show declaration) declaration output
+  assertContains "normal browse is explicitly labelled"
+    "-- Exference module Surface" output
+  assertContains "starred browse is explicitly labelled"
+    "-- Exference module *Surface" output
+  assertEqual "ordinary browse hides a non-exported binding" 1
+    $ countOccurrences "Surface.hiddenValue" output
+  assertEqual "ordinary browse hides an unexported constructor" 1
+    $ countOccurrences "Surface.HiddenConstructor" output
+  assertEqual "both browse modes include an exported binding" 2
+    $ countOccurrences "Surface.publicValue" output
+  assertNoCallStack errors
+
+testReplSearchScope :: Assertion
+testReplSearchScope = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      alpha = canonicalRoot </> "scope" </> "Alpha.hs"
+      beta = canonicalRoot </> "scope" </> "Beta.hs"
+
+  -- Clearing the source context must not remove syntax-level constructors.
+  -- Conversely, it must not leave ordinary loaded source declarations usable.
+  (structuralExit, structuralOutput, structuralErrors) <- runRepl empty
+    [ ":load " ++ show alpha
+    , ":backend exference"
+    , ":set render expression"
+    , ":set max-steps 8"
+    , ":module"
+    , "a -> [a]"
+    , "Alpha.AlphaType"
+    ]
+  assertEqual "structural scope REPL exit" ExitSuccess structuralExit
+  assertContains "list constructors remain searchable in an empty context"
+    "[]" structuralOutput
+  assertBool "empty context leaked an ordinary source binding" $
+    not $ "Alpha.alphaValue" `isInfixOf` structuralOutput
+  assertContains "empty context cannot synthesize an ordinary source type"
+    "[DJEX_EXF_NO_RESULT]" structuralErrors
+
+  -- The searched dictionary and the query type resolver use the same import
+  -- projection: an unimported module and a name omitted by an alias list are
+  -- rejected, while the selected qualified binding is actually synthesized.
+  (scopeExit, scopeOutput, scopeErrors) <- runRepl empty
+    [ ":load " ++ show [alpha, beta]
+    , ":backend exference"
+    , ":set render expression"
+    , ":set max-steps 4"
+    , ":module Alpha"
+    , "Beta.BetaType"
+    , ":module"
+    , "import qualified Beta as B (BetaType, betaValue)"
+    , "B.BetaType"
+    , "B.OtherType"
+    , ":module"
+    , "import Beta hiding (otherValue)"
+    , "OtherType"
+    ]
+  assertEqual "scoped search REPL exit" ExitSuccess scopeExit
+  assertEqual "selected qualified import contributes one searchable binding" 1
+    $ countOccurrences "Beta.betaValue" scopeOutput
+  assertBool "hiding leaked the uniquely typed binding" $
+    not $ "Beta.otherValue" `isInfixOf` scopeOutput
+  assertContains "unimported and list-excluded query types are rejected"
+    "[DJEX_EXF_PARSE]" scopeErrors
+  assertContains "hidden unique binding produces no result"
+    "[DJEX_EXF_NO_RESULT]" scopeErrors
+  assertNoCallStack scopeErrors
+
+testReplAliasesAndReexports :: Assertion
+testReplAliasesAndReexports = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      reexport = canonicalRoot </> "reexport" </> "Reexport.hs"
+      aliasLeft = canonicalRoot </> "scope" </> "AliasLeft.hs"
+      aliasRight = canonicalRoot </> "scope" </> "AliasRight.hs"
+      querySetup targets =
+        [ ":load " ++ show targets
+        , ":backend exference"
+        , ":set render expression"
+        , ":set max-steps 4"
+        , ":module"
+        ]
+
+  (reexportExit, reexportOutput, reexportErrors) <- runRepl empty $
+    querySetup [reexport]
+      ++ [ "import qualified Reexport as X"
+         , "X.Item"
+         ]
+  assertEqual "re-export alias REPL exit" ExitSuccess reexportExit
+  assertContains "alias resolves a re-export to its defining module"
+    "Origin.itemValue" reexportOutput
+  assertNoCallStack reexportErrors
+
+  (disjointExit, disjointOutput, disjointErrors) <- runRepl empty $
+    querySetup [aliasLeft, aliasRight]
+      ++ [ "import qualified AliasLeft as X (LeftType, leftValue)"
+         , "import qualified AliasRight as X (RightType, rightValue)"
+         , "X.LeftType"
+         , "X.RightType"
+         ]
+  assertEqual "disjoint shared alias REPL exit" ExitSuccess disjointExit
+  assertContains "shared alias resolves its left-only occurrence"
+    "AliasLeft.leftValue" disjointOutput
+  assertContains "shared alias resolves its right-only occurrence"
+    "AliasRight.rightValue" disjointOutput
+  assertBool "disjoint aliases were rejected eagerly" $
+    not $ "DJEX_REPL_IMPORT_ALIAS_AMBIGUOUS" `isInfixOf` disjointErrors
+  assertNoCallStack disjointErrors
+
+  (overlapExit, overlapOutput, overlapErrors) <- runRepl empty $
+    querySetup [aliasLeft, aliasRight]
+      ++ [ "import qualified AliasLeft as X (Clash, leftClash)"
+         , "import qualified AliasRight as X (Clash, rightClash)"
+         , ":show imports"
+         , "X.Clash"
+         ]
+  assertEqual "overlapping shared alias REPL exit" ExitSuccess overlapExit
+  assertContains "first overlapping import is retained"
+    "import qualified AliasLeft as X (Clash, leftClash)" overlapOutput
+  assertContains "second overlapping import is retained"
+    "import qualified AliasRight as X (Clash, rightClash)" overlapOutput
+  assertBool "overlapping alias leaked its left candidate" $
+    not $ "AliasLeft.leftClash" `isInfixOf` overlapOutput
+  assertBool "overlapping alias leaked its right candidate" $
+    not $ "AliasRight.rightClash" `isInfixOf` overlapOutput
+  assertContains "shared occurrence ambiguity is rejected when used"
+    "[DJEX_EXF_PARSE]" overlapErrors
+  assertContains "shared occurrence diagnostic explains the ambiguity"
+    "ambiguous" $ map toLower overlapErrors
+  assertNoCallStack overlapErrors
+
+testReplRecordSelectors :: Assertion
+testReplRecordSelectors = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      records = canonicalRoot </> "scope" </> "RecordSurface.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show records
+    , ":backend exference"
+    , ":set render expression"
+    , ":set max-steps 4"
+    , ":module"
+    , "import qualified RecordSurface as R (Record(field), Field)"
+    , ":show imports"
+    , "R.Record -> R.Field"
+    , ":module"
+    , "import RecordSurface hiding (field)"
+    , "Record -> Field"
+    ]
+  assertEqual "record selector REPL exit" ExitSuccess exitCode
+  assertContains "record child survives module export and explicit import"
+    "import qualified RecordSurface as R (Record(field), Field)" output
+  assertEqual "selected record field is the sole projected inhabitant" 1
+    $ countOccurrences "RecordSurface.field" output
+  assertContains "hiding a record field removes it from search"
+    "[DJEX_EXF_NO_RESULT]" errors
+  assertNoCallStack errors
+
+testReplSourcePackageImport :: Assertion
+testReplSourcePackageImport = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      localModule = canonicalRoot </> "package-import" </> "LocalM.hs"
+      packageUser = canonicalRoot </> "package-import" </> "PackageUser.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show [packageUser, localModule]
+    , ":show targets"
+    , ":show modules"
+    ]
+  assertEqual "source package import REPL exit" ExitSuccess exitCode
+  assertContains "package import rejects the whole target transaction"
+    "Exference load failed; retaining the previous session and settings."
+    output
+  assertContains "failed source package import retains the empty workspace"
+    "(no modules loaded)" output
+  assertBool "package import accidentally committed its same-named local target" $
+    not $ packageUser `isInfixOf` output
+  assertContains ("source package import has a structured diagnostic: " ++ errors)
+    "[DJEX_REPL_IMPORT_PACKAGE]" errors
+  assertNoCallStack errors
+
+testReplSymlinkModuleMismatch :: Assertion
+testReplSymlinkModuleMismatch = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      symlinkRoot = canonicalRoot </> "symlink"
+      realModule = symlinkRoot </> "Real.hs"
+      aliasModule = symlinkRoot </> "Alias.hs"
+      importer = symlinkRoot </> "UsesAlias.hs"
+  createFileLink realModule aliasModule
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show [realModule, importer]
+    , ":show modules"
+    ]
+  assertEqual "symlink module mismatch REPL exit" ExitSuccess exitCode
+  assertContains "symlink mismatch rejects the target transaction"
+    "Exference load failed; retaining the previous session and settings."
+    output
+  assertContains "symlink mismatch retains the prior empty workspace"
+    "(no modules loaded)" output
+  assertContains "symlink alias mismatch has a structured diagnostic"
+    "[DJEX_REPL_MODULE_MISMATCH]" errors
+  assertContains "symlink mismatch names the imported module" "Alias" errors
+  assertContains "symlink mismatch names the declared module" "Real" errors
+  assertNoCallStack errors
+
+testReplExportAmbiguity :: Assertion
+testReplExportAmbiguity = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      exportRoot = canonicalRoot </> "export-scope"
+      duplicate = exportRoot </> "Duplicate.hs"
+      namespace = exportRoot </> "Namespace.hs"
+      collision = exportRoot </> "Collision.hs"
+
+  (allowedExit, allowedOutput, allowedErrors) <- runRepl empty
+    [ ":load " ++ show duplicate
+    , ":show imports"
+    , ":load " ++ show namespace
+    , ":show imports"
+    ]
+  assertEqual "allowed re-export REPL exit" ExitSuccess allowedExit
+  assertContains "re-exporting the same canonical name twice is harmless"
+    "import *Duplicate -- automatic" allowedOutput
+  assertContains
+    ("type and value namespaces may share an occurrence: "
+      ++ allowedOutput ++ allowedErrors)
+    "import *Namespace -- automatic" allowedOutput
+  assertBool "valid re-exports were diagnosed as ambiguous" $
+    not $ "DJEX_REPL_EXPORT_AMBIGUOUS" `isInfixOf` allowedErrors
+  assertNoCallStack allowedErrors
+
+  (collisionExit, collisionOutput, collisionErrors) <- runRepl empty
+    [ ":load " ++ show collision
+    , ":show modules"
+    ]
+  assertEqual "ambiguous re-export REPL exit" ExitSuccess collisionExit
+  assertContains "colliding re-export rejects the target transaction"
+    "Exference load failed; retaining the previous session and settings."
+    collisionOutput
+  assertContains "colliding re-export retains the prior empty workspace"
+    "(no modules loaded)" collisionOutput
+  assertContains "same-namespace collision has a structured diagnostic"
+    "[DJEX_REPL_EXPORT_AMBIGUOUS]" collisionErrors
+  assertNoCallStack collisionErrors
+
+testReplBundledOwners :: Assertion
+testReplBundledOwners = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      bundleRoot = canonicalRoot </> "bundle"
+      emptyData = bundleRoot </> "EmptyData.hs"
+      invalidSynonym = bundleRoot </> "InvalidSynonym.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show emptyData
+    , ":module"
+    , "import EmptyData (E(..))"
+    , ":show imports"
+    , ":load " ++ show invalidSynonym
+    , ":show modules"
+    ]
+  assertEqual "bundled owner REPL exit" ExitSuccess exitCode
+  assertContains "an empty datatype owns a valid empty wildcard bundle"
+    "import EmptyData (E(..))" output
+  assertContains "type-synonym wildcard rejects the target transaction"
+    "Exference load failed; retaining the previous session and settings."
+    output
+  assertContains "invalid synonym export retains the prior empty datatype"
+    ("EmptyData (" ++ emptyData ++ ")") output
+  assertBool "invalid synonym export was committed" $
+    not $ "InvalidSynonym (" `isInfixOf` output
+  assertContains "invalid wildcard diagnostic identifies its source form"
+    "S(..)" errors
+  assertNoCallStack errors
+
+testReplImportRollback :: Assertion
+testReplImportRollback = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      beta = canonicalRoot </> "scope" </> "Beta.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show beta
+    , ":module Beta"
+    , ":backend djinn"
+    , ":set render expression"
+    , "a -> a"
+    , "import qualified Beta as"
+    , ":show imports"
+    , "import Missing"
+    , ":show imports"
+    , "import \"package-name\" Beta"
+    , ":show imports"
+    , "a -> a"
+    ]
+  assertEqual "import rollback REPL exit" ExitSuccess exitCode
+  assertEqual "each failed import retains the prior module context" 3
+    $ countOccurrences "import Beta\n" output
+  assertContains "malformed import has a dedicated diagnostic"
+    "[DJEX_REPL_IMPORT_PARSE]" errors
+  assertContains "missing module import has a dedicated diagnostic"
+    "[DJEX_REPL_MODULE_NOT_LOADED]" errors
+  assertContains "package import has a dedicated diagnostic"
+    "[DJEX_REPL_IMPORT_PACKAGE]" errors
+  assertEqual "Exference scope edits do not alter the Djinn session" 2
+    $ countOccurrences "\\a -> a" output
+  assertNoCallStack errors
 
 testReplFixReload :: Assertion
 testReplFixReload = withTemporaryEnvironment
@@ -623,8 +1311,180 @@ withTemporaryEnvironment files action = bracket create removePathForcibly use
     createDirectory path
     pure path
   use path = do
-    forM_ files $ \(name, contents) -> writeFile (path ++ "/" ++ name) contents
+    forM_ files $ \(name, contents) -> do
+      let file = path </> name
+      createDirectoryIfMissing True $ parentDirectory file
+      writeFile file contents
     action path
+
+-- One nested source tree exercises each admission spelling without making the
+-- REPL's startup directory accidentally load the fixtures under test.
+withReplModuleFixture :: (FilePath -> IO result) -> IO result
+withReplModuleFixture = withTemporaryEnvironment
+  [ ("empty/.keep", "")
+  , ("named/App.hs", unlines
+      [ "module App (AppType, appValue) where"
+      , "import Lib.Dep"
+      , "data AppType = AppConstructor"
+      , "appValue :: AppType"
+      ])
+  , ("named/Lib/Dep.hs", unlines
+      [ "module Lib.Dep (DepType, depValue) where"
+      , "data DepType = DepConstructor"
+      , "depValue :: DepType"
+      ])
+  , ("directory/Dir/First.hs", unlines
+      [ "module Dir.First (FirstType, firstValue) where"
+      , "data FirstType = FirstConstructor"
+      , "firstValue :: FirstType"
+      ])
+  , ("directory/Dir/Second.hs", unlines
+      [ "module Dir.Second (SecondType, secondValue) where"
+      , "import Dir.First"
+      , "data SecondType = SecondConstructor"
+      , "secondValue :: SecondType"
+      ])
+  , ("scope/Alpha.hs", unlines
+      [ "module Alpha (AlphaType, alphaValue) where"
+      , "data AlphaType = AlphaConstructor"
+      , "alphaValue :: AlphaType"
+      , "alphaHidden :: AlphaType"
+      ])
+  , ("scope/Beta.hs", unlines
+      [ "module Beta (BetaType, betaValue, OtherType, otherValue) where"
+      , "data BetaType = BetaConstructor"
+      , "betaValue :: BetaType"
+      , "data OtherType = OtherConstructor"
+      , "otherValue :: OtherType"
+      ])
+  , ("scope/Surface.hs", unlines
+      [ "module Surface (PublicType, publicValue, HiddenType) where"
+      , "data PublicType = PublicConstructor"
+      , "publicValue :: PublicType"
+      , "data HiddenType = HiddenConstructor"
+      , "hiddenValue :: HiddenType"
+      ])
+  , ("scope/AliasLeft.hs", unlines
+      [ "module AliasLeft"
+      , "  (LeftType, leftValue, Clash, leftClash) where"
+      , "data LeftType = LeftConstructor"
+      , "leftValue :: LeftType"
+      , "data Clash = LeftClashConstructor"
+      , "leftClash :: Clash"
+      ])
+  , ("scope/AliasRight.hs", unlines
+      [ "module AliasRight"
+      , "  (RightType, rightValue, Clash, rightClash) where"
+      , "data RightType = RightConstructor"
+      , "rightValue :: RightType"
+      , "data Clash = RightClashConstructor"
+      , "rightClash :: Clash"
+      ])
+  , ("scope/RecordSurface.hs", unlines
+      [ "module RecordSurface (Record(field), Field) where"
+      , "data Field = FieldConstructor"
+      , "data Record = RecordConstructor { field :: Field }"
+      ])
+  , ("reexport/Origin.hs", unlines
+      [ "module Origin (Item, itemValue) where"
+      , "data Item = ItemConstructor"
+      , "itemValue :: Item"
+      ])
+  , ("reexport/Reexport.hs", unlines
+      [ "module Reexport (module Origin) where"
+      , "import Origin"
+      ])
+  , ("package-import/LocalM.hs", unlines
+      [ "module LocalM (LocalType, localValue) where"
+      , "data LocalType = LocalConstructor"
+      , "localValue :: LocalType"
+      ])
+  , ("package-import/PackageUser.hs", unlines
+      [ "{-# LANGUAGE PackageImports #-}"
+      , "module PackageUser where"
+      , "import \"example-package\" LocalM"
+      ])
+  , ("export-scope/CollisionLeft.hs", unlines
+      [ "module CollisionLeft (clash) where"
+      , "clash :: a -> a"
+      ])
+  , ("export-scope/CollisionRight.hs", unlines
+      [ "module CollisionRight (clash) where"
+      , "clash :: a -> a"
+      ])
+  , ("export-scope/Collision.hs", unlines
+      [ "module Collision (module X) where"
+      , "import CollisionLeft as X"
+      , "import CollisionRight as X"
+      ])
+  , ("export-scope/Duplicate.hs", unlines
+      [ "module Duplicate (module X) where"
+      , "import CollisionLeft as X"
+      , "import CollisionLeft as X"
+      ])
+  , ("export-scope/TypeSide.hs", unlines
+      [ "module TypeSide (Same) where"
+      , "data Same = TypeConstructor"
+      ])
+  , ("export-scope/ValueSide.hs", unlines
+      [ "module ValueSide where"
+      , "data Other = Same"
+      ])
+  , ("export-scope/Namespace.hs", unlines
+      [ "module Namespace (module X) where"
+      , "import TypeSide as X"
+      , "import ValueSide as X"
+      ])
+  , ("symlink/Real.hs", unlines
+      [ "module Real (RealType, realValue) where"
+      , "data RealType = RealConstructor"
+      , "realValue :: RealType"
+      ])
+  , ("symlink/UsesAlias.hs", unlines
+      [ "module UsesAlias where"
+      , "import Alias"
+      ])
+  , ("rename/Target.hs", unlines
+      [ "module Before (BeforeType, beforeValue) where"
+      , "data BeforeType = BeforeConstructor"
+      , "beforeValue :: BeforeType"
+      ])
+  , ("rename/After.source", unlines
+      [ "module After (AfterType, afterValue) where"
+      , "data AfterType = AfterConstructor"
+      , "afterValue :: AfterType"
+      ])
+  , ("named-alias/A.hs", unlines
+      [ "module A (AType, aValue) where"
+      , "data AType = AConstructor"
+      , "aValue :: AType"
+      ])
+  , ("directory-links/Inside.hs", unlines
+      [ "module Inside (InsideType, insideValue) where"
+      , "data InsideType = InsideConstructor"
+      , "insideValue :: InsideType"
+      ])
+  , ("linked-file/Linked.hs", unlines
+      [ "module Linked (LinkedType, linkedValue) where"
+      , "data LinkedType = LinkedConstructor"
+      , "linkedValue :: LinkedType"
+      ])
+  , ("escaped-directory/Escaped.hs", unlines
+      [ "module Escaped (EscapedType, escapedValue) where"
+      , "data EscapedType = EscapedConstructor"
+      , "escapedValue :: EscapedType"
+      ])
+  , ("bundle/EmptyData.hs", unlines
+      [ "{-# LANGUAGE EmptyDataDecls #-}"
+      , "module EmptyData (E(..)) where"
+      , "data E"
+      ])
+  , ("bundle/InvalidSynonym.hs", unlines
+      [ "module InvalidSynonym (S(..)) where"
+      , "data Field = Field"
+      , "type S = Field"
+      ])
+  ]
 
 withMissingPath :: (FilePath -> IO result) -> IO result
 withMissingPath action = do
@@ -633,6 +1493,19 @@ withMissingPath action = do
   hClose handle
   removeFile path
   action path
+
+-- The CLI suite intentionally has no filepath dependency. Its subprocess and
+-- shell coverage is already POSIX-specific, so a tiny local join keeps nested
+-- temporary fixtures readable without widening the test component's API.
+(</>) :: FilePath -> FilePath -> FilePath
+directory </> entry = directory ++ "/" ++ entry
+
+infixr 5 </>
+
+parentDirectory :: FilePath -> FilePath
+parentDirectory path = case break (== '/') $ reverse path of
+  (_, []) -> "."
+  (_, _ : reversedParent) -> reverse reversedParent
 
 assertNoCallStack :: String -> Assertion
 assertNoCallStack output = assertBool "controlled failure exposed a CallStack" $

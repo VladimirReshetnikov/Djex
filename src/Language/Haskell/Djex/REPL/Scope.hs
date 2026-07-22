@@ -22,6 +22,7 @@ module Language.Haskell.Djex.REPL.Scope
   , scopeQualifiedNames
   , scopeQualifierAliases
   , scopeCurrentModule
+  , resolveScopeNameAmong
   , renderScopeImports
   , renderScopeModules
   , moduleNamesForBrowse
@@ -132,6 +133,76 @@ scopeQualifierAliases = replScopeAliases
 -- of giving one module an arbitrary lookup priority.
 scopeCurrentModule :: ReplScope -> Maybe ModuleName
 scopeCurrentModule = replScopeCurrentModule
+
+-- | Resolve one prompt spelling inside a caller-selected Haskell namespace.
+--
+-- 'ReplScope' deliberately records type and term names together because
+-- imports expose both.  Consumers such as @:info@ and @:type@ must select the
+-- namespace they own before ambiguity is decided; otherwise the legal pair
+-- @data T = T@ would make the term constructor appear ambiguous with its type.
+-- Canonically qualified names may address any loaded declaration in the
+-- selected namespace, while aliases remain limited by their exact import
+-- surfaces.
+resolveScopeNameAmong
+  :: Set Name
+  -> ReplScope
+  -> Name
+  -> Either String Name
+resolveScopeNameAmong available context source = case
+    SharedName.nameModule source of
+  Nothing -> case SharedName.nameSpecial source of
+    Just _ -> Right source
+    Nothing -> chooseUnqualified
+  Just qualifier -> case qualifiedCandidates qualifier of
+    [name] -> Right name
+    _ : _ : _ -> Left $ "ambiguous qualified name "
+      ++ SharedName.renderCanonical source ++ "; matches "
+      ++ intercalate ", "
+          (map SharedName.renderCanonical $ qualifiedCandidates qualifier)
+    [] -> case
+        [ canonical
+        | (alias, canonical) <- scopeQualifierAliases context
+        , alias == qualifier
+        ] of
+      []
+        | source `Set.member` available -> Right source
+        | otherwise -> Left $ "qualified name "
+            ++ SharedName.renderCanonical source ++ " is not loaded"
+      [_] -> chooseAlias qualifier
+      modules -> Left $ "ambiguous module qualifier "
+        ++ SharedName.renderModuleName qualifier ++ "; matches "
+        ++ intercalate ", " (map SharedName.renderModuleName modules)
+ where
+  sameOccurrence candidate =
+    SharedName.nameOccurrence candidate == SharedName.nameOccurrence source
+  selected = filter (`Set.member` available)
+  unqualified = selected $ filter sameOccurrence
+    $ scopeUnqualifiedNames context
+  local = case scopeCurrentModule context of
+    Nothing -> []
+    Just current -> filter ((== Just current) . SharedName.nameModule)
+      unqualified
+  chooseUnqualified = case if null local then unqualified else local of
+    [name] -> Right name
+    [] -> Left $ "name " ++ SharedName.renderCanonical source
+      ++ " is not in scope"
+    names -> Left $ "ambiguous unqualified name "
+      ++ SharedName.renderCanonical source ++ "; matches "
+      ++ intercalate ", " (map SharedName.renderCanonical names)
+  chooseAlias qualifier = case qualifiedCandidates qualifier of
+    [name] -> Right name
+    [] -> Left $ "qualified name " ++ SharedName.renderCanonical source
+      ++ " is not in scope"
+    names -> Left $ "ambiguous qualified name "
+      ++ SharedName.renderCanonical source ++ "; matches "
+      ++ intercalate ", " (map SharedName.renderCanonical names)
+  qualifiedCandidates qualifier = selected
+    [ name
+    | (written, admitted) <- scopeQualifiedNames context
+    , written == qualifier
+    , name <- admitted
+    , sameOccurrence name
+    ]
 
 -- | Construct the initial prompt scope, including GHCi's automatic starred
 -- context for the most recent source-interpreted target.

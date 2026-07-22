@@ -1025,11 +1025,11 @@ showInfo state source = case parseName $ trim source of
           , exferenceRuntimeScope runtime
           ) of
         (Just session, Just context) -> case
-            resolveScopeName context parsedName of
+            resolveScopeNameAmong
+              (declarationNameSet environment) context parsedName of
           Left failure -> settingFailure failure
           Right name -> do
-            let environment = exferenceSessionEnvironment session
-                matchingNames = name : map declarationSubjectName
+            let matchingNames = name : map declarationSubjectName
                   (matchingDeclarations name environment)
             info "Exference loaded declarations"
               ExferenceType.defaultVariableName name
@@ -1037,55 +1037,11 @@ showInfo state source = case parseName $ trim source of
             mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
               $ filter ((`elem` matchingNames) . omittedName)
               $ exferenceSessionOmissions session
+         where
+          environment = exferenceSessionEnvironment session
         _ -> putStrLn "Exference is unavailable."
  where
   runtime = exferenceRuntime state
-
-resolveScopeName :: ReplScope -> Name -> Either String Name
-resolveScopeName context source = case nameModule source of
-  Nothing -> case nameSpecial source of
-    Just _ -> Right source
-    Nothing -> chooseUnqualified
-  Just qualifier -> case qualifiedCandidates qualifier of
-    [name] -> Right name
-    _ : _ : _ -> Left $ "ambiguous qualified name "
-      ++ renderCanonical source ++ "; matches "
-      ++ intercalate ", " (map renderCanonical $ qualifiedCandidates qualifier)
-    [] -> case
-        [ canonical
-        | (alias, canonical) <- scopeQualifierAliases context
-        , alias == qualifier
-        ] of
-      [] -> Right source
-      [_] -> chooseAlias qualifier
-      modules -> Left $ "ambiguous module qualifier "
-        ++ renderModuleName qualifier ++ "; matches "
-        ++ intercalate ", " (map renderModuleName modules)
- where
-  sameOccurrence candidate = nameOccurrence candidate == nameOccurrence source
-  unqualified = filter sameOccurrence $ scopeUnqualifiedNames context
-  local = case scopeCurrentModule context of
-    Nothing -> []
-    Just current -> filter ((== Just current) . nameModule) unqualified
-  chooseUnqualified = case if null local then unqualified else local of
-    [name] -> Right name
-    [] -> Left $ "name " ++ renderCanonical source ++ " is not in scope"
-    names -> Left $ "ambiguous unqualified name " ++ renderCanonical source
-      ++ "; matches " ++ intercalate ", " (map renderCanonical names)
-  chooseAlias qualifier = case
-      qualifiedCandidates qualifier of
-    [name] -> Right name
-    [] -> Left $ "qualified name " ++ renderCanonical source
-      ++ " is not in scope"
-    names -> Left $ "ambiguous qualified name " ++ renderCanonical source
-      ++ "; matches " ++ intercalate ", " (map renderCanonical names)
-  qualifiedCandidates qualifier =
-    [ name
-    | (written, admitted) <- scopeQualifiedNames context
-    , written == qualifier
-    , name <- admitted
-    , sameOccurrence name
-    ]
 
 forSelectedBackends :: ReplState -> (Backend -> IO ()) -> IO ()
 forSelectedBackends state action = case activeBackends state of
@@ -1163,6 +1119,19 @@ declarationDefines name declaration =
     ClassDeclaration _ _ _ _ methods ->
       any ((== name) . valueName) methods
     _ -> False
+
+declarationNameSet
+  :: Environment variable kind annotation
+  -> Set.Set Name
+declarationNameSet = Set.fromList
+  . concatMap declarationNames
+  . environmentDeclarations
+ where
+  declarationNames declaration = declarationSubjectName declaration : case
+    declaration of
+      DataTypeDeclaration _ _ _ constructors -> map constructorName constructors
+      ClassDeclaration _ _ _ _ methods -> map valueName methods
+      _ -> []
 
 renderDeclaration
   :: (variable -> String)

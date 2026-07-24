@@ -11,10 +11,12 @@
 -- make Djinn's otherwise-terminating proof search intractable. They are
 -- therefore excluded unless the caller opts in ('IncludeDjinnAxioms'), which
 -- the REPL exposes as the @djinn-axioms@ setting. Record selectors are the
--- exception: they are bounded, structural field projections derived from the
--- visible datatypes, so they always project. That also keeps a recursive
--- record usable, because its selectors survive the datatype's degradation to
--- an abstract type.
+-- exception: a selector whose parent datatype cannot be case-eliminated
+-- (recursive, hidden or missing constructors) is the only route to its
+-- field, so it always projects. Selectors of fully eliminable records stay
+-- out of the axiom set — they would only multiply equivalent proofs of what
+-- structural elimination already derives, and the projection instead reports
+-- their positions so presentation can name the eliminated field.
 module Language.Haskell.Djex.REPL.DjinnScope
   ( DjinnAxiomPolicy (..)
   , DjinnProjection (..)
@@ -67,6 +69,9 @@ data DjinnAxiomPolicy
 data DjinnProjection = DjinnProjection
   { djinnProjectionSession :: DjinnSession
   , djinnProjectionOmissions :: [DjinnScopeOmission]
+  , djinnProjectionFieldSelectors :: Map.Map (Name, Int) Name
+    -- ^ Selector spellings for @(constructor, field index)@ positions in
+    -- the session's renamed vocabulary, for presenting field projections.
   }
 
 -- | One projection compromise, in user-reportable form.
@@ -95,20 +100,50 @@ type ScopeDeclaration = Declaration String Void ()
 -- Djinn session. The input declarations use canonical names; the projection
 -- renames them to their in-scope unqualified spellings, because Djinn's
 -- declaration grammar has no qualified type, class, or constructor names.
--- Values named in the selector set are record-field projections and enter
+-- Record datatypes arrive as @(parent, [(constructor, selectors in field
+-- order)])@ groups; selectors of parents Djinn cannot case-eliminate enter
 -- the session under every axiom policy.
 projectDjinnScope
   :: DjinnAxiomPolicy
-  -> Set.Set Name
-  -- ^ Canonical names of record selectors among the declarations.
+  -> [(Name, [(Name, [Name])])]
   -> [ScopeDeclaration]
   -> Set.Set Name
   -- ^ Canonical names visible unqualified in the prompt scope.
   -> Either Diagnostic DjinnProjection
-projectDjinnScope policy selectors declarations visible = do
-  let (shaped, shapeOmissions) =
-        shapeDeclarations policy selectors visible declarations
-      (renamed, renameOmissions) = renameDeclarations shaped
+projectDjinnScope policy records declarations visible = do
+  let recursive = recursiveDataTypeNames declarations
+      fullyEliminable = Set.fromList
+        [ name
+        | DataTypeDeclaration _ name _ constructors <- declarations
+        , name `Set.member` visible
+        , not $ null constructors
+        , all ((`Set.member` visible) . constructorName) constructors
+        , not $ name `Set.member` recursive
+        ]
+      allSelectors = Set.fromList
+        [ selector
+        | (_, constructors) <- records
+        , (_, selectorNames) <- constructors
+        , selector <- selectorNames
+        ]
+      axiomSelectors = Set.fromList
+        [ selector
+        | (parent, constructors) <- records
+        , not $ parent `Set.member` fullyEliminable
+        , (_, selectorNames) <- constructors
+        , selector <- selectorNames
+        ]
+      (shaped, shapeOmissions) = shapeDeclarations
+        policy axiomSelectors allSelectors visible declarations
+      (renamed, renameOmissions, forward) = renameDeclarations shaped
+      fieldSelectors = Map.fromList
+        [ ((renamedConstructor, index), renamedSelector)
+        | (_, constructors) <- records
+        , (constructor, selectorNames) <- constructors
+        , Just renamedConstructor <- [Map.lookup constructor forward]
+        , (index, selector) <- zip [0 ..] selectorNames
+        , Just renamedSelector <- [unqualifyName selector]
+        ]
       (grounded, recursionOmissions) = degradeRecursiveDataTypes renamed
       (admitted, admissionOmissions) = admitDeclarations grounded
       (stubbed, stubOmissions) = stubUnknownReferences admitted
@@ -125,6 +160,7 @@ projectDjinnScope policy selectors declarations visible = do
         , referenceOmissions
         , sealOmissions
         ]
+    , djinnProjectionFieldSelectors = fieldSelectors
     }
 
 -- Scope filtering and structural policy. Invisible declarations vanish
@@ -134,9 +170,10 @@ shapeDeclarations
   :: DjinnAxiomPolicy
   -> Set.Set Name
   -> Set.Set Name
+  -> Set.Set Name
   -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-shapeDeclarations policy selectors visible declarations =
+shapeDeclarations policy axiomSelectors allSelectors visible declarations =
   (kept, omissions ++ instanceSummary)
  where
   (kept, omissions, instanceCount) =
@@ -154,7 +191,11 @@ shapeDeclarations policy selectors visible declarations =
     ValueDeclaration signature
       | not $ isVisible $ valueName signature -> skip
       | policy == IncludeDjinnAxioms
-          || valueName signature `Set.member` selectors -> keep declaration
+          || valueName signature `Set.member` axiomSelectors ->
+            keep declaration
+      -- A selector of an eliminable record is not lost: its field is
+      -- reachable structurally, and presentation names the projection.
+      | valueName signature `Set.member` allSelectors -> skip
       | otherwise -> omit (valueName signature)
           "value axioms are excluded; :set djinn-axioms on to include them"
     TypeSynonymDeclaration _ name _ _
@@ -198,8 +239,8 @@ shapeDeclarations policy selectors visible declarations =
 -- outside it keep their canonical spelling and are resolved by stubbing.
 renameDeclarations
   :: [ScopeDeclaration]
-  -> ([ScopeDeclaration], [DjinnScopeOmission])
-renameDeclarations declarations = (renamed, omissions)
+  -> ([ScopeDeclaration], [DjinnScopeOmission], Map.Map Name Name)
+renameDeclarations declarations = (renamed, omissions, forward)
  where
   owned = concatMap declarationOwnedNames declarations
   (forward, ambiguous) = renameMap owned

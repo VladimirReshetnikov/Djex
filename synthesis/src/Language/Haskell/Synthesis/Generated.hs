@@ -41,6 +41,7 @@ module Language.Haskell.Synthesis.Generated
   , fillExpressionHole
   , substituteExpressionLocalBy
   , alphaEquivalentExpression
+  , projectFieldSelectors
   , simplifyCaseExpression
   , simplifyExpressionCases
   , normalizeExpressionPatterns
@@ -471,6 +472,129 @@ alphaEquivalentExpression = equivalent [] []
       nested <- matchPattern leftNested rightNested
       pure $ (leftLocal, rightLocal) : nested
     _ -> Nothing
+
+-- | Normalize a checked clause's record eliminations toward their simplest
+-- spelling, then eta-contract the clause when a rewrite fired.
+--
+-- Three total-term reductions cooperate. A single-alternative elimination
+-- that merely projects one field becomes an application of that field's
+-- record selector, named by the @(constructor, field index)@ map. A
+-- reconstruction @C v1 .. vn@ appearing under @let C v1 .. vn = x@ collapses
+-- back to @x@, undoing the deconstruct-and-rebuild spelling that searches
+-- required to use every bound variable. A @let@ none of whose binders is
+-- used disappears: pattern bindings are lazy, so the dropped match was never
+-- forced. Like 'simplifyCaseExpression', these are reductions for
+-- independently checked total synthesis terms, not bottom-preserving Haskell
+-- optimizations.
+projectFieldSelectors
+  :: Eq local
+  => Map (Name, Int) Name
+  -> FunctionClause local
+  -> FunctionClause local
+projectFieldSelectors selectors clause
+  | Map.null selectors = clause
+  | rewritten == clauseBody clause = clause
+  | otherwise = etaContractClause clause {clauseBody = rewritten}
+ where
+  rewritten = converge (8 :: Int) $ clauseBody clause
+  converge fuel body
+    | fuel <= 0 = body
+    | next == body = body
+    | otherwise = converge (fuel - 1) next
+   where
+    next = rewrite body
+
+  rewrite expression = case descend expression of
+    Case scrutinee [(Constructor constructor patterns, Local result)]
+      | Just selector <- fieldSelector constructor patterns result ->
+          Apply (Global selector) scrutinee
+    Let pattern bound body -> rewriteLet pattern bound body
+    other -> other
+
+  descend expression = case expression of
+    Local local -> Local local
+    Global name -> Global name
+    Hole local -> Hole local
+    Lambda patterns body -> Lambda patterns $ rewrite body
+    Apply function argument -> Apply (rewrite function) (rewrite argument)
+    Tuple elements -> Tuple $ map rewrite elements
+    Let pattern bound body -> Let pattern (rewrite bound) (rewrite body)
+    Case scrutinee alternatives -> Case (rewrite scrutinee)
+      [(pattern, rewrite body) | (pattern, body) <- alternatives]
+
+  rewriteLet pattern bound body
+    | Constructor constructor patterns <- pattern
+    , Local result <- body
+    , Just selector <- fieldSelector constructor patterns result =
+        Apply (Global selector) bound
+    | Constructor constructor patterns <- pattern
+    , duplicable bound
+    , Just binders <- bindersOf patterns
+    , let collapsed = substituteRebuild constructor binders bound body
+    , collapsed /= body = rewriteLet pattern bound collapsed
+    | not (any (`elem` toList body) (toList pattern)) = body
+    | otherwise = Let pattern bound body
+
+  -- Only variable-like bound expressions are duplicated into rebuild sites;
+  -- anything larger would trade sharing for the shorter spelling.
+  duplicable bound = case bound of
+    Local _ -> True
+    Global _ -> True
+    _ -> False
+
+  substituteRebuild constructor binders bound = replace
+   where
+    replace expression
+      | rebuildsBinding expression = bound
+      | otherwise = case expression of
+          Lambda patterns body -> Lambda patterns $ replace body
+          Apply function argument ->
+            Apply (replace function) (replace argument)
+          Tuple elements -> Tuple $ map replace elements
+          Let pattern inner body -> Let pattern (replace inner) (replace body)
+          Case scrutinee alternatives -> Case (replace scrutinee)
+            [(pattern, replace body) | (pattern, body) <- alternatives]
+          other -> other
+    rebuildsBinding expression = case expressionApplicationSpine expression of
+      (Global name, arguments) -> name == constructor
+        && arguments == map Local binders
+      _ -> False
+
+  bindersOf = traverse asBind
+   where
+    asBind (Bind local) = Just local
+    asBind _ = Nothing
+
+  fieldSelector constructor patterns result = do
+    index <- projectedIndex patterns result
+    Map.lookup (constructor, index) selectors
+
+  -- The projected binder must occur at exactly one field position, and every
+  -- sibling pattern must be irrefutable and dead, so replacing the whole
+  -- elimination with one selector cannot change which field is returned.
+  projectedIndex patterns result = case
+      [ index
+      | (index, pattern) <- zip [0 ..] patterns
+      , pattern == Bind result
+      ] of
+    [index] | all shallowPattern patterns -> Just index
+    _ -> Nothing
+
+  shallowPattern pattern = case pattern of
+    Bind _ -> True
+    Wildcard -> True
+    _ -> False
+
+etaContractClause :: Eq local => FunctionClause local -> FunctionClause local
+etaContractClause clause = case
+    (reverse $ clausePatterns clause, clauseBody clause) of
+  (Bind binder : reversedRest, Apply function (Local argument))
+    | binder == argument
+    , binder `notElem` toList function -> etaContractClause clause
+        { clausePatterns = reverse reversedRest
+        , clauseBody = function
+        }
+  _ -> clause
 
 -- | Construct a case expression while applying the total-term reductions used
 -- by synthesis output.

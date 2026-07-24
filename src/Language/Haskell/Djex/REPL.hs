@@ -27,6 +27,7 @@ import Data.Char (isSpace)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty)
+import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Data.Version (showVersion)
@@ -105,6 +106,10 @@ data ReplState = ReplState
   { activeBackends :: ReplBackend
   , djinnRuntime :: DjinnRuntime
   , exferenceRuntime :: ExferenceRuntime
+  , scopeFieldSelectors :: FieldSelectors
+    -- ^ Canonical selector spellings per constructor field position, for
+    -- presenting Exference candidates; Djinn's renamed table lives in its
+    -- projection.
   , resultTarget :: DefinitionName
   , presentation :: PresentationOptions
   , djinnSearchOptions :: QueryOptions
@@ -141,9 +146,7 @@ refreshDjinnProjection state = case
     ) of
   (Just baseSession, Just context) -> case projectDjinnScope
       (djinnAxiomPolicy djinn)
-      (maybe Set.empty
-        (workspaceRecordSelectors $ exferenceSessionInventory baseSession)
-        (exferenceRuntimeWorkspace runtime))
+      records
       (scopeProjectionDeclarations baseSession)
       (Set.fromList $ scopeUnqualifiedNames context) of
     Left failure -> do
@@ -155,8 +158,22 @@ refreshDjinnProjection state = case
  where
   runtime = exferenceRuntime state
   djinn = djinnRuntime state
-  withProjection projection =
-    state {djinnRuntime = djinn {djinnProjection = projection}}
+  records = case
+      ( exferenceRuntimeBaseSession runtime
+      , exferenceRuntimeWorkspace runtime
+      ) of
+    (Just baseSession, Just workspace) -> workspaceRecordProjections
+      (exferenceSessionInventory baseSession) workspace
+    _ -> []
+  withProjection projection = state
+    { djinnRuntime = djinn {djinnProjection = projection}
+    , scopeFieldSelectors = Map.fromList
+        [ ((constructor, index), selector)
+        | (_, constructors) <- records
+        , (constructor, selectorNames) <- constructors
+        , (index, selector) <- zip [0 ..] selectorNames
+        ]
+    }
 
 scopeProjectionDeclarations :: ExferenceSession -> [Declaration String Void ()]
 scopeProjectionDeclarations = map
@@ -226,6 +243,7 @@ runRepl options = case standardDjinnSession of
                     , djinnProjection = Nothing
                     }
                 , exferenceRuntime = exference
+                , scopeFieldSelectors = noFieldSelectors
                 , resultTarget = target
                 , presentation = defaultInteractivePresentationOptions
                 , djinnSearchOptions = defaultQueryOptions
@@ -401,6 +419,8 @@ runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()
 runDjinnInteractive sourceName typeSource state = ignoreExit
   $ executeDjinnCommand
       (presentation state)
+      (maybe noFieldSelectors djinnProjectionFieldSelectors
+        $ djinnProjection $ djinnRuntime state)
       (currentDjinnSession state)
       (djinnSearchOptions state)
       (resultTarget state)
@@ -412,6 +432,7 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
   (Just session, Just context) -> ignoreExit
     $ executeExferenceCommandInScope
         (presentation state)
+        (scopeFieldSelectors state)
         session
         (exferenceSearchOptions state)
         (resultTarget state)

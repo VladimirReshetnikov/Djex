@@ -26,7 +26,7 @@ module Language.Haskell.Djex.REPL.Scope
   , renderScopeImports
   , renderScopeModules
   , moduleNamesForBrowse
-  , workspaceRecordSelectors
+  , workspaceRecordProjections
   ) where
 
 import Control.Monad.Trans.Class (lift)
@@ -626,52 +626,73 @@ symbolIndex inventory modules = foldl' addRecordFields declarationsIndex
 -- the already parsed source snapshot only to recover the parent relation
 -- needed by Haskell import/export forms such as @Record(..)@ and
 -- @Record(field)@, or by consumers that must distinguish field projections
--- from ordinary values. Every parent and field is intersected with the
--- checked inventory, so rejected syntax can never leak names to a consumer.
+-- from ordinary values. Every parent, constructor, and field is intersected
+-- with the checked inventory, so rejected syntax can never leak names.
 moduleRecordSelectorGroups
   :: SymbolIndex
   -> ModuleName
   -> WorkspaceModule
   -> [(Name, [Name])]
 moduleRecordSelectorGroups index moduleName target =
-  [ (parent, ordNub $ concatMap (matches ValueSymbol) fieldSpellings)
-  | (parentSpelling, fieldSpellings) <-
-      recordFieldGroups $ workspaceModuleSyntax target
-  , [parent] <- [matches TypeSymbol parentSpelling]
+  [ ( parent
+    , ordNub $ concatMap (symbolMatches index moduleName ValueSymbol)
+        $ concatMap snd constructors
+    )
+  | (parentSpelling, constructors) <-
+      recordConstructorGroups $ workspaceModuleSyntax target
+  , [parent] <- [symbolMatches index moduleName TypeSymbol parentSpelling]
   ]
- where
-  available = moduleSymbols index moduleName
-  matches role spelling =
-    [ name
-    | name <- available
-    , SharedName.nameSpelling name == Just spelling
-    , role `Set.member` Map.findWithDefault Set.empty name
-        (symbolRoles index)
-    ]
 
--- | Every record-selector name defined by the workspace's parsed source. The
--- shared declaration model keeps selectors as plain values, so the source
+symbolMatches :: SymbolIndex -> ModuleName -> SymbolRole -> String -> [Name]
+symbolMatches index moduleName role spelling =
+  [ name
+  | name <- moduleSymbols index moduleName
+  , SharedName.nameSpelling name == Just spelling
+  , role `Set.member` Map.findWithDefault Set.empty name (symbolRoles index)
+  ]
+
+-- | Every record datatype in the workspace as canonical
+-- @(parent, [(constructor, selectors in field order)])@ groups. A field
+-- whose selector cannot be uniquely matched in the checked inventory drops
+-- its whole constructor, so reported positions never silently shift. The
+-- shared declaration model keeps selectors as plain values; the source
 -- snapshot is the only witness of their record provenance.
-workspaceRecordSelectors
+workspaceRecordProjections
   :: Inventory typeVariable annotation
   -> SourceWorkspace
-  -> Set.Set Name
-workspaceRecordSelectors inventory workspace = case
+  -> [(Name, [(Name, [Name])])]
+workspaceRecordProjections inventory workspace = case
     workspaceModuleMap workspace of
-  Left _ -> Set.empty
+  Left _ -> []
   Right modules ->
     let index = symbolIndex inventory modules
-    in Set.fromList
-      [ selector
+    in
+      [ (parent, positional)
       | (moduleName, target) <- Map.toList modules
-      , (_, selectors) <- moduleRecordSelectorGroups index moduleName target
-      , selector <- selectors
+      , (parentSpelling, constructors) <-
+          recordConstructorGroups $ workspaceModuleSyntax target
+      , [parent] <-
+          [symbolMatches index moduleName TypeSymbol parentSpelling]
+      , let positional =
+              [ (constructor, selectors)
+              | (constructorSpelling, fieldSpellings) <- constructors
+              , [constructor] <- [symbolMatches index moduleName
+                  ConstructorSymbol constructorSpelling]
+              , Just selectors <- [traverse
+                  (unique . symbolMatches index moduleName ValueSymbol)
+                  fieldSpellings]
+              ]
       ]
+ where
+  unique [selector] = Just selector
+  unique _ = Nothing
 
-recordFieldGroups
+-- | Record constructors and their field spellings per datatype, in source
+-- field order.
+recordConstructorGroups
   :: HSE.Module HSE.SrcSpanInfo
-  -> [(String, [String])]
-recordFieldGroups syntax = concatMap declarationGroups declarations
+  -> [(String, [(String, [String])])]
+recordConstructorGroups syntax = concatMap declarationGroups declarations
  where
   declarations = case syntax of
     HSE.Module _ _ _ _ items -> items
@@ -680,21 +701,24 @@ recordFieldGroups syntax = concatMap declarationGroups declarations
 
   declarationGroups declaration = case declaration of
     HSE.DataDecl _ _ _ headSyntax constructors _ ->
-      oneGroup headSyntax $ concatMap constructorFields constructors
+      oneGroup headSyntax $ mapMaybe constructorFields constructors
     HSE.GDataDecl _ _ _ headSyntax _ constructors _ ->
-      oneGroup headSyntax $ concatMap gadtFields constructors
+      oneGroup headSyntax $ mapMaybe gadtFields constructors
     _ -> []
 
-  oneGroup headSyntax fields = case ordNub fields of
+  oneGroup headSyntax constructors = case constructors of
     [] -> []
-    names -> [(hseNameText $ declarationHeadName headSyntax, names)]
+    _ -> [(hseNameText $ declarationHeadName headSyntax, constructors)]
 
   constructorFields (HSE.QualConDecl _ _ _ constructor) = case constructor of
-    HSE.RecDecl _ _ fields -> concatMap fieldNames fields
-    _ -> []
+    HSE.RecDecl _ name fields ->
+      Just (hseNameText name, concatMap fieldNames fields)
+    _ -> Nothing
 
-  gadtFields (HSE.GadtDecl _ _ _ _ fields _) =
-    maybe [] (concatMap fieldNames) fields
+  gadtFields (HSE.GadtDecl _ name _ _ fields _) = case fields of
+    Just fieldList ->
+      Just (hseNameText name, concatMap fieldNames fieldList)
+    Nothing -> Nothing
 
   fieldNames (HSE.FieldDecl _ names _) = map hseNameText names
 

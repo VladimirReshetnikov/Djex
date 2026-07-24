@@ -182,6 +182,7 @@ runDjinn options = case standardDjinnSession of
   Left failure -> diagnosticFailure failure
   Right session -> executeDjinnCommand
     (commonPresentation common)
+    noFieldSelectors
     session
     (djinnQueryOptions options)
     (commonTarget common)
@@ -212,6 +213,7 @@ runExference options = case
         pure runtimeFailure
       Right session -> executeExferenceCommand
         (commonPresentation common)
+        noFieldSelectors
         session
         (exferenceSearchOptions options)
         (commonTarget common)

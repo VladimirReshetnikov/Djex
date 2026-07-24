@@ -1672,10 +1672,10 @@ testReplUnifiedScope = withTemporaryEnvironment
   assertEqual "unified scope REPL exit" ExitSuccess exitCode
   assertContains "comparison labels Djinn" "-- Djinn" output
   assertContains "comparison labels Exference" "-- Exference" output
-  assertContains "Djinn uses the record selector without axiom opt-in"
-    "unwrapped" output
-  assertContains "Exference eliminates the loaded constructor"
-    "Custom.MkWrapped" output
+  assertEqual "both backends present the bare record selector" 2
+    $ countOccurrences "unwrapped" output
+  assertContains "Exference qualifies the presented selector"
+    "Custom.unwrapped" output
   assertContains "Djinn reports its projected environment"
     "projected from the module scope" output
   assertEqual "the value-axiom omission disappears once axioms are enabled" 1

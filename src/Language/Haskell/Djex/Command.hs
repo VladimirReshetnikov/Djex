@@ -23,6 +23,8 @@ module Language.Haskell.Djex.Command
   , renderModeName
   , qualificationName
   , renderBounded
+  , FieldSelectors
+  , noFieldSelectors
   , prepareDjinnQueryOptions
   , executeDjinnCommand
   , executeExferenceCommand
@@ -39,6 +41,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Bifunctor (first)
 import Data.List (intercalate)
+import qualified Data.Map.Strict as Map
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.IO (hFlush, hPutStrLn, stderr, stdout)
 import Text.Read (readMaybe)
@@ -162,6 +165,14 @@ qualificationName FullyQualified = "full"
 renderBounded :: Show value => Maybe value -> String
 renderBounded = maybe "unbounded" show
 
+-- | Selector spellings for @(constructor, field index)@ positions, used to
+-- present a candidate's field projections by selector name.
+type FieldSelectors = Map.Map (Name, Int) Name
+
+-- | The empty selector table used by frontends without a source workspace.
+noFieldSelectors :: FieldSelectors
+noFieldSelectors = Map.empty
+
 -- | Apply presentation-driven proof enumeration without changing the caller's
 -- resource limits. Djinn never needs its historical internal sorting because
 -- the shared selection layer owns result ordering.
@@ -177,13 +188,15 @@ prepareDjinnQueryOptions presentation options = options
 -- | Parse, execute, and present one checked Djinn query.
 executeDjinnCommand
   :: PresentationOptions
+  -> FieldSelectors
   -> DjinnSession
   -> QueryOptions
   -> DefinitionName
   -> FilePath
   -> String
   -> IO ExitCode
-executeDjinnCommand presentation session options target sourceName source =
+executeDjinnCommand presentation fieldSelectors session options target
+    sourceName source =
   case parseDjinnRequestWithCheckedTarget
       session
       (prepareDjinnQueryOptions presentation options)
@@ -193,30 +206,33 @@ executeDjinnCommand presentation session options target sourceName source =
     Left failure -> diagnosticFailure failure
     Right request -> case runDjinnQuery session request of
       Left failure -> diagnosticFailure failure
-      Right result -> presentDjinn presentation result
+      Right result -> presentDjinn presentation fieldSelectors result
 
 -- | Parse, execute, and present one checked Exference query.
 executeExferenceCommand
   :: PresentationOptions
+  -> FieldSelectors
   -> ExferenceSession
   -> ExferenceOptions
   -> DefinitionName
   -> FilePath
   -> String
   -> IO ExitCode
-executeExferenceCommand presentation session options target sourceName source =
+executeExferenceCommand presentation fieldSelectors session options target
+    sourceName source =
   case parseExferenceRequestWithCheckedTarget
       session options target sourceName source of
     Left failure -> diagnosticFailure failure
     Right request -> case runExferenceQuery session request of
       Left failure -> diagnosticFailure failure
-      Right results -> presentExference presentation results
+      Right results -> presentExference presentation fieldSelectors results
 
 -- | Parse, execute, and present an Exference query in an interactive module
 -- scope. The supplied session may already have its search dictionary narrowed;
 -- its complete inventory is still retained for qualified type elaboration.
 executeExferenceCommandInScope
   :: PresentationOptions
+  -> FieldSelectors
   -> ExferenceSession
   -> ExferenceOptions
   -> DefinitionName
@@ -224,18 +240,23 @@ executeExferenceCommandInScope
   -> FilePath
   -> String
   -> IO ExitCode
-executeExferenceCommandInScope presentation session options target scope
-    sourceName source =
+executeExferenceCommandInScope presentation fieldSelectors session options
+    target scope sourceName source =
   case parseExferenceRequestWithCheckedTargetInScope
       session options target scope sourceName source of
     Left failure -> diagnosticFailure failure
     Right request -> case runExferenceQuery session request of
       Left failure -> diagnosticFailure failure
-      Right results -> presentExference presentation results
+      Right results -> presentExference presentation fieldSelectors results
 
 -- | Select, render, and report one terminal Djinn result.
-presentDjinn :: PresentationOptions -> DjinnResult -> IO ExitCode
-presentDjinn options result = case traverse (renderDjinn options) candidates of
+presentDjinn
+  :: PresentationOptions
+  -> FieldSelectors
+  -> DjinnResult
+  -> IO ExitCode
+presentDjinn options fieldSelectors result = case
+    traverse (renderDjinn options) candidates of
   Left failure -> renderFailure "DJEX_DJINN_RENDER" failure
   Right rendered -> do
     printCandidates rendered
@@ -249,15 +270,20 @@ presentDjinn options result = case traverse (renderDjinn options) candidates of
     candidateDetails
     (const True)
     [result]
-  candidates = selectionCandidates selection
+  candidates = map (fmap $ projectFieldSelectors fieldSelectors)
+    $ selectionCandidates selection
   progress = selectionProgress selection
 
 -- | Select, render, and report Exference's lazy result sequence.
-presentExference :: PresentationOptions -> [ExferenceResult] -> IO ExitCode
-presentExference options results
+presentExference
+  :: PresentationOptions
+  -> FieldSelectors
+  -> [ExferenceResult]
+  -> IO ExitCode
+presentExference options fieldSelectors results
   | presentationSelection options == SelectAll =
-      presentAllExference options results
-presentExference options results = case traverse
+      presentAllExference options fieldSelectors results
+presentExference options fieldSelectors results = case traverse
     (renderExferenceBlock options) candidates of
   Left failure -> renderFailure "DJEX_EXF_RENDER" failure
   Right rendered -> do
@@ -266,16 +292,37 @@ presentExference options results = case traverse
     reportTruncation progress
     pure ExitSuccess
  where
-  selection = selectQueryResults
-    (presentationSelection options)
-    (exferenceCandidateComplexity . exferenceCandidateMetrics)
-    (const True)
-    results
-  candidates = selectionCandidates selection
+  -- When record selectors are in scope, a first-candidate request looks a
+  -- few results ahead and shows the one whose selector-normalized spelling
+  -- is smallest: search order distinguishes deconstruct-and-rebuild
+  -- spellings that presentation renders identically simple or not at all.
+  selection = case presentationSelection options of
+    SelectFirst
+      | not $ Map.null fieldSelectors -> selectQueryResults
+          (SelectBestLookahead simplificationLookahead)
+          (expressionSize . functionClauseExpression
+            . projectFieldSelectors fieldSelectors . candidateOutput)
+          (const True)
+          results
+    mode -> selectQueryResults mode
+      (exferenceCandidateComplexity . exferenceCandidateMetrics)
+      (const True)
+      results
+  picked = case presentationSelection options of
+    SelectFirst -> take 1 $ selectionCandidates selection
+    _ -> selectionCandidates selection
+  candidates = map (fmap $ projectFieldSelectors fieldSelectors) picked
   progress = selectionProgress selection
 
-presentAllExference :: PresentationOptions -> [ExferenceResult] -> IO ExitCode
-presentAllExference options results = do
+simplificationLookahead :: Int
+simplificationLookahead = 3
+
+presentAllExference
+  :: PresentationOptions
+  -> FieldSelectors
+  -> [ExferenceResult]
+  -> IO ExitCode
+presentAllExference options fieldSelectors results = do
   outcome <- runExceptT $ foldAllQueryResultsM
     (const True) printOne False results
   case outcome of
@@ -286,7 +333,8 @@ presentAllExference options results = do
       pure ExitSuccess
  where
   printOne printed candidate = do
-    rendered <- ExceptT $ pure $ renderExferenceBlock options candidate
+    rendered <- ExceptT $ pure $ renderExferenceBlock options
+      $ fmap (projectFieldSelectors fieldSelectors) candidate
     liftIO $ do
       when printed $ putStrLn "\n-- or\n"
       putStrLn rendered

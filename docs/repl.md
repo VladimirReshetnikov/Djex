@@ -592,11 +592,23 @@ so the projection degrades rather than fails:
   `:set djinn-axioms on`. Axioms are off by default because even
   moderate axiom sets make Djinn's otherwise-terminating proof search
   intractable; structural proving over the projected datatypes stays fast.
-- Record selectors are the exception to the axiom policy: both engines treat
-  a field name as a term-level projection, so selectors always enter Djinn's
-  session. Because selectors survive their parent's degradation to an
-  abstract type, a recursive or opaque record stays field-accessible to
-  Djinn even though it cannot be case-eliminated.
+- Record selectors are the exception to the axiom policy exactly where they
+  add proof power: a selector whose parent datatype Djinn cannot
+  case-eliminate (recursive, hidden, or out-of-scope constructors) always
+  enters the session, so a recursive or opaque record stays
+  field-accessible. Selectors of fully eliminable records stay out of the
+  axiom set — they would only multiply equivalent proofs of what structural
+  elimination already derives.
+
+Field projections are also normalized at presentation for both backends: a
+candidate that eliminates a record merely to return one field, or that
+faithfully rebuilds a deconstructed record, is shown as an application of
+the field's selector (for example `secondPart` rather than
+`\a -> case a of MkPair _ c -> c`). When selectors are in scope, an
+Exference `select first` request additionally looks a few candidates ahead
+and shows the one with the smallest normalized spelling, because search
+order distinguishes rebuild spellings that presentation renders identically
+simple or not at all.
 
 Every compromise is recorded: `:show environment` reports the projected
 declaration and omission counts, and `:show omissions` lists each omitted

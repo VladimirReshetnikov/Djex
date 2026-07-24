@@ -28,7 +28,7 @@ import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import qualified Data.Set as Set
 import Data.Version (showVersion)
 import Data.Void (Void)
@@ -36,13 +36,17 @@ import System.Directory
   ( Permissions (readable, searchable, writable)
   , canonicalizePath
   , doesDirectoryExist
+  , doesFileExist
   , doesPathExist
+  , getHomeDirectory
   , getPermissions
   , getCurrentDirectory
   , setCurrentDirectory
   )
+import System.Environment (lookupEnv)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.FilePath (takeDirectory)
+import qualified System.FilePath as FilePath
 import System.IO (IOMode (ReadMode), hGetContents, withFile)
 import System.IO.Error (tryIOError)
 import System.Process
@@ -89,6 +93,9 @@ data ReplOptions = ReplOptions
     -- ^ Whether known recursion helpers are retained while sealing Exference.
   , replHistoryFile :: Maybe FilePath
     -- ^ Optional Haskeline history file. 'Nothing' keeps in-session history.
+  , replIgnoreStartupFiles :: Bool
+    -- ^ Whether @.djexrc@ startup files are skipped, as GHCi's
+    -- @-ignore-dot-ghci@ skips @.ghci@.
   }
   deriving (Eq, Show)
 
@@ -100,6 +107,7 @@ defaultReplOptions = ReplOptions
   , replEnvironmentPath = Nothing
   , replAllowFix = False
   , replHistoryFile = Nothing
+  , replIgnoreStartupFiles = False
   }
 
 data ReplState = ReplState
@@ -261,12 +269,105 @@ runRepl options = case standardDjinnSession of
             Nothing -> putStrLn
               "Exference is unavailable; use :load TARGET after fixing its workspace."
           putStrLn "Type :help for help."
-          _ <- runReplDriver historyPath ready renderPrompt
-            $ executeSource "<interactive>"
-          pure ExitSuccess
+          started <- if replIgnoreStartupFiles options
+            then pure $ ContinueRepl ready
+            else runStartupFiles ready
+          case started of
+            ExitRepl _ -> pure ExitSuccess
+            ContinueRepl configured -> do
+              _ <- runReplDriver historyPath configured renderPrompt
+                replCompletions $ executeSource "<interactive>"
+              pure ExitSuccess
 
 defaultPromptTemplate :: String
 defaultPromptTemplate = "djex[%b]> "
+
+-- | Run @.djexrc@ from the home directory and then the current directory
+-- through the ordinary script machinery, exactly as GHCi runs @.ghci@.
+-- Missing files are skipped silently; a broken line reports and continues.
+runStartupFiles :: ReplState -> IO (ReplStep ReplState)
+runStartupFiles initial = do
+  home <- tryIOError getHomeDirectory
+  current <- tryIOError getCurrentDirectory
+  candidates <- startupCandidates $ either (const []) pure home
+    ++ either (const []) pure current
+  go initial candidates
+ where
+  go state [] = pure $ ContinueRepl state
+  go state (path : remaining) = do
+    putStrLn $ "Loaded startup commands from " ++ path
+    outcome <- runScript path [] state
+    case outcome of
+      ExitRepl final -> pure $ ExitRepl final
+      ContinueRepl next -> go next remaining
+
+-- Canonical deduplication keeps one run when the home and current
+-- directories coincide.
+startupCandidates :: [FilePath] -> IO [FilePath]
+startupCandidates directories = go Set.empty directories
+ where
+  go _ [] = pure []
+  go seen (directory : remaining) = do
+    let candidate = directory FilePath.</> ".djexrc"
+    present <- doesFileExist candidate
+    if not present
+      then go seen remaining
+      else do
+        resolved <- tryIOError $ canonicalizePath candidate
+        case resolved of
+          Left _ -> go seen remaining
+          Right canonical
+            | canonical `Set.member` seen -> go seen remaining
+            | otherwise ->
+                (canonical :) <$> go (Set.insert canonical seen) remaining
+
+-- | Project the completion candidates GHCi would offer: loaded module names
+-- for module-oriented commands and in-scope identifier spellings at query
+-- positions, both qualified and unqualified.
+replCompletions :: ReplState -> ReplCompletions
+replCompletions state = ReplCompletions
+  { completionModules = maybe []
+      (map workspaceModuleName . workspaceModules)
+      $ exferenceRuntimeWorkspace runtime
+  , completionIdentifiers = case exferenceRuntimeScope runtime of
+      Nothing -> []
+      Just context -> Set.toList $ Set.fromList
+        $ mapMaybe nameSpelling (scopeUnqualifiedNames context)
+        ++ [ renderModuleName qualifier ++ "." ++ spelling
+           | (qualifier, names) <- scopeQualifiedNames context
+           , Just spelling <- map nameSpelling names
+           ]
+  }
+ where
+  runtime = exferenceRuntime state
+
+-- | Open the configured editor, defaulting to the most recently loaded
+-- explicit file target as GHCi's @:edit@ defaults to the current module.
+editTargetFile :: Maybe FilePath -> ReplState -> IO ()
+editTargetFile requested state = do
+  visual <- lookupEnv "VISUAL"
+  fallback <- lookupEnv "EDITOR"
+  case filter (not . null . trim) $ catMaybes [visual, fallback] of
+    [] -> replFailure "DJEX_REPL_EDITOR" "no editor is configured"
+      "set the VISUAL or EDITOR environment variable"
+    editor : _ -> do
+      target <- maybe (latestFileTarget state) (pure . Just) requested
+      case target of
+        Nothing -> replFailure "DJEX_REPL_EDITOR" "no file target to edit"
+          "load a source file or name one with :edit FILE"
+        Just path -> runShellCommand $ editor ++ " \"" ++ path ++ "\""
+
+latestFileTarget :: ReplState -> IO (Maybe FilePath)
+latestFileTarget state = case exferenceRuntimeWorkspace
+    $ exferenceRuntime state of
+  Nothing -> pure Nothing
+  Just workspace -> firstExisting $ reverse
+    $ map workspaceTargetDisplay $ workspaceTargets workspace
+ where
+  firstExisting [] = pure Nothing
+  firstExisting (path : remaining) = do
+    present <- doesFileExist path
+    if present then pure $ Just path else firstExisting remaining
 
 defaultTarget :: Either Diagnostic DefinitionName
 defaultTarget = case parseResultTarget defaultResultTargetSpelling of
@@ -337,6 +438,7 @@ runCommand sourceName history command state = case command of
     runQuery sourceName (ExplicitBackends BothBackends) typeSource state
   DownloadPackages packages ->
     runPackageOperation DownloadOperation packages >> continue state
+  EditFile requested -> editTargetFile requested state >> continue state
   Help Nothing -> putStr shortHelp >> continue state
   Help (Just name) -> case commandHelp name of
     Left failure -> settingFailure failure >> continue state
@@ -1259,10 +1361,21 @@ info
   -> IO ()
 info label variableName name environment = do
   putStrLn $ "-- " ++ label
-  case matchingDeclarations name environment of
-    [] -> putStrLn $ "No declaration for " ++ renderCanonical name
-    declarations -> mapM_ (putStrLn . renderDeclaration variableName)
-      declarations
+  case (matchingDeclarations name environment, relatedInstances) of
+    ([], []) -> putStrLn $ "No declaration for " ++ renderCanonical name
+    (declarations, instances) -> do
+      mapM_ (putStrLn . renderDeclaration variableName) declarations
+      mapM_ (putStrLn . renderDeclaration variableName) instances
+ where
+  -- GHCi's :info lists the instances a name participates in. Instances whose
+  -- subject class is the name itself already match as declarations.
+  relatedInstances = filter mentions $ environmentDeclarations environment
+  mentions declaration = case declaration of
+    InstanceDeclaration _ _ _ headConstraint ->
+      not (declarationDefines name declaration)
+        && any (Set.member name . typeConstructors)
+            (constraintArguments headConstraint)
+    _ -> False
 
 matchingDeclarations
   :: Name

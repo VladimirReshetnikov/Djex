@@ -72,6 +72,7 @@ data ReplCommand
   | ChangeModules ModuleChange [String]
   | CompareBackends String
   | DownloadPackages [String]
+  | EditFile (Maybe FilePath)
   | Help (Maybe String)
   | History (Maybe String)
   | InspectDeclaration String
@@ -292,6 +293,9 @@ commandDescriptors =
   , command "download" ["dl"] "CABAL_TARGET ..."
       "ask Cabal to fetch targets and dependencies into its source cache"
       $ fmap (ReplCommand . DownloadPackages) . packageArguments
+  , command "edit" [] "[FILE]"
+      "open the configured editor on a file"
+      $ fmap (ReplCommand . EditFile) . optionalArgument "at most one file"
   , command "exference" [] "TYPE" "synthesize once with Exference"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend ExferenceBackend)
           . required "a type"
@@ -451,6 +455,11 @@ commandHelp source = case token of
       [ "  prefix a loaded module with * to include non-exported declarations"
       ]
     "download" -> packageDetails
+    "edit" ->
+      [ "  uses the VISUAL editor, or EDITOR when VISUAL is unset"
+      , "  with no argument, edits the most recently loaded file target"
+      , "  the environment is not reloaded; use :reload afterwards"
+      ]
     "install" -> packageDetails ++
       [ "  defaults to Cabal's executable mode; --lib installs libraries"
       , "  a leading -- makes a following --lib an ordinary package target"

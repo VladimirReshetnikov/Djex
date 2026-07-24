@@ -64,6 +64,7 @@ data Flag
   | AllowFixFlag
   | ReplBackendFlag String
   | HistoryFlag FilePath
+  | IgnoreStartupFlag
   deriving (Eq, Show)
 
 data CommonOptions = CommonOptions
@@ -167,11 +168,14 @@ parseReplOptions arguments = case
       "--environment" environmentValue flags
     allowFix <- uniqueSwitch "--fix" (== AllowFixFlag) flags
     history <- optionalUniqueValue "--history" historyValue flags
+    ignoreStartup <- uniqueSwitch "--ignore-startup"
+      (== IgnoreStartupFlag) flags
     pure defaultReplOptions
       { replInitialBackend = selectedBackend
       , replEnvironmentPath = environment
       , replAllowFix = allowFix
       , replHistoryFile = history
+      , replIgnoreStartupFiles = ignoreStartup
       }
   (_, positional, []) -> Left $ "repl takes no positional arguments, but got "
     ++ show (length positional)
@@ -459,6 +463,8 @@ replOptionDescriptors =
       "retain known nonterminating Exference recursion helpers"
   , Option [] ["history"] (ReqArg HistoryFlag "FILE")
       "read and write persistent REPL history"
+  , Option [] ["ignore-startup"] (NoArg IgnoreStartupFlag)
+      "skip .djexrc startup files"
   ]
 
 -- Parser fallbacks and help text share these spellings. Backend-owned numeric

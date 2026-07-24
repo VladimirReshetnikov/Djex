@@ -42,6 +42,14 @@ options initialize state before the first prompt:
 | `--environment DIR` | Initial Exference directory target (the recursive directory compatibility form). | Installed Djex environment |
 | `--fix` | Retain the known nonterminating Exference recursion helpers while loading. | Off |
 | `--history FILE` | Read and write Haskeline history in `FILE`. | In-session history only |
+| `--ignore-startup` | Skip `.djexrc` startup files. | Startup files run |
+
+After the banner and before the first prompt, the REPL runs `.djexrc` from
+the home directory and then from the current directory, exactly as GHCi runs
+`.ghci`. Each file is executed through the ordinary `:script` machinery: any
+REPL input is accepted, failed lines report and continue, settings persist
+into the session, and `:quit` exits. Missing files are skipped silently, each
+load is announced, and `--ignore-startup` suppresses both files.
 
 Run `djex repl --help` for the startup table. Options for a one-shot backend,
 such as `--select` or `--max-steps`, are changed inside the REPL with `:set`;
@@ -120,7 +128,10 @@ non-inhabitation evidence.
 Exact aliases win; otherwise any nonempty, unique prefix of a canonical
 command is accepted. For example, `:q` is `:quit`, `:s` is deliberately
 `:set`, and `:sy` is `:synth`. Tab completion offers commands, backend names,
-settings, `:show` subjects, and paths where appropriate.
+settings, `:show` subjects, and paths where appropriate; it also follows the
+loaded workspace, offering module names after `:module` and `:browse` and
+in-scope identifiers (qualified and unqualified) at type-query, `:info`,
+`:type`, and `:kind` positions.
 
 | Command | Purpose |
 | --- | --- |
@@ -134,7 +145,8 @@ settings, `:show` subjects, and paths where appropriate.
 | `:exference TYPE` | Run one Exference query. |
 | `:help [COMMAND]` (`:h`, `:?`) | Show the command summary or detailed command help. |
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
-| `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors and class methods. |
+| `:edit [FILE]` | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
+| `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors, class methods, and the instances the name participates in. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
 | `import DECLARATION` | Append a Haskell import to the Exference prompt context. |
 | `:kind[!] TYPE` (`:k`) | Infer a type's kind in the current loaded module scope; attached `!` also shows its synonym-normalized form. |
@@ -206,8 +218,9 @@ Other option-shaped values such as `"--dry-run"` are targets rather than
 injected Cabal options. Cabal's stdout and stderr are streamed unchanged, while
 its stdin is closed so a child cannot consume later REPL or script input.
 Unrelated inherited file descriptors are also closed. `:d` is ambiguous
-between `:djinn` and `:download`, and `:in` is ambiguous between `:info` and
-`:install`; the exact `:i` alias continues to mean `:info`.
+between `:djinn` and `:download`, `:e` is ambiguous between `:edit` and
+`:exference`, and `:in` is ambiguous between `:info` and `:install`; the
+exact `:i` alias continues to mean `:info`.
 
 `CABAL_TARGET` is intentionally broader than a Hackage package name. Cabal
 accepts repository package/version and component selectors, local package

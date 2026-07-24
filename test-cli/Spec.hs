@@ -32,7 +32,7 @@ import System.Info (os)
 import System.Exit (ExitCode (..))
 import System.IO (hClose, openTempFile)
 import System.Process
-  ( CreateProcess (env)
+  ( CreateProcess (cwd, env)
   , proc
   , readCreateProcessWithExitCode
   , readProcessWithExitCode
@@ -117,6 +117,10 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplFixReload
   , testCase "REPL projects the loaded scope into Djinn"
       testReplUnifiedScope
+  , testCase "REPL loads .djexrc startup files" testReplStartupFiles
+  , testCase "REPL :edit opens the configured editor" testReplEdit
+  , testCase "REPL :info lists participating instances"
+      testReplInfoInstances
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -1691,6 +1695,80 @@ testReplUnifiedScope = withTemporaryEnvironment
   assertEqual "the value-axiom omission disappears once axioms are enabled" 1
     $ countOccurrences "value axioms are excluded" output
 
+-- Startup commands come from the home and current directories' .djexrc in
+-- that order, exactly like GHCi's .ghci; a possible developer-machine home
+-- file cannot disturb the assertions because the local file runs last.
+testReplStartupFiles :: Assertion
+testReplStartupFiles = withTemporaryEnvironment
+  [ ( ".djexrc"
+    , unlines [":set render expression", ":backend exference"]
+    )
+  ] $ \directory -> do
+  (exitCode, output, _errors) <- runReplFrom directory [] directory
+    ["a -> a"]
+  assertEqual "startup REPL exit" ExitSuccess exitCode
+  assertContainsPath "startup file load is announced"
+    (directory ++ "/.djexrc") output
+  assertContains "startup settings shape the session" "\\a -> a" output
+  (ignoredExit, ignoredOutput, _ignoredErrors) <- runReplFrom directory
+    ["--ignore-startup"] directory ["a -> a"]
+  assertEqual "suppressed startup REPL exit" ExitSuccess ignoredExit
+  assertBool "--ignore-startup still loaded a startup file" $
+    not $ "Loaded startup commands" `isInfixOf` ignoredOutput
+  assertBool "suppressed startup still applied its settings" $
+    not $ "\\a -> a" `isInfixOf` ignoredOutput
+
+-- The stream-observing fake build tool doubles as a fake editor: it records
+-- its argv, so both the explicit file form and the latest-target default are
+-- observable without a real editor.
+testReplEdit :: Assertion
+testReplEdit = withTemporaryEnvironment
+  [ ( "Custom.hs"
+    , unlines
+        [ "module Custom where"
+        , "data Thing = MkThing"
+        ]
+    )
+  ] $ \directory -> do
+  fake <- findExecutable "djex-fake-cabal" >>= maybe
+    (fail "cannot locate the djex-fake-cabal test build tool")
+    canonicalizePath
+  let logPath = directory </> "editor-log"
+      file = directory </> "Custom.hs"
+  (exitCode, _output, errors) <- runReplWithOverrides
+    [("VISUAL", fake), ("DJEX_FAKE_CABAL_LOG", logPath)]
+    directory
+    [ ":edit " ++ show file
+    , ":load " ++ show file
+    , ":edit"
+    ]
+  assertEqual "edit REPL exit" ExitSuccess exitCode
+  recorded <- readFile logPath
+  assertEqual "both edit forms launched the editor" 2
+    $ countOccurrences "CALL" recorded
+  assertEqual "the named file and the latest target reach the editor" 2
+    $ countOccurrencesPath ("ARG:" ++ file) recorded
+  assertNoCallStack errors
+
+testReplInfoInstances :: Assertion
+testReplInfoInstances = withTemporaryEnvironment
+  [ ( "Inst.hs"
+    , unlines
+        [ "module Inst where"
+        , "class Marker a"
+        , "data Thing = MkThing"
+        , "instance Marker Thing"
+        ]
+    )
+  ] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [":backend exference", ":info Thing"]
+  assertEqual "info instances REPL exit" ExitSuccess exitCode
+  assertContains "info lists the datatype" "data Inst.Thing" output
+  assertContains "info lists participating instances"
+    "instance Inst.Marker Inst.Thing" output
+  assertNoCallStack errors
+
 testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do
   let script = directory ++ "/commands.djex"
@@ -2148,13 +2226,55 @@ missingInterpreterCabalSource = unlines
   , "exit 0"
   ]
 
+-- Ordinary REPL tests skip startup files so a developer's own .djexrc can
+-- never leak configuration into assertions.
 runRepl
   :: FilePath
   -> [String]
   -> IO (ExitCode, String, String)
 runRepl directory inputs = runDjexInput
-  ["repl", "--environment", directory]
-  $ unlines $ ":set prompt \"\"" : inputs ++ [":quit"]
+  ["repl", "--environment", directory, "--ignore-startup"]
+  $ replSession inputs
+
+replSession :: [String] -> String
+replSession inputs = unlines $ ":set prompt \"\"" : inputs ++ [":quit"]
+
+-- Run the REPL from a chosen working directory without suppressing startup
+-- files, for exercising .djexrc loading itself.
+runReplFrom
+  :: FilePath
+  -> [String]
+  -> FilePath
+  -> [String]
+  -> IO (ExitCode, String, String)
+runReplFrom workingDirectory extraArguments environment inputs = do
+  executable <- findExecutable "djex" >>= maybe
+    (fail "cannot locate the djex test build tool")
+    canonicalizePath
+  normalizeCapturedStreams <$> readCreateProcessWithExitCode
+    ((proc executable
+        (["repl", "--environment", environment] ++ extraArguments))
+      {cwd = Just workingDirectory})
+    (replSession inputs)
+
+-- Run the REPL with extra environment variables, for editor integration.
+runReplWithOverrides
+  :: [(String, String)]
+  -> FilePath
+  -> [String]
+  -> IO (ExitCode, String, String)
+runReplWithOverrides overrides environment inputs = do
+  executable <- findExecutable "djex" >>= maybe
+    (fail "cannot locate the djex test build tool")
+    canonicalizePath
+  inherited <- getEnvironment
+  let childEnvironment =
+        foldr (uncurry replaceEnvironment) inherited overrides
+  normalizeCapturedStreams <$> readCreateProcessWithExitCode
+    ((proc executable
+        ["repl", "--environment", environment, "--ignore-startup"])
+      {env = Just childEnvironment})
+    (replSession inputs)
 
 -- Keep kind inspection independent of the larger module-workspace fixture so
 -- its class and synonym declarations cannot alter unrelated search tests.

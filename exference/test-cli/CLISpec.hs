@@ -1,6 +1,10 @@
 module Main (main) where
 
-import CLIAssertions (assertContains, countOccurrences)
+import CLIAssertions
+  ( assertContains
+  , assertContainsPath
+  , countOccurrences
+  )
 import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.List (isInfixOf)
@@ -265,7 +269,7 @@ testInvalidEnvironment = withTemporaryEnvironment $ \environmentDirectory -> do
     ExitSuccess -> fail "invalid class environment returned success"
   assertContains "fatal class diagnostics belong on stderr"
     "could not load source environment:" errors
-  assertContains "class diagnostics retain code and declaration span"
+  assertContainsPath "class diagnostics retain code and declaration span"
     (environmentDirectory
       ++ "/Broken.hs:2:1: error [EXF_CLASS_DECLARATION]:"
       ++ " could not load a source class declaration") errors
@@ -292,11 +296,11 @@ testInvalidSynonyms = withTemporaryEnvironment $ \environmentDirectory -> do
     1 $ countOccurrences "could not load source environment:" errors
   assertEqual "both synonym failures should remain accumulated"
     2 $ countOccurrences "[EXF_TYPE_DECLARATION]" errors
-  assertContains "the first synonym failure retains its declaration span"
+  assertContainsPath "the first synonym failure retains its declaration span"
     (environmentDirectory
       ++ "/Broken.hs:2:1-11: error [EXF_TYPE_DECLARATION]:"
       ++ " could not load a source type declaration") errors
-  assertContains "the second synonym failure retains its declaration span"
+  assertContainsPath "the second synonym failure retains its declaration span"
     (environmentDirectory
       ++ "/Broken.hs:3:1-11: error [EXF_TYPE_DECLARATION]:"
       ++ " could not load a source type declaration") errors

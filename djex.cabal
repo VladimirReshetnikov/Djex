@@ -246,6 +246,15 @@ Executable djex
   Hs-Source-Dirs: app
   Build-Depends:    djex
 
+-- Test-only stand-in for the real Cabal executable. The CLI suites copy it
+-- onto a temporary PATH as cabal(.exe) so package tests can observe exact
+-- argv on every platform; a POSIX shell script cannot launch on Windows.
+Executable djex-fake-cabal
+  import:         build-settings, directory-dep
+  Main-Is:        Main.hs
+  Hs-Source-Dirs: test-support/fake-cabal
+  Build-Depends:  filepath >= 1.4 && < 1.6
+
 Test-Suite djex-tests
   import:         tasty-hunit-test, containers-dep
   Type:           exitcode-stdio-1.0
@@ -261,7 +270,7 @@ Test-Suite djex-cli-tests
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-cli
   Build-Depends:    djex
-  Build-Tool-Depends: djex:djex
+  Build-Tool-Depends: djex:djex, djex:djex-fake-cabal
 
 Test-Suite synthesis-tests
   import:           tasty-hunit-test, tasty-quickcheck-dep, containers-dep, deepseq-dep

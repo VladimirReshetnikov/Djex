@@ -1,12 +1,19 @@
 module Main (main) where
 
-import CLIAssertions (assertContains, countOccurrences)
+import CLIAssertions
+  ( assertContains
+  , assertContainsPath
+  , countOccurrences
+  , countOccurrencesPath
+  , stripCarriageReturns
+  )
 import Control.Exception (bracket)
 import Control.Monad (forM_)
 import Data.Char (toLower)
 import Data.List (intercalate, isInfixOf)
 import System.Directory
   ( canonicalizePath
+  , copyFile
   , createDirectory
   , createDirectoryLink
   , createDirectoryIfMissing
@@ -21,6 +28,7 @@ import System.Directory
   , setPermissions
   )
 import System.Environment (getEnvironment)
+import System.Info (os)
 import System.Exit (ExitCode (..))
 import System.IO (hClose, openTempFile)
 import System.Process
@@ -256,7 +264,7 @@ testPackageCommands = withFakeCabal 0 $ \_ fakeBin calls -> do
       ]) recorded
 
 testPackageProcessIO :: Assertion
-testPackageProcessIO = withFakeCabalExecutable fakeCabalIoSource
+testPackageProcessIO = withCompiledFakeCabal [("cabal-mode", "io")]
     $ \_ fakeBin calls -> do
   (exitCode, output, errors) <- runDjexInputWithPackagePath fakeBin calls
     ["download", "stream-target"] "sentinel must not reach Cabal\n"
@@ -327,7 +335,7 @@ testPackageFailures = do
       "cannot find `cabal' on PATH" errors
     assertNoCallStack errors
 
-  withFakeCabalExecutable missingInterpreterCabalSource
+  withFakeCabalScript missingInterpreterCabalSource
       $ \_ fakeBin unusedLog -> do
     (exitCode, output, errors) <- runDjexWithPackagePath fakeBin unusedLog
       ["download", "broken-launch-target"]
@@ -528,7 +536,7 @@ testReplTransactionalLoad = withTemporaryEnvironment [] $ \directory ->
       "retaining the previous session and settings" output
     assertEqual "old session remains usable across failed load and cwd change" 2
       $ countOccurrences "\\a -> a" output
-    assertContains "reload retains canonical environment path" directory output
+    assertContainsPath "reload retains canonical environment path" directory output
     assertContains "failed load reports missing source"
       "[DJEX_REPL_TARGET_NOT_FOUND]" errors
 
@@ -568,7 +576,7 @@ testReplWorkspaceTargets = withReplModuleFixture $ \root -> do
   assertEqual "module-name target survives canonical reload" 2
     $ countOccurrences "App\n" namedOutput
   assertEqual "module-name dependency order survives reload" 2
-    $ countOccurrences namedModules namedOutput
+    $ countOccurrencesPath namedModules namedOutput
   assertContains "last named target becomes the automatic starred module"
     "import *App -- automatic" namedOutput
   assertNoCallStack namedErrors
@@ -589,12 +597,13 @@ testReplWorkspaceTargets = withReplModuleFixture $ \root -> do
     , ":show imports"
     ]
   assertEqual "path target REPL exit" ExitSuccess pathExit
-  assertContains "file target has canonical display" (app ++ "\n") pathOutput
-  assertContains "file target dependencies are ordered first"
+  assertContainsPath "file target has canonical display"
+    (app ++ "\n") pathOutput
+  assertContainsPath "file target dependencies are ordered first"
     namedModules pathOutput
-  assertContains "directory target has canonical display"
+  assertContainsPath "directory target has canonical display"
     (directory ++ "\n") pathOutput
-  assertContains "directory dependencies are ordered first"
+  assertContainsPath "directory dependencies are ordered first"
     directoryModules pathOutput
   assertContains "first directory module enters the automatic context"
     "import *Dir.First -- automatic" pathOutput
@@ -705,9 +714,9 @@ testReplDirectoryLinks = withReplModuleFixture $ \root -> do
     , ":show imports"
     ]
   assertEqual "directory symlink REPL exit" ExitSuccess exitCode
-  assertContains "ordinary source file in directory is loaded"
+  assertContainsPath "ordinary source file in directory is loaded"
     ("Inside (" ++ inside ++ ")") output
-  assertContains "regular-file symlink is admitted canonically"
+  assertContainsPath "regular-file symlink is admitted canonically"
     ("Linked (" ++ linkedFile ++ ")") output
   assertBool "directory symlink escaped the admitted source tree" $
     not $ "Escaped (" `isInfixOf` output
@@ -726,7 +735,8 @@ testReplDirectoryLinks = withReplModuleFixture $ \root -> do
     , ":show modules"
     ]
   assertEqual "explicit linked-file target REPL exit" ExitSuccess fileExit
-  assertContains "explicit file target retains its hierarchical source root"
+  assertContainsPath
+    "explicit file target retains its hierarchical source root"
     ( "OutsideSibling (" ++ outsideSibling ++ ")\n"
       ++ "Linked (" ++ linkedFile ++ ")"
     ) fileOutput
@@ -756,7 +766,7 @@ testReplTargetMutation = withReplModuleFixture $ \root -> do
     ]
   assertEqual "idempotent add REPL exit" ExitSuccess removeExit
   assertEqual "adding one canonical target twice retains one target" 1
-    $ countOccurrences (app ++ "\n") removeOutput
+    $ countOccurrencesPath (app ++ "\n") removeOutput
   assertContains "unadding the sole target empties target state"
     "(no targets)" removeOutput
   assertContains "unadding a target prunes dependency-only modules"
@@ -777,8 +787,8 @@ testReplTargetMutation = withReplModuleFixture $ \root -> do
         "Exference load failed; retaining the previous session and settings."
         failureOutput
   assertEqual "failed additions and removals retain the canonical target" 2
-    $ countOccurrences (app ++ "\n") failureOutput
-  assertContains "failed mutations retain the dependency closure"
+    $ countOccurrencesPath (app ++ "\n") failureOutput
+  assertContainsPath "failed mutations retain the dependency closure"
     loadedModules failureOutput
   assertContains "missing addition is structured"
     "[DJEX_REPL_TARGET_NOT_FOUND]" failureErrors
@@ -1582,7 +1592,7 @@ testReplBundledOwners = withReplModuleFixture $ \root -> do
   assertContains "type-synonym wildcard rejects the target transaction"
     "Exference load failed; retaining the previous session and settings."
     output
-  assertContains "invalid synonym export retains the prior empty datatype"
+  assertContainsPath "invalid synonym export retains the prior empty datatype"
     ("EmptyData (" ++ emptyData ++ ")") output
   assertBool "invalid synonym export was committed" $
     not $ "InvalidSynonym (" `isInfixOf` output
@@ -1706,7 +1716,7 @@ testReplScripts = withTemporaryEnvironment [] $ \directory -> do
   assertContains "script setting persists" "exference\n" output
   assertContains "recursive script is rejected"
     "[DJEX_REPL_SCRIPT_CYCLE]" errors
-  assertContains "script command diagnostic keeps its source line"
+  assertContainsPath "script command diagnostic keeps its source line"
     (broken ++ " (line 2)") errors
 
 testReplHistory :: Assertion
@@ -2037,7 +2047,16 @@ runDjex :: [String] -> IO (ExitCode, String, String)
 runDjex arguments = runDjexInput arguments ""
 
 runDjexInput :: [String] -> String -> IO (ExitCode, String, String)
-runDjexInput = readProcessWithExitCode "djex"
+runDjexInput arguments input = normalizeCapturedStreams
+  <$> readProcessWithExitCode "djex" arguments input
+
+-- Windows text-mode pipes deliver CRLF line endings; needles are written
+-- with bare newlines, so captured streams normalize once at the boundary.
+normalizeCapturedStreams
+  :: (ExitCode, String, String)
+  -> (ExitCode, String, String)
+normalizeCapturedStreams (exitCode, output, errors) =
+  (exitCode, stripCarriageReturns output, stripCarriageReturns errors)
 
 runDjexWithPackagePath
   :: FilePath
@@ -2063,7 +2082,7 @@ runDjexInputWithPackagePath packagePath logPath arguments input = do
   inherited <- getEnvironment
   let childEnvironment = replaceEnvironment "PATH" packagePath
         $ replaceEnvironment "DJEX_FAKE_CABAL_LOG" logPath inherited
-  readCreateProcessWithExitCode
+  normalizeCapturedStreams <$> readCreateProcessWithExitCode
     ((proc executable arguments) {env = Just childEnvironment}) input
 
 replaceEnvironment
@@ -2078,49 +2097,50 @@ withFakeCabal
   :: Int
   -> (FilePath -> FilePath -> FilePath -> IO result)
   -> IO result
-withFakeCabal status = withFakeCabalExecutable $ fakeCabalSource status
+withFakeCabal status =
+  withCompiledFakeCabal [("cabal-status", show status)]
 
-withFakeCabalExecutable
+-- Copy the compiled djex-fake-cabal build tool onto a temporary PATH entry
+-- under the executable name Djex resolves. Behavior is selected by sibling
+-- configuration files, so no argv or environment plumbing can reorder the
+-- exact command line under test.
+withCompiledFakeCabal
+  :: [(FilePath, String)]
+  -> (FilePath -> FilePath -> FilePath -> IO result)
+  -> IO result
+withCompiledFakeCabal configurations action = withTemporaryEnvironment []
+    $ \root -> do
+  fake <- findExecutable "djex-fake-cabal" >>= maybe
+    (fail "cannot locate the djex-fake-cabal test build tool")
+    canonicalizePath
+  let bin = root </> "bin"
+      executable = bin </> fakeCabalFileName
+  createDirectoryIfMissing True bin
+  copyFile fake executable
+  permissions <- getPermissions executable
+  setPermissions executable $ setOwnerExecutable True permissions
+  forM_ configurations $ \(name, contents) ->
+    writeFile (bin </> name) contents
+  action root bin (root </> "cabal-calls")
+
+fakeCabalFileName :: FilePath
+fakeCabalFileName
+  | os == "mingw32" = "cabal.exe"
+  | otherwise = "cabal"
+
+-- The unlaunchable-interpreter scenario is inherently a script: it needs a
+-- file that resolution accepts but launching rejects.
+withFakeCabalScript
   :: String
   -> (FilePath -> FilePath -> FilePath -> IO result)
   -> IO result
-withFakeCabalExecutable source action = withTemporaryEnvironment
+withFakeCabalScript source action = withTemporaryEnvironment
     [("bin/cabal", source)] $ \root -> do
   let executable = root </> "bin" </> "cabal"
       logPath = root </> "cabal-calls"
   permissions <- getPermissions executable
   setPermissions executable $ setOwnerExecutable True permissions
   action root (root </> "bin") logPath
-
--- Targets reject control characters, so one prefixed line per argv element is
--- an unambiguous log format while remaining portable to the POSIX shell used
--- by the fake executable. No external utility or network access is involved.
-fakeCabalSource :: Int -> String
-fakeCabalSource status = unlines
-  $ fakeCabalLogLines ++ ["exit " ++ show status]
-
-fakeCabalIoSource :: String
-fakeCabalIoSource = unlines $ fakeCabalLogLines ++
-  [ "if IFS= read -r input"
-  , "then"
-  , "  printf 'FAKE_STDIN_DATA:%s\\n' \"$input\""
-  , "else"
-  , "  printf 'FAKE_STDIN_EOF\\n'"
-  , "fi"
-  , "printf 'FAKE_STDOUT_MARKER\\n'"
-  , "printf 'FAKE_STDERR_MARKER\\n' >&2"
-  , "exit 0"
-  ]
-
-fakeCabalLogLines :: [String]
-fakeCabalLogLines =
-  [ "#!/bin/sh"
-  , "printf 'CALL\\n' >> \"$DJEX_FAKE_CABAL_LOG\""
-  , "for argument"
-  , "do"
-  , "  printf 'ARG:%s\\n' \"$argument\" >> \"$DJEX_FAKE_CABAL_LOG\""
-  , "done"
-  ]
 
 missingInterpreterCabalSource :: String
 missingInterpreterCabalSource = unlines

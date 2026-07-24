@@ -1645,18 +1645,19 @@ testReplFixReload = withTemporaryEnvironment
     "[DJEX_EXF_NO_RESULT]" errors
 
 -- Both backends must synthesize from the same loaded declarations: Djinn
--- through its scope projection (structurally, and via axioms only on request),
--- Exference through its scoped search session.
+-- through its scope projection, Exference through its scoped search session.
+-- Record selectors are field projections and reach Djinn under every axiom
+-- policy; ordinary values join its proof search only with djinn-axioms.
 testReplUnifiedScope :: Assertion
 testReplUnifiedScope = withTemporaryEnvironment
   [ ( "Custom.hs"
     , unlines
         [ "module Custom where"
         , ""
-        , "data Wrapped = MkWrapped Bool"
+        , "data Wrapped = MkWrapped { unwrapped :: Bool }"
         , ""
-        , "unwrap :: Wrapped -> Bool"
-        , "unwrap (MkWrapped b) = b"
+        , "extract :: Wrapped -> Bool"
+        , "extract (MkWrapped b) = b"
         ]
     )
   ] $ \directory -> do
@@ -1666,19 +1667,19 @@ testReplUnifiedScope = withTemporaryEnvironment
     , ":show environment"
     , ":show omissions"
     , ":set djinn-axioms on"
-    , ":djinn Wrapped -> Bool"
+    , ":show omissions"
     ]
   assertEqual "unified scope REPL exit" ExitSuccess exitCode
   assertContains "comparison labels Djinn" "-- Djinn" output
   assertContains "comparison labels Exference" "-- Exference" output
-  assertEqual "both backends eliminate the loaded constructor" 2
-    $ countOccurrences "MkWrapped" output
+  assertContains "Djinn uses the record selector without axiom opt-in"
+    "unwrapped" output
+  assertContains "Exference eliminates the loaded constructor"
+    "Custom.MkWrapped" output
   assertContains "Djinn reports its projected environment"
     "projected from the module scope" output
-  assertContains "excluded value axioms stay visible"
-    "value axioms are excluded" output
-  assertContains "opting into axioms lets Djinn use the loaded value"
-    "unwrap" output
+  assertEqual "the value-axiom omission disappears once axioms are enabled" 1
+    $ countOccurrences "value axioms are excluded" output
 
 testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do

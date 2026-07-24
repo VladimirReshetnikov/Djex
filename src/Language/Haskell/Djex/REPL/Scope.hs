@@ -26,6 +26,7 @@ module Language.Haskell.Djex.REPL.Scope
   , renderScopeImports
   , renderScopeModules
   , moduleNamesForBrowse
+  , workspaceRecordSelectors
   ) where
 
 import Control.Monad.Trans.Class (lift)
@@ -614,29 +615,58 @@ symbolIndex inventory modules = foldl' addRecordFields declarationsIndex
         $ symbolChildren index
     }
 
-  -- The neutral declaration layer deliberately models record selectors as
-  -- ordinary values. Retain that backend-independent representation and use
-  -- the already parsed source snapshot only to recover the parent relation
-  -- needed by Haskell import/export forms such as @Record(..)@ and
-  -- @Record(field)@. Every parent and field is intersected with the checked
-  -- inventory, so rejected syntax can never leak into prompt scope.
   addRecordFields index (moduleName, target) = foldl' addRecord index
-    $ recordFieldGroups $ workspaceModuleSyntax target
+    $ moduleRecordSelectorGroups index moduleName target
    where
-    available = moduleSymbols index moduleName
-    matches role spelling =
-      [ name
-      | name <- available
-      , SharedName.nameSpelling name == Just spelling
-      , role `Set.member` Map.findWithDefault Set.empty name
-          (symbolRoles index)
-      ]
-    addRecord current (parentSpelling, fieldSpellings) = case
-        matches TypeSymbol parentSpelling of
-      [parent] -> addChildren parent
-        (ordNub $ concatMap (matches ValueSymbol) fieldSpellings) current
-      _ -> current
+    addRecord current (parent, selectors) = addChildren parent selectors current
   appendOld new old = old ++ new
+
+-- The neutral declaration layer deliberately models record selectors as
+-- ordinary values. Retain that backend-independent representation and use
+-- the already parsed source snapshot only to recover the parent relation
+-- needed by Haskell import/export forms such as @Record(..)@ and
+-- @Record(field)@, or by consumers that must distinguish field projections
+-- from ordinary values. Every parent and field is intersected with the
+-- checked inventory, so rejected syntax can never leak names to a consumer.
+moduleRecordSelectorGroups
+  :: SymbolIndex
+  -> ModuleName
+  -> WorkspaceModule
+  -> [(Name, [Name])]
+moduleRecordSelectorGroups index moduleName target =
+  [ (parent, ordNub $ concatMap (matches ValueSymbol) fieldSpellings)
+  | (parentSpelling, fieldSpellings) <-
+      recordFieldGroups $ workspaceModuleSyntax target
+  , [parent] <- [matches TypeSymbol parentSpelling]
+  ]
+ where
+  available = moduleSymbols index moduleName
+  matches role spelling =
+    [ name
+    | name <- available
+    , SharedName.nameSpelling name == Just spelling
+    , role `Set.member` Map.findWithDefault Set.empty name
+        (symbolRoles index)
+    ]
+
+-- | Every record-selector name defined by the workspace's parsed source. The
+-- shared declaration model keeps selectors as plain values, so the source
+-- snapshot is the only witness of their record provenance.
+workspaceRecordSelectors
+  :: Inventory typeVariable annotation
+  -> SourceWorkspace
+  -> Set.Set Name
+workspaceRecordSelectors inventory workspace = case
+    workspaceModuleMap workspace of
+  Left _ -> Set.empty
+  Right modules ->
+    let index = symbolIndex inventory modules
+    in Set.fromList
+      [ selector
+      | (moduleName, target) <- Map.toList modules
+      , (_, selectors) <- moduleRecordSelectorGroups index moduleName target
+      , selector <- selectors
+      ]
 
 recordFieldGroups
   :: HSE.Module HSE.SrcSpanInfo

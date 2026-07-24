@@ -141,6 +141,9 @@ refreshDjinnProjection state = case
     ) of
   (Just baseSession, Just context) -> case projectDjinnScope
       (djinnAxiomPolicy djinn)
+      (maybe Set.empty
+        (workspaceRecordSelectors $ exferenceSessionInventory baseSession)
+        (exferenceRuntimeWorkspace runtime))
       (scopeProjectionDeclarations baseSession)
       (Set.fromList $ scopeUnqualifiedNames context) of
     Left failure -> do

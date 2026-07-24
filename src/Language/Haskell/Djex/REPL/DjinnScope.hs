@@ -10,7 +10,11 @@
 -- Value declarations become LJT axioms, and axiom sets of even moderate size
 -- make Djinn's otherwise-terminating proof search intractable. They are
 -- therefore excluded unless the caller opts in ('IncludeDjinnAxioms'), which
--- the REPL exposes as the @djinn-axioms@ setting.
+-- the REPL exposes as the @djinn-axioms@ setting. Record selectors are the
+-- exception: they are bounded, structural field projections derived from the
+-- visible datatypes, so they always project. That also keeps a recursive
+-- record usable, because its selectors survive the datatype's degradation to
+-- an abstract type.
 module Language.Haskell.Djex.REPL.DjinnScope
   ( DjinnAxiomPolicy (..)
   , DjinnProjection (..)
@@ -91,13 +95,19 @@ type ScopeDeclaration = Declaration String Void ()
 -- Djinn session. The input declarations use canonical names; the projection
 -- renames them to their in-scope unqualified spellings, because Djinn's
 -- declaration grammar has no qualified type, class, or constructor names.
+-- Values named in the selector set are record-field projections and enter
+-- the session under every axiom policy.
 projectDjinnScope
   :: DjinnAxiomPolicy
+  -> Set.Set Name
+  -- ^ Canonical names of record selectors among the declarations.
   -> [ScopeDeclaration]
   -> Set.Set Name
+  -- ^ Canonical names visible unqualified in the prompt scope.
   -> Either Diagnostic DjinnProjection
-projectDjinnScope policy declarations visible = do
-  let (shaped, shapeOmissions) = shapeDeclarations policy visible declarations
+projectDjinnScope policy selectors declarations visible = do
+  let (shaped, shapeOmissions) =
+        shapeDeclarations policy selectors visible declarations
       (renamed, renameOmissions) = renameDeclarations shaped
       (grounded, recursionOmissions) = degradeRecursiveDataTypes renamed
       (admitted, admissionOmissions) = admitDeclarations grounded
@@ -123,9 +133,10 @@ projectDjinnScope policy declarations visible = do
 shapeDeclarations
   :: DjinnAxiomPolicy
   -> Set.Set Name
+  -> Set.Set Name
   -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-shapeDeclarations policy visible declarations =
+shapeDeclarations policy selectors visible declarations =
   (kept, omissions ++ instanceSummary)
  where
   (kept, omissions, instanceCount) =
@@ -142,7 +153,8 @@ shapeDeclarations policy visible declarations =
     InstanceDeclaration {} -> (keptSoFar, omitted, instances + 1)
     ValueDeclaration signature
       | not $ isVisible $ valueName signature -> skip
-      | policy == IncludeDjinnAxioms -> keep declaration
+      | policy == IncludeDjinnAxioms
+          || valueName signature `Set.member` selectors -> keep declaration
       | otherwise -> omit (valueName signature)
           "value axioms are excluded; :set djinn-axioms on to include them"
     TypeSynonymDeclaration _ name _ _
@@ -153,15 +165,14 @@ shapeDeclarations policy visible declarations =
       | otherwise -> skip
     DataTypeDeclaration annotation name parameters constructors
       | not $ isVisible name -> skip
+      -- A constructor-less datatype is how source environments spell an
+      -- opaque primitive. Treating it as genuinely empty would let Djinn
+      -- prove anything from it by absurd elimination.
+      | null constructors -> degradeToAbstract annotation name parameters
+          "declared without constructors; projected as an abstract type"
       | all (isVisible . constructorName) constructors -> keep declaration
-      | otherwise ->
-          ( AbstractTypeDeclaration annotation name
-              (parameterCountKind parameters) : keptSoFar
-          , DjinnScopeOmission (renderCanonical name)
-              "some constructors are hidden; projected as an abstract type"
-              : omitted
-          , instances
-          )
+      | otherwise -> degradeToAbstract annotation name parameters
+          "some constructors are hidden; projected as an abstract type"
     ClassDeclaration annotation name parameters superclasses methods
       | isVisible name -> keep $ ClassDeclaration annotation name parameters
           superclasses (filter (isVisible . valueName) methods)
@@ -171,6 +182,12 @@ shapeDeclarations policy visible declarations =
     keep shapedDeclaration = (shapedDeclaration : keptSoFar, omitted, instances)
     omit name reason =
       ( keptSoFar
+      , DjinnScopeOmission (renderCanonical name) reason : omitted
+      , instances
+      )
+    degradeToAbstract annotation name parameters reason =
+      ( AbstractTypeDeclaration annotation name
+          (parameterCountKind parameters) : keptSoFar
       , DjinnScopeOmission (renderCanonical name) reason : omitted
       , instances
       )

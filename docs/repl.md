@@ -579,7 +579,10 @@ so the projection degrades rather than fails:
   unqualified spelling is ambiguous in scope is omitted.
 - Recursive datatypes and datatypes with hidden constructors are projected as
   opaque abstract types, keeping their signatures usable without giving LJT
-  an elimination it cannot decide.
+  an elimination it cannot decide. A datatype declared without constructors
+  is treated the same way: source environments spell opaque primitives that
+  way, and a genuinely empty projection would let Djinn prove anything from
+  such a type by absurd elimination.
 - Instance declarations, classes with superclasses, and declarations with
   types outside Djinn's grammar (explicit foralls, residual constraints) are
   omitted.
@@ -589,6 +592,11 @@ so the projection degrades rather than fails:
   `:set djinn-axioms on`. Axioms are off by default because even
   moderate axiom sets make Djinn's otherwise-terminating proof search
   intractable; structural proving over the projected datatypes stays fast.
+- Record selectors are the exception to the axiom policy: both engines treat
+  a field name as a term-level projection, so selectors always enter Djinn's
+  session. Because selectors survive their parent's degradation to an
+  abstract type, a recursive or opaque record stays field-accessible to
+  Djinn even though it cannot be case-eliminated.
 
 Every compromise is recorded: `:show environment` reports the projected
 declaration and omission counts, and `:show omissions` lists each omitted

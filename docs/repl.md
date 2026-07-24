@@ -51,7 +51,7 @@ A normal startup looks like:
 
 ```text
 Djex REPL <package-version>
-Djinn session ready (standard checked environment).
+Djinn environment: <count> declarations (projected from the module scope, <count> omissions)
 Exference environment: "/path/to/environment"
 Type :help for help.
 djex[djinn]>
@@ -88,14 +88,16 @@ Backend commands distinguish persistent selection from one-query routing:
 Entering `:` repeats the last type with the backend selection recorded for
 that query; current rendering and search settings are used for the repeat.
 
-The shared REPL does not force the engines into a common type language. Djinn
-parses its contextual type grammar against its checked standard environment.
-Exference parses its Haskell type grammar against the currently loaded source
-workspace and prompt module context. That context controls unqualified source
-names and the source declarations available to Exference's search. It never
-changes Djinn's independent standard session. A spelling can therefore be
-valid for only one backend or mean something supported by only one search
-engine.
+Both engines see the same loaded workspace. Exference parses its Haskell type
+grammar against the loaded source workspace and prompt module context, which
+control unqualified source names and the declarations available to its
+search. Djinn tracks the same module scope through a checked projection into
+its own declaration grammar (see
+[the Djinn scope projection](#the-djinn-scope-projection)), so a datatype
+loaded with `:load` or exposed with `:module` is available to both backends.
+The engines still parse independently — Djinn's contextual type grammar has
+no qualified names, so a spelling can remain valid for only one backend or
+mean something supported by only one search engine.
 
 In `both` mode Djex prints labelled sections in a deterministic order:
 
@@ -107,10 +109,10 @@ In `both` mode Djex prints labelled sections in a deterministic order:
 ```
 
 Each backend parses and runs independently. A diagnostic from Djinn does not
-prevent Exference from running, or vice versa. The sessions do not share
-declarations, type-variable identities, caches, or class-resolution policy;
-only query routing and presentation settings are shared. In particular, an
-empty Exference result is not upgraded to Djinn's proof-backed
+prevent Exference from running, or vice versa. The sessions share the module
+scope, but not type-variable identities, caches, or class-resolution policy;
+each seals its own independent projection of the loaded declarations. In
+particular, an empty Exference result is not upgraded to Djinn's proof-backed
 non-inhabitation evidence.
 
 ## Commands
@@ -370,14 +372,16 @@ module, or an invalid import item leaves the previous context and searchable
 session intact. `:browse MODULE` lists that module's exports,
 `:browse *MODULE` includes its complete source scope, and bare `:browse` lists
 the current visible scope. Bare `:browse` respects the active backend selection
-and can therefore show Djinn's standard inventory, Exference's current scope,
+and can therefore show Djinn's projected scope, Exference's current scope,
 or both. Supplying a module is an explicit source-workspace selector, so
 `:browse M` and `:browse *M` show only Exference declarations regardless of
 the active backend. The default prompt shows the backend selection rather than
 the whole context; `:show imports` is authoritative.
 
-Module context applies only to Exference. Djinn continues to parse and search
-its independent standard checked session, including when `both` is selected.
+Module context changes apply to both backends: Exference reprojects its
+search scope and Djinn reprojects its declaration environment from the same
+visible names. Only when no source workspace is loaded at all does Djinn fall
+back to its historical standard checked session.
 
 ## Inspecting type kinds
 
@@ -536,6 +540,7 @@ diagnostic and leave the previous state unchanged.
 | `prompt` | Text; `%b` expands to the active selection | `"djex[%b]> "` | Interactive UI |
 | `candidate-limit` | Positive integer | `200` | Djinn |
 | `choice-budget` | Non-negative integer; `0` means unbounded | `0` | Djinn |
+| `djinn-axioms` | Boolean | Off | Djinn |
 | `allow-unused` | Boolean | Off | Exference |
 | `allow-constraints` | Boolean | Off | Exference |
 | `constraint-deferral-steps` | Non-negative integer | `8192` | Exference |
@@ -559,9 +564,42 @@ construction and therefore transactionally rebuilds the current workspace.
 thus `:unset backend` returns to `djinn` even if the session started with
 `--backend both`.
 
+## The Djinn scope projection
+
+Whenever a source workspace is loaded, the REPL projects the unqualified
+prompt scope into a fresh Djinn session, so `:load`, `:add`, `:unadd`,
+`:reload`, `import`, and `:module` change what both backends can see. The
+projection reprojects on every scope change and is transactional: a failed
+load retains the previous sessions of both backends.
+
+Djinn's declaration grammar is stricter than the shared neutral vocabulary,
+so the projection degrades rather than fails:
+
+- Names are projected at their unqualified in-scope spellings; a name whose
+  unqualified spelling is ambiguous in scope is omitted.
+- Recursive datatypes and datatypes with hidden constructors are projected as
+  opaque abstract types, keeping their signatures usable without giving LJT
+  an elimination it cannot decide.
+- Instance declarations, classes with superclasses, and declarations with
+  types outside Djinn's grammar (explicit foralls, residual constraints) are
+  omitted.
+- Type constructors referenced from signatures but not declared in scope are
+  stubbed as abstract types with an arity-derived kind.
+- Value declarations are omitted by default and become LJT axioms with
+  `:set djinn-axioms on`. Axioms are off by default because even
+  moderate axiom sets make Djinn's otherwise-terminating proof search
+  intractable; structural proving over the projected datatypes stays fast.
+
+Every compromise is recorded: `:show environment` reports the projected
+declaration and omission counts, and `:show omissions` lists each omitted
+name with its reason next to Exference's own omissions. If projection fails
+outright, the failure is reported and Djinn falls back to its standard
+checked environment.
+
 ## Workspace replacement is transactional
 
-The shared REPL always constructs Djinn's standard checked session. It loads
+The shared REPL constructs Djinn's standard checked session as the fallback
+used until a workspace projection is available. It loads
 Exference separately from the installed directory target or
 `--environment DIR` using the command-safe policy. A directory is admitted
 through the same recursive target machinery used by an interactive `:load`;
@@ -588,9 +626,10 @@ diagnostics remain available through `:show diagnostics`. Rebuilding is
 necessary for `fix` because source ratings and policy inputs are not
 reconstructed from the annotation-erased sealed session.
 
-On success, `:show environment` reports both independent declaration counts
-and the active Exference workspace. `:show omissions` explains source
-capabilities that could not enter Exference search. `:browse` displays
+On success, `:show environment` reports both declaration counts and the
+active Exference workspace. `:show omissions` explains both source
+capabilities that could not enter Exference search and declarations the
+Djinn scope projection had to omit or degrade. `:browse` displays
 declarations rather than changing them; unlike the historical `djinn`
 executable, the shared REPL has no mutable declaration editor.
 

@@ -2,11 +2,13 @@
 
 -- | Persistent, GHCi-style access to both Djex synthesis backends.
 --
--- One REPL owns independent immutable Djinn and Exference sessions. Backend
--- switching changes only the active query target; it does not reload either
--- engine or pretend their environment and type-variable representations are
--- interchangeable. Exference environment and policy replacement is explicit
--- and transactional, so a failed load leaves the last usable session intact.
+-- One REPL owns immutable Djinn and Exference sessions built from the same
+-- loaded module scope: Exference seals the source workspace directly, and
+-- Djinn receives a checked projection of the visible declarations with its
+-- own representation and omission policy. Backend switching changes only the
+-- active query target. Environment replacement is explicit and
+-- transactional, so a failed load leaves both backends' last usable sessions
+-- intact.
 module Language.Haskell.Djex.REPL
   ( ReplBackend (..)
   , ReplOptions (..)
@@ -64,6 +66,7 @@ import Language.Haskell.Djex.Package
   , runPackageOperation
   )
 import Language.Haskell.Djex.REPL.Command
+import Language.Haskell.Djex.REPL.DjinnScope
 import Language.Haskell.Djex.REPL.Driver
 import Language.Haskell.Djex.REPL.Kind
 import Language.Haskell.Djex.REPL.Scope
@@ -100,7 +103,7 @@ defaultReplOptions = ReplOptions
 
 data ReplState = ReplState
   { activeBackends :: ReplBackend
-  , djinnRuntimeSession :: DjinnSession
+  , djinnRuntime :: DjinnRuntime
   , exferenceRuntime :: ExferenceRuntime
   , resultTarget :: DefinitionName
   , presentation :: PresentationOptions
@@ -110,6 +113,63 @@ data ReplState = ReplState
   , lastQuery :: Maybe (ReplBackend, String)
   , scriptStack :: [FilePath]
   }
+
+-- | Djinn's session state. When a source workspace is loaded, Djinn tracks
+-- the same module scope Exference searches through a checked projection;
+-- without one it falls back to its historical standard environment.
+data DjinnRuntime = DjinnRuntime
+  { djinnStandardSession :: DjinnSession
+  , djinnAxiomPolicy :: DjinnAxiomPolicy
+  , djinnProjection :: Maybe DjinnProjection
+  }
+
+currentDjinnSession :: ReplState -> DjinnSession
+currentDjinnSession state = case djinnProjection djinn of
+  Just projection -> djinnProjectionSession projection
+  Nothing -> djinnStandardSession djinn
+ where
+  djinn = djinnRuntime state
+
+-- | Recompute Djinn's view of the module scope after any change to the
+-- loaded workspace, the scope, or the axiom policy. A projection failure is
+-- reported and reverts Djinn to its standard environment rather than
+-- retaining a stale scope.
+refreshDjinnProjection :: ReplState -> IO ReplState
+refreshDjinnProjection state = case
+    ( exferenceRuntimeBaseSession runtime
+    , exferenceRuntimeScope runtime
+    ) of
+  (Just baseSession, Just context) -> case projectDjinnScope
+      (djinnAxiomPolicy djinn)
+      (scopeProjectionDeclarations baseSession)
+      (Set.fromList $ scopeUnqualifiedNames context) of
+    Left failure -> do
+      emitDiagnostic failure
+      putStrLn "Djinn falls back to its standard checked environment."
+      pure $ withProjection Nothing
+    Right projection -> pure $ withProjection $ Just projection
+  _ -> pure $ withProjection Nothing
+ where
+  runtime = exferenceRuntime state
+  djinn = djinnRuntime state
+  withProjection projection =
+    state {djinnRuntime = djinn {djinnProjection = projection}}
+
+scopeProjectionDeclarations :: ExferenceSession -> [Declaration String Void ()]
+scopeProjectionDeclarations = map
+  (mapDeclarationTypeVariables ExferenceType.defaultVariableName)
+  . environmentDeclarations
+  . exferenceSessionEnvironment
+
+djinnEnvironmentSummary :: ReplState -> String
+djinnEnvironmentSummary state = show
+    (length $ environmentDeclarations
+      $ djinnSessionEnvironment $ currentDjinnSession state)
+  ++ " declarations " ++ case djinnProjection $ djinnRuntime state of
+    Just projection -> "(projected from the module scope, "
+      ++ show (length $ djinnProjectionOmissions projection)
+      ++ " omissions)"
+    Nothing -> "(standard checked environment)"
 
 data ExferenceRuntime = ExferenceRuntime
   { exferenceRuntimeRequestedTargets :: [String]
@@ -157,7 +217,11 @@ runRepl options = case standardDjinnSession of
                 }
               initial = ReplState
                 { activeBackends = replInitialBackend options
-                , djinnRuntimeSession = djinnSession
+                , djinnRuntime = DjinnRuntime
+                    { djinnStandardSession = djinnSession
+                    , djinnAxiomPolicy = ExcludeDjinnAxioms
+                    , djinnProjection = Nothing
+                    }
                 , exferenceRuntime = exference
                 , resultTarget = target
                 , presentation = defaultInteractivePresentationOptions
@@ -168,14 +232,15 @@ runRepl options = case standardDjinnSession of
                 , scriptStack = []
                 }
           putStrLn $ "Djex REPL " ++ showVersion version
-          putStrLn "Djinn session ready (standard checked environment)."
+          ready <- refreshDjinnProjection initial
+          putStrLn $ "Djinn environment: " ++ djinnEnvironmentSummary ready
           case attemptedSession attempt of
             Just _ -> putStrLn $ "Exference environment: "
               ++ renderRequestedTargets (attemptedTargets attempt)
             Nothing -> putStrLn
               "Exference is unavailable; use :load TARGET after fixing its workspace."
           putStrLn "Type :help for help."
-          _ <- runReplDriver historyPath initial renderPrompt
+          _ <- runReplDriver historyPath ready renderPrompt
             $ executeSource "<interactive>"
           pure ExitSuccess
 
@@ -333,7 +398,7 @@ runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()
 runDjinnInteractive sourceName typeSource state = ignoreExit
   $ executeDjinnCommand
       (presentation state)
-      (djinnRuntimeSession state)
+      (currentDjinnSession state)
       (djinnSearchOptions state)
       (resultTarget state)
       sourceName
@@ -561,7 +626,7 @@ updateExferenceWorkspaceWithPolicy allowFix action retention successMessage
         Nothing -> retainAfterFailure $ attemptedDiagnostics attempt
         Just session -> do
           putStrLn successMessage
-          pure state
+          refreshDjinnProjection state
             { exferenceRuntime = ExferenceRuntime
                 { exferenceRuntimeRequestedTargets = attemptedTargets attempt
                 , exferenceRuntimeWorkspace = attemptedWorkspace attempt
@@ -662,7 +727,7 @@ modifyExferenceScope change state = case
       Right next -> case ExferenceSession.scopeExferenceSession
           (Set.fromList $ scopeSearchNames next) baseSession of
         Left failure -> reject failure
-        Right session -> pure state
+        Right session -> refreshDjinnProjection state
           { exferenceRuntime = runtime
               { exferenceRuntimeScope = Just next
               , exferenceRuntimeSession = Just session
@@ -754,6 +819,15 @@ settingBehavior setting = case setting of
     (\value -> onDjinnOptions $ \options -> options {optionBudget = value})
     (optionBudget defaultQueryOptions)
     (maybe "0" show)
+  -- Axiom projection changes the sealed Djinn session, so applying or
+  -- resetting it reprojects the scope instead of updating a plain field.
+  DjinnAxiomsSetting -> SettingBehavior
+    { settingApply = fmap applyDjinnAxiomPolicy
+        . parseBoolean (replSettingName setting)
+    , settingReset = applyDjinnAxiomPolicy False
+    , settingRender = booleanName . (== IncludeDjinnAxioms)
+        . djinnAxiomPolicy . djinnRuntime
+    }
   AllowUnusedSetting -> exferenceBooleanSetting setting
     exferenceAllowUnused
     (\value options -> options {exferenceAllowUnused = value})
@@ -794,6 +868,15 @@ applyFixPolicy :: Bool -> ReplState -> IO ReplState
 applyFixPolicy allowFix state
   | allowFix == exferenceRuntimeAllowsFix (exferenceRuntime state) = pure state
   | otherwise = reloadExferenceWorkspaceWithPolicy allowFix state
+
+applyDjinnAxiomPolicy :: Bool -> ReplState -> IO ReplState
+applyDjinnAxiomPolicy enabled state
+  | policy == djinnAxiomPolicy djinn = pure state
+  | otherwise = refreshDjinnProjection state
+      {djinnRuntime = djinn {djinnAxiomPolicy = policy}}
+ where
+  djinn = djinnRuntime state
+  policy = if enabled then IncludeDjinnAxioms else ExcludeDjinnAxioms
 
 parseChoiceBudget :: String -> String -> Either String (Maybe Integer)
 parseChoiceBudget name source = do
@@ -960,9 +1043,7 @@ backendSelected _ BothBackends = True
 
 showEnvironmentSummary :: ReplState -> IO ()
 showEnvironmentSummary state = do
-  putStrLn $ "Djinn: " ++ declarationCount
-      (djinnSessionEnvironment $ djinnRuntimeSession state)
-    ++ " declarations (standard checked environment)"
+  putStrLn $ "Djinn: " ++ djinnEnvironmentSummary state
   let runtime = exferenceRuntime state
   putStrLn $ "Exference: " ++ case exferenceRuntimeSession runtime of
     Nothing -> "unavailable (last attempted "
@@ -997,11 +1078,21 @@ showTargets state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
     targets -> mapM_ (putStrLn . workspaceTargetDisplay) targets
 
 showOmissions :: ReplState -> IO ()
-showOmissions state = case exferenceRuntimeSession $ exferenceRuntime state of
-  Nothing -> putStrLn "Exference is unavailable."
-  Just session -> case exferenceSessionOmissions session of
-    [] -> putStrLn "No Exference capabilities were omitted."
-    omissions -> mapM_ (putStrLn . renderOmission) omissions
+showOmissions state = do
+  case djinnProjection $ djinnRuntime state of
+    Nothing -> putStrLn
+      "-- Djinn: standard checked environment (nothing projected)"
+    Just projection -> do
+      putStrLn "-- Djinn scope projection"
+      case djinnProjectionOmissions projection of
+        [] -> putStrLn "(no omissions)"
+        omissions -> mapM_ (putStrLn . renderDjinnScopeOmission) omissions
+  putStrLn "-- Exference"
+  case exferenceRuntimeSession $ exferenceRuntime state of
+    Nothing -> putStrLn "Exference is unavailable."
+    Just session -> case exferenceSessionOmissions session of
+      [] -> putStrLn "No Exference capabilities were omitted."
+      omissions -> mapM_ (putStrLn . renderOmission) omissions
 
 renderOmission :: ExferenceOmission -> String
 renderOmission omission = renderCanonical (omittedName omission) ++ ": "
@@ -1019,7 +1110,7 @@ browseState (Just reference) state = browseWorkspaceModule reference state
 browseState Nothing state = forSelectedBackends state $ \selectedBackend ->
   case selectedBackend of
     DjinnBackend -> browse "Djinn" id
-      $ djinnSessionEnvironment $ djinnRuntimeSession state
+      $ djinnSessionEnvironment $ currentDjinnSession state
     ExferenceBackend -> case
         ( exferenceRuntimeBaseSession runtime
         , exferenceRuntimeScope runtime
@@ -1069,7 +1160,7 @@ showInfo state source = case parseName $ trim source of
   Right parsedName -> forSelectedBackends state $ \selectedBackend ->
     case selectedBackend of
       DjinnBackend -> info "Djinn" id parsedName
-        $ djinnSessionEnvironment $ djinnRuntimeSession state
+        $ djinnSessionEnvironment $ currentDjinnSession state
       ExferenceBackend -> case
           ( exferenceRuntimeSession runtime
           , exferenceRuntimeScope runtime
@@ -1163,25 +1254,14 @@ declarationDefines
   -> Declaration variable kind annotation
   -> Bool
 declarationDefines name declaration =
-  declarationSubjectName declaration == name || case declaration of
-    DataTypeDeclaration _ _ _ constructors ->
-      any ((== name) . constructorName) constructors
-    ClassDeclaration _ _ _ _ methods ->
-      any ((== name) . valueName) methods
-    _ -> False
+  name `elem` declarationOwnedNames declaration
 
 declarationNameSet
   :: Environment variable kind annotation
   -> Set.Set Name
 declarationNameSet = Set.fromList
-  . concatMap declarationNames
+  . concatMap declarationOwnedNames
   . environmentDeclarations
- where
-  declarationNames declaration = declarationSubjectName declaration : case
-    declaration of
-      DataTypeDeclaration _ _ _ constructors -> map constructorName constructors
-      ClassDeclaration _ _ _ _ methods -> map valueName methods
-      _ -> []
 
 renderDeclaration
   :: (variable -> String)

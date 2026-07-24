@@ -107,6 +107,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplImportRollback
   , testCase "REPL fix policy rebuilds the Exference session"
       testReplFixReload
+  , testCase "REPL projects the loaded scope into Djinn"
+      testReplUnifiedScope
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -1641,6 +1643,42 @@ testReplFixReload = withTemporaryEnvironment
     $ countOccurrences "Data.Function.fix" output
   assertContains "safe policy finds no unrestricted inhabitant first"
     "[DJEX_EXF_NO_RESULT]" errors
+
+-- Both backends must synthesize from the same loaded declarations: Djinn
+-- through its scope projection (structurally, and via axioms only on request),
+-- Exference through its scoped search session.
+testReplUnifiedScope :: Assertion
+testReplUnifiedScope = withTemporaryEnvironment
+  [ ( "Custom.hs"
+    , unlines
+        [ "module Custom where"
+        , ""
+        , "data Wrapped = MkWrapped Bool"
+        , ""
+        , "unwrap :: Wrapped -> Bool"
+        , "unwrap (MkWrapped b) = b"
+        ]
+    )
+  ] $ \directory -> do
+  (exitCode, output, _errors) <- runRepl directory
+    [ ":set render expression"
+    , ":compare Wrapped -> Bool"
+    , ":show environment"
+    , ":show omissions"
+    , ":set djinn-axioms on"
+    , ":djinn Wrapped -> Bool"
+    ]
+  assertEqual "unified scope REPL exit" ExitSuccess exitCode
+  assertContains "comparison labels Djinn" "-- Djinn" output
+  assertContains "comparison labels Exference" "-- Exference" output
+  assertEqual "both backends eliminate the loaded constructor" 2
+    $ countOccurrences "MkWrapped" output
+  assertContains "Djinn reports its projected environment"
+    "projected from the module scope" output
+  assertContains "excluded value axioms stay visible"
+    "value axioms are excluded" output
+  assertContains "opting into axioms lets Djinn use the loaded value"
+    "unwrap" output
 
 testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do

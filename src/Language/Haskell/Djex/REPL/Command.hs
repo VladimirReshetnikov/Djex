@@ -129,6 +129,7 @@ data ReplSetting
   | PromptSetting
   | CandidateLimitSetting
   | ChoiceBudgetSetting
+  | DjinnAxiomsSetting
   | AllowUnusedSetting
   | AllowConstraintsSetting
   | ConstraintDeferralStepsSetting
@@ -149,6 +150,7 @@ replSettingName setting = case setting of
   PromptSetting -> "prompt"
   CandidateLimitSetting -> "candidate-limit"
   ChoiceBudgetSetting -> "choice-budget"
+  DjinnAxiomsSetting -> "djinn-axioms"
   AllowUnusedSetting -> "allow-unused"
   AllowConstraintsSetting -> "allow-constraints"
   ConstraintDeferralStepsSetting -> "constraint-deferral-steps"
@@ -365,7 +367,8 @@ settingNames = map replSettingName [minBound .. maxBound]
 
 booleanSettingNames :: [String]
 booleanSettingNames = map replSettingName
-  [ AllowUnusedSetting
+  [ DjinnAxiomsSetting
+  , AllowUnusedSetting
   , AllowConstraintsSetting
   , MultiConstructorPatternsSetting
   , FixSetting

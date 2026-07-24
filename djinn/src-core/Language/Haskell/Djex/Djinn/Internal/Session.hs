@@ -11,6 +11,7 @@ module Language.Haskell.Djex.Djinn.Internal.Session
   , DjinnInventory
   , DjinnDeclarationSnapshot
   , mkDjinnSession
+  , mkDjinnSessionChecked
   , standardDjinnSession
   , djinnSessionEnvironment
   , djinnSessionInventory
@@ -78,9 +79,16 @@ data DjinnDeclarationSnapshot = DjinnDeclarationSnapshot
 -- | Lower a shared declaration environment through Djinn's stricter lexical,
 -- dependency, and kind checks, then seal it into a reusable session.
 mkDjinnSession :: DjinnEnvironment -> Either Diagnostic DjinnSession
-mkDjinnSession sharedEnvironment = DjinnSession <$>
-  first environmentFailure
-    (RawEnvironment.prepareGroundSynthesisEnvironment sharedEnvironment)
+mkDjinnSession = first environmentFailure . mkDjinnSessionChecked
+
+-- | 'mkDjinnSession' with the structured sealing failure preserved, so an
+-- environment-projecting caller can repair the specific rejected declaration
+-- instead of failing its complete projection.
+mkDjinnSessionChecked
+  :: DjinnEnvironment
+  -> Either Core.SynthesisEnvironmentError DjinnSession
+mkDjinnSessionChecked sharedEnvironment = DjinnSession
+  <$> RawEnvironment.prepareGroundSynthesisEnvironment sharedEnvironment
 
 -- | The historical checked Djinn prelude. Its raw declaration spelling is a
 -- compatibility source only: convert it once and use the same neutral session

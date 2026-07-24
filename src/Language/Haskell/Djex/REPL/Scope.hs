@@ -54,6 +54,7 @@ import Language.Haskell.Djex.REPL.Workspace
   , workspaceModuleSyntax
   , workspaceModules
   )
+import Language.Haskell.Djex.Text (trim)
 import Language.Haskell.Synthesis.Declaration
   ( DataConstructor (constructorName)
   , Declaration (..)
@@ -1285,6 +1286,3 @@ ordNub = reverse . snd . foldl' step (Set.empty, [])
   step (seen, values) value
     | value `Set.member` seen = (seen, values)
     | otherwise = (Set.insert value seen, value : values)
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace

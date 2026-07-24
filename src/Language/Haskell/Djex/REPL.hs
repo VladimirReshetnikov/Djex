@@ -21,7 +21,7 @@ import Control.Exception
   , handleJust
   )
 import Control.Monad (forM_, when)
-import Data.Char (isSpace, toLower)
+import Data.Char (isSpace)
 import Data.Foldable (toList)
 import Data.List (intercalate, isPrefixOf)
 import Data.List.NonEmpty (NonEmpty)
@@ -69,6 +69,7 @@ import Language.Haskell.Djex.REPL.Kind
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
 import Language.Haskell.Djex.REPL.Workspace
+import Language.Haskell.Djex.Text (normalize, trim)
 import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
 import qualified Language.Haskell.Exference.Core.Types as ExferenceType
@@ -162,7 +163,7 @@ runRepl options = case standardDjinnSession of
                 , presentation = defaultInteractivePresentationOptions
                 , djinnSearchOptions = defaultQueryOptions
                 , exferenceSearchOptions = defaultExferenceOptions
-                , promptTemplate = "djex[%b]> "
+                , promptTemplate = defaultPromptTemplate
                 , lastQuery = Nothing
                 , scriptStack = []
                 }
@@ -177,6 +178,9 @@ runRepl options = case standardDjinnSession of
           _ <- runReplDriver historyPath initial renderPrompt
             $ executeSource "<interactive>"
           pure ExitSuccess
+
+defaultPromptTemplate :: String
+defaultPromptTemplate = "djex[%b]> "
 
 defaultTarget :: Either Diagnostic DefinitionName
 defaultTarget = case parseResultTarget defaultResultTargetSpelling of
@@ -683,177 +687,192 @@ setOption source state
       Right (setting, value) -> applySetting setting value state
 
 applySetting :: ReplSetting -> Maybe String -> ReplState -> IO ReplState
-applySetting setting value state = case setting of
-  BackendSetting -> withValue setting $ \source ->
-    case parseReplBackend source of
-      Left failure -> reject failure
-      Right selected -> pure state {activeBackends = selected}
-  TargetSetting -> withValue setting $ \source -> case checkedTarget source of
-    Left failure -> reject failure
-    Right target -> pure state {resultTarget = target}
-  SelectionSetting -> withValue setting $ \source ->
-    case parseSelectionMode (replSettingName setting) source of
-      Left failure -> reject failure
-      Right selected -> pure state
-        { presentation = (presentation state)
-            { presentationSelection = selected }
-        }
-  RenderingSetting -> withValue setting $ \source ->
-    case parseRenderMode (replSettingName setting) source of
-      Left failure -> reject failure
-      Right mode -> pure state
-        { presentation = (presentation state)
-            { presentationRenderMode = mode }
-        }
-  QualificationSetting -> withValue setting $ \source ->
-    case parseQualification (replSettingName setting) source of
-      Left failure -> reject failure
-      Right qualification -> pure state
-        { presentation = (presentation state)
-            { presentationQualification = qualification }
-        }
-  PromptSetting -> withValue setting $ \source -> pure state
-    {promptTemplate = decodeString source}
-  CandidateLimitSetting -> withValue setting $ \source ->
-    case positiveInt (replSettingName setting) source of
-      Left failure -> reject failure
-      Right limit -> pure state
-        { djinnSearchOptions = (djinnSearchOptions state)
-            { optionCutoff = limit }
-        }
-  ChoiceBudgetSetting -> withValue setting $ \source ->
-    case nonNegativeInteger (replSettingName setting) source of
-      Left failure -> reject failure
-      Right budget -> pure state
-        { djinnSearchOptions = (djinnSearchOptions state)
-            { optionBudget = if budget == 0 then Nothing else Just budget }
-        }
-  AllowUnusedSetting -> setExferenceBool setting value state
-    $ \enabled options -> options {exferenceAllowUnused = enabled}
-  AllowConstraintsSetting -> setExferenceBool setting value state
-    $ \enabled options -> options
-        {exferenceAllowResidualConstraints = enabled}
-  MultiConstructorPatternsSetting -> setExferenceBool setting value state
-    $ \enabled options -> options
-        {exferenceMultiConstructorPatterns = enabled}
-  ConstraintDeferralStepsSetting -> withValue setting $ \source ->
-    case nonNegativeInt (replSettingName setting) source of
-      Left failure -> reject failure
-      Right count -> pure state
-        { exferenceSearchOptions = (exferenceSearchOptions state)
-            { exferenceConstraintDeferralSteps = count }
-        }
-  MaximumStepsSetting -> withValue setting $ \source ->
-    case positiveInt (replSettingName setting) source of
-      Left failure -> reject failure
-      Right count -> pure state
-        { exferenceSearchOptions = (exferenceSearchOptions state)
-            { exferenceMaximumSteps = count }
-        }
-  MaximumQueueSetting -> withValue setting $ \source ->
-    case boundedNonNegativeInt (replSettingName setting) source of
-      Left failure -> reject failure
-      Right count -> pure state
-        { exferenceSearchOptions = (exferenceSearchOptions state)
-            { exferenceMaximumQueueSize = count }
-        }
-  MaximumDepthSetting -> withValue setting $ \source ->
-    case boundedPenalty (replSettingName setting) source of
-      Left failure -> reject failure
-      Right depth -> pure state
-        { exferenceSearchOptions = (exferenceSearchOptions state)
-            { exferenceMaximumDepth = depth }
-        }
-  FixSetting -> case parseBoolean (replSettingName setting) value of
-    Left failure -> reject failure
-    Right allowFix
-      | allowFix == exferenceRuntimeAllowsFix (exferenceRuntime state) ->
-          pure state
-      | otherwise -> reloadExferenceWorkspaceWithPolicy allowFix state
- where
-  reject failure = settingFailure failure >> pure state
-  withValue requiredSetting action = case value of
-    Nothing -> reject $ "setting " ++ replSettingName requiredSetting
-      ++ " requires a value"
-    Just suppliedValue -> action suppliedValue
-
-setExferenceBool
-  :: ReplSetting
-  -> Maybe String
-  -> ReplState
-  -> (Bool -> ExferenceOptions -> ExferenceOptions)
-  -> IO ReplState
-setExferenceBool setting value state update = case
-    parseBoolean (replSettingName setting) value of
+applySetting setting value state = case
+    settingApply (settingBehavior setting) value of
   Left failure -> settingFailure failure >> pure state
-  Right enabled -> pure state
-    { exferenceSearchOptions = update enabled $ exferenceSearchOptions state }
+  Right update -> update state
 
 unsetOption :: String -> ReplState -> IO ReplState
-unsetOption source state = case words $ map toLower $ trim source of
+unsetOption source state = case words $ normalize source of
   [rawName] -> case parseReplSetting rawName of
     Left failure -> settingFailure failure >> pure state
-    Right setting -> reset setting
+    Right setting -> settingReset (settingBehavior setting) state
   [] -> settingFailure "expected a setting name" >> pure state
   _ -> settingFailure "expected exactly one setting name" >> pure state
- where
-  reset setting = case setting of
-    BackendSetting -> pure state
-      {activeBackends = replInitialBackend defaultReplOptions}
-    TargetSetting -> case defaultTarget of
-      Left failure -> emitDiagnostic failure >> pure state
-      Right target -> pure state {resultTarget = target}
-    SelectionSetting -> pure state
-      { presentation = (presentation state)
-          { presentationSelection = presentationSelection
-              defaultInteractivePresentationOptions }
-      }
-    RenderingSetting -> pure state
-      { presentation = (presentation state)
-          { presentationRenderMode = presentationRenderMode
-              defaultInteractivePresentationOptions }
-      }
-    QualificationSetting -> pure state
-      { presentation = (presentation state)
-          { presentationQualification = presentationQualification
-              defaultInteractivePresentationOptions }
-      }
-    PromptSetting -> pure state {promptTemplate = "djex[%b]> "}
-    CandidateLimitSetting -> pure state
-      { djinnSearchOptions = (djinnSearchOptions state)
-          { optionCutoff = optionCutoff defaultQueryOptions }
-      }
-    ChoiceBudgetSetting -> pure state
-      { djinnSearchOptions = (djinnSearchOptions state)
-          { optionBudget = optionBudget defaultQueryOptions }
-      }
-    AllowUnusedSetting -> resetExference $ \defaults options -> options
-      {exferenceAllowUnused = exferenceAllowUnused defaults}
-    AllowConstraintsSetting -> resetExference $ \defaults options -> options
-      { exferenceAllowResidualConstraints =
-          exferenceAllowResidualConstraints defaults }
-    MultiConstructorPatternsSetting -> resetExference
-      $ \defaults options -> options
-      { exferenceMultiConstructorPatterns =
-          exferenceMultiConstructorPatterns defaults }
-    ConstraintDeferralStepsSetting -> resetExference
-      $ \defaults options -> options
-      { exferenceConstraintDeferralSteps =
-          exferenceConstraintDeferralSteps defaults }
-    MaximumStepsSetting -> resetExference $ \defaults options -> options
-      {exferenceMaximumSteps = exferenceMaximumSteps defaults}
-    MaximumQueueSetting -> resetExference $ \defaults options -> options
-      {exferenceMaximumQueueSize = exferenceMaximumQueueSize defaults}
-    MaximumDepthSetting -> resetExference $ \defaults options -> options
-      {exferenceMaximumDepth = exferenceMaximumDepth defaults}
-    FixSetting
-      | exferenceRuntimeAllowsFix (exferenceRuntime state) ->
-          reloadExferenceWorkspaceWithPolicy False state
-      | otherwise -> pure state
 
-  resetExference update = pure state
-    { exferenceSearchOptions = update defaultExferenceOptions
-        $ exferenceSearchOptions state }
+-- | One setting's complete behavior. Application, reset, and display are
+-- projections of the same descriptor, so the three views cannot drift apart.
+data SettingBehavior = SettingBehavior
+  { settingApply :: Maybe String -> Either String (ReplState -> IO ReplState)
+  , settingReset :: ReplState -> IO ReplState
+  , settingRender :: ReplState -> String
+  }
+
+settingBehavior :: ReplSetting -> SettingBehavior
+settingBehavior setting = case setting of
+  BackendSetting -> fieldSetting setting (const parseReplBackend)
+    activeBackends
+    (\value state -> state {activeBackends = value})
+    (replInitialBackend defaultReplOptions)
+    replBackendName
+  -- The built-in target spelling is validated at startup, but restoring it
+  -- still reports the impossible failure instead of inventing a fallback.
+  TargetSetting -> SettingBehavior
+    { settingApply = requiredValue setting $ \source ->
+        (\target state -> pure state {resultTarget = target})
+          <$> checkedTarget source
+    , settingReset = \state -> case defaultTarget of
+        Left failure -> emitDiagnostic failure >> pure state
+        Right target -> pure state {resultTarget = target}
+    , settingRender = definitionSpelling . resultTarget
+    }
+  SelectionSetting -> presentationSetting setting parseSelectionMode
+    presentationSelection
+    (\value options -> options {presentationSelection = value})
+    selectionModeName
+  RenderingSetting -> presentationSetting setting parseRenderMode
+    presentationRenderMode
+    (\value options -> options {presentationRenderMode = value})
+    renderModeName
+  QualificationSetting -> presentationSetting setting parseQualification
+    presentationQualification
+    (\value options -> options {presentationQualification = value})
+    qualificationName
+  PromptSetting -> fieldSetting setting
+    (\_ source -> Right $ decodeString source)
+    promptTemplate
+    (\value state -> state {promptTemplate = value})
+    defaultPromptTemplate
+    show
+  CandidateLimitSetting -> fieldSetting setting positiveInt
+    (optionCutoff . djinnSearchOptions)
+    (\value -> onDjinnOptions $ \options -> options {optionCutoff = value})
+    (optionCutoff defaultQueryOptions)
+    show
+  ChoiceBudgetSetting -> fieldSetting setting parseChoiceBudget
+    (optionBudget . djinnSearchOptions)
+    (\value -> onDjinnOptions $ \options -> options {optionBudget = value})
+    (optionBudget defaultQueryOptions)
+    (maybe "0" show)
+  AllowUnusedSetting -> exferenceBooleanSetting setting
+    exferenceAllowUnused
+    (\value options -> options {exferenceAllowUnused = value})
+  AllowConstraintsSetting -> exferenceBooleanSetting setting
+    exferenceAllowResidualConstraints
+    (\value options -> options {exferenceAllowResidualConstraints = value})
+  MultiConstructorPatternsSetting -> exferenceBooleanSetting setting
+    exferenceMultiConstructorPatterns
+    (\value options -> options {exferenceMultiConstructorPatterns = value})
+  ConstraintDeferralStepsSetting -> exferenceFieldSetting setting
+    nonNegativeInt
+    exferenceConstraintDeferralSteps
+    (\value options -> options {exferenceConstraintDeferralSteps = value})
+    show
+  MaximumStepsSetting -> exferenceFieldSetting setting positiveInt
+    exferenceMaximumSteps
+    (\value options -> options {exferenceMaximumSteps = value})
+    show
+  MaximumQueueSetting -> exferenceFieldSetting setting boundedNonNegativeInt
+    exferenceMaximumQueueSize
+    (\value options -> options {exferenceMaximumQueueSize = value})
+    renderBounded
+  MaximumDepthSetting -> exferenceFieldSetting setting boundedPenalty
+    exferenceMaximumDepth
+    (\value options -> options {exferenceMaximumDepth = value})
+    renderBounded
+  -- The fix policy is baked into the sealed Exference session, so changing
+  -- or resetting it reloads the workspace instead of updating a plain field.
+  FixSetting -> SettingBehavior
+    { settingApply = fmap applyFixPolicy
+        . parseBoolean (replSettingName setting)
+    , settingReset = applyFixPolicy False
+    , settingRender =
+        booleanName . exferenceRuntimeAllowsFix . exferenceRuntime
+    }
+
+applyFixPolicy :: Bool -> ReplState -> IO ReplState
+applyFixPolicy allowFix state
+  | allowFix == exferenceRuntimeAllowsFix (exferenceRuntime state) = pure state
+  | otherwise = reloadExferenceWorkspaceWithPolicy allowFix state
+
+parseChoiceBudget :: String -> String -> Either String (Maybe Integer)
+parseChoiceBudget name source = do
+  budget <- nonNegativeInteger name source
+  Right $ if budget == 0 then Nothing else Just budget
+
+-- | The common setting shape: parse a required value, store it in a state
+-- field, restore a built-in default, and render the current value.
+fieldSetting
+  :: ReplSetting
+  -> (String -> String -> Either String value)
+  -> (ReplState -> value)
+  -> (value -> ReplState -> ReplState)
+  -> value
+  -> (value -> String)
+  -> SettingBehavior
+fieldSetting setting parser get set defaultValue render = SettingBehavior
+  { settingApply = requiredValue setting $ \source ->
+      (\parsed -> pure . set parsed) <$> parser (replSettingName setting) source
+  , settingReset = pure . set defaultValue
+  , settingRender = render . get
+  }
+
+-- | Reject a missing setting value before invoking a value parser.
+requiredValue
+  :: ReplSetting
+  -> (String -> Either String (ReplState -> IO ReplState))
+  -> Maybe String
+  -> Either String (ReplState -> IO ReplState)
+requiredValue setting _ Nothing = Left
+  $ "setting " ++ replSettingName setting ++ " requires a value"
+requiredValue _ parse (Just source) = parse source
+
+presentationSetting
+  :: ReplSetting
+  -> (String -> String -> Either String value)
+  -> (PresentationOptions -> value)
+  -> (value -> PresentationOptions -> PresentationOptions)
+  -> (value -> String)
+  -> SettingBehavior
+presentationSetting setting parser get set = fieldSetting setting parser
+  (get . presentation)
+  (\value state -> state {presentation = set value $ presentation state})
+  (get defaultInteractivePresentationOptions)
+
+exferenceFieldSetting
+  :: ReplSetting
+  -> (String -> String -> Either String value)
+  -> (ExferenceOptions -> value)
+  -> (value -> ExferenceOptions -> ExferenceOptions)
+  -> (value -> String)
+  -> SettingBehavior
+exferenceFieldSetting setting parser get set = fieldSetting setting parser
+  (get . exferenceSearchOptions)
+  (\value -> onExferenceOptions $ set value)
+  (get defaultExferenceOptions)
+
+exferenceBooleanSetting
+  :: ReplSetting
+  -> (ExferenceOptions -> Bool)
+  -> (Bool -> ExferenceOptions -> ExferenceOptions)
+  -> SettingBehavior
+exferenceBooleanSetting setting get set = SettingBehavior
+  { settingApply = \value -> (\enabled -> pure . update enabled)
+      <$> parseBoolean (replSettingName setting) value
+  , settingReset = pure . update (get defaultExferenceOptions)
+  , settingRender = booleanName . get . exferenceSearchOptions
+  }
+ where
+  update value = onExferenceOptions $ set value
+
+onDjinnOptions :: (QueryOptions -> QueryOptions) -> ReplState -> ReplState
+onDjinnOptions update state =
+  state {djinnSearchOptions = update $ djinnSearchOptions state}
+
+onExferenceOptions
+  :: (ExferenceOptions -> ExferenceOptions) -> ReplState -> ReplState
+onExferenceOptions update state =
+  state {exferenceSearchOptions = update $ exferenceSearchOptions state}
 
 settingInvocation :: String -> Either String (ReplSetting, Maybe String)
 settingInvocation source = case trim source of
@@ -874,14 +893,14 @@ settingInvocation source = case trim source of
         setting <- parseReplSetting normalized
         Right (setting, value)
    where
-    normalized = map toLower $ trim rawName
+    normalized = normalize rawName
 
   optionalRemainder name value = case trim $ drop (length name) value of
     "" -> Nothing
     remainder -> Just remainder
 
 parseBoolean :: String -> Maybe String -> Either String Bool
-parseBoolean name source = case fmap (map toLower . trim) source of
+parseBoolean name source = case fmap normalize source of
   Just "on" -> Right True
   Just "true" -> Right True
   Just "yes" -> Right True
@@ -896,7 +915,7 @@ checkedTarget = parseResultTarget . trim
 
 showState :: Maybe String -> ReplState -> IO ()
 showState Nothing = showSettings
-showState (Just rawSubject) = case words $ map toLower $ trim rawSubject of
+showState (Just rawSubject) = case words $ normalize rawSubject of
   ["settings"] -> showSettings
   ["backends"] -> showBackends
   ["environment"] -> showEnvironmentSummary
@@ -919,35 +938,7 @@ showSettings state = putStr $ unlines
     ++ renderSettingValue state setting
 
 renderSettingValue :: ReplState -> ReplSetting -> String
-renderSettingValue state setting = case setting of
-  BackendSetting -> replBackendName $ activeBackends state
-  TargetSetting -> definitionSpelling $ resultTarget state
-  SelectionSetting -> selectionModeName
-    $ presentationSelection $ presentation state
-  RenderingSetting -> renderModeName
-    $ presentationRenderMode $ presentation state
-  QualificationSetting -> qualificationName
-    $ presentationQualification $ presentation state
-  PromptSetting -> show $ promptTemplate state
-  CandidateLimitSetting -> show $ optionCutoff $ djinnSearchOptions state
-  ChoiceBudgetSetting -> maybe "0" show
-    $ optionBudget $ djinnSearchOptions state
-  AllowUnusedSetting -> booleanName
-    $ exferenceAllowUnused $ exferenceSearchOptions state
-  AllowConstraintsSetting -> booleanName
-    $ exferenceAllowResidualConstraints $ exferenceSearchOptions state
-  ConstraintDeferralStepsSetting -> show
-    $ exferenceConstraintDeferralSteps $ exferenceSearchOptions state
-  MultiConstructorPatternsSetting -> booleanName
-    $ exferenceMultiConstructorPatterns $ exferenceSearchOptions state
-  MaximumStepsSetting -> show
-    $ exferenceMaximumSteps $ exferenceSearchOptions state
-  MaximumQueueSetting -> renderBounded
-    $ exferenceMaximumQueueSize $ exferenceSearchOptions state
-  MaximumDepthSetting -> renderBounded
-    $ exferenceMaximumDepth $ exferenceSearchOptions state
-  FixSetting -> booleanName
-    $ exferenceRuntimeAllowsFix $ exferenceRuntime state
+renderSettingValue state setting = settingRender (settingBehavior setting) state
 
 booleanName :: Bool -> String
 booleanName True = "on"
@@ -1382,6 +1373,3 @@ ioFailure summary path failure = emitDiagnostic
 ioDiagnostic :: String -> FilePath -> IOError -> Diagnostic
 ioDiagnostic summary path failure = contextualDiagnostic
   Error "DJEX_REPL_IO" summary $ path ++ ": " ++ show failure
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace

@@ -38,7 +38,6 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Except (ExceptT (..), runExceptT)
 import Data.Bifunctor (first)
-import Data.Char (isSpace, toLower)
 import Data.List (intercalate)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.IO (hFlush, hPutStrLn, stderr, stdout)
@@ -50,6 +49,7 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , parseExferenceRequestWithCheckedTarget
   , parseExferenceRequestWithCheckedTargetInScope
   )
+import Language.Haskell.Djex.Text (normalize, trim)
 
 -- | Whether a candidate is presented as a complete binding or an expression.
 data RenderMode = RenderDefinition | RenderExpression
@@ -232,12 +232,6 @@ executeExferenceCommandInScope presentation session options target scope
     Right request -> case runExferenceQuery session request of
       Left failure -> diagnosticFailure failure
       Right results -> presentExference presentation results
-
-normalize :: String -> String
-normalize = map toLower . trim
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace
 
 -- | Select, render, and report one terminal Djinn result.
 presentDjinn :: PresentationOptions -> DjinnResult -> IO ExitCode

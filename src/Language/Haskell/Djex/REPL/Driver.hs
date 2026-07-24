@@ -9,7 +9,6 @@ module Language.Haskell.Djex.REPL.Driver
   ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Char (isSpace)
 import Data.List (isPrefixOf)
 import System.Console.Haskeline
   ( Completion
@@ -34,6 +33,7 @@ import Language.Haskell.Djex.REPL.Command
   , settingNames
   , showNames
   )
+import Language.Haskell.Djex.Text (trim)
 
 data ReplStep state
   = ContinueRepl state
@@ -118,6 +118,3 @@ completingPath source = case words source of
   command : _ -> command `elem`
     [":load", ":l", ":add", ":unadd", ":script", ":cd"]
   [] -> False
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace

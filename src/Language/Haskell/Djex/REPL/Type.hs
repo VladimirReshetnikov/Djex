@@ -21,7 +21,6 @@ import Control.Monad.Trans.State.Strict
   , modify'
   , runStateT
   )
-import Data.Char (isSpace)
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (inits, intercalate, tails)
 import qualified Data.Map.Strict as Map
@@ -59,6 +58,7 @@ import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
 import Language.Haskell.Djex.REPL.Command (TypeDefaulting (..))
 import Language.Haskell.Djex.REPL.Scope
+import Language.Haskell.Djex.Text (trim)
 import Language.Haskell.Exference.Core.ConstraintSolver (isPossible)
 import Language.Haskell.Exference.Core.Declaration
   ( prepareSynthesisInventory
@@ -1115,6 +1115,3 @@ renderRawType = renderTypeWithQualification
 renderRawConstraint :: Constraint HsType -> String
 renderRawConstraint = renderConstraintWithQualification
   FullyQualified defaultVariableName
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace

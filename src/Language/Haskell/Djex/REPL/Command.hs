@@ -37,6 +37,7 @@ import Language.Haskell.Djex.Package
   , parsePackageInstall
   , validatePackageTargets
   )
+import Language.Haskell.Djex.Text (normalize, trim)
 
 -- | Backend selection retained by the interactive frontend.
 data ReplBackend
@@ -158,12 +159,10 @@ replSettingName setting = case setting of
   FixSetting -> "fix"
 
 parseReplSetting :: String -> Either String ReplSetting
-parseReplSetting source = case filter ((== normalized) . replSettingName)
+parseReplSetting source = case filter ((== normalize source) . replSettingName)
     [minBound .. maxBound] of
   [setting] -> Right setting
   _ -> Left $ "unknown setting " ++ show source
- where
-  normalized = map toLower $ trim source
 
 data CommandDescriptor = CommandDescriptor
   { descriptorName :: String
@@ -255,16 +254,19 @@ parseReplBackend source = case exactMatches of
   matches -> Left $ "ambiguous backend " ++ show source ++ " (could be "
     ++ intercalate ", " (map replBackendName matches) ++ ")"
  where
-  token = map toLower $ trim source
-  choices =
-    [ OneBackend DjinnBackend
-    , OneBackend ExferenceBackend
-    , BothBackends
-    ]
-  exactMatches = filter ((== token) . replBackendName) choices
+  token = normalize source
+  exactMatches = filter ((== token) . replBackendName) replBackendChoices
   prefixMatches
     | null token = []
-    | otherwise = filter (isPrefixOf token . replBackendName) choices
+    | otherwise = filter (isPrefixOf token . replBackendName)
+        replBackendChoices
+
+replBackendChoices :: [ReplBackend]
+replBackendChoices =
+  [ OneBackend DjinnBackend
+  , OneBackend ExferenceBackend
+  , BothBackends
+  ]
 
 commandDescriptors :: [CommandDescriptor]
 commandDescriptors =
@@ -322,7 +324,7 @@ commandDescriptors =
   , command "set" ["s"] "[OPTION [VALUE]]" "show or change settings"
       $ Right . ReplCommand . SetOption
   , command "show" []
-      "[settings|backends|environment|imports|modules|targets|omissions|diagnostics|directory]"
+      ("[" ++ intercalate "|" showNames ++ "]")
       "inspect REPL and backend state"
       $ Right . ReplCommand . ShowState . optionalText
   , command "synth" ["sy"] "TYPE" "synthesize with the active backend(s)"
@@ -356,7 +358,7 @@ commandNames = concatMap completionNames commandDescriptors
     $ descriptorName descriptor : descriptorAliases descriptor
 
 backendNames :: [String]
-backendNames = ["djinn", "exference", "both"]
+backendNames = map replBackendName replBackendChoices
 
 settingNames :: [String]
 settingNames = map replSettingName [minBound .. maxBound]
@@ -424,7 +426,7 @@ commandHelp source = case token of
       ++ aliasLines descriptor
       ++ descriptorDetails descriptor
  where
-  token = dropWhile (== ':') $ map toLower $ trim source
+  token = dropWhile (== ':') $ normalize source
   multilineHelp = unlines
     [ ":{"
     , "INPUT"
@@ -606,6 +608,3 @@ stripKeyword keyword source
       rest@(first : _)
         | isSpace first -> Just $ dropWhile isSpace rest
         | otherwise -> Nothing
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace

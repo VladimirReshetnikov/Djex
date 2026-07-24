@@ -202,6 +202,7 @@ Library
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Command
     Language.Haskell.Djex.Package
+    Language.Haskell.Djex.Text
     Language.Haskell.Djex.REPL.Command
     Language.Haskell.Djex.REPL.Driver
     Language.Haskell.Djex.REPL.Kind

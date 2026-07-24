@@ -17,7 +17,6 @@ module Language.Haskell.Djex.REPL.Kind
 import Control.Monad (unless)
 import Control.Monad.Trans.Except (runExceptT)
 import Data.Bifunctor (first)
-import Data.Char (isSpace)
 import Data.Functor.Identity (runIdentity)
 import Data.List (mapAccumL)
 import qualified Data.Map.Strict as Map
@@ -37,6 +36,7 @@ import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
 import Language.Haskell.Djex.REPL.Command (KindNormalization (..))
 import Language.Haskell.Djex.REPL.Scope
+import Language.Haskell.Djex.Text (trim)
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , TypeVarIndex
@@ -310,6 +310,3 @@ kindTypeResolver resolver = resolver
   { resolverUnqualifiedTypeNames = resolverUnqualifiedTypeNames resolver
       ++ resolverUnqualifiedClassNames resolver
   }
-
-trim :: String -> String
-trim = reverse . dropWhile isSpace . reverse . dropWhile isSpace

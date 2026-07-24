@@ -73,6 +73,7 @@ data ReplCommand
   | CompareBackends String
   | DownloadPackages [String]
   | EditFile (Maybe FilePath)
+  | Evaluate String
   | Help (Maybe String)
   | History (Maybe String)
   | InspectDeclaration String
@@ -296,6 +297,9 @@ commandDescriptors =
   , command "edit" [] "[FILE]"
       "open the configured editor on a file"
       $ fmap (ReplCommand . EditFile) . optionalArgument "at most one file"
+  , command "eval" [] "EXPRESSION"
+      "evaluate a Haskell expression with real GHC"
+      $ fmap (ReplCommand . Evaluate) . required "a Haskell expression"
   , command "exference" [] "TYPE" "synthesize once with Exference"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend ExferenceBackend)
           . required "a type"
@@ -459,6 +463,11 @@ commandHelp source = case token of
       [ "  uses the VISUAL editor, or EDITOR when VISUAL is unset"
       , "  with no argument, edits the most recently loaded file target"
       , "  the environment is not reloaded; use :reload afterwards"
+      ]
+    "eval" ->
+      [ "  compiles the loaded file targets into scope when they are"
+      , "  real Haskell; otherwise evaluates against Prelude alone"
+      , "  each :eval runs a fresh session, so bindings do not persist"
       ]
     "install" -> packageDetails ++
       [ "  defaults to Cabal's executable mode; --lib installs libraries"

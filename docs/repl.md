@@ -146,6 +146,7 @@ in-scope identifiers (qualified and unqualified) at type-query, `:info`,
 | `:help [COMMAND]` (`:h`, `:?`) | Show the command summary or detailed command help. |
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
 | `:edit [FILE]` | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
+| `:eval EXPRESSION` | Evaluate a Haskell expression with real GHC and print its shown value. |
 | `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors, class methods, and the instances the name participates in. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
 | `import DECLARATION` | Append a Haskell import to the Exference prompt context. |
@@ -526,6 +527,40 @@ is deliberately rejected; plain `:type` already preserves eligible result
 variables. If no loaded default type can satisfy an ambiguity that is absent
 from the result type, inference reports that ambiguity instead of inventing
 evidence.
+
+## Evaluating expressions
+
+`:eval EXPRESSION` compiles and runs one Haskell expression with the real
+GHC that built Djex (through the GHC API, via hint) and prints its shown
+value. It is the only command that executes code; synthesis queries and
+inspection commands never do. Because bare input is a synthesis query, there
+is no GHCi-style bare-expression evaluation — the command is always
+explicit.
+
+Evaluation targets the real package universe, not the synthesis
+environment. When every loaded file target compiles under real GHC, those
+modules join the interpreter at top level (their whole source scope, like
+GHCi's `*M`), so a loaded record can be built, projected, and passed to a
+synthesized candidate spliced in with `let`:
+
+```text
+djex[djinn]> :eval let djexResult = unwrapped in djexResult (MkWrapped True)
+True
+```
+
+The bundled synthesis environment is deliberately parser-level
+pseudo-Haskell that real GHC rejects, so with it (or any uncompilable
+workspace) loaded, evaluation degrades to Prelude-only scope and one
+`DJEX_REPL_EVAL_SCOPE` advisory explains why; plain expressions such as
+`:eval 1 + 1` keep working. A rejected expression is an ordinary
+`DJEX_REPL_EVAL` diagnostic.
+
+Each `:eval` runs a fresh, isolated interpreter session that always reflects
+the current workspace: bindings do not persist between evaluations and there
+is no `it`. A diverging evaluation is interruptible with Ctrl-C. Evaluation
+needs the GHC library directory recorded when Djex was built, so a relocated
+installation without that toolchain reports a launch failure rather than
+evaluating.
 
 ## Settings and defaults
 

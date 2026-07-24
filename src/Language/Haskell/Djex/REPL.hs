@@ -73,6 +73,7 @@ import Language.Haskell.Djex.Package
 import Language.Haskell.Djex.REPL.Command
 import Language.Haskell.Djex.REPL.DjinnScope
 import Language.Haskell.Djex.REPL.Driver
+import Language.Haskell.Djex.REPL.Eval
 import Language.Haskell.Djex.REPL.Kind
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.REPL.Type
@@ -439,6 +440,7 @@ runCommand sourceName history command state = case command of
   DownloadPackages packages ->
     runPackageOperation DownloadOperation packages >> continue state
   EditFile requested -> editTargetFile requested state >> continue state
+  Evaluate expression -> evaluateInteractive expression state >> continue state
   Help Nothing -> putStr shortHelp >> continue state
   Help (Just name) -> case commandHelp name of
     Left failure -> settingFailure failure >> continue state
@@ -623,9 +625,30 @@ runShellCommand command = do
     Right (ShellCompleted (ExitFailure status)) -> replFailure
       "DJEX_REPL_SHELL" "shell command failed"
       $ command ++ ": exit status " ++ show status
+
+onlyUserInterrupt :: AsyncException -> Maybe ()
+onlyUserInterrupt UserInterrupt = Just ()
+onlyUserInterrupt _ = Nothing
+
+-- | Evaluate one expression with real GHC. Unlike every synthesis command,
+-- this runs code; a diverging expression is interruptible with Ctrl-C.
+evaluateInteractive :: String -> ReplState -> IO ()
+evaluateInteractive expression state = do
+  outcome <- handleJust onlyUserInterrupt (const $ pure Nothing)
+    $ Just <$> evaluateExpression evaluableModules expression
+  case outcome of
+    Nothing -> putStrLn "Interrupted."
+    Just result -> do
+      mapM_ emitDiagnostic $ evalAdvisories result
+      case evalResult result of
+        Left failure -> emitDiagnostic failure
+        Right value -> putStrLn value
  where
-  onlyUserInterrupt UserInterrupt = Just ()
-  onlyUserInterrupt _ = Nothing
+  evaluableModules = maybe []
+    (map moduleEntry . workspaceModules)
+    $ exferenceRuntimeWorkspace $ exferenceRuntime state
+  moduleEntry loaded =
+    (workspaceModuleName loaded, workspaceModulePath loaded)
 
 data ScopeRetention = ResetScope | RefreshAutomaticScope
 

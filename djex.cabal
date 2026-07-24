@@ -206,6 +206,7 @@ Library
     Language.Haskell.Djex.REPL.Command
     Language.Haskell.Djex.REPL.DjinnScope
     Language.Haskell.Djex.REPL.Driver
+    Language.Haskell.Djex.REPL.Eval
     Language.Haskell.Djex.REPL.Kind
     Language.Haskell.Djex.REPL.Scope
     Language.Haskell.Djex.REPL.Type
@@ -231,8 +232,10 @@ Library
   Autogen-Modules: Paths_djex
 
   Build-Depends:
+    exceptions >= 0.10 && < 0.11,
     filepath >= 1.4 && < 1.6,
     haskeline >= 0.8 && < 0.9,
+    hint >= 0.9.0.8 && < 0.10,
     pqueue >= 1.3.1 && < 1.8,
     pretty >= 1.1 && < 1.2,
     process >= 1.6 && < 1.7

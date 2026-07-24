@@ -148,6 +148,7 @@ candidatesFor completions previous word = case previous of
     , ":type", ":t"
     , ":kind", ":k", ":kind!", ":k!"
     , ":djinn", ":exference", ":compare", ":synth", ":sy"
+    , ":eval"
     ]
 
 completingPath :: String -> Bool

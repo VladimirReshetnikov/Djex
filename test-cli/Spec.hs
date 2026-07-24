@@ -121,6 +121,7 @@ main = defaultMain $ testGroup "Djex CLI integration"
   , testCase "REPL :edit opens the configured editor" testReplEdit
   , testCase "REPL :info lists participating instances"
       testReplInfoInstances
+  , testCase "REPL :eval runs expressions with real GHC" testReplEval
   , testCase "REPL scripts persist state and reject recursion"
       testReplScripts
   , testCase "REPL history preserves chronological numbering"
@@ -1768,6 +1769,49 @@ testReplInfoInstances = withTemporaryEnvironment
   assertContains "info lists participating instances"
     "instance Inst.Marker Inst.Thing" output
   assertNoCallStack errors
+
+-- Evaluation is the one command that runs code. A compilable workspace joins
+-- the interpreter scope; a synthesis-only pseudo-Haskell workspace degrades
+-- to Prelude with an advisory instead of failing arithmetic.
+testReplEval :: Assertion
+testReplEval = do
+  withTemporaryEnvironment
+    [ ( "Custom.hs"
+      , unlines
+          [ "module Custom where"
+          , ""
+          , "data Wrapped = MkWrapped { unwrapped :: Bool }"
+          ]
+      )
+    ] $ \directory -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ ":eval 20 + 22"
+      , ":eval unwrapped (MkWrapped True)"
+      , ":eval bogusIdentifier"
+      ]
+    assertEqual "eval REPL exit" ExitSuccess exitCode
+    assertContains "pure expression evaluates" "42" output
+    assertContains "workspace declarations are in evaluation scope"
+      "True" output
+    assertContains "a rejected expression is a structured diagnostic"
+      "[DJEX_REPL_EVAL]" errors
+    assertBool "compilable workspace produced a scope advisory" $
+      not $ "DJEX_REPL_EVAL_SCOPE" `isInfixOf` errors
+  withTemporaryEnvironment
+    [ ( "Fake.hs"
+      , unlines
+          [ "module Fake where"
+          , ""
+          , "opaque :: Missing"
+          ]
+      )
+    ] $ \directory -> do
+    (exitCode, output, errors) <- runRepl directory [":eval 20 + 22"]
+    assertEqual "fallback eval REPL exit" ExitSuccess exitCode
+    assertContains "evaluation still answers under Prelude fallback"
+      "42" output
+    assertContains "the degraded scope is an advisory"
+      "[DJEX_REPL_EVAL_SCOPE]" errors
 
 testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do

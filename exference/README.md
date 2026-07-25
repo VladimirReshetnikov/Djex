@@ -155,8 +155,9 @@ ordinary and boxed-tuple views are match-only; construct them with
 is reported explicitly. Programmatic unboxed tuples use the shared
 `tupleName Unboxed` builder; the compatibility HSE frontend still rejects
 unboxed tuple syntax because the search language cannot generate its terms.
-Unqualified frontend lookup rejects ambiguous imported type names instead of
-silently choosing the first.
+Checked module loading resolves bare type and class names through the defining
+module's direct imports and rejects ambiguity instead of choosing by load
+order.
 
 Exference's `HsType` is now a compatibility alias for the shared
 `Type (Variable Int)`, not a recursively isomorphic engine-owned tree. The
@@ -287,6 +288,35 @@ their nominal heads; every projected shape still comes from the prepared
 witness. The unused intermediate entrance that accepted constructor penalties
 but could not retain class-method ownership has been removed; source sealing
 always uses the complete ownership-aware operation.
+
+All public, default, directory, file, and in-memory source loaders elaborate
+declarations with the same module-aware resolver. Local type and class names
+take precedence; direct imports honor `qualified`, `as`, positive import lists,
+and `hiding`. Export surfaces include named exports and `module M` re-exports,
+and re-exported entities retain their defining canonical names. A loaded
+`Prelude` contributes an implicit unqualified import unless the module is
+`Prelude`, imports it explicitly, or enables `NoImplicitPrelude` or
+`RebindableSyntax`. The resolver covers datatype fields, type synonyms, class
+heads and methods, instances, and ordinary or foreign signatures; term bodies
+remain outside Exference's source semantics.
+
+Imports govern elaboration, not dependency discovery. Explicit file and source
+loaders consume exactly the ordered closure supplied by their caller; the
+unified REPL discovers resolvable local imports before passing that snapshot to
+the same loader. Loaded modules have an exact surface, so an unimported loaded
+declaration is out of scope even through its canonical qualifier. Djex does not
+load external interfaces, however, and open inventories retain genuinely
+unknown names as external. A positive import list provides a finite canonical
+surface for an unloaded module; unrestricted and `hiding` imports cannot
+enumerate or validate its unknown export complement.
+
+Export lists restrict downstream imports but never delete declarations from
+the checked inventory. Private declarations remain available to whole-graph
+kind, synonym, recursion, and class validation and to an explicit `*MODULE`
+prompt scope. Source imports are consumed while that inventory is built;
+interactive prompt imports are a later query/search projection and do not
+reinterpret source declarations or discover dependencies.
+
 Before backend lowering, the foundation's opaque transient
 `PreparedInventoryExpansion` prepares the exact alias table, expands
 operational declarations in source order, attributes the first failure to its

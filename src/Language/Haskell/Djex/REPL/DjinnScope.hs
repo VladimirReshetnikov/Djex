@@ -10,13 +10,14 @@
 -- Value declarations become LJT axioms, and axiom sets of even moderate size
 -- make Djinn's otherwise-terminating proof search intractable. They are
 -- therefore excluded unless the caller opts in ('IncludeDjinnAxioms'), which
--- the REPL exposes as the @djinn-axioms@ setting. Record selectors are the
--- exception: a selector whose parent datatype cannot be case-eliminated
--- (recursive, hidden or missing constructors) is the only route to its
--- field, so it always projects. Selectors of fully eliminable records stay
--- out of the axiom set — they would only multiply equivalent proofs of what
--- structural elimination already derives, and the projection instead reports
--- their positions so presentation can name the eliminated field.
+-- the REPL exposes as the @djinn-axioms@ setting. Scope-visible record
+-- selectors are the exception: a selector whose parent datatype cannot be
+-- case-eliminated (recursive, hidden or missing constructors) is the only
+-- route to its field, so it projects under either policy. Hidden selectors do
+-- not enter the session. Selectors of fully eliminable records stay out of the
+-- axiom set — they would only multiply equivalent proofs of what structural
+-- elimination already derives, and the projection instead reports their
+-- positions so presentation can name a visible eliminated field.
 module Language.Haskell.Djex.REPL.DjinnScope
   ( DjinnAxiomPolicy (..)
   , DjinnProjection (..)
@@ -131,8 +132,8 @@ type ScopeDeclaration = Declaration String Void ()
 -- renames them to their in-scope unqualified spellings, because Djinn's
 -- declaration grammar has no qualified type, class, or constructor names.
 -- Record datatypes arrive as @(parent, [(constructor, selectors in field
--- order)])@ groups; selectors of parents Djinn cannot case-eliminate enter
--- the session under every axiom policy.
+-- order)])@ groups; scope-visible selectors of parents Djinn cannot
+-- case-eliminate enter the session under every axiom policy.
 projectDjinnScope
   :: DjinnAxiomPolicy
   -> [(Name, [(Name, [Name])])]

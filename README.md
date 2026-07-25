@@ -185,11 +185,16 @@ dependencies; bare Haskell imports and `:module` manage the prompt scope;
 `:show targets`, `:show modules`, and `:show imports` expose the three distinct
 states. Loading and scope changes are transactional. This is source loading,
 not GHC compilation for synthesis: Djex consumes declarations and signatures
-without compiling or inferring function bodies, and projects the same prompt
-scope into checked Exference and Djinn sessions. Djinn falls back to its
-standard checked session only if that projection cannot be sealed. The
-explicit `:eval` boundary separately gives the loaded files to real GHC; its
-package and compiled-module scope is not added to either synthesis inventory.
+without compiling or inferring function bodies. Imports written in each module
+govern that module's declaration elaboration; bare interactive imports and
+`:module` govern the later prompt scope and never reinterpret the inventory.
+Djex projects that prompt scope into checked Exference and Djinn sessions.
+Djinn's abstract type stubs reuse kinds inferred by the shared inventory, and
+its presentation uses a record-selector spelling only when that selector is
+visible unqualified. Djinn falls back to its standard checked session only if
+the source projection cannot be sealed. The explicit `:eval` boundary
+separately gives the loaded files to real GHC; its package and compiled-module
+scope is not added to either synthesis inventory.
 See the [shared REPL guide](docs/repl.md) for the target grammar, export
 visibility, commands, settings, defaults, and failure behavior.
 
@@ -497,18 +502,33 @@ exported `UnsupportedVocabularyForm` constructors are the authoritative
 compatibility vocabulary for this rejection phase; `ExplicitExportList`
 remains for source compatibility but is no longer emitted.
 
-Explicit module export lists are accepted. Source loading retains every local
-declaration in the authoritative inventory; a module-aware frontend separately
-projects that inventory through the export list for plain imports and keeps
-the full inventory for `*MODULE` scope and canonical qualified lookup. This
-inventory-versus-scope split avoids reparsing or losing private declarations.
+Every source signature and nominal declaration is elaborated in its defining
+module's own scope. Local type and class names take precedence; direct imports
+honor `qualified`, `as`, positive lists, and `hiding`. Loaded export surfaces
+include named exports and `module M` re-exports, with re-exported entities
+retaining their defining canonical names. A loaded `Prelude` is imported
+implicitly unless the module is `Prelude`, imports it explicitly, or enables
+`NoImplicitPrelude` or `RebindableSyntax`.
+
+Import resolution does not discover files. Directory and explicit snapshot
+loaders elaborate only the supplied modules; the shared REPL first discovers
+its resolvable local dependency closure and then invokes the same loader. Scope
+is exact among loaded modules, so an unimported loaded name cannot bypass an
+import by using its canonical qualifier. Unloaded module interfaces are not
+available, and the open inventory therefore retains genuinely unknown names as
+external. A positive import list provides a finite canonical external surface;
+unrestricted and `hiding` imports cannot enumerate or verify the remainder.
+
+Source loading retains private as well as exported declarations in the
+authoritative inventory for whole-environment validation and later `*MODULE`
+scope. Export lists govern downstream imports rather than deleting facts.
 Ordinary positional, infix, record, strict, and unpacked datatype fields are
-lowered explicitly; record selectors become rated value bindings exactly
-once. Imports, fixities, ordinary value and method bodies, ordinary term
-patterns and pattern-value bodies, default declarations, and operational
-pragmas remain accepted because they do not change the nominal type/class
-inventory. These forms are explicit current limitations rather than syntax
-that can silently disappear during loading.
+lowered explicitly; record selectors become rated Exference value bindings
+exactly once. Fixities, ordinary value and method bodies, ordinary term patterns
+and pattern-value bodies, default declarations, and operational pragmas remain
+accepted because they do not add nominal declarations or executable semantics
+to the synthesis inventory. These are explicit limitations, not syntax that is
+silently reinterpreted.
 
 `ExferenceSessionPolicy` applies exact structural-name exclusions and
 finite, signed rating overrides while the private search projection is

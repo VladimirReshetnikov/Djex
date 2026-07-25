@@ -305,6 +305,11 @@ and is reported at the importing file by a
 `DJEX_REPL_IMPORT_UNRESOLVED` warning; it contributes no declarations to the
 session. These checks happen before the new workspace is published.
 
+Once that closure is fixed, the shared source loader elaborates every
+declaration in its defining module's own import scope. Bare imports entered at
+the prompt and `:module` operate later: they select the query/search scope from
+the already checked inventory and never reinterpret source declarations.
+
 Filesystem targets are canonicalized when admitted. `:reload` therefore keeps
 referring to the same files after `:cd`; it does not reinterpret the original
 relative spelling in the new directory. `:show targets` uses canonical paths
@@ -663,23 +668,26 @@ so the projection degrades rather than fails:
   types outside Djinn's grammar (explicit foralls, residual constraints) are
   omitted.
 - Type constructors referenced from signatures but not declared in scope are
-  stubbed as abstract types with an arity-derived kind.
+  stubbed as abstract types. A kind already inferred by the shared inventory is
+  authoritative; an arity-derived kind is only the fallback for a genuinely
+  absent external name.
 - Value declarations are omitted by default and become LJT axioms with
   `:set djinn-axioms on`. Axioms are off by default because even
   moderate axiom sets make Djinn's otherwise-terminating proof search
   intractable; structural proving over the projected datatypes stays fast.
-- Record selectors are the exception to the axiom policy exactly where they
-  add proof power: a selector whose parent datatype Djinn cannot
-  case-eliminate (recursive, hidden, or out-of-scope constructors) always
-  enters the session, so a recursive or opaque record stays
-  field-accessible. Selectors of fully eliminable records stay out of the
-  axiom set — they would only multiply equivalent proofs of what structural
-  elimination already derives.
+- Scope-visible record selectors are the exception to the axiom policy exactly
+  where they add proof power: a selector whose parent datatype Djinn cannot
+  case-eliminate (recursive, hidden, or out-of-scope constructors) enters the
+  session under either axiom setting, so a recursive or opaque record can stay
+  field-accessible. Hidden selectors do not enter or leak into presentation.
+  Selectors of fully eliminable records stay out of the axiom set — they would
+  only multiply equivalent proofs of what structural elimination already
+  derives.
 
 Field projections are also normalized at presentation for both backends: a
 candidate that eliminates a record merely to return one field, or that
 faithfully rebuilds a deconstructed record, is shown as an application of
-the field's selector (for example `secondPart` rather than
+the field's scope-visible selector (for example `secondPart` rather than
 `\a -> case a of MkPair _ c -> c`). When selectors are in scope, an
 Exference `select first` request additionally looks a few candidates ahead
 and shows the one with the smallest normalized spelling, because search
@@ -746,21 +754,25 @@ linker:
   but ordinary function, method, and pattern-binding bodies are neither
   compiled nor used to infer missing signatures.
 
-An unresolved external import contributes no declarations: sessions contain
-only the workspace snapshots and structural built-ins. Package-qualified
-imports are rejected with `DJEX_REPL_IMPORT_PACKAGE`: the shared canonical
-name model cannot preserve package identity and must not silently bind a
-same-spelled local module. Source that depends on external types or
-declarations must provide enough loaded source vocabulary for Exference's
-inventory checks, or loading fails with a structured diagnostic. No implicit
-package `Prelude` is added to a prompt context.
+An unresolved external import contributes no loaded declarations: sessions
+contain only the workspace snapshots and structural built-ins. A positive
+import list nevertheless provides a finite interface spelling from which the
+loader can preserve an external type constructor or class under its canonical
+module name. An unrestricted or `hiding` import has no enumerable external
+surface, and declarations that require absent inventory facts may still fail
+with a structured diagnostic. Package-qualified imports are rejected with
+`DJEX_REPL_IMPORT_PACKAGE`: the shared canonical name model cannot preserve
+package identity and must not silently bind a same-spelled local module. No
+implicit package `Prelude` is added to a prompt context.
 
 Explicit module export lists are accepted. The loader retains a complete
-module inventory so `*MODULE`, qualified parsing, and later context changes do
-not require reparsing; the prompt-scope layer separately projects the public
-exports for plain imports and plain `:module`/`:browse`. Other unsupported
-nominal source constructs remain fail-closed as described in the
-[library API guide](library-api.md).
+module inventory so whole-environment validation, `*MODULE`, and later context
+changes do not require reparsing; the prompt-scope layer separately projects
+the public exports for plain imports and plain `:module`/`:browse`. In prompt
+queries only, canonical qualification remains a deliberate full-inventory
+escape hatch. Source declaration elaboration has no such escape: its loaded
+module scope is exact. Other unsupported nominal source constructs remain
+fail-closed as described in the [library API guide](library-api.md).
 
 ## Multiline input, scripts, history, and the shell
 

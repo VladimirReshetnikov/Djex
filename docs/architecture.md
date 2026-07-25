@@ -315,15 +315,31 @@ Ordinary term patterns and pattern-value bodies are accepted, as are ordinary
 value/method bodies and other syntax that does not alter the nominal
 inventory.
 
-Explicit module export lists are now an accepted visibility boundary. Source
-loading keeps every module-local declaration in the authoritative inventory,
-because private declarations may later be requested through a `*MODULE`
-context and because qualified parsing must use the same checked kind and
-synonym authority. A module-aware caller separately computes the exported or
-full-top-level name set and projects Exference's prompt scope and searchable
-binding dictionary from it. The projection retains the complete sealed
-inventory, so changing imports never splices together independently prepared
-environments or requires source reparsing.
+Every source declaration is elaborated in its defining module's nominal scope.
+Local type and class declarations take precedence; only direct imports add
+loaded names, and `qualified`, `as`, positive import lists, and `hiding` are
+honored. A loaded `Prelude` contributes its implicit unqualified surface unless
+the module is `Prelude`, imports it explicitly, or enables `NoImplicitPrelude`
+or `RebindableSyntax`. Export surfaces include named exports and `module M`
+re-exports, so a downstream import sees only that surface while a re-exported
+entity retains its defining canonical name. Transitive imports do not become
+scope unless they are explicitly re-exported.
+
+This resolution pass does not discover or load dependencies. Directory and
+explicit snapshot loaders elaborate exactly the modules supplied to them; the
+REPL workspace separately discovers resolvable local imports before invoking
+the loader. Scope is exact for modules in that loaded set: an unimported loaded
+name cannot be rescued by spelling its canonical qualifier. Interfaces for
+unloaded modules are unavailable, so the open-inventory policy still retains
+genuinely unknown names as external. A positive import list supplies a finite
+canonical surface for such a module; an unrestricted or `hiding` import cannot
+prove its unknown export complement.
+
+Source loading keeps exported and private declarations together in the
+authoritative inventory for whole-environment kind, synonym, recursion, and
+class checks. Export lists restrict what another module may import; they do not
+discard private facts. A later `*MODULE` prompt entry can therefore request a
+loaded module's full top-level scope without rebuilding the inventory.
 
 Successful extraction erases HSE annotations, so ordering metadata is captured
 before that boundary. Ordinary signatures, datatype batches, and nested class
@@ -354,10 +370,12 @@ Module-name targets are resolved through hierarchical `.hs`/`.lhs` paths.
 File targets may declare an unrelated module name. A directory target is the
 legacy environment compatibility form: it recursively contributes source and
 `.ratings` files while remaining one explicit target. Resolvable local imports
-are discovered transitively. The workspace does not consult a GHC package
-database or load interface/object code for synthesis. `:eval` is an explicit
-parallel boundary that hands the retained source paths to real GHC; package
-and compiled-module names visible there are never added to the neutral
+are discovered transitively by the workspace before the source loader
+elaborates each module under those imports. The loader's import resolver itself
+never expands the dependency closure. The workspace does not consult a GHC
+package database or load interface/object code for synthesis. `:eval` is an
+explicit parallel boundary that hands the retained source paths to real GHC;
+package and compiled-module names visible there are never added to the neutral
 inventory.
 
 The package commands do not weaken this source-only invariant. `download` asks
@@ -372,25 +390,34 @@ never an implicit consequence of parsing an import or query.
 Every filesystem target is canonicalized at admission, so a later `:cd` cannot
 retarget `:reload`. The workspace parses the whole candidate graph, rejects
 duplicate modules, dependency files whose declaration disagrees with the
-imported name, and non-`SOURCE` cycles, orders the closure, loads and seals one
-Exference session, computes export-aware scope, and publishes the replacement
-only after every phase succeeds. Import and `:module` changes use the same
-publication discipline for the scoped session.
+imported name, and non-`SOURCE` cycles, orders the closure, elaborates and seals
+one Exference session, computes export-aware prompt scope, and publishes the
+replacement only after every phase succeeds. Source imports are fixed inputs
+to declaration elaboration. Bare interactive imports and `:module` instead
+change the later prompt projection; they neither reinterpret declarations nor
+alter the dependency graph, and use the same transactional publication
+discipline.
 
 The REPL then parses Exference types with `ExferenceQueryScope`: exact visible
 names govern unqualified lookup, one full-top-level current module gets local
 precedence, aliases map prompt qualifiers to canonical modules, and canonical
 qualified lookup still consults the complete sealed inventory. The searchable
 Exference environment is narrowed to the visible binding projection. The same
-prompt scope drives a checked Djinn declaration projection; successful unknown
-type stubs reuse the exact ground kinds already inferred by the shared
-inventory, and every unsupported or hidden declaration is recorded as an
-omission. Djinn's standard checked session is only the recovery state when no
-source projection is available or sealing that projection fails. The scope
-projection is intentionally name-based: the shared structural `Name` has no
-Haskell namespace tag, so same-spelled type/value entities cannot be filtered
-independently at this boundary. Real-GHC evaluation consumes the same ordered
-prompt entries but has no access to either backend's synthesis dictionary.
+prompt scope drives a checked Djinn declaration projection. Abstract stubs for
+referenced but undeclared nominal types reuse the exact ground kind inferred by
+the shared inventory when one exists; arity-derived kinds are only the fallback
+for genuinely absent external names. Record selectors are axioms only when
+their parent cannot be eliminated structurally. For an eliminable record,
+presentation may replace the structural projection with a selector spelling
+only when that selector is visible unqualified, so hidden names never leak into
+output. Every unsupported or hidden declaration is recorded as an omission.
+
+Djinn's standard checked session is only the recovery state when no source
+projection is available or sealing that projection fails. The scope projection
+tracks type and value claims separately while resolving source spellings, even
+though the shared structural `Name` is namespace-neutral. Real-GHC evaluation
+consumes the same ordered prompt entries but has no access to either backend's
+synthesis dictionary.
 
 ## API and stability tiers
 

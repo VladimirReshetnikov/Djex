@@ -237,10 +237,16 @@ the same context-free forall wrapper; nested Constraint-kinded class forms are
 rejected explicitly. Like `:type`, this path uses the neutral base session and
 module scope rather than the selected backend or filtered search projection.
 
-The GHCi resemblance still stops short of evaluation. Bare input asks for an
-inhabitant of a type, while `:type` parses a term expression and performs
-structural inference without running it or compiling loaded function bodies;
-`:kind` inspects only the structural kind subset described above.
+Bare input remains synthesis rather than GHCi-style expression evaluation.
+`:type` parses a term expression and performs structural inference without
+running it or compiling loaded function bodies; `:kind` inspects only the
+structural kind subset described above. The deliberately explicit `:eval`
+command is the separate execution boundary. Its private Hint adapter compiles
+the complete loaded dependency closure, translates the checked prompt entries
+to GHC top-level modules and exact ordinary/qualified import surfaces, and
+runs one expression in a fresh interpreter. Workspace or context setup is
+transactional: failure resets to installed Prelude scope and emits one
+advisory, while no partial GHC context enters either synthesis session.
 The inferencer covers common applications, operators, lambdas and patterns,
 conditionals, cases, tuples, lists, enumerations, literals, and annotations;
 forms requiring local-declaration generalization or richer GHC semantics fail
@@ -349,7 +355,10 @@ File targets may declare an unrelated module name. A directory target is the
 legacy environment compatibility form: it recursively contributes source and
 `.ratings` files while remaining one explicit target. Resolvable local imports
 are discovered transitively. The workspace does not consult a GHC package
-database or load interface/object code.
+database or load interface/object code for synthesis. `:eval` is an explicit
+parallel boundary that hands the retained source paths to real GHC; package
+and compiled-module names visible there are never added to the neutral
+inventory.
 
 The package commands do not weaken this source-only invariant. `download` asks
 Cabal to populate its source cache, while `install` builds executable
@@ -372,11 +381,16 @@ The REPL then parses Exference types with `ExferenceQueryScope`: exact visible
 names govern unqualified lookup, one full-top-level current module gets local
 precedence, aliases map prompt qualifiers to canonical modules, and canonical
 qualified lookup still consults the complete sealed inventory. The searchable
-Exference environment is narrowed to the visible binding projection. Djinn is
-outside this flow and retains its independently prepared standard session.
-The scope projection is intentionally name-based: the shared structural
-`Name` has no Haskell namespace tag, so same-spelled type/value entities cannot
-be filtered independently at this boundary.
+Exference environment is narrowed to the visible binding projection. The same
+prompt scope drives a checked Djinn declaration projection; successful unknown
+type stubs reuse the exact ground kinds already inferred by the shared
+inventory, and every unsupported or hidden declaration is recorded as an
+omission. Djinn's standard checked session is only the recovery state when no
+source projection is available or sealing that projection fails. The scope
+projection is intentionally name-based: the shared structural `Name` has no
+Haskell namespace tag, so same-spelled type/value entities cannot be filtered
+independently at this boundary. Real-GHC evaluation consumes the same ordered
+prompt entries but has no access to either backend's synthesis dictionary.
 
 ## API and stability tiers
 
@@ -410,7 +424,10 @@ private raw declaration snapshot, edit, and instance-method operations.
 the explicit one-shot subcommands. `Language.Haskell.Djex.REPL` exposes the
 narrower interactive launcher and its startup options. Both are exposed so
 applications can invoke a frontend without spawning a process, but neither is
-re-exported by the main facade.
+re-exported by the main facade. They remain effectful terminal frontends: the
+dispatcher returns an `ExitCode` instead of terminating its host, but may use
+process streams, read trusted startup files and sources, change the working
+directory, evaluate Haskell, or launch editor, shell, and Cabal children.
 
 ### Public compatibility and research API
 

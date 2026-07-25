@@ -112,6 +112,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplExportAmbiguity
   , testCase "REPL Djinn projection preserves cross-namespace names"
       testReplDjinnNamespaceProjection
+  , testCase "REPL Djinn projection repairs scopes beyond legacy caps"
+      testReplDjinnRepairDepth
   , testCase "REPL bundled imports reject type-synonym wildcards"
       testReplBundledOwners
   , testCase "REPL import failures roll back without touching Djinn"
@@ -1603,6 +1605,54 @@ testReplDjinnNamespaceProjection = withReplModuleFixture $ \root -> do
   assertBool "legal cross-namespace names were reported as ambiguous" $
     not $ "unqualified spelling is ambiguous" `isInfixOf` output
   assertNoCallStack errors
+
+-- Hiding the root of this synonym dependency chain removes exactly one alias
+-- per reference-resolution round. The old reference loop removed 201 aliases;
+-- its seal loop could remove another 200 and still perform the final check,
+-- but a 201st seal repair re-entered above its cap before checking success.
+-- Thus 402 aliases are the smallest chain that reliably failed those loops.
+testReplDjinnRepairDepth :: Assertion
+testReplDjinnRepairDepth = withTemporaryEnvironment
+    [("RepairChain.hs", repairChainSource chainLength)] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import RepairChain hiding (HiddenRoot)"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Survivor"
+    , ":show environment"
+    ]
+  assertEqual "deep Djinn projection exit" ExitSuccess exitCode
+  assertContains
+    ("unaffected declaration survives every repair round: "
+      ++ output ++ errors)
+    "Survivor" output
+  assertContains "all cascading omissions reach the sealed projection"
+    ("1 declarations (projected from the module scope, "
+      ++ show (chainLength + 1) ++ " omissions)") output
+  assertBool "deep repair fell back from the projected environment" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "deep repair emitted an internal convergence diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+ where
+  -- The additional omission records the rejected qualified abstract stub for
+  -- hidden RepairChain.HiddenRoot; every alias contributes one more.
+  chainLength = 402
+
+repairChainSource :: Int -> String
+repairChainSource chainLength = unlines $
+  [ "module RepairChain where"
+  , "data Survivor = Survivor"
+  , "data HiddenRoot = HiddenRoot"
+  ] ++ map synonymDeclaration [0 .. chainLength - 1]
+ where
+  synonymDeclaration index = "type " ++ aliasName index
+    ++ " = " ++ prerequisite index
+  prerequisite 0 = "HiddenRoot"
+  prerequisite index = aliasName $ index - 1
+  aliasName index = "Repair" ++ show index
 
 testReplBundledOwners :: Assertion
 testReplBundledOwners = withReplModuleFixture $ \root -> do

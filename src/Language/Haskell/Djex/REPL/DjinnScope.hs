@@ -178,7 +178,7 @@ projectDjinnScope policy records declarations visible = do
       (grounded, recursionOmissions) = degradeRecursiveDataTypes renamed
       (admitted, admissionOmissions) = admitDeclarations grounded
       (stubbed, stubOmissions) = stubUnknownReferences admitted
-      (resolved, referenceOmissions) = resolveScopeReferences stubbed
+  (resolved, referenceOmissions) <- resolveScopeReferences stubbed
   (session, sealOmissions) <- sealWithRepairs resolved
   pure DjinnProjection
     { djinnProjectionSession = session
@@ -534,21 +534,37 @@ declarationMentions declaration = Set.union
     TupleType _ elements -> concatMap typeConstraintClasses elements
     _ -> []
 
+-- | A natural-valued potential shared by both projection-repair loops. Every
+-- declaration contributes one step, each class method contributes one more,
+-- and a concrete datatype contributes an extra step for its possible
+-- degradation to an abstract type. All supported repairs therefore decrease
+-- this measure: they drop a declaration, shed at least one method, or replace
+-- a concrete datatype with its abstract form.
+projectionRepairMeasure :: [ScopeDeclaration] -> Integer
+projectionRepairMeasure = sum . map declarationMeasure
+ where
+  declarationMeasure declaration = 1 + case declaration of
+    ClassDeclaration _ _ _ _ methods -> toInteger $ length methods
+    DataTypeDeclaration {} -> 1
+    _ -> 0
+
 -- Names that remain undefined after stubbing cannot survive Djinn's closed
 -- kind inference, so the scope is resolved to a fixpoint by shedding exactly
 -- the affected pieces: values and synonyms are dropped, classes lose the
 -- offending methods, and datatypes degrade to abstract types.
 resolveScopeReferences
   :: [ScopeDeclaration]
-  -> ([ScopeDeclaration], [DjinnScopeOmission])
-resolveScopeReferences = go (0 :: Int) []
+  -> Either Diagnostic ([ScopeDeclaration], [DjinnScopeOmission])
+resolveScopeReferences = go []
  where
-  -- The declaration count strictly shrinks or a datatype becomes abstract in
-  -- every looping round, but the seal loop backstops this bound anyway.
-  go rounds omissions declarations
-    | rounds > 200 = (declarations, omissions)
-    | null newOmissions = (declarations, omissions)
-    | otherwise = go (rounds + 1) (omissions ++ newOmissions) (concat resolved)
+  go omissions declarations
+    | repaired == declarations && null newOmissions =
+        Right (declarations, reverse omissions)
+    | projectionRepairMeasure repaired
+        < projectionRepairMeasure declarations =
+          go (reverse newOmissions ++ omissions) repaired
+    | otherwise = Left $ projectionFailure
+        "scope-reference repair did not decrease its structural measure"
    where
     defined = Set.fromList $ concatMap declarationOwnedNames declarations
     isResolved name =
@@ -557,6 +573,7 @@ resolveScopeReferences = go (0 :: Int) []
       . declarationMentions
     shedded = map shed declarations
     resolved = map fst shedded
+    repaired = concat resolved
     newOmissions = concatMap snd shedded
     shed declaration = case unresolvedIn declaration of
       [] -> ([declaration], [])
@@ -589,8 +606,11 @@ resolveScopeReferences = go (0 :: Int) []
           , [mentionOmission (declarationSubjectName declaration) missing]
           )
      where
-      unresolvedMethod = filter (not . isResolved) . map fst
-        . typeReferences . valueType
+      -- Reuse the complete mention traversal so a method whose missing name
+      -- appears only as a constraint class is shed just like one whose result
+      -- type names an unavailable constructor.
+      unresolvedMethod = filter (not . isResolved) . Set.toList
+        . declarationMentions . ValueDeclaration
       unresolvedConstraint constraint = filter (not . isResolved)
         $ constraintClass constraint
           : map fst (constraintTypeReferences constraint)
@@ -605,22 +625,21 @@ resolveScopeReferences = go (0 :: Int) []
 sealWithRepairs
   :: [ScopeDeclaration]
   -> Either Diagnostic (DjinnSession, [DjinnScopeOmission])
-sealWithRepairs = go (0 :: Int) []
+sealWithRepairs = go []
  where
-  limit = 200
-  go rounds omissions declarations
-    | rounds > limit = Left
-        $ projectionFailure "the projection repair loop did not converge"
-    | otherwise = case mkEnvironment declarations of
-        Left failure -> Left $ projectionFailure $ show failure
-        Right environment -> case mkDjinnSessionChecked environment of
-          Right session -> Right (session, reverse omissions)
-          Left failure -> case repairFor failure declarations of
-            Just (repaired, newOmissions)
-              | repaired /= declarations ->
-                  go (rounds + 1) (newOmissions ++ omissions) repaired
-            _ -> Left $ projectionFailure
-              $ DjinnCore.renderEnvironmentEditFailure failure
+  go omissions declarations = case mkEnvironment declarations of
+    Left failure -> Left $ projectionFailure $ show failure
+    Right environment -> case mkDjinnSessionChecked environment of
+      Right session -> Right (session, reverse omissions)
+      Left failure -> case repairFor failure declarations of
+        Just (repaired, newOmissions)
+          | projectionRepairMeasure repaired
+              < projectionRepairMeasure declarations ->
+                go (newOmissions ++ omissions) repaired
+          | otherwise -> Left $ projectionFailure
+              "Djinn's requested repair did not decrease its structural measure"
+        Nothing -> Left $ projectionFailure
+          $ DjinnCore.renderEnvironmentEditFailure failure
 
 repairFor
   :: DjinnCore.SynthesisEnvironmentError

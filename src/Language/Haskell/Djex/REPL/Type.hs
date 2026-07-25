@@ -82,6 +82,7 @@ import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify (unifyShared)
 import Language.Haskell.Exference.EnvironmentParser
   ( haskellSrcExtsParseMode )
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
 import Language.Haskell.Synthesis.Declaration
   ( ValueSignature (..)
@@ -1087,12 +1088,7 @@ ensureTupleArity context boxity arity
         ++ "; maximum supported arity is " ++ show maximumTupleArity
 
 distinct :: Ord value => [value] -> [value]
-distinct = go Set.empty
- where
-  go _ [] = []
-  go seen (value : remaining)
-    | value `Set.member` seen = go seen remaining
-    | otherwise = value : go (Set.insert value seen) remaining
+distinct = SharedCollection.distinctOn id
 
 unsupported :: TypeContext -> String -> Infer value
 unsupported context feature = typeFailure context

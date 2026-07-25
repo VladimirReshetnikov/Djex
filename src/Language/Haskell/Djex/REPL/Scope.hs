@@ -56,6 +56,7 @@ import Language.Haskell.Djex.REPL.Workspace
   , workspaceModules
   )
 import Language.Haskell.Djex.Text (trim)
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import Language.Haskell.Synthesis.Declaration
   ( DataConstructor (constructorName)
   , Declaration (..)
@@ -1335,8 +1336,4 @@ scopeDiagnostic code message detail =
   contextualDiagnostic Error code message detail
 
 ordNub :: Ord value => [value] -> [value]
-ordNub = reverse . snd . foldl' step (Set.empty, [])
- where
-  step (seen, values) value
-    | value `Set.member` seen = (seen, values)
-    | otherwise = (Set.insert value seen, value : values)
+ordNub = SharedCollection.distinctOn id

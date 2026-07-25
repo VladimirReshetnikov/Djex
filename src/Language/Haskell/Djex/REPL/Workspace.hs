@@ -82,6 +82,7 @@ import Language.Haskell.Synthesis.Diagnostic
   , contextualDiagnostic
   , withSource
   )
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
 -- | An immutable snapshot of explicit source targets and their local import
@@ -1079,20 +1080,15 @@ deduplicateTargets = foldl' insert []
         $ targetModuleExpectations existing
         ++ targetModuleExpectations candidate
     , targetModuleSpellings = stableNub
-        $ targetModuleExpectations existing
-        ++ targetModuleExpectations candidate
+        $ targetModuleSpellings existing
+        ++ targetModuleSpellings candidate
     }
 
 mergeTargets :: [WorkspaceTarget] -> [WorkspaceTarget] -> [WorkspaceTarget]
 mergeTargets old new = deduplicateTargets $ old ++ new
 
 stableNub :: Ord value => [value] -> [value]
-stableNub = go Set.empty
- where
-  go _ [] = []
-  go seen (value : remaining)
-    | value `Set.member` seen = go seen remaining
-    | otherwise = value : go (Set.insert value seen) remaining
+stableNub = SharedCollection.distinctOn id
 
 foldEitherM
   :: (state -> value -> IO (Either error state))

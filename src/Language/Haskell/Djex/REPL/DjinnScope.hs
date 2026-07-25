@@ -72,6 +72,8 @@ data DjinnProjection = DjinnProjection
   , djinnProjectionFieldSelectors :: Map.Map (Name, Int) Name
     -- ^ Selector spellings for @(constructor, field index)@ positions in
     -- the session's renamed vocabulary, for presenting field projections.
+    -- A position is present only while its selector is visible unqualified;
+    -- otherwise presentation must retain the structural elimination.
   }
 
 -- | One projection compromise, in user-reportable form.
@@ -93,6 +95,34 @@ declarationOwnedNames declaration =
     DataTypeDeclaration _ _ _ constructors -> map constructorName constructors
     ClassDeclaration _ _ _ _ methods -> map valueName methods
     _ -> []
+
+-- Haskell permits a type/class and a value/constructor to share one
+-- occurrence spelling. Djinn's concrete grammar still needs both declarations
+-- renamed, so ambiguity detection must retain the source namespace even though
+-- the shared 'Name' itself is deliberately namespace-neutral.
+data NameNamespace
+  = TypeNamespace
+  | ValueNamespace
+  deriving (Eq, Ord, Show)
+
+declarationOwnedNameClaims
+  :: Declaration variable kind annotation
+  -> [(NameNamespace, Name)]
+declarationOwnedNameClaims declaration = case declaration of
+  TypeSynonymDeclaration _ name _ _ -> [(TypeNamespace, name)]
+  DataTypeDeclaration _ name _ constructors ->
+    (TypeNamespace, name)
+      : [(ValueNamespace, constructorName constructor)
+        | constructor <- constructors]
+  AbstractTypeDeclaration _ name _ -> [(TypeNamespace, name)]
+  ValueDeclaration signature -> [(ValueNamespace, valueName signature)]
+  ClassDeclaration _ name _ _ methods ->
+    (TypeNamespace, name)
+      : [(ValueNamespace, valueName method) | method <- methods]
+  -- Instances refer to a class; they do not introduce a name. Scope shaping
+  -- removes them before renaming, but spelling this out keeps the ownership
+  -- helper correct independently of that ordering.
+  InstanceDeclaration {} -> []
 
 type ScopeDeclaration = Declaration String Void ()
 
@@ -142,6 +172,7 @@ projectDjinnScope policy records declarations visible = do
         , (constructor, selectorNames) <- constructors
         , Just renamedConstructor <- [Map.lookup constructor forward]
         , (index, selector) <- zip [0 ..] selectorNames
+        , selector `Set.member` visible
         , Just renamedSelector <- [unqualifyName selector]
         ]
       (grounded, recursionOmissions) = degradeRecursiveDataTypes renamed
@@ -235,41 +266,51 @@ shapeDeclarations policy axiomSelectors allSelectors visible declarations =
 
 -- Rename canonical names to their unqualified spellings, dropping any
 -- declaration whose unqualified spelling is claimed by a different canonical
--- name. References to renamed names follow the same map; references to names
--- outside it keep their canonical spelling and are resolved by stubbing.
+-- name in the same Haskell namespace. References to renamed names follow the
+-- same map; references to names outside it keep their canonical spelling and
+-- are resolved by stubbing.
 renameDeclarations
   :: [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission], Map.Map Name Name)
 renameDeclarations declarations = (renamed, omissions, forward)
  where
-  owned = concatMap declarationOwnedNames declarations
-  (forward, ambiguous) = renameMap owned
+  claims = concatMap declarationOwnedNameClaims declarations
+  (forward, ambiguous) = renameMap claims
   contested declaration =
-    filter (`Set.member` ambiguous) $ declarationOwnedNames declaration
+    filter (`Set.member` ambiguous) $ declarationOwnedNameClaims declaration
   (renamed, omissions) = partitionEithers
     [ case contested declaration of
         [] -> Left $ renameDeclaration forward declaration
-        name : _ -> Right $ DjinnScopeOmission (renderCanonical name)
+        (_, name) : _ -> Right $ DjinnScopeOmission (renderCanonical name)
           "its unqualified spelling is ambiguous in this scope"
     | declaration <- declarations
     ]
 
-renameMap :: [Name] -> (Map.Map Name Name, Set.Set Name)
-renameMap = finish . foldl' claim (Map.empty, Map.empty, Set.empty)
+renameMap
+  :: [(NameNamespace, Name)]
+  -> (Map.Map Name Name, Set.Set (NameNamespace, Name))
+renameMap claims = finish
+  $ foldl' claim (Map.empty, Map.empty, Set.empty) claims
  where
-  claim (forward, owners, ambiguous) name = case unqualifyName name of
-    Nothing -> (forward, owners, Set.insert name ambiguous)
-    Just unqualified -> case Map.lookup unqualified owners of
+  claim (forward, owners, ambiguous) owned@(namespace, name) =
+    case unqualifyName name of
+    Nothing -> (forward, owners, Set.insert owned ambiguous)
+    Just unqualified -> case Map.lookup (namespace, unqualified) owners of
       Just owner
         | owner /= name ->
-            (forward, owners, Set.insert owner $ Set.insert name ambiguous)
+            ( forward
+            , owners
+            , Set.insert (namespace, owner) $ Set.insert owned ambiguous
+            )
       _ ->
         ( Map.insert name unqualified forward
-        , Map.insert unqualified name owners
+        , Map.insert (namespace, unqualified) name owners
         , ambiguous
         )
   finish (forward, _, ambiguous) =
-    (Map.withoutKeys forward ambiguous, ambiguous)
+    ( Map.withoutKeys forward $ Set.map snd ambiguous
+    , ambiguous
+    )
 
 unqualifyName :: Name -> Maybe Name
 unqualifyName name

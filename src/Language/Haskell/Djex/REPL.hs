@@ -130,9 +130,10 @@ data ReplState = ReplState
   , djinnRuntime :: DjinnRuntime
   , exferenceRuntime :: ExferenceRuntime
   , scopeFieldSelectors :: FieldSelectors
-    -- ^ Canonical selector spellings per constructor field position, for
-    -- presenting Exference candidates; Djinn's renamed table lives in its
-    -- projection.
+    -- ^ Canonical, unqualified-visible selector spellings per constructor
+    -- field position, for presenting Exference candidates; Djinn's renamed
+    -- table lives in its projection. Hidden selectors deliberately leave
+    -- structural eliminations unchanged.
   , resultTarget :: DefinitionName
   , presentation :: PresentationOptions
   , djinnSearchOptions :: QueryOptions
@@ -167,17 +168,19 @@ refreshDjinnProjection state = case
     ( exferenceRuntimeBaseSession runtime
     , exferenceRuntimeScope runtime
     ) of
-  (Just baseSession, Just context) -> case projectDjinnScope
-      (djinnAxiomPolicy djinn)
-      records
-      (scopeProjectionDeclarations baseSession)
-      (Set.fromList $ scopeUnqualifiedNames context) of
-    Left failure -> do
-      emitDiagnostic failure
-      putStrLn "Djinn falls back to its standard checked environment."
-      pure $ withProjection Nothing
-    Right projection -> pure $ withProjection $ Just projection
-  _ -> pure $ withProjection Nothing
+  (Just baseSession, Just context) ->
+    let visible = Set.fromList $ scopeUnqualifiedNames context
+    in case projectDjinnScope
+        (djinnAxiomPolicy djinn)
+        records
+        (scopeProjectionDeclarations baseSession)
+        visible of
+      Left failure -> do
+        emitDiagnostic failure
+        putStrLn "Djinn falls back to its standard checked environment."
+        pure $ withProjection visible Nothing
+      Right projection -> pure $ withProjection visible $ Just projection
+  _ -> pure $ withProjection Set.empty Nothing
  where
   runtime = exferenceRuntime state
   djinn = djinnRuntime state
@@ -188,13 +191,14 @@ refreshDjinnProjection state = case
     (Just baseSession, Just workspace) -> workspaceRecordProjections
       (exferenceSessionInventory baseSession) workspace
     _ -> []
-  withProjection projection = state
+  withProjection visible projection = state
     { djinnRuntime = djinn {djinnProjection = projection}
     , scopeFieldSelectors = Map.fromList
         [ ((constructor, index), selector)
         | (_, constructors) <- records
         , (constructor, selectorNames) <- constructors
         , (index, selector) <- zip [0 ..] selectorNames
+        , selector `Set.member` visible
         ]
     }
 

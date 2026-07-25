@@ -110,6 +110,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSymlinkModuleMismatch
   , testCase "REPL re-exports reject only same-namespace collisions"
       testReplExportAmbiguity
+  , testCase "REPL Djinn projection preserves cross-namespace names"
+      testReplDjinnNamespaceProjection
   , testCase "REPL bundled imports reject type-synonym wildcards"
       testReplBundledOwners
   , testCase "REPL import failures roll back without touching Djinn"
@@ -1577,6 +1579,31 @@ testReplExportAmbiguity = withReplModuleFixture $ \root -> do
     "[DJEX_REPL_EXPORT_AMBIGUOUS]" collisionErrors
   assertNoCallStack collisionErrors
 
+-- The scope validator already accepts a type and a constructor with the same
+-- occurrence. Djinn's canonical-to-unqualified projection must preserve the
+-- same namespace distinction instead of dropping both owning datatypes as an
+-- apparent collision.
+testReplDjinnNamespaceProjection :: Assertion
+testReplDjinnNamespaceProjection = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      namespace = canonicalRoot </> "export-scope" </> "Namespace.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show namespace
+    , ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Same -> Other"
+    , ":show omissions"
+    ]
+  assertEqual "cross-namespace Djinn projection exit" ExitSuccess exitCode
+  assertContains
+    ("same-spelled type and value remain usable: " ++ output ++ errors)
+    "\\_ -> Same" output
+  assertBool "legal cross-namespace names were reported as ambiguous" $
+    not $ "unqualified spelling is ambiguous" `isInfixOf` output
+  assertNoCallStack errors
+
 testReplBundledOwners :: Assertion
 testReplBundledOwners = withReplModuleFixture $ \root -> do
   canonicalRoot <- canonicalizePath root
@@ -1677,8 +1704,11 @@ testReplUnifiedScope = withTemporaryEnvironment
         ]
     )
   ] $ \directory -> do
-  (exitCode, output, _errors) <- runRepl directory
+  (exitCode, output, errors) <- runRepl directory
     [ ":set render expression"
+    , ":compare Wrapped -> Bool"
+    , ":module"
+    , "import Custom hiding (unwrapped)"
     , ":compare Wrapped -> Bool"
     , ":show environment"
     , ":show omissions"
@@ -1692,6 +1722,12 @@ testReplUnifiedScope = withTemporaryEnvironment
     $ countOccurrences "unwrapped" output
   assertContains "Exference qualifies the presented selector"
     "Custom.unwrapped" output
+  assertContains
+    ("Djinn keeps a hidden selector structural: " ++ output ++ errors)
+    "case a of" output
+  assertContains
+    ("Exference keeps a hidden selector structural: " ++ output ++ errors)
+    "let Custom.MkWrapped" output
   assertContains "Djinn reports its projected environment"
     "projected from the module scope" output
   assertEqual "the value-axiom omission disappears once axioms are enabled" 1

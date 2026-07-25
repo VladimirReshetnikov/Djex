@@ -8,7 +8,7 @@ import CLIAssertions
   , stripCarriageReturns
   )
 import Control.Exception (bracket)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.Char (toLower)
 import Data.List (intercalate, isInfixOf)
 import System.Directory
@@ -33,6 +33,7 @@ import System.Exit (ExitCode (..))
 import System.IO (hClose, openTempFile)
 import System.Process
   ( CreateProcess (cwd, env)
+  , callProcess
   , proc
   , readCreateProcessWithExitCode
   , readProcessWithExitCode
@@ -1719,6 +1720,22 @@ testReplStartupFiles = withTemporaryEnvironment
   assertBool "suppressed startup still applied its settings" $
     not $ "\\a -> a" `isInfixOf` ignoredOutput
 
+  -- GHCi refuses a POSIX startup file that another group member can replace.
+  -- Djex executes shell, package, and evaluation commands from the same file,
+  -- so it must preserve that trust boundary before reading a line.
+  when (os /= "mingw32") $ do
+    let startup = directory </> ".djexrc"
+    callProcess "chmod" ["g+w", startup]
+    (untrustedExit, untrustedOutput, untrustedErrors) <-
+      runReplFrom directory [] directory ["a -> a"]
+    assertEqual "untrusted startup REPL exit" ExitSuccess untrustedExit
+    assertBool "untrusted startup file was announced as loaded" $
+      not $ startup `isInfixOf` untrustedOutput
+    assertBool "untrusted startup settings were applied" $
+      not $ "\\a -> a" `isInfixOf` untrustedOutput
+    assertContains "untrusted startup diagnostic"
+      "[DJEX_REPL_STARTUP_UNTRUSTED]" untrustedErrors
+
 -- The stream-observing fake build tool doubles as a fake editor: it records
 -- its argv, so both the explicit file form and the latest-target default are
 -- observable without a real editor.
@@ -1736,19 +1753,29 @@ testReplEdit = withTemporaryEnvironment
     canonicalizePath
   let logPath = directory </> "editor-log"
       file = directory </> "Custom.hs"
+      injectedMarker = directory </> "editor-injection"
+      hostile = directory
+        </> ("literal$(touch " ++ injectedMarker ++ ").hs")
   (exitCode, _output, errors) <- runReplWithOverrides
-    [("VISUAL", fake), ("DJEX_FAKE_CABAL_LOG", logPath)]
+    [("VISUAL", show fake ++ " --editor-mode"), ("DJEX_FAKE_CABAL_LOG", logPath)]
     directory
-    [ ":edit " ++ show file
+    [ ":e " ++ show hostile
+    , ":edit " ++ show file
     , ":load " ++ show file
     , ":edit"
     ]
   assertEqual "edit REPL exit" ExitSuccess exitCode
   recorded <- readFile logPath
-  assertEqual "both edit forms launched the editor" 2
+  assertEqual "all edit forms launched the editor" 3
     $ countOccurrences "CALL" recorded
   assertEqual "the named file and the latest target reach the editor" 2
     $ countOccurrencesPath ("ARG:" ++ file) recorded
+  assertEqual "editor options are parsed into fixed argv" 3
+    $ countOccurrences "ARG:--editor-mode" recorded
+  assertContainsPath "a hostile source path remains one literal argv value"
+    ("ARG:" ++ hostile) recorded
+  injected <- doesFileExist injectedMarker
+  assertBool "the editor path was evaluated as shell syntax" $ not injected
   assertNoCallStack errors
 
 testReplInfoInstances :: Assertion

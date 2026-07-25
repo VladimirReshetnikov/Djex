@@ -9,15 +9,14 @@ bare `import` or `:module` controls which of those modules is in scope at the
 prompt. Djex also borrows GHCi's colon-command, completion, history, interrupt,
 and multiline conventions.
 
-Djex is nevertheless not a GHCi-compatible evaluator. A bare line is a type
-that Djex should inhabit, not a Haskell expression to evaluate. Source modules
-provide checked type, data, class, instance, and signature information to
-Exference; their function bodies are not compiled or interpreted. The two
-synthesis engines also retain different parsers and search semantics. The
-`:type` and `:kind` commands are read-only exceptions at the command boundary.
-The first infers an expression's type from loaded signatures; the second
-inspects a type against the loaded kind inventory. Neither command evaluates
-an expression, compiles a source body, or invokes synthesis search.
+Djex is nevertheless not a drop-in GHCi evaluator. A bare line is a type that
+Djex should inhabit, not a Haskell expression to evaluate. The synthesis
+workspace reads type, data, class, instance, and signature information without
+compiling function bodies, and the two synthesis engines retain different
+parsers and search semantics. `:type` and `:kind` inspect that structural
+workspace without invoking synthesis or executing code. The deliberately
+explicit `:eval EXPRESSION` command is a separate boundary: it invokes the real
+GHC API and may compile and execute loaded Haskell code.
 
 Use the shared REPL when exploring or comparing types. Use the one-shot
 `djex djinn` and `djex exference` subcommands when a script needs generated
@@ -49,7 +48,12 @@ the home directory and then from the current directory, exactly as GHCi runs
 `.ghci`. Each file is executed through the ordinary `:script` machinery: any
 REPL input is accepted, failed lines report and continue, settings persist
 into the session, and `:quit` exits. Missing files are skipped silently, each
-load is announced, and `--ignore-startup` suppresses both files.
+load is announced, and `--ignore-startup` suppresses both files. On POSIX,
+Djex follows GHCi's startup-file trust rule: both the file and its containing
+directory must be owned by the current user or root and must not be writable
+by the group or by others. An unverifiable or untrusted file is skipped with a
+warning. Windows lacks the corresponding ownership/mode check and accepts the
+file, matching GHCi's platform behavior.
 
 Run `djex repl --help` for the startup table. Options for a one-shot backend,
 such as `--select` or `--max-steps`, are changed inside the REPL with `:set`;
@@ -145,7 +149,7 @@ in-scope identifiers (qualified and unqualified) at type-query, `:info`,
 | `:exference TYPE` | Run one Exference query. |
 | `:help [COMMAND]` (`:h`, `:?`) | Show the command summary or detailed command help. |
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
-| `:edit [FILE]` | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
+| `:edit [FILE]` (`:e`) | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
 | `:eval EXPRESSION` | Evaluate a Haskell expression with real GHC and print its shown value. |
 | `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors, class methods, and the instances the name participates in. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
@@ -171,6 +175,13 @@ Target and path arguments may be bare words, Haskell string literals, or a
 whole Haskell `[String]` value. The list form is particularly useful in
 scripts. `:module+ M` and `:module- M` are accepted conveniences for the
 canonical GHCi-style `:module + M` and `:module - M` spellings.
+
+`:edit` treats `VISUAL`, falling back to `EDITOR`, as a whitespace-separated
+executable and argument vector; use Haskell double-string literals for an
+executable or fixed argument containing whitespace. Djex launches that
+executable directly and appends the selected path as exactly one argument, so
+shell metacharacters in a source filename are never evaluated. `:!` remains
+the intentional shell-command boundary.
 
 `:show` accepts `settings`, `backends`, `environment`, `imports`, `modules`,
 `targets`, `omissions`, `diagnostics`, or `directory`; with no subject it
@@ -219,9 +230,10 @@ Other option-shaped values such as `"--dry-run"` are targets rather than
 injected Cabal options. Cabal's stdout and stderr are streamed unchanged, while
 its stdin is closed so a child cannot consume later REPL or script input.
 Unrelated inherited file descriptors are also closed. `:d` is ambiguous
-between `:djinn` and `:download`, `:e` is ambiguous between `:edit` and
-`:exference`, and `:in` is ambiguous between `:info` and `:install`; the
-exact `:i` alias continues to mean `:info`.
+between `:djinn` and `:download`, while `:in` is ambiguous between `:info` and
+`:install`. The exact `:e` alias means `:edit`; `:ev` and `:ex` are useful
+unique prefixes for `:eval` and `:exference`. The exact `:i` alias continues
+to mean `:info`.
 
 `CABAL_TARGET` is intentionally broader than a Hackage package name. Cabal
 accepts repository package/version and component selectors, local package

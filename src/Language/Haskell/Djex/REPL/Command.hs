@@ -18,6 +18,7 @@ module Language.Haskell.Djex.REPL.Command
   , parseReplSetting
   , parseReplInput
   , parseReplBackend
+  , parseCommandWords
   , commandNames
   , backendNames
   , settingNames
@@ -294,7 +295,7 @@ commandDescriptors =
   , command "download" ["dl"] "CABAL_TARGET ..."
       "ask Cabal to fetch targets and dependencies into its source cache"
       $ fmap (ReplCommand . DownloadPackages) . packageArguments
-  , command "edit" [] "[FILE]"
+  , command "edit" ["e"] "[FILE]"
       "open the configured editor on a file"
       $ fmap (ReplCommand . EditFile) . optionalArgument "at most one file"
   , command "eval" [] "EXPRESSION"
@@ -594,7 +595,15 @@ commandArguments source = case trim source of
   input@('[' : _) -> case readMaybe input of
     Just arguments -> Right arguments
     Nothing -> Left "malformed [String] command argument list"
-  input -> parseWords input
+  input -> parseCommandWords input
+
+-- | Parse whitespace-separated process-style arguments, with Haskell string
+-- literals available for values containing whitespace. Unlike
+-- 'commandArguments', a leading bracket has no special meaning. This is the
+-- appropriate grammar for command strings supplied through environment
+-- variables such as @VISUAL@ and @EDITOR@.
+parseCommandWords :: String -> Either String [String]
+parseCommandWords source = parseWords $ trim source
  where
   parseWords "" = Right []
   parseWords input = case dropWhile isSpace input of

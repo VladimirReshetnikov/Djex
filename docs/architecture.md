@@ -415,11 +415,12 @@ re-exported by the main facade.
 ### Public compatibility and research API
 
 The single library also exposes the historical `Djinn`, `Djinn.Core`, and
-`Language.Haskell.Exference.*` surfaces. Some exposed compatibility modules
-contain `.Internal.` in their names because earlier packages made those
-research APIs importable. They remain available for migration and testing, but
-the name is intentional: new clients should not treat their representation as
-the curated stability boundary.
+`Language.Haskell.Exference.*` surfaces. The specifically retained
+`Language.Haskell.Exference.Core.Internal.Scope` research API predates the
+merge; its `.Internal.` spelling is intentional, and new clients should not
+treat its representation as the curated stability boundary. Other Exference
+`Internal` modules are private implementation, not historical compatibility
+promises.
 
 Module exposure, not the spelling alone, determines whether a module is
 importable. The `Exposed-Modules` section of `djex.cabal` is the exact public
@@ -435,11 +436,17 @@ workers. Downstream code cannot import them through a `djex` dependency.
 
 ## Test boundaries
 
-The package has eleven test suites:
+The package has twelve test suites:
 
 - shared-foundation, facade integration, downstream API, and merged CLI suites;
 - Djinn unit, property, frontend-import, and CLI suites;
-- Exference unit, frontend-import, and CLI suites.
+- Exference unit, private-engine, frontend-import, and CLI suites.
+
+`exference-engine-tests` compiles the parser-neutral Exference core and a
+test-only seam as home modules. This preserves finite-identifier, queue
+representation, saturation, and strictness regressions whose artificial
+limits cannot be reached through production options, without exposing that
+seam from the `djex` library.
 
 The downstream API suite also compiles deliberately rejected probes to protect
 opaque-constructor boundaries. Benchmarks are separate Cabal components and are

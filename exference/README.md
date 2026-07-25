@@ -45,7 +45,7 @@ from the repository root:
 
 ```console
 cabal build djex:lib:djex djex:exe:exference
-cabal test djex-api-tests exference-frontend-api-tests exference-tests exference-cli-tests --test-show-details=direct
+cabal test djex-api-tests exference-frontend-api-tests exference-tests exference-engine-tests exference-cli-tests --test-show-details=direct
 ```
 
 The former top-level `exference/` package is now the `djex/exference/` source
@@ -705,10 +705,14 @@ tuning but no longer starts one capability per core or reserves a
 multi-gigabyte heap for trivial invocations. Its obsolete Hood, search-tree,
 parallel-mode, and embedded manual-test machinery has been removed;
 deterministic regressions live in `exference-tests`, the frontend-import check,
-and the separate `exference-cli-tests` subprocess suite.
-The finite-identifier test seam likewise retains only its exercised raw
-compatibility-element path and canonical `QueryResult` path; the unconsumed
-generated-batch intermediate and private search-node export aliases are gone.
+and the separate `exference-cli-tests` subprocess suite. Artificial
+finite-identifier, queue-capacity, saturation, and poisoned-value checks live
+in `exference-engine-tests`. That component compiles the parser-neutral core
+and its test seam as home modules, so
+`Language.Haskell.Exference.Core.Internal.Testing` is not part of the library
+API. The seam retains only its exercised raw compatibility-element and
+canonical `QueryResult` paths; the unconsumed generated-batch intermediate and
+private search-node export aliases remain gone.
 
 ```console
 cabal run exference -- --first "a -> a"

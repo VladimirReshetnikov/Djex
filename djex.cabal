@@ -180,7 +180,6 @@ Library
     Language.Haskell.Exference.Core.FunctionBinding
     Language.Haskell.Exference.Core.Score
     Language.Haskell.Exference.Core.Internal.Scope
-    Language.Haskell.Exference.Core.Internal.Testing
     Language.Haskell.Djex.Exference.HaskellSrc
     Language.Haskell.Exference.CLI
     Language.Haskell.Exference.ExpressionToHaskellSrc
@@ -383,6 +382,46 @@ Test-Suite exference-tests
   Autogen-Modules: Paths_djex
 
   Build-Depends:    djex
+
+-- Artificial representation-boundary checks need allocator capacities and
+-- poisoned values that are intentionally absent from the library API. Compile
+-- the parser-neutral core and its test seam as home modules in this private
+-- component so those regressions do not turn an Internal module into a public
+-- compatibility promise.
+Test-Suite exference-engine-tests
+  import:          tasty-hunit-test, containers-dep, deepseq-dep, transformers-dep
+  Type:            exitcode-stdio-1.0
+  Main-Is:         EngineSpec.hs
+  Hs-Source-Dirs:
+    exference/test-engine
+    exference/src-core
+  Other-Modules:
+    Language.Haskell.Exference.Core.Candidate
+    Language.Haskell.Exference.Core.ConstraintSolver
+    Language.Haskell.Exference.Core.ExferenceStats
+    Language.Haskell.Exference.Core.Expression
+    Language.Haskell.Exference.Core.ExpressionCheck
+    Language.Haskell.Exference.Core.FunctionBinding
+    Language.Haskell.Exference.Core.Internal.Candidate
+    Language.Haskell.Exference.Core.Internal.Exference
+    Language.Haskell.Exference.Core.Internal.ExferenceNode
+    Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
+    Language.Haskell.Exference.Core.Internal.FlexibleIds
+    Language.Haskell.Exference.Core.Internal.Options
+    Language.Haskell.Exference.Core.Internal.Scope
+    Language.Haskell.Exference.Core.Internal.SearchControl
+    Language.Haskell.Exference.Core.Internal.SourceNames
+    Language.Haskell.Exference.Core.Internal.Testing
+    Language.Haskell.Exference.Core.Internal.VariableSupply
+    Language.Haskell.Exference.Core.Name
+    Language.Haskell.Exference.Core.RigidInstantiation
+    Language.Haskell.Exference.Core.Score
+    Language.Haskell.Exference.Core.TypeUtils
+    Language.Haskell.Exference.Core.Types
+    Language.Haskell.Exference.Core.Unify
+  Build-Depends:
+    djex,
+    pqueue >= 1.3.1 && < 1.8
 
 Test-Suite exference-cli-tests
   import:         cli-test

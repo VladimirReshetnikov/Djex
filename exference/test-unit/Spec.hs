@@ -95,18 +95,6 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   )
 import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
-import Language.Haskell.Exference.Core.Internal.Testing
-  ( IdentifierCapacities (..)
-  , compatibilityBindingUsageCounts
-  , compatibilityPruningCount
-  , findExpressionsWithIdentifierCapacitiesEither
-  , findQueryResultsWithIdentifierCapacitiesEither
-  , mergePriorityQueueAtCapacity
-  , pruningReasonsFromNaturalTotals
-  , queryProjectionStrictnessForTesting
-  , singleOptionValidationStrictnessForTesting
-  , typeComplexityForTesting
-  )
 import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify
@@ -2852,14 +2840,6 @@ tests = testGroup "Exference"
           validateExferenceQuery environment query @?= preparedQuery query
           validateExferenceQuery environment invalidQuery @?=
             preparedQuery invalidQuery
-      , testCase "prepared queries consume one validated options witness" $ do
-          environment <- expectRight $ sealLegacyEnvironment identityInput
-          target <- checkedIdentifierTarget "singleOptionValidation"
-          let query = legacyInputQuery identityInput
-              sourceHints = emptyExferenceSourceTypeVariableHints
-                $ queryGoalType query
-          singleOptionValidationStrictnessForTesting
-            target sourceHints environment query @?= Right ()
       , testCase "query options validate against one sealed environment" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
           let query = legacyInputQuery identityInput
@@ -3595,180 +3575,6 @@ tests = testGroup "Exference"
       , testCase "step exhaustion is reported explicitly" $ do
           chunk <- onlyChunk $ identityInput {input_maxSteps = 1}
           searchCompletion (chunkStatus chunk) @?= SearchStepLimitReached
-      , testCase "term identifier exhaustion truncates instead of colliding" $ do
-          chunk <- lastCapacityChunk
-            (IdentifierCapacities 0 100 100) identityInput
-          chunkStatus chunk @?=
-            SearchStatus SearchIdentifierSpaceExhausted 0 0
-          assertBool "an exhausted term-ID branch produced a candidate"
-            $ null $ chunkElements chunk
-      , testCase "identifier truncation survives a successful sibling" $ do
-          let integer = TypeCons $ name "Int"
-              polymorphic = FunctionBinding
-                (TypeVar 0) (name "polymorphic") 0 [] []
-              constant = FunctionBinding
-                integer (name "constant") 0 [] []
-              input = identityInput
-                { input_goalType = integer
-                , input_envFuncs = [polymorphic, constant]
-                }
-              capacities = IdentifierCapacities 100 0 100
-          chunk <- lastCapacityChunk capacities input
-          searchCompletion (chunkStatus chunk) @?=
-            SearchIdentifierSpaceExhausted
-          assertBool "a viable sibling was suppressed by identifier exhaustion"
-            $ not $ null $ chunkElements chunk
-          targetName <- expectRight $ SharedName.mkIdentifier "generated"
-          target <- expectRight $ Generated.mkDefinitionName targetName
-          environment <- expectRight $ sealLegacyEnvironment input
-          results <- expectRight
-            $ findQueryResultsWithIdentifierCapacitiesEither
-                capacities target
-                (emptyExferenceSourceTypeVariableHints $ input_goalType input)
-                environment (legacyInputQuery input)
-          result <- case results of
-            [] -> fail "expected at least one capacity-limited query result"
-            firstResult : remaining ->
-              pure $ lastElement firstResult remaining
-          let batch = SharedQuery.resultSearch result
-          SharedQuery.resultEvidence result @?=
-            SharedQuery.ValidatedCandidates
-          SharedSearch.batchProgress batch @?= SharedSearch.Completed
-            (SharedSearch.Truncated
-              $ SharedSearch.IdentifierSpaceExhausted :| [])
-          assertBool "the direct result lost its checked target"
-            $ all ((== target) . Generated.clauseName
-                . SharedCandidate.candidateOutput)
-            $ SharedSearch.batchCandidates batch
-      , testCase "generic deconstructors need no persistent flexible IDs" $ do
-          let integer = TypeCons $ name "Int"
-              box argument = TypeApp (TypeCons $ name "Box") argument
-              deconstructor = DeconstructorBinding
-                (box $ TypeVar 0)
-                [ConstructorBinding (name "Box") [TypeVar 0]]
-                False
-              input = identityInput
-                { input_goalType = TypeArrow (box integer) integer
-                , input_envDeconsS = [deconstructor]
-                }
-              capacities = IdentifierCapacities 100 0 100
-              isBoxElimination candidate = case candidate of
-                ( ExpLambda scrutinee _
-                    (ExpLetMatch constructor [(field, annotation)]
-                      (ExpVar matchedScrutinee _)
-                      (ExpVar returnedField _))
-                  , []
-                  , _
-                  ) -> constructor == name "Box"
-                    && matchedScrutinee == scrutinee
-                    && returnedField == field
-                    && annotation == integer
-                _ -> False
-          chunks <- expectRight
-            $ findExpressionsWithIdentifierCapacitiesEither capacities input
-          finalChunk <- case chunks of
-            [] -> fail "generic Box elimination produced no search chunks"
-            initial : remaining -> pure $ lastElement initial remaining
-          chunkStatus finalChunk @?= SearchStatus SearchExhausted 0 0
-          assertBool "generic Box elimination consumed a flexible ID"
-            $ any isBoxElimination
-            $ concatMap chunkElements chunks
-      , testCase "multi-case deconstructors need no persistent flexible IDs" $ do
-          let integer = TypeCons $ name "Int"
-              choice argument = TypeApp
-                (TypeCons $ name "Choice") argument
-              genericChoice = choice $ TypeVar 0
-              integerChoice = choice integer
-              leftName = name "First"
-              rightName = name "Second"
-              deconstructor = DeconstructorBinding genericChoice
-                [ ConstructorBinding leftName [TypeVar 0]
-                , ConstructorBinding rightName [TypeVar 0]
-                ] False
-              input = identityInput
-                { input_goalType = TypeArrow integerChoice integer
-                , input_envDeconsS = [deconstructor]
-                , input_multiPM = True
-                , input_maxSteps = 200
-                }
-              capacities = IdentifierCapacities 100 0 100
-              returnsAnnotatedField (_, [(field, annotation)], body) =
-                annotation == integer && body == ExpVar field annotation
-              returnsAnnotatedField _ = False
-              isChoiceElimination candidate = case candidate of
-                ( ExpLambda scrutinee _
-                    (ExpCaseMatch (ExpVar matchedScrutinee _) alternatives)
-                  , []
-                  , _
-                  ) -> matchedScrutinee == scrutinee
-                    && map (\(constructor, _, _) -> constructor) alternatives
-                      == [leftName, rightName]
-                    && all returnsAnnotatedField alternatives
-                _ -> False
-          chunks <- expectRight
-            $ findExpressionsWithIdentifierCapacitiesEither capacities input
-          finalChunk <- case chunks of
-            [] -> fail "generic Choice elimination produced no search chunks"
-            initial : remaining -> pure $ lastElement initial remaining
-          chunkStatus finalChunk @?= SearchStatus SearchExhausted 0 0
-          assertBool "generic Choice elimination consumed a flexible ID"
-            $ any isChoiceElimination
-            $ concatMap chunkElements chunks
-      , testCase "empty elimination consumes no flexible identifier" $ do
-          let integer = TypeCons $ name "Int"
-              empty argument = TypeApp (TypeCons $ name "Empty") argument
-              deconstructor = DeconstructorBinding
-                (empty $ TypeVar 0) [] False
-              input = identityInput
-                { input_goalType = TypeArrow (empty integer) integer
-                , input_envDeconsS = [deconstructor]
-                }
-          chunk <- lastCapacityChunk
-            (IdentifierCapacities 100 0 100) input
-          chunkStatus chunk @?= SearchStatus SearchExhausted 0 0
-          assertBool "empty elimination required a non-escaping flexible ID"
-            $ not $ null $ chunkElements chunk
-      , testCase "scope identifier collisions are operational truncations" $ do
-          chunk <- lastCapacityChunk
-            (IdentifierCapacities 100 100 1) identityInput
-          chunkStatus chunk @?=
-            SearchStatus SearchIdentifierSpaceExhausted 0 0
-      , testCase "exact progress retains simultaneous step and ID limits" $ do
-          let integer = TypeCons $ name "Int"
-              boolean = TypeCons $ name "Bool"
-              polymorphic = FunctionBinding
-                (TypeVar 0) (name "polymorphic") 0 [] []
-              deferred = FunctionBinding
-                boolean (name "deferred") 0 [] [integer]
-              input = identityInput
-                { input_goalType = boolean
-                , input_envFuncs = [polymorphic, deferred]
-                -- The root opens even an empty leading forall before the
-                -- binding-expansion step under test.
-                , input_maxSteps = 2
-                }
-              capacities = IdentifierCapacities 100 0 100
-          chunk <- lastCapacityChunk capacities input
-          searchCompletion (chunkStatus chunk) @?=
-            SearchIdentifierSpaceExhausted
-          targetName <- expectRight $ SharedName.mkIdentifier "generated"
-          target <- expectRight $ Generated.mkDefinitionName targetName
-          environment <- expectRight $ sealLegacyEnvironment input
-          results <- expectRight
-            $ findQueryResultsWithIdentifierCapacitiesEither
-                capacities target
-                (emptyExferenceSourceTypeVariableHints $ input_goalType input)
-                environment (legacyInputQuery input)
-          result <- case results of
-            [] -> fail "expected at least one capacity-limited query result"
-            firstResult : remaining ->
-              pure $ lastElement firstResult remaining
-          let batch = SharedQuery.resultSearch result
-          SharedQuery.resultEvidence result @?= SharedQuery.NoEvidence
-          SharedSearch.batchProgress batch @?= SharedSearch.Completed
-            (SharedSearch.Truncated
-              $ SharedSearch.StepLimitReached
-                :| [SharedSearch.IdentifierSpaceExhausted])
       , testCase "candidate statistics count completed search steps" $ do
           chunk <- lastChunk identityInput
           let candidateSteps =
@@ -3986,33 +3792,6 @@ tests = testGroup "Exference"
           chunk <- onlyChunk $ identityInput {input_maxQueueSize = Just 0}
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchQueuePruned (chunkStatus chunk) @?= 1
-      , testCase "queue representation overflow retains the best priorities" $ do
-          let queued = [(2, 20)]
-              generated = [(3, 30), (1, 10)]
-          mergePriorityQueueAtCapacity 3 Nothing queued generated @?=
-            ([(3, 30), (2, 20), (1, 10)], 0)
-          mergePriorityQueueAtCapacity 2 Nothing queued generated @?=
-            ([(3, 30), (2, 20)], 1)
-          mergePriorityQueueAtCapacity 2 (Just 1) queued generated @?=
-            ([(3, 30)], 2)
-          mergePriorityQueueAtCapacity 3 (Just (-1)) queued generated @?=
-            ([], 3)
-      , testCase "compatibility pruning counts saturate without losing reasons" $ do
-          let maximumCount = fromIntegral (maxBound :: Int) :: Natural
-              queueTotal = maximumCount + 1
-              depthTotal = maximumCount + 2
-              binding = name "usedBinding"
-          compatibilityPruningCount (maximumCount - 1) @?=
-            maxBound - 1
-          compatibilityPruningCount maximumCount @?= maxBound
-          compatibilityPruningCount queueTotal @?= maxBound
-          compatibilityBindingUsageCounts
-              (Map.singleton binding queueTotal) @?=
-            Map.singleton binding maxBound
-          pruningReasonsFromNaturalTotals queueTotal depthTotal @?=
-            [ SharedSearch.QueueLimitPruned queueTotal
-            , SharedSearch.DepthLimitPruned depthTotal
-            ]
       , testCase "depth pruning is configured and reported" $ do
           let config = defaultHeuristicsConfig
                 {heuristics_functionGoalTransform = 1}
@@ -4022,7 +3801,7 @@ tests = testGroup "Exference"
             }
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchDepthPruned (chunkStatus chunk) @?= 1
-      , testCase "structural tuple ranking exactly preserves applications" $ do
+      , testCase "structural tuple searches match application spellings" $ do
           tupleConstructor <- expectRight $ SharedName.tupleName Boxed 3
           let elements =
                 [ TypeVar 0
@@ -4045,13 +3824,23 @@ tests = testGroup "Exference"
                 , heuristics_goalArrow = near 9
                 , heuristics_goalApp = near 7
                 }
-              complexity config = typeComplexityForTesting config
-          assertEqual "fractional accumulation order"
-            (complexity fractional legacy)
-            (complexity fractional structural)
-          assertEqual "near-saturation accumulation order"
-            (complexity nearSaturation legacy)
-            (complexity nearSaturation structural)
+              searchTrace config representation = do
+                chunks <- expectRight $ findExpressionsWithStatsEither
+                  identityInput
+                    { input_goalType = TypeArrow representation representation
+                    , input_heuristicsConfig = config
+                    }
+                pure
+                  [ (chunkStatus chunk, chunkBindingUsages chunk,
+                      chunkElements chunk)
+                  | chunk <- chunks
+                  ]
+              assertEquivalent label config = do
+                applicationTrace <- searchTrace config legacy
+                structuralTrace <- searchTrace config structural
+                assertBool label $ applicationTrace == structuralTrace
+          assertEquivalent "fractional public trace" fractional
+          assertEquivalent "near-saturation public trace" nearSaturation
       , testCase "solution length contributes structural candidate cost" $ do
           let firstStatistics input = take 1
                 [ statistics
@@ -6695,6 +6484,16 @@ tests = testGroup "Exference"
                 results
           assertBool "canonical identity search produced no candidate"
             $ not $ null candidates
+          assertBool "canonical candidates lost the checked target"
+            $ all ((== target) . Generated.clauseName
+                . SharedCandidate.candidateOutput) candidates
+          mapM_ (\result ->
+              let batch = SharedQuery.resultSearch result
+                  expectedEvidence = case SharedSearch.batchCandidates batch of
+                    [] -> SharedQuery.NoEvidence
+                    _ : _ -> SharedQuery.ValidatedCandidates
+              in SharedQuery.resultEvidence result @?= expectedEvidence)
+            results
           case candidates of
             candidate : _ -> do
               let details = SharedCandidate.candidateDetails candidate
@@ -6707,17 +6506,6 @@ tests = testGroup "Exference"
                 (SharedQuery.resultSearch
                   $ lastElement firstResult remaining) @?=
               SharedSearch.Completed SharedSearch.Finished
-      , testCase "query-result projection preserves its envelope lazily" $ do
-          targetName <- expectRight $ SharedName.mkOperator "<~>"
-          target <- expectRight $ Generated.mkDefinitionName targetName
-          let metadata = ExferenceBatchMetadata Map.empty 2 3
-              (hasValidatedEvidence, progress, observedMetadata,
-                observedTarget) =
-                  queryProjectionStrictnessForTesting target Map.empty
-          hasValidatedEvidence @?= True
-          progress @?= SharedSearch.Continuing
-          observedMetadata @?= metadata
-          observedTarget @?= target
       , testCase "type hints follow every leading forall layer" $ do
           let function = TypeArrow (TypeVar 4) (TypeVar 9)
               goal = TypeForall [4] []
@@ -8146,17 +7934,6 @@ lastChunk input = case findExpressionsWithStats input of
  where
   go latest [] = latest
   go _ (next : rest) = go next rest
-
-lastCapacityChunk
-  :: IdentifierCapacities
-  -> ExferenceInput
-  -> IO ExferenceChunkElement
-lastCapacityChunk capacities input = do
-  chunks <- expectRight
-    $ findExpressionsWithIdentifierCapacitiesEither capacities input
-  case chunks of
-    [] -> fail "expected at least one capacity-limited search chunk"
-    chunk : remaining -> pure $ lastElement chunk remaining
 
 lastElement :: value -> [value] -> value
 lastElement latest [] = latest

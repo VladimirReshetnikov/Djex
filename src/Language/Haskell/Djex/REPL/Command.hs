@@ -36,6 +36,7 @@ import Data.Char (isSpace, toLower)
 import Data.List (intercalate, isPrefixOf)
 import Text.Read (readMaybe)
 
+import Djinn.Internal.HIdentifier (stripLineComments)
 import Language.Haskell.Djex (Backend (..))
 import Language.Haskell.Djex.Package
   ( PackageInstallMode
@@ -203,15 +204,20 @@ data CommandDescriptor = CommandDescriptor
 
 parseReplInput :: String -> Either String ReplInput
 parseReplInput source
+  | rawInput == ":" = Right $ ReplCommand RepeatQuery
+  | ":!" `isPrefixOf` rawInput = ReplCommand . RunShell
+      <$> required "a shell command" (trim $ drop 2 rawInput)
+  | ':' : commandSource <- rawInput = parseColon commandSource
   | null input = Right ReplNoInput
-  | input == ":" = Right $ ReplCommand RepeatQuery
-  | ":!" `isPrefixOf` input = ReplCommand . RunShell
-      <$> required "a shell command" (trim $ drop 2 input)
-  | ':' : commandSource <- input = parseColon commandSource
   | isImport input = Right $ ReplImport input
   | otherwise = Right $ ReplQuery ActiveBackends input
  where
-  input = trim source
+  -- Colon commands own their argument grammar: shell text, prompts, and paths
+  -- may contain a literal @--@. Bare Haskell input instead follows Djinn's
+  -- existing line-comment lexer before import/query classification, including
+  -- across one explicitly collected multiline input.
+  rawInput = trim source
+  input = trim $ stripLineComments source
   isImport value = case stripKeyword "import" value of
     Just _ -> True
     Nothing -> False

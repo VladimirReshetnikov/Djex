@@ -3473,6 +3473,21 @@ testIdentifiers = do
     assertEqual "Unicode symbols also continue dash-prefixed operators"
         "(--⊕) :: a -> a\n"
         (stripLineComments "(--⊕) :: a -> a\n")
+    assertEqual "line-comment markers inside strings remain literal"
+        "import \"pkg--name\" A \n"
+        (stripLineComments "import \"pkg--name\" A -- trailing\n")
+    assertEqual "escaped string quotes do not expose comment markers"
+        "\"quoted \\\"--\\\" text\" \n"
+        (stripLineComments "\"quoted \\\"--\\\" text\" -- trailing\n")
+    assertEqual "escaped character quotes do not expose comments"
+        "'\\\'' \n"
+        (stripLineComments "'\\\'' -- trailing\n")
+    assertEqual "identifier apostrophes do not hide trailing comments"
+        "value' \n"
+        (stripLineComments "value' -- trailing\n")
+    assertEqual "promotion ticks do not hide trailing comments"
+        "'Just a \n"
+        (stripLineComments "'Just a -- trailing\n")
 
 atomA :: Formula
 atomA = PVar $ Symbol "a"

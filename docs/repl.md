@@ -773,9 +773,10 @@ djex|   -> (b, a)
 djex| :}
 ```
 
-The collected text is parsed as one logical input. EOF before `:}` reports an
-unterminated block and exits. The same `:{` and `:}` structure works in script
-files.
+The collected text is parsed as one logical input. Haskell `--` line comments
+are removed from bare type and import input; colon-command payloads remain
+literal. EOF before `:}` reports an unterminated block and exits. The same
+`:{` and `:}` structure works in script files.
 
 `:script FILE` reads the complete file before execution, then evaluates its
 logical inputs in the current session. Setting and backend changes persist

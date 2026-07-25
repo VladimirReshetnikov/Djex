@@ -64,6 +64,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSharedSession
   , testCase "REPL multiline, repeat, and command errors recover"
       testReplInputRecovery
+  , testCase "REPL bare input handles Haskell line comments"
+      testReplLineComments
   , testCase "REPL both mode isolates an unavailable backend"
       testReplBackendIsolation
   , testCase "REPL environment replacement is transactional"
@@ -514,6 +516,35 @@ testReplInputRecovery = withTemporaryEnvironment [] $ \directory -> do
     "ambiguous command :c" errors
   assertContains "unknown command diagnostic" "unknown command :wat" errors
   assertContains "failed shell command diagnostic" "[DJEX_REPL_SHELL]" errors
+  assertNoCallStack errors
+
+testReplLineComments :: Assertion
+testReplLineComments = withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":set render expression"
+    , "-- a whole-line comment is empty input"
+    , "a -> a -- a trailing comment"
+    , ":{"
+    , "a"
+    , "  -> a -- a multiline trailing comment"
+    , ":}"
+    , "import \"pkg--name\" Missing"
+    , "a --* b"
+    , ":set prompt \"-- colon payload\""
+    , ":show settings"
+    , ":set prompt \"\""
+    ]
+  assertEqual "comment-aware REPL exit" ExitSuccess exitCode
+  assertEqual "trailing comments preserve single- and multiline queries" 2
+    $ countOccurrences "\\a -> a" output
+  assertContains "colon command payloads remain literal"
+    "prompt = \"-- colon payload\"" output
+  assertContains "quoted import comment markers remain literal"
+    "package \"pkg--name\"" errors
+  assertContains "quoted imports still reach scope validation"
+    "[DJEX_REPL_IMPORT_PACKAGE]" errors
+  assertEqual "a longer dash operator remains query text" 1
+    $ countOccurrences "[DJEX_DJINN_PARSE]" errors
   assertNoCallStack errors
 
 testReplBackendIsolation :: Assertion
@@ -1825,14 +1856,25 @@ testReplUnifiedScope = withTemporaryEnvironment
 testReplStartupFiles :: Assertion
 testReplStartupFiles = withTemporaryEnvironment
   [ ( ".djexrc"
-    , unlines [":set render expression", ":backend exference"]
+    , unlines
+        [ "-- whole-line startup comment"
+        , ":set target startupCommentResult"
+        , "a -> a -- trailing startup comment"
+        , ":set target djexResult"
+        , ":set render expression"
+        , ":backend exference"
+        ]
     )
   ] $ \directory -> do
-  (exitCode, output, _errors) <- runReplFrom directory [] directory
+  (exitCode, output, errors) <- runReplFrom directory [] directory
     ["a -> a"]
   assertEqual "startup REPL exit" ExitSuccess exitCode
   assertContainsPath "startup file load is announced"
     (directory ++ "/.djexrc") output
+  assertContains "startup trailing comment preserves its query"
+    "startupCommentResult a = a" output
+  assertBool "whole-line startup comment was executed as a query" $
+    not $ (directory ++ "/.djexrc (line 1)") `isInfixOf` errors
   assertContains "startup settings shape the session" "\\a -> a" output
   (ignoredExit, ignoredOutput, _ignoredErrors) <- runReplFrom directory
     ["--ignore-startup"] directory ["a -> a"]
@@ -2032,8 +2074,10 @@ testReplScripts = withTemporaryEnvironment [] $ \directory -> do
       broken = directory ++ "/broken.djex"
   writeFile script $ unlines
     [ ":set render expression"
+    , ":backend djinn"
+    , "-- whole-line script comment"
+    , "a -> a -- trailing script comment"
     , ":backend exference"
-    , "a -> a"
     ]
   writeFile recursive $ ":script " ++ show recursive ++ "\n"
   writeFile broken $ unlines ["", ":wat"]

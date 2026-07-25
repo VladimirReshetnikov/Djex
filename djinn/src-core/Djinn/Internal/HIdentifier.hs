@@ -12,7 +12,7 @@ module Djinn.Internal.HIdentifier (
     schar, sstring, skeyword, pParen
     ) where
 
-import Data.Char (isAlpha)
+import Data.Char (isAlpha, isSpace)
 import Data.Maybe (isJust)
 import Language.Haskell.Synthesis.Name (
     LexicalClass(..), Name,
@@ -161,18 +161,46 @@ variableOperator source =
         _ -> Nothing
 
 -- Strip Haskell-style line comments without mistaking a longer symbolic
--- operator such as @--*@ for a comment introducer.  Djinn has no string or
--- character literals, so operator continuation is the only lexical ambiguity.
+-- operator such as @--*@ for a comment introducer. Keep quoted text intact as
+-- well: the shared REPL also applies this lexer to imports and HSE type input,
+-- where package names and promoted literals may contain @--@.
 stripLineComments :: String -> String
-stripLineComments [] = []
-stripLineComments ('-' : '-' : rest)
-    | continuesOperator rest = '-' : '-' : stripLineComments rest
-    | otherwise = stripLineComments $ dropWhile (/= '\n') rest
+stripLineComments = outsideLiteral
   where
+    outsideLiteral [] = []
+    outsideLiteral ('"' : rest) = '"' : insideLiteral '"' rest
+    outsideLiteral ('\'' : rest)
+        | beginsCharacterLiteral rest = '\'' : insideLiteral '\'' rest
+        | otherwise = '\'' : outsideLiteral rest
+    outsideLiteral ('-' : '-' : rest)
+        | continuesOperator rest = '-' : '-' : outsideLiteral rest
+        | otherwise = outsideLiteral $ dropWhile (/= '\n') rest
+    outsideLiteral (character : rest) =
+        character : outsideLiteral rest
+
+    -- Copy escapes as one lexical unit, so an escaped quote cannot terminate
+    -- its literal. An unescaped newline recovers to ordinary lexing; a valid
+    -- multiline string gap reaches this branch through its preceding escape.
+    insideLiteral _ [] = []
+    insideLiteral quote ('\\' : escaped : rest) =
+        '\\' : escaped : insideLiteral quote rest
+    insideLiteral _ ['\\'] = "\\"
+    insideLiteral _ ('\n' : rest) = '\n' : outsideLiteral rest
+    insideLiteral quote (character : rest)
+        | character == quote = character : outsideLiteral rest
+        | otherwise = character : insideLiteral quote rest
+
+    -- Apostrophes are also legal at the end of Haskell identifiers and before
+    -- promoted constructors. Enter character-literal mode only for the
+    -- ordinary one-character form or for a compact escape ending in a quote.
+    beginsCharacterLiteral (character : '\'' : _) = character /= '\n'
+        && character /= '\r' && character /= '\\'
+    beginsCharacterLiteral ('\\' : rest) =
+        '\'' `elem` takeWhile (not . isSpace) rest
+    beginsCharacterLiteral _ = False
+
     continuesOperator (character : _) = isOperatorCharacter character
     continuesOperator [] = False
-stripLineComments (character : rest) =
-    character : stripLineComments rest
 
 isQualifiedCharacter :: Char -> Bool
 isQualifiedCharacter character =

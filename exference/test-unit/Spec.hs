@@ -133,6 +133,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentFromPath
   , maximumBuiltInTupleArity
   , parseModules
+  , parseModuleSources
   , parseRatings
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
@@ -4209,6 +4210,295 @@ tests = testGroup "Exference"
               (diagnosticSeverity failure, diagnosticMessage failure))
             (parseRatings "foo NaN") @?= Left
               (Error, "rating for foo must be finite: NaN")
+      , testGroup "source declaration import scope"
+        [ testCase "a direct import disambiguates an unqualified type" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  ])
+              , ("B.hs", unlines
+                  [ "module B where"
+                  , "data T = BT"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (T)"
+                  , "selected :: T -> T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            let imported = TypeCons $ validQualifiedName ["A"] "T"
+            functionParameters selected @?= [imported]
+            functionResult selected @?= imported
+        , testCase "class constraints use the same direct import scope" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "class C a"
+                  ])
+              , ("B.hs", unlines
+                  [ "module B where"
+                  , "class C a"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (C)"
+                  , "selected :: C a => a -> a"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            case functionConstraints selected of
+              [HsConstraint owner [TypeVar _]] ->
+                owner @?= validQualifiedName ["A"] "C"
+              constraints -> fail $ "unexpected imported constraints: "
+                ++ show constraints
+        , testCase "scope threads through every declaration type pass" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  , "class C a"
+                  ])
+              , ("B.hs", unlines
+                  [ "module B where"
+                  , "data T = BT"
+                  , "class C a"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (T, C)"
+                  , "type Alias = T"
+                  , "data Box = Box T"
+                  , "class Owner a where"
+                  , "  method :: T -> a"
+                  , "class D a"
+                  , "instance C T => D T"
+                  ])
+              ]
+            let importedType = TypeCons $ validQualifiedName ["A"] "T"
+                importedClass = validQualifiedName ["A"] "C"
+                localClass = validQualifiedName ["Use"] "D"
+            case find
+                ((== validQualifiedName ["Use"] "Alias") . tdecl_name)
+                (sourceTypeSynonyms environment) of
+              Just declaration -> tdecl_result declaration @?= importedType
+              Nothing -> fail "import-scoped type synonym was not loaded"
+            constructor <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "Box"
+            functionParameters constructor @?= [importedType]
+            method <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "method"
+            functionParameters method @?= [importedType]
+            let instances = concat $ Map.elems $ sClassEnv_instances
+                  $ sourceClasses environment
+                matchingInstances =
+                  [ declaration
+                  | declaration <- instances
+                  , constraint_tclass (instance_head declaration) == localClass
+                  , constraint_params (instance_head declaration)
+                      == [importedType]
+                  ]
+            case matchingInstances of
+              declaration : _ -> assertBool (show declaration)
+                $ HsConstraint importedClass [importedType]
+                    `elem` instance_constraints declaration
+              [] -> fail "import-scoped instance head was not loaded"
+        , testCase "qualified aliases preserve canonical identity and lists" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  , "data U = AU"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified A as X (T)"
+                  , "selected :: X.T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["A"] "T")
+            messages <- expectBindingScopeFailure
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  , "data U = AU"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified A as X (T)"
+                  , "excluded :: X.U"
+                  ])
+              ]
+            assertBool (show messages)
+              $ any ("X.U is not in scope" `isInfixOf`) messages
+        , testCase "a local declaration wins over imported names" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("B.hs", "module B where\ndata T = BT\n")
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (T)"
+                  , "import B (T)"
+                  , "data T = LocalT"
+                  , "selected :: T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Use"] "T")
+        , testCase "hiding and missing imports reject loaded declarations" $ do
+            hidden <- expectBindingScopeFailure
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A hiding (T)"
+                  , "hidden :: T"
+                  ])
+              ]
+            assertBool (show hidden)
+              $ any ("T is not in scope" `isInfixOf`) hidden
+            missing <- expectBindingScopeFailure
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("Support.hs", "module Support where\ndata U = U\n")
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Support ()"
+                  , "bare :: T"
+                  , "qualified :: A.T"
+                  ])
+              ]
+            case missing of
+              [bareFailure, qualifiedFailure] -> do
+                assertBool (show missing)
+                  $ "T is not in scope" `isInfixOf` bareFailure
+                assertBool (show missing)
+                  $ "A.T is not in scope" `isInfixOf` qualifiedFailure
+              _ -> fail $ "unexpected missing-import failures: "
+                ++ show missing
+        , testCase "public source parsing is strict with no imports" $ do
+            messages <- expectBindingScopeFailure
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "excluded :: T"
+                  ])
+              ]
+            assertBool (show messages)
+              $ any ("T is not in scope" `isInfixOf`) messages
+        , testCase "explicit exports retain named re-export identity" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A (T) where"
+                  , "data T = AT"
+                  , "data Private = Private"
+                  ])
+              , ("Reexport.hs", unlines
+                  [ "module Reexport (T) where"
+                  , "import A (T)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Reexport (T)"
+                  , "selected :: T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["A"] "T")
+            privateFailure <- expectBindingScopeFailure
+              [ ("A.hs", unlines
+                  [ "module A (T) where"
+                  , "data T = AT"
+                  , "data Private = Private"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (Private)"
+                  , "excluded :: Private"
+                  ])
+              ]
+            assertBool (show privateFailure)
+              $ any ("Private is not in scope" `isInfixOf`) privateFailure
+        , testCase "positive lists preserve unloaded external identities" $ do
+            environment <- expectSourceEnvironment
+              [ ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified Data.Text as X (Text)"
+                  , "selected :: X.Text"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Data", "Text"] "Text")
+        , testCase "package imports cannot bind a same-spelled source module" $ do
+            messages <- expectBindingScopeFailure
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("Use.hs", unlines
+                  [ "{-# LANGUAGE PackageImports #-}"
+                  , "module Use where"
+                  , "import \"package\" A (T)"
+                  , "excluded :: T"
+                  ])
+              ]
+            assertBool (show messages)
+              $ any ("T is not in scope" `isInfixOf`) messages
+        , testCase "loaded Prelude is implicit unless disabled" $ do
+            let prelude = ("Prelude.hs", unlines
+                  [ "module Prelude (Bool) where"
+                  , "data Bool = False | True"
+                  ])
+                support = ("Support.hs",
+                  "module Support where\ndata Marker = Marker\n")
+            environment <- expectSourceEnvironment
+              [ prelude
+              , support
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Support ()"
+                  , "selected :: Bool"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Prelude"] "Bool")
+            disabled <- expectBindingScopeFailure
+              [ prelude
+              , support
+              , ("Use.hs", unlines
+                  [ "{-# LANGUAGE NoImplicitPrelude #-}"
+                  , "module Use where"
+                  , "import Support ()"
+                  , "selected :: Bool"
+                  ])
+              ]
+            assertBool (show disabled)
+              $ any ("Bool is not in scope" `isInfixOf`) disabled
+        , testCase "legacy extraction keeps unique-global fallback" $ do
+            provider <- expectParsedModule
+              "module Provider where\ndata T = T\n"
+            consumer <- expectParsedModule
+              "module Consumer where\nlegacy :: T -> T\n"
+            typeNames <- expectRight $ getDataTypes [provider]
+            results <- pure $ runIdentity
+              $ getDecls typeNames Map.empty Map.empty [consumer]
+            legacy <- case results of
+              [result] -> expectRight result
+              _ -> fail $ "unexpected legacy extraction results: "
+                ++ show results
+            let imported = TypeCons $ validQualifiedName ["Provider"] "T"
+            functionParameters legacy @?= [imported]
+            functionResult legacy @?= imported
+        ]
       , testCase "mixed binding categories retain declaration source order" $
           withTemporaryFile (unlines
             [ "module OrderedBindings where"
@@ -5630,10 +5920,12 @@ tests = testGroup "Exference"
       , testCase "checked recursion spans source modules" $
           withTemporaryFile (unlines
             [ "module MutualA where"
+            , "import MutualB (B)"
             , "data A = MakeA B"
             ]) $ \firstPath ->
           withTemporaryFile (unlines
             [ "module MutualB where"
+            , "import MutualA (A)"
             , "data B = MakeB A"
             ]) $ \secondPath -> do
               LoadReport parsedResult _ <- parseModules
@@ -7941,6 +8233,34 @@ lastElement _ (next : remaining) = lastElement next remaining
 
 expectRight :: Show problem => Either problem result -> IO result
 expectRight = either (fail . show) pure
+
+expectSourceEnvironment
+  :: [(FilePath, String)]
+  -> IO SourceEnvironment
+expectSourceEnvironment sources = do
+  LoadReport result _ <- parseModuleSources sources
+  expectRight result
+
+sourceFunctionNamed
+  :: SourceEnvironment
+  -> QualifiedName
+  -> IO FunctionBinding
+sourceFunctionNamed environment wanted = case find
+    ((== wanted) . functionName) $ sourceFunctions environment of
+  Just binding -> pure binding
+  Nothing -> fail $ "source function was not loaded: " ++ show wanted
+
+expectBindingScopeFailure
+  :: [(FilePath, String)]
+  -> IO [String]
+expectBindingScopeFailure sources = do
+  LoadReport result _ <- parseModuleSources sources
+  case result of
+    Left (BindingDeclarationErrors failures) -> pure
+      $ map extractionErrorMessage $ NonEmpty.toList failures
+    Left failure -> fail $ "unexpected source-scope failure: " ++ show failure
+    Right environment -> fail $ "out-of-scope source was accepted: "
+      ++ show environment
 
 validSourceSpan :: Int -> Int -> Int -> Int -> SourceSpan
 validSourceSpan startLine startColumn endLine endColumn =

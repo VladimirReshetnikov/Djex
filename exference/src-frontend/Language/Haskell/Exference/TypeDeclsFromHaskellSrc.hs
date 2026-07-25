@@ -7,8 +7,11 @@ module Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   , applyTypeDecls
   , getTypeDecls
   , getTypeDeclsLocated
+  , getTypeDeclsLocatedWithResolvers
   , convertType
+  , convertTypeWithResolver
   , convertTypeInternal
+  , convertTypeInternalWithResolver
   , parseType
   , parseTypeWithKinds
   , parseTypeWithInventory
@@ -162,7 +165,19 @@ getTypeDeclsLocated :: Monad m
                     => [QualifiedName]
                     -> [Module SrcSpanInfo]
                     -> m [Either ExtractionError HsTypeDecl]
-getTypeDeclsLocated ds modules = do
+getTypeDeclsLocated ds = getTypeDeclsLocatedWithResolvers
+  (const $ legacyTypeResolver M.empty ds)
+
+-- | Elaborate synonym bodies in the source scope of their owning module.
+-- The compatibility entry point above intentionally retains its historical
+-- unique-global lookup; complete source loaders use this variant so an import
+-- list, hiding clause, or qualifier alias applies before synonym expansion.
+getTypeDeclsLocatedWithResolvers
+  :: Monad m
+  => (ModuleName SrcSpanInfo -> TypeResolver)
+  -> [Module SrcSpanInfo]
+  -> m [Either ExtractionError HsTypeDecl]
+getTypeDeclsLocatedWithResolvers resolverFor modules = do
   rawList <- sequence $ do
     modul <- modules
     (mn, decls) <- maybeToList $ moduleNameAndDecls modul
@@ -178,7 +193,8 @@ getTypeDeclsLocated ds modules = do
       -- Keep RHS conversion and head binding in one exact namespace. Hidden
       -- alpha-renamed RHS binders have no spelling-map entry, so rebuilding a
       -- state from that map could otherwise reuse one for a phantom parameter.
-      ty <- convertTypeNoDeclInternal M.empty (Just mn) ds rawTy
+      ty <- convertTypeNoDeclInternalWithResolver
+        (resolverFor mn) (Just mn) rawTy
       -- Retain the historical failure precedence: RHS conversion precedes
       -- validation of the declaration name.
       qname <- either throwE pure $ convertModuleName mn name
@@ -211,8 +227,19 @@ convertType :: Monad m
             -> TypeDeclMap
             -> Type SrcSpanInfo
             -> ExceptT String m (HsType, TypeVarIndex)
-convertType tcs mn ds declMap t = do
-  (ty, index) <- convertTypeNoDecl tcs mn ds t
+convertType tcs mn ds = convertTypeWithResolver
+  (legacyTypeResolver tcs ds) mn
+
+-- | Resolver-aware counterpart of 'convertType'.
+convertTypeWithResolver
+  :: Monad m
+  => TypeResolver
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> TypeDeclMap
+  -> Type SrcSpanInfo
+  -> ExceptT String m (HsType, TypeVarIndex)
+convertTypeWithResolver resolver mn declMap t = do
+  (ty, index) <- convertTypeNoDeclWithResolver resolver mn t
   expanded <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
   -- The returned index describes this type's own source spellings; treating
   -- those IDs as an enclosing namespace would needlessly rename an ordinary
@@ -231,9 +258,20 @@ convertTypeInternal
   -> TypeDeclMap
   -> Type SrcSpanInfo
   -> ConversionT String m HsType
-convertTypeInternal tcs defModuleName ds declMap t = do
+convertTypeInternal tcs defModuleName ds = convertTypeInternalWithResolver
+  (legacyTypeResolver tcs ds) defModuleName
+
+-- | Stateful resolver-aware counterpart of 'convertTypeInternal'.
+convertTypeInternalWithResolver
+  :: Monad m
+  => TypeResolver
+  -> Maybe (ModuleName SrcSpanInfo)
+  -> TypeDeclMap
+  -> Type SrcSpanInfo
+  -> ConversionT String m HsType
+convertTypeInternalWithResolver resolver defModuleName declMap t = do
   ambientVariables <- convDataReservedIds <$> lift get
-  ty <- convertTypeNoDeclInternal tcs defModuleName ds t
+  ty <- convertTypeNoDeclInternalWithResolver resolver defModuleName t
   expanded <- either throwE pure $ applyTypeDecls (M.map Right declMap) ty
   normalizeConvertedForalls ambientVariables expanded
 

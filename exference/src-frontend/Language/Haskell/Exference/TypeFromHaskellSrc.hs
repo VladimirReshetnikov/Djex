@@ -15,10 +15,12 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , scopeTypeResolverWithQualifiedNames
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
+  , convertTypeNoDeclInternalWithResolver
   , convertTypeNoDeclWithResolver
   , normalizeConvertedForalls
   , convertName
   , convertQName
+  , convertQNameWithResolver
   , convertModuleName
   , getVar
   -- , ConversionMonad
@@ -560,6 +562,12 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
         Nothing -> Right canonical
         Just admitted -> case M.lookup writtenModule admitted of
           Just names | canonical `S.member` names -> Right canonical
+          -- An explicitly imported module outside the loaded source set has
+          -- no enumerable export surface. Preserve the frontend's open-world
+          -- identity when no exact surface was installed for its qualifier;
+          -- callers can install an empty surface to make a restrictive import
+          -- list fail closed.
+          Nothing | target `S.notMember` knownModules -> Right canonical
           _ -> Left $ "qualified name " ++ show raw ++ " is not in scope"
     ambiguous modules = Left $ "ambiguous module qualifier "
       ++ SharedName.renderModuleName writtenModule ++ "; matches "

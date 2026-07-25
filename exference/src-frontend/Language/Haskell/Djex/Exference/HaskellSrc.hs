@@ -17,6 +17,7 @@ module Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSessionFromFilesWithPolicy
   , loadExferenceSessionFromSources
   , loadExferenceSessionFromSourcesWithPolicy
+  , loadLegacyExferenceSessionFromSourcesWithPolicy
   , parseExferenceRequest
   , parseExferenceRequestInScope
   , parseExferenceRequestWithCheckedTarget
@@ -52,6 +53,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentFromFiles
   , environmentFromPath
   , environmentFromSources
+  , environmentFromLegacySources
   , environmentLoadErrorDiagnostics
   , haskellSrcExtsParseMode
   )
@@ -220,6 +222,20 @@ loadExferenceSessionFromSourcesWithPolicy
 loadExferenceSessionFromSourcesWithPolicy policy moduleSources ratingSources = do
   LoadReport sourceResult sourceDiagnostics <-
     environmentFromSources moduleSources ratingSources
+  pure $ sealSourceLoadReport policy sourceResult sourceDiagnostics
+
+-- | Internal compatibility route used when the unified REPL combines the
+-- bundled import-less environment corpus with ordinary workspace snapshots.
+-- Public exact-snapshot loading above remains strictly import-aware.
+loadLegacyExferenceSessionFromSourcesWithPolicy
+  :: ExferenceSessionPolicy
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO ExferenceSessionLoadReport
+loadLegacyExferenceSessionFromSourcesWithPolicy
+    policy moduleSources ratingSources = do
+  LoadReport sourceResult sourceDiagnostics <-
+    environmentFromLegacySources moduleSources ratingSources
   pure $ sealSourceLoadReport policy sourceResult sourceDiagnostics
 
 sealSourceLoadReport

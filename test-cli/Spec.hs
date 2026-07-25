@@ -8,7 +8,7 @@ import CLIAssertions
   , stripCarriageReturns
   )
 import Control.Exception (bracket)
-import Control.Monad (forM_)
+import Control.Monad (forM_, when)
 import Data.Char (toLower)
 import Data.List (intercalate, isInfixOf)
 import System.Directory
@@ -33,6 +33,7 @@ import System.Exit (ExitCode (..))
 import System.IO (hClose, openTempFile)
 import System.Process
   ( CreateProcess (cwd, env)
+  , callProcess
   , proc
   , readCreateProcessWithExitCode
   , readProcessWithExitCode
@@ -63,6 +64,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSharedSession
   , testCase "REPL multiline, repeat, and command errors recover"
       testReplInputRecovery
+  , testCase "REPL bare input handles Haskell line comments"
+      testReplLineComments
   , testCase "REPL both mode isolates an unavailable backend"
       testReplBackendIsolation
   , testCase "REPL environment replacement is transactional"
@@ -97,6 +100,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSearchScope
   , testCase "REPL aliases retain canonical re-exports and defer ambiguity"
       testReplAliasesAndReexports
+  , testCase "REPL module re-exports intersect qualified and bare scope"
+      testReplModuleExportIntersection
   , testCase "REPL unresolved import lists remain advisory"
       testReplUnresolvedImportList
   , testCase "REPL import lists preserve exported record selectors"
@@ -109,6 +114,16 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSymlinkModuleMismatch
   , testCase "REPL re-exports reject only same-namespace collisions"
       testReplExportAmbiguity
+  , testCase "REPL Djinn projection preserves cross-namespace names"
+      testReplDjinnNamespaceProjection
+  , testCase "REPL Djinn projection preserves inferred higher-kinded stubs"
+      testReplDjinnHigherKindStub
+  , testCase "REPL Djinn projection preserves recursive higher-kinded types"
+      testReplDjinnRecursiveHigherKind
+  , testCase "REPL Djinn projection preserves opaque higher-kinded types"
+      testReplDjinnHiddenHigherKind
+  , testCase "REPL Djinn projection repairs scopes beyond legacy caps"
+      testReplDjinnRepairDepth
   , testCase "REPL bundled imports reject type-synonym wildcards"
       testReplBundledOwners
   , testCase "REPL import failures roll back without touching Djinn"
@@ -507,6 +522,35 @@ testReplInputRecovery = withTemporaryEnvironment [] $ \directory -> do
     "ambiguous command :c" errors
   assertContains "unknown command diagnostic" "unknown command :wat" errors
   assertContains "failed shell command diagnostic" "[DJEX_REPL_SHELL]" errors
+  assertNoCallStack errors
+
+testReplLineComments :: Assertion
+testReplLineComments = withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":set render expression"
+    , "-- a whole-line comment is empty input"
+    , "a -> a -- a trailing comment"
+    , ":{"
+    , "a"
+    , "  -> a -- a multiline trailing comment"
+    , ":}"
+    , "import \"pkg--name\" Missing"
+    , "a --* b"
+    , ":set prompt \"-- colon payload\""
+    , ":show settings"
+    , ":set prompt \"\""
+    ]
+  assertEqual "comment-aware REPL exit" ExitSuccess exitCode
+  assertEqual "trailing comments preserve single- and multiline queries" 2
+    $ countOccurrences "\\a -> a" output
+  assertContains "colon command payloads remain literal"
+    "prompt = \"-- colon payload\"" output
+  assertContains "quoted import comment markers remain literal"
+    "package \"pkg--name\"" errors
+  assertContains "quoted imports still reach scope validation"
+    "[DJEX_REPL_IMPORT_PACKAGE]" errors
+  assertEqual "a longer dash operator remains query text" 1
+    $ countOccurrences "[DJEX_DJINN_PARSE]" errors
   assertNoCallStack errors
 
 testReplBackendIsolation :: Assertion
@@ -1406,6 +1450,93 @@ testReplAliasesAndReexports = withReplModuleFixture $ \root -> do
     "ambiguous" $ map toLower overlapErrors
   assertNoCallStack overlapErrors
 
+testReplModuleExportIntersection :: Assertion
+testReplModuleExportIntersection = withTemporaryEnvironment
+    [ ("empty/.keep", "")
+    , ("Origin.hs", unlines
+        [ "module Origin where"
+        , "data Aliased = AliasedConstructor"
+        , "aliasedValue :: Aliased"
+        , "data Bridged = BridgedConstructor"
+        , "bridgedValue :: Bridged"
+        , "data QualifiedOnly = QualifiedOnlyConstructor"
+        , "qualifiedOnlyValue :: QualifiedOnly"
+        ])
+    , ("SelfExport.hs", unlines
+        [ "module SelfExport (module SelfExport) where"
+        , "data SelfType = SelfConstructor"
+        , "selfValue :: SelfType"
+        ])
+    , ("AliasExport.hs", unlines
+        [ "module AliasExport (module X) where"
+        , "import Origin as X (Aliased, aliasedValue)"
+        ])
+    , ("BridgeExport.hs", unlines
+        [ "module BridgeExport (module X) where"
+        , "import Origin (Bridged, bridgedValue)"
+        , "import qualified Origin as X (Bridged, bridgedValue)"
+        ])
+    , ("QualifiedOnlyExport.hs", unlines
+        [ "module QualifiedOnlyExport (module X) where"
+        , "import qualified Origin as X"
+        ])
+    , ("WrongAliasExport.hs", unlines
+        [ "module WrongAliasExport (module Origin) where"
+        , "import Origin as X"
+        ])
+    ] $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      source name = canonicalRoot </> name
+      targets = map source
+        [ "Origin.hs"
+        , "SelfExport.hs"
+        , "AliasExport.hs"
+        , "BridgeExport.hs"
+        , "QualifiedOnlyExport.hs"
+        ]
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show targets
+    , ":module"
+    , "import qualified SelfExport as S"
+    , ":kind S.SelfType"
+    , ":module"
+    , "import qualified AliasExport as A"
+    , ":kind A.Aliased"
+    , ":module"
+    , "import qualified BridgeExport as B"
+    , ":kind B.Bridged"
+    , ":module"
+    , "import qualified QualifiedOnlyExport as Q"
+    , ":kind Q.QualifiedOnly"
+    ]
+  assertEqual "module-export intersection REPL exit" ExitSuccess exitCode
+  assertContains "a self module export includes local declarations"
+    "S.SelfType :: Type" output
+  assertContains "an unqualified aliased import is re-exported"
+    "A.Aliased :: Type" output
+  assertContains "separate imports can supply the two identity views"
+    "B.Bridged :: Type" output
+  assertBool "a qualified-only import leaked through module X" $
+    not $ "Q.QualifiedOnly ::" `isInfixOf` output
+  assertContains "qualified-only module export is empty at the prompt"
+    "[DJEX_REPL_KIND_PARSE]" errors
+  assertNoCallStack errors
+
+  let wrongAlias = source "WrongAliasExport.hs"
+      origin = source "Origin.hs"
+  (wrongExit, wrongOutput, wrongErrors) <- runRepl empty
+    [ ":load " ++ show [origin, wrongAlias]
+    , ":show modules"
+    ]
+  assertEqual "renamed canonical export REPL exit" ExitSuccess wrongExit
+  assertContains "an as alias removes the canonical export qualifier"
+    "Exference load failed; retaining the previous session and settings."
+    wrongOutput
+  assertContains "renamed canonical module export is not in scope"
+    "[DJEX_REPL_EXPORT_NOT_IN_SCOPE]" wrongErrors
+  assertNoCallStack wrongErrors
+
 testReplUnresolvedImportList :: Assertion
 testReplUnresolvedImportList = withReplModuleFixture $ \root -> do
   canonicalRoot <- canonicalizePath root
@@ -1576,6 +1707,177 @@ testReplExportAmbiguity = withReplModuleFixture $ \root -> do
     "[DJEX_REPL_EXPORT_AMBIGUOUS]" collisionErrors
   assertNoCallStack collisionErrors
 
+-- The scope validator already accepts a type and a constructor with the same
+-- occurrence. Djinn's canonical-to-unqualified projection must preserve the
+-- same namespace distinction instead of dropping both owning datatypes as an
+-- apparent collision.
+testReplDjinnNamespaceProjection :: Assertion
+testReplDjinnNamespaceProjection = withReplModuleFixture $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      namespace = canonicalRoot </> "export-scope" </> "Namespace.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show namespace
+    , ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Same -> Other"
+    , ":show omissions"
+    ]
+  assertEqual "cross-namespace Djinn projection exit" ExitSuccess exitCode
+  assertContains
+    ("same-spelled type and value remain usable: " ++ output ++ errors)
+    "\\_ -> Same" output
+  assertBool "legal cross-namespace names were reported as ambiguous" $
+    not $ "unqualified spelling is ambiguous" `isInfixOf` output
+  assertNoCallStack errors
+
+-- An undeclared source type can still acquire an exact kind from its uses in
+-- Exference's open inventory. Djinn must reuse that fact: the application
+-- count in @External Unary@ cannot reveal that @Unary :: Type -> Type@, and an
+-- arity-only @External :: Type -> Type@ stub makes the wrapper ill-kinded.
+testReplDjinnHigherKindStub :: Assertion
+testReplDjinnHigherKindStub = withTemporaryEnvironment
+    [("HigherKindStub.hs", unlines
+      [ "module HigherKindStub where"
+      , "data Unary a = Unary a"
+      , "data Wrapper = Wrapper (External Unary)"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Wrapper -> External Unary"
+    , ":show environment"
+    , ":show omissions"
+    ]
+  assertEqual "higher-kinded Djinn stub REPL exit" ExitSuccess exitCode
+  assertContains
+    ("the wrapper remains structurally eliminable: " ++ output ++ errors)
+    "case a of" output
+  assertContains "the inferred external stub remains in the projection"
+    "3 declarations (projected from the module scope, 0 omissions)" output
+  assertContains "the exact inferred kind avoids projection omissions"
+    "-- Djinn scope projection\n(no omissions)" output
+  assertBool "higher-kinded stub forced the standard-environment fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "higher-kinded stub emitted a projection diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+
+-- Djinn cannot structurally eliminate recursive datatypes, but making @Fix@
+-- opaque must not weaken its inferred @(* -> *) -> *@ kind to @* -> *@. The
+-- latter rejects the otherwise valid @Fix Maybe@ query before proof search.
+testReplDjinnRecursiveHigherKind :: Assertion
+testReplDjinnRecursiveHigherKind = withTemporaryEnvironment
+    [("RecursiveHigherKind.hs", unlines
+      [ "module RecursiveHigherKind where"
+      , "data Maybe a = Nothing | Just a"
+      , "data Fix f = Fix (f (Fix f))"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Fix Maybe -> Fix Maybe"
+    , ":show omissions"
+    ]
+  assertEqual "recursive higher-kinded Djinn REPL exit" ExitSuccess exitCode
+  assertContains
+    ("Fix Maybe remains a valid Djinn query: " ++ output ++ errors)
+    "\\a -> a" output
+  assertContains "recursive Fix is deliberately projected opaquely"
+    "Fix: recursive datatype; projected as an abstract type" output
+  assertBool "recursive kind loss forced the standard-environment fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "recursive kind loss emitted a projection diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+
+-- Exporting a datatype without its constructors triggers the earlier scope
+-- shaping degradation rather than recursive-type repair. It must retain the
+-- same higher-kinded constructor shape as the checked source inventory.
+testReplDjinnHiddenHigherKind :: Assertion
+testReplDjinnHiddenHigherKind = withTemporaryEnvironment
+    [("HiddenHigherKind.hs", unlines
+      [ "module HiddenHigherKind (Maybe(..), Apply) where"
+      , "data Maybe a = Nothing | Just a"
+      , "data Apply f = MkApply (f ())"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import HiddenHigherKind (Maybe(..), Apply)"
+    , ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Apply Maybe -> Apply Maybe"
+    , ":show omissions"
+    ]
+  assertEqual "hidden higher-kinded Djinn REPL exit" ExitSuccess exitCode
+  assertContains
+    ("Apply Maybe remains a valid Djinn query: " ++ output ++ errors)
+    "\\a -> a" output
+  assertContains
+    ("constructor-hidden Apply is projected opaquely: " ++ output ++ errors)
+    ("HiddenHigherKind.Apply: some constructors are hidden; projected as an"
+      ++ " abstract type") output
+  assertBool "hidden-constructor kind loss forced the standard fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "hidden-constructor kind loss emitted a projection diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+
+-- Hiding the root of this synonym dependency chain removes exactly one alias
+-- per reference-resolution round. The old reference loop removed 201 aliases;
+-- its seal loop could remove another 200 and still perform the final check,
+-- but a 201st seal repair re-entered above its cap before checking success.
+-- Thus 402 aliases are the smallest chain that reliably failed those loops.
+testReplDjinnRepairDepth :: Assertion
+testReplDjinnRepairDepth = withTemporaryEnvironment
+    [("RepairChain.hs", repairChainSource chainLength)] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import RepairChain hiding (HiddenRoot)"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Survivor"
+    , ":show environment"
+    ]
+  assertEqual "deep Djinn projection exit" ExitSuccess exitCode
+  assertContains
+    ("unaffected declaration survives every repair round: "
+      ++ output ++ errors)
+    "Survivor" output
+  assertContains "all cascading omissions reach the sealed projection"
+    ("1 declarations (projected from the module scope, "
+      ++ show (chainLength + 1) ++ " omissions)") output
+  assertBool "deep repair fell back from the projected environment" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "deep repair emitted an internal convergence diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+ where
+  -- The additional omission records the rejected qualified abstract stub for
+  -- hidden RepairChain.HiddenRoot; every alias contributes one more.
+  chainLength = 402
+
+repairChainSource :: Int -> String
+repairChainSource chainLength = unlines $
+  [ "module RepairChain where"
+  , "data Survivor = Survivor"
+  , "data HiddenRoot = HiddenRoot"
+  ] ++ map synonymDeclaration [0 .. chainLength - 1]
+ where
+  synonymDeclaration index = "type " ++ aliasName index
+    ++ " = " ++ prerequisite index
+  prerequisite 0 = "HiddenRoot"
+  prerequisite index = aliasName $ index - 1
+  aliasName index = "Repair" ++ show index
+
 testReplBundledOwners :: Assertion
 testReplBundledOwners = withReplModuleFixture $ \root -> do
   canonicalRoot <- canonicalizePath root
@@ -1676,8 +1978,11 @@ testReplUnifiedScope = withTemporaryEnvironment
         ]
     )
   ] $ \directory -> do
-  (exitCode, output, _errors) <- runRepl directory
+  (exitCode, output, errors) <- runRepl directory
     [ ":set render expression"
+    , ":compare Wrapped -> Bool"
+    , ":module"
+    , "import Custom hiding (unwrapped)"
     , ":compare Wrapped -> Bool"
     , ":show environment"
     , ":show omissions"
@@ -1691,6 +1996,12 @@ testReplUnifiedScope = withTemporaryEnvironment
     $ countOccurrences "unwrapped" output
   assertContains "Exference qualifies the presented selector"
     "Custom.unwrapped" output
+  assertContains
+    ("Djinn keeps a hidden selector structural: " ++ output ++ errors)
+    "case a of" output
+  assertContains
+    ("Exference keeps a hidden selector structural: " ++ output ++ errors)
+    "let Custom.MkWrapped" output
   assertContains "Djinn reports its projected environment"
     "projected from the module scope" output
   assertEqual "the value-axiom omission disappears once axioms are enabled" 1
@@ -1702,14 +2013,25 @@ testReplUnifiedScope = withTemporaryEnvironment
 testReplStartupFiles :: Assertion
 testReplStartupFiles = withTemporaryEnvironment
   [ ( ".djexrc"
-    , unlines [":set render expression", ":backend exference"]
+    , unlines
+        [ "-- whole-line startup comment"
+        , ":set target startupCommentResult"
+        , "a -> a -- trailing startup comment"
+        , ":set target djexResult"
+        , ":set render expression"
+        , ":backend exference"
+        ]
     )
   ] $ \directory -> do
-  (exitCode, output, _errors) <- runReplFrom directory [] directory
+  (exitCode, output, errors) <- runReplFrom directory [] directory
     ["a -> a"]
   assertEqual "startup REPL exit" ExitSuccess exitCode
   assertContainsPath "startup file load is announced"
     (directory ++ "/.djexrc") output
+  assertContains "startup trailing comment preserves its query"
+    "startupCommentResult a = a" output
+  assertBool "whole-line startup comment was executed as a query" $
+    not $ (directory ++ "/.djexrc (line 1)") `isInfixOf` errors
   assertContains "startup settings shape the session" "\\a -> a" output
   (ignoredExit, ignoredOutput, _ignoredErrors) <- runReplFrom directory
     ["--ignore-startup"] directory ["a -> a"]
@@ -1718,6 +2040,22 @@ testReplStartupFiles = withTemporaryEnvironment
     not $ "Loaded startup commands" `isInfixOf` ignoredOutput
   assertBool "suppressed startup still applied its settings" $
     not $ "\\a -> a" `isInfixOf` ignoredOutput
+
+  -- GHCi refuses a POSIX startup file that another group member can replace.
+  -- Djex executes shell, package, and evaluation commands from the same file,
+  -- so it must preserve that trust boundary before reading a line.
+  when (os /= "mingw32") $ do
+    let startup = directory </> ".djexrc"
+    callProcess "chmod" ["g+w", startup]
+    (untrustedExit, untrustedOutput, untrustedErrors) <-
+      runReplFrom directory [] directory ["a -> a"]
+    assertEqual "untrusted startup REPL exit" ExitSuccess untrustedExit
+    assertBool "untrusted startup file was announced as loaded" $
+      not $ startup `isInfixOf` untrustedOutput
+    assertBool "untrusted startup settings were applied" $
+      not $ "\\a -> a" `isInfixOf` untrustedOutput
+    assertContains "untrusted startup diagnostic"
+      "[DJEX_REPL_STARTUP_UNTRUSTED]" untrustedErrors
 
 -- The stream-observing fake build tool doubles as a fake editor: it records
 -- its argv, so both the explicit file form and the latest-target default are
@@ -1736,19 +2074,29 @@ testReplEdit = withTemporaryEnvironment
     canonicalizePath
   let logPath = directory </> "editor-log"
       file = directory </> "Custom.hs"
+      injectedMarker = directory </> "editor-injection"
+      hostile = directory
+        </> ("literal$(touch " ++ injectedMarker ++ ").hs")
   (exitCode, _output, errors) <- runReplWithOverrides
-    [("VISUAL", fake), ("DJEX_FAKE_CABAL_LOG", logPath)]
+    [("VISUAL", show fake ++ " --editor-mode"), ("DJEX_FAKE_CABAL_LOG", logPath)]
     directory
-    [ ":edit " ++ show file
+    [ ":e " ++ show hostile
+    , ":edit " ++ show file
     , ":load " ++ show file
     , ":edit"
     ]
   assertEqual "edit REPL exit" ExitSuccess exitCode
   recorded <- readFile logPath
-  assertEqual "both edit forms launched the editor" 2
+  assertEqual "all edit forms launched the editor" 3
     $ countOccurrences "CALL" recorded
   assertEqual "the named file and the latest target reach the editor" 2
     $ countOccurrencesPath ("ARG:" ++ file) recorded
+  assertEqual "editor options are parsed into fixed argv" 3
+    $ countOccurrences "ARG:--editor-mode" recorded
+  assertContainsPath "a hostile source path remains one literal argv value"
+    ("ARG:" ++ hostile) recorded
+  injected <- doesFileExist injectedMarker
+  assertBool "the editor path was evaluated as shell syntax" $ not injected
   assertNoCallStack errors
 
 testReplInfoInstances :: Assertion
@@ -1770,33 +2118,93 @@ testReplInfoInstances = withTemporaryEnvironment
     "instance Inst.Marker Inst.Thing" output
   assertNoCallStack errors
 
--- Evaluation is the one command that runs code. A compilable workspace joins
--- the interpreter scope; a synthesis-only pseudo-Haskell workspace degrades
--- to Prelude with an advisory instead of failing arithmetic.
+-- Evaluation is the one command that runs code. It compiles the entire local
+-- dependency closure but translates the transactional prompt scope to GHC's
+-- context instead of opening every loaded module.
 testReplEval :: Assertion
 testReplEval = do
   withTemporaryEnvironment
-    [ ( "Custom.hs"
+    [ ("empty/.keep", "")
+    , ( "scope/EvalA.hs"
       , unlines
-          [ "module Custom where"
-          , ""
-          , "data Wrapped = MkWrapped { unwrapped :: Bool }"
+          [ "module EvalA (publicA) where"
+          , "publicA :: String"
+          , "publicA = \"public-a\""
+          , "privateA :: String"
+          , "privateA = \"private-a\""
+          ]
+      )
+    , ( "scope/EvalB.hs"
+      , unlines
+          [ "module EvalB (publicB, otherB) where"
+          , "publicB :: String"
+          , "publicB = \"public-b\""
+          , "otherB :: String"
+          , "otherB = \"other-b\""
+          ]
+      )
+    , ( "scope/EvalTop.hs"
+      , unlines
+          [ "module EvalTop (publicTop) where"
+          , "import EvalA"
+          , "import qualified EvalB as B"
+          , "publicTop :: String"
+          , "publicTop = \"public-top\""
+          , "privateTop :: String"
+          , "privateTop = \"top-private\""
+          ]
+      )
+    , ( "scope/Bare.hs"
+      , unlines
+          [ "{-# LANGUAGE NoImplicitPrelude #-}"
+          , "module Bare where"
+          , "import qualified Prelude"
+          , "bareValue :: Prelude.String"
+          , "bareValue = \"bare-value\""
           ]
       )
     ] $ \directory -> do
-    (exitCode, output, errors) <- runRepl directory
-      [ ":eval 20 + 22"
-      , ":eval unwrapped (MkWrapped True)"
-      , ":eval bogusIdentifier"
+    let environment = directory </> "empty"
+        top = directory </> "scope/EvalTop.hs"
+        bare = directory </> "scope/Bare.hs"
+    (exitCode, output, errors) <- runRepl environment
+      [ ":load " ++ show top
+      , ":eval (privateTop, publicA, B.publicB)"
+      , ":eval publicB"
+      , ":eval EvalA.privateA"
+      , ":module EvalA"
+      , ":eval \"ordinary:\" ++ publicA"
+      , ":eval privateA"
+      , ":module"
+      , ":eval 20 + 22"
+      , ":eval publicA"
+      , "import qualified EvalB as EB (publicB, otherB)"
+      , "import qualified EvalB as Hidden hiding (otherB)"
+      , ":eval (EB.publicB, EB.otherB, Hidden.publicB)"
+      , ":eval Hidden.otherB"
+      , ":load " ++ show bare
+      , ":eval bareValue"
+      , ":eval 20 + 22"
       ]
     assertEqual "eval REPL exit" ExitSuccess exitCode
-    assertContains "pure expression evaluates" "42" output
-    assertContains "workspace declarations are in evaluation scope"
-      "True" output
-    assertContains "a rejected expression is a structured diagnostic"
-      "[DJEX_REPL_EVAL]" errors
+    assertContains "a starred module exposes private and imported names"
+      "(\"top-private\",\"public-a\",\"public-b\")" output
+    assertContains "an ordinary module exposes its exports"
+      "\"ordinary:public-a\"" output
+    assertContains "an empty context receives installed Prelude"
+      "42" output
+    assertContains "qualified aliases preserve import lists and hiding"
+      "(\"public-b\",\"other-b\",\"public-b\")" output
+    assertContains "a starred NoImplicitPrelude module remains evaluable"
+      "\"bare-value\"" output
+    assertEqual
+      "private, unqualified, hidden, and no-Prelude names stay unavailable"
+      6 $ countOccurrences "[DJEX_REPL_EVAL]" errors
     assertBool "compilable workspace produced a scope advisory" $
       not $ "DJEX_REPL_EVAL_SCOPE" `isInfixOf` errors
+
+  -- A synthesis-only pseudo-Haskell workspace still degrades to Prelude with
+  -- one advisory instead of preventing an independent expression.
   withTemporaryEnvironment
     [ ( "Fake.hs"
       , unlines
@@ -1806,12 +2214,15 @@ testReplEval = do
           ]
       )
     ] $ \directory -> do
-    (exitCode, output, errors) <- runRepl directory [":eval 20 + 22"]
+    (exitCode, output, errors) <- runRepl directory
+      [":eval 20 + 22", ":eval bogusIdentifier"]
     assertEqual "fallback eval REPL exit" ExitSuccess exitCode
     assertContains "evaluation still answers under Prelude fallback"
       "42" output
-    assertContains "the degraded scope is an advisory"
-      "[DJEX_REPL_EVAL_SCOPE]" errors
+    assertEqual "each degraded evaluation retains exactly one advisory"
+      2 $ countOccurrences "[DJEX_REPL_EVAL_SCOPE]" errors
+    assertContains "fallback evaluation failures stay structured"
+      "[DJEX_REPL_EVAL]" errors
 
 testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do
@@ -1820,8 +2231,10 @@ testReplScripts = withTemporaryEnvironment [] $ \directory -> do
       broken = directory ++ "/broken.djex"
   writeFile script $ unlines
     [ ":set render expression"
+    , ":backend djinn"
+    , "-- whole-line script comment"
+    , "a -> a -- trailing script comment"
     , ":backend exference"
-    , "a -> a"
     ]
   writeFile recursive $ ":script " ++ show recursive ++ "\n"
   writeFile broken $ unlines ["", ":wat"]

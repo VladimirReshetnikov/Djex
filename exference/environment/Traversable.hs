@@ -1,5 +1,10 @@
 module Data.Traversable where
 
+import qualified Control.Applicative (Applicative)
+import qualified Data.Foldable (Foldable)
+import qualified Data.Functor (Functor)
+import qualified Data.Functor.Const (Const)
+import qualified Data.Functor.Identity (Identity)
 
 
 class (Data.Functor.Functor t, Data.Foldable.Foldable t) => Traversable t where

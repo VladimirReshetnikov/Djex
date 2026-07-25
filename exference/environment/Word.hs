@@ -1,5 +1,14 @@
 module Data.Word where
 
+import qualified Data.Bits (Bits, FiniteBits)
+import qualified Data.Data (Data)
+import qualified Data.Eq (Eq)
+import qualified Data.Ix (Ix)
+import qualified Data.Ord (Ord)
+import qualified Foreign.Storable (Storable)
+import qualified Text.Printf (PrintfArg)
+import qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 data Word

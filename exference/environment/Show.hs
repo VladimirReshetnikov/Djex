@@ -1,5 +1,8 @@
 module Text.Show where
 
+import qualified Data.Int (Int)
+import qualified Data.Monoid (Dual, First, Last, Product, Sum)
+import qualified Data.String (String)
 
 
 data ShowS

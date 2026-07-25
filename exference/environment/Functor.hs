@@ -1,5 +1,16 @@
 module Data.Functor where
 
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Control.Applicative (WrappedArrow, WrappedMonad)
+import Control.Arrow (Arrow, ArrowMonad)
+import qualified Control.Concurrent.STM (STM)
+import qualified Control.Exception (Handler)
+import {-# SOURCE #-} qualified Control.Monad (Monad)
+import qualified Control.Monad.ST (ST)
+import qualified Data.Functor.Const (Const)
+import qualified System.Console.GetOpt (ArgDescr, ArgOrder, OptDescr)
+import qualified Text.ParserCombinators.ReadP (ReadP)
+import qualified Text.ParserCombinators.ReadPrec (ReadPrec)
 
 
 class Functor f where

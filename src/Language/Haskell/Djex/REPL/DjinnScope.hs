@@ -10,13 +10,14 @@
 -- Value declarations become LJT axioms, and axiom sets of even moderate size
 -- make Djinn's otherwise-terminating proof search intractable. They are
 -- therefore excluded unless the caller opts in ('IncludeDjinnAxioms'), which
--- the REPL exposes as the @djinn-axioms@ setting. Record selectors are the
--- exception: a selector whose parent datatype cannot be case-eliminated
--- (recursive, hidden or missing constructors) is the only route to its
--- field, so it always projects. Selectors of fully eliminable records stay
--- out of the axiom set — they would only multiply equivalent proofs of what
--- structural elimination already derives, and the projection instead reports
--- their positions so presentation can name the eliminated field.
+-- the REPL exposes as the @djinn-axioms@ setting. Scope-visible record
+-- selectors are the exception: a selector whose parent datatype cannot be
+-- case-eliminated (recursive, hidden or missing constructors) is the only
+-- route to its field, so it projects under either policy. Hidden selectors do
+-- not enter the session. Selectors of fully eliminable records stay out of the
+-- axiom set — they would only multiply equivalent proofs of what structural
+-- elimination already derives, and the projection instead reports their
+-- positions so presentation can name a visible eliminated field.
 module Language.Haskell.Djex.REPL.DjinnScope
   ( DjinnAxiomPolicy (..)
   , DjinnProjection (..)
@@ -72,6 +73,8 @@ data DjinnProjection = DjinnProjection
   , djinnProjectionFieldSelectors :: Map.Map (Name, Int) Name
     -- ^ Selector spellings for @(constructor, field index)@ positions in
     -- the session's renamed vocabulary, for presenting field projections.
+    -- A position is present only while its selector is visible unqualified;
+    -- otherwise presentation must retain the structural elimination.
   }
 
 -- | One projection compromise, in user-reportable form.
@@ -94,6 +97,34 @@ declarationOwnedNames declaration =
     ClassDeclaration _ _ _ _ methods -> map valueName methods
     _ -> []
 
+-- Haskell permits a type/class and a value/constructor to share one
+-- occurrence spelling. Djinn's concrete grammar still needs both declarations
+-- renamed, so ambiguity detection must retain the source namespace even though
+-- the shared 'Name' itself is deliberately namespace-neutral.
+data NameNamespace
+  = TypeNamespace
+  | ValueNamespace
+  deriving (Eq, Ord, Show)
+
+declarationOwnedNameClaims
+  :: Declaration variable kind annotation
+  -> [(NameNamespace, Name)]
+declarationOwnedNameClaims declaration = case declaration of
+  TypeSynonymDeclaration _ name _ _ -> [(TypeNamespace, name)]
+  DataTypeDeclaration _ name _ constructors ->
+    (TypeNamespace, name)
+      : [(ValueNamespace, constructorName constructor)
+        | constructor <- constructors]
+  AbstractTypeDeclaration _ name _ -> [(TypeNamespace, name)]
+  ValueDeclaration signature -> [(ValueNamespace, valueName signature)]
+  ClassDeclaration _ name _ _ methods ->
+    (TypeNamespace, name)
+      : [(ValueNamespace, valueName method) | method <- methods]
+  -- Instances refer to a class; they do not introduce a name. Scope shaping
+  -- removes them before renaming, but spelling this out keeps the ownership
+  -- helper correct independently of that ordering.
+  InstanceDeclaration {} -> []
+
 type ScopeDeclaration = Declaration String Void ()
 
 -- | Project the unqualified-visible part of the shared environment into a
@@ -101,16 +132,18 @@ type ScopeDeclaration = Declaration String Void ()
 -- renames them to their in-scope unqualified spellings, because Djinn's
 -- declaration grammar has no qualified type, class, or constructor names.
 -- Record datatypes arrive as @(parent, [(constructor, selectors in field
--- order)])@ groups; selectors of parents Djinn cannot case-eliminate enter
--- the session under every axiom policy.
+-- order)])@ groups; scope-visible selectors of parents Djinn cannot
+-- case-eliminate enter the session under every axiom policy.
 projectDjinnScope
   :: DjinnAxiomPolicy
   -> [(Name, [(Name, [Name])])]
+  -> Map.Map Name (Kind Void)
+  -- ^ Authoritative ground kinds inferred by the shared source inventory.
   -> [ScopeDeclaration]
   -> Set.Set Name
   -- ^ Canonical names visible unqualified in the prompt scope.
   -> Either Diagnostic DjinnProjection
-projectDjinnScope policy records declarations visible = do
+projectDjinnScope policy records inferredKinds declarations visible = do
   let recursive = recursiveDataTypeNames declarations
       fullyEliminable = Set.fromList
         [ name
@@ -134,21 +167,30 @@ projectDjinnScope policy records declarations visible = do
         , selector <- selectorNames
         ]
       (shaped, shapeOmissions) = shapeDeclarations
-        policy axiomSelectors allSelectors visible declarations
+        inferredKinds policy axiomSelectors allSelectors visible declarations
       (renamed, renameOmissions, forward) = renameDeclarations shaped
+      -- Source kind assumptions use canonical names, while every declaration
+      -- Djinn accepts uses its prompt spelling. Retain both views: canonical
+      -- keys still describe out-of-scope references, and renamed keys make
+      -- the same inferred facts available to every later repair pass.
+      projectionKinds = renamedInferredKinds forward inferredKinds
       fieldSelectors = Map.fromList
         [ ((renamedConstructor, index), renamedSelector)
         | (_, constructors) <- records
         , (constructor, selectorNames) <- constructors
         , Just renamedConstructor <- [Map.lookup constructor forward]
         , (index, selector) <- zip [0 ..] selectorNames
+        , selector `Set.member` visible
         , Just renamedSelector <- [unqualifyName selector]
         ]
-      (grounded, recursionOmissions) = degradeRecursiveDataTypes renamed
+      (grounded, recursionOmissions) =
+        degradeRecursiveDataTypes projectionKinds renamed
       (admitted, admissionOmissions) = admitDeclarations grounded
-      (stubbed, stubOmissions) = stubUnknownReferences admitted
-      (resolved, referenceOmissions) = resolveScopeReferences stubbed
-  (session, sealOmissions) <- sealWithRepairs resolved
+      (stubbed, stubOmissions) =
+        stubUnknownReferences projectionKinds admitted
+  (resolved, referenceOmissions) <-
+    resolveScopeReferences projectionKinds stubbed
+  (session, sealOmissions) <- sealWithRepairs projectionKinds resolved
   pure DjinnProjection
     { djinnProjectionSession = session
     , djinnProjectionOmissions = concat
@@ -167,13 +209,15 @@ projectDjinnScope policy records declarations visible = do
 -- silently, exactly as they do from Exference's search scope; visible
 -- declarations that Djinn cannot take whole are degraded or omitted loudly.
 shapeDeclarations
-  :: DjinnAxiomPolicy
+  :: Map.Map Name (Kind Void)
+  -> DjinnAxiomPolicy
   -> Set.Set Name
   -> Set.Set Name
   -> Set.Set Name
   -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-shapeDeclarations policy axiomSelectors allSelectors visible declarations =
+shapeDeclarations inferredKinds policy axiomSelectors allSelectors visible
+    declarations =
   (kept, omissions ++ instanceSummary)
  where
   (kept, omissions, instanceCount) =
@@ -228,48 +272,58 @@ shapeDeclarations policy axiomSelectors allSelectors visible declarations =
       )
     degradeToAbstract annotation name parameters reason =
       ( AbstractTypeDeclaration annotation name
-          (parameterCountKind parameters) : keptSoFar
+          (inferredDataTypeKind inferredKinds name parameters) : keptSoFar
       , DjinnScopeOmission (renderCanonical name) reason : omitted
       , instances
       )
 
 -- Rename canonical names to their unqualified spellings, dropping any
 -- declaration whose unqualified spelling is claimed by a different canonical
--- name. References to renamed names follow the same map; references to names
--- outside it keep their canonical spelling and are resolved by stubbing.
+-- name in the same Haskell namespace. References to renamed names follow the
+-- same map; references to names outside it keep their canonical spelling and
+-- are resolved by stubbing.
 renameDeclarations
   :: [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission], Map.Map Name Name)
 renameDeclarations declarations = (renamed, omissions, forward)
  where
-  owned = concatMap declarationOwnedNames declarations
-  (forward, ambiguous) = renameMap owned
+  claims = concatMap declarationOwnedNameClaims declarations
+  (forward, ambiguous) = renameMap claims
   contested declaration =
-    filter (`Set.member` ambiguous) $ declarationOwnedNames declaration
+    filter (`Set.member` ambiguous) $ declarationOwnedNameClaims declaration
   (renamed, omissions) = partitionEithers
     [ case contested declaration of
         [] -> Left $ renameDeclaration forward declaration
-        name : _ -> Right $ DjinnScopeOmission (renderCanonical name)
+        (_, name) : _ -> Right $ DjinnScopeOmission (renderCanonical name)
           "its unqualified spelling is ambiguous in this scope"
     | declaration <- declarations
     ]
 
-renameMap :: [Name] -> (Map.Map Name Name, Set.Set Name)
-renameMap = finish . foldl' claim (Map.empty, Map.empty, Set.empty)
+renameMap
+  :: [(NameNamespace, Name)]
+  -> (Map.Map Name Name, Set.Set (NameNamespace, Name))
+renameMap claims = finish
+  $ foldl' claim (Map.empty, Map.empty, Set.empty) claims
  where
-  claim (forward, owners, ambiguous) name = case unqualifyName name of
-    Nothing -> (forward, owners, Set.insert name ambiguous)
-    Just unqualified -> case Map.lookup unqualified owners of
+  claim (forward, owners, ambiguous) owned@(namespace, name) =
+    case unqualifyName name of
+    Nothing -> (forward, owners, Set.insert owned ambiguous)
+    Just unqualified -> case Map.lookup (namespace, unqualified) owners of
       Just owner
         | owner /= name ->
-            (forward, owners, Set.insert owner $ Set.insert name ambiguous)
+            ( forward
+            , owners
+            , Set.insert (namespace, owner) $ Set.insert owned ambiguous
+            )
       _ ->
         ( Map.insert name unqualified forward
-        , Map.insert unqualified name owners
+        , Map.insert (namespace, unqualified) name owners
         , ambiguous
         )
   finish (forward, _, ambiguous) =
-    (Map.withoutKeys forward ambiguous, ambiguous)
+    ( Map.withoutKeys forward $ Set.map snd ambiguous
+    , ambiguous
+    )
 
 unqualifyName :: Name -> Maybe Name
 unqualifyName name
@@ -284,6 +338,20 @@ renameDeclaration :: Map.Map Name Name -> ScopeDeclaration -> ScopeDeclaration
 renameDeclaration forward = onDeclarationNames rename
  where
   rename name = Map.findWithDefault name name forward
+
+-- | Index inferred kinds under both source-canonical and Djinn-renamed names.
+-- The renamed side is left-biased because it describes the exact declaration
+-- that survived ambiguity filtering and entered the projected vocabulary.
+renamedInferredKinds
+  :: Map.Map Name Name
+  -> Map.Map Name (Kind Void)
+  -> Map.Map Name (Kind Void)
+renamedInferredKinds forward inferredKinds = renamed `Map.union` inferredKinds
+ where
+  renamed = Map.fromList
+    [ (Map.findWithDefault canonical canonical forward, kind)
+    | (canonical, kind) <- Map.toList inferredKinds
+    ]
 
 onDeclarationNames
   :: (Name -> Name)
@@ -327,9 +395,10 @@ onDeclarationNames rename declaration = case declaration of
 -- Djinn's LJT calculus cannot eliminate recursive datatypes, so they stay
 -- available as opaque abstract types instead of disappearing from signatures.
 degradeRecursiveDataTypes
-  :: [ScopeDeclaration]
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-degradeRecursiveDataTypes declarations
+degradeRecursiveDataTypes inferredKinds declarations
   | Set.null recursive = (declarations, [])
   | otherwise = unzipOmissions $ map degrade declarations
  where
@@ -338,7 +407,7 @@ degradeRecursiveDataTypes declarations
     DataTypeDeclaration annotation name parameters _
       | name `Set.member` recursive ->
           ( AbstractTypeDeclaration annotation name
-              (parameterCountKind parameters)
+              (inferredDataTypeKind inferredKinds name parameters)
           , Just $ DjinnScopeOmission (renderCanonical name)
               "recursive datatype; projected as an abstract type"
           )
@@ -402,14 +471,20 @@ describeAdmissionFailure failure = case failure of
     "its type is not representable in Djinn"
   other -> show other
 
--- Referenced-but-undeclared nominal type constructors become abstract stubs
--- with an arity-derived kind, keeping declarations whose signatures mention
--- out-of-scope types usable instead of cascading into omissions. Structural
--- names (functions, tuples, lists) are native to Djinn and never stubbed.
+-- Referenced-but-undeclared nominal type constructors become abstract stubs,
+-- keeping declarations whose signatures mention out-of-scope types usable
+-- instead of cascading into omissions. Prefer the exact kind inferred while
+-- sealing the shared source inventory: application arity alone cannot
+-- distinguish @F Int@ from @F Maybe@, whose arguments have different kinds.
+-- The arity-derived kind remains a compatibility fallback for a nominal name
+-- absent from that authoritative inventory. Structural names (functions,
+-- tuples, lists) are native to Djinn and never stubbed.
 stubUnknownReferences
-  :: [ScopeDeclaration]
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-stubUnknownReferences declarations = (declarations ++ stubs, omissions)
+stubUnknownReferences inferredKinds declarations =
+  (declarations ++ stubs, omissions)
  where
   defined = Set.fromList $ concatMap declarationOwnedNames declarations
   arities = Map.fromListWith max
@@ -429,7 +504,8 @@ stubUnknownReferences declarations = (declarations ++ stubs, omissions)
         Left _ -> Left $ DjinnScopeOmission (renderCanonical name)
           "referenced type is not representable in Djinn"
     | (name, arity) <- unknown
-    , let stub = AbstractTypeDeclaration () name (arityKind arity)
+    , let stub = AbstractTypeDeclaration () name
+            $ Map.findWithDefault (arityKind arity) name inferredKinds
     ]
 
 -- | Type constructors referenced by a declaration with the largest applied
@@ -493,21 +569,38 @@ declarationMentions declaration = Set.union
     TupleType _ elements -> concatMap typeConstraintClasses elements
     _ -> []
 
+-- | A natural-valued potential shared by both projection-repair loops. Every
+-- declaration contributes one step, each class method contributes one more,
+-- and a concrete datatype contributes an extra step for its possible
+-- degradation to an abstract type. All supported repairs therefore decrease
+-- this measure: they drop a declaration, shed at least one method, or replace
+-- a concrete datatype with its abstract form.
+projectionRepairMeasure :: [ScopeDeclaration] -> Integer
+projectionRepairMeasure = sum . map declarationMeasure
+ where
+  declarationMeasure declaration = 1 + case declaration of
+    ClassDeclaration _ _ _ _ methods -> toInteger $ length methods
+    DataTypeDeclaration {} -> 1
+    _ -> 0
+
 -- Names that remain undefined after stubbing cannot survive Djinn's closed
 -- kind inference, so the scope is resolved to a fixpoint by shedding exactly
 -- the affected pieces: values and synonyms are dropped, classes lose the
 -- offending methods, and datatypes degrade to abstract types.
 resolveScopeReferences
-  :: [ScopeDeclaration]
-  -> ([ScopeDeclaration], [DjinnScopeOmission])
-resolveScopeReferences = go (0 :: Int) []
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
+  -> Either Diagnostic ([ScopeDeclaration], [DjinnScopeOmission])
+resolveScopeReferences inferredKinds = go []
  where
-  -- The declaration count strictly shrinks or a datatype becomes abstract in
-  -- every looping round, but the seal loop backstops this bound anyway.
-  go rounds omissions declarations
-    | rounds > 200 = (declarations, omissions)
-    | null newOmissions = (declarations, omissions)
-    | otherwise = go (rounds + 1) (omissions ++ newOmissions) (concat resolved)
+  go omissions declarations
+    | repaired == declarations && null newOmissions =
+        Right (declarations, reverse omissions)
+    | projectionRepairMeasure repaired
+        < projectionRepairMeasure declarations =
+          go (reverse newOmissions ++ omissions) repaired
+    | otherwise = Left $ projectionFailure
+        "scope-reference repair did not decrease its structural measure"
    where
     defined = Set.fromList $ concatMap declarationOwnedNames declarations
     isResolved name =
@@ -516,6 +609,7 @@ resolveScopeReferences = go (0 :: Int) []
       . declarationMentions
     shedded = map shed declarations
     resolved = map fst shedded
+    repaired = concat resolved
     newOmissions = concatMap snd shedded
     shed declaration = case unresolvedIn declaration of
       [] -> ([declaration], [])
@@ -535,7 +629,7 @@ resolveScopeReferences = go (0 :: Int) []
               )
         DataTypeDeclaration annotation name parameters _ ->
           ( [ AbstractTypeDeclaration annotation name
-                (parameterCountKind parameters)
+                (inferredDataTypeKind inferredKinds name parameters)
             ]
           , [ DjinnScopeOmission (renderCanonical name)
                 ("its constructors mention " ++ renderCanonical missing
@@ -548,8 +642,11 @@ resolveScopeReferences = go (0 :: Int) []
           , [mentionOmission (declarationSubjectName declaration) missing]
           )
      where
-      unresolvedMethod = filter (not . isResolved) . map fst
-        . typeReferences . valueType
+      -- Reuse the complete mention traversal so a method whose missing name
+      -- appears only as a constraint class is shed just like one whose result
+      -- type names an unavailable constructor.
+      unresolvedMethod = filter (not . isResolved) . Set.toList
+        . declarationMentions . ValueDeclaration
       unresolvedConstraint constraint = filter (not . isResolved)
         $ constraintClass constraint
           : map fst (constraintTypeReferences constraint)
@@ -562,30 +659,31 @@ resolveScopeReferences = go (0 :: Int) []
 -- accepts the environment. Every repair strictly shrinks or simplifies the
 -- declaration list, so the loop terminates.
 sealWithRepairs
-  :: [ScopeDeclaration]
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
   -> Either Diagnostic (DjinnSession, [DjinnScopeOmission])
-sealWithRepairs = go (0 :: Int) []
+sealWithRepairs inferredKinds = go []
  where
-  limit = 200
-  go rounds omissions declarations
-    | rounds > limit = Left
-        $ projectionFailure "the projection repair loop did not converge"
-    | otherwise = case mkEnvironment declarations of
-        Left failure -> Left $ projectionFailure $ show failure
-        Right environment -> case mkDjinnSessionChecked environment of
-          Right session -> Right (session, reverse omissions)
-          Left failure -> case repairFor failure declarations of
-            Just (repaired, newOmissions)
-              | repaired /= declarations ->
-                  go (rounds + 1) (newOmissions ++ omissions) repaired
-            _ -> Left $ projectionFailure
-              $ DjinnCore.renderEnvironmentEditFailure failure
+  go omissions declarations = case mkEnvironment declarations of
+    Left failure -> Left $ projectionFailure $ show failure
+    Right environment -> case mkDjinnSessionChecked environment of
+      Right session -> Right (session, reverse omissions)
+      Left failure -> case repairFor inferredKinds failure declarations of
+        Just (repaired, newOmissions)
+          | projectionRepairMeasure repaired
+              < projectionRepairMeasure declarations ->
+                go (newOmissions ++ omissions) repaired
+          | otherwise -> Left $ projectionFailure
+              "Djinn's requested repair did not decrease its structural measure"
+        Nothing -> Left $ projectionFailure
+          $ DjinnCore.renderEnvironmentEditFailure failure
 
 repairFor
-  :: DjinnCore.SynthesisEnvironmentError
+  :: Map.Map Name (Kind Void)
+  -> DjinnCore.SynthesisEnvironmentError
   -> [ScopeDeclaration]
   -> Maybe ([ScopeDeclaration], [DjinnScopeOmission])
-repairFor failure declarations = case failure of
+repairFor inferredKinds failure declarations = case failure of
   DjinnCore.RecursiveSynthesisDataTypes names
     -- Degrade full datatypes first; drop the named subjects outright when a
     -- previous degradation was insufficient, so every round makes progress.
@@ -601,7 +699,7 @@ repairFor failure declarations = case failure of
       DataTypeDeclaration annotation name parameters _
         | name `Set.member` recursive ->
             ( AbstractTypeDeclaration annotation name
-                (parameterCountKind parameters)
+                (inferredDataTypeKind inferredKinds name parameters)
             , Just $ DjinnScopeOmission (renderCanonical name)
                 "recursive datatype; projected as an abstract type"
             )
@@ -630,6 +728,18 @@ repairFor failure declarations = case failure of
 
 parameterCountKind :: [TypeParameter String Void] -> Kind Void
 parameterCountKind = foldr (const $ FunctionKind ProperTypeKind) ProperTypeKind
+
+-- Every datatype originating in the checked inventory has an authoritative
+-- inferred kind. The parameter-count shape is retained only as a defensive
+-- fallback for a declaration supplied without a matching inventory entry;
+-- ordinary REPL projection never takes that branch.
+inferredDataTypeKind
+  :: Map.Map Name (Kind Void)
+  -> Name
+  -> [TypeParameter String Void]
+  -> Kind Void
+inferredDataTypeKind inferredKinds name parameters =
+  Map.findWithDefault (parameterCountKind parameters) name inferredKinds
 
 arityKind :: Int -> Kind Void
 arityKind arity = iterate (FunctionKind ProperTypeKind) ProperTypeKind !! arity

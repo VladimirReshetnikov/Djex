@@ -4,9 +4,11 @@ module Language.Haskell.Exference.BindingsFromHaskellSrc
   ( getDecls
   , getDeclsLocated
   , getDeclsSourced
+  , getDeclsSourcedWithResolver
   , getDataConss
   , getDataConssLocated
   , getDataConssSourced
+  , getDataConssSourcedWithResolver
   , getDataTypes
   , getDataTypesLocated
   )
@@ -81,7 +83,17 @@ getDeclsSourced
   -> TypeDeclMap
   -> Module SrcSpanInfo
   -> m [SourcedExtraction [FunctionBinding]]
-getDeclsSourced ds tcs tDeclMap modul = sequence $ do
+getDeclsSourced ds tcs = getDeclsSourcedWithResolver
+  (legacyTypeResolver tcs ds)
+
+-- | Extract signatures using the exact source scope of this module.
+getDeclsSourcedWithResolver
+  :: Monad m
+  => TypeResolver
+  -> TypeDeclMap
+  -> Module SrcSpanInfo
+  -> m [SourcedExtraction [FunctionBinding]]
+getDeclsSourcedWithResolver resolver tDeclMap modul = sequence $ do
   (mn, declarations) <- maybeToList $ moduleNameAndDecls modul
   (slot, declaration) <- zip [0 :: Natural ..] declarations
   case declaration of
@@ -92,18 +104,17 @@ getDeclsSourced ds tcs tDeclMap modul = sequence $ do
   extract slot moduleName declaration = pure $ do
     result <- fmap (first $ extractionErrorAt $ ann declaration)
       $ runExceptT
-      $ transformDecl tcs ds moduleName tDeclMap declaration
+      $ transformDeclWithResolver resolver moduleName tDeclMap declaration
     pure $ SourcedExtraction (SourceSlot slot 0) result
 
-transformDecl
+transformDeclWithResolver
   :: Monad m
-  => M.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
+  => TypeResolver
   -> ModuleName SrcSpanInfo
   -> TypeDeclMap
   -> Decl SrcSpanInfo
   -> ExceptT String m [FunctionBinding]
-transformDecl tcs ds mn tDeclMap declaration = case declaration of
+transformDeclWithResolver resolver mn tDeclMap declaration = case declaration of
   TypeSig _ names qtype -> lowerSignature names qtype
   -- A foreign import introduces an ordinary Haskell binding.  Its calling
   -- convention and external symbol affect execution, not the type-directed
@@ -114,7 +125,7 @@ transformDecl tcs ds mn tDeclMap declaration = case declaration of
   _ -> pure []
  where
   lowerSignature names qtype = insName qtype $ do
-    (ctype, _) <- convertType tcs (Just mn) ds tDeclMap qtype
+    (ctype, _) <- convertTypeWithResolver resolver (Just mn) tDeclMap qtype
     mapM (either throwE pure . helper mn ctype) names
 
 insName :: Monad m
@@ -171,12 +182,26 @@ getDataConssSourced
        [ SourcedExtraction
            ([FunctionBinding], DeconstructorBinding)
        ]
-getDataConssSourced tcs ds tDeclMap modul = do
+getDataConssSourced tcs ds = getDataConssSourcedWithResolver
+  (legacyTypeResolver tcs ds)
+
+-- | Extract datatype fields and selectors using the module's source scope.
+getDataConssSourcedWithResolver
+  :: Monad m
+  => TypeResolver
+  -> TypeDeclMap
+  -> Module SrcSpanInfo
+  -> m
+       [ SourcedExtraction
+           ([FunctionBinding], DeconstructorBinding)
+       ]
+getDataConssSourcedWithResolver resolver tDeclMap modul = do
   sourced <- sequence $ do
     (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
     (slot, declaration@(DataDecl _ _ context rawHead conss _)) <-
       zip [0 :: Natural ..] declarations
-    pure $ extractDataDeclaration tcs ds tDeclMap slot moduleName declaration
+    pure $ extractDataDeclarationWithResolver
+      resolver tDeclMap slot moduleName declaration
       context rawHead conss
   let marked = markRecursiveDeconstructors
         $ map sourcedExtractionResult sourced
@@ -184,10 +209,9 @@ getDataConssSourced tcs ds tDeclMap modul = do
     (\entry result -> entry {sourcedExtractionResult = result})
     sourced marked
 
-extractDataDeclaration
+extractDataDeclarationWithResolver
   :: Monad m
-  => M.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
+  => TypeResolver
   -> TypeDeclMap
   -> Natural
   -> ModuleName SrcSpanInfo
@@ -199,8 +223,8 @@ extractDataDeclaration
        ( SourcedExtraction
            ([FunctionBinding], DeconstructorBinding)
        )
-extractDataDeclaration tcs ds tDeclMap slot moduleName declaration context
-    rawHead conss = do
+extractDataDeclarationWithResolver resolver tDeclMap slot moduleName declaration
+    context rawHead conss = do
   let (name, params) = splitDeclHead rawHead
   let
     rTypeM :: Monad m => ConversionT String m HsType
@@ -249,8 +273,8 @@ extractDataDeclaration tcs ds tDeclMap slot moduleName declaration context
      where
       -- Strictness and unpacking govern representation and evaluation, not a
       -- field's source type. Exference's inventory models the latter only.
-      convertFieldType = convertTypeInternal
-        tcs (Just moduleName) ds tDeclMap . eraseFieldAnnotations
+      convertFieldType = convertTypeInternalWithResolver
+        resolver (Just moduleName) tDeclMap . eraseFieldAnnotations
 
       convertRecordField (FieldDecl _ names fieldType) = do
         convertedType <- convertFieldType fieldType

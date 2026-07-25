@@ -45,7 +45,7 @@ from the repository root:
 
 ```console
 cabal build djex:lib:djex djex:exe:exference
-cabal test djex-api-tests exference-frontend-api-tests exference-tests exference-cli-tests --test-show-details=direct
+cabal test djex-api-tests exference-frontend-api-tests exference-tests exference-engine-tests exference-cli-tests --test-show-details=direct
 ```
 
 The former top-level `exference/` package is now the `djex/exference/` source
@@ -155,8 +155,9 @@ ordinary and boxed-tuple views are match-only; construct them with
 is reported explicitly. Programmatic unboxed tuples use the shared
 `tupleName Unboxed` builder; the compatibility HSE frontend still rejects
 unboxed tuple syntax because the search language cannot generate its terms.
-Unqualified frontend lookup rejects ambiguous imported type names instead of
-silently choosing the first.
+Checked module loading resolves bare type and class names through the defining
+module's direct imports and rejects ambiguity instead of choosing by load
+order.
 
 Exference's `HsType` is now a compatibility alias for the shared
 `Type (Variable Int)`, not a recursively isomorphic engine-owned tree. The
@@ -270,10 +271,14 @@ and point location under the stable `EXF_MODULE_PARSE` code, with the native
 parser detail preserved as context. HSE locations cross the shared checked
 one-based, half-open span boundary explicitly; a malformed native location
 retains its source and becomes diagnostic context rather than causing a crash
-or forging an invalid span. Binding extractors attach module-local source slots
-before erasing HSE annotations. Ordinary signatures and datatype declarations
-occupy top-level slots; class methods occupy nested slots, and every multi-name
-signature remains one success batch or one failure. The final stable merge
+or forging an invalid span. Duplicate explicit module headers and multiple
+headerless `Main` modules fail before nominal scope maps are built; ordered
+`EXF_MODULE_DUPLICATE` diagnostics identify every later source and the first
+declaration it conflicts with. Binding extractors attach module-local source
+slots before erasing HSE annotations. Ordinary signatures and datatype
+declarations occupy top-level slots; class methods occupy nested slots, and
+every multi-name signature remains one success batch or one failure. The final
+stable merge
 therefore preserves exact cross-category binding and diagnostic order without
 reconstructing declaration cardinality. Low-level `parseModules` keeps aliases
 unexpanded in its `SourceEnvironment`; `checkSourceEnvironment` seals and
@@ -287,6 +292,38 @@ their nominal heads; every projected shape still comes from the prepared
 witness. The unused intermediate entrance that accepted constructor penalties
 but could not retain class-method ownership has been removed; source sealing
 always uses the complete ownership-aware operation.
+
+All public, default, directory, file, and in-memory source loaders elaborate
+declarations with the same module-aware resolver. Local type and class names
+take precedence; direct imports honor `qualified`, `as`, positive import lists,
+and `hiding`. Export surfaces include named exports and `module M` re-exports,
+and re-exported entities retain their defining canonical names. The
+`module M` surface is the identity intersection of unqualified scope and scope
+through the written qualifier `M`, so self locals and ordinary aliases are
+included while qualified-only imports are not. A loaded `Prelude` contributes
+an implicit unqualified import unless the module is `Prelude`, imports it
+explicitly, or enables `NoImplicitPrelude` or `RebindableSyntax`. The resolver
+covers datatype fields, type synonyms, class heads and methods, instances, and
+ordinary or foreign signatures; term bodies remain outside Exference's source
+semantics.
+
+Imports govern elaboration, not dependency discovery. Explicit file and source
+loaders consume exactly the ordered closure supplied by their caller; the
+unified REPL discovers resolvable local imports before passing that snapshot to
+the same loader. Loaded modules have an exact surface, so an unimported loaded
+declaration is out of scope even through its canonical qualifier. Djex does not
+load external interfaces, however, and open inventories retain genuinely
+unknown names as external. A positive import list provides a finite canonical
+surface for an unloaded module; unrestricted and `hiding` imports cannot
+enumerate or validate its unknown export complement.
+
+Export lists restrict downstream imports but never delete declarations from
+the checked inventory. Private declarations remain available to whole-graph
+kind, synonym, recursion, and class validation and to an explicit `*MODULE`
+prompt scope. Source imports are consumed while that inventory is built;
+interactive prompt imports are a later query/search projection and do not
+reinterpret source declarations or discover dependencies.
+
 Before backend lowering, the foundation's opaque transient
 `PreparedInventoryExpansion` prepares the exact alias table, expands
 operational declarations in source order, attributes the first failure to its
@@ -705,10 +742,14 @@ tuning but no longer starts one capability per core or reserves a
 multi-gigabyte heap for trivial invocations. Its obsolete Hood, search-tree,
 parallel-mode, and embedded manual-test machinery has been removed;
 deterministic regressions live in `exference-tests`, the frontend-import check,
-and the separate `exference-cli-tests` subprocess suite.
-The finite-identifier test seam likewise retains only its exercised raw
-compatibility-element path and canonical `QueryResult` path; the unconsumed
-generated-batch intermediate and private search-node export aliases are gone.
+and the separate `exference-cli-tests` subprocess suite. Artificial
+finite-identifier, queue-capacity, saturation, and poisoned-value checks live
+in `exference-engine-tests`. That component compiles the parser-neutral core
+and its test seam as home modules, so
+`Language.Haskell.Exference.Core.Internal.Testing` is not part of the library
+API. The seam retains only its exercised raw compatibility-element and
+canonical `QueryResult` paths; the unconsumed generated-batch intermediate and
+private search-node export aliases remain gone.
 
 ```console
 cabal run exference -- --first "a -> a"

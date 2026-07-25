@@ -69,6 +69,7 @@ runProjectRepl = runRepl defaultReplOptions
   , replEnvironmentPath = Just "./environment"
   , replAllowFix = False
   , replHistoryFile = Just "./.djex-history"
+  , replIgnoreStartupFiles = False
   }
 ```
 
@@ -88,16 +89,40 @@ Djinn session is still usable.
 
 This API embeds a terminal frontend, not an abstract protocol: it reads through
 Haskeline, writes results and diagnostics to the process streams, can change
-the process working directory, and permits both `:!` shell commands and
-`:download`/`:install` Cabal effects. Package installation can execute
+the process working directory, and runs trusted `.djexrc` startup commands
+unless `replIgnoreStartupFiles` is `True`. Interactive commands can launch the
+configured editor or a shell, evaluate code through real GHC, and invoke Cabal
+through `:download`/`:install`. Package installation can execute
 target-supplied build code and does not add compiled modules to Djex's
 source-only inventory. Package children receive no REPL stdin or unrelated
 inherited file descriptors. Use the checked adapters below when an editor,
-service, or GUI needs to own input, output,
-authorization, or session persistence. The complete interactive contract,
-including commands, settings, transactional reloads, both-mode isolation, and
-the distinction from the historical Djinn REPL, is in the
+service, or GUI needs to own input, output, authorization, or session
+persistence. The complete interactive contract, including startup-file trust
+checks, commands, settings, transactional reloads, prompt scope, both-mode
+isolation, and the distinction from the historical Djinn REPL, is in the
 [shared REPL guide](repl.md).
+
+## Embed the complete command dispatcher
+
+Applications that deliberately want the executable's whole interface can call
+the exposed dispatcher without letting it terminate the host process:
+
+```haskell
+import Language.Haskell.Djex.CLI (runArguments)
+import System.Exit (ExitCode)
+
+runDjexCommand :: [String] -> IO ExitCode
+runDjexCommand = runArguments
+```
+
+`runArguments` accepts the same argument vector as `djex`, writes to the
+process streams, and returns the status that the executable would pass to
+`exitWith`. It may start the REPL or a synthesis search, read source and
+startup files, change the working directory, execute evaluated Haskell, or
+launch editor, shell, and Cabal child processes. It is therefore convenient
+for another command-line program, but it is not an isolation boundary. Use the
+checked adapters below for a server or tool that needs explicit control over
+input, output, authorization, and execution.
 
 ## Common lifecycle
 
@@ -295,9 +320,11 @@ These functions run the same read, parse, inventory, rating, and sealing
 pipeline as directory loading. The `FromSources` variants never reopen their
 paths; paths are retained as parser filenames and diagnostic provenance. They
 are appropriate when a caller already owns an immutable filesystem snapshot.
-None of these functions discover imports: the caller owns the complete ordered
-source closure. An empty module list is valid and retains Exference's built-in
-syntax-level constructor inventory.
+None of these functions discover dependencies: the caller owns the complete
+ordered source closure. They do use the `import` declarations inside that
+closure to elaborate types, classes, instances, constructors, and value or
+method signatures. An empty module list is valid and retains Exference's
+built-in syntax-level constructor inventory.
 
 Callers that need the checked source projection before session policy and
 sealing can use the corresponding lower-level boundary from
@@ -329,6 +356,12 @@ available at those phases. A later neutral-inventory, sealing, or policy
 failure uses its `DJEX_EXF_*` code and may be source-free because no single
 token owns that whole-environment invariant.
 
+The supplied closure must contain each logical module exactly once. Duplicate
+explicit headers and multiple headerless `Main` modules fail before scope
+construction with `DuplicateModuleDeclarations`; its
+`EXF_MODULE_DUPLICATE` diagnostics point at each later source in caller order
+and name the first declaration in context.
+
 The loader rejects unsupported source meaning before building a partial
 inventory. The authoritative emitted `UnsupportedVocabularyForm` set includes
 pattern-synonym signatures and XML page/hybrid modules as well as the
@@ -338,12 +371,32 @@ interpret the pattern-synonym-signature restriction as a ban on ordinary
 pattern matching. `ExplicitExportList` is retained as a source-compatible
 constructor but is no longer emitted.
 
-Explicit module export lists are accepted. Loading deliberately retains both
-exported and private declarations in the checked inventory. A module-aware
-caller applies an export list when constructing its interactive visibility
-scope, while retaining the full inventory for `*MODULE` access and canonical
-qualified lookup. Directory and explicit-file loaders themselves build an
-inventory, not a prompt scope.
+All public, default, directory, file, and in-memory loaders apply the same
+module-aware policy. A declaration sees its module's local nominal names and
+only directly imported loaded names. `qualified`, `as`, positive import lists,
+and `hiding` restrict both bare and qualified lookup. Named exports and
+`module M` re-exports form the surface seen by downstream modules, while an
+entity re-exported through another module retains its defining canonical name.
+The `module M` surface is the identity intersection of unqualified scope and
+scope through the written qualifier `M`; this includes self locals and
+unqualified `as` imports, but not qualified-only imports. A loaded `Prelude`
+contributes its implicit unqualified surface unless the module is `Prelude`,
+imports it explicitly, or enables `NoImplicitPrelude` or
+`RebindableSyntax`.
+
+That policy is exact for modules present in the supplied closure: a
+loaded-but-unimported declaration is out of scope even through its canonical
+qualifier. Djex does not read package interfaces, so genuinely unknown names
+remain external under Exference's open-inventory policy. A positive import list
+provides enough information to assign finite canonical external names; an
+unrestricted or `hiding` import of an unloaded module has no enumerable export
+complement and cannot be verified as if its interface had been loaded.
+
+Loading deliberately retains exported and private declarations in the checked
+inventory for kind checking, synonym expansion, recursion analysis, and class
+validation. Export lists govern later imports rather than deleting facts; a
+module-aware frontend may expose the full top level through `*MODULE`. The
+result is still an inventory, not a prompt context.
 
 With `loadExferenceSessionWithPolicy`, unknown exclusions are harmless no-ops.
 This lets a reusable policy exclude an optional binding absent from a particular
@@ -357,8 +410,9 @@ With a session, use
 names, class arities, synonyms, source spellings, and later diagnostic spans all
 come from the same checked inventory.
 
-An interactive source frontend should instead construct an
-`ExferenceQueryScope` and call `parseExferenceRequestInScope` (or the
+Source imports have already governed declaration elaboration by this point.
+An interactive source frontend separately constructs an
+`ExferenceQueryScope` and calls `parseExferenceRequestInScope` (or the
 checked-target counterpart). Its fields have intentionally narrow meanings:
 
 - `exferenceQueryVisibleNames` is the exact set admitted for unqualified
@@ -379,7 +433,8 @@ nothing through that spelling. Scope is therefore a visibility projection
 over one checked inventory, not a second independently loaded environment. The
 shared REPL also narrows Exference's searchable binding projection to the same
 visible names while keeping the complete inventory for qualified type
-elaboration.
+elaboration. Changing this prompt scope does not re-elaborate declarations or
+discover another source dependency.
 
 The `djex` and `exference` executables use the same default-path operation.
 Cabal's generated `Paths_djex` module remains private; applications do not need

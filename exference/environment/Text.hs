@@ -1,5 +1,12 @@
 module Data.Text where
 
+import qualified Data.Data (Data)
+import qualified Data.Eq (Eq)
+import qualified Data.Monoid (Monoid)
+import qualified Data.Ord (Ord)
+import qualified Data.String (String)
+import qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 data Text

@@ -1,5 +1,8 @@
 module Data.Eq where
 
+import qualified Data.Bool (Bool)
+import qualified Data.Monoid (Dual, First, Last, Product, Sum)
+import GHC.Generics (K1)
 
 
 class Eq a where

@@ -741,9 +741,9 @@ projectQueryResult target typeHints =
     projectValidatedCandidate
       target typeHints candidateExpression constraints statistics
 
--- | Closed strictness probe for the exposed internal regression module. It
--- returns observations rather than accepting raw candidates, so even clients
--- of that module cannot bypass the checked engine-candidate constructor.
+-- | Closed strictness probe compiled only by @exference-engine-tests@. It
+-- returns observations rather than accepting raw candidates, so the test seam
+-- cannot bypass the checked engine-candidate constructor.
 queryProjectionStrictnessForTesting
   :: SharedGenerated.DefinitionName
   -> ExferenceTypeVariableHints

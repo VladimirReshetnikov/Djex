@@ -95,18 +95,6 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   )
 import qualified Language.Haskell.Exference.Core.Score as Score
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
-import Language.Haskell.Exference.Core.Internal.Testing
-  ( IdentifierCapacities (..)
-  , compatibilityBindingUsageCounts
-  , compatibilityPruningCount
-  , findExpressionsWithIdentifierCapacitiesEither
-  , findQueryResultsWithIdentifierCapacitiesEither
-  , mergePriorityQueueAtCapacity
-  , pruningReasonsFromNaturalTotals
-  , queryProjectionStrictnessForTesting
-  , singleOptionValidationStrictnessForTesting
-  , typeComplexityForTesting
-  )
 import Language.Haskell.Exference.Core.TypeUtils hiding (largestId)
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.Unify
@@ -145,6 +133,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentFromPath
   , maximumBuiltInTupleArity
   , parseModules
+  , parseModuleSources
   , parseRatings
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
@@ -205,20 +194,24 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
   ( ConversionT
+  , TypeResolver
   , convDataFromTypeVarIndex
   , convDataReservedIds
   , convDataTypeVarIndex
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
+  , convertTypeNoDeclWithResolver
   , emptyConvData
   , getVar
   , haskellSrcExtsParseMode
+  , legacyTypeResolver
   , parseQualifiedName
   , convertName
   , convertModuleName
   , convertQName
   , normalizeConvertedForalls
   , runConversionTWithState
+  , scopeTypeResolverWithQualifiedNames
   )
 import Language.Haskell.Exference.SimpleDict (emptyClassEnv)
 import qualified Language.Haskell.Exference.SimpleDict as SimpleDict
@@ -2848,14 +2841,6 @@ tests = testGroup "Exference"
           validateExferenceQuery environment query @?= preparedQuery query
           validateExferenceQuery environment invalidQuery @?=
             preparedQuery invalidQuery
-      , testCase "prepared queries consume one validated options witness" $ do
-          environment <- expectRight $ sealLegacyEnvironment identityInput
-          target <- checkedIdentifierTarget "singleOptionValidation"
-          let query = legacyInputQuery identityInput
-              sourceHints = emptyExferenceSourceTypeVariableHints
-                $ queryGoalType query
-          singleOptionValidationStrictnessForTesting
-            target sourceHints environment query @?= Right ()
       , testCase "query options validate against one sealed environment" $ do
           environment <- expectRight $ sealLegacyEnvironment identityInput
           let query = legacyInputQuery identityInput
@@ -3591,180 +3576,6 @@ tests = testGroup "Exference"
       , testCase "step exhaustion is reported explicitly" $ do
           chunk <- onlyChunk $ identityInput {input_maxSteps = 1}
           searchCompletion (chunkStatus chunk) @?= SearchStepLimitReached
-      , testCase "term identifier exhaustion truncates instead of colliding" $ do
-          chunk <- lastCapacityChunk
-            (IdentifierCapacities 0 100 100) identityInput
-          chunkStatus chunk @?=
-            SearchStatus SearchIdentifierSpaceExhausted 0 0
-          assertBool "an exhausted term-ID branch produced a candidate"
-            $ null $ chunkElements chunk
-      , testCase "identifier truncation survives a successful sibling" $ do
-          let integer = TypeCons $ name "Int"
-              polymorphic = FunctionBinding
-                (TypeVar 0) (name "polymorphic") 0 [] []
-              constant = FunctionBinding
-                integer (name "constant") 0 [] []
-              input = identityInput
-                { input_goalType = integer
-                , input_envFuncs = [polymorphic, constant]
-                }
-              capacities = IdentifierCapacities 100 0 100
-          chunk <- lastCapacityChunk capacities input
-          searchCompletion (chunkStatus chunk) @?=
-            SearchIdentifierSpaceExhausted
-          assertBool "a viable sibling was suppressed by identifier exhaustion"
-            $ not $ null $ chunkElements chunk
-          targetName <- expectRight $ SharedName.mkIdentifier "generated"
-          target <- expectRight $ Generated.mkDefinitionName targetName
-          environment <- expectRight $ sealLegacyEnvironment input
-          results <- expectRight
-            $ findQueryResultsWithIdentifierCapacitiesEither
-                capacities target
-                (emptyExferenceSourceTypeVariableHints $ input_goalType input)
-                environment (legacyInputQuery input)
-          result <- case results of
-            [] -> fail "expected at least one capacity-limited query result"
-            firstResult : remaining ->
-              pure $ lastElement firstResult remaining
-          let batch = SharedQuery.resultSearch result
-          SharedQuery.resultEvidence result @?=
-            SharedQuery.ValidatedCandidates
-          SharedSearch.batchProgress batch @?= SharedSearch.Completed
-            (SharedSearch.Truncated
-              $ SharedSearch.IdentifierSpaceExhausted :| [])
-          assertBool "the direct result lost its checked target"
-            $ all ((== target) . Generated.clauseName
-                . SharedCandidate.candidateOutput)
-            $ SharedSearch.batchCandidates batch
-      , testCase "generic deconstructors need no persistent flexible IDs" $ do
-          let integer = TypeCons $ name "Int"
-              box argument = TypeApp (TypeCons $ name "Box") argument
-              deconstructor = DeconstructorBinding
-                (box $ TypeVar 0)
-                [ConstructorBinding (name "Box") [TypeVar 0]]
-                False
-              input = identityInput
-                { input_goalType = TypeArrow (box integer) integer
-                , input_envDeconsS = [deconstructor]
-                }
-              capacities = IdentifierCapacities 100 0 100
-              isBoxElimination candidate = case candidate of
-                ( ExpLambda scrutinee _
-                    (ExpLetMatch constructor [(field, annotation)]
-                      (ExpVar matchedScrutinee _)
-                      (ExpVar returnedField _))
-                  , []
-                  , _
-                  ) -> constructor == name "Box"
-                    && matchedScrutinee == scrutinee
-                    && returnedField == field
-                    && annotation == integer
-                _ -> False
-          chunks <- expectRight
-            $ findExpressionsWithIdentifierCapacitiesEither capacities input
-          finalChunk <- case chunks of
-            [] -> fail "generic Box elimination produced no search chunks"
-            initial : remaining -> pure $ lastElement initial remaining
-          chunkStatus finalChunk @?= SearchStatus SearchExhausted 0 0
-          assertBool "generic Box elimination consumed a flexible ID"
-            $ any isBoxElimination
-            $ concatMap chunkElements chunks
-      , testCase "multi-case deconstructors need no persistent flexible IDs" $ do
-          let integer = TypeCons $ name "Int"
-              choice argument = TypeApp
-                (TypeCons $ name "Choice") argument
-              genericChoice = choice $ TypeVar 0
-              integerChoice = choice integer
-              leftName = name "First"
-              rightName = name "Second"
-              deconstructor = DeconstructorBinding genericChoice
-                [ ConstructorBinding leftName [TypeVar 0]
-                , ConstructorBinding rightName [TypeVar 0]
-                ] False
-              input = identityInput
-                { input_goalType = TypeArrow integerChoice integer
-                , input_envDeconsS = [deconstructor]
-                , input_multiPM = True
-                , input_maxSteps = 200
-                }
-              capacities = IdentifierCapacities 100 0 100
-              returnsAnnotatedField (_, [(field, annotation)], body) =
-                annotation == integer && body == ExpVar field annotation
-              returnsAnnotatedField _ = False
-              isChoiceElimination candidate = case candidate of
-                ( ExpLambda scrutinee _
-                    (ExpCaseMatch (ExpVar matchedScrutinee _) alternatives)
-                  , []
-                  , _
-                  ) -> matchedScrutinee == scrutinee
-                    && map (\(constructor, _, _) -> constructor) alternatives
-                      == [leftName, rightName]
-                    && all returnsAnnotatedField alternatives
-                _ -> False
-          chunks <- expectRight
-            $ findExpressionsWithIdentifierCapacitiesEither capacities input
-          finalChunk <- case chunks of
-            [] -> fail "generic Choice elimination produced no search chunks"
-            initial : remaining -> pure $ lastElement initial remaining
-          chunkStatus finalChunk @?= SearchStatus SearchExhausted 0 0
-          assertBool "generic Choice elimination consumed a flexible ID"
-            $ any isChoiceElimination
-            $ concatMap chunkElements chunks
-      , testCase "empty elimination consumes no flexible identifier" $ do
-          let integer = TypeCons $ name "Int"
-              empty argument = TypeApp (TypeCons $ name "Empty") argument
-              deconstructor = DeconstructorBinding
-                (empty $ TypeVar 0) [] False
-              input = identityInput
-                { input_goalType = TypeArrow (empty integer) integer
-                , input_envDeconsS = [deconstructor]
-                }
-          chunk <- lastCapacityChunk
-            (IdentifierCapacities 100 0 100) input
-          chunkStatus chunk @?= SearchStatus SearchExhausted 0 0
-          assertBool "empty elimination required a non-escaping flexible ID"
-            $ not $ null $ chunkElements chunk
-      , testCase "scope identifier collisions are operational truncations" $ do
-          chunk <- lastCapacityChunk
-            (IdentifierCapacities 100 100 1) identityInput
-          chunkStatus chunk @?=
-            SearchStatus SearchIdentifierSpaceExhausted 0 0
-      , testCase "exact progress retains simultaneous step and ID limits" $ do
-          let integer = TypeCons $ name "Int"
-              boolean = TypeCons $ name "Bool"
-              polymorphic = FunctionBinding
-                (TypeVar 0) (name "polymorphic") 0 [] []
-              deferred = FunctionBinding
-                boolean (name "deferred") 0 [] [integer]
-              input = identityInput
-                { input_goalType = boolean
-                , input_envFuncs = [polymorphic, deferred]
-                -- The root opens even an empty leading forall before the
-                -- binding-expansion step under test.
-                , input_maxSteps = 2
-                }
-              capacities = IdentifierCapacities 100 0 100
-          chunk <- lastCapacityChunk capacities input
-          searchCompletion (chunkStatus chunk) @?=
-            SearchIdentifierSpaceExhausted
-          targetName <- expectRight $ SharedName.mkIdentifier "generated"
-          target <- expectRight $ Generated.mkDefinitionName targetName
-          environment <- expectRight $ sealLegacyEnvironment input
-          results <- expectRight
-            $ findQueryResultsWithIdentifierCapacitiesEither
-                capacities target
-                (emptyExferenceSourceTypeVariableHints $ input_goalType input)
-                environment (legacyInputQuery input)
-          result <- case results of
-            [] -> fail "expected at least one capacity-limited query result"
-            firstResult : remaining ->
-              pure $ lastElement firstResult remaining
-          let batch = SharedQuery.resultSearch result
-          SharedQuery.resultEvidence result @?= SharedQuery.NoEvidence
-          SharedSearch.batchProgress batch @?= SharedSearch.Completed
-            (SharedSearch.Truncated
-              $ SharedSearch.StepLimitReached
-                :| [SharedSearch.IdentifierSpaceExhausted])
       , testCase "candidate statistics count completed search steps" $ do
           chunk <- lastChunk identityInput
           let candidateSteps =
@@ -3982,33 +3793,6 @@ tests = testGroup "Exference"
           chunk <- onlyChunk $ identityInput {input_maxQueueSize = Just 0}
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchQueuePruned (chunkStatus chunk) @?= 1
-      , testCase "queue representation overflow retains the best priorities" $ do
-          let queued = [(2, 20)]
-              generated = [(3, 30), (1, 10)]
-          mergePriorityQueueAtCapacity 3 Nothing queued generated @?=
-            ([(3, 30), (2, 20), (1, 10)], 0)
-          mergePriorityQueueAtCapacity 2 Nothing queued generated @?=
-            ([(3, 30), (2, 20)], 1)
-          mergePriorityQueueAtCapacity 2 (Just 1) queued generated @?=
-            ([(3, 30)], 2)
-          mergePriorityQueueAtCapacity 3 (Just (-1)) queued generated @?=
-            ([], 3)
-      , testCase "compatibility pruning counts saturate without losing reasons" $ do
-          let maximumCount = fromIntegral (maxBound :: Int) :: Natural
-              queueTotal = maximumCount + 1
-              depthTotal = maximumCount + 2
-              binding = name "usedBinding"
-          compatibilityPruningCount (maximumCount - 1) @?=
-            maxBound - 1
-          compatibilityPruningCount maximumCount @?= maxBound
-          compatibilityPruningCount queueTotal @?= maxBound
-          compatibilityBindingUsageCounts
-              (Map.singleton binding queueTotal) @?=
-            Map.singleton binding maxBound
-          pruningReasonsFromNaturalTotals queueTotal depthTotal @?=
-            [ SharedSearch.QueueLimitPruned queueTotal
-            , SharedSearch.DepthLimitPruned depthTotal
-            ]
       , testCase "depth pruning is configured and reported" $ do
           let config = defaultHeuristicsConfig
                 {heuristics_functionGoalTransform = 1}
@@ -4018,7 +3802,7 @@ tests = testGroup "Exference"
             }
           searchCompletion (chunkStatus chunk) @?= SearchPruned
           searchDepthPruned (chunkStatus chunk) @?= 1
-      , testCase "structural tuple ranking exactly preserves applications" $ do
+      , testCase "structural tuple searches match application spellings" $ do
           tupleConstructor <- expectRight $ SharedName.tupleName Boxed 3
           let elements =
                 [ TypeVar 0
@@ -4041,13 +3825,23 @@ tests = testGroup "Exference"
                 , heuristics_goalArrow = near 9
                 , heuristics_goalApp = near 7
                 }
-              complexity config = typeComplexityForTesting config
-          assertEqual "fractional accumulation order"
-            (complexity fractional legacy)
-            (complexity fractional structural)
-          assertEqual "near-saturation accumulation order"
-            (complexity nearSaturation legacy)
-            (complexity nearSaturation structural)
+              searchTrace config representation = do
+                chunks <- expectRight $ findExpressionsWithStatsEither
+                  identityInput
+                    { input_goalType = TypeArrow representation representation
+                    , input_heuristicsConfig = config
+                    }
+                pure
+                  [ (chunkStatus chunk, chunkBindingUsages chunk,
+                      chunkElements chunk)
+                  | chunk <- chunks
+                  ]
+              assertEquivalent label config = do
+                applicationTrace <- searchTrace config legacy
+                structuralTrace <- searchTrace config structural
+                assertBool label $ applicationTrace == structuralTrace
+          assertEquivalent "fractional public trace" fractional
+          assertEquivalent "near-saturation public trace" nearSaturation
       , testCase "solution length contributes structural candidate cost" $ do
           let firstStatistics input = take 1
                 [ statistics
@@ -4416,6 +4210,474 @@ tests = testGroup "Exference"
               (diagnosticSeverity failure, diagnosticMessage failure))
             (parseRatings "foo NaN") @?= Left
               (Error, "rating for foo must be finite: NaN")
+      , testCase "source loading rejects duplicate explicit modules" $ do
+          let firstPath = "/virtual/FirstA.hs"
+              secondPath = "/virtual/SecondA.hs"
+              thirdPath = "/virtual/ThirdA.hs"
+              sources =
+                [ (firstPath, "module A where\n")
+                , (secondPath, "module A where\n")
+                , (thirdPath, "module A where\n")
+                ]
+          LoadReport result diagnostics <- parseModuleSources sources
+          diagnostics @?= []
+          case result of
+            Left (DuplicateModuleDeclarations failures@(failure :| _)) -> do
+              let rendered = NonEmpty.toList failures
+              map diagnosticSource rendered @?=
+                [Just secondPath, Just thirdPath]
+              map diagnosticContext rendered @?=
+                [ [ "A is declared by both " ++ firstPath
+                      ++ " and " ++ secondPath
+                  ]
+                , [ "A is declared by both " ++ firstPath
+                      ++ " and " ++ thirdPath
+                  ]
+                ]
+              diagnosticSeverity failure @?= Error
+              diagnosticCode failure @?= Just "EXF_MODULE_DUPLICATE"
+              fmap (sourceLine . sourceStart) (diagnosticSpan failure)
+                @?= Just 1
+              diagnosticMessage failure @?= "duplicate source module"
+              environmentLoadErrorDiagnostics
+                (DuplicateModuleDeclarations failures) @?= failures
+            Left failure -> fail $ "unexpected duplicate-module failure: "
+              ++ show failure
+            Right _ -> fail "duplicate explicit modules were accepted"
+      , testCase "checked loading rejects duplicate implicit Main modules" $ do
+          let firstPath = "/virtual/FirstMain.hs"
+              secondPath = "/virtual/SecondMain.hs"
+              sources =
+                [ (firstPath, "first :: a -> a\n")
+                , (secondPath, "second :: a -> a\n")
+                ]
+          LoadReport result diagnostics <- environmentFromSources sources []
+          diagnostics @?= []
+          case result of
+            Left (DuplicateModuleDeclarations (failure :| rest)) -> do
+              rest @?= []
+              diagnosticCode failure @?= Just "EXF_MODULE_DUPLICATE"
+              diagnosticSource failure @?= Just secondPath
+              diagnosticContext failure @?=
+                [ "Main is declared by both " ++ firstPath
+                    ++ " and " ++ secondPath
+                ]
+            Left failure -> fail $ "unexpected duplicate-Main failure: "
+              ++ show failure
+            Right _ -> fail "duplicate implicit Main modules were accepted"
+      , testGroup "source declaration import scope"
+        [ testCase "a direct import disambiguates an unqualified type" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  ])
+              , ("B.hs", unlines
+                  [ "module B where"
+                  , "data T = BT"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (T)"
+                  , "selected :: T -> T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            let imported = TypeCons $ validQualifiedName ["A"] "T"
+            functionParameters selected @?= [imported]
+            functionResult selected @?= imported
+        , testCase "class constraints use the same direct import scope" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "class C a"
+                  ])
+              , ("B.hs", unlines
+                  [ "module B where"
+                  , "class C a"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (C)"
+                  , "selected :: C a => a -> a"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            case functionConstraints selected of
+              [HsConstraint owner [TypeVar _]] ->
+                owner @?= validQualifiedName ["A"] "C"
+              constraints -> fail $ "unexpected imported constraints: "
+                ++ show constraints
+        , testCase "scope threads through every declaration type pass" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  , "class C a"
+                  ])
+              , ("B.hs", unlines
+                  [ "module B where"
+                  , "data T = BT"
+                  , "class C a"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (T, C)"
+                  , "type Alias = T"
+                  , "data Box = Box T"
+                  , "class Owner a where"
+                  , "  method :: T -> a"
+                  , "class D a"
+                  , "instance C T => D T"
+                  ])
+              ]
+            let importedType = TypeCons $ validQualifiedName ["A"] "T"
+                importedClass = validQualifiedName ["A"] "C"
+                localClass = validQualifiedName ["Use"] "D"
+            case find
+                ((== validQualifiedName ["Use"] "Alias") . tdecl_name)
+                (sourceTypeSynonyms environment) of
+              Just declaration -> tdecl_result declaration @?= importedType
+              Nothing -> fail "import-scoped type synonym was not loaded"
+            constructor <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "Box"
+            functionParameters constructor @?= [importedType]
+            method <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "method"
+            functionParameters method @?= [importedType]
+            let instances = concat $ Map.elems $ sClassEnv_instances
+                  $ sourceClasses environment
+                matchingInstances =
+                  [ declaration
+                  | declaration <- instances
+                  , constraint_tclass (instance_head declaration) == localClass
+                  , constraint_params (instance_head declaration)
+                      == [importedType]
+                  ]
+            case matchingInstances of
+              declaration : _ -> assertBool (show declaration)
+                $ HsConstraint importedClass [importedType]
+                    `elem` instance_constraints declaration
+              [] -> fail "import-scoped instance head was not loaded"
+        , testCase "qualified aliases preserve canonical identity and lists" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  , "data U = AU"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified A as X (T)"
+                  , "selected :: X.T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["A"] "T")
+            messages <- expectBindingScopeFailure
+              [ ("A.hs", unlines
+                  [ "module A where"
+                  , "data T = AT"
+                  , "data U = AU"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified A as X (T)"
+                  , "excluded :: X.U"
+                  ])
+              ]
+            assertBool (show messages)
+              $ any ("X.U is not in scope" `isInfixOf`) messages
+        , testCase "a local declaration wins over imported names" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("B.hs", "module B where\ndata T = BT\n")
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (T)"
+                  , "import B (T)"
+                  , "data T = LocalT"
+                  , "selected :: T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Use"] "T")
+        , testCase "hiding and missing imports reject loaded declarations" $ do
+            hidden <- expectBindingScopeFailure
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A hiding (T)"
+                  , "hidden :: T"
+                  ])
+              ]
+            assertBool (show hidden)
+              $ any ("T is not in scope" `isInfixOf`) hidden
+            missing <- expectBindingScopeFailure
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("Support.hs", "module Support where\ndata U = U\n")
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Support ()"
+                  , "bare :: T"
+                  , "qualified :: A.T"
+                  ])
+              ]
+            case missing of
+              [bareFailure, qualifiedFailure] -> do
+                assertBool (show missing)
+                  $ "T is not in scope" `isInfixOf` bareFailure
+                assertBool (show missing)
+                  $ "A.T is not in scope" `isInfixOf` qualifiedFailure
+              _ -> fail $ "unexpected missing-import failures: "
+                ++ show missing
+        , testCase "public source loaders are strict with no imports" $ do
+            let sources =
+                  [ ("A.hs", "module A where\ndata T = AT\n")
+                  , ("Use.hs", unlines
+                      [ "module Use where"
+                      , "excluded :: T"
+                      ])
+                  ]
+            messages <- expectBindingScopeFailure sources
+            assertBool (show messages)
+              $ any ("T is not in scope" `isInfixOf`) messages
+            LoadReport checkedResult _ <- environmentFromSources sources []
+            case checkedResult of
+              Left (BindingDeclarationErrors failures) -> assertBool
+                (show failures)
+                $ any (("T is not in scope" `isInfixOf`)
+                    . extractionErrorMessage)
+                $ NonEmpty.toList failures
+              Left failure -> fail $ "unexpected snapshot scope failure: "
+                ++ show failure
+              Right _ -> fail "checked snapshot loading used global fallback"
+        , testCase "explicit exports retain named re-export identity" $ do
+            environment <- expectSourceEnvironment
+              [ ("A.hs", unlines
+                  [ "module A (T) where"
+                  , "data T = AT"
+                  , "data Private = Private"
+                  ])
+              , ("Reexport.hs", unlines
+                  [ "module Reexport (T) where"
+                  , "import A (T)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Reexport (T)"
+                  , "selected :: T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["A"] "T")
+            privateFailure <- expectBindingScopeFailure
+              [ ("A.hs", unlines
+                  [ "module A (T) where"
+                  , "data T = AT"
+                  , "data Private = Private"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import A (Private)"
+                  , "excluded :: Private"
+                  ])
+              ]
+            assertBool (show privateFailure)
+              $ any ("Private is not in scope" `isInfixOf`) privateFailure
+        , testCase "module self exports include local declarations" $ do
+            environment <- expectSourceEnvironment
+              [ ("Self.hs", unlines
+                  [ "module Self (module Self) where"
+                  , "data Local = LocalConstructor"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Self (Local)"
+                  , "selected :: Local"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Self"] "Local")
+        , testCase "module exports honor aliased and unaliased imports" $ do
+            environment <- expectSourceEnvironment
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data Direct = DirectConstructor"
+                  , "data Aliased = AliasedConstructor"
+                  ])
+              , ("Direct.hs", unlines
+                  [ "module Direct (module Origin) where"
+                  , "import Origin (Direct)"
+                  ])
+              , ("Aliased.hs", unlines
+                  [ "module Aliased (module X) where"
+                  , "import Origin as X (Aliased)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Direct (Direct)"
+                  , "import Aliased (Aliased)"
+                  , "direct :: Direct"
+                  , "aliased :: Aliased"
+                  ])
+              ]
+            direct <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "direct"
+            functionResult direct @?=
+              TypeCons (validQualifiedName ["Origin"] "Direct")
+            aliased <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "aliased"
+            functionResult aliased @?=
+              TypeCons (validQualifiedName ["Origin"] "Aliased")
+        , testCase "qualified-only module aliases re-export no names" $ do
+            failures <- expectBindingScopeFailure
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data T = TConstructor"
+                  ])
+              , ("QualifiedOnly.hs", unlines
+                  [ "module QualifiedOnly (module X) where"
+                  , "import qualified Origin as X (T)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import QualifiedOnly (T)"
+                  , "excluded :: T"
+                  ])
+              ]
+            assertBool (show failures)
+              $ any ("T is not in scope" `isInfixOf`) failures
+        , testCase "module exports intersect identity across imports" $ do
+            environment <- expectSourceEnvironment
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data T = TConstructor"
+                  ])
+              , ("Bridge.hs", unlines
+                  [ "module Bridge (module X) where"
+                  , "import Origin (T)"
+                  , "import qualified Origin as X (T)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Bridge (T)"
+                  , "selected :: T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Origin"] "T")
+        , testCase "positive lists preserve unloaded external identities" $ do
+            environment <- expectSourceEnvironment
+              [ ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified Data.Text as X (Text)"
+                  , "selected :: X.Text"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Data", "Text"] "Text")
+        , testCase "package imports cannot bind a same-spelled source module" $ do
+            messages <- expectBindingScopeFailure
+              [ ("A.hs", "module A where\ndata T = AT\n")
+              , ("Use.hs", unlines
+                  [ "{-# LANGUAGE PackageImports #-}"
+                  , "module Use where"
+                  , "import \"package\" A (T)"
+                  , "excluded :: T"
+                  ])
+              ]
+            assertBool (show messages)
+              $ any ("T is not in scope" `isInfixOf`) messages
+        , testCase "loaded Prelude is implicit unless disabled" $ do
+            let prelude = ("Prelude.hs", unlines
+                  [ "module Prelude (Bool) where"
+                  , "data Bool = False | True"
+                  ])
+                support = ("Support.hs",
+                  "module Support where\ndata Marker = Marker\n")
+            environment <- expectSourceEnvironment
+              [ prelude
+              , support
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Support ()"
+                  , "selected :: Bool"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Prelude"] "Bool")
+            disabled <- expectBindingScopeFailure
+              [ prelude
+              , support
+              , ("Use.hs", unlines
+                  [ "{-# LANGUAGE NoImplicitPrelude #-}"
+                  , "module Use where"
+                  , "import Support ()"
+                  , "selected :: Bool"
+                  ])
+              ]
+            assertBool (show disabled)
+              $ any ("Bool is not in scope" `isInfixOf`) disabled
+        , testCase "parse-mode flags can suppress implicit Prelude" $
+            withTemporaryFile (unlines
+              [ "module Prelude (Bool) where"
+              , "data Bool = False | True"
+              ]) $ \preludePath ->
+            withTemporaryFile (unlines
+              [ "module ModeDisabled where"
+              , "excluded :: Bool"
+              ]) $ \usePath -> do
+              let preludeMode = haskellSrcExtsParseMode preludePath
+                  baseUseMode = haskellSrcExtsParseMode usePath
+                  disabledMode = baseUseMode
+                    { HSE.extensions =
+                        HSE.DisableExtension HSE.ImplicitPrelude
+                          : HSE.extensions baseUseMode
+                    }
+              LoadReport result _ <- parseModules
+                [(preludeMode, preludePath), (disabledMode, usePath)]
+              case result of
+                Left (BindingDeclarationErrors failures) -> assertBool
+                  (show failures)
+                  $ any (("Bool is not in scope" `isInfixOf`)
+                      . extractionErrorMessage)
+                  $ NonEmpty.toList failures
+                Left failure -> fail $ "unexpected parse-mode failure: "
+                  ++ show failure
+                Right _ -> fail "parse mode ignored disabled implicit Prelude"
+        , testCase "legacy extraction keeps unique-global fallback" $ do
+            provider <- expectParsedModule
+              "module Provider where\ndata T = T\n"
+            consumer <- expectParsedModule
+              "module Consumer where\nlegacy :: T -> T\n"
+            typeNames <- expectRight $ getDataTypes [provider]
+            results <- pure $ runIdentity
+              $ getDecls typeNames Map.empty Map.empty [consumer]
+            legacy <- case results of
+              [result] -> expectRight result
+              _ -> fail $ "unexpected legacy extraction results: "
+                ++ show results
+            let imported = TypeCons $ validQualifiedName ["Provider"] "T"
+            functionParameters legacy @?= [imported]
+            functionResult legacy @?= imported
+        ]
       , testCase "mixed binding categories retain declaration source order" $
           withTemporaryFile (unlines
             [ "module OrderedBindings where"
@@ -4467,13 +4729,13 @@ tests = testGroup "Exference"
                   ++ show declarations
       , testCase "mixed binding errors retain declaration source order" $
           withTemporaryFile (unlines
-            [ "{-# LANGUAGE TypeOperators #-}"
+            [ "{-# LANGUAGE TypeFamilies #-}"
             , "module OrderedBindingErrors where"
-            , "ordinaryBefore, ordinaryPeer :: Int :+: Bool"
+            , "ordinaryBefore, ordinaryPeer :: Int ~ Bool"
             , "class Owner a where"
-            , "  method :: Int :+: Bool"
-            , "data Broken = Broken (Int :+: Bool)"
-            , "ordinaryAfter :: Int :*: Bool"
+            , "  method :: Int ~ Bool"
+            , "data Broken = Broken (Int ~ Bool)"
+            , "ordinaryAfter :: Bool ~ Int"
             ]) $ \modulePath -> do
               LoadReport result _ <- parseModules
                 [(haskellSrcExtsParseMode modulePath, modulePath)]
@@ -5448,7 +5710,7 @@ tests = testGroup "Exference"
           parsedModule <- expectParsedModule $ unlines
             [ "module OrderedSynonymErrors where"
             , "type Earlier = Earlier"
-            , "type Later = Int :+: Bool"
+            , "type Later = Int ~ Bool"
             ]
           typeNames <- expectRight $ getDataTypes [parsedModule]
           let errors =
@@ -5462,7 +5724,7 @@ tests = testGroup "Exference"
                 $ "cyclic type synonym" `isInfixOf`
                     extractionErrorMessage earlier
               assertBool "later raw conversion error was reordered"
-                $ "infix operator" `isInfixOf`
+                $ "unsupported type syntax" `isInfixOf`
                     extractionErrorMessage later
             _ -> fail $ "unexpected type declaration errors: " ++ show errors
       , testCase "type-synonym foralls shadow their head parameters" $ do
@@ -5837,10 +6099,12 @@ tests = testGroup "Exference"
       , testCase "checked recursion spans source modules" $
           withTemporaryFile (unlines
             [ "module MutualA where"
+            , "import MutualB (B)"
             , "data A = MakeA B"
             ]) $ \firstPath ->
           withTemporaryFile (unlines
             [ "module MutualB where"
+            , "import MutualA (A)"
             , "data B = MakeB A"
             ]) $ \secondPath -> do
               LoadReport parsedResult _ <- parseModules
@@ -6380,6 +6644,70 @@ tests = testGroup "Exference"
                     (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
               className @?= name "Eq"
             Right result -> fail $ "unexpected elaboration: " ++ show result
+      , testCase "infix type operators share prefix elaboration and aliases" $ do
+          let operatorName = validQualifiedName ["TypeOwner"] ":*:"
+              baseResolver = legacyTypeResolver Map.empty [operatorName]
+              unqualifiedResolver = scopeTypeResolverWithQualifiedNames
+                [operatorName] [] [] baseResolver
+          (infixType, infixHints) <- expectRight
+            $ parseTypeWithTestResolver unqualifiedResolver
+                "left :*: right"
+          (prefixType, prefixHints) <- expectRight
+            $ parseTypeWithTestResolver unqualifiedResolver
+                "(:*:) left right"
+          infixType @?= TypeApp
+            (TypeApp (TypeCons operatorName) (TypeVar 0))
+            (TypeVar 1)
+          infixHints @?= Map.fromList [("left", 0), ("right", 1)]
+          (infixType, infixHints) @?= (prefixType, prefixHints)
+
+          ownerModule <- expectRight $ SharedName.mkModuleName "TypeOwner"
+          aliasModule <- expectRight $ SharedName.mkModuleName "Alias"
+          let aliasedResolver = scopeTypeResolverWithQualifiedNames
+                []
+                [(aliasModule, ownerModule)]
+                [(aliasModule, [operatorName])]
+                baseResolver
+          aliased <- expectRight $ parseTypeWithTestResolver aliasedResolver
+            "left Alias.:*: right"
+          aliased @?= (infixType, infixHints)
+      , testCase "infix type operators obey scope and ambiguity checks" $ do
+          let firstOperator = validQualifiedName ["First"] ":*:"
+              secondOperator = validQualifiedName ["Second"] ":*:"
+              baseResolver = legacyTypeResolver
+                Map.empty [firstOperator, secondOperator]
+              hiddenResolver = scopeTypeResolverWithQualifiedNames
+                [] [] [] baseResolver
+              ambiguousResolver = scopeTypeResolverWithQualifiedNames
+                [firstOperator, secondOperator] [] [] baseResolver
+              assertRejected label detail resolver =
+                case parseTypeWithTestResolver resolver "left :*: right" of
+                  Left message -> assertBool (label ++ ": " ++ message)
+                    $ detail `isInfixOf` message
+                  Right converted -> fail $ label ++ " accepted "
+                    ++ show converted
+          assertRejected
+            "a hidden loaded operator"
+            "is not in scope"
+            hiddenResolver
+          assertRejected
+            "two visible operators"
+            "ambiguous unqualified name"
+            ambiguousResolver
+
+          firstModule <- expectRight $ SharedName.mkModuleName "First"
+          aliasModule <- expectRight $ SharedName.mkModuleName "Alias"
+          let excludedAliasResolver = scopeTypeResolverWithQualifiedNames
+                []
+                [(aliasModule, firstModule)]
+                [(aliasModule, [])]
+                baseResolver
+          case parseTypeWithTestResolver excludedAliasResolver
+              "left Alias.:*: right" of
+            Left message -> assertBool message
+              $ "is not in scope" `isInfixOf` message
+            Right converted -> fail $ "excluded qualified operator accepted "
+              ++ show converted
       , testCase "explicit forall retains its source hint identity" $ do
           (converted, hints) <- expectRight
             $ parseTypePure "forall foo. foo -> foo"
@@ -6627,6 +6955,16 @@ tests = testGroup "Exference"
                 results
           assertBool "canonical identity search produced no candidate"
             $ not $ null candidates
+          assertBool "canonical candidates lost the checked target"
+            $ all ((== target) . Generated.clauseName
+                . SharedCandidate.candidateOutput) candidates
+          mapM_ (\result ->
+              let batch = SharedQuery.resultSearch result
+                  expectedEvidence = case SharedSearch.batchCandidates batch of
+                    [] -> SharedQuery.NoEvidence
+                    _ : _ -> SharedQuery.ValidatedCandidates
+              in SharedQuery.resultEvidence result @?= expectedEvidence)
+            results
           case candidates of
             candidate : _ -> do
               let details = SharedCandidate.candidateDetails candidate
@@ -6639,17 +6977,6 @@ tests = testGroup "Exference"
                 (SharedQuery.resultSearch
                   $ lastElement firstResult remaining) @?=
               SharedSearch.Completed SharedSearch.Finished
-      , testCase "query-result projection preserves its envelope lazily" $ do
-          targetName <- expectRight $ SharedName.mkOperator "<~>"
-          target <- expectRight $ Generated.mkDefinitionName targetName
-          let metadata = ExferenceBatchMetadata Map.empty 2 3
-              (hasValidatedEvidence, progress, observedMetadata,
-                observedTarget) =
-                  queryProjectionStrictnessForTesting target Map.empty
-          hasValidatedEvidence @?= True
-          progress @?= SharedSearch.Continuing
-          observedMetadata @?= metadata
-          observedTarget @?= target
       , testCase "type hints follow every leading forall layer" $ do
           let function = TypeArrow (TypeVar 4) (TypeVar 9)
               goal = TypeForall [4] []
@@ -7810,6 +8137,16 @@ canonicalType = SharedType.canonicalizeType
 parseTypePure :: String -> Either Diagnostic (HsType, TypeVarIndex)
 parseTypePure = parseTypeWithModePure $ haskellSrcExtsParseMode "test"
 
+parseTypeWithTestResolver
+  :: TypeResolver
+  -> String
+  -> Either String (HsType, TypeVarIndex)
+parseTypeWithTestResolver resolver source = case
+    HSE.parseTypeWithMode (haskellSrcExtsParseMode "type-operator-test") source of
+  HSE.ParseFailed location message -> Left $ show location ++ ": " ++ message
+  HSE.ParseOk syntaxType -> runIdentity $ runExceptT
+    $ convertTypeNoDeclWithResolver resolver Nothing syntaxType
+
 isLoaderSummary :: String -> Bool
 isLoaderSummary message = any (`isPrefixOf` message)
   ["got ", "and ", "(-> "]
@@ -8069,23 +8406,40 @@ lastChunk input = case findExpressionsWithStats input of
   go latest [] = latest
   go _ (next : rest) = go next rest
 
-lastCapacityChunk
-  :: IdentifierCapacities
-  -> ExferenceInput
-  -> IO ExferenceChunkElement
-lastCapacityChunk capacities input = do
-  chunks <- expectRight
-    $ findExpressionsWithIdentifierCapacitiesEither capacities input
-  case chunks of
-    [] -> fail "expected at least one capacity-limited search chunk"
-    chunk : remaining -> pure $ lastElement chunk remaining
-
 lastElement :: value -> [value] -> value
 lastElement latest [] = latest
 lastElement _ (next : remaining) = lastElement next remaining
 
 expectRight :: Show problem => Either problem result -> IO result
 expectRight = either (fail . show) pure
+
+expectSourceEnvironment
+  :: [(FilePath, String)]
+  -> IO SourceEnvironment
+expectSourceEnvironment sources = do
+  LoadReport result _ <- parseModuleSources sources
+  expectRight result
+
+sourceFunctionNamed
+  :: SourceEnvironment
+  -> QualifiedName
+  -> IO FunctionBinding
+sourceFunctionNamed environment wanted = case find
+    ((== wanted) . functionName) $ sourceFunctions environment of
+  Just binding -> pure binding
+  Nothing -> fail $ "source function was not loaded: " ++ show wanted
+
+expectBindingScopeFailure
+  :: [(FilePath, String)]
+  -> IO [String]
+expectBindingScopeFailure sources = do
+  LoadReport result _ <- parseModuleSources sources
+  case result of
+    Left (BindingDeclarationErrors failures) -> pure
+      $ map extractionErrorMessage $ NonEmpty.toList failures
+    Left failure -> fail $ "unexpected source-scope failure: " ++ show failure
+    Right environment -> fail $ "out-of-scope source was accepted: "
+      ++ show environment
 
 validSourceSpan :: Int -> Int -> Int -> Int -> SourceSpan
 validSourceSpan startLine startColumn endLine endColumn =

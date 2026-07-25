@@ -41,8 +41,13 @@ import Language.Haskell.Exference.ClassEnvFromHaskellSrc
 import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
 import Language.Haskell.Exference.TypeFromHaskellSrc
 import Language.Haskell.Exference.ExtractionError
+import Language.Haskell.Exference.Internal.SourceTypeScope
+  ( sourceClassArities
+  , sourceTypeResolvers
+  )
 import Language.Haskell.Exference.HaskellSrcUtils
   ( contextConstraints
+  , moduleNameAndDecls
   , splitDeclHead
   , splitInstRule
   , withHaskellSrcLocation
@@ -65,11 +70,12 @@ import Language.Haskell.Synthesis.Diagnostic
 
 import Control.DeepSeq
 
-import Control.Monad ( forM_, zipWithM )
+import Control.Monad ( forM_ )
 import Data.List ( sort, sortOn, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
+import Data.Maybe ( maybeToList )
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Writer.Strict (WriterT, runWriterT, tell)
 import System.Directory ( listDirectory )
@@ -264,6 +270,9 @@ data EnvironmentLoadError
   = EnvironmentDirectoryReadError Diagnostic
   | ModuleReadErrors (NonEmpty Diagnostic)
   | ModuleParseErrors (NonEmpty Diagnostic)
+  | DuplicateModuleDeclarations (NonEmpty Diagnostic)
+    -- ^ Later declarations of an already loaded logical module, including
+    -- headerless modules that all declare @Main@.
   | UnsupportedSourceVocabulary
       (NonEmpty UnsupportedVocabularyOccurrence)
   | DataTypeNameError ExtractionError
@@ -290,6 +299,7 @@ environmentLoadErrorDiagnostics failure = case failure of
     withCode "EXF_ENV_DIRECTORY_READ" value NonEmpty.:| []
   ModuleReadErrors values -> fmap (withCode "EXF_MODULE_READ") values
   ModuleParseErrors values -> fmap (withCode "EXF_MODULE_PARSE") values
+  DuplicateModuleDeclarations values -> values
   UnsupportedSourceVocabulary occurrences ->
     fmap unsupportedVocabularyDiagnostic occurrences
   DataTypeNameError detail -> locatedDiagnostic
@@ -831,6 +841,42 @@ data ModuleInput
   = ModuleFileInput ParseMode FilePath
   | ModuleSourceInput ParseMode String
 
+-- Reject duplicate logical modules before any type/class scope is indexed by
+-- module name. Headerless Haskell modules all declare @Main@, so they follow
+-- the same rule as repeated explicit module headers. Only later occurrences
+-- are diagnosed, in caller order, and each diagnostic identifies the first
+-- declaration as context.
+duplicateModuleDiagnostics
+  :: [Module SrcSpanInfo]
+  -> [Diagnostic]
+duplicateModuleDiagnostics modules = go M.empty occurrences
+ where
+  occurrences =
+    [ (source, HSE.srcInfoSpan location)
+    | modul <- modules
+    , (HSE.ModuleName location source, _) <-
+        maybeToList $ moduleNameAndDecls modul
+    ]
+
+  go _ [] = []
+  go seen ((source, currentSpan) : remaining) = case
+      M.lookup source seen of
+    Nothing -> go (M.insert source currentSpan seen) remaining
+    Just originalSpan ->
+      duplicateDiagnostic source originalSpan currentSpan
+        : go seen remaining
+
+  duplicateDiagnostic source originalSpan currentSpan =
+    withHaskellSrcSpan currentSpan
+      $ contextualDiagnostic
+          Error
+          "EXF_MODULE_DUPLICATE"
+          "duplicate source module"
+          ( source ++ " is declared by both "
+              ++ HSE.srcSpanFilename originalSpan ++ " and "
+              ++ HSE.srcSpanFilename currentSpan
+          )
+
 -- File-backed and in-memory entry points converge before parsing, so source
 -- extraction, warning order, checked lowering, and sealing cannot drift.
 parseModuleInputsM
@@ -881,6 +927,10 @@ parseModuleInputsM inputs = do
         Nothing -> pure ()
       let modules = rights parsedModules
 
+      case NonEmpty.nonEmpty $ duplicateModuleDiagnostics modules of
+        Just errors -> throwE $ DuplicateModuleDeclarations errors
+        Nothing -> pure ()
+
       case NonEmpty.nonEmpty $ unsupportedVocabularyOccurrences modules of
         Just occurrences ->
           throwE $ UnsupportedSourceVocabulary occurrences
@@ -892,7 +942,22 @@ parseModuleInputsM inputs = do
               ("could not extract data-type names: " ++) conversionError
         Right result -> pure result
 
-      typeDeclarationResults <- lift $ getTypeDeclsLocated dataTypes modules
+      let classArities = sourceClassArities modules
+          resolvers = sourceTypeResolvers dataTypes classArities
+            $ zip (map fst rawTuples) modules
+          globalResolver = TypeResolver
+            { resolverTypeNames = dataTypes
+            , resolverClassArities = classArities
+            , resolverUnqualifiedTypeNames = dataTypes
+            , resolverUnqualifiedClassNames = M.keys classArities
+            , resolverModuleAliases = []
+            , resolverQualifiedNames = Nothing
+            }
+          resolverFor (HSE.ModuleName _ source) =
+            M.findWithDefault globalResolver source resolvers
+
+      typeDeclarationResults <- lift
+        $ getTypeDeclsLocatedWithResolvers resolverFor modules
       let typeDeclarationErrors = lefts typeDeclarationResults
       case NonEmpty.nonEmpty typeDeclarationErrors of
         Just errors -> throwE $ TypeDeclarationErrors errors
@@ -905,7 +970,8 @@ parseModuleInputsM inputs = do
       -- checked backend projection expands the retained synonym declarations
       -- later through 'prepareSourceSynthesisInventory'.
       classResult <- lift
-        $ loadClassEnvironmentSourced dataTypes M.empty modules
+        $ loadClassEnvironmentSourcedWithResolvers
+            (\_ -> resolverFor) M.empty modules
       (loadedClasses, methodsByModule) <- either
         (throwE . ClassEnvironmentLoadFailure)
         pure
@@ -913,9 +979,15 @@ parseModuleInputsM inputs = do
       let classEnvironment = loadedStaticClassEnvironment loadedClasses
           instanceCount = loadedSourceInstanceCount loadedClasses
 
-      extracted <- lift $ zipWithM
-        (hExtractBinds classEnvironment dataTypes M.empty)
-        modules methodsByModule
+      extracted <- lift $ sequence
+        [ hExtractBinds
+            (resolverFor moduleName)
+            M.empty
+            modul
+            methodResults
+        | (modul, methodResults) <- zip modules methodsByModule
+        , (moduleName, _) <- maybeToList $ moduleNameAndDecls modul
+        ]
       let (bindingLists, deconstructorLists, errorLists) = unzip3 extracted
           declarations = concat bindingLists
           deconstructors = concat deconstructorLists
@@ -1041,8 +1113,7 @@ parseModuleInputsM inputs = do
 
     failBuiltIns = throwE . BuiltInEnvironmentErrors
 
-    hExtractBinds :: StaticClassEnv
-                  -> [QualifiedName]
+    hExtractBinds :: TypeResolver
                   -> TypeDeclMap
                   -> Module SrcSpanInfo
                   -> [SourcedExtraction [ClassMethodDeclaration]]
@@ -1051,11 +1122,11 @@ parseModuleInputsM inputs = do
                        , [DeconstructorBinding]
                        , [ExtractionError]
                        )
-    hExtractBinds cntxt ds tDeclMap modul methodResults = do
-      fromData <- getDataConssSourced
-        (sClassEnv_tclasses cntxt) ds tDeclMap modul
-      declarations <- getDeclsSourced
-        ds (sClassEnv_tclasses cntxt) tDeclMap modul
+    hExtractBinds resolver tDeclMap modul methodResults = do
+      fromData <- getDataConssSourcedWithResolver
+        resolver tDeclMap modul
+      declarations <- getDeclsSourcedWithResolver
+        resolver tDeclMap modul
       let ordered = sortOn orderedBindingSlot
             $ map dataBindingExtraction fromData
             ++ map ordinaryBindingExtraction declarations

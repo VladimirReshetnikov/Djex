@@ -1,8 +1,9 @@
--- | Narrow test seam for otherwise unreachable finite identifier exhaustion.
+-- | Cabal-private test seam for otherwise unreachable engine boundaries.
 --
--- This module is explicitly internal: production searches always use the full
--- 'Int' namespaces.  Small capacities let regression tests exercise truthful
--- operational truncation without attempting to materialize billions of IDs.
+-- The dedicated @exference-engine-tests@ component compiles this module and
+-- the parser-neutral core as home modules. Production searches always use the
+-- full 'Int' namespaces; tiny capacities let regressions exercise truthful
+-- truncation without making a testing hook part of the library API.
 module Language.Haskell.Exference.Core.Internal.Testing
   ( IdentifierCapacities (..)
   , findExpressionsWithIdentifierCapacitiesEither

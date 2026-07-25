@@ -15,10 +15,12 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , scopeTypeResolverWithQualifiedNames
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
+  , convertTypeNoDeclInternalWithResolver
   , convertTypeNoDeclWithResolver
   , normalizeConvertedForalls
   , convertName
   , convertQName
+  , convertQNameWithResolver
   , convertModuleName
   , getVar
   -- , ConversionMonad
@@ -329,7 +331,15 @@ convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
   helper (TyList _ t)       =
     T.TypeApp (T.TypeCons SharedName.listName) <$> helper t
   helper (TyParen _ t)      = helper t
-  helper TyInfix{}        = throwE "infix operator"
+  helper (TyInfix location left operator right) = case operator of
+    UnpromotedName operatorLocation name ->
+      -- An infix type constructor is only surface syntax. Lower it exactly as
+      -- @(:*:) left right@ so both spellings share nominal scope resolution,
+      -- type-variable allocation order, and the later kind-checking path.
+      helper $ TyApp location
+        (TyApp location (TyCon operatorLocation name) left)
+        right
+    PromotedName{} -> throwE "promoted type"
   helper TyKind{}         = throwE "kind annotation"
   helper TyPromoted{}     = throwE "promoted type"
   helper (TyForall _ maybeTVars context t) =
@@ -552,6 +562,12 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
         Nothing -> Right canonical
         Just admitted -> case M.lookup writtenModule admitted of
           Just names | canonical `S.member` names -> Right canonical
+          -- An explicitly imported module outside the loaded source set has
+          -- no enumerable export surface. Preserve the frontend's open-world
+          -- identity when no exact surface was installed for its qualifier;
+          -- callers can install an empty surface to make a restrictive import
+          -- list fail closed.
+          Nothing | target `S.notMember` knownModules -> Right canonical
           _ -> Left $ "qualified name " ++ show raw ++ " is not in scope"
     ambiguous modules = Left $ "ambiguous module qualifier "
       ++ SharedName.renderModuleName writtenModule ++ "; matches "

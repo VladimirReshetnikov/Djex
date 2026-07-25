@@ -1,5 +1,9 @@
 module System.IO where
 
+import qualified Control.Applicative (Applicative)
+import qualified Control.Monad (Monad)
+import qualified Data.Functor (Functor)
+import qualified Data.String (String)
 
 
 data IO a

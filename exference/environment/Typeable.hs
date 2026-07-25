@@ -1,5 +1,9 @@
 module Data.Typeable where
 
+import qualified Data.Eq (Eq)
+import Data.Maybe (Maybe)
+import qualified Data.Ord (Ord)
+import qualified Text.Show (Show)
 
 
 data TypeRep

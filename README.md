@@ -138,7 +138,7 @@ Start the shared interactive session with either equivalent form:
 
 ```console
 djex
-djex repl [--backend djinn|exference|both] [--environment DIR] [--fix] [--history FILE]
+djex repl [--backend djinn|exference|both] [--environment DIR] [--fix] [--history FILE] [--ignore-startup]
 ```
 
 The default prompt is `djex[djinn]>`. Entering a bare type synthesizes with
@@ -146,9 +146,11 @@ the active backend selection; `:backend` changes that selection, while
 `:djinn TYPE`, `:exference TYPE`, and `:compare TYPE` select a backend for one
 query. Both-mode labels each engine's independent output and still runs the
 other engine if one rejects the type or fails. This resembles GHCi's colon
-commands, history, completion, and `:{`/`:}` input, but it is not a GHCi
-evaluator: bare input is a requested result type, not a Haskell expression,
-and each backend retains its own type grammar and semantics.
+commands, startup files, history, completion, and `:{`/`:}` input. Bare input
+is deliberately still a requested result type, not a Haskell expression, and
+each backend retains its own type grammar and semantics; the explicit `:eval`
+command is the separate boundary that compiles and executes an expression with
+real GHC.
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded
@@ -169,16 +171,32 @@ synonyms normalized. See
 [kind inspection](docs/repl.md#inspecting-type-kinds) for scope rules,
 qualification behavior, and the intentionally supported kind-language subset.
 
+`:eval EXPRESSION` compiles the loaded source workspace with real GHC and
+evaluates one expression in the current prompt module/import context. This is
+the only REPL command that executes Haskell code, and each invocation uses a
+fresh interpreter. If the workspace or its prompt context does not compile,
+evaluation falls back to Prelude scope and reports an advisory. See
+[evaluating expressions](docs/repl.md#evaluating-expressions) for the scope,
+fallback, isolation, and interrupt contract.
+
 The Exference half has a GHCi-shaped source workspace. `:load`, `:add`,
 `:unadd`, and `:reload` manage module/file targets and their local source
 dependencies; bare Haskell imports and `:module` manage the prompt scope;
 `:show targets`, `:show modules`, and `:show imports` expose the three distinct
 states. Loading and scope changes are transactional. This is source loading,
-not GHC compilation: Djex does not read the GHC package database or `.hi`
-files, and it consumes declarations and signatures without compiling or
-inferring function bodies. Djinn always retains its independent standard
-session. See the [shared REPL guide](docs/repl.md) for the target grammar,
-export visibility, commands, settings, defaults, and failure behavior.
+not GHC compilation for synthesis: Djex consumes declarations and signatures
+without compiling or inferring function bodies. Imports written in each module
+govern that module's declaration elaboration; bare interactive imports and
+`:module` govern the later prompt scope and never reinterpret the inventory.
+Djex projects that prompt scope into checked Exference and Djinn sessions.
+Djinn's abstract type stubs reuse kinds inferred by the shared inventory, and
+its presentation uses a record-selector spelling only when that selector is
+visible unqualified. Djinn falls back to its standard checked session only if
+the source projection cannot be sealed. The explicit `:eval` boundary
+separately gives the loaded files to real GHC; its package and compiled-module
+scope is not added to either synthesis inventory.
+See the [shared REPL guide](docs/repl.md) for the target grammar, export
+visibility, commands, settings, defaults, and failure behavior.
 
 Djex can also delegate explicit package-manager work to Cabal:
 
@@ -444,6 +462,11 @@ checked environment. The explicitly named
 `CheckedSourceEnvironment` bridge for the historical CLI and clients that
 opt into the compatibility frontend.
 
+All file and snapshot loaders reject duplicate logical modules before building
+scope maps. This includes multiple headerless files, which all declare
+`Main`; each later occurrence receives an `EXF_MODULE_DUPLICATE` diagnostic
+that identifies the first source.
+
 The source boundary tags class methods with their qualified owner, nests
 them under the common class declaration for validation, and lowers each
 rated selector exactly once into Exference's flat search inventory without
@@ -484,18 +507,36 @@ exported `UnsupportedVocabularyForm` constructors are the authoritative
 compatibility vocabulary for this rejection phase; `ExplicitExportList`
 remains for source compatibility but is no longer emitted.
 
-Explicit module export lists are accepted. Source loading retains every local
-declaration in the authoritative inventory; a module-aware frontend separately
-projects that inventory through the export list for plain imports and keeps
-the full inventory for `*MODULE` scope and canonical qualified lookup. This
-inventory-versus-scope split avoids reparsing or losing private declarations.
+Every source signature and nominal declaration is elaborated in its defining
+module's own scope. Local type and class names take precedence; direct imports
+honor `qualified`, `as`, positive lists, and `hiding`. Loaded export surfaces
+include named exports and `module M` re-exports, with re-exported entities
+retaining their defining canonical names. As in Haskell, `module M` means the
+identities available both unqualified and through the written qualifier `M`:
+self exports include local declarations, aliases are honored, and a
+qualified-only import contributes no names. A loaded `Prelude` is imported
+implicitly unless the module is `Prelude`, imports it explicitly, or enables
+`NoImplicitPrelude` or `RebindableSyntax`.
+
+Import resolution does not discover files. Directory and explicit snapshot
+loaders elaborate only the supplied modules; the shared REPL first discovers
+its resolvable local dependency closure and then invokes the same loader. Scope
+is exact among loaded modules, so an unimported loaded name cannot bypass an
+import by using its canonical qualifier. Unloaded module interfaces are not
+available, and the open inventory therefore retains genuinely unknown names as
+external. A positive import list provides a finite canonical external surface;
+unrestricted and `hiding` imports cannot enumerate or verify the remainder.
+
+Source loading retains private as well as exported declarations in the
+authoritative inventory for whole-environment validation and later `*MODULE`
+scope. Export lists govern downstream imports rather than deleting facts.
 Ordinary positional, infix, record, strict, and unpacked datatype fields are
-lowered explicitly; record selectors become rated value bindings exactly
-once. Imports, fixities, ordinary value and method bodies, ordinary term
-patterns and pattern-value bodies, default declarations, and operational
-pragmas remain accepted because they do not change the nominal type/class
-inventory. These forms are explicit current limitations rather than syntax
-that can silently disappear during loading.
+lowered explicitly; record selectors become rated Exference value bindings
+exactly once. Fixities, ordinary value and method bodies, ordinary term patterns
+and pattern-value bodies, default declarations, and operational pragmas remain
+accepted because they do not add nominal declarations or executable semantics
+to the synthesis inventory. These are explicit limitations, not syntax that is
+silently reinterpreted.
 
 `ExferenceSessionPolicy` applies exact structural-name exclusions and
 finite, signed rating overrides while the private search projection is

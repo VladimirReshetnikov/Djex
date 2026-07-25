@@ -1,5 +1,11 @@
 module Data.Ord where
 
+import qualified Data.Bool (Bool)
+import qualified Data.Eq (Eq)
+import qualified Data.Monoid (Dual, First, Last, Product, Sum)
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Text.Read (Read)
+import {-# SOURCE #-} qualified Text.Show (Show)
 
 
 class Data.Eq.Eq a => Ord a where

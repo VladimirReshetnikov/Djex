@@ -211,7 +211,7 @@ loadExferenceSessionFromSources = loadExferenceSessionFromSourcesWithPolicy
 
 -- | Policy-aware counterpart of 'loadExferenceSessionFromSources'. The
 -- in-memory inputs enter the same parse/rate/check/seal pipeline used by the
--- compatibility file loaders.
+-- file loaders.
 loadExferenceSessionFromSourcesWithPolicy
   :: ExferenceSessionPolicy
   -> [(FilePath, String)]

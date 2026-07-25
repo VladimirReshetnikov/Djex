@@ -1,5 +1,10 @@
 module Text.Read where
 
+import qualified Data.Either (Either)
+import qualified Data.Eq (Eq)
+import qualified Data.Maybe (Maybe)
+import qualified Data.String (String)
+import qualified Text.Show (Show)
 
 
 data ReadS

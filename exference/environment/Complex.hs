@@ -1,5 +1,10 @@
 module Data.Complex where
 
+import qualified Data.Data (Data)
+import qualified Data.Eq (Eq)
+import qualified Foreign.Storable (Storable)
+import qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 data Complex a

@@ -1,5 +1,8 @@
 module Data.Ix where
 
+import qualified Data.Bool (Bool)
+import qualified Data.Int (Int)
+import qualified Data.Ord (Ord)
 
 
 class Data.Ord.Ord a => Ix a where
@@ -34,4 +37,3 @@ class Data.Ord.Ord a => Ix a where
 -- instance (Ix a1, Ix a2, Ix a3) => Ix (a1, a2, a3)
 -- instance (Ix a1, Ix a2, Ix a3, Ix a4) => Ix (a1, a2, a3, a4)
 -- instance (Ix a1, Ix a2, Ix a3, Ix a4, Ix a5) => Ix (a1, a2, a3, a4, a5)
-   

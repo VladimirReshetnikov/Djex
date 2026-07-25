@@ -4,6 +4,7 @@ module Language.Haskell.Exference.ClassEnvFromHaskellSrc
   , LoadedClassEnvironment (..)
   , loadClassEnvironment
   , loadClassEnvironmentSourced
+  , loadClassEnvironmentSourcedWithResolvers
   )
 where
 
@@ -107,9 +108,32 @@ loadClassEnvironmentSourced
            , [[SourcedExtraction [ClassMethodDeclaration]]]
            )
        )
-loadClassEnvironmentSourced dataTypes typeDeclarations modules = do
+loadClassEnvironmentSourced dataTypes =
+  loadClassEnvironmentSourcedWithResolvers resolverFor
+ where
+  resolverFor classes _ = legacyTypeResolver classes dataTypes
+
+-- | Class loading whose superclass, method, and instance types obey each
+-- owning module's source scope. The class map argument lets the compatibility
+-- wrapper retain unique-global class resolution without a recursive value;
+-- strict source loaders may ignore it and return their precomputed resolver.
+loadClassEnvironmentSourcedWithResolvers
+  :: Monad m
+  => ( Map.Map QualifiedName HsTypeClass
+       -> ModuleName SrcSpanInfo
+       -> TypeResolver
+     )
+  -> TypeDeclMap
+  -> [Module SrcSpanInfo]
+  -> m
+       ( Either ClassEnvironmentLoadError
+           ( LoadedClassEnvironment
+           , [[SourcedExtraction [ClassMethodDeclaration]]]
+           )
+       )
+loadClassEnvironmentSourcedWithResolvers resolverFor typeDeclarations modules = do
   (classResults, rawClassesByModule) <-
-    getTypeClasses dataTypes typeDeclarations modules
+    getTypeClasses resolverFor typeDeclarations modules
   case NonEmpty.nonEmpty $ lefts classResults of
     Just classErrors -> pure $ Left $ ClassDeclarationErrors classErrors
     Nothing -> do
@@ -118,7 +142,8 @@ loadClassEnvironmentSourced dataTypes typeDeclarations modules = do
             [ (tclass_name typeClass, typeClass)
             | typeClass <- classDeclarations
             ]
-      instanceResults <- getInstances classes dataTypes typeDeclarations modules
+      instanceResults <- getInstances resolverFor classes
+        typeDeclarations modules
       case NonEmpty.nonEmpty $ lefts instanceResults of
         Just instanceErrors ->
           pure $ Left $ InstanceDeclarationErrors instanceErrors
@@ -128,7 +153,7 @@ loadClassEnvironmentSourced dataTypes typeDeclarations modules = do
               (mkStaticClassEnv classDeclarations instances) of
             Left failure -> pure $ Left failure
             Right environment -> do
-              methodBatches <- getClassMethodsFromRaw classes dataTypes
+              methodBatches <- getClassMethodsFromRaw resolverFor classes
                 typeDeclarations rawClassesByModule
               let methods = map
                     (concatMap flattenSourcedExtraction) methodBatches
@@ -144,13 +169,16 @@ loadClassEnvironmentSourced dataTypes typeDeclarations modules = do
 
 getTypeClasses
   :: Monad m
-  => [QualifiedName]
+  => ( Map.Map QualifiedName HsTypeClass
+       -> ModuleName SrcSpanInfo
+       -> TypeResolver
+     )
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m ( [Either ExtractionError HsTypeClass]
        , [[Either ExtractionError RawTypeClass]]
        )
-getTypeClasses dataTypes typeDeclarations modules = do
+getTypeClasses resolverFor typeDeclarations modules = do
   let rawDeclarationsByModule = map rawTypeClasses modules
       -- Number every declaration before the global nominal passes.  The maps
       -- below still provide order-independent lookup, while these slots let us
@@ -218,9 +246,10 @@ getTypeClasses dataTypes typeDeclarations modules = do
       $ runExceptT $ runConversionT emptyConversionState $ do
         parameters <- mapM tyVarTransform $ rawClassVariables rawClass
         superclasses <- mapM
-          (convertClassConstraint headers
+          (convertClassConstraintWithResolver
+            (resolverFor headers $ rawClassModule rawClass)
+            headers
             (Just $ rawClassModule rawClass)
-            dataTypes
             typeDeclarations)
           (contextConstraints $ rawClassContext rawClass)
         pure $ HsTypeClass (rawClassName rawClass) parameters superclasses
@@ -259,12 +288,15 @@ rawTypeClasses modul = do
 
 getClassMethodsFromRaw
   :: Monad m
-  => Map.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
+  => ( Map.Map QualifiedName HsTypeClass
+       -> ModuleName SrcSpanInfo
+       -> TypeResolver
+     )
+  -> Map.Map QualifiedName HsTypeClass
   -> TypeDeclMap
   -> [[Either ExtractionError RawTypeClass]]
   -> m [[SourcedExtraction [ClassMethodDeclaration]]]
-getClassMethodsFromRaw classes dataTypes typeDeclarations =
+getClassMethodsFromRaw resolverFor classes typeDeclarations =
   mapM $ fmap concat . mapM elaborate
  where
   -- Invalid raw class names abort the earlier class-declaration phase, so this
@@ -272,16 +304,16 @@ getClassMethodsFromRaw classes dataTypes typeDeclarations =
   -- is preferable to assigning such a failure to another declaration.
   elaborate (Left _) = pure []
   elaborate (Right rawClass) = elaborateRawClass
-    classes dataTypes typeDeclarations rawClass
+    (resolverFor classes) classes typeDeclarations rawClass
 
 elaborateRawClass
   :: Monad m
-  => Map.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
+  => (ModuleName SrcSpanInfo -> TypeResolver)
+  -> Map.Map QualifiedName HsTypeClass
   -> TypeDeclMap
   -> RawTypeClass
   -> m [SourcedExtraction [ClassMethodDeclaration]]
-elaborateRawClass classes dataTypes typeDeclarations rawClass =
+elaborateRawClass resolverFor classes typeDeclarations rawClass =
   case Map.lookup (rawClassName rawClass) classes of
     Nothing -> pure
       [ classFailure
@@ -336,8 +368,9 @@ elaborateRawClass classes dataTypes typeDeclarations rawClass =
 
   transformMethodDeclaration owner (TypeSig _ names signature) =
     withExceptT (\failure -> failure ++ " in " ++ prettyPrint signature) $ do
-      converted <- convertTypeInternal classes
-        (Just $ rawClassModule rawClass) dataTypes typeDeclarations signature
+      converted <- convertTypeInternalWithResolver
+        (resolverFor $ rawClassModule rawClass)
+        (Just $ rawClassModule rawClass) typeDeclarations signature
       mapM (convertedMethod owner converted) names
   transformMethodDeclaration _ _ = pure []
 
@@ -351,12 +384,15 @@ elaborateRawClass classes dataTypes typeDeclarations rawClass =
 
 getInstances
   :: Monad m
-  => Map.Map QualifiedName HsTypeClass
-  -> [QualifiedName]
+  => ( Map.Map QualifiedName HsTypeClass
+       -> ModuleName SrcSpanInfo
+       -> TypeResolver
+     )
+  -> Map.Map QualifiedName HsTypeClass
   -> TypeDeclMap
   -> [Module SrcSpanInfo]
   -> m [Either ExtractionError HsInstance]
-getInstances classes dataTypes typeDeclarations modules = sequence $ do
+getInstances resolverFor classes typeDeclarations modules = sequence $ do
   modul <- modules
   (moduleName, declarations) <- maybeToList $ moduleNameAndDecls modul
   declaration@(InstDecl _ _ rule _) <- declarations
@@ -364,6 +400,7 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
     maybeToList $ splitInstRule rule
   pure $ fmap (first $ extractionErrorAt $ ann declaration)
     $ runExceptT $ runConversionT emptyConvData $ do
+    let resolver = resolverFor classes moduleName
     explicitIds <- case explicitVariables of
       Nothing -> pure Nothing
       Just variables -> do
@@ -375,13 +412,14 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
         pure $ Just $ Set.fromList ids
     -- The head's class is resolved before prerequisites so an unknown head
     -- keeps diagnostic precedence over a malformed prerequisite.
-    className <- resolveKnownClass classes (Just moduleName) syntaxName
+    className <- resolveKnownClassWithResolver
+      resolver classes (Just moduleName) syntaxName
     prerequisites <- mapM
-      (convertClassConstraint classes (Just moduleName)
-        dataTypes typeDeclarations)
+      (convertClassConstraintWithResolver resolver classes
+        (Just moduleName) typeDeclarations)
       (contextConstraints context)
-    headConstraint <- checkedClassApplication classes (Just moduleName)
-      dataTypes typeDeclarations className argumentSyntax
+    headConstraint <- checkedClassApplicationWithResolver resolver classes
+      (Just moduleName) typeDeclarations className argumentSyntax
     case explicitIds of
       Nothing -> pure ()
       Just declaredIds -> do
@@ -396,43 +434,45 @@ getInstances classes dataTypes typeDeclarations modules = sequence $ do
 -- | Convert a class application against the complete closed class inventory.
 -- Both superclass edges and instance prerequisites must name a declaration;
 -- ordinary function signatures retain the frontend's open-world policy.
-convertClassConstraint
+convertClassConstraintWithResolver
   :: Monad m
-  => Map.Map QualifiedName HsTypeClass
+  => TypeResolver
+  -> Map.Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
-  -> [QualifiedName]
   -> TypeDeclMap
   -> Asst SrcSpanInfo
   -> ConversionT String m HsConstraint
-convertClassConstraint classes defaultModule dataTypes
+convertClassConstraintWithResolver resolver classes defaultModule
     typeDeclarations (TypeA _ classType) = do
   (syntaxName, argumentSyntax) <- maybe
     (throwE $ "invalid class constraint: " ++ prettyPrint classType)
     pure
     (splitClassApplication classType)
-  className <- resolveKnownClass classes defaultModule syntaxName
-  checkedClassApplication classes defaultModule dataTypes
+  className <- resolveKnownClassWithResolver
+    resolver classes defaultModule syntaxName
+  checkedClassApplicationWithResolver resolver classes defaultModule
     typeDeclarations className argumentSyntax
-convertClassConstraint classes defaultModule dataTypes
+convertClassConstraintWithResolver resolver classes defaultModule
     typeDeclarations (ParenA _ constraint) =
-  convertClassConstraint classes defaultModule dataTypes
+  convertClassConstraintWithResolver resolver classes defaultModule
     typeDeclarations constraint
-convertClassConstraint _ _ _ _ constraint =
+convertClassConstraintWithResolver _ _ _ _ constraint =
   throwE $ "unknown class constraint: " ++ show constraint
 
 -- Closed-world class-name resolution shared by superclass edges, instance
 -- prerequisites, and instance heads. The signature frontend's open-world
 -- resolver conversion deliberately stays separate: unknown external classes
 -- remain representable there.
-resolveKnownClass
+resolveKnownClassWithResolver
   :: Monad m
-  => Map.Map QualifiedName HsTypeClass
+  => TypeResolver
+  -> Map.Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
   -> QName SrcSpanInfo
   -> ConversionT String m QualifiedName
-resolveKnownClass classes defaultModule syntaxName = do
-  className <- either throwE pure
-    $ convertQName defaultModule (Map.keys classes) syntaxName
+resolveKnownClassWithResolver resolver classes defaultModule syntaxName = do
+  className <- either throwE pure $ convertQNameWithResolver resolver
+    (resolverUnqualifiedClassNames resolver) defaultModule syntaxName
   case Map.lookup className classes of
     Nothing -> throwE $ "unknown type class: " ++ show className
     _ -> pure ()
@@ -440,19 +480,19 @@ resolveKnownClass classes defaultModule syntaxName = do
 
 -- Argument conversion, arity validation, and construction for one resolved
 -- class application, shared by constraint conversion and instance heads.
-checkedClassApplication
+checkedClassApplicationWithResolver
   :: Monad m
-  => Map.Map QualifiedName HsTypeClass
+  => TypeResolver
+  -> Map.Map QualifiedName HsTypeClass
   -> Maybe (ModuleName SrcSpanInfo)
-  -> [QualifiedName]
   -> TypeDeclMap
   -> QualifiedName
   -> [Type SrcSpanInfo]
   -> ConversionT String m HsConstraint
-checkedClassApplication classes defaultModule dataTypes typeDeclarations
-    className argumentSyntax = do
+checkedClassApplicationWithResolver resolver classes defaultModule
+    typeDeclarations className argumentSyntax = do
   arguments <- mapM
-    (convertTypeInternal classes defaultModule dataTypes typeDeclarations)
+    (convertTypeInternalWithResolver resolver defaultModule typeDeclarations)
     argumentSyntax
   either throwE pure
     $ validateConstraintArity classes className (length arguments)

@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE LambdaCase #-}
 
 -- | Persistent, GHCi-style access to both Djex synthesis backends.
@@ -51,11 +52,24 @@ import System.IO (IOMode (ReadMode), hGetContents, withFile)
 import System.IO.Error (tryIOError)
 import System.Process
   ( CreateProcess (delegate_ctlc)
+  , proc
   , shell
   , waitForProcess
   , withCreateProcess
   )
 import Text.Read (readMaybe)
+
+#if !defined(mingw32_HOST_OS)
+import System.Posix.Files
+  ( fileMode
+  , fileOwner
+  , getFileStatus
+  , groupWriteMode
+  , intersectFileModes
+  , otherWriteMode
+  )
+import System.Posix.User (getRealUserID)
+#endif
 
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
@@ -116,9 +130,10 @@ data ReplState = ReplState
   , djinnRuntime :: DjinnRuntime
   , exferenceRuntime :: ExferenceRuntime
   , scopeFieldSelectors :: FieldSelectors
-    -- ^ Canonical selector spellings per constructor field position, for
-    -- presenting Exference candidates; Djinn's renamed table lives in its
-    -- projection.
+    -- ^ Canonical, unqualified-visible selector spellings per constructor
+    -- field position, for presenting Exference candidates; Djinn's renamed
+    -- table lives in its projection. Hidden selectors deliberately leave
+    -- structural eliminations unchanged.
   , resultTarget :: DefinitionName
   , presentation :: PresentationOptions
   , djinnSearchOptions :: QueryOptions
@@ -153,17 +168,21 @@ refreshDjinnProjection state = case
     ( exferenceRuntimeBaseSession runtime
     , exferenceRuntimeScope runtime
     ) of
-  (Just baseSession, Just context) -> case projectDjinnScope
-      (djinnAxiomPolicy djinn)
-      records
-      (scopeProjectionDeclarations baseSession)
-      (Set.fromList $ scopeUnqualifiedNames context) of
-    Left failure -> do
-      emitDiagnostic failure
-      putStrLn "Djinn falls back to its standard checked environment."
-      pure $ withProjection Nothing
-    Right projection -> pure $ withProjection $ Just projection
-  _ -> pure $ withProjection Nothing
+  (Just baseSession, Just context) ->
+    let visible = Set.fromList $ scopeUnqualifiedNames context
+    in case projectDjinnScope
+        (djinnAxiomPolicy djinn)
+        records
+        (typeConstructorKinds $ inventoryKindAssumptions
+          $ exferenceSessionInventory baseSession)
+        (scopeProjectionDeclarations baseSession)
+        visible of
+      Left failure -> do
+        emitDiagnostic failure
+        putStrLn "Djinn falls back to its standard checked environment."
+        pure $ withProjection visible Nothing
+      Right projection -> pure $ withProjection visible $ Just projection
+  _ -> pure $ withProjection Set.empty Nothing
  where
   runtime = exferenceRuntime state
   djinn = djinnRuntime state
@@ -174,13 +193,14 @@ refreshDjinnProjection state = case
     (Just baseSession, Just workspace) -> workspaceRecordProjections
       (exferenceSessionInventory baseSession) workspace
     _ -> []
-  withProjection projection = state
+  withProjection visible projection = state
     { djinnRuntime = djinn {djinnProjection = projection}
     , scopeFieldSelectors = Map.fromList
         [ ((constructor, index), selector)
         | (_, constructors) <- records
         , (constructor, selectorNames) <- constructors
         , (index, selector) <- zip [0 ..] selectorNames
+        , selector `Set.member` visible
         ]
     }
 
@@ -284,7 +304,9 @@ defaultPromptTemplate :: String
 defaultPromptTemplate = "djex[%b]> "
 
 -- | Run @.djexrc@ from the home directory and then the current directory
--- through the ordinary script machinery, exactly as GHCi runs @.ghci@.
+-- through the ordinary script machinery, following GHCi's trust boundary for
+-- @.ghci@: on POSIX, both the file and its containing directory must be owned
+-- by the current user (or root) and must not be group- or world-writable.
 -- Missing files are skipped silently; a broken line reports and continues.
 runStartupFiles :: ReplState -> IO (ReplStep ReplState)
 runStartupFiles initial = do
@@ -319,8 +341,55 @@ startupCandidates directories = go Set.empty directories
           Left _ -> go seen remaining
           Right canonical
             | canonical `Set.member` seen -> go seen remaining
-            | otherwise ->
-                (canonical :) <$> go (Set.insert canonical seen) remaining
+            | otherwise -> do
+                trusted <- trustedStartupPath canonical
+                if trusted
+                  then (canonical :)
+                    <$> go (Set.insert canonical seen) remaining
+                  else go (Set.insert canonical seen) remaining
+
+-- Match GHCi's deliberate platform split. POSIX exposes the ownership and
+-- group/other mode bits needed for a meaningful check; Windows' Directory
+-- permission abstraction does not, so GHCi accepts the file there as well.
+trustedStartupPath :: FilePath -> IO Bool
+#if defined(mingw32_HOST_OS)
+trustedStartupPath _ = pure True
+#else
+trustedStartupPath path = do
+  inspected <- tryIOError $ do
+    user <- getRealUserID
+    fileTrusted <- trustedBy user path
+    if fileTrusted
+      then trustedBy user $ takeDirectory path
+      else pure False
+  case inspected of
+    Left failure -> do
+      emitDiagnostic $ contextualDiagnostic Warning
+        "DJEX_REPL_STARTUP_TRUST"
+        "cannot verify startup-file ownership and permissions"
+        $ path ++ ": " ++ show failure
+      pure False
+    Right True -> pure True
+    Right False -> do
+      emitDiagnostic $ contextualDiagnostic Warning
+        "DJEX_REPL_STARTUP_UNTRUSTED"
+        "ignored an untrusted startup file"
+        $ path ++ ": require current-user or root ownership and remove "
+          ++ "group/other write permission from the file and its directory"
+      pure False
+ where
+  trustedBy user candidate = do
+    status <- getFileStatus candidate
+    let mode = fileMode status
+        owner = fileOwner status
+        writableByGroup =
+          mode `intersectFileModes` groupWriteMode == groupWriteMode
+        writableByOthers =
+          mode `intersectFileModes` otherWriteMode == otherWriteMode
+    pure $ (owner == user || owner == 0)
+      && not writableByGroup
+      && not writableByOthers
+#endif
 
 -- | Project the completion candidates GHCi would offer: loaded module names
 -- for module-oriented commands and in-scope identifier spellings at query
@@ -351,12 +420,17 @@ editTargetFile requested state = do
   case filter (not . null . trim) $ catMaybes [visual, fallback] of
     [] -> replFailure "DJEX_REPL_EDITOR" "no editor is configured"
       "set the VISUAL or EDITOR environment variable"
-    editor : _ -> do
-      target <- maybe (latestFileTarget state) (pure . Just) requested
-      case target of
-        Nothing -> replFailure "DJEX_REPL_EDITOR" "no file target to edit"
-          "load a source file or name one with :edit FILE"
-        Just path -> runShellCommand $ editor ++ " \"" ++ path ++ "\""
+    editor : _ -> case parseCommandWords editor of
+      Left failure -> replFailure "DJEX_REPL_EDITOR"
+        "invalid editor command" failure
+      Right [] -> replFailure "DJEX_REPL_EDITOR"
+        "invalid editor command" "VISUAL or EDITOR contains no executable"
+      Right (executable : arguments) -> do
+        target <- maybe (latestFileTarget state) (pure . Just) requested
+        case target of
+          Nothing -> replFailure "DJEX_REPL_EDITOR" "no file target to edit"
+            "load a source file or name one with :edit FILE"
+          Just path -> runEditorCommand executable arguments path
 
 latestFileTarget :: ReplState -> IO (Maybe FilePath)
 latestFileTarget state = case exferenceRuntimeWorkspace
@@ -612,19 +686,45 @@ data ShellOutcome
   | ShellInterrupted
 
 runShellCommand :: String -> IO ()
-runShellCommand command = do
+runShellCommand command = runExternalCommand
+  "DJEX_REPL_SHELL"
+  "cannot run shell command"
+  "shell command failed"
+  command
+  (shell command)
+
+-- Editor configuration is parsed once and launched directly. In particular,
+-- a source path is one argv element and can never become shell syntax.
+runEditorCommand :: FilePath -> [String] -> FilePath -> IO ()
+runEditorCommand executable arguments path = runExternalCommand
+  "DJEX_REPL_EDITOR"
+  "cannot launch editor"
+  "editor command failed"
+  rendered
+  (proc executable $ arguments ++ [path])
+ where
+  rendered = unwords $ map show $ executable : arguments ++ [path]
+
+runExternalCommand
+  :: String
+  -> String
+  -> String
+  -> String
+  -> CreateProcess
+  -> IO ()
+runExternalCommand code launchSummary failureSummary rendered processSpec = do
   outcome <- tryIOError $ handleJust onlyUserInterrupt
     (const $ pure ShellInterrupted)
-    $ withCreateProcess ((shell command) {delegate_ctlc = True})
-      $ \_ _ _ process ->
-        ShellCompleted <$> waitForProcess process
+    $ withCreateProcess (processSpec {delegate_ctlc = True})
+      $ \_ _ _ processHandle ->
+        ShellCompleted <$> waitForProcess processHandle
   case outcome of
-    Left failure -> ioFailure "cannot run shell command" command failure
+    Left failure -> ioFailure launchSummary rendered failure
     Right ShellInterrupted -> putStrLn "Interrupted."
     Right (ShellCompleted ExitSuccess) -> pure ()
-    Right (ShellCompleted (ExitFailure status)) -> replFailure
-      "DJEX_REPL_SHELL" "shell command failed"
-      $ command ++ ": exit status " ++ show status
+    Right (ShellCompleted (ExitFailure status)) ->
+      replFailure code failureSummary
+        $ rendered ++ ": exit status " ++ show status
 
 onlyUserInterrupt :: AsyncException -> Maybe ()
 onlyUserInterrupt UserInterrupt = Just ()
@@ -635,7 +735,10 @@ onlyUserInterrupt _ = Nothing
 evaluateInteractive :: String -> ReplState -> IO ()
 evaluateInteractive expression state = do
   outcome <- handleJust onlyUserInterrupt (const $ pure Nothing)
-    $ Just <$> evaluateExpression evaluableModules expression
+    $ Just <$> evaluateExpression
+        (exferenceRuntimeScope runtime)
+        evaluableModules
+        expression
   case outcome of
     Nothing -> putStrLn "Interrupted."
     Just result -> do
@@ -644,9 +747,10 @@ evaluateInteractive expression state = do
         Left failure -> emitDiagnostic failure
         Right value -> putStrLn value
  where
+  runtime = exferenceRuntime state
   evaluableModules = maybe []
     (map moduleEntry . workspaceModules)
-    $ exferenceRuntimeWorkspace $ exferenceRuntime state
+    $ exferenceRuntimeWorkspace runtime
   moduleEntry loaded =
     (workspaceModuleName loaded, workspaceModulePath loaded)
 

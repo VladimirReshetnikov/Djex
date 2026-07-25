@@ -1,5 +1,18 @@
 module Data.Maybe where
 
+import qualified Control.Applicative (Alternative, Applicative)
+import qualified Control.Monad (Monad, MonadPlus)
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Data.Data (Data)
+import qualified Data.Eq (Eq)
+import qualified Data.Foldable (Foldable)
+import qualified Data.Functor (Functor)
+import qualified Data.Monoid (Monoid)
+import qualified Data.Ord (Ord)
+import qualified Data.Traversable (Traversable)
+import qualified GHC.Generics (Generic, Generic1)
+import {-# SOURCE #-} qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 data Maybe a = Just a

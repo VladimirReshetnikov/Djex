@@ -16,6 +16,7 @@ module Language.Haskell.Djex.REPL.Scope
   , addScopeImport
   , changeScopeModules
   , scopeEntries
+  , parseScopeImport
   , scopeUnqualifiedNames
   , scopeVisibleNames
   , scopeSearchNames
@@ -56,6 +57,7 @@ import Language.Haskell.Djex.REPL.Workspace
   , workspaceModules
   )
 import Language.Haskell.Djex.Text (trim)
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import Language.Haskell.Synthesis.Declaration
   ( DataConstructor (constructorName)
   , Declaration (..)
@@ -253,7 +255,7 @@ revalidateScope inventory workspace scope = do
 entryIsLoaded :: Map ModuleName WorkspaceModule -> ScopeEntry -> Bool
 entryIsLoaded modules entry = case entry of
   ScopeModule _ _ moduleName -> Map.member moduleName modules
-  ScopeImport source -> case parseImport source of
+  ScopeImport source -> case parseScopeImport source of
     Right declaration -> case importModuleName declaration of
       Right moduleName -> Map.member moduleName modules
       Left _ -> False
@@ -267,7 +269,7 @@ addScopeImport
   -> ReplScope
   -> Either Diagnostic ReplScope
 addScopeImport inventory workspace source scope = do
-  declaration <- parseImport source
+  declaration <- parseScopeImport source
   let normalized = HSE.prettyPrint declaration
   compileScope inventory workspace
     $ scopeEntries scope ++ [ScopeImport normalized]
@@ -355,7 +357,7 @@ addModuleEntry entries incoming = entries ++ [incoming]
 removedBy :: [(Bool, ModuleName)] -> ScopeEntry -> Bool
 removedBy references entry = case entry of
   ScopeModule _ _ moduleName -> moduleName `Set.member` removed
-  ScopeImport source -> case parseImport source of
+  ScopeImport source -> case parseScopeImport source of
     Right declaration -> case importModuleName declaration of
       Right moduleName -> moduleName `Set.member` removed
       Left _ -> False
@@ -379,8 +381,14 @@ checkedModuleName source
  where
   token = trim source
 
-parseImport :: String -> Either Diagnostic (HSE.ImportDecl HSE.SrcSpanInfo)
-parseImport source = case HSE.parseImportDeclWithMode importParseMode source of
+-- | Parse the normalized import text retained by 'ScopeImport'. The parser is
+-- shared with real-GHC evaluation so synthesis and execution cannot disagree
+-- about qualified aliases or explicit import surfaces.
+parseScopeImport
+  :: String
+  -> Either Diagnostic (HSE.ImportDecl HSE.SrcSpanInfo)
+parseScopeImport source = case
+    HSE.parseImportDeclWithMode importParseMode source of
   HSE.ParseOk declaration -> do
     _ <- importModuleName declaration
     _ <- traverse checkedHseModuleName $ HSE.importAs declaration
@@ -466,7 +474,7 @@ entryContribution index modules views entry = case entry of
         [(moduleName, moduleViewExports view)]
         []
   ScopeImport source -> do
-    declaration <- parseImport source
+    declaration <- parseScopeImport source
     rejectPackageImport declaration
     canonical <- importModuleName declaration
     _ <- requireLoaded modules canonical
@@ -522,7 +530,7 @@ implicitPreludeContribution modules views entries = case
   isStarredModule (ScopeModule _ True _) = True
   isStarredModule _ = False
   mentionsModule wanted (ScopeModule _ _ candidate) = wanted == candidate
-  mentionsModule wanted (ScopeImport source) = case parseImport source of
+  mentionsModule wanted (ScopeImport source) = case parseScopeImport source of
     Right declaration -> importModuleName declaration == Right wanted
     Left _ -> False
 
@@ -856,7 +864,7 @@ buildModuleViewCached index modules stack target = do
             }
       rawExports <- lift
         $ atSource (workspaceModulePath target)
-        $ resolveModuleExports index provisional allImports moduleHead
+        $ resolveModuleExports index provisional moduleHead
       let exports = normalizeSurface rawExports
           uniqueExports = surfaceNames exports
       lift $ validateExportSurface index target uniqueExports
@@ -979,13 +987,12 @@ sourceImplicitPrelude index modules stack current pragmas imports = case
 resolveModuleExports
   :: SymbolIndex
   -> ModuleView
-  -> [ImportView]
   -> Maybe (HSE.ModuleHead HSE.SrcSpanInfo)
   -> Either Diagnostic NameSurface
-resolveModuleExports index view _ Nothing = Right $ localSurface index view
-resolveModuleExports index view _
+resolveModuleExports index view Nothing = Right $ localSurface index view
+resolveModuleExports index view
     (Just (HSE.ModuleHead _ _ _ Nothing)) = Right $ localSurface index view
-resolveModuleExports index view imports
+resolveModuleExports index view
     (Just (HSE.ModuleHead _ _ _ (Just (HSE.ExportSpecList _ specs)))) =
   mergeSurfaces <$> traverse resolve specs
  where
@@ -1017,18 +1024,31 @@ resolveModuleExports index view imports
         _ -> pure $ namesOnly parent
     HSE.EModuleContents _ syntaxModule -> do
       wanted <- checkedHseModuleName syntaxModule
-      let matching =
-            [ NameSurface
-                (importViewNames item)
-                (importViewChildren item)
-            | item <- imports
-            , wanted == importViewCanonical item
-                || wanted == importViewQualifier item
+      let matchingQualified =
+            [ NameSurface names children
+            | (qualifier, names) <- moduleViewQualified view
+            , qualifier == wanted
+            , children <-
+                [ mergeChildGroups
+                    [ candidate
+                    | (childQualifier, candidate) <-
+                        moduleViewQualifiedChildren view
+                    , childQualifier == wanted
+                    ]
+                ]
             ]
-      if null matching
+          unqualified = NameSurface
+            (moduleViewUnqualified view)
+            (moduleViewUnqualifiedChildren view)
+      if null matchingQualified
         then Left $ scopeDiagnostic "DJEX_REPL_EXPORT_NOT_IN_SCOPE"
           "module re-export is not in scope" $ HSE.prettyPrint spec
-        else Right $ mergeSurfaces matching
+        -- Per the Haskell Report, @module M@ denotes identities available
+        -- both unqualified and through the written qualifier @M@. This keeps
+        -- the current module's locals, honors @as@ aliases, and makes a
+        -- qualified-only import a valid but empty module export.
+        else Right $ intersectSurfaces unqualified
+          $ mergeSurfaces matchingQualified
 
 
 localSurface :: SymbolIndex -> ModuleView -> NameSurface
@@ -1267,6 +1287,17 @@ mergeSurfaces surfaces = normalizeSurface $ NameSurface
   (concatMap surfaceNames surfaces)
   (mergeChildGroups $ map surfaceChildren surfaces)
 
+intersectSurfaces :: NameSurface -> NameSurface -> NameSurface
+intersectSurfaces left right = normalizeSurface $ NameSurface names children
+ where
+  rightNames = Set.fromList $ surfaceNames right
+  names = filter (`Set.member` rightNames) $ surfaceNames left
+  children = Map.mergeWithKey intersectChildren
+    (const Map.empty) (const Map.empty)
+    (surfaceChildren left) (surfaceChildren right)
+  intersectChildren _ leftChildren rightChildren = Just
+    $ filter (`Set.member` Set.fromList rightChildren) leftChildren
+
 childGroupsFor :: SymbolIndex -> [Name] -> Map Name [Name]
 childGroupsFor index available = filterChildGroups available
   $ symbolChildren index
@@ -1335,8 +1366,4 @@ scopeDiagnostic code message detail =
   contextualDiagnostic Error code message detail
 
 ordNub :: Ord value => [value] -> [value]
-ordNub = reverse . snd . foldl' step (Set.empty, [])
- where
-  step (seen, values) value
-    | value `Set.member` seen = (seen, values)
-    | otherwise = (Set.insert value seen, value : values)
+ordNub = SharedCollection.distinctOn id

@@ -1,5 +1,6 @@
 module Data.Monoid where
 
+import qualified Data.Functor.Const (Const)
 
 
 class Monoid a where

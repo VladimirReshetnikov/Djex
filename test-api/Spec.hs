@@ -17,12 +17,14 @@ import qualified Djinn.Internal.LJTFormula as LJT
 import qualified Djinn.Internal.ProofEnv as ProofEnv
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex (Backend (DjinnBackend))
+import Language.Haskell.Djex.CLI (runArguments)
 import Language.Haskell.Djex.REPL
   ( ReplBackend (OneBackend)
   , ReplOptions (..)
   , defaultReplOptions
   , runRepl
   )
+import System.Exit (ExitCode)
 import qualified Language.Haskell.Exference.Core.Declaration as Declaration
 import Language.Haskell.Exference.Core.FunctionBinding
   ( EnvDictionary (..)
@@ -177,8 +179,11 @@ projectionSignatures =
 main :: IO ()
 main = defaultMain $ testGroup "Djex downstream API"
   [ facadeTests
-  , testCase "the shared REPL has an exposed non-terminating launcher" $ do
+  , testCase "the shared frontends expose non-terminating launchers" $ do
+      let runCli :: [String] -> IO ExitCode
+          runCli = runArguments
       replInitialBackend defaultReplOptions @?= OneBackend DjinnBackend
+      runCli ["--version"] `seq` pure ()
       runRepl defaultReplOptions `seq` pure ()
   , testCase "both engines are available from one dependency" $
       assertBool "the Djinn parser was unavailable from djex"

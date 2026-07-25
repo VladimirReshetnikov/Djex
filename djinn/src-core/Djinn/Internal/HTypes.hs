@@ -289,7 +289,13 @@ instance Show HType where
         where f [] = id
               f [cts] = scts cts
               f (cts : ctss) = scts cts . showString " | " . f ctss
-              scts (c, ts) = foldl (\ s t -> s . showString " " . showsPrec 10 t) (showString c) ts
+              -- Compose fields from the right so the constructor prefix does
+              -- not require the complete field spine.  Besides avoiding a
+              -- deferred left-composition chain for wide declarations, this
+              -- keeps ordinary ShowS prefix consumption productive.
+              scts (c, ts) = showString c . foldr showField id ts
+              showField t rest =
+                  showString " " . showsPrec 10 t . rest
     showsPrec _ (HTAbstract s _) = showString s
 
 instance Read HType where
@@ -303,7 +309,7 @@ pHType' = do
 
 pHType :: ReadP HType
 pHType = do
-    ts <- sepBy1 pHTypeApp (sstring "->")
+    ts <- maximalSepBy1 pHTypeApp (sstring "->")
     return $ foldr1 HTArrow ts
 
 -- | Parse Djinn's historical optional query context.  Keeping this token-level
@@ -312,7 +318,7 @@ pHType = do
 pHContext :: ReadP [Constraint HType]
 pHContext = do
     contexts <-
-        pParen (sepBy1 pHConstraint (schar ','))
+        pParen (maximalSepBy1 pHConstraint (schar ','))
         +++ fmap (: []) pHConstraint
     sstring "=>"
     return contexts
@@ -320,7 +326,7 @@ pHContext = do
 pHConstraint :: ReadP (Constraint HType)
 pHConstraint = do
     className <- pHSymbol True
-    arguments <- many pHTAtom
+    arguments <- maximalMany pHTAtom
     case SharedName.parseName className of
         Right name -> return $ Constraint name arguments
         Left _ -> pfail
@@ -329,9 +335,9 @@ pHDataType :: ReadP HType
 pHDataType = do
     let con = do
             c <- pHSymbol True
-            ts <- many pHTAtom
+            ts <- maximalMany pHTAtom
             return (c, ts)
-    cts <- sepBy con (schar '|')
+    cts <- maximalSepBy con (schar '|')
     return $ HTUnion cts
 
 pHTAtom :: ReadP HType
@@ -360,13 +366,14 @@ pHSymbol False = pVarId
 pHTTuple :: ReadP HType
 pHTTuple = do
     t <- pHType
-    ts <- many1 (do schar ','; pHType)
+    ts <- maximalMany1 (do schar ','; pHType)
     return $ HTTuple $ t:ts
 
 pHTypeApp :: ReadP HType
 pHTypeApp = do
-    ts <- many1 pHTAtom
-    return $ foldl1 hTApp ts
+    firstType <- pHTAtom
+    remainingTypes <- maximalMany pHTAtom
+    return $ foldl' hTApp firstType remainingTypes
 
 pHTList :: ReadP HType
 pHTList = do
@@ -377,11 +384,32 @@ pHTList = do
 
 pHKind :: ReadP HKind
 pHKind = do
-    ts <- sepBy1 pHKindA (sstring "->")
+    ts <- maximalSepBy1 pHKindA (sstring "->")
     return $ foldr1 KArrow ts
 
 pHKindA :: ReadP HKind
 pHKindA = (do schar '*'; return KStar) +++ pParen pHKind
+
+-- ReadP's standard repetition operations deliberately return every valid
+-- prefix. That behavior is useful for ambiguous grammars, but these token
+-- spines are unambiguous at their arrow, comma, bar, or enclosing delimiter.
+-- A whole-input caller would otherwise rebuild every shorter prefix before it
+-- reached the sole complete parse. Keep the left bias local to these known
+-- spines rather than changing the alternatives that define the grammar.
+maximalMany :: ReadP a -> ReadP [a]
+maximalMany parser =
+    ((:) <$> parser <*> maximalMany parser) <++ return []
+
+maximalMany1 :: ReadP a -> ReadP [a]
+maximalMany1 parser = (:) <$> parser <*> maximalMany parser
+
+maximalSepBy :: ReadP a -> ReadP separator -> ReadP [a]
+maximalSepBy parser separator =
+    maximalSepBy1 parser separator <++ return []
+
+maximalSepBy1 :: ReadP a -> ReadP separator -> ReadP [a]
+maximalSepBy1 parser separator =
+    (:) <$> parser <*> maximalMany (separator >> parser)
 
 -------------------------------
 

@@ -237,10 +237,16 @@ the same context-free forall wrapper; nested Constraint-kinded class forms are
 rejected explicitly. Like `:type`, this path uses the neutral base session and
 module scope rather than the selected backend or filtered search projection.
 
-The GHCi resemblance still stops short of evaluation. Bare input asks for an
-inhabitant of a type, while `:type` parses a term expression and performs
-structural inference without running it or compiling loaded function bodies;
-`:kind` inspects only the structural kind subset described above.
+Bare input remains synthesis rather than GHCi-style expression evaluation.
+`:type` parses a term expression and performs structural inference without
+running it or compiling loaded function bodies; `:kind` inspects only the
+structural kind subset described above. The deliberately explicit `:eval`
+command is the separate execution boundary. Its private Hint adapter compiles
+the complete loaded dependency closure, translates the checked prompt entries
+to GHC top-level modules and exact ordinary/qualified import surfaces, and
+runs one expression in a fresh interpreter. Workspace or context setup is
+transactional: failure resets to installed Prelude scope and emits one
+advisory, while no partial GHC context enters either synthesis session.
 The inferencer covers common applications, operators, lambdas and patterns,
 conditionals, cases, tuples, lists, enumerations, literals, and annotations;
 forms requiring local-declaration generalization or richer GHC semantics fail
@@ -309,15 +315,34 @@ Ordinary term patterns and pattern-value bodies are accepted, as are ordinary
 value/method bodies and other syntax that does not alter the nominal
 inventory.
 
-Explicit module export lists are now an accepted visibility boundary. Source
-loading keeps every module-local declaration in the authoritative inventory,
-because private declarations may later be requested through a `*MODULE`
-context and because qualified parsing must use the same checked kind and
-synonym authority. A module-aware caller separately computes the exported or
-full-top-level name set and projects Exference's prompt scope and searchable
-binding dictionary from it. The projection retains the complete sealed
-inventory, so changing imports never splices together independently prepared
-environments or requires source reparsing.
+Every source declaration is elaborated in its defining module's nominal scope.
+Local type and class declarations take precedence; only direct imports add
+loaded names, and `qualified`, `as`, positive import lists, and `hiding` are
+honored. A loaded `Prelude` contributes its implicit unqualified surface unless
+the module is `Prelude`, imports it explicitly, or enables `NoImplicitPrelude`
+or `RebindableSyntax`. Export surfaces include named exports and `module M`
+re-exports, so a downstream import sees only that surface while a re-exported
+entity retains its defining canonical name. Transitive imports do not become
+scope unless they are explicitly re-exported. A `module M` item is computed as
+an identity intersection: the entity must be in scope both unqualified and
+through the written qualifier `M`. This includes the defining module's locals,
+honors `as` aliases, and prevents qualified-only imports from leaking.
+
+This resolution pass does not discover or load dependencies. Directory and
+explicit snapshot loaders elaborate exactly the modules supplied to them; the
+REPL workspace separately discovers resolvable local imports before invoking
+the loader. Scope is exact for modules in that loaded set: an unimported loaded
+name cannot be rescued by spelling its canonical qualifier. Interfaces for
+unloaded modules are unavailable, so the open-inventory policy still retains
+genuinely unknown names as external. A positive import list supplies a finite
+canonical surface for such a module; an unrestricted or `hiding` import cannot
+prove its unknown export complement.
+
+Source loading keeps exported and private declarations together in the
+authoritative inventory for whole-environment kind, synonym, recursion, and
+class checks. Export lists restrict what another module may import; they do not
+discard private facts. A later `*MODULE` prompt entry can therefore request a
+loaded module's full top-level scope without rebuilding the inventory.
 
 Successful extraction erases HSE annotations, so ordering metadata is captured
 before that boundary. Ordinary signatures, datatype batches, and nested class
@@ -348,8 +373,13 @@ Module-name targets are resolved through hierarchical `.hs`/`.lhs` paths.
 File targets may declare an unrelated module name. A directory target is the
 legacy environment compatibility form: it recursively contributes source and
 `.ratings` files while remaining one explicit target. Resolvable local imports
-are discovered transitively. The workspace does not consult a GHC package
-database or load interface/object code.
+are discovered transitively by the workspace before the source loader
+elaborates each module under those imports. The loader's import resolver itself
+never expands the dependency closure. The workspace does not consult a GHC
+package database or load interface/object code for synthesis. `:eval` is an
+explicit parallel boundary that hands the retained source paths to real GHC;
+package and compiled-module names visible there are never added to the neutral
+inventory.
 
 The package commands do not weaken this source-only invariant. `download` asks
 Cabal to populate its source cache, while `install` builds executable
@@ -363,20 +393,36 @@ never an implicit consequence of parsing an import or query.
 Every filesystem target is canonicalized at admission, so a later `:cd` cannot
 retarget `:reload`. The workspace parses the whole candidate graph, rejects
 duplicate modules, dependency files whose declaration disagrees with the
-imported name, and non-`SOURCE` cycles, orders the closure, loads and seals one
-Exference session, computes export-aware scope, and publishes the replacement
-only after every phase succeeds. Import and `:module` changes use the same
-publication discipline for the scoped session.
+imported name, and non-`SOURCE` cycles, orders the closure, elaborates and seals
+one Exference session, computes export-aware prompt scope, and publishes the
+replacement only after every phase succeeds. Source imports are fixed inputs
+to declaration elaboration. Bare interactive imports and `:module` instead
+change the later prompt projection; they neither reinterpret declarations nor
+alter the dependency graph, and use the same transactional publication
+discipline.
 
 The REPL then parses Exference types with `ExferenceQueryScope`: exact visible
 names govern unqualified lookup, one full-top-level current module gets local
 precedence, aliases map prompt qualifiers to canonical modules, and canonical
 qualified lookup still consults the complete sealed inventory. The searchable
-Exference environment is narrowed to the visible binding projection. Djinn is
-outside this flow and retains its independently prepared standard session.
-The scope projection is intentionally name-based: the shared structural
-`Name` has no Haskell namespace tag, so same-spelled type/value entities cannot
-be filtered independently at this boundary.
+Exference environment is narrowed to the visible binding projection. The same
+prompt scope drives a checked Djinn declaration projection. Every abstract
+projection reuses the exact ground kind inferred by the shared inventory,
+including referenced stubs and concrete datatypes degraded because they are
+recursive, constructor-hidden, or require a later repair. Arity-derived kinds
+are only the fallback for genuinely absent external names. Record selectors
+are axioms only when their parent cannot be eliminated structurally. For an
+eliminable record, presentation may replace the structural projection with a
+selector spelling only when that selector is visible unqualified, so hidden
+names never leak into output. Every unsupported or hidden declaration is
+recorded as an omission.
+
+Djinn's standard checked session is only the recovery state when no source
+projection is available or sealing that projection fails. The scope projection
+tracks type and value claims separately while resolving source spellings, even
+though the shared structural `Name` is namespace-neutral. Real-GHC evaluation
+consumes the same ordered prompt entries but has no access to either backend's
+synthesis dictionary.
 
 ## API and stability tiers
 
@@ -410,16 +456,20 @@ private raw declaration snapshot, edit, and instance-method operations.
 the explicit one-shot subcommands. `Language.Haskell.Djex.REPL` exposes the
 narrower interactive launcher and its startup options. Both are exposed so
 applications can invoke a frontend without spawning a process, but neither is
-re-exported by the main facade.
+re-exported by the main facade. They remain effectful terminal frontends: the
+dispatcher returns an `ExitCode` instead of terminating its host, but may use
+process streams, read trusted startup files and sources, change the working
+directory, evaluate Haskell, or launch editor, shell, and Cabal children.
 
 ### Public compatibility and research API
 
 The single library also exposes the historical `Djinn`, `Djinn.Core`, and
-`Language.Haskell.Exference.*` surfaces. Some exposed compatibility modules
-contain `.Internal.` in their names because earlier packages made those
-research APIs importable. They remain available for migration and testing, but
-the name is intentional: new clients should not treat their representation as
-the curated stability boundary.
+`Language.Haskell.Exference.*` surfaces. The specifically retained
+`Language.Haskell.Exference.Core.Internal.Scope` research API predates the
+merge; its `.Internal.` spelling is intentional, and new clients should not
+treat its representation as the curated stability boundary. Other Exference
+`Internal` modules are private implementation, not historical compatibility
+promises.
 
 Module exposure, not the spelling alone, determines whether a module is
 importable. The `Exposed-Modules` section of `djex.cabal` is the exact public
@@ -435,11 +485,17 @@ workers. Downstream code cannot import them through a `djex` dependency.
 
 ## Test boundaries
 
-The package has eleven test suites:
+The package has twelve test suites:
 
 - shared-foundation, facade integration, downstream API, and merged CLI suites;
 - Djinn unit, property, frontend-import, and CLI suites;
-- Exference unit, frontend-import, and CLI suites.
+- Exference unit, private-engine, frontend-import, and CLI suites.
+
+`exference-engine-tests` compiles the parser-neutral Exference core and a
+test-only seam as home modules. This preserves finite-identifier, queue
+representation, saturation, and strictness regressions whose artificial
+limits cannot be reached through production options, without exposing that
+seam from the `djex` library.
 
 The downstream API suite also compiles deliberately rejected probes to protect
 opaque-constructor boundaries. Benchmarks are separate Cabal components and are

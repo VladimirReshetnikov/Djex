@@ -9,15 +9,14 @@ bare `import` or `:module` controls which of those modules is in scope at the
 prompt. Djex also borrows GHCi's colon-command, completion, history, interrupt,
 and multiline conventions.
 
-Djex is nevertheless not a GHCi-compatible evaluator. A bare line is a type
-that Djex should inhabit, not a Haskell expression to evaluate. Source modules
-provide checked type, data, class, instance, and signature information to
-Exference; their function bodies are not compiled or interpreted. The two
-synthesis engines also retain different parsers and search semantics. The
-`:type` and `:kind` commands are read-only exceptions at the command boundary.
-The first infers an expression's type from loaded signatures; the second
-inspects a type against the loaded kind inventory. Neither command evaluates
-an expression, compiles a source body, or invokes synthesis search.
+Djex is nevertheless not a drop-in GHCi evaluator. A bare line is a type that
+Djex should inhabit, not a Haskell expression to evaluate. The synthesis
+workspace reads type, data, class, instance, and signature information without
+compiling function bodies, and the two synthesis engines retain different
+parsers and search semantics. `:type` and `:kind` inspect that structural
+workspace without invoking synthesis or executing code. The deliberately
+explicit `:eval EXPRESSION` command is a separate boundary: it invokes the real
+GHC API and may compile and execute loaded Haskell code.
 
 Use the shared REPL when exploring or comparing types. Use the one-shot
 `djex djinn` and `djex exference` subcommands when a script needs generated
@@ -49,7 +48,12 @@ the home directory and then from the current directory, exactly as GHCi runs
 `.ghci`. Each file is executed through the ordinary `:script` machinery: any
 REPL input is accepted, failed lines report and continue, settings persist
 into the session, and `:quit` exits. Missing files are skipped silently, each
-load is announced, and `--ignore-startup` suppresses both files.
+load is announced, and `--ignore-startup` suppresses both files. On POSIX,
+Djex follows GHCi's startup-file trust rule: both the file and its containing
+directory must be owned by the current user or root and must not be writable
+by the group or by others. An unverifiable or untrusted file is skipped with a
+warning. Windows lacks the corresponding ownership/mode check and accepts the
+file, matching GHCi's platform behavior.
 
 Run `djex repl --help` for the startup table. Options for a one-shot backend,
 such as `--select` or `--max-steps`, are changed inside the REPL with `:set`;
@@ -128,14 +132,18 @@ non-inhabitation evidence.
 Exact aliases win; otherwise any nonempty, unique prefix of a canonical
 command is accepted. For example, `:q` is `:quit`, `:s` is deliberately
 `:set`, and `:sy` is `:synth`. Tab completion offers commands, backend names,
-settings, `:show` subjects, and paths where appropriate; it also follows the
-loaded workspace, offering module names after `:module` and `:browse` and
-in-scope identifiers (qualified and unqualified) at type-query, `:info`,
-`:type`, and `:kind` positions.
+settings, `:show` subjects, and paths where appropriate. Argument completion
+uses the same command descriptor as parsing, so exact aliases and accepted
+unique prefixes behave like the canonical command; `:module` completion also
+preserves a typed `+`, `-`, or `*` marker. Completion follows the loaded
+workspace, offering module names after `:module` and `:browse` and in-scope
+identifiers (qualified and unqualified) at type-query, `:info`, `:type`, and
+`:kind` positions. Completed paths that need quoting are inserted as Haskell
+string literals, matching the path grammar rather than shell escape syntax.
 
 | Command | Purpose |
 | --- | --- |
-| `:add [TARGET ...]` | Add explicit Exference source targets and reload their local dependencies. |
+| `:add [TARGET ...]` | Add explicit source targets and reload their local dependencies. |
 | `:backend [djinn\|exference\|both]` (`:b`) | Show or change the active selection. |
 | `:browse [[*]MODULE]` | Browse the current scope, a module's exports, or a source module's full source scope. |
 | `:cd DIR` | Change the process working directory. |
@@ -145,23 +153,23 @@ in-scope identifiers (qualified and unqualified) at type-query, `:info`,
 | `:exference TYPE` | Run one Exference query. |
 | `:help [COMMAND]` (`:h`, `:?`) | Show the command summary or detailed command help. |
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
-| `:edit [FILE]` | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
+| `:edit [FILE]` (`:e`) | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
 | `:eval EXPRESSION` | Evaluate a Haskell expression with real GHC and print its shown value. |
 | `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors, class methods, and the instances the name participates in. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
-| `import DECLARATION` | Append a Haskell import to the Exference prompt context. |
+| `import DECLARATION` | Append a Haskell import to the shared prompt context. |
 | `:kind[!] TYPE` (`:k`) | Infer a type's kind in the current loaded module scope; attached `!` also shows its synonym-normalized form. |
-| `:load [TARGET ...]` (`:l`) | Replace the Exference target set and load local dependencies. No targets clears it. |
-| `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the Exference prompt context. |
+| `:load [TARGET ...]` (`:l`) | Replace the source target set and load local dependencies. No targets clears it. |
+| `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the shared prompt context. |
 | `:pwd` | Print the process working directory. |
 | `:quit` (`:q`) | Leave successfully. |
-| `:reload` (`:r`) | Re-read the retained canonical Exference targets and dependencies. |
+| `:reload` (`:r`) | Re-read the retained canonical source targets and dependencies. |
 | `:script FILE` | Execute REPL inputs from a file. |
 | `:set [OPTION [VALUE]]` (`:s`) | Show all settings, or change one. |
 | `:show [SUBJECT]` | Show settings, loaded-source state, or selected backend state. |
 | `:synth TYPE` (`:sy`) | Query the active backend(s). |
 | `:type [+d] EXPRESSION` (`:t`) | Infer an expression's type in the current loaded module scope without evaluating it. |
-| `:unadd [TARGET ...]` | Remove explicit Exference targets and reload the surviving dependency closure. |
+| `:unadd [TARGET ...]` | Remove explicit source targets and reload the surviving dependency closure. |
 | `:unset OPTION` | Restore one built-in default. |
 | `:version` (`:v`) | Print the Djex package version. |
 | `:! COMMAND` | Run a shell command. |
@@ -171,6 +179,13 @@ Target and path arguments may be bare words, Haskell string literals, or a
 whole Haskell `[String]` value. The list form is particularly useful in
 scripts. `:module+ M` and `:module- M` are accepted conveniences for the
 canonical GHCi-style `:module + M` and `:module - M` spellings.
+
+`:edit` treats `VISUAL`, falling back to `EDITOR`, as a whitespace-separated
+executable and argument vector; use Haskell double-string literals for an
+executable or fixed argument containing whitespace. Djex launches that
+executable directly and appends the selected path as exactly one argument, so
+shell metacharacters in a source filename are never evaluated. `:!` remains
+the intentional shell-command boundary.
 
 `:show` accepts `settings`, `backends`, `environment`, `imports`, `modules`,
 `targets`, `omissions`, `diagnostics`, or `directory`; with no subject it
@@ -219,9 +234,10 @@ Other option-shaped values such as `"--dry-run"` are targets rather than
 injected Cabal options. Cabal's stdout and stderr are streamed unchanged, while
 its stdin is closed so a child cannot consume later REPL or script input.
 Unrelated inherited file descriptors are also closed. `:d` is ambiguous
-between `:djinn` and `:download`, `:e` is ambiguous between `:edit` and
-`:exference`, and `:in` is ambiguous between `:info` and `:install`; the
-exact `:i` alias continues to mean `:info`.
+between `:djinn` and `:download`, while `:in` is ambiguous between `:info` and
+`:install`. The exact `:e` alias means `:edit`; `:ev` and `:ex` are useful
+unique prefixes for `:eval` and `:exference`. The exact `:i` alias continues
+to mean `:info`.
 
 `CABAL_TARGET` is intentionally broader than a Hackage package name. Cabal
 accepts repository package/version and component selectors, local package
@@ -288,6 +304,11 @@ the same module. A non-package import with no local source remains unresolved
 and is reported at the importing file by a
 `DJEX_REPL_IMPORT_UNRESOLVED` warning; it contributes no declarations to the
 session. These checks happen before the new workspace is published.
+
+Once that closure is fixed, the shared source loader elaborates every
+declaration in its defining module's own import scope. Bare imports entered at
+the prompt and `:module` operate later: they select the query/search scope from
+the already checked inventory and never reinterpret source declarations.
 
 Filesystem targets are canonicalized when admitted. `:reload` therefore keeps
 referring to the same files after `:cd`; it does not reinterpret the original
@@ -537,23 +558,35 @@ inspection commands never do. Because bare input is a synthesis query, there
 is no GHCi-style bare-expression evaluation — the command is always
 explicit.
 
-Evaluation targets the real package universe, not the synthesis
-environment. When every loaded file target compiles under real GHC, those
-modules join the interpreter at top level (their whole source scope, like
-GHCi's `*M`), so a loaded record can be built, projected, and passed to a
-synthesized candidate spliced in with `let`:
+Evaluation targets the real package universe, not the synthesis environment.
+Every module in the loaded dependency closure is compiled, but compilation
+does not put every declaration in scope. Djex translates the current prompt
+context to GHC's interpreter context:
+
+- `*M` opens the full top-level scope of `M`, including its private
+  declarations and the names admitted by its own imports.
+- Plain `M` behaves as an ordinary `import M`, exposing only exports.
+- Bare imports preserve `qualified`, `as`, explicit import lists, and
+  `hiding` exactly; a loaded dependency does not leak merely because another
+  target needs it.
+- With no starred module and no explicit Prelude entry, the installed Prelude
+  is imported implicitly. A starred module instead supplies its own source
+  scope, so `NoImplicitPrelude` remains effective.
+
+Consequently a record admitted by the prompt scope can be built, projected,
+and passed to a synthesized candidate spliced in with `let`:
 
 ```text
 djex[djinn]> :eval let djexResult = unwrapped in djexResult (MkWrapped True)
 True
 ```
 
-The bundled synthesis environment is deliberately parser-level
-pseudo-Haskell that real GHC rejects, so with it (or any uncompilable
-workspace) loaded, evaluation degrades to Prelude-only scope and one
-`DJEX_REPL_EVAL_SCOPE` advisory explains why; plain expressions such as
-`:eval 1 + 1` keep working. A rejected expression is an ordinary
-`DJEX_REPL_EVAL` diagnostic.
+The bundled synthesis environment is deliberately parser-level pseudo-Haskell
+that real GHC rejects. If either the workspace or the translated prompt
+context fails under GHC, evaluation resets the interpreter to Prelude-only
+scope and one `DJEX_REPL_EVAL_SCOPE` advisory explains why; plain expressions
+such as `:eval 1 + 1` keep working. The failed context is never partly
+retained. A rejected expression is an ordinary `DJEX_REPL_EVAL` diagnostic.
 
 Each `:eval` runs a fresh, isolated interpreter session that always reflects
 the current workspace: bindings do not persist between evaluations and there
@@ -630,28 +663,33 @@ so the projection degrades rather than fails:
   an elimination it cannot decide. A datatype declared without constructors
   is treated the same way: source environments spell opaque primitives that
   way, and a genuinely empty projection would let Djinn prove anything from
-  such a type by absurd elimination.
+  such a type by absurd elimination. Every such degradation retains the exact
+  kind inferred by the shared source inventory, including higher-kinded
+  parameters.
 - Instance declarations, classes with superclasses, and declarations with
   types outside Djinn's grammar (explicit foralls, residual constraints) are
   omitted.
 - Type constructors referenced from signatures but not declared in scope are
-  stubbed as abstract types with an arity-derived kind.
+  stubbed as abstract types. A kind already inferred by the shared inventory is
+  authoritative; an arity-derived kind is only the fallback for a genuinely
+  absent external name.
 - Value declarations are omitted by default and become LJT axioms with
   `:set djinn-axioms on`. Axioms are off by default because even
   moderate axiom sets make Djinn's otherwise-terminating proof search
   intractable; structural proving over the projected datatypes stays fast.
-- Record selectors are the exception to the axiom policy exactly where they
-  add proof power: a selector whose parent datatype Djinn cannot
-  case-eliminate (recursive, hidden, or out-of-scope constructors) always
-  enters the session, so a recursive or opaque record stays
-  field-accessible. Selectors of fully eliminable records stay out of the
-  axiom set — they would only multiply equivalent proofs of what structural
-  elimination already derives.
+- Scope-visible record selectors are the exception to the axiom policy exactly
+  where they add proof power: a selector whose parent datatype Djinn cannot
+  case-eliminate (recursive, hidden, or out-of-scope constructors) enters the
+  session under either axiom setting, so a recursive or opaque record can stay
+  field-accessible. Hidden selectors do not enter or leak into presentation.
+  Selectors of fully eliminable records stay out of the axiom set — they would
+  only multiply equivalent proofs of what structural elimination already
+  derives.
 
 Field projections are also normalized at presentation for both backends: a
 candidate that eliminates a record merely to return one field, or that
 faithfully rebuilds a deconstructed record, is shown as an application of
-the field's selector (for example `secondPart` rather than
+the field's scope-visible selector (for example `secondPart` rather than
 `\a -> case a of MkPair _ c -> c`). When selectors are in scope, an
 Exference `select first` request additionally looks a few candidates ahead
 and shows the one with the smallest normalized spelling, because search
@@ -718,21 +756,28 @@ linker:
   but ordinary function, method, and pattern-binding bodies are neither
   compiled nor used to infer missing signatures.
 
-An unresolved external import contributes no declarations: sessions contain
-only the workspace snapshots and structural built-ins. Package-qualified
-imports are rejected with `DJEX_REPL_IMPORT_PACKAGE`: the shared canonical
-name model cannot preserve package identity and must not silently bind a
-same-spelled local module. Source that depends on external types or
-declarations must provide enough loaded source vocabulary for Exference's
-inventory checks, or loading fails with a structured diagnostic. No implicit
-package `Prelude` is added to a prompt context.
+An unresolved external import contributes no loaded declarations: sessions
+contain only the workspace snapshots and structural built-ins. A positive
+import list nevertheless provides a finite interface spelling from which the
+loader can preserve an external type constructor or class under its canonical
+module name. An unrestricted or `hiding` import has no enumerable external
+surface, and declarations that require absent inventory facts may still fail
+with a structured diagnostic. Package-qualified imports are rejected with
+`DJEX_REPL_IMPORT_PACKAGE`: the shared canonical name model cannot preserve
+package identity and must not silently bind a same-spelled local module. No
+implicit package `Prelude` is added to a prompt context.
 
 Explicit module export lists are accepted. The loader retains a complete
-module inventory so `*MODULE`, qualified parsing, and later context changes do
-not require reparsing; the prompt-scope layer separately projects the public
-exports for plain imports and plain `:module`/`:browse`. Other unsupported
-nominal source constructs remain fail-closed as described in the
-[library API guide](library-api.md).
+module inventory so whole-environment validation, `*MODULE`, and later context
+changes do not require reparsing; the prompt-scope layer separately projects
+the public exports for plain imports and plain `:module`/`:browse`. In prompt
+queries only, canonical qualification remains a deliberate full-inventory
+escape hatch. Source declaration elaboration has no such escape: its loaded
+module scope is exact. A `module M` export item includes exactly the identities
+available both unqualified and through the written qualifier `M`; self locals
+and unqualified aliases therefore work, while qualified-only imports do not
+leak. Other unsupported nominal source constructs remain fail-closed as
+described in the [library API guide](library-api.md).
 
 ## Multiline input, scripts, history, and the shell
 
@@ -745,9 +790,10 @@ djex|   -> (b, a)
 djex| :}
 ```
 
-The collected text is parsed as one logical input. EOF before `:}` reports an
-unterminated block and exits. The same `:{` and `:}` structure works in script
-files.
+The collected text is parsed as one logical input. Haskell `--` line comments
+are removed from bare type and import input; colon-command payloads remain
+literal. EOF before `:}` reports an unterminated block and exits. The same
+`:{` and `:}` structure works in script files.
 
 `:script FILE` reads the complete file before execution, then evaluates its
 logical inputs in the current session. Setting and backend changes persist
@@ -812,6 +858,7 @@ runComparisonRepl = runRepl defaultReplOptions
   , replEnvironmentPath = Just "./environment"
   , replAllowFix = False
   , replHistoryFile = Just "./.djex-history"
+  , replIgnoreStartupFiles = False
   }
 ```
 
@@ -819,10 +866,11 @@ runComparisonRepl = runRepl defaultReplOptions
 engine; `BothBackends` selects both. `runRepl` returns an `ExitCode` instead of
 terminating the host process, which makes it suitable for an application
 launcher. It is still a terminal-oriented interface: it owns Haskeline input,
-stdout/stderr presentation, process working-directory changes, and requested
-shell and Cabal package commands. Applications needing custom transport or
-mutable caller-owned state should embed the checked adapters documented in
-[the library API guide](library-api.md) instead.
+stdout/stderr presentation, trusted startup-file execution, process
+working-directory changes, and requested evaluation, editor, shell, and Cabal
+package commands. Applications needing custom transport or mutable
+caller-owned state should embed the checked adapters documented in [the
+library API guide](library-api.md) instead.
 
 ## Relationship to the historical frontends
 

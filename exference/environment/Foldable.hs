@@ -1,5 +1,9 @@
 module Data.Foldable where
 
+import qualified Control.Applicative (Alternative)
+import qualified Data.Functor.Const (Const)
+import qualified Data.Functor.Identity (Identity)
+import qualified Data.Monoid (Monoid)
 
 
 class Foldable t where

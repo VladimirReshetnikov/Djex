@@ -143,7 +143,7 @@ string literals, matching the path grammar rather than shell escape syntax.
 
 | Command | Purpose |
 | --- | --- |
-| `:add [TARGET ...]` | Add explicit Exference source targets and reload their local dependencies. |
+| `:add [TARGET ...]` | Add explicit source targets and reload their local dependencies. |
 | `:backend [djinn\|exference\|both]` (`:b`) | Show or change the active selection. |
 | `:browse [[*]MODULE]` | Browse the current scope, a module's exports, or a source module's full source scope. |
 | `:cd DIR` | Change the process working directory. |
@@ -157,19 +157,19 @@ string literals, matching the path grammar rather than shell escape syntax.
 | `:eval EXPRESSION` | Evaluate a Haskell expression with real GHC and print its shown value. |
 | `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors, class methods, and the instances the name participates in. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
-| `import DECLARATION` | Append a Haskell import to the Exference prompt context. |
+| `import DECLARATION` | Append a Haskell import to the shared prompt context. |
 | `:kind[!] TYPE` (`:k`) | Infer a type's kind in the current loaded module scope; attached `!` also shows its synonym-normalized form. |
-| `:load [TARGET ...]` (`:l`) | Replace the Exference target set and load local dependencies. No targets clears it. |
-| `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the Exference prompt context. |
+| `:load [TARGET ...]` (`:l`) | Replace the source target set and load local dependencies. No targets clears it. |
+| `:module [+\|-] [[*]MODULE ...]` (`:m`) | Replace, add to, or remove from the shared prompt context. |
 | `:pwd` | Print the process working directory. |
 | `:quit` (`:q`) | Leave successfully. |
-| `:reload` (`:r`) | Re-read the retained canonical Exference targets and dependencies. |
+| `:reload` (`:r`) | Re-read the retained canonical source targets and dependencies. |
 | `:script FILE` | Execute REPL inputs from a file. |
 | `:set [OPTION [VALUE]]` (`:s`) | Show all settings, or change one. |
 | `:show [SUBJECT]` | Show settings, loaded-source state, or selected backend state. |
 | `:synth TYPE` (`:sy`) | Query the active backend(s). |
 | `:type [+d] EXPRESSION` (`:t`) | Infer an expression's type in the current loaded module scope without evaluating it. |
-| `:unadd [TARGET ...]` | Remove explicit Exference targets and reload the surviving dependency closure. |
+| `:unadd [TARGET ...]` | Remove explicit source targets and reload the surviving dependency closure. |
 | `:unset OPTION` | Restore one built-in default. |
 | `:version` (`:v`) | Print the Djex package version. |
 | `:! COMMAND` | Run a shell command. |
@@ -553,23 +553,35 @@ inspection commands never do. Because bare input is a synthesis query, there
 is no GHCi-style bare-expression evaluation — the command is always
 explicit.
 
-Evaluation targets the real package universe, not the synthesis
-environment. When every loaded file target compiles under real GHC, those
-modules join the interpreter at top level (their whole source scope, like
-GHCi's `*M`), so a loaded record can be built, projected, and passed to a
-synthesized candidate spliced in with `let`:
+Evaluation targets the real package universe, not the synthesis environment.
+Every module in the loaded dependency closure is compiled, but compilation
+does not put every declaration in scope. Djex translates the current prompt
+context to GHC's interpreter context:
+
+- `*M` opens the full top-level scope of `M`, including its private
+  declarations and the names admitted by its own imports.
+- Plain `M` behaves as an ordinary `import M`, exposing only exports.
+- Bare imports preserve `qualified`, `as`, explicit import lists, and
+  `hiding` exactly; a loaded dependency does not leak merely because another
+  target needs it.
+- With no starred module and no explicit Prelude entry, the installed Prelude
+  is imported implicitly. A starred module instead supplies its own source
+  scope, so `NoImplicitPrelude` remains effective.
+
+Consequently a record admitted by the prompt scope can be built, projected,
+and passed to a synthesized candidate spliced in with `let`:
 
 ```text
 djex[djinn]> :eval let djexResult = unwrapped in djexResult (MkWrapped True)
 True
 ```
 
-The bundled synthesis environment is deliberately parser-level
-pseudo-Haskell that real GHC rejects, so with it (or any uncompilable
-workspace) loaded, evaluation degrades to Prelude-only scope and one
-`DJEX_REPL_EVAL_SCOPE` advisory explains why; plain expressions such as
-`:eval 1 + 1` keep working. A rejected expression is an ordinary
-`DJEX_REPL_EVAL` diagnostic.
+The bundled synthesis environment is deliberately parser-level pseudo-Haskell
+that real GHC rejects. If either the workspace or the translated prompt
+context fails under GHC, evaluation resets the interpreter to Prelude-only
+scope and one `DJEX_REPL_EVAL_SCOPE` advisory explains why; plain expressions
+such as `:eval 1 + 1` keep working. The failed context is never partly
+retained. A rejected expression is an ordinary `DJEX_REPL_EVAL` diagnostic.
 
 Each `:eval` runs a fresh, isolated interpreter session that always reflects
 the current workspace: bindings do not persist between evaluations and there
@@ -828,6 +840,7 @@ runComparisonRepl = runRepl defaultReplOptions
   , replEnvironmentPath = Just "./environment"
   , replAllowFix = False
   , replHistoryFile = Just "./.djex-history"
+  , replIgnoreStartupFiles = False
   }
 ```
 
@@ -835,10 +848,11 @@ runComparisonRepl = runRepl defaultReplOptions
 engine; `BothBackends` selects both. `runRepl` returns an `ExitCode` instead of
 terminating the host process, which makes it suitable for an application
 launcher. It is still a terminal-oriented interface: it owns Haskeline input,
-stdout/stderr presentation, process working-directory changes, and requested
-shell and Cabal package commands. Applications needing custom transport or
-mutable caller-owned state should embed the checked adapters documented in
-[the library API guide](library-api.md) instead.
+stdout/stderr presentation, trusted startup-file execution, process
+working-directory changes, and requested evaluation, editor, shell, and Cabal
+package commands. Applications needing custom transport or mutable
+caller-owned state should embed the checked adapters documented in [the
+library API guide](library-api.md) instead.
 
 ## Relationship to the historical frontends
 

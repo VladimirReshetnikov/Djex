@@ -733,7 +733,10 @@ onlyUserInterrupt _ = Nothing
 evaluateInteractive :: String -> ReplState -> IO ()
 evaluateInteractive expression state = do
   outcome <- handleJust onlyUserInterrupt (const $ pure Nothing)
-    $ Just <$> evaluateExpression evaluableModules expression
+    $ Just <$> evaluateExpression
+        (exferenceRuntimeScope runtime)
+        evaluableModules
+        expression
   case outcome of
     Nothing -> putStrLn "Interrupted."
     Just result -> do
@@ -742,9 +745,10 @@ evaluateInteractive expression state = do
         Left failure -> emitDiagnostic failure
         Right value -> putStrLn value
  where
+  runtime = exferenceRuntime state
   evaluableModules = maybe []
     (map moduleEntry . workspaceModules)
-    $ exferenceRuntimeWorkspace $ exferenceRuntime state
+    $ exferenceRuntimeWorkspace runtime
   moduleEntry loaded =
     (workspaceModuleName loaded, workspaceModulePath loaded)
 

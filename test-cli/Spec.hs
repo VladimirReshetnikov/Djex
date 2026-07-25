@@ -1883,33 +1883,93 @@ testReplInfoInstances = withTemporaryEnvironment
     "instance Inst.Marker Inst.Thing" output
   assertNoCallStack errors
 
--- Evaluation is the one command that runs code. A compilable workspace joins
--- the interpreter scope; a synthesis-only pseudo-Haskell workspace degrades
--- to Prelude with an advisory instead of failing arithmetic.
+-- Evaluation is the one command that runs code. It compiles the entire local
+-- dependency closure but translates the transactional prompt scope to GHC's
+-- context instead of opening every loaded module.
 testReplEval :: Assertion
 testReplEval = do
   withTemporaryEnvironment
-    [ ( "Custom.hs"
+    [ ("empty/.keep", "")
+    , ( "scope/EvalA.hs"
       , unlines
-          [ "module Custom where"
-          , ""
-          , "data Wrapped = MkWrapped { unwrapped :: Bool }"
+          [ "module EvalA (publicA) where"
+          , "publicA :: String"
+          , "publicA = \"public-a\""
+          , "privateA :: String"
+          , "privateA = \"private-a\""
+          ]
+      )
+    , ( "scope/EvalB.hs"
+      , unlines
+          [ "module EvalB (publicB, otherB) where"
+          , "publicB :: String"
+          , "publicB = \"public-b\""
+          , "otherB :: String"
+          , "otherB = \"other-b\""
+          ]
+      )
+    , ( "scope/EvalTop.hs"
+      , unlines
+          [ "module EvalTop (publicTop) where"
+          , "import EvalA"
+          , "import qualified EvalB as B"
+          , "publicTop :: String"
+          , "publicTop = \"public-top\""
+          , "privateTop :: String"
+          , "privateTop = \"top-private\""
+          ]
+      )
+    , ( "scope/Bare.hs"
+      , unlines
+          [ "{-# LANGUAGE NoImplicitPrelude #-}"
+          , "module Bare where"
+          , "import qualified Prelude"
+          , "bareValue :: Prelude.String"
+          , "bareValue = \"bare-value\""
           ]
       )
     ] $ \directory -> do
-    (exitCode, output, errors) <- runRepl directory
-      [ ":eval 20 + 22"
-      , ":eval unwrapped (MkWrapped True)"
-      , ":eval bogusIdentifier"
+    let environment = directory </> "empty"
+        top = directory </> "scope/EvalTop.hs"
+        bare = directory </> "scope/Bare.hs"
+    (exitCode, output, errors) <- runRepl environment
+      [ ":load " ++ show top
+      , ":eval (privateTop, publicA, B.publicB)"
+      , ":eval publicB"
+      , ":eval EvalA.privateA"
+      , ":module EvalA"
+      , ":eval \"ordinary:\" ++ publicA"
+      , ":eval privateA"
+      , ":module"
+      , ":eval 20 + 22"
+      , ":eval publicA"
+      , "import qualified EvalB as EB (publicB, otherB)"
+      , "import qualified EvalB as Hidden hiding (otherB)"
+      , ":eval (EB.publicB, EB.otherB, Hidden.publicB)"
+      , ":eval Hidden.otherB"
+      , ":load " ++ show bare
+      , ":eval bareValue"
+      , ":eval 20 + 22"
       ]
     assertEqual "eval REPL exit" ExitSuccess exitCode
-    assertContains "pure expression evaluates" "42" output
-    assertContains "workspace declarations are in evaluation scope"
-      "True" output
-    assertContains "a rejected expression is a structured diagnostic"
-      "[DJEX_REPL_EVAL]" errors
+    assertContains "a starred module exposes private and imported names"
+      "(\"top-private\",\"public-a\",\"public-b\")" output
+    assertContains "an ordinary module exposes its exports"
+      "\"ordinary:public-a\"" output
+    assertContains "an empty context receives installed Prelude"
+      "42" output
+    assertContains "qualified aliases preserve import lists and hiding"
+      "(\"public-b\",\"other-b\",\"public-b\")" output
+    assertContains "a starred NoImplicitPrelude module remains evaluable"
+      "\"bare-value\"" output
+    assertEqual
+      "private, unqualified, hidden, and no-Prelude names stay unavailable"
+      6 $ countOccurrences "[DJEX_REPL_EVAL]" errors
     assertBool "compilable workspace produced a scope advisory" $
       not $ "DJEX_REPL_EVAL_SCOPE" `isInfixOf` errors
+
+  -- A synthesis-only pseudo-Haskell workspace still degrades to Prelude with
+  -- one advisory instead of preventing an independent expression.
   withTemporaryEnvironment
     [ ( "Fake.hs"
       , unlines
@@ -1919,12 +1979,15 @@ testReplEval = do
           ]
       )
     ] $ \directory -> do
-    (exitCode, output, errors) <- runRepl directory [":eval 20 + 22"]
+    (exitCode, output, errors) <- runRepl directory
+      [":eval 20 + 22", ":eval bogusIdentifier"]
     assertEqual "fallback eval REPL exit" ExitSuccess exitCode
     assertContains "evaluation still answers under Prelude fallback"
       "42" output
-    assertContains "the degraded scope is an advisory"
-      "[DJEX_REPL_EVAL_SCOPE]" errors
+    assertEqual "each degraded evaluation retains exactly one advisory"
+      2 $ countOccurrences "[DJEX_REPL_EVAL_SCOPE]" errors
+    assertContains "fallback evaluation failures stay structured"
+      "[DJEX_REPL_EVAL]" errors
 
 testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do

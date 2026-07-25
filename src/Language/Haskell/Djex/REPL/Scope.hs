@@ -16,6 +16,7 @@ module Language.Haskell.Djex.REPL.Scope
   , addScopeImport
   , changeScopeModules
   , scopeEntries
+  , parseScopeImport
   , scopeUnqualifiedNames
   , scopeVisibleNames
   , scopeSearchNames
@@ -254,7 +255,7 @@ revalidateScope inventory workspace scope = do
 entryIsLoaded :: Map ModuleName WorkspaceModule -> ScopeEntry -> Bool
 entryIsLoaded modules entry = case entry of
   ScopeModule _ _ moduleName -> Map.member moduleName modules
-  ScopeImport source -> case parseImport source of
+  ScopeImport source -> case parseScopeImport source of
     Right declaration -> case importModuleName declaration of
       Right moduleName -> Map.member moduleName modules
       Left _ -> False
@@ -268,7 +269,7 @@ addScopeImport
   -> ReplScope
   -> Either Diagnostic ReplScope
 addScopeImport inventory workspace source scope = do
-  declaration <- parseImport source
+  declaration <- parseScopeImport source
   let normalized = HSE.prettyPrint declaration
   compileScope inventory workspace
     $ scopeEntries scope ++ [ScopeImport normalized]
@@ -356,7 +357,7 @@ addModuleEntry entries incoming = entries ++ [incoming]
 removedBy :: [(Bool, ModuleName)] -> ScopeEntry -> Bool
 removedBy references entry = case entry of
   ScopeModule _ _ moduleName -> moduleName `Set.member` removed
-  ScopeImport source -> case parseImport source of
+  ScopeImport source -> case parseScopeImport source of
     Right declaration -> case importModuleName declaration of
       Right moduleName -> moduleName `Set.member` removed
       Left _ -> False
@@ -380,8 +381,14 @@ checkedModuleName source
  where
   token = trim source
 
-parseImport :: String -> Either Diagnostic (HSE.ImportDecl HSE.SrcSpanInfo)
-parseImport source = case HSE.parseImportDeclWithMode importParseMode source of
+-- | Parse the normalized import text retained by 'ScopeImport'. The parser is
+-- shared with real-GHC evaluation so synthesis and execution cannot disagree
+-- about qualified aliases or explicit import surfaces.
+parseScopeImport
+  :: String
+  -> Either Diagnostic (HSE.ImportDecl HSE.SrcSpanInfo)
+parseScopeImport source = case
+    HSE.parseImportDeclWithMode importParseMode source of
   HSE.ParseOk declaration -> do
     _ <- importModuleName declaration
     _ <- traverse checkedHseModuleName $ HSE.importAs declaration
@@ -467,7 +474,7 @@ entryContribution index modules views entry = case entry of
         [(moduleName, moduleViewExports view)]
         []
   ScopeImport source -> do
-    declaration <- parseImport source
+    declaration <- parseScopeImport source
     rejectPackageImport declaration
     canonical <- importModuleName declaration
     _ <- requireLoaded modules canonical
@@ -523,7 +530,7 @@ implicitPreludeContribution modules views entries = case
   isStarredModule (ScopeModule _ True _) = True
   isStarredModule _ = False
   mentionsModule wanted (ScopeModule _ _ candidate) = wanted == candidate
-  mentionsModule wanted (ScopeImport source) = case parseImport source of
+  mentionsModule wanted (ScopeImport source) = case parseScopeImport source of
     Right declaration -> importModuleName declaration == Right wanted
     Left _ -> False
 

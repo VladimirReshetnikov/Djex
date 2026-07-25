@@ -138,7 +138,7 @@ Start the shared interactive session with either equivalent form:
 
 ```console
 djex
-djex repl [--backend djinn|exference|both] [--environment DIR] [--fix] [--history FILE]
+djex repl [--backend djinn|exference|both] [--environment DIR] [--fix] [--history FILE] [--ignore-startup]
 ```
 
 The default prompt is `djex[djinn]>`. Entering a bare type synthesizes with
@@ -146,9 +146,11 @@ the active backend selection; `:backend` changes that selection, while
 `:djinn TYPE`, `:exference TYPE`, and `:compare TYPE` select a backend for one
 query. Both-mode labels each engine's independent output and still runs the
 other engine if one rejects the type or fails. This resembles GHCi's colon
-commands, history, completion, and `:{`/`:}` input, but it is not a GHCi
-evaluator: bare input is a requested result type, not a Haskell expression,
-and each backend retains its own type grammar and semantics.
+commands, startup files, history, completion, and `:{`/`:}` input. Bare input
+is deliberately still a requested result type, not a Haskell expression, and
+each backend retains its own type grammar and semantics; the explicit `:eval`
+command is the separate boundary that compiles and executes an expression with
+real GHC.
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded
@@ -169,16 +171,27 @@ synonyms normalized. See
 [kind inspection](docs/repl.md#inspecting-type-kinds) for scope rules,
 qualification behavior, and the intentionally supported kind-language subset.
 
+`:eval EXPRESSION` compiles the loaded source workspace with real GHC and
+evaluates one expression in the current prompt module/import context. This is
+the only REPL command that executes Haskell code, and each invocation uses a
+fresh interpreter. If the workspace or its prompt context does not compile,
+evaluation falls back to Prelude scope and reports an advisory. See
+[evaluating expressions](docs/repl.md#evaluating-expressions) for the scope,
+fallback, isolation, and interrupt contract.
+
 The Exference half has a GHCi-shaped source workspace. `:load`, `:add`,
 `:unadd`, and `:reload` manage module/file targets and their local source
 dependencies; bare Haskell imports and `:module` manage the prompt scope;
 `:show targets`, `:show modules`, and `:show imports` expose the three distinct
 states. Loading and scope changes are transactional. This is source loading,
-not GHC compilation: Djex does not read the GHC package database or `.hi`
-files, and it consumes declarations and signatures without compiling or
-inferring function bodies. Djinn always retains its independent standard
-session. See the [shared REPL guide](docs/repl.md) for the target grammar,
-export visibility, commands, settings, defaults, and failure behavior.
+not GHC compilation for synthesis: Djex consumes declarations and signatures
+without compiling or inferring function bodies, and projects the same prompt
+scope into checked Exference and Djinn sessions. Djinn falls back to its
+standard checked session only if that projection cannot be sealed. The
+explicit `:eval` boundary separately gives the loaded files to real GHC; its
+package and compiled-module scope is not added to either synthesis inventory.
+See the [shared REPL guide](docs/repl.md) for the target grammar, export
+visibility, commands, settings, defaults, and failure behavior.
 
 Djex can also delegate explicit package-manager work to Cabal:
 

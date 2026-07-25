@@ -1,5 +1,6 @@
 module Control.Monad.Trans.Class where
 
+import qualified Control.Monad (Monad)
 
 
 class MonadTrans t where

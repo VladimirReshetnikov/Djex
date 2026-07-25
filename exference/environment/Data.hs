@@ -1,5 +1,8 @@
 module Data.Data where
 
+import qualified Data.Either (Either)
+import qualified Data.Maybe (Maybe)
+import Data.Typeable (Typeable)
 
 
 data DataType

@@ -1,5 +1,7 @@
 module Control.Monad.Loops where
 
+import qualified Control.Monad (Monad, MonadPlus)
+import Data.Bool (Bool)
 
 
 -- whileM :: Control.Monad.Monad m => m Data.Bool.Bool -> m a -> m [a]

@@ -4382,16 +4382,27 @@ tests = testGroup "Exference"
                   $ "A.T is not in scope" `isInfixOf` qualifiedFailure
               _ -> fail $ "unexpected missing-import failures: "
                 ++ show missing
-        , testCase "public source parsing is strict with no imports" $ do
-            messages <- expectBindingScopeFailure
-              [ ("A.hs", "module A where\ndata T = AT\n")
-              , ("Use.hs", unlines
-                  [ "module Use where"
-                  , "excluded :: T"
-                  ])
-              ]
+        , testCase "public source loaders are strict with no imports" $ do
+            let sources =
+                  [ ("A.hs", "module A where\ndata T = AT\n")
+                  , ("Use.hs", unlines
+                      [ "module Use where"
+                      , "excluded :: T"
+                      ])
+                  ]
+            messages <- expectBindingScopeFailure sources
             assertBool (show messages)
               $ any ("T is not in scope" `isInfixOf`) messages
+            LoadReport checkedResult _ <- environmentFromSources sources []
+            case checkedResult of
+              Left (BindingDeclarationErrors failures) -> assertBool
+                (show failures)
+                $ any (("T is not in scope" `isInfixOf`)
+                    . extractionErrorMessage)
+                $ NonEmpty.toList failures
+              Left failure -> fail $ "unexpected snapshot scope failure: "
+                ++ show failure
+              Right _ -> fail "checked snapshot loading used global fallback"
         , testCase "explicit exports retain named re-export identity" $ do
             environment <- expectSourceEnvironment
               [ ("A.hs", unlines
@@ -4483,6 +4494,33 @@ tests = testGroup "Exference"
               ]
             assertBool (show disabled)
               $ any ("Bool is not in scope" `isInfixOf`) disabled
+        , testCase "parse-mode flags can suppress implicit Prelude" $
+            withTemporaryFile (unlines
+              [ "module Prelude (Bool) where"
+              , "data Bool = False | True"
+              ]) $ \preludePath ->
+            withTemporaryFile (unlines
+              [ "module ModeDisabled where"
+              , "excluded :: Bool"
+              ]) $ \usePath -> do
+              let preludeMode = haskellSrcExtsParseMode preludePath
+                  baseUseMode = haskellSrcExtsParseMode usePath
+                  disabledMode = baseUseMode
+                    { HSE.extensions =
+                        HSE.DisableExtension HSE.ImplicitPrelude
+                          : HSE.extensions baseUseMode
+                    }
+              LoadReport result _ <- parseModules
+                [(preludeMode, preludePath), (disabledMode, usePath)]
+              case result of
+                Left (BindingDeclarationErrors failures) -> assertBool
+                  (show failures)
+                  $ any (("Bool is not in scope" `isInfixOf`)
+                      . extractionErrorMessage)
+                  $ NonEmpty.toList failures
+                Left failure -> fail $ "unexpected parse-mode failure: "
+                  ++ show failure
+                Right _ -> fail "parse mode ignored disabled implicit Prelude"
         , testCase "legacy extraction keeps unique-global fallback" $ do
             provider <- expectParsedModule
               "module Provider where\ndata T = T\n"

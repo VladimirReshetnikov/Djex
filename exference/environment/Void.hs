@@ -1,5 +1,14 @@
 module Data.Void where
 
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Data.Data (Data)
+import qualified Data.Eq (Eq)
+import Data.Functor (Functor)
+import qualified Data.Ix (Ix)
+import qualified Data.Ord (Ord)
+import qualified GHC.Generics (Generic)
+import {-# SOURCE #-} qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 data Void

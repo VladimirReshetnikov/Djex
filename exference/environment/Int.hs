@@ -1,5 +1,16 @@
 module Data.Int where
 
+import qualified Data.Bits (Bits, FiniteBits)
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Data.Data (Data)
+import qualified Data.Eq (Eq)
+import {-# SOURCE #-} qualified Data.Ix (Ix)
+import qualified Data.Ord (Ord)
+import qualified Foreign.Storable (Storable)
+import qualified GHC.Generics (Generic)
+import qualified Text.Printf (PrintfArg)
+import {-# SOURCE #-} qualified Text.Read (Read)
+import {-# SOURCE #-} qualified Text.Show (Show)
 
 
 data Int

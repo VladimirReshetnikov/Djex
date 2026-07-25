@@ -1,5 +1,14 @@
 module Control.Monad where
 
+import qualified Control.Applicative (Alternative, Applicative, WrappedMonad)
+import Control.Arrow (ArrowApply, ArrowMonad)
+import qualified Control.Concurrent.STM (STM)
+import qualified Control.Monad.ST (ST)
+import qualified Data.Bool (Bool)
+import Data.Foldable (Foldable)
+import qualified Data.Void (Void)
+import qualified Text.ParserCombinators.ReadP (ReadP)
+import qualified Text.ParserCombinators.ReadPrec (ReadPrec)
 
 
 

@@ -1,5 +1,8 @@
 module Control.Arrow where
 
+import qualified Control.Category (Category)
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Control.Monad (Monad)
 
 
 class Control.Category.Category a => Arrow a where

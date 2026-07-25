@@ -1,5 +1,15 @@
 module Data.Bool where
 
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Data.Bits (Bits, FiniteBits)
+import {-# SOURCE #-} qualified Data.Data (Data)
+import {-# SOURCE #-} qualified Data.Eq (Eq)
+import {-# SOURCE #-} qualified Data.Ix (Ix)
+import {-# SOURCE #-} qualified Data.Ord (Ord)
+import qualified Foreign.Storable (Storable)
+import qualified GHC.Generics (Generic)
+import {-# SOURCE #-} qualified Text.Read (Read)
+import {-# SOURCE #-} qualified Text.Show (Show)
 
 
 data Bool = True

@@ -78,7 +78,7 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
-  , loadLegacyExferenceSessionFromSourcesWithPolicy
+  , loadExferenceSessionFromSourcesWithPolicy
   )
 import Language.Haskell.Djex.Package
   ( PackageOperation (DownloadOperation, InstallOperation)
@@ -777,7 +777,7 @@ attemptWorkspaceLoad allowFix retention previousScope workspace =
       emitDiagnostic failure
       pure $ failedLoadAttempt targets (Just workspace) [failure]
     Right policy -> do
-      report <- loadLegacyExferenceSessionFromSourcesWithPolicy
+      report <- loadExferenceSessionFromSourcesWithPolicy
         policy
         (workspaceModuleSources workspace)
         (workspaceRatingSources workspace)

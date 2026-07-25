@@ -1,5 +1,11 @@
 module Data.Ratio where
 
+import qualified Data.Data (Data)
+import qualified Data.Eq (Eq)
+import qualified Data.Ord (Ord)
+import qualified Foreign.Storable (Storable)
+import qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 data Ratio a

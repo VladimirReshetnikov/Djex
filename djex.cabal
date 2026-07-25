@@ -225,6 +225,7 @@ Library
     Language.Haskell.Exference.Core.Internal.SourceNames
     Language.Haskell.Exference.Core.Internal.VariableSupply
     Language.Haskell.Exference.HaskellSrcUtils
+    Language.Haskell.Exference.Internal.SourceTypeScope
     Language.Haskell.Exference.Internal.TypeParsing
     Paths_djex
 

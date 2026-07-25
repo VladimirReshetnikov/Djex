@@ -1,5 +1,10 @@
 module Control.Monad.State where
 
+import qualified Control.Applicative (Alternative, Applicative)
+import qualified Control.Monad (Monad, MonadPlus)
+import qualified Control.Monad.IO.Class (MonadIO)
+import qualified Control.Monad.Trans.Class (MonadTrans)
+import qualified Data.Functor (Functor)
 
 
 newtype State s a = State (s -> (a, s))

@@ -1,5 +1,16 @@
 module Control.Applicative where
 
+import Control.Arrow (Arrow, ArrowMonad, ArrowPlus, ArrowZero)
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Control.Monad (Monad, MonadPlus)
+import qualified Data.Eq (Eq)
+import qualified Data.Functor (Functor)
+import qualified Data.Functor.Const (Const)
+import qualified Data.Monoid (Monoid)
+import qualified Data.Ord (Ord)
+import qualified GHC.Generics (Generic, Generic1)
+import {-# SOURCE #-} qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 class Data.Functor.Functor f => Applicative f where

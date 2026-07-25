@@ -1,5 +1,16 @@
 module Data.Either where
 
+import qualified Control.Applicative (Applicative)
+import qualified Control.Monad (Monad)
+import qualified Data.Eq (Eq)
+import qualified Data.Foldable (Foldable)
+import qualified Data.Functor (Functor)
+import qualified Data.Ord (Ord)
+import qualified Data.Traversable (Traversable)
+import qualified GHC.Generics (Generic, Generic1)
+-- Instance-only SOURCE imports keep the curated module graph acyclic.
+import {-# SOURCE #-} qualified Text.Read (Read)
+import qualified Text.Show (Show)
 
 
 data Either a b = Left a

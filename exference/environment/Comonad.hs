@@ -1,5 +1,6 @@
 module Control.Comonad where
 
+import qualified Data.Functor (Functor)
 
 
 class Data.Functor.Functor w => Comonad w where

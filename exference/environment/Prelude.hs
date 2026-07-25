@@ -1,5 +1,20 @@
 module Prelude where
 
+-- Prelude is the corpus boot interface: its SOURCE imports prevent every
+-- module's implicit Prelude edge from turning these dependencies into cycles.
+import {-# SOURCE #-} qualified Data.Bits (Bits)
+import {-# SOURCE #-} qualified Data.Data (Data)
+import {-# SOURCE #-} qualified Data.Eq (Eq)
+import {-# SOURCE #-} qualified Data.Int (Int)
+import {-# SOURCE #-} qualified Data.Ix (Ix)
+import {-# SOURCE #-} qualified Data.Monoid (Product, Sum)
+import {-# SOURCE #-} qualified Data.Ord (Ord)
+import {-# SOURCE #-} qualified Data.Ratio (Rational)
+import {-# SOURCE #-} qualified Foreign.Storable (Storable)
+import {-# SOURCE #-} qualified GHC.Generics (Generic)
+import {-# SOURCE #-} qualified Text.Printf (PrintfArg)
+import {-# SOURCE #-} qualified Text.Read (Read)
+import {-# SOURCE #-} qualified Text.Show (Show)
 
 
 data Float

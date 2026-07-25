@@ -86,11 +86,19 @@ data ExferenceCliOptions = ExferenceCliOptions
   , exferenceSearchOptions :: ExferenceOptions
   }
 
+-- | Process entry point. This delegates to 'runArguments' and terminates the
+-- process with the returned status.
 main :: IO ()
 main = getArgs >>= runArguments >>= exitWith
 
--- | Run the command without terminating the process.  Keeping argument
--- dispatch here makes the process-level CLI straightforward to exercise.
+-- | Run the complete @djex@ command without calling 'exitWith'. The returned
+-- status has the same meaning as the executable's status.
+--
+-- This is an in-process command frontend, not a pure argument parser. It uses
+-- the process streams and working directory and, depending on the arguments
+-- or interactive input, may read startup files, evaluate Haskell with GHC,
+-- launch an editor or shell, and run Cabal. Embed the checked backend adapters
+-- instead when the host must own those effects.
 runArguments :: [String] -> IO ExitCode
 runArguments arguments = case arguments of
   ["--help"] -> putStrLn fullUsage >> pure ExitSuccess

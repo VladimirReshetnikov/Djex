@@ -69,6 +69,7 @@ runProjectRepl = runRepl defaultReplOptions
   , replEnvironmentPath = Just "./environment"
   , replAllowFix = False
   , replHistoryFile = Just "./.djex-history"
+  , replIgnoreStartupFiles = False
   }
 ```
 
@@ -88,16 +89,40 @@ Djinn session is still usable.
 
 This API embeds a terminal frontend, not an abstract protocol: it reads through
 Haskeline, writes results and diagnostics to the process streams, can change
-the process working directory, and permits both `:!` shell commands and
-`:download`/`:install` Cabal effects. Package installation can execute
+the process working directory, and runs trusted `.djexrc` startup commands
+unless `replIgnoreStartupFiles` is `True`. Interactive commands can launch the
+configured editor or a shell, evaluate code through real GHC, and invoke Cabal
+through `:download`/`:install`. Package installation can execute
 target-supplied build code and does not add compiled modules to Djex's
 source-only inventory. Package children receive no REPL stdin or unrelated
 inherited file descriptors. Use the checked adapters below when an editor,
-service, or GUI needs to own input, output,
-authorization, or session persistence. The complete interactive contract,
-including commands, settings, transactional reloads, both-mode isolation, and
-the distinction from the historical Djinn REPL, is in the
+service, or GUI needs to own input, output, authorization, or session
+persistence. The complete interactive contract, including startup-file trust
+checks, commands, settings, transactional reloads, prompt scope, both-mode
+isolation, and the distinction from the historical Djinn REPL, is in the
 [shared REPL guide](repl.md).
+
+## Embed the complete command dispatcher
+
+Applications that deliberately want the executable's whole interface can call
+the exposed dispatcher without letting it terminate the host process:
+
+```haskell
+import Language.Haskell.Djex.CLI (runArguments)
+import System.Exit (ExitCode)
+
+runDjexCommand :: [String] -> IO ExitCode
+runDjexCommand = runArguments
+```
+
+`runArguments` accepts the same argument vector as `djex`, writes to the
+process streams, and returns the status that the executable would pass to
+`exitWith`. It may start the REPL or a synthesis search, read source and
+startup files, change the working directory, execute evaluated Haskell, or
+launch editor, shell, and Cabal child processes. It is therefore convenient
+for another command-line program, but it is not an isolation boundary. Use the
+checked adapters below for a server or tool that needs explicit control over
+input, output, authorization, and execution.
 
 ## Common lifecycle
 

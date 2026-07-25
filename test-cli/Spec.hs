@@ -112,6 +112,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplExportAmbiguity
   , testCase "REPL Djinn projection preserves cross-namespace names"
       testReplDjinnNamespaceProjection
+  , testCase "REPL Djinn projection preserves inferred higher-kinded stubs"
+      testReplDjinnHigherKindStub
   , testCase "REPL Djinn projection repairs scopes beyond legacy caps"
       testReplDjinnRepairDepth
   , testCase "REPL bundled imports reject type-synonym wildcards"
@@ -1604,6 +1606,40 @@ testReplDjinnNamespaceProjection = withReplModuleFixture $ \root -> do
     "\\_ -> Same" output
   assertBool "legal cross-namespace names were reported as ambiguous" $
     not $ "unqualified spelling is ambiguous" `isInfixOf` output
+  assertNoCallStack errors
+
+-- An undeclared source type can still acquire an exact kind from its uses in
+-- Exference's open inventory. Djinn must reuse that fact: the application
+-- count in @External Unary@ cannot reveal that @Unary :: Type -> Type@, and an
+-- arity-only @External :: Type -> Type@ stub makes the wrapper ill-kinded.
+testReplDjinnHigherKindStub :: Assertion
+testReplDjinnHigherKindStub = withTemporaryEnvironment
+    [("HigherKindStub.hs", unlines
+      [ "module HigherKindStub where"
+      , "data Unary a = Unary a"
+      , "data Wrapper = Wrapper (External Unary)"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Wrapper -> External Unary"
+    , ":show environment"
+    , ":show omissions"
+    ]
+  assertEqual "higher-kinded Djinn stub REPL exit" ExitSuccess exitCode
+  assertContains
+    ("the wrapper remains structurally eliminable: " ++ output ++ errors)
+    "case a of" output
+  assertContains "the inferred external stub remains in the projection"
+    "3 declarations (projected from the module scope, 0 omissions)" output
+  assertContains "the exact inferred kind avoids projection omissions"
+    "-- Djinn scope projection\n(no omissions)" output
+  assertBool "higher-kinded stub forced the standard-environment fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "higher-kinded stub emitted a projection diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
   assertNoCallStack errors
 
 -- Hiding the root of this synonym dependency chain removes exactly one alias

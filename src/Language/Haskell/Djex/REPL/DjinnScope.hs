@@ -136,11 +136,13 @@ type ScopeDeclaration = Declaration String Void ()
 projectDjinnScope
   :: DjinnAxiomPolicy
   -> [(Name, [(Name, [Name])])]
+  -> Map.Map Name (Kind Void)
+  -- ^ Authoritative ground kinds inferred by the shared source inventory.
   -> [ScopeDeclaration]
   -> Set.Set Name
   -- ^ Canonical names visible unqualified in the prompt scope.
   -> Either Diagnostic DjinnProjection
-projectDjinnScope policy records declarations visible = do
+projectDjinnScope policy records inferredKinds declarations visible = do
   let recursive = recursiveDataTypeNames declarations
       fullyEliminable = Set.fromList
         [ name
@@ -177,7 +179,8 @@ projectDjinnScope policy records declarations visible = do
         ]
       (grounded, recursionOmissions) = degradeRecursiveDataTypes renamed
       (admitted, admissionOmissions) = admitDeclarations grounded
-      (stubbed, stubOmissions) = stubUnknownReferences admitted
+      (stubbed, stubOmissions) =
+        stubUnknownReferences inferredKinds admitted
   (resolved, referenceOmissions) <- resolveScopeReferences stubbed
   (session, sealOmissions) <- sealWithRepairs resolved
   pure DjinnProjection
@@ -443,14 +446,20 @@ describeAdmissionFailure failure = case failure of
     "its type is not representable in Djinn"
   other -> show other
 
--- Referenced-but-undeclared nominal type constructors become abstract stubs
--- with an arity-derived kind, keeping declarations whose signatures mention
--- out-of-scope types usable instead of cascading into omissions. Structural
--- names (functions, tuples, lists) are native to Djinn and never stubbed.
+-- Referenced-but-undeclared nominal type constructors become abstract stubs,
+-- keeping declarations whose signatures mention out-of-scope types usable
+-- instead of cascading into omissions. Prefer the exact kind inferred while
+-- sealing the shared source inventory: application arity alone cannot
+-- distinguish @F Int@ from @F Maybe@, whose arguments have different kinds.
+-- The arity-derived kind remains a compatibility fallback for a nominal name
+-- absent from that authoritative inventory. Structural names (functions,
+-- tuples, lists) are native to Djinn and never stubbed.
 stubUnknownReferences
-  :: [ScopeDeclaration]
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-stubUnknownReferences declarations = (declarations ++ stubs, omissions)
+stubUnknownReferences inferredKinds declarations =
+  (declarations ++ stubs, omissions)
  where
   defined = Set.fromList $ concatMap declarationOwnedNames declarations
   arities = Map.fromListWith max
@@ -470,7 +479,8 @@ stubUnknownReferences declarations = (declarations ++ stubs, omissions)
         Left _ -> Left $ DjinnScopeOmission (renderCanonical name)
           "referenced type is not representable in Djinn"
     | (name, arity) <- unknown
-    , let stub = AbstractTypeDeclaration () name (arityKind arity)
+    , let stub = AbstractTypeDeclaration () name
+            $ Map.findWithDefault (arityKind arity) name inferredKinds
     ]
 
 -- | Type constructors referenced by a declaration with the largest applied

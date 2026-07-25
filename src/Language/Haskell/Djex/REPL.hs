@@ -173,6 +173,8 @@ refreshDjinnProjection state = case
     in case projectDjinnScope
         (djinnAxiomPolicy djinn)
         records
+        (typeConstructorKinds $ inventoryKindAssumptions
+          $ exferenceSessionInventory baseSession)
         (scopeProjectionDeclarations baseSession)
         visible of
       Left failure -> do

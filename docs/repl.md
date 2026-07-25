@@ -132,10 +132,14 @@ non-inhabitation evidence.
 Exact aliases win; otherwise any nonempty, unique prefix of a canonical
 command is accepted. For example, `:q` is `:quit`, `:s` is deliberately
 `:set`, and `:sy` is `:synth`. Tab completion offers commands, backend names,
-settings, `:show` subjects, and paths where appropriate; it also follows the
-loaded workspace, offering module names after `:module` and `:browse` and
-in-scope identifiers (qualified and unqualified) at type-query, `:info`,
-`:type`, and `:kind` positions.
+settings, `:show` subjects, and paths where appropriate. Argument completion
+uses the same command descriptor as parsing, so exact aliases and accepted
+unique prefixes behave like the canonical command; `:module` completion also
+preserves a typed `+`, `-`, or `*` marker. Completion follows the loaded
+workspace, offering module names after `:module` and `:browse` and in-scope
+identifiers (qualified and unqualified) at type-query, `:info`, `:type`, and
+`:kind` positions. Completed paths that need quoting are inserted as Haskell
+string literals, matching the path grammar rather than shell escape syntax.
 
 | Command | Purpose |
 | --- | --- |

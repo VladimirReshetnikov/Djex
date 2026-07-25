@@ -13,13 +13,17 @@ module Language.Haskell.Djex.REPL.Command
   , ModuleChange (..)
   , KindNormalization (..)
   , TypeDefaulting (..)
+  , CompletionDomain (..)
   , ReplSetting (..)
   , replSettingName
   , parseReplSetting
   , parseReplInput
   , parseReplBackend
   , parseCommandWords
+  , resolveCommandToken
+  , commandCompletionDomain
   , commandNames
+  , helpNames
   , backendNames
   , settingNames
   , booleanSettingNames
@@ -122,6 +126,24 @@ data TypeDefaulting
   | DefaultTypeVariables
   deriving (Eq, Show)
 
+-- | The semantic argument vocabulary owned by a colon command.
+--
+-- Haskeline consumes this metadata, so exact aliases and unique command
+-- prefixes receive exactly the same completion behavior as canonical names.
+-- Keeping it beside the parser also prevents newly added commands from
+-- silently acquiring a different grammar at the completion boundary.
+data CompletionDomain
+  = NoCompletion
+  | BackendCompletion
+  | CommandCompletion
+  | IdentifierCompletion
+  | ModuleCompletion
+  | ModuleContextCompletion
+  | PathCompletion
+  | SettingCompletion
+  | ShowCompletion
+  deriving (Eq, Show)
+
 -- | Every mutable REPL setting, in stable display and completion order.
 data ReplSetting
   = BackendSetting
@@ -174,6 +196,8 @@ data CommandDescriptor = CommandDescriptor
   , descriptorAliases :: [String]
   , descriptorArguments :: String
   , descriptorSummary :: String
+  , descriptorDetails :: [String]
+  , descriptorCompletionDomain :: CompletionDomain
   , descriptorParser :: String -> Either String ReplInput
   }
 
@@ -248,6 +272,32 @@ resolveCommand token = case exactMatches of
     ++ " (could be "
     ++ intercalate ", " (map ((':' :) . descriptorName) descriptors) ++ ")"
 
+-- | Resolve a colon-command token to its canonical name. The input may retain
+-- its leading colon and the attached @module+@, @module-@, or @kind!@ mode.
+-- Exact aliases win before unique canonical prefixes, exactly as in
+-- 'parseReplInput'.
+resolveCommandToken :: String -> Either String String
+resolveCommandToken source = descriptorName <$> resolveCommandSyntax source
+
+-- | Look up the completion vocabulary for any spelling accepted by the
+-- command parser. Unknown and ambiguous prefixes deliberately have no
+-- argument completion until the user supplies enough of the command name.
+commandCompletionDomain :: String -> Maybe CompletionDomain
+commandCompletionDomain source = case resolveCommandSyntax source of
+  Right descriptor -> Just $ descriptorCompletionDomain descriptor
+  Left _ -> Nothing
+
+resolveCommandSyntax :: String -> Either String CommandDescriptor
+resolveCommandSyntax source = case attachedKindBangBase normalized of
+  Just base -> resolveCommand base
+  Nothing -> resolveCommand normalized
+ where
+  withoutColon = case normalize source of
+    ':' : token -> token
+    token -> token
+  (moduleToken, _) = normalizeAttachedModule withoutColon ""
+  normalized = map toLower moduleToken
+
 parseReplBackend :: String -> Either String ReplBackend
 parseReplBackend source = case exactMatches of
   [backend] -> Right backend
@@ -275,53 +325,66 @@ replBackendChoices =
 
 commandDescriptors :: [CommandDescriptor]
 commandDescriptors =
-  [ command "add" [] "[TARGET ...]"
+  [ commandWith PathCompletion targetDetails "add" [] "[TARGET ...]"
       "add module or file targets and reload their dependencies"
       $ fmap (ReplCommand . AddEnvironment) . commandArguments
-  , command "backend" ["b"] "[djinn|exference|both]"
+  , commandWith BackendCompletion
+      ["  choices: " ++ intercalate ", " backendNames]
+      "backend" ["b"] "[djinn|exference|both]"
       "show or change the active backend selection"
       $ Right . ReplCommand . ChangeBackend . optionalText
-  , command "browse" [] "[[*]MODULE]"
+  , commandWith ModuleCompletion
+      ["  prefix a loaded module with * to include non-exported declarations"]
+      "browse" [] "[[*]MODULE]"
       "list declarations exported by a module or the current scope"
       $ fmap (ReplCommand . Browse)
           . optionalArgument "at most one module name"
-  , command "cd" [] "DIR" "change the process working directory"
+  , commandWith PathCompletion []
+      "cd" [] "DIR" "change the process working directory"
       $ fmap (ReplCommand . ChangeDirectory) . pathArgument "a directory"
-  , command "compare" [] "TYPE" "synthesize with both backends"
+  , commandWith IdentifierCompletion []
+      "compare" [] "TYPE" "synthesize with both backends"
       $ fmap (ReplCommand . CompareBackends) . required "a type"
-  , command "djinn" [] "TYPE" "synthesize once with Djinn"
+  , commandWith IdentifierCompletion []
+      "djinn" [] "TYPE" "synthesize once with Djinn"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend DjinnBackend)
           . required "a type"
-  , command "download" ["dl"] "CABAL_TARGET ..."
+  , commandWith NoCompletion packageDetails
+      "download" ["dl"] "CABAL_TARGET ..."
       "ask Cabal to fetch targets and dependencies into its source cache"
       $ fmap (ReplCommand . DownloadPackages) . packageArguments
-  , command "edit" ["e"] "[FILE]"
+  , commandWith PathCompletion editDetails "edit" ["e"] "[FILE]"
       "open the configured editor on a file"
       $ fmap (ReplCommand . EditFile) . optionalArgument "at most one file"
-  , command "eval" [] "EXPRESSION"
+  , commandWith IdentifierCompletion evalDetails "eval" [] "EXPRESSION"
       "evaluate a Haskell expression with real GHC"
       $ fmap (ReplCommand . Evaluate) . required "a Haskell expression"
-  , command "exference" [] "TYPE" "synthesize once with Exference"
+  , commandWith IdentifierCompletion []
+      "exference" [] "TYPE" "synthesize once with Exference"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend ExferenceBackend)
           . required "a type"
-  , command "help" ["h", "?"] "[COMMAND]" "show command help"
+  , commandWith CommandCompletion []
+      "help" ["h", "?"] "[COMMAND]" "show command help"
       $ Right . ReplCommand . Help . optionalText
   , command "history" ["hist"] "[N]" "show command history"
       $ Right . ReplCommand . History . optionalText
-  , command "info" ["i"] "NAME" "inspect a declaration by exact name"
+  , commandWith IdentifierCompletion []
+      "info" ["i"] "NAME" "inspect a declaration by exact name"
       $ fmap (ReplCommand . InspectDeclaration) . required "a declaration name"
-  , command "install" [] "[--lib] CABAL_TARGET ..."
+  , commandWith NoCompletion installDetails
+      "install" [] "[--lib] CABAL_TARGET ..."
       "build and install package executables or libraries through Cabal"
       $ fmap (\(mode, targets) -> ReplCommand $ InstallPackages mode targets)
           . installArguments
-  , command "kind" ["k"] "TYPE"
+  , commandWith IdentifierCompletion kindDetails "kind" ["k"] "TYPE"
       "infer the kind of a Haskell type in the current module scope"
       $ fmap (ReplCommand . InspectKind PreserveTypeSynonyms)
           . required "a Haskell type"
-  , command "load" ["l"] "[TARGET ...]"
+  , commandWith PathCompletion loadDetails "load" ["l"] "[TARGET ...]"
       "replace the module or file targets and load their dependencies"
       $ fmap (ReplCommand . LoadEnvironment) . commandArguments
-  , command "module" ["m"] "[+|-] [[*]MODULE ...]"
+  , commandWith ModuleContextCompletion moduleDetails
+      "module" ["m"] "[+|-] [[*]MODULE ...]"
       "set, add to, or remove from the module context"
       $ fmap ReplCommand . parseModuleChange
   , command "pwd" [] "" "show the current working directory"
@@ -330,23 +393,30 @@ commandDescriptors =
       $ noArguments $ ReplCommand Quit
   , command "reload" ["r"] "" "reload the Exference environment"
       $ noArguments $ ReplCommand ReloadEnvironment
-  , command "script" [] "FILE" "execute a file of REPL inputs"
+  , commandWith PathCompletion []
+      "script" [] "FILE" "execute a file of REPL inputs"
       $ fmap (ReplCommand . RunScript) . pathArgument "a script file"
-  , command "set" ["s"] "[OPTION [VALUE]]" "show or change settings"
+  , commandWith SettingCompletion setDetails
+      "set" ["s"] "[OPTION [VALUE]]" "show or change settings"
       $ Right . ReplCommand . SetOption
-  , command "show" []
+  , commandWith ShowCompletion
+      ["  subjects: " ++ intercalate ", " showNames]
+      "show" []
       ("[" ++ intercalate "|" showNames ++ "]")
       "inspect REPL and backend state"
       $ Right . ReplCommand . ShowState . optionalText
-  , command "synth" ["sy"] "TYPE" "synthesize with the active backend(s)"
+  , commandWith IdentifierCompletion []
+      "synth" ["sy"] "TYPE" "synthesize with the active backend(s)"
       $ fmap (ReplQuery ActiveBackends) . required "a type"
-  , command "type" ["t"] "[+d] EXPRESSION"
+  , commandWith IdentifierCompletion typeDetails "type" ["t"] "[+d] EXPRESSION"
       "infer the type of a Haskell expression in the current module scope"
       $ fmap ReplCommand . parseTypeInspection
-  , command "unadd" [] "[TARGET ...]"
+  , commandWith PathCompletion targetDetails "unadd" [] "[TARGET ...]"
       "remove module or file targets and reload their dependencies"
       $ fmap (ReplCommand . UnaddEnvironment) . commandArguments
-  , command "unset" [] "OPTION" "restore one setting to its default"
+  , commandWith SettingCompletion
+      ["  restores a setting to its built-in default"]
+      "unset" [] "OPTION" "restore one setting to its default"
       $ fmap (ReplCommand . UnsetOption) . required "a setting name"
   , command "version" ["v"] "" "show the Djex version"
       $ noArguments $ ReplCommand Version
@@ -359,7 +429,27 @@ command
   -> String
   -> (String -> Either String ReplInput)
   -> CommandDescriptor
-command = CommandDescriptor
+command = commandWith NoCompletion []
+
+commandWith
+  :: CompletionDomain
+  -> [String]
+  -> String
+  -> [String]
+  -> String
+  -> String
+  -> (String -> Either String ReplInput)
+  -> CommandDescriptor
+commandWith completion details name aliases arguments summary parser =
+  CommandDescriptor
+    { descriptorName = name
+    , descriptorAliases = aliases
+    , descriptorArguments = arguments
+    , descriptorSummary = summary
+    , descriptorDetails = details
+    , descriptorCompletionDomain = completion
+    , descriptorParser = parser
+    }
 
 commandNames :: [String]
 commandNames = concatMap completionNames commandDescriptors
@@ -367,6 +457,13 @@ commandNames = concatMap completionNames commandDescriptors
  where
   completionNames descriptor = map (':' :)
     $ descriptorName descriptor : descriptorAliases descriptor
+
+-- | Every subject accepted after @:help@, without an optional leading colon.
+-- This is wider than executable colon commands because imports and attached
+-- module modes have dedicated grammar at the prompt boundary.
+helpNames :: [String]
+helpNames = "import" : "module+" : "module-"
+  : map (dropWhile (== ':')) commandNames
 
 backendNames :: [String]
 backendNames = map replBackendName replBackendChoices
@@ -453,62 +550,72 @@ commandHelp source = case token of
   aliasLines descriptor = case descriptorAliases descriptor of
     [] -> []
     aliases -> ["  aliases: " ++ intercalate ", " (map (':' :) aliases)]
-  descriptorDetails descriptor = case descriptorName descriptor of
-    "add" -> targetDetails
-    "backend" -> ["  choices: " ++ intercalate ", " backendNames]
-    "browse" ->
-      [ "  prefix a loaded module with * to include non-exported declarations"
-      ]
-    "download" -> packageDetails
-    "edit" ->
-      [ "  uses the VISUAL editor, or EDITOR when VISUAL is unset"
-      , "  with no argument, edits the most recently loaded file target"
-      , "  the environment is not reloaded; use :reload afterwards"
-      ]
-    "eval" ->
-      [ "  compiles the loaded file targets into scope when they are"
-      , "  real Haskell; otherwise evaluates against Prelude alone"
-      , "  each :eval runs a fresh session, so bindings do not persist"
-      ]
-    "install" -> packageDetails ++
-      [ "  defaults to Cabal's executable mode; --lib installs libraries"
-      , "  a leading -- makes a following --lib an ordinary package target"
-      , "  installation is independent of the surrounding Cabal project"
-      ]
-    "kind" ->
-      [ "  append ! to the command or any accepted prefix to show normal form"
-      , "  uses the loaded module scope independently of backend selection"
-      , "  normal form expands saturated type synonyms, not type families"
-      ]
-    "load" ->
-      [ "  accepts module names, file paths, quoted strings, or [String] syntax"
-      , "  with no targets, unloads the current environment"
-      ]
-    "module" ->
-      [ "  no sign replaces the context; + adds modules; - removes modules"
-      , "  canonical examples: :module +Data.List, :module + Data.Maybe"
-      , "  prefix a loaded module with * to include non-exported declarations"
-      ]
-    "set" ->
-      [ "  settings: " ++ intercalate ", " settingNames
-      , "  booleans also accept :set +NAME and :set -NAME"
-      ]
-    "show" -> ["  subjects: " ++ intercalate ", " showNames]
-    "type" ->
-      [ "  +d defaults eligible numeric type variables in the result"
-      , "  the obsolete +v mode is no longer accepted"
-      ]
-    "unadd" -> targetDetails
-    "unset" -> ["  restores a setting to its built-in default"]
-    _ -> []
-  targetDetails =
-    [ "  accepts module names, file paths, quoted strings, or [String] syntax"
-    ]
-  packageDetails =
-    [ "  accepts Cabal targets as words, quoted strings, or [String] syntax"
-    , "  target values are passed to Cabal as data, never as command options"
-    , "  this does not add compiled package modules to Djex's source workspace"
-    ]
+
+targetDetails :: [String]
+targetDetails =
+  [ "  accepts module names, file paths, quoted strings, or [String] syntax"
+  ]
+
+packageDetails :: [String]
+packageDetails =
+  [ "  accepts Cabal targets as words, quoted strings, or [String] syntax"
+  , "  target values are passed to Cabal as data, never as command options"
+  , "  this does not add compiled package modules to Djex's source workspace"
+  ]
+
+editDetails :: [String]
+editDetails =
+  [ "  uses the VISUAL editor, or EDITOR when VISUAL is unset"
+  , "  launches parsed editor argv directly and appends the path as one value"
+  , "  with no argument, edits the most recently loaded file target"
+  , "  the environment is not reloaded; use :reload afterwards"
+  ]
+
+evalDetails :: [String]
+evalDetails =
+  [ "  compiles the loaded file targets into scope when they are"
+  , "  real Haskell; otherwise evaluates against Prelude alone"
+  , "  each :eval runs a fresh session, so bindings do not persist"
+  ]
+
+installDetails :: [String]
+installDetails = packageDetails ++
+  [ "  defaults to Cabal's executable mode; --lib installs libraries"
+  , "  a leading -- makes a following --lib an ordinary package target"
+  , "  installation is independent of the surrounding Cabal project"
+  ]
+
+kindDetails :: [String]
+kindDetails =
+  [ "  append ! to the command or any accepted prefix to show normal form"
+  , "  uses the loaded module scope independently of backend selection"
+  , "  normal form expands saturated type synonyms, not type families"
+  ]
+
+loadDetails :: [String]
+loadDetails =
+  [ "  accepts module names, file paths, quoted strings, or [String] syntax"
+  , "  with no targets, unloads the current environment"
+  ]
+
+moduleDetails :: [String]
+moduleDetails =
+  [ "  no sign replaces the context; + adds modules; - removes modules"
+  , "  canonical examples: :module +Data.List, :module + Data.Maybe"
+  , "  prefix a loaded module with * to include non-exported declarations"
+  ]
+
+setDetails :: [String]
+setDetails =
+  [ "  settings: " ++ intercalate ", " settingNames
+  , "  booleans also accept :set +NAME and :set -NAME"
+  ]
+
+typeDetails :: [String]
+typeDetails =
+  [ "  +d defaults eligible numeric type variables in the result"
+  , "  the obsolete +v mode is no longer accepted"
+  ]
 
 descriptorUsage :: CommandDescriptor -> String
 descriptorUsage descriptor = ':' : usageName

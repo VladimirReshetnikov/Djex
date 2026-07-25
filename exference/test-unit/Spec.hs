@@ -205,20 +205,24 @@ import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
   ( ConversionT
+  , TypeResolver
   , convDataFromTypeVarIndex
   , convDataReservedIds
   , convDataTypeVarIndex
   , convertTypeNoDecl
   , convertTypeNoDeclInternal
+  , convertTypeNoDeclWithResolver
   , emptyConvData
   , getVar
   , haskellSrcExtsParseMode
+  , legacyTypeResolver
   , parseQualifiedName
   , convertName
   , convertModuleName
   , convertQName
   , normalizeConvertedForalls
   , runConversionTWithState
+  , scopeTypeResolverWithQualifiedNames
   )
 import Language.Haskell.Exference.SimpleDict (emptyClassEnv)
 import qualified Language.Haskell.Exference.SimpleDict as SimpleDict
@@ -4467,13 +4471,13 @@ tests = testGroup "Exference"
                   ++ show declarations
       , testCase "mixed binding errors retain declaration source order" $
           withTemporaryFile (unlines
-            [ "{-# LANGUAGE TypeOperators #-}"
+            [ "{-# LANGUAGE TypeFamilies #-}"
             , "module OrderedBindingErrors where"
-            , "ordinaryBefore, ordinaryPeer :: Int :+: Bool"
+            , "ordinaryBefore, ordinaryPeer :: Int ~ Bool"
             , "class Owner a where"
-            , "  method :: Int :+: Bool"
-            , "data Broken = Broken (Int :+: Bool)"
-            , "ordinaryAfter :: Int :*: Bool"
+            , "  method :: Int ~ Bool"
+            , "data Broken = Broken (Int ~ Bool)"
+            , "ordinaryAfter :: Bool ~ Int"
             ]) $ \modulePath -> do
               LoadReport result _ <- parseModules
                 [(haskellSrcExtsParseMode modulePath, modulePath)]
@@ -5448,7 +5452,7 @@ tests = testGroup "Exference"
           parsedModule <- expectParsedModule $ unlines
             [ "module OrderedSynonymErrors where"
             , "type Earlier = Earlier"
-            , "type Later = Int :+: Bool"
+            , "type Later = Int ~ Bool"
             ]
           typeNames <- expectRight $ getDataTypes [parsedModule]
           let errors =
@@ -5462,7 +5466,7 @@ tests = testGroup "Exference"
                 $ "cyclic type synonym" `isInfixOf`
                     extractionErrorMessage earlier
               assertBool "later raw conversion error was reordered"
-                $ "infix operator" `isInfixOf`
+                $ "unsupported type syntax" `isInfixOf`
                     extractionErrorMessage later
             _ -> fail $ "unexpected type declaration errors: " ++ show errors
       , testCase "type-synonym foralls shadow their head parameters" $ do
@@ -6380,6 +6384,70 @@ tests = testGroup "Exference"
                     (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
               className @?= name "Eq"
             Right result -> fail $ "unexpected elaboration: " ++ show result
+      , testCase "infix type operators share prefix elaboration and aliases" $ do
+          let operatorName = validQualifiedName ["TypeOwner"] ":*:"
+              baseResolver = legacyTypeResolver Map.empty [operatorName]
+              unqualifiedResolver = scopeTypeResolverWithQualifiedNames
+                [operatorName] [] [] baseResolver
+          (infixType, infixHints) <- expectRight
+            $ parseTypeWithTestResolver unqualifiedResolver
+                "left :*: right"
+          (prefixType, prefixHints) <- expectRight
+            $ parseTypeWithTestResolver unqualifiedResolver
+                "(:*:) left right"
+          infixType @?= TypeApp
+            (TypeApp (TypeCons operatorName) (TypeVar 0))
+            (TypeVar 1)
+          infixHints @?= Map.fromList [("left", 0), ("right", 1)]
+          (infixType, infixHints) @?= (prefixType, prefixHints)
+
+          ownerModule <- expectRight $ SharedName.mkModuleName "TypeOwner"
+          aliasModule <- expectRight $ SharedName.mkModuleName "Alias"
+          let aliasedResolver = scopeTypeResolverWithQualifiedNames
+                []
+                [(aliasModule, ownerModule)]
+                [(aliasModule, [operatorName])]
+                baseResolver
+          aliased <- expectRight $ parseTypeWithTestResolver aliasedResolver
+            "left Alias.:*: right"
+          aliased @?= (infixType, infixHints)
+      , testCase "infix type operators obey scope and ambiguity checks" $ do
+          let firstOperator = validQualifiedName ["First"] ":*:"
+              secondOperator = validQualifiedName ["Second"] ":*:"
+              baseResolver = legacyTypeResolver
+                Map.empty [firstOperator, secondOperator]
+              hiddenResolver = scopeTypeResolverWithQualifiedNames
+                [] [] [] baseResolver
+              ambiguousResolver = scopeTypeResolverWithQualifiedNames
+                [firstOperator, secondOperator] [] [] baseResolver
+              assertRejected label detail resolver =
+                case parseTypeWithTestResolver resolver "left :*: right" of
+                  Left message -> assertBool (label ++ ": " ++ message)
+                    $ detail `isInfixOf` message
+                  Right converted -> fail $ label ++ " accepted "
+                    ++ show converted
+          assertRejected
+            "a hidden loaded operator"
+            "is not in scope"
+            hiddenResolver
+          assertRejected
+            "two visible operators"
+            "ambiguous unqualified name"
+            ambiguousResolver
+
+          firstModule <- expectRight $ SharedName.mkModuleName "First"
+          aliasModule <- expectRight $ SharedName.mkModuleName "Alias"
+          let excludedAliasResolver = scopeTypeResolverWithQualifiedNames
+                []
+                [(aliasModule, firstModule)]
+                [(aliasModule, [])]
+                baseResolver
+          case parseTypeWithTestResolver excludedAliasResolver
+              "left Alias.:*: right" of
+            Left message -> assertBool message
+              $ "is not in scope" `isInfixOf` message
+            Right converted -> fail $ "excluded qualified operator accepted "
+              ++ show converted
       , testCase "explicit forall retains its source hint identity" $ do
           (converted, hints) <- expectRight
             $ parseTypePure "forall foo. foo -> foo"
@@ -7809,6 +7877,16 @@ canonicalType = SharedType.canonicalizeType
 
 parseTypePure :: String -> Either Diagnostic (HsType, TypeVarIndex)
 parseTypePure = parseTypeWithModePure $ haskellSrcExtsParseMode "test"
+
+parseTypeWithTestResolver
+  :: TypeResolver
+  -> String
+  -> Either String (HsType, TypeVarIndex)
+parseTypeWithTestResolver resolver source = case
+    HSE.parseTypeWithMode (haskellSrcExtsParseMode "type-operator-test") source of
+  HSE.ParseFailed location message -> Left $ show location ++ ": " ++ message
+  HSE.ParseOk syntaxType -> runIdentity $ runExceptT
+    $ convertTypeNoDeclWithResolver resolver Nothing syntaxType
 
 isLoaderSummary :: String -> Bool
 isLoaderSummary message = any (`isPrefixOf` message)

@@ -329,7 +329,15 @@ convertTypeNoDeclInternalWithResolver resolver defModuleName ty = do
   helper (TyList _ t)       =
     T.TypeApp (T.TypeCons SharedName.listName) <$> helper t
   helper (TyParen _ t)      = helper t
-  helper TyInfix{}        = throwE "infix operator"
+  helper (TyInfix location left operator right) = case operator of
+    UnpromotedName operatorLocation name ->
+      -- An infix type constructor is only surface syntax. Lower it exactly as
+      -- @(:*:) left right@ so both spellings share nominal scope resolution,
+      -- type-variable allocation order, and the later kind-checking path.
+      helper $ TyApp location
+        (TyApp location (TyCon operatorLocation name) left)
+        right
+    PromotedName{} -> throwE "promoted type"
   helper TyKind{}         = throwE "kind annotation"
   helper TyPromoted{}     = throwE "promoted type"
   helper (TyForall _ maybeTVars context t) =

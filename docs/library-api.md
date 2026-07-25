@@ -356,6 +356,12 @@ available at those phases. A later neutral-inventory, sealing, or policy
 failure uses its `DJEX_EXF_*` code and may be source-free because no single
 token owns that whole-environment invariant.
 
+The supplied closure must contain each logical module exactly once. Duplicate
+explicit headers and multiple headerless `Main` modules fail before scope
+construction with `DuplicateModuleDeclarations`; its
+`EXF_MODULE_DUPLICATE` diagnostics point at each later source in caller order
+and name the first declaration in context.
+
 The loader rejects unsupported source meaning before building a partial
 inventory. The authoritative emitted `UnsupportedVocabularyForm` set includes
 pattern-synonym signatures and XML page/hybrid modules as well as the

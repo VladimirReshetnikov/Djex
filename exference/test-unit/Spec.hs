@@ -4210,6 +4210,61 @@ tests = testGroup "Exference"
               (diagnosticSeverity failure, diagnosticMessage failure))
             (parseRatings "foo NaN") @?= Left
               (Error, "rating for foo must be finite: NaN")
+      , testCase "source loading rejects duplicate explicit modules" $ do
+          let firstPath = "/virtual/FirstA.hs"
+              secondPath = "/virtual/SecondA.hs"
+              thirdPath = "/virtual/ThirdA.hs"
+              sources =
+                [ (firstPath, "module A where\n")
+                , (secondPath, "module A where\n")
+                , (thirdPath, "module A where\n")
+                ]
+          LoadReport result diagnostics <- parseModuleSources sources
+          diagnostics @?= []
+          case result of
+            Left (DuplicateModuleDeclarations failures@(failure :| _)) -> do
+              let rendered = NonEmpty.toList failures
+              map diagnosticSource rendered @?=
+                [Just secondPath, Just thirdPath]
+              map diagnosticContext rendered @?=
+                [ [ "A is declared by both " ++ firstPath
+                      ++ " and " ++ secondPath
+                  ]
+                , [ "A is declared by both " ++ firstPath
+                      ++ " and " ++ thirdPath
+                  ]
+                ]
+              diagnosticSeverity failure @?= Error
+              diagnosticCode failure @?= Just "EXF_MODULE_DUPLICATE"
+              fmap (sourceLine . sourceStart) (diagnosticSpan failure)
+                @?= Just 1
+              diagnosticMessage failure @?= "duplicate source module"
+              environmentLoadErrorDiagnostics
+                (DuplicateModuleDeclarations failures) @?= failures
+            Left failure -> fail $ "unexpected duplicate-module failure: "
+              ++ show failure
+            Right _ -> fail "duplicate explicit modules were accepted"
+      , testCase "checked loading rejects duplicate implicit Main modules" $ do
+          let firstPath = "/virtual/FirstMain.hs"
+              secondPath = "/virtual/SecondMain.hs"
+              sources =
+                [ (firstPath, "first :: a -> a\n")
+                , (secondPath, "second :: a -> a\n")
+                ]
+          LoadReport result diagnostics <- environmentFromSources sources []
+          diagnostics @?= []
+          case result of
+            Left (DuplicateModuleDeclarations (failure :| rest)) -> do
+              rest @?= []
+              diagnosticCode failure @?= Just "EXF_MODULE_DUPLICATE"
+              diagnosticSource failure @?= Just secondPath
+              diagnosticContext failure @?=
+                [ "Main is declared by both " ++ firstPath
+                    ++ " and " ++ secondPath
+                ]
+            Left failure -> fail $ "unexpected duplicate-Main failure: "
+              ++ show failure
+            Right _ -> fail "duplicate implicit Main modules were accepted"
       , testGroup "source declaration import scope"
         [ testCase "a direct import disambiguates an unqualified type" $ do
             environment <- expectSourceEnvironment

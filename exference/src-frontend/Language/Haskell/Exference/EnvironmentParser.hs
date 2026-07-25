@@ -270,6 +270,9 @@ data EnvironmentLoadError
   = EnvironmentDirectoryReadError Diagnostic
   | ModuleReadErrors (NonEmpty Diagnostic)
   | ModuleParseErrors (NonEmpty Diagnostic)
+  | DuplicateModuleDeclarations (NonEmpty Diagnostic)
+    -- ^ Later declarations of an already loaded logical module, including
+    -- headerless modules that all declare @Main@.
   | UnsupportedSourceVocabulary
       (NonEmpty UnsupportedVocabularyOccurrence)
   | DataTypeNameError ExtractionError
@@ -296,6 +299,7 @@ environmentLoadErrorDiagnostics failure = case failure of
     withCode "EXF_ENV_DIRECTORY_READ" value NonEmpty.:| []
   ModuleReadErrors values -> fmap (withCode "EXF_MODULE_READ") values
   ModuleParseErrors values -> fmap (withCode "EXF_MODULE_PARSE") values
+  DuplicateModuleDeclarations values -> values
   UnsupportedSourceVocabulary occurrences ->
     fmap unsupportedVocabularyDiagnostic occurrences
   DataTypeNameError detail -> locatedDiagnostic
@@ -837,6 +841,42 @@ data ModuleInput
   = ModuleFileInput ParseMode FilePath
   | ModuleSourceInput ParseMode String
 
+-- Reject duplicate logical modules before any type/class scope is indexed by
+-- module name. Headerless Haskell modules all declare @Main@, so they follow
+-- the same rule as repeated explicit module headers. Only later occurrences
+-- are diagnosed, in caller order, and each diagnostic identifies the first
+-- declaration as context.
+duplicateModuleDiagnostics
+  :: [Module SrcSpanInfo]
+  -> [Diagnostic]
+duplicateModuleDiagnostics modules = go M.empty occurrences
+ where
+  occurrences =
+    [ (source, HSE.srcInfoSpan location)
+    | modul <- modules
+    , (HSE.ModuleName location source, _) <-
+        maybeToList $ moduleNameAndDecls modul
+    ]
+
+  go _ [] = []
+  go seen ((source, currentSpan) : remaining) = case
+      M.lookup source seen of
+    Nothing -> go (M.insert source currentSpan seen) remaining
+    Just originalSpan ->
+      duplicateDiagnostic source originalSpan currentSpan
+        : go seen remaining
+
+  duplicateDiagnostic source originalSpan currentSpan =
+    withHaskellSrcSpan currentSpan
+      $ contextualDiagnostic
+          Error
+          "EXF_MODULE_DUPLICATE"
+          "duplicate source module"
+          ( source ++ " is declared by both "
+              ++ HSE.srcSpanFilename originalSpan ++ " and "
+              ++ HSE.srcSpanFilename currentSpan
+          )
+
 -- File-backed and in-memory entry points converge before parsing, so source
 -- extraction, warning order, checked lowering, and sealing cannot drift.
 parseModuleInputsM
@@ -886,6 +926,10 @@ parseModuleInputsM inputs = do
         Just errors -> throwE $ ModuleParseErrors errors
         Nothing -> pure ()
       let modules = rights parsedModules
+
+      case NonEmpty.nonEmpty $ duplicateModuleDiagnostics modules of
+        Just errors -> throwE $ DuplicateModuleDeclarations errors
+        Nothing -> pure ()
 
       case NonEmpty.nonEmpty $ unsupportedVocabularyOccurrences modules of
         Just occurrences ->

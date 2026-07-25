@@ -462,6 +462,11 @@ checked environment. The explicitly named
 `CheckedSourceEnvironment` bridge for the historical CLI and clients that
 opt into the compatibility frontend.
 
+All file and snapshot loaders reject duplicate logical modules before building
+scope maps. This includes multiple headerless files, which all declare
+`Main`; each later occurrence receives an `EXF_MODULE_DUPLICATE` diagnostic
+that identifies the first source.
+
 The source boundary tags class methods with their qualified owner, nests
 them under the common class declaration for validation, and lowers each
 rated selector exactly once into Exference's flat search inventory without

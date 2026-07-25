@@ -23,7 +23,7 @@ import Data.Char (isControl)
 import Data.List (intercalate)
 import System.Directory (findExecutable)
 import System.Exit (ExitCode (ExitFailure, ExitSuccess))
-import System.IO (hPutStrLn, stderr)
+import System.IO (hClose, hPutStrLn, stderr)
 import System.IO.Error (tryIOError)
 import System.Process
   ( CreateProcess
@@ -34,7 +34,7 @@ import System.Process
       , use_process_jobs
       )
   , ProcessHandle
-  , StdStream (NoStream)
+  , StdStream (CreatePipe)
   , interruptProcessGroupOf
   , proc
   , terminateProcess
@@ -111,13 +111,19 @@ runPackageOperation operation targets = do
             { close_fds = True
             , create_group = True
             , delegate_ctlc = False
-            , std_in = NoStream
+            -- Keep descriptor 0 occupied by a real pipe until exec. Merely
+            -- closing it (NoStream) lets a Haskell child reuse fd 0 for an
+            -- RTS timer/event descriptor, after which reading stdin can
+            -- block forever instead of observing EOF.
+            , std_in = CreatePipe
             , use_process_jobs = True
             }
       outcome <- tryIOError $ withCreateProcess packageProcess
-        $ \_ _ _ process -> handleJust userInterrupt
-            (const $ interruptPackageProcess process)
-            (PackageCompleted <$> waitForProcess process)
+        $ \input _ _ process -> do
+            maybe (pure ()) hClose input
+            handleJust userInterrupt
+              (const $ interruptPackageProcess process)
+              (PackageCompleted <$> waitForProcess process)
       case outcome of
         Left failure -> launchFailure $ show failure
         Right PackageInterrupted -> do

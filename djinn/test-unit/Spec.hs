@@ -2,6 +2,7 @@ module Main (main) where
 
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, nub, sort)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (listToMaybe)
 import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
 import Test.Tasty (defaultMain, testGroup)
@@ -74,6 +75,9 @@ tests =
     hTypeCompatibilityTests ++
     hCheckCompatibilityTests ++
     [ ("parse prefix function constructor", testPrefixArrowParsing)
+    , ("parse maximal Djinn type and kind spines", testMaximalParserSpines)
+    , ("render union prefixes without forcing field tails",
+          testProductiveUnionRendering)
     , ("parse and render through the checked Djinn adapter",
           testCheckedDjinnAdapter)
     , ("reject residual constraints at the Djinn rendering boundary",
@@ -727,6 +731,81 @@ testPrefixArrowParsing = do
         (Just expected) parsed
     assertEqual "the canonical rendering should use infix arrow syntax"
         "a -> b" (show expected)
+
+testMaximalParserSpines :: IO ()
+testMaximalParserSpines = do
+    assertEqual "tuple and application parsing retains source association"
+        (Right $ HTArrow
+            (HTTuple [HTVar "a", HTVar "b"])
+            (HTApp (HTApp (HTCon "Result") (HTVar "a")) (HTVar "b")))
+        (parseHType "(a, b) -> Result a b")
+    assertEqual "parenthesized contexts retain every constraint and argument"
+        [ [ context "Eq" [HTVar "a"]
+          , context "Monad" [HTVar "m"]
+          ]
+        ]
+        (parseFully pHContext "(Eq a, Monad m) =>")
+    assertEqual "datatype alternatives retain constructor field order"
+        [HTUnion
+            [ ("Nothing", [])
+            , ("Just", [HTVar "a"])
+            , ("Pair", [HTVar "a", HTVar "b"])
+            ]]
+        (parseFully pHDataType "Nothing | Just a | Pair a b")
+    assertEqual "kind arrows remain right-associative"
+        (Right $ KArrow KStar $ KArrow KStar KStar)
+        (parseHKind "* -> * -> *")
+    assertLeft "a trailing tuple separator remains invalid"
+        (parseHType "(a,)")
+    assertLeft "a trailing kind arrow remains invalid"
+        (parseHKind "* ->")
+    assertBool "a trailing context separator remains invalid" $
+        null $ parseFully pHContext "(Eq a,) =>"
+    assertBool "a trailing datatype separator remains invalid" $
+        null $ parseFully pHDataType "Just a |"
+
+    -- These parser-level counts are deterministic strictness regressions:
+    -- ReadP's ordinary many/sepBy combinators would expose every shorter
+    -- prefix even though this grammar has only one maximal token spine.
+    assertEqual "a type application emits only its maximal parse" 1
+        (length $ readP_to_S pHType $ unwords $ replicate 128 "F")
+    assertEqual "an arrow kind emits only its maximal parse" 1
+        (length $ readP_to_S pHKind $ unwords $ replicate 128 "* ->" ++ ["*"])
+
+    let wideSize = 10000
+        wideApplication = unwords $ "F" : replicate wideSize "a"
+        wideKind = unwords $ replicate wideSize "* ->" ++ ["*"]
+    parsedApplication <- expectRight $ parseHType wideApplication
+    parsedKind <- expectRight $ parseHKind wideKind
+    assertEqual "wide application parsing retains every argument"
+        wideSize (applicationArgumentCount parsedApplication)
+    assertEqual "wide kind parsing retains every arrow"
+        wideSize (kindArrowCount parsedKind)
+  where
+    applicationArgumentCount = go 0
+      where
+        go count (HTApp function _) = go (count + 1) function
+        go count _ = count
+
+    kindArrowCount = go 0
+      where
+        go count (KArrow _ result) = go (count + 1) result
+        go count _ = count
+
+testProductiveUnionRendering :: IO ()
+testProductiveUnionRendering = do
+    let poisonedFields = HTCon "()" :
+            error "union rendering forced the unrequested field tail"
+        source = HTUnion [("Constructor", poisonedFields)]
+    assertEqual "the constructor prefix is available independently"
+        (Just 'C') (listToMaybe $ show source)
+    assertEqual "finite union rendering retains field and alternative order"
+        "Nothing | Just a | Pair a b"
+        (show $ HTUnion
+            [ ("Nothing", [])
+            , ("Just", [HTVar "a"])
+            , ("Pair", [HTVar "a", HTVar "b"])
+            ])
 
 testIntrinsicListKind :: IO ()
 testIntrinsicListKind = do

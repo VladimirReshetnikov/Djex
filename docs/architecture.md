@@ -323,7 +323,10 @@ the module is `Prelude`, imports it explicitly, or enables `NoImplicitPrelude`
 or `RebindableSyntax`. Export surfaces include named exports and `module M`
 re-exports, so a downstream import sees only that surface while a re-exported
 entity retains its defining canonical name. Transitive imports do not become
-scope unless they are explicitly re-exported.
+scope unless they are explicitly re-exported. A `module M` item is computed as
+an identity intersection: the entity must be in scope both unqualified and
+through the written qualifier `M`. This includes the defining module's locals,
+honors `as` aliases, and prevents qualified-only imports from leaking.
 
 This resolution pass does not discover or load dependencies. Directory and
 explicit snapshot loaders elaborate exactly the modules supplied to them; the
@@ -403,14 +406,16 @@ names govern unqualified lookup, one full-top-level current module gets local
 precedence, aliases map prompt qualifiers to canonical modules, and canonical
 qualified lookup still consults the complete sealed inventory. The searchable
 Exference environment is narrowed to the visible binding projection. The same
-prompt scope drives a checked Djinn declaration projection. Abstract stubs for
-referenced but undeclared nominal types reuse the exact ground kind inferred by
-the shared inventory when one exists; arity-derived kinds are only the fallback
-for genuinely absent external names. Record selectors are axioms only when
-their parent cannot be eliminated structurally. For an eliminable record,
-presentation may replace the structural projection with a selector spelling
-only when that selector is visible unqualified, so hidden names never leak into
-output. Every unsupported or hidden declaration is recorded as an omission.
+prompt scope drives a checked Djinn declaration projection. Every abstract
+projection reuses the exact ground kind inferred by the shared inventory,
+including referenced stubs and concrete datatypes degraded because they are
+recursive, constructor-hidden, or require a later repair. Arity-derived kinds
+are only the fallback for genuinely absent external names. Record selectors
+are axioms only when their parent cannot be eliminated structurally. For an
+eliminable record, presentation may replace the structural projection with a
+selector spelling only when that selector is visible unqualified, so hidden
+names never leak into output. Every unsupported or hidden declaration is
+recorded as an omission.
 
 Djinn's standard checked session is only the recovery state when no source
 projection is available or sealing that projection fails. The scope projection

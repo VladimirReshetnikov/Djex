@@ -4493,6 +4493,92 @@ tests = testGroup "Exference"
               ]
             assertBool (show privateFailure)
               $ any ("Private is not in scope" `isInfixOf`) privateFailure
+        , testCase "module self exports include local declarations" $ do
+            environment <- expectSourceEnvironment
+              [ ("Self.hs", unlines
+                  [ "module Self (module Self) where"
+                  , "data Local = LocalConstructor"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Self (Local)"
+                  , "selected :: Local"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Self"] "Local")
+        , testCase "module exports honor aliased and unaliased imports" $ do
+            environment <- expectSourceEnvironment
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data Direct = DirectConstructor"
+                  , "data Aliased = AliasedConstructor"
+                  ])
+              , ("Direct.hs", unlines
+                  [ "module Direct (module Origin) where"
+                  , "import Origin (Direct)"
+                  ])
+              , ("Aliased.hs", unlines
+                  [ "module Aliased (module X) where"
+                  , "import Origin as X (Aliased)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Direct (Direct)"
+                  , "import Aliased (Aliased)"
+                  , "direct :: Direct"
+                  , "aliased :: Aliased"
+                  ])
+              ]
+            direct <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "direct"
+            functionResult direct @?=
+              TypeCons (validQualifiedName ["Origin"] "Direct")
+            aliased <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "aliased"
+            functionResult aliased @?=
+              TypeCons (validQualifiedName ["Origin"] "Aliased")
+        , testCase "qualified-only module aliases re-export no names" $ do
+            failures <- expectBindingScopeFailure
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data T = TConstructor"
+                  ])
+              , ("QualifiedOnly.hs", unlines
+                  [ "module QualifiedOnly (module X) where"
+                  , "import qualified Origin as X (T)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import QualifiedOnly (T)"
+                  , "excluded :: T"
+                  ])
+              ]
+            assertBool (show failures)
+              $ any ("T is not in scope" `isInfixOf`) failures
+        , testCase "module exports intersect identity across imports" $ do
+            environment <- expectSourceEnvironment
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data T = TConstructor"
+                  ])
+              , ("Bridge.hs", unlines
+                  [ "module Bridge (module X) where"
+                  , "import Origin (T)"
+                  , "import qualified Origin as X (T)"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Bridge (T)"
+                  , "selected :: T"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Origin"] "T")
         , testCase "positive lists preserve unloaded external identities" $ do
             environment <- expectSourceEnvironment
               [ ("Use.hs", unlines

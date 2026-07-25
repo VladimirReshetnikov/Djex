@@ -100,6 +100,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplSearchScope
   , testCase "REPL aliases retain canonical re-exports and defer ambiguity"
       testReplAliasesAndReexports
+  , testCase "REPL module re-exports intersect qualified and bare scope"
+      testReplModuleExportIntersection
   , testCase "REPL unresolved import lists remain advisory"
       testReplUnresolvedImportList
   , testCase "REPL import lists preserve exported record selectors"
@@ -116,6 +118,10 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplDjinnNamespaceProjection
   , testCase "REPL Djinn projection preserves inferred higher-kinded stubs"
       testReplDjinnHigherKindStub
+  , testCase "REPL Djinn projection preserves recursive higher-kinded types"
+      testReplDjinnRecursiveHigherKind
+  , testCase "REPL Djinn projection preserves opaque higher-kinded types"
+      testReplDjinnHiddenHigherKind
   , testCase "REPL Djinn projection repairs scopes beyond legacy caps"
       testReplDjinnRepairDepth
   , testCase "REPL bundled imports reject type-synonym wildcards"
@@ -1444,6 +1450,93 @@ testReplAliasesAndReexports = withReplModuleFixture $ \root -> do
     "ambiguous" $ map toLower overlapErrors
   assertNoCallStack overlapErrors
 
+testReplModuleExportIntersection :: Assertion
+testReplModuleExportIntersection = withTemporaryEnvironment
+    [ ("empty/.keep", "")
+    , ("Origin.hs", unlines
+        [ "module Origin where"
+        , "data Aliased = AliasedConstructor"
+        , "aliasedValue :: Aliased"
+        , "data Bridged = BridgedConstructor"
+        , "bridgedValue :: Bridged"
+        , "data QualifiedOnly = QualifiedOnlyConstructor"
+        , "qualifiedOnlyValue :: QualifiedOnly"
+        ])
+    , ("SelfExport.hs", unlines
+        [ "module SelfExport (module SelfExport) where"
+        , "data SelfType = SelfConstructor"
+        , "selfValue :: SelfType"
+        ])
+    , ("AliasExport.hs", unlines
+        [ "module AliasExport (module X) where"
+        , "import Origin as X (Aliased, aliasedValue)"
+        ])
+    , ("BridgeExport.hs", unlines
+        [ "module BridgeExport (module X) where"
+        , "import Origin (Bridged, bridgedValue)"
+        , "import qualified Origin as X (Bridged, bridgedValue)"
+        ])
+    , ("QualifiedOnlyExport.hs", unlines
+        [ "module QualifiedOnlyExport (module X) where"
+        , "import qualified Origin as X"
+        ])
+    , ("WrongAliasExport.hs", unlines
+        [ "module WrongAliasExport (module Origin) where"
+        , "import Origin as X"
+        ])
+    ] $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      source name = canonicalRoot </> name
+      targets = map source
+        [ "Origin.hs"
+        , "SelfExport.hs"
+        , "AliasExport.hs"
+        , "BridgeExport.hs"
+        , "QualifiedOnlyExport.hs"
+        ]
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show targets
+    , ":module"
+    , "import qualified SelfExport as S"
+    , ":kind S.SelfType"
+    , ":module"
+    , "import qualified AliasExport as A"
+    , ":kind A.Aliased"
+    , ":module"
+    , "import qualified BridgeExport as B"
+    , ":kind B.Bridged"
+    , ":module"
+    , "import qualified QualifiedOnlyExport as Q"
+    , ":kind Q.QualifiedOnly"
+    ]
+  assertEqual "module-export intersection REPL exit" ExitSuccess exitCode
+  assertContains "a self module export includes local declarations"
+    "S.SelfType :: Type" output
+  assertContains "an unqualified aliased import is re-exported"
+    "A.Aliased :: Type" output
+  assertContains "separate imports can supply the two identity views"
+    "B.Bridged :: Type" output
+  assertBool "a qualified-only import leaked through module X" $
+    not $ "Q.QualifiedOnly ::" `isInfixOf` output
+  assertContains "qualified-only module export is empty at the prompt"
+    "[DJEX_REPL_KIND_PARSE]" errors
+  assertNoCallStack errors
+
+  let wrongAlias = source "WrongAliasExport.hs"
+      origin = source "Origin.hs"
+  (wrongExit, wrongOutput, wrongErrors) <- runRepl empty
+    [ ":load " ++ show [origin, wrongAlias]
+    , ":show modules"
+    ]
+  assertEqual "renamed canonical export REPL exit" ExitSuccess wrongExit
+  assertContains "an as alias removes the canonical export qualifier"
+    "Exference load failed; retaining the previous session and settings."
+    wrongOutput
+  assertContains "renamed canonical module export is not in scope"
+    "[DJEX_REPL_EXPORT_NOT_IN_SCOPE]" wrongErrors
+  assertNoCallStack wrongErrors
+
 testReplUnresolvedImportList :: Assertion
 testReplUnresolvedImportList = withReplModuleFixture $ \root -> do
   canonicalRoot <- canonicalizePath root
@@ -1670,6 +1763,70 @@ testReplDjinnHigherKindStub = withTemporaryEnvironment
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output
   assertBool "higher-kinded stub emitted a projection diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+
+-- Djinn cannot structurally eliminate recursive datatypes, but making @Fix@
+-- opaque must not weaken its inferred @(* -> *) -> *@ kind to @* -> *@. The
+-- latter rejects the otherwise valid @Fix Maybe@ query before proof search.
+testReplDjinnRecursiveHigherKind :: Assertion
+testReplDjinnRecursiveHigherKind = withTemporaryEnvironment
+    [("RecursiveHigherKind.hs", unlines
+      [ "module RecursiveHigherKind where"
+      , "data Maybe a = Nothing | Just a"
+      , "data Fix f = Fix (f (Fix f))"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Fix Maybe -> Fix Maybe"
+    , ":show omissions"
+    ]
+  assertEqual "recursive higher-kinded Djinn REPL exit" ExitSuccess exitCode
+  assertContains
+    ("Fix Maybe remains a valid Djinn query: " ++ output ++ errors)
+    "\\a -> a" output
+  assertContains "recursive Fix is deliberately projected opaquely"
+    "Fix: recursive datatype; projected as an abstract type" output
+  assertBool "recursive kind loss forced the standard-environment fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "recursive kind loss emitted a projection diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+
+-- Exporting a datatype without its constructors triggers the earlier scope
+-- shaping degradation rather than recursive-type repair. It must retain the
+-- same higher-kinded constructor shape as the checked source inventory.
+testReplDjinnHiddenHigherKind :: Assertion
+testReplDjinnHiddenHigherKind = withTemporaryEnvironment
+    [("HiddenHigherKind.hs", unlines
+      [ "module HiddenHigherKind (Maybe(..), Apply) where"
+      , "data Maybe a = Nothing | Just a"
+      , "data Apply f = MkApply (f ())"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import HiddenHigherKind (Maybe(..), Apply)"
+    , ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Apply Maybe -> Apply Maybe"
+    , ":show omissions"
+    ]
+  assertEqual "hidden higher-kinded Djinn REPL exit" ExitSuccess exitCode
+  assertContains
+    ("Apply Maybe remains a valid Djinn query: " ++ output ++ errors)
+    "\\a -> a" output
+  assertContains
+    ("constructor-hidden Apply is projected opaquely: " ++ output ++ errors)
+    ("HiddenHigherKind.Apply: some constructors are hidden; projected as an"
+      ++ " abstract type") output
+  assertBool "hidden-constructor kind loss forced the standard fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "hidden-constructor kind loss emitted a projection diagnostic" $
     not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
   assertNoCallStack errors
 

@@ -297,12 +297,15 @@ All public, default, directory, file, and in-memory source loaders elaborate
 declarations with the same module-aware resolver. Local type and class names
 take precedence; direct imports honor `qualified`, `as`, positive import lists,
 and `hiding`. Export surfaces include named exports and `module M` re-exports,
-and re-exported entities retain their defining canonical names. A loaded
-`Prelude` contributes an implicit unqualified import unless the module is
-`Prelude`, imports it explicitly, or enables `NoImplicitPrelude` or
-`RebindableSyntax`. The resolver covers datatype fields, type synonyms, class
-heads and methods, instances, and ordinary or foreign signatures; term bodies
-remain outside Exference's source semantics.
+and re-exported entities retain their defining canonical names. The
+`module M` surface is the identity intersection of unqualified scope and scope
+through the written qualifier `M`, so self locals and ordinary aliases are
+included while qualified-only imports are not. A loaded `Prelude` contributes
+an implicit unqualified import unless the module is `Prelude`, imports it
+explicitly, or enables `NoImplicitPrelude` or `RebindableSyntax`. The resolver
+covers datatype fields, type synonyms, class heads and methods, instances, and
+ordinary or foreign signatures; term bodies remain outside Exference's source
+semantics.
 
 Imports govern elaboration, not dependency discovery. Explicit file and source
 loaders consume exactly the ordered closure supplied by their caller; the

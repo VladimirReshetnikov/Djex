@@ -86,8 +86,8 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     , canonical <- maybeToList $ checkedModuleName moduleName
     ]
   moduleSyntax = M.fromList
-    [ (canonical, modul)
-    | modul <- modules
+    [ (canonical, (mode, modul))
+    | (mode, modul) <- parsedModules
     , (moduleName, _) <- maybeToList $ moduleNameAndDecls modul
     , canonical <- maybeToList $ checkedModuleName moduleName
     ]
@@ -125,7 +125,8 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       explicitImports = mapMaybe nominalImport imports
       importsWithPrelude = explicitImports
         ++ maybeToList
-          (implicitPrelude modeDisablesPrelude pragmas imports current)
+          (implicitPreludeFrom surfaces modeDisablesPrelude
+            pragmas imports current)
       unqualified = foldr mergeSurface local
         [ nominalImportSurface imported
         | imported <- importsWithPrelude
@@ -194,7 +195,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     converted syntaxName = either (const []) (: [])
       $ convertModuleName (HSE.importModule declaration) syntaxName
 
-  implicitPrelude modeDisablesPrelude pragmas imports current = do
+  implicitPreludeFrom available modeDisablesPrelude pragmas imports current = do
     prelude <- either (const Nothing) Just
       $ SharedName.mkModuleName "Prelude"
     if current == prelude
@@ -203,7 +204,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
         || any disablesImplicitPrelude pragmas
       then Nothing
       else do
-        surface <- M.lookup prelude surfaces
+        surface <- M.lookup prelude available
         if null $ surfaceNames surface
           then Nothing
           else Just NominalImport
@@ -221,12 +222,13 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
         then current
         else stabilizeExports (remaining - 1) next
 
-  moduleExports available canonical modul = case moduleExportSpecs modul of
+  moduleExports available canonical (mode, modul) = case
+      moduleExportSpecs modul of
     Nothing -> M.findWithDefault emptyNominalSurface canonical localSurfaces
     Just specs -> foldr mergeSurface emptyNominalSurface
-      $ map (resolveExport available canonical modul) specs
+      $ map (resolveExport available canonical mode modul) specs
 
-  resolveExport available canonical modul spec = case spec of
+  resolveExport available canonical mode modul spec = case spec of
     HSE.EAbs _ namespace syntaxName
       | exportTypeNamespace namespace -> selectNamedExport
           canonical syntaxName
@@ -237,13 +239,32 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     _ -> emptyNominalSurface
    where
     local = M.findWithDefault emptyNominalSurface canonical localSurfaces
-    importedViews = mapMaybe (nominalImportFrom available)
-      $ moduleExplicitImports modul
-    reexport wanted = foldr mergeSurface emptyNominalSurface
-      [ nominalImportSurface imported
-      | imported <- importedViews
-      , nominalImportQualifier imported == wanted
-      ]
+    explicitImports = moduleExplicitImports modul
+    importedViews = mapMaybe (nominalImportFrom available) explicitImports
+      ++ maybeToList (implicitPreludeForExports explicitImports)
+    implicitPreludeForExports imports = case moduleImportsAndPragmas modul of
+      Just (pragmas, _) -> implicitPreludeFrom available
+        (modeDisablesImplicitPrelude mode) pragmas imports canonical
+      Nothing -> Nothing
+    -- The Report defines @module M@ as the identities simultaneously in
+    -- unqualified scope and in scope through qualifier @M@. In particular,
+    -- locals participate under the defining module name, an @as@ alias is the
+    -- written qualifier, and a qualified-only import contributes nothing.
+    reexport wanted = intersectSurface unqualified qualified
+     where
+      unqualified = foldr mergeSurface local
+        [ nominalImportSurface imported
+        | imported <- importedViews
+        , not $ nominalImportIsQualified imported
+        ]
+      qualified = foldr mergeSurface selfSurface
+        [ nominalImportSurface imported
+        | imported <- importedViews
+        , nominalImportQualifier imported == wanted
+        ]
+      selfSurface
+        | wanted == canonical = local
+        | otherwise = emptyNominalSurface
     selectNamedExport current syntaxName = case syntaxName of
       HSE.UnQual _ occurrence ->
         let localMatch = selectOccurrence occurrence local
@@ -352,6 +373,17 @@ mergeSurface new old = NominalSurface
  where
   mergeNames left right = S.toAscList
     $ S.fromList left `S.union` S.fromList right
+
+intersectSurface :: NominalSurface -> NominalSurface -> NominalSurface
+intersectSurface left right = NominalSurface
+  { nominalTypes = intersectNames
+      (nominalTypes left) (nominalTypes right)
+  , nominalClasses = intersectNames
+      (nominalClasses left) (nominalClasses right)
+  }
+ where
+  intersectNames first second = S.toAscList
+    $ S.fromList first `S.intersection` S.fromList second
 
 applyNominalImportSpecs
   :: Maybe (HSE.ImportSpecList SrcSpanInfo)

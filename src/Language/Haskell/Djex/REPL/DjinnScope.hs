@@ -167,8 +167,13 @@ projectDjinnScope policy records inferredKinds declarations visible = do
         , selector <- selectorNames
         ]
       (shaped, shapeOmissions) = shapeDeclarations
-        policy axiomSelectors allSelectors visible declarations
+        inferredKinds policy axiomSelectors allSelectors visible declarations
       (renamed, renameOmissions, forward) = renameDeclarations shaped
+      -- Source kind assumptions use canonical names, while every declaration
+      -- Djinn accepts uses its prompt spelling. Retain both views: canonical
+      -- keys still describe out-of-scope references, and renamed keys make
+      -- the same inferred facts available to every later repair pass.
+      projectionKinds = renamedInferredKinds forward inferredKinds
       fieldSelectors = Map.fromList
         [ ((renamedConstructor, index), renamedSelector)
         | (_, constructors) <- records
@@ -178,12 +183,14 @@ projectDjinnScope policy records inferredKinds declarations visible = do
         , selector `Set.member` visible
         , Just renamedSelector <- [unqualifyName selector]
         ]
-      (grounded, recursionOmissions) = degradeRecursiveDataTypes renamed
+      (grounded, recursionOmissions) =
+        degradeRecursiveDataTypes projectionKinds renamed
       (admitted, admissionOmissions) = admitDeclarations grounded
       (stubbed, stubOmissions) =
-        stubUnknownReferences inferredKinds admitted
-  (resolved, referenceOmissions) <- resolveScopeReferences stubbed
-  (session, sealOmissions) <- sealWithRepairs resolved
+        stubUnknownReferences projectionKinds admitted
+  (resolved, referenceOmissions) <-
+    resolveScopeReferences projectionKinds stubbed
+  (session, sealOmissions) <- sealWithRepairs projectionKinds resolved
   pure DjinnProjection
     { djinnProjectionSession = session
     , djinnProjectionOmissions = concat
@@ -202,13 +209,15 @@ projectDjinnScope policy records inferredKinds declarations visible = do
 -- silently, exactly as they do from Exference's search scope; visible
 -- declarations that Djinn cannot take whole are degraded or omitted loudly.
 shapeDeclarations
-  :: DjinnAxiomPolicy
+  :: Map.Map Name (Kind Void)
+  -> DjinnAxiomPolicy
   -> Set.Set Name
   -> Set.Set Name
   -> Set.Set Name
   -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-shapeDeclarations policy axiomSelectors allSelectors visible declarations =
+shapeDeclarations inferredKinds policy axiomSelectors allSelectors visible
+    declarations =
   (kept, omissions ++ instanceSummary)
  where
   (kept, omissions, instanceCount) =
@@ -263,7 +272,7 @@ shapeDeclarations policy axiomSelectors allSelectors visible declarations =
       )
     degradeToAbstract annotation name parameters reason =
       ( AbstractTypeDeclaration annotation name
-          (parameterCountKind parameters) : keptSoFar
+          (inferredDataTypeKind inferredKinds name parameters) : keptSoFar
       , DjinnScopeOmission (renderCanonical name) reason : omitted
       , instances
       )
@@ -330,6 +339,20 @@ renameDeclaration forward = onDeclarationNames rename
  where
   rename name = Map.findWithDefault name name forward
 
+-- | Index inferred kinds under both source-canonical and Djinn-renamed names.
+-- The renamed side is left-biased because it describes the exact declaration
+-- that survived ambiguity filtering and entered the projected vocabulary.
+renamedInferredKinds
+  :: Map.Map Name Name
+  -> Map.Map Name (Kind Void)
+  -> Map.Map Name (Kind Void)
+renamedInferredKinds forward inferredKinds = renamed `Map.union` inferredKinds
+ where
+  renamed = Map.fromList
+    [ (Map.findWithDefault canonical canonical forward, kind)
+    | (canonical, kind) <- Map.toList inferredKinds
+    ]
+
 onDeclarationNames
   :: (Name -> Name)
   -> ScopeDeclaration
@@ -372,9 +395,10 @@ onDeclarationNames rename declaration = case declaration of
 -- Djinn's LJT calculus cannot eliminate recursive datatypes, so they stay
 -- available as opaque abstract types instead of disappearing from signatures.
 degradeRecursiveDataTypes
-  :: [ScopeDeclaration]
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-degradeRecursiveDataTypes declarations
+degradeRecursiveDataTypes inferredKinds declarations
   | Set.null recursive = (declarations, [])
   | otherwise = unzipOmissions $ map degrade declarations
  where
@@ -383,7 +407,7 @@ degradeRecursiveDataTypes declarations
     DataTypeDeclaration annotation name parameters _
       | name `Set.member` recursive ->
           ( AbstractTypeDeclaration annotation name
-              (parameterCountKind parameters)
+              (inferredDataTypeKind inferredKinds name parameters)
           , Just $ DjinnScopeOmission (renderCanonical name)
               "recursive datatype; projected as an abstract type"
           )
@@ -564,9 +588,10 @@ projectionRepairMeasure = sum . map declarationMeasure
 -- the affected pieces: values and synonyms are dropped, classes lose the
 -- offending methods, and datatypes degrade to abstract types.
 resolveScopeReferences
-  :: [ScopeDeclaration]
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
   -> Either Diagnostic ([ScopeDeclaration], [DjinnScopeOmission])
-resolveScopeReferences = go []
+resolveScopeReferences inferredKinds = go []
  where
   go omissions declarations
     | repaired == declarations && null newOmissions =
@@ -604,7 +629,7 @@ resolveScopeReferences = go []
               )
         DataTypeDeclaration annotation name parameters _ ->
           ( [ AbstractTypeDeclaration annotation name
-                (parameterCountKind parameters)
+                (inferredDataTypeKind inferredKinds name parameters)
             ]
           , [ DjinnScopeOmission (renderCanonical name)
                 ("its constructors mention " ++ renderCanonical missing
@@ -634,15 +659,16 @@ resolveScopeReferences = go []
 -- accepts the environment. Every repair strictly shrinks or simplifies the
 -- declaration list, so the loop terminates.
 sealWithRepairs
-  :: [ScopeDeclaration]
+  :: Map.Map Name (Kind Void)
+  -> [ScopeDeclaration]
   -> Either Diagnostic (DjinnSession, [DjinnScopeOmission])
-sealWithRepairs = go []
+sealWithRepairs inferredKinds = go []
  where
   go omissions declarations = case mkEnvironment declarations of
     Left failure -> Left $ projectionFailure $ show failure
     Right environment -> case mkDjinnSessionChecked environment of
       Right session -> Right (session, reverse omissions)
-      Left failure -> case repairFor failure declarations of
+      Left failure -> case repairFor inferredKinds failure declarations of
         Just (repaired, newOmissions)
           | projectionRepairMeasure repaired
               < projectionRepairMeasure declarations ->
@@ -653,10 +679,11 @@ sealWithRepairs = go []
           $ DjinnCore.renderEnvironmentEditFailure failure
 
 repairFor
-  :: DjinnCore.SynthesisEnvironmentError
+  :: Map.Map Name (Kind Void)
+  -> DjinnCore.SynthesisEnvironmentError
   -> [ScopeDeclaration]
   -> Maybe ([ScopeDeclaration], [DjinnScopeOmission])
-repairFor failure declarations = case failure of
+repairFor inferredKinds failure declarations = case failure of
   DjinnCore.RecursiveSynthesisDataTypes names
     -- Degrade full datatypes first; drop the named subjects outright when a
     -- previous degradation was insufficient, so every round makes progress.
@@ -672,7 +699,7 @@ repairFor failure declarations = case failure of
       DataTypeDeclaration annotation name parameters _
         | name `Set.member` recursive ->
             ( AbstractTypeDeclaration annotation name
-                (parameterCountKind parameters)
+                (inferredDataTypeKind inferredKinds name parameters)
             , Just $ DjinnScopeOmission (renderCanonical name)
                 "recursive datatype; projected as an abstract type"
             )
@@ -701,6 +728,18 @@ repairFor failure declarations = case failure of
 
 parameterCountKind :: [TypeParameter String Void] -> Kind Void
 parameterCountKind = foldr (const $ FunctionKind ProperTypeKind) ProperTypeKind
+
+-- Every datatype originating in the checked inventory has an authoritative
+-- inferred kind. The parameter-count shape is retained only as a defensive
+-- fallback for a declaration supplied without a matching inventory entry;
+-- ordinary REPL projection never takes that branch.
+inferredDataTypeKind
+  :: Map.Map Name (Kind Void)
+  -> Name
+  -> [TypeParameter String Void]
+  -> Kind Void
+inferredDataTypeKind inferredKinds name parameters =
+  Map.findWithDefault (parameterCountKind parameters) name inferredKinds
 
 arityKind :: Int -> Kind Void
 arityKind arity = iterate (FunctionKind ProperTypeKind) ProperTypeKind !! arity

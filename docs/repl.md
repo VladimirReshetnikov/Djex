@@ -663,7 +663,9 @@ so the projection degrades rather than fails:
   an elimination it cannot decide. A datatype declared without constructors
   is treated the same way: source environments spell opaque primitives that
   way, and a genuinely empty projection would let Djinn prove anything from
-  such a type by absurd elimination.
+  such a type by absurd elimination. Every such degradation retains the exact
+  kind inferred by the shared source inventory, including higher-kinded
+  parameters.
 - Instance declarations, classes with superclasses, and declarations with
   types outside Djinn's grammar (explicit foralls, residual constraints) are
   omitted.
@@ -771,8 +773,11 @@ changes do not require reparsing; the prompt-scope layer separately projects
 the public exports for plain imports and plain `:module`/`:browse`. In prompt
 queries only, canonical qualification remains a deliberate full-inventory
 escape hatch. Source declaration elaboration has no such escape: its loaded
-module scope is exact. Other unsupported nominal source constructs remain
-fail-closed as described in the [library API guide](library-api.md).
+module scope is exact. A `module M` export item includes exactly the identities
+available both unqualified and through the written qualifier `M`; self locals
+and unqualified aliases therefore work, while qualified-only imports do not
+leak. Other unsupported nominal source constructs remain fail-closed as
+described in the [library API guide](library-api.md).
 
 ## Multiline input, scripts, history, and the shell
 

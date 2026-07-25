@@ -864,7 +864,7 @@ buildModuleViewCached index modules stack target = do
             }
       rawExports <- lift
         $ atSource (workspaceModulePath target)
-        $ resolveModuleExports index provisional allImports moduleHead
+        $ resolveModuleExports index provisional moduleHead
       let exports = normalizeSurface rawExports
           uniqueExports = surfaceNames exports
       lift $ validateExportSurface index target uniqueExports
@@ -987,13 +987,12 @@ sourceImplicitPrelude index modules stack current pragmas imports = case
 resolveModuleExports
   :: SymbolIndex
   -> ModuleView
-  -> [ImportView]
   -> Maybe (HSE.ModuleHead HSE.SrcSpanInfo)
   -> Either Diagnostic NameSurface
-resolveModuleExports index view _ Nothing = Right $ localSurface index view
-resolveModuleExports index view _
+resolveModuleExports index view Nothing = Right $ localSurface index view
+resolveModuleExports index view
     (Just (HSE.ModuleHead _ _ _ Nothing)) = Right $ localSurface index view
-resolveModuleExports index view imports
+resolveModuleExports index view
     (Just (HSE.ModuleHead _ _ _ (Just (HSE.ExportSpecList _ specs)))) =
   mergeSurfaces <$> traverse resolve specs
  where
@@ -1025,18 +1024,31 @@ resolveModuleExports index view imports
         _ -> pure $ namesOnly parent
     HSE.EModuleContents _ syntaxModule -> do
       wanted <- checkedHseModuleName syntaxModule
-      let matching =
-            [ NameSurface
-                (importViewNames item)
-                (importViewChildren item)
-            | item <- imports
-            , wanted == importViewCanonical item
-                || wanted == importViewQualifier item
+      let matchingQualified =
+            [ NameSurface names children
+            | (qualifier, names) <- moduleViewQualified view
+            , qualifier == wanted
+            , children <-
+                [ mergeChildGroups
+                    [ candidate
+                    | (childQualifier, candidate) <-
+                        moduleViewQualifiedChildren view
+                    , childQualifier == wanted
+                    ]
+                ]
             ]
-      if null matching
+          unqualified = NameSurface
+            (moduleViewUnqualified view)
+            (moduleViewUnqualifiedChildren view)
+      if null matchingQualified
         then Left $ scopeDiagnostic "DJEX_REPL_EXPORT_NOT_IN_SCOPE"
           "module re-export is not in scope" $ HSE.prettyPrint spec
-        else Right $ mergeSurfaces matching
+        -- Per the Haskell Report, @module M@ denotes identities available
+        -- both unqualified and through the written qualifier @M@. This keeps
+        -- the current module's locals, honors @as@ aliases, and makes a
+        -- qualified-only import a valid but empty module export.
+        else Right $ intersectSurfaces unqualified
+          $ mergeSurfaces matchingQualified
 
 
 localSurface :: SymbolIndex -> ModuleView -> NameSurface
@@ -1274,6 +1286,17 @@ mergeSurfaces :: [NameSurface] -> NameSurface
 mergeSurfaces surfaces = normalizeSurface $ NameSurface
   (concatMap surfaceNames surfaces)
   (mergeChildGroups $ map surfaceChildren surfaces)
+
+intersectSurfaces :: NameSurface -> NameSurface -> NameSurface
+intersectSurfaces left right = normalizeSurface $ NameSurface names children
+ where
+  rightNames = Set.fromList $ surfaceNames right
+  names = filter (`Set.member` rightNames) $ surfaceNames left
+  children = Map.mergeWithKey intersectChildren
+    (const Map.empty) (const Map.empty)
+    (surfaceChildren left) (surfaceChildren right)
+  intersectChildren _ leftChildren rightChildren = Just
+    $ filter (`Set.member` Set.fromList rightChildren) leftChildren
 
 childGroupsFor :: SymbolIndex -> [Name] -> Map Name [Name]
 childGroupsFor index available = filterChildGroups available

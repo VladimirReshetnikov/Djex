@@ -511,7 +511,10 @@ Every source signature and nominal declaration is elaborated in its defining
 module's own scope. Local type and class names take precedence; direct imports
 honor `qualified`, `as`, positive lists, and `hiding`. Loaded export surfaces
 include named exports and `module M` re-exports, with re-exported entities
-retaining their defining canonical names. A loaded `Prelude` is imported
+retaining their defining canonical names. As in Haskell, `module M` means the
+identities available both unqualified and through the written qualifier `M`:
+self exports include local declarations, aliases are honored, and a
+qualified-only import contributes no names. A loaded `Prelude` is imported
 implicitly unless the module is `Prelude`, imports it explicitly, or enables
 `NoImplicitPrelude` or `RebindableSyntax`.
 

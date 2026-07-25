@@ -377,8 +377,11 @@ only directly imported loaded names. `qualified`, `as`, positive import lists,
 and `hiding` restrict both bare and qualified lookup. Named exports and
 `module M` re-exports form the surface seen by downstream modules, while an
 entity re-exported through another module retains its defining canonical name.
-A loaded `Prelude` contributes its implicit unqualified surface unless the
-module is `Prelude`, imports it explicitly, or enables `NoImplicitPrelude` or
+The `module M` surface is the identity intersection of unqualified scope and
+scope through the written qualifier `M`; this includes self locals and
+unqualified `as` imports, but not qualified-only imports. A loaded `Prelude`
+contributes its implicit unqualified surface unless the module is `Prelude`,
+imports it explicitly, or enables `NoImplicitPrelude` or
 `RebindableSyntax`.
 
 That policy is exact for modules present in the supplied closure: a

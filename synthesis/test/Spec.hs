@@ -2218,7 +2218,10 @@ typeTests = testGroup "source types"
           renamed = churchList "item" "answer"
           impredicative = SharedType.TypeApplication
             (SharedType.TypeConstructor listConstructorName) source
+          renamedImpredicative = SharedType.TypeApplication
+            (SharedType.TypeConstructor listConstructorName) renamed
       right (mkTypeAtom source) @?= right (mkTypeAtom renamed)
+      alphaTypeKey impredicative @?= alphaTypeKey renamedImpredicative
       TypeRender.renderType id impredicative @?=
         "[(forall fold. (item -> fold -> fold) -> fold -> fold)]"
   , testCase "substitute atom free variables without capture" $ do

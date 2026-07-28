@@ -217,6 +217,7 @@ Library
     Language.Haskell.Djex.Djinn.Internal.Session
     Language.Haskell.Djex.Exference.Internal.Request
     Language.Haskell.Djex.Exference.Internal.Session
+    Language.Haskell.Synthesis.Internal.Alpha
     Language.Haskell.Synthesis.Internal.InstanceHead
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Candidate

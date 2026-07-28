@@ -18,6 +18,7 @@ module Language.Haskell.Synthesis.TypeAtom
   , mkTypeAtom
   , typeAtomType
   , typeAtomKey
+  , alphaTypeKey
   , typeAtomFreeVariables
   , mapTypeAtomVariables
   , substituteTypeAtomVariables
@@ -25,15 +26,16 @@ module Language.Haskell.Synthesis.TypeAtom
   ) where
 
 import Control.DeepSeq (NFData)
-import Control.Monad.Trans.State.Strict (State, evalState, get, put)
 import Data.Bifunctor (first)
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import GHC.Generics (Generic)
-import Numeric.Natural (Natural)
 
-import Language.Haskell.Synthesis.Constraint (Constraint (..))
+import Language.Haskell.Synthesis.Internal.Alpha
+  ( AlphaVariable
+  , BinderSlotPolicy (PositionalBinderSlots)
+  , alphaNormalizeTypeWith
+  )
 import Language.Haskell.Synthesis.Type
   ( FreshVariableAllocator
   , SubstitutionError
@@ -95,13 +97,6 @@ newtype TypeAtomKey variable = TypeAtomKey
 
 instance NFData variable => NFData (TypeAtomKey variable)
 
-data AlphaVariable variable
-  = AlphaBoundVariable !Natural !Natural
-  | AlphaFreeVariable variable
-  deriving (Eq, Ord, Show, Generic)
-
-instance NFData variable => NFData (AlphaVariable variable)
-
 instance Ord variable => Eq (TypeAtom variable) where
   left == right = atomKey left == atomKey right
 
@@ -126,6 +121,16 @@ typeAtomType = atomSource
 -- | Recover the cached alpha-normal identity used by 'Eq' and 'Ord'.
 typeAtomKey :: TypeAtom variable -> TypeAtomKey variable
 typeAtomKey = atomKey
+
+-- | Construct the same structural alpha identity for any shared type.
+--
+-- This is useful when a backend must keep an ordinary outer application as
+-- one logical proposition while one of its children is an opaque polytype.
+-- It is deliberately a key operation, not permission to open a nested atom.
+alphaTypeKey :: Ord variable => Type variable -> TypeAtomKey variable
+alphaTypeKey = TypeAtomKey
+  . alphaNormalizeTypeWith PositionalBinderSlots
+  . atomCanonicalForm
 
 -- | The lexically free variables which an enclosing unifier may substitute.
 -- Quantified variables never escape through this view.
@@ -170,12 +175,11 @@ alphaEquivalentTypes
   -> Type variable
   -> Bool
 alphaEquivalentTypes left right =
-  alphaNormalizeType (atomCanonicalForm left)
-    == alphaNormalizeType (atomCanonicalForm right)
+  alphaTypeKey left == alphaTypeKey right
 
 sealTypeAtom :: Ord variable => Type variable -> TypeAtom variable
 sealTypeAtom source = TypeAtom source
-  $ TypeAtomKey $ alphaNormalizeType source
+  $ TypeAtomKey $ alphaNormalizeTypeWith PositionalBinderSlots source
 
 -- Text rendering intentionally elides a forall with no binders or context.
 -- Erasing those no-op nodes here gives sealed atoms a genuine textual
@@ -197,43 +201,3 @@ eraseVacuousForalls source = case source of
 
 atomCanonicalForm :: Type variable -> Type variable
 atomCanonicalForm = eraseVacuousForalls . canonicalizeType
-
-alphaNormalizeType
-  :: Ord variable
-  => Type variable
-  -> Type (AlphaVariable variable)
-alphaNormalizeType source = evalState (normalize Map.empty source) 0
- where
-  normalize bindings typeExpression = case typeExpression of
-    TypeVariable variable -> pure $ TypeVariable
-      $ Map.findWithDefault (AlphaFreeVariable variable) variable bindings
-    TypeConstructor name -> pure $ TypeConstructor name
-    TypeApplication function argument -> TypeApplication
-      <$> normalize bindings function
-      <*> normalize bindings argument
-    FunctionType parameter result -> FunctionType
-      <$> normalize bindings parameter
-      <*> normalize bindings result
-    TupleType boxity elements -> TupleType boxity
-      <$> mapM (normalize bindings) elements
-    ForallType variables constraints body -> do
-      scope <- allocateScope
-      let canonicalBinders =
-            [ AlphaBoundVariable scope position
-            | (position, _) <- zip [0 ..] variables
-            ]
-          nestedBindings = Map.fromList (zip variables canonicalBinders)
-            `Map.union` bindings
-      canonicalConstraints <- mapM
-        (normalizeConstraint nestedBindings) constraints
-      canonicalBody <- normalize nestedBindings body
-      pure $ ForallType canonicalBinders canonicalConstraints canonicalBody
-
-  normalizeConstraint bindings (Constraint className arguments) =
-    Constraint className <$> mapM (normalize bindings) arguments
-
-  allocateScope :: State Natural Natural
-  allocateScope = do
-    scope <- get
-    put $ scope + 1
-    pure scope

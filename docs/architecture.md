@@ -417,14 +417,17 @@ selector spelling only when that selector is visible unqualified, so hidden
 names never leak into output. Every unsupported or hidden declaration is
 recorded as an omission.
 
-Djinn's standard checked session is only the recovery state when no source
-projection is available or sealing that projection fails. The scope projection
-tracks type and value claims separately while resolving source spellings, then
-keeps type-constructor and class requirements distinct while repairing the
-closed Djinn inventory. A same-named value therefore cannot masquerade as a
-referenced type even though the shared structural `Name` is namespace-neutral.
-Real-GHC evaluation consumes the same ordered prompt entries but has no access
-to either backend's synthesis dictionary.
+Djinn's standard checked session is the startup recovery state when no source
+projection is available. After startup, workspace replacement, prompt-scope
+edits, and projection-affecting settings publish only when both backend
+sessions have been checked; a Djinn projection failure retains the complete
+preceding state. The scope projection tracks type and value claims separately
+while resolving source spellings, then keeps type-constructor and class
+requirements distinct while repairing the closed Djinn inventory. A
+same-named value therefore cannot masquerade as a referenced type even though
+the shared structural `Name` is namespace-neutral. Real-GHC evaluation
+consumes the same ordered prompt entries but has no access to either backend's
+synthesis dictionary.
 
 ## API and stability tiers
 
@@ -507,14 +510,20 @@ Run the complete supported validation from the repository root:
 
 ```console
 cabal build all
-cabal test all --test-show-details=direct
+cabal test all -j1 --test-show-details=direct
 cabal check
 ```
 
+The serial whole-tree run is intentional: subprocess CLI suites consume the
+freshly linked `djex`, `djinn`, and `exference` tools, so another component
+must not replace one of those executables while a suite is using it. Focused
+library-only test targets may still run concurrently.
+
 See [the library API guide](library-api.md) for runnable examples and
 [the synthesis API map](../synthesis/README.md) for the shared modules. The
-[post-merge code review](reports/2026-07-21-post-merge-code-review.md) records
-the latest comparative findings and evaluation audit. The earlier
+[2026-07-27 unification review](reports/2026-07-27-unification-review.md)
+records the latest comparative findings and REPL audit. The earlier
+[post-merge code review](reports/2026-07-21-post-merge-code-review.md),
 [final convergence review](reports/2026-07-17-final-convergence-review.md) and
 [checker-boundary follow-up](reports/2026-07-17-checker-boundary-follow-up.md)
-record the preceding compatibility and raw-checker changes.
+record the preceding strictness, compatibility, and raw-checker changes.

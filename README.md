@@ -63,13 +63,15 @@ library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
 boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
-the two engines continue converging. The latest whole-tree findings,
-strictness audit, architectural decisions, and retained semantic differences
-are recorded in the
-[post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md).
-The earlier [final convergence review](docs/reports/2026-07-17-final-convergence-review.md)
+the two engines continue converging. The latest unification findings, REPL
+review, architectural decisions, and retained semantic differences are
+recorded in the
+[2026-07-27 unification review](docs/reports/2026-07-27-unification-review.md).
+The earlier [post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md),
+[final convergence review](docs/reports/2026-07-17-final-convergence-review.md),
 and [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md)
-record the larger compatibility and raw-checker migrations that preceded it.
+record the larger strictness, compatibility, and raw-checker migrations that
+preceded it.
 
 ## Building
 
@@ -77,8 +79,14 @@ Build and test the complete graph from the repository root:
 
 ```console
 cabal build all
-cabal test all --test-show-details=direct
+cabal test all -j1 --test-show-details=direct
 ```
+
+The whole-tree test run is deliberately serial. Several CLI suites invoke the
+freshly linked `djex`, `djinn`, and `exference` tools as subprocesses; serial
+scheduling prevents a concurrent component rebuild from replacing an
+executable while a suite is consuming it. Focused library-only suites do not
+need this restriction.
 
 Install the merged command and both historical command names into Cabal's
 executable directory with:
@@ -101,7 +109,7 @@ ordinary latest-compatible build plan:
 
 ```console
 cabal build all --prefer-oldest --builddir=dist-newstyle-oldest
-cabal test all --prefer-oldest --builddir=dist-newstyle-oldest --test-show-details=direct
+cabal test all -j1 --prefer-oldest --builddir=dist-newstyle-oldest --test-show-details=direct
 ```
 
 Useful component and compatibility-executable targets:
@@ -191,10 +199,12 @@ govern that module's declaration elaboration; bare interactive imports and
 Djex projects that prompt scope into checked Exference and Djinn sessions.
 Djinn's abstract type stubs reuse kinds inferred by the shared inventory, and
 its presentation uses a record-selector spelling only when that selector is
-visible unqualified. Djinn falls back to its standard checked session only if
-the source projection cannot be sealed. The explicit `:eval` boundary
-separately gives the loaded files to real GHC; its package and compiled-module
-scope is not added to either synthesis inventory.
+visible unqualified. At startup, Djinn falls back to its standard checked
+session if the initial source projection cannot be sealed. Later workspace,
+scope, and projection-policy changes publish atomically across both backends;
+a failed projection retains the complete previous state. The explicit `:eval`
+boundary separately gives the loaded files to real GHC; its package and
+compiled-module scope is not added to either synthesis inventory.
 See the [shared REPL guide](docs/repl.md) for the target grammar, export
 visibility, commands, settings, defaults, and failure behavior.
 

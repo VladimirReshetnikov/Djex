@@ -10,8 +10,11 @@ Djex currently supports GHC 9.12.4. From the repository root:
 
 ```console
 cabal build all
-cabal test all --test-show-details=direct
+cabal test all -j1 --test-show-details=direct
 ```
+
+The complete run is serial because its CLI suites invoke freshly linked Djex
+executables as subprocesses. Focused library-only suites may run concurrently.
 
 Run without installing:
 

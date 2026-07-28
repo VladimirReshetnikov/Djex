@@ -570,6 +570,10 @@ context to GHC's interpreter context:
 - Bare imports preserve `qualified`, `as`, explicit import lists, and
   `hiding` exactly; a loaded dependency does not leak merely because another
   target needs it.
+- A `safe` import remains valid synthesis-scope syntax, but the evaluator's
+  structured GHC context cannot preserve its safety flag. `:eval` refuses to
+  weaken that request to an ordinary import and uses the complete
+  Prelude-only fallback described below.
 - With no starred module and no explicit Prelude entry, the installed Prelude
   is imported implicitly. A starred module instead supplies its own source
   scope, so `NoImplicitPrelude` remains effective.
@@ -652,7 +656,8 @@ Whenever a source workspace is loaded, the REPL projects the unqualified
 prompt scope into a fresh Djinn session, so `:load`, `:add`, `:unadd`,
 `:reload`, `import`, and `:module` change what both backends can see. The
 projection reprojects on every scope change and is transactional: a failed
-load retains the previous sessions of both backends.
+load, scope edit, or projection-affecting setting retains the previous
+sessions and settings of both backends.
 
 Djinn's declaration grammar is stricter than the shared neutral vocabulary,
 so the projection degrades rather than fails:
@@ -702,8 +707,11 @@ simple or not at all.
 Every compromise is recorded: `:show environment` reports the projected
 declaration and omission counts, and `:show omissions` lists each omitted
 name with its reason next to Exference's own omissions. If projection fails
-outright, the failure is reported and Djinn falls back to its standard
-checked environment.
+outright during an interactive mutation, the failure is reported and the
+entire candidate state is rejected; Exference and Djinn therefore never
+publish different prompt scopes. Only an initial startup projection failure,
+where no earlier source state exists, falls back to Djinn's standard checked
+environment while leaving the REPL available for recovery commands.
 
 ## Workspace replacement is transactional
 

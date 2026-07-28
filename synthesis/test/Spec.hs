@@ -1648,7 +1648,7 @@ environmentTests = testGroup "environments"
           [ (["x"], leftHead)
           , ([], rightHead)
           ] @?= [(leftHead, rightHead)]
-  , testCase "pair commuting forall binders by first occurrence" $ do
+  , testCase "do not commute explicit forall binders in instance heads" $ do
       let className = right $ mkIdentifier "C"
           innerClassName = right $ mkIdentifier "Inner"
           integer = SharedType.TypeConstructor $ right $ mkIdentifier "Int"
@@ -1663,7 +1663,7 @@ environmentTests = testGroup "environments"
       Environment.overlappingInstanceHeadPairsInSourceOrder
           [ (["x"], leftHead)
           , ([], rightHead)
-          ] @?= [(leftHead, rightHead)]
+          ] @?= []
   , testCase "canonicalize structural instance heads at the public boundary" $ do
       let className = right $ mkIdentifier "C"
           integer = SharedType.TypeConstructor $ right $ mkIdentifier "Int"
@@ -1720,7 +1720,7 @@ environmentTests = testGroup "environments"
             $ constraintArguments reorderedHead
       Environment.mkEnvironment [first, reordered] @?=
         Left (Environment.DuplicateInstanceDeclaration reorderedHead)
-  , testCase "canonicalize nested forall binders by scope and occurrence" $ do
+  , testCase "canonicalize nested forall binders by lexical position" $ do
       let className = right $ mkIdentifier "Nested"
           innerClassName = right $ mkIdentifier "Inner"
           variable = SharedType.TypeVariable
@@ -1728,15 +1728,23 @@ environmentTests = testGroup "environments"
             [Constraint innerClassName [variable "innerB"]]
             $ SharedType.TupleType Boxed
                 [variable "innerA", variable "outer", variable "innerB"]
-          renamedType = SharedType.ForallType ["right", "left"]
+          renamedType = SharedType.ForallType ["left", "right"]
             [Constraint innerClassName [variable "right"]]
             $ SharedType.TupleType Boxed
                 [variable "left", variable "renamedOuter", variable "right"]
+          reorderedType = SharedType.ForallType ["right", "left"]
+            [Constraint innerClassName [variable "right"]]
+            $ SharedType.TupleType Boxed
+                [variable "left", variable "anotherOuter", variable "right"]
           first = environmentInstance className ["outer"] [firstType]
           renamedHead = Constraint className [renamedType]
           renamed = environmentInstance className ["renamedOuter"] [renamedType]
+          reordered = environmentInstance className ["anotherOuter"]
+            [reorderedType]
       Environment.mkEnvironment [first, renamed] @?=
         Left (Environment.DuplicateInstanceDeclaration renamedHead)
+      Map.size (Environment.instanceDeclarationMap $ right
+          $ Environment.mkEnvironment [first, reordered]) @?= 2
   , testCase "respect nested forall shadowing" $ do
       let className = right $ mkIdentifier "Scoped"
           variable = SharedType.TypeVariable
@@ -2197,6 +2205,55 @@ typeTests = testGroup "source types"
       sourceAtom @?= renamedAtom
       assertBool "binder reordering was mistaken for alpha-renaming"
         $ sourceAtom /= reorderedAtom
+  , testCase "alpha-renaming preserves binder positions in contexts" $ do
+      let className = right $ mkIdentifier "C"
+          variable = SharedType.TypeVariable
+          quantified binders constrained body = SharedType.ForallType binders
+            [Constraint className [variable constrained]]
+            $ variable body
+          source = quantified ["a", "b"] "b" "a"
+          renamed = quantified ["x", "y"] "y" "x"
+          reordered = quantified ["y", "x"] "y" "x"
+      right (mkTypeAtom source) @?= right (mkTypeAtom renamed)
+      assertBool "context occurrences ignored binder declaration positions"
+        $ right (mkTypeAtom source) /= right (mkTypeAtom reordered)
+  , testCase "alpha-renaming follows nested lexical shadowing" $ do
+      let variable = SharedType.TypeVariable
+          source = SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType (variable "a")
+            $ SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType (variable "a") (variable "free")
+          renamed = SharedType.ForallType ["outer"] []
+            $ SharedType.FunctionType (variable "outer")
+            $ SharedType.ForallType ["inner"] []
+            $ SharedType.FunctionType (variable "inner") (variable "free")
+          capturesOuter = SharedType.ForallType ["outer"] []
+            $ SharedType.FunctionType (variable "outer")
+            $ SharedType.ForallType ["inner"] []
+            $ SharedType.FunctionType (variable "outer") (variable "free")
+      right (mkTypeAtom source) @?= right (mkTypeAtom renamed)
+      assertBool "an inner occurrence was resolved to the outer binder"
+        $ right (mkTypeAtom source) /= right (mkTypeAtom capturesOuter)
+  , testCase "reject variable projections which can introduce capture" $ do
+      let variable = SharedType.TypeVariable
+          freeCapture = SharedType.ForallType ["bound"] []
+            $ SharedType.FunctionType (variable "free") (variable "bound")
+          shadowCapture = SharedType.ForallType ["outer"] []
+            $ SharedType.ForallType ["inner"] []
+            $ SharedType.FunctionType (variable "outer") (variable "inner")
+          collapse name
+            | name `elem` ["bound", "free", "outer", "inner"] = "same"
+            | otherwise = name
+      mapTypeAtomVariables collapse (right $ mkTypeAtom freeCapture) @?=
+        Left (NonInjectiveTypeAtomVariableMapping "same")
+      mapTypeAtomVariables collapse (right $ mkTypeAtom shadowCapture) @?=
+        Left (NonInjectiveTypeAtomVariableMapping "same")
+      fmap typeAtomType
+          (mapTypeAtomVariables (++ "'") $ right $ mkTypeAtom freeCapture)
+        @?= Right
+          (SharedType.ForallType ["bound'"] []
+            $ SharedType.FunctionType (variable "free'")
+                (variable "bound'"))
   , testCase "seal only valid explicitly quantified atoms" $ do
       let variable = SharedType.TypeVariable "a"
           duplicate = SharedType.ForallType ["a", "a"] [] variable
@@ -2238,6 +2295,29 @@ typeTests = testGroup "source types"
           (substituteTypeAtomVariables freshStringVariable Set.empty
             (Map.singleton "item" $ variable "answer") atom) @?=
         Right expected
+  , testCase "substitute through every shadowing scope of an atom" $ do
+      let variable = SharedType.TypeVariable
+          source = SharedType.ForallType ["bound"] []
+            $ SharedType.TupleType Boxed
+              [ variable "bound"
+              , SharedType.ForallType ["bound"] []
+                  $ SharedType.FunctionType
+                      (variable "free") (variable "bound")
+              ]
+          expected = SharedType.ForallType ["bound'"] []
+            $ SharedType.TupleType Boxed
+              [ variable "bound'"
+              , SharedType.ForallType ["bound''"] []
+                  $ SharedType.FunctionType
+                      (variable "bound") (variable "bound''")
+              ]
+          atom = right $ mkTypeAtom source
+          substituted = substituteTypeAtomVariables
+            freshStringVariable Set.empty
+            (Map.singleton "free" $ variable "bound") atom
+      fmap typeAtomType substituted @?= Right expected
+      fmap typeAtomFreeVariables substituted @?=
+        Right (Set.singleton "bound")
   , testCase "alpha identity canonicalizes equivalent source forms" $ do
       let a = SharedType.TypeVariable "a"
           b = SharedType.TypeVariable "b"

@@ -26,8 +26,11 @@ module Language.Haskell.Synthesis.TypeAtom
   ) where
 
 import Control.DeepSeq (NFData)
+import Control.Monad (foldM)
 import Data.Bifunctor (first)
+import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import qualified Data.Set as Set
 import Data.Set (Set)
 import GHC.Generics (Generic)
 
@@ -69,6 +72,10 @@ data TypeAtomError variable
     -- ^ The shared type itself is malformed.
   | MonomorphicTypeAtom (Type variable)
     -- ^ The canonical outermost node is not a 'ForallType'.
+  | NonInjectiveTypeAtomVariableMapping variable
+    -- ^ Distinct source identities were projected onto this target identity.
+    -- Such a projection could capture a free variable or change which nested
+    -- forall owns an occurrence.
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
 
 instance NFData variable => NFData (TypeAtomError variable)
@@ -138,13 +145,30 @@ typeAtomFreeVariables :: Ord variable => TypeAtom variable -> Set variable
 typeAtomFreeVariables = freeVariables . atomSource
 
 -- | Change the atom's variable representation and rebuild its checked key.
--- The result is checked because a non-injective mapping can merge binders.
+-- The mapping must be injective over every variable identity in the atom;
+-- otherwise it could merge free variables, capture one beneath a binder, or
+-- change the owner of an occurrence across nested scopes.
 mapTypeAtomVariables
-  :: Ord target
+  :: (Ord source, Ord target)
   => (source -> target)
   -> TypeAtom source
   -> Either (TypeAtomError target) (TypeAtom target)
-mapTypeAtomVariables convert = mkTypeAtom . fmap convert . atomSource
+mapTypeAtomVariables convert atom = do
+  -- Re-validating only the mapped tree catches duplicate binders in one
+  -- binder list, but misses cross-scope capture.  Require the representation
+  -- projection to preserve every distinct nominal identity before rebuilding
+  -- the lexical tree.
+  _ <- foldM rememberTarget Map.empty
+    $ Set.toAscList $ foldMap Set.singleton $ atomSource atom
+  mkTypeAtom $ fmap convert $ atomSource atom
+ where
+  rememberTarget seen source =
+    let target = convert source
+    in case Map.lookup target seen of
+      Nothing -> Right $ Map.insert target source seen
+      Just previous
+        | previous == source -> Right seen
+        | otherwise -> Left $ NonInjectiveTypeAtomVariableMapping target
 
 -- | Capture-avoiding substitution of only the atom's free variables.
 --

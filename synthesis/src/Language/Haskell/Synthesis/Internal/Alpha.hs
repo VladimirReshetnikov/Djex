@@ -71,7 +71,10 @@ alphaNormalizeConstraintWithOuter
   -> Constraint (Type variable)
   -> Constraint (Type (AlphaVariable variable))
 alphaNormalizeConstraintWithOuter policy variables source = evalState
-  (normalizeConstraint policy bindings source)
+  -- Only the synthetic outer scope is allowed to commute.  Any explicit
+  -- forall reached inside the instance head remains ordinary lexical syntax,
+  -- whose declaration positions are significant under alpha-renaming.
+  (normalizeConstraint PositionalBinderSlots bindings source)
   $ AlphaState Map.empty Map.empty 1
  where
   bindings = scopeBindings policy 0 variables

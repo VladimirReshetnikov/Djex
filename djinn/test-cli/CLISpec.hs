@@ -2,6 +2,7 @@ module Main (main) where
 
 import CLIAssertions (assertContains, countOccurrences)
 import Control.Exception (bracket)
+import Data.Char (isSpace)
 import Data.List (intercalate, isInfixOf)
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode(ExitFailure, ExitSuccess))
@@ -20,6 +21,8 @@ main = defaultMain $ testGroup "Djinn CLI integration"
     [ testCase "EOF exits a successful session" testEof
     , testCase "startup settings follow the library query defaults"
         testDefaultSettings
+    , testCase "verbose help renders the package version"
+        testVerboseHelpVersion
     , testCase "explicit RTS tuning reaches the application" testRtsOptions
     , testCase "same-named assumptions cannot become recursion"
         testSelfReference
@@ -69,6 +72,21 @@ testDefaultSettings = do
         ("cutoff=" ++ show (optionCutoff defaults)) output
     assertContains "choice budget follows the public default"
         ("budget=" ++ show defaultBudget) output
+
+testVerboseHelpVersion :: Assertion
+testVerboseHelpVersion = do
+    output <- runSession [":verbose-help", ":quit"]
+    case map (dropWhile isSpace) $ filter (isInfixOf welcomePrefix)
+        $ lines output of
+        [startupWelcome, helpWelcome] ->
+            assertEqual "verbose-help example matches the versioned startup"
+                startupWelcome helpWelcome
+        welcomes -> fail $ "expected two version welcome lines, got "
+            ++ show welcomes
+    assertBool "verbose help must not expose its source placeholder" $
+        not $ "<package-version>" `isInfixOf` output
+  where
+    welcomePrefix = "Welcome to Djinn version "
 
 testRtsOptions :: Assertion
 testRtsOptions = do

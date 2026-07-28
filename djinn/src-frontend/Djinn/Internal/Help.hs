@@ -1,4 +1,8 @@
 module Djinn.Internal.Help (verboseHelp) where
+
+import Data.Version (showVersion)
+import Paths_djex (version)
+
 verboseHelp :: String
 verboseHelp = "\
 \\n\
@@ -128,7 +132,7 @@ verboseHelp = "\
 \Further examples\n\
 \================\n\
 \  $ djinn\n\
-\  Welcome to Djinn version <package-version>.\n\
+\  Welcome to Djinn version " ++ showVersion version ++ ".\n\
 \  Type :h to get help.\n\
 \\n\
 \   -- return, bind, and callCC in the continuation monad\n\

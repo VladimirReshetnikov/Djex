@@ -1565,7 +1565,7 @@ browseNames label variableName names environment = do
       declarations
  where
   visible = Set.fromList names
-  definesVisible declaration = any (`declarationDefines` declaration)
+  definesVisible declaration = any (`declarationMatchesName` declaration)
     $ Set.toList visible
   renderVisibleDeclaration declaration = renderDeclaration variableName
     $ case declaration of
@@ -1597,7 +1597,7 @@ info label variableName name environment = do
   -- Asking about a constructor or class method finds its owning declaration.
   -- Instances participate through that datatype or class, not through the
   -- member's value name. Owner queries already include class instances in
-  -- 'declarations', so 'declarationDefines' also prevents duplicate output.
+  -- 'declarations', so the lookup predicate also prevents duplicate output.
   declarationOwner declaration = case declaration of
     TypeSynonymDeclaration _ owner _ _ -> Just owner
     DataTypeDeclaration _ owner _ _ -> Just owner
@@ -1611,7 +1611,7 @@ info label variableName name environment = do
   relatedInstances = filter mentions $ environmentDeclarations environment
   mentions declaration = case declaration of
     InstanceDeclaration _ _ _ headConstraint ->
-      not (declarationDefines name declaration)
+      not (declarationMatchesName name declaration)
         && ( constraintClass headConstraint `Set.member` owners
           || any (not . Set.disjoint owners . typeConstructors)
               (constraintArguments headConstraint)
@@ -1622,23 +1622,24 @@ matchingDeclarations
   :: Name
   -> Environment variable kind annotation
   -> [Declaration variable kind annotation]
-matchingDeclarations name = filter (declarationDefines name)
+matchingDeclarations name = filter (declarationMatchesName name)
   . environmentDeclarations
 
--- Constructors and class methods are usable search names even though the
--- neutral environment indexes them beneath their owning declaration.
-declarationDefines
+-- Constructors and class methods find their owner, while an instance is found
+-- through its head class. The neutral environment indexes all three beneath
+-- one declaration rather than manufacturing separate lookup records.
+declarationMatchesName
   :: Name
   -> Declaration variable kind annotation
   -> Bool
-declarationDefines name declaration =
-  name `elem` declarationOwnedNames declaration
+declarationMatchesName name declaration =
+  name `elem` declarationLookupNames declaration
 
 declarationNameSet
   :: Environment variable kind annotation
   -> Set.Set Name
 declarationNameSet = Set.fromList
-  . concatMap declarationOwnedNames
+  . concatMap declarationLookupNames
   . environmentDeclarations
 
 renderDeclaration

@@ -68,9 +68,10 @@ data ClassEnvironmentLoadError
   deriving (Eq, Show)
 
 -- | The complete result of one transactional class-declaration pass. Source
--- instance count deliberately precedes superclass inflation, and method
--- groups align one-for-one with the input modules so the outer loader can
--- retain declaration and diagnostic order.
+-- instance count records source declarations before their resolution rules
+-- receive superclass prerequisites, and method groups align one-for-one with
+-- the input modules so the outer loader can retain declaration and diagnostic
+-- order.
 data LoadedClassEnvironment = LoadedClassEnvironment
   { loadedStaticClassEnvironment :: StaticClassEnv
   , loadedSourceInstanceCount :: Natural

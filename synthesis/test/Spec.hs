@@ -156,6 +156,21 @@ collectionTests = testGroup "collections"
   , testCase "emit a fresh value without forcing the remaining input" $
       take 1 (distinctOn id (1 : error "forced distinct suffix") :: [Int])
         @?= [1]
+  , testCase "pair each repetition with its first keyed value" $ do
+      repetitionsWithFirstOn fst
+        [ ("alpha", 1 :: Int)
+        , ("beta", 2)
+        , ("alpha", 3)
+        , ("alpha", 4)
+        , ("beta", 5)
+        ] @?=
+          [ (("alpha", 1), ("alpha", 3))
+          , (("alpha", 1), ("alpha", 4))
+          , (("beta", 2), ("beta", 5))
+          ]
+      take 1 (repetitionsWithFirstOn id
+        ([1, 1, error "forced repetition suffix"] :: [Int]))
+        @?= [(1, 1)]
   , testCase "return the first present value without forcing its suffix" $ do
       firstPresent
           ([Nothing, Just "present", error "forced present suffix"]
@@ -1590,6 +1605,98 @@ environmentTests = testGroup "environments"
           , (["renamedOuter"], repeatedD)
           , (["third"], repeatedCAgain)
           ] @?= [repeatedC, repeatedD]
+  , testCase "classify pairwise instance overlap with shared substitutions" $ do
+      let className = right $ mkIdentifier "C"
+          otherClassName = right $ mkIdentifier "D"
+          integerName = right $ mkIdentifier "Int"
+          booleanName = right $ mkIdentifier "Bool"
+          variable = SharedType.TypeVariable "a"
+          integer = SharedType.TypeConstructor integerName
+          boolean = SharedType.TypeConstructor booleanName
+          genericHead = Constraint className [variable, variable]
+          incompatibleHead = Constraint className [integer, boolean]
+          compatibleHead = Constraint className [integer, integer]
+          otherClassHead = Constraint otherClassName [integer, integer]
+      Environment.overlappingInstanceHeadPairsInSourceOrder
+          [ (["a"], genericHead)
+          , ([], incompatibleHead)
+          , ([], compatibleHead)
+          , ([], otherClassHead)
+          ] @?= [(genericHead, compatibleHead)]
+  , testCase "do not let an outer instance variable capture a forall skolem" $ do
+      let className = right $ mkIdentifier "C"
+          variable = SharedType.TypeVariable
+          leftHead = Constraint className
+            [SharedType.ForallType ["a"] [] $ variable "x"]
+          rightHead = Constraint className
+            [SharedType.ForallType ["b"] [] $ variable "b"]
+      Environment.overlappingInstanceHeadPairsInSourceOrder
+          [ (["x"], leftHead)
+          , ([], rightHead)
+          ] @?= []
+  , testCase "bind a variable to a closed forall and alpha-pair later binders" $ do
+      let className = right $ mkIdentifier "C"
+          variable = SharedType.TypeVariable
+          identityForall binder = SharedType.ForallType [binder] []
+            $ variable binder
+          leftHead = Constraint className
+            [variable "x", identityForall "a"]
+          rightHead = Constraint className
+            [identityForall "b", identityForall "c"]
+      Environment.overlappingInstanceHeadPairsInSourceOrder
+          [ (["x"], leftHead)
+          , ([], rightHead)
+          ] @?= [(leftHead, rightHead)]
+  , testCase "pair commuting forall binders by first occurrence" $ do
+      let className = right $ mkIdentifier "C"
+          innerClassName = right $ mkIdentifier "Inner"
+          integer = SharedType.TypeConstructor $ right $ mkIdentifier "Int"
+          variable = SharedType.TypeVariable
+          quantified binders constrained body = SharedType.ForallType binders
+            [Constraint innerClassName [variable constrained]]
+            $ variable body
+          leftHead = Constraint className
+            [variable "x", quantified ["a", "b"] "b" "a"]
+          rightHead = Constraint className
+            [integer, quantified ["u", "v"] "u" "v"]
+      Environment.overlappingInstanceHeadPairsInSourceOrder
+          [ (["x"], leftHead)
+          , ([], rightHead)
+          ] @?= [(leftHead, rightHead)]
+  , testCase "canonicalize structural instance heads at the public boundary" $ do
+      let className = right $ mkIdentifier "C"
+          integer = SharedType.TypeConstructor $ right $ mkIdentifier "Int"
+          boolean = SharedType.TypeConstructor $ right $ mkIdentifier "Bool"
+          structuralHead = Constraint className
+            [SharedType.FunctionType integer boolean]
+          appliedHead = Constraint className
+            [ SharedType.TypeApplication
+                (SharedType.TypeApplication
+                  (SharedType.TypeConstructor functionName) integer)
+                boolean
+            ]
+      Environment.overlappingInstanceHeadPairsInSourceOrder
+          [ (([] :: [String]), structuralHead)
+          , ([], appliedHead)
+          ] @?=
+            [(structuralHead, appliedHead)]
+  , testCase "unify variables on both sides without admitting occurs cycles" $ do
+      let className = right $ mkIdentifier "C"
+          constructorName = right $ mkIdentifier "F"
+          variable = SharedType.TypeVariable
+          applyF = SharedType.TypeApplication
+            $ SharedType.TypeConstructor constructorName
+          leftVariableHead = Constraint className [variable "x"]
+          rightVariableHead = Constraint className [variable "y"]
+          cyclicLeft = Constraint className
+            [variable "x", applyF $ variable "x"]
+          cyclicRight = Constraint className
+            [applyF $ variable "y", variable "y"]
+      Environment.overlappingInstanceHeadPairsInSourceOrder
+          [(["x"], leftVariableHead), (["y"], rightVariableHead)] @?=
+            [(leftVariableHead, rightVariableHead)]
+      Environment.overlappingInstanceHeadPairsInSourceOrder
+          [(["x"], cyclicLeft), (["y"], cyclicRight)] @?= []
   , testCase "distinguish bound instance variables from nominal free ones" $ do
       let className = right $ mkIdentifier "C"
           variable = SharedType.TypeVariable
@@ -1741,6 +1848,8 @@ declarationTests = testGroup "declarations"
             ]
           value = Declaration.ValueDeclaration
             $ Declaration.ValueSignature () valueName variable
+          sameSpelling = Declaration.DataTypeDeclaration () maybeName []
+            [Declaration.DataConstructor () maybeName []]
       Declaration.declarationTermSignatures constructor @?=
         [ Declaration.ValueSignature () justName
             $ SharedType.FunctionType variable maybeType
@@ -1758,6 +1867,12 @@ declarationTests = testGroup "declarations"
           (Declaration.AbstractTypeDeclaration () maybeName
             Kind.ProperTypeKind :: Declaration.Declaration String Void ())
         @?= []
+      Declaration.declarationLookupNames constructor @?=
+        [maybeName, justName]
+      Declaration.declarationLookupNames classDeclaration @?=
+        [equalityName, equalsName]
+      Declaration.declarationLookupNames value @?= [valueName]
+      Declaration.declarationLookupNames sameSpelling @?= [maybeName]
   , testCase "preserve method quantifiers while adding the owner constraint" $ do
       let className = right $ mkIdentifier "Convert"
           constraintName = right $ mkIdentifier "Show"

@@ -5,7 +5,8 @@ module Djinn.Internal.Type
   , checkedDjinnTypeVariable
   , djinnTypeConstructorSymbol
   , freshPrimedVariable
-  , normalizeSynthesisSignature
+  , sealSynthesisSignature
+  , validateSynthesisConstraintHeader
   , normalizeSynthesisType
   , renderSynthesisType
   , toSynthesisType
@@ -24,7 +25,7 @@ import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 
-import Djinn.Internal.HIdentifier (isQualifiedConId, isVarId)
+import Djinn.Internal.HIdentifier (isConId, isQualifiedConId, isVarId)
 import Djinn.Internal.HTypes
   ( HType (..)
   , HSymbol
@@ -36,6 +37,7 @@ data SynthesisTypeError
   = InvalidHTypeName HSymbol SharedName.NameError
   | InvalidDjinnTypeVariable HSymbol
   | UnsupportedDjinnTypeConstructorName SharedName.Name
+  | UnsupportedDjinnConstraintClassName SharedName.Name
   | DeclarationBodyIsNotSourceType HType
   | InvalidSynthesisType (SharedType.TypeError HSymbol)
   | SynthesisForallUnsupported
@@ -138,15 +140,15 @@ normalizeSynthesisType source = do
 -- remains unsupported.  Keeping that boundary here lets parser-neutral
 -- callers use ordinary Haskell-shaped signatures without weakening the
 -- monotype invariant at formula compilation.
-normalizeSynthesisSignature
+sealSynthesisSignature
   :: SharedType.Type HSymbol
   -> Either SynthesisTypeError (SharedType.Type HSymbol)
-normalizeSynthesisSignature = normalizePrefix
+sealSynthesisSignature = normalizePrefix
  where
   normalizePrefix source = case source of
     SharedType.ForallType binders constraints body -> do
       validateBinders binders
-      mapM_ validateConstraintHeader constraints
+      mapM_ validateSynthesisConstraintHeader constraints
       SharedType.ForallType binders constraints <$> normalizePrefix body
     monotype -> normalizeSynthesisType monotype
 
@@ -157,15 +159,28 @@ normalizeSynthesisSignature = normalizePrefix
         $ SharedType.DuplicateForallVariable duplicate
       Nothing -> Right ()
 
-  -- Do not enter an argument spine here. A programmatic caller may construct
-  -- a cyclic list, and only a sealed session knows the class arity with which
-  -- that list can be inspected productively. Argument types are normalized
-  -- after the bounded arity preflight in the request adapter.
-  validateConstraintHeader (Constraint className _) =
-    either
-      (Left . InvalidSynthesisType . SharedType.InvalidTypeConstraint)
-      Right
-      $ validateConstraintClassName className
+-- | Validate only the nominal header of a Djinn constraint. Do not enter its
+-- argument spine here: a programmatic caller may construct a cyclic list, and
+-- only a sealed session knows the class arity with which that list can be
+-- inspected productively. Argument types are normalized after that bounded
+-- preflight in the request adapter.
+--
+-- The shared constraint vocabulary admits qualified class names, while
+-- Djinn's declarations and historical parser admit local constructor
+-- identifiers only. Keeping this backend policy beside signature sealing
+-- makes explicit and embedded contexts cross the same checked boundary.
+validateSynthesisConstraintHeader
+  :: Constraint (SharedType.Type HSymbol)
+  -> Either SynthesisTypeError ()
+validateSynthesisConstraintHeader (Constraint className _) = do
+  either
+    (Left . InvalidSynthesisType . SharedType.InvalidTypeConstraint)
+    Right
+    $ validateConstraintClassName className
+  if isConId $ SharedName.renderCanonical className then
+    Right ()
+  else
+    Left $ UnsupportedDjinnConstraintClassName className
 
 -- | Render a checked shared type with Djinn's historical source-like syntax.
 -- Keeping this projection native avoids constructing an 'HType' merely to

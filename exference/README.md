@@ -259,8 +259,8 @@ meaning. Ownership-aware callers instead use
 `EnvDictionary` together with a `Map QualifiedName [FunctionBinding]` accepted
 by `toSynthesisEnvironmentWithConstructorPenaltiesAndClassMethods`.
 `StaticClassEnv` retains explicit instance declarations separately from its
-superclass-inflated lookup index, so adapters serialize source facts rather
-than derived cache entries. The core-only adapters still reject frontend-only
+superclass-completed resolution index, so adapters serialize source facts
+rather than derived cache entries. The core-only adapters still reject frontend-only
 declarations such as type synonyms because the search dictionary has no
 representation for them.
 
@@ -806,8 +806,10 @@ any / the right solution. Some common current limitations are:
   `EXF_UNSUPPORTED_VOCABULARY` diagnostics; they are never silently omitted;
 - The environment is composed by hand currently, and does only include parts
   of base plus a few other selected modules. Its canonical inventory of 41
-  classes and 432 source instances is checked at load time and expands to 535
-  lookup instances after superclass inflation; all counts are pinned by tests.
+  classes and 432 source instances is checked at load time and produces 432
+  resolution rules whose explicit heads retain stably deduplicated superclass
+  prerequisites; all counts are pinned by tests. Given dictionaries still
+  entail their transitive superclasses in the ordinary direction.
   The [normalization report](docs/reports/2026-07-11-environment-normalization.md)
   documents its naming and validation rules. Additions welcome!
 - Pattern matching on multiple-constructor data types is disabled by default;

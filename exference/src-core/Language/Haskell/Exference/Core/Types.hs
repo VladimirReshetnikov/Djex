@@ -350,6 +350,8 @@ data ClassEnvError
       Int -- ^ Zero-based argument index.
       SynthesisTypeError
   | DuplicateInstanceHeads [HsConstraint]
+  | OverlappingInstanceHeads [(HsConstraint, HsConstraint)]
+    -- ^ Pairwise-overlapping explicit heads, retained in source order.
   | ExpandingInstancePrerequisite HsConstraint HsConstraint
     -- ^ Instance head and a groundable prerequisite that can increase a goal.
   | SuperclassCycle [QualifiedName]
@@ -379,6 +381,8 @@ renderClassEnvError failure = case failure of
     [show site, show name, show index, show typeFailure]
   DuplicateInstanceHeads constraints -> constructor
     "DuplicateInstanceHeads" [sourceConstraintList constraints]
+  OverlappingInstanceHeads pairs -> constructor
+    "OverlappingInstanceHeads" [sourceConstraintPairs pairs]
   ExpandingInstancePrerequisite headConstraint prerequisite -> constructor
     "ExpandingInstancePrerequisite"
     [sourceConstraint headConstraint, sourceConstraint prerequisite]
@@ -388,11 +392,15 @@ renderClassEnvError failure = case failure of
   sourceConstraint = showHsConstraint M.empty
   sourceConstraintList constraints = "[" ++ L.intercalate ","
     (map sourceConstraint constraints) ++ "]"
+  sourceConstraintPairs pairs = "[" ++ L.intercalate ","
+    [ "(" ++ sourceConstraint left ++ "," ++ sourceConstraint right ++ ")"
+    | (left, right) <- pairs
+    ] ++ "]"
 
 -- Positional fields are deliberate.  Exported record labels would let a
 -- downstream caller update the declarations or either derived index and
--- bypass 'mkStaticClassEnv'. Explicit instances remain separate because the
--- per-class map also contains implied superclass instances.
+-- bypass 'mkStaticClassEnv'. Source instances remain separate because the
+-- per-class map stores their superclass-completed resolution rules.
 data StaticClassEnv = StaticClassEnv
   !(M.Map QualifiedName HsTypeClass)
   ![HsInstance]
@@ -415,7 +423,7 @@ emptyStaticClassEnv = StaticClassEnv M.empty [] M.empty
 
 -- | Validate and index a finite class environment. Class declaration failures
 -- follow input order even though superclass lookup supports forward
--- references. Instance inflation runs only after declarations, heads,
+-- references. Instance completion runs only after declarations, heads,
 -- prerequisites, arities, and the superclass graph have been checked.
 mkStaticClassEnv
   :: [HsTypeClass]
@@ -437,15 +445,22 @@ mkStaticClassEnv sourceClasses sourceInstances = do
     [] -> Right ()
     duplicates -> Left $ DuplicateInstanceHeads duplicates
   traverse_ (validateInstance classTable) instances
+  case SharedEnvironment.overlappingInstanceHeadPairsInSourceOrder
+      [ (implicitInstanceVariables declaration, instance_head declaration)
+      | declaration <- instances
+      ] of
+    [] -> Right ()
+    overlaps -> Left $ OverlappingInstanceHeads overlaps
   validateSuperclassGraph classTable
   let declarations = StaticClassEnv classTable [] M.empty
-      allInstances = inflateInstances declarations instances
-  traverse_ validateInstanceTermination allInstances
-  return $ StaticClassEnv classTable instances $ indexInstances allInstances
+      resolutionInstances = inflateInstances declarations instances
+  traverse_ validateInstanceTermination resolutionInstances
+  return $ StaticClassEnv classTable instances
+    $ indexInstances resolutionInstances
  where
   -- Canonicalization is total, so normalizing before validation does not
   -- disturb error precedence.  It does ensure that duplicate-head checks,
-  -- superclass inflation, and every value sealed in the environment observe
+  -- superclass completion, and every value sealed in the environment observe
   -- the same structural function/tuple representation.
   classes = map canonicalizeClass sourceClasses
   instances = map canonicalizeInstance sourceInstances
@@ -550,9 +565,8 @@ mkStaticClassEnv sourceClasses sourceInstances = do
   -- constraints already on the current proof path. An expanding edge is not:
   -- @C [a] => C a@ turns a finite ground query into an infinite sequence of
   -- ever-larger constraints. These two Paterson-style checks make every
-  -- instantiated prerequisite structurally non-increasing. Checking the
-  -- superclass-inflated instances is essential because projection from a
-  -- multi-parameter class can remove head arguments.
+  -- explicit or superclass-completed prerequisite structurally
+  -- non-increasing.
   validateInstanceTermination instanceDeclaration = traverse_
     validatePrerequisite $ instance_constraints instanceDeclaration
    where
@@ -856,17 +870,23 @@ inflateHsConstraints
 inflateHsConstraints environment = SharedCollection.transitiveClosure
   $ S.fromList . directSuperclasses environment
 
--- | Add instance heads implied by superclass declarations.  Exact arity is
--- checked before substitution, so no malformed head can be truncated by
--- @zip@ even if this helper is called independently of 'mkStaticClassEnv'.
+-- | Complete each explicit instance rule with the direct superclass
+-- dictionaries required by its class declaration. The head is never
+-- projected to a superclass: having a way to construct @B a@ from @A a@ does
+-- not provide an @A a@ dictionary in the opposite direction. Existing source
+-- prerequisites win during stable deduplication.
+--
+-- The historical name is retained for compatibility. Exact arity is checked
+-- by 'directSuperclasses', so malformed caller-built heads simply receive no
+-- added obligations rather than being truncated by @zip@.
 inflateInstances :: StaticClassEnv -> [HsInstance] -> [HsInstance]
 inflateInstances environment =
-  S.toList
-    . SharedCollection.transitiveClosure (S.fromList . superclasses)
-    . S.fromList
+  map completeSuperclasses
  where
-  superclasses (HsInstance prerequisites headConstraint) = map
-    (HsInstance prerequisites) $ directSuperclasses environment headConstraint
+  completeSuperclasses (HsInstance prerequisites headConstraint) = HsInstance
+    (SharedCollection.distinctOn id
+      $ prerequisites ++ directSuperclasses environment headConstraint)
+    headConstraint
 
 -- | Instantiate one constraint's declared immediate superclasses. The arity
 -- guard keeps the two low-level closure helpers total for caller-built

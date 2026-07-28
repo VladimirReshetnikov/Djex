@@ -12,6 +12,7 @@ module Language.Haskell.Synthesis.Collection
   , DuplicateSummary
   , observedListLength
   , distinctOn
+  , repetitionsWithFirstOn
   , firstPresent
   , maximumPresent
   , transitiveClosure
@@ -22,6 +23,7 @@ module Language.Haskell.Synthesis.Collection
   , repeatedValuesInFirstRepetitionOrder
   ) where
 
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 -- | Observe a list's exact length through a supplied finite bound.
@@ -54,6 +56,27 @@ distinctOn project = go Set.empty
   go !seen (value : remaining)
     | key `Set.member` seen = go seen remaining
     | otherwise = value : go (Set.insert key seen) remaining
+   where
+    key = project value
+
+-- | Pair every repeated occurrence with the first value that had the same
+-- key, preserving the order in which repetitions are encountered.
+--
+-- A third or later occurrence is still paired with the original value. This
+-- is useful for diagnostics that should point at each later declaration while
+-- naming the one that first claimed the key. Emitting a pair does not inspect
+-- the remaining input.
+repetitionsWithFirstOn
+  :: Ord key
+  => (value -> key)
+  -> [value]
+  -> [(value, value)]
+repetitionsWithFirstOn project = go Map.empty
+ where
+  go !_ [] = []
+  go !firsts (value : remaining) = case Map.lookup key firsts of
+    Nothing -> go (Map.insert key value firsts) remaining
+    Just original -> (original, value) : go firsts remaining
    where
     key = project value
 

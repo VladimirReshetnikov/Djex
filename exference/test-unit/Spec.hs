@@ -465,15 +465,15 @@ tests = testGroup "Exference"
               impliedConstraint = HsConstraint (name "Base")
                 [rigidArgument]
               sourceInstance = HsInstance [] sourceConstraint
-              impliedInstance = HsInstance [] impliedConstraint
+              completedInstance = HsInstance [impliedConstraint] sourceConstraint
           environment <- expectRight
             $ mkStaticClassEnv [base, derived] []
           let queryEnvironment = mkQueryClassEnv environment
                 [sourceConstraint]
           qClassEnv_inflatedConstraints queryEnvironment @?=
             Set.fromList [sourceConstraint, impliedConstraint]
-          Set.fromList (inflateInstances environment [sourceInstance]) @?=
-            Set.fromList [sourceInstance, impliedInstance]
+          inflateInstances environment [sourceInstance] @?=
+            [completedInstance]
       , testCase "constraint and instance closure share parameter substitution" $ do
           let base = HsTypeClass (name "Base") [0, 1] []
               derived = HsTypeClass (name "Derived") [2, 3]
@@ -487,13 +487,14 @@ tests = testGroup "Exference"
               prerequisite = HsConstraint (name "Base")
                 [integer, boolean]
               sourceInstance = HsInstance [prerequisite] sourceConstraint
-              impliedInstance = HsInstance [prerequisite] impliedConstraint
+              completedInstance = HsInstance
+                [prerequisite, impliedConstraint] sourceConstraint
           environment <- expectRight
             $ mkStaticClassEnv [base, derived] []
           inflateHsConstraints environment (Set.singleton sourceConstraint)
             @?= Set.fromList [sourceConstraint, impliedConstraint]
-          Set.fromList (inflateInstances environment [sourceInstance]) @?=
-            Set.fromList [sourceInstance, impliedInstance]
+          inflateInstances environment [sourceInstance] @?=
+            [completedInstance]
       , testCase "duplicate class names are rejected in either order" $ do
           let unary = HsTypeClass (name "C") [0] []
               binary = HsTypeClass (name "C") [0, 1] []
@@ -522,6 +523,21 @@ tests = testGroup "Exference"
               (map instanceOf
                 [firstC, firstD, repeatedC, repeatedD, repeatedCAgain]) @?=
             Left (DuplicateInstanceHeads [repeatedC, repeatedD])
+      , testCase "pairwise-overlapping explicit instance heads are rejected" $ do
+          let cls = HsTypeClass (name "C") [0, 1] []
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              genericHead = HsConstraint (name "C")
+                [TypeVar 0, TypeVar 0]
+              incompatibleHead = HsConstraint (name "C")
+                [integer, boolean]
+              compatibleHead = HsConstraint (name "C")
+                [integer, integer]
+              instanceOf = HsInstance []
+          mkStaticClassEnv [cls]
+              (map instanceOf
+                [genericHead, incompatibleHead, compatibleHead]) @?=
+            Left (OverlappingInstanceHeads [(genericHead, compatibleHead)])
       , testCase "duplicate instance identity respects nested forall scopes" $ do
           let cls = HsTypeClass (name "C") [0] []
               firstHead = HsConstraint (name "C")
@@ -640,6 +656,20 @@ tests = testGroup "Exference"
             [source binary unary]
           check "forward duplicate" forwardResult
           check "reverse duplicate" reverseResult
+      , testCase "frontend rejects unannotated overlapping instances" $ do
+          result <- classEnvironmentFromSources
+            [ unlines
+                [ "module M where"
+                , "class C a where"
+                , "instance C a"
+                , "instance C Int"
+                ]
+            ]
+          case result of
+            Left (InvalidClassEnvironment
+                (OverlappingInstanceHeads [(_, _)])) -> pure ()
+            other -> fail $ "overlapping instances were accepted: "
+              ++ show other
       , testCase "superclass arity is checked against the class table" $ do
           let binary = HsTypeClass (name "Binary") [0, 1] []
               derived = HsTypeClass (name "Derived") [0]
@@ -779,20 +809,22 @@ tests = testGroup "Exference"
           mkStaticClassEnv [headClass] [instanceDeclaration]
             @?= Left (UnknownConstraintClass
               (InstancePrerequisite $ name "D") (name "Missing"))
-      , testCase "instance inflation substitutes nominal superclass heads" $ do
+      , testCase "instance completion adds nominal superclass prerequisites" $ do
           let base = HsTypeClass (name "Base") [0] []
               derived = HsTypeClass (name "Derived") [7]
                 [HsConstraint (name "Base") [TypeVar 7]]
               integer = TypeCons $ name "Int"
               sourceInstance = HsInstance []
                 $ HsConstraint (name "Derived") [integer]
-              impliedInstance = HsInstance []
-                $ HsConstraint (name "Base") [integer]
+              superclassConstraint = HsConstraint (name "Base") [integer]
+              completedInstance = HsInstance [superclassConstraint]
+                $ instance_head sourceInstance
           environment <- expectRight
             $ mkStaticClassEnv [base, derived] [sourceInstance]
           sClassEnv_explicitInstances environment @?= [sourceInstance]
-          Map.lookup (name "Base") (sClassEnv_instances environment)
-            @?= Just [impliedInstance]
+          Map.lookup (name "Base") (sClassEnv_instances environment) @?= Nothing
+          Map.lookup (name "Derived") (sClassEnv_instances environment)
+            @?= Just [completedInstance]
       , testCase "class methods attach to the exactly qualified class" $ do
           classAName <- expectRight $ mkQualifiedName ["A"] "C"
           classBName <- expectRight $ mkQualifiedName ["B"] "C"
@@ -866,7 +898,14 @@ tests = testGroup "Exference"
                 functionParameters ordinary @?= [TypeVar 0]
                 functionResult ordinary @?= TypeVar 0
             result -> fail $ "unexpected lexical class methods: " ++ show result
-      , testCase "cyclic instance prerequisites remain unresolved" $ do
+      , testCase "exact variable-bearing givens discharge before deferral" $ do
+          let cls = HsTypeClass (name "C") [0] []
+              given = HsConstraint (name "C") [TypeVar 0]
+          staticEnvironment <- expectRight $ mkStaticClassEnv [cls] []
+          let environment = mkQueryClassEnv staticEnvironment [given]
+          isPossible environment [given] @?= Just []
+          filterUnresolved environment [given] @?= Just []
+      , testCase "cyclic instance prerequisites are refuted during search" $ do
           let cls = HsTypeClass (name "C") [0] []
               prerequisite = HsConstraint (name "C") [TypeVar 0]
               query = HsConstraint (name "C") [TypeCons $ name "Int"]
@@ -874,7 +913,7 @@ tests = testGroup "Exference"
           staticEnvironment <- expectRight
             $ mkStaticClassEnv [cls] [cyclicInstance]
           let environment = mkQueryClassEnv staticEnvironment []
-          isPossible environment [query] @?= Just [query]
+          isPossible environment [query] @?= Nothing
           filterUnresolved environment [query] @?= Just [query]
       , testCase "expanding instance prerequisites are rejected" $ do
           let className = name "C"
@@ -903,39 +942,91 @@ tests = testGroup "Exference"
           let environment = mkQueryClassEnv staticEnvironment []
           isPossible environment [listIntegerConstraint] @?= Just []
           filterUnresolved environment [listIntegerConstraint] @?= Just []
-      , testCase "termination is checked after superclass inflation" $ do
+      , testCase "termination includes completed superclass prerequisites" $ do
           let baseName = name "Base"
-              needName = name "Need"
               derivedName = name "Derived"
               base = HsTypeClass baseName [0] []
-              need = HsTypeClass needName [0] []
-              derived = HsTypeClass derivedName [0, 1, 2]
-                [HsConstraint baseName [TypeVar 0]]
-              sourceHead = HsConstraint derivedName
-                [TypeVar 0, TypeVar 1, TypeVar 2]
-              prerequisite = HsConstraint needName
+              superclassConstraint = HsConstraint baseName
                 [TypeApp (TypeCons SharedName.listName) (TypeVar 0)]
-              sourceInstance = HsInstance [prerequisite] sourceHead
-              inflatedHead = HsConstraint baseName [TypeVar 0]
-          mkStaticClassEnv [base, need, derived] [sourceInstance] @?= Left
-            (ExpandingInstancePrerequisite inflatedHead prerequisite)
-      , testCase "projected unbound prerequisites remain non-recursive" $ do
-          let baseName = name "Base"
-              needName = name "Need"
-              derivedName = name "Derived"
+              derived = HsTypeClass derivedName [0]
+                [superclassConstraint]
+              sourceHead = HsConstraint derivedName [TypeVar 0]
+              sourceInstance = HsInstance [] sourceHead
+          mkStaticClassEnv [base, derived] [sourceInstance] @?= Left
+            (ExpandingInstancePrerequisite
+              sourceHead superclassConstraint)
+      , testCase "subclass instances require rather than imply superclasses" $ do
+          let baseName = name "A"
+              derivedName = name "B"
+              integer = TypeCons $ name "Int"
               base = HsTypeClass baseName [0] []
-              need = HsTypeClass needName [0] []
-              derived = HsTypeClass derivedName [0, 1]
+              derived = HsTypeClass derivedName [0]
                 [HsConstraint baseName [TypeVar 0]]
-              prerequisite = HsConstraint needName [TypeVar 1]
-              sourceInstance = HsInstance [prerequisite]
-                $ HsConstraint derivedName [TypeVar 0, TypeVar 1]
+              baseConstraint = HsConstraint baseName [integer]
+              derivedConstraint = HsConstraint derivedName [integer]
+              sourceInstance = HsInstance [] derivedConstraint
+              completedInstance = HsInstance
+                [baseConstraint] derivedConstraint
           staticEnvironment <- expectRight
-            $ mkStaticClassEnv [base, need, derived] [sourceInstance]
-          let query = HsConstraint baseName [TypeCons $ name "Int"]
-              environment = mkQueryClassEnv staticEnvironment []
-          isPossible environment [query] @?= Just [prerequisite]
-          filterUnresolved environment [query] @?= Just [query]
+            $ mkStaticClassEnv [base, derived] [sourceInstance]
+          Map.lookup baseName (sClassEnv_instances staticEnvironment) @?= Nothing
+          Map.lookup derivedName (sClassEnv_instances staticEnvironment)
+            @?= Just [completedInstance]
+          let environment = mkQueryClassEnv staticEnvironment []
+          isPossible environment [baseConstraint] @?= Nothing
+          isPossible environment [derivedConstraint] @?= Nothing
+          filterUnresolved environment [baseConstraint]
+            @?= Just [baseConstraint]
+          filterUnresolved environment [derivedConstraint]
+            @?= Just [baseConstraint]
+          -- A supplied subclass dictionary contains its superclass
+          -- dictionary, so query givens continue to close upward.
+          filterUnresolved
+              (mkQueryClassEnv staticEnvironment [derivedConstraint])
+              [baseConstraint]
+            @?= Just []
+      , testCase "explicit superclass and subclass instances resolve cleanly" $ do
+          let baseName = name "A"
+              derivedName = name "B"
+              integer = TypeCons $ name "Int"
+              base = HsTypeClass baseName [0] []
+              derived = HsTypeClass derivedName [0]
+                [HsConstraint baseName [TypeVar 0]]
+              baseConstraint = HsConstraint baseName [integer]
+              derivedConstraint = HsConstraint derivedName [integer]
+              baseInstance = HsInstance [] baseConstraint
+              derivedInstance = HsInstance [] derivedConstraint
+              completedDerived = HsInstance
+                [baseConstraint] derivedConstraint
+          staticEnvironment <- expectRight $ mkStaticClassEnv [base, derived]
+            [baseInstance, derivedInstance]
+          Map.lookup baseName (sClassEnv_instances staticEnvironment)
+            @?= Just [baseInstance]
+          Map.lookup derivedName (sClassEnv_instances staticEnvironment)
+            @?= Just [completedDerived]
+          let environment = mkQueryClassEnv staticEnvironment []
+          isPossible environment [baseConstraint, derivedConstraint]
+            @?= Just []
+          filterUnresolved environment [baseConstraint, derivedConstraint]
+            @?= Just []
+      , testCase "superclass completion deduplicates prerequisites stably" $ do
+          let baseName = name "A"
+              otherName = name "Other"
+              derivedName = name "B"
+              integer = TypeCons $ name "Int"
+              base = HsTypeClass baseName [0] []
+              other = HsTypeClass otherName [0] []
+              derived = HsTypeClass derivedName [0]
+                [HsConstraint baseName [TypeVar 0]]
+              baseConstraint = HsConstraint baseName [integer]
+              otherConstraint = HsConstraint otherName [integer]
+              derivedConstraint = HsConstraint derivedName [integer]
+              sourceInstance = HsInstance
+                [baseConstraint, otherConstraint] derivedConstraint
+          staticEnvironment <- expectRight
+            $ mkStaticClassEnv [base, other, derived] []
+          inflateInstances staticEnvironment [sourceInstance] @?=
+            [sourceInstance]
       ]
   , testGroup "Haskell source bindings"
       [ testCase "headerless signatures belong to the implicit Main module" $ do
@@ -6833,11 +6924,11 @@ tests = testGroup "Exference"
             (not $ Map.null $ sClassEnv_instances classEnvironment)
           Map.size (sClassEnv_tclasses classEnvironment) @?= 41
           sum (map length $ Map.elems $ sClassEnv_instances classEnvironment)
-            @?= 535
+            @?= 432
           messages @?=
               [ "got 41 classes"
               , "and 432 instances"
-            , "(-> 535 instances after inflation)"
+            , "(-> 432 superclass-completed resolution rules)"
             , "and 156 function decls"
             ]
           (goal, _) <- expectRight $ parseTypePure "()"

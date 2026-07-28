@@ -76,6 +76,10 @@ projectionSignatures =
   (Inventory.inventoryKindAssumptions
     :: Inventory.Inventory Int ()
     -> KindInference.KindAssumptions) `seq`
+  (Inventory.inventoryClassArity
+    :: Inventory.Inventory Int ()
+    -> Name
+    -> Maybe Int) `seq`
   (KindInference.inferTypeKind
     :: KindInference.KindAssumptions
     -> Type Int
@@ -93,6 +97,9 @@ projectionSignatures =
   (Query.resultSearch
     :: Query.QueryResult () ()
     -> Search.SearchBatch () ()) `seq`
+  (Query.requestContextVariablesNotInScope
+    :: Query.QueryRequest (Type Int) ()
+    -> [Int]) `seq`
   (Rigid.rigidInstantiations
     :: Rigid.RigidInstantiationPlan
     -> [(CoreTypes.TVarId, CoreTypes.TVarId)]) `seq`

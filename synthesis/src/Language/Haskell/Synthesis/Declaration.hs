@@ -13,7 +13,7 @@ module Language.Haskell.Synthesis.Declaration
   , Declaration (..)
   , DeclarationError (..)
   , declarationSubjectName
-  , declarationOwnedNames
+  , declarationLookupNames
   , declarationTermSignatures
   , declarationTypeVariables
   , validateDeclaration
@@ -31,7 +31,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
-import Language.Haskell.Synthesis.Collection (firstDuplicate)
+import Language.Haskell.Synthesis.Collection (distinctOn, firstDuplicate)
 import Language.Haskell.Synthesis.Constraint
 import Language.Haskell.Synthesis.Kind
 import Language.Haskell.Synthesis.Name
@@ -132,16 +132,19 @@ declarationSubjectName declaration = case declaration of
   InstanceDeclaration _ _ _ headConstraint -> constraintClass headConstraint
 
 -- | Every name by which a declaration can be found: its nominal subject plus
--- any data constructors or class methods it owns. Instances are found through
--- the class at their head, consistently with 'declarationSubjectName'.
-declarationOwnedNames
+-- any data constructors or class methods it owns. Instance lookup uses the
+-- class at its head, consistently with 'declarationSubjectName', without
+-- claiming that the instance owns that class. A declaration such as
+-- @data T = T@ exposes its shared type/value spelling only once.
+declarationLookupNames
   :: Declaration typeVariable kindVariable annotation
   -> [Name]
-declarationOwnedNames declaration =
-  declarationSubjectName declaration : case declaration of
-    DataTypeDeclaration _ _ _ constructors -> map constructorName constructors
-    ClassDeclaration _ _ _ _ methods -> map valueName methods
-    _ -> []
+declarationLookupNames declaration = distinctOn id
+  $ declarationSubjectName declaration : case declaration of
+      DataTypeDeclaration _ _ _ constructors ->
+        map constructorName constructors
+      ClassDeclaration _ _ _ _ methods -> map valueName methods
+      _ -> []
 
 -- | Every term introduced by one declaration, with its complete callable
 -- type.  Keeping this derivation beside the declaration grammar gives

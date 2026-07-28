@@ -86,13 +86,12 @@ import Language.Haskell.Synthesis.Environment
 import Language.Haskell.Synthesis.Count (naturalLength)
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
+  , inventoryClassArity
   , inventoryEnvironment
-  , inventoryKindAssumptions
   , mkInventoryFromEnvironmentWithClassPolicy
   )
 import Language.Haskell.Synthesis.KindInference
   ( ClassKindPolicy (GeneralizeClassKinds)
-  , KindAssumptions (classParameterKinds)
   , KindInventoryPolicy (OpenKindInventory)
   )
 import Language.Haskell.Synthesis.Kind (Kind (ProperTypeKind))
@@ -372,9 +371,7 @@ sessionSearchEnvironment = searchView
 -- class retained by this session. Query preparation uses this finite width
 -- before entering a caller-built constraint argument spine.
 sessionClassArity :: ExferenceSession -> Name -> Maybe Int
-sessionClassArity session name = length <$> Map.lookup name
-  (classParameterKinds $ inventoryKindAssumptions
-    $ preparedInventory $ preparedView session)
+sessionClassArity = inventoryClassArity . preparedInventory . preparedView
 
 -- | Elaborate a proper query type through the exact alias and kind witness
 -- retained by this session. Request provenance and diagnostic presentation

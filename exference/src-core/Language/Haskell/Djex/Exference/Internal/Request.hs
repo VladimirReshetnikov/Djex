@@ -24,7 +24,6 @@ module Language.Haskell.Djex.Exference.Internal.Request
 
 import Data.Bifunctor (first)
 import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceOptions (..)
@@ -60,6 +59,7 @@ import Language.Haskell.Synthesis.Query
   , requestTypeSiteLabel
   , sealCachedQueryWithProvenance
   , requestContextualType
+  , requestContextVariablesNotInScope
   , traverseRequestContextsWithKnownArity
   , validateRequestTarget
   , withCachedQueryProvenance
@@ -223,14 +223,10 @@ contextArityFailure name expected actual = shownErrorDiagnostic
 validateRequest
   :: QueryRequest ExferenceType ExferenceOptions
   -> Either Diagnostic ()
-validateRequest query = do
-  let goalVariables = inScopeContextVariables $ requestGoal query
-      contextVariables = foldMap SharedType.constraintFreeVariables
-        $ requestContexts query
-      extraneous = Set.toAscList $ contextVariables Set.\\ goalVariables
-  case extraneous of
+validateRequest query =
+  case requestContextVariablesNotInScope query of
     [] -> Right ()
-    _ -> Left $ shownErrorDiagnostic
+    extraneous -> Left $ shownErrorDiagnostic
       "DJEX_EXF_REQUEST"
       "explicit Exference contexts contain variables not in scope"
       extraneous
@@ -246,15 +242,6 @@ sourceHintFailure
 sourceHintFailure = shownErrorDiagnostic
   "DJEX_EXF_SOURCE_HINT"
   "invalid Exference source type-variable rendering hint"
-
--- Explicit contexts are inserted beneath only the leading prenex chain.
--- Free goal variables remain usable there, as do binders from that chain;
--- a binder below an arrow, tuple, or application is not in context scope.
-inScopeContextVariables
-  :: ExferenceType
-  -> Set.Set ExferenceTypeVariable
-inScopeContextVariables goal = SharedType.freeVariables goal
-  `Set.union` Set.fromList (SharedType.leadingForallVariables goal)
 
 exferenceRequestPlan :: ExferenceRequest -> ExferenceRequestPlan
 exferenceRequestPlan (ExferenceRequest query) = cachedQueryCache query

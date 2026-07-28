@@ -234,13 +234,13 @@ testClassKindEnforcement :: Assertion
 testClassKindEnforcement = do
     output <- runSession
         [ "class Empty a where"
-        , "bad ? Empty (Bool a) => b -> b"
+        , "bad ? Empty (Bool a) => a -> b -> b"
         , "?instance Monad Bool"
         , "class Value a where"
         , "class Higher f where use :: f a -> f a"
         , "?instance (Value f, Higher f) => Value x"
         , "class Capture a where capture :: f a"
-        , "safe ? Capture f => x -> x"
+        , "safe ? Capture f => f -> x -> x"
         , "class Independent a where left :: f a; right :: f"
         , ":environment"
         , "good ? Empty c => c -> c"
@@ -257,7 +257,7 @@ testClassKindEnforcement = do
         not $ "instance (Value f, Higher f) => Value x where"
             `isInfixOf` output
     assertContains "a context argument cannot capture a method-local variable"
-        "safe a = a" output
+        "safe _ a = a" output
     assertBool "capture avoidance must prevent a cyclic kind" $
         not $ "cyclic kind" `isInfixOf` output
     assertContains "same-spelled variables remain local to each class method"

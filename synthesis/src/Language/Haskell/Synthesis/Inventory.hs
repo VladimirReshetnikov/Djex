@@ -16,8 +16,10 @@ module Language.Haskell.Synthesis.Inventory
   , adjustInventoryDataTypeAnnotations
   , inventoryEnvironment
   , inventoryKindAssumptions
+  , inventoryClassArity
   ) where
 
+import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 import GHC.Generics (Generic)
 
@@ -46,6 +48,19 @@ inventoryEnvironment (Inventory environment _) = environment
 -- | Recover the assumptions inferred while sealing the inventory.
 inventoryKindAssumptions :: Inventory typeVariable annotation -> KindAssumptions
 inventoryKindAssumptions (Inventory _ assumptions) = assumptions
+
+-- | Look up the exact width inferred for a declared or open-inventory class.
+--
+-- Query adapters use this finite width before traversing a caller-built
+-- constraint argument spine. Keeping the projection beside 'Inventory'
+-- ensures every backend consults the same checked class-kind witness rather
+-- than independently reconstructing an arity table.
+inventoryClassArity
+  :: Inventory typeVariable annotation
+  -> Name
+  -> Maybe Int
+inventoryClassArity inventory name = length <$> Map.lookup name
+  (classParameterKinds $ inventoryKindAssumptions inventory)
 
 -- | The phase at which inventory construction failed.
 data InventoryError typeVariable kindVariable

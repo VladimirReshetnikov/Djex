@@ -296,7 +296,8 @@ silently choosing one would make evidence depend on declaration order.
 
 Class-environment construction also rejects any groundable instance
 prerequisite that can grow its head by type-node count or by occurrences of a
-head variable, including rules produced by superclass inflation. For example,
+head variable, including direct superclass prerequisites completed onto
+explicit rules. For example,
 `C [a] => C a` is rejected because resolving `C Int` would grow forever.
 Shrinking rules and size-preserving cycles are accepted. Revisiting a ground
 goal refutes that evidence branch during candidate search; final residual

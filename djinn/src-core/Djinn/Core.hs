@@ -20,7 +20,7 @@ module Djinn.Core (
     -- * Names, types, and kinds
     HSymbol, HType, HKind, kStar, kArrow,
     parseHType, parseContextualHType, parseHKind, SynthesisTypeError(..),
-    normalizeSynthesisSignature, normalizeSynthesisType,
+    normalizeSynthesisType,
     toSynthesisType, fromSynthesisType,
     -- * Declarations
     Constructor, Declaration(..), SynthesisDeclaration,
@@ -423,10 +423,10 @@ instantiateContext prepared context = do
             ++ show failure)
         $ fromSynthesisType methodType
 
--- Native shared-type context resolution used by the Djex adapter. The raw
--- 'Context' operations above remain exact compatibility projections; this
--- path keeps the goal, arguments, and class methods in the common type tree
--- through kind checking, synonym elaboration, and instantiation.
+-- Native shared-type context validation used by the Djex adapter. The raw
+-- 'Context' operations above remain exact compatibility projections that can
+-- inspect methods; ordinary search keeps only the goal and class arguments in
+-- the common type tree through kind checking and synonym elaboration.
 type SynthesisContext = Constraint (SharedType.Type HSymbol)
 
 type ResolvedSynthesisContext =

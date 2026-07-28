@@ -26,7 +26,11 @@ module Language.Haskell.Djex.Djinn.Internal.Request
 
 import Data.Bifunctor (first)
 
-import Djinn.Internal.Type (freshPrimedVariable)
+import Djinn.Internal.Type
+  ( freshPrimedVariable
+  , sealSynthesisSignature
+  , validateSynthesisConstraintHeader
+  )
 import Djinn.Core
   ( QueryOptions (..)
   , defaultQueryOptions
@@ -57,6 +61,7 @@ import Language.Haskell.Synthesis.Query
   , cachedQueryRequest
   , requestTypeSiteLabel
   , requestContextualType
+  , requestContextVariablesNotInScope
   , sealCachedQueryWithProvenance
   , validateRequestTarget
   , withCachedQueryProvenance
@@ -153,9 +158,10 @@ prepareDjinnRequest lookupClassArity request =
   first (withDjinnRequestProvenance request) $ do
     let query = djinnRequestQuery request
         plan = djinnRequestPlan request
-        contextual = requestContextualType query
+        preparedQuery = query
           { requestGoal = plannedGoal plan
           }
+        contextual = requestContextualType preparedQuery
         (_, combinedContexts, _) =
           SharedType.splitLeadingForalls contextual
     -- 'implicitizeLeadingForalls' collects every variable in the signature.
@@ -170,13 +176,19 @@ prepareDjinnRequest lookupClassArity request =
           SharedType.splitLeadingForalls implicit
     contexts <- traverse prepareContext embeddedContexts
     goal <- normalizeMonotype RequestGoal body
+    -- Scope is checked only after every bounded context argument has crossed
+    -- Djinn's type boundary. This preserves the shared goal/context failure
+    -- order: an earlier malformed argument is not hidden by a later aggregate
+    -- scope diagnostic.
+    case requestContextVariablesNotInScope preparedQuery of
+      [] -> pure ()
+      variables -> Left $ outOfScopeContextVariables variables
     pure (contexts, goal)
  where
   freshVariable reserved variable = Just
     $ fst $ freshPrimedVariable reserved variable
 
   validateContextWidth context = do
-    _ <- validateRequestContext context
     let className = constraintClass context
     expected <- maybe (Left $ unknownContextClass className) Right
       $ lookupClassArity className
@@ -185,12 +197,12 @@ prepareDjinnRequest lookupClassArity request =
       contextArityFailure
       context
 
-  prepareContext context = do
-    validateContextWidth context
-    normalized <- traverse
-      (normalizeMonotype RequestContextArgument)
-      context
-    validateRequestContext normalized
+  -- Sealing has already checked every header, and the pass above has bounded
+  -- every argument spine. Binder implicitization changes neither property, so
+  -- this phase owns only the argument-type normalization that was deferred
+  -- until after the productive width check.
+  prepareContext = traverse
+    (normalizeMonotype RequestContextArgument)
 
 -- | Attach a request's sealed provenance to a diagnostic.
 withDjinnRequestProvenance
@@ -237,7 +249,7 @@ normalizeRequestType
   -> Either Diagnostic DjinnType
 normalizeRequestType site = first
   (loweringFailure $ requestTypeSiteLabel site)
-  . Core.normalizeSynthesisSignature
+  . sealSynthesisSignature
 
 normalizeMonotype
   :: RequestTypeSite
@@ -248,18 +260,14 @@ normalizeMonotype site = first
   . Core.normalizeSynthesisType
 
 -- Constraint is intentionally a more permissive neutral node than Djinn's
--- historical grammar. Validate its name with the core smart constructor so a
--- qualified or otherwise non-Djinn class cannot cross the sealed request
--- boundary, then retain its canonical arguments in the shared representation.
+-- historical grammar. Apply the same backend-specific header check used for
+-- embedded signature contexts without entering the deferred argument spine.
 validateRequestContext
   :: Constraint DjinnType
   -> Either Diagnostic (Constraint DjinnType)
 validateRequestContext context = do
-  -- No raw type is retained: the empty context is only the historical
-  -- namespace validator for the exact structural class name.
-  _ <- first contextLoweringFailure $ Core.mkContext
-    (renderCanonical $ constraintClass context)
-    []
+  _ <- first (loweringFailure "context")
+    $ validateSynthesisConstraintHeader context
   pure context
 
 parsedTypeDiagnostic :: String -> Core.SynthesisTypeError -> Diagnostic
@@ -270,11 +278,6 @@ parsedTypeDiagnostic role failure = contextualDiagnostic Error
 loweringFailure :: String -> Core.SynthesisTypeError -> Diagnostic
 loweringFailure role failure = contextualDiagnostic Error "DJEX_DJINN_LOWER"
   "cannot lower the shared query to Djinn" (role ++ ": " ++ show failure)
-
-contextLoweringFailure :: String -> Diagnostic
-contextLoweringFailure failure = contextualDiagnostic Error
-  "DJEX_DJINN_LOWER" "cannot lower the shared query to Djinn"
-  ("context: " ++ failure)
 
 unknownContextClass :: Name -> Diagnostic
 unknownContextClass name = contextualDiagnostic Error
@@ -287,6 +290,12 @@ contextArityFailure name expected actual = contextualDiagnostic Error
   ( "Class " ++ renderCanonical name ++ " expects " ++ show expected
       ++ " type argument(s), but got " ++ show actual
   )
+
+outOfScopeContextVariables :: [DjinnTypeVariable] -> Diagnostic
+outOfScopeContextVariables = contextualDiagnostic Error
+  "DJEX_DJINN_QUERY"
+  "explicit Djinn contexts contain variables not in scope"
+  . show
 
 signatureLoweringFailure
   :: SharedType.BinderNormalizationError String ()

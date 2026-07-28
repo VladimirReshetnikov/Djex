@@ -945,7 +945,12 @@ data ModuleInput
 duplicateModuleDiagnostics
   :: [Module SrcSpanInfo]
   -> [Diagnostic]
-duplicateModuleDiagnostics modules = go M.empty occurrences
+duplicateModuleDiagnostics modules =
+  [ duplicateDiagnostic source originalSpan currentSpan
+  | ( (source, originalSpan)
+      , (_, currentSpan)
+      ) <- SharedCollection.repetitionsWithFirstOn fst occurrences
+  ]
  where
   occurrences =
     [ (source, HSE.srcInfoSpan location)
@@ -953,14 +958,6 @@ duplicateModuleDiagnostics modules = go M.empty occurrences
     , (HSE.ModuleName location source, _) <-
         maybeToList $ moduleNameAndDecls modul
     ]
-
-  go _ [] = []
-  go seen ((source, currentSpan) : remaining) = case
-      M.lookup source seen of
-    Nothing -> go (M.insert source currentSpan seen) remaining
-    Just originalSpan ->
-      duplicateDiagnostic source originalSpan currentSpan
-        : go seen remaining
 
   duplicateDiagnostic source originalSpan currentSpan =
     withHaskellSrcSpan currentSpan
@@ -1167,7 +1164,7 @@ parseModuleInputsM inputs = do
           instances = sClassEnv_instances classEnvironment
           allValidNames = dataTypes ++ M.keys classes
           classCount = SharedCount.naturalLength classes
-          inflatedInstanceCount = sum
+          resolutionInstanceCount = sum
             $ map SharedCount.naturalLength
             $ M.elems instances
           functionDeclarationCount =
@@ -1254,8 +1251,8 @@ parseModuleInputsM inputs = do
         tell [infoDiagnostic $ "and " ++ show instanceCount ++ " instances"]
         tell
           [ infoDiagnostic
-              $ "(-> " ++ show inflatedInstanceCount
-                ++ " instances after inflation)"
+              $ "(-> " ++ show resolutionInstanceCount
+                ++ " superclass-completed resolution rules)"
           ]
         tell
           [ infoDiagnostic

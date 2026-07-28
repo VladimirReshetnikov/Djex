@@ -18,6 +18,7 @@ module Language.Haskell.Synthesis.Query
   , traverseRequestTypes
   , traverseRequestContextsWithKnownArity
   , requestContextualType
+  , requestContextVariablesNotInScope
   , RequestProvenance (..)
   , withRequestProvenance
   , CachedQuery
@@ -39,6 +40,7 @@ module Language.Haskell.Synthesis.Query
 
 import Control.DeepSeq (NFData (rnf))
 import Data.Bifunctor (first)
+import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
 import Language.Haskell.Synthesis.Constraint
@@ -61,6 +63,7 @@ import Language.Haskell.Synthesis.Search
   , batchCandidates
   )
 import Language.Haskell.Synthesis.Type (Type (ForallType))
+import qualified Language.Haskell.Synthesis.Type as Type
 
 -- | One synthesis request, parameterized by a backend's goal type and search
 -- options.
@@ -296,6 +299,27 @@ requestContextualType request
         $ insertUnderLeadingForalls body
     | otherwise = ForallType variables (contexts ++ embedded) body
   insertUnderLeadingForalls goal = ForallType [] contexts goal
+
+-- | Explicit-context variables that are outside the query goal's lexical
+-- scope, in deterministic identity order.
+--
+-- A variable is available when it occurs free anywhere in the supplied goal
+-- or is bound by its complete leading prenex chain. A binder below an arrow,
+-- tuple, or application is not visible to the separate context list. Existing
+-- contexts embedded in the goal remain part of that goal; this operation
+-- validates only the separately supplied 'requestContexts'.
+requestContextVariablesNotInScope
+  :: Ord variable
+  => QueryRequest (Type variable) options
+  -> [variable]
+requestContextVariablesNotInScope request = Set.toAscList
+  $ contextVariables Set.\\ inScopeVariables
+ where
+  contextVariables = foldMap Type.constraintFreeVariables
+    $ requestContexts request
+  inScopeVariables = Type.freeVariables (requestGoal request)
+    `Set.union` Set.fromList
+      (Type.leadingForallVariables $ requestGoal request)
 
 -- | Logical evidence established by a backend, kept separate from operational
 -- search completion in the accompanying 'SearchBatch'.

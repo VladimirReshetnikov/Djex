@@ -300,6 +300,19 @@ testCheckedDjinnAdapter = do
                 (SharedDiagnostic.diagnosticCode failure)
             pure failure
         Right _ -> fail "the Djinn request constructor accepted a qualified class"
+    let invalidEmbeddedClassQuery = programmaticQuery
+            { SharedQuery.requestGoal = SharedType.ForallType []
+                [Constraint invalidClass [SharedType.TypeVariable "a"]]
+                expectedGoal
+            , SharedQuery.requestContexts = []
+            }
+    case Djex.mkDjinnRequest invalidEmbeddedClassQuery of
+        Left failure -> assertEqual
+            "qualified embedded classes fail while sealing the request"
+            (Just "DJEX_DJINN_LOWER")
+            (SharedDiagnostic.diagnosticCode failure)
+        Right _ -> fail
+            "the Djinn request constructor accepted a qualified embedded class"
     let interContextPrecedenceQuery = programmaticQuery
             { SharedQuery.requestContexts =
                 [ Constraint invalidClass [SharedType.TypeVariable "a"]

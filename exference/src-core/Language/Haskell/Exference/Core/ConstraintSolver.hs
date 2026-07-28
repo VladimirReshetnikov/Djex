@@ -46,10 +46,16 @@ checkConstraints variableResult noEvidenceResult environment = solve Set.empty
         (qClassEnv_env environment) QueryConstraint constraint of
       Left _ -> Nothing
       Right ()
-        | constraintContainsVariables constraint -> variableResult constraint
+        -- A matching local dictionary is conclusive even while its type
+        -- arguments contain flexible variables. Deferring first would reject
+        -- an exact given such as @C a => ... C a ...@ at final checking time.
         | constraint `Set.member` qClassEnv_inflatedConstraints environment ->
             Just []
-        | constraint `Set.member` visiting -> Just [constraint]
+        | constraintContainsVariables constraint -> variableResult constraint
+        -- Revisiting the same ground goal proves nothing on this instance
+        -- branch. Search mode rejects it; final residual mode retains the
+        -- obligation through its ordinary no-evidence policy.
+        | constraint `Set.member` visiting -> noEvidenceResult constraint
         | otherwise ->
             SharedCollection.firstPresent
               [ bestResult

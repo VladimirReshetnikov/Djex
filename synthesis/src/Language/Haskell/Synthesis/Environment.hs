@@ -22,6 +22,7 @@ module Language.Haskell.Synthesis.Environment
   , classDeclarationMap
   , instanceDeclarationMap
   , repeatedInstanceHeadsInFirstRepetitionOrder
+  , overlappingInstanceHeadPairsInSourceOrder
   ) where
 
 import Control.DeepSeq (NFData (rnf))
@@ -38,6 +39,7 @@ import Language.Haskell.Synthesis.Declaration
 import Language.Haskell.Synthesis.Internal.InstanceHead
   ( InstanceHeadKey
   , instanceHeadKey
+  , overlappingInstanceHeadPairsInSourceOrder
   , repeatedInstanceHeadsInFirstRepetitionOrder
   )
 import Language.Haskell.Synthesis.Name

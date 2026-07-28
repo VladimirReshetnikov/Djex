@@ -36,14 +36,21 @@ facadeTests = testGroup "public Djex facade"
         , Just 5
         )
   , testCase "exports the prepared class authority" $ do
+      className <- expectRight $ mkIdentifier "Class"
+      missingName <- expectRight $ mkIdentifier "Missing"
       inventory <- expectRight
-        ( mkInventory ClosedKindInventory []
+        ( mkInventory ClosedKindInventory
+            [ ClassDeclaration () className
+                [TypeParameter "a" Nothing] [] []
+            ]
           :: Either (InventoryError String Void) (Inventory String ())
         )
       let index :: PreparedClassIndex String
           index = prepareClassIndex inventory
-      preparedClasses index @?= []
+      map preparedClassName (preparedClasses index) @?= [className]
       preparedExplicitInstances index @?= []
+      inventoryClassArity inventory className @?= Just 1
+      inventoryClassArity inventory missingName @?= Nothing
   , testCase "exports shared collision-free allocation" $ do
       let candidate suffix = ("v" ++ show suffix, suffix + 1 :: Int)
           reserved = Set.fromList ["v0", "v1"]
@@ -118,6 +125,56 @@ facadeTests = testGroup "public Djex facade"
           requestTraversal = traverseRequestTypes
       requestTraversal `seq`
         (RequestGoal < RequestContextArgument) @?= True
+  , testCase "shares explicit context scope across adapters" $ do
+      className <- expectRight $ mkIdentifier "Eq"
+      targetName <- expectRight $ mkIdentifier "scopedIdentity"
+      target <- expectRight $ mkDefinitionName targetName
+      let variable name = TypeVariable name
+          identity name = FunctionType (variable name) (variable name)
+          request goal contexts = QueryRequest
+            { requestTarget = target
+            , requestGoal = goal
+            , requestContexts = contexts
+            , requestOptions = defaultQueryOptions
+            }
+          context name = Constraint className [variable name]
+          escaped = request (identity "a") [context "b"]
+          malformedBeforeEscaped = request (identity "a")
+            [ Constraint className [variable "Bad"]
+            , context "b"
+            ]
+          leadingBound = request
+            (ForallType ["a"] [] $ identity "a") [context "a"]
+          embedded = request
+            (ForallType [] [context "b"] $ identity "a") [context "b"]
+          nestedBound = request
+            (FunctionType (variable "a")
+              $ ForallType ["b"] [] $ variable "b")
+            [context "b"]
+      requestContextVariablesNotInScope escaped @?= ["b"]
+      requestContextVariablesNotInScope leadingBound @?= []
+      -- An embedded context is part of the goal itself, while a binder below
+      -- an arrow is not in scope for the separate request context list.
+      requestContextVariablesNotInScope embedded @?= []
+      requestContextVariablesNotInScope nestedBound @?= ["b"]
+
+      session <- expectRight standardDjinnSession
+      escapedRequest <- expectRight $ mkDjinnRequest escaped
+      case runDjinnQuery session escapedRequest of
+        Left failure -> diagnosticCode failure @?= Just "DJEX_DJINN_QUERY"
+        Right _ -> assertBool
+          "Djinn accepted an explicit context variable outside the goal"
+          False
+      malformedRequest <- expectRight $ mkDjinnRequest malformedBeforeEscaped
+      case runDjinnQuery session malformedRequest of
+        Left failure -> diagnosticCode failure @?= Just "DJEX_DJINN_LOWER"
+        Right _ -> assertBool
+          "Djinn's aggregate scope check hid an earlier malformed context"
+          False
+      leadingRequest <- expectRight $ mkDjinnRequest leadingBound
+      leadingResult <- expectRight $ runDjinnQuery session leadingRequest
+      assertBool "Djinn rejected a leading forall variable in context scope"
+        $ not $ null $ batchCandidates $ resultSearch leadingResult
   , testCase "exports generated-code rendering" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

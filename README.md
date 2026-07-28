@@ -460,7 +460,8 @@ The nominal class environment also enforces a termination condition before
 publishing its instance index. For every prerequisite whose variables can be
 grounded by matching the instance head, the prerequisite may not contain more
 type nodes than the head and may not use any head variable more often. The
-check also covers superclass-inflated rules. A rule such as
+check also covers the direct superclass prerequisites added to explicit
+instance rules. A rule such as
 `C [a] => C a` is rejected as `ExpandingInstancePrerequisite`, because it
 would turn `C Int` into an unbounded chain of larger goals. Shrinking rules are
 accepted; exact and size-preserving cycles are safe because resolution tracks

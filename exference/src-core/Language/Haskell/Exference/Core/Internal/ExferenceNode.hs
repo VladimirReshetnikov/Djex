@@ -44,7 +44,8 @@ data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
 
 -- | A scoped variable together with the exposed arrow prefix of its type.
--- Any quantified parameter or result stays intact as an opaque atom; function
+-- A quantified result stays intact until a use site either forwards the exact
+-- opaque value or explicitly instantiates its leading forall chain. Function
 -- constraints live in 'nodeConstraintGoals', not on lexical values.
 data VarPBinding = VarPBinding
   { varPVariable :: !TVarId
@@ -160,7 +161,7 @@ splitBinding = splitBindingWithParameters []
 -- | Split a scoped value while retaining parameters already exposed by an
 -- earlier partial application. Substitution can turn the stored result into
 -- another arrow, so every construction path comes through this helper. A
--- quantified result is retained whole and later unified as an opaque atom.
+-- quantified result is retained whole for use-site forwarding or elimination.
 splitBindingWithParameters :: [HsType] -> VarBinding -> VarPBinding
 splitBindingWithParameters previousParameters (VarBinding variable ty) =
   VarPBinding variable result $ previousParameters ++ parameters

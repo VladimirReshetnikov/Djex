@@ -3651,6 +3651,21 @@ tests = testGroup "Exference"
             Right expressions -> assertBool
               "rank-N identity did not use its opaque scoped argument"
               $ not $ null expressions
+          case findOneExpression input of
+            Just
+                ( ExpLambda binder declared (ExpVar returned occurrence)
+                , residual
+                , _
+                ) -> do
+              returned @?= binder
+              declared @?= polymorphic
+              occurrence @?= polymorphic
+              residual @?= []
+            Nothing -> fail "exact opaque forwarding produced no expression"
+            Just (expression, residual, _) -> fail
+              $ "unexpected exact opaque forwarding result: "
+              ++ showExpression expression
+              ++ " with constraints " ++ show residual
           case findExpressionsWithStatsEither input of
             Left failure -> fail
               $ "checked rank-N chunk search failed: " ++ show failure
@@ -3667,6 +3682,129 @@ tests = testGroup "Exference"
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Right ()
+      , testCase "scoped provider foralls instantiate at monomorphic uses" $ do
+          let integer = TypeCons $ name "Int"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              goal = TypeArrow polymorphic $ TypeArrow integer integer
+              input = identityInput
+                { input_goalType = goal
+                , input_maxSteps = 100
+                }
+          (expression, residual, _) <- maybe
+            (fail "a polymorphic scoped identity was not instantiated") pure
+            $ findOneExpression input
+          residual @?= []
+          case expression of
+            -- Eta reduction is sound here because the occurrence annotation
+            -- records the monomorphic instantiation independently of the
+            -- lambda binder's declared scheme.
+            ExpLambda binder declared (ExpVar returned instantiated) -> do
+              returned @?= binder
+              declared @?= polymorphic
+              assertBool
+                ("unexpected provider instantiation: "
+                  ++ showHsType Map.empty instantiated)
+                $ case unifyShared instantiated
+                    (TypeArrow integer integer) of
+                    Just _ -> True
+                    Nothing -> False
+            _ -> fail $ "unexpected provider elimination result: "
+              ++ showExpression expression
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+      , testCase "bare forall providers instantiate flexible occurrences" $ do
+          let unit = TypeTuple Boxed []
+              vacuousUnit = TypeForall [] [] unit
+              polymorphic = TypeForall [0] [] $ TypeVar 0
+              goal = TypeArrow polymorphic unit
+              input = identityInput
+                { input_goalType = goal
+                , input_maxSteps = 100
+                }
+          (expression, residual, _) <- maybe
+            (fail "forall a. a was not instantiated at unit") pure
+            $ findOneExpression input
+          residual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+          (wrappedExpression, wrappedResidual, _) <- maybe
+            (fail "a vacuous forall wrapper suppressed provider instantiation")
+            pure
+            $ findOneExpression
+            $ input {input_goalType = TypeArrow polymorphic vacuousUnit}
+          wrappedResidual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            (TypeArrow polymorphic vacuousUnit) [] wrappedExpression @?= Right ()
+          let distinctPolymorphic = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              impredicativeGoal =
+                TypeArrow polymorphic distinctPolymorphic
+          case findOneExpression $ input {input_goalType = impredicativeGoal} of
+            Nothing -> pure ()
+            Just (unexpected, _, _) -> fail
+              $ "provider elimination crossed a quantified goal: "
+              ++ showExpression unexpected
+      , testCase "provider forall contexts become proof obligations" $ do
+          let className = name "C"
+              integer = TypeCons $ name "Int"
+              evidence variable = HsConstraint className [variable]
+              polymorphic = TypeForall [0] [evidence $ TypeVar 0]
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              goal = TypeArrow polymorphic $ TypeArrow integer integer
+          withoutInstance <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          withInstance <- expectRight
+            $ mkStaticClassEnv
+                [HsTypeClass className [0] []]
+                [HsInstance [] $ evidence integer]
+          let input environment = identityInput
+                { input_goalType = goal
+                , input_envClasses = environment
+                , input_maxSteps = 100
+                }
+              exactInput = (input withoutInstance)
+                {input_goalType = TypeArrow polymorphic polymorphic}
+          case findOneExpression exactInput of
+            Just (_, exactResidual, _) -> exactResidual @?= []
+            Nothing -> fail
+              "exact polymorphic forwarding incorrectly required C evidence"
+          case findOneExpression $ input withoutInstance of
+            Nothing -> pure ()
+            Just (unexpected, _, _) -> fail
+              $ "an unresolved provider context produced "
+              ++ showExpression unexpected
+          (_, residual, _) <- maybe
+            (fail "residual provider context was discarded") pure
+            $ findOneExpression
+            $ (input withoutInstance) {input_allowConstraints = True}
+          residual @?= [evidence integer]
+          (expression, solved, _) <- maybe
+            (fail "a matching instance did not solve the provider context") pure
+            $ findOneExpression $ input withInstance
+          solved @?= []
+          checkExpression (mkQueryClassEnv withInstance []) [] []
+            goal [] expression @?= Right ()
+      , testCase "rank-N fields instantiate after pattern elimination" $ do
+          let integer = TypeCons $ name "Int"
+              boxType = TypeCons $ name "PolyBox"
+              constructor = name "PolyBox"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              deconstructor = DeconstructorBinding boxType
+                [ConstructorBinding constructor [polymorphic]] False
+              goal = TypeArrow boxType $ TypeArrow integer integer
+              input = identityInput
+                { input_goalType = goal
+                , input_envDeconsS = [deconstructor]
+                , input_maxSteps = 100
+                }
+          (expression, residual, _) <- maybe
+            (fail "a rank-N field could not be selected and instantiated") pure
+            $ findOneExpression input
+          residual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) []
+            [deconstructor] goal [] expression @?= Right ()
       , testCase "generic constructors instantiate impredicatively" $ do
           let polymorphic = TypeForall [0] []
                 $ TypeArrow (TypeVar 0) (TypeVar 0)
@@ -8274,6 +8412,67 @@ tests = testGroup "Exference"
               expression = ExpLambda 1 polymorphic $ ExpVar 1 polymorphic
           checkExpression (mkQueryClassEnv staticClasses []) [] []
             (TypeArrow renamed polymorphic) [] expression @?= Right ()
+      , testCase "instantiates each polymorphic local occurrence independently" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              result = TypeCons $ name "Result"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              combineName = name "combine"
+              integerName = name "integer"
+              booleanName = name "boolean"
+              functions =
+                [ FunctionBinding result combineName 0 [] [integer, boolean]
+                , FunctionBinding integer integerName 0 [] []
+                , FunctionBinding boolean booleanName 0 [] []
+                ]
+              use local ty value = ExpApply
+                (ExpVar local $ TypeArrow ty ty)
+                (ExpName value)
+              expression = ExpLambda 1 polymorphic
+                $ ExpApply
+                    (ExpApply (ExpName combineName)
+                      $ use 1 integer integerName)
+                    (use 1 boolean booleanName)
+          checkExpression (mkQueryClassEnv staticClasses []) functions []
+            (TypeArrow polymorphic result) [] expression @?= Right ()
+      , testCase "a flexible occurrence annotation requests instantiation" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let unit = TypeTuple Boxed []
+              polymorphic = TypeForall [0] [] $ TypeVar 0
+              expression = ExpLambda 1 polymorphic $ ExpVar 1 (TypeVar 2)
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow polymorphic unit) [] expression @?= Right ()
+          let vacuousUnit = TypeForall [] [] unit
+              wrappedOccurrence = ExpLambda 1 polymorphic
+                $ ExpVar 1 $ TypeForall [] [] $ TypeVar 2
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow polymorphic vacuousUnit) [] wrappedOccurrence @?= Right ()
+      , testCase "a quantified occurrence annotation requests exact forwarding" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let polymorphic = TypeForall [0] [] $ TypeVar 0
+              distinct = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              expression = ExpLambda 1 polymorphic $ ExpVar 1 distinct
+          case checkExpression (mkQueryClassEnv staticClasses []) [] []
+              (TypeArrow polymorphic distinct) [] expression of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail $ "checker impredicatively opened an exact use: "
+              ++ show actual
+      , testCase "rejects an invalid monomorphic provider annotation" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              invalidUse = TypeArrow integer boolean
+              expression = ExpLambda 1 polymorphic $ ExpVar 1 invalidUse
+          case checkExpression (mkQueryClassEnv staticClasses []) [] []
+              (TypeArrow polymorphic invalidUse) [] expression of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail $ "checker accepted an inconsistent forall use: "
+              ++ show actual
       , testCase "empty cases require a matching empty deconstructor" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let emptyType = TypeCons $ name "Empty"

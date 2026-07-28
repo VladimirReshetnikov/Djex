@@ -28,6 +28,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Internal.VariableSupply
+import Language.Haskell.Exference.Core.Internal.Polytype
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
@@ -257,8 +258,22 @@ checkValidatedExpression
     infer variables (ExpVar variable annotation) = do
       declared <- maybe (throwCheck $ UnknownVariable variable) pure
         $ IntMap.lookup variable variables
-      unifyTypes declared annotation
-      zonk declared
+      declared' <- zonk declared
+      annotation' <- zonk annotation
+      case classifyProviderUse declared' annotation' of
+        OpaqueProviderForwarding -> do
+          -- Exact opaque forwarding has priority over elimination, matching
+          -- search and preserving explicitly polymorphic occurrences. Merely
+          -- being unifiable is not enough: a fresh monotype annotation can
+          -- bind to the whole opaque atom, but denotes an instantiated use.
+          unifyTypes declared' annotation'
+          zonk declared'
+        InstantiateProviderUse -> do
+          instantiated <- instantiateScopedProvider declared'
+          unifyTypes instantiated annotation'
+          zonk annotation'
+        OrdinaryProviderUse ->
+          unifyTypes declared' annotation' >> zonk declared'
     infer _ (ExpName name) = instantiateBinding name
     infer variables (ExpLambda variable annotation body) =
       TypeArrow annotation <$> infer (IntMap.insert variable annotation variables) body
@@ -325,6 +340,21 @@ checkValidatedExpression
         modify' $ \current -> current
           { checkConstraints = freshConstraints ++ checkConstraints current }
         pure freshType
+
+    -- Local polymorphic values are instantiated independently at every use.
+    -- Their direct forall contexts become ordinary checker obligations. The
+    -- generated occurrence annotation contains search's instantiated
+    -- monotype, so checking does not need to reproduce search's fresh IDs.
+    instantiateScopedProvider declared = do
+      supply <- gets checkFlexibleIds
+      case instantiateLeadingForallsWith allocateNamespace supply declared of
+        Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
+        Just (instantiated, constraints, nextSupply) -> do
+          modify' $ \current -> current
+            { checkFlexibleIds = nextSupply
+            , checkConstraints = constraints ++ checkConstraints current
+            }
+          pure instantiated
 
     instantiateConstructor name scrutineeType = case
         [ (deconstructorInput deconstructor, constructorFields alternative)

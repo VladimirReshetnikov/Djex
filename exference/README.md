@@ -72,9 +72,9 @@ independent input namespaces, while `unifyShared` applies one occurs-checked
 substitution to a common namespace. The historical `unify` name remains a
 compatibility alias for `unifyDisjoint`. All three operate directly on the
 native shared type tree, canonicalize saturated functions and tuples before
-solving, reject quantifiers at any depth through the shared type and
-constraint-argument inspection authority, and canonicalize their projected
-substitutions. Declaration ingress and egress likewise use one checked native
+solving, and represent every quantified subtree as an alpha-aware opaque atom.
+They can compare or bind that whole atom but never decompose its quantified
+body. Declaration ingress and egress likewise use one checked native
 type/constraint operation; the former converted/lowered pair was only a name
 distinction after `HsType` became the shared tree. The right-directed matcher
 uses the same tagged solver while
@@ -226,11 +226,13 @@ duplicate local identities before its inference map can hide a malformed
 pattern. Rank-N occurrences are validated across unused bindings, datatype
 fields, the complete class/instance environment, expected constraints, and
 generated annotations rather than only when inference happens to reach them.
-The checker and search use the same opaque, alpha-aware unifier, so neither can
-erase or decompose a quantified body. They also share the higher-kinded view of
-structural functions and tuples, while tuple complexity replays the historical
-left-associated constructor/application accumulation exactly so floating-point
-rounding and saturation cannot perturb queue order.
+The checker and search use both the same opaque, alpha-aware unifier and the
+same explicit leading-forall provider-instantiation primitive. The latter acts
+at a scoped-value typing boundary; it does not make the unifier decompose a
+quantified body. They also share the higher-kinded view of structural functions
+and tuples, while tuple complexity replays the historical left-associated
+constructor/application accumulation exactly so floating-point rounding and
+saturation cannot perturb queue order.
 
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration
@@ -727,19 +729,22 @@ projection, so substitutions returned for either side are closed even when the
 two inputs reuse numeric IDs. The root query's prenex `forall` layers use the
 same rigid-ID order in search and the independent checker. Quantifiers reached
 under an arrow, constructor, tuple, constraint, or spawned search goal remain
-opaque, and type rendering uses one capture-safe source-name plan for
-quantifiers, constraints, and body occurrences.
+opaque to structural unification. When lambda introduction or pattern
+elimination exposes one as the leading type of a scoped provider, the explicit
+use-site rule described below may instantiate it. Type rendering uses one
+capture-safe source-name plan for quantifiers, constraints, and body
+occurrences.
 
-The status-bearing search API is `findExpressionsWithStatsEither`. It retains
-structured input failures and distinguishes a genuinely exhausted search space
-from a step-limited search and one made incomplete by queue/depth pruning. The
+The raw status-bearing API `findExpressionsWithStatsEither` retains structured
+input failures and distinguishes a genuinely exhausted search space from a
+step-limited search and one made incomplete by queue/depth pruning. Its
 validator also rejects negative step counts for delayed constraint solving,
 rather than accepting a setting whose threshold can never be reached. It checks
 every goal, binding, deconstructor, and explicit constraint argument through
 the shared type vocabulary. Rank-N occurrences that the historical filter
-overlooked are now retained as opaque atoms. It is retained for historical clients
-that require raw expressions and compatibility status values; new core code
-should use `findQueryResultsInEnvironmentEither`, whose private checked engine batches
+overlooked are retained as opaque atoms. This API remains for clients that need
+raw expressions and compatibility status values; new core code should use
+`findQueryResultsInEnvironmentEither`, whose private checked engine batches
 provide exact shared progress without reinterpreting raw status. Neither API
 turns heuristic exhaustion into a logical uninhabitability claim. The
 historical list-returning entry points are deprecated compatibility adapters
@@ -836,12 +841,20 @@ any / the right solution. Some common current limitations are:
   `-c` / `--patternMatchMC`, but can reduce performance significantly for
   non-trivial queries. It is intentionally not part of the default search
   policy while that branch of the core algorithm remains expensive.
-- Chains of outer (prenex) `forall`s are opened only at the query root. Nested
-  rank-N positions and impredicative constructor arguments are supported as
-  inert `TypeAtom`s, shared with Djinn. Their quantified bodies compare modulo
-  lexical alpha-renaming but are never decomposed by unification. This does not
-  implement higher-rank subsumption or visible type application; it replaces
-  the historical unsound behavior that erased some nested quantifiers.
+- Chains of outer (prenex) `forall`s are opened rigidly at the query root. At a
+  scoped-value use site, an exposed leading `forall` is first eligible for an
+  exact opaque match against a quantified goal, which preserves polymorphic
+  forwarding. Empty-binder, empty-context forall wrappers are ignored for
+  this classification. At a monomorphic (non-quantified) goal, its binders are
+  instead instantiated with fresh flexible variables for that occurrence,
+  its direct contexts become proof obligations, and its arrow body participates
+  in ordinary search. Thus a value of type
+  `forall a. C a => a -> a` can be applied at `Int` when `C Int` is available,
+  and a rank-N datatype field can participate after pattern elimination.
+  Quantifiers that have not reached one of these explicit introduction or
+  elimination boundaries remain alpha-aware `TypeAtom`s. This limited rule
+  does not provide general higher-rank subsumption, polymorphic let
+  generalization, or visible type application.
 
 ## Other known (technical) issues
 

@@ -1475,9 +1475,7 @@ showInfo state source = case parseName $ trim source of
       -- backends. Djinn-only repair stubs are projection details rather than
       -- prompt-scope declarations and remain visible through :show
       -- environment, not as manufactured ReplScope bindings.
-      withResolvedScope session context parsedName $ \environment canonicalName ->
-        forSelectedBackends state
-          $ showProjectedInfo projection session environment canonicalName
+      showResolvedProjection projection session context parsedName
     (Just session, Just context, Nothing) ->
       -- Initial loading may retain the historical standard Djinn session if
       -- its source projection fails. In that recovery state Djinn has no
@@ -1494,6 +1492,22 @@ showInfo state source = case parseName $ trim source of
       ExferenceBackend -> putStrLn "Exference is unavailable."
  where
   runtime = exferenceRuntime state
+
+  showResolvedProjection projection session context parsedName =
+    let environment = exferenceSessionEnvironment session
+    in case resolveScopeNameAmong
+        AnyScope (declarationNameSet environment) context parsedName of
+      Left failure -> case activeBackends state of
+        -- The historical Djinn inspector reports an ordinary missing
+        -- declaration on an unknown name. Keep that contract in Djinn-only
+        -- mode; aliases and qualified source identities still take the shared
+        -- successful-resolution path below. Exference and both mode retain
+        -- prompt-scope errors because they have a shared source scope to
+        -- enforce.
+        OneBackend DjinnBackend -> showDjinnInfo parsedName
+        _ -> settingFailure failure
+      Right canonicalName -> forSelectedBackends state
+        $ showProjectedInfo projection session environment canonicalName
 
   withResolvedScope session context parsedName action =
     let environment = exferenceSessionEnvironment session

@@ -419,10 +419,12 @@ recorded as an omission.
 
 Djinn's standard checked session is only the recovery state when no source
 projection is available or sealing that projection fails. The scope projection
-tracks type and value claims separately while resolving source spellings, even
-though the shared structural `Name` is namespace-neutral. Real-GHC evaluation
-consumes the same ordered prompt entries but has no access to either backend's
-synthesis dictionary.
+tracks type and value claims separately while resolving source spellings, then
+keeps type-constructor and class requirements distinct while repairing the
+closed Djinn inventory. A same-named value therefore cannot masquerade as a
+referenced type even though the shared structural `Name` is namespace-neutral.
+Real-GHC evaluation consumes the same ordered prompt entries but has no access
+to either backend's synthesis dictionary.
 
 ## API and stability tiers
 

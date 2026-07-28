@@ -436,8 +436,11 @@ latestFileTarget :: ReplState -> IO (Maybe FilePath)
 latestFileTarget state = case exferenceRuntimeWorkspace
     $ exferenceRuntime state of
   Nothing -> pure Nothing
-  Just workspace -> firstExisting $ reverse
-    $ map workspaceTargetDisplay $ workspaceTargets workspace
+  Just workspace -> firstExisting
+    [ path
+    | target <- reverse $ workspaceTargets workspace
+    , path <- reverse $ workspaceTargetModuleFiles target
+    ]
  where
   firstExisting [] = pure Nothing
   firstExisting (path : remaining) = do

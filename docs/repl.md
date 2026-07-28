@@ -136,9 +136,10 @@ settings, `:show` subjects, and paths where appropriate. Argument completion
 uses the same command descriptor as parsing, so exact aliases and accepted
 unique prefixes behave like the canonical command; `:module` completion also
 preserves a typed `+`, `-`, or `*` marker. Completion follows the loaded
-workspace, offering module names after `:module` and `:browse` and in-scope
-identifiers (qualified and unqualified) at type-query, `:info`, `:type`, and
-`:kind` positions. Completed paths that need quoting are inserted as Haskell
+workspace, offering module names after bare `import`, `import qualified`,
+`:module`, and `:browse`, and in-scope identifiers (qualified and unqualified)
+at type-query, `:info`, `:type`, and `:kind` positions. Completed paths that
+need quoting are inserted as Haskell
 string literals, matching the path grammar rather than shell escape syntax.
 
 | Command | Purpose |
@@ -672,7 +673,9 @@ so the projection degrades rather than fails:
 - Type constructors referenced from signatures but not declared in scope are
   stubbed as abstract types. A kind already inferred by the shared inventory is
   authoritative; an arity-derived kind is only the fallback for a genuinely
-  absent external name.
+  absent external name. Type references remain distinct from value ownership
+  during this repair, so a same-named data constructor does not suppress the
+  abstract type stub required by Haskell's separate namespaces.
 - Value declarations are omitted by default and become LJT axioms with
   `:set djinn-axioms on`. Axioms are off by default because even
   moderate axiom sets make Djinn's otherwise-terminating proof search

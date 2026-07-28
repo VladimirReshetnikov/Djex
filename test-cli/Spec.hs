@@ -116,6 +116,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplExportAmbiguity
   , testCase "REPL Djinn projection preserves cross-namespace names"
       testReplDjinnNamespaceProjection
+  , testCase "REPL Djinn projection distinguishes reference namespaces"
+      testReplDjinnReferenceNamespaces
   , testCase "REPL Djinn projection preserves inferred higher-kinded stubs"
       testReplDjinnHigherKindStub
   , testCase "REPL Djinn projection preserves recursive higher-kinded types"
@@ -1732,6 +1734,43 @@ testReplDjinnNamespaceProjection = withReplModuleFixture $ \root -> do
     not $ "unqualified spelling is ambiguous" `isInfixOf` output
   assertNoCallStack errors
 
+-- A constructor and an otherwise undeclared external type may have the same
+-- canonical name because they live in different Haskell namespaces. The
+-- constructor must not make the type look declared: Djinn still needs an
+-- abstract type stub before the value signature can enter its closed inventory.
+testReplDjinnReferenceNamespaces :: Assertion
+testReplDjinnReferenceNamespaces = withTemporaryEnvironment
+    [("ReferenceNamespaces.hs", unlines
+      [ "module ReferenceNamespaces where"
+      , "data Owner = Missing"
+      , "data Target"
+      , "bridge :: Missing -> Target"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set djinn-axioms on"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Missing -> Target"
+    , ":show environment"
+    , ":show omissions"
+    ]
+  assertEqual "reference-namespace Djinn REPL exit" ExitSuccess exitCode
+  assertContains
+    ("same-named type stub keeps the value axiom usable: " ++ output ++ errors)
+    "bridge" output
+  assertContains "the distinct type stub enters the projected environment"
+    "4 declarations (projected from the module scope, 1 omissions)" output
+  assertContains "the unrelated empty datatype is the sole compromise"
+    ("Target: declared without constructors; projected as an abstract type")
+    output
+  assertBool "cross-namespace reference forced the standard fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertBool "cross-namespace reference emitted a projection diagnostic" $
+    not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+
 -- An undeclared source type can still acquire an exact kind from its uses in
 -- Exference's open inventory. Djinn must reuse that fact: the application
 -- count in @External Unary@ cannot reveal that @Unary :: Type -> Type@, and an
@@ -2084,14 +2123,16 @@ testReplEdit = withTemporaryEnvironment
     , ":edit " ++ show file
     , ":load " ++ show file
     , ":edit"
+    , ":load " ++ show ('*' : file)
+    , ":edit"
     ]
   assertEqual "edit REPL exit" ExitSuccess exitCode
   recorded <- readFile logPath
-  assertEqual "all edit forms launched the editor" 3
+  assertEqual "all edit forms launched the editor" 4
     $ countOccurrences "CALL" recorded
-  assertEqual "the named file and the latest target reach the editor" 2
+  assertEqual "plain and starred targets resolve to the canonical edit file" 3
     $ countOccurrencesPath ("ARG:" ++ file) recorded
-  assertEqual "editor options are parsed into fixed argv" 3
+  assertEqual "editor options are parsed into fixed argv" 4
     $ countOccurrences "ARG:--editor-mode" recorded
   assertContainsPath "a hostile source path remains one literal argv value"
     ("ARG:" ++ hostile) recorded

@@ -486,7 +486,15 @@ stubUnknownReferences
 stubUnknownReferences inferredKinds declarations =
   (declarations ++ stubs, omissions)
  where
-  defined = Set.fromList $ concatMap declarationOwnedNames declarations
+  -- A value constructor and a type constructor may legally have the same
+  -- canonical Haskell name. Only type-owning declarations satisfy a type
+  -- reference; treating every owned name as interchangeable would suppress
+  -- the abstract stub and make the later closed Djinn inventory fail.
+  defined = Set.fromList
+    [ name
+    | declaration <- declarations
+    , TypeRequirement name <- declarationOwnedRequirements declaration
+    ]
   arities = Map.fromListWith max
     [ reference
     | declaration <- declarations
@@ -538,12 +546,38 @@ typeReferences = go 0
 constraintTypeReferences :: Constraint (Type String) -> [(Name, Int)]
 constraintTypeReferences = concatMap (typeReferences) . constraintArguments
 
--- | Every name a declaration mentions that sealing may require to be
--- declared: referenced type constructors and constraint classes.
-declarationMentions :: ScopeDeclaration -> Set.Set Name
+-- A class and an ordinary type share Haskell's source namespace, but they do
+-- not satisfy the same backend obligation: a datatype cannot resolve a class
+-- constraint, and a class cannot supply a type constructor to Djinn's formula
+-- compiler. Keep requirement identity after the earlier spelling projection.
+data DeclarationRequirement
+  = TypeRequirement Name
+  | ClassRequirement Name
+  deriving (Eq, Ord, Show)
+
+requirementName :: DeclarationRequirement -> Name
+requirementName requirement = case requirement of
+  TypeRequirement name -> name
+  ClassRequirement name -> name
+
+declarationOwnedRequirements
+  :: ScopeDeclaration
+  -> [DeclarationRequirement]
+declarationOwnedRequirements declaration = case declaration of
+  TypeSynonymDeclaration _ name _ _ -> [TypeRequirement name]
+  DataTypeDeclaration _ name _ _ -> [TypeRequirement name]
+  AbstractTypeDeclaration _ name _ -> [TypeRequirement name]
+  ClassDeclaration _ name _ _ _ -> [ClassRequirement name]
+  ValueDeclaration {} -> []
+  InstanceDeclaration {} -> []
+
+-- | Every backend obligation a declaration mentions: referenced type
+-- constructors and constraint classes, with their distinct resolution roles.
+declarationMentions :: ScopeDeclaration -> Set.Set DeclarationRequirement
 declarationMentions declaration = Set.union
-  (Set.fromList $ map fst $ declarationTypeReferences declaration)
-  (Set.fromList $ constraintClasses declaration)
+  (Set.fromList
+    $ map (TypeRequirement . fst) $ declarationTypeReferences declaration)
+  (Set.fromList $ map ClassRequirement $ constraintClasses declaration)
  where
   constraintClasses inner = case inner of
     ClassDeclaration _ _ _ superclasses methods ->
@@ -602,9 +636,12 @@ resolveScopeReferences inferredKinds = go []
     | otherwise = Left $ projectionFailure
         "scope-reference repair did not decrease its structural measure"
    where
-    defined = Set.fromList $ concatMap declarationOwnedNames declarations
-    isResolved name =
-      name `Set.member` defined || isJust (nameSpecial name)
+    defined = Set.fromList
+      $ concatMap declarationOwnedRequirements declarations
+    isResolved requirement =
+      requirement `Set.member` defined || case requirement of
+        TypeRequirement name -> isJust $ nameSpecial name
+        ClassRequirement _ -> False
     unresolvedIn = filter (not . isResolved) . Set.toList
       . declarationMentions
     shedded = map shed declarations
@@ -632,7 +669,8 @@ resolveScopeReferences inferredKinds = go []
                 (inferredDataTypeKind inferredKinds name parameters)
             ]
           , [ DjinnScopeOmission (renderCanonical name)
-                ("its constructors mention " ++ renderCanonical missing
+                ("its constructors mention "
+                  ++ renderCanonical (requirementName missing)
                   ++ ", which is outside the Djinn scope; projected as an"
                   ++ " abstract type")
             ]
@@ -648,11 +686,11 @@ resolveScopeReferences inferredKinds = go []
       unresolvedMethod = filter (not . isResolved) . Set.toList
         . declarationMentions . ValueDeclaration
       unresolvedConstraint constraint = filter (not . isResolved)
-        $ constraintClass constraint
-          : map fst (constraintTypeReferences constraint)
+        $ ClassRequirement (constraintClass constraint)
+          : map (TypeRequirement . fst) (constraintTypeReferences constraint)
     mentionOmission subject missing = DjinnScopeOmission
       (renderCanonical subject)
-      ("it mentions " ++ renderCanonical missing
+      ("it mentions " ++ renderCanonical (requirementName missing)
         ++ ", which is outside the Djinn scope")
 
 -- Seal the projection, repairing the specific failure Djinn reports until it
@@ -704,18 +742,25 @@ repairFor inferredKinds failure declarations = case failure of
                 "recursive datatype; projected as an abstract type"
             )
       _ -> (declaration, Nothing)
-  DjinnCore.MissingSynthesisTypeKind name -> Just $ dropMentioning name
-  DjinnCore.MissingSynthesisClassKinds name -> Just $ dropMentioning name
-  DjinnCore.UnresolvedSynthesisClassKind name _ -> Just $ dropMentioning name
+  DjinnCore.MissingSynthesisTypeKind name ->
+    Just $ dropRequiring $ TypeRequirement name
+  DjinnCore.MissingSynthesisClassKinds name ->
+    Just $ dropRequiring $ ClassRequirement name
+  DjinnCore.UnresolvedSynthesisClassKind name _ ->
+    Just $ dropRequiring $ ClassRequirement name
   DjinnCore.SynthesisClassKindArityMismatch name _ _ -> Just $ dropWhere
-    ((== name) . declarationSubjectName)
+    (declarationOwns $ ClassRequirement name)
     (const "Djinn rejected its kind")
   _ -> Nothing
  where
-  dropMentioning name = dropWhere
-    ((name `Set.member`) . declarationMentions)
-    (const $ "it mentions " ++ renderCanonical name
+  dropRequiring requirement = dropWhere
+    (\declaration ->
+      declarationOwns requirement declaration
+        || requirement `Set.member` declarationMentions declaration)
+    (const $ "it mentions " ++ renderCanonical (requirementName requirement)
       ++ ", which Djinn cannot resolve")
+  declarationOwns requirement =
+    (requirement `elem`) . declarationOwnedRequirements
   dropWhere predicate reason =
     ( filter (not . predicate) declarations
     , [ DjinnScopeOmission

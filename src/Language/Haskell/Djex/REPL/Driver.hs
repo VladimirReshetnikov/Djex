@@ -175,6 +175,8 @@ candidatesFor completions previous word = case previous of
     | ":" `isPrefixOf` word -> commandNames
     | otherwise -> completionIdentifiers completions
   command : arguments
+    | importModulePosition command arguments ->
+        moduleCandidates False completions word
     | not $ ":" `isPrefixOf` command -> completionIdentifiers completions
     | otherwise -> case commandCompletionDomain command of
         Just BackendCompletion
@@ -204,6 +206,14 @@ candidatesFor completions previous word = case previous of
       | map toLower setting == "backend" -> backendNames
     (Right "unset", []) -> settingNames
     _ -> []
+
+  -- A bare import is Haskell syntax rather than a colon command, but its first
+  -- semantic argument is still a loaded module. Keep the useful @qualified@
+  -- and @safe@ prefixes in module-completion position; once a module has been
+  -- entered, ordinary identifier completion resumes for its import list.
+  importModulePosition command arguments =
+    map toLower command == "import" && all importModifier arguments
+  importModifier token = map toLower token `elem` ["qualified", "safe"]
 
 attachedModuleMode :: String -> Bool
 attachedModuleMode source = map toLower (dropWhile (== ':') source)

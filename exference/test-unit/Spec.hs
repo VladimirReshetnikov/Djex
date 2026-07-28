@@ -4591,8 +4591,8 @@ tests = testGroup "Exference"
               $ validQualifiedName ["Use"] "selected"
             functionResult selected @?=
               TypeCons (validQualifiedName ["Data", "Text"] "Text")
-        , testCase "package imports cannot bind a same-spelled source module" $ do
-            messages <- expectBindingScopeFailure
+        , testCase "package imports fail before nominal scope projection" $ do
+            LoadReport result _ <- parseModuleSources
               [ ("A.hs", "module A where\ndata T = AT\n")
               , ("Use.hs", unlines
                   [ "{-# LANGUAGE PackageImports #-}"
@@ -4601,8 +4601,11 @@ tests = testGroup "Exference"
                   , "excluded :: T"
                   ])
               ]
-            assertBool (show messages)
-              $ any ("T is not in scope" `isInfixOf`) messages
+            occurrences <- expectUnsupportedVocabulary result
+            map unsupportedVocabularyForm occurrences @?=
+              [PackageQualifiedImport]
+            map (diagnosticSource . unsupportedVocabularyDiagnostic)
+              occurrences @?= [Just "Use.hs"]
         , testCase "loaded Prelude is implicit unless disabled" $ do
             let prelude = ("Prelude.hs", unlines
                   [ "module Prelude (Bool) where"
@@ -4959,7 +4962,7 @@ tests = testGroup "Exference"
                 @?= map Just modulePaths
             Left failure -> fail $ "unexpected source failure: " ++ show failure
             Right _ -> fail "a malformed in-memory module was accepted"
-      , testCase "in-memory module parsing honors LANGUAGE pragmas" $ do
+      , testCase "unused package imports fail after LANGUAGE pragma parsing" $ do
           let modulePath = "/virtual/PackageImportSnapshot.hs"
               moduleSource = unlines
                 [ "{-# LANGUAGE PackageImports #-}"
@@ -4969,8 +4972,11 @@ tests = testGroup "Exference"
                 ]
           LoadReport result _ <- environmentFromSources
             [(modulePath, moduleSource)] []
-          _ <- expectRight result
-          pure ()
+          occurrences <- expectUnsupportedVocabulary result
+          map unsupportedVocabularyForm occurrences @?=
+            [PackageQualifiedImport]
+          map (diagnosticSource . unsupportedVocabularyDiagnostic)
+            occurrences @?= [Just modulePath]
       , testCase "explicit files accept no modules and order rating warnings" $
           do
             environmentDirectory <- getDataFileName "exference/environment"

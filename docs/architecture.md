@@ -338,6 +338,13 @@ genuinely unknown names as external. A positive import list supplies a finite
 canonical surface for such a module; an unrestricted or `hiding` import cannot
 prove its unknown export complement.
 
+Package-qualified imports are rejected by every source-loader entry point,
+even when unused. The neutral `Name` identity records a module and occurrence,
+not a Cabal package key, so accepting `import "one" M` would either conflate it
+with a supplied source module `M` or silently lose the qualifier through the
+open-world fallback. Rejecting the syntax before scope projection keeps file,
+directory, in-memory, compatibility, and REPL loading on one fail-closed rule.
+
 Source loading keeps exported and private declarations together in the
 authoritative inventory for whole-environment kind, synonym, recursion, and
 class checks. Export lists restrict what another module may import; they do not

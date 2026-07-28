@@ -395,6 +395,11 @@ provides enough information to assign finite canonical external names; an
 unrestricted or `hiding` import of an unloaded module has no enumerable export
 complement and cannot be verified as if its interface had been loaded.
 
+This external-name policy applies only to ordinary, non-package imports.
+Package-qualified imports fail during source-vocabulary validation, including
+unused imports: the neutral nominal identity cannot retain a package key, and
+must not make two same-named modules from different packages appear equal.
+
 Loading deliberately retains exported and private declarations in the checked
 inventory for kind checking, synonym expansion, recursion analysis, and class
 validation. Export lists govern later imports rather than deleting facts; a

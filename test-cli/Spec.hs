@@ -1641,7 +1641,9 @@ testReplSourcePackageImport = withReplModuleFixture $ \root -> do
   assertBool "package import accidentally committed its same-named local target" $
     not $ packageUser `isInfixOf` output
   assertContains ("source package import has a structured diagnostic: " ++ errors)
-    "[DJEX_REPL_IMPORT_PACKAGE]" errors
+    "[EXF_UNSUPPORTED_VOCABULARY]" errors
+  assertContains "source package import identifies the unsupported construct"
+    "package-qualified import" errors
   assertNoCallStack errors
 
 testReplSymlinkModuleMismatch :: Assertion

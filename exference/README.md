@@ -317,6 +317,11 @@ unknown names as external. A positive import list provides a finite canonical
 surface for an unloaded module; unrestricted and `hiding` imports cannot
 enumerate or validate its unknown export complement.
 
+Package-qualified imports are rejected consistently by all loaders, whether or
+not a later declaration uses them. Package identity is not representable in
+the shared nominal name, so treating such an import as ordinary source or as
+an unknown external module would be unsound.
+
 Export lists restrict downstream imports but never delete declarations from
 the checked inventory. Private declarations remain available to whole-graph
 kind, synonym, recursion, and class validation and to an explicit `*MODULE`

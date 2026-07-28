@@ -223,6 +223,7 @@ data UnsupportedVocabularyForm
     -- ^ Retained as a compatibility spelling, but no longer emitted. The
     -- source loader keeps every declaration in the checked inventory while a
     -- module-aware caller applies the export list to its visibility scope.
+  | PackageQualifiedImport
   | OpenTypeFamily
   | ClosedTypeFamily
   | DataFamily
@@ -607,8 +608,8 @@ tupleType :: QualifiedName -> Int -> HsType
 tupleType tupleName arity = SharedType.applyTypeArguments (TypeCons tupleName)
   $ typeVariables arity
 
--- | Find every declaration whose source-level type/class meaning would be
--- lost by the current extractor. Value definitions, imports, fixities,
+-- | Find every source construct whose type/class meaning would be lost by the
+-- current extractor. Value definitions, ordinary imports, fixities,
 -- default declarations, untyped pattern bodies, and benign pragmas
 -- deliberately remain outside this scan.
 unsupportedVocabularyOccurrences
@@ -617,8 +618,9 @@ unsupportedVocabularyOccurrences
 unsupportedVocabularyOccurrences = concatMap unsupportedModule
  where
   unsupportedModule modul = case modul of
-    HSE.Module _ _ _ _ declarations ->
-      concatMap unsupportedDecl declarations
+    HSE.Module _ _ _ imports declarations ->
+      concatMap unsupportedImport imports
+        ++ concatMap unsupportedDecl declarations
     -- An XML page is an executable module form, not an ordinary module with
     -- no declarations.  The declaration extractors deliberately return
     -- 'Nothing' for it, so accepting it here would manufacture an empty
@@ -631,6 +633,15 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
     -- or emitting a cascade for children we cannot load in context.
     HSE.XmlHybrid location _ _ _ _ _ _ _ _ ->
       [unsupportedOccurrence XmlHybridModule location]
+
+  -- Package identity is not part of the neutral nominal Name vocabulary.
+  -- Treating @import "one" M@ as either the loaded source module @M@ or an
+  -- unqualified open-world fallback would silently change which declaration
+  -- a type denotes. Reject the import even when no declaration happens to use
+  -- it, keeping every loader entry point on the same fail-closed boundary.
+  unsupportedImport declaration = case HSE.importPkg declaration of
+    Just _ -> one PackageQualifiedImport $ HSE.importAnn declaration
+    Nothing -> []
 
   unsupportedDecl declaration = case declaration of
     HSE.TypeFamDecl location _ _ _ ->
@@ -764,6 +775,7 @@ unsupportedOccurrence form location = UnsupportedVocabularyOccurrence form
 unsupportedVocabularyDescription :: UnsupportedVocabularyForm -> String
 unsupportedVocabularyDescription form = case form of
   ExplicitExportList -> "explicit module export list"
+  PackageQualifiedImport -> "package-qualified import"
   OpenTypeFamily -> "open type-family declaration"
   ClosedTypeFamily -> "closed type-family declaration"
   DataFamily -> "data-family declaration"

@@ -306,6 +306,12 @@ and is reported at the importing file by a
 `DJEX_REPL_IMPORT_UNRESOLVED` warning; it contributes no declarations to the
 session. These checks happen before the new workspace is published.
 
+Package-qualified imports are rejected instead of being treated as unresolved.
+Djex's source inventory has no package-database identity to distinguish two
+same-named modules, so accepting the import would make its nominal references
+ambiguous. The failed load remains transactional like every other workspace
+failure.
+
 Once that closure is fixed, the shared source loader elaborates every
 declaration in its defining module's own import scope. Bare imports entered at
 the prompt and `:module` operate later: they select the query/search scope from

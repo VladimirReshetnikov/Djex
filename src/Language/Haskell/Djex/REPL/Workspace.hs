@@ -15,24 +15,16 @@ module Language.Haskell.Djex.REPL.Workspace
   , reloadWorkspace
   , addWorkspaceTargets
   , removeWorkspaceTargets
-  , workspaceExplicitTargets
   , workspaceTargets
-  , workspaceLoadedModules
   , workspaceModules
-  , workspaceModuleFiles
   , workspaceModuleSources
-  , workspaceRatingFiles
   , workspaceRatingSources
   , workspaceUnresolvedImportsWithSources
   , workspaceModuleName
   , workspaceModulePath
-  , workspaceModuleSource
   , workspaceModuleSyntax
   , workspaceTargetDisplay
-  , workspaceTargetIsStarred
   , workspaceTargetModuleFiles
-  , workspaceTargetRatingFiles
-  , workspaceTargetModuleName
   , workspaceAutomaticTargetModules
   ) where
 
@@ -217,35 +209,19 @@ retainedAutomaticPreference workspace = case
   Nothing -> []
 
 -- | Explicit targets in admission order.
-workspaceExplicitTargets :: SourceWorkspace -> [WorkspaceTarget]
-workspaceExplicitTargets = sourceWorkspaceTargets
-
--- | Short alias useful to the REPL state renderer.
 workspaceTargets :: SourceWorkspace -> [WorkspaceTarget]
-workspaceTargets = workspaceExplicitTargets
+workspaceTargets = sourceWorkspaceTargets
 
 -- | Loaded source modules in deterministic dependency-first order.
-workspaceLoadedModules :: SourceWorkspace -> [WorkspaceModule]
-workspaceLoadedModules = sourceWorkspaceModules
-
--- | Short alias useful to source-session construction.
 workspaceModules :: SourceWorkspace -> [WorkspaceModule]
-workspaceModules = workspaceLoadedModules
-
--- | Canonical module files in dependency-first loader order.
-workspaceModuleFiles :: SourceWorkspace -> [FilePath]
-workspaceModuleFiles = map workspaceModulePath . workspaceLoadedModules
+workspaceModules = sourceWorkspaceModules
 
 -- | The exact, fully evaluated source texts parsed while constructing this
 -- workspace, in dependency-first session-loader order.
 workspaceModuleSources :: SourceWorkspace -> [(FilePath, String)]
-workspaceModuleSources = map snapshot . workspaceLoadedModules
+workspaceModuleSources = map snapshot . workspaceModules
  where
-  snapshot modul = (workspaceModulePath modul, workspaceModuleSource modul)
-
--- | Canonical rating files contributed by explicit directory targets.
-workspaceRatingFiles :: SourceWorkspace -> [FilePath]
-workspaceRatingFiles = map fst . sourceWorkspaceRatings
+  snapshot modul = (parsedModulePath modul, parsedModuleSource modul)
 
 -- | Exact, fully evaluated rating texts read with the workspace snapshot, in
 -- deterministic target/directory order.
@@ -264,23 +240,20 @@ workspaceUnresolvedImportsWithSources workspace =
     , parsedModuleName modul
     , importedModuleName imported
     )
-  | modul <- workspaceLoadedModules workspace
+  | modul <- workspaceModules workspace
   , imported <- parsedModuleImports modul
   , not $ importedFromPackage imported
   , importedModuleName imported `Set.notMember` loadedNames
   ]
  where
   loadedNames = Set.fromList
-    $ map parsedModuleName $ workspaceLoadedModules workspace
+    $ map parsedModuleName $ workspaceModules workspace
 
 workspaceModuleName :: WorkspaceModule -> String
 workspaceModuleName = parsedModuleName
 
 workspaceModulePath :: WorkspaceModule -> FilePath
 workspaceModulePath = parsedModulePath
-
-workspaceModuleSource :: WorkspaceModule -> String
-workspaceModuleSource = parsedModuleSource
 
 workspaceModuleSyntax
   :: WorkspaceModule
@@ -298,22 +271,8 @@ workspaceTargetDisplay target = starPrefix ++ base
     Just name | locatorKind locator == ModuleNameTarget -> name
     _ -> locatorPath locator
 
-workspaceTargetIsStarred :: WorkspaceTarget -> Bool
-workspaceTargetIsStarred = targetStarred
-
 workspaceTargetModuleFiles :: WorkspaceTarget -> [FilePath]
 workspaceTargetModuleFiles = targetSourceFiles
-
-workspaceTargetRatingFiles :: WorkspaceTarget -> [FilePath]
-workspaceTargetRatingFiles = targetRatings
-
--- | The declared/admitted module name for a single-source target.  Directory
--- targets deliberately return 'Nothing', even when they currently contain one
--- file, because their membership may change on reload.
-workspaceTargetModuleName :: WorkspaceTarget -> Maybe String
-workspaceTargetModuleName target = case targetModuleSpellings target of
-  [name] | locatorKind (targetLocator target) /= DirectoryTarget -> Just name
-  _ -> Nothing
 
 -- | Source modules supplied by the history-selected automatic target. A file
 -- or named-module target contributes one entry; Djex's directory extension
@@ -737,26 +696,20 @@ workspaceImport path declaration =
 duplicateModuleDiagnostics
   :: [WorkspaceModule]
   -> Maybe (NonEmpty Diagnostic)
-duplicateModuleDiagnostics = NonEmpty.nonEmpty . go Map.empty
- where
-  -- Targets carry caller order. Keep the first declaration authoritative and
-  -- report every later occurrence at the point where it was encountered.
-  go _ [] = []
-  go originals (modul : remaining) =
-    case Map.lookup (parsedModuleName modul) originals of
-      Nothing -> go
-        (Map.insert (parsedModuleName modul) modul originals)
-        remaining
-      Just original ->
-        withSource (parsedModulePath modul)
-          (workspaceFailure
-            "DJEX_REPL_MODULE_DUPLICATE"
-            "duplicate source module"
-            ( parsedModuleName modul ++ " is declared by both "
-                ++ parsedModulePath original ++ " and "
-                ++ parsedModulePath modul
-            ))
-          : go originals remaining
+-- Targets carry caller order. Keep the first declaration authoritative and
+-- report every later occurrence at the point where it was encountered.
+duplicateModuleDiagnostics modules = NonEmpty.nonEmpty
+  [ withSource (parsedModulePath duplicate)
+      $ workspaceFailure
+          "DJEX_REPL_MODULE_DUPLICATE"
+          "duplicate source module"
+          ( parsedModuleName duplicate ++ " is declared by both "
+              ++ parsedModulePath original ++ " and "
+              ++ parsedModulePath duplicate
+          )
+  | (original, duplicate) <- SharedCollection.repetitionsWithFirstOn
+      parsedModuleName modules
+  ]
 
 targetModuleMismatchDiagnostics
   :: [WorkspaceTarget]

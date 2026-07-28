@@ -12,7 +12,6 @@ module Language.Haskell.Djex.REPL.Scope
   , ScopeOrigin (..)
   , ScopeNamespace (..)
   , scopeFromWorkspace
-  , resetScopeForWorkspace
   , revalidateScope
   , addScopeImport
   , changeScopeModules
@@ -21,11 +20,9 @@ module Language.Haskell.Djex.REPL.Scope
   , scopeUnqualifiedNames
   , scopeUnqualifiedTypeNames
   , scopeUnqualifiedValueNames
-  , scopeVisibleNames
   , scopeSearchNames
   , scopeQualifiedNames
   , scopeQualifiedTypeNames
-  , scopeQualifiedValueNames
   , scopeQualifierAliases
   , scopeCurrentModule
   , resolveScopeNameAmong
@@ -140,10 +137,6 @@ scopeUnqualifiedValueNames :: ReplScope -> [Name]
 scopeUnqualifiedValueNames = surfaceNamesIn ValueScope
   . replScopeUnqualifiedSurface
 
--- | Compatibility alias for 'scopeUnqualifiedNames'.
-scopeVisibleNames :: ReplScope -> [Name]
-scopeVisibleNames = scopeUnqualifiedNames
-
 -- | Exact canonical values and constructors available to synthesis, whether
 -- admitted unqualified or through a written qualifier.
 scopeSearchNames :: ReplScope -> [Name]
@@ -158,11 +151,6 @@ scopeQualifiedNames = map (fmap surfaceNames) . replScopeQualifiedSurfaces
 -- | Exact type/class identities admitted under each written qualifier.
 scopeQualifiedTypeNames :: ReplScope -> [(ModuleName, [Name])]
 scopeQualifiedTypeNames = map (fmap $ surfaceNamesIn TypeScope)
-  . replScopeQualifiedSurfaces
-
--- | Exact value/constructor identities admitted under each qualifier.
-scopeQualifiedValueNames :: ReplScope -> [(ModuleName, [Name])]
-scopeQualifiedValueNames = map (fmap $ surfaceNamesIn ValueScope)
   . replScopeQualifiedSurfaces
 
 -- | Non-canonical written qualifier to canonical defining module.
@@ -256,13 +244,6 @@ scopeFromWorkspace
 scopeFromWorkspace inventory workspace = do
   entries <- automaticEntries workspace
   compileScope inventory workspace entries
-
--- | Discard explicit imports and module changes after a replacing @:load@.
-resetScopeForWorkspace
-  :: Inventory typeVariable annotation
-  -> SourceWorkspace
-  -> Either Diagnostic ReplScope
-resetScopeForWorkspace = scopeFromWorkspace
 
 -- | Revalidate retained entries after @:reload@. Entries whose modules
 -- disappeared are pruned, old automatic entries are replaced, and the fresh

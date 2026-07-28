@@ -148,6 +148,7 @@ Library
     Language.Haskell.Synthesis.Search
     Language.Haskell.Synthesis.Selection
     Language.Haskell.Synthesis.Type
+    Language.Haskell.Synthesis.TypeAtom
     Language.Haskell.Synthesis.TypeSynonym
     Language.Haskell.Synthesis.TypeRender
     Djinn.Core

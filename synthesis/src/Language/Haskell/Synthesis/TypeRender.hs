@@ -112,7 +112,9 @@ showsTypeWithQualification qualification variableName precedence typeExpression 
     | otherwise -> showString $ renderNamePrefix qualification name
   TypeApplication (TypeConstructor name) argument
     | nameSpecial name == Just ListConstructor -> showChar '['
-      . showsTypeWithQualification qualification variableName 0 argument
+      -- haskell-src-exts 1.24 requires an impredicative list element to be
+      -- parenthesized even when its parser mode enables ImpredicativeTypes.
+      . showsTypeWithQualification qualification variableName 1 argument
       . showChar ']'
   TypeApplication function argument -> showParen (precedence > 1)
     $ showsTypeWithQualification qualification variableName 1 function

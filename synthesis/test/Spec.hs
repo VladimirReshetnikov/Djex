@@ -31,6 +31,7 @@ import Language.Haskell.Synthesis.Search
 import Language.Haskell.Synthesis.Selection
 import qualified Language.Haskell.Synthesis.TypeRender as TypeRender
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import Language.Haskell.Synthesis.TypeAtom
 import qualified Language.Haskell.Synthesis.TypeSynonym as TypeSynonym
 import Test.Tasty (TestTree, defaultMain, localOption, testGroup)
 import Test.Tasty.HUnit
@@ -2152,6 +2153,96 @@ typeTests = testGroup "source types"
           (SharedType.TypeApplication listOfA
             $ SharedType.TypeVariable rigid) @?= "[a] skolem"
       TypeRender.renderType variableName (listOf listOfA) @?= "[[a]]"
+      let churchBoolean = SharedType.ForallType [flexible] []
+            $ SharedType.FunctionType (SharedType.TypeVariable flexible)
+            $ SharedType.FunctionType (SharedType.TypeVariable flexible)
+              (SharedType.TypeVariable flexible)
+      TypeRender.renderType variableName (listOf churchBoolean) @?=
+        "[(forall a. a -> a -> a)]"
+  , testCase "compare opaque polytypes by lexical alpha-equivalence" $ do
+      let outerClass = right $ mkIdentifier "Outer"
+          innerClass = right $ mkIdentifier "Inner"
+          variable = SharedType.TypeVariable
+          quantified outer inner free = SharedType.ForallType [outer]
+            [Constraint outerClass [variable outer]]
+            $ SharedType.FunctionType
+                (SharedType.ForallType [inner]
+                  [Constraint innerClass [variable inner]]
+                  $ SharedType.FunctionType
+                      (variable inner) (variable free))
+                (variable outer)
+          leftType = quantified "a" "a" "free"
+          renamedType = quantified "x" "y" "free"
+          differentFreeType = quantified "x" "y" "other"
+      let leftAtom = right $ mkTypeAtom leftType
+          renamedAtom = right $ mkTypeAtom renamedType
+          differentFreeAtom = right $ mkTypeAtom differentFreeType
+      leftAtom @?= renamedAtom
+      assertBool "a free variable disappeared into alpha-equivalence"
+        $ leftAtom /= differentFreeAtom
+      typeAtomType leftAtom @?= leftType
+      alphaEquivalentTypes leftType renamedType @?= True
+      alphaEquivalentTypes leftType differentFreeType @?= False
+  , testCase "alpha-renaming preserves binder positions" $ do
+      let variable = SharedType.TypeVariable
+          source = SharedType.ForallType ["a", "b"] []
+            $ SharedType.FunctionType (variable "a") (variable "b")
+          renamed = SharedType.ForallType ["x", "y"] []
+            $ SharedType.FunctionType (variable "x") (variable "y")
+          reordered = SharedType.ForallType ["y", "x"] []
+            $ SharedType.FunctionType (variable "x") (variable "y")
+      let sourceAtom = right $ mkTypeAtom source
+          renamedAtom = right $ mkTypeAtom renamed
+          reorderedAtom = right $ mkTypeAtom reordered
+      sourceAtom @?= renamedAtom
+      assertBool "binder reordering was mistaken for alpha-renaming"
+        $ sourceAtom /= reorderedAtom
+  , testCase "seal only valid explicitly quantified atoms" $ do
+      let variable = SharedType.TypeVariable "a"
+          duplicate = SharedType.ForallType ["a", "a"] [] variable
+          vacuous = SharedType.ForallType [] [] variable
+      mkTypeAtom variable @?= Left (MonomorphicTypeAtom variable)
+      mkTypeAtom vacuous @?= Left (MonomorphicTypeAtom variable)
+      mkTypeAtom duplicate @?= Left
+        (InvalidTypeAtom $ SharedType.DuplicateForallVariable "a")
+  , testCase "opaque Church encodings survive impredicative containers" $ do
+      let variable = SharedType.TypeVariable
+          listConstructorName = right $ specialName ListConstructor
+          churchList element result = SharedType.ForallType [result] []
+            $ SharedType.FunctionType
+                (SharedType.FunctionType (variable element)
+                  $ SharedType.FunctionType (variable result)
+                    (variable result))
+            $ SharedType.FunctionType (variable result) (variable result)
+          source = churchList "item" "fold"
+          renamed = churchList "item" "answer"
+          impredicative = SharedType.TypeApplication
+            (SharedType.TypeConstructor listConstructorName) source
+      right (mkTypeAtom source) @?= right (mkTypeAtom renamed)
+      TypeRender.renderType id impredicative @?=
+        "[(forall fold. (item -> fold -> fold) -> fold -> fold)]"
+  , testCase "substitute atom free variables without capture" $ do
+      let variable = SharedType.TypeVariable
+          source = SharedType.ForallType ["answer"] []
+            $ SharedType.FunctionType (variable "item")
+              (variable "answer")
+          expected = SharedType.ForallType ["answer'"] []
+            $ SharedType.FunctionType (variable "answer")
+              (variable "answer'")
+          atom = right $ mkTypeAtom source
+      typeAtomFreeVariables atom @?= Set.singleton "item"
+      fmap typeAtomType
+          (substituteTypeAtomVariables freshStringVariable Set.empty
+            (Map.singleton "item" $ variable "answer") atom) @?=
+        Right expected
+  , testCase "alpha identity canonicalizes equivalent source forms" $ do
+      let a = SharedType.TypeVariable "a"
+          b = SharedType.TypeVariable "b"
+          appliedArrow = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor functionName) a) b
+      alphaEquivalentTypes appliedArrow (SharedType.FunctionType a b) @?=
+        True
   , testCase "canonicalize saturated function and tuple constructors" $ do
       let a = SharedType.TypeVariable "a"
           b = SharedType.TypeVariable "b"

@@ -595,7 +595,7 @@ lookupTermScheme context source = do
 
 scopeResolvedTerm :: TypeContext -> Name -> Either Diagnostic Name
 scopeResolvedTerm context name = case resolveScopeNameAmong
-    (contextTermNames context) (contextScope context) name of
+    ValueScope (contextTermNames context) (contextScope context) name of
   Left failure -> Left $ typeDiagnostic context "DJEX_REPL_TYPE_SCOPE"
     "expression name is not available" failure
   Right resolved -> Right resolved
@@ -926,9 +926,9 @@ parseAnnotationScheme context signature = do
 queryScope :: ReplScope -> ExferenceQueryScope
 queryScope scope = ExferenceQueryScope
   { exferenceQueryCurrentModule = scopeCurrentModule scope
-  , exferenceQueryVisibleNames = scopeUnqualifiedNames scope
+  , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames scope
   , exferenceQueryModuleAliases = scopeQualifierAliases scope
-  , exferenceQueryQualifiedNames = scopeQualifiedNames scope
+  , exferenceQueryQualifiedNames = scopeQualifiedTypeNames scope
   }
 
 addUnaryConstraint :: TypeContext -> String -> HsType -> Infer ()

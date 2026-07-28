@@ -103,7 +103,7 @@ data ReplOptions = ReplOptions
   { replInitialBackend :: ReplBackend
     -- ^ Backend selection shown by the first prompt.
   , replEnvironmentPath :: Maybe FilePath
-    -- ^ Exference source directory; 'Nothing' uses installed package data.
+    -- ^ Source-workspace directory; 'Nothing' uses installed package data.
   , replAllowFix :: Bool
     -- ^ Whether known recursion helpers are retained while sealing Exference.
   , replHistoryFile :: Maybe FilePath
@@ -170,16 +170,18 @@ refreshDjinnProjection state = case
     , exferenceRuntimeScope runtime
     ) of
   (Just baseSession, Just context) ->
-    let visible = Set.fromList $ scopeUnqualifiedNames context
+    let visibleTypes = Set.fromList $ scopeUnqualifiedTypeNames context
+        visibleValues = Set.fromList $ scopeUnqualifiedValueNames context
     in case projectDjinnScope
         (djinnAxiomPolicy djinn)
         records
         (typeConstructorKinds $ inventoryKindAssumptions
           $ exferenceSessionInventory baseSession)
         (scopeProjectionDeclarations baseSession)
-        visible of
+        visibleTypes
+        visibleValues of
       Left failure -> Left failure
-      Right projection -> Right $ withProjection visible $ Just projection
+      Right projection -> Right $ withProjection visibleValues $ Just projection
   _ -> Right $ withProjection Set.empty Nothing
  where
   runtime = exferenceRuntime state
@@ -295,10 +297,10 @@ runRepl options = case standardDjinnSession of
             Right projected -> pure projected
           putStrLn $ "Djinn environment: " ++ djinnEnvironmentSummary ready
           case attemptedSession attempt of
-            Just _ -> putStrLn $ "Exference environment: "
+            Just _ -> putStrLn $ "Source workspace: "
               ++ renderRequestedTargets (attemptedTargets attempt)
             Nothing -> putStrLn
-              "Exference is unavailable; use :load TARGET after fixing its workspace."
+              "Source workspace unavailable; use :load TARGET after fixing it."
           putStrLn "Type :help for help."
           started <- if replIgnoreStartupFiles options
             then pure $ ContinueRepl ready
@@ -503,7 +505,7 @@ runCommand sourceName history command state = case command of
   AddEnvironment targets -> updateExferenceWorkspace
     (addWorkspaceTargetsFor state targets)
     ResetScope
-    ("Added Exference targets: " ++ renderRequestedTargets targets)
+    ("Added source targets: " ++ renderRequestedTargets targets)
     state >>= continue
   Browse selectedModule -> browseState selectedModule state >> continue state
   ChangeBackend Nothing -> do
@@ -545,7 +547,7 @@ runCommand sourceName history command state = case command of
   LoadEnvironment targets -> updateExferenceWorkspace
     (loadWorkspace targets)
     ResetScope
-    ("Loaded Exference environment: " ++ renderRequestedTargets targets)
+    ("Loaded source workspace: " ++ renderRequestedTargets targets)
     state >>= continue
   Quit -> pure $ ExitRepl state
   ReloadEnvironment -> do
@@ -564,7 +566,7 @@ runCommand sourceName history command state = case command of
   UnaddEnvironment targets -> updateExferenceWorkspace
     (removeWorkspaceTargetsFor state targets)
     ResetScope
-    ("Removed Exference targets: " ++ renderRequestedTargets targets)
+    ("Removed source targets: " ++ renderRequestedTargets targets)
     state >>= continue
   UnsetOption source -> unsetOption source state >>= continue
   Version -> putStrLn ("djex version " ++ showVersion version) >> continue state
@@ -641,9 +643,9 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
     (exferenceRuntimeSession runtime, exferenceRuntimeScope runtime)
   queryScope context = ExferenceQueryScope
     { exferenceQueryCurrentModule = scopeCurrentModule context
-    , exferenceQueryVisibleNames = scopeUnqualifiedNames context
+    , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames context
     , exferenceQueryModuleAliases = scopeQualifierAliases context
-    , exferenceQueryQualifiedNames = scopeQualifiedNames context
+    , exferenceQueryQualifiedNames = scopeQualifiedTypeNames context
     }
 
 ignoreExit :: IO ExitCode -> IO ()
@@ -906,7 +908,7 @@ updateExferenceWorkspaceWithPolicy allowFix action retention successMessage
  where
   retainAfterFailure diagnostics = do
     putStrLn
-      "Exference load failed; retaining the previous session and settings."
+      "Source workspace load failed; retaining previous sessions and settings."
     pure state
       { exferenceRuntime = (exferenceRuntime state)
           { exferenceRuntimeDiagnostics = diagnostics }
@@ -942,7 +944,7 @@ reloadExferenceWorkspaceWithPolicy :: Bool -> ReplState -> IO ReplState
 reloadExferenceWorkspaceWithPolicy allowFix state =
   updateExferenceWorkspaceWithPolicy allowFix
     action RefreshAutomaticScope
-      ("Loaded Exference environment: " ++ renderRequestedTargets
+      ("Loaded source workspace: " ++ renderRequestedTargets
         (exferenceRuntimeRequestedTargets runtime))
       state
  where
@@ -1327,14 +1329,14 @@ showEnvironmentSummary state = do
 
 showImports :: ReplState -> IO ()
 showImports state = case exferenceRuntimeScope $ exferenceRuntime state of
-  Nothing -> putStrLn "No Exference module context."
+  Nothing -> putStrLn "No source module context."
   Just context -> case renderScopeImports context of
     [] -> putStrLn "(no imports)"
     imports -> mapM_ putStrLn imports
 
 showModules :: ReplState -> IO ()
 showModules state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
-  Nothing -> putStrLn "No Exference modules are loaded."
+  Nothing -> putStrLn "No source modules are loaded."
   Just workspace -> case workspaceModules workspace of
     [] -> putStrLn "(no modules loaded)"
     modules -> forM_ modules $ \modul -> putStrLn
@@ -1342,7 +1344,7 @@ showModules state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
 
 showTargets :: ReplState -> IO ()
 showTargets state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
-  Nothing -> putStrLn "No Exference targets are loaded."
+  Nothing -> putStrLn "No source targets are loaded."
   Just workspace -> case workspaceTargets workspace of
     [] -> putStrLn "(no targets)"
     targets -> mapM_ (putStrLn . workspaceTargetDisplay) targets
@@ -1386,7 +1388,7 @@ browseState Nothing state = forSelectedBackends state $ \selectedBackend ->
         , exferenceRuntimeScope runtime
         ) of
       (Just session, Just context) -> do
-        browseNames "Exference current scope"
+        browseNames "Current source scope"
           ExferenceType.defaultVariableName
           (scopeBrowseNames context)
           $ exferenceSessionEnvironment session
@@ -1412,7 +1414,7 @@ browseWorkspaceModule reference state = case
         (exferenceSessionInventory session) workspace starred moduleSource of
       Left failure -> emitDiagnostic failure
       Right names -> browseNames
-        ("Exference module " ++ (if starred then "*" else "") ++ moduleSource)
+        ("Source module " ++ (if starred then "*" else "") ++ moduleSource)
         ExferenceType.defaultVariableName names
         $ exferenceSessionEnvironment session
   _ -> replFailure "DJEX_REPL_MODULE" "no source workspace is loaded"
@@ -1437,7 +1439,7 @@ showInfo state source = case parseName $ trim source of
           ) of
         (Just session, Just context) -> case
             resolveScopeNameAmong
-              (declarationNameSet environment) context parsedName of
+              AnyScope (declarationNameSet environment) context parsedName of
           Left failure -> settingFailure failure
           Right name -> do
             let matchingNames = name : map declarationSubjectName

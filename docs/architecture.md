@@ -163,14 +163,20 @@ not a mutable union environment:
 
 ```text
 REPL state
-  |-- immutable standard DjinnSession
+  |-- Djinn runtime
+  |     |-- immutable standard-session fallback and axiom policy
+  |     `-- Maybe checked projection of the current prompt scope
   |-- Exference runtime
-  |     |-- source directory and fix policy
-  |     |-- Maybe immutable ExferenceSession
+  |     |-- requested targets and Maybe SourceWorkspace
+  |     |-- Maybe prompt scope
+  |     |-- fix policy
+  |     |-- Maybe immutable base and search-projected sessions
   |     `-- diagnostics from the latest load attempt
+  |-- visible record-selector presentation map
   |-- active backend selection and last query
-  |-- shared target and presentation settings
-  `-- backend-specific search settings
+  |-- shared result, presentation, and prompt settings
+  |-- backend-specific search settings
+  `-- active script-inclusion stack
 ```
 
 Switching the active backend changes routing only. Both-mode invokes the
@@ -181,13 +187,14 @@ controls, and evidence described below. No cross-backend cache or unchecked
 conversion is introduced by sharing a prompt.
 
 The Exference runtime is deliberately richer than a bare session. Source
-ratings and command policy are not recoverable from its annotation-erased
-neutral environment, so `:load`, `:reload`, and `:set fix` return to the source
-directory and construct a complete candidate runtime. The new directory,
-policy, and sealed session are published together only on success. A failed
-initial load leaves Exference unavailable while Djinn remains useful; a failed
-replacement retains the preceding usable Exference runtime and records the new
-diagnostics for inspection.
+targets, ratings, prompt scope, and command policy are not recoverable from its
+annotation-erased neutral environment, so `:load`, `:reload`, and `:set fix`
+construct a complete candidate runtime from the retained or requested
+workspace. The workspace, prompt scope, policy, base session, and searchable
+session are published together only on success. A failed initial load leaves
+Exference unavailable while Djinn remains useful; a failed replacement retains
+the preceding usable sessions and settings while recording the new diagnostics
+for inspection.
 
 Private `Language.Haskell.Djex.REPL.Command` owns one descriptor table for
 parsing, unique-prefix resolution, help, and completion inventories. Private
@@ -335,8 +342,10 @@ the loader. Scope is exact for modules in that loaded set: an unimported loaded
 name cannot be rescued by spelling its canonical qualifier. Interfaces for
 unloaded modules are unavailable, so the open-inventory policy still retains
 genuinely unknown names as external. A positive import list supplies a finite
-canonical surface for such a module; an unrestricted or `hiding` import cannot
-prove its unknown export complement.
+canonical surface for such a module. An unrestricted import remains open, and
+a `hiding` import remains open except for its exact excluded occurrences.
+Those routes stay separate when aliases coincide, so an exact loaded import
+cannot accidentally close an unrelated external one.
 
 Package-qualified imports are rejected by every source-loader entry point,
 even when unused. The neutral `Name` identity records a module and occurrence,
@@ -419,8 +428,13 @@ names govern unqualified lookup, one full-top-level current module gets local
 precedence, aliases map prompt qualifiers to canonical modules, and canonical
 qualified lookup still consults the complete sealed inventory. The searchable
 Exference environment is narrowed to the visible binding projection. The same
-prompt scope drives a checked Djinn declaration projection. Every abstract
-projection reuses the exact ground kind inferred by the shared inventory,
+prompt scope retains a type/value namespace set per canonical identity and per
+written qualifier. Type parsing and kind inspection receive the type surface;
+expression typing and search receive the value surface; Djinn receives both as
+separate visibility sets. This preserves `type`/`pattern` import items and
+namespace-specific `hiding` even when a datatype and constructor share one
+neutral `Name`. The scope then drives a checked Djinn declaration projection.
+Every abstract projection reuses the exact ground kind inferred by the shared inventory,
 including referenced stubs and concrete datatypes degraded because they are
 recursive, constructor-hidden, or require a later repair. Arity-derived kinds
 are only the fallback for genuinely absent external names. Record selectors

@@ -396,7 +396,7 @@ commandDescriptors =
       $ noArguments $ ReplCommand $ ShowState $ Just "directory"
   , command "quit" ["q"] "" "leave the REPL"
       $ noArguments $ ReplCommand Quit
-  , command "reload" ["r"] "" "reload the Exference environment"
+  , command "reload" ["r"] "" "reload the source workspace"
       $ noArguments $ ReplCommand ReloadEnvironment
   , commandWith PathCompletion []
       "script" [] "FILE" "execute a file of REPL inputs"
@@ -573,7 +573,7 @@ editDetails =
   [ "  uses the VISUAL editor, or EDITOR when VISUAL is unset"
   , "  launches parsed editor argv directly and appends the path as one value"
   , "  with no argument, edits the most recently loaded file target"
-  , "  the environment is not reloaded; use :reload afterwards"
+  , "  the source workspace is not reloaded; use :reload afterwards"
   ]
 
 evalDetails :: [String]
@@ -600,7 +600,7 @@ kindDetails =
 loadDetails :: [String]
 loadDetails =
   [ "  accepts module names, file paths, quoted strings, or [String] syntax"
-  , "  with no targets, unloads the current environment"
+  , "  with no targets, unloads the current source workspace"
   ]
 
 moduleDetails :: [String]

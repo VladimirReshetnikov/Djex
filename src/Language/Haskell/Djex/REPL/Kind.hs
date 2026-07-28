@@ -160,13 +160,13 @@ inspectKind session scope sourceName normalization source = do
     (toHseModuleName <$> scopeCurrentModule scope)
     mode
     source
-  resolver = kindTypeResolver $ case scopeQualifiedNames scope of
+  resolver = kindTypeResolver $ case scopeQualifiedTypeNames scope of
     [] -> scopeTypeResolver
-      (scopeUnqualifiedNames scope)
+      (scopeUnqualifiedTypeNames scope)
       (scopeQualifierAliases scope)
       $ typeResolverFromInventory inventory
     qualified -> scopeTypeResolverWithQualifiedNames
-      (scopeUnqualifiedNames scope)
+      (scopeUnqualifiedTypeNames scope)
       (scopeQualifierAliases scope)
       qualified
       $ typeResolverFromInventory inventory
@@ -306,7 +306,12 @@ toHseModuleName moduleName = HSE.ModuleName HSE.noSrcSpan
 -- 'inferInspectionKind' immediately distinguishes the outer class head before
 -- the shared type representation crosses any public boundary.
 kindTypeResolver :: TypeResolver -> TypeResolver
-kindTypeResolver resolver = resolver
-  { resolverUnqualifiedTypeNames = resolverUnqualifiedTypeNames resolver
+kindTypeResolver resolver = TypeResolver
+  { resolverTypeNames = resolverTypeNames resolver
+  , resolverClassArities = resolverClassArities resolver
+  , resolverUnqualifiedTypeNames = resolverUnqualifiedTypeNames resolver
       ++ resolverUnqualifiedClassNames resolver
+  , resolverUnqualifiedClassNames = resolverUnqualifiedClassNames resolver
+  , resolverModuleAliases = resolverModuleAliases resolver
+  , resolverQualifiedNames = resolverQualifiedNames resolver
   }

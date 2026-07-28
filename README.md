@@ -187,7 +187,7 @@ evaluation falls back to Prelude scope and reports an advisory. See
 [evaluating expressions](docs/repl.md#evaluating-expressions) for the scope,
 fallback, isolation, and interrupt contract.
 
-The Exference half has a GHCi-shaped source workspace. `:load`, `:add`,
+The shared REPL has a GHCi-shaped source workspace. `:load`, `:add`,
 `:unadd`, and `:reload` manage module/file targets and their local source
 dependencies; bare Haskell imports and `:module` manage the prompt scope;
 `:show targets`, `:show modules`, and `:show imports` expose the three distinct
@@ -527,6 +527,11 @@ self exports include local declarations, aliases are honored, and a
 qualified-only import contributes no names. A loaded `Prelude` is imported
 implicitly unless the module is `Prelude`, imports it explicitly, or enables
 `NoImplicitPrelude` or `RebindableSyntax`.
+
+Interactive import and re-export routes retain Haskell's type/value namespace
+selection alongside the namespace-neutral canonical `Name`. A type-only item
+cannot expose a same-named constructor, `pattern` cannot expose its datatype,
+and hiding either one leaves the other intact in both backend projections.
 
 Ordinary imports must form an acyclic graph. Every source-loader entry point
 rejects the first stable cycle as `CyclicModuleImports` before export surfaces

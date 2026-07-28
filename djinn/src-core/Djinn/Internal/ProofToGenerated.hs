@@ -343,8 +343,10 @@ alphaRenameTerm term = evalState
 -- This is deliberately a pre-storage canonicalization, not a rendering
 -- preference, and must not migrate to the shared render-time allocator:
 --
--- * the spellings ARE the public stored-tree contract — 'candidateOutput',
---   the 'HClause' compatibility view, and every identity-preference render
+-- * the spellings ARE the public stored-tree contract —
+--   v'Language.Haskell.Synthesis.Candidate.candidateOutput', the
+--   t'Djinn.Internal.Generated.HClause' compatibility view, and every
+--   identity-preference render
 --   site (REPL, CLI, @hPrClause@) observe them directly;
 -- * candidate de-duplication in "Djinn.Core" compares checked shared clauses
 --   structurally, so alpha-equivalent proofs collapse only because this pass

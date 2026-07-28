@@ -84,8 +84,10 @@ instance (NFData ty, NFData options) =>
 
 -- | Validate the shared generated-definition namespace and attach one
 -- adapter-specific code and summary to the common failure detail. Keeping the
--- exact rejected spelling and 'RenderError' together prevents backend request
--- boundaries from drifting in either accepted names or diagnostic context.
+-- exact rejected spelling and
+-- t'Language.Haskell.Synthesis.Generated.RenderError' together prevents
+-- backend request boundaries from drifting in either accepted names or
+-- diagnostic context.
 validateRequestTarget
   :: String
   -> String

@@ -3,11 +3,12 @@
 The `djex` REPL keeps Djinn and Exference available in one terminal session.
 Its source-workspace and module-context commands deliberately follow the model
 described in the
-[GHCi User's Guide](https://downloads.haskell.org/ghc/latest/docs/users_guide/ghci.html):
+[GHC 9.12.4 GHCi User's Guide](https://downloads.haskell.org/ghc/9.12.4/docs/users_guide/ghci.html):
 `:load`, `:add`, `:unadd`, and `:reload` control loaded source modules, while a
 bare `import` or `:module` controls which of those modules is in scope at the
 prompt. Djex also borrows GHCi's colon-command, completion, history, interrupt,
-and multiline conventions.
+and multiline conventions. These commands are GHCi-inspired; they are not a
+claim of command-for-command compatibility.
 
 Djex is nevertheless not a drop-in GHCi evaluator. A bare line is a type that
 Djex should inhabit, not a Haskell expression to evaluate. The synthesis
@@ -38,22 +39,26 @@ options initialize state before the first prompt:
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `--backend djinn\|exference\|both` | Initial active backend selection. | `djinn` |
-| `--environment DIR` | Initial Exference directory target (the recursive directory compatibility form). | Installed Djex environment |
+| `--environment DIR` | Initial source-workspace directory target (the recursive directory compatibility form). | Installed Djex workspace |
 | `--fix` | Retain the known nonterminating Exference recursion helpers while loading. | Off |
 | `--history FILE` | Read and write Haskeline history in `FILE`. | In-session history only |
 | `--ignore-startup` | Skip `.djexrc` startup files. | Startup files run |
 
-After the banner and before the first prompt, the REPL runs `.djexrc` from
-the home directory and then from the current directory, exactly as GHCi runs
-`.ghci`. Each file is executed through the ordinary `:script` machinery: any
-REPL input is accepted, failed lines report and continue, settings persist
-into the session, and `:quit` exits. Missing files are skipped silently, each
-load is announced, and `--ignore-startup` suppresses both files. On POSIX,
-Djex follows GHCi's startup-file trust rule: both the file and its containing
-directory must be owned by the current user or root and must not be writable
-by the group or by others. An unverifiable or untrusted file is skipped with a
-warning. Windows lacks the corresponding ownership/mode check and accepts the
-file, matching GHCi's platform behavior.
+After the banner and before the first prompt, the REPL runs `.djexrc` from the
+home directory and then from the current directory. This ordering is
+GHCi-inspired, not identical to GHC 9.12.4, which considers
+`ghcappdata/ghci.conf` and then `./.ghci`; Djex deliberately uses two `.djexrc`
+locations.
+Each file is executed through the ordinary `:script` machinery: any REPL input
+is accepted, failed lines report and continue, settings persist into the
+session, and `:quit` exits. Missing files are skipped silently, each load is
+announced, and `--ignore-startup` suppresses both files. When the two paths
+resolve to the same file, it runs only once. On POSIX, Djex adopts GHCi's
+startup-file trust test: both the file and its containing directory must be
+owned by the current user or root and must not be writable by the group or by
+others. An unverifiable or untrusted file is skipped with a warning. Windows
+lacks the corresponding ownership/mode check and accepts the file, following
+GHCi's platform convention.
 
 Run `djex repl --help` for the startup table. Options for a one-shot backend,
 such as `--select` or `--max-steps`, are changed inside the REPL with `:set`;
@@ -64,7 +69,7 @@ A normal startup looks like:
 ```text
 Djex REPL <package-version>
 Djinn environment: <count> declarations (projected from the module scope, <count> omissions)
-Exference environment: "/path/to/environment"
+Source workspace: "/path/to/environment"
 Type :help for help.
 djex[djinn]>
 ```
@@ -147,7 +152,7 @@ string literals, matching the path grammar rather than shell escape syntax.
 | `:add [TARGET ...]` | Add explicit source targets and reload their local dependencies. |
 | `:backend [djinn\|exference\|both]` (`:b`) | Show or change the active selection. |
 | `:browse [[*]MODULE]` | Browse the current scope, a module's exports, or a source module's full source scope. |
-| `:cd DIR` | Change the process working directory. |
+| `:cd DIR` | Change the process working directory without unloading the Djex workspace. |
 | `:compare TYPE` | Run one independently parsed query with both backends. |
 | `:djinn TYPE` | Run one Djinn query. |
 | `:download CABAL_TARGET ...` (`:dl`) | Ask Cabal to fetch targets and dependencies into its configured source cache. |
@@ -156,7 +161,7 @@ string literals, matching the path grammar rather than shell escape syntax.
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
 | `:edit [FILE]` (`:e`) | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
 | `:eval EXPRESSION` | Evaluate a Haskell expression with real GHC and print its shown value. |
-| `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s). A constructor or class method resolves to its owning declaration, and each spelling lists the instances in which that datatype or class participates. |
+| `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s). A constructor or class method resolves to its owning declaration. The Exference view also lists instances in which that datatype or class participates; Djinn's checked projection does not retain instances. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
 | `import DECLARATION` | Append a Haskell import to the shared prompt context. |
 | `:kind[!] TYPE` (`:k`) | Infer a type's kind in the current loaded module scope; attached `!` also shows its synonym-normalized form. |
@@ -296,7 +301,7 @@ For example:
 :reload
 ```
 
-Like [GHCi source loading](https://downloads.haskell.org/ghc/latest/docs/users_guide/ghci.html#loading-source-files),
+Like [GHC 9.12.4 GHCi source loading](https://downloads.haskell.org/ghc/9.12.4/docs/users_guide/ghci.html#loading-source-files),
 the loader follows resolvable local, non-package imports transitively and loads
 the resulting graph dependency-first. Import cycles not broken by a
 `{-# SOURCE #-}` import are rejected. An imported module found at the expected
@@ -329,6 +334,11 @@ canonical target is idempotent.
 the explicit targets that keep a dependency reachable if it should leave the
 closure.
 
+This is an intentional `:cd` divergence. GHCi 9.12.4 unloads the current
+modules after changing directory; Djex retains its canonical source targets,
+loaded workspace, and prompt context. Only later relative path arguments are
+resolved from the new working directory.
+
 The target commands affect state as follows:
 
 | Command | Target set | Prompt context after success |
@@ -353,7 +363,7 @@ has no compiled-versus-interpreted loading mode for it to select.
 ## Prompt module context
 
 Loaded modules and modules visible at the prompt are deliberately separate,
-following [GHCi's scope model](https://downloads.haskell.org/ghc/latest/docs/users_guide/ghci.html#ghci-scope).
+following [the GHC 9.12.4 GHCi scope model](https://downloads.haskell.org/ghc/9.12.4/docs/users_guide/ghci.html#ghci-scope).
 Only loaded source modules can be added to Djex's context. A bare import
 appends one entry, in order, and accepts the useful Haskell import forms:
 
@@ -404,10 +414,15 @@ imported unqualified. This is deliberate compatibility behavior, not exactly
 the visibility of a compiled Haskell module. Ambiguous unqualified use is
 diagnosed when the query is parsed.
 
-Djex's shared structural `Name` does not carry a separate Haskell namespace
-tag. If a module has distinct type- and value-namespace entities with the same
-canonical spelling, an import list cannot expose or hide those two identities
-independently.
+Djex's shared structural `Name` remains namespace-neutral, but every prompt
+route retains whether that identity was admitted in Haskell's type namespace,
+value namespace, or both. Thus `import M (T)`,
+`import M (pattern T)`, and `import M hiding (pattern T)` remain distinct even
+for `data T = T`, including through aliases and re-exports. `:kind` and query
+type parsing consume only the type surface; `:type` and backend search consume
+only the value/constructor surface. Djinn receives the two projections
+separately, so hiding a constructor makes its datatype abstract rather than
+silently reintroducing the constructor.
 
 Module-context operations are transactional. A malformed import, an unknown
 module, or an invalid import item leaves the previous context and searchable
@@ -722,18 +737,18 @@ environment while leaving the REPL available for recovery commands.
 ## Workspace replacement is transactional
 
 The shared REPL constructs Djinn's standard checked session as the fallback
-used until a workspace projection is available. It loads
-Exference separately from the installed directory target or
-`--environment DIR` using the command-safe policy. A directory is admitted
+used until a workspace projection is available. It loads the shared source
+workspace from the installed directory target or `--environment DIR` using
+the command-safe policy. A directory is admitted
 through the same recursive target machinery used by an interactive `:load`;
 it is retained as one explicit target even though it contributes several
 modules and rating files. By default the policy excludes
 `Data.Function.fix`, `Control.Monad.forever`, and
 `Control.Monad.Loops.iterateM_`; `--fix` or `:set +fix` retains them.
 
-An initial Exference load failure is reported, but Djinn remains usable and
-the REPL still starts. Exference queries then explain that no environment is
-available until a `:load` succeeds.
+An initial workspace load failure is reported, but Djinn remains usable and
+the REPL still starts. Exference queries then explain that no source workspace
+is available until a `:load` succeeds.
 
 `:load`, `:add`, `:unadd`, `:reload`, and a change to `fix` first resolve and
 parse every affected source, build the complete neutral inventory, apply
@@ -743,14 +758,14 @@ discovery, retained module syntax, export visibility, ratings, and the sealed
 inventory all consume that same immutable text snapshot, so an edit racing a
 load cannot publish a session assembled from two file versions.
 Only then are the target set, dependency closure, context, and searchable
-session published together. On failure the prior Exference session, targets,
+session published together. On failure the prior workspace, backend sessions,
 context, fix policy, and search settings remain active. The failed attempt's
 diagnostics remain available through `:show diagnostics`. Rebuilding is
 necessary for `fix` because source ratings and policy inputs are not
 reconstructed from the annotation-erased sealed session.
 
 On success, `:show environment` reports both declaration counts and the
-active Exference workspace. `:show omissions` explains both source
+active source targets. `:show omissions` explains both source
 capabilities that could not enter Exference search and declarations the
 Djinn scope projection had to omit or degrade. `:browse` displays
 declarations rather than changing them; unlike the historical `djinn`

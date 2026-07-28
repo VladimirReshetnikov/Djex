@@ -54,17 +54,13 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , DeconstructorBinding (..)
   , EnvDictionary (..)
   , FunctionBinding (..)
-  , deconstructorBindingTypes
-  , functionBindingTypes
   )
 import Language.Haskell.Exference.Core.Score
   ( Penalty
   , isFiniteScore
   )
 import Language.Haskell.Exference.Core.TypeUtils
-  ( containsForall
-  , typeConstructorHead
-  )
+  ( typeConstructorHead )
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , QueryClassEnv
@@ -129,7 +125,8 @@ instance NFData ExferenceOmissionCapability
 -- | Why Exference could not or should not retain a search capability.
 data ExferenceOmissionReason
   = UnsupportedNestedForall
-    -- ^ The capability's type contains a nested universal quantifier.
+    -- ^ Legacy compatibility value. Current sessions retain nested universal
+    -- quantifiers as opaque type atoms and never produce this omission.
   | RecursiveDataEliminationUnsupported
     -- ^ Exference cannot safely eliminate this recursive datatype.
   | ExcludedByPolicy
@@ -238,7 +235,6 @@ sealPreparedEnvironment policy prepared = do
         [ binding
         | binding <- sourceFunctions
         , not $ functionExcluded binding
-        , functionSupported binding
         ]
   supportedFunctions <- applyRatingOverrides overrides retainedFunctions
   let deconstructors = environmentDeconstructors backend
@@ -256,7 +252,7 @@ sealPreparedEnvironment policy prepared = do
         | binding <- sourceFunctions
         , reason <- if functionExcluded binding
             then [ExcludedByPolicy]
-            else [UnsupportedNestedForall | not $ functionSupported binding]
+            else []
         ] ++ mapMaybe deconstructorOmission omittedDeconstructors
   searchEnvironment <- first
     (shownErrorDiagnostic "DJEX_EXF_ENV"
@@ -442,12 +438,8 @@ sessionInspectionClasses = inspectionClassesView
 sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView
 
-functionSupported :: FunctionBinding -> Bool
-functionSupported = all (not . containsForall) . functionBindingTypes
-
 deconstructorSupported :: DeconstructorBinding -> Bool
-deconstructorSupported binding = not (deconstructorRecursive binding)
-  && all (not . containsForall) (deconstructorBindingTypes binding)
+deconstructorSupported = not . deconstructorRecursive
 
 deconstructorOmission :: DeconstructorBinding -> Maybe ExferenceOmission
 deconstructorOmission binding = do
@@ -457,9 +449,7 @@ deconstructorOmission binding = do
     DataElimination
     reason
  where
-  reason
-    | deconstructorRecursive binding = RecursiveDataEliminationUnsupported
-    | otherwise = UnsupportedNestedForall
+  reason = RecursiveDataEliminationUnsupported
 
 preparationFailure
   :: Show detail

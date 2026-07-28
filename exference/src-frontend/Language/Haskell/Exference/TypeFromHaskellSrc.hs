@@ -304,9 +304,14 @@ haskellSrcExtsParseMode sourceName = P.ParseMode parseSourceName
       '>' : _ -> True
       _ -> False
     isVirtualSourceName _ = False
+    -- These extensions admit quantified types at nested and applied
+    -- positions. Both engines carry those nodes as opaque atoms; enabling the
+    -- syntax here does not add higher-rank inference or instantiation rules.
     exts1 = [ TypeOperators
             , ExplicitForAll
             , ExistentialQuantification
+            , RankNTypes
+            , ImpredicativeTypes
             , TypeFamilies
             , FunctionalDependencies
             , FlexibleContexts

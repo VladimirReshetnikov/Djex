@@ -418,7 +418,8 @@ prepareSearchDeclaration recursiveNames declaration = case declaration of
 -- shared operation owns prenex traversal, capture avoidance, and context
 -- order; this adapter supplies only the flexible-binder policy, finite tagged
 -- allocator, and historical error vocabulary. A forall below another type
--- boundary remains visible to the existing rank-N omission boundary.
+-- boundary is deliberately preserved; the search engine later treats that
+-- complete polytype as one opaque atom.
 implicitizeExferenceForalls
   :: Set.Set SynthesisVariable
   -> SharedType.Type SynthesisVariable

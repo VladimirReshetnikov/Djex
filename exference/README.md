@@ -206,9 +206,10 @@ There is no longer a structural conversion API: `QualifiedName`, `HsType`, and
 `HsConstraint` already are the shared values, so the merger-only identity
 projections would falsely imply a representation boundary. `toSynthesisType`
 and `fromSynthesisType` both call the foundation's single checked
-`normalizeType` boundary, then reject rigid forall binders rather than
-weakening them during lowering. The unifier consumes that same checked
-normalization before changing to its applicative higher-kinded view.
+`normalizeType` boundary over the complete tree, including explicit foralls.
+The unifier consumes that same checked normalization before changing ordinary
+structure to its applicative higher-kinded view; each quantified subtree is
+instead lowered to the shared opaque `TypeAtom` representation.
 The checked constraint operations validate the class namespace and normalize
 their argument types without reconstructing the outer constraint. Because
 `HsType` inherits the shared structural `Show` instance, diagnostics and other
@@ -222,11 +223,12 @@ validator runs during live search sealing, so neither path can resolve an
 ambiguous name by list order. It also validates unused function and constructor
 names through the shared generated-syntax boundary, and rejects unbound or
 duplicate local identities before its inference map can hide a malformed
-pattern. Unsupported nested quantifiers are rejected across unused bindings,
-datatype fields, the complete class/instance environment, expected
-constraints, and generated annotations rather than only when inference happens
-to reach them. The checker uses the same higher-kinded view of structural
-functions and tuples as search, while tuple complexity replays the historical
+pattern. Rank-N occurrences are validated across unused bindings, datatype
+fields, the complete class/instance environment, expected constraints, and
+generated annotations rather than only when inference happens to reach them.
+The checker and search use the same opaque, alpha-aware unifier, so neither can
+erase or decompose a quantified body. They also share the higher-kinded view of
+structural functions and tuples, while tuple complexity replays the historical
 left-associated constructor/application accumulation exactly so floating-point
 rounding and saturation cannot perturb queue order.
 
@@ -452,8 +454,8 @@ from a parser-independent
 `ExferenceEnvironment = Environment ExferenceTypeVariable Void ()`. Both paths
 use the annotation-polymorphic `prepareSynthesisInventory` boundary to prepare
 the shared inventory and synonym table, then seal one core search
-projection, and report unsupported rank-N or recursive-data elimination
-capabilities structurally; the source path preserves its historical ratings
+projection, and report recursive-data elimination limitations structurally;
+the source path preserves its historical ratings
 and equal-cost order. Its explicit `prepareSourceSynthesisInventory` refinement
 also copies alias-aware recursion into the retained source annotations; there
 is no separate neutral Inventory type or preparation API. The CLI parses
@@ -461,8 +463,9 @@ requests through that session; a
 query whose proper-type obligation conflicts with retained constructor or
 class kinds cannot reach heuristic search.
 
-The executable no longer rebuilds an `ExferenceInput`, repeats rank-N filters,
-or consumes legacy tuple chunks. It maps flags to `ExferenceOptions`, calls
+The executable no longer rebuilds an `ExferenceInput`, maintains a second
+rank-N filter, or consumes legacy tuple chunks. It maps flags to
+`ExferenceOptions`, calls
 `runExferenceQuery`, applies the backend-neutral shared selection policies, and
 renders the resulting shared candidates. The historical `exference` command
 and merged `djex exference` command now consume one checked command-session
@@ -721,9 +724,11 @@ hidden session state.
 
 Symmetric unification keeps goal and provider variables tagged until the final
 projection, so substitutions returned for either side are closed even when the
-two inputs reuse numeric IDs.  The independent checker consumes every prenex
-`forall` layer with the same rigid-ID order as search, and type rendering uses
-one source-name map for quantifiers, constraints, and body occurrences.
+two inputs reuse numeric IDs. The root query's prenex `forall` layers use the
+same rigid-ID order in search and the independent checker. Quantifiers reached
+under an arrow, constructor, tuple, constraint, or spawned search goal remain
+opaque, and type rendering uses one capture-safe source-name plan for
+quantifiers, constraints, and body occurrences.
 
 The status-bearing search API is `findExpressionsWithStatsEither`. It retains
 structured input failures and distinguishes a genuinely exhausted search space
@@ -731,8 +736,8 @@ from a step-limited search and one made incomplete by queue/depth pruning. The
 validator also rejects negative step counts for delayed constraint solving,
 rather than accepting a setting whose threshold can never be reached. It checks
 every goal, binding, deconstructor, and explicit constraint argument through
-the shared type vocabulary, including rank-N occurrences in function contexts
-that the historical filter overlooked. It is retained for historical clients
+the shared type vocabulary. Rank-N occurrences that the historical filter
+overlooked are now retained as opaque atoms. It is retained for historical clients
 that require raw expressions and compatibility status values; new core code
 should use `findQueryResultsInEnvironmentEither`, whose private checked engine batches
 provide exact shared progress without reinterpreting raw status. Neither API
@@ -831,10 +836,12 @@ any / the right solution. Some common current limitations are:
   `-c` / `--patternMatchMC`, but can reduce performance significantly for
   non-trivial queries. It is intentionally not part of the default search
   policy while that branch of the core algorithm remains expensive.
-- Chains of outer (prenex) `forall`s are supported. Rank-N positions are
-  rejected conservatively; the historical implementation erased some nested
-  quantifiers during unification, which was not a sound implementation of
-  subsumption.
+- Chains of outer (prenex) `forall`s are opened only at the query root. Nested
+  rank-N positions and impredicative constructor arguments are supported as
+  inert `TypeAtom`s, shared with Djinn. Their quantified bodies compare modulo
+  lexical alpha-renaming but are never decomposed by unification. This does not
+  implement higher-rank subsumption or visible type application; it replaces
+  the historical unsound behavior that erased some nested quantifiers.
 
 ## Other known (technical) issues
 

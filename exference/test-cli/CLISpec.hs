@@ -28,7 +28,7 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "the shipped environment supports identity search" testIdentity
   , testCase "parse failures are controlled diagnostics" testParseFailure
   , testCase "ill-kinded queries stop before search" testKindFailure
-  , testCase "invalid searches never enter reporting modes" testInvalidSearch
+  , testCase "rank-N queries synthesize through opaque atoms" testRankNSearch
   , testCase "invalid verbosity is a controlled usage error" testInvalidVerbosity
   , testCase "out-of-range verbosity cannot wrap" testVerbosityComponentOverflow
   , testCase "repeated verbosity cannot overflow" testVerbosityOverflow
@@ -94,7 +94,7 @@ testIdentity = do
   -- instead of assuming that an unqualified Prelude.id is available.
   assertContains "identity should be synthesized" "\\a -> a" output
   assertContains "candidate metrics should describe the emitted queue state"
-    "(depth 0.42000000000000004, 3 steps, 145 final queue size)" output
+    "(depth 0.42000000000000004, 3 steps, 149 final queue size)" output
   assertBool "a final queue size must not be reported as a historical maximum"
     (not $ "max pqueue size" `isInfixOf` output)
   assertBool "the adapter's internal clause target must stay hidden"
@@ -118,14 +118,13 @@ testKindFailure = do
   assertBool "ill-kinded input must not enter search"
     (not $ "[selecting" `isInfixOf` output)
 
-testInvalidSearch :: Assertion
-testInvalidSearch = do
-  (output, errors) <- runExferenceFailure
-    ["--envUsage", "(forall a. a) -> Int"]
-  assertContains "rank-N input should fail at the checked search boundary"
-    "NestedForallInGoal" errors
-  assertBool "environment-usage reporting must not evaluate an empty trace"
-    (not $ "Prelude.last" `isInfixOf` output)
+testRankNSearch :: Assertion
+testRankNSearch = do
+  output <- runExference
+    ["--first", "(forall a. a -> a) -> (forall b. b -> b)"]
+  assertContains "rank-N identity should use its opaque argument" "\\" output
+  assertBool "rank-N input was rejected at the checked search boundary"
+    (not $ "NestedForall" `isInfixOf` output)
 
 testInvalidVerbosity :: Assertion
 testInvalidVerbosity = do

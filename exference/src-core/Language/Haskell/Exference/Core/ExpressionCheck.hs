@@ -1,9 +1,9 @@
 -- | Independent validation of Exference's typed generated expressions.
 --
--- This module deliberately reconstructs types without trusting the search
--- tree. Raw environments cross the same binding-identity and deconstructor
--- checks as live search before any name lookup, so a successful check cannot
--- depend on which duplicate declaration happened to appear first.
+-- This module reconstructs types without trusting the search tree. It shares
+-- the pure unification kernel so opaque-polytype semantics cannot drift, while
+-- raw environments still cross binding-identity and deconstructor checks
+-- independently before any name lookup.
 module Language.Haskell.Exference.Core.ExpressionCheck
   ( ExpressionCheckError (..)
   , ExpressionCheckContext
@@ -31,6 +31,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.RigidInstantiation
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.Unify (unifyShared)
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -44,6 +45,8 @@ data ExpressionCheckError
   | PatternArity QualifiedName Int Int
   | TypeMismatch HsType HsType
   | InfiniteType TVarId HsType
+  -- | Legacy compatibility constructor. Rank-N types are accepted and the
+  -- checker no longer produces this error.
   | UnsupportedNestedForall HsType
   | RefutableConstraints [HsConstraint]
   | ConstraintMismatch [HsConstraint] [HsConstraint]
@@ -83,8 +86,8 @@ type VariableEnvironment = IntMap.IntMap HsType
 type Check a = StateT CheckState (Either ExpressionCheckError) a
 
 -- | Independently reconstruct and check a generated expression. This checker
--- does not reuse the search unifier or node transformations; it sees only the
--- final expression, the declared environment, and the requested type.
+-- sees only the final expression, declared environment, and requested type; it
+-- reuses no search node or transformation state.
 checkExpression
   :: QueryClassEnv
   -> [FunctionBinding]
@@ -384,15 +387,11 @@ validateCheckInputs classEnvironment functions deconstructors goal expected
     $ Set.toAscList
     $ qClassEnv_constraints classEnvironment
   mapM_ (validateCheckFunction classEnvironment) functions
-  mapM_ validateCheckDeconstructorTypes deconstructors
+  mapM_ (validateCheckDeconstructorTypes classEnvironment) deconstructors
   validateExpressionPatternArities
     (constructorArityIndex deconstructors) expression
   mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
     $ expressionTypedLocals expression
-  case firstUnsupportedForall rawEnvironment classEnvironment goal expected
-      expression of
-    Nothing -> Right ()
-    Just quantified -> Left $ UnsupportedNestedForall quantified
   mapM_ validateCheckDeconstructor deconstructors
   validateGeneratedExpression expression
  where
@@ -417,11 +416,7 @@ validateCheckContextInputs classEnvironment functions deconstructors goal = do
   mapM_ (validateCheckConstraint classEnvironment QueryConstraint)
     $ Set.toAscList $ qClassEnv_constraints classEnvironment
   mapM_ (validateCheckFunction classEnvironment) functions
-  mapM_ validateCheckDeconstructorTypes deconstructors
-  case firstUnsupportedForall rawEnvironment classEnvironment goal []
-      (ExpHole 0) of
-    Nothing -> Right ()
-    Just quantified -> Left $ UnsupportedNestedForall quantified
+  mapM_ (validateCheckDeconstructorTypes classEnvironment) deconstructors
   mapM_ validateCheckDeconstructor deconstructors
  where
   rawEnvironment = EnvDictionary
@@ -439,9 +434,6 @@ validateCheckCandidateInputs
   validateExpressionPatternArities constructorArities expression
   mapM_ (validateCheckType classEnvironment QueryConstraint . snd)
     $ expressionTypedLocals expression
-  case firstCandidateForall expected expression of
-    Nothing -> Right ()
-    Just quantified -> Left $ UnsupportedNestedForall quantified
   validateGeneratedExpression expression
 
 validateCheckEnvironmentIdentity
@@ -540,19 +532,22 @@ validateCheckFunction classEnvironment binding = do
   site = BindingConstraint $ functionName binding
 
 validateCheckDeconstructorTypes
-  :: DeconstructorBinding
+  :: QueryClassEnv
+  -> DeconstructorBinding
   -> Either ExpressionCheckError ()
-validateCheckDeconstructorTypes = mapM_ validateType
-  . deconstructorBindingTypes
+validateCheckDeconstructorTypes classEnvironment deconstructor = do
+  validateType inputSite $ deconstructorInput deconstructor
+  mapM_ validateConstructor $ deconstructorConstructors deconstructor
  where
-  validateType typeExpression = do
-    SharedType.validateTypeWidthsWith
-      (InvalidCheckType typeExpression . InvalidSynthesisType)
-      (const $ Left $ UnsupportedNestedForall typeExpression)
-      typeExpression
-    case toSynthesisType typeExpression of
-      Left failure -> Left $ InvalidCheckType typeExpression failure
-      Right _ -> Right ()
+  inputSite = maybe QueryConstraint BindingConstraint
+    $ typeConstructorHead $ deconstructorInput deconstructor
+  validateConstructor constructor = mapM_
+    (validateType $ BindingConstraint $ constructorName constructor)
+    $ constructorFields constructor
+  validateType site typeExpression = do
+    validateCheckType classEnvironment site typeExpression
+    validateCheckClassConstraints classEnvironment site
+      $ typeConstraints typeExpression
 
 validateCheckDeconstructor
   :: DeconstructorBinding
@@ -624,48 +619,6 @@ validateExpressionPatternArities constructorArities = inspectExpression
     SharedGenerated.TuplePattern elements -> mapM_ inspectPattern elements
     SharedGenerated.As _ nested -> inspectPattern nested
 
-firstCandidateForall :: [HsConstraint] -> Expression -> Maybe HsType
-firstCandidateForall expected expression = SharedCollection.firstPresent
-  [ firstConstraintForall expected
-  , firstTypeForall $ map snd $ expressionTypedLocals expression
-  ]
- where
-  firstTypeForall = SharedCollection.firstPresent
-    . map SharedType.firstForallType
-  firstConstraintForall = firstTypeForall
-    . concatMap constraint_params
-
--- Search supports a leading prenex query spine, but every environment binding,
--- constraint argument, and generated local annotation must be a monotype.
--- Inspect the complete raw environment even when the expression does not use
--- a declaration: otherwise checking could certify a value for an environment
--- that the search boundary itself cannot seal.
-firstUnsupportedForall
-  :: EnvDictionary
-  -> QueryClassEnv
-  -> HsType
-  -> [HsConstraint]
-  -> Expression
-  -> Maybe HsType
-firstUnsupportedForall environment classEnvironment goal expected expression =
-  SharedCollection.firstPresent
-    [ if containsNestedForall goal then Just goal else Nothing
-    , firstTypeForall $ map functionBindingType
-        $ environmentFunctions environment
-    , firstTypeForall $ map deconstructorBindingType
-        $ environmentDeconstructors environment
-    , firstConstraintForall $ map snd $ environmentConstraints environment
-    , firstConstraintForall expected
-    , firstConstraintForall $ Set.toAscList
-        $ qClassEnv_constraints classEnvironment
-    , firstTypeForall $ map snd $ expressionTypedLocals expression
-    ]
- where
-  firstTypeForall = SharedCollection.firstPresent
-    . map SharedType.firstForallType
-  firstConstraintForall = firstTypeForall
-    . concatMap constraint_params
-
 throwCheck :: ExpressionCheckError -> Check a
 throwCheck = lift . Left
 
@@ -699,25 +652,10 @@ unifyTypes :: HsType -> HsType -> Check ()
 unifyTypes left right = do
   left' <- zonk $ SharedType.canonicalizeType left
   right' <- zonk $ SharedType.canonicalizeType right
-  case SharedType.firstForallType left' of
-    Just quantified -> throwCheck $ UnsupportedNestedForall quantified
-    Nothing -> pure ()
-  case SharedType.firstForallType right' of
-    Just quantified -> throwCheck $ UnsupportedNestedForall quantified
-    Nothing -> pure ()
-  case ( SharedType.constructorApplicationForm left'
-       , SharedType.constructorApplicationForm right'
-       ) of
-    (leftForm, rightForm) | leftForm == rightForm -> pure ()
-    (TypeVar variable, ty) -> bindVariable variable ty
-    (ty, TypeVar variable) -> bindVariable variable ty
-    (TypeApp leftFunction leftArgument, TypeApp rightFunction rightArgument) ->
-      unifyTypes leftFunction rightFunction >> unifyTypes leftArgument rightArgument
-    (TypeTuple leftBoxity leftElements, TypeTuple rightBoxity rightElements)
-      | leftBoxity == rightBoxity
-      , length leftElements == length rightElements ->
-          mapM_ (uncurry unifyTypes) $ zip leftElements rightElements
-    _ -> throwCheck $ TypeMismatch left' right'
+  case unifyShared left' right' of
+    Nothing -> throwCheck $ TypeMismatch left' right'
+    Just substitutions -> mapM_ (uncurry bindVariable)
+      $ IntMap.toAscList substitutions
 
 bindVariable :: TVarId -> HsType -> Check ()
 bindVariable variable ty

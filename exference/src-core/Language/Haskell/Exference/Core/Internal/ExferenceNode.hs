@@ -3,6 +3,7 @@
 
 module Language.Haskell.Exference.Core.Internal.ExferenceNode
   ( SearchNode (..)
+  , ForallGoalMode (..)
   , TGoal (..)
   , Scopes
   , ScopeId
@@ -42,11 +43,9 @@ import GHC.Generics
 data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
  deriving (Generic)
 
--- | A scoped variable together with the arrow decomposition of its monotype.
--- Checked query and environment entry points reject nested foralls before a
--- search node exists; function constraints live in 'nodeConstraintGoals', not
--- on lexical values. Keeping only these three fields makes that invariant
--- structural inside the search state.
+-- | A scoped variable together with the exposed arrow prefix of its type.
+-- Any quantified parameter or result stays intact as an opaque atom; function
+-- constraints live in 'nodeConstraintGoals', not on lexical values.
 data VarPBinding = VarPBinding
   { varPVariable :: !TVarId
   , varPResult :: HsType
@@ -99,10 +98,18 @@ requireValidScopes = either
   (error . ("Exference internal scope invariant violated: " ++) . show)
   id
 
+-- | Whether an outer forall on a goal is the query's prenex scheme or an
+-- opaque rank-N value reached below a type constructor or arrow.
+data ForallGoalMode
+  = OpenLeadingForalls
+  | KeepForallsOpaque
+  deriving (Eq, Generic)
+
 -- | An expression hole and the innermost lexical scope visible from it.
 data TGoal = TGoal
   { goalBinding :: VarBinding
   , goalScope :: !ScopeId
+  , goalForallMode :: !ForallGoalMode
   }
   deriving Generic
 
@@ -116,7 +123,7 @@ goalApplySubst ss | IntMap.null ss = id
 mkGoals :: ScopeId
         -> [VarBinding]
         -> [TGoal]
-mkGoals sid = map (`TGoal` sid)
+mkGoals sid = map (\binding -> TGoal binding sid KeepForallsOpaque)
 
 data SearchNode = SearchNode
   { nodeGoals           :: Seq TGoal
@@ -143,24 +150,20 @@ data SearchNode = SearchNode
 
 instance NFData VarBinding
 instance NFData VarPBinding
+instance NFData ForallGoalMode
 instance NFData TGoal
 instance NFData SearchNode
 
 splitBinding :: VarBinding -> VarPBinding
 splitBinding = splitBindingWithParameters []
 
--- | Split a scoped monotype while retaining parameters already exposed by an
+-- | Split a scoped value while retaining parameters already exposed by an
 -- earlier partial application. Substitution can turn the stored result into
--- another arrow, so every construction path comes through this helper.
+-- another arrow, so every construction path comes through this helper. A
+-- quantified result is retained whole and later unified as an opaque atom.
 splitBindingWithParameters :: [HsType] -> VarBinding -> VarPBinding
-splitBindingWithParameters previousParameters (VarBinding variable ty)
-  | any containsForall $ ty : previousParameters = error
-      $ "Exference internal scoped binding contains a forall: "
-      ++ show (previousParameters, ty)
-  | otherwise = VarPBinding variable result
-      $ previousParameters ++ parameters
+splitBindingWithParameters previousParameters (VarBinding variable ty) =
+  VarPBinding variable result $ previousParameters ++ parameters
  where
-  -- The guard establishes the monotype invariant once. Splitting the arrow
-  -- chain directly avoids both needless alpha-normalization and an impossible
-  -- second failure branch for quantifiers or constraints.
+  -- Quantifiers below this arrow chain remain in the result or a parameter.
   (result, parameters) = splitArrowChain ty

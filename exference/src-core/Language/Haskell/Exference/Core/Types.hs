@@ -77,9 +77,11 @@ where
 
 import Data.Bifunctor (first)
 import Data.Char ( ord, chr, toLower )
-import Data.Foldable (traverse_)
+import Data.Foldable (toList, traverse_)
+import Data.Functor.Identity (Identity (..))
 import Data.Graph (SCC (..), stronglyConnComp)
 import Data.Monoid ( Any(..) )
+import Numeric.Natural (Natural)
 
 import qualified Data.Set as S
 import qualified Data.Map.Strict as M
@@ -94,6 +96,7 @@ import Language.Haskell.Exference.Core.Name
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
+import qualified Language.Haskell.Synthesis.Fresh as SharedFresh
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import Language.Haskell.Synthesis.Name (Boxity (..))
 import Language.Haskell.Synthesis.Qualification (Qualification (FullyQualified))
@@ -101,6 +104,7 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeRender as SharedRender
 
 import Control.DeepSeq
+import Control.Monad.Trans.State.Strict (State, get, put, runState)
 import GHC.Generics
 
 
@@ -802,9 +806,11 @@ showHsTypeWithQualification
   -> TypeVarIndex
   -> HsType
   -> String
-showHsTypeWithQualification qualification sourceNames =
-  SharedRender.renderTypeWithQualification qualification
-    $ sourceVariableName sourceNames
+showHsTypeWithQualification qualification sourceNames source = case
+    sourceRenderingPlan sourceNames $ Identity source of
+  (Identity scopedSource, renderVariable) ->
+    SharedRender.renderTypeWithQualification qualification renderVariable
+      scopedSource
 
 -- instance Read HsType where
 --   readsPrec _ = maybeToList . parseType
@@ -812,31 +818,169 @@ showHsTypeWithQualification qualification sourceNames =
 showHsConstraint :: TypeVarIndex
                  -> HsConstraint
                  -> String
-showHsConstraint sourceNames = SharedRender.renderConstraint
-  (sourceVariableName sourceNames)
+showHsConstraint sourceNames source = case
+    sourceRenderingPlan sourceNames source of
+  (scopedSource, renderVariable) ->
+    SharedRender.renderConstraint renderVariable scopedSource
 
 defaultVariableName :: SynthesisVariable -> String
 defaultVariableName variable = case variable of
   SharedType.FlexibleVariable identifier -> showVar identifier
   SharedType.RigidVariable identifier -> "C" ++ showVar identifier
 
--- The parser index is spelling-to-ID because name lookup is its primary job.
--- Rendering reverses it once, retaining the lexicographically first spelling
--- if a caller supplies multiple aliases for one ID (the historical behavior).
-sourceVariableName
-  :: TypeVarIndex
-  -> SynthesisVariable
-  -> String
-sourceVariableName sourceNames = renderVariable
+-- The raw shared tree identifies variables by engine ID.  That is sufficient
+-- for inference, but source conversion may reuse an ID in a nested lexical
+-- scope before its alpha-normalization pass assigns the inner binder a fresh
+-- ID.  Rendering must therefore distinguish binder occurrences by scope as
+-- well as by ID; otherwise a generated fallback can capture a free source
+-- spelling (for example, an inner default @c@ and a free source variable @c@).
+data SourceRenderVariable
+  = SourceRenderFree !SynthesisVariable
+  | SourceRenderBound !Natural !Natural
+  deriving (Eq, Ord)
+
+data SourceRenderState = SourceRenderState
+  { sourceRenderNextScope :: !Natural
+  , sourceRenderOriginalVariables
+      :: !(M.Map SourceRenderVariable SynthesisVariable)
+  }
+
+-- Alpha identities intentionally discard source provenance. Rendering needs
+-- the opposite combination: lexical identities for safety, plus each source
+-- ID for spelling hints. Keep that naming plan separate from semantic alpha
+-- comparison and share it across both complete types and constraints.
+sourceRenderingPlan
+  :: Traversable container
+  => TypeVarIndex
+  -> container HsType
+  -> ( container (SharedType.Type SourceRenderVariable)
+     , SourceRenderVariable -> String
+     )
+sourceRenderingPlan sourceNames source = (scopedSource, renderVariable)
  where
-  preferredNames = preferredSourceTypeVariableNames $ M.toList sourceNames
-  -- This raw compatibility map predates tagged variables and has only one
-  -- numeric key space. Stable candidate hints use separate tagged keys; this
-  -- renderer is the intentional legacy boundary where the tag is erased.
-  renderVariable variable = IntMap.findWithDefault
-    (defaultVariableName variable)
-    (SharedType.variableIdentity variable)
-    preferredNames
+  (scopedSource, finalState) = runState
+    (traverse (scopeRenderTypeWith M.empty) source)
+    (SourceRenderState 0 M.empty)
+  originalVariables = sourceRenderOriginalVariables finalState
+  variableNames = allocateSourceVariableNames sourceNames originalVariables
+    $ foldMap toList scopedSource
+  renderVariable variable = M.findWithDefault
+    (renderVariableFallback originalVariables variable)
+    variable variableNames
+
+scopeRenderTypeWith
+  :: M.Map SynthesisVariable SourceRenderVariable
+  -> HsType
+  -> State SourceRenderState (SharedType.Type SourceRenderVariable)
+scopeRenderTypeWith bindings source = case source of
+  SharedType.TypeVariable original -> do
+    let scoped = M.findWithDefault (SourceRenderFree original)
+          original bindings
+    rememberSourceRenderVariable scoped original
+    pure $ SharedType.TypeVariable scoped
+  SharedType.TypeConstructor constructor ->
+    pure $ SharedType.TypeConstructor constructor
+  SharedType.TypeApplication function argument ->
+    SharedType.TypeApplication
+      <$> scopeRenderTypeWith bindings function
+      <*> scopeRenderTypeWith bindings argument
+  SharedType.FunctionType parameter result -> SharedType.FunctionType
+    <$> scopeRenderTypeWith bindings parameter
+    <*> scopeRenderTypeWith bindings result
+  SharedType.TupleType boxity elements -> SharedType.TupleType boxity
+    <$> mapM (scopeRenderTypeWith bindings) elements
+  SharedType.ForallType variables constraints body -> do
+    scope <- allocateSourceRenderScope
+    let scopedVariables = zipWith
+          (\position _ -> SourceRenderBound scope position)
+          [0 ..] variables
+        nestedBindings = M.fromList (zip variables scopedVariables)
+          `M.union` bindings
+    mapM_ (uncurry rememberSourceRenderVariable)
+      $ zip scopedVariables variables
+    scopedConstraints <- mapM
+      (traverse $ scopeRenderTypeWith nestedBindings) constraints
+    scopedBody <- scopeRenderTypeWith nestedBindings body
+    pure $ SharedType.ForallType scopedVariables scopedConstraints scopedBody
+
+allocateSourceRenderScope :: State SourceRenderState Natural
+allocateSourceRenderScope = do
+  current <- get
+  let scope = sourceRenderNextScope current
+  put current {sourceRenderNextScope = scope + 1}
+  pure scope
+
+rememberSourceRenderVariable
+  :: SourceRenderVariable
+  -> SynthesisVariable
+  -> State SourceRenderState ()
+rememberSourceRenderVariable scoped original = do
+  current <- get
+  put current
+    { sourceRenderOriginalVariables = M.insert scoped original
+        $ sourceRenderOriginalVariables current
+    }
+
+-- Assign names over the complete rendered tree, not independently at each
+-- occurrence.  Real source hints are reserved first, so a generated fallback
+-- can never steal a spelling which belongs to a later free variable.
+allocateSourceVariableNames
+  :: TypeVarIndex
+  -> M.Map SourceRenderVariable SynthesisVariable
+  -> [SourceRenderVariable]
+  -> M.Map SourceRenderVariable String
+allocateSourceVariableNames sourceNames originalVariables variables = names
+ where
+  orderedVariables = SharedCollection.distinctOn id variables
+  preferredNames = preferredSourceTypeVariableNames
+    [ (validSpelling, variable)
+    | (spelling, variable) <- M.toList sourceNames
+    , Just validSpelling <- [validSourceVariableName spelling]
+    ]
+  (hintedNames, hintedSpellings) = L.foldl' reserveHint
+    (M.empty, S.empty) orderedVariables
+  (names, _) = L.foldl' allocateFallback
+    (hintedNames, hintedSpellings) orderedVariables
+
+  sourceHint variable = do
+    original <- M.lookup variable originalVariables
+    IntMap.lookup
+      (SharedType.variableIdentity original) preferredNames
+
+  preferredBase variable = case sourceHint variable of
+    Just spelling -> spelling
+    Nothing -> renderVariableFallback originalVariables variable
+
+  reserveHint state@(assigned, used) variable = case sourceHint variable of
+    Just spelling
+      | S.notMember spelling used ->
+          (M.insert variable spelling assigned, S.insert spelling used)
+    _ -> state
+
+  allocateFallback state@(assigned, used) variable
+    | M.member variable assigned = state
+    | otherwise =
+        let spelling = SharedFresh.selectFresh (++ "'") used
+              $ preferredBase variable
+        in (M.insert variable spelling assigned, S.insert spelling used)
+
+renderVariableFallback
+  :: M.Map SourceRenderVariable SynthesisVariable
+  -> SourceRenderVariable
+  -> String
+renderVariableFallback originalVariables variable = case
+    M.lookup variable originalVariables of
+  Just original -> defaultVariableName original
+  Nothing -> "v0"
+
+validSourceVariableName :: String -> Maybe String
+validSourceVariableName spelling
+  | spelling == "_" || spelling == "family" = Nothing
+  | otherwise = case SharedName.mkIdentifier spelling of
+      Right identifier
+        | SharedName.nameLexicalClass identifier == SharedName.VariableLike ->
+            Just spelling
+      _ -> Nothing
 
 instance Show QueryClassEnv where
   show (QueryClassEnv _ cs _) = "(QueryClassEnv _ " ++ show cs ++ " _)"

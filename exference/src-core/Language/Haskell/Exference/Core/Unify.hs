@@ -16,18 +16,23 @@ module Language.Haskell.Exference.Core.Unify
   )
 where
 
+import Control.Monad (foldM)
+import Control.Monad.Trans.State.Strict (StateT (..), evalStateT, get, put)
 import qualified Data.IntMap.Strict as IntMap
-import Data.Maybe (mapMaybe)
+import Data.Maybe (catMaybes)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Internal.VariableSupply
-  ( checkedAddIdentifier
+  ( allocateFreshIdentifier
+  , checkedAddIdentifier
+  , freshSynthesisVariable
   , supplyFromIdentifiers
   )
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
 data TypeEq = TypeEq !HsType !HsType
 
@@ -76,9 +81,10 @@ unifyShared rawLeft rawRight = do
   let variables = Set.toAscList $ Set.union
         (freeVars left)
         (freeVars right)
-  pure $ IntMap.fromList $ mapMaybe
+  projected <- mapM
     (projectVariableBinding plainIdentifier substitutions LeftVariable)
     variables
+  pure $ IntMap.fromList $ catMaybes projected
 
 {-# INLINE unifyOffset #-}
 unifyOffset :: HsType -> HsTypeOffset -> Maybe (Substs, Substs)
@@ -94,6 +100,16 @@ data TaggedVariable
   | RightVariable !TVarId
   deriving (Eq, Ord)
 
+-- Variables inside an opaque polytype retain both distinctions that ordinary
+-- tagged nodes encode structurally: flexible variables belong to the left or
+-- right unification namespace, while rigid variables are nominal constants
+-- shared by both sides. Bound variables use the same representation in the
+-- retained source tree, but 'TypeAtom' removes their spelling from equality.
+data TaggedAtomVariable
+  = TaggedAtomFlexible !TaggedVariable
+  | TaggedAtomRigid !TVarId
+  deriving (Eq, Ord)
+
 -- Structural functions and constructor-backed tuples deliberately use the
 -- same applicative kernel as their intrinsic constructors. Besides making the
 -- two shared source spellings equivalent, this preserves higher-kinded
@@ -107,13 +123,12 @@ data TaggedType
   | TaggedConstructor !QualifiedName
   | TaggedApplication !TaggedType !TaggedType
   | TaggedTuple !Boxity ![TaggedType]
+  | TaggedOpaquePolytype !(SharedTypeAtom.TypeAtom TaggedAtomVariable)
   deriving (Eq)
 
 type TaggedSubstitutions = Map.Map TaggedVariable TaggedType
 
 -- | Canonicalize and structurally validate every public unifier input.
--- Quantifiers are rejected separately by 'tagType', including a forall nested
--- in a tuple or application and a native forall with rigid binders.
 canonicalUnificationType :: HsType -> Maybe HsType
 canonicalUnificationType = either (const Nothing) Just
   . SharedType.normalizeType
@@ -131,10 +146,27 @@ tagType side = tag . SharedType.constructorApplicationForm
     -- The shared applicative view leaves unary unboxed tuples structural
     -- because Haskell has no corresponding unary constructor.
     TypeTuple boxity elements -> TaggedTuple boxity <$> mapM tag elements
-    -- Higher-rank subsumption requires skolemization and escape checks.
-    -- Conservatively reject every native forall instead of erasing binders or
-    -- accidentally accepting the match-only legacy 'TypeForall' view.
-    TypeForallNative{} -> Nothing
+    -- A quantified subterm is one first-order atom. The solver may bind a
+    -- metavariable to the whole value, but never generates equations from its
+    -- context or body. This is enough for impredicative constructor arguments
+    -- without introducing higher-rank subsumption.
+    quantified@TypeForallNative{} -> case SharedTypeAtom.mkTypeAtom quantified of
+      Right sourceAtom -> TaggedOpaquePolytype <$> either (const Nothing) Just
+        (SharedTypeAtom.mapTypeAtomVariables
+          (tagAtomVariable side) sourceAtom)
+      -- A vacuous forall is textually and semantically transparent. The shared
+      -- atom constructor erases it and returns the remaining monotype.
+      Left (SharedTypeAtom.MonomorphicTypeAtom monotype) -> tag monotype
+      Left _ -> Nothing
+
+tagAtomVariable
+  :: (TVarId -> TaggedVariable)
+  -> SynthesisVariable
+  -> TaggedAtomVariable
+tagAtomVariable side variable = case variable of
+  SharedType.FlexibleVariable identifier ->
+    TaggedAtomFlexible $ side identifier
+  SharedType.RigidVariable identifier -> TaggedAtomRigid identifier
 
 solveTagged
   :: (TaggedVariable -> Bool)
@@ -142,46 +174,61 @@ solveTagged
   -> TaggedSubstitutions
   -> Maybe TaggedSubstitutions
 solveTagged _ [] substitutions = Just substitutions
-solveTagged bindable ((rawLeft, rawRight) : equations) substitutions
-  | left == right = solveTagged bindable equations substitutions
-  | TaggedVar variable <- right
-  , bindable variable = bindTagged variable left
-  | TaggedVar variable <- left
-  , bindable variable = bindTagged variable right
-  | TaggedConstant leftConstant <- left
-  , TaggedConstant rightConstant <- right
-  , leftConstant == rightConstant =
-      solveTagged bindable equations substitutions
-  | TaggedConstructor leftConstructor <- left
-  , TaggedConstructor rightConstructor <- right
-  , leftConstructor == rightConstructor =
-      solveTagged bindable equations substitutions
-  | TaggedApplication leftFunction leftArgument <- left
-  , TaggedApplication rightFunction rightArgument <- right =
-      solveTagged bindable
-        ((leftFunction, rightFunction) : (leftArgument, rightArgument) : equations)
-        substitutions
-  | TaggedTuple leftBoxity leftElements <- left
-  , TaggedTuple rightBoxity rightElements <- right
-  , leftBoxity == rightBoxity
-  , length leftElements == length rightElements =
-      solveTagged bindable
-        (zip leftElements rightElements ++ equations)
-        substitutions
-  | otherwise = Nothing
+solveTagged bindable ((rawLeft, rawRight) : equations) substitutions = do
+  left <- zonkTagged substitutions rawLeft
+  right <- zonkTagged substitutions rawRight
+  solveCurrent left right
  where
-  left = zonkTagged substitutions rawLeft
-  right = zonkTagged substitutions rawRight
+  solveCurrent left right
+    | left == right = solveTagged bindable equations substitutions
+    | TaggedVar variable <- right
+    , bindable variable = bindTagged variable left
+    | TaggedVar variable <- left
+    , bindable variable = bindTagged variable right
+    | TaggedConstant leftConstant <- left
+    , TaggedConstant rightConstant <- right
+    , leftConstant == rightConstant =
+        solveTagged bindable equations substitutions
+    | TaggedConstructor leftConstructor <- left
+    , TaggedConstructor rightConstructor <- right
+    , leftConstructor == rightConstructor =
+        solveTagged bindable equations substitutions
+    | TaggedApplication leftFunction leftArgument <- left
+    , TaggedApplication rightFunction rightArgument <- right =
+        solveTagged bindable
+          ((leftFunction, rightFunction)
+            : (leftArgument, rightArgument) : equations)
+          substitutions
+    | TaggedTuple leftBoxity leftElements <- left
+    , TaggedTuple rightBoxity rightElements <- right
+    , leftBoxity == rightBoxity
+    , length leftElements == length rightElements =
+        solveTagged bindable
+          (zip leftElements rightElements ++ equations)
+          substitutions
+    -- Atom equality can become true after an independent outer equation
+    -- substitutes one of their free variables. Solve those equations first,
+    -- then compare the zonked atoms once; never inspect their internal shape.
+    | TaggedOpaquePolytype{} <- left
+    , TaggedOpaquePolytype{} <- right = do
+        solved <- solveTagged bindable equations substitutions
+        solvedLeft <- zonkTagged solved left
+        solvedRight <- zonkTagged solved right
+        if solvedLeft == solvedRight then Just solved else Nothing
+    | otherwise = Nothing
+
   bindTagged variable replacement
     | occursTagged variable replacement = Nothing
-    | otherwise = solveTagged bindable
-        [ ( substituteTagged variable replacement equationLeft
-          , substituteTagged variable replacement equationRight
-          )
-        | (equationLeft, equationRight) <- equations
-        ]
-        $ Map.insert variable replacement
-        $ Map.map (substituteTagged variable replacement) substitutions
+    | otherwise = do
+        substitutedEquations <- mapM
+          (\(equationLeft, equationRight) -> (,)
+            <$> substituteTagged variable replacement equationLeft
+            <*> substituteTagged variable replacement equationRight)
+          equations
+        substitutedBindings <- traverse
+          (substituteTagged variable replacement) substitutions
+        solveTagged bindable substitutedEquations
+          $ Map.insert variable replacement substitutedBindings
 
 occursTagged :: TaggedVariable -> TaggedType -> Bool
 occursTagged variable ty = case ty of
@@ -191,31 +238,97 @@ occursTagged variable ty = case ty of
   TaggedApplication function argument ->
     occursTagged variable function || occursTagged variable argument
   TaggedTuple _ elements -> any (occursTagged variable) elements
+  TaggedOpaquePolytype atom -> Set.member
+    (TaggedAtomFlexible variable) $ SharedTypeAtom.typeAtomFreeVariables atom
 
-substituteTagged :: TaggedVariable -> TaggedType -> TaggedType -> TaggedType
+substituteTagged
+  :: TaggedVariable
+  -> TaggedType
+  -> TaggedType
+  -> Maybe TaggedType
 substituteTagged variable replacement ty = case ty of
   TaggedVar candidate
-    | variable == candidate -> replacement
-    | otherwise -> ty
-  TaggedConstant{} -> ty
-  TaggedConstructor{} -> ty
+    | variable == candidate -> Just replacement
+    | otherwise -> Just ty
+  TaggedConstant{} -> Just ty
+  TaggedConstructor{} -> Just ty
   TaggedApplication function argument -> TaggedApplication
-    (substituteTagged variable replacement function)
-    (substituteTagged variable replacement argument)
+    <$> substituteTagged variable replacement function
+    <*> substituteTagged variable replacement argument
   TaggedTuple boxity elements -> TaggedTuple boxity
-    $ map (substituteTagged variable replacement) elements
+    <$> mapM (substituteTagged variable replacement) elements
+  TaggedOpaquePolytype atom
+    | TaggedAtomFlexible variable `Set.notMember`
+        SharedTypeAtom.typeAtomFreeVariables atom -> Just ty
+    | otherwise -> TaggedOpaquePolytype <$> either (const Nothing) Just
+        (SharedTypeAtom.substituteTypeAtomVariables
+          freshTaggedAtomVariable
+          Set.empty
+          (Map.singleton (TaggedAtomFlexible variable)
+            $ taggedTypeAsAtomType replacement)
+          atom)
 
-zonkTagged :: TaggedSubstitutions -> TaggedType -> TaggedType
+zonkTagged :: TaggedSubstitutions -> TaggedType -> Maybe TaggedType
 zonkTagged substitutions ty = case ty of
-  TaggedVar variable -> maybe ty (zonkTagged substitutions)
+  TaggedVar variable -> maybe (Just ty) (zonkTagged substitutions)
     $ Map.lookup variable substitutions
-  TaggedConstant{} -> ty
-  TaggedConstructor{} -> ty
+  TaggedConstant{} -> Just ty
+  TaggedConstructor{} -> Just ty
   TaggedApplication function argument -> TaggedApplication
-    (zonkTagged substitutions function)
-    (zonkTagged substitutions argument)
+    <$> zonkTagged substitutions function
+    <*> zonkTagged substitutions argument
   TaggedTuple boxity elements -> TaggedTuple boxity
-    $ map (zonkTagged substitutions) elements
+    <$> mapM (zonkTagged substitutions) elements
+  TaggedOpaquePolytype atom -> foldM substituteFree ty
+    $ Set.toAscList $ SharedTypeAtom.typeAtomFreeVariables atom
+ where
+  substituteFree current atomVariable = case atomVariable of
+    TaggedAtomRigid{} -> Just current
+    TaggedAtomFlexible variable -> case Map.lookup variable substitutions of
+      Nothing -> Just current
+      Just replacement -> do
+        resolved <- zonkTagged substitutions replacement
+        substituteTagged variable resolved current
+
+taggedTypeAsAtomType :: TaggedType -> SharedType.Type TaggedAtomVariable
+taggedTypeAsAtomType ty = case ty of
+  TaggedVar variable -> SharedType.TypeVariable
+    $ TaggedAtomFlexible variable
+  TaggedConstant identifier -> SharedType.TypeVariable
+    $ TaggedAtomRigid identifier
+  TaggedConstructor constructor -> SharedType.TypeConstructor constructor
+  TaggedApplication function argument -> SharedType.TypeApplication
+    (taggedTypeAsAtomType function) (taggedTypeAsAtomType argument)
+  TaggedTuple boxity elements -> SharedType.TupleType boxity
+    $ map taggedTypeAsAtomType elements
+  TaggedOpaquePolytype atom -> SharedTypeAtom.typeAtomType atom
+
+freshTaggedAtomVariable
+  :: Set.Set TaggedAtomVariable
+  -> TaggedAtomVariable
+  -> Maybe TaggedAtomVariable
+freshTaggedAtomVariable reserved old = wrap . fst
+  <$> allocateFreshIdentifier (supplyFromIdentifiers matchingIdentifiers)
+ where
+  (matchingIdentifiers, wrap) = case old of
+    TaggedAtomFlexible LeftVariable{} ->
+      ( [identifier
+        | TaggedAtomFlexible (LeftVariable identifier) <- Set.toList reserved
+        ]
+      , TaggedAtomFlexible . LeftVariable
+      )
+    TaggedAtomFlexible RightVariable{} ->
+      ( [identifier
+        | TaggedAtomFlexible (RightVariable identifier) <- Set.toList reserved
+        ]
+      , TaggedAtomFlexible . RightVariable
+      )
+    TaggedAtomRigid{} ->
+      ( [identifier
+        | TaggedAtomRigid identifier <- Set.toList reserved
+        ]
+      , TaggedAtomRigid
+      )
 
 projectTagged
   :: HsType
@@ -233,11 +346,14 @@ projectTagged left right substitutions = do
       externalIdentifier tagged = case tagged of
         LeftVariable variable -> variable
         RightVariable variable -> canonicalRight variable
-      project side = mapMaybe
-        $ projectVariableBinding externalIdentifier substitutions side
+      project side variables = catMaybes <$> mapM
+        (projectVariableBinding externalIdentifier substitutions side)
+        variables
+  leftBindings <- project LeftVariable leftVariables
+  rightBindings <- project RightVariable rightVariables
   pure
-    ( IntMap.fromList $ project LeftVariable leftVariables
-    , IntMap.fromList $ project RightVariable rightVariables
+    ( IntMap.fromList leftBindings
+    , IntMap.fromList rightBindings
     )
  where
   leftVariables = Set.toAscList $ freeVars left
@@ -250,14 +366,13 @@ projectVariableBinding
   -> TaggedSubstitutions
   -> (TVarId -> TaggedVariable)
   -> TVarId
-  -> Maybe (TVarId, HsType)
-projectVariableBinding identifier substitutions side variable =
-  let resolved = untagTagged identifier
-        $ zonkTagged substitutions
-        $ TaggedVar $ side variable
-  in if resolved == TypeVar variable
-     then Nothing
-     else Just (variable, resolved)
+  -> Maybe (Maybe (TVarId, HsType))
+projectVariableBinding identifier substitutions side variable = do
+  tagged <- zonkTagged substitutions $ TaggedVar $ side variable
+  resolved <- untagTagged identifier tagged
+  pure $ if resolved == TypeVar variable
+    then Nothing
+    else Just (variable, resolved)
 
 -- Both solver tags project to their numeric identity. Entry points that can
 -- only produce one tag still use this total projection, keeping the solver
@@ -267,16 +382,73 @@ plainIdentifier tagged = case tagged of
   LeftVariable variable -> variable
   RightVariable variable -> variable
 
-untagTagged :: (TaggedVariable -> TVarId) -> TaggedType -> HsType
-untagTagged variableIdentifier = SharedType.canonicalizeType . convert
+untagTagged
+  :: (TaggedVariable -> TVarId)
+  -> TaggedType
+  -> Maybe HsType
+untagTagged variableIdentifier tagged = SharedType.canonicalizeType
+  <$> convert tagged
  where
   convert ty = case ty of
-    TaggedVar variable -> TypeVar $ variableIdentifier variable
-    TaggedConstant constant -> TypeConstant constant
-    TaggedConstructor constructor -> TypeCons constructor
+    TaggedVar variable -> Just $ TypeVar $ variableIdentifier variable
+    TaggedConstant constant -> Just $ TypeConstant constant
+    TaggedConstructor constructor -> Just $ TypeCons constructor
     TaggedApplication function argument -> TypeApp
-      (convert function) (convert argument)
-    TaggedTuple boxity elements -> TypeTuple boxity $ map convert elements
+      <$> convert function <*> convert argument
+    TaggedTuple boxity elements -> TypeTuple boxity <$> mapM convert elements
+    TaggedOpaquePolytype atom -> untagTypeAtom variableIdentifier atom
+
+-- Erasing the solver-side tag is intentionally binder-aware. A bound variable
+-- from one side may have the same numeric spelling as a free variable inserted
+-- from the other; choosing binder names after reserving every mapped free name
+-- prevents projection from capturing that variable.
+untagTypeAtom
+  :: (TaggedVariable -> TVarId)
+  -> SharedTypeAtom.TypeAtom TaggedAtomVariable
+  -> Maybe HsType
+untagTypeAtom variableIdentifier atom = evalStateT
+  (convert Map.empty $ SharedTypeAtom.typeAtomType atom)
+  initialReserved
+ where
+  initialReserved = Set.map freeVariable
+    $ SharedTypeAtom.typeAtomFreeVariables atom
+
+  freeVariable atomVariable = case atomVariable of
+    TaggedAtomFlexible variable -> SharedType.FlexibleVariable
+      $ variableIdentifier variable
+    TaggedAtomRigid identifier -> SharedType.RigidVariable identifier
+
+  convert bindings source = case source of
+    SharedType.TypeVariable variable -> pure $ SharedType.TypeVariable
+      $ Map.findWithDefault (freeVariable variable) variable bindings
+    SharedType.TypeConstructor constructor -> pure
+      $ SharedType.TypeConstructor constructor
+    SharedType.TypeApplication function argument -> SharedType.TypeApplication
+      <$> convert bindings function
+      <*> convert bindings argument
+    SharedType.FunctionType parameter result -> SharedType.FunctionType
+      <$> convert bindings parameter
+      <*> convert bindings result
+    SharedType.TupleType boxity elements -> SharedType.TupleType boxity
+      <$> mapM (convert bindings) elements
+    SharedType.ForallType variables constraints body -> do
+      replacements <- mapM allocateBinder variables
+      let nestedBindings = Map.fromList (zip variables replacements)
+            `Map.union` bindings
+      SharedType.ForallType replacements
+        <$> mapM (traverse $ convert nestedBindings) constraints
+        <*> convert nestedBindings body
+
+  allocateBinder variable = do
+    reserved <- get
+    let preferred = freeVariable variable
+    replacement <- if preferred `Set.notMember` reserved
+      then pure preferred
+      else StateT $ \current -> do
+        fresh <- freshSynthesisVariable current preferred
+        pure (fresh, current)
+    put $ Set.insert replacement reserved
+    pure replacement
 
 allocateRightVariables
   :: Set.Set TVarId
@@ -298,7 +470,7 @@ unifyRightEqs rawEquations = do
   equations <- mapM canonicalEquation rawEquations
   taggedEquations <- mapM tagEquation equations
   substitutions <- solveTagged isRightVariable taggedEquations Map.empty
-  pure $ projectRightSubstitutions equations substitutions
+  projectRightSubstitutions equations substitutions
  where
   canonicalEquation (TypeEq left right) = TypeEq
     <$> canonicalUnificationType left
@@ -313,11 +485,12 @@ unifyRightEqs rawEquations = do
 projectRightSubstitutions
   :: [TypeEq]
   -> TaggedSubstitutions
-  -> Substs
-projectRightSubstitutions equations substitutions = IntMap.fromList
-  $ mapMaybe
-      (projectVariableBinding plainIdentifier substitutions RightVariable)
-      rightVariables
+  -> Maybe Substs
+projectRightSubstitutions equations substitutions = do
+  projected <- mapM
+    (projectVariableBinding plainIdentifier substitutions RightVariable)
+    rightVariables
+  pure $ IntMap.fromList $ catMaybes projected
  where
   rightVariables = Set.toAscList $ foldMap
     (\(TypeEq _ right) -> freeVars right) equations

@@ -427,7 +427,7 @@ findEngineBatchesWith allocators
     , findQueue = Q.singleton 0 $ ScheduledNode rootGoal rootSearchNode
     }
   t = forallify rawType
-  rootGoal = TGoal (VarBinding 0 t) initialScopeId
+  rootGoal = TGoal (VarBinding 0 t) initialScopeId OpenLeadingForalls
   rootSearchNode = SearchNode
     { nodeGoals           = Seq.empty
     , nodeConstraintGoals = []
@@ -796,11 +796,8 @@ prepareExferenceInput input = do
   validateQueryHeuristics query
   validateEnvironmentRatingsAndSyntax environment
   validateQueryInputWidths environment query
-  validateQueryForall query
   validateEnvironmentMonotypeWidths environment
-  validateEnvironmentForalls environment
   validateEnvironmentConstraintWidths environment
-  validateConstraintForalls allConstraints
   validateQueryClassConstraints environment query
   validateBindingClassConstraints environment
   validateInputTypes
@@ -862,8 +859,6 @@ prepareExferenceQueryWithCheckedOptions
     sealed@(ExferenceEnvironment environment rigidContext)
     (CheckedExferenceOptions options) uncheckedQuery = do
   validateQueryInputWidths environment query
-  validateQueryForall query
-  validateConstraintForalls constraints
   validateQueryClassConstraints environment query
   validateInputTypes
     $ queryGoalType query
@@ -910,9 +905,7 @@ validateExferenceEnvironment environment = do
   validateEnvironmentDuplicates environment
   validateEnvironmentRatingsAndSyntax environment
   validateEnvironmentMonotypeWidths environment
-  validateEnvironmentForalls environment
   validateEnvironmentConstraintWidths environment
-  validateConstraintForalls constraints
   validateBindingClassConstraints environment
   validateInputTypes
     $ environmentBindingMonotypes environment
@@ -983,35 +976,6 @@ validateEnvironmentRatingsAndSyntax environment =
         Left $ InvalidGeneratedConstructor name syntaxError
       Right () -> Right ()
 
-validateQueryForall
-  :: ExferenceQuery
-  -> Either ExferenceInputError ()
-validateQueryForall query
-  | containsNestedForall $ queryGoalType query =
-      Left $ NestedForallInGoal $ queryGoalType query
-  | otherwise = Right ()
-
-validateEnvironmentForalls
-  :: EnvDictionary
-  -> Either ExferenceInputError ()
-validateEnvironmentForalls environment
-  | Just binding <- find (containsForall . functionBindingType)
-      (environmentFunctions environment) =
-      Left $ NestedForallInBinding (functionName binding) $ functionBindingType binding
-  | Just deconstructor <- find (containsForall . deconstructorBindingType)
-      (environmentDeconstructors environment) =
-      Left $ NestedForallInDeconstructor $ deconstructorBindingType deconstructor
-  | otherwise = Right ()
-
-validateConstraintForalls
-  :: [(ConstraintSite, HsConstraint)]
-  -> Either ExferenceInputError ()
-validateConstraintForalls constraints
-  | Just (site, constraint) <- find (constraintContainsForall . snd)
-      constraints =
-      Left $ NestedForallInConstraint site constraint
-  | otherwise = Right ()
-
 -- Width preflights run before forall discovery because both tuple elements and
 -- class arguments are public lazy lists. They own only the first impossible
 -- cell; complete native-type and class validation remains in the established
@@ -1036,16 +1000,17 @@ validateEnvironmentMonotypeWidths environment = do
     (BindingConstraint $ functionName binding)
     $ functionBindingType binding
 
-  validateDeconstructorWidth binding = traverse_
-    (validateDeconstructorTypeWidth binding)
-    $ deconstructorBindingTypes binding
-
-  validateDeconstructorTypeWidth binding original =
-    SharedType.validateTypeWidthsWith
-      (InvalidInputType original . InvalidSynthesisType)
-      (const $ Left $ NestedForallInDeconstructor
-        $ deconstructorBindingType binding)
-      original
+  validateDeconstructorWidth binding = do
+    validateTypeInputWidths environment inputSite
+      $ deconstructorInput binding
+    traverse_ validateConstructor $ deconstructorConstructors binding
+   where
+    inputSite = maybe QueryConstraint BindingConstraint
+      $ typeConstructorHead $ deconstructorInput binding
+    validateConstructor constructor = traverse_
+      (validateTypeInputWidths environment
+        $ BindingConstraint $ constructorName constructor)
+      $ constructorFields constructor
 
 validateEnvironmentConstraintWidths
   :: EnvDictionary
@@ -1065,7 +1030,7 @@ validateConstraintInputWidths environment site constraint = do
  where
   validateArgument argument = SharedType.validateTypeWidthsWith
     (InvalidInputType argument . InvalidSynthesisType)
-    (const $ Left $ NestedForallInConstraint site constraint)
+    (validateKnownArity environment site)
     argument
 
 validateTypeInputWidths
@@ -1112,17 +1077,32 @@ validateBindingClassConstraints
 validateBindingClassConstraints environment =
   case listToMaybe
       [ classError
-      | binding <- environmentFunctions environment
-      , constraint <- functionConstraints binding
-          ++ typeConstraints (functionBindingType binding)
-      , Left classError <- [validateKnownConstraintInEnv classes
-          (BindingConstraint $ functionName binding)
-          constraint]
+      | (site, constraint) <- bindingConstraints
+      , Left classError <-
+          [validateKnownConstraintInEnv classes site constraint]
       ] of
     Just classError -> Left $ InvalidClassConstraint classError
     Nothing -> Right ()
  where
   classes = environmentClasses environment
+  bindingConstraints =
+    [ (BindingConstraint $ functionName binding, constraint)
+    | binding <- environmentFunctions environment
+    , constraint <- functionConstraints binding
+        ++ typeConstraints (functionBindingType binding)
+    ] ++
+    [ (deconstructorSite deconstructor, constraint)
+    | deconstructor <- environmentDeconstructors environment
+    , constraint <- typeConstraints $ deconstructorInput deconstructor
+    ] ++
+    [ (BindingConstraint $ constructorName constructor, constraint)
+    | deconstructor <- environmentDeconstructors environment
+    , constructor <- deconstructorConstructors deconstructor
+    , field <- constructorFields constructor
+    , constraint <- typeConstraints field
+    ]
+  deconstructorSite deconstructor = maybe QueryConstraint BindingConstraint
+    $ typeConstructorHead $ deconstructorInput deconstructor
 
 validateInputTypes
   :: [HsType]
@@ -1311,7 +1291,7 @@ rateNode h s = priorityFromPenalty
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sumScores . fmap rateGoal
   where
-    rateGoal (TGoal (VarBinding _ t) _) = typeComplexity h t
+    rateGoal (TGoal (VarBinding _ t) _ _) = typeComplexity h t
 
 -- TODO: actually measure performance with different values and derive these
 -- weights instead of relying on historically chosen defaults.
@@ -1333,7 +1313,10 @@ typeComplexity h = complexity
    where
     applyElement functionCost element = sumScores
       [heuristics_goalApp h, functionCost, complexity element]
-  complexity (TypeForallNative _ _ body) = complexity body
+  -- Nested quantified values are indivisible atoms to the search heuristic,
+  -- just as they are to unification. The root prenex wrapper is scheduled at
+  -- priority zero and opened separately, so this cost applies to rank-N goals.
+  complexity TypeForallNative{} = heuristics_goalCons h
 
 rateUsage :: ExferenceHeuristicsConfig -> SearchNode -> Penalty
 rateUsage h = sumScores . map f . IntMap.elems . nodeVarUses where
@@ -1364,7 +1347,7 @@ stateStep :: SearchAllocators
           -> TGoal
           -> StateT SearchNode SearchBranches ()
 stateStep allocators multiPM allowConstrs h
-    (TGoal (VarBinding var goalType) scopeId) = do
+    (TGoal (VarBinding var goalType) scopeId forallMode) = do
   -- This paragraph is evil, and hopefully temporary. (Scoping issues make it necessary.)
   contxt <- gets nodeQueryClassEnv
   constraintGoals' <- gets nodeConstraintGoals
@@ -1429,7 +1412,8 @@ stateStep allocators multiPM allowConstrs h
             [(binder, TypeConstant rigid) | (binder, rigid) <- instantiations]
       modify $ \node -> node
         { nodeGoals = TGoal
-            (VarBinding var $ snd $ applySubsts substs t) scopeId
+            (VarBinding var $ snd $ applySubsts substs t)
+            scopeId OpenLeadingForalls
             Seq.<| nodeGoals node
         , nodeQueryClassEnv = addQueryClassEnv
             (snd . constraintApplySubsts substs <$> cs)
@@ -1526,7 +1510,8 @@ stateStep allocators multiPM allowConstrs h
                 (ExpApply coreExp $ ExpHole vParam)
                 (ExpHole var))
                 (nodeExpression node)
-            , nodeGoals = TGoal (VarBinding vParam d) scopeId
+            , nodeGoals = TGoal (VarBinding vParam d)
+                scopeId KeepForallsOpaque
                 Seq.<| nodeGoals node
             }
           newScopeId <- builderAddScope allocators scopeId
@@ -1582,9 +1567,8 @@ stateStep allocators multiPM allowConstrs h
 
   case goalType of
     TypeArrow _ _ -> arrowStep goalType []
-    TypeForall is cs t -> forallStep is cs t
-    TypeForallNative{} -> error
-      "transformGoal: rigid forall binder escaped checked input validation"
+    TypeForall is cs t | forallMode == OpenLeadingForalls ->
+      forallStep is cs t
     _ -> byProvided <|> byFunctionSimple
 
 
@@ -1605,7 +1589,8 @@ addScopePatternMatch :: SearchAllocators
                      -> [VarPBinding]
                      -> StateT SearchNode SearchBranches [TGoal]
 addScopePatternMatch allocators multiPM goalType vid sid bindings = case bindings of
-  [] -> return [TGoal (VarBinding vid goalType) sid]
+  [] -> return
+    [TGoal (VarBinding vid goalType) sid KeepForallsOpaque]
   (b : bindingRest) -> do
     let v = varPVariable b
         vtResult = varPResult b
@@ -1620,9 +1605,9 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
       TypeVar {}    -> defaultHandleRest -- dont pattern-match on variables, even if it unifies
       TypeArrow {}  ->
         error $ "addScopePatternMatch: TypeArrow: " ++ show vtResult  -- should never happen, given a pbinding..
-      TypeForallNative {} ->
-        error $ "addScopePatternMatch: TypeForall (RankNTypes not yet implemented)" -- todo when we do RankNTypes
-                ++ show vtResult
+      -- A quantified result has no nominal head visible to pattern matching.
+      -- It remains usable as one opaque scoped value.
+      TypeForallNative {} -> defaultHandleRest
       _ | not $ null vtParams -> defaultHandleRest
         | otherwise -> do
             selectDeconstructor =<< gets nodeDeconstructors

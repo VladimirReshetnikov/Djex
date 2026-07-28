@@ -65,7 +65,6 @@ import Language.Haskell.Exference.Core.Expression
   )
 import Language.Haskell.Exference.Core.ExpressionCheck
   hiding (UnsupportedNestedForall)
-import qualified Language.Haskell.Exference.Core.ExpressionCheck as ExpressionCheck
 import Language.Haskell.Exference.Core.ExpressionSimplify (simplifyExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
@@ -86,6 +85,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , functionBindingTypes
   , mapDeconstructorBindingTypes
   , mapFunctionBindingTypes
+  , validateDeconstructorBinding
   )
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( RigidInstantiationError (..)
@@ -1319,8 +1319,9 @@ tests = testGroup "Exference"
           functionBindingSignature binding @?= signature
           case mkExferenceEnvironment
               $ EnvDictionary [binding] [] emptyStaticClassEnv of
-            Left failure -> failure @?= NestedForallInBinding function signature
-            Right _ -> fail "a rank-N result reached an Exference environment"
+            Left failure -> fail
+              $ "a valid rank-N result was rejected: " ++ show failure
+            Right _ -> pure ()
       , testCase "empty source foralls canonicalize to monotypes" $ do
           function <- expectRight $ mkQualifiedName ["Fixture"] "identity"
           let body = TypeArrow (TypeVar 0) (TypeVar 0)
@@ -1350,9 +1351,10 @@ tests = testGroup "Exference"
           binding @?= FunctionBinding malformed function 0 [] []
           case mkExferenceEnvironment
               $ EnvDictionary [binding] [] emptyStaticClassEnv of
-            Left failure -> failure @?=
-              NestedForallInBinding function malformed
-            Right _ -> fail "a duplicate forall binder list was flattened"
+            Left failure -> failure @?= InvalidInputType malformed
+              (InvalidSynthesisType $ SharedType.DuplicateForallVariable
+                $ SharedType.FlexibleVariable 0)
+            Right _ -> fail "a duplicate forall binder list was accepted"
       , testCase "datatype recursion follows strongly connected components" $ do
           parsedModule <- expectParsedModule $ unlines
             [ "module Fixture where"
@@ -1702,6 +1704,9 @@ tests = testGroup "Exference"
             "C (Maybe x) (x -> y)"
           showHsType (Map.fromList [("z", 0), ("a", 0)]) (TypeVar 0)
             @?= "a"
+          showHsType (Map.fromList [("!", 0), ("x", 0)]) (TypeVar 0)
+            @?= "x"
+          showHsType (Map.singleton "_" 0) (TypeVar 0) @?= "v0"
           showHsType Map.empty (TypeConstant 0) @?= "Cv0"
           pairName <- expectRight $ mkBoxedTupleName 2
           showHsType Map.empty
@@ -1709,21 +1714,86 @@ tests = testGroup "Exference"
                 (TypeApp (TypeCons pairName) (TypeVar 0))
                 (TypeVar 1))
             @?= "(,) v0 a"
-      , testCase "unification rejects nested foralls conservatively" $ do
-          let flexibleForall = TypeForall [0] [] (TypeVar 0)
-              rigidForall = TypeForallNative
-                [SharedType.RigidVariable 0] [] (TypeConstant 0)
-              nestedForall = TypeTuple Boxed
-                [TypeCons $ name "Int", flexibleForall]
+      , testCase "rank-N and impredicative types render round trip" $ do
+          forM_
+            [ "forall result. result -> result -> result"
+            , "forall result. (element -> result -> result) -> result -> result"
+            , "(forall result. result -> result -> result) -> "
+                ++ "(forall result. "
+                ++ "(element -> result -> result) -> result -> result)"
+            , "[(forall element. element -> element)]"
+            ]
+            assertTypeRenderRoundTrip
+          (listType, listNames) <- expectRight
+            $ parseTypePure "[(forall element. element -> element)]"
+          showHsType listNames listType
+            @?= "[(forall element. element -> element)]"
+      , testCase "rendering avoids lexical source-name capture" $ do
+          (shadowed, shadowedNames) <- expectRight $ parseTypePure
+            "forall x. (forall x. (x, c)) -> y"
+          showHsType shadowedNames shadowed
+            @?= "forall x. (forall c'. (c', c)) -> y"
+
+          let reusedIdentifier = TypeForall [0] [] $ TypeArrow
+                (TypeVar 0) (TypeForall [0] [] $ TypeVar 0)
+          showHsType (Map.singleton "x" 0) reusedIdentifier
+            @?= "forall x. x -> forall x'. x'"
+
+          let collisionConstraint = HsConstraint (name "C")
+                [TypeForall [3] [] $ TypeTuple Boxed [TypeVar 3, TypeVar 1]]
+          showHsConstraint (Map.singleton "c" 1) collisionConstraint
+            @?= "C (forall c'. (c', c))"
+      , testCase "unifiers compare opaque polytypes by alpha identity" $ do
+          let flexibleLeft = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              flexibleRight = TypeForall [7] []
+                $ TypeArrow (TypeVar 7) (TypeVar 7)
+              rigidLeft = TypeForallNative
+                [SharedType.RigidVariable 0] []
+                $ TypeArrow (TypeConstant 0) (TypeConstant 0)
+              rigidRight = TypeForallNative
+                [SharedType.RigidVariable 7] []
+                $ TypeArrow (TypeConstant 7) (TypeConstant 7)
+              assertEquivalent left right = do
+                unify left right @?= Just (IntMap.empty, IntMap.empty)
+                unifyShared left right @?= Just IntMap.empty
+                unifyRight left right @?= Just IntMap.empty
+                unifyOffset left (HsTypeOffset right 0) @?=
+                  Just (IntMap.empty, IntMap.empty)
+                unifyRightOffset left (HsTypeOffset right 0) @?=
+                  Just IntMap.empty
+          assertEquivalent flexibleLeft flexibleRight
+          assertEquivalent rigidLeft rigidRight
+      , testCase "metavariables bind whole impredicative atoms" $ do
+          let polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              listOf element = TypeApp
+                (TypeCons SharedName.listName) element
               variable = TypeVar 1
-              assertRejected polymorphic = do
-                unify polymorphic variable @?= Nothing
-                unify variable polymorphic @?= Nothing
-                unifyShared polymorphic variable @?= Nothing
-                unifyShared variable polymorphic @?= Nothing
-                unifyRight polymorphic variable @?= Nothing
-                unifyRight variable polymorphic @?= Nothing
-          mapM_ assertRejected [flexibleForall, rigidForall, nestedForall]
+          unify polymorphic variable @?=
+            Just (IntMap.empty, IntMap.singleton 1 polymorphic)
+          unify variable polymorphic @?=
+            Just (IntMap.singleton 1 polymorphic, IntMap.empty)
+          unifyShared variable polymorphic @?=
+            Just (IntMap.singleton 1 polymorphic)
+          unifyRight polymorphic variable @?=
+            Just (IntMap.singleton 1 polymorphic)
+          unifyRight variable polymorphic @?= Nothing
+          unifyShared (listOf variable) (listOf polymorphic) @?=
+            Just (IntMap.singleton 1 polymorphic)
+      , testCase "opaque polytypes expose only free variables to substitution" $ do
+          let integer = TypeCons $ name "Int"
+              open = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 0)
+              closed = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) integer
+              pair left right = TypeTuple Boxed [left, right]
+          -- The atom equation is deliberately first. It may become equal after
+          -- an independent outer equation, but is never decomposed itself.
+          unifyShared (pair open $ TypeVar 0) (pair closed integer) @?=
+            Just (IntMap.singleton 0 integer)
+          unifyShared open closed @?= Nothing
+          unifyShared (TypeVar 0) open @?= Nothing
       , testCase "all unifier modes canonicalize structural tuples" $ do
           boxedPairName <- expectRight $ mkBoxedTupleName 2
           unboxedPairName <- expectRight
@@ -2685,7 +2755,7 @@ tests = testGroup "Exference"
                   ++ show omissions
               map diagnosticCode (exferenceSessionDiagnostics session) @?=
                 [Just "DJEX_EXF_RECURSIVE_OMISSION"]
-      , testCase "HSE sessions preserve and omit rank-N result bindings" $
+      , testCase "HSE sessions preserve and retain rank-N result bindings" $
           withTemporaryFile (unlines
             [ "{-# LANGUAGE RankNTypes #-}"
             , "module RankNResult where"
@@ -2699,7 +2769,7 @@ tests = testGroup "Exference"
               cls <- expectRight $ mkQualifiedName ["RankNResult"] "C"
               let projection = checkedSourceProjection checked
                   integer = TypeCons $ name "Int"
-              nested <- case find ((== function) . functionName)
+              _nested <- case find ((== function) . functionName)
                   $ sourceFunctions projection of
                 Just binding -> do
                   functionParameters binding @?= [integer]
@@ -2719,33 +2789,26 @@ tests = testGroup "Exference"
                     (sourceFunctions projection)
                     (sourceDeconstructors projection)
                     (sourceClasses projection)
-                  signature = TypeArrow integer nested
               case mkExferenceEnvironment backend of
-                Left failure -> failure @?=
-                  NestedForallInBinding function signature
-                Right _ -> fail "the core accepted a checked rank-N projection"
+                Left failure -> fail
+                  $ "the core rejected a checked rank-N projection: "
+                  ++ show failure
+                Right _ -> pure ()
               session <- expectRight
                 $ ExferenceSession.mkExferenceSession checked
-              case find ((== function) . omittedName)
-                  $ exferenceSessionOmissions session of
-                Just omission -> omittedReason omission @?=
-                  UnsupportedNestedForall
-                Nothing -> fail "the stable session did not report rank-N omission"
+              assertBool "the stable session still omitted the rank-N binding"
+                $ all ((/= function) . omittedName)
+                $ exferenceSessionOmissions session
               let overridePolicy = defaultExferenceSessionPolicy
                     { exferenceRatingOverrides =
                         Map.singleton function $ Penalty 1
                     }
               case ExferenceSession.mkExferenceSessionWithPolicy
                   overridePolicy checked of
-                Left failure -> do
-                  diagnosticCode failure @?=
-                    Just "DJEX_EXF_POLICY_RATING"
-                  assertBool ("unexpected rank-N policy failure: "
-                      ++ show failure)
-                    $ "unavailable bindings" `isInfixOf`
-                        diagnosticMessage failure
-                Right _ -> fail
-                  "an override for an omitted rank-N binding was accepted"
+                Left failure -> fail
+                  $ "an override for a retained rank-N binding failed: "
+                  ++ show failure
+                Right _ -> pure ()
       , testCase "HSE sessions accept finite signed overrides" $
           withTemporaryFile (unlines
             [ "module Ratings where"
@@ -2974,15 +3037,13 @@ tests = testGroup "Exference"
                       query
                   , Left $ InvalidHeuristic "goalVar" (-1)
                   )
-                , ( "nested forall"
-                  , query {queryGoalType = nestedGoal}
-                  , Left $ NestedForallInGoal nestedGoal
-                  )
                 ]
           mapM_ (\(label, invalidQuery, expected) ->
               assertEqual label expected
                 $ validateExferenceQuery environment invalidQuery)
             invalidQueries
+          validateExferenceQuery environment
+            query {queryGoalType = nestedGoal} @?= Right ()
       , testCase "sealing owns environment-only validation" $ do
           let duplicateName = name "duplicate"
               duplicate = FunctionBinding
@@ -3002,9 +3063,9 @@ tests = testGroup "Exference"
               constrainedEnvironment = legacyInputEnvironment identityInput
                 {input_envFuncs = [constrained]}
           case mkExferenceEnvironment constrainedEnvironment of
-            Left failure -> failure @?= NestedForallInConstraint
-              (BindingConstraint bindingName) constraint
-            Right _ -> fail "rank-N constraint reached a sealed environment"
+            Left failure -> fail
+              $ "rank-N constraint was rejected: " ++ show failure
+            Right _ -> pure ()
       , testCase "target exclusion is exact and absent from metadata" $ do
           let excludedName = name "answer"
           targetName <- expectRight $ SharedName.mkIdentifier "answer"
@@ -3304,7 +3365,7 @@ tests = testGroup "Exference"
               , input_maxQueueSize = Nothing
               , input_maxDepth = Nothing
               , input_heuristicsConfig = defaultHeuristicsConfig
-              } @?= Left (NestedForallInGoal nestedGoal)
+              } @?= Right ()
       ]
   , testGroup "search policy"
       [ testCase "duplicate function names are complete and order-independent" $ do
@@ -3579,20 +3640,25 @@ tests = testGroup "Exference"
           in validateExferenceInput identityInput
               { input_envFuncs = [binding] }
               @?= Left (InvalidClassConstraint $ InvalidClassName invalidName)
-      , testCase "nested foralls return a structured input error" $ do
+      , testCase "nested forall goals remain opaque after root opening" $ do
           let polymorphic = TypeForall [0] [] (TypeVar 0)
               goal = TypeArrow polymorphic polymorphic
               input = ExferenceInput goal [] [] emptyClassEnv
                 False False 0 False 20 Nothing Nothing defaultHeuristicsConfig
+          validateExferenceInput input @?= Right ()
           case findExpressionsEither input of
-            Left actual -> actual @?= NestedForallInGoal goal
-            Right _ -> fail "nested forall was accepted"
+            Left failure -> fail $ "rank-N goal was rejected: " ++ show failure
+            Right expressions -> assertBool
+              "rank-N identity did not use its opaque scoped argument"
+              $ not $ null expressions
           case findExpressionsWithStatsEither input of
-            Left actual -> actual @?= NestedForallInGoal goal
-            Right _ -> fail "the checked chunk API discarded validation failure"
+            Left failure -> fail
+              $ "checked rank-N chunk search failed: " ++ show failure
+            Right _ -> pure ()
           case Core.findExpressionsChunkedEither input of
-            Left actual -> actual @?= NestedForallInGoal goal
-            Right _ -> fail "the checked grouped API discarded validation failure"
+            Left failure -> fail
+              $ "grouped rank-N search failed: " ++ show failure
+            Right _ -> pure ()
           let nestedConstraint = HsConstraint (name "Inner") [TypeVar 1]
               outerConstraint = HsConstraint (name "Outer")
                 [TypeForall [1] [nestedConstraint] $ TypeVar 1]
@@ -3600,7 +3666,29 @@ tests = testGroup "Exference"
           typeConstraints constrainedGoal
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
-            @?= Left (NestedForallInGoal constrainedGoal)
+            @?= Right ()
+      , testCase "generic constructors instantiate impredicatively" $ do
+          let polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              listOf element = TypeApp
+                (TypeCons SharedName.listName) element
+              emptyName = name "emptyPolyList"
+              emptyList = FunctionBinding
+                (listOf $ TypeVar 1) emptyName 0 [] []
+              goal = listOf polymorphic
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = [emptyList]
+                }
+          (expression, constraints, _) <- maybe
+            (fail "generic empty list did not instantiate to a polytype") pure
+            $ findOneExpression input
+          assertBool ("unexpected impredicative constructor result: "
+              ++ showExpression expression)
+            $ expression == ExpName emptyName
+          constraints @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [emptyList] []
+            goal [] expression @?= Right ()
       , testCase "input errors render native types as Haskell" $ do
           let polymorphic = TypeForall [0] []
                 $ TypeArrow (TypeVar 0) (TypeVar 0)
@@ -3616,7 +3704,7 @@ tests = testGroup "Exference"
             ("structural constraint leaked into diagnostic: " ++ classFailure)
             $ not ("TypeVariable" `isInfixOf` classFailure)
               && "C v0" `isInfixOf` classFailure
-      , testCase "nested foralls are rejected throughout the environment" $ do
+      , testCase "rank-N atoms are accepted throughout the environment" $ do
           let polymorphic = TypeForall [1] [] $ TypeVar 1
               bindingName = name "f"
               bindingConstraint = HsConstraint (name "External")
@@ -3625,23 +3713,20 @@ tests = testGroup "Exference"
                 (TypeVar 0) bindingName 0 [bindingConstraint] []
           validateExferenceInput identityInput
             { input_envFuncs = [constrainedBinding] }
-            @?= Left (NestedForallInConstraint
-              (BindingConstraint bindingName) bindingConstraint)
+            @?= Right ()
 
           let polymorphicBinding = FunctionBinding
                 polymorphic bindingName 0 [] []
           validateExferenceInput identityInput
             { input_envFuncs = [polymorphicBinding] }
-            @?= Left (NestedForallInBinding bindingName polymorphic)
+            @?= Right ()
 
           let deconstructor = DeconstructorBinding
                 (TypeCons $ name "Box")
                 [ConstructorBinding (name "Box") [polymorphic]] False
-              deconstructorType = TypeArrow polymorphic
-                (TypeCons $ name "Box")
           validateExferenceInput identityInput
             { input_envDeconsS = [deconstructor] }
-            @?= Left (NestedForallInDeconstructor deconstructorType)
+            @?= Right ()
       , testCase "shared type validation covers otherwise-valid prenex input" $ do
           let duplicate = TypeForall [0, 0] [] $ TypeVar 0
           validateExferenceInput identityInput
@@ -7082,18 +7167,14 @@ tests = testGroup "Exference"
             (TypeArrow (TypeVar 0) (TypeVar 0))
           hints @?= Map.singleton "foo" 0
       , testCase "rank-N forall does not capture a later free spelling" $ do
-          let mode = enableExtensions [HSE.RankNTypes]
-                $ haskellSrcExtsParseMode "rank-n-shadow"
           (converted, hints) <- expectRight
-            $ parseTypeWithModePure mode "(forall foo. foo -> foo) -> foo"
+            $ parseTypePure "(forall foo. foo -> foo) -> foo"
           converted @?= TypeArrow
             (TypeForall [1] [] $ TypeArrow (TypeVar 1) (TypeVar 1))
             (TypeVar 0)
           hints @?= Map.singleton "foo" 0
       , testCase "nested forall contexts follow lexical shadowing" $ do
-          let mode = enableExtensions [HSE.RankNTypes]
-                $ haskellSrcExtsParseMode "nested-context-shadow"
-          (converted, hints) <- expectRight $ parseTypeWithModePure mode
+          (converted, hints) <- expectRight $ parseTypePure
             "forall a. Outer a => forall a. Inner a => a -> a"
           converted @?= TypeForall [0]
             [HsConstraint (name "Outer") [TypeVar 0]]
@@ -8144,7 +8225,7 @@ tests = testGroup "Exference"
             [deconstructor] (TypeArrow pairType integer) [] expression @?=
               Left (InvalidCheckExpressionScope
                 $ Generated.DuplicatePatternBinder duplicateBinder)
-      , testCase "rejects unused nested-forall environment capabilities" $ do
+      , testCase "accepts unused rank-N environment capabilities" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"
               polymorphic = TypeForall [0] [] $ TypeVar 0
@@ -8159,11 +8240,9 @@ tests = testGroup "Exference"
               checked functions deconstructors = checkExpression
                 (mkQueryClassEnv staticClasses []) functions deconstructors
                 integer [] $ ExpName seedName
-          checked [nestedFunction, seed] [] @?=
-            Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
-          checked [seed] [nestedDeconstructor] @?=
-            Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
-      , testCase "rejects nested foralls in the complete class environment" $ do
+          checked [nestedFunction, seed] [] @?= Right ()
+          checked [seed] [nestedDeconstructor] @?= Right ()
+      , testCase "accepts rank-N atoms in the complete class environment" $ do
           let className = name "C"
               polymorphic = TypeForall [1] [] $ TypeVar 1
               headConstraint = HsConstraint className [polymorphic]
@@ -8176,16 +8255,14 @@ tests = testGroup "Exference"
           map snd (environmentConstraints
               $ EnvDictionary [] [] staticClasses) @?= [headConstraint]
           checkExpression (mkQueryClassEnv staticClasses [])
-            [seed] [] integer [] (ExpName seedName) @?=
-              Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
-      , testCase "rejects nested foralls in generated annotations" $ do
+            [seed] [] integer [] (ExpName seedName) @?= Right ()
+      , testCase "checks alpha-equivalent rank-N generated annotations" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let polymorphic = TypeForall [0] [] $ TypeVar 0
-              integer = TypeCons $ name "Int"
+              renamed = TypeForall [7] [] $ TypeVar 7
               expression = ExpLambda 1 polymorphic $ ExpVar 1 polymorphic
           checkExpression (mkQueryClassEnv staticClasses []) [] []
-            (TypeArrow integer integer) [] expression @?=
-              Left (ExpressionCheck.UnsupportedNestedForall polymorphic)
+            (TypeArrow renamed polymorphic) [] expression @?= Right ()
       , testCase "empty cases require a matching empty deconstructor" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let emptyType = TypeCons $ name "Empty"
@@ -8254,6 +8331,21 @@ tests = testGroup "Exference"
             [escaping] integer [] (ExpName seedName)
             @?= Left (InvalidCheckDeconstructor
               $ UnboundDeconstructorFields boxName constructor [1])
+      , testCase "rank-N field binders do not escape their scope" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let boxName = name "PolyBox"
+              boxType = TypeCons boxName
+              constructor = name "MkPolyBox"
+              polymorphic = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              rankN = DeconstructorBinding boxType
+                [ConstructorBinding constructor [polymorphic]] False
+              integer = TypeCons $ name "Int"
+              seedName = name "seed"
+              seed = FunctionBinding integer seedName 0 [] []
+          validateDeconstructorBinding rankN @?= Right ()
+          checkExpression (mkQueryClassEnv staticClasses []) [seed]
+            [rankN] integer [] (ExpName seedName) @?= Right ()
       , testCase "deconstructor type errors precede nominal shape errors" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"
@@ -8503,6 +8595,18 @@ canonicalType = SharedType.canonicalizeType
 
 parseTypePure :: String -> Either Diagnostic (HsType, TypeVarIndex)
 parseTypePure = parseTypeWithModePure $ haskellSrcExtsParseMode "test"
+
+-- A source round trip is stable when reparsing the rendered type produces the
+-- same text again.  This deliberately compares source identities rather than
+-- raw numeric IDs: renaming a nested binder can change the parser's allocation
+-- order without changing which textual variables are free.
+assertTypeRenderRoundTrip :: String -> IO ()
+assertTypeRenderRoundTrip source = do
+  (parsed, sourceNames) <- expectRight $ parseTypePure source
+  let rendered = showHsType sourceNames parsed
+  (reparsed, reparsedNames) <- expectRight $ parseTypePure rendered
+  assertEqual ("unstable type rendering for " ++ source)
+    rendered $ showHsType reparsedNames reparsed
 
 parseTypeWithTestResolver
   :: TypeResolver

@@ -34,8 +34,6 @@ import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
 import GHC.Generics (Generic)
 
-import Language.Haskell.Exference.Core.Internal.FlexibleIds
-  ( flexibleIdentifiers )
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
@@ -60,8 +58,8 @@ instance NFData FunctionBinding
 
 -- | Lower one fully quantified source signature into the search engine's
 -- flat binding shape. Only its complete leading prenex chain is opened;
--- a forall below an arrow remains visible in 'functionResult' for the checked
--- environment boundary to reject. Quantifier IDs are local to the signature;
+-- a forall below an arrow remains visible in 'functionResult' as an opaque
+-- polymorphic atom. Quantifier IDs are local to the signature;
 -- cross-layer shadows are alpha-normalized before their binders disappear.
 -- Leading constraints and arrow parameters remain explicit search inputs,
 -- while the caller-owned penalty is attached without changing the remaining
@@ -161,7 +159,7 @@ validateDeconstructorBinding binding = do
     $ deconstructorConstructors binding
  where
   input = deconstructorInput binding
-  parameters = flexibleIdentifiers input
+  parameters = flexibleFreeIdentifiers input
 
   validateConstructor headName parameters' constructor
     | IntSet.null unbound = Right ()
@@ -169,8 +167,16 @@ validateDeconstructorBinding binding = do
         headName (constructorName constructor) $ IntSet.toAscList unbound
    where
     unbound = IntSet.unions
-      (map flexibleIdentifiers $ constructorFields constructor)
+      (map flexibleFreeIdentifiers $ constructorFields constructor)
       `IntSet.difference` parameters'
+
+  -- Bound variables of a rank-N field are local to that field and therefore
+  -- cannot escape the datatype parameter scope. The old whole-tree fold also
+  -- visited binder declarations, incorrectly rejecting a field such as
+  -- @(forall a. a -> a)@ as an undeclared existential.
+  flexibleFreeIdentifiers = foldMap
+    (SharedType.foldFlexibleVariable IntSet.singleton)
+    . SharedType.freeVariables
 
 -- | Reconstruct the synthetic elimination type used by validation. Fields of
 -- every constructor precede the datatype result in declaration order.

@@ -552,7 +552,7 @@ runCommand sourceName history command state = case command of
     putStrLn $ replBackendName $ activeBackends state
     continue state
   ChangeBackend (Just source) -> case parseReplBackend source of
-    Left failure -> settingFailure failure >> continue state
+    Left failure -> backendFailure failure >> continue state
     Right selected -> do
       putStrLn $ "Active backend: " ++ replBackendName selected
       continue state {activeBackends = selected}
@@ -572,7 +572,7 @@ runCommand sourceName history command state = case command of
   Evaluate expression -> evaluateInteractive expression state >> continue state
   Help Nothing -> putStr shortHelp >> continue state
   Help (Just name) -> case commandHelp name of
-    Left failure -> settingFailure failure >> continue state
+    Left failure -> commandFailure failure >> continue state
     Right help -> putStr help >> continue state
   History countSource -> do
     showHistory countSource history
@@ -1351,18 +1351,28 @@ settingInvocation source = case trim source of
     | sign `elem` "+-"
     , not (null rest)
     , all (not . isSpace) rest ->
-        checked rest $ Just $ if sign == '+' then "on" else "off"
+        signed sign rest
   value -> case break (== '=') value of
     (name, '=' : settingValue) -> checked name $ Just $ trim settingValue
     _ -> case words value of
       [] -> Left "expected a setting name"
       name : _ -> checked name $ optionalRemainder name value
  where
-  checked rawName value
+  signed sign rawName = do
+    setting <- checkedName rawName
+    if replSettingIsBoolean setting
+      then Right
+        (setting, Just $ if sign == '+' then "on" else "off")
+      else Left $ "setting " ++ replSettingName setting
+        ++ " is not boolean; sign forms are available only for boolean settings"
+
+  checked rawName value = do
+    setting <- checkedName rawName
+    Right (setting, value)
+
+  checkedName rawName
     | null normalized = Left "expected a setting name"
-    | otherwise = do
-        setting <- parseReplSetting normalized
-        Right (setting, value)
+    | otherwise = parseReplSetting normalized
    where
     normalized = normalize rawName
 
@@ -1397,7 +1407,7 @@ showState (Just rawSubject) = case words $ normalize rawSubject of
   ["diagnostics"] -> showLoadDiagnostics
   ["directory"] -> const $ getCurrentDirectory >>= putStrLn
   [] -> showSettings
-  _ -> \_ -> settingFailure $ "unknown :show subject " ++ show rawSubject
+  _ -> \_ -> showFailure $ "unknown :show subject " ++ show rawSubject
 
 showSettings :: ReplState -> IO ()
 showSettings state = putStr $ unlines
@@ -1544,7 +1554,7 @@ splitModuleStar source = (False, source)
 
 showInfo :: ReplState -> String -> IO ()
 showInfo state source = case parseName $ trim source of
-  Left failure -> settingFailure (renderNameError failure)
+  Left failure -> infoFailure (renderNameError failure)
   Right parsedName -> case
       ( exferenceRuntimeSession runtime
       , exferenceRuntimeScope runtime
@@ -1587,7 +1597,7 @@ showInfo state source = case parseName $ trim source of
         -- prompt-scope errors because they have a shared source scope to
         -- enforce.
         OneBackend DjinnBackend -> showDjinnInfo parsedName
-        _ -> settingFailure failure
+        _ -> infoFailure failure
       Right canonicalName -> forSelectedBackends state
         $ showProjectedInfo projection session environment canonicalName
 
@@ -1595,7 +1605,7 @@ showInfo state source = case parseName $ trim source of
     let environment = exferenceSessionEnvironment session
     in case resolveScopeNameAmong
         AnyScope (declarationNameSet environment) context parsedName of
-      Left failure -> settingFailure failure
+      Left failure -> infoFailure failure
       Right canonicalName -> action environment canonicalName
 
   showProjectedInfo projection session environment canonicalName = \case
@@ -1770,7 +1780,7 @@ renderDeclaration variableName declaration = case declaration of
 
 showHistory :: Maybe String -> [String] -> IO ()
 showHistory countSource history = case traverse parseCount countSource of
-  Left failure -> settingFailure failure
+  Left failure -> historyFailure failure
   Right maximumCount -> forM_ (zip [firstIndex ..] selected) $ \(index, line) ->
     putStrLn $ show index ++ "  " ++ line
    where
@@ -1924,6 +1934,21 @@ replFailure code summary detail = emitDiagnostic
 
 settingFailure :: String -> IO ()
 settingFailure = replFailure "DJEX_REPL_SETTING" "invalid REPL setting"
+
+backendFailure :: String -> IO ()
+backendFailure = replFailure "DJEX_REPL_BACKEND" "invalid REPL backend"
+
+commandFailure :: String -> IO ()
+commandFailure = replFailure "DJEX_REPL_COMMAND" "invalid REPL command"
+
+showFailure :: String -> IO ()
+showFailure = replFailure "DJEX_REPL_SHOW" "invalid :show request"
+
+infoFailure :: String -> IO ()
+infoFailure = replFailure "DJEX_REPL_INFO" "invalid :info request"
+
+historyFailure :: String -> IO ()
+historyFailure = replFailure "DJEX_REPL_HISTORY" "invalid REPL history request"
 
 ioFailure :: String -> FilePath -> IOError -> IO ()
 ioFailure summary path failure = emitDiagnostic

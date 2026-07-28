@@ -62,6 +62,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplPackageCommands
   , testCase "REPL keeps both backend sessions and settings alive"
       testReplSharedSession
+  , testCase "REPL setting signs and diagnostics follow their command domains"
+      testReplSettingSignsAndDiagnostics
   , testCase "REPL shares Church rank-N and impredicative queries"
       testReplRankNQueries
   , testCase "REPL retains safe Djinn rank-N axioms"
@@ -519,6 +521,80 @@ testReplSharedSession = withTemporaryEnvironment [] $ \directory -> do
   assertBool "successful shared session emitted an error" $
     not $ "error" `isInfixOf` map toLower errors
 
+testReplSettingSignsAndDiagnostics :: Assertion
+testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory -> do
+  let nonBooleanSettings =
+        [ "backend"
+        , "target"
+        , "select"
+        , "render"
+        , "qualification"
+        , "prompt"
+        , "candidate-limit"
+        , "choice-budget"
+        , "constraint-deferral-steps"
+        , "max-steps"
+        , "max-queue"
+        , "max-depth"
+        ]
+      signedSettings = zipWith
+        (\sign setting -> ":set " ++ [sign] ++ setting)
+        (cycle "+-") nonBooleanSettings
+  (settingExit, settingOutput, settingErrors) <- runRepl directory $
+    [ ":set target retained"
+    , ":set prompt retained-prompt"
+    ] ++ signedSettings ++
+    [ ":set +allow-unused"
+    , ":show settings"
+    , ":help set"
+    ]
+  assertEqual "setting-sign REPL exit" ExitSuccess settingExit
+  assertEqual "every non-boolean sign form is rejected before value parsing"
+    (length nonBooleanSettings)
+    $ countOccurrences
+        "sign forms are available only for boolean settings" settingErrors
+  assertEqual "each rejected sign form is a setting diagnostic"
+    (length nonBooleanSettings)
+    $ countOccurrences "[DJEX_REPL_SETTING]" settingErrors
+  assertContains "a rejected target sign retains the preceding target"
+    "target = retained" settingOutput
+  assertContains "a rejected prompt sign retains the preceding prompt"
+    "prompt = \"retained-prompt\"" settingOutput
+  assertContains "a boolean sign form remains accepted"
+    "allow-unused = on" settingOutput
+  assertContains "setting help documents the sign restriction"
+    "sign forms are rejected for non-boolean settings" settingOutput
+  assertNoCallStack settingErrors
+
+  (commandExit, commandOutput, commandErrors) <- runRepl directory
+    [ ":backend exference"
+    , ":backend wat"
+    , ":backend"
+    , ":help wat"
+    , ":show wat"
+    , ":history -1"
+    , ":info _"
+    , ":info NotLoaded"
+    ]
+  assertEqual "command-diagnostic REPL exit" ExitSuccess commandExit
+  assertContains "an invalid backend does not replace the active backend"
+    "Active backend: exference" commandOutput
+  assertEqual "the backend query still reports the preceding selection" 2
+    $ countOccurrences "exference\n" commandOutput
+  assertEqual "backend failures use the backend family" 1
+    $ countOccurrences "[DJEX_REPL_BACKEND]" commandErrors
+  assertEqual "unknown help subjects use the command family" 1
+    $ countOccurrences "[DJEX_REPL_COMMAND]" commandErrors
+  assertEqual "unknown show subjects use the show family" 1
+    $ countOccurrences "[DJEX_REPL_SHOW]" commandErrors
+  assertEqual "invalid history counts use the history family" 1
+    $ countOccurrences "[DJEX_REPL_HISTORY]" commandErrors
+  assertEqual "invalid and unavailable info names use the info family" 2
+    $ countOccurrences "[DJEX_REPL_INFO]" commandErrors
+  assertBool "a non-setting command failure was mislabeled as a setting" $
+    not $ "[DJEX_REPL_SETTING]" `isInfixOf` commandErrors
+  assertNoCallStack commandErrors
+
 testReplRankNQueries :: Assertion
 testReplRankNQueries = withTemporaryEnvironment [] $ \directory -> do
   (exitCode, output, errors) <- runRepl directory
@@ -557,6 +633,10 @@ testReplRankNAxioms = withTemporaryEnvironment
   (exitCode, output, errors) <- runRepl directory
     [ ":backend djinn"
     , ":set djinn-axioms on"
+    -- Positive forall introduction now yields a structural candidate before
+    -- the loaded axiom. Enumerate alternatives so this remains a test of axiom
+    -- searchability rather than of the first-candidate ordering policy.
+    , ":set select all"
     , ":set render expression"
     , ":set qualification none"
     , "Token -> (forall answer. answer -> answer -> answer)"

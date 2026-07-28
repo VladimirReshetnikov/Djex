@@ -10,7 +10,9 @@ module Djinn.Internal.Environment (
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentSynthesisFormulaTranslator,
+    preparedEnvironmentPolarizedSynthesisFormulaTranslator,
     preparedEnvironmentFunctionPremises,
+    preparedEnvironmentPolarizedFunctionPremises,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
     elaboratePreparedSynthesisTypes,
     SynthesisEnvironment, SynthesisInventory,
@@ -26,6 +28,7 @@ import Data.List (find)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void, absurd)
+import Numeric.Natural (Natural)
 import qualified Language.Haskell.Synthesis.Class as SharedClass
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
@@ -77,7 +80,15 @@ data PreparedEnvironment = PreparedEnvironment
     PreparedSynthesisInventory
     (SharedClass.PreparedClassIndex HSymbol)
     [(Symbol, Formula)]
+    PreparedPolarizedPremises
     PreparedFormulaCompiler
+
+-- A premise whose translation kept a forall opaque is still safe to use: it
+-- merely supports fewer eliminations than the source type. The aggregate bit
+-- prevents that deliberately incomplete search space from proving a negative.
+data PreparedPolarizedPremises = PreparedPolarizedPremises
+    [(Symbol, Formula)]
+    Bool
 
 -- Historical context APIs wrap final methods in 'HType' only at their
 -- compatibility edge; native queries never cross this projection.
@@ -519,6 +530,17 @@ compileSynthesisFormula compiler =
     compileFormula synthesisFormulaTypeView compiler .
         SharedType.canonicalizeType
 
+compilePolarizedSynthesisFormula
+    :: Natural
+    -> FormulaPolarity
+    -> PreparedFormulaCompiler
+    -> SharedType.Type HSymbol
+    -> Either String FormulaTranslation
+compilePolarizedSynthesisFormula namespace polarity compiler =
+    compilePolarizedFormula namespace polarity
+        synthesisFormulaTypeView synthesisFormulaTypeView compiler .
+            SharedType.canonicalizeType
+
 synthesisFormulaTypeSymbol :: SharedName.Name -> Either String HSymbol
 synthesisFormulaTypeSymbol = first show . djinnTypeConstructorSymbol
 
@@ -532,12 +554,16 @@ sealPreparedEnvironment expansion = do
     -- is deliberate. Kind checking plus whole-definition graph validation
     -- excludes such failures for supported declarations, and eager preparation
     -- ensures every published environment owns a complete premise cache.
-    premises <- first InvalidSynthesisFormulaDefinitions $
-        mapM (translateFunction compiler)
+    translatedPremises <- first InvalidSynthesisFormulaDefinitions $
+        mapM (translateFunction compiler) $ zip [1 ..]
             [ signature
             | SharedDeclaration.ValueDeclaration signature <-
                 expandedDeclarations
             ]
+    let premises = map opaquePremise translatedPremises
+        polarizedPremises = PreparedPolarizedPremises
+            (map polarizedPremise translatedPremises)
+            (any premiseTranslationIncomplete translatedPremises)
     let classIndex = SharedClass.prepareClassIndex inventory
     -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
     -- ground kind. Check that backend-specific requirement at sealing while
@@ -548,7 +574,7 @@ sealPreparedEnvironment expansion = do
     -- expanded declaration product alive through an unevaluated selector.
     prepared `seq` compiler `seq` classIndex `seq`
         return (PreparedEnvironment
-            prepared classIndex premises compiler)
+            prepared classIndex premises polarizedPremises compiler)
   where
     prepared =
         SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
@@ -556,7 +582,7 @@ sealPreparedEnvironment expansion = do
         SharedTypeSynonym.inventoryExpansionDeclarations expansion
     inventory = SharedTypeSynonym.preparedInventory prepared
 
-    translateFunction compiler signature = do
+    translateFunction compiler (namespace, signature) = do
         name <- synthesisValueSymbol FunctionOwner "function" $
             SharedDeclaration.valueName signature
         let sourceType = SharedDeclaration.valueType signature
@@ -569,9 +595,18 @@ sealPreparedEnvironment expansion = do
             fmap fst $ SharedType.implicitizeLeadingForalls
                 (const (Nothing :: Maybe ())) freshBinder mempty sourceType
         let (_, _, body) = SharedType.splitLeadingForalls implicit
-        formula <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
+        opaqueFormula <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
             compileSynthesisFormula compiler body
-        return (Symbol name, formula)
+        polarized <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
+            compilePolarizedSynthesisFormula namespace NegativeFormula
+                compiler body
+        return (Symbol name, opaqueFormula, polarized)
+
+    opaquePremise (symbol, formula, _) = (symbol, formula)
+    polarizedPremise (symbol, _, translation) =
+        (symbol, translatedFormula translation)
+    premiseTranslationIncomplete (_, _, translation) =
+        translationIncomplete translation
 
     freshBinder reserved variable = Just
         $ fst $ freshPrimedVariable reserved variable
@@ -607,7 +642,7 @@ preparedEnvironmentWitness
     :: PreparedEnvironment
     -> PreparedSynthesisInventory
 preparedEnvironmentWitness
-        (PreparedEnvironment prepared _ _ _) =
+        (PreparedEnvironment prepared _ _ _ _) =
     prepared
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
@@ -670,7 +705,17 @@ preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
     -> [(Symbol, Formula)]
 preparedEnvironmentFunctionPremises
-        (PreparedEnvironment _ _ premises _) = premises
+        (PreparedEnvironment _ _ premises _ _) = premises
+
+-- | Premises for the polarized rank-N plan, paired with whether that plan had
+-- to leave any quantified subtree opaque.
+preparedEnvironmentPolarizedFunctionPremises
+    :: PreparedEnvironment
+    -> ([(Symbol, Formula)], Bool)
+preparedEnvironmentPolarizedFunctionPremises
+        (PreparedEnvironment _ _ _
+            (PreparedPolarizedPremises premises incomplete) _) =
+        (premises, incomplete)
 
 -- | Translate a checked shared type directly. Stable raw and native queries
 -- meet here after raw compatibility validation and use the exact same
@@ -682,8 +727,24 @@ preparedEnvironmentSynthesisFormulaTranslator
     -> SharedType.Type HSymbol
     -> Either String Formula
 preparedEnvironmentSynthesisFormulaTranslator
-        (PreparedEnvironment _ _ _ compiler) =
+        (PreparedEnvironment _ _ _ _ compiler) =
     compileSynthesisFormula compiler
+
+-- | Translate a checked goal in positive position. The Boolean is true when
+-- part of the source remains deliberately opaque and negative search evidence
+-- must therefore be reported as inconclusive.
+preparedEnvironmentPolarizedSynthesisFormulaTranslator
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> Either String (Formula, Bool)
+preparedEnvironmentPolarizedSynthesisFormulaTranslator
+        (PreparedEnvironment _ _ _ _ compiler) source = do
+    translation <- compilePolarizedSynthesisFormula
+        0 PositiveFormula compiler source
+    return
+        ( translatedFormula translation
+        , translationIncomplete translation
+        )
 
 projectPreparedInventory
     :: PreparedEnvironment
@@ -709,7 +770,7 @@ lookupPreparedSynthesisClass
         , [(SharedName.Name, SharedType.Type HSymbol)]
         )
 lookupPreparedSynthesisClass name
-        (PreparedEnvironment _ classes _ _) = do
+        (PreparedEnvironment _ classes _ _ _) = do
     preparedClass <- SharedClass.lookupPreparedClass name classes
     case projectPreparedSynthesisClass preparedClass of
         Right projected -> Just projected

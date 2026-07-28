@@ -91,8 +91,10 @@ tests =
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
-    , ("treat rank-N and impredicative types as structural atoms",
+    , ("infer simple positive rank-N types with an opaque fallback",
           testRankNTypeAtoms)
+    , ("merge complementary rank-N formula plans within global bounds",
+          testComplementaryRankNPlans)
     , ("round-trip shared declarations", testSharedDeclarationAdapter)
     , ("round-trip shared environments", testSharedEnvironmentAdapter)
     , ("normalize raw abstract definitions at every environment boundary",
@@ -946,9 +948,10 @@ testSharedTypeAdapter = do
         assertEqual ("shared rendering changed " ++ show raw)
             (show raw) (SharedTypeRender.renderType id projected)
 
--- Rank-N syntax remains structurally visible until the first quantified node.
--- That node is then one inert LJT atom whose equality comes from the shared
--- alpha-normal key, including when it occurs inside an otherwise opaque list.
+-- The raw compatibility formula keeps rank-N types as alpha-stable atoms.
+-- Checked queries additionally try a polarized translation: context-free
+-- positive foralls open for introduction, while an opaque fallback retains
+-- exact polymorphic transport and unsupported searches stay inconclusive.
 testRankNTypeAtoms :: IO ()
 testRankNTypeAtoms = do
     parsed <- expectRight $ parseHType
@@ -995,6 +998,65 @@ testRankNTypeAtoms = do
         "[forall a. a -> a] -> [forall renamed. renamed -> renamed]"
     runStableIdentity stableSession "leadingForall"
         "forall a. a -> a"
+
+    -- These are the first deliberately non-atomic rank-N cases. The first
+    -- opens a forall in a function result; the second reaches positive
+    -- position after crossing two function-parameter boundaries.
+    runStableIdentity stableSession "introduceRankNResult"
+        "c -> (forall a. a -> a)"
+    runStableIdentity stableSession "passRankNArgument"
+        "((forall a. a -> a) -> c) -> c"
+    runStableIdentity stableSession "introduceRankNTuple"
+        "c -> ((forall a. a -> a), (forall b. b -> b))"
+
+    -- Positive opening alone cannot implement this transport: its argument
+    -- stays opaque while its result opens with a fresh skolem. The legacy
+    -- alpha-opaque plan is therefore retained as a sound fallback.
+    runStableIdentity stableSession "transportEmptyPolytype"
+        "(forall a. a) -> (forall b. b)"
+
+    -- Instantiating a negative forall is outside this bounded fragment. It is
+    -- semantically inhabited (apply the argument at @b@), so the incomplete
+    -- search must not manufacture a proof of uninhabitability.
+    unsupported <- runStableQuery stableSession "instantiateOpaqueRankN"
+        "(forall a. a) -> b"
+    assertEqual "unsupported rank-N elimination unexpectedly found a candidate"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch unsupported
+    assertEqual "unsupported opaque rank-N search was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence unsupported
+
+    -- Plans are whole-query alternatives rather than a compositional mix.
+    -- One can transport the first tuple field opaquely and the other can
+    -- introduce the second field structurally, but neither currently does
+    -- both. This known boundary must remain inconclusive, not a refutation.
+    mixed <- runStableQuery stableSession "mixedRankNStrategies"
+        "(forall a. a) -> ((forall b. b), (forall c. c -> c))"
+    assertEqual "whole-plan rank-N approximations unexpectedly mixed fragments"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch mixed
+    assertEqual "a bounded mixed-strategy gap was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence mixed
+
+    -- Goal and premise translation are separate skolem scopes. Reusing the
+    -- same internal proposition for both would admit the ill-typed proof
+    -- @\_ x -> consumePoly x@.
+    let proper = SharedKind.ProperTypeKind
+        constructor name = SharedType.TypeConstructor $ sharedName name
+        abstract name = SharedDeclaration.AbstractTypeDeclaration ()
+            (sharedName name) proper
+        emptyPoly binder = SharedType.ForallType [binder] []
+            $ SharedType.TypeVariable binder
+        consumePoly = SharedDeclaration.ValueDeclaration $
+            SharedDeclaration.ValueSignature () (sharedName "consumePoly") $
+                SharedType.FunctionType (emptyPoly "a")
+                    (constructor "RankNResult")
+    scopedSession <- sealDjinnSessionFrom stableSession
+        [abstract "RankNInput", abstract "RankNResult", consumePoly]
+    scoped <- runStableQuery scopedSession "doNotCaptureRankNSkolem"
+        "RankNInput -> (forall b. b -> RankNResult)"
+    assertEqual "premise and goal forall skolems were accidentally shared"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch scoped
+    assertEqual "a complete polarized search lost its negative evidence"
+        SharedQuery.ProvedUninhabitable $ SharedQuery.resultEvidence scoped
 
     -- Substituting the free alias parameter @a := r@ must freshen the bound
     -- @r@ before the quantified body is sealed. The same operation occurs in
@@ -1048,13 +1110,101 @@ testRankNTypeAtoms = do
         outcome -> fail $ description ++ " was not realized: " ++ show outcome
 
     runStableIdentity session targetSpelling source = do
-        target <- expectShownRight $ SharedName.mkIdentifier targetSpelling
-        request <- expectShownRight $ Djex.parseDjinnRequest session
-            defaultQueryOptions target (targetSpelling ++ ".djinn") source
-        result <- expectShownRight $ Djex.runDjinnQuery session request
+        result <- runStableQuery session targetSpelling source
         assertBool (targetSpelling ++ " produced no candidate")
             $ not $ null $ SharedSearch.batchCandidates
             $ SharedQuery.resultSearch result
+
+    runStableQuery session targetSpelling source = do
+        target <- expectShownRight $ SharedName.mkIdentifier targetSpelling
+        request <- expectShownRight $ Djex.parseDjinnRequest session
+            defaultQueryOptions target (targetSpelling ++ ".djinn") source
+        expectShownRight $ Djex.runDjinnQuery session request
+
+-- The polarized plan constructs either Church projection, while only the
+-- alpha-opaque plan can reuse the exact loaded polytype. Alternative search
+-- must retain all three without granting either plan its own cutoff budget.
+testComplementaryRankNPlans :: IO ()
+testComplementaryRankNPlans = do
+    let token = HTCon "Token"
+        churchChoice binder = HTForall [binder] [] $
+            HTArrow (HTVar binder) $
+                HTArrow (HTVar binder) (HTVar binder)
+        churchType binder = HTArrow token $ churchChoice binder
+        goal = churchType "answer"
+        unsortedOptions = defaultQueryOptions {
+            optionAlternatives = True,
+            optionSorted = False,
+            optionCutoff = 20
+            }
+        sortedOptions = unsortedOptions {
+            optionAlternatives = False,
+            optionSorted = True
+            }
+    environment <- expectRight $ do
+        withToken <- declare (AbstractType "Token" KStar) emptyEnvironment
+        declare (Function "church" $ churchType "result") withToken
+
+    complete <- run unsortedOptions "allRankNPlans" environment goal
+    assertEqual "complementary plans did not finish within the global cutoff"
+        SharedSearch.Finished $ reportCompletion complete
+    allClauses <- realizedClauses "complementary rank-N plans" complete
+    assertEqual "the plan union lost or duplicated a candidate"
+        3 $ length allClauses
+    assertBool "the opaque church candidate disappeared behind polarized hits"
+        $ any ("church" `isInfixOf`) allClauses
+
+    sorted <- run sortedOptions "rankAllPlansOnce" environment goal
+    sortedClauses <- realizedClauses "globally ranked rank-N plans" sorted
+    case sortedClauses of
+        firstClause : _ -> assertBool
+            "plans were ranked separately before concatenation"
+            $ "church" `isInfixOf` firstClause
+        [] -> fail "globally ranked rank-N plans produced no candidates"
+
+    firstOnly <- run
+        unsortedOptions {
+            optionAlternatives = False,
+            optionSorted = False
+            }
+        "firstRankNPlan" environment goal
+    firstClauses <- realizedClauses "first-only rank-N plan" firstOnly
+    assertEqual "first-only search did not short-circuit on a polarized hit"
+        1 $ length firstClauses
+    assertBool "first-only search unexpectedly entered the opaque plan"
+        $ all (not . isInfixOf "church") firstClauses
+
+    limited <- run
+        unsortedOptions {optionCutoff = 4}
+        "boundAllRankNPlans" environment goal
+    limitedClauses <- realizedClauses "globally bounded rank-N plans" limited
+    assertEqual "global raw-proof accounting changed the distinct union"
+        3 $ length limitedClauses
+    assertBool "the bounded opaque plan did not retain its first candidate"
+        $ any ("church" `isInfixOf`) limitedClauses
+    assertEqual "the opaque plan incorrectly received a fresh cutoff"
+        (SharedSearch.truncated SharedSearch.CandidateLimitReached)
+        $ reportCompletion limited
+
+    budgeted <- run
+        unsortedOptions {optionBudget = Just 9}
+        "budgetAllRankNPlans" environment goal
+    budgetedClauses <- realizedClauses
+        "choice-bounded rank-N plans" budgeted
+    assertEqual "sharing choice fuel changed the complementary candidate union"
+        3 $ length budgetedClauses
+    assertBool "the opaque plan did not receive the polarized remainder"
+        $ any ("church" `isInfixOf`) budgetedClauses
+    assertEqual "the opaque plan incorrectly received a fresh choice budget"
+        (SharedSearch.truncated SharedSearch.ChoicePointLimitReached)
+        $ reportCompletion budgeted
+  where
+    run options target environment goal = expectRight $
+        inhabit options environment [] target goal
+
+    realizedClauses description report = case reportOutcome report of
+        Realized clauses -> return clauses
+        outcome -> fail $ description ++ " failed: " ++ show outcome
 
 testSharedDeclarationAdapter :: IO ()
 testSharedDeclarationAdapter = do

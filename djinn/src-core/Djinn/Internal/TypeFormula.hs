@@ -14,8 +14,13 @@ module Djinn.Internal.TypeFormula
     , TypeView
     , FormulaDefinition(..)
     , PreparedFormulaCompiler
+    , FormulaPolarity(..)
+    , FormulaTranslation
+    , translatedFormula
+    , translationIncomplete
     , prepareFormulaCompiler
     , compileFormula
+    , compilePolarizedFormula
     ) where
 
 import Control.Monad (zipWithM)
@@ -71,7 +76,7 @@ data ExpansionType
     | ExpansionCon String ExpansionOrigin
     | ExpansionTuple [ExpansionType]
     | ExpansionArrow ExpansionType ExpansionType
-    | ExpansionForall (SharedTypeAtom.TypeAtom String)
+    | ExpansionForall ExpansionOrigin (SharedTypeAtom.TypeAtom String)
     | ExpansionUnion [(String, [ExpansionType])]
     | ExpansionAbstract String
     | ExpansionArgument ExpansionPath ExpansionType
@@ -84,7 +89,11 @@ data ExpansionOrigin
     = QueryOrigin [Natural]
     | DefinitionTemplateOrigin [Natural]
     | DefinitionOrigin ExpansionOrigin String [Natural]
-    deriving (Eq, Ord)
+    -- A quantified body is converted lazily only if its forall is opened.
+    -- Retaining the parent occurrence makes skolems from two equal-looking
+    -- forall nodes distinct, including after definition instantiation.
+    | OpenedForallOrigin ExpansionOrigin [Natural]
+    deriving (Eq, Ord, Show)
 
 data ExpansionFrame = ExpansionFrame String ExpansionOrigin
 
@@ -107,6 +116,22 @@ pushExpansion name origin (ExpansionPath frames active) =
 data PreparedFormulaCompiler = PreparedFormulaCompiler
     (Map.Map String ([String], ExpansionType))
     (Set.Set String)
+
+-- | Variance at the current formula node. A function parameter reverses it;
+-- products, sums, and definition expansion preserve it.
+data FormulaPolarity
+    = PositiveFormula
+    | NegativeFormula
+    deriving (Eq, Show)
+
+-- | A polarized formula plus an honesty bit. 'translationIncomplete' means
+-- that at least one quantified subtree had to remain opaque. Proofs are still
+-- sound, but an empty proof search is not a refutation of the Haskell type.
+data FormulaTranslation = FormulaTranslation
+    { translatedFormula :: Formula
+    , translationIncomplete :: Bool
+    }
+    deriving (Eq, Show)
 
 data PreparedDefinition = PreparedDefinition
     String
@@ -169,7 +194,33 @@ compileFormula
     -> Either String Formula
 compileFormula view prepared source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
-    lowerExpansionType prepared emptyExpansionPath expanded
+    translatedFormula <$> lowerExpansionType
+        OpaqueForalls prepared emptyExpansionPath [] expanded
+
+-- | Compile the bounded rank-N fragment used by checked Djinn queries.
+-- Context-free foralls in positive position are opened with fresh rigid
+-- proposition names; unsupported occurrences stay alpha-stable opaque atoms.
+-- The numeric namespace must be distinct for independently compiled goals
+-- and premises so their locally introduced skolems cannot accidentally meet.
+compilePolarizedFormula
+    :: Natural
+    -> FormulaPolarity
+    -> TypeView (SharedType.Type String)
+    -> TypeView source
+    -> PreparedFormulaCompiler
+    -> source
+    -> Either String FormulaTranslation
+compilePolarizedFormula namespace polarity openedView view prepared source = do
+    expanded <- expansionTypeAt view QueryOrigin [] source
+    lowerExpansionType (PolarizedForalls namespace polarity openedView)
+        prepared emptyExpansionPath [] expanded
+
+data ForallLowering
+    = OpaqueForalls
+    | PolarizedForalls
+        Natural
+        FormulaPolarity
+        (TypeView (SharedType.Type String))
 
 lookupFormulaDefinition
     :: String
@@ -208,7 +259,7 @@ expansionTypeAt view origin = convert
             TypeArrowLayer argument result -> ExpansionArrow
                 <$> convert (0 : path) argument
                 <*> convert (1 : path) result
-            TypeForallLayer atom -> Right $ ExpansionForall atom
+            TypeForallLayer atom -> Right $ ExpansionForall (origin path) atom
             TypeUnionLayer constructors -> ExpansionUnion <$> zipWithM
                 (convertConstructor path) [0 ..] constructors
             TypeAbstractLayer name -> Right $ ExpansionAbstract name
@@ -235,20 +286,24 @@ instantiateDefinitionOrigins parent owner = instantiate
         ExpansionApp function argument -> ExpansionApp
             (instantiate function) (instantiate argument)
         variable@(ExpansionVar _) -> variable
-        ExpansionCon name origin -> ExpansionCon name $ case origin of
-            DefinitionTemplateOrigin path ->
-                DefinitionOrigin parent owner path
-            _ -> origin
+        ExpansionCon name origin ->
+            ExpansionCon name $ instantiateOrigin origin
         ExpansionTuple types -> ExpansionTuple $ map instantiate types
         ExpansionArrow argument result ->
             ExpansionArrow (instantiate argument) (instantiate result)
-        quantified@ExpansionForall{} -> quantified
+        ExpansionForall origin atom ->
+            ExpansionForall (instantiateOrigin origin) atom
         ExpansionUnion constructors -> ExpansionUnion
             [(constructor, map instantiate fields) |
                 (constructor, fields) <- constructors]
         abstract@(ExpansionAbstract _) -> abstract
         ExpansionArgument path argument ->
             ExpansionArgument path $ instantiate argument
+
+    instantiateOrigin origin = case origin of
+        DefinitionTemplateOrigin sourcePath ->
+            DefinitionOrigin parent owner sourcePath
+        _ -> origin
 
 expansionApp :: ExpansionType -> ExpansionType -> ExpansionType
 expansionApp function argument = case partialExpansionArrow function of
@@ -272,35 +327,147 @@ expansionArrowHead source = case source of
     _ -> False
 
 lowerExpansionType
-    :: PreparedFormulaCompiler
+    :: ForallLowering
+    -> PreparedFormulaCompiler
     -> ExpansionPath
+    -> [Natural]
     -> ExpansionType
-    -> Either String Formula
-lowerExpansionType definitions path source = case source of
+    -> Either String FormulaTranslation
+lowerExpansionType lowering definitions path occurrencePath source = case source of
     ExpansionArgument origin argument ->
-        lowerExpansionType definitions origin argument
-    ExpansionTuple types ->
-        Conj `fmap` mapM (lowerExpansionType definitions path) types
-    ExpansionArrow argument result -> (:->)
-        `fmap` lowerExpansionType definitions path argument
-        <*> lowerExpansionType definitions path result
-    ExpansionForall atom -> Right $ PVar $ opaqueTypeSymbol
-        $ SharedTypeAtom.typeAtomType atom
-    ExpansionUnion [] -> Right false
-    ExpansionUnion constructors -> Disj `fmap` mapM lowerConstructor constructors
-    _ -> lowerApplication definitions path source
+        lowerExpansionType lowering definitions origin occurrencePath argument
+    ExpansionTuple types -> do
+        translated <- zipWithM
+            (\index -> lowerChild index) [0 ..] types
+        return $ combineTranslations Conj translated
+    ExpansionArrow argument result -> do
+        translatedArgument <- lowerExpansionType
+            (reverseFormulaPolarity lowering) definitions path
+            (0 : occurrencePath) argument
+        translatedResult <- lowerChild 1 result
+        return $ combineBinary (:->) translatedArgument translatedResult
+    ExpansionForall origin atom ->
+        lowerForall lowering definitions path occurrencePath origin atom
+    ExpansionUnion [] -> Right $ completeTranslation false
+    ExpansionUnion constructors -> do
+        translated <- zipWithM lowerConstructor [0 ..] constructors
+        return $ FormulaTranslation
+            (Disj $ map fst translated)
+            (any (translationIncomplete . snd) translated)
+    _ -> lowerApplication lowering definitions path occurrencePath source
   where
-    lowerConstructor (constructor, fields) = do
-        formula <- lowerExpansionType definitions path $
-            ExpansionTuple fields
-        return (ConsDesc constructor (length fields), formula)
+    lowerChild index = lowerExpansionType lowering definitions path
+        (index : occurrencePath)
+
+    lowerConstructor constructorIndex (constructor, fields) = do
+        translation <- lowerExpansionType lowering definitions path
+            (constructorIndex : occurrencePath) $ ExpansionTuple fields
+        return
+            ( (ConsDesc constructor (length fields),
+                translatedFormula translation)
+            , translation
+            )
+
+lowerForall
+    :: ForallLowering
+    -> PreparedFormulaCompiler
+    -> ExpansionPath
+    -> [Natural]
+    -> ExpansionOrigin
+    -> SharedTypeAtom.TypeAtom String
+    -> Either String FormulaTranslation
+lowerForall lowering definitions path occurrencePath origin atom = case lowering of
+    OpaqueForalls -> Right opaque
+    PolarizedForalls namespace PositiveFormula openedView ->
+        case SharedTypeAtom.typeAtomType atom of
+            SharedType.ForallType binders [] body -> do
+                opened <- openForallBody
+                    namespace occurrencePath origin binders body
+                expanded <- expansionTypeAt openedView
+                    (OpenedForallOrigin origin) [] opened
+                lowerExpansionType lowering definitions path
+                    occurrencePath expanded
+            _ -> Right $ opaque { translationIncomplete = True }
+    PolarizedForalls _ NegativeFormula _ ->
+        Right $ opaque { translationIncomplete = True }
+  where
+    opaque = completeTranslation $ PVar $ opaqueTypeSymbol
+        $ SharedTypeAtom.typeAtomType atom
+
+-- Opening happens after removing the forall wrapper, so its binders are free
+-- in @body@ and ordinary capture-avoiding substitution can replace them. The
+-- private '$' namespace cannot be produced by Djinn's checked source parser;
+-- the reservation walk also protects programmatically constructed inputs.
+openForallBody
+    :: Natural
+    -> [Natural]
+    -> ExpansionOrigin
+    -> [String]
+    -> SharedType.Type String
+    -> Either String (SharedType.Type String)
+openForallBody namespace occurrencePath origin binders body = first show $
+    SharedType.substituteTypeVariables allocateShadow Set.empty replacements body
+  where
+    source = SharedType.ForallType binders [] body
+    (_, replacements) = foldl allocateSkolem
+        (foldMap Set.singleton source, Map.empty)
+        $ zip [0 :: Natural ..] binders
+
+    allocateSkolem (reserved, substitutions) (index, binder) =
+        let fresh = chooseFresh reserved $ skolemBase index
+        in ( Set.insert fresh reserved
+           , Map.insert binder (SharedType.TypeVariable fresh) substitutions
+           )
+
+    skolemBase index = "$djinn$skolem$" ++ show namespace ++ "$" ++
+        show occurrencePath ++ "$" ++ show origin ++ "$" ++ show index
+
+    allocateShadow reserved binder = Just $ chooseFresh reserved $
+        "$djinn$shadow$" ++ binder
+
+    chooseFresh reserved candidate
+        | candidate `Set.member` reserved =
+            chooseFresh reserved $ candidate ++ "'"
+        | otherwise = candidate
+
+completeTranslation :: Formula -> FormulaTranslation
+completeTranslation formula = FormulaTranslation formula False
+
+combineTranslations
+    :: ([Formula] -> Formula)
+    -> [FormulaTranslation]
+    -> FormulaTranslation
+combineTranslations constructor translations = FormulaTranslation
+    (constructor $ map translatedFormula translations)
+    (any translationIncomplete translations)
+
+combineBinary
+    :: (Formula -> Formula -> Formula)
+    -> FormulaTranslation
+    -> FormulaTranslation
+    -> FormulaTranslation
+combineBinary constructor left right = FormulaTranslation
+    (constructor (translatedFormula left) $ translatedFormula right)
+    (translationIncomplete left || translationIncomplete right)
+
+reverseFormulaPolarity :: ForallLowering -> ForallLowering
+reverseFormulaPolarity lowering = case lowering of
+    OpaqueForalls -> OpaqueForalls
+    PolarizedForalls namespace polarity openedView ->
+        PolarizedForalls namespace reversed openedView
+      where
+        reversed = case polarity of
+            PositiveFormula -> NegativeFormula
+            NegativeFormula -> PositiveFormula
 
 lowerApplication
-    :: PreparedFormulaCompiler
+    :: ForallLowering
+    -> PreparedFormulaCompiler
     -> ExpansionPath
+    -> [Natural]
     -> ExpansionType
-    -> Either String Formula
-lowerApplication definitions path source =
+    -> Either String FormulaTranslation
+lowerApplication lowering definitions path occurrencePath source =
     case expansionApplication source [] of
         (ExpansionCon name origin, arguments) ->
             case lookupFormulaDefinition name definitions of
@@ -312,15 +479,24 @@ lowerApplication definitions path source =
                             ExpansionUnion [] -> do
                                 normalized <- normalizeExpansionAliases
                                     definitions path source
-                                Empty <$> expansionSymbol normalized
-                            _ -> lowerExpansionType definitions
-                                (pushExpansion name origin path) expanded
+                                completeTranslation . Empty <$>
+                                    expansionSymbol normalized
+                            _ -> lowerExpansionType lowering definitions
+                                (pushExpansion name origin path)
+                                occurrencePath expanded
                 _ -> atom
         _ -> atom
   where
     atom = do
         normalized <- normalizeExpansionAliases definitions path source
-        PVar <$> expansionSymbol normalized
+        formula <- PVar <$> expansionSymbol normalized
+        return $ FormulaTranslation formula $
+            polarizedOpaqueForall lowering normalized
+
+polarizedOpaqueForall :: ForallLowering -> ExpansionType -> Bool
+polarizedOpaqueForall lowering source = case lowering of
+    OpaqueForalls -> False
+    PolarizedForalls{} -> expansionContainsForall source
 
 -- Ordinary historical atoms retain their exact renderer identity. As soon as
 -- an opaque application contains a quantified child, however, its proposition
@@ -365,7 +541,7 @@ expansionSourceType source = SharedType.canonicalizeType <$> case source of
         <$> mapM expansionSourceType types
     ExpansionArrow argument result -> SharedType.FunctionType
         <$> expansionSourceType argument <*> expansionSourceType result
-    ExpansionForall atom -> Right $ SharedTypeAtom.typeAtomType atom
+    ExpansionForall _ atom -> Right $ SharedTypeAtom.typeAtomType atom
     ExpansionUnion{} -> Left
         "datatype expansion reached opaque type identity"
     ExpansionAbstract name -> SharedType.TypeConstructor
@@ -401,7 +577,7 @@ substituteExpansion replacements source = case source of
     ExpansionArrow argument result -> ExpansionArrow
         <$> substituteExpansion replacements argument
         <*> substituteExpansion replacements result
-    ExpansionForall atom -> ExpansionForall <$>
+    ExpansionForall origin atom -> ExpansionForall origin <$>
         substituteExpansionAtom replacements atom
     ExpansionUnion constructors -> ExpansionUnion <$>
         mapM substituteConstructor constructors
@@ -415,8 +591,9 @@ substituteExpansion replacements source = case source of
 
 -- Definition parameters remain ordinary free variables when they occur under
 -- a nested forall. Substitute them through the shared capture-avoiding worker,
--- then rebuild the atom and its cached alpha key. No logical equation is ever
--- generated from the quantified body.
+-- then rebuild the atom and its cached alpha key. Substitution itself does not
+-- inspect the quantified body logically; polarized lowering may later reopen
+-- a context-free occurrence in positive position.
 substituteExpansionAtom
     :: LazyMap.Map String ExpansionType
     -> SharedTypeAtom.TypeAtom String
@@ -503,7 +680,8 @@ data ExpansionAlgebra result = ExpansionAlgebra
     , algebraApplication :: result -> [result] -> result
     , algebraTuple :: [result] -> result
     , algebraArrow :: result -> result -> result
-    , algebraForall :: SharedTypeAtom.TypeAtom String -> result
+    , algebraForall ::
+        ExpansionOrigin -> SharedTypeAtom.TypeAtom String -> result
     , algebraUnion :: [(String, [result])] -> result
     , algebraAbstract :: String -> result
     }
@@ -526,7 +704,8 @@ foldExpansionAliases definitions algebra path source = case source of
         foldedArgument <- foldCurrent argument
         foldedResult <- foldCurrent result
         return $ algebraArrow algebra foldedArgument foldedResult
-    ExpansionForall atom -> Right $ algebraForall algebra atom
+    ExpansionForall origin atom -> Right $
+        algebraForall algebra origin atom
     ExpansionUnion constructors ->
         algebraUnion algebra `fmap` mapM foldConstructor constructors
     ExpansionAbstract name -> Right $ algebraAbstract algebra name
@@ -608,7 +787,7 @@ showsExpansionType precedence source = case source of
     ExpansionArrow argument result -> showParen (precedence > 0) $
         showsExpansionType 1 argument . showString " -> " .
             showsExpansionType 0 result
-    ExpansionForall atom -> showParen (precedence > 0) $ showString
+    ExpansionForall _ atom -> showParen (precedence > 0) $ showString
         $ SharedTypeRender.renderType id $ SharedTypeAtom.typeAtomType atom
     ExpansionUnion constructors -> renderConstructors constructors
     ExpansionAbstract name -> showString name
@@ -653,7 +832,7 @@ referenceExpansionAlgebra interesting = ExpansionAlgebra
         Set.unions $ headReferences : argumentReferences
     , algebraTuple = Set.unions
     , algebraArrow = Set.union
-    , algebraForall = Set.intersection interesting .
+    , algebraForall = \_ -> Set.intersection interesting .
         Set.map SharedName.renderCanonical .
         SharedType.typeConstructors . SharedTypeAtom.typeAtomType
     , algebraUnion = Set.unions . concatMap snd
@@ -773,7 +952,7 @@ definitionReferences source = case source of
     ExpansionArrow argument result ->
         definitionReferences argument `Set.union`
             definitionReferences result
-    ExpansionForall atom -> Set.map SharedName.renderCanonical
+    ExpansionForall _ atom -> Set.map SharedName.renderCanonical
         $ SharedType.typeConstructors
         $ SharedTypeAtom.typeAtomType atom
     ExpansionUnion constructors -> Set.unions

@@ -108,5 +108,9 @@ cabal haddock lib:djex --haddock-hyperlink-source
 cabal sdist
 ```
 
-The build is pinned and tested with GHC 9.12.4. Exact suite counts and command
-results are recorded in the draft pull request after the release gate.
+The release gate completed on GHC 9.12.4. The strict all-component build and
+`cabal check` passed without errors; all 12 suites passed, totaling 980 tests.
+Haddock generated the complete library site while retaining the historical raw
+Djinn/Exference coverage and hidden-representation link warnings documented in
+the preceding review. The final source distribution includes this follow-up
+and the updated guides.

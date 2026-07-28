@@ -13,8 +13,9 @@
 -- * "Djinn.Core" is the validated historical Djinn compatibility API.
 -- * "Language.Haskell.Djex.Exference" is the checked, parser-neutral adapter.
 -- * "Language.Haskell.Exference.Core" is the lower-level search API.
--- * @Language.Haskell.Djex.Exference.HaskellSrc@ is the checked HSE
---   source-loader and type-parser boundary.
+-- * "Language.Haskell.Djex.HaskellSrc" parses a checked source type once for
+--   either engine; "Language.Haskell.Djex.Exference.HaskellSrc" retains the
+--   source-loader and legacy Exference parser facade.
 -- * @Language.Haskell.Synthesis.*@ modules hold the shared neutral vocabulary.
 --
 -- In particular, both adapters use the same @Constraint (Type variable)@
@@ -97,6 +98,10 @@ data Capability
   | HeuristicSearch -- ^ Bounded, heuristic exploration of expressions.
   | PrenexPolymorphism
     -- ^ Leading binders are accepted at the checked search edge.
+  | OpaqueRankNTypes
+    -- ^ Nested quantified subterms are carried as alpha-aware inert atoms.
+  | ImpredicativeTypes
+    -- ^ Ordinary constructors may contain opaque polymorphic arguments.
   | RankedCandidates -- ^ Multiple results carry heuristic rankings.
   | TypeClassConstraints
     -- ^ Shared nominal class constraints are accepted and validated.  An
@@ -119,6 +124,8 @@ backendInfo DjinnBackend = BackendInfo
   , backendCapabilities =
       [ DecidingInhabitation
       , PrenexPolymorphism
+      , OpaqueRankNTypes
+      , ImpredicativeTypes
       , TypeClassConstraints
       ]
   }
@@ -128,6 +135,8 @@ backendInfo ExferenceBackend = BackendInfo
   , backendCapabilities =
       [ HeuristicSearch
       , PrenexPolymorphism
+      , OpaqueRankNTypes
+      , ImpredicativeTypes
       , RankedCandidates
       , TypeClassConstraints
       ]

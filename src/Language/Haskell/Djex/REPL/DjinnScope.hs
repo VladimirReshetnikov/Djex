@@ -58,6 +58,7 @@ import Language.Haskell.Synthesis.Name
   , renderCanonical
   )
 import Language.Haskell.Synthesis.Type (Type (..))
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 -- | Whether scope-visible value declarations become Djinn proof axioms.
 data DjinnAxiomPolicy
@@ -442,6 +443,14 @@ admitDeclarations = foldr admit ([], [])
       in case checkDeclaration shrunk of
         Right () -> (shrunk : kept, methodOmissions ++ omitted)
         Left failure -> (kept, describeOmission name failure : omitted)
+    ValueDeclaration signature
+      | hasLeadingContext $ valueType signature ->
+          ( kept
+          , DjinnScopeOmission
+              (renderCanonical $ valueName signature)
+              "its residual class context cannot become a proof axiom"
+              : omitted
+          )
     _ -> case checkDeclaration declaration of
       Right () -> (declaration : kept, omitted)
       Left failure ->
@@ -451,6 +460,14 @@ admitDeclarations = foldr admit ([], [])
         )
   admissibleMethod signature =
     checkDeclaration (ValueDeclaration signature) == Right ()
+
+  -- Context-free prenex binders are safe: the environment sealer merely
+  -- implicitizes them before formula compilation. A residual dictionary
+  -- context would instead turn a conditional Haskell value into an
+  -- unconditional propositional premise, so it remains an explicit omission.
+  hasLeadingContext source = case SharedType.splitLeadingForalls source of
+    (_, [], _) -> False
+    _ -> True
 
 checkDeclaration :: ScopeDeclaration -> Either String ()
 checkDeclaration declaration = case

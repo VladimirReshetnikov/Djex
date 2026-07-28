@@ -62,6 +62,12 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplPackageCommands
   , testCase "REPL keeps both backend sessions and settings alive"
       testReplSharedSession
+  , testCase "REPL shares Church rank-N and impredicative queries"
+      testReplRankNQueries
+  , testCase "REPL retains safe Djinn rank-N axioms"
+      testReplRankNAxioms
+  , testCase "REPL reports a shared both-mode parse failure once"
+      testReplSharedParseFailure
   , testCase "REPL multiline, repeat, and command errors recover"
       testReplInputRecovery
   , testCase "REPL bare input handles Haskell line comments"
@@ -513,6 +519,69 @@ testReplSharedSession = withTemporaryEnvironment [] $ \directory -> do
   assertBool "successful shared session emitted an error" $
     not $ "error" `isInfixOf` map toLower errors
 
+testReplRankNQueries :: Assertion
+testReplRankNQueries = withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":set render expression"
+    , ":compare forall item. "
+        ++ "(forall result. (item -> result -> result) -> result -> result) "
+        ++ "-> (forall answer. "
+        ++ "(item -> answer -> answer) -> answer -> answer)"
+    , ":compare [(forall result. result -> result -> result)] "
+        ++ "-> [(forall answer. answer -> answer -> answer)]"
+    ]
+  assertEqual "rank-N REPL exit" ExitSuccess exitCode
+  assertEqual "both engines run both rank-N queries" 2
+    $ countOccurrences "-- Djinn" output
+  assertEqual "both engines run both impredicative queries" 2
+    $ countOccurrences "-- Exference" output
+  assertEqual "Djinn finds both alpha-renamed identities" 2
+    $ countOccurrences "-- Djinn\n\\" output
+  assertEqual "Exference finds both alpha-renamed identities" 2
+    $ countOccurrences "-- Exference\n\\" output
+  assertBool ("rank-N REPL emitted an error:\n" ++ errors) $
+    not $ "error" `isInfixOf` map toLower errors
+
+testReplRankNAxioms :: Assertion
+testReplRankNAxioms = withTemporaryEnvironment
+    [("RankNAxioms.hs", unlines
+      [ "{-# LANGUAGE RankNTypes #-}"
+      , "module RankNAxioms where"
+      , "data Token = Token"
+      , "class C a"
+      , "church :: Token -> "
+          ++ "(forall result. result -> result -> result)"
+      , "constrained :: C a => a -> "
+          ++ "(forall result. result -> result -> result)"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set djinn-axioms on"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Token -> (forall answer. answer -> answer -> answer)"
+    , ":show omissions"
+    ]
+  assertEqual "rank-N axiom REPL exit" ExitSuccess exitCode
+  assertContains "context-free rank-N value remains a searchable axiom"
+    "church" output
+  assertContains "constrained rank-N value remains an explicit omission"
+    "its residual class context cannot become a proof axiom" output
+  assertBool "the safe rank-N value was reported as an omission" $
+    not $ "church: " `isInfixOf` output
+  assertNoCallStack errors
+
+testReplSharedParseFailure :: Assertion
+testReplSharedParseFailure = withTemporaryEnvironment [] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory [":compare ("]
+  assertEqual "shared parse-failure REPL exit" ExitSuccess exitCode
+  assertEqual "both-mode parse failure is emitted once" 1
+    $ countOccurrences "[DJEX_TYPE_PARSE]" errors
+  assertBool "a backend ran after the common parser failed" $
+    not $ "-- Djinn" `isInfixOf` output
+      && not ("-- Exference" `isInfixOf` output)
+  assertNoCallStack errors
+
 testReplInputRecovery :: Assertion
 testReplInputRecovery = withTemporaryEnvironment [] $ \directory -> do
   (exitCode, output, errors) <- runRepl directory
@@ -562,7 +631,7 @@ testReplLineComments = withTemporaryEnvironment [] $ \directory -> do
   assertContains "quoted imports still reach scope validation"
     "[DJEX_REPL_IMPORT_PACKAGE]" errors
   assertEqual "a longer dash operator remains query text" 1
-    $ countOccurrences "[DJEX_DJINN_PARSE]" errors
+    $ countOccurrences "[DJEX_TYPE_PARSE]" errors
   assertNoCallStack errors
 
 testReplBackendIsolation :: Assertion
@@ -1480,7 +1549,7 @@ testReplSearchScope = withReplModuleFixture $ \root -> do
   assertBool "hiding leaked the uniquely typed binding" $
     not $ "Beta.otherValue" `isInfixOf` scopeOutput
   assertContains "unimported and list-excluded query types are rejected"
-    "[DJEX_EXF_PARSE]" scopeErrors
+    "[DJEX_TYPE_PARSE]" scopeErrors
   assertContains "hidden unique binding produces no result"
     "[DJEX_EXF_NO_RESULT]" scopeErrors
   assertNoCallStack scopeErrors
@@ -1543,7 +1612,7 @@ testReplAliasesAndReexports = withReplModuleFixture $ \root -> do
   assertBool "overlapping alias leaked its right candidate" $
     not $ "AliasRight.rightClash" `isInfixOf` overlapOutput
   assertContains "shared occurrence ambiguity is rejected when used"
-    "[DJEX_EXF_PARSE]" overlapErrors
+    "[DJEX_TYPE_PARSE]" overlapErrors
   assertContains "shared occurrence diagnostic explains the ambiguity"
     "ambiguous" $ map toLower overlapErrors
   assertNoCallStack overlapErrors

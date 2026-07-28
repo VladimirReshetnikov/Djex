@@ -73,11 +73,15 @@ tests = testGroup "Djex facade"
       backendCapabilities (backendInfo DjinnBackend) @?=
         [ DecidingInhabitation
         , PrenexPolymorphism
+        , OpaqueRankNTypes
+        , ImpredicativeTypes
         , TypeClassConstraints
         ]
       backendCapabilities (backendInfo ExferenceBackend) @?=
         [ HeuristicSearch
         , PrenexPolymorphism
+        , OpaqueRankNTypes
+        , ImpredicativeTypes
         , RankedCandidates
         , TypeClassConstraints
         ]
@@ -284,15 +288,38 @@ tests = testGroup "Djex facade"
 
       nestedTargetName <- expectRight $ mkIdentifier "nestedForall"
       nestedTarget <- expectRight $ mkDefinitionName nestedTargetName
+      listConstructor <- expectRight $ specialName ListConstructor
+      let polymorphic binder = ForallType [binder] []
+            $ FunctionType (TypeVariable binder) (TypeVariable binder)
+          listOf element = TypeApplication
+            (TypeConstructor listConstructor) element
       let nestedQuery = query
             { requestTarget = nestedTarget
-            , requestGoal = FunctionType variable
-                $ ForallType ["b"] [] $ TypeVariable "b"
+            , requestGoal = FunctionType
+                (polymorphic "input") (polymorphic "output")
             }
-      case mkDjinnRequest nestedQuery of
-        Left failure -> diagnosticCode failure @?=
-          Just "DJEX_DJINN_LOWER"
-        Right _ -> fail "Djinn accepted a forall below an arrow"
+      nestedRequest <- expectRight $ mkDjinnRequest nestedQuery
+      nestedResult <- expectRight $ runDjinnQuery session nestedRequest
+      resultEvidence nestedResult @?= ValidatedCandidates
+      assertBool "alpha-renamed rank-N identity produced no proof"
+        $ not $ null $ batchCandidates $ resultSearch nestedResult
+
+      impredicativeTargetName <- expectRight
+        $ mkIdentifier "impredicativeIdentity"
+      impredicativeTarget <- expectRight
+        $ mkDefinitionName impredicativeTargetName
+      let impredicativeQuery = nestedQuery
+            { requestTarget = impredicativeTarget
+            , requestGoal = FunctionType
+                (listOf $ polymorphic "element")
+                (listOf $ polymorphic "renamed")
+            }
+      impredicativeRequest <- expectRight $ mkDjinnRequest impredicativeQuery
+      impredicativeResult <- expectRight
+        $ runDjinnQuery session impredicativeRequest
+      resultEvidence impredicativeResult @?= ValidatedCandidates
+      assertBool "impredicative list identity produced no proof"
+        $ not $ null $ batchCandidates $ resultSearch impredicativeResult
   , testCase "classify Djinn options without attributing type source" $ do
       session <- sealDjinnEnvironment standardEnvironment
       target <- expectRight $ mkIdentifier "invalidOptions"
@@ -1106,7 +1133,7 @@ tests = testGroup "Djex facade"
               $ not $ referencesGlobal target body
           [] -> fail "Exference reported candidate evidence without a candidate"
         [] -> fail "Exference found no identity candidate after target exclusion"
-  , testCase "seal unsupported Exference bindings once with diagnostics" $ do
+  , testCase "retain Exference rank-N bindings without omissions" $ do
       rankNName <- expectRight $ mkQualifiedName [] "rankN"
       let rankN = FunctionBinding
             { functionResult = TypeVar 0
@@ -1125,15 +1152,8 @@ tests = testGroup "Djex facade"
         map (fmap $ const ())
           (environmentDeclarations
             $ inventoryEnvironment $ checkedSourceInventory checked)
-      case exferenceSessionOmissions session of
-        [omission] -> do
-          omittedCapability omission @?= BindingIntroduction
-          omittedReason omission @?= UnsupportedNestedForall
-        omissions -> fail $ "expected one rank-N omission, got " ++ show omissions
-      map diagnosticCode (exferenceSessionDiagnostics session) @?=
-        [Just "DJEX_EXF_OMISSION"]
-      map diagnosticSeverity (exferenceSessionDiagnostics session) @?=
-        [Warning]
+      exferenceSessionOmissions session @?= []
+      exferenceSessionDiagnostics session @?= []
   , testCase "exclude Exference bindings by exact structural policy name" $ do
       blockedBackendName <- expectRight
         $ mkQualifiedName ["Data", "Function"] "fix"

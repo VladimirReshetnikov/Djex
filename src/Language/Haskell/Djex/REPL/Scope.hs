@@ -88,7 +88,7 @@ data ScopeOrigin = ExplicitScope | AutomaticScope
 
 -- | One ordered prompt-context entry.  Imports retain source text rather than
 -- exposing a @haskell-src-exts@ tree in the REPL state API; every constructor
--- is revalidated transactionally before it can enter a 'ReplScope'.
+-- is revalidated transactionally before it can enter a t'ReplScope'.
 data ScopeEntry
   = ScopeModule ScopeOrigin Bool ModuleName
     -- ^ Origin, starred/full-top-level flag, and canonical module.
@@ -165,7 +165,7 @@ scopeCurrentModule = replScopeCurrentModule
 
 -- | Resolve one prompt spelling inside a caller-selected Haskell namespace.
 --
--- 'ReplScope' carries both namespaces in one route surface but retains the
+-- t'ReplScope' carries both namespaces in one route surface but retains the
 -- admitted namespace set for each identity. Consumers such as @:info@ and
 -- @:type@ select the namespace they own before ambiguity is decided; otherwise
 -- the legal pair @data T = T@ would make the constructor leak through a

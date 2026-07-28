@@ -272,7 +272,7 @@ data HsInstance = HsInstance
   deriving (Eq, Show, Ord, Generic)
 
 -- | Every free variable of an instance's head and prerequisite constraints:
--- the binder set 'HsInstance' quantifies implicitly. The compatibility class
+-- the binder set t'HsInstance' quantifies implicitly. The compatibility class
 -- validator and the shared-declaration adapter both derive their alpha
 -- identities from this single operation so the two cannot drift.
 instanceConstraintVariables

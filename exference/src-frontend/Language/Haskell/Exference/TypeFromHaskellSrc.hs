@@ -157,7 +157,7 @@ data TypeResolver
   deriving (Eq, Show)
 
 -- | Attach source-loader import routes without changing the historical
--- six-field 'TypeResolver' constructor. Low-level compatibility callers can
+-- six-field t'TypeResolver' constructor. Low-level compatibility callers can
 -- therefore keep constructing that record exactly as before.
 withTypeImportScopes :: [TypeImportScope] -> TypeResolver -> TypeResolver
 withTypeImportScopes imports resolver = ScopedTypeResolver

@@ -6,7 +6,7 @@
 -- classes, inferred kinds, and synonyms regardless of the currently selected
 -- synthesis backend. Ordinary type kinds come from the shared inference engine;
 -- this private frontend adds only the @Constraint@ result needed to display
--- class kinds, because constraints are deliberately not source 'Type' nodes.
+-- class kinds, because constraints are deliberately not source @Type@ nodes.
 module Language.Haskell.Djex.REPL.Kind
   ( KindInspection
   , inspectKind

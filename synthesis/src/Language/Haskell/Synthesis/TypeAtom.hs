@@ -5,7 +5,7 @@
 
 -- | Validated opaque polymorphic types shared by both search engines.
 --
--- A 'TypeAtom' retains the complete source tree for rendering, but its
+-- A t'TypeAtom' retains the complete source tree for rendering, but its
 -- equality and ordering ignore the spelling of lexically bound variables.
 -- Free variables remain significant.  This is the deliberately small
 -- semantic contract needed by engines which can carry a rank-N type without

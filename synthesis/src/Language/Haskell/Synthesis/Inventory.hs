@@ -52,7 +52,7 @@ inventoryKindAssumptions (Inventory _ assumptions) = assumptions
 -- | Look up the exact width inferred for a declared or open-inventory class.
 --
 -- Query adapters use this finite width before traversing a caller-built
--- constraint argument spine. Keeping the projection beside 'Inventory'
+-- constraint argument spine. Keeping the projection beside t'Inventory'
 -- ensures every backend consults the same checked class-kind witness rather
 -- than independently reconstructing an arity table.
 inventoryClassArity

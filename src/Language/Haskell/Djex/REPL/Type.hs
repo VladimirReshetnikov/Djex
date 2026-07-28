@@ -48,7 +48,6 @@ import Language.Haskell.Djex.Exference
   ( ExferenceSession
   , defaultExferenceOptions
   , exferenceRequestQuery
-  , exferenceSessionInventory
   )
 import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceQueryScope (..)
@@ -60,12 +59,6 @@ import Language.Haskell.Djex.REPL.Command (TypeDefaulting (..))
 import Language.Haskell.Djex.REPL.Scope
 import Language.Haskell.Djex.Text (trim)
 import Language.Haskell.Exference.Core.ConstraintSolver (isPossible)
-import Language.Haskell.Exference.Core.Declaration
-  ( prepareSynthesisInventory
-  , preparedSynthesisBackend
-  )
-import Language.Haskell.Exference.Core.FunctionBinding
-  ( EnvDictionary (environmentClasses) )
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( freshSynthesisVariable )
 import Language.Haskell.Exference.Core.Types
@@ -84,25 +77,16 @@ import Language.Haskell.Exference.EnvironmentParser
   ( haskellSrcExtsParseMode )
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
-import Language.Haskell.Synthesis.Declaration
-  ( ValueSignature (..)
-  , declarationTermSignatures
-  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
   , contextualDiagnostic
-  , shownErrorDiagnostic
   , sourceTextLocation
   , withCode
   , withContext
   , withSourceLocation
   )
-import Language.Haskell.Synthesis.Environment
-  ( environmentDeclarations )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
-import Language.Haskell.Synthesis.Inventory
-  ( inventoryEnvironment )
 import Language.Haskell.Synthesis.Name
   ( Boxity (..)
   , Name
@@ -200,15 +184,6 @@ prepareContext
   -> String
   -> Either Diagnostic TypeContext
 prepareContext session scope target sourceName source = do
-  prepared <- case prepareSynthesisInventory inventory of
-    Left failure -> Left $ withSourceLocation location
-      $ shownErrorDiagnostic "DJEX_REPL_TYPE_ENV"
-          "cannot prepare the loaded declarations for type inference" failure
-    Right value -> Right value
-  let signatures = concatMap declarationTermSignatures
-        $ environmentDeclarations environment
-      schemes = Map.fromList
-        [(valueName signature, valueType signature) | signature <- signatures]
   pure TypeContext
     { contextSession = session
     , contextScope = scope
@@ -217,13 +192,10 @@ prepareContext session scope target sourceName source = do
     , contextSourceText = source
     , contextTermSchemes = schemes
     , contextTermNames = Map.keysSet schemes
-    , contextClasses = mkQueryClassEnv
-        (environmentClasses $ preparedSynthesisBackend prepared) []
+    , contextClasses = ExferenceSession.sessionInspectionClasses session
     }
  where
-  inventory = exferenceSessionInventory session
-  environment = inventoryEnvironment inventory
-  location = sourceTextLocation sourceName source
+  schemes = ExferenceSession.sessionInspectionTermSchemes session
 
 parseExpression
   :: TypeContext

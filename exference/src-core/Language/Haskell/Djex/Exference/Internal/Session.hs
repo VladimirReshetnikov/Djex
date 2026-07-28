@@ -25,6 +25,8 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , checkSessionTypeSynonymInspectionSaturation
   , normalizeSessionTypeSynonyms
   , exferenceSessionInventory
+  , sessionInspectionTermSchemes
+  , sessionInspectionClasses
   , sessionOmissions
   ) where
 
@@ -63,15 +65,28 @@ import Language.Haskell.Exference.Core.TypeUtils
   ( containsForall
   , typeConstructorHead
   )
-import Language.Haskell.Exference.Core.Types (SynthesisVariable)
+import Language.Haskell.Exference.Core.Types
+  ( HsType
+  , QueryClassEnv
+  , SynthesisVariable
+  , mkQueryClassEnv
+  )
+import Language.Haskell.Synthesis.Declaration
+  ( ValueSignature (..)
+  , declarationTermSignatures
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , shownErrorDiagnostic
   )
-import Language.Haskell.Synthesis.Environment (Environment)
+import Language.Haskell.Synthesis.Environment
+  ( Environment
+  , environmentDeclarations
+  )
 import Language.Haskell.Synthesis.Count (naturalLength)
 import Language.Haskell.Synthesis.Inventory
   ( Inventory
+  , inventoryEnvironment
   , inventoryKindAssumptions
   , mkInventoryFromEnvironmentWithClassPolicy
   )
@@ -147,6 +162,8 @@ data ExferenceSession = ExferenceSession
   { searchView :: Core.ExferenceEnvironment
   , reusableSearchView :: EnvDictionary
   , preparedView :: PreparedInventory SynthesisVariable ()
+  , inspectionTermSchemesView :: Map Name HsType
+  , inspectionClassesView :: QueryClassEnv
   , omissionView :: [ExferenceOmission]
   }
 
@@ -247,17 +264,33 @@ sealPreparedEnvironment policy prepared = do
       "cannot seal the Exference session environment")
     $ mkExferenceEnvironment supportedBackend
   let foundation = preparedSynthesisWitness prepared
+      inspectionEnvironment = inventoryEnvironment
+        $ preparedInventory foundation
+      inspectionSignatures = concatMap declarationTermSignatures
+        $ environmentDeclarations inspectionEnvironment
+      inspectionTermSchemes = Map.fromList
+        [ (valueName signature, valueType signature)
+        | signature <- inspectionSignatures
+        ]
+      inspectionClasses = mkQueryClassEnv (environmentClasses backend) []
       session = ExferenceSession
         { searchView = searchEnvironment
         , reusableSearchView = supportedBackend
         , preparedView = foundation
+        , inspectionTermSchemesView = inspectionTermSchemes
+        , inspectionClassesView = inspectionClasses
         , omissionView = omissions
         }
-  -- Evaluate the selector and the complete omission summary before the
-  -- backend-bearing witness leaves scope. Otherwise a lazy selector or list
-  -- comprehension could keep the unfiltered EnvDictionary reachable from an
-  -- otherwise parser-neutral session.
-  foundation `seq` (omissions `deepseq` pure session)
+  -- Materialize the inspection indexes and complete omission summary before
+  -- the backend-bearing witness leaves scope. Otherwise their lazy builders
+  -- could retain the unfiltered EnvDictionary or the declaration list behind
+  -- an otherwise parser-neutral session. Map values deliberately remain the
+  -- shared type trees owned by the retained inventory.
+  foundation `seq`
+    Map.size inspectionTermSchemes `seq`
+    inspectionClasses `deepseq`
+    omissions `deepseq`
+    pure session
 
 -- | Rebuild only the query-facing search projection for an interactive
 -- scope. The complete checked inventory remains available for qualified type
@@ -395,6 +428,19 @@ exferenceSessionInventory
   :: ExferenceSession
   -> ExferenceInventory
 exferenceSessionInventory = preparedInventory . preparedView
+
+-- | Complete term schemes retained for non-synthesizing inspection. This view
+-- is derived once from the authoritative inventory, before search policy can
+-- exclude a binding, so @:type@ can inspect every declaration without
+-- rebuilding Exference's complete lowering for each expression.
+sessionInspectionTermSchemes :: ExferenceSession -> Map Name HsType
+sessionInspectionTermSchemes = inspectionTermSchemesView
+
+-- | Class resolution context paired with 'sessionInspectionTermSchemes'.
+-- Search scoping and binding exclusions do not change classes or instances,
+-- so every scoped session can safely reuse this sealed empty-query view.
+sessionInspectionClasses :: ExferenceSession -> QueryClassEnv
+sessionInspectionClasses = inspectionClassesView
 
 sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView

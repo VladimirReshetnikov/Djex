@@ -6413,6 +6413,18 @@ tests = testGroup "Exference"
                 ("missing constraint-class diagnostic: " ++ show messages)
                 $ "unknown constraint class 'External.Constraint' used in the binding Warnings.constrained"
                     `elem` messages
+      , testCase "loader accepts infix classes at every constraint site" $ do
+          withTemporaryFile (unlines
+            [ "module OperatorClasses where"
+            , "class left :== right"
+            , "class (left :== right) => Child left right"
+            , "instance (left :== right) => Child left right"
+            , "constrained :: (left :== right) => left -> right"
+            ]) $ \modulePath -> do
+              (result, _) <- runLoad $ parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              _ <- expectRight result
+              pure ()
       , testCase "loader retains constraints nested in constraint arguments" $ do
           withTemporaryFile (unlines
             [ "module Warnings where"
@@ -6644,6 +6656,21 @@ tests = testGroup "Exference"
                     (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
               className @?= name "Eq"
             Right result -> fail $ "unexpected elaboration: " ++ show result
+      , testCase "infix class constraints match their prefix form" $ do
+          infixResult <- expectRight
+            $ parseTypePure "(left :== right) => left -> right"
+          prefixResult <- expectRight
+            $ parseTypePure "((:==) left right) => left -> right"
+          infixResult @?= prefixResult
+          case infixResult of
+            ( TypeForall []
+                [HsConstraint className [TypeVar 0, TypeVar 1]]
+                (TypeArrow (TypeVar 0) (TypeVar 1))
+              , hints
+              ) -> do
+                className @?= name ":=="
+                hints @?= Map.fromList [("left", 0), ("right", 1)]
+            result -> fail $ "unexpected infix constraint: " ++ show result
       , testCase "infix type operators share prefix elaboration and aliases" $ do
           let operatorName = validQualifiedName ["TypeOwner"] ":*:"
               baseResolver = legacyTypeResolver Map.empty [operatorName]

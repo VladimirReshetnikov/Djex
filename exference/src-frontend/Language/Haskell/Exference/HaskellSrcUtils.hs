@@ -47,6 +47,13 @@ splitClassApplication = go []
   where
     go arguments (TyApp _ function argument) = go (argument : arguments) function
     go arguments (TyParen _ inner) = go arguments inner
+    -- HSE keeps an infix type operator as a dedicated node rather than an
+    -- application spine.  Normalize it here so signatures, superclasses, and
+    -- instance prerequisites all accept the same symbolic class spelling as
+    -- the already-supported prefix form @(:==) left right@.  A promoted
+    -- operator is a type-level constructor occurrence, not a class head.
+    go arguments (TyInfix _ left (UnpromotedName _ name) right) =
+      Just (name, left : right : arguments)
     go arguments (TyCon _ name) = Just (name, arguments)
     go _ _ = Nothing
 

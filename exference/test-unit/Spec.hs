@@ -4638,6 +4638,55 @@ tests = testGroup "Exference"
               ]
             assertBool (show disabled)
               $ any ("Bool is not in scope" `isInfixOf`) disabled
+        , testCase "later LANGUAGE switches decide implicit Prelude" $ do
+            let prelude = ("Prelude.hs", unlines
+                  [ "module Prelude (Bool) where"
+                  , "data Bool = False | True"
+                  ])
+                support = ("Support.hs",
+                  "module Support where\ndata Marker = Marker\n")
+                sources switches =
+                  [ prelude
+                  , support
+                  , ("Use.hs", unlines
+                      [ "{-# LANGUAGE " ++ switches ++ " #-}"
+                      , "module Use where"
+                      , "import Support ()"
+                      , "selected :: Bool"
+                      ])
+                  ]
+            forM_
+              [ "NoImplicitPrelude, ImplicitPrelude"
+              , "RebindableSyntax, NoRebindableSyntax"
+              ] $ \switches -> do
+                _ <- expectSourceEnvironment $ sources switches
+                pure ()
+            forM_
+              [ "ImplicitPrelude, NoImplicitPrelude"
+              , "NoRebindableSyntax, RebindableSyntax"
+              ] $ \switches -> do
+                failures <- expectBindingScopeFailure $ sources switches
+                assertBool (switches ++ ": " ++ show failures)
+                  $ any ("Bool is not in scope" `isInfixOf`) failures
+        , testCase "later OPTIONS_GHC switches decide implicit Prelude" $ do
+            let prelude = ("Prelude.hs", unlines
+                  [ "module Prelude (Bool) where"
+                  , "data Bool = False | True"
+                  ])
+                sources switches =
+                  [ prelude
+                  , ("Use.hs", unlines
+                      [ "{-# OPTIONS_GHC " ++ switches ++ " #-}"
+                      , "module Use where"
+                      , "selected :: Bool"
+                      ])
+                  ]
+            _ <- expectSourceEnvironment
+              $ sources "-XNoImplicitPrelude -XImplicitPrelude"
+            failures <- expectBindingScopeFailure
+              $ sources "-XImplicitPrelude -XNoImplicitPrelude"
+            assertBool (show failures)
+              $ any ("Bool is not in scope" `isInfixOf`) failures
         , testCase "parse-mode flags can suppress implicit Prelude" $
             withTemporaryFile (unlines
               [ "module Prelude (Bool) where"

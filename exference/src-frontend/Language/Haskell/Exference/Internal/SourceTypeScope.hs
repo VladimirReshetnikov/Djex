@@ -104,11 +104,10 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     ((== Just canonical) . qualifiedNameModule)
 
   resolverFor mode modul moduleName = case moduleImportsAndPragmas modul of
-    Just (pragmas, imports) -> strictResolver moduleName
-      (modeDisablesImplicitPrelude mode) pragmas imports
+    Just (pragmas, imports) -> strictResolver moduleName mode pragmas imports
     _ -> baseResolver
 
-  strictResolver syntaxModule modeDisablesPrelude pragmas imports = case
+  strictResolver syntaxModule mode pragmas imports = case
       checkedModuleName syntaxModule of
     Nothing -> baseResolver
     Just current -> baseResolver
@@ -125,8 +124,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       explicitImports = mapMaybe nominalImport imports
       importsWithPrelude = explicitImports
         ++ maybeToList
-          (implicitPreludeFrom surfaces modeDisablesPrelude
-            pragmas imports current)
+          (implicitPreludeFrom surfaces mode pragmas imports current)
       unqualified = foldr mergeSurface local
         [ nominalImportSurface imported
         | imported <- importsWithPrelude
@@ -195,13 +193,12 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     converted syntaxName = either (const []) (: [])
       $ convertModuleName (HSE.importModule declaration) syntaxName
 
-  implicitPreludeFrom available modeDisablesPrelude pragmas imports current = do
+  implicitPreludeFrom available mode pragmas imports current = do
     prelude <- either (const Nothing) Just
       $ SharedName.mkModuleName "Prelude"
     if current == prelude
         || any ((== Just prelude) . checkedModuleName . HSE.importModule) imports
-        || modeDisablesPrelude
-        || any disablesImplicitPrelude pragmas
+        || implicitPreludeDisabled mode pragmas
       then Nothing
       else do
         surface <- M.lookup prelude available
@@ -244,7 +241,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       ++ maybeToList (implicitPreludeForExports explicitImports)
     implicitPreludeForExports imports = case moduleImportsAndPragmas modul of
       Just (pragmas, _) -> implicitPreludeFrom available
-        (modeDisablesImplicitPrelude mode) pragmas imports canonical
+        mode pragmas imports canonical
       Nothing -> Nothing
     -- The Report defines @module M@ as the identities simultaneously in
     -- unqualified scope and in scope through qualifier @M@. In particular,
@@ -332,21 +329,38 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     HSE.Module _ _ pragmas imports _ -> Just (pragmas, imports)
     _ -> Nothing
 
-  disablesImplicitPrelude pragma = case pragma of
-    HSE.LanguagePragma _ names -> any
-      ((`elem` ["NoImplicitPrelude", "RebindableSyntax"])
-        . sourceNameText)
-      names
-    HSE.OptionsPragma _ _ options -> any
-      (`elem` ["-XNoImplicitPrelude", "-XRebindableSyntax"])
-      $ words options
-    _ -> False
-
-  modeDisablesImplicitPrelude mode = not preludeEnabled || rebindableSyntax
+  -- Extension switches are ordered. In particular, a later
+  -- @ImplicitPrelude@ or @NoRebindableSyntax@ must be able to reverse an
+  -- earlier command-line or source pragma instead of an earlier disabling
+  -- spelling winning forever. Apply the parse mode first, then pragmas and
+  -- the names/tokens within each pragma in their source order, matching GHC's
+  -- left-to-right flag semantics.
+  implicitPreludeDisabled mode pragmas =
+    not preludeEnabled || rebindableSyntax
    where
-    (preludeEnabled, rebindableSyntax) = foldl' update (True, False)
-      $ extensions mode
-    update (implicit, rebindable) extension = case extension of
+    modeState = foldl' updateExtension (True, False) $ extensions mode
+    (preludeEnabled, rebindableSyntax) =
+      foldl' updatePragma modeState pragmas
+
+    updatePragma state pragma = case pragma of
+      HSE.LanguagePragma _ names ->
+        foldl' updateSpelling state $ map sourceNameText names
+      HSE.OptionsPragma _ _ options ->
+        foldl' updateOption state $ words options
+      _ -> state
+
+    updateOption state option = case option of
+      '-':'X':spelling -> updateSpelling state spelling
+      _ -> state
+
+    updateSpelling (implicit, rebindable) spelling = case spelling of
+      "ImplicitPrelude" -> (True, rebindable)
+      "NoImplicitPrelude" -> (False, rebindable)
+      "RebindableSyntax" -> (implicit, True)
+      "NoRebindableSyntax" -> (implicit, False)
+      _ -> (implicit, rebindable)
+
+    updateExtension (implicit, rebindable) extension = case extension of
       HSEExtension.EnableExtension HSEExtension.ImplicitPrelude ->
         (True, rebindable)
       HSEExtension.DisableExtension HSEExtension.ImplicitPrelude ->

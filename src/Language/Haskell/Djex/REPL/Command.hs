@@ -36,14 +36,13 @@ import Data.Char (isSpace, toLower)
 import Data.List (intercalate, isPrefixOf)
 import Text.Read (readMaybe)
 
-import Djinn.Internal.HIdentifier (stripLineComments)
 import Language.Haskell.Djex (Backend (..))
 import Language.Haskell.Djex.Package
   ( PackageInstallMode
   , parsePackageInstall
   , validatePackageTargets
   )
-import Language.Haskell.Djex.Text (normalize, trim)
+import Language.Haskell.Djex.Text (normalize, stripLineComments, trim)
 
 -- | Backend selection retained by the interactive frontend.
 data ReplBackend

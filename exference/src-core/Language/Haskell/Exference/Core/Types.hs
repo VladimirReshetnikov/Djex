@@ -1081,9 +1081,17 @@ showVar i
 -- | Suggest a readable binder spelling from its type.  This is only a
 -- preference: a renderer must still allocate a fresh name because distinct
 -- variable IDs can have the same suggestion and globals may use it too.
+-- Present hints are authoritative at the shared rendering boundary, so a
+-- derived plural such as local 1's historical list suggestion @as@ must fall
+-- back here instead of becoming a late rendering error.
 preferredVarName :: TVarId -> HsType -> String
-preferredVarName i = h
+preferredVarName i source = case SharedName.mkIdentifier suggestion of
+  Right candidate
+    | SharedName.nameLexicalClass candidate == SharedName.VariableLike ->
+        suggestion
+  _ -> showVar i
  where
+  suggestion = h source
   suffix
     | i < 0 = "n" ++ show (negate $ toInteger i)
     | otherwise = show i

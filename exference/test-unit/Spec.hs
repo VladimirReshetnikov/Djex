@@ -7388,6 +7388,17 @@ tests = testGroup "Exference"
             @?= Right "map"
           renderExpression Generated.FullyQualified (ExpName global)
             @?= Right "Data.List.map"
+      , testCase "derived list hints avoid reserved local identifiers" $ do
+          let listType = TypeApp
+                (TypeCons SharedName.listName) (TypeVar 0)
+              expression = ExpLambda 1 listType $ ExpVar 1 listType
+          -- The old pluralization produced @as@ for local ID 1. Derived
+          -- preferences enter the shared renderer as authoritative hints, so
+          -- Exference must sanitize them before that strict boundary.
+          preferredVarName 1 listType @?= "a"
+          expressionNameHints expression @?= Map.singleton 1 "a"
+          renderExpression Generated.Unqualified expression
+            @?= Right "\\a -> a"
       , testCase "validated canonical search stays lazy and total" $ do
           let goal = input_goalType identityInput
           sourceHints <- expectRight $ mkExferenceSourceTypeVariableHints

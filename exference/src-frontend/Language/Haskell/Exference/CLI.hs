@@ -46,7 +46,12 @@ import Language.Haskell.Exference.EnvironmentParser
   )
 import Language.Haskell.Synthesis.Candidate
   ( candidateResidualConstraints )
-import Language.Haskell.Synthesis.Diagnostic (renderDiagnostic)
+import Language.Haskell.Synthesis.Diagnostic
+  ( Diagnostic
+  , Severity (Info)
+  , diagnosticSeverity
+  , renderDiagnostic
+  )
 import Language.Haskell.Synthesis.Generated
   ( DefinitionName
   , mkDefinitionName
@@ -191,8 +196,7 @@ run flags inputs = do
       : map renderDiagnostic
           (NonEmpty.toList $ environmentLoadErrorDiagnostics failure)
     Right value -> pure value
-  when (verbosity > 0) $ forM_ loaderDiagnostics $ \value ->
-    putStrLn $ "environment " ++ renderDiagnostic value
+  forM_ loaderDiagnostics $ emitLoadDiagnostic verbosity "environment"
   let sourceEnvironment = checkedSourceProjection checkedEnvironment
 
   policy <- either
@@ -203,8 +207,8 @@ run flags inputs = do
     (fatal . ("could not seal Exference session: " ++) . renderDiagnostic)
     pure
     $ Session.mkExferenceSessionWithPolicy policy checkedEnvironment
-  when (verbosity > 0) $ forM_ (exferenceSessionDiagnostics session) $ \value ->
-    putStrLn $ "session " ++ renderDiagnostic value
+  forM_ (exferenceSessionDiagnostics session) $
+    emitLoadDiagnostic verbosity "session"
 
   when (PrintEnv `elem` flags) $
     printEnvironment verbosity sourceEnvironment
@@ -403,6 +407,18 @@ printEnvironment verbosity environment = do
  where
   classes = sClassEnv_tclasses $ sourceClasses environment
   instances = sClassEnv_instances $ sourceClasses environment
+
+-- Loader summaries are historical verbose output, but warnings must not
+-- disappear merely because the user omitted @--verbose@. Keep informational
+-- progress on stdout and send every actionable diagnostic to stderr, matching
+-- the merged one-shot command's stream and verbosity policy.
+emitLoadDiagnostic :: Int -> String -> Diagnostic -> IO ()
+emitLoadDiagnostic verbosity phase value
+  | diagnosticSeverity value == Info =
+      when (verbosity > 0) $ putStrLn rendered
+  | otherwise = hPutStrLn stderr rendered
+ where
+  rendered = phase ++ " " ++ renderDiagnostic value
 
 -- The shared session correctly excludes an environment binding equal to its
 -- generated definition target. This compatibility CLI prints only the clause

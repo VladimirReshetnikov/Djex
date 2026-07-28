@@ -7,7 +7,7 @@ import CLIAssertions
   )
 import Control.Exception (bracket)
 import Control.Monad (forM_)
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isPrefixOf)
 import System.Directory
   (createDirectory, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Exit (ExitCode (..))
@@ -38,6 +38,10 @@ main = defaultMain $ testGroup "Exference CLI integration"
   , testCase "short mode contributes structural expression cost" testShortMode
   , testCase "recursion helpers require explicit command opt-in"
       testRecursionPolicy
+  , testCase "loader warnings are visible without verbose mode"
+      testLoaderWarningVisibility
+  , testCase "session warnings are visible without verbose mode"
+      testSessionWarningVisibility
   , testCase "missing environment directories fail closed" testMissingEnvironment
   , testCase "invalid class environments fail closed" testInvalidEnvironment
   , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
@@ -236,6 +240,50 @@ testRecursionPolicy = withTemporaryEnvironment $ \environmentDirectory -> do
   assertBool "explicit opt-in retained a policy omission" $
     not $ "DJEX_EXF_POLICY_OMISSION" `isInfixOf` allowed
 
+testLoaderWarningVisibility :: Assertion
+testLoaderWarningVisibility =
+  withTemporaryEnvironment $ \environmentDirectory -> do
+    let ratingPath = environmentDirectory ++ "/Broken.ratings"
+    writeFile (environmentDirectory ++ "/Fixture.hs") $ unlines
+      [ "module Fixture where"
+      , "identity :: a -> a"
+      ]
+    writeFile ratingPath "Fixture.identity not-a-finite-number"
+
+    (output, errors) <- runExferenceCapture
+      [ "--envdir", environmentDirectory
+      , "--first"
+      , "a -> a"
+      ]
+    assertContains "a recoverable rating warning must not stop synthesis"
+      "\\a -> a" output
+    assertContainsPath "the default command must report loader warnings on stderr"
+      (ratingPath ++ ": warning: could not parse rating file:") errors
+    assertEqual "the loader warning should be emitted exactly once"
+      1 $ countOccurrences "warning: could not parse rating file:" errors
+    assertBool "loader warnings must not contaminate candidate output"
+      $ not $ "warning: could not parse rating file:" `isInfixOf` output
+    assertBool "informational loader summaries remain opt-in"
+      $ not $ "environment info:" `isInfixOf` output
+
+testSessionWarningVisibility :: Assertion
+testSessionWarningVisibility =
+  withTemporaryEnvironment $ \environmentDirectory -> do
+    writeFile (environmentDirectory ++ "/Recursive.hs") $ unlines
+      [ "module Recursive where"
+      , "data Nat = Zero | Succ Nat"
+      ]
+
+    (output, errors) <- runExferenceCapture
+      ["--envdir", environmentDirectory]
+    assertEqual "a load-only command should keep stdout quiet" "" output
+    assertContains "the default command must report session warnings on stderr"
+      "session warning [DJEX_EXF_RECURSIVE_OMISSION]:" errors
+    assertContains "the omission should identify the affected datatype"
+      "Recursive.Nat" errors
+    assertEqual "the recursive fixture should be diagnosed exactly once"
+      1 $ countOccurrences "context: Recursive.Nat" errors
+
 testMissingEnvironment :: Assertion
 testMissingEnvironment = withMissingTemporaryEnvironment $ \environmentDirectory -> do
   (exitCode, output, errors) <- readProcessWithExitCode "exference"
@@ -366,7 +414,7 @@ testParsedDatatypePatternMatch =
       , "Fixture.Box a -> a"
       ] ""
     assertEqual ("pattern-match stderr: " ++ errors) ExitSuccess exitCode
-    assertEqual "pattern matching should not write to stderr" "" errors
+    assertOnlyWarningDiagnostics errors
     assertContains "the result must eliminate the parsed Box constructor"
       "Box" output
     assertBool "the parsed datatype must not be silently omitted"
@@ -418,11 +466,31 @@ testVersion = do
 
 runExference :: [String] -> IO String
 runExference arguments = do
+  (output, errors) <- runExferenceCapture arguments
+  assertOnlyWarningDiagnostics errors
+  pure output
+
+-- Successful commands can report checked loader/session omissions. Keep the
+-- general subprocess helper strict enough that an Info diagnostic, raw output,
+-- or an accidentally non-fatal Error still fails every ordinary CLI test.
+assertOnlyWarningDiagnostics :: String -> Assertion
+assertOnlyWarningDiagnostics errors =
+  assertBool ("unexpected exference stderr: " ++ errors)
+    $ all isWarningLine $ lines errors
+ where
+  isWarningLine line
+    | "  context: " `isPrefixOf` line = True
+    | otherwise =
+        ("environment " `isPrefixOf` line || "session " `isPrefixOf` line)
+          && (": warning" `isInfixOf` line
+            || " warning [" `isInfixOf` line)
+
+runExferenceCapture :: [String] -> IO (String, String)
+runExferenceCapture arguments = do
   (exitCode, output, errors) <-
     readProcessWithExitCode "exference" arguments ""
   assertEqual ("exference stderr: " ++ errors) ExitSuccess exitCode
-  assertEqual "exference should not write to stderr" "" errors
-  pure output
+  pure (output, errors)
 
 runExferenceFailure :: [String] -> IO (String, String)
 runExferenceFailure arguments = do

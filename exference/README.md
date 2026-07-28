@@ -455,7 +455,10 @@ caller supplies a policy. Multiple input types run in order; conflicting
 selection or qualification flags fail explicitly; parse, kind, and search
 failures use stderr and nonzero status. The historical heuristic vector remains
 named in the CLI, and `--short` now ranks by structural generated-expression
-size rather than rendered identifier length.
+size rather than rendered identifier length. Recoverable loader and session
+warnings are also written to stderr at every verbosity; informational loading
+summaries remain quiet by default and retain their historical stdout output
+under `--verbose`.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

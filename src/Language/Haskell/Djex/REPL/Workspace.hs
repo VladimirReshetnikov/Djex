@@ -43,6 +43,7 @@ import Data.List (intercalate, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
+import Data.Semigroup (sconcat)
 import qualified Data.Set as Set
 import System.Directory
   ( canonicalizePath
@@ -1068,9 +1069,7 @@ collectResults
   -> Either (NonEmpty error) [value]
 collectResults results = case partitionEithers results of
   ([], values) -> Right values
-  (failures, _) -> case NonEmpty.nonEmpty $ concatMap NonEmpty.toList failures of
-    Just combined -> Left combined
-    Nothing -> error "collectResults: partition reported empty failures"
+  (failure : failures, _) -> Left $ sconcat $ failure :| failures
 
 workspaceFailure :: String -> String -> String -> Diagnostic
 workspaceFailure code summary detail =

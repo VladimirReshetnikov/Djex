@@ -2241,13 +2241,16 @@ testReplStartupFiles = withTemporaryEnvironment
         , ":backend exference"
         ]
     )
+  , ("malformed/.djexrc", ":{\n")
   , ("environment/.keep", "")
   ] $ \directory -> do
   let home = directory </> "home"
       working = directory </> "cwd"
       environment = directory </> "environment"
+      malformed = directory </> "malformed"
       homeStartup = home </> ".djexrc"
       workingStartup = working </> ".djexrc"
+      malformedStartup = malformed </> ".djexrc"
   canonicalHomeStartup <- canonicalizePath homeStartup
   canonicalWorkingStartup <- canonicalizePath workingStartup
   (exitCode, output, errors) <- runReplFrom working home [] environment
@@ -2292,6 +2295,16 @@ testReplStartupFiles = withTemporaryEnvironment
   assertBool "suppressed startup still applied its settings" $
     not $ "\\a -> a" `isInfixOf` ignoredOutput
 
+  -- Discovery alone is not a successful load. A startup file must be read
+  -- strictly and parsed completely before Djex announces it.
+  (malformedExit, malformedOutput, malformedErrors) <-
+    runReplFrom malformed environment [] environment ["a -> a"]
+  assertEqual "malformed startup REPL exit" ExitSuccess malformedExit
+  assertBool "malformed startup file was announced as loaded" $
+    not $ malformedStartup `isInfixOf` malformedOutput
+  assertContains "malformed startup diagnostic"
+    "[DJEX_REPL_SCRIPT]" malformedErrors
+
   -- GHCi refuses a POSIX startup file that another group member can replace.
   -- Djex executes shell, package, and evaluation commands from the same file,
   -- so it must preserve that trust boundary before reading a line.
@@ -2306,6 +2319,18 @@ testReplStartupFiles = withTemporaryEnvironment
       not $ "\\a -> a" `isInfixOf` untrustedOutput
     assertContains "untrusted startup diagnostic"
       "[DJEX_REPL_STARTUP_UNTRUSTED]" untrustedErrors
+
+    -- A trusted but unreadable file can still fail after candidate discovery.
+    -- Its load announcement must likewise wait until the strict read succeeds.
+    callProcess "chmod" ["g-w,u-r", workingStartup]
+    (unreadableExit, unreadableOutput, unreadableErrors) <-
+      runReplFrom working environment [] environment ["a -> a"]
+    callProcess "chmod" ["u+r", workingStartup]
+    assertEqual "unreadable startup REPL exit" ExitSuccess unreadableExit
+    assertBool "unreadable startup file was announced as loaded" $
+      not $ canonicalWorkingStartup `isInfixOf` unreadableOutput
+    assertContains "unreadable startup diagnostic"
+      "[DJEX_REPL_IO]" unreadableErrors
 
 occurrenceOffset :: String -> String -> Maybe Int
 occurrenceOffset needle = findIndex (needle `isPrefixOf`) . tails

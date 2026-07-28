@@ -58,12 +58,12 @@ splitClassApplication = go []
     go _ _ = Nothing
 
 splitDeclHead :: DeclHead l -> (Name l, [TyVarBind l])
-splitDeclHead (DHead _ name) = (name, [])
-splitDeclHead (DHInfix _ variable name) = (name, [variable])
-splitDeclHead (DHParen _ head') = splitDeclHead head'
-splitDeclHead (DHApp _ head' variable) =
-  let (name, variables) = splitDeclHead head'
-  in (name, variables ++ [variable])
+splitDeclHead = go []
+  where
+    go variables (DHead _ name) = (name, variables)
+    go variables (DHInfix _ variable name) = (name, variable : variables)
+    go variables (DHParen _ head') = go variables head'
+    go variables (DHApp _ head' variable) = go (variable : variables) head'
 
 splitInstRule
   :: InstRule l

@@ -49,7 +49,7 @@ import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.FilePath (takeDirectory)
 import qualified System.FilePath as FilePath
 import System.IO (IOMode (ReadMode), hGetContents, withFile)
-import System.IO.Error (tryIOError)
+import System.IO.Error (isDoesNotExistError, tryIOError)
 import System.Process
   ( CreateProcess (delegate_ctlc)
   , proc
@@ -322,19 +322,29 @@ defaultPromptTemplate = "djex[%b]> "
 -- Missing files are skipped silently; a broken line reports and continues.
 runStartupFiles :: ReplState -> IO (ReplStep ReplState)
 runStartupFiles initial = do
-  home <- tryIOError getHomeDirectory
-  current <- tryIOError getCurrentDirectory
-  candidates <- startupCandidates $ either (const []) pure home
-    ++ either (const []) pure current
+  home <- startupDirectory "home directory" getHomeDirectory
+  current <- startupDirectory "current directory" getCurrentDirectory
+  candidates <- startupCandidates $ home ++ current
   go initial candidates
  where
   go state [] = pure $ ContinueRepl state
   go state (path : remaining) = do
-    putStrLn $ "Loaded startup commands from " ++ path
-    outcome <- runScript path [] state
+    outcome <- runScriptWithAnnouncement path [] state
     case outcome of
       ExitRepl final -> pure $ ExitRepl final
       ContinueRepl next -> go next remaining
+
+-- Failure to locate a configured startup directory is different from an
+-- absent .djexrc inside a successfully located directory. Keep absence quiet,
+-- but do not silently discard an I/O failure that prevents discovery.
+startupDirectory :: String -> IO FilePath -> IO [FilePath]
+startupDirectory description locate = do
+  resolved <- tryIOError locate
+  case resolved of
+    Left failure -> startupPathFailure
+        ("cannot locate the " ++ description) description failure
+      >> pure []
+    Right path -> pure [path]
 
 -- Canonical deduplication keeps one run when the home and current
 -- directories coincide.
@@ -344,21 +354,34 @@ startupCandidates directories = go Set.empty directories
   go _ [] = pure []
   go seen (directory : remaining) = do
     let candidate = directory FilePath.</> ".djexrc"
-    present <- doesFileExist candidate
-    if not present
-      then go seen remaining
-      else do
-        resolved <- tryIOError $ canonicalizePath candidate
-        case resolved of
-          Left _ -> go seen remaining
-          Right canonical
-            | canonical `Set.member` seen -> go seen remaining
-            | otherwise -> do
-                trusted <- trustedStartupPath canonical
-                if trusted
-                  then (canonical :)
-                    <$> go (Set.insert canonical seen) remaining
-                  else go (Set.insert canonical seen) remaining
+    inspected <- tryIOError $ getPermissions candidate
+    case inspected of
+      Left failure
+        | isDoesNotExistError failure -> go seen remaining
+        | otherwise -> startupPathFailure "cannot inspect startup file"
+            candidate failure >> go seen remaining
+      Right _ -> do
+        present <- doesFileExist candidate
+        if not present
+          then go seen remaining
+          else do
+            resolved <- tryIOError $ canonicalizePath candidate
+            case resolved of
+              Left failure -> startupPathFailure "cannot resolve startup file"
+                  candidate failure >> go seen remaining
+              Right canonical
+                | canonical `Set.member` seen -> go seen remaining
+                | otherwise -> do
+                    trusted <- trustedStartupPath canonical
+                    if trusted
+                      then (canonical :)
+                        <$> go (Set.insert canonical seen) remaining
+                      else go (Set.insert canonical seen) remaining
+
+startupPathFailure :: String -> FilePath -> IOError -> IO ()
+startupPathFailure summary path failure = emitDiagnostic
+  $ contextualDiagnostic Warning "DJEX_REPL_STARTUP_PATH" summary
+  $ path ++ ": " ++ show failure
 
 -- Match GHCi's deliberate platform split. POSIX exposes the ownership and
 -- group/other mode bits needed for a meaningful check; Windows' Directory
@@ -1626,7 +1649,23 @@ takeLast :: Int -> [value] -> [value]
 takeLast count = reverse . take count . reverse
 
 runScript :: FilePath -> [String] -> ReplState -> IO (ReplStep ReplState)
-runScript path history state = do
+runScript = runScriptWith $ const $ pure ()
+
+-- Announce startup files only after path resolution, strict reading, and
+-- whole-script parsing have succeeded. This keeps a failed candidate from
+-- being presented as loaded while retaining the useful pre-execution notice.
+runScriptWithAnnouncement
+  :: FilePath -> [String] -> ReplState -> IO (ReplStep ReplState)
+runScriptWithAnnouncement = runScriptWith $ \canonical ->
+  putStrLn $ "Loaded startup commands from " ++ canonical
+
+runScriptWith
+  :: (FilePath -> IO ())
+  -> FilePath
+  -> [String]
+  -> ReplState
+  -> IO (ReplStep ReplState)
+runScriptWith announce path history state = do
   resolved <- tryIOError $ canonicalizePath path
   case resolved of
     Left failure -> ioFailure "cannot resolve script" path failure
@@ -1645,8 +1684,10 @@ runScript path history state = do
               Left failure -> replFailure "DJEX_REPL_SCRIPT"
                   "invalid REPL script" (canonical ++ ": " ++ failure)
                 >> pure (ContinueRepl state)
-              Right inputs -> runInputs canonical
-                history state {scriptStack = canonical : scriptStack state} inputs
+              Right inputs -> do
+                announce canonical
+                runInputs canonical history
+                  state {scriptStack = canonical : scriptStack state} inputs
 
 runInputs
   :: FilePath

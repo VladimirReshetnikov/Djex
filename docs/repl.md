@@ -51,9 +51,11 @@ GHCi-inspired, not identical to GHC 9.12.4, which considers
 locations.
 Each file is executed through the ordinary `:script` machinery: any REPL input
 is accepted, failed lines report and continue, settings persist into the
-session, and `:quit` exits. Missing files are skipped silently, each load is
-announced, and `--ignore-startup` suppresses both files. When the two paths
-resolve to the same file, it runs only once. On POSIX, Djex adopts GHCi's
+session, and `:quit` exits. Missing files are skipped silently; path discovery,
+canonicalization, read, and whole-script parse failures are diagnosed. A file
+is announced only after it has been read and parsed, and `--ignore-startup`
+suppresses both files. When the two paths resolve to the same file, it runs
+only once. On POSIX, Djex adopts GHCi's
 startup-file trust test: both the file and its containing directory must be
 owned by the current user or root and must not be writable by the group or by
 others. An unverifiable or untrusted file is skipped with a warning. Windows

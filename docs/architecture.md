@@ -408,6 +408,12 @@ change the later prompt projection; they neither reinterpret declarations nor
 alter the dependency graph, and use the same transactional publication
 discipline.
 
+The raw file and in-memory source loaders repeat the non-`SOURCE` cycle
+preflight because their callers supply an already discovered closure. Both
+layers use the same stable dependency-order engine; only the surrounding path
+discovery and diagnostics differ. This makes the export-surface fixed point an
+acyclic calculation instead of returning a parity-dependent intermediate state.
+
 The REPL then parses Exference types with `ExferenceQueryScope`: exact visible
 names govern unqualified lookup, one full-top-level current module gets local
 precedence, aliases map prompt qualifiers to canonical modules, and canonical

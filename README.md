@@ -528,6 +528,12 @@ qualified-only import contributes no names. A loaded `Prelude` is imported
 implicitly unless the module is `Prelude`, imports it explicitly, or enables
 `NoImplicitPrelude` or `RebindableSyntax`.
 
+Ordinary imports must form an acyclic graph. Every source-loader entry point
+rejects the first stable cycle as `CyclicModuleImports` before export surfaces
+are computed; `{-# SOURCE #-}` imports are interface edges and intentionally
+break that graph. The filesystem workspace and in-memory loader share one
+stable dependency traversal, so cycle and ordering policy cannot drift.
+
 Import resolution does not discover files. Directory and explicit snapshot
 loaders elaborate only the supplied modules; the shared REPL first discovers
 its resolvable local dependency closure and then invokes the same loader. Scope

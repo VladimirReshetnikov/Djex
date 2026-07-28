@@ -4265,6 +4265,68 @@ tests = testGroup "Exference"
             Left failure -> fail $ "unexpected duplicate-Main failure: "
               ++ show failure
             Right _ -> fail "duplicate implicit Main modules were accepted"
+      , testCase "ordinary import cycles fail independently of graph parity" $ do
+          let cyclicSources =
+                [ ("B.hs", unlines
+                    [ "module B (T) where"
+                    , "data T = BT"
+                    ])
+                , ("D.hs", unlines
+                    [ "module D (T) where"
+                    , "data T = DT"
+                    ])
+                , ("A.hs", unlines
+                    [ "module A (T) where"
+                    , "import B"
+                    , "import C"
+                    ])
+                , ("C.hs", unlines
+                    [ "module C (T) where"
+                    , "import D"
+                    , "import A"
+                    ])
+                , ("E.hs", unlines
+                    [ "module E where"
+                    , "import A"
+                    , "selected :: T"
+                    ])
+                ]
+              unrelated = ("F.hs", "module F where\n")
+              loadCycle sources = do
+                LoadReport result diagnostics <- parseModuleSources sources
+                diagnostics @?= []
+                case result of
+                  Left (CyclicModuleImports (failure :| rest)) -> do
+                    rest @?= []
+                    environmentLoadErrorDiagnostics
+                      (CyclicModuleImports $ failure :| []) @?=
+                        failure :| []
+                    pure failure
+                  Left failure -> fail $ "unexpected cycle failure: "
+                    ++ show failure
+                  Right _ -> fail "an ordinary import cycle was accepted"
+          baseFailure <- loadCycle cyclicSources
+          extendedFailure <- loadCycle $ cyclicSources ++ [unrelated]
+          extendedFailure @?= baseFailure
+          diagnosticCode baseFailure @?= Just "EXF_MODULE_CYCLE"
+          diagnosticSource baseFailure @?= Just "C.hs"
+          fmap (sourceLine . sourceStart) (diagnosticSpan baseFailure)
+            @?= Just 3
+          diagnosticContext baseFailure @?= ["A -> C -> A"]
+      , testCase "SOURCE imports break ordinary module cycles" $ do
+          _ <- expectSourceEnvironment
+            [ ("A.hs", unlines
+                [ "module A where"
+                , "import {-# SOURCE #-} B"
+                , "data A = A"
+                ])
+            , ("B.hs", unlines
+                [ "module B where"
+                , "import A"
+                , "data B = B"
+                ])
+            ]
+          pure ()
       , testGroup "source declaration import scope"
         [ testCase "a direct import disambiguates an unqualified type" $ do
             environment <- expectSourceEnvironment
@@ -6154,7 +6216,7 @@ tests = testGroup "Exference"
       , testCase "checked recursion spans source modules" $
           withTemporaryFile (unlines
             [ "module MutualA where"
-            , "import MutualB (B)"
+            , "import {-# SOURCE #-} MutualB (B)"
             , "data A = MakeA B"
             ]) $ \firstPath ->
           withTemporaryFile (unlines
@@ -6177,7 +6239,8 @@ tests = testGroup "Exference"
                     ]
               -- The compatibility extractor still processes module-local
               -- batches, so this also proves the checked projection no longer
-              -- trusts those preliminary bits.
+              -- trusts those preliminary bits. The SOURCE edge makes the
+              -- mutually recursive declaration graph a valid module graph.
               mutualFlags parsed @?= [False, False]
               checked <- case checkSourceEnvironment parsed of
                 Left failure -> fail $ "unexpected sealing failure: "

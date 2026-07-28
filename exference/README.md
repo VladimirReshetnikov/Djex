@@ -307,6 +307,12 @@ covers datatype fields, type synonyms, class heads and methods, instances, and
 ordinary or foreign signatures; term bodies remain outside Exference's source
 semantics.
 
+Ordinary module imports must be acyclic. The loader reports
+`CyclicModuleImports` at the import closing the first stable cycle before it
+computes export surfaces; `{-# SOURCE #-}` imports remain interface edges that
+break the dependency graph. This prevents cyclic re-exports from acquiring a
+meaning based on module-count iteration parity.
+
 Imports govern elaboration, not dependency discovery. Explicit file and source
 loaders consume exactly the ordered closure supplied by their caller; the
 unified REPL discovers resolvable local imports before passing that snapshot to

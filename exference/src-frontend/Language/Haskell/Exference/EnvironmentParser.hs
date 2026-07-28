@@ -56,6 +56,10 @@ import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Score (Penalty (..))
+import Language.Haskell.Djex.Internal.DependencyGraph
+  ( DependencyCycle (..)
+  , stableDependencyOrder
+  )
 
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Synthesis.Diagnostic
@@ -71,7 +75,7 @@ import Language.Haskell.Synthesis.Diagnostic
 import Control.DeepSeq
 
 import Control.Monad ( forM_ )
-import Data.List ( sort, sortOn, isSuffixOf )
+import Data.List ( intercalate, sort, sortOn, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
@@ -274,6 +278,9 @@ data EnvironmentLoadError
   | DuplicateModuleDeclarations (NonEmpty Diagnostic)
     -- ^ Later declarations of an already loaded logical module, including
     -- headerless modules that all declare @Main@.
+  | CyclicModuleImports (NonEmpty Diagnostic)
+    -- ^ Ordinary imports form a cycle. SOURCE imports are interface edges and
+    -- deliberately do not participate in this source-dependency graph.
   | UnsupportedSourceVocabulary
       (NonEmpty UnsupportedVocabularyOccurrence)
   | DataTypeNameError ExtractionError
@@ -301,6 +308,7 @@ environmentLoadErrorDiagnostics failure = case failure of
   ModuleReadErrors values -> fmap (withCode "EXF_MODULE_READ") values
   ModuleParseErrors values -> fmap (withCode "EXF_MODULE_PARSE") values
   DuplicateModuleDeclarations values -> values
+  CyclicModuleImports values -> values
   UnsupportedSourceVocabulary occurrences ->
     fmap unsupportedVocabularyDiagnostic occurrences
   DataTypeNameError detail -> locatedDiagnostic
@@ -889,6 +897,65 @@ duplicateModuleDiagnostics modules = go M.empty occurrences
               ++ HSE.srcSpanFilename currentSpan
           )
 
+-- The export-surface resolver is a finite fixed-point calculation only for an
+-- ordinary acyclic module graph. Reject cycles explicitly instead of returning
+-- whichever surface happens to exist after an iteration cutoff; otherwise an
+-- unrelated module can change the cutoff parity and therefore source meaning.
+-- SOURCE imports remain valid interface edges and are excluded, matching the
+-- workspace loader and the bundled environment's boot-style imports.
+cyclicModuleImportDiagnostics
+  :: [Module SrcSpanInfo]
+  -> [Diagnostic]
+cyclicModuleImportDiagnostics modules = case
+    stableDependencyOrder moduleOrder modulesByName ordinaryImports of
+  Right _ -> []
+  Left cycleResult -> [locatedCycleDiagnostic cycleResult]
+ where
+  namedModules =
+    [ (source, modul)
+    | modul <- modules
+    , (HSE.ModuleName _ source, _) <- maybeToList $ moduleNameAndDecls modul
+    ]
+  moduleOrder = map fst namedModules
+  modulesByName = M.fromList namedModules
+
+  ordinaryImports modul = case modul of
+    HSE.Module _ _ _ imports _ ->
+      [ source
+      | declaration <- imports
+      , HSE.importPkg declaration == Nothing
+      , not $ HSE.importSrc declaration
+      , let HSE.ModuleName _ source = HSE.importModule declaration
+      ]
+    _ -> []
+
+  locatedCycleDiagnostic cycleResult = maybe baseDiagnostic
+      (\location -> withHaskellSrcSpan location baseDiagnostic)
+      closingImportSpan
+   where
+    source = dependencyCycleSource cycleResult
+    path = NonEmpty.toList $ dependencyCyclePath cycleResult
+    target = case path of
+      firstName : _ -> firstName
+      [] -> source
+    closingImportSpan = case M.lookup source modulesByName of
+      Just (HSE.Module _ _ _ imports _) -> case
+          [ HSE.srcInfoSpan $ HSE.importAnn declaration
+          | declaration <- imports
+          , HSE.importPkg declaration == Nothing
+          , not $ HSE.importSrc declaration
+          , let HSE.ModuleName _ imported = HSE.importModule declaration
+          , imported == target
+          ] of
+        location : _ -> Just location
+        [] -> Nothing
+      _ -> Nothing
+    baseDiagnostic = contextualDiagnostic
+      Error
+      "EXF_MODULE_CYCLE"
+      "cyclic non-SOURCE module imports"
+      $ intercalate " -> " path
+
 -- File-backed and in-memory entry points converge before parsing, so source
 -- extraction, warning order, checked lowering, and sealing cannot drift.
 parseModuleInputsM
@@ -946,6 +1013,10 @@ parseModuleInputsM inputs = do
       case NonEmpty.nonEmpty $ unsupportedVocabularyOccurrences modules of
         Just occurrences ->
           throwE $ UnsupportedSourceVocabulary occurrences
+        Nothing -> pure ()
+
+      case NonEmpty.nonEmpty $ cyclicModuleImportDiagnostics modules of
+        Just errors -> throwE $ CyclicModuleImports errors
         Nothing -> pure ()
 
       dataTypes <- case getDataTypesLocated modules of

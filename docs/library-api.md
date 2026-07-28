@@ -365,6 +365,12 @@ construction with `DuplicateModuleDeclarations`; its
 `EXF_MODULE_DUPLICATE` diagnostics point at each later source in caller order
 and name the first declaration in context.
 
+It must also be acyclic after `{-# SOURCE #-}` edges are removed. Ordinary
+cycles fail as `CyclicModuleImports` with an `EXF_MODULE_CYCLE` diagnostic at
+the import that closes the first stable cycle. This preflight prevents cyclic
+re-export surfaces from oscillating or depending on an iteration cutoff;
+adding an unrelated module cannot change the result.
+
 The loader rejects unsupported source meaning before building a partial
 inventory. The authoritative emitted `UnsupportedVocabularyForm` set includes
 pattern-synonym signatures and XML page/hybrid modules as well as the

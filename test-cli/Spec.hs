@@ -142,6 +142,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplUnifiedScope
   , testCase "REPL loads .djexrc startup files" testReplStartupFiles
   , testCase "REPL :edit opens the configured editor" testReplEdit
+  , testCase "REPL :info shares prompt scope resolution across backends"
+      testReplInfoScopeResolution
   , testCase "REPL :info lists participating instances"
       testReplInfoInstances
   , testCase "REPL :eval runs expressions with real GHC" testReplEval
@@ -2378,6 +2380,56 @@ testReplEdit = withTemporaryEnvironment
   injected <- doesFileExist injectedMarker
   assertBool "the editor path was evaluated as shell syntax" $ not injected
   assertNoCallStack errors
+
+-- The source inventory uses canonical names while Djinn's projection uses
+-- their unqualified prompt spellings. Resolve through the shared prompt scope
+-- once, then translate the resulting identity for Djinn so every accepted
+-- spelling means the same thing in djinn, exference, and both mode. Giving the
+-- type and constructor the same occurrence also guards the shared AnyScope
+-- namespace used specifically by :info.
+testReplInfoScopeResolution :: Assertion
+testReplInfoScopeResolution = withTemporaryEnvironment
+  [ ( "InfoScope.hs"
+    , unlines
+        [ "module InfoScope (Token(..)) where"
+        , "data Token = Token"
+        ]
+    )
+  ] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import InfoScope as I (Token(..))"
+    , ":backend djinn"
+    , ":info Token"
+    , ":info InfoScope.Token"
+    , ":info I.Token"
+    , ":backend exference"
+    , ":info Token"
+    , ":info InfoScope.Token"
+    , ":info I.Token"
+    , ":backend both"
+    , ":info Token"
+    , ":info InfoScope.Token"
+    , ":info I.Token"
+    ]
+  assertEqual "scoped info REPL exit" ExitSuccess exitCode
+  assertEqual "Djinn accepts every spelling in its own and both mode" 6
+    $ countOccurrences "data Token = Token" output
+  assertEqual "Exference accepts every spelling in its own and both mode" 6
+    $ countOccurrences "data InfoScope.Token = InfoScope.Token" output
+  assertBool "a scoped spelling reached a backend without a declaration" $
+    not $ "No declaration for" `isInfixOf` output
+  assertNoCallStack errors
+
+  (fallbackExit, fallbackOutput, fallbackErrors) <- runRepl
+    (directory </> "missing-source-workspace")
+    [":backend djinn", ":info Bool"]
+  assertEqual "standard-session info REPL exit" ExitSuccess fallbackExit
+  assertContains "standard-session info retains its parsed spelling"
+    "data Bool = False | True" fallbackOutput
+  assertContains "fallback fixture really has no source scope"
+    "[DJEX_REPL_TARGET_NOT_FOUND]" fallbackErrors
+  assertNoCallStack fallbackErrors
 
 testReplInfoInstances :: Assertion
 testReplInfoInstances = withTemporaryEnvironment

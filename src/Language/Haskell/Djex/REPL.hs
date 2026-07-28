@@ -427,24 +427,35 @@ trustedStartupPath path = do
 #endif
 
 -- | Project the completion candidates GHCi would offer: loaded module names
--- for module-oriented commands and in-scope identifier spellings at query
--- positions, both qualified and unqualified.
+-- for module-oriented commands and namespace-appropriate identifier spellings
+-- at query positions, both qualified and unqualified.
 replCompletions :: ReplState -> ReplCompletions
 replCompletions state = ReplCompletions
   { completionModules = maybe []
       (map workspaceModuleName . workspaceModules)
       $ exferenceRuntimeWorkspace runtime
-  , completionIdentifiers = case exferenceRuntimeScope runtime of
-      Nothing -> []
-      Just context -> Set.toList $ Set.fromList
-        $ mapMaybe nameSpelling (scopeUnqualifiedNames context)
-        ++ [ renderModuleName qualifier ++ "." ++ spelling
-           | (qualifier, names) <- scopeQualifiedNames context
-           , Just spelling <- map nameSpelling names
-           ]
+  , completionIdentifiers = allIdentifiers
+  , completionTypeIdentifiers = typeIdentifiers
   }
  where
   runtime = exferenceRuntime state
+  (allIdentifiers, typeIdentifiers) = case exferenceRuntimeScope runtime of
+    Nothing -> ([], [])
+    Just context ->
+      ( scopeSpellings
+          (scopeUnqualifiedNames context)
+          (scopeQualifiedNames context)
+      , scopeSpellings
+          (scopeUnqualifiedTypeNames context)
+          (scopeQualifiedTypeNames context)
+      )
+
+  scopeSpellings unqualified qualified = Set.toList $ Set.fromList
+    $ mapMaybe nameSpelling unqualified
+    ++ [ renderModuleName qualifier ++ "." ++ spelling
+       | (qualifier, names) <- qualified
+       , Just spelling <- map nameSpelling names
+       ]
 
 -- | Open the configured editor, defaulting to the most recently loaded
 -- explicit file target as GHCi's @:edit@ defaults to the current module.
@@ -1397,7 +1408,7 @@ renderOmission omission = renderCanonical (omittedName omission) ++ ": "
 showLoadDiagnostics :: ReplState -> IO ()
 showLoadDiagnostics state = case
     exferenceRuntimeDiagnostics $ exferenceRuntime state of
-  [] -> putStrLn "No Exference load diagnostics."
+  [] -> putStrLn "No source load diagnostics."
   diagnostics -> mapM_ (putStrLn . renderDiagnostic) diagnostics
 
 browseState :: Maybe String -> ReplState -> IO ()
@@ -1452,32 +1463,62 @@ splitModuleStar source = (False, source)
 showInfo :: ReplState -> String -> IO ()
 showInfo state source = case parseName $ trim source of
   Left failure -> settingFailure (renderNameError failure)
-  Right parsedName -> forSelectedBackends state $ \selectedBackend ->
-    case selectedBackend of
-      DjinnBackend -> info "Djinn" id parsedName
-        $ djinnSessionEnvironment $ currentDjinnSession state
-      ExferenceBackend -> case
-          ( exferenceRuntimeSession runtime
-          , exferenceRuntimeScope runtime
-          ) of
-        (Just session, Just context) -> case
-            resolveScopeNameAmong
-              AnyScope (declarationNameSet environment) context parsedName of
-          Left failure -> settingFailure failure
-          Right name -> do
-            let matchingNames = name : map declarationSubjectName
-                  (matchingDeclarations name environment)
-            info "Exference loaded declarations"
-              ExferenceType.defaultVariableName name
-              environment
-            mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
-              $ filter ((`elem` matchingNames) . omittedName)
-              $ exferenceSessionOmissions session
-         where
-          environment = exferenceSessionEnvironment session
-        _ -> putStrLn "Exference is unavailable."
+  Right parsedName -> case
+      ( exferenceRuntimeSession runtime
+      , exferenceRuntimeScope runtime
+      , djinnProjection $ djinnRuntime state
+      ) of
+    (Just session, Just context, Just projection) ->
+      -- Interactive scoping narrows only Exference's private search view;
+      -- this public environment remains the complete checked source
+      -- inventory. It is therefore the authoritative candidate set for both
+      -- backends. Djinn-only repair stubs are projection details rather than
+      -- prompt-scope declarations and remain visible through :show
+      -- environment, not as manufactured ReplScope bindings.
+      withResolvedScope session context parsedName $ \environment canonicalName ->
+        forSelectedBackends state
+          $ showProjectedInfo projection session environment canonicalName
+    (Just session, Just context, Nothing) ->
+      -- Initial loading may retain the historical standard Djinn session if
+      -- its source projection fails. In that recovery state Djinn has no
+      -- canonical-to-prompt map, so it must keep direct standard-session name
+      -- lookup while Exference continues to follow the loaded prompt scope.
+      forSelectedBackends state $ \case
+        DjinnBackend -> showDjinnInfo parsedName
+        ExferenceBackend -> withResolvedScope session context parsedName
+          $ showExferenceInfo session
+    _ -> forSelectedBackends state $ \case
+      -- With no source scope, Djinn retains its historical standard session
+      -- and therefore its ordinary unqualified spelling rules.
+      DjinnBackend -> showDjinnInfo parsedName
+      ExferenceBackend -> putStrLn "Exference is unavailable."
  where
   runtime = exferenceRuntime state
+
+  withResolvedScope session context parsedName action =
+    let environment = exferenceSessionEnvironment session
+    in case resolveScopeNameAmong
+        AnyScope (declarationNameSet environment) context parsedName of
+      Left failure -> settingFailure failure
+      Right canonicalName -> action environment canonicalName
+
+  showProjectedInfo projection session environment canonicalName = \case
+    DjinnBackend -> showDjinnInfo $ Map.findWithDefault canonicalName
+      canonicalName $ djinnProjectionPromptNames projection
+    ExferenceBackend -> showExferenceInfo session environment canonicalName
+
+  showExferenceInfo session environment canonicalName = do
+    let matchingNames = canonicalName : map declarationSubjectName
+          (matchingDeclarations canonicalName environment)
+    info "Exference loaded declarations"
+      ExferenceType.defaultVariableName canonicalName
+      environment
+    mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
+      $ filter ((`elem` matchingNames) . omittedName)
+      $ exferenceSessionOmissions session
+
+  showDjinnInfo name = info "Djinn" id name
+    $ djinnSessionEnvironment $ currentDjinnSession state
 
 forSelectedBackends :: ReplState -> (Backend -> IO ()) -> IO ()
 forSelectedBackends state action = case activeBackends state of

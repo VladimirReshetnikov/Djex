@@ -66,7 +66,9 @@ property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. The latest unification findings, REPL
 review, architectural decisions, and retained semantic differences are
 recorded in the
-[2026-07-27 unification review](docs/reports/2026-07-27-unification-review.md).
+[2026-07-27 source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md)
+and its preceding
+[unification review](docs/reports/2026-07-27-unification-review.md).
 The earlier [post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md),
 [final convergence review](docs/reports/2026-07-17-final-convergence-review.md),
 and [checker-boundary follow-up](docs/reports/2026-07-17-checker-boundary-follow-up.md)

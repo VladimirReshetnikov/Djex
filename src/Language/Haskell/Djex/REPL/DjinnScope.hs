@@ -70,6 +70,12 @@ data DjinnAxiomPolicy
 data DjinnProjection = DjinnProjection
   { djinnProjectionSession :: DjinnSession
   , djinnProjectionOmissions :: [DjinnScopeOmission]
+  , djinnProjectionPromptNames :: Map.Map Name Name
+    -- ^ Canonical source identities to the unqualified spellings used by the
+    -- sealed Djinn session. The shared scope resolves user input canonically;
+    -- this final translation keeps inspection independent of how the user
+    -- reached that identity (bare, canonically qualified, or through an
+    -- import alias).
   , djinnProjectionFieldSelectors :: Map.Map (Name, Int) Name
     -- ^ Selector spellings for @(constructor, field index)@ positions in
     -- the session's renamed vocabulary, for presenting field projections.
@@ -206,6 +212,7 @@ projectDjinnScope policy records inferredKinds declarations
         , referenceOmissions
         , sealOmissions
         ]
+    , djinnProjectionPromptNames = forward
     , djinnProjectionFieldSelectors = fieldSelectors
     }
 

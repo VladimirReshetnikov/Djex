@@ -137,6 +137,7 @@ data CompletionDomain
   | BackendCompletion
   | CommandCompletion
   | IdentifierCompletion
+  | TypeIdentifierCompletion
   | ModuleCompletion
   | ModuleContextCompletion
   | PathCompletion
@@ -347,10 +348,10 @@ commandDescriptors =
   , commandWith PathCompletion []
       "cd" [] "DIR" "change the process working directory"
       $ fmap (ReplCommand . ChangeDirectory) . pathArgument "a directory"
-  , commandWith IdentifierCompletion []
+  , commandWith TypeIdentifierCompletion []
       "compare" [] "TYPE" "synthesize with both backends"
       $ fmap (ReplCommand . CompareBackends) . required "a type"
-  , commandWith IdentifierCompletion []
+  , commandWith TypeIdentifierCompletion []
       "djinn" [] "TYPE" "synthesize once with Djinn"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend DjinnBackend)
           . required "a type"
@@ -364,7 +365,7 @@ commandDescriptors =
   , commandWith IdentifierCompletion evalDetails "eval" [] "EXPRESSION"
       "evaluate a Haskell expression with real GHC"
       $ fmap (ReplCommand . Evaluate) . required "a Haskell expression"
-  , commandWith IdentifierCompletion []
+  , commandWith TypeIdentifierCompletion []
       "exference" [] "TYPE" "synthesize once with Exference"
       $ fmap (ReplQuery $ ExplicitBackends $ OneBackend ExferenceBackend)
           . required "a type"
@@ -381,7 +382,7 @@ commandDescriptors =
       "build and install package executables or libraries through Cabal"
       $ fmap (\(mode, targets) -> ReplCommand $ InstallPackages mode targets)
           . installArguments
-  , commandWith IdentifierCompletion kindDetails "kind" ["k"] "TYPE"
+  , commandWith TypeIdentifierCompletion kindDetails "kind" ["k"] "TYPE"
       "infer the kind of a Haskell type in the current module scope"
       $ fmap (ReplCommand . InspectKind PreserveTypeSynonyms)
           . required "a Haskell type"
@@ -410,7 +411,7 @@ commandDescriptors =
       ("[" ++ intercalate "|" showNames ++ "]")
       "inspect REPL and backend state"
       $ Right . ReplCommand . ShowState . optionalText
-  , commandWith IdentifierCompletion []
+  , commandWith TypeIdentifierCompletion []
       "synth" ["sy"] "TYPE" "synthesize with the active backend(s)"
       $ fmap (ReplQuery ActiveBackends) . required "a type"
   , commandWith IdentifierCompletion typeDetails "type" ["t"] "[+d] EXPRESSION"

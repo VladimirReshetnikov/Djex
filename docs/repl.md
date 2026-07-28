@@ -145,8 +145,10 @@ unique prefixes behave like the canonical command; `:module` completion also
 preserves a typed `+`, `-`, or `*` marker. Completion follows the loaded
 workspace, offering module names after bare `import`, `import qualified`,
 `:module`, and `:browse`, and in-scope identifiers (qualified and unqualified)
-at type-query, `:info`, `:type`, and `:kind` positions. Completed paths that
-need quoting are inserted as Haskell
+at type-query, `:info`, `:type`, and `:kind` positions. Bare synthesis and
+`:kind` completion use only the type namespace; expression, inspection, and
+import-list positions retain both namespaces because their grammar can mention
+either. Completed paths that need quoting are inserted as Haskell
 string literals, matching the path grammar rather than shell escape syntax.
 
 | Command | Purpose |
@@ -203,8 +205,9 @@ shows settings. The three workspace views answer different questions:
   admission order.
 - `:show modules` lists the complete loaded source closure in deterministic,
   dependency-first order, including modules found through imports.
-- `:show imports` lists the ordered prompt context that controls Exference
-  name visibility and search.
+- `:show imports` lists the ordered prompt context projected into both
+  backends. It controls Exference visibility and search and the corresponding
+  Djinn declaration environment.
 
 ## Downloading and installing packages
 

@@ -51,7 +51,12 @@ data ReplCompletions = ReplCompletions
   { completionModules :: [String]
     -- ^ Loaded module names, offered after module-oriented commands.
   , completionIdentifiers :: [String]
-    -- ^ In-scope identifier spellings, offered at query positions.
+    -- ^ In-scope type and value spellings, offered where either namespace can
+    -- occur (for example, import lists and expression type annotations).
+  , completionTypeIdentifiers :: [String]
+    -- ^ In-scope type-namespace spellings, offered for synthesis and kind
+    -- queries. Keeping this projection separate prevents a value-only name
+    -- from being suggested where the parser necessarily expects a type.
   }
 
 data ReplStep state
@@ -173,11 +178,13 @@ candidatesFor :: ReplCompletions -> [String] -> String -> [String]
 candidatesFor completions previous word = case previous of
   []
     | ":" `isPrefixOf` word -> commandNames
-    | otherwise -> completionIdentifiers completions
+    | otherwise -> completionTypeIdentifiers completions
   command : arguments
     | importModulePosition command arguments ->
         moduleCandidates False completions word
-    | not $ ":" `isPrefixOf` command -> completionIdentifiers completions
+    | command == "import" -> completionIdentifiers completions
+    | not $ ":" `isPrefixOf` command ->
+        completionTypeIdentifiers completions
     | otherwise -> case commandCompletionDomain command of
         Just BackendCompletion
           | null arguments -> backendNames
@@ -186,6 +193,7 @@ candidatesFor completions previous word = case previous of
               then map (':' :) helpNames
               else helpNames
         Just IdentifierCompletion -> completionIdentifiers completions
+        Just TypeIdentifierCompletion -> completionTypeIdentifiers completions
         Just ModuleCompletion
           | null arguments -> moduleCandidates False completions word
         Just ModuleContextCompletion ->

@@ -39,11 +39,14 @@ module Language.Haskell.Djex.REPL.Workspace
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Data.Either (partitionEithers)
+import qualified Data.Foldable as Foldable
 import Data.List (intercalate, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
 import Data.Semigroup (sconcat)
+import Data.Sequence (Seq, ViewL (..), (|>))
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import System.Directory
   ( canonicalizePath
@@ -772,39 +775,51 @@ discoverDependencies
   :: [WorkspaceTarget]
   -> [WorkspaceModule]
   -> IO (Either (NonEmpty Diagnostic) [WorkspaceModule])
-discoverDependencies targets initial = go initial 0
+discoverDependencies targets initial = go
+    (modulesByName initial)
+    (modulesByPath initial)
+    initialQueue
+    initialQueue
  where
-  go modules index
-    | index >= length modules = pure $ Right modules
-    | otherwise = do
-        let modul = modules !! index
-        expanded <- foldEitherM (discoverImport modul) modules
-          $ parsedModuleImports modul
-        case expanded of
-          Left failures -> pure $ Left failures
-          Right next -> go next $ index + 1
+  initialQueue = Seq.fromList initial
+  roots = sourceRoots targets initial
 
-  discoverImport _ modules WorkspaceImport {importedFromPackage = True} =
-    pure $ Right modules
-  discoverImport importer modules imported
-    | importedModuleName imported `Map.member` modulesByName modules =
-        pure $ Right modules
+  go byName byPath discovered pending = case Seq.viewl pending of
+    EmptyL -> pure $ Right $ toList discovered
+    modul :< remaining -> do
+      expanded <- foldEitherM (discoverImport modul)
+        (byName, byPath, discovered, remaining)
+        $ parsedModuleImports modul
+      case expanded of
+        Left failures -> pure $ Left failures
+        Right (nextByName, nextByPath, nextDiscovered, nextPending) ->
+          go nextByName nextByPath nextDiscovered nextPending
+
+  discoverImport _ state WorkspaceImport {importedFromPackage = True} =
+    pure $ Right state
+  discoverImport importer state@(byName, byPath, discovered, pending) imported
+    | importedModuleName imported `Map.member` byName = pure $ Right state
     | otherwise = do
-        resolved <- resolveModuleFile (sourceRoots targets modules)
+        resolved <- resolveModuleFile roots
           (moduleSegments $ importedModuleName imported)
         case resolved of
           Left failures -> pure $ Left failures
-          Right Nothing -> pure $ Right modules
-          Right (Just path) -> case Map.lookup path $ modulesByPath modules of
-            Just dependency -> pure $ modules
-              <$ validateDependency importer imported modules dependency
+          Right Nothing -> pure $ Right state
+          Right (Just path) -> case Map.lookup path byPath of
+            Just dependency -> pure $ state
+              <$ validateDependency importer imported byName dependency
             Nothing -> do
               parsed <- parseWorkspaceModule path
               pure $ parsed >>= \dependency -> do
-                validateDependency importer imported modules dependency
-                Right $ modules ++ [dependency]
+                validateDependency importer imported byName dependency
+                Right
+                  ( Map.insert (parsedModuleName dependency) dependency byName
+                  , Map.insert path dependency byPath
+                  , discovered |> dependency
+                  , pending |> dependency
+                  )
 
-  validateDependency importer imported modules dependency
+  validateDependency importer imported byName dependency
     | parsedModuleName dependency /= importedModuleName imported =
         singletonFailure
           "DJEX_REPL_MODULE_MISMATCH"
@@ -814,8 +829,7 @@ discoverDependencies targets initial = go initial 0
               ++ parsedModuleName importer ++ ", but the file declares "
               ++ parsedModuleName dependency
           )
-    | otherwise = case Map.lookup (parsedModuleName dependency)
-        $ modulesByName modules of
+    | otherwise = case Map.lookup (parsedModuleName dependency) byName of
       Just original
         | parsedModulePath original /= parsedModulePath dependency ->
             singletonFailure
@@ -825,6 +839,9 @@ discoverDependencies targets initial = go initial 0
               (parsedModuleName dependency ++ " is also declared by "
                 ++ parsedModulePath original)
       _ -> Right ()
+
+  toList :: Seq value -> [value]
+  toList = Foldable.toList
 
 moduleSegments :: String -> [String]
 moduleSegments source = case SharedName.mkModuleName source of

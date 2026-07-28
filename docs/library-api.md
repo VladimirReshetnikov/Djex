@@ -79,8 +79,8 @@ runProjectRepl = runRepl defaultReplOptions
 `ReplBackend` also provides `OneBackend DjinnBackend` and
 `OneBackend ExferenceBackend`; import `Backend(..)` from
 `Language.Haskell.Djex` when constructing those values. `defaultReplOptions`
-starts on Djinn, loads the installed Exference environment with the
-command-safe no-fix policy, and keeps history only for the process lifetime.
+starts on Djinn, loads the installed source workspace with the command-safe
+no-fix policy, and keeps history only for the process lifetime.
 
 `runRepl` returns an `ExitCode` and does not terminate the host application.
 EOF and `:quit` are successful. Individual query, setting, shell, script,
@@ -380,6 +380,14 @@ interpret the pattern-synonym-signature restriction as a ban on ordinary
 pattern matching. `ExplicitExportList` is retained as a source-compatible
 constructor but is no longer emitted.
 
+Type-operator fixity declarations are not retained in the neutral inventory.
+Accordingly, a nested `TyInfix` tree without explicit grouping fails as
+`UnparenthesizedTypeOperatorChain` at the complete chain span, even when the
+operators have compatible default fixities or local declarations would select
+one association. A single infix type application remains valid, as do
+both `(A :<: B) :>: C` and `A :<: (B :>: C)`: the parentheses make the stored
+tree independent of discarded fixity metadata.
+
 All public, default, directory, file, and in-memory loaders apply the same
 module-aware policy. A declaration sees its module's local nominal names and
 only directly imported loaded names. `qualified`, `as`, positive import lists,
@@ -399,7 +407,9 @@ qualifier. Djex does not read package interfaces, so genuinely unknown names
 remain external under Exference's open-inventory policy. A positive import list
 provides enough information to assign finite canonical external names; an
 unrestricted or `hiding` import of an unloaded module has no enumerable export
-complement and cannot be verified as if its interface had been loaded.
+complement and cannot be verified as if its interface had been loaded. The
+resolver nevertheless enforces every explicit `hiding` occurrence and keeps
+each open or exact import route separate when qualifiers coincide.
 
 This external-name policy applies only to ordinary, non-package imports.
 Package-qualified imports fail during source-vocabulary validation, including

@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# OPTIONS_GHC -Wno-partial-fields #-}
 
 module Language.Haskell.Exference.TypeFromHaskellSrc
   ( ConvData
@@ -9,7 +10,18 @@ module Language.Haskell.Exference.TypeFromHaskellSrc
   , ConversionT
   , runConversionT
   , runConversionTWithState
-  , TypeResolver (..)
+  , TypeImportScope (..)
+  , TypeImportSurface (..)
+  , TypeResolver
+      ( TypeResolver
+      , resolverTypeNames
+      , resolverClassArities
+      , resolverUnqualifiedTypeNames
+      , resolverUnqualifiedClassNames
+      , resolverModuleAliases
+      , resolverQualifiedNames
+      )
+  , withTypeImportScopes
   , legacyTypeResolver
   , scopeTypeResolver
   , scopeTypeResolverWithQualifiedNames
@@ -89,21 +101,79 @@ data ConvData = ConvData
   , conversionReservedIds :: !IntSet.IntSet
   }
 
--- | The complete nominal information needed while elaborating one Haskell
--- source type.  Query parsing needs only type-constructor identities and
--- class arities; retaining complete backend class declarations here would
--- make an immutable parser cache look like a second environment authority.
-data TypeResolver = TypeResolver
-  { resolverTypeNames :: [T.QualifiedName]
-  , resolverClassArities :: M.Map T.QualifiedName Int
-  , resolverUnqualifiedTypeNames :: [T.QualifiedName]
-  , resolverUnqualifiedClassNames :: [T.QualifiedName]
-  , resolverModuleAliases
-      :: [(SharedName.ModuleName, SharedName.ModuleName)]
-  , resolverQualifiedNames
-      :: Maybe (M.Map SharedName.ModuleName (S.Set T.QualifiedName))
+-- | Whether one import route is closed by an enumerable interface or open
+-- except for exact exclusions.
+data TypeImportSurface
+  = ExactTypeImportSurface (S.Set T.QualifiedName)
+    -- ^ A loaded interface or positive import list supplies every admitted
+    -- canonical identity.
+  | OpenTypeImportSurface (S.Set SharedName.Occurrence)
+    -- ^ An unloaded unrestricted import has an unknown positive surface.  A
+    -- @hiding@ list still supplies exact negative facts that must survive.
+  deriving (Eq, Show)
+
+-- | One import route kept separate from other routes that happen to use the
+-- same written qualifier.  Aggregating by qualifier loses whether an empty
+-- match belongs to an exact loaded interface or to a different open external
+-- target.
+data TypeImportScope = TypeImportScope
+  { typeImportQualifier :: SharedName.ModuleName
+  , typeImportCanonical :: SharedName.ModuleName
+  , typeImportQualifiedOnly :: Bool
+  , typeImportSurface :: TypeImportSurface
   }
   deriving (Eq, Show)
+
+-- | The complete nominal information needed while elaborating one Haskell
+-- source type. Query parsing needs only type-constructor identities and class
+-- arities; retaining complete backend class declarations here would make an
+-- immutable parser cache look like a second environment authority.
+--
+-- The second constructor is private. Its one extra record field is read only
+-- by the total 'typeResolverImportScopes' match below; keeping the six public
+-- fields on both constructors preserves legacy record construction and update.
+data TypeResolver
+  = TypeResolver
+      { resolverTypeNames :: [T.QualifiedName]
+      , resolverClassArities :: M.Map T.QualifiedName Int
+      , resolverUnqualifiedTypeNames :: [T.QualifiedName]
+      , resolverUnqualifiedClassNames :: [T.QualifiedName]
+      , resolverModuleAliases
+          :: [(SharedName.ModuleName, SharedName.ModuleName)]
+      , resolverQualifiedNames
+          :: Maybe (M.Map SharedName.ModuleName (S.Set T.QualifiedName))
+      }
+  | ScopedTypeResolver
+      { resolverTypeNames :: [T.QualifiedName]
+      , resolverClassArities :: M.Map T.QualifiedName Int
+      , resolverUnqualifiedTypeNames :: [T.QualifiedName]
+      , resolverUnqualifiedClassNames :: [T.QualifiedName]
+      , resolverModuleAliases
+          :: [(SharedName.ModuleName, SharedName.ModuleName)]
+      , resolverQualifiedNames
+          :: Maybe (M.Map SharedName.ModuleName (S.Set T.QualifiedName))
+      , scopedTypeImportScopes :: [TypeImportScope]
+      }
+  deriving (Eq, Show)
+
+-- | Attach source-loader import routes without changing the historical
+-- six-field 'TypeResolver' constructor. Low-level compatibility callers can
+-- therefore keep constructing that record exactly as before.
+withTypeImportScopes :: [TypeImportScope] -> TypeResolver -> TypeResolver
+withTypeImportScopes imports resolver = ScopedTypeResolver
+  { resolverTypeNames = resolverTypeNames resolver
+  , resolverClassArities = resolverClassArities resolver
+  , resolverUnqualifiedTypeNames = resolverUnqualifiedTypeNames resolver
+  , resolverUnqualifiedClassNames = resolverUnqualifiedClassNames resolver
+  , resolverModuleAliases = resolverModuleAliases resolver
+  , resolverQualifiedNames = resolverQualifiedNames resolver
+  , scopedTypeImportScopes = imports
+  }
+
+typeResolverImportScopes :: TypeResolver -> [TypeImportScope]
+typeResolverImportScopes TypeResolver{} = []
+typeResolverImportScopes
+    ScopedTypeResolver{scopedTypeImportScopes = imports} = imports
 
 -- | Project the historical parser arguments onto the smaller resolver used
 -- internally.  This keeps the low-level compatibility API source-compatible
@@ -152,12 +222,14 @@ scopeTypeResolverWithQualifiedNames
   -> TypeResolver
   -> TypeResolver
 scopeTypeResolverWithQualifiedNames visible aliases qualified resolver =
-  (scopeTypeResolver visible aliases resolver)
+  scoped
     { resolverQualifiedNames = Just $ M.fromListWith S.union
         [ (qualifier, S.fromList names)
         | (qualifier, names) <- qualified
         ]
     }
+ where
+  scoped = scopeTypeResolver visible aliases resolver
 
 -- | An empty, collision-free source-conversion inventory.
 emptyConvData :: ConvData
@@ -474,12 +546,13 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
         Nothing -> Right raw
         Just writtenModule -> resolveQualifiedAlias
           location writtenModule syntaxName raw
-    UnQual _ syntaxName -> do
+    UnQual location syntaxName -> do
       externalName <- convertName syntaxName
       localName <- case defaultModule of
         Nothing -> Right externalName
         Just currentModule -> convertModuleName currentModule syntaxName
-      resolveScopedUnqualifiedName localName externalName
+      resolveScopedUnqualifiedName
+        location syntaxName localName externalName
     _ -> convertQName defaultModule visible syntaxQName
  where
   allKnown = resolverTypeNames resolver
@@ -494,16 +567,19 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
   -- loaded declaration is not external merely because the prompt context hid
   -- it. Check the complete inventory after scoped lookup so @:module@ and
   -- explicit import lists cannot be bypassed by spelling a hidden type bare.
-  resolveScopedUnqualifiedName localName externalName =
-    case visibleCandidates of
+  resolveScopedUnqualifiedName location syntaxName localName externalName =
+    case admittedCandidates of
       _ | localName `elem` visibleCandidates -> Right localName
       [] -> case knownCandidates of
-        [] -> Right externalName
+        []
+          | hiddenByOpenImport -> Left
+              $ "name " ++ show externalName ++ " is not in scope"
+          | otherwise -> Right externalName
         _ -> Left $ "name " ++ show externalName ++ " is not in scope"
           ++ "; loaded declarations include "
           ++ intercalate ", " (map show knownCandidates)
       [candidate] -> Right candidate
-      _ -> Left $ ambiguousUnqualifiedName externalName visibleCandidates
+      _ -> Left $ ambiguousUnqualifiedName externalName admittedCandidates
    where
     occurrence = T.qualifiedNameOccurrence externalName
     candidates names = S.toAscList $ S.fromList
@@ -513,9 +589,45 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
       ]
     visibleCandidates = candidates visible
     knownCandidates = candidates allKnown
+    admittedCandidates = S.toAscList $ S.fromList
+      $ visibleCandidates ++ openImportCandidates
+    openImports =
+      [ imported
+      | imported <- typeResolverImportScopes resolver
+      , not $ typeImportQualifiedOnly imported
+      , OpenTypeImportSurface{} <- [typeImportSurface imported]
+      ]
+    openImportCandidates =
+      [ candidate
+      | imported <- openImports
+      , OpenTypeImportSurface hidden <- [typeImportSurface imported]
+      , occurrence `S.notMember` hidden
+      , Right candidate <- [nameUnderImport location syntaxName imported]
+      ]
+    hiddenByOpenImport = any hidesOccurrence openImports
+    hidesOccurrence imported = case typeImportSurface imported of
+      OpenTypeImportSurface hidden -> occurrence `S.member` hidden
+      ExactTypeImportSurface{} -> False
 
   resolveQualifiedAlias location writtenModule syntaxName raw =
-    case qualifiedCandidates of
+    case matchingImportScopes of
+      _ : _ -> case scopedCandidates of
+        [candidate] -> Right candidate
+        _ : _ : _ -> Left $ "ambiguous qualified name " ++ show raw
+          ++ "; matches "
+          ++ intercalate ", " (map show scopedCandidates)
+        [] -> Left $ "qualified name " ++ show raw ++ " is not in scope"
+      [] -> resolveLegacyAlias
+   where
+    matchingImportScopes =
+      [ imported
+      | imported <- typeResolverImportScopes resolver
+      , typeImportQualifier imported == writtenModule
+      ]
+    scopedCandidates = S.toAscList $ S.fromList $ concatMap
+      (namesFromImport location syntaxName raw) matchingImportScopes
+
+    resolveLegacyAlias = case qualifiedCandidates of
       [candidate] -> Right candidate
       _ : _ : _ -> Left $ "ambiguous qualified name " ++ show raw
         ++ "; matches "
@@ -534,7 +646,7 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
             ] of
           [target] -> underScoped target
           _ -> ambiguous targets
-   where
+
     -- An exported entity keeps its defining canonical module. Looking only at
     -- the import's module-level alias would turn a re-exported @B.T@ into the
     -- unrelated external identity @A.T@ (or reject @X.T@ for @A as X@).
@@ -572,6 +684,21 @@ convertQNameWithResolver resolver visible defaultModule syntaxQName =
     ambiguous modules = Left $ "ambiguous module qualifier "
       ++ SharedName.renderModuleName writtenModule ++ "; matches "
       ++ intercalate ", " (map SharedName.renderModuleName modules)
+
+  namesFromImport location syntaxName raw imported =
+    case typeImportSurface imported of
+      ExactTypeImportSurface admitted -> S.toAscList $ S.filter
+        ((== T.qualifiedNameOccurrence raw) . T.qualifiedNameOccurrence)
+        admitted
+      OpenTypeImportSurface hidden
+        | T.qualifiedNameOccurrence raw `S.member` hidden -> []
+        | otherwise -> either (const []) (: [])
+            $ nameUnderImport location syntaxName imported
+
+  nameUnderImport location syntaxName imported = convertModuleName
+    (ModuleName location
+      $ SharedName.renderModuleName $ typeImportCanonical imported)
+    syntaxName
 
 -- The historical environment modules intentionally omit their imports.  We
 -- can still model the useful part of Haskell name lookup without manufacturing

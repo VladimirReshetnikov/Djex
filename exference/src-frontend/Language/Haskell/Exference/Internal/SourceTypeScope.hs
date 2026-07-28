@@ -12,10 +12,11 @@ import Data.Maybe (isJust, mapMaybe, maybeToList)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Language.Haskell.Exts.Parser (ParseMode (..))
-import qualified Language.Haskell.Exts.Extension as HSEExtension
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo)
 import Language.Haskell.Exts.Syntax (Module)
 import qualified Language.Haskell.Exts.Syntax as HSE
+import Language.Haskell.Djex.Internal.ImplicitPrelude
+  ( implicitPreludeEnabled )
 import Language.Haskell.Exference.Core.Types
   ( QualifiedName
   , qualifiedNameModule
@@ -26,9 +27,12 @@ import Language.Haskell.Exference.HaskellSrcUtils
   , splitDeclHead
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
-  ( TypeResolver (..)
+  ( TypeImportScope (..)
+  , TypeImportSurface (..)
+  , TypeResolver (..)
   , convertModuleName
   , convertName
+  , withTypeImportScopes
   )
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
@@ -54,6 +58,7 @@ data NominalImport = NominalImport
   , nominalImportIsQualified :: Bool
   , nominalImportSurface :: NominalSurface
   , nominalImportSurfaceIsExact :: Bool
+  , nominalImportHiddenOccurrences :: S.Set SharedName.Occurrence
   }
 
 -- | Construct one strict resolver for every parsed module. All source-loading
@@ -110,8 +115,10 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
   strictResolver syntaxModule mode pragmas imports = case
       checkedModuleName syntaxModule of
     Nothing -> baseResolver
-    Just current -> baseResolver
-      { resolverUnqualifiedTypeNames = nominalTypes unqualified
+    Just current -> withTypeImportScopes importScopes TypeResolver
+      { resolverTypeNames = resolverTypeNames baseResolver
+      , resolverClassArities = resolverClassArities baseResolver
+      , resolverUnqualifiedTypeNames = nominalTypes unqualified
       , resolverUnqualifiedClassNames = nominalClasses unqualified
       , resolverModuleAliases = blockers ++ importAliases
       , resolverQualifiedNames = Just $ M.fromListWith S.union
@@ -146,6 +153,36 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       -- external qualifier remains representable under the open-world policy.
       blockers = [(loaded, loaded) | loaded <- loadedModules]
 
+      importScopes =
+        TypeImportScope
+          { typeImportQualifier = current
+          , typeImportCanonical = current
+          , typeImportQualifiedOnly = True
+          , typeImportSurface = ExactTypeImportSurface
+              $ S.fromList $ surfaceNames local
+          }
+        : [ TypeImportScope
+              { typeImportQualifier = loaded
+              , typeImportCanonical = loaded
+              , typeImportQualifiedOnly = True
+              , typeImportSurface = ExactTypeImportSurface S.empty
+              }
+          | loaded <- loadedModules
+          ]
+        ++ map importScope importsWithPrelude
+
+      importScope imported = TypeImportScope
+        { typeImportQualifier = nominalImportQualifier imported
+        , typeImportCanonical = nominalImportCanonical imported
+        , typeImportQualifiedOnly = nominalImportIsQualified imported
+        , typeImportSurface =
+            if nominalImportSurfaceIsExact imported
+              then ExactTypeImportSurface $ S.fromList
+                $ surfaceNames $ nominalImportSurface imported
+              else OpenTypeImportSurface
+                $ nominalImportHiddenOccurrences imported
+        }
+
   nominalImport = nominalImportFrom surfaces
 
   nominalImportFrom available declaration = do
@@ -171,7 +208,17 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       , nominalImportSurface = applyNominalImportSpecs
           (HSE.importSpecs declaration) targetSurface
       , nominalImportSurfaceIsExact = targetIsLoaded || restricted
+      , nominalImportHiddenOccurrences = hiddenImportOccurrences declaration
       }
+
+  -- An unloaded @hiding@ import has no enumerable positive surface, but each
+  -- listed occurrence is still an exact negative fact. Keep those facts on
+  -- this particular import route so they do not hide a same-spelled name
+  -- admitted by another module.
+  hiddenImportOccurrences declaration = case HSE.importSpecs declaration of
+    Just (HSE.ImportSpecList _ True specs) -> S.fromList
+      $ map qualifiedNameOccurrence $ concatMap importSpecOccurrences specs
+    _ -> S.empty
 
   -- An explicit positive import list is itself enough interface information
   -- to preserve an unloaded module's canonical nominal identities. A hiding
@@ -198,7 +245,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       $ SharedName.mkModuleName "Prelude"
     if current == prelude
         || any ((== Just prelude) . checkedModuleName . HSE.importModule) imports
-        || implicitPreludeDisabled mode pragmas
+        || not (implicitPreludeEnabled (extensions mode) pragmas)
       then Nothing
       else do
         surface <- M.lookup prelude available
@@ -210,6 +257,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
             , nominalImportIsQualified = False
             , nominalImportSurface = surface
             , nominalImportSurfaceIsExact = True
+            , nominalImportHiddenOccurrences = S.empty
             }
 
   stabilizeExports 0 current = current
@@ -329,56 +377,6 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     HSE.Module _ _ pragmas imports _ -> Just (pragmas, imports)
     _ -> Nothing
 
-  -- Extension switches are ordered. In particular, a later
-  -- @ImplicitPrelude@ or @NoRebindableSyntax@ must be able to reverse an
-  -- earlier command-line or source pragma instead of an earlier disabling
-  -- spelling winning forever. Apply the parse mode first, then pragmas and
-  -- the names/tokens within each pragma in their source order, matching GHC's
-  -- left-to-right flag semantics.
-  implicitPreludeDisabled mode pragmas =
-    not preludeEnabled || rebindableSyntax
-   where
-    modeState = foldl' updateExtension (True, False) $ extensions mode
-    (preludeEnabled, rebindableSyntax) =
-      foldl' updatePragma modeState pragmas
-
-    updatePragma state pragma = case pragma of
-      HSE.LanguagePragma _ names ->
-        foldl' updateSpelling state $ map sourceNameText names
-      HSE.OptionsPragma _ _ options ->
-        foldl' updateOption state $ words options
-      _ -> state
-
-    updateOption state option = case option of
-      '-':'X':spelling -> updateSpelling state spelling
-      _ -> state
-
-    updateSpelling (implicit, rebindable) spelling = case spelling of
-      "ImplicitPrelude" -> (True, rebindable)
-      "NoImplicitPrelude" -> (False, rebindable)
-      "RebindableSyntax" -> (implicit, True)
-      "NoRebindableSyntax" -> (implicit, False)
-      _ -> (implicit, rebindable)
-
-    updateExtension (implicit, rebindable) extension = case extension of
-      HSEExtension.EnableExtension HSEExtension.ImplicitPrelude ->
-        (True, rebindable)
-      HSEExtension.DisableExtension HSEExtension.ImplicitPrelude ->
-        (False, rebindable)
-      HSEExtension.EnableExtension HSEExtension.RebindableSyntax ->
-        (implicit, True)
-      HSEExtension.DisableExtension HSEExtension.RebindableSyntax ->
-        (implicit, False)
-      HSEExtension.UnknownExtension "ImplicitPrelude" ->
-        (True, rebindable)
-      HSEExtension.UnknownExtension "NoImplicitPrelude" ->
-        (False, rebindable)
-      HSEExtension.UnknownExtension "RebindableSyntax" ->
-        (implicit, True)
-      HSEExtension.UnknownExtension "NoRebindableSyntax" ->
-        (implicit, False)
-      _ -> (implicit, rebindable)
-
 mergeSurface :: NominalSurface -> NominalSurface -> NominalSurface
 mergeSurface new old = NominalSurface
   { nominalTypes = mergeNames (nominalTypes old) (nominalTypes new)
@@ -430,11 +428,6 @@ importSpecOccurrences spec = case spec of
     HSE.NoNamespace _ -> True
     HSE.TypeNamespace _ -> True
     HSE.PatternNamespace _ -> False
-
-sourceNameText :: HSE.Name annotation -> String
-sourceNameText syntaxName = case syntaxName of
-  HSE.Ident _ source -> source
-  HSE.Symbol _ source -> source
 
 sourceClassArities
   :: [Module SrcSpanInfo]

@@ -201,6 +201,7 @@ Library
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Command
     Language.Haskell.Djex.Internal.DependencyGraph
+    Language.Haskell.Djex.Internal.ImplicitPrelude
     Language.Haskell.Djex.Package
     Language.Haskell.Djex.Text
     Language.Haskell.Djex.REPL.Command
@@ -258,6 +259,7 @@ Executable djex
 -- argv on every platform; a POSIX shell script cannot launch on Windows.
 Executable djex-fake-cabal
   import:         build-settings, directory-dep
+  Scope:          private
   Main-Is:        Main.hs
   Hs-Source-Dirs: test-support/fake-cabal
   Build-Depends:  filepath >= 1.4 && < 1.6

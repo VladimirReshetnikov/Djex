@@ -4653,6 +4653,57 @@ tests = testGroup "Exference"
               $ validQualifiedName ["Use"] "selected"
             functionResult selected @?=
               TypeCons (validQualifiedName ["Data", "Text"] "Text")
+        , testCase "external hiding lists block bare and qualified names" $
+            forM_
+              [ ("import Data.External hiding (Hidden)", "Hidden")
+              , ( "import qualified Data.External as X hiding (Hidden)"
+                , "X.Hidden"
+                )
+              ] $ \(importDeclaration, typeName) -> do
+                failures <- expectBindingScopeFailure
+                  [ ("Use.hs", unlines
+                      [ "module Use where"
+                      , importDeclaration
+                      , "excluded :: " ++ typeName
+                      ])
+                  ]
+                assertBool (typeName ++ ": " ++ show failures)
+                  $ any ("is not in scope" `isInfixOf`) failures
+        , testCase "an external hiding route does not block another import" $ do
+            environment <- expectSourceEnvironment
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data Shared = SharedConstructor"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Data.External hiding (Shared)"
+                  , "import Origin (Shared)"
+                  , "selected :: Shared"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Origin"] "Shared")
+        , testCase "a loaded alias does not close an external alias" $ do
+            environment <- expectSourceEnvironment
+              [ ("Loaded.hs", unlines
+                  [ "module Loaded where"
+                  , "data Admitted = AdmittedConstructor"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified Loaded as X (Admitted)"
+                  , "import qualified Data.External as X"
+                  , "selected :: X.External"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons
+                (validQualifiedName ["Data", "External"] "External")
         , testCase "package imports fail before nominal scope projection" $ do
             LoadReport result _ <- parseModuleSources
               [ ("A.hs", "module A where\ndata T = AT\n")
@@ -4743,12 +4794,19 @@ tests = testGroup "Exference"
                       , "selected :: Bool"
                       ])
                   ]
-            _ <- expectSourceEnvironment
-              $ sources "-XNoImplicitPrelude -XImplicitPrelude"
-            failures <- expectBindingScopeFailure
-              $ sources "-XImplicitPrelude -XNoImplicitPrelude"
-            assertBool (show failures)
-              $ any ("Bool is not in scope" `isInfixOf`) failures
+            forM_
+              [ "-XNoImplicitPrelude -XImplicitPrelude"
+              , "-fno-implicit-prelude -fimplicit-prelude"
+              ] $ \switches -> do
+                _ <- expectSourceEnvironment $ sources switches
+                pure ()
+            forM_
+              [ "-XImplicitPrelude -XNoImplicitPrelude"
+              , "-fimplicit-prelude -fno-implicit-prelude"
+              ] $ \switches -> do
+                failures <- expectBindingScopeFailure $ sources switches
+                assertBool (switches ++ ": " ++ show failures)
+                  $ any ("Bool is not in scope" `isInfixOf`) failures
         , testCase "parse-mode flags can suppress implicit Prelude" $
             withTemporaryFile (unlines
               [ "module Prelude (Bool) where"
@@ -5365,6 +5423,79 @@ tests = testGroup "Exference"
               , KindedInstanceBinder
               )
             ]
+      , testCase "default type-operator chains fail at their complete span" $ do
+          occurrences <- unsupportedFromSource $ unlines
+            [ "module DefaultTypeFixity where"
+            , "data A = A"
+            , "data B = B"
+            , "data C = C"
+            , "data a :<: b = Less"
+            , "data a :>: b = Greater"
+            , "ambiguous :: A :<: B :>: C"
+            ]
+          case occurrences of
+            [occurrence] -> do
+              unsupportedVocabularyForm occurrence @?=
+                UnparenthesizedTypeOperatorChain
+              let value = unsupportedVocabularyDiagnostic occurrence
+              diagnosticSpan value @?= Just (validSourceSpan 7 14 7 27)
+              diagnosticMessage value @?=
+                "unsupported source vocabulary: "
+                  ++ "unparenthesized type-operator chain"
+            _ -> fail $ "expected one type-operator occurrence, got "
+              ++ show occurrences
+      , testCase "opposing local type fixities cannot select a grouping" $
+          forM_
+            [ ("infixl 6 :<:", "infixr 5 :>:")
+            , ("infixr 5 :<:", "infixl 6 :>:")
+            ] $ \(leftFixity, rightFixity) -> do
+              occurrences <- unsupportedFromSource $ unlines
+                [ "module LocalTypeFixity where"
+                , "data A = A"
+                , "data B = B"
+                , "data C = C"
+                , "data a :<: b = Less"
+                , "data a :>: b = Greater"
+                , leftFixity
+                , rightFixity
+                , "ambiguous :: A :<: B :>: C"
+                ]
+              map unsupportedVocabularyForm occurrences @?=
+                [UnparenthesizedTypeOperatorChain]
+      , testCase "explicit type-operator groupings and one application load" $
+          do
+            environment <- expectSourceEnvironment
+              [ ("ParenthesizedTypeFixity.hs", unlines
+                  [ "module ParenthesizedTypeFixity where"
+                  , "data A = A"
+                  , "data B = B"
+                  , "data C = C"
+                  , "data a :<: b = Less"
+                  , "data a :>: b = Greater"
+                  , "infixl 6 :<:"
+                  , "infixr 5 :>:"
+                  , "single :: A :<: B"
+                  , "leftGrouped :: (A :<: B) :>: C"
+                  , "rightGrouped :: A :<: (B :>: C)"
+                  ])
+              ]
+            let local occurrence =
+                  validQualifiedName ["ParenthesizedTypeFixity"] occurrence
+                applied occurrence arguments =
+                  SharedType.applyTypeArguments
+                    (TypeCons $ local occurrence) arguments
+                a = TypeCons $ local "A"
+                b = TypeCons $ local "B"
+                c = TypeCons $ local "C"
+                left = applied ":<:" [a, b]
+                right = applied ":>:" [b, c]
+                resultOf occurrence = functionResult
+                  <$> sourceFunctionNamed environment (local occurrence)
+            resultOf "single" >>= (@?= left)
+            resultOf "leftGrouped" >>=
+              (@?= applied ":>:" [left, c])
+            resultOf "rightGrouped" >>=
+              (@?= applied ":<:" [a, right])
       , testCase "declaration vocabulary retains source order" $ do
           occurrences <- unsupportedFromSourceWith [HSE.PatternSynonyms]
             $ unlines

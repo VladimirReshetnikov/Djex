@@ -307,6 +307,13 @@ covers datatype fields, type synonyms, class heads and methods, instances, and
 ordinary or foreign signatures; term bodies remain outside Exference's source
 semantics.
 
+Fixity declarations are not part of that neutral source inventory. The loader
+therefore rejects an unparenthesized chain of type operators with a located
+`UnparenthesizedTypeOperatorChain` occurrence rather than preserving a tree
+whose association depended on discarded metadata. One infix application is
+supported, and either association of a longer chain is supported when written
+with explicit parentheses.
+
 Ordinary module imports must be acyclic. The loader reports
 `CyclicModuleImports` at the import closing the first stable cycle before it
 computes export surfaces; `{-# SOURCE #-}` imports remain interface edges that
@@ -320,8 +327,10 @@ the same loader. Loaded modules have an exact surface, so an unimported loaded
 declaration is out of scope even through its canonical qualifier. Djex does not
 load external interfaces, however, and open inventories retain genuinely
 unknown names as external. A positive import list provides a finite canonical
-surface for an unloaded module; unrestricted and `hiding` imports cannot
-enumerate or validate its unknown export complement.
+surface for an unloaded module. Unrestricted imports remain open; `hiding`
+imports remain open except for their exact negative occurrences. Import routes
+are resolved separately, so sharing an alias with an exact loaded import does
+not close an unrelated external module.
 
 Package-qualified imports are rejected consistently by all loaders, whether or
 not a later declaration uses them. Package identity is not representable in

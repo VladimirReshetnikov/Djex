@@ -6,10 +6,14 @@ Djex is a Haskell expression synthesizer formed by merging
 generates a Haskell expression of that type. Djinn contributes a complete
 intuitionistic prover built on Dyckhoff's LJT calculus, so it terminates and
 can prove a type uninhabited; Exference contributes a ranked heuristic search
-engine with type-class participation and explicit resource controls. Its
-nominal instance resolution terminates for accepted rules, but its broader
-expression search is not an inhabitation decision procedure. Both
-engines, their compatibility frontends, and a shared parser-independent
+engine with type-class evidence resolution and explicit resource controls.
+Both engines carry class obligations as the same shared
+`Constraint (Type variable)` structure. Exference resolves givens,
+superclasses, and explicit instances; Djinn validates the class, arity, and
+kinds of a context but proves only inhabitants that do not need a class
+method. Exference's nominal instance resolution terminates for accepted rules,
+but its broader expression search is not an inhabitation decision procedure.
+Both engines, their compatibility frontends, and a shared parser-independent
 synthesis foundation compile into one Cabal package with a single library,
 version, and dependency contract.
 
@@ -42,7 +46,7 @@ these tiers explicitly.
   `Language.Haskell.Djex.Djinn` and `Language.Haskell.Djex.Exference` run
   both engines through the shared query/evidence/search envelope. Their
   sessions are immutable neutral-environment projections; historical Djinn
-  declaration edits and instance-method projections stay in its compatibility
+  declaration edits and instance generation stay in its compatibility
   frontend. All
   modules formerly exposed by the three parser-free sublibraries remain
   exposed for import compatibility.
@@ -342,13 +346,12 @@ those ordered premises; historical raw declaration tables are derived only
 when a compatibility caller asks to display them.
 
 At query time Djinn elaborates the goal and all class arguments as one
-shared kind scope, instantiates class methods in that same shared type tree,
-and compiles the alias-free goal and methods directly into formulas through
-one representation-neutral prepared definition cache; opaque requests retain
-their exact session-independent source view. Invalid search controls have a
-typed core failure and stable `DJEX_DJINN_OPTIONS` diagnostic; query-type
-provenance is attached only to source-derived input rejection, never to
-separately supplied options or an internal proof/result invariant.
+shared kind scope, then compiles the alias-free goal directly into a formula
+through one representation-neutral prepared definition cache. Opaque requests
+retain their exact session-independent source view. Invalid search controls
+have a typed core failure and stable `DJEX_DJINN_OPTIONS` diagnostic;
+query-type provenance is attached only to source-derived input rejection,
+never to separately supplied options or an internal proof/result invariant.
 `standardDjinnSession` converts the historical built-in spelling once and
 then uses the same neutral `mkDjinnSession` path as every caller-supplied
 environment, and `parseDjinnRequest` shares the compatibility frontend's
@@ -362,14 +365,24 @@ private raw declaration snapshot, edit, and instance-method helpers.
 
 Both `DjinnRequest` and `DjinnCandidate` expose
 `DjinnType = Type DjinnTypeVariable`. `mkDjinnRequest` checks and canonicalizes
-the goal, validates each context class header without entering its argument
-spine, and seals an opaque shared execution plan while retaining the caller's
-exact neutral query; `djinnRequestQuery` recovers that stable source view.
-Execution resolves each class in the selected session and checks its finite
-arity before normalizing the arguments, so known cyclic spines terminate
-without a global class-width limit. The plan stays shared through
-environment-dependent kind checking, synonym elaboration, class-method
-instantiation, and formula compilation. Queries return shared
+prenex signatures, validates each context class header without entering its
+argument spine, and seals an opaque shared execution plan while retaining the
+caller's exact neutral query; `djinnRequestQuery` recovers that stable source
+view. Execution resolves each class in the selected session and checks its
+finite arity before traversing any argument spine. It then capture-safely lowers
+leading `ForallType` binders and normalizes the finite arguments, so known
+cyclic spines terminate without a global class-width limit. The goal and every
+constraint argument share one kind scope and synonym environment before the
+monomorphic goal enters formula compilation.
+
+Djinn deliberately does not add context methods to the proof environment.
+Treating a polymorphic method as one monomorphic premise made inhabitation
+depend on incidental source-variable spelling. A constrained query therefore
+succeeds only when its inhabitant is dictionary-independent: for example,
+`Eq a => a -> a` can yield the identity function, while a query whose only
+possible implementation calls `(==)` remains uninhabitable. Class lookup,
+arity, and kind failures are still rejected rather than silently erasing an
+invalid context. Queries return shared
 candidates containing structured generated clauses, empty residual
 constraints, and Djinn's unused-binder ranking details in one terminal
 batch. A proof beyond `optionCutoff` produces

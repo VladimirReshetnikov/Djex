@@ -71,7 +71,10 @@ tests = testGroup "Djex facade"
       availableBackends @?= map backendInfo [DjinnBackend, ExferenceBackend]
   , testCase "advertise only the checked backend capabilities" $ do
       backendCapabilities (backendInfo DjinnBackend) @?=
-        [DecidingInhabitation, TypeClassConstraints]
+        [ DecidingInhabitation
+        , PrenexPolymorphism
+        , TypeClassConstraints
+        ]
       backendCapabilities (backendInfo ExferenceBackend) @?=
         [ HeuristicSearch
         , PrenexPolymorphism
@@ -350,11 +353,11 @@ tests = testGroup "Djex facade"
       captureArgument <- expectRight $ parseHType "f"
       captureContext <- expectRight $
         mkContext "CapturePrepared" [captureArgument]
-      -- The class argument @f@ collides with the method-local @f@. Requiring
-      -- the resulting @f' f@ premise makes this exercise native shared-type
-      -- alpha-renaming rather than merely carrying an unused context.
+      -- The class argument @f@ collides with the method-local @f@. The query
+      -- still validates that context without admitting its instantiated method
+      -- as a hidden proof premise.
       captureGoal <- expectRight $ parseHType "f' f"
-      assertDjinnCompatibility "capture-safe instantiated method"
+      assertDjinnCompatibility "capture-safe context validation"
         captureEnvironment captureSession [captureContext]
         defaultQueryOptions "captureSafePrepared" captureGoal
       captureTarget <- expectRight $ mkIdentifier "captureSafePrepared"
@@ -365,10 +368,8 @@ tests = testGroup "Djex facade"
       batchCandidates (resultSearch captureResult) @?= []
       resultEvidence captureResult @?= ProvedUninhabitable
 
-      -- Use an otherwise uninhabited nominal result so the operator premise
-      -- is mandatory. This pins the native Name -> proof-symbol projection to
-      -- Djinn's historical bare spelling; @(==)@ must not become a symbol
-      -- whose stored name literally contains parentheses.
+      -- Use an otherwise uninhabited nominal result so the operator method
+      -- would be essential. Dictionary-independent search must reject it.
       tokenType <- expectRight $ parseHType "TokenPrepared"
       operatorMethod <- expectRight $ parseHType "a -> ProofPrepared"
       operatorEnvironment <- expectRight $ do
@@ -391,7 +392,7 @@ tests = testGroup "Djex facade"
         defaultQueryOptions operatorEnvironment []
         checkedOperatorTarget operatorGoal
       batchCandidates (resultSearch withoutContext) @?= []
-      assertDjinnCompatibility "native operator method"
+      assertDjinnCompatibility "essential operator method"
         operatorEnvironment operatorSession [operatorContext]
         defaultQueryOptions "operatorPrepared" operatorGoal
       operatorRequest <- sharedDjinnRequest operatorTarget [operatorContext]

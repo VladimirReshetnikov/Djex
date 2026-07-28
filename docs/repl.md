@@ -118,6 +118,16 @@ The engines still parse independently — Djinn's contextual type grammar has
 no qualified names, so a spelling can remain valid for only one backend or
 mean something supported by only one search engine.
 
+Both engines lower class obligations to the same shared
+`Constraint (Type variable)` representation, but a backend name still selects
+an evidence policy. Exference can discharge exact givens, follow superclasses,
+and resolve non-overlapping explicit instances. Djinn validates every context
+class, arity, and argument kind, then searches only for an inhabitant that does
+not use a class method. Consequently `Eq a => a -> a` is a useful Djinn query,
+whereas `Monad m => a -> m a` does not receive `return` as an implicit proof
+premise. Invalid or ill-kinded Djinn contexts are diagnosed; they are not
+silently discarded.
+
 In `both` mode Djex prints labelled sections in a deterministic order:
 
 ```text
@@ -698,9 +708,15 @@ so the projection degrades rather than fails:
   such a type by absurd elimination. Every such degradation retains the exact
   kind inferred by the shared source inventory, including higher-kinded
   parameters.
-- Instance declarations, classes with superclasses, and declarations with
-  types outside Djinn's grammar (explicit foralls, residual constraints) are
-  omitted.
+- Instance declarations and classes with superclasses are omitted. Ordinary
+  classes without superclasses remain available for validating Djinn query
+  contexts.
+- A declaration with an explicit forall or residual constraints is omitted
+  from Djinn's axiom projection. Stripping a value's context and admitting it
+  as an unconditional proof premise would be unsound. This projection rule is
+  separate from the query boundary: a Djinn query may carry a prenex context,
+  and the checked library adapter also accepts leading `ForallType` binders,
+  provided the synthesized inhabitant is dictionary-independent.
 - Type constructors referenced from signatures but not declared in scope are
   stubbed as abstract types. A kind already inferred by the shared inventory is
   authoritative; an arity-derived kind is only the fallback for a genuinely

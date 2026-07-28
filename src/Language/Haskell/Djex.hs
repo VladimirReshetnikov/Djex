@@ -17,6 +17,13 @@
 --   source-loader and type-parser boundary.
 -- * @Language.Haskell.Synthesis.*@ modules hold the shared neutral vocabulary.
 --
+-- In particular, both adapters use the same @Constraint (Type variable)@
+-- representation for class obligations.  Capabilities describe acceptance at
+-- a checked backend edge; they do not imply identical evidence semantics.
+-- Exference resolves givens, superclasses, and explicit instances.  Djinn
+-- validates contexts and supports only dictionary-independent inhabitants,
+-- without adding class methods as proof premises.
+--
 -- Compatibility CLI modules and modules containing @.Internal.@ are not part
 -- of this module's stable surface or stability contract.
 module Language.Haskell.Djex
@@ -86,9 +93,12 @@ data Backend
 data Capability
   = DecidingInhabitation -- ^ Terminating proof search in unbudgeted mode.
   | HeuristicSearch -- ^ Bounded, heuristic exploration of expressions.
-  | PrenexPolymorphism -- ^ Polymorphism accepted at the checked search edge.
+  | PrenexPolymorphism
+    -- ^ Leading binders are accepted at the checked search edge.
   | RankedCandidates -- ^ Multiple results carry heuristic rankings.
-  | TypeClassConstraints -- ^ Nominal class constraints participate in search.
+  | TypeClassConstraints
+    -- ^ Shared nominal class constraints are accepted and validated.  An
+    -- engine may resolve evidence or require a dictionary-independent result.
   deriving (Bounded, Enum, Eq, Ord, Show)
 
 -- | Static metadata for one backend.
@@ -106,6 +116,7 @@ backendInfo DjinnBackend = BackendInfo
   , backendName = "Djinn"
   , backendCapabilities =
       [ DecidingInhabitation
+      , PrenexPolymorphism
       , TypeClassConstraints
       ]
   }

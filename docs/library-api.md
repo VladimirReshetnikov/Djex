@@ -45,13 +45,20 @@ build-depends: djex
 | Terminating unbudgeted search for the supported logic | Yes | No |
 | Proof-backed non-inhabitation result | Yes | No |
 | Ranked heuristic candidates | No | Yes |
-| Explicit prenex polymorphism | No | Yes |
-| Type-class participation | Declared methods as proof assumptions | Class/instance-aware; accepted nominal resolution terminates |
+| Explicit prenex polymorphism | Yes at the checked request edge | Yes |
+| Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
 Neither backend guesses the other's semantics. One-shot commands and checked
 library calls select an engine explicitly; the shared REPL stores an explicit
 active selection that can be `djinn`, `exference`, or `both`.
+
+Both adapters represent an obligation as the same shared
+`Constraint (Type variable)` value. `TypeClassConstraints` therefore means
+that an engine accepts and checks that common syntax, not that the engines have
+the same evidence semantics. Exference resolves nominal evidence. Djinn checks
+class existence, arity, and kinds, then deliberately withholds class methods
+from its propositional proof environment.
 
 ## Embed the shared terminal REPL
 
@@ -188,6 +195,21 @@ for `result`. An empty candidate list must be interpreted together with
 uninhabited, found that only a target self-reference works, or stopped at a
 budget.
 
+The checked Djinn request edge accepts a leading `ForallType`/constraint
+prefix as well as the textual contextual grammar. Explicit
+`requestContexts` are inserted beneath those leading binders, whose variables
+are then lowered capture-safely to Djinn's implicit monotype variables. The
+selected session validates every combined constraint against its class table
+and checks the goal and class arguments in one kind scope. Quantification below
+that prefix remains unsupported.
+
+Validated contexts do not contribute methods to proof search. This is the
+sound subset supported by Djinn's monomorphic propositional calculus: a query
+such as `Eq a => a -> a` can synthesize an implementation that ignores its
+dictionary, while a goal whose only implementation needs `(==)` remains
+uninhabitable. Exference should be selected when synthesis must use class
+evidence.
+
 Use `mkDjinnSession` for a caller-built
 `Environment DjinnTypeVariable Void ()`. Checked sessions are immutable. To
 change declarations, retain or recover the neutral environment, build the
@@ -265,16 +287,25 @@ separate presentation policy, so a caller can take the first candidate, retain
 all globally best candidates, use bounded lookahead, or stream every admissible
 candidate without changing search semantics.
 
-Class-environment construction rejects any groundable instance prerequisite
-that can grow its head by type-node count or by occurrences of a head variable,
-including rules produced by superclass inflation. For example,
+Exference first discharges an exact local given, including a variable-bearing
+given such as `C a`, before deciding whether an obligation must be deferred. It
+then follows superclass closure and explicit instance prerequisites. A session
+rejects duplicate instance heads and any pair of explicit heads that can match
+the same ground constraint; Exference has no overlap-selection policy, so
+silently choosing one would make evidence depend on declaration order.
+
+Class-environment construction also rejects any groundable instance
+prerequisite that can grow its head by type-node count or by occurrences of a
+head variable, including rules produced by superclass inflation. For example,
 `C [a] => C a` is rejected because resolving `C Int` would grow forever.
-Shrinking rules and size-preserving cycles are accepted; path tracking closes
-the cycles, and a prerequisite with a variable absent from the head remains an
-unresolved obligation. This makes nominal resolution terminate for accepted
-finite ground constraints. Exference's surrounding ranked expression search
-still is not an inhabitation decision procedure, so keep its step, queue, and
-depth controls appropriate for the application.
+Shrinking rules and size-preserving cycles are accepted. Revisiting a ground
+goal refutes that evidence branch during candidate search; final residual
+checking retains the unresolved obligation rather than claiming evidence. A
+prerequisite with a variable absent from the head likewise remains unresolved.
+This makes nominal resolution terminate for accepted finite ground
+constraints. Exference's surrounding ranked expression search still is not an
+inhabitation decision procedure, so keep its step, queue, and depth controls
+appropriate for the application.
 
 ## Loading an Exference source environment
 

@@ -686,8 +686,8 @@ data QueryReport = QueryReport {
 -- The target name is the defined identifier in the rendered clauses; a
 -- same-named function assumption is excluded from the search rather than
 -- rendered as recursion.  Contexts are resolved through the environment's
--- classes and simply contribute each instantiated method as an extra
--- premise.  'Left' reports invalid input or an internal rendering
+-- classes for arity and kind validation, but their methods do not become
+-- proof premises.  'Left' reports invalid input or an internal rendering
 -- failure, never an unprovable goal — that is 'Unrealizable'.
 inhabit :: QueryOptions -> Environment -> [Context] -> HSymbol -> HType
         -> Either String QueryReport
@@ -733,9 +733,9 @@ inhabitResult options environment contexts target goal = do
         prepareCompatibilityEnvironment environment
     inhabitResultPreparedChecked options prepared contexts target goal
 
--- | Search using a sealed environment.  All context, goal, and instantiated
--- method obligations share the cached assumptions prepared with the session;
--- this function never reconstructs them from 'envTypes'.
+-- | Search using a sealed environment.  The context and goal obligations share
+-- the cached kind and synonym assumptions prepared with the session; this
+-- function never reconstructs them from 'envTypes'.
 inhabitResultPrepared
     :: QueryOptions
     -> PreparedEnvironment
@@ -749,7 +749,7 @@ inhabitResultPrepared options prepared contexts target goal = do
 
 -- | Search a sealed Djinn environment while keeping the query in Djex's
 -- common type representation through validation, kind checking, synonym
--- elaboration, class-method instantiation, and formula compilation. The
+-- elaboration, and formula compilation. The
 -- native path never crosses even the zero-copy historical 'HType' view.
 inhabitSynthesisResultPrepared
     :: QueryOptions

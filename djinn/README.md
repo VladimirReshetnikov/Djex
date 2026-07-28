@@ -19,6 +19,12 @@ README.
 the same structural-and-kind artifact used by Exference sessions. Both now
 seal that Inventory together with its exact normalized synonyms in the shared
 opaque `PreparedInventory` witness.
+Class obligations are likewise represented identically: both engines use the
+foundation's `Constraint (Type variable)` node rather than a Djinn-specific
+context pair. Their evidence policies remain intentionally different.
+Exference performs nominal given, superclass, and instance resolution; Djinn
+checks a context against its sealed class inventory but does not add class
+methods to propositional proof search.
 Standalone declaration adapters still round-trip historical `KVar` syntax,
 while inventory sealing rejects any unsolved kind rather than allowing it into
 query elaboration. `HKind` now stores the shared `Kind Int` tree directly
@@ -193,21 +199,28 @@ remains available normally inside type expressions and constructor fields.
 
 ### Type-class contexts
 
-A context is interpreted as an extra collection of available class methods:
+A query may carry a prenex type-class context:
 
 ```text
-Djinn> reflexive ? Eq a => a -> Bool
-reflexive :: (Eq a) => a -> Bool
-reflexive a = a == a
-
-Djinn> ?instance Monad Maybe
-instance Monad Maybe where
-   ...
+Djinn> independent ? Eq a => a -> a
+independent :: (Eq a) => a -> a
+independent a = a
 ```
 
-This is not Haskell instance resolution. Djinn neither imports the installed
-package environment nor instantiates arbitrary polymorphic methods. Classes and
-methods needed beyond the small initial environment must be declared explicitly.
+Djinn validates that every named class exists, that its arity is exact, and
+that its arguments and the goal are well-kinded in one shared scope. It then
+searches for a dictionary-independent inhabitant: context methods are not proof
+premises. Thus `Eq a => a -> a` can produce the identity function, but
+`Monad m => a -> m a` does not gain `return` merely from the `Monad m`
+constraint. A query whose only implementation needs a class method remains
+uninhabitable.
+
+This boundary avoids pretending that Djinn's monomorphic propositional core can
+instantiate a polymorphic method. The former premise model also made
+alpha-equivalent queries depend on the spelling of method-local type variables.
+Exference is the backend to use when synthesis must resolve and consume class
+evidence. Djinn neither imports the installed package environment nor performs
+instance resolution.
 
 At the library boundary, `Context` is the shared backend-neutral
 `Constraint HType` value from the shared synthesis modules in `djex`, rather
@@ -220,8 +233,9 @@ eqA <- mkContext "Eq" [a]
 report <- inhabit defaultQueryOptions environment [eqA] "reflexive" goal
 ```
 
-Class lookup, kind checking, and the interpretation of methods as search
-premises remain deliberately Djinn-specific.
+Both stable engines use this same constraint/type representation. Djinn owns
+only its validation and dictionary-independent search policy; Exference owns
+given, superclass, and instance resolution.
 
 Class parameter kinds are inferred from the method types when a class is
 declared (defaulting to `*`, so `Monad`'s parameter is `* -> *` while a
@@ -239,11 +253,12 @@ different kinds in different parts of the generated instance signature.
 For kind inference and class-argument substitution, method-local variables
 have per-signature scope: identical spellings in sibling methods do not share a
 kind, and instantiating a class parameter alpha-renames a colliding local.
-After resolution, Djinn's intentionally shallow premise model still uses the
-resulting string-named type atoms without fresh polymorphic instantiation.
-Djinn also searches every method before printing the header: an unrealizable
-method produces diagnostics without leaving a partial, non-compiling instance
-block in the output.
+These substitution rules remain relevant to the historical `?instance`
+generator, which instantiates and searches every declared method before
+printing the header. Its prerequisite contexts receive the same
+dictionary-independent treatment as an ordinary query: an unrealizable method
+produces diagnostics without leaving a partial, non-compiling instance block
+in the output.
 
 ## Worked examples
 
@@ -491,25 +506,30 @@ Raw `HType` query entry points retain Djinn's historical class lookup, arity,
 kind, and synonym-saturation diagnostic preflight. Ordinary `HType` values now
 store the shared IR natively behind bundled compatibility patterns; the
 checked boundary uses the foundation's single `normalizeType` operation before
-applying Djinn's narrower variable, constructor, forall, and tuple policy and
-delegating to the native query worker.
+applying Djinn's narrower variable, constructor, and tuple policy and
+delegating to the native query worker. The stable shared-type request boundary
+also accepts leading `ForallType` binders and constraints; it lowers only that
+prenex prefix and still rejects nested or higher-rank quantification.
 `inhabitResult` then runs formula translation, budgeted proof search,
 independent proof checking, and constructs the shared `QueryResult` directly
 without choosing a renderer or passing through a backend-owned report envelope.
 The historical `inhabit` entry point is its explicit rendered-string
 compatibility wrapper. Both report the formula and first proof term for
-debugging. Their completion uses the shared operational vocabulary:
+debugging. `resolveContext` remains a compatibility inspection operation that
+instantiates one class's methods, and `resolveInstanceMethods` uses the same
+operation for historical instance generation. Ordinary inhabitation validates
+contexts but does not feed those methods to proof search. Their completion uses
+the shared operational vocabulary:
 `Finished` means the configured proof exploration completed, while
 `Truncated ChoicePointLimitReached` explains `Undecided`, and
 `Truncated CandidateLimitReached` says that another proof was observed beyond
 `optionCutoff`. The latter inspects only that one overflow witness instead of
 forcing the remaining proof stream. This status remains separate from Djinn's
-proof-backed `Unrealizable` outcomes. `resolveContext`
-instantiates one class context;
-`resolveInstanceMethods` jointly checks an instance target and all of its
-prerequisites before returning the target's instantiated methods. A query's
-goal and every class argument are likewise kind-checked together, so a free
-type variable has one kind throughout the complete signature. Public query
+proof-backed `Unrealizable` outcomes. `resolveInstanceMethods` jointly checks
+an instance target and all of its prerequisites before returning the target's
+instantiated methods. A query's goal and every class argument are likewise
+kind-checked together, so a free type variable has one kind throughout the
+complete signature. Public query
 budgets must be non-negative; `Nothing` is unlimited and `Just 0` expires at
 the first choice point. `toSynthesisType` and `fromSynthesisType` validate the
 lossless ordinary-type subset without recursively rebuilding it; they
@@ -543,8 +563,8 @@ now enters through this operational shared preparation path. The separate
 `validateEnvironment` function remains quarantined as a raw research
 compatibility boundary because its historical value/type/axiom/class error
 order is intentionally different from stable session preparation.
-Global assumptions are translated once while sealing; only a query goal and
-its instantiated class methods still vary per search. Historical raw search
+Global assumptions are translated once while sealing; only a query goal varies
+per search. Historical raw search
 tables are reconstructed from the Inventory only for compatibility inspection,
 not retained in `PreparedEnvironment`. The expanded declaration copy is
 likewise released after formula and premise sealing. Raw `prepareEnvironment`
@@ -581,11 +601,12 @@ neutral `QueryRequest` followed by `mkDjinnRequest`, and use
 `djinnRequestQuery` when they need to inspect that original value. Sealing
 receives the request's already checked shared `DefinitionName`, checks Djinn's
 narrower class-name namespace, retains that target in the original
-`QueryRequest`, and caches only a canonical shared goal. Exact context
-arguments remain in the neutral request until execution, when the selected
-session resolves the class and checks its declared arity before entering the
-argument spine. A cyclic or over-applied known-class spine therefore produces
-a bounded query diagnostic without imposing a global maximum class arity.
+`QueryRequest`, and caches a canonical shared prenex signature. Exact context
+arguments remain in the neutral request until execution, when leading binders
+are capture-safely lowered and the selected session resolves each class and
+checks its declared arity before entering the argument spine. A cyclic or
+over-applied known-class spine therefore produces a bounded query diagnostic
+without imposing a global maximum class arity.
 The raw-`Name` parser helper constructs
 that checked target before parsing so target diagnostics retain precedence;
 search-option validation and all environment-dependent class and kind checks
@@ -602,11 +623,10 @@ messages. Here
 `DjinnTypeVariable` and the generated-binder `DjinnLocal` remain distinct API
 names despite both currently being represented by `String`. Parsed raw types
 already contain `DjinnType` structure and are checked in place; stable requests
-retain that shared representation
-for the goal, constraints, and instantiated class methods throughout kind
-checking, synonym elaboration, and formula compilation. The resulting
-alias-free goal and method types enter the same prepared compiler as raw
-compatibility queries without first rebuilding `HType`.
+retain that shared representation for the goal and constraints throughout
+binder lowering, kind checking, and synonym elaboration. The resulting
+alias-free goal enters the same prepared compiler as raw compatibility queries
+without first rebuilding `HType`; validated constraints do not become formulas.
 Its checked `QueryResult` carries the same shared `Candidate DjinnType`
 structure as Exference plus Djinn's
 formula/proof metadata; even the currently empty residual constraints no
@@ -646,8 +666,8 @@ expansion; `hTypeToFormula`
 is the one-shot checked wrapper. Checked Djinn sessions retain the same opaque
 compiled definition table used by the native shared-type entrance and every
 ordered global premise in `PreparedEnvironment`, so later
-queries perform only their source-local goal and instantiated-method expansion
-checks rather than repeating whole-table analysis or translating unchanged
+queries perform only their source-local signature validation and goal
+compilation rather than repeating whole-table analysis or translating unchanged
 function assumptions.
 
 The central pipelines converge before environment-dependent validation:
@@ -655,7 +675,7 @@ The central pipelines converge before environment-dependent validation:
 ```text
 REPL command -> HType patterns over Type String -------------\
 neutral request -> Type String -> canonical shared plan -----+-> shared kind check
-    -> shared synonym elaboration + class-method instantiation
+    -> prenex lowering + shared constraint validation + synonym elaboration
     -> alias-free Type String -> prepared formula compiler -> Formula
     -> LJT proof search
     -> proof-term normalization -> independent proof check
@@ -730,8 +750,9 @@ knowing before editing the source:
 ## Important limitations
 
 - Djinn implements propositional intuitionistic reasoning, not the full Haskell
-  type system. It has no higher-rank types, GADTs, type families, constraints
-  imported from packages, or general type-class solver.
+  type system. It accepts only a prenex `forall`/constraint prefix and ignores
+  valid contexts for proof power; it has no higher-rank types, GADTs, type
+  families, package instance import, or general type-class solver.
 - Added functions are used at exactly their declared type; their polymorphic
   type variables are not freshly instantiated at each use.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract

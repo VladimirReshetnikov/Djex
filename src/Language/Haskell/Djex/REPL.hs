@@ -160,10 +160,11 @@ currentDjinnSession state = case djinnProjection djinn of
   djinn = djinnRuntime state
 
 -- | Recompute Djinn's view of the module scope after any change to the
--- loaded workspace, the scope, or the axiom policy. A projection failure is
--- reported and reverts Djinn to its standard environment rather than
--- retaining a stale scope.
-refreshDjinnProjection :: ReplState -> IO ReplState
+-- loaded workspace, the scope, or the axiom policy. The caller decides how to
+-- recover from failure: startup has no earlier source state and may use the
+-- standard session, while interactive mutations must reject the whole
+-- candidate so Exference and Djinn cannot publish different scopes.
+refreshDjinnProjection :: ReplState -> Either Diagnostic ReplState
 refreshDjinnProjection state = case
     ( exferenceRuntimeBaseSession runtime
     , exferenceRuntimeScope runtime
@@ -177,12 +178,9 @@ refreshDjinnProjection state = case
           $ exferenceSessionInventory baseSession)
         (scopeProjectionDeclarations baseSession)
         visible of
-      Left failure -> do
-        emitDiagnostic failure
-        putStrLn "Djinn falls back to its standard checked environment."
-        pure $ withProjection visible Nothing
-      Right projection -> pure $ withProjection visible $ Just projection
-  _ -> pure $ withProjection Set.empty Nothing
+      Left failure -> Left failure
+      Right projection -> Right $ withProjection visible $ Just projection
+  _ -> Right $ withProjection Set.empty Nothing
  where
   runtime = exferenceRuntime state
   djinn = djinnRuntime state
@@ -203,6 +201,13 @@ refreshDjinnProjection state = case
         , selector `Set.member` visible
         ]
     }
+
+retainAfterDjinnProjectionFailure :: ReplState -> Diagnostic -> IO ReplState
+retainAfterDjinnProjectionFailure state failure = do
+  emitDiagnostic failure
+  putStrLn
+    "Djinn projection failed; retaining the previous sessions and settings."
+  pure state
 
 scopeProjectionDeclarations :: ExferenceSession -> [Declaration String Void ()]
 scopeProjectionDeclarations = map
@@ -282,7 +287,12 @@ runRepl options = case standardDjinnSession of
                 , scriptStack = []
                 }
           putStrLn $ "Djex REPL " ++ showVersion version
-          ready <- refreshDjinnProjection initial
+          ready <- case refreshDjinnProjection initial of
+            Left failure -> do
+              emitDiagnostic failure
+              putStrLn "Djinn falls back to its standard checked environment."
+              pure initial
+            Right projected -> pure projected
           putStrLn $ "Djinn environment: " ++ djinnEnvironmentSummary ready
           case attemptedSession attempt of
             Just _ -> putStrLn $ "Exference environment: "
@@ -880,9 +890,7 @@ updateExferenceWorkspaceWithPolicy allowFix action retention successMessage
         (exferenceRuntimeScope $ exferenceRuntime state) workspace
       case attemptedSession attempt of
         Nothing -> retainAfterFailure $ attemptedDiagnostics attempt
-        Just session -> do
-          putStrLn successMessage
-          refreshDjinnProjection state
+        Just session -> case refreshDjinnProjection state
             { exferenceRuntime = ExferenceRuntime
                 { exferenceRuntimeRequestedTargets = attemptedTargets attempt
                 , exferenceRuntimeWorkspace = attemptedWorkspace attempt
@@ -892,7 +900,9 @@ updateExferenceWorkspaceWithPolicy allowFix action retention successMessage
                 , exferenceRuntimeSession = Just session
                 , exferenceRuntimeDiagnostics = attemptedDiagnostics attempt
                 }
-            }
+            } of
+          Left failure -> retainAfterDjinnProjectionFailure state failure
+          Right projected -> putStrLn successMessage >> pure projected
  where
   retainAfterFailure diagnostics = do
     putStrLn
@@ -983,12 +993,14 @@ modifyExferenceScope change state = case
       Right next -> case ExferenceSession.scopeExferenceSession
           (Set.fromList $ scopeSearchNames next) baseSession of
         Left failure -> reject failure
-        Right session -> refreshDjinnProjection state
-          { exferenceRuntime = runtime
-              { exferenceRuntimeScope = Just next
-              , exferenceRuntimeSession = Just session
-              }
-          }
+        Right session -> case refreshDjinnProjection state
+            { exferenceRuntime = runtime
+                { exferenceRuntimeScope = Just next
+                , exferenceRuntimeSession = Just session
+                }
+            } of
+          Left failure -> retainAfterDjinnProjectionFailure state failure
+          Right projected -> pure projected
   _ -> replFailure "DJEX_REPL_MODULE" "no source workspace is loaded"
       "use :load TARGET before changing imports or modules"
     >> pure state
@@ -1128,8 +1140,10 @@ applyFixPolicy allowFix state
 applyDjinnAxiomPolicy :: Bool -> ReplState -> IO ReplState
 applyDjinnAxiomPolicy enabled state
   | policy == djinnAxiomPolicy djinn = pure state
-  | otherwise = refreshDjinnProjection state
-      {djinnRuntime = djinn {djinnAxiomPolicy = policy}}
+  | otherwise = case refreshDjinnProjection state
+      {djinnRuntime = djinn {djinnAxiomPolicy = policy}} of
+        Left failure -> retainAfterDjinnProjectionFailure state failure
+        Right projected -> pure projected
  where
   djinn = djinnRuntime state
   policy = if enabled then IncludeDjinnAxioms else ExcludeDjinnAxioms

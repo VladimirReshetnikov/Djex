@@ -43,9 +43,10 @@ build-depends: djex
 | Requirement | Djinn | Exference |
 | --- | --- | --- |
 | Terminating unbudgeted search for the supported logic | Yes | No |
-| Proof-backed non-inhabitation result | Yes | No |
+| Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
+| Bounded rank-N rule | Positive, context-free introduction | Non-quantified scoped-provider elimination |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -201,17 +202,23 @@ prefix as well as the textual contextual grammar. Explicit
 are then lowered capture-safely to Djinn's implicit monotype variables. The
 selected session validates every combined constraint against its class table
 and checks the goal and class arguments in one kind scope. Quantification below
-that prefix is retained as a shared `TypeAtom`: Djinn treats it as one
-propositional atom and compares it by lexical alpha-equivalence without opening
-its context or body. Ordinary enclosing applications remain structural, so
-impredicative arguments are supported.
+that prefix is retained as a shared `TypeAtom`. Djinn's ordinary formula
+projection treats it as one proposition and compares it by lexical
+alpha-equivalence. The checked query worker also tries a polarized projection
+that opens context-free atoms in positive positions and runs the exact opaque
+plan when needed or when collecting complementary alternatives. If either
+projection is incomplete, an empty search carries no negative evidence.
+Ordinary enclosing applications remain structural, so impredicative arguments
+are supported.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
 representation. A sealed atom retains normalized source syntax, a cached
 alpha-normal key, and capture-avoiding free-variable substitution. Bound
 variables are keyed by lexical scope and binder position; free identities are
-not renamed away. This is intentionally an inert transport/equality feature,
-not rank-N inference or subsumption.
+not renamed away. The representation itself remains an inert
+transport/equality feature. Each backend must opt into an explicit typing rule:
+positive introduction in Djinn, or fresh per-use provider instantiation in
+Exference. Neither rule is general rank-N subsumption.
 
 Validated contexts do not contribute methods to proof search. This is the
 sound subset supported by Djinn's monomorphic propositional calculus: a query

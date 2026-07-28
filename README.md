@@ -67,9 +67,11 @@ library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
 boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
-the two engines continue converging. The latest unification findings, REPL
-review, architectural decisions, and retained semantic differences are
-recorded in the
+the two engines continue converging. The latest rank-N inference findings,
+REPL corrections, architectural decisions, and retained semantic differences
+are recorded in the
+[2026-07-28 rank-N inference review](docs/reports/2026-07-28-rank-n-inference-review.md).
+The preceding convergence work is recorded in the
 [2026-07-27 source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md)
 and its preceding
 [unification review](docs/reports/2026-07-27-unification-review.md).
@@ -168,20 +170,40 @@ deliberately still a requested result type, not a Haskell expression; the
 explicit `:eval` command is the separate boundary that compiles and executes
 an expression with real GHC.
 
-Initial rank-N support treats every nested explicitly quantified subtree as an
-inert atom. Alpha-renamed binders compare by lexical scope and declaration
-position, while free variables remain significant. Ordinary structure outside
-the atom is retained, including impredicative applications such as lists of
-Church booleans:
+Rank-N support now has two deliberately bounded inference rules. Djinn can
+introduce a context-free `forall` in a positive position: arrow results,
+products, and datatype fields preserve that position, while each arrow
+parameter reverses it. Exference can eliminate the complete leading `forall`
+chain of a scoped value at a monomorphic use site, freshly and independently
+for each occurrence; direct contexts become ordinary proof obligations. This
+covers, for example:
+
+```text
+:djinn c -> (forall a. a -> a)
+:djinn ((forall a. a -> a) -> c) -> c
+:exference (forall a. a -> a) -> Int -> Int
+```
+
+Every quantified subtree outside those explicit boundaries remains an opaque
+atom. Alpha-renamed binders compare by lexical scope and declaration position,
+while free variables remain significant. Ordinary structure outside the atom
+is retained, including impredicative applications such as lists of Church
+booleans:
 
 ```text
 :compare forall item. (forall result. (item -> result -> result) -> result -> result) -> (forall answer. (item -> answer -> answer) -> answer -> answer)
 :compare [(forall result. result -> result -> result)] -> [(forall answer. answer -> answer -> answer)]
 ```
 
-This adds neither higher-rank subsumption nor inference inside a quantified
-body. Only the query's leading prenex scheme is opened by an engine. The
-examples use the same Church Boolean and Church List shapes as the
+This is not general higher-rank subsumption, polymorphic-let generalization, or
+visible type application. Unsupported Djinn positions remain opaque and make
+an otherwise empty search inconclusive rather than manufacturing a logical
+refutation. Djinn's polarized and opaque translations are whole-query plans:
+their candidate sets are merged when alternatives or ranking are requested,
+but one proof cannot mix the two strategies at separate forall occurrences. An
+incomplete cached premise also makes negative evidence conservative for the
+whole query. The examples use the same Church Boolean and Church List shapes as
+the
 [church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs).
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
@@ -604,9 +626,10 @@ capability request, so an unknown excluded name is an intentional no-op; this
 also lets command defaults name optional recursion helpers without requiring
 every environment to define them. A rating override claims to change search,
 so a non-finite rating or a name unavailable after exclusion and capability
-filtering is a fatal structured diagnostic. Rank-N introduction and
-elimination signatures remain searchable through opaque atoms. Recursive-data
-elimination is still a structured omission and warning rather than silently
+filtering is a fatal structured diagnostic. Quantified subtrees remain
+searchable through opaque atoms outside each backend's bounded rank-N rule.
+Recursive-data elimination is still a structured omission and warning rather
+than silently
 disappearing per query; omission order follows introduction order and then
 elimination order.
 

@@ -94,12 +94,22 @@ data Backend
 -- deliberately conservative: they describe checked behavior available now,
 -- rather than planned convergence features.
 data Capability
-  = DecidingInhabitation -- ^ Terminating proof search in unbudgeted mode.
+  = DecidingInhabitation
+    -- ^ Terminating proof search in unbudgeted mode. Accepted types that
+    -- retain an opaque higher-rank boundary may still yield no logical
+    -- evidence, rather than an unsound refutation.
   | HeuristicSearch -- ^ Bounded, heuristic exploration of expressions.
   | PrenexPolymorphism
     -- ^ Leading binders are accepted at the checked search edge.
+  | RankNIntroduction
+    -- ^ A quantified type in a supported positive position can be
+    -- constructed by introducing its binders and synthesizing its body.
+  | RankNElimination
+    -- ^ A quantified local value can be instantiated at a supported
+    -- non-quantified use site.
   | OpaqueRankNTypes
-    -- ^ Nested quantified subterms are carried as alpha-aware inert atoms.
+    -- ^ Quantified subterms outside an active inference rule are retained as
+    -- alpha-aware atoms instead of being rejected or flattened unsafely.
   | ImpredicativeTypes
     -- ^ Ordinary constructors may contain opaque polymorphic arguments.
   | RankedCandidates -- ^ Multiple results carry heuristic rankings.
@@ -124,6 +134,7 @@ backendInfo DjinnBackend = BackendInfo
   , backendCapabilities =
       [ DecidingInhabitation
       , PrenexPolymorphism
+      , RankNIntroduction
       , OpaqueRankNTypes
       , ImpredicativeTypes
       , TypeClassConstraints
@@ -135,6 +146,7 @@ backendInfo ExferenceBackend = BackendInfo
   , backendCapabilities =
       [ HeuristicSearch
       , PrenexPolymorphism
+      , RankNElimination
       , OpaqueRankNTypes
       , ImpredicativeTypes
       , RankedCandidates

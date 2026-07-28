@@ -141,11 +141,28 @@ Church booleans:
 [(forall result. result -> result -> result)]
 ```
 
-Only the leading quantifiers of the query itself are opened as ordinary search
-variables. Every nested `forall` is a shared opaque type atom: both engines can
-carry it through constructors, arrows, declarations, equality, substitution,
-and rendering, but neither engine looks inside it or applies higher-rank
-subsumption. For example, the Church-list encoding can be transported as a
+Both engines open the leading quantifiers of the query itself. They also expose
+one complementary rank-N rule apiece:
+
+- Djinn introduces a context-free `forall` in a positive formula position.
+  Arrow results, tuples, and datatype structure preserve polarity; crossing an
+  arrow parameter reverses it.
+- Exference instantiates the complete leading `forall` chain of a scoped value
+  freshly at each monomorphic use. Its direct contexts become proof
+  obligations. An exact polymorphic forwarding use takes priority.
+
+For example:
+
+```haskell
+c -> (forall a. a -> a)
+((forall a. a -> a) -> c) -> c
+(forall a. a -> a) -> Int -> Int
+```
+
+Every nested `forall` outside those boundaries is a shared opaque type atom.
+Both engines can carry it through constructors, arrows, declarations,
+equality, substitution, and rendering without decomposing it in ordinary
+unification. For example, the Church-list encoding can be transported as a
 value even though search does not derive its eliminator laws:
 
 ```haskell
@@ -158,9 +175,17 @@ types above are therefore equal despite `result` becoming `answer`. Binder
 position, scope, and free-variable identity remain significant, so shadowing
 and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
-free name. This is intentionally representation support rather than a new
-inference rule: higher-rank instantiation, subsumption, and type application
-are still outside both engines.
+free name. These bounded rules do not add general higher-rank subsumption,
+polymorphic-let generalization, or visible type application. In particular,
+Djinn keeps unsupported negative occurrences opaque; if that approximation
+finds no term, the result is inconclusive rather than a proof of
+uninhabitability. Its polarized and opaque translations are complementary
+whole-query plans. Djex merges their candidate sets when alternative collection
+or ranking is requested, but a single proof cannot use positive opening at one
+occurrence and opaque forwarding at another. For example,
+`(forall a. a) -> ((forall b. b), (forall c. c -> c))` remains inconclusive.
+An incomplete cached premise also conservatively disables negative evidence
+for the whole query, even when that premise would turn out to be irrelevant.
 
 In `both` mode Djex prints labelled sections in a deterministic order:
 
@@ -171,13 +196,15 @@ In `both` mode Djex prints labelled sections in a deterministic order:
 ...
 ```
 
-The shared query is parsed and kind-checked once, so a source diagnostic is
-printed once. Backend lowering and search still run independently: a Djinn
-diagnostic does not prevent Exference from running, or vice versa. The sessions
-share the module scope, but not caches or class-resolution policy; each seals
-its own independent projection of the loaded declarations. In particular, an
-empty Exference result is not upgraded to Djinn's proof-backed non-inhabitation
-evidence.
+When the source workspace and its Djinn projection are available, the shared
+query is parsed and kind-checked once, so a source diagnostic is printed once.
+If either shared component is unavailable, both mode falls back to each
+backend's legacy parser so the remaining session can still run. Backend
+lowering and search are always independent: a Djinn diagnostic does not prevent
+Exference from running, or vice versa. The sessions share the module scope, but
+not caches or class-resolution policy; each seals its own independent
+projection of the loaded declarations. In particular, an empty Exference
+result is not upgraded to Djinn's proof-backed non-inhabitation evidence.
 
 ## Commands
 
@@ -202,7 +229,7 @@ string literals, matching the path grammar rather than shell escape syntax.
 | `:backend [djinn\|exference\|both]` (`:b`) | Show or change the active selection. |
 | `:browse [[*]MODULE]` | Browse the current scope, a module's exports, or a source module's full source scope. |
 | `:cd DIR` | Change the process working directory without unloading the Djex workspace. |
-| `:compare TYPE` | Run one independently parsed query with both backends. |
+| `:compare TYPE` | Run one query with both backends, sharing parsing when the source workspace and Djinn projection are available. |
 | `:djinn TYPE` | Run one Djinn query. |
 | `:download CABAL_TARGET ...` (`:dl`) | Ask Cabal to fetch targets and dependencies into its configured source cache. |
 | `:exference TYPE` | Run one Exference query. |
@@ -684,8 +711,11 @@ Use any of these forms:
 :set                            -- show every current value
 ```
 
-Boolean values also accept `true`/`false` and `yes`/`no`. Invalid values emit a
-diagnostic and leave the previous state unchanged.
+Boolean values also accept `true`/`false` and `yes`/`no`. The compact
+`+NAME`/`-NAME` forms are available only for the boolean settings listed below;
+using a sign with a non-boolean setting is rejected before value parsing and
+leaves the previous state unchanged. Other invalid values have the same
+transactional behavior.
 
 | Setting | Accepted values | Default | Owner |
 | --- | --- | --- | --- |
@@ -750,8 +780,10 @@ so the projection degrades rather than fails:
   from Djinn's axiom projection. Stripping that context and admitting the value
   as an unconditional proof premise would be unsound. Context-free leading
   quantifiers are implicitized as Djinn assumptions, and nested rank-N atoms
-  remain intact. A Djinn query may also carry a prenex context, provided the
-  synthesized inhabitant is dictionary-independent.
+  remain intact at the projection boundary. Djinn's polarized formula
+  translation may subsequently open a context-free atom in a supported
+  positive position. A Djinn query may also carry a prenex context, provided
+  the synthesized inhabitant is dictionary-independent.
 - Type constructors referenced from signatures but not declared in scope are
   stubbed as abstract types. A kind already inferred by the shared inventory is
   authoritative; an arity-derived kind is only the fallback for a genuinely
@@ -911,6 +943,13 @@ failures are rendered as structured Djex diagnostics, normally on stderr. They
 are recoverable inside a session: the prompt continues, and the eventual
 process status remains success when the user leaves with `:quit` or EOF.
 Both-mode failure isolation follows the same rule.
+
+Late argument validation retains the command's diagnostic family:
+`:backend`, `:show`, `:info`, and `:history` use `DJEX_REPL_BACKEND`,
+`DJEX_REPL_SHOW`, `DJEX_REPL_INFO`, and `DJEX_REPL_HISTORY`, respectively;
+an unknown `:help` subject is a `DJEX_REPL_COMMAND` error.
+`DJEX_REPL_SETTING` is reserved for `:set` and `:unset`, including an invalid
+sign form.
 
 Failures needed before the loop can exist, such as failure to build the
 standard Djinn session or validate a requested history path, make `runRepl`

@@ -73,6 +73,7 @@ tests = testGroup "Djex facade"
       backendCapabilities (backendInfo DjinnBackend) @?=
         [ DecidingInhabitation
         , PrenexPolymorphism
+        , RankNIntroduction
         , OpaqueRankNTypes
         , ImpredicativeTypes
         , TypeClassConstraints
@@ -80,6 +81,7 @@ tests = testGroup "Djex facade"
       backendCapabilities (backendInfo ExferenceBackend) @?=
         [ HeuristicSearch
         , PrenexPolymorphism
+        , RankNElimination
         , OpaqueRankNTypes
         , ImpredicativeTypes
         , RankedCandidates

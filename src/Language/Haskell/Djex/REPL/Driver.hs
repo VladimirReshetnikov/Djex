@@ -212,8 +212,8 @@ candidatesFor completions previous word = case previous of
   -- and @safe@ prefixes in module-completion position; once a module has been
   -- entered, ordinary identifier completion resumes for its import list.
   importModulePosition command arguments =
-    map toLower command == "import" && all importModifier arguments
-  importModifier token = map toLower token `elem` ["qualified", "safe"]
+    command == "import" && all importModifier arguments
+  importModifier token = token `elem` ["qualified", "safe"]
 
 attachedModuleMode :: String -> Bool
 attachedModuleMode source = map toLower (dropWhile (== ':') source)

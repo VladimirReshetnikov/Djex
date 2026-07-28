@@ -2145,18 +2145,27 @@ testReplInfoInstances = withTemporaryEnvironment
   [ ( "Inst.hs"
     , unlines
         [ "module Inst where"
-        , "class Marker a"
+        , "class Marker a where"
+        , "  marker :: a -> a"
         , "data Thing = MkThing"
         , "instance Marker Thing"
         ]
     )
   ] $ \directory -> do
   (exitCode, output, errors) <- runRepl directory
-    [":backend exference", ":info Thing"]
+    [ ":backend exference"
+    , ":info Thing"
+    , ":info MkThing"
+    , ":info Marker"
+    , ":info marker"
+    ]
   assertEqual "info instances REPL exit" ExitSuccess exitCode
-  assertContains "info lists the datatype" "data Inst.Thing" output
-  assertContains "info lists participating instances"
-    "instance Inst.Marker Inst.Thing" output
+  assertEqual "the type and its constructor both show the owning datatype" 2
+    $ countOccurrences "data Inst.Thing" output
+  assertEqual "the class and its method both show the owning class" 2
+    $ countOccurrences "class Inst.Marker" output
+  assertEqual "each :info spelling lists the participating instance once" 4
+    $ countOccurrences "instance Inst.Marker Inst.Thing" output
   assertNoCallStack errors
 
 -- Evaluation is the one command that runs code. It compiles the entire local

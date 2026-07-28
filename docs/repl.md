@@ -156,7 +156,7 @@ string literals, matching the path grammar rather than shell escape syntax.
 | `:history [N]` (`:hist`) | Show all history, or its last `N` entries, oldest first. |
 | `:edit [FILE]` (`:e`) | Open the `VISUAL` (or `EDITOR`) editor on `FILE`, or on the most recently loaded file target. |
 | `:eval EXPRESSION` | Evaluate a Haskell expression with real GHC and print its shown value. |
-| `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s), including constructors, class methods, and the instances the name participates in. |
+| `:info NAME` (`:i`) | Show exact-name declarations for the active backend(s). A constructor or class method resolves to its owning declaration, and each spelling lists the instances in which that datatype or class participates. |
 | `:install [--lib] CABAL_TARGET ...` | Build and install package executables, or libraries with `--lib`. |
 | `import DECLARATION` | Append a Haskell import to the shared prompt context. |
 | `:kind[!] TYPE` (`:k`) | Infer a type's kind in the current loaded module scope; attached `!` also shows its synonym-normalized form. |

@@ -1491,20 +1491,37 @@ info
   -> IO ()
 info label variableName name environment = do
   putStrLn $ "-- " ++ label
-  case (matchingDeclarations name environment, relatedInstances) of
+  case (declarations, relatedInstances) of
     ([], []) -> putStrLn $ "No declaration for " ++ renderCanonical name
-    (declarations, instances) -> do
-      mapM_ (putStrLn . renderDeclaration variableName) declarations
+    (matching, instances) -> do
+      mapM_ (putStrLn . renderDeclaration variableName) matching
       mapM_ (putStrLn . renderDeclaration variableName) instances
  where
+  declarations = matchingDeclarations name environment
+  owners = Set.fromList $ mapMaybe declarationOwner declarations
+
+  -- Asking about a constructor or class method finds its owning declaration.
+  -- Instances participate through that datatype or class, not through the
+  -- member's value name. Owner queries already include class instances in
+  -- 'declarations', so 'declarationDefines' also prevents duplicate output.
+  declarationOwner declaration = case declaration of
+    TypeSynonymDeclaration _ owner _ _ -> Just owner
+    DataTypeDeclaration _ owner _ _ -> Just owner
+    AbstractTypeDeclaration _ owner _ -> Just owner
+    ClassDeclaration _ owner _ _ _ -> Just owner
+    ValueDeclaration _ -> Nothing
+    InstanceDeclaration _ _ _ _ -> Nothing
+
   -- GHCi's :info lists the instances a name participates in. Instances whose
   -- subject class is the name itself already match as declarations.
   relatedInstances = filter mentions $ environmentDeclarations environment
   mentions declaration = case declaration of
     InstanceDeclaration _ _ _ headConstraint ->
       not (declarationDefines name declaration)
-        && any (Set.member name . typeConstructors)
-            (constraintArguments headConstraint)
+        && ( constraintClass headConstraint `Set.member` owners
+          || any (not . Set.disjoint owners . typeConstructors)
+              (constraintArguments headConstraint)
+           )
     _ -> False
 
 matchingDeclarations

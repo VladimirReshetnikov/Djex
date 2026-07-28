@@ -40,6 +40,8 @@ data SynthesisTypeError
   | UnsupportedDjinnConstraintClassName SharedName.Name
   | DeclarationBodyIsNotSourceType HType
   | InvalidSynthesisType (SharedType.TypeError HSymbol)
+  -- Kept so downstream matches on the formerly public error vocabulary keep
+  -- compiling; forall-capable boundaries no longer emit this alternative.
   | SynthesisForallUnsupported
   | SynthesisUnboxedTupleUnsupported Int
   | PartialTupleConstructorUnsupported SharedName.Boxity Int
@@ -71,6 +73,9 @@ toSynthesisType source = case hTypeSynthesisStructure source of
       <$> convert function <*> convert argument
     HTArrow parameter result -> SharedType.FunctionType
       <$> convert parameter <*> convert result
+    HTForall binders constraints body -> SharedType.ForallType binders
+      <$> traverse (traverse convert) constraints
+      <*> convert body
     HTTuple elements -> do
       let arity = SharedCollection.observedListLength
             SharedName.maximumTupleArity elements
@@ -128,29 +133,56 @@ normalizeSynthesisType source = do
       mapM_ validateSupported elements
     SharedType.TupleType SharedName.Unboxed elements ->
       Left $ SynthesisUnboxedTupleUnsupported $ length elements
-    SharedType.ForallType{} -> Left SynthesisForallUnsupported
+    SharedType.ForallType binders constraints body -> do
+      mapM_ checkedDjinnTypeVariable binders
+      mapM_ validateConstraint constraints
+      validateSupported body
 
--- | Validate a prenex Djinn signature while retaining its leading binders and
--- class context in the shared representation.  Djinn's proof calculus still
--- consumes the monotype beneath that prefix; the checked request adapter
--- erases the binders capture-safely and passes the constraints to the session
--- for class, arity, and kind validation.
---
--- Quantification below an arrow, application, tuple, or constraint argument
--- remains unsupported.  Keeping that boundary here lets parser-neutral
--- callers use ordinary Haskell-shaped signatures without weakening the
--- monotype invariant at formula compilation.
+  validateConstraint constraint = do
+    validateSynthesisConstraintHeader constraint
+    mapM_ validateSupported $ constraintArguments constraint
+
+-- | Perform the session-independent, bounded validation of a Djinn signature.
+-- Leading quantifiers are later implicitized by the request adapter; nested
+-- quantifiers remain in the shared tree and become opaque formula atoms.
+-- Constraint argument spines deliberately remain untouched here because only
+-- a prepared session owns the finite class arities needed to inspect them
+-- productively.
 sealSynthesisSignature
   :: SharedType.Type HSymbol
   -> Either SynthesisTypeError (SharedType.Type HSymbol)
-sealSynthesisSignature = normalizePrefix
+sealSynthesisSignature source = do
+  validateSignature source
+  pure source
  where
-  normalizePrefix source = case source of
+  -- Constraint arguments stay deliberately opaque at this session-independent
+  -- boundary. A session first bounds every known class application, then the
+  -- request worker performs the complete recursive normalization. This keeps
+  -- nested rank-N contexts as productive as the historical prenex context.
+  validateSignature typeExpression = case typeExpression of
+    SharedType.TypeVariable variable ->
+      () <$ checkedDjinnTypeVariable variable
+    SharedType.TypeConstructor name ->
+      () <$ djinnTypeConstructorSymbol name
+    SharedType.TypeApplication function argument ->
+      validateSignature function >> validateSignature argument
+    SharedType.FunctionType parameter result ->
+      validateSignature parameter >> validateSignature result
+    SharedType.TupleType SharedName.Boxed elements -> do
+      let arity = SharedCollection.observedListLength
+            SharedName.maximumTupleArity elements
+      if arity == 1 || arity > SharedName.maximumTupleArity
+        then Left $ InvalidSynthesisType
+          $ SharedType.InvalidTupleTypeArity SharedName.Boxed arity
+        else mapM_ validateSignature elements
+    SharedType.TupleType SharedName.Unboxed elements ->
+      Left $ SynthesisUnboxedTupleUnsupported
+        $ SharedCollection.observedListLength
+            SharedName.maximumTupleArity elements
     SharedType.ForallType binders constraints body -> do
       validateBinders binders
       mapM_ validateSynthesisConstraintHeader constraints
-      SharedType.ForallType binders constraints <$> normalizePrefix body
-    monotype -> normalizeSynthesisType monotype
+      validateSignature body
 
   validateBinders binders = do
     mapM_ checkedDjinnTypeVariable binders
@@ -214,7 +246,9 @@ fromSynthesisType source = do
     -- 'normalizeSynthesisType' rejects both alternatives before conversion.
     SharedType.TupleType SharedName.Unboxed elements ->
       Left $ SynthesisUnboxedTupleUnsupported $ length elements
-    SharedType.ForallType{} -> Left SynthesisForallUnsupported
+    SharedType.ForallType binders constraints body -> HTForall binders
+      <$> traverse (traverse convert) constraints
+      <*> convert body
 
 -- | Project one validated shared type-constructor name into Djinn's spelling.
 -- Unit is included because declaration owners use the nominal name directly;

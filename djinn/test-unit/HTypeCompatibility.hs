@@ -10,7 +10,10 @@ import Test.Tasty.HUnit (Assertion, assertEqual)
 
 import Djinn.Internal.HTypes
     ( HKind (KStar)
-    , HType (HTAbstract, HTApp, HTArrow, HTCon, HTTuple, HTUnion, HTVar)
+    , HType
+        ( HTAbstract, HTApp, HTArrow, HTCon, HTForall, HTTuple, HTUnion
+        , HTVar
+        )
     )
 
 hTypeCompatibilityTests :: [(String, Assertion)]
@@ -24,11 +27,12 @@ hTypeCompatibilityTests =
                 , constructor
                 , HTTuple [variable, constructor]
                 , HTArrow variable constructor
+                , HTForall ["a"] [] $ HTArrow variable variable
                 , HTUnion [("Just", [variable]), ("Nothing", [])]
                 , HTAbstract "Opaque" KStar
                 ]
         assertEqual "every bundled HType pattern remains available"
-            [0 .. 6] $ map classify forms)
+            [0 .. 7] $ map classify forms)
     ]
 
 classify :: HType -> Int
@@ -38,5 +42,6 @@ classify source = case source of
     HTCon{} -> 2
     HTTuple{} -> 3
     HTArrow{} -> 4
-    HTUnion{} -> 5
-    HTAbstract{} -> 6
+    HTForall{} -> 5
+    HTUnion{} -> 6
+    HTAbstract{} -> 7

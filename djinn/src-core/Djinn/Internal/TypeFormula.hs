@@ -31,6 +31,10 @@ import Numeric.Natural (Natural)
 import Djinn.Internal.HIdentifier (isQualifiedConId)
 import Djinn.Internal.LJTFormula
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
+import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 
 -- | A single observable layer of a source type.  Keeping children in the
 -- caller's representation avoids introducing another source-facing recursive
@@ -41,6 +45,7 @@ data TypeLayer source
     | TypeConstructorLayer String
     | TypeTupleLayer [source]
     | TypeArrowLayer source source
+    | TypeForallLayer (SharedTypeAtom.TypeAtom String)
     | TypeUnionLayer [(String, [source])]
     | TypeAbstractLayer String
 
@@ -66,6 +71,7 @@ data ExpansionType
     | ExpansionCon String ExpansionOrigin
     | ExpansionTuple [ExpansionType]
     | ExpansionArrow ExpansionType ExpansionType
+    | ExpansionForall (SharedTypeAtom.TypeAtom String)
     | ExpansionUnion [(String, [ExpansionType])]
     | ExpansionAbstract String
     | ExpansionArgument ExpansionPath ExpansionType
@@ -202,6 +208,7 @@ expansionTypeAt view origin = convert
             TypeArrowLayer argument result -> ExpansionArrow
                 <$> convert (0 : path) argument
                 <*> convert (1 : path) result
+            TypeForallLayer atom -> Right $ ExpansionForall atom
             TypeUnionLayer constructors -> ExpansionUnion <$> zipWithM
                 (convertConstructor path) [0 ..] constructors
             TypeAbstractLayer name -> Right $ ExpansionAbstract name
@@ -235,6 +242,7 @@ instantiateDefinitionOrigins parent owner = instantiate
         ExpansionTuple types -> ExpansionTuple $ map instantiate types
         ExpansionArrow argument result ->
             ExpansionArrow (instantiate argument) (instantiate result)
+        quantified@ExpansionForall{} -> quantified
         ExpansionUnion constructors -> ExpansionUnion
             [(constructor, map instantiate fields) |
                 (constructor, fields) <- constructors]
@@ -276,6 +284,8 @@ lowerExpansionType definitions path source = case source of
     ExpansionArrow argument result -> (:->)
         `fmap` lowerExpansionType definitions path argument
         <*> lowerExpansionType definitions path result
+    ExpansionForall atom -> Right $ PVar $ opaqueTypeSymbol
+        $ SharedTypeAtom.typeAtomType atom
     ExpansionUnion [] -> Right false
     ExpansionUnion constructors -> Disj `fmap` mapM lowerConstructor constructors
     _ -> lowerApplication definitions path source
@@ -302,15 +312,65 @@ lowerApplication definitions path source =
                             ExpansionUnion [] -> do
                                 normalized <- normalizeExpansionAliases
                                     definitions path source
-                                return $ Empty $ Symbol $
-                                    renderExpansionType normalized
+                                Empty <$> expansionSymbol normalized
                             _ -> lowerExpansionType definitions
                                 (pushExpansion name origin path) expanded
                 _ -> atom
         _ -> atom
   where
-    atom = (PVar . Symbol . renderExpansionType) `fmap`
-        normalizeExpansionAliases definitions path source
+    atom = do
+        normalized <- normalizeExpansionAliases definitions path source
+        PVar <$> expansionSymbol normalized
+
+-- Ordinary historical atoms retain their exact renderer identity. As soon as
+-- an opaque application contains a quantified child, however, its proposition
+-- key is the shared alpha-normal structure of the whole application. This is
+-- what makes impredicative wrappers compare correctly without flattening or
+-- otherwise changing their existing logical treatment.
+expansionSymbol :: ExpansionType -> Either String Symbol
+expansionSymbol source
+    | expansionContainsForall source = opaqueTypeSymbol
+        <$> expansionSourceType source
+    | otherwise = Right $ Symbol $ renderExpansionType source
+
+expansionContainsForall :: ExpansionType -> Bool
+expansionContainsForall source = case source of
+    ExpansionApp function argument ->
+        expansionContainsForall function || expansionContainsForall argument
+    ExpansionVar{} -> False
+    ExpansionCon{} -> False
+    ExpansionTuple types -> any expansionContainsForall types
+    ExpansionArrow argument result ->
+        expansionContainsForall argument || expansionContainsForall result
+    ExpansionForall{} -> True
+    ExpansionUnion constructors -> any
+        (any expansionContainsForall . snd) constructors
+    ExpansionAbstract{} -> False
+    ExpansionArgument _ argument -> expansionContainsForall argument
+
+-- Recover the shared source structure of a normalized, non-logical expansion
+-- subtree. Unions are formula definitions rather than Haskell source types and
+-- therefore cannot become opaque atoms. Constructor origins are operational
+-- expansion metadata and deliberately disappear from logical identity.
+expansionSourceType
+    :: ExpansionType
+    -> Either String (SharedType.Type String)
+expansionSourceType source = SharedType.canonicalizeType <$> case source of
+    ExpansionApp function argument -> SharedType.TypeApplication
+        <$> expansionSourceType function <*> expansionSourceType argument
+    ExpansionVar variable -> Right $ SharedType.TypeVariable variable
+    ExpansionCon name _ -> SharedType.TypeConstructor
+        <$> first show (SharedName.parseName name)
+    ExpansionTuple types -> SharedType.TupleType SharedName.Boxed
+        <$> mapM expansionSourceType types
+    ExpansionArrow argument result -> SharedType.FunctionType
+        <$> expansionSourceType argument <*> expansionSourceType result
+    ExpansionForall atom -> Right $ SharedTypeAtom.typeAtomType atom
+    ExpansionUnion{} -> Left
+        "datatype expansion reached opaque type identity"
+    ExpansionAbstract name -> SharedType.TypeConstructor
+        <$> first show (SharedName.parseName name)
+    ExpansionArgument _ argument -> expansionSourceType argument
 
 -- A marker in function position is unwrapped without resetting the current
 -- definition path; a marker around the complete expression is handled by
@@ -328,24 +388,57 @@ expansionApplication headType arguments = (headType, arguments)
 substituteExpansion
     :: LazyMap.Map String ExpansionType
     -> ExpansionType
-    -> ExpansionType
+    -> Either String ExpansionType
 substituteExpansion replacements source = case source of
     ExpansionApp function argument -> expansionApp
-        (substituteExpansion replacements function)
-        (substituteExpansion replacements argument)
+        <$> substituteExpansion replacements function
+        <*> substituteExpansion replacements argument
     variable@(ExpansionVar name) ->
-        LazyMap.findWithDefault variable name replacements
-    constructor@(ExpansionCon _ _) -> constructor
+        Right $ LazyMap.findWithDefault variable name replacements
+    constructor@(ExpansionCon _ _) -> Right constructor
     ExpansionTuple types ->
-        ExpansionTuple $ map (substituteExpansion replacements) types
+        ExpansionTuple <$> mapM (substituteExpansion replacements) types
     ExpansionArrow argument result -> ExpansionArrow
-        (substituteExpansion replacements argument)
-        (substituteExpansion replacements result)
-    ExpansionUnion constructors -> ExpansionUnion
-        [(constructor, map (substituteExpansion replacements) fields) |
-            (constructor, fields) <- constructors]
-    abstract@(ExpansionAbstract _) -> abstract
-    argument@(ExpansionArgument _ _) -> argument
+        <$> substituteExpansion replacements argument
+        <*> substituteExpansion replacements result
+    ExpansionForall atom -> ExpansionForall <$>
+        substituteExpansionAtom replacements atom
+    ExpansionUnion constructors -> ExpansionUnion <$>
+        mapM substituteConstructor constructors
+      where
+        substituteConstructor (constructor, fields) = do
+            substitutedFields <- mapM
+                (substituteExpansion replacements) fields
+            pure (constructor, substitutedFields)
+    abstract@(ExpansionAbstract _) -> Right abstract
+    argument@(ExpansionArgument _ _) -> Right argument
+
+-- Definition parameters remain ordinary free variables when they occur under
+-- a nested forall. Substitute them through the shared capture-avoiding worker,
+-- then rebuild the atom and its cached alpha key. No logical equation is ever
+-- generated from the quantified body.
+substituteExpansionAtom
+    :: LazyMap.Map String ExpansionType
+    -> SharedTypeAtom.TypeAtom String
+    -> Either String (SharedTypeAtom.TypeAtom String)
+substituteExpansionAtom replacements atom = do
+    sharedReplacements <- Map.fromList `fmap` mapM convertReplacement
+        [ (variable, replacement)
+        | (variable, replacement) <- LazyMap.toList replacements
+        , variable `Set.member` SharedTypeAtom.typeAtomFreeVariables atom
+        ]
+    first show $ SharedTypeAtom.substituteTypeAtomVariables
+        freshAtomVariable Set.empty sharedReplacements atom
+  where
+    convertReplacement (variable, replacement) =
+        fmap (\converted -> (variable, converted))
+            $ expansionSourceType replacement
+
+    freshAtomVariable reserved variable = Just $ choose (variable ++ "'")
+      where
+        choose candidate
+            | candidate `Set.member` reserved = choose $ candidate ++ "'"
+            | otherwise = candidate
 
 -- Raw low-level definitions may repeat a parameter. Association-list lookup
 -- historically selected its first binding; folding inserts from the right.
@@ -373,7 +466,7 @@ expandDefinitionStep definitions path name origin parameters body arguments = do
     rejectActiveExpansion definitions path name origin
     let replacements = firstExpansionSubstitutions $
             zip parameters $ map (ExpansionArgument path) arguments
-    return $ substituteExpansion replacements $
+    substituteExpansion replacements $
         instantiateDefinitionOrigins origin name body
 
 rejectActiveExpansion
@@ -410,6 +503,7 @@ data ExpansionAlgebra result = ExpansionAlgebra
     , algebraApplication :: result -> [result] -> result
     , algebraTuple :: [result] -> result
     , algebraArrow :: result -> result -> result
+    , algebraForall :: SharedTypeAtom.TypeAtom String -> result
     , algebraUnion :: [(String, [result])] -> result
     , algebraAbstract :: String -> result
     }
@@ -432,6 +526,7 @@ foldExpansionAliases definitions algebra path source = case source of
         foldedArgument <- foldCurrent argument
         foldedResult <- foldCurrent result
         return $ algebraArrow algebra foldedArgument foldedResult
+    ExpansionForall atom -> Right $ algebraForall algebra atom
     ExpansionUnion constructors ->
         algebraUnion algebra `fmap` mapM foldConstructor constructors
     ExpansionAbstract name -> Right $ algebraAbstract algebra name
@@ -482,6 +577,7 @@ normalizedExpansionAlgebra = ExpansionAlgebra
     , algebraApplication = foldl' expansionApp
     , algebraTuple = ExpansionTuple
     , algebraArrow = ExpansionArrow
+    , algebraForall = ExpansionForall
     , algebraUnion = ExpansionUnion
     , algebraAbstract = ExpansionAbstract
     }
@@ -512,6 +608,8 @@ showsExpansionType precedence source = case source of
     ExpansionArrow argument result -> showParen (precedence > 0) $
         showsExpansionType 1 argument . showString " -> " .
             showsExpansionType 0 result
+    ExpansionForall atom -> showParen (precedence > 0) $ showString
+        $ SharedTypeRender.renderType id $ SharedTypeAtom.typeAtomType atom
     ExpansionUnion constructors -> renderConstructors constructors
     ExpansionAbstract name -> showString name
   where
@@ -555,6 +653,9 @@ referenceExpansionAlgebra interesting = ExpansionAlgebra
         Set.unions $ headReferences : argumentReferences
     , algebraTuple = Set.unions
     , algebraArrow = Set.union
+    , algebraForall = Set.intersection interesting .
+        Set.map SharedName.renderCanonical .
+        SharedType.typeConstructors . SharedTypeAtom.typeAtomType
     , algebraUnion = Set.unions . concatMap snd
     , algebraAbstract = const Set.empty
     }
@@ -672,6 +773,9 @@ definitionReferences source = case source of
     ExpansionArrow argument result ->
         definitionReferences argument `Set.union`
             definitionReferences result
+    ExpansionForall atom -> Set.map SharedName.renderCanonical
+        $ SharedType.typeConstructors
+        $ SharedTypeAtom.typeAtomType atom
     ExpansionUnion constructors -> Set.unions
         [definitionReferences field |
             (_, fields) <- constructors, field <- fields]

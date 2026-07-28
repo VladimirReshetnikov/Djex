@@ -508,8 +508,13 @@ store the shared IR natively behind bundled compatibility patterns; the
 checked boundary uses the foundation's single `normalizeType` operation before
 applying Djinn's narrower variable, constructor, and tuple policy and
 delegating to the native query worker. The stable shared-type request boundary
-also accepts leading `ForallType` binders and constraints; it lowers only that
-prenex prefix and still rejects nested or higher-rank quantification.
+accepts explicit quantification at every type position. It implicitizes the
+leading `ForallType` binders and constraints of a query as before, while every
+nested quantifier becomes a shared `TypeAtom`: one opaque proposition whose
+identity is its lexical alpha-normal form. Outer applications containing an
+atom, such as `[(forall result. result -> result -> result)]`, retain their
+structure and compare alpha-equivalently without exposing the quantified body
+to proof search.
 `inhabitResult` then runs formula translation, budgeted proof search,
 independent proof checking, and constructs the shared `QueryResult` directly
 without choosing a renderer or passing through a backend-owned report envelope.
@@ -532,9 +537,9 @@ kind-checked together, so a free type variable has one kind throughout the
 complete signature. Public query
 budgets must be non-negative; `Nothing` is unlimited and `Just 0` expires at
 the first choice point. `toSynthesisType` and `fromSynthesisType` validate the
-lossless ordinary-type subset without recursively rebuilding it; they
-explicitly reject declaration bodies, shared foralls, and unboxed tuples
-instead of conflating those layers.
+lossless source-type subset without recursively rebuilding it. Explicit
+foralls now round-trip through the native shared tree; declaration-only
+`HTUnion`/`HTAbstract` forms and unboxed tuples remain outside that boundary.
 `toSynthesisDeclaration` and `fromSynthesisDeclaration` likewise round-trip
 Djinn's synonyms, data/abstract types, classes, and assumptions while rejecting
 shared superclass and instance semantics that Djinn does not implement.
@@ -601,12 +606,13 @@ neutral `QueryRequest` followed by `mkDjinnRequest`, and use
 `djinnRequestQuery` when they need to inspect that original value. Sealing
 receives the request's already checked shared `DefinitionName`, checks Djinn's
 narrower class-name namespace, retains that target in the original
-`QueryRequest`, and caches a canonical shared prenex signature. Exact context
-arguments remain in the neutral request until execution, when leading binders
-are capture-safely lowered and the selected session resolves each class and
-checks its declared arity before entering the argument spine. A cyclic or
-over-applied known-class spine therefore produces a bounded query diagnostic
-without imposing a global maximum class arity.
+`QueryRequest`, and seals its bounded-validation witness without duplicating
+the recursive type tree. Complete
+canonicalization waits until execution, when the selected session first checks
+the declared arity of every context, including contexts in nested quantified
+types, before entering its argument spine. Leading binders are then lowered
+capture-safely. A cyclic or over-applied known-class spine therefore produces a
+bounded query diagnostic without imposing a global maximum class arity.
 The raw-`Name` parser helper constructs
 that checked target before parsing so target diagnostics retain precedence;
 search-option validation and all environment-dependent class and kind checks
@@ -674,8 +680,9 @@ The central pipelines converge before environment-dependent validation:
 
 ```text
 REPL command -> HType patterns over Type String -------------\
-neutral request -> Type String -> canonical shared plan -----+-> shared kind check
-    -> prenex lowering + shared constraint validation + synonym elaboration
+neutral request -> Type String -> bounded sealed request -----+-> context-width preflight
+    -> canonical Type String -> shared kind check + prenex lowering
+    -> shared constraint validation + synonym elaboration
     -> alias-free Type String -> prepared formula compiler -> Formula
     -> LJT proof search
     -> proof-term normalization -> independent proof check
@@ -750,9 +757,11 @@ knowing before editing the source:
 ## Important limitations
 
 - Djinn implements propositional intuitionistic reasoning, not the full Haskell
-  type system. It accepts only a prenex `forall`/constraint prefix and ignores
-  valid contexts for proof power; it has no higher-rank types, GADTs, type
-  families, package instance import, or general type-class solver.
+  type system. A query's prenex `forall`/constraint prefix is elaborated, while
+  nested rank-N and impredicative types are retained only as opaque,
+  alpha-equated atoms. Djinn does not implement higher-rank instantiation or
+  subsumption, and it ignores valid contexts for proof power; it also has no
+  GADTs, type families, package instance import, or general type-class solver.
 - Added functions are used at exactly their declared type; their polymorphic
   type variables are not freshly instantiated at each use.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract

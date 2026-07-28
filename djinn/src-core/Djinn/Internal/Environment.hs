@@ -33,6 +33,7 @@ import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
 import qualified Language.Haskell.Synthesis.KindInference as SharedInference
 import qualified Language.Haskell.Synthesis.Name as SharedName
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
 import Djinn.Internal.Declaration
@@ -506,8 +507,9 @@ synthesisFormulaTypeView source = case source of
     SharedType.TupleType SharedName.Unboxed elements -> Left $
         "unboxed tuple reached Djinn formula compilation (arity " ++
             show (length elements) ++ ")"
-    SharedType.ForallType{} ->
-        Left "forall type reached Djinn formula compilation"
+    SharedType.ForallType [] [] body -> synthesisFormulaTypeView body
+    quantified@SharedType.ForallType{} -> TypeForallLayer <$>
+        first show (SharedTypeAtom.mkTypeAtom quantified)
 
 compileSynthesisFormula
     :: PreparedFormulaCompiler
@@ -557,10 +559,22 @@ sealPreparedEnvironment expansion = do
     translateFunction compiler signature = do
         name <- synthesisValueSymbol FunctionOwner "function" $
             SharedDeclaration.valueName signature
+        let sourceType = SharedDeclaration.valueType signature
+            (_, constraints, _) = SharedType.splitLeadingForalls sourceType
+        if null constraints then pure () else Left $
+            "function " ++ prHSymbolOp name ++
+                ": constrained premises are unsupported"
+        implicit <- first
+            ((("function " ++ prHSymbolOp name ++ ": ") ++) . show) $
+            fmap fst $ SharedType.implicitizeLeadingForalls
+                (const (Nothing :: Maybe ())) freshBinder mempty sourceType
+        let (_, _, body) = SharedType.splitLeadingForalls implicit
         formula <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
-            compileSynthesisFormula compiler $
-                SharedDeclaration.valueType signature
+            compileSynthesisFormula compiler body
         return (Symbol name, formula)
+
+    freshBinder reserved variable = Just
+        $ fst $ freshPrimedVariable reserved variable
 
 projectPreparedSynthesisClass
     :: SharedClass.PreparedClass HSymbol

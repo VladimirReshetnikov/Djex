@@ -164,6 +164,7 @@ genSurfaceType depth
     | otherwise = QC.frequency
         [ (5, QC.elements surfaceAtoms)
         , (3, HTArrow `fmap` smaller <*> smaller)
+        , (2, HTForall ["q"] [] `fmap` smaller)
         , (2, do
                 first <- smaller
                 second <- smaller
@@ -178,6 +179,7 @@ surfaceAtoms :: [HType]
 surfaceAtoms =
     [ HTVar "a"
     , HTVar "b'"
+    , HTVar "q"
     , HTVar "_value"
     , HTCon "Bool"
     , HTCon "Data.Example.Token"

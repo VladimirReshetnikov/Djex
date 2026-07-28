@@ -7,7 +7,8 @@
 --
 module Djinn.Internal.HTypes(
         HKind(KStar, KArrow, KVar),
-        HType(HTApp, HTVar, HTCon, HTTuple, HTArrow, HTUnion, HTAbstract),
+        HType(HTApp, HTVar, HTCon, HTTuple, HTArrow, HTForall,
+            HTUnion, HTAbstract),
         HSymbol,
         toSynthesisKind, fromSynthesisKind,
         checkedGroundHKind, fromGroundHKind,
@@ -33,6 +34,7 @@ import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
 type HSymbol = String
 
@@ -113,6 +115,7 @@ data HTypeLayer
         | HTypeConstructorLayer HSymbol
         | HTypeTupleLayer [HType]
         | HTypeArrowLayer HType HType
+        | HTypeForallLayer [HSymbol] [Constraint HType] HType
         | HTypeUnionLayer [(HSymbol, [HType])]
         | HTypeAbstractLayer HSymbol HKind
         deriving (Eq)
@@ -178,6 +181,21 @@ pattern HTArrow parameter result <-
             SharedType.FunctionType parameterType resultType
         _ -> HTypeCompatibility $ HTypeArrowLayer parameter result
 
+-- | Explicit universal quantification backed by the shared Djex type tree.
+-- Only a raw forall containing another declaration-only compatibility node
+-- needs the fallback layer; parsed and checked source types stay native.
+pattern HTForall :: [HSymbol] -> [Constraint HType] -> HType -> HType
+pattern HTForall binders constraints body <-
+    (viewHType -> Just (HTypeForallLayer binders constraints body))
+  where
+    HTForall binders constraints body = case
+            (traverse (traverse hTypeSynthesisStructure) constraints,
+             hTypeSynthesisStructure body) of
+        (Just sharedConstraints, Just sharedBody) -> HTypeSource $
+            SharedType.ForallType binders sharedConstraints sharedBody
+        _ -> HTypeCompatibility $
+            HTypeForallLayer binders constraints body
+
 pattern HTUnion :: [(HSymbol, [HType])] -> HType
 pattern HTUnion constructors <-
     (viewHType -> Just (HTypeUnionLayer constructors))
@@ -191,7 +209,9 @@ pattern HTAbstract name kind <-
     HTAbstract name kind = HTypeCompatibility $
         HTypeAbstractLayer name kind
 
-{-# COMPLETE HTApp, HTVar, HTCon, HTTuple, HTArrow, HTUnion, HTAbstract #-}
+{-# COMPLETE
+    HTApp, HTVar, HTCon, HTTuple, HTArrow, HTForall, HTUnion, HTAbstract
+    #-}
 
 -- | Obtain the native shared structure of an ordinary compatibility type.
 -- Declaration-only and constructor-sensitive fallback forms return 'Nothing'.
@@ -221,7 +241,8 @@ fromHTypeSynthesisStructure source
         SharedType.TupleType SharedName.Boxed elements ->
             all isRepresentable elements
         SharedType.TupleType SharedName.Unboxed _ -> False
-        SharedType.ForallType{} -> False
+        SharedType.ForallType _ constraints body ->
+            all (all isRepresentable) constraints && isRepresentable body
 
 viewHType :: HType -> Maybe HTypeLayer
 viewHType source = case source of
@@ -244,7 +265,10 @@ viewHType source = case source of
         -- The private constructor can acquire neither form: every entrance
         -- crosses 'fromHTypeSynthesisStructure' or a bundled pattern above.
         SharedType.TupleType SharedName.Unboxed _ -> Nothing
-        SharedType.ForallType{} -> Nothing
+        SharedType.ForallType binders constraints body ->
+            Just $ HTypeForallLayer binders
+                (map (fmap HTypeSource) constraints)
+                (HTypeSource body)
     HTypeCompatibility layer -> Just layer
 
 -- Preserve Djinn's historical spelling for the prefix arrow. The shared
@@ -285,6 +309,25 @@ instance Show HType where
               f [t] = showsPrec 0 t
               f (t:ts) = showsPrec 0 t . showString ", " . f ts
     showsPrec p (HTArrow s t) = showParen (p > 0) $ showsPrec 1 s . showString " -> " . showsPrec 0 t
+    showsPrec p (HTForall binders contexts body) = showParen (p > 0) $
+        renderBinders binders . renderContext contexts . showsPrec 0 body
+      where
+        renderBinders [] = id
+        renderBinders variables = showString "forall " .
+            showString (unwords variables) . showString ". "
+        renderContext [] = id
+        renderContext constraints = showChar '(' .
+            renderConstraints constraints . showString ") => "
+        renderConstraints [] = id
+        renderConstraints [constraint] = renderConstraint constraint
+        renderConstraints (constraint : constraints) =
+            renderConstraint constraint . showString ", " .
+                renderConstraints constraints
+        renderConstraint (Constraint className arguments) =
+            showString (SharedName.renderCanonical className) .
+                foldr renderArgument id arguments
+        renderArgument argument rest =
+            showChar ' ' . showsPrec 3 argument . rest
     showsPrec _ (HTUnion cs) = f cs
         where f [] = id
               f [cts] = scts cts
@@ -308,9 +351,32 @@ pHType' = do
     return t
 
 pHType :: ReadP HType
-pHType = do
-    ts <- maximalSepBy1 pHTypeApp (sstring "->")
-    return $ foldr1 HTArrow ts
+pHType = pHExplicitForall +++ pHConstrainedType +++ pHArrowType
+
+pHExplicitForall :: ReadP HType
+pHExplicitForall = do
+    skeyword "forall"
+    binders <- maximalMany1 pVarId
+    schar '.'
+    -- Once a context parses, it belongs to this explicit forall. Keeping the
+    -- choice left-biased avoids a second, structurally different parse that
+    -- treats the same context as a nested binderless forall.
+    contexts <- pHContext <++ return []
+    HTForall binders contexts <$> pHType
+
+-- A binderless forall is the shared representation of a context without an
+-- explicit binder list. Accept its rendered form at nested positions so every
+-- representable HType has parseable source syntax.
+pHConstrainedType :: ReadP HType
+pHConstrainedType = HTForall [] <$> pHContext <*> pHType
+
+pHArrowType :: ReadP HType
+pHArrowType = do
+    parameter <- pHTypeApp
+    -- Parse the result as a complete type, rather than another application
+    -- atom. Besides preserving right associativity, this is what permits an
+    -- unparenthesized higher-rank result such as @a -> forall b. b -> b@.
+    (do sstring "->"; HTArrow parameter <$> pHType) <++ return parameter
 
 -- | Parse Djinn's historical optional query context.  Keeping this token-level
 -- parser beside the type grammar lets both the compatibility REPL and the
@@ -434,15 +500,20 @@ hTypeToFormula definitions source =
     prepareTypeFormulaTranslator definitions >>= ($ source)
 
 hTypeFormulaView :: TypeView HType
-hTypeFormulaView source = Right $ case source of
+hTypeFormulaView source = case source of
     HTApp function argument ->
-        TypeApplicationLayer function argument
-    HTVar variable -> TypeVariableLayer variable
-    HTCon name -> TypeConstructorLayer name
-    HTTuple types -> TypeTupleLayer types
-    HTArrow argument result -> TypeArrowLayer argument result
-    HTUnion constructors -> TypeUnionLayer constructors
-    HTAbstract name _ -> TypeAbstractLayer name
+        Right $ TypeApplicationLayer function argument
+    HTVar variable -> Right $ TypeVariableLayer variable
+    HTCon name -> Right $ TypeConstructorLayer name
+    HTTuple types -> Right $ TypeTupleLayer types
+    HTArrow argument result -> Right $ TypeArrowLayer argument result
+    HTForall [] [] body -> hTypeFormulaView body
+    quantified@HTForall{} -> case hTypeSynthesisStructure quantified of
+        Just shared -> TypeForallLayer <$> first show
+            (SharedTypeAtom.mkTypeAtom shared)
+        Nothing -> Left "forall contains a non-source compatibility type"
+    HTUnion constructors -> Right $ TypeUnionLayer constructors
+    HTAbstract name _ -> Right $ TypeAbstractLayer name
 
 hTypeFormulaDefinition
     :: (HSymbol, ([HSymbol], HType, a))

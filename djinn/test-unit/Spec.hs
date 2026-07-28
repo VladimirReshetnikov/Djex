@@ -82,7 +82,7 @@ tests =
           testCheckedDjinnAdapter)
     , ("reject residual constraints at the Djinn rendering boundary",
           testDjinnResidualRendering)
-    , ("reuse canonical shared Djinn request plans across sessions",
+    , ("reuse checked shared Djinn requests across sessions",
           testCheckedDjinnRequestReuse)
     , ("rebuild immutable Djinn session indexes from neutral environments",
           testCheckedDjinnSessionRebuilding)
@@ -91,6 +91,8 @@ tests =
     , ("kind-check intrinsic list syntax", testIntrinsicListKind)
     , ("render canonical units and kinds", testCanonicalRendering)
     , ("round-trip shared source types", testSharedTypeAdapter)
+    , ("treat rank-N and impredicative types as structural atoms",
+          testRankNTypeAtoms)
     , ("round-trip shared declarations", testSharedDeclarationAdapter)
     , ("round-trip shared environments", testSharedEnvironmentAdapter)
     , ("normalize raw abstract definitions at every environment boundary",
@@ -229,10 +231,10 @@ testCheckedDjinnAdapter = do
                     Djex.FullyQualified candidate)
         [] -> fail "the checked Djinn adapter found no identity candidate"
 
-    -- The private execution plan is canonical, but the public request remains
-    -- the exact shared value supplied by its caller. In particular, sealing a
-    -- saturated prefix arrow must not rewrite djinnRequestQuery even though
-    -- the proof core consumes the structural FunctionType form.
+    -- The public request remains the exact shared value supplied by its caller.
+    -- In particular, sealing a saturated prefix arrow must not rewrite
+    -- djinnRequestQuery even though execution later normalizes it to the
+    -- structural FunctionType form.
     let noncanonicalGoal = SharedType.TypeApplication
             (SharedType.TypeApplication
                 (SharedType.TypeConstructor SharedName.functionName)
@@ -891,11 +893,15 @@ testSharedTypeAdapter = do
     assertEqual "declaration bodies cannot masquerade as source types"
         (Left $ DeclarationBodyIsNotSourceType $ HTUnion [])
         (toSynthesisType $ HTUnion [])
-    assertEqual "explicit foralls remain outside Djinn's supported subset"
-        (Left SynthesisForallUnsupported)
-        (fromSynthesisType $ SharedType.ForallType ["a"] []
-            $ SharedType.TypeVariable "a")
-    assertEqual "shared binder errors precede Djinn's forall restriction"
+    let sharedForall = SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "a")
+                (SharedType.TypeVariable "a")
+        compatibilityForall = HTForall ["a"] []
+            $ HTArrow (HTVar "a") (HTVar "a")
+    assertEqual "explicit foralls round-trip through the shared tree"
+        (Right compatibilityForall) (fromSynthesisType sharedForall)
+    assertEqual "shared binder errors are retained for explicit foralls"
         (Left $ InvalidSynthesisType
             $ SharedType.DuplicateForallVariable "a")
         (fromSynthesisType $ SharedType.ForallType ["a", "a"] []
@@ -939,6 +945,116 @@ testSharedTypeAdapter = do
         projected <- expectShownRight $ toSynthesisType raw
         assertEqual ("shared rendering changed " ++ show raw)
             (show raw) (SharedTypeRender.renderType id projected)
+
+-- Rank-N syntax remains structurally visible until the first quantified node.
+-- That node is then one inert LJT atom whose equality comes from the shared
+-- alpha-normal key, including when it occurs inside an otherwise opaque list.
+testRankNTypeAtoms :: IO ()
+testRankNTypeAtoms = do
+    parsed <- expectRight $ parseHType
+        "(forall a. Eq a => a -> a) -> [forall b. b -> b]"
+    assertEqual "rendered higher-rank syntax parses back exactly"
+        (Just parsed) (readMaybe $ show parsed)
+    shared <- expectShownRight $ toSynthesisType parsed
+    assertEqual "higher-rank HType/shared conversion is lossless"
+        (Right parsed) (fromSynthesisType shared)
+    assertEqual "higher-rank shared rendering remains parseable"
+        (Just parsed) (readMaybe $ SharedTypeRender.renderType id shared)
+
+    let poly binder = HTForall [binder] []
+            $ HTArrow (HTVar binder) (HTVar binder)
+        list element = HTApp (HTCon "[]") element
+        withFree binder free = HTForall [binder] []
+            $ HTArrow (HTVar binder) (HTVar free)
+    directIdentity <- expectRight $ hTypeToFormula []
+        $ HTArrow (poly "a") (poly "renamed")
+    case directIdentity of
+        argument :-> result -> assertEqual
+            "alpha-renamed direct rank-N types are the same atom"
+            argument result
+        other -> fail $ "rank-N arrow lost its outer structure: " ++ show other
+    impredicativeIdentity <- expectRight $ hTypeToFormula []
+        $ HTArrow (list $ poly "a") (list $ poly "renamed")
+    case impredicativeIdentity of
+        argument :-> result -> assertEqual
+            "lists of alpha-renamed rank-N types are the same atom"
+            argument result
+        other -> fail $ "impredicative list lost its arrow: " ++ show other
+    freeLeft <- expectRight $ hTypeToFormula [] $ withFree "a" "freeLeft"
+    freeRight <- expectRight $ hTypeToFormula [] $ withFree "b" "freeRight"
+    assertBool "free variables must remain part of opaque atom identity"
+        $ freeLeft /= freeRight
+    assertEqual "a syntactically vacuous forall is transparent"
+        (hTypeToFormula [] $ HTVar "plain")
+        (hTypeToFormula [] $ HTForall [] [] $ HTVar "plain")
+
+    stableSession <- expectShownRight Djex.standardDjinnSession
+    runStableIdentity stableSession "directRankN"
+        "(forall a. a -> a) -> forall renamed. renamed -> renamed"
+    runStableIdentity stableSession "impredicativeRankN"
+        "[forall a. a -> a] -> [forall renamed. renamed -> renamed]"
+    runStableIdentity stableSession "leadingForall"
+        "forall a. a -> a"
+
+    -- Substituting the free alias parameter @a := r@ must freshen the bound
+    -- @r@ before the quantified body is sealed. The same operation occurs in
+    -- a datatype field, covering the declaration expansion path as well as a
+    -- direct synonym application.
+    let churchBody = church "r" $ HTVar "a"
+        church binder element = HTForall [binder] []
+            $ HTArrow
+                (HTArrow element
+                    $ HTArrow (HTVar binder) (HTVar binder))
+                (HTArrow (HTVar binder) (HTVar binder))
+        apply name argument = HTApp (HTCon name) argument
+        explicitChurch = church "s" $ HTVar "r"
+        definitions =
+            [ ("Church", (["a"], churchBody, ()))
+            , ("ChurchBox", (["a"], HTUnion
+                [("ChurchBox", [apply "Church" $ HTVar "a"])], ()))
+            ]
+    substituted <- expectRight $ hTypeToFormula definitions
+        $ apply "Church" $ HTVar "r"
+    explicit <- expectRight $ hTypeToFormula [] explicitChurch
+    assertEqual "synonym substitution under forall avoids capture"
+        explicit substituted
+    boxed <- expectRight $ hTypeToFormula definitions
+        $ apply "ChurchBox" $ HTVar "r"
+    assertEqual "datatype parameters reach quantified fields capture-safely"
+        (Disj [(ConsDesc "ChurchBox" 1, Conj [explicit])]) boxed
+
+    environment <- expectRight $ do
+        withChurch <- declare
+            (TypeSynonym "Church" ["a"] churchBody)
+            standardEnvironment
+        declare
+            (DataType "ChurchBox" ["a"]
+                [("ChurchBox", [apply "Church" $ HTVar "a"])])
+            withChurch
+    listReport <- expectRight $ inhabit defaultQueryOptions environment []
+        "churches" $ HTArrow
+            (list $ apply "Church" $ HTVar "r")
+            (list explicitChurch)
+    assertRealized "impredicative Church-list identity" listReport
+    unboxReport <- expectRight $ inhabit defaultQueryOptions environment []
+        "unboxChurch" $ HTArrow
+            (apply "ChurchBox" $ HTVar "r") explicitChurch
+    assertRealized "rank-N datatype field elimination" unboxReport
+  where
+    assertRealized description report = case reportOutcome report of
+        Realized clauses -> assertBool
+            (description ++ " produced no rendered candidate")
+            $ not $ null clauses
+        outcome -> fail $ description ++ " was not realized: " ++ show outcome
+
+    runStableIdentity session targetSpelling source = do
+        target <- expectShownRight $ SharedName.mkIdentifier targetSpelling
+        request <- expectShownRight $ Djex.parseDjinnRequest session
+            defaultQueryOptions target (targetSpelling ++ ".djinn") source
+        result <- expectShownRight $ Djex.runDjinnQuery session request
+        assertBool (targetSpelling ++ " produced no candidate")
+            $ not $ null $ SharedSearch.batchCandidates
+            $ SharedQuery.resultSearch result
 
 testSharedDeclarationAdapter :: IO ()
 testSharedDeclarationAdapter = do
@@ -1516,6 +1632,33 @@ testBoundedContextArity = do
         Left message -> assertBool "context arity did not use its first failure"
             $ "expects 1 type argument(s), but got 2" `isInfixOf` message
         Right _ -> fail "an infinite known-class context was accepted"
+
+    -- Request sealing must not traverse a nested context spine before a
+    -- session supplies Eq's finite arity. This is the rank-N counterpart of
+    -- the raw compatibility check above.
+    session <- expectShownRight Djex.standardDjinnSession
+    targetName <- expectShownRight $ SharedGenerated.mkDefinitionName
+        $ sharedName "nestedContext"
+    let variable = SharedType.TypeVariable "a"
+        nestedGoal = SharedType.ForallType ["a"]
+            [Constraint (sharedName "Eq") $ repeat variable]
+            variable
+        query = SharedQuery.QueryRequest
+            { SharedQuery.requestTarget = targetName
+            , SharedQuery.requestGoal = nestedGoal
+            , SharedQuery.requestContexts = []
+            , SharedQuery.requestOptions = defaultQueryOptions
+            }
+    request <- expectShownRight $ Djex.mkDjinnRequest query
+    case Djex.runDjinnQuery session request of
+        Left failure -> do
+            assertEqual "nested arity failure has the query code"
+                (Just "DJEX_DJINN_QUERY")
+                (SharedDiagnostic.diagnosticCode failure)
+            assertBool "nested context arity did not stop at its first excess"
+                $ "expects 1 type argument(s), but got 2" `isInfixOf`
+                    unwords (SharedDiagnostic.diagnosticContext failure)
+        Right _ -> fail "an infinite nested context was accepted"
 
 -- Saturation and kind checking own different failures. A partial synonym can
 -- be kind-compatible in a higher-kinded position, so the explicit arity guard

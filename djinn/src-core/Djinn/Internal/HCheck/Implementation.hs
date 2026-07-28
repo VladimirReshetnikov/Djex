@@ -309,6 +309,8 @@ checkSynonymSaturationWith checkApplication = checkType
     checkType (HTTuple types) = mapM_ checkType types
     checkType (HTArrow argument result) =
         checkType argument >> checkType result
+    checkType (HTForall _ constraints body) =
+        mapM_ (mapM_ checkType) constraints >> checkType body
     checkType (HTUnion constructors) =
         mapM_ (mapM_ checkType . snd) constructors
     checkType (HTVar _) = return ()

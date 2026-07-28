@@ -308,7 +308,7 @@ termToGeneratedClause target term = do
   pure clause
 
 unSymbol :: Symbol -> HSymbol
-unSymbol (Symbol spelling) = spelling
+unSymbol = symbolSpelling
 
 tuple :: [Expression] -> Expression
 tuple [expression] = expression

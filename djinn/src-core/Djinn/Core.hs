@@ -93,8 +93,10 @@ kStar = KStar
 kArrow :: HKind -> HKind -> HKind
 kArrow = KArrow
 
--- | Parse a type in Djinn's Haskell-like syntax, requiring the whole
--- input to be consumed.
+-- | Parse a type in Djinn's Haskell-like syntax, requiring the whole input to
+-- be consumed. Explicit @forall@ is accepted at any type position, including
+-- inside constructor applications; proof search treats each nested quantified
+-- subtree as one inert, alpha-aware atom.
 parseHType :: String -> Either String HType
 parseHType = parseWith pHType "type"
 

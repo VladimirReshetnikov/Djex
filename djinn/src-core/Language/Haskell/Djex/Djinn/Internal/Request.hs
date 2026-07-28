@@ -2,11 +2,11 @@
 
 {-# OPTIONS_HADDOCK not-home #-}
 
--- | Private ownership of Djinn's checked request and execution plan.
+-- | Private ownership of Djinn's checked request.
 --
 -- The stable facade re-exports only the opaque request, its checked
--- constructor, and the caller's exact neutral query. Canonical execution data
--- and diagnostic provenance remain inseparable inside this module.
+-- constructor, and the caller's exact neutral query. Its bounded-validation
+-- witness and diagnostic provenance remain inseparable inside this module.
 module Language.Haskell.Djex.Djinn.Internal.Request
   ( QueryOptions (..)
   , defaultQueryOptions
@@ -57,7 +57,6 @@ import Language.Haskell.Synthesis.Query
   , QueryRequest (..)
   , RequestProvenance (..)
   , RequestTypeSite (..)
-  , cachedQueryCache
   , cachedQueryRequest
   , requestTypeSiteLabel
   , requestContextualType
@@ -85,27 +84,20 @@ type DjinnLocal = String
 -- Djinn's historical raw type remains only at compatibility API boundaries.
 type DjinnType = Type DjinnTypeVariable
 
--- | The canonical shared query projection consumed by the proof core.
---
--- Keep this separate from the stable request: callers can recover their exact
--- (possibly noncanonical) neutral spelling with 'djinnRequestQuery', while a
--- reusable request never retains a second recursive type representation.
-data DjinnRequestPlan = DjinnRequestPlan
-  { plannedGoal :: DjinnType
-  }
-
--- | A checked query whose exact neutral spelling and canonical shared plan
--- cannot drift apart. The constructor and plan stay private; callers can
--- inspect the original neutral query with 'djinnRequestQuery'.
+-- | A checked query whose constructor is private. The unit cache is a witness
+-- that the exact neutral request passed the session-independent preflight;
+-- complete normalization occurs only after session-owned widths are known.
 newtype DjinnRequest = DjinnRequest
-  (CachedQuery DjinnType QueryOptions DjinnRequestPlan)
+  (CachedQuery DjinnType QueryOptions ())
   deriving (Eq, Show)
-    via (CachedQuery DjinnType QueryOptions DjinnRequestPlan)
+    via (CachedQuery DjinnType QueryOptions ())
 
 -- | Check the session-independent portion of a neutral Djinn query.
--- The goal is canonicalized once into a shared plan, while
--- 'djinnRequestQuery' retains the caller's exact neutral value. Context class
--- names are checked here, but their argument spines are deliberately deferred:
+-- The goal receives a bounded structural preflight, while
+-- 'djinnRequestQuery' retains the caller's exact neutral value. Complete
+-- canonicalization is deliberately deferred until a session has bounded every
+-- nested context argument spine. Context class names are checked here, but
+-- their argument spines remain deferred:
 -- only a session's declared class arity can bound a cyclic caller-built list
 -- without imposing an arbitrary library-wide maximum. Search options and all
 -- environment-dependent kind, class, synonym, and context-argument checks
@@ -124,13 +116,9 @@ mkDjinnRequestWithProvenance
   -> Either Diagnostic DjinnRequest
 mkDjinnRequestWithProvenance provenance query = DjinnRequest <$>
   sealCachedQueryWithProvenance provenance (do
-    normalizedGoal <- normalizeRequestType RequestGoal $ requestGoal query
+    preflightRequestType RequestGoal $ requestGoal query
     mapM_ validateRequestContext $ requestContexts query
-    pure
-      ( query
-      , DjinnRequestPlan
-        { plannedGoal = normalizedGoal }
-      ))
+    pure (query, ()))
 
 -- | Recover the exact neutral query from which this checked request was
 -- sealed. Modifications must be passed back through 'mkDjinnRequest'.
@@ -157,17 +145,16 @@ prepareDjinnRequest
 prepareDjinnRequest lookupClassArity request =
   first (withDjinnRequestProvenance request) $ do
     let query = djinnRequestQuery request
-        plan = djinnRequestPlan request
-        preparedQuery = query
-          { requestGoal = plannedGoal plan
-          }
-        contextual = requestContextualType preparedQuery
-        (_, combinedContexts, _) =
-          SharedType.splitLeadingForalls contextual
-    -- 'implicitizeLeadingForalls' collects every variable in the signature.
-    -- Bound all context spines first so that collection remains productive
-    -- even for adversarial caller-built cyclic argument lists.
-    mapM_ validateContextWidth combinedContexts
+        rawContextual = requestContextualType query
+    -- Bound every context argument spine, including contexts inside a nested
+    -- forall, before any complete type traversal. Programmatic callers may use
+    -- cyclic lists, so restricting this preflight to the prenex prefix would
+    -- make rank-N validation diverge before the session's class arity is used.
+    SharedType.validateTypeWidthsWith
+      widthTypeFailure
+      validateContextWidth
+      rawContextual
+    contextual <- normalizeMonotype RequestGoal rawContextual
     implicit <- first signatureLoweringFailure
       $ fmap fst
       $ SharedType.implicitizeLeadingForalls
@@ -180,7 +167,7 @@ prepareDjinnRequest lookupClassArity request =
     -- Djinn's type boundary. This preserves the shared goal/context failure
     -- order: an earlier malformed argument is not hidden by a later aggregate
     -- scope diagnostic.
-    case requestContextVariablesNotInScope preparedQuery of
+    case requestContextVariablesNotInScope query of
       [] -> pure ()
       variables -> Left $ outOfScopeContextVariables variables
     pure (contexts, goal)
@@ -196,6 +183,9 @@ prepareDjinnRequest lookupClassArity request =
       (const $ Just expected)
       contextArityFailure
       context
+
+  widthTypeFailure = loweringFailure "signature"
+    . Core.InvalidSynthesisType
 
   -- Sealing has already checked every header, and the pass above has bounded
   -- every argument spine. Binder implicitization changes neither property, so
@@ -240,14 +230,11 @@ validateDjinnTarget :: Name -> Either Diagnostic DefinitionName
 validateDjinnTarget = validateRequestTarget "DJEX_DJINN_TARGET"
   "Djinn targets must be unqualified value identifiers or operators"
 
-djinnRequestPlan :: DjinnRequest -> DjinnRequestPlan
-djinnRequestPlan (DjinnRequest query) = cachedQueryCache query
-
-normalizeRequestType
+preflightRequestType
   :: RequestTypeSite
   -> DjinnType
-  -> Either Diagnostic DjinnType
-normalizeRequestType site = first
+  -> Either Diagnostic ()
+preflightRequestType site = fmap (const ()) . first
   (loweringFailure $ requestTypeSiteLabel site)
   . sealSynthesisSignature
 

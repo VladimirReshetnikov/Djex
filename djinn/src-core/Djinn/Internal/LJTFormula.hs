@@ -3,7 +3,8 @@
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.LJTFormula (
-    Symbol(..), Formula(..), (<->), (&), (|:), fnot, false, true,
+    Symbol(Symbol), opaqueTypeSymbol, symbolSpelling,
+    Formula(..), (<->), (&), (|:), fnot, false, true,
     formulaSymbols,
     ConsDesc(..), Term(..), applys, validateTermMetadata,
     freeVars, freshenTermBinders
@@ -13,17 +14,52 @@ import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 
 import Language.Haskell.Synthesis.Collection (distinctOn)
+import Language.Haskell.Synthesis.Type (Type)
+import Language.Haskell.Synthesis.TypeAtom (TypeAtomKey, alphaTypeKey)
+import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 
 infixr 2 :->
 infix  2 <->
 infixl 3 |:
 infixl 4 &
 
-newtype Symbol = Symbol String
-     deriving (Eq, Ord)
+-- Proof variables and ordinary historical atoms retain their source spelling.
+-- An opaque type atom additionally carries the exact shared source tree for
+-- display and an alpha-normal key for logical identity. Keeping those roles in
+-- one sum lets the existing LJT indexes stay unchanged without ever treating a
+-- rendered forall spelling as its proposition key.
+data Symbol
+    = Symbol String
+    | OpaqueTypeSymbol !(Type String) !(TypeAtomKey String)
+
+instance Eq Symbol where
+    Symbol left == Symbol right = left == right
+    OpaqueTypeSymbol _ left == OpaqueTypeSymbol _ right = left == right
+    _ == _ = False
+
+instance Ord Symbol where
+    compare (Symbol left) (Symbol right) = compare left right
+    compare Symbol{} OpaqueTypeSymbol{} = LT
+    compare OpaqueTypeSymbol{} Symbol{} = GT
+    compare (OpaqueTypeSymbol _ left) (OpaqueTypeSymbol _ right) =
+        compare left right
+
+-- | Seal any shared source type as one opaque logical proposition. The caller
+-- decides which enclosing structure remains logical; this operation merely
+-- gives the selected subtree alpha-aware identity.
+opaqueTypeSymbol :: Type String -> Symbol
+opaqueTypeSymbol source = OpaqueTypeSymbol source $ alphaTypeKey source
+
+-- | Source-like display spelling. Proof terms contain only the ordinary
+-- constructor, but keeping this projection total makes invariant failures
+-- diagnosable instead of turning proof lowering into a partial match.
+symbolSpelling :: Symbol -> String
+symbolSpelling symbol = case symbol of
+    Symbol spelling -> spelling
+    OpaqueTypeSymbol source _ -> SharedTypeRender.renderType id source
 
 instance Show Symbol where
-    show (Symbol s) = s
+    show = symbolSpelling
 
 data ConsDesc = ConsDesc String Int     -- name and arity
      deriving (Eq, Ord, Show)
@@ -56,8 +92,9 @@ true :: Formula
 true = Conj []
 
 -- Every symbol occurring in a formula: propositional atoms and the nominal
--- tags of empty types.  Freshness machinery reserves all of them, because
--- Symbol is shared by proof variables and propositional atoms.
+-- tags of empty types. Freshness machinery reserves all of them. An opaque
+-- type symbol is structurally disjoint from every generated spelling, so it
+-- cannot collide with a proof binder even when its rendered text does.
 formulaSymbols :: Formula -> [Symbol]
 formulaSymbols (Conj fs) = concatMap formulaSymbols fs
 formulaSymbols (Disj alternatives) = concatMap (formulaSymbols . snd) alternatives

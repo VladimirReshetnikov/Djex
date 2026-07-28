@@ -88,11 +88,14 @@ evaluateExpression promptScope workspaceModules expression = do
       [ Hint.languageExtensions Hint.:=
           [Hint.ExplicitNamespaces, Hint.PatternSynonyms]
       ]
+    (topLevel, imports) <- either Catch.throwM pure
+      $ interpreterContext promptScope
+    -- Validate the context before compiling any workspace module. In
+    -- particular, a safe import that Hint cannot represent must not be
+    -- weakened after loading the module it was meant to guard.
     if null workspaceModules
       then pure ()
       else Hint.loadModules $ map snd workspaceModules
-    (topLevel, imports) <- either Catch.throwM pure
-      $ interpreterContext promptScope
     Hint.setTopLevelModules topLevel
     Hint.setImportsF imports
 
@@ -137,11 +140,14 @@ entryImport entry = case entry of
   ScopeImport source -> case parseScopeImport source of
     Left _ -> Left $ Hint.UnknownError
       "the retained REPL import no longer parses"
-    Right declaration -> Right $ Just $ Hint.ModuleImport
-      { Hint.modName = hseModuleName $ HSE.importModule declaration
-      , Hint.modQual = importQualification declaration
-      , Hint.modImp = importSurface declaration
-      }
+    Right declaration
+      | HSE.importSafe declaration -> Left $ Hint.UnknownError
+          "the evaluator cannot preserve import safe; refusing to weaken it"
+      | otherwise -> Right $ Just $ Hint.ModuleImport
+          { Hint.modName = hseModuleName $ HSE.importModule declaration
+          , Hint.modQual = importQualification declaration
+          , Hint.modImp = importSurface declaration
+          }
 
 plainImport :: String -> Hint.ModuleImport
 plainImport moduleName = Hint.ModuleImport

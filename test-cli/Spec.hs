@@ -2274,6 +2274,33 @@ testReplEval = do
     assertContains "fallback evaluation failures stay structured"
       "[DJEX_REPL_EVAL]" errors
 
+  -- Hint's structured import context has no safe-import flag. Evaluation must
+  -- refuse that context before loading its module rather than silently
+  -- weakening the user's request to an ordinary import.
+  withTemporaryEnvironment
+    [ ( "UnsafeEval.hs"
+      , unlines
+          [ "{-# LANGUAGE Unsafe #-}"
+          , "module UnsafeEval (unsafeValue) where"
+          , "unsafeValue :: String"
+          , "unsafeValue = \"unsafe-value\""
+          ]
+      )
+    ] $ \directory -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ "import safe UnsafeEval"
+      , ":eval unsafeValue"
+      , ":eval 20 + 22"
+      ]
+    assertEqual "safe-import eval REPL exit" ExitSuccess exitCode
+    assertContains "safe-import fallback still evaluates Prelude" "42" output
+    assertEqual "each safe-import evaluation explains its full fallback" 2
+      $ countOccurrences "[DJEX_REPL_EVAL_SCOPE]" errors
+    assertEqual "the evaluator never silently weakens import safe" 2
+      $ countOccurrences "refusing to weaken it" errors
+    assertContains "the unavailable safe import stays out of evaluation"
+      "[DJEX_REPL_EVAL]" errors
+
 testReplScripts :: Assertion
 testReplScripts = withTemporaryEnvironment [] $ \directory -> do
   let script = directory ++ "/commands.djex"

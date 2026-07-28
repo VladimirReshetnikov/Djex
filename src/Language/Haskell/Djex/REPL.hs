@@ -74,11 +74,17 @@ import System.Posix.User (getRealUserID)
 import Language.Haskell.Djex
 import Language.Haskell.Djex.Command
 import Language.Haskell.Djex.Exference.HaskellSrc
-  ( ExferenceQueryScope (..)
-  , ExferenceSessionLoadReport (..)
+  ( ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
   , loadExferenceSessionFromSourcesWithPolicy
+  , mkExferenceRequestWithCheckedTargetFromParsed
+  )
+import Language.Haskell.Djex.HaskellSrc
+  ( ExferenceQueryScope (..)
+  , ParsedSourceType
+  , parseSourceTypeInScope
+  , parsedSourceType
   )
 import Language.Haskell.Djex.Package
   ( PackageOperation (DownloadOperation, InstallOperation)
@@ -627,20 +633,102 @@ runResolvedQuery
   -> ReplState
   -> IO (ReplStep ReplState)
 runResolvedQuery sourceName selected typeSource state = do
-  case selected of
-    OneBackend selectedBackend -> runBackend False selectedBackend
-    BothBackends -> do
-      runBackend True DjinnBackend
-      runBackend True ExferenceBackend
+  case sharedRuntime of
+    Just (session, context)
+      | sharedProjectionAvailable -> case parseSourceTypeInScope
+          (exferenceSessionInventory session)
+          (queryScope context) sourceName typeSource of
+        Left failure -> emitDiagnostic failure
+        Right parsed -> runParsedSelection session parsed
+    _ -> runLegacySelection
   pure $ ContinueRepl state
     { lastQuery = Just (selected, typeSource) }
  where
-  runBackend labelled selectedBackend = do
-    when labelled $ putStrLn
-      $ "-- " ++ backendName (backendInfo selectedBackend)
+  runtime = exferenceRuntime state
+  sharedRuntime =
+    (,) <$> exferenceRuntimeSession runtime <*> exferenceRuntimeScope runtime
+  sharedProjectionAvailable = case selected of
+    OneBackend ExferenceBackend -> True
+    _ -> case djinnProjection $ djinnRuntime state of
+      Just _ -> True
+      Nothing -> False
+
+  runParsedSelection session parsed = case selected of
+    OneBackend selectedBackend ->
+      runParsedBackend False session parsed selectedBackend
+    BothBackends -> do
+      runParsedBackend True session parsed DjinnBackend
+      runParsedBackend True session parsed ExferenceBackend
+
+  runLegacySelection = case selected of
+    OneBackend selectedBackend -> runLegacyBackend False selectedBackend
+    BothBackends -> do
+      runLegacyBackend True DjinnBackend
+      runLegacyBackend True ExferenceBackend
+
+  labelBackend labelled selectedBackend = when labelled $ putStrLn
+    $ "-- " ++ backendName (backendInfo selectedBackend)
+
+  runLegacyBackend labelled selectedBackend = do
+    labelBackend labelled selectedBackend
     case selectedBackend of
       DjinnBackend -> runDjinnInteractive sourceName typeSource state
       ExferenceBackend -> runExferenceInteractive sourceName typeSource state
+
+  runParsedBackend labelled session parsed selectedBackend = do
+    labelBackend labelled selectedBackend
+    case selectedBackend of
+      DjinnBackend -> runParsedDjinn parsed
+      ExferenceBackend -> runParsedExference session parsed
+
+  runParsedDjinn parsed = case mkDjinnRequest QueryRequest
+      { requestTarget = resultTarget state
+      , requestGoal = projectParsedTypeToDjinn state parsed
+      , requestContexts = []
+      , requestOptions = prepareDjinnQueryOptions
+          (presentation state) (djinnSearchOptions state)
+      } of
+    Left failure -> emitDiagnostic failure
+    Right request -> case runDjinnQuery (currentDjinnSession state) request of
+      Left failure -> emitDiagnostic failure
+      Right result -> ignoreExit $ presentDjinn
+        (presentation state)
+        (maybe noFieldSelectors djinnProjectionFieldSelectors
+          $ djinnProjection $ djinnRuntime state)
+        result
+
+  runParsedExference session parsed = case
+      mkExferenceRequestWithCheckedTargetFromParsed
+        (exferenceSearchOptions state) (resultTarget state) parsed of
+    Left failure -> emitDiagnostic failure
+    Right request -> case runExferenceQuery session request of
+      Left failure -> emitDiagnostic failure
+      Right results -> ignoreExit $ presentExference
+        (presentation state) (scopeFieldSelectors state) results
+
+projectParsedTypeToDjinn
+  :: ReplState
+  -> ParsedSourceType
+  -> DjinnType
+projectParsedTypeToDjinn state = mapTypeNames projectName
+  . fmap ExferenceType.defaultVariableName
+  . parsedSourceType
+ where
+  promptNames = maybe Map.empty djinnProjectionPromptNames
+    $ djinnProjection $ djinnRuntime state
+  projectName name = Map.findWithDefault name name promptNames
+
+queryScope :: ReplScope -> ExferenceQueryScope
+queryScope context = ExferenceQueryScope
+  { exferenceQueryCurrentModule = scopeCurrentModule context
+  , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames context
+  , exferenceQueryModuleAliases = scopeQualifierAliases context
+  , exferenceQueryQualifiedNames = scopeQualifiedTypeNames context
+  }
+
+-- The legacy runners remain the fallback when no shared source inventory is
+-- available. With a loaded workspace, 'runResolvedQuery' parses once above
+-- and feeds the exact checked type to both engines.
 
 runDjinnInteractive :: FilePath -> String -> ReplState -> IO ()
 runDjinnInteractive sourceName typeSource state = ignoreExit
@@ -675,12 +763,6 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
   runtime = exferenceRuntime state
   runtimeState =
     (exferenceRuntimeSession runtime, exferenceRuntimeScope runtime)
-  queryScope context = ExferenceQueryScope
-    { exferenceQueryCurrentModule = scopeCurrentModule context
-    , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames context
-    , exferenceQueryModuleAliases = scopeQualifierAliases context
-    , exferenceQueryQualifiedNames = scopeQualifiedTypeNames context
-    }
 
 ignoreExit :: IO ExitCode -> IO ()
 ignoreExit action = action >> pure ()

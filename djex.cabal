@@ -126,6 +126,7 @@ Library
   Exposed-Modules:
     Language.Haskell.Djex
     Language.Haskell.Djex.CLI
+    Language.Haskell.Djex.HaskellSrc
     Language.Haskell.Djex.REPL
     Language.Haskell.Djex.Djinn
     Language.Haskell.Djex.Exference

@@ -53,6 +53,7 @@ module Language.Haskell.Synthesis.Type
   , freeVariables
   , constraintFreeVariables
   , typeConstructors
+  , mapTypeNames
   ) where
 
 import Control.DeepSeq (NFData)
@@ -983,3 +984,25 @@ typeConstructors typeExpression = case typeExpression of
       | constraint <- constraints
       , argument <- constraintArguments constraint
       ])
+
+-- | Rewrite every nominal type-constructor and constraint-class identity.
+--
+-- Variables and structure are preserved. This is the shared projection used
+-- when a frontend resolves canonical source names once and a backend stores a
+-- deliberately renamed view of the same inventory.
+mapTypeNames :: (Name -> Name) -> Type variable -> Type variable
+mapTypeNames convert source = case source of
+  TypeVariable{} -> source
+  TypeConstructor name -> TypeConstructor $ convert name
+  TypeApplication function argument -> TypeApplication
+    (mapTypeNames convert function) (mapTypeNames convert argument)
+  FunctionType parameter result -> FunctionType
+    (mapTypeNames convert parameter) (mapTypeNames convert result)
+  TupleType boxity elements -> TupleType boxity
+    $ map (mapTypeNames convert) elements
+  ForallType variables constraints body -> ForallType variables
+    (map mapConstraintNames constraints)
+    (mapTypeNames convert body)
+ where
+  mapConstraintNames (Constraint className arguments) = Constraint
+    (convert className) $ map (mapTypeNames convert) arguments

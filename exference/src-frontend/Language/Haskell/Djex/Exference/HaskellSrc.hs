@@ -21,16 +21,12 @@ module Language.Haskell.Djex.Exference.HaskellSrc
   , parseExferenceRequestInScope
   , parseExferenceRequestWithCheckedTarget
   , parseExferenceRequestWithCheckedTargetInScope
+  , mkExferenceRequestWithCheckedTargetFromParsed
   ) where
 
-import Control.Monad.Trans.Except (runExceptT)
 import Data.Bifunctor (first)
-import Data.Functor.Identity (runIdentity)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
-import qualified Language.Haskell.Exts.Parser as HSE
-import qualified Language.Haskell.Exts.SrcLoc as HSEL
-import qualified Language.Haskell.Exts.Syntax as HSES
 
 import Language.Haskell.Djex.Exference
   ( ExferenceOptions
@@ -43,7 +39,6 @@ import Language.Haskell.Djex.Exference
   )
 import qualified Language.Haskell.Djex.Exference.Internal.Request as Request
 import qualified Language.Haskell.Djex.Exference.Internal.Session as Session
-import Language.Haskell.Exference.Core.Types (toSynthesisType)
 import Language.Haskell.Exference.EnvironmentParser
   ( CheckedSourceEnvironment
   , EnvironmentLoadError
@@ -53,28 +48,27 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentFromPath
   , environmentFromSources
   , environmentLoadErrorDiagnostics
-  , haskellSrcExtsParseMode
-  )
-import Language.Haskell.Exference.TypeDeclsFromHaskellSrc
-  ( parseTypeWithInventory
-  , parseTypeWithInventoryInScope
-  , parseTypeWithInventoryInQualifiedScope
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , shownErrorDiagnostic
-  , sourceTextLocation
   , withCode
-  , withSourceLocation
   )
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Name
-  ( ModuleName
-  , Name
+  ( Name
   , parseName
-  , renderModuleName
   )
 import Language.Haskell.Synthesis.Query (QueryRequest (..))
+import Language.Haskell.Djex.HaskellSrc
+  ( ExferenceQueryScope (..)
+  , ParsedSourceType
+  , parseSourceType
+  , parseSourceTypeInScope
+  , parsedSourceType
+  , parsedSourceTypeLocation
+  , parsedSourceTypeVariableNames
+  )
 import Paths_djex (getDataFileName)
 
 -- | A fully sealed session or structured fatal diagnostics, paired with all
@@ -85,23 +79,6 @@ data ExferenceSessionLoadReport = ExferenceSessionLoadReport
       :: Either (NonEmpty Diagnostic) ExferenceSession
   , exferenceSessionLoadDiagnostics :: [Diagnostic]
   }
-
--- | Name-resolution state supplied by an interactive source workspace.
--- Exact visible names control only unqualified lookup; every name in the
--- sealed inventory remains available through its canonical qualifier.
-data ExferenceQueryScope = ExferenceQueryScope
-  { exferenceQueryCurrentModule :: Maybe ModuleName
-    -- ^ Optional full-top-level module whose local names take precedence.
-  , exferenceQueryVisibleNames :: [Name]
-    -- ^ Exact canonical names admitted for unqualified query syntax.
-  , exferenceQueryModuleAliases :: [(ModuleName, ModuleName)]
-    -- ^ Prompt qualifier paired with its canonical loaded module.
-  , exferenceQueryQualifiedNames :: [(ModuleName, [Name])]
-    -- ^ Exact canonical names admitted through each written qualifier. An
-    -- empty outer list retains the permissive behavior of the original scoped
-    -- API; a present qualifier with an empty inner list admits no names.
-  }
-  deriving (Eq, Show)
 
 -- | The exact session policy shared by the historical @exference@ command
 -- and the merged @djex exference@ command.  Programmatic sessions deliberately
@@ -316,47 +293,30 @@ parseCheckedRequest
   -> String
   -> Either Diagnostic ExferenceRequest
 parseCheckedRequest session options checkedTarget maybeScope sourceName source = do
-  let mode = haskellSrcExtsParseMode sourceName
-      location = sourceTextLocation (HSE.parseFilename mode) source
-      inventory = exferenceSessionInventory session
-      parsed = runIdentity $ runExceptT $ case maybeScope of
-        Nothing -> parseTypeWithInventory inventory Nothing mode source
-        Just scope
-          | null $ exferenceQueryQualifiedNames scope ->
-              parseTypeWithInventoryInScope
-                inventory
-                (toHseModuleName <$> exferenceQueryCurrentModule scope)
-                (exferenceQueryVisibleNames scope)
-                (exferenceQueryModuleAliases scope)
-                mode
-                source
-          | otherwise -> parseTypeWithInventoryInQualifiedScope
-              inventory
-              (toHseModuleName <$> exferenceQueryCurrentModule scope)
-              (exferenceQueryVisibleNames scope)
-              (exferenceQueryModuleAliases scope)
-              (exferenceQueryQualifiedNames scope)
-              mode
-              source
-  -- The HSE compatibility frontend predates structured diagnostic codes.
-  -- Seal every failure at this boundary while preserving its exact message,
-  -- source, and span.
-  (backendType, sourceVariables) <- first
-    (withCode "DJEX_EXF_PARSE") parsed
-  sharedType <- either
-    (Left . withSourceLocation location . shownErrorDiagnostic
-      "DJEX_EXF_PARSE" "parsed Exference type failed shared validation"
-    )
-    Right
-    $ toSynthesisType backendType
+  parsed <- first (withCode "DJEX_EXF_PARSE") $ case maybeScope of
+    Nothing -> parseSourceType inventory sourceName source
+    Just scope -> parseSourceTypeInScope inventory scope sourceName source
+  mkExferenceRequestWithCheckedTargetFromParsed
+    options checkedTarget parsed
+ where
+  inventory = exferenceSessionInventory session
+
+-- | Seal an Exference request from a source type parsed once by Djex.
+-- Other backends can lower the same 'ParsedSourceType' before this function
+-- attaches Exference's search options and source-name hints.
+mkExferenceRequestWithCheckedTargetFromParsed
+  :: ExferenceOptions
+  -> DefinitionName
+  -> ParsedSourceType
+  -> Either Diagnostic ExferenceRequest
+mkExferenceRequestWithCheckedTargetFromParsed options checkedTarget parsed = do
   let query = QueryRequest
         { requestTarget = checkedTarget
-        , requestGoal = sharedType
+        , requestGoal = parsedSourceType parsed
         , requestContexts = []
         , requestOptions = options
         }
   Request.mkExferenceRequestWithSourceInfo
-    sourceVariables location query
- where
-  toHseModuleName moduleName = HSES.ModuleName HSEL.noSrcSpan
-    $ renderModuleName moduleName
+    (parsedSourceTypeVariableNames parsed)
+    (parsedSourceTypeLocation parsed)
+    query

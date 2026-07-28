@@ -2246,6 +2246,23 @@ typeTests = testGroup "source types"
               (SharedType.TypeConstructor functionName) a) b
       alphaEquivalentTypes appliedArrow (SharedType.FunctionType a b) @?=
         True
+  , testCase "project nominal names through quantified contexts" $ do
+      let sourceConstructor = right $ parseName "Source.T"
+          targetConstructor = right $ parseName "Prompt.T"
+          sourceClass = right $ parseName "Source.C"
+          targetClass = right $ parseName "Prompt.C"
+          variable = SharedType.TypeVariable "a"
+          source = SharedType.ForallType ["a"]
+            [Constraint sourceClass [variable]]
+            $ SharedType.TypeConstructor sourceConstructor
+          expected = SharedType.ForallType ["a"]
+            [Constraint targetClass [variable]]
+            $ SharedType.TypeConstructor targetConstructor
+          convert name
+            | name == sourceConstructor = targetConstructor
+            | name == sourceClass = targetClass
+            | otherwise = name
+      SharedType.mapTypeNames convert source @?= expected
   , testCase "canonicalize saturated function and tuple constructors" $ do
       let a = SharedType.TypeVariable "a"
           b = SharedType.TypeVariable "b"

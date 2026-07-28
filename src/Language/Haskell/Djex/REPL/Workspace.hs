@@ -39,10 +39,14 @@ module Language.Haskell.Djex.REPL.Workspace
 import Control.DeepSeq (force)
 import Control.Exception (evaluate)
 import Data.Either (partitionEithers)
+import qualified Data.Foldable as Foldable
 import Data.List (intercalate, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NonEmpty
 import qualified Data.Map.Strict as Map
+import Data.Semigroup (sconcat)
+import Data.Sequence (Seq, ViewL (..), (|>))
+import qualified Data.Sequence as Seq
 import qualified Data.Set as Set
 import System.Directory
   ( canonicalizePath
@@ -76,6 +80,10 @@ import Language.Haskell.Exference.HaskellSrcUtils
   ( withHaskellSrcLocation )
 import Language.Haskell.Exference.TypeFromHaskellSrc
   ( haskellSrcExtsParseMode )
+import Language.Haskell.Djex.Internal.DependencyGraph
+  ( DependencyCycle (..)
+  , stableDependencyOrder
+  )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
   , Severity (Error)
@@ -138,9 +146,6 @@ data TargetLocator = TargetLocator
   , locatorModuleName :: Maybe String
   , locatorAdmissionRoot :: FilePath
   }
-
-data VisitState = Visiting | Visited
-  deriving (Eq, Show)
 
 -- | Resolve a fresh target list relative to the current directory.
 loadWorkspace
@@ -770,39 +775,51 @@ discoverDependencies
   :: [WorkspaceTarget]
   -> [WorkspaceModule]
   -> IO (Either (NonEmpty Diagnostic) [WorkspaceModule])
-discoverDependencies targets initial = go initial 0
+discoverDependencies targets initial = go
+    (modulesByName initial)
+    (modulesByPath initial)
+    initialQueue
+    initialQueue
  where
-  go modules index
-    | index >= length modules = pure $ Right modules
-    | otherwise = do
-        let modul = modules !! index
-        expanded <- foldEitherM (discoverImport modul) modules
-          $ parsedModuleImports modul
-        case expanded of
-          Left failures -> pure $ Left failures
-          Right next -> go next $ index + 1
+  initialQueue = Seq.fromList initial
+  roots = sourceRoots targets initial
 
-  discoverImport _ modules WorkspaceImport {importedFromPackage = True} =
-    pure $ Right modules
-  discoverImport importer modules imported
-    | importedModuleName imported `Map.member` modulesByName modules =
-        pure $ Right modules
+  go byName byPath discovered pending = case Seq.viewl pending of
+    EmptyL -> pure $ Right $ toList discovered
+    modul :< remaining -> do
+      expanded <- foldEitherM (discoverImport modul)
+        (byName, byPath, discovered, remaining)
+        $ parsedModuleImports modul
+      case expanded of
+        Left failures -> pure $ Left failures
+        Right (nextByName, nextByPath, nextDiscovered, nextPending) ->
+          go nextByName nextByPath nextDiscovered nextPending
+
+  discoverImport _ state WorkspaceImport {importedFromPackage = True} =
+    pure $ Right state
+  discoverImport importer state@(byName, byPath, discovered, pending) imported
+    | importedModuleName imported `Map.member` byName = pure $ Right state
     | otherwise = do
-        resolved <- resolveModuleFile (sourceRoots targets modules)
+        resolved <- resolveModuleFile roots
           (moduleSegments $ importedModuleName imported)
         case resolved of
           Left failures -> pure $ Left failures
-          Right Nothing -> pure $ Right modules
-          Right (Just path) -> case Map.lookup path $ modulesByPath modules of
-            Just dependency -> pure $ modules
-              <$ validateDependency importer imported modules dependency
+          Right Nothing -> pure $ Right state
+          Right (Just path) -> case Map.lookup path byPath of
+            Just dependency -> pure $ state
+              <$ validateDependency importer imported byName dependency
             Nothing -> do
               parsed <- parseWorkspaceModule path
               pure $ parsed >>= \dependency -> do
-                validateDependency importer imported modules dependency
-                Right $ modules ++ [dependency]
+                validateDependency importer imported byName dependency
+                Right
+                  ( Map.insert (parsedModuleName dependency) dependency byName
+                  , Map.insert path dependency byPath
+                  , discovered |> dependency
+                  , pending |> dependency
+                  )
 
-  validateDependency importer imported modules dependency
+  validateDependency importer imported byName dependency
     | parsedModuleName dependency /= importedModuleName imported =
         singletonFailure
           "DJEX_REPL_MODULE_MISMATCH"
@@ -812,8 +829,7 @@ discoverDependencies targets initial = go initial 0
               ++ parsedModuleName importer ++ ", but the file declares "
               ++ parsedModuleName dependency
           )
-    | otherwise = case Map.lookup (parsedModuleName dependency)
-        $ modulesByName modules of
+    | otherwise = case Map.lookup (parsedModuleName dependency) byName of
       Just original
         | parsedModulePath original /= parsedModulePath dependency ->
             singletonFailure
@@ -823,6 +839,9 @@ discoverDependencies targets initial = go initial 0
               (parsedModuleName dependency ++ " is also declared by "
                 ++ parsedModulePath original)
       _ -> Right ()
+
+  toList :: Seq value -> [value]
+  toList = Foldable.toList
 
 moduleSegments :: String -> [String]
 moduleSegments source = case SharedName.mkModuleName source of
@@ -916,68 +935,28 @@ dependencyOrder explicitPaths modules = do
       roots = stableNub
         $ [parsedModuleName modul | path <- explicitPaths, Just modul <- [Map.lookup path byPath]]
         ++ map parsedModuleName modules
-  (_, ordered) <- foldlVisit byName (Map.empty, []) roots
-  pure ordered
-
-foldlVisit
-  :: Map.Map String WorkspaceModule
-  -> (Map.Map String VisitState, [WorkspaceModule])
-  -> [String]
-  -> Either (NonEmpty Diagnostic) (Map.Map String VisitState, [WorkspaceModule])
-foldlVisit _ state [] = Right state
-foldlVisit modules state (name : remaining) = do
-  next <- visitModule modules [] state name
-  foldlVisit modules next remaining
-
-visitModule
-  :: Map.Map String WorkspaceModule
-  -> [String]
-  -> (Map.Map String VisitState, [WorkspaceModule])
-  -> String
-  -> Either (NonEmpty Diagnostic) (Map.Map String VisitState, [WorkspaceModule])
-visitModule modules stack state@(marks, ordered) name = case Map.lookup name marks of
-  Just Visited -> Right state
-  Just Visiting -> case Map.lookup currentName modules of
-    Nothing -> Right state
-    Just current -> Left $ withSource (parsedModulePath current)
-      (workspaceFailure
-        "DJEX_REPL_MODULE_CYCLE"
-        "cyclic non-SOURCE module imports"
-        $ intercalate " -> " cycleNames)
-      :| []
-  Nothing -> case Map.lookup name modules of
-    Nothing -> Right state
-    Just modul -> do
-      let marked = (Map.insert name Visiting marks, ordered)
-          dependencies =
-            [ importedModuleName imported
-            | imported <- parsedModuleImports modul
-            , not $ importedFromPackage imported
-            , not $ importedAsSource imported
-            , importedModuleName imported `Map.member` modules
-            ]
-      (afterDependencies, accumulated) <- foldlVisitWithStack modules
-        (name : stack) marked dependencies
-      pure
-        ( Map.insert name Visited afterDependencies
-        , accumulated ++ [modul]
-        )
+  case stableDependencyOrder roots byName localDependencies of
+    Right ordered -> Right ordered
+    Left DependencyCycle
+        { dependencyCycleSource
+        , dependencyCyclePath
+        } ->
+      let cycleFailure =
+            workspaceFailure
+              "DJEX_REPL_MODULE_CYCLE"
+              "cyclic non-SOURCE module imports"
+              $ intercalate " -> " $ NonEmpty.toList dependencyCyclePath
+      in Left $ maybe cycleFailure
+          (\current -> withSource (parsedModulePath current) cycleFailure)
+          (Map.lookup dependencyCycleSource byName)
+        :| []
  where
-  currentName = case stack of
-    current : _ -> current
-    [] -> name
-  cycleNames = name : reverse (takeWhile (/= name) stack) ++ [name]
-
-foldlVisitWithStack
-  :: Map.Map String WorkspaceModule
-  -> [String]
-  -> (Map.Map String VisitState, [WorkspaceModule])
-  -> [String]
-  -> Either (NonEmpty Diagnostic) (Map.Map String VisitState, [WorkspaceModule])
-foldlVisitWithStack _ _ state [] = Right state
-foldlVisitWithStack modules stack state (name : remaining) = do
-  next <- visitModule modules stack state name
-  foldlVisitWithStack modules stack next remaining
+  localDependencies modul =
+    [ importedModuleName imported
+    | imported <- parsedModuleImports modul
+    , not $ importedFromPackage imported
+    , not $ importedAsSource imported
+    ]
 
 annotateTargets
   :: [WorkspaceTarget]
@@ -1107,9 +1086,7 @@ collectResults
   -> Either (NonEmpty error) [value]
 collectResults results = case partitionEithers results of
   ([], values) -> Right values
-  (failures, _) -> case NonEmpty.nonEmpty $ concatMap NonEmpty.toList failures of
-    Just combined -> Left combined
-    Nothing -> error "collectResults: partition reported empty failures"
+  (failure : failures, _) -> Left $ sconcat $ failure :| failures
 
 workspaceFailure :: String -> String -> String -> Diagnostic
 workspaceFailure code summary detail =

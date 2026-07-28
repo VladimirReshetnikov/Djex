@@ -47,16 +47,23 @@ splitClassApplication = go []
   where
     go arguments (TyApp _ function argument) = go (argument : arguments) function
     go arguments (TyParen _ inner) = go arguments inner
+    -- HSE keeps an infix type operator as a dedicated node rather than an
+    -- application spine.  Normalize it here so signatures, superclasses, and
+    -- instance prerequisites all accept the same symbolic class spelling as
+    -- the already-supported prefix form @(:==) left right@.  A promoted
+    -- operator is a type-level constructor occurrence, not a class head.
+    go arguments (TyInfix _ left (UnpromotedName _ name) right) =
+      Just (name, left : right : arguments)
     go arguments (TyCon _ name) = Just (name, arguments)
     go _ _ = Nothing
 
 splitDeclHead :: DeclHead l -> (Name l, [TyVarBind l])
-splitDeclHead (DHead _ name) = (name, [])
-splitDeclHead (DHInfix _ variable name) = (name, [variable])
-splitDeclHead (DHParen _ head') = splitDeclHead head'
-splitDeclHead (DHApp _ head' variable) =
-  let (name, variables) = splitDeclHead head'
-  in (name, variables ++ [variable])
+splitDeclHead = go []
+  where
+    go variables (DHead _ name) = (name, variables)
+    go variables (DHInfix _ variable name) = (name, variable : variables)
+    go variables (DHParen _ head') = go variables head'
+    go variables (DHApp _ head' variable) = go (variable : variables) head'
 
 splitInstRule
   :: InstRule l

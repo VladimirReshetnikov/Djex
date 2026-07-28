@@ -70,6 +70,12 @@ data DjinnAxiomPolicy
 data DjinnProjection = DjinnProjection
   { djinnProjectionSession :: DjinnSession
   , djinnProjectionOmissions :: [DjinnScopeOmission]
+  , djinnProjectionPromptNames :: Map.Map Name Name
+    -- ^ Canonical source identities to the unqualified spellings used by the
+    -- sealed Djinn session. The shared scope resolves user input canonically;
+    -- this final translation keeps inspection independent of how the user
+    -- reached that identity (bare, canonically qualified, or through an
+    -- import alias).
   , djinnProjectionFieldSelectors :: Map.Map (Name, Int) Name
     -- ^ Selector spellings for @(constructor, field index)@ positions in
     -- the session's renamed vocabulary, for presenting field projections.
@@ -141,16 +147,19 @@ projectDjinnScope
   -- ^ Authoritative ground kinds inferred by the shared source inventory.
   -> [ScopeDeclaration]
   -> Set.Set Name
-  -- ^ Canonical names visible unqualified in the prompt scope.
+  -- ^ Canonical types/classes visible unqualified in the prompt scope.
+  -> Set.Set Name
+  -- ^ Canonical values/constructors visible unqualified in the prompt scope.
   -> Either Diagnostic DjinnProjection
-projectDjinnScope policy records inferredKinds declarations visible = do
+projectDjinnScope policy records inferredKinds declarations
+    visibleTypes visibleValues = do
   let recursive = recursiveDataTypeNames declarations
       fullyEliminable = Set.fromList
         [ name
         | DataTypeDeclaration _ name _ constructors <- declarations
-        , name `Set.member` visible
+        , name `Set.member` visibleTypes
         , not $ null constructors
-        , all ((`Set.member` visible) . constructorName) constructors
+        , all ((`Set.member` visibleValues) . constructorName) constructors
         , not $ name `Set.member` recursive
         ]
       allSelectors = Set.fromList
@@ -167,7 +176,8 @@ projectDjinnScope policy records inferredKinds declarations visible = do
         , selector <- selectorNames
         ]
       (shaped, shapeOmissions) = shapeDeclarations
-        inferredKinds policy axiomSelectors allSelectors visible declarations
+        inferredKinds policy axiomSelectors allSelectors
+        visibleTypes visibleValues declarations
       (renamed, renameOmissions, forward) = renameDeclarations shaped
       -- Source kind assumptions use canonical names, while every declaration
       -- Djinn accepts uses its prompt spelling. Retain both views: canonical
@@ -180,7 +190,7 @@ projectDjinnScope policy records inferredKinds declarations visible = do
         , (constructor, selectorNames) <- constructors
         , Just renamedConstructor <- [Map.lookup constructor forward]
         , (index, selector) <- zip [0 ..] selectorNames
-        , selector `Set.member` visible
+        , selector `Set.member` visibleValues
         , Just renamedSelector <- [unqualifyName selector]
         ]
       (grounded, recursionOmissions) =
@@ -202,6 +212,7 @@ projectDjinnScope policy records inferredKinds declarations visible = do
         , referenceOmissions
         , sealOmissions
         ]
+    , djinnProjectionPromptNames = forward
     , djinnProjectionFieldSelectors = fieldSelectors
     }
 
@@ -214,10 +225,11 @@ shapeDeclarations
   -> Set.Set Name
   -> Set.Set Name
   -> Set.Set Name
+  -> Set.Set Name
   -> [ScopeDeclaration]
   -> ([ScopeDeclaration], [DjinnScopeOmission])
-shapeDeclarations inferredKinds policy axiomSelectors allSelectors visible
-    declarations =
+shapeDeclarations inferredKinds policy axiomSelectors allSelectors
+    visibleTypes visibleValues declarations =
   (kept, omissions ++ instanceSummary)
  where
   (kept, omissions, instanceCount) =
@@ -228,12 +240,13 @@ shapeDeclarations inferredKinds policy axiomSelectors allSelectors visible
         [ DjinnScopeOmission (show instanceCount ++ " instance declarations")
             "instance declarations are not supported by Djinn"
         ]
-  isVisible name = name `Set.member` visible
+  isTypeVisible name = name `Set.member` visibleTypes
+  isValueVisible name = name `Set.member` visibleValues
 
   shape declaration (keptSoFar, omitted, instances) = case declaration of
     InstanceDeclaration {} -> (keptSoFar, omitted, instances + 1)
     ValueDeclaration signature
-      | not $ isVisible $ valueName signature -> skip
+      | not $ isValueVisible $ valueName signature -> skip
       | policy == IncludeDjinnAxioms
           || valueName signature `Set.member` axiomSelectors ->
             keep declaration
@@ -243,24 +256,24 @@ shapeDeclarations inferredKinds policy axiomSelectors allSelectors visible
       | otherwise -> omit (valueName signature)
           "value axioms are excluded; :set djinn-axioms on to include them"
     TypeSynonymDeclaration _ name _ _
-      | isVisible name -> keep declaration
+      | isTypeVisible name -> keep declaration
       | otherwise -> skip
     AbstractTypeDeclaration _ name _
-      | isVisible name -> keep declaration
+      | isTypeVisible name -> keep declaration
       | otherwise -> skip
     DataTypeDeclaration annotation name parameters constructors
-      | not $ isVisible name -> skip
+      | not $ isTypeVisible name -> skip
       -- A constructor-less datatype is how source environments spell an
       -- opaque primitive. Treating it as genuinely empty would let Djinn
       -- prove anything from it by absurd elimination.
       | null constructors -> degradeToAbstract annotation name parameters
           "declared without constructors; projected as an abstract type"
-      | all (isVisible . constructorName) constructors -> keep declaration
+      | all (isValueVisible . constructorName) constructors -> keep declaration
       | otherwise -> degradeToAbstract annotation name parameters
           "some constructors are hidden; projected as an abstract type"
     ClassDeclaration annotation name parameters superclasses methods
-      | isVisible name -> keep $ ClassDeclaration annotation name parameters
-          superclasses (filter (isVisible . valueName) methods)
+      | isTypeVisible name -> keep $ ClassDeclaration annotation name parameters
+          superclasses (filter (isValueVisible . valueName) methods)
       | otherwise -> skip
    where
     skip = (keptSoFar, omitted, instances)
@@ -655,7 +668,7 @@ resolveScopeReferences inferredKinds = go []
           | let (goodMethods, badMethods) =
                   partition (null . unresolvedMethod) methods
           , all (null . unresolvedConstraint) superclasses
-          , not $ null goodMethods ->
+          , not $ null badMethods ->
               ( [ ClassDeclaration annotation name parameters
                     superclasses goodMethods
                 ]
@@ -710,7 +723,10 @@ sealWithRepairs inferredKinds = go []
         Just (repaired, newOmissions)
           | projectionRepairMeasure repaired
               < projectionRepairMeasure declarations ->
-                go (newOmissions ++ omissions) repaired
+                -- 'go' keeps accumulated omissions reversed. Reverse this
+                -- source-ordered batch too, so the final reversal preserves
+                -- order within and across repair rounds.
+                go (reverse newOmissions ++ omissions) repaired
           | otherwise -> Left $ projectionFailure
               "Djinn's requested repair did not decrease its structural measure"
         Nothing -> Left $ projectionFailure

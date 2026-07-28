@@ -49,7 +49,7 @@ import System.Exit (ExitCode (ExitFailure, ExitSuccess))
 import System.FilePath (takeDirectory)
 import qualified System.FilePath as FilePath
 import System.IO (IOMode (ReadMode), hGetContents, withFile)
-import System.IO.Error (tryIOError)
+import System.IO.Error (isDoesNotExistError, tryIOError)
 import System.Process
   ( CreateProcess (delegate_ctlc)
   , proc
@@ -103,7 +103,7 @@ data ReplOptions = ReplOptions
   { replInitialBackend :: ReplBackend
     -- ^ Backend selection shown by the first prompt.
   , replEnvironmentPath :: Maybe FilePath
-    -- ^ Exference source directory; 'Nothing' uses installed package data.
+    -- ^ Source-workspace directory; 'Nothing' uses installed package data.
   , replAllowFix :: Bool
     -- ^ Whether known recursion helpers are retained while sealing Exference.
   , replHistoryFile :: Maybe FilePath
@@ -170,16 +170,18 @@ refreshDjinnProjection state = case
     , exferenceRuntimeScope runtime
     ) of
   (Just baseSession, Just context) ->
-    let visible = Set.fromList $ scopeUnqualifiedNames context
+    let visibleTypes = Set.fromList $ scopeUnqualifiedTypeNames context
+        visibleValues = Set.fromList $ scopeUnqualifiedValueNames context
     in case projectDjinnScope
         (djinnAxiomPolicy djinn)
         records
         (typeConstructorKinds $ inventoryKindAssumptions
           $ exferenceSessionInventory baseSession)
         (scopeProjectionDeclarations baseSession)
-        visible of
+        visibleTypes
+        visibleValues of
       Left failure -> Left failure
-      Right projection -> Right $ withProjection visible $ Just projection
+      Right projection -> Right $ withProjection visibleValues $ Just projection
   _ -> Right $ withProjection Set.empty Nothing
  where
   runtime = exferenceRuntime state
@@ -295,10 +297,10 @@ runRepl options = case standardDjinnSession of
             Right projected -> pure projected
           putStrLn $ "Djinn environment: " ++ djinnEnvironmentSummary ready
           case attemptedSession attempt of
-            Just _ -> putStrLn $ "Exference environment: "
+            Just _ -> putStrLn $ "Source workspace: "
               ++ renderRequestedTargets (attemptedTargets attempt)
             Nothing -> putStrLn
-              "Exference is unavailable; use :load TARGET after fixing its workspace."
+              "Source workspace unavailable; use :load TARGET after fixing it."
           putStrLn "Type :help for help."
           started <- if replIgnoreStartupFiles options
             then pure $ ContinueRepl ready
@@ -320,19 +322,29 @@ defaultPromptTemplate = "djex[%b]> "
 -- Missing files are skipped silently; a broken line reports and continues.
 runStartupFiles :: ReplState -> IO (ReplStep ReplState)
 runStartupFiles initial = do
-  home <- tryIOError getHomeDirectory
-  current <- tryIOError getCurrentDirectory
-  candidates <- startupCandidates $ either (const []) pure home
-    ++ either (const []) pure current
+  home <- startupDirectory "home directory" getHomeDirectory
+  current <- startupDirectory "current directory" getCurrentDirectory
+  candidates <- startupCandidates $ home ++ current
   go initial candidates
  where
   go state [] = pure $ ContinueRepl state
   go state (path : remaining) = do
-    putStrLn $ "Loaded startup commands from " ++ path
-    outcome <- runScript path [] state
+    outcome <- runScriptWithAnnouncement path [] state
     case outcome of
       ExitRepl final -> pure $ ExitRepl final
       ContinueRepl next -> go next remaining
+
+-- Failure to locate a configured startup directory is different from an
+-- absent .djexrc inside a successfully located directory. Keep absence quiet,
+-- but do not silently discard an I/O failure that prevents discovery.
+startupDirectory :: String -> IO FilePath -> IO [FilePath]
+startupDirectory description locate = do
+  resolved <- tryIOError locate
+  case resolved of
+    Left failure -> startupPathFailure
+        ("cannot locate the " ++ description) description failure
+      >> pure []
+    Right path -> pure [path]
 
 -- Canonical deduplication keeps one run when the home and current
 -- directories coincide.
@@ -342,21 +354,34 @@ startupCandidates directories = go Set.empty directories
   go _ [] = pure []
   go seen (directory : remaining) = do
     let candidate = directory FilePath.</> ".djexrc"
-    present <- doesFileExist candidate
-    if not present
-      then go seen remaining
-      else do
-        resolved <- tryIOError $ canonicalizePath candidate
-        case resolved of
-          Left _ -> go seen remaining
-          Right canonical
-            | canonical `Set.member` seen -> go seen remaining
-            | otherwise -> do
-                trusted <- trustedStartupPath canonical
-                if trusted
-                  then (canonical :)
-                    <$> go (Set.insert canonical seen) remaining
-                  else go (Set.insert canonical seen) remaining
+    inspected <- tryIOError $ getPermissions candidate
+    case inspected of
+      Left failure
+        | isDoesNotExistError failure -> go seen remaining
+        | otherwise -> startupPathFailure "cannot inspect startup file"
+            candidate failure >> go seen remaining
+      Right _ -> do
+        present <- doesFileExist candidate
+        if not present
+          then go seen remaining
+          else do
+            resolved <- tryIOError $ canonicalizePath candidate
+            case resolved of
+              Left failure -> startupPathFailure "cannot resolve startup file"
+                  candidate failure >> go seen remaining
+              Right canonical
+                | canonical `Set.member` seen -> go seen remaining
+                | otherwise -> do
+                    trusted <- trustedStartupPath canonical
+                    if trusted
+                      then (canonical :)
+                        <$> go (Set.insert canonical seen) remaining
+                      else go (Set.insert canonical seen) remaining
+
+startupPathFailure :: String -> FilePath -> IOError -> IO ()
+startupPathFailure summary path failure = emitDiagnostic
+  $ contextualDiagnostic Warning "DJEX_REPL_STARTUP_PATH" summary
+  $ path ++ ": " ++ show failure
 
 -- Match GHCi's deliberate platform split. POSIX exposes the ownership and
 -- group/other mode bits needed for a meaningful check; Windows' Directory
@@ -402,24 +427,35 @@ trustedStartupPath path = do
 #endif
 
 -- | Project the completion candidates GHCi would offer: loaded module names
--- for module-oriented commands and in-scope identifier spellings at query
--- positions, both qualified and unqualified.
+-- for module-oriented commands and namespace-appropriate identifier spellings
+-- at query positions, both qualified and unqualified.
 replCompletions :: ReplState -> ReplCompletions
 replCompletions state = ReplCompletions
   { completionModules = maybe []
       (map workspaceModuleName . workspaceModules)
       $ exferenceRuntimeWorkspace runtime
-  , completionIdentifiers = case exferenceRuntimeScope runtime of
-      Nothing -> []
-      Just context -> Set.toList $ Set.fromList
-        $ mapMaybe nameSpelling (scopeUnqualifiedNames context)
-        ++ [ renderModuleName qualifier ++ "." ++ spelling
-           | (qualifier, names) <- scopeQualifiedNames context
-           , Just spelling <- map nameSpelling names
-           ]
+  , completionIdentifiers = allIdentifiers
+  , completionTypeIdentifiers = typeIdentifiers
   }
  where
   runtime = exferenceRuntime state
+  (allIdentifiers, typeIdentifiers) = case exferenceRuntimeScope runtime of
+    Nothing -> ([], [])
+    Just context ->
+      ( scopeSpellings
+          (scopeUnqualifiedNames context)
+          (scopeQualifiedNames context)
+      , scopeSpellings
+          (scopeUnqualifiedTypeNames context)
+          (scopeQualifiedTypeNames context)
+      )
+
+  scopeSpellings unqualified qualified = Set.toList $ Set.fromList
+    $ mapMaybe nameSpelling unqualified
+    ++ [ renderModuleName qualifier ++ "." ++ spelling
+       | (qualifier, names) <- qualified
+       , Just spelling <- map nameSpelling names
+       ]
 
 -- | Open the configured editor, defaulting to the most recently loaded
 -- explicit file target as GHCi's @:edit@ defaults to the current module.
@@ -503,7 +539,7 @@ runCommand sourceName history command state = case command of
   AddEnvironment targets -> updateExferenceWorkspace
     (addWorkspaceTargetsFor state targets)
     ResetScope
-    ("Added Exference targets: " ++ renderRequestedTargets targets)
+    ("Added source targets: " ++ renderRequestedTargets targets)
     state >>= continue
   Browse selectedModule -> browseState selectedModule state >> continue state
   ChangeBackend Nothing -> do
@@ -545,7 +581,7 @@ runCommand sourceName history command state = case command of
   LoadEnvironment targets -> updateExferenceWorkspace
     (loadWorkspace targets)
     ResetScope
-    ("Loaded Exference environment: " ++ renderRequestedTargets targets)
+    ("Loaded source workspace: " ++ renderRequestedTargets targets)
     state >>= continue
   Quit -> pure $ ExitRepl state
   ReloadEnvironment -> do
@@ -564,7 +600,7 @@ runCommand sourceName history command state = case command of
   UnaddEnvironment targets -> updateExferenceWorkspace
     (removeWorkspaceTargetsFor state targets)
     ResetScope
-    ("Removed Exference targets: " ++ renderRequestedTargets targets)
+    ("Removed source targets: " ++ renderRequestedTargets targets)
     state >>= continue
   UnsetOption source -> unsetOption source state >>= continue
   Version -> putStrLn ("djex version " ++ showVersion version) >> continue state
@@ -641,9 +677,9 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
     (exferenceRuntimeSession runtime, exferenceRuntimeScope runtime)
   queryScope context = ExferenceQueryScope
     { exferenceQueryCurrentModule = scopeCurrentModule context
-    , exferenceQueryVisibleNames = scopeUnqualifiedNames context
+    , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames context
     , exferenceQueryModuleAliases = scopeQualifierAliases context
-    , exferenceQueryQualifiedNames = scopeQualifiedNames context
+    , exferenceQueryQualifiedNames = scopeQualifiedTypeNames context
     }
 
 ignoreExit :: IO ExitCode -> IO ()
@@ -906,7 +942,7 @@ updateExferenceWorkspaceWithPolicy allowFix action retention successMessage
  where
   retainAfterFailure diagnostics = do
     putStrLn
-      "Exference load failed; retaining the previous session and settings."
+      "Source workspace load failed; retaining previous sessions and settings."
     pure state
       { exferenceRuntime = (exferenceRuntime state)
           { exferenceRuntimeDiagnostics = diagnostics }
@@ -942,7 +978,7 @@ reloadExferenceWorkspaceWithPolicy :: Bool -> ReplState -> IO ReplState
 reloadExferenceWorkspaceWithPolicy allowFix state =
   updateExferenceWorkspaceWithPolicy allowFix
     action RefreshAutomaticScope
-      ("Loaded Exference environment: " ++ renderRequestedTargets
+      ("Loaded source workspace: " ++ renderRequestedTargets
         (exferenceRuntimeRequestedTargets runtime))
       state
  where
@@ -1327,14 +1363,14 @@ showEnvironmentSummary state = do
 
 showImports :: ReplState -> IO ()
 showImports state = case exferenceRuntimeScope $ exferenceRuntime state of
-  Nothing -> putStrLn "No Exference module context."
+  Nothing -> putStrLn "No source module context."
   Just context -> case renderScopeImports context of
     [] -> putStrLn "(no imports)"
     imports -> mapM_ putStrLn imports
 
 showModules :: ReplState -> IO ()
 showModules state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
-  Nothing -> putStrLn "No Exference modules are loaded."
+  Nothing -> putStrLn "No source modules are loaded."
   Just workspace -> case workspaceModules workspace of
     [] -> putStrLn "(no modules loaded)"
     modules -> forM_ modules $ \modul -> putStrLn
@@ -1342,7 +1378,7 @@ showModules state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
 
 showTargets :: ReplState -> IO ()
 showTargets state = case exferenceRuntimeWorkspace $ exferenceRuntime state of
-  Nothing -> putStrLn "No Exference targets are loaded."
+  Nothing -> putStrLn "No source targets are loaded."
   Just workspace -> case workspaceTargets workspace of
     [] -> putStrLn "(no targets)"
     targets -> mapM_ (putStrLn . workspaceTargetDisplay) targets
@@ -1372,7 +1408,7 @@ renderOmission omission = renderCanonical (omittedName omission) ++ ": "
 showLoadDiagnostics :: ReplState -> IO ()
 showLoadDiagnostics state = case
     exferenceRuntimeDiagnostics $ exferenceRuntime state of
-  [] -> putStrLn "No Exference load diagnostics."
+  [] -> putStrLn "No source load diagnostics."
   diagnostics -> mapM_ (putStrLn . renderDiagnostic) diagnostics
 
 browseState :: Maybe String -> ReplState -> IO ()
@@ -1386,7 +1422,7 @@ browseState Nothing state = forSelectedBackends state $ \selectedBackend ->
         , exferenceRuntimeScope runtime
         ) of
       (Just session, Just context) -> do
-        browseNames "Exference current scope"
+        browseNames "Current source scope"
           ExferenceType.defaultVariableName
           (scopeBrowseNames context)
           $ exferenceSessionEnvironment session
@@ -1412,7 +1448,7 @@ browseWorkspaceModule reference state = case
         (exferenceSessionInventory session) workspace starred moduleSource of
       Left failure -> emitDiagnostic failure
       Right names -> browseNames
-        ("Exference module " ++ (if starred then "*" else "") ++ moduleSource)
+        ("Source module " ++ (if starred then "*" else "") ++ moduleSource)
         ExferenceType.defaultVariableName names
         $ exferenceSessionEnvironment session
   _ -> replFailure "DJEX_REPL_MODULE" "no source workspace is loaded"
@@ -1427,32 +1463,76 @@ splitModuleStar source = (False, source)
 showInfo :: ReplState -> String -> IO ()
 showInfo state source = case parseName $ trim source of
   Left failure -> settingFailure (renderNameError failure)
-  Right parsedName -> forSelectedBackends state $ \selectedBackend ->
-    case selectedBackend of
-      DjinnBackend -> info "Djinn" id parsedName
-        $ djinnSessionEnvironment $ currentDjinnSession state
-      ExferenceBackend -> case
-          ( exferenceRuntimeSession runtime
-          , exferenceRuntimeScope runtime
-          ) of
-        (Just session, Just context) -> case
-            resolveScopeNameAmong
-              (declarationNameSet environment) context parsedName of
-          Left failure -> settingFailure failure
-          Right name -> do
-            let matchingNames = name : map declarationSubjectName
-                  (matchingDeclarations name environment)
-            info "Exference loaded declarations"
-              ExferenceType.defaultVariableName name
-              environment
-            mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
-              $ filter ((`elem` matchingNames) . omittedName)
-              $ exferenceSessionOmissions session
-         where
-          environment = exferenceSessionEnvironment session
-        _ -> putStrLn "Exference is unavailable."
+  Right parsedName -> case
+      ( exferenceRuntimeSession runtime
+      , exferenceRuntimeScope runtime
+      , djinnProjection $ djinnRuntime state
+      ) of
+    (Just session, Just context, Just projection) ->
+      -- Interactive scoping narrows only Exference's private search view;
+      -- this public environment remains the complete checked source
+      -- inventory. It is therefore the authoritative candidate set for both
+      -- backends. Djinn-only repair stubs are projection details rather than
+      -- prompt-scope declarations and remain visible through :show
+      -- environment, not as manufactured ReplScope bindings.
+      showResolvedProjection projection session context parsedName
+    (Just session, Just context, Nothing) ->
+      -- Initial loading may retain the historical standard Djinn session if
+      -- its source projection fails. In that recovery state Djinn has no
+      -- canonical-to-prompt map, so it must keep direct standard-session name
+      -- lookup while Exference continues to follow the loaded prompt scope.
+      forSelectedBackends state $ \case
+        DjinnBackend -> showDjinnInfo parsedName
+        ExferenceBackend -> withResolvedScope session context parsedName
+          $ showExferenceInfo session
+    _ -> forSelectedBackends state $ \case
+      -- With no source scope, Djinn retains its historical standard session
+      -- and therefore its ordinary unqualified spelling rules.
+      DjinnBackend -> showDjinnInfo parsedName
+      ExferenceBackend -> putStrLn "Exference is unavailable."
  where
   runtime = exferenceRuntime state
+
+  showResolvedProjection projection session context parsedName =
+    let environment = exferenceSessionEnvironment session
+    in case resolveScopeNameAmong
+        AnyScope (declarationNameSet environment) context parsedName of
+      Left failure -> case activeBackends state of
+        -- The historical Djinn inspector reports an ordinary missing
+        -- declaration on an unknown name. Keep that contract in Djinn-only
+        -- mode; aliases and qualified source identities still take the shared
+        -- successful-resolution path below. Exference and both mode retain
+        -- prompt-scope errors because they have a shared source scope to
+        -- enforce.
+        OneBackend DjinnBackend -> showDjinnInfo parsedName
+        _ -> settingFailure failure
+      Right canonicalName -> forSelectedBackends state
+        $ showProjectedInfo projection session environment canonicalName
+
+  withResolvedScope session context parsedName action =
+    let environment = exferenceSessionEnvironment session
+    in case resolveScopeNameAmong
+        AnyScope (declarationNameSet environment) context parsedName of
+      Left failure -> settingFailure failure
+      Right canonicalName -> action environment canonicalName
+
+  showProjectedInfo projection session environment canonicalName = \case
+    DjinnBackend -> showDjinnInfo $ Map.findWithDefault canonicalName
+      canonicalName $ djinnProjectionPromptNames projection
+    ExferenceBackend -> showExferenceInfo session environment canonicalName
+
+  showExferenceInfo session environment canonicalName = do
+    let matchingNames = canonicalName : map declarationSubjectName
+          (matchingDeclarations canonicalName environment)
+    info "Exference loaded declarations"
+      ExferenceType.defaultVariableName canonicalName
+      environment
+    mapM_ (putStrLn . ("-- search omission: " ++) . renderOmission)
+      $ filter ((`elem` matchingNames) . omittedName)
+      $ exferenceSessionOmissions session
+
+  showDjinnInfo name = info "Djinn" id name
+    $ djinnSessionEnvironment $ currentDjinnSession state
 
 forSelectedBackends :: ReplState -> (Backend -> IO ()) -> IO ()
 forSelectedBackends state action = case activeBackends state of
@@ -1624,7 +1704,23 @@ takeLast :: Int -> [value] -> [value]
 takeLast count = reverse . take count . reverse
 
 runScript :: FilePath -> [String] -> ReplState -> IO (ReplStep ReplState)
-runScript path history state = do
+runScript = runScriptWith $ const $ pure ()
+
+-- Announce startup files only after path resolution, strict reading, and
+-- whole-script parsing have succeeded. This keeps a failed candidate from
+-- being presented as loaded while retaining the useful pre-execution notice.
+runScriptWithAnnouncement
+  :: FilePath -> [String] -> ReplState -> IO (ReplStep ReplState)
+runScriptWithAnnouncement = runScriptWith $ \canonical ->
+  putStrLn $ "Loaded startup commands from " ++ canonical
+
+runScriptWith
+  :: (FilePath -> IO ())
+  -> FilePath
+  -> [String]
+  -> ReplState
+  -> IO (ReplStep ReplState)
+runScriptWith announce path history state = do
   resolved <- tryIOError $ canonicalizePath path
   case resolved of
     Left failure -> ioFailure "cannot resolve script" path failure
@@ -1643,8 +1739,10 @@ runScript path history state = do
               Left failure -> replFailure "DJEX_REPL_SCRIPT"
                   "invalid REPL script" (canonical ++ ": " ++ failure)
                 >> pure (ContinueRepl state)
-              Right inputs -> runInputs canonical
-                history state {scriptStack = canonical : scriptStack state} inputs
+              Right inputs -> do
+                announce canonical
+                runInputs canonical history
+                  state {scriptStack = canonical : scriptStack state} inputs
 
 runInputs
   :: FilePath

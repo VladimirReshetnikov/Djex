@@ -10,7 +10,7 @@ import CLIAssertions
 import Control.Exception (bracket)
 import Control.Monad (forM_, when)
 import Data.Char (toLower)
-import Data.List (intercalate, isInfixOf)
+import Data.List (findIndex, intercalate, isInfixOf, isPrefixOf, tails)
 import System.Directory
   ( canonicalizePath
   , copyFile
@@ -72,6 +72,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplTransactionalLoad
   , testCase "REPL source targets load canonically and dependency-first"
       testReplWorkspaceTargets
+  , testCase "REPL source pragmas decide implicit Prelude in order"
+      testReplImplicitPreludeOrder
   , testCase "REPL default environment keeps its full automatic context"
       testReplDefaultEnvironmentScope
   , testCase "REPL reload refreshes derived module target spellings"
@@ -116,6 +118,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplExportAmbiguity
   , testCase "REPL Djinn projection preserves cross-namespace names"
       testReplDjinnNamespaceProjection
+  , testCase "REPL imports preserve type and value namespaces"
+      testReplNamespaceSelectiveImports
   , testCase "REPL Djinn projection distinguishes reference namespaces"
       testReplDjinnReferenceNamespaces
   , testCase "REPL Djinn projection preserves inferred higher-kinded stubs"
@@ -124,6 +128,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplDjinnRecursiveHigherKind
   , testCase "REPL Djinn projection preserves opaque higher-kinded types"
       testReplDjinnHiddenHigherKind
+  , testCase "REPL Djinn projection retains classes after shedding methods"
+      testReplDjinnClassMethodRepair
   , testCase "REPL Djinn projection repairs scopes beyond legacy caps"
       testReplDjinnRepairDepth
   , testCase "REPL bundled imports reject type-synonym wildcards"
@@ -136,6 +142,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplUnifiedScope
   , testCase "REPL loads .djexrc startup files" testReplStartupFiles
   , testCase "REPL :edit opens the configured editor" testReplEdit
+  , testCase "REPL :info shares prompt scope resolution across backends"
+      testReplInfoScopeResolution
   , testCase "REPL :info lists participating instances"
       testReplInfoInstances
   , testCase "REPL :eval runs expressions with real GHC" testReplEval
@@ -584,7 +592,7 @@ testReplTransactionalLoad = withTemporaryEnvironment [] $ \directory ->
       ]
     assertEqual "transactional load exit" ExitSuccess exitCode
     assertContains "failed replacement retains the old session"
-      "retaining the previous session and settings" output
+      "retaining previous sessions and settings" output
     assertEqual "old session remains usable across failed load and cwd change" 2
       $ countOccurrences "\\a -> a" output
     assertContainsPath "reload retains canonical environment path" directory output
@@ -667,6 +675,55 @@ testReplWorkspaceTargets = withReplModuleFixture $ \root -> do
     "(no imports)" pathOutput
   assertNoCallStack pathErrors
 
+-- Workspace module views and source elaboration share the same ordered flag
+-- state. A later enabling spelling must reverse an earlier disabling spelling,
+-- including the legacy -f OPTIONS_GHC aliases accepted by GHC.
+testReplImplicitPreludeOrder :: Assertion
+testReplImplicitPreludeOrder = withTemporaryEnvironment
+    [ ("Prelude.hs", unlines
+        [ "module Prelude (P) where"
+        , "data P = P"
+        ])
+    , ("LanguageEnabled.hs", unlines
+        [ "{-# LANGUAGE NoImplicitPrelude, ImplicitPrelude #-}"
+        , "module LanguageEnabled where"
+        ])
+    , ("LanguageDisabled.hs", unlines
+        [ "{-# LANGUAGE ImplicitPrelude, NoImplicitPrelude #-}"
+        , "module LanguageDisabled where"
+        ])
+    , ("OptionsEnabled.hs", unlines
+        [ "{-# OPTIONS_GHC -fno-implicit-prelude -fimplicit-prelude #-}"
+        , "module OptionsEnabled where"
+        ])
+    , ("OptionsDisabled.hs", unlines
+        [ "{-# OPTIONS_GHC -fimplicit-prelude -fno-implicit-prelude #-}"
+        , "module OptionsDisabled where"
+        ])
+    ] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module *LanguageEnabled"
+    , ":show imports"
+    , ":kind P"
+    , ":module *LanguageDisabled"
+    , ":show imports"
+    , ":kind P"
+    , ":module *OptionsEnabled"
+    , ":show imports"
+    , ":kind P"
+    , ":module *OptionsDisabled"
+    , ":show imports"
+    , ":kind P"
+    ]
+  assertEqual "ordered implicit Prelude REPL exit" ExitSuccess exitCode
+  assertContains ("LANGUAGE order re-enables implicit Prelude: " ++ show output)
+    "import *LanguageEnabled\nP :: Type\nimport *LanguageDisabled" output
+  assertContains ("OPTIONS_GHC order re-enables implicit Prelude: " ++ show output)
+    "import *OptionsEnabled\nP :: Type\nimport *OptionsDisabled" output
+  assertEqual "later disabling switches hide implicit Prelude" 2
+    $ countOccurrences "[DJEX_REPL_KIND_PARSE]" errors
+  assertNoCallStack errors
+
 testReplDefaultEnvironmentScope :: Assertion
 testReplDefaultEnvironmentScope = do
   (exitCode, output, errors) <- runDjexInput
@@ -705,15 +762,15 @@ testReplReloadTargetSpelling = withReplModuleFixture $ \root -> do
     ]
   assertEqual "renamed module reload REPL exit" ExitSuccess exitCode
   assertContains "reload accepts the replacement module declaration"
-    "Loaded Exference environment:" output
+    "Loaded source workspace:" output
   assertEqual "stale derived module spelling is rejected once" 1
     $ countOccurrences
-        "Exference load failed; retaining the previous session and settings."
+        "Source workspace load failed; retaining previous sessions and settings."
         output
   assertContains "stale derived module spelling is no longer loaded"
     "[DJEX_REPL_TARGET_NOT_LOADED]" errors
   assertContains "fresh derived module spelling removes the file target"
-    "Removed Exference targets: \"After\"" output
+    "Removed source targets: \"After\"" output
   assertContains "fresh module spelling leaves no target"
     "(no targets)" output
   assertNoCallStack errors
@@ -733,7 +790,7 @@ testReplNamedSymlinkTargets = withReplModuleFixture $ \root -> do
     ]
   assertEqual "named symlink target REPL exit" ExitSuccess exitCode
   assertContains "conflicting named aliases reject the target transaction"
-    "Exference load failed; retaining the previous session and settings."
+    "Source workspace load failed; retaining previous sessions and settings."
     output
   assertContains "conflicting aliases retain the prior empty workspace"
     "(no modules loaded)" output
@@ -835,7 +892,7 @@ testReplTargetMutation = withReplModuleFixture $ \root -> do
   assertEqual "transactional target mutation exit" ExitSuccess failureExit
   assertEqual "both failed mutations report retained state" 2
     $ countOccurrences
-        "Exference load failed; retaining the previous session and settings."
+        "Source workspace load failed; retaining previous sessions and settings."
         failureOutput
   assertEqual "failed additions and removals retain the canonical target" 2
     $ countOccurrencesPath (app ++ "\n") failureOutput
@@ -956,9 +1013,9 @@ testReplImportsAndBrowsing = withReplModuleFixture $ \root -> do
     ] $ \declaration -> assertContains
       ("show imports retains " ++ show declaration) declaration output
   assertContains "normal browse is explicitly labelled"
-    "-- Exference module Surface" output
+    "-- Source module Surface" output
   assertContains "starred browse is explicitly labelled"
-    "-- Exference module *Surface" output
+    "-- Source module *Surface" output
   assertEqual "ordinary browse hides a non-exported binding" 1
     $ countOccurrences "Surface.hiddenValue" output
   assertEqual "ordinary browse hides an unexported constructor" 1
@@ -1533,7 +1590,7 @@ testReplModuleExportIntersection = withTemporaryEnvironment
     ]
   assertEqual "renamed canonical export REPL exit" ExitSuccess wrongExit
   assertContains "an as alias removes the canonical export qualifier"
-    "Exference load failed; retaining the previous session and settings."
+    "Source workspace load failed; retaining previous sessions and settings."
     wrongOutput
   assertContains "renamed canonical module export is not in scope"
     "[DJEX_REPL_EXPORT_NOT_IN_SCOPE]" wrongErrors
@@ -1551,11 +1608,11 @@ testReplUnresolvedImportList = withReplModuleFixture $ \root -> do
     ]
   assertEqual "unresolved import-list REPL exit" ExitSuccess exitCode
   assertContains "unresolved import list does not abort the load transaction"
-    "Loaded Exference environment:" output
+    "Loaded source workspace:" output
   assertContains "module with unresolved import list is committed"
     "UnresolvedList (" output
   assertBool "unresolved import list was treated as a fatal load error" $
-    not $ "Exference load failed" `isInfixOf` output
+    not $ "Source workspace load failed" `isInfixOf` output
   assertContains "unresolved import warning is retained by :show diagnostics"
     "[DJEX_REPL_IMPORT_UNRESOLVED]" output
   assertContains "unresolved import warning is emitted when loading"
@@ -1634,14 +1691,16 @@ testReplSourcePackageImport = withReplModuleFixture $ \root -> do
     ]
   assertEqual "source package import REPL exit" ExitSuccess exitCode
   assertContains "package import rejects the whole target transaction"
-    "Exference load failed; retaining the previous session and settings."
+    "Source workspace load failed; retaining previous sessions and settings."
     output
   assertContains "failed source package import retains the empty workspace"
     "(no modules loaded)" output
   assertBool "package import accidentally committed its same-named local target" $
     not $ packageUser `isInfixOf` output
   assertContains ("source package import has a structured diagnostic: " ++ errors)
-    "[DJEX_REPL_IMPORT_PACKAGE]" errors
+    "[EXF_UNSUPPORTED_VOCABULARY]" errors
+  assertContains "source package import identifies the unsupported construct"
+    "package-qualified import" errors
   assertNoCallStack errors
 
 testReplSymlinkModuleMismatch :: Assertion
@@ -1659,7 +1718,7 @@ testReplSymlinkModuleMismatch = withReplModuleFixture $ \root -> do
     ]
   assertEqual "symlink module mismatch REPL exit" ExitSuccess exitCode
   assertContains "symlink mismatch rejects the target transaction"
-    "Exference load failed; retaining the previous session and settings."
+    "Source workspace load failed; retaining previous sessions and settings."
     output
   assertContains "symlink mismatch retains the prior empty workspace"
     "(no modules loaded)" output
@@ -1701,7 +1760,7 @@ testReplExportAmbiguity = withReplModuleFixture $ \root -> do
     ]
   assertEqual "ambiguous re-export REPL exit" ExitSuccess collisionExit
   assertContains "colliding re-export rejects the target transaction"
-    "Exference load failed; retaining the previous session and settings."
+    "Source workspace load failed; retaining previous sessions and settings."
     collisionOutput
   assertContains "colliding re-export retains the prior empty workspace"
     "(no modules loaded)" collisionOutput
@@ -1733,6 +1792,83 @@ testReplDjinnNamespaceProjection = withReplModuleFixture $ \root -> do
   assertBool "legal cross-namespace names were reported as ambiguous" $
     not $ "unqualified spelling is ambiguous" `isInfixOf` output
   assertNoCallStack errors
+
+-- The neutral Name intentionally identifies Types.T in both Haskell
+-- namespaces. Import routes must retain the selected namespace separately so
+-- the type does not manufacture its constructor (or vice versa) in either
+-- backend projection.
+testReplNamespaceSelectiveImports :: Assertion
+testReplNamespaceSelectiveImports = withTemporaryEnvironment
+    [ ("Types.hs", unlines
+        [ "module Types (T(..)) where"
+        , "data T = T"
+        ])
+    , ("TypeOnly.hs", unlines
+        [ "module TypeOnly (T) where"
+        , "import Types (T(..))"
+        ])
+    ] $ \directory -> do
+  (typeExit, typeOutput, typeErrors) <- runRepl directory
+    [ ":module"
+    , "import TypeOnly (T)"
+    , ":set qualification none"
+    , ":kind T"
+    , ":type T"
+    , ":backend exference"
+    , ":set max-steps 8"
+    , "T"
+    , ":backend djinn"
+    , "T"
+    ]
+  assertEqual "type-only namespace REPL exit" ExitSuccess typeExit
+  assertContains "a type-only re-export remains available to :kind"
+    "T :: Type" typeOutput
+  assertContains "a type-only import exposes no term"
+    "[DJEX_REPL_TYPE_SCOPE]" typeErrors
+  assertContains "Exference cannot synthesize the hidden constructor"
+    "[DJEX_EXF_NO_RESULT]" typeErrors
+  assertContains "Djinn treats the constructor-hidden type as uninhabited"
+    "[DJEX_DJINN_UNINHABITABLE]" typeErrors
+  assertNoCallStack typeErrors
+
+  (patternExit, patternOutput, patternErrors) <- runRepl directory
+    [ ":module"
+    , "import Types (pattern T)"
+    , ":set qualification none"
+    , ":type T"
+    , ":kind T"
+    , ":module"
+    , "import qualified Types as X (pattern T)"
+    , ":type X.T"
+    , ":kind X.T"
+    ]
+  assertEqual "pattern-only namespace REPL exit" ExitSuccess patternExit
+  assertContains "a pattern-only import exposes the constructor term"
+    "T :: T" patternOutput
+  assertContains "a qualified pattern route exposes the constructor term"
+    "X.T :: T" patternOutput
+  assertEqual "pattern routes expose no type constructor" 2
+    $ countOccurrences "[DJEX_REPL_KIND_PARSE]" patternErrors
+  assertNoCallStack patternErrors
+
+  (hidingExit, hidingOutput, hidingErrors) <- runRepl directory
+    [ ":module"
+    , "import Types hiding (pattern T)"
+    , ":set qualification none"
+    , ":kind T"
+    , ":type T"
+    , ":backend exference"
+    , ":set max-steps 8"
+    , "T"
+    ]
+  assertEqual "namespace hiding REPL exit" ExitSuccess hidingExit
+  assertContains "hiding the pattern retains the same-spelled type"
+    "T :: Type" hidingOutput
+  assertContains "hiding the pattern removes only the term"
+    "[DJEX_REPL_TYPE_SCOPE]" hidingErrors
+  assertContains "the hidden constructor cannot enter Exference search"
+    "[DJEX_EXF_NO_RESULT]" hidingErrors
+  assertNoCallStack hidingErrors
 
 -- A constructor and an otherwise undeclared external type may have the same
 -- canonical name because they live in different Haskell namespaces. The
@@ -1869,6 +2005,46 @@ testReplDjinnHiddenHigherKind = withTemporaryEnvironment
     not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
   assertNoCallStack errors
 
+-- Every method may mention a type hidden from the prompt while the class
+-- itself remains useful as a constraint. Reference repair must retain the
+-- now-methodless class: requiring one good method accidentally discarded the
+-- entire declaration precisely when all of its methods needed shedding.
+testReplDjinnClassMethodRepair :: Assertion
+testReplDjinnClassMethodRepair = withTemporaryEnvironment
+    [("ClassMethodRepair.hs", unlines
+      [ "{-# LANGUAGE MultiParamTypeClasses #-}"
+      , "module ClassMethodRepair where"
+      , "data HiddenRoot = HiddenRoot"
+      , "class C where"
+      , "  first :: HiddenRoot -> HiddenRoot"
+      , "  second :: HiddenRoot -> HiddenRoot"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import ClassMethodRepair hiding (HiddenRoot)"
+    , ":show environment"
+    , ":show omissions"
+    ]
+  assertEqual "all-bad-method repair REPL exit" ExitSuccess exitCode
+  assertContains "the methodless class remains in the projected environment"
+    "1 declarations (projected from the module scope, 3 omissions)" output
+  assertContains
+    ("the first unusable method is reported independently: "
+      ++ output ++ errors)
+    ("first: it mentions ClassMethodRepair.HiddenRoot, which is outside the"
+      ++ " Djinn scope") output
+  assertContains
+    ("the second unusable method is reported independently: "
+      ++ output ++ errors)
+    ("second: it mentions ClassMethodRepair.HiddenRoot, which is outside the"
+      ++ " Djinn scope") output
+  assertBool "method repair discarded the whole class" $
+    not $ "C: it mentions ClassMethodRepair.HiddenRoot" `isInfixOf` output
+  assertBool "method repair forced the standard-environment fallback" $
+    not $ "Djinn falls back to its standard checked environment" `isInfixOf`
+      output
+  assertNoCallStack errors
+
 -- Hiding the root of this synonym dependency chain removes exactly one alias
 -- per reference-resolution round. The old reference loop removed 201 aliases;
 -- its seal loop could remove another 200 and still perform the final check,
@@ -1936,7 +2112,7 @@ testReplBundledOwners = withReplModuleFixture $ \root -> do
   assertContains "an empty datatype owns a valid empty wildcard bundle"
     "import EmptyData (E(..))" output
   assertContains "type-synonym wildcard rejects the target transaction"
-    "Exference load failed; retaining the previous session and settings."
+    "Source workspace load failed; retaining previous sessions and settings."
     output
   assertContainsPath "invalid synonym export retains the prior empty datatype"
     ("EmptyData (" ++ emptyData ++ ")") output
@@ -1994,7 +2170,7 @@ testReplFixReload = withTemporaryEnvironment
     ]
   assertEqual "fix reload exit" ExitSuccess exitCode
   assertContains "policy change reloads the source environment"
-    "Loaded Exference environment:" output
+    "Loaded source workspace:" output
   assertEqual "fix is introduced only after opt-in" 1
     $ countOccurrences "Data.Function.fix" output
   assertContains "safe policy finds no unrestricted inhabitant first"
@@ -2047,54 +2223,119 @@ testReplUnifiedScope = withTemporaryEnvironment
     $ countOccurrences "value axioms are excluded" output
 
 -- Startup commands come from the home and current directories' .djexrc in
--- that order, exactly like GHCi's .ghci; a possible developer-machine home
--- file cannot disturb the assertions because the local file runs last.
+-- that order. Both locations are controlled explicitly: this test must never
+-- read or execute a developer-machine startup file.
 testReplStartupFiles :: Assertion
 testReplStartupFiles = withTemporaryEnvironment
-  [ ( ".djexrc"
+  [ ( "home/.djexrc"
     , unlines
         [ "-- whole-line startup comment"
-        , ":set target startupCommentResult"
+        , ":set target homeResult"
         , "a -> a -- trailing startup comment"
+        , ":set target inheritedResult"
+        ]
+    )
+  , ( "cwd/.djexrc"
+    , unlines
+        [ "a -> a"
         , ":set target djexResult"
         , ":set render expression"
         , ":backend exference"
         ]
     )
+  , ("malformed/.djexrc", ":{\n")
+  , ("environment/.keep", "")
   ] $ \directory -> do
-  (exitCode, output, errors) <- runReplFrom directory [] directory
+  let home = directory </> "home"
+      working = directory </> "cwd"
+      environment = directory </> "environment"
+      malformed = directory </> "malformed"
+      homeStartup = home </> ".djexrc"
+      workingStartup = working </> ".djexrc"
+      malformedStartup = malformed </> ".djexrc"
+  canonicalHomeStartup <- canonicalizePath homeStartup
+  canonicalWorkingStartup <- canonicalizePath workingStartup
+  (exitCode, output, errors) <- runReplFrom working home [] environment
     ["a -> a"]
   assertEqual "startup REPL exit" ExitSuccess exitCode
-  assertContainsPath "startup file load is announced"
-    (directory ++ "/.djexrc") output
+  assertEqual "home startup file is loaded once" 1
+    $ countOccurrencesPath
+        ("Loaded startup commands from " ++ canonicalHomeStartup) output
+  assertEqual "working-directory startup file is loaded once" 1
+    $ countOccurrencesPath
+        ("Loaded startup commands from " ++ canonicalWorkingStartup) output
+  assertBool "home startup commands did not run before current-directory ones"
+    $ case
+        ( occurrenceOffset "homeResult a = a" output
+        , occurrenceOffset "inheritedResult a = a" output
+        ) of
+      (Just homeOffset, Just workingOffset) -> homeOffset < workingOffset
+      _ -> False
   assertContains "startup trailing comment preserves its query"
-    "startupCommentResult a = a" output
+    "homeResult a = a" output
   assertBool "whole-line startup comment was executed as a query" $
-    not $ (directory ++ "/.djexrc (line 1)") `isInfixOf` errors
+    not $ (canonicalHomeStartup ++ " (line 1)") `isInfixOf` errors
   assertContains "startup settings shape the session" "\\a -> a" output
-  (ignoredExit, ignoredOutput, _ignoredErrors) <- runReplFrom directory
-    ["--ignore-startup"] directory ["a -> a"]
+
+  -- Home and current-directory candidates may resolve to the same file. The
+  -- startup runner canonicalizes before deduplicating, so it executes once.
+  (deduplicatedExit, deduplicatedOutput, _deduplicatedErrors) <-
+    runReplFrom home home [] environment []
+  assertEqual "deduplicated startup REPL exit" ExitSuccess deduplicatedExit
+  assertEqual "coincident home/current startup file is loaded once" 1
+    $ countOccurrencesPath
+        ("Loaded startup commands from " ++ canonicalHomeStartup)
+        deduplicatedOutput
+  assertEqual "coincident home/current startup commands execute once" 1
+    $ countOccurrences "homeResult a = a" deduplicatedOutput
+
+  (ignoredExit, ignoredOutput, _ignoredErrors) <- runReplFrom working home
+    ["--ignore-startup"] environment ["a -> a"]
   assertEqual "suppressed startup REPL exit" ExitSuccess ignoredExit
   assertBool "--ignore-startup still loaded a startup file" $
     not $ "Loaded startup commands" `isInfixOf` ignoredOutput
   assertBool "suppressed startup still applied its settings" $
     not $ "\\a -> a" `isInfixOf` ignoredOutput
 
+  -- Discovery alone is not a successful load. A startup file must be read
+  -- strictly and parsed completely before Djex announces it.
+  (malformedExit, malformedOutput, malformedErrors) <-
+    runReplFrom malformed environment [] environment ["a -> a"]
+  assertEqual "malformed startup REPL exit" ExitSuccess malformedExit
+  assertBool "malformed startup file was announced as loaded" $
+    not $ malformedStartup `isInfixOf` malformedOutput
+  assertContains "malformed startup diagnostic"
+    "[DJEX_REPL_SCRIPT]" malformedErrors
+
   -- GHCi refuses a POSIX startup file that another group member can replace.
   -- Djex executes shell, package, and evaluation commands from the same file,
   -- so it must preserve that trust boundary before reading a line.
   when (os /= "mingw32") $ do
-    let startup = directory </> ".djexrc"
-    callProcess "chmod" ["g+w", startup]
+    callProcess "chmod" ["g+w", workingStartup]
     (untrustedExit, untrustedOutput, untrustedErrors) <-
-      runReplFrom directory [] directory ["a -> a"]
+      runReplFrom working home [] environment ["a -> a"]
     assertEqual "untrusted startup REPL exit" ExitSuccess untrustedExit
     assertBool "untrusted startup file was announced as loaded" $
-      not $ startup `isInfixOf` untrustedOutput
+      not $ canonicalWorkingStartup `isInfixOf` untrustedOutput
     assertBool "untrusted startup settings were applied" $
       not $ "\\a -> a" `isInfixOf` untrustedOutput
     assertContains "untrusted startup diagnostic"
       "[DJEX_REPL_STARTUP_UNTRUSTED]" untrustedErrors
+
+    -- A trusted but unreadable file can still fail after candidate discovery.
+    -- Its load announcement must likewise wait until the strict read succeeds.
+    callProcess "chmod" ["g-w,u-r", workingStartup]
+    (unreadableExit, unreadableOutput, unreadableErrors) <-
+      runReplFrom working environment [] environment ["a -> a"]
+    callProcess "chmod" ["u+r", workingStartup]
+    assertEqual "unreadable startup REPL exit" ExitSuccess unreadableExit
+    assertBool "unreadable startup file was announced as loaded" $
+      not $ canonicalWorkingStartup `isInfixOf` unreadableOutput
+    assertContains "unreadable startup diagnostic"
+      "[DJEX_REPL_IO]" unreadableErrors
+
+occurrenceOffset :: String -> String -> Maybe Int
+occurrenceOffset needle = findIndex (needle `isPrefixOf`) . tails
 
 -- The stream-observing fake build tool doubles as a fake editor: it records
 -- its argv, so both the explicit file form and the latest-target default are
@@ -2139,6 +2380,56 @@ testReplEdit = withTemporaryEnvironment
   injected <- doesFileExist injectedMarker
   assertBool "the editor path was evaluated as shell syntax" $ not injected
   assertNoCallStack errors
+
+-- The source inventory uses canonical names while Djinn's projection uses
+-- their unqualified prompt spellings. Resolve through the shared prompt scope
+-- once, then translate the resulting identity for Djinn so every accepted
+-- spelling means the same thing in djinn, exference, and both mode. Giving the
+-- type and constructor the same occurrence also guards the shared AnyScope
+-- namespace used specifically by :info.
+testReplInfoScopeResolution :: Assertion
+testReplInfoScopeResolution = withTemporaryEnvironment
+  [ ( "InfoScope.hs"
+    , unlines
+        [ "module InfoScope (Token(..)) where"
+        , "data Token = Token"
+        ]
+    )
+  ] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import InfoScope as I (Token(..))"
+    , ":backend djinn"
+    , ":info Token"
+    , ":info InfoScope.Token"
+    , ":info I.Token"
+    , ":backend exference"
+    , ":info Token"
+    , ":info InfoScope.Token"
+    , ":info I.Token"
+    , ":backend both"
+    , ":info Token"
+    , ":info InfoScope.Token"
+    , ":info I.Token"
+    ]
+  assertEqual "scoped info REPL exit" ExitSuccess exitCode
+  assertEqual "Djinn accepts every spelling in its own and both mode" 6
+    $ countOccurrences "data Token = Token" output
+  assertEqual "Exference accepts every spelling in its own and both mode" 6
+    $ countOccurrences "data InfoScope.Token = InfoScope.Token" output
+  assertBool "a scoped spelling reached a backend without a declaration" $
+    not $ "No declaration for" `isInfixOf` output
+  assertNoCallStack errors
+
+  (fallbackExit, fallbackOutput, fallbackErrors) <- runRepl
+    (directory </> "missing-source-workspace")
+    [":backend djinn", ":info Bool"]
+  assertEqual "standard-session info REPL exit" ExitSuccess fallbackExit
+  assertContains "standard-session info retains its parsed spelling"
+    "data Bool = False | True" fallbackOutput
+  assertContains "fallback fixture really has no source scope"
+    "[DJEX_REPL_TARGET_NOT_FOUND]" fallbackErrors
+  assertNoCallStack fallbackErrors
 
 testReplInfoInstances :: Assertion
 testReplInfoInstances = withTemporaryEnvironment
@@ -2703,7 +2994,13 @@ replaceEnvironment
   -> [(String, String)]
   -> [(String, String)]
 replaceEnvironment name value environment = (name, value)
-  : filter ((/= name) . fst) environment
+  : filter ((/= environmentName name) . environmentName . fst) environment
+ where
+  -- Windows environment-variable lookup is case-insensitive. Avoid leaving a
+  -- stale inherited spelling (for example, Path beside PATH) in the child.
+  environmentName
+    | os == "mingw32" = map toLower
+    | otherwise = id
 
 withFakeCabal
   :: Int
@@ -2777,19 +3074,39 @@ replSession inputs = unlines $ ":set prompt \"\"" : inputs ++ [":quit"]
 -- files, for exercising .djexrc loading itself.
 runReplFrom
   :: FilePath
+  -> FilePath
   -> [String]
   -> FilePath
   -> [String]
   -> IO (ExitCode, String, String)
-runReplFrom workingDirectory extraArguments environment inputs = do
+runReplFrom workingDirectory homeDirectory extraArguments environment inputs = do
   executable <- findExecutable "djex" >>= maybe
     (fail "cannot locate the djex test build tool")
     canonicalizePath
+  inherited <- getEnvironment
+  let childEnvironment = foldr (uncurry replaceEnvironment) inherited
+        $ homeEnvironmentOverrides homeDirectory
   normalizeCapturedStreams <$> readCreateProcessWithExitCode
     ((proc executable
         (["repl", "--environment", environment] ++ extraArguments))
-      {cwd = Just workingDirectory})
+      { cwd = Just workingDirectory
+      , env = Just childEnvironment
+      })
     (replSession inputs)
+
+-- Directory's home lookup uses HOME on POSIX and may consult USERPROFILE or
+-- HOMEDRIVE/HOMEPATH on Windows. Pin every relevant spelling so a subprocess
+-- cannot discover the account running the test.
+homeEnvironmentOverrides :: FilePath -> [(String, String)]
+homeEnvironmentOverrides directory =
+    [("HOME", directory), ("USERPROFILE", directory)]
+    ++ windowsDriveOverrides
+ where
+  windowsDriveOverrides
+    | os /= "mingw32" = []
+    | (drive, ':' : path) <- break (== ':') directory =
+        [("HOMEDRIVE", drive ++ ":"), ("HOMEPATH", path)]
+    | otherwise = [("HOMEPATH", directory)]
 
 -- Run the REPL with extra environment variables, for editor integration.
 runReplWithOverrides

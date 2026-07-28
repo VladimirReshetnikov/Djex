@@ -12,10 +12,11 @@ import Data.Maybe (isJust, mapMaybe, maybeToList)
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
 import Language.Haskell.Exts.Parser (ParseMode (..))
-import qualified Language.Haskell.Exts.Extension as HSEExtension
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo)
 import Language.Haskell.Exts.Syntax (Module)
 import qualified Language.Haskell.Exts.Syntax as HSE
+import Language.Haskell.Djex.Internal.ImplicitPrelude
+  ( implicitPreludeEnabled )
 import Language.Haskell.Exference.Core.Types
   ( QualifiedName
   , qualifiedNameModule
@@ -26,9 +27,12 @@ import Language.Haskell.Exference.HaskellSrcUtils
   , splitDeclHead
   )
 import Language.Haskell.Exference.TypeFromHaskellSrc
-  ( TypeResolver (..)
+  ( TypeImportScope (..)
+  , TypeImportSurface (..)
+  , TypeResolver (..)
   , convertModuleName
   , convertName
+  , withTypeImportScopes
   )
 import qualified Language.Haskell.Synthesis.Name as SharedName
 
@@ -54,6 +58,7 @@ data NominalImport = NominalImport
   , nominalImportIsQualified :: Bool
   , nominalImportSurface :: NominalSurface
   , nominalImportSurfaceIsExact :: Bool
+  , nominalImportHiddenOccurrences :: S.Set SharedName.Occurrence
   }
 
 -- | Construct one strict resolver for every parsed module. All source-loading
@@ -104,15 +109,16 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     ((== Just canonical) . qualifiedNameModule)
 
   resolverFor mode modul moduleName = case moduleImportsAndPragmas modul of
-    Just (pragmas, imports) -> strictResolver moduleName
-      (modeDisablesImplicitPrelude mode) pragmas imports
+    Just (pragmas, imports) -> strictResolver moduleName mode pragmas imports
     _ -> baseResolver
 
-  strictResolver syntaxModule modeDisablesPrelude pragmas imports = case
+  strictResolver syntaxModule mode pragmas imports = case
       checkedModuleName syntaxModule of
     Nothing -> baseResolver
-    Just current -> baseResolver
-      { resolverUnqualifiedTypeNames = nominalTypes unqualified
+    Just current -> withTypeImportScopes importScopes TypeResolver
+      { resolverTypeNames = resolverTypeNames baseResolver
+      , resolverClassArities = resolverClassArities baseResolver
+      , resolverUnqualifiedTypeNames = nominalTypes unqualified
       , resolverUnqualifiedClassNames = nominalClasses unqualified
       , resolverModuleAliases = blockers ++ importAliases
       , resolverQualifiedNames = Just $ M.fromListWith S.union
@@ -125,8 +131,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       explicitImports = mapMaybe nominalImport imports
       importsWithPrelude = explicitImports
         ++ maybeToList
-          (implicitPreludeFrom surfaces modeDisablesPrelude
-            pragmas imports current)
+          (implicitPreludeFrom surfaces mode pragmas imports current)
       unqualified = foldr mergeSurface local
         [ nominalImportSurface imported
         | imported <- importsWithPrelude
@@ -147,6 +152,36 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       -- loaded modules. Thus an unimported @A.T@ is rejected, while a truly
       -- external qualifier remains representable under the open-world policy.
       blockers = [(loaded, loaded) | loaded <- loadedModules]
+
+      importScopes =
+        TypeImportScope
+          { typeImportQualifier = current
+          , typeImportCanonical = current
+          , typeImportQualifiedOnly = True
+          , typeImportSurface = ExactTypeImportSurface
+              $ S.fromList $ surfaceNames local
+          }
+        : [ TypeImportScope
+              { typeImportQualifier = loaded
+              , typeImportCanonical = loaded
+              , typeImportQualifiedOnly = True
+              , typeImportSurface = ExactTypeImportSurface S.empty
+              }
+          | loaded <- loadedModules
+          ]
+        ++ map importScope importsWithPrelude
+
+      importScope imported = TypeImportScope
+        { typeImportQualifier = nominalImportQualifier imported
+        , typeImportCanonical = nominalImportCanonical imported
+        , typeImportQualifiedOnly = nominalImportIsQualified imported
+        , typeImportSurface =
+            if nominalImportSurfaceIsExact imported
+              then ExactTypeImportSurface $ S.fromList
+                $ surfaceNames $ nominalImportSurface imported
+              else OpenTypeImportSurface
+                $ nominalImportHiddenOccurrences imported
+        }
 
   nominalImport = nominalImportFrom surfaces
 
@@ -173,7 +208,17 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       , nominalImportSurface = applyNominalImportSpecs
           (HSE.importSpecs declaration) targetSurface
       , nominalImportSurfaceIsExact = targetIsLoaded || restricted
+      , nominalImportHiddenOccurrences = hiddenImportOccurrences declaration
       }
+
+  -- An unloaded @hiding@ import has no enumerable positive surface, but each
+  -- listed occurrence is still an exact negative fact. Keep those facts on
+  -- this particular import route so they do not hide a same-spelled name
+  -- admitted by another module.
+  hiddenImportOccurrences declaration = case HSE.importSpecs declaration of
+    Just (HSE.ImportSpecList _ True specs) -> S.fromList
+      $ map qualifiedNameOccurrence $ concatMap importSpecOccurrences specs
+    _ -> S.empty
 
   -- An explicit positive import list is itself enough interface information
   -- to preserve an unloaded module's canonical nominal identities. A hiding
@@ -195,13 +240,12 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     converted syntaxName = either (const []) (: [])
       $ convertModuleName (HSE.importModule declaration) syntaxName
 
-  implicitPreludeFrom available modeDisablesPrelude pragmas imports current = do
+  implicitPreludeFrom available mode pragmas imports current = do
     prelude <- either (const Nothing) Just
       $ SharedName.mkModuleName "Prelude"
     if current == prelude
         || any ((== Just prelude) . checkedModuleName . HSE.importModule) imports
-        || modeDisablesPrelude
-        || any disablesImplicitPrelude pragmas
+        || not (implicitPreludeEnabled (extensions mode) pragmas)
       then Nothing
       else do
         surface <- M.lookup prelude available
@@ -213,6 +257,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
             , nominalImportIsQualified = False
             , nominalImportSurface = surface
             , nominalImportSurfaceIsExact = True
+            , nominalImportHiddenOccurrences = S.empty
             }
 
   stabilizeExports 0 current = current
@@ -244,7 +289,7 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
       ++ maybeToList (implicitPreludeForExports explicitImports)
     implicitPreludeForExports imports = case moduleImportsAndPragmas modul of
       Just (pragmas, _) -> implicitPreludeFrom available
-        (modeDisablesImplicitPrelude mode) pragmas imports canonical
+        mode pragmas imports canonical
       Nothing -> Nothing
     -- The Report defines @module M@ as the identities simultaneously in
     -- unqualified scope and in scope through qualifier @M@. In particular,
@@ -332,39 +377,6 @@ sourceTypeResolvers typeNames classArities parsedModules = M.fromList
     HSE.Module _ _ pragmas imports _ -> Just (pragmas, imports)
     _ -> Nothing
 
-  disablesImplicitPrelude pragma = case pragma of
-    HSE.LanguagePragma _ names -> any
-      ((`elem` ["NoImplicitPrelude", "RebindableSyntax"])
-        . sourceNameText)
-      names
-    HSE.OptionsPragma _ _ options -> any
-      (`elem` ["-XNoImplicitPrelude", "-XRebindableSyntax"])
-      $ words options
-    _ -> False
-
-  modeDisablesImplicitPrelude mode = not preludeEnabled || rebindableSyntax
-   where
-    (preludeEnabled, rebindableSyntax) = foldl' update (True, False)
-      $ extensions mode
-    update (implicit, rebindable) extension = case extension of
-      HSEExtension.EnableExtension HSEExtension.ImplicitPrelude ->
-        (True, rebindable)
-      HSEExtension.DisableExtension HSEExtension.ImplicitPrelude ->
-        (False, rebindable)
-      HSEExtension.EnableExtension HSEExtension.RebindableSyntax ->
-        (implicit, True)
-      HSEExtension.DisableExtension HSEExtension.RebindableSyntax ->
-        (implicit, False)
-      HSEExtension.UnknownExtension "ImplicitPrelude" ->
-        (True, rebindable)
-      HSEExtension.UnknownExtension "NoImplicitPrelude" ->
-        (False, rebindable)
-      HSEExtension.UnknownExtension "RebindableSyntax" ->
-        (implicit, True)
-      HSEExtension.UnknownExtension "NoRebindableSyntax" ->
-        (implicit, False)
-      _ -> (implicit, rebindable)
-
 mergeSurface :: NominalSurface -> NominalSurface -> NominalSurface
 mergeSurface new old = NominalSurface
   { nominalTypes = mergeNames (nominalTypes old) (nominalTypes new)
@@ -416,11 +428,6 @@ importSpecOccurrences spec = case spec of
     HSE.NoNamespace _ -> True
     HSE.TypeNamespace _ -> True
     HSE.PatternNamespace _ -> False
-
-sourceNameText :: HSE.Name annotation -> String
-sourceNameText syntaxName = case syntaxName of
-  HSE.Ident _ source -> source
-  HSE.Symbol _ source -> source
 
 sourceClassArities
   :: [Module SrcSpanInfo]

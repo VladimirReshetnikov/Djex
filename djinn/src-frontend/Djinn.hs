@@ -2,7 +2,10 @@
 -- Copyright (c) 2005 Lennart Augustsson
 -- See LICENSE for licensing details.
 --
-module Djinn (main) where
+module Djinn
+    ( main
+    , runWithSessionInitializer
+    ) where
 import Data.Char(isAlpha, isDigit, isSpace)
 import Data.List(isPrefixOf, intercalate)
 import Data.Version(showVersion)
@@ -37,21 +40,41 @@ version = "version " ++ showVersion Paths_djex.version
 main :: IO ()
 main = do
     args <- getArgs
-    (files, state) <- case decodeArguments args of
+    runWithSessionInitializer (return standardDjinnSession) args
+
+-- | Run the historical frontend with a checked-session initializer.
+--
+-- The action is invoked both at process startup and for @:clear@.  Keeping it
+-- injectable makes the complete lifecycle total: an embedding launcher can
+-- propagate a structured construction failure, and a failed reset can retain
+-- the last usable session instead of installing a partial value.
+runWithSessionInitializer
+    :: IO (Either Diagnostic.Diagnostic DjinnSession)
+    -> [String]
+    -> IO ()
+runWithSessionInitializer initializeSession args = do
+    initialState <- initializeState initializeSession
+    state <- case initialState of
+        Left failure -> do
+            hPutStrLn stderr $ renderSessionInitializationFailure
+                "Djinn startup failed:" failure
+            exitWith $ ExitFailure 1
+        Right state -> return state
+    (files, configuredState) <- case decodeArguments state args of
         Left message -> do
             hPutStrLn stderr message
             usage
             exitWith $ ExitFailure 1
         Right result -> return result
     case files of
-        [] -> repl (hsGenRepl state)
+        [] -> repl (hsGenRepl configuredState)
         _ -> do
-            finalState <- loadFiles state files
+            finalState <- loadFiles configuredState files
             when (commandFailed finalState) $
                 exitWith $ ExitFailure 1
 
-decodeArguments :: [String] -> Either String ([FilePath], State)
-decodeArguments = go startState []
+decodeArguments :: State -> [String] -> Either String ([FilePath], State)
+decodeArguments initialState = go initialState []
   where
     go state reversed [] = Right (reverse reversed, state)
     go state reversed ("--" : remaining) =
@@ -103,6 +126,9 @@ data State = State {
     -- only as private display projections. Search uses sealed premise, class,
     -- kind, synonym, and formula indexes instead.
     djinnSession :: DjinnSession,
+    -- Re-run the checked constructor for :clear rather than retaining an
+    -- assumed-infallible top-level session value.
+    sessionInitializer :: IO (Either Diagnostic.Diagnostic DjinnSession),
     multi :: Bool,
     sorted :: Bool,
     debug :: Bool,
@@ -112,9 +138,20 @@ data State = State {
     commandFailed :: Bool
     }
 
-startState :: State
-startState = State {
-    djinnSession = standardSession,
+initializeState
+    :: IO (Either Diagnostic.Diagnostic DjinnSession)
+    -> IO (Either Diagnostic.Diagnostic State)
+initializeState initializeSession = do
+    result <- initializeSession
+    return $ fmap (stateFromSession initializeSession) result
+
+stateFromSession
+    :: IO (Either Diagnostic.Diagnostic DjinnSession)
+    -> DjinnSession
+    -> State
+stateFromSession initializeSession session = State {
+    djinnSession = session,
+    sessionInitializer = initializeSession,
     multi = optionAlternatives defaults,
     sorted = optionSorted defaults,
     debug = False,
@@ -124,13 +161,6 @@ startState = State {
     }
   where
     defaults = defaultQueryOptions
-
-standardSession :: DjinnSession
-standardSession = case standardDjinnSession of
-    Right session -> session
-    Left failure -> error $ "invalid standard Djinn session: " ++
-        Diagnostic.renderDiagnostic failure
-
 
 welcome :: State -> IO (String, State)
 welcome state = do
@@ -190,8 +220,15 @@ runCmd s Quit =
 runCmd s (Load f) = loadFile s f
 runCmd s (Add i t) = updateSession s $
     CompatibilitySession.declareDjinnDeclaration (Function i t)
-runCmd s Clear =
-    return (False, startState { commandFailed = commandFailed s })
+runCmd s Clear = do
+    result <- initializeState $ sessionInitializer s
+    case result of
+        Left failure -> do
+            putStrLn $ renderSessionInitializationFailure
+                "Error: cannot clear the Djinn session:" failure
+            return (False, markFailed s)
+        Right cleared ->
+            return (False, cleared { commandFailed = commandFailed s })
 runCmd s (Del i) =
     case CompatibilitySession.removeDjinnDeclaration i (djinnSession s) of
         Left failure -> do
@@ -402,6 +439,14 @@ commandDiagnostic failure = case reverse $ Diagnostic.diagnosticContext failure 
         let strippedFailure = failure
                 { Diagnostic.diagnosticContext = reverse reversedOuterContexts }
         in context ++ "\n  " ++ Diagnostic.renderDiagnostic strippedFailure
+
+renderSessionInitializationFailure
+    :: String
+    -> Diagnostic.Diagnostic
+    -> String
+renderSessionInitializationFailure heading failure =
+    heading ++ "\n  " ++ intercalate "\n  "
+        (lines $ Diagnostic.renderDiagnostic failure)
 
 contextPrefix :: [Context] -> String
 contextPrefix [] = ""

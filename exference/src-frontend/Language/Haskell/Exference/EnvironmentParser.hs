@@ -56,6 +56,10 @@ import Language.Haskell.Exference.HaskellSrcUtils
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Declaration
 import Language.Haskell.Exference.Core.Score (Penalty (..))
+import Language.Haskell.Djex.Internal.DependencyGraph
+  ( DependencyCycle (..)
+  , stableDependencyOrder
+  )
 
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Synthesis.Diagnostic
@@ -71,7 +75,7 @@ import Language.Haskell.Synthesis.Diagnostic
 import Control.DeepSeq
 
 import Control.Monad ( forM_ )
-import Data.List ( sort, sortOn, isSuffixOf )
+import Data.List ( intercalate, sort, sortOn, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
 import Data.Either ( lefts, rights )
@@ -223,6 +227,8 @@ data UnsupportedVocabularyForm
     -- ^ Retained as a compatibility spelling, but no longer emitted. The
     -- source loader keeps every declaration in the checked inventory while a
     -- module-aware caller applies the export list to its visibility scope.
+  | PackageQualifiedImport
+  | UnparenthesizedTypeOperatorChain
   | OpenTypeFamily
   | ClosedTypeFamily
   | DataFamily
@@ -273,6 +279,9 @@ data EnvironmentLoadError
   | DuplicateModuleDeclarations (NonEmpty Diagnostic)
     -- ^ Later declarations of an already loaded logical module, including
     -- headerless modules that all declare @Main@.
+  | CyclicModuleImports (NonEmpty Diagnostic)
+    -- ^ Ordinary imports form a cycle. SOURCE imports are interface edges and
+    -- deliberately do not participate in this source-dependency graph.
   | UnsupportedSourceVocabulary
       (NonEmpty UnsupportedVocabularyOccurrence)
   | DataTypeNameError ExtractionError
@@ -300,6 +309,7 @@ environmentLoadErrorDiagnostics failure = case failure of
   ModuleReadErrors values -> fmap (withCode "EXF_MODULE_READ") values
   ModuleParseErrors values -> fmap (withCode "EXF_MODULE_PARSE") values
   DuplicateModuleDeclarations values -> values
+  CyclicModuleImports values -> values
   UnsupportedSourceVocabulary occurrences ->
     fmap unsupportedVocabularyDiagnostic occurrences
   DataTypeNameError detail -> locatedDiagnostic
@@ -607,18 +617,22 @@ tupleType :: QualifiedName -> Int -> HsType
 tupleType tupleName arity = SharedType.applyTypeArguments (TypeCons tupleName)
   $ typeVariables arity
 
--- | Find every declaration whose source-level type/class meaning would be
--- lost by the current extractor. Value definitions, imports, fixities,
--- default declarations, untyped pattern bodies, and benign pragmas
--- deliberately remain outside this scan.
+-- | Find every source construct whose type/class meaning would be lost by the
+-- current extractor. Value definitions, ordinary imports, individual fixity
+-- declarations, default declarations, untyped pattern bodies, and benign
+-- pragmas deliberately remain outside this scan. A fixity-sensitive type
+-- operator chain is different: unless its grouping is explicit, retaining the
+-- parser's provisional tree while dropping the declarations could change its
+-- meaning.
 unsupportedVocabularyOccurrences
   :: [Module SrcSpanInfo]
   -> [UnsupportedVocabularyOccurrence]
 unsupportedVocabularyOccurrences = concatMap unsupportedModule
  where
   unsupportedModule modul = case modul of
-    HSE.Module _ _ _ _ declarations ->
-      concatMap unsupportedDecl declarations
+    HSE.Module _ _ _ imports declarations ->
+      concatMap unsupportedImport imports
+        ++ concatMap unsupportedDecl declarations
     -- An XML page is an executable module form, not an ordinary module with
     -- no declarations.  The declaration extractors deliberately return
     -- 'Nothing' for it, so accepting it here would manufacture an empty
@@ -631,6 +645,15 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
     -- or emitting a cascade for children we cannot load in context.
     HSE.XmlHybrid location _ _ _ _ _ _ _ _ ->
       [unsupportedOccurrence XmlHybridModule location]
+
+  -- Package identity is not part of the neutral nominal Name vocabulary.
+  -- Treating @import "one" M@ as either the loaded source module @M@ or an
+  -- unqualified open-world fallback would silently change which declaration
+  -- a type denotes. Reject the import even when no declaration happens to use
+  -- it, keeping every loader entry point on the same fail-closed boundary.
+  unsupportedImport declaration = case HSE.importPkg declaration of
+    Just _ -> one PackageQualifiedImport $ HSE.importAnn declaration
+    Nothing -> []
 
   unsupportedDecl declaration = case declaration of
     HSE.TypeFamDecl location _ _ _ ->
@@ -661,17 +684,21 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       maybe [] (unsupportedContext DataTypeContext) context
         ++ concatMap (unsupportedBinder KindedDataBinder)
             (snd $ splitDeclHead rawHead)
-        ++ concatMap unsupportedConstructor constructors
+        ++ concatMap unsupportedConstructorVocabulary constructors
         ++ concatMap unsupportedDeriving derivings
     -- The parse mode accepts kind signatures (TypeFamilies implies
     -- KindSignatures in HSE), so class, synonym, and explicit instance
     -- binders must cross the same boundary as datatype binders; otherwise
     -- they would only fail later in an extractor with a span-free string.
-    HSE.TypeDecl _ rawHead _ ->
+    HSE.TypeDecl _ rawHead resultType ->
       concatMap (unsupportedBinder KindedSynonymBinder)
         (snd $ splitDeclHead rawHead)
-    HSE.ClassDecl _ _ rawHead dependencies declarations ->
-      concatMap (unsupportedBinder KindedClassBinder)
+        ++ unsupportedType resultType
+    HSE.TypeSig _ _ signature -> unsupportedType signature
+    HSE.ForImp _ _ _ _ _ signature -> unsupportedType signature
+    HSE.ClassDecl _ context rawHead dependencies declarations ->
+      unsupportedMaybeContext context
+        ++ concatMap (unsupportedBinder KindedClassBinder)
           (snd $ splitDeclHead rawHead)
         ++ concatMap unsupportedDependency dependencies
         ++ concatMap unsupportedClassDecl (maybe [] id declarations)
@@ -679,6 +706,7 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       maybe [] unsupportedOverlap overlap
         ++ concatMap (unsupportedBinder KindedInstanceBinder)
             (maybe [] (maybe [] id . instRuleVariables) (splitInstRule rule))
+        ++ unsupportedInstanceRule rule
         ++ concatMap unsupportedInstanceDecl (maybe [] id declarations)
     _ -> []
 
@@ -700,6 +728,69 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
       Just (_ : _) -> one ExistentialConstructor location
       _ -> [])
       ++ maybe [] (unsupportedContext ConstrainedConstructor) context
+
+  unsupportedConstructorVocabulary constructor =
+    unsupportedConstructor constructor
+      ++ unsupportedConstructorTypes constructor
+
+  unsupportedConstructorTypes (HSE.QualConDecl _ _ _ declaration) =
+    concatMap unsupportedType $ case declaration of
+      HSE.ConDecl _ _ fieldTypes -> fieldTypes
+      HSE.InfixConDecl _ left _ right -> [left, right]
+      HSE.RecDecl _ _ fields ->
+        [ fieldType
+        | HSE.FieldDecl _ _ fieldType <- fields
+        ]
+
+  unsupportedInstanceRule rule = case splitInstRule rule of
+    Nothing -> []
+    Just (_, context, _, argumentTypes) ->
+      unsupportedMaybeContext context
+        ++ concatMap unsupportedType argumentTypes
+
+  unsupportedMaybeContext =
+    concatMap unsupportedConstraint . contextConstraints
+
+  unsupportedConstraint constraint = case constraint of
+    HSE.TypeA _ constraintType -> unsupportedType constraintType
+    HSE.IParam _ _ constraintType -> unsupportedType constraintType
+    HSE.ParenA _ inner -> unsupportedConstraint inner
+
+  -- HSE represents an operator chain as nested 'TyInfix' nodes. The neutral
+  -- inventory does not retain the fixities needed to justify that grouping,
+  -- so only a single application or a chain whose nested applications sit
+  -- behind explicit 'TyParen' nodes is stable.
+  -- Report the maximal unparenthesized chain once, at its complete source
+  -- span; resetting at every other type constructor also finds chains nested
+  -- in arrows, applications, tuples, fields, and constraints.
+  unsupportedType = go False
+   where
+    go insideChain syntaxType = case syntaxType of
+      HSE.TyForall _ _ context body ->
+        unsupportedMaybeContext context ++ go False body
+      HSE.TyFun _ argument result ->
+        go False argument ++ go False result
+      HSE.TyTuple _ _ elements -> concatMap (go False) elements
+      HSE.TyUnboxedSum _ elements -> concatMap (go False) elements
+      HSE.TyList _ element -> go False element
+      HSE.TyParArray _ element -> go False element
+      HSE.TyApp _ function argument ->
+        go False function ++ go False argument
+      HSE.TyParen _ inner -> go False inner
+      HSE.TyInfix location left _ right ->
+        (if not insideChain && any isInfixType [left, right]
+          then one UnparenthesizedTypeOperatorChain location
+          else [])
+          ++ go True left
+          ++ go True right
+      HSE.TyKind _ inner kind -> go False inner ++ go False kind
+      HSE.TyEquals _ left right -> go False left ++ go False right
+      HSE.TyBang _ _ _ inner -> go False inner
+      _ -> []
+
+    isInfixType typeExpression = case typeExpression of
+      HSE.TyInfix{} -> True
+      _ -> False
 
   unsupportedContext form context
     | null $ contextConstraints $ Just context = []
@@ -745,7 +836,9 @@ unsupportedVocabularyOccurrences = concatMap unsupportedModule
     -- Method signatures, implementations, and benign pragmas still produce
     -- no occurrences; recurse so unsupported typed pattern vocabulary cannot
     -- hide inside the generic declaration wrapper.
-    HSE.InsDecl _ wrappedDeclaration -> unsupportedDecl wrappedDeclaration
+    HSE.InsDecl _ wrappedDeclaration -> case wrappedDeclaration of
+      HSE.PatSynSig{} -> unsupportedDecl wrappedDeclaration
+      _ -> []
 
   one form location = [unsupportedOccurrence form location]
 
@@ -764,6 +857,9 @@ unsupportedOccurrence form location = UnsupportedVocabularyOccurrence form
 unsupportedVocabularyDescription :: UnsupportedVocabularyForm -> String
 unsupportedVocabularyDescription form = case form of
   ExplicitExportList -> "explicit module export list"
+  PackageQualifiedImport -> "package-qualified import"
+  UnparenthesizedTypeOperatorChain ->
+    "unparenthesized type-operator chain"
   OpenTypeFamily -> "open type-family declaration"
   ClosedTypeFamily -> "closed type-family declaration"
   DataFamily -> "data-family declaration"
@@ -877,6 +973,65 @@ duplicateModuleDiagnostics modules = go M.empty occurrences
               ++ HSE.srcSpanFilename currentSpan
           )
 
+-- The export-surface resolver is a finite fixed-point calculation only for an
+-- ordinary acyclic module graph. Reject cycles explicitly instead of returning
+-- whichever surface happens to exist after an iteration cutoff; otherwise an
+-- unrelated module can change the cutoff parity and therefore source meaning.
+-- SOURCE imports remain valid interface edges and are excluded, matching the
+-- workspace loader and the bundled environment's boot-style imports.
+cyclicModuleImportDiagnostics
+  :: [Module SrcSpanInfo]
+  -> [Diagnostic]
+cyclicModuleImportDiagnostics modules = case
+    stableDependencyOrder moduleOrder modulesByName ordinaryImports of
+  Right _ -> []
+  Left cycleResult -> [locatedCycleDiagnostic cycleResult]
+ where
+  namedModules =
+    [ (source, modul)
+    | modul <- modules
+    , (HSE.ModuleName _ source, _) <- maybeToList $ moduleNameAndDecls modul
+    ]
+  moduleOrder = map fst namedModules
+  modulesByName = M.fromList namedModules
+
+  ordinaryImports modul = case modul of
+    HSE.Module _ _ _ imports _ ->
+      [ source
+      | declaration <- imports
+      , HSE.importPkg declaration == Nothing
+      , not $ HSE.importSrc declaration
+      , let HSE.ModuleName _ source = HSE.importModule declaration
+      ]
+    _ -> []
+
+  locatedCycleDiagnostic cycleResult = maybe baseDiagnostic
+      (\location -> withHaskellSrcSpan location baseDiagnostic)
+      closingImportSpan
+   where
+    source = dependencyCycleSource cycleResult
+    path = NonEmpty.toList $ dependencyCyclePath cycleResult
+    target = case path of
+      firstName : _ -> firstName
+      [] -> source
+    closingImportSpan = case M.lookup source modulesByName of
+      Just (HSE.Module _ _ _ imports _) -> case
+          [ HSE.srcInfoSpan $ HSE.importAnn declaration
+          | declaration <- imports
+          , HSE.importPkg declaration == Nothing
+          , not $ HSE.importSrc declaration
+          , let HSE.ModuleName _ imported = HSE.importModule declaration
+          , imported == target
+          ] of
+        location : _ -> Just location
+        [] -> Nothing
+      _ -> Nothing
+    baseDiagnostic = contextualDiagnostic
+      Error
+      "EXF_MODULE_CYCLE"
+      "cyclic non-SOURCE module imports"
+      $ intercalate " -> " path
+
 -- File-backed and in-memory entry points converge before parsing, so source
 -- extraction, warning order, checked lowering, and sealing cannot drift.
 parseModuleInputsM
@@ -934,6 +1089,10 @@ parseModuleInputsM inputs = do
       case NonEmpty.nonEmpty $ unsupportedVocabularyOccurrences modules of
         Just occurrences ->
           throwE $ UnsupportedSourceVocabulary occurrences
+        Nothing -> pure ()
+
+      case NonEmpty.nonEmpty $ cyclicModuleImportDiagnostics modules of
+        Just errors -> throwE $ CyclicModuleImports errors
         Nothing -> pure ()
 
       dataTypes <- case getDataTypesLocated modules of

@@ -466,7 +466,7 @@ replOptionDescriptors =
       $ defaulted "initial backend selection"
           $ replBackendName $ replInitialBackend defaultReplOptions
   , Option [] ["environment"] (ReqArg EnvironmentFlag "DIR")
-      "initial Exference source environment directory"
+      "initial source workspace directory"
   , Option [] ["fix"] (NoArg AllowFixFlag)
       "retain known nonterminating Exference recursion helpers"
   , Option [] ["history"] (ReqArg HistoryFlag "FILE")

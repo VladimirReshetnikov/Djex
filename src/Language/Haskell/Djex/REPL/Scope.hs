@@ -10,6 +10,7 @@ module Language.Haskell.Djex.REPL.Scope
   ( ReplScope
   , ScopeEntry (..)
   , ScopeOrigin (..)
+  , ScopeNamespace (..)
   , scopeFromWorkspace
   , resetScopeForWorkspace
   , revalidateScope
@@ -18,9 +19,13 @@ module Language.Haskell.Djex.REPL.Scope
   , scopeEntries
   , parseScopeImport
   , scopeUnqualifiedNames
+  , scopeUnqualifiedTypeNames
+  , scopeUnqualifiedValueNames
   , scopeVisibleNames
   , scopeSearchNames
   , scopeQualifiedNames
+  , scopeQualifiedTypeNames
+  , scopeQualifiedValueNames
   , scopeQualifierAliases
   , scopeCurrentModule
   , resolveScopeNameAmong
@@ -46,6 +51,8 @@ import qualified Language.Haskell.Exts.Pretty as HSE
 import qualified Language.Haskell.Exts.SrcLoc as HSE
 import qualified Language.Haskell.Exts.Syntax as HSE
 
+import Language.Haskell.Djex.Internal.ImplicitPrelude
+  ( implicitPreludeEnabled )
 import Language.Haskell.Djex.REPL.Command (ModuleChange (..))
 import Language.Haskell.Djex.REPL.Workspace
   ( SourceWorkspace
@@ -92,14 +99,24 @@ data ScopeEntry
     -- ^ A complete Haskell import declaration.
   deriving (Eq, Ord, Show)
 
+-- | A Haskell occurrence may denote distinct entities in the type and value
+-- namespaces. 'AnyScope' is reserved for polymorphic inspection commands such
+-- as @:info@; type parsing, expression typing, and synthesis always request an
+-- exact namespace.
+data ScopeNamespace
+  = TypeScope
+  | ValueScope
+  | AnyScope
+  deriving (Eq, Ord, Show)
+
 -- The separate projections are intentional. A qualified import adds bindings
 -- to backend search, but it must not make a type constructor legal bare at the
 -- prompt. Keeping both sets avoids recreating that distinction downstream.
 data ReplScope = ReplScope
   { replScopeEntries :: [ScopeEntry]
-  , replScopeUnqualifiedNames :: [Name]
-  , replScopeSearchNames :: [Name]
-  , replScopeQualifiedNames :: [(ModuleName, [Name])]
+  , replScopeUnqualifiedSurface :: NameSurface
+  , replScopeSearchSurface :: NameSurface
+  , replScopeQualifiedSurfaces :: [(ModuleName, NameSurface)]
   , replScopeAliases :: [(ModuleName, ModuleName)]
   , replScopeCurrentModule :: Maybe ModuleName
   , replScopeHasImplicitPrelude :: Bool
@@ -111,7 +128,17 @@ scopeEntries = replScopeEntries
 
 -- | Exact canonical names that may be written without a qualifier.
 scopeUnqualifiedNames :: ReplScope -> [Name]
-scopeUnqualifiedNames = replScopeUnqualifiedNames
+scopeUnqualifiedNames = surfaceNames . replScopeUnqualifiedSurface
+
+-- | Canonical type and class identities admitted without a qualifier.
+scopeUnqualifiedTypeNames :: ReplScope -> [Name]
+scopeUnqualifiedTypeNames = surfaceNamesIn TypeScope
+  . replScopeUnqualifiedSurface
+
+-- | Canonical values and constructors admitted without a qualifier.
+scopeUnqualifiedValueNames :: ReplScope -> [Name]
+scopeUnqualifiedValueNames = surfaceNamesIn ValueScope
+  . replScopeUnqualifiedSurface
 
 -- | Compatibility alias for 'scopeUnqualifiedNames'.
 scopeVisibleNames :: ReplScope -> [Name]
@@ -120,13 +147,23 @@ scopeVisibleNames = scopeUnqualifiedNames
 -- | Exact canonical values and constructors available to synthesis, whether
 -- admitted unqualified or through a written qualifier.
 scopeSearchNames :: ReplScope -> [Name]
-scopeSearchNames = replScopeSearchNames
+scopeSearchNames = surfaceNamesIn ValueScope . replScopeSearchSurface
 
 -- | Exact names admitted under each written qualifier.  This is separate from
 -- 'scopeQualifierAliases': an alias alone cannot encode an explicit import
 -- list or @hiding@ clause.
 scopeQualifiedNames :: ReplScope -> [(ModuleName, [Name])]
-scopeQualifiedNames = replScopeQualifiedNames
+scopeQualifiedNames = map (fmap surfaceNames) . replScopeQualifiedSurfaces
+
+-- | Exact type/class identities admitted under each written qualifier.
+scopeQualifiedTypeNames :: ReplScope -> [(ModuleName, [Name])]
+scopeQualifiedTypeNames = map (fmap $ surfaceNamesIn TypeScope)
+  . replScopeQualifiedSurfaces
+
+-- | Exact value/constructor identities admitted under each qualifier.
+scopeQualifiedValueNames :: ReplScope -> [(ModuleName, [Name])]
+scopeQualifiedValueNames = map (fmap $ surfaceNamesIn ValueScope)
+  . replScopeQualifiedSurfaces
 
 -- | Non-canonical written qualifier to canonical defining module.
 scopeQualifierAliases :: ReplScope -> [(ModuleName, ModuleName)]
@@ -140,19 +177,21 @@ scopeCurrentModule = replScopeCurrentModule
 
 -- | Resolve one prompt spelling inside a caller-selected Haskell namespace.
 --
--- 'ReplScope' deliberately records type and term names together because
--- imports expose both.  Consumers such as @:info@ and @:type@ must select the
--- namespace they own before ambiguity is decided; otherwise the legal pair
--- @data T = T@ would make the term constructor appear ambiguous with its type.
+-- 'ReplScope' carries both namespaces in one route surface but retains the
+-- admitted namespace set for each identity. Consumers such as @:info@ and
+-- @:type@ select the namespace they own before ambiguity is decided; otherwise
+-- the legal pair @data T = T@ would make the constructor leak through a
+-- type-only import.
 -- Canonically qualified names may address any loaded declaration in the
 -- selected namespace, while aliases remain limited by their exact import
 -- surfaces.
 resolveScopeNameAmong
-  :: Set Name
+  :: ScopeNamespace
+  -> Set Name
   -> ReplScope
   -> Name
   -> Either String Name
-resolveScopeNameAmong available context source = case
+resolveScopeNameAmong namespace available context source = case
     SharedName.nameModule source of
   Nothing -> case SharedName.nameSpecial source of
     Just _ -> Right source
@@ -181,7 +220,7 @@ resolveScopeNameAmong available context source = case
     SharedName.nameOccurrence candidate == SharedName.nameOccurrence source
   selected = filter (`Set.member` available)
   unqualified = selected $ filter sameOccurrence
-    $ scopeUnqualifiedNames context
+    $ surfaceNamesIn namespace $ replScopeUnqualifiedSurface context
   local = case scopeCurrentModule context of
     Nothing -> []
     Just current -> filter ((== Just current) . SharedName.nameModule)
@@ -202,9 +241,9 @@ resolveScopeNameAmong available context source = case
       ++ intercalate ", " (map SharedName.renderCanonical names)
   qualifiedCandidates qualifier = selected
     [ name
-    | (written, admitted) <- scopeQualifiedNames context
+    | (written, surface) <- replScopeQualifiedSurfaces context
     , written == qualifier
-    , name <- admitted
+    , name <- surfaceNamesIn namespace surface
     , sameOccurrence name
     ]
 
@@ -311,7 +350,9 @@ moduleNamesForBrowse inventory workspace starred source = do
   let index = symbolIndex inventory modules
   views <- buildModuleViews index modules $ workspaceModules workspace
   view <- requireModuleView views moduleName
-  pure $ if starred then moduleViewSearchNames view else moduleViewExports view
+  pure $ surfaceNames $ if starred
+    then moduleViewSearch view
+    else moduleViewExports view
 
 -- | Stable, human-readable import context for @:show imports@.
 renderScopeImports :: ReplScope -> [String]
@@ -421,11 +462,10 @@ compileScope inventory workspace entries = do
   contributions <- traverse (entryContribution index modules views) entries
   implicit <- implicitPreludeContribution modules views entries
   let allContributions = maybe contributions (: contributions) implicit
-      unqualified = ordNub
-        $ concatMap contributionUnqualified allContributions
-      search = filter (isSearchName index) $ ordNub
-        $ concatMap contributionSearch allContributions
-      qualified = mergeQualified
+      unqualified = mergeSurfaces
+        $ map contributionUnqualified allContributions
+      search = mergeSurfaces $ map contributionSearch allContributions
+      qualified = mergeQualifiedSurfaces
         $ concatMap contributionQualified allContributions
       aliases = ordNub $ concatMap contributionAliases allContributions
       starredModules = ordNub
@@ -437,18 +477,18 @@ compileScope inventory workspace entries = do
         _ -> Nothing
   pure ReplScope
     { replScopeEntries = entries
-    , replScopeUnqualifiedNames = unqualified
-    , replScopeSearchNames = search
-    , replScopeQualifiedNames = qualified
+    , replScopeUnqualifiedSurface = unqualified
+    , replScopeSearchSurface = search
+    , replScopeQualifiedSurfaces = qualified
     , replScopeAliases = aliases
     , replScopeCurrentModule = current
     , replScopeHasImplicitPrelude = maybe False (const True) implicit
     }
 
 data ScopeContribution = ScopeContribution
-  { contributionUnqualified :: [Name]
-  , contributionSearch :: [Name]
-  , contributionQualified :: [(ModuleName, [Name])]
+  { contributionUnqualified :: NameSurface
+  , contributionSearch :: NameSurface
+  , contributionQualified :: [(ModuleName, NameSurface)]
   , contributionAliases :: [(ModuleName, ModuleName)]
   }
 
@@ -465,7 +505,7 @@ entryContribution index modules views entry = case entry of
     pure $ if starred
       then ScopeContribution
         (moduleViewUnqualified view)
-        (moduleViewSearchNames view)
+        (moduleViewSearch view)
         (moduleViewQualified view)
         (moduleViewAliases view)
       else ScopeContribution
@@ -479,9 +519,7 @@ entryContribution index modules views entry = case entry of
     canonical <- importModuleName declaration
     _ <- requireLoaded modules canonical
     imported <- requireModuleView views canonical
-    selected <- applyImportSpecs index
-      (moduleViewExportChildren imported)
-      (moduleViewExports imported)
+    selected <- applyImportSpecs index (moduleViewExports imported)
       $ HSE.importSpecs declaration
     qualifier <- maybe (Right canonical) checkedHseModuleName
       $ HSE.importAs declaration
@@ -492,10 +530,10 @@ entryContribution index modules views entry = case entry of
     pure ScopeContribution
       { contributionUnqualified =
           if HSE.importQualified declaration
-            then []
-            else surfaceNames selected
-      , contributionSearch = surfaceNames selected
-      , contributionQualified = [(qualifier, surfaceNames selected)]
+            then emptySurface
+            else selected
+      , contributionSearch = selected
+      , contributionQualified = [(qualifier, selected)]
       , contributionAliases = aliases
       }
 
@@ -518,7 +556,7 @@ implicitPreludeContribution modules views entries = case
         Nothing -> pure Nothing
         Just _ -> do
           exports <- moduleViewExports <$> requireModuleView views prelude
-          pure $ if null exports
+          pure $ if null $ surfaceNames exports
             then Nothing
             else Just ScopeContribution
               { contributionUnqualified = exports
@@ -563,12 +601,10 @@ requireModuleView views moduleName = case Map.lookup moduleName views of
     "loaded module has no validated scope"
     $ SharedName.renderModuleName moduleName
 
--- Shared 'Name' deliberately identifies a canonical spelling, not GHC's
--- separate type/value namespace entities. The role set recovers enough source
--- information for @type@, @pattern@, constructors, and class methods, but a
--- legal same-spelled type and constructor remain one exact shared identity.
--- Filtering that identity more finely would require changing the common
--- declaration model rather than guessing from syntax here.
+-- Shared 'Name' deliberately identifies a canonical spelling rather than a
+-- GHC namespace entity. Source roles recover which namespaces that identity
+-- inhabits; 'NameSurface' below retains the admitted subset on every route so
+-- an import of @T@ cannot accidentally expose a same-named constructor.
 data SymbolRole
   = TypeSymbol
   | BundledOwnerSymbol
@@ -741,42 +777,33 @@ moduleSymbols :: SymbolIndex -> ModuleName -> [Name]
 moduleSymbols index moduleName = ordNub
   $ Map.findWithDefault [] moduleName $ symbolsByModule index
 
-isSearchName :: SymbolIndex -> Name -> Bool
-isSearchName index name = not $ Set.null $ Set.intersection searchable
-  $ Map.findWithDefault Set.empty name $ symbolRoles index
- where
-  searchable = Set.fromList [ValueSymbol, ConstructorSymbol]
-
 -- Child maps deliberately mirror each name projection. A flat export set
 -- cannot distinguish @module A (T, field)@ from @module A (T(field))@, yet
 -- only the latter permits a downstream bundled import. Keeping provenance per
 -- unqualified/qualified route also prevents one permissive alias from
 -- widening another alias's restricted surface.
 data ModuleView = ModuleView
-  { moduleViewLocal :: [Name]
-  , moduleViewUnqualified :: [Name]
-  , moduleViewSearchNames :: [Name]
-  , moduleViewQualified :: [(ModuleName, [Name])]
-  , moduleViewUnqualifiedChildren :: Map Name [Name]
-  , moduleViewSearchChildren :: Map Name [Name]
-  , moduleViewQualifiedChildren :: [(ModuleName, Map Name [Name])]
+  { moduleViewLocal :: NameSurface
+  , moduleViewUnqualified :: NameSurface
+  , moduleViewSearch :: NameSurface
+  , moduleViewQualified :: [(ModuleName, NameSurface)]
   , moduleViewAliases :: [(ModuleName, ModuleName)]
-  , moduleViewExports :: [Name]
-  , moduleViewExportChildren :: Map Name [Name]
+  , moduleViewExports :: NameSurface
   }
 
 data ImportView = ImportView
   { importViewCanonical :: ModuleName
   , importViewQualifier :: ModuleName
   , importViewIsQualified :: Bool
-  , importViewNames :: [Name]
-  , importViewChildren :: Map Name [Name]
+  , importViewSurface :: NameSurface
   }
 
 data NameSurface = NameSurface
   { surfaceNames :: [Name]
+  , surfaceNamespaces :: Map Name (Set ScopeNamespace)
   , surfaceChildren :: Map Name [Name]
   }
+  deriving (Eq, Show)
 
 buildModuleViews
   :: SymbolIndex
@@ -821,28 +848,15 @@ buildModuleViewCached index modules stack target = do
       implicit <- sourceImplicitPrelude index modules (moduleName : stack)
         moduleName pragmas sourceImports
       let allImports = maybe imports (: imports) implicit
-          local = moduleSymbols index moduleName
-          localChildren = childGroupsFor index local
-          unqualified = ordNub $ local ++ concat
-            [ importViewNames item
+          local = surfaceFromNames index $ moduleSymbols index moduleName
+          unqualified = mergeSurfaces $ local :
+            [ importViewSurface item
             | item <- allImports
             , not $ importViewIsQualified item
             ]
-          unqualifiedChildren = mergeChildGroups $ localChildren :
-            [ importViewChildren item
-            | item <- allImports
-            , not $ importViewIsQualified item
-            ]
-          search = ordNub $ local ++ concatMap importViewNames allImports
-          searchChildren = mergeChildGroups
-            $ localChildren : map importViewChildren allImports
-          qualified = mergeQualified $ (moduleName, local) :
-            [ (importViewQualifier item, importViewNames item)
-            | item <- allImports
-            ]
-          qualifiedChildren = mergeQualifiedChildren
-            $ (moduleName, localChildren) :
-            [ (importViewQualifier item, importViewChildren item)
+          search = mergeSurfaces $ local : map importViewSurface allImports
+          qualified = mergeQualifiedSurfaces $ (moduleName, local) :
+            [ (importViewQualifier item, importViewSurface item)
             | item <- allImports
             ]
           aliases = ordNub
@@ -853,25 +867,17 @@ buildModuleViewCached index modules stack target = do
           provisional = ModuleView
             { moduleViewLocal = local
             , moduleViewUnqualified = unqualified
-            , moduleViewSearchNames = search
+            , moduleViewSearch = search
             , moduleViewQualified = qualified
-            , moduleViewUnqualifiedChildren = unqualifiedChildren
-            , moduleViewSearchChildren = searchChildren
-            , moduleViewQualifiedChildren = qualifiedChildren
             , moduleViewAliases = aliases
-            , moduleViewExports = []
-            , moduleViewExportChildren = Map.empty
+            , moduleViewExports = emptySurface
             }
       rawExports <- lift
         $ atSource (workspaceModulePath target)
         $ resolveModuleExports index provisional moduleHead
       let exports = normalizeSurface rawExports
-          uniqueExports = surfaceNames exports
-      lift $ validateExportSurface index target uniqueExports
-      let completed = provisional
-            { moduleViewExports = uniqueExports
-            , moduleViewExportChildren = surfaceChildren exports
-            }
+      lift $ validateExportSurface target exports
+      let completed = provisional {moduleViewExports = exports}
       modify $ Map.insert moduleName completed
       pure completed
 
@@ -913,13 +919,12 @@ resolveSourceImport index modules importerPath stack declaration = do
       | not (HSE.importSrc declaration) -> do
           imported <- buildModuleViewCached index modules stack target
           lift $ atSource importerPath $ applyImportSpecs index
-            (moduleViewExportChildren imported)
             (moduleViewExports imported)
             $ HSE.importSpecs declaration
     Just _ -> do
       let available = moduleSymbols index canonical
       lift $ atSource importerPath $ applyImportSpecs index
-        (childGroupsFor index available) available
+        (surfaceFromNames index available)
         $ HSE.importSpecs declaration
     -- This source-only session has no package database. An unresolved import
     -- therefore contributes no declarations; the workspace warning explains
@@ -932,8 +937,7 @@ resolveSourceImport index modules importerPath stack declaration = do
     { importViewCanonical = canonical
     , importViewQualifier = qualifier
     , importViewIsQualified = HSE.importQualified declaration
-    , importViewNames = surfaceNames selected
-    , importViewChildren = surfaceChildren selected
+    , importViewSurface = selected
     }
 
 rejectPackageImport
@@ -962,28 +966,18 @@ sourceImplicitPrelude index modules stack current pragmas imports = case
   Right prelude
     | current == prelude
         || any ((== Right prelude) . importModuleName) imports
-        || any disablesImplicitPrelude pragmas -> pure Nothing
+        || not (implicitPreludeEnabled [] pragmas) -> pure Nothing
     | otherwise -> case Map.lookup prelude modules of
         Nothing -> pure Nothing
         Just target -> do
           imported <- buildModuleViewCached index modules stack target
           let available = moduleViewExports imported
-          pure $ if null available then Nothing else Just ImportView
+          pure $ if null (surfaceNames available) then Nothing else Just ImportView
             { importViewCanonical = prelude
             , importViewQualifier = prelude
             , importViewIsQualified = False
-            , importViewNames = available
-            , importViewChildren = moduleViewExportChildren imported
+            , importViewSurface = available
             }
- where
-  disablesImplicitPrelude (HSE.LanguagePragma _ names) =
-    any ((`elem` ["NoImplicitPrelude", "RebindableSyntax"])
-      . hseNameText) names
-  disablesImplicitPrelude (HSE.OptionsPragma _ _ options) = any
-    (`elem` ["-XNoImplicitPrelude", "-XRebindableSyntax"])
-    $ words options
-  disablesImplicitPrelude _ = False
-
 resolveModuleExports
   :: SymbolIndex
   -> ModuleView
@@ -997,17 +991,20 @@ resolveModuleExports index view
   mergeSurfaces <$> traverse resolve specs
  where
   resolve spec = case spec of
-    HSE.EVar _ qname -> namesOnly <$> selectQName index [ValueSymbol]
-      view qname (HSE.prettyPrint spec)
-    HSE.EAbs _ namespace qname -> namesOnly <$> selectQName index
-      (namespaceRoles namespace) view qname (HSE.prettyPrint spec)
+    HSE.EVar _ qname -> surfaceForRoles index [ValueSymbol]
+      <$> selectQName index [ValueSymbol] view qname (HSE.prettyPrint spec)
+    HSE.EAbs _ namespace qname ->
+      let roles = namespaceRoles namespace
+      in surfaceForRoles index roles
+          <$> selectQName index roles view qname (HSE.prettyPrint spec)
     HSE.EThingWith _ wildcard qname children -> do
       parent <- selectQName index [BundledOwnerSymbol] view qname
         $ HSE.prettyPrint spec
       case parent of
         [oneParent] -> do
-          candidateNames <- qNameCandidates view qname
-          childGroups <- qNameChildGroups view qname
+          candidates <- qNameCandidates view qname
+          let candidateNames = surfaceNames candidates
+              childGroups = surfaceChildren candidates
           _ <- requireChildGroup childGroups oneParent $ HSE.prettyPrint spec
           selectedChildren <- selectChildren childGroups candidateNames
             oneParent children $ HSE.prettyPrint spec
@@ -1017,29 +1014,16 @@ resolveModuleExports index view
                   candidateNames oneParent
               exportedChildren = ordNub
                 $ wildcardChildren ++ selectedChildren
-          pure NameSurface
-            { surfaceNames = oneParent : exportedChildren
-            , surfaceChildren = Map.singleton oneParent exportedChildren
-            }
-        _ -> pure $ namesOnly parent
+          pure $ bundledSurface index oneParent exportedChildren
+        _ -> pure $ surfaceForRoles index [BundledOwnerSymbol] parent
     HSE.EModuleContents _ syntaxModule -> do
       wanted <- checkedHseModuleName syntaxModule
       let matchingQualified =
-            [ NameSurface names children
-            | (qualifier, names) <- moduleViewQualified view
+            [ surface
+            | (qualifier, surface) <- moduleViewQualified view
             , qualifier == wanted
-            , children <-
-                [ mergeChildGroups
-                    [ candidate
-                    | (childQualifier, candidate) <-
-                        moduleViewQualifiedChildren view
-                    , childQualifier == wanted
-                    ]
-                ]
             ]
-          unqualified = NameSurface
-            (moduleViewUnqualified view)
-            (moduleViewUnqualifiedChildren view)
+          unqualified = moduleViewUnqualified view
       if null matchingQualified
         then Left $ scopeDiagnostic "DJEX_REPL_EXPORT_NOT_IN_SCOPE"
           "module re-export is not in scope" $ HSE.prettyPrint spec
@@ -1052,20 +1036,17 @@ resolveModuleExports index view
 
 
 localSurface :: SymbolIndex -> ModuleView -> NameSurface
-localSurface index view = NameSurface
-  (moduleViewLocal view)
-  (childGroupsFor index $ moduleViewLocal view)
+localSurface _ = moduleViewLocal
 
 -- Haskell has separate type and value export namespaces, but two different
 -- entities in the same namespace may not share one exported occurrence. This
 -- most often arises through two @module X@ re-exports whose aliases expose
 -- colliding declarations. Exact duplicate exports remain harmless.
 validateExportSurface
-  :: SymbolIndex
-  -> WorkspaceModule
-  -> [Name]
+  :: WorkspaceModule
+  -> NameSurface
   -> Either Diagnostic ()
-validateExportSurface index target exports = case firstConflict of
+validateExportSurface target exports = case firstConflict of
   Nothing -> Right ()
   Just (occurrence, left, right) -> Left
     $ withSource (workspaceModulePath target)
@@ -1077,16 +1058,19 @@ validateExportSurface index target exports = case firstConflict of
         )
  where
   groups = Map.elems $ Map.fromListWith appendOld
-    [ (occurrence, [name])
-    | name <- exports
+    [ (occurrence, [(name, namespaces)])
+    | name <- surfaceNames exports
+    , let namespaces = Map.findWithDefault Set.empty name
+            $ surfaceNamespaces exports
     , Just occurrence <- [SharedName.nameSpelling name]
     ]
   firstConflict = firstPair
     [ (occurrence, left, right)
-    | names <- groups
-    , (left, right) <- unorderedPairs names
+    | claims <- groups
+    , ((left, leftNamespaces), (right, rightNamespaces)) <-
+        unorderedPairs claims
     , left /= right
-    , sameNamespace left right
+    , not $ Set.null $ Set.intersection leftNamespaces rightNamespaces
     , Just occurrence <- [SharedName.nameSpelling left]
     ]
   firstPair [] = Nothing
@@ -1094,16 +1078,6 @@ validateExportSurface index target exports = case firstConflict of
   unorderedPairs [] = []
   unorderedPairs (name : names) =
     [(name, other) | other <- names] ++ unorderedPairs names
-  sameNamespace left right = typeOverlap || valueOverlap
-   where
-    leftRoles = Map.findWithDefault Set.empty left $ symbolRoles index
-    rightRoles = Map.findWithDefault Set.empty right $ symbolRoles index
-    typeOverlap = TypeSymbol `Set.member` leftRoles
-      && TypeSymbol `Set.member` rightRoles
-    valueOverlap = hasValueRole leftRoles && hasValueRole rightRoles
-    hasValueRole = not . Set.null
-      . Set.intersection valueNamespaceRoles
-  valueNamespaceRoles = Set.fromList [ValueSymbol, ConstructorSymbol]
   appendOld new old = old ++ new
 
 selectQName
@@ -1125,56 +1099,39 @@ selectQName index roles view qname rendered = case qname of
 qNameCandidates
   :: ModuleView
   -> HSE.QName HSE.SrcSpanInfo
-  -> Either Diagnostic [Name]
+  -> Either Diagnostic NameSurface
 qNameCandidates view qname = case qname of
   HSE.UnQual _ _ -> Right $ moduleViewUnqualified view
   HSE.Qual _ syntaxModule _ -> do
     wanted <- checkedHseModuleName syntaxModule
-    Right $ concat
-      [ names
-      | (qualifier, names) <- moduleViewQualified view
+    Right $ mergeSurfaces
+      [ surface
+      | (qualifier, surface) <- moduleViewQualified view
       , qualifier == wanted
       ]
-  HSE.Special _ _ -> Right $ moduleViewSearchNames view
-
-qNameChildGroups
-  :: ModuleView
-  -> HSE.QName HSE.SrcSpanInfo
-  -> Either Diagnostic (Map Name [Name])
-qNameChildGroups view qname = case qname of
-  HSE.UnQual _ _ -> Right $ moduleViewUnqualifiedChildren view
-  HSE.Qual _ syntaxModule _ -> do
-    wanted <- checkedHseModuleName syntaxModule
-    Right $ mergeChildGroups
-      [ groups
-      | (qualifier, groups) <- moduleViewQualifiedChildren view
-      , qualifier == wanted
-      ]
-  HSE.Special _ _ -> Right $ moduleViewSearchChildren view
+  HSE.Special _ _ -> Right $ moduleViewSearch view
 
 applyImportSpecs
   :: SymbolIndex
-  -> Map Name [Name]
-  -> [Name]
+  -> NameSurface
   -> Maybe (HSE.ImportSpecList HSE.SrcSpanInfo)
   -> Either Diagnostic NameSurface
-applyImportSpecs _ childGroups available Nothing = Right
-  $ normalizeSurface $ NameSurface available childGroups
-applyImportSpecs index childGroups available
+applyImportSpecs _ available Nothing = Right $ normalizeSurface available
+applyImportSpecs index available
     (Just (HSE.ImportSpecList _ hiding specs)) = do
   selected <- mergeSurfaces <$> traverse select specs
-  let selectedSet = Set.fromList $ surfaceNames selected
-      remaining = filter (`Set.notMember` selectedSet) available
-  pure $ if hiding
-    then NameSurface remaining $ filterChildGroups remaining childGroups
-    else selected
+  pure $ if hiding then subtractSurface available selected else selected
  where
+  availableNames = surfaceNames available
+  childGroups = surfaceChildren available
   select spec = case spec of
-    HSE.IVar _ name -> namesOnly <$> selectUnique index [ValueSymbol]
+    HSE.IVar _ name -> surfaceForRoles index [ValueSymbol]
+      <$> selectUnique index [ValueSymbol]
       available (hseNameText name) (HSE.prettyPrint spec)
-    HSE.IAbs _ namespace name -> namesOnly <$> selectUnique index
-      (namespaceRoles namespace) available (hseNameText name)
-      (HSE.prettyPrint spec)
+    HSE.IAbs _ namespace name ->
+      let roles = namespaceRoles namespace
+      in surfaceForRoles index roles <$> selectUnique index
+          roles available (hseNameText name) (HSE.prettyPrint spec)
     HSE.IThingAll _ name -> do
       parents <- selectUnique index [BundledOwnerSymbol] available
         (hseNameText name)
@@ -1182,12 +1139,9 @@ applyImportSpecs index childGroups available
       case parents of
         [parent] -> do
           _ <- requireChildGroup childGroups parent $ HSE.prettyPrint spec
-          let children = availableChildren childGroups available parent
-          pure NameSurface
-            { surfaceNames = parent : children
-            , surfaceChildren = Map.singleton parent children
-            }
-        _ -> pure $ namesOnly parents
+          let children = availableChildren childGroups availableNames parent
+          pure $ bundledSurface index parent children
+        _ -> pure $ surfaceForRoles index [BundledOwnerSymbol] parents
     HSE.IThingWith _ name children -> do
       parents <- selectUnique index [BundledOwnerSymbol] available
         (hseNameText name)
@@ -1195,18 +1149,15 @@ applyImportSpecs index childGroups available
       case parents of
         [parent] -> do
           _ <- requireChildGroup childGroups parent $ HSE.prettyPrint spec
-          selectedChildren <- selectChildren childGroups available parent
+          selectedChildren <- selectChildren childGroups availableNames parent
             children $ HSE.prettyPrint spec
-          pure NameSurface
-            { surfaceNames = parent : selectedChildren
-            , surfaceChildren = Map.singleton parent selectedChildren
-            }
-        _ -> pure $ namesOnly parents
+          pure $ bundledSurface index parent selectedChildren
+        _ -> pure $ surfaceForRoles index [BundledOwnerSymbol] parents
 
 selectUnique
   :: SymbolIndex
   -> [SymbolRole]
-  -> [Name]
+  -> NameSurface
   -> String
   -> String
   -> Either Diagnostic [Name]
@@ -1220,12 +1171,15 @@ selectUnique index roles available occurrence rendered = case matches of
     ++ intercalate ", " (map SharedName.renderCanonical names)
  where
   accepted = Set.fromList roles
+  acceptedNamespaces = namespacesForRoles accepted
   matches = ordNub
     [ name
-    | name <- available
+    | name <- surfaceNames available
     , SharedName.nameSpelling name == Just occurrence
     , not $ Set.null $ Set.intersection accepted
         $ Map.findWithDefault Set.empty name $ symbolRoles index
+    , not $ Set.null $ Set.intersection acceptedNamespaces
+        $ Map.findWithDefault Set.empty name $ surfaceNamespaces available
     ]
 
 selectChildren
@@ -1271,45 +1225,113 @@ requireChildGroup childGroups parent rendered = case
     "type or class is not available with its bundled children" rendered
 
 emptySurface :: NameSurface
-emptySurface = NameSurface [] Map.empty
+emptySurface = NameSurface [] Map.empty Map.empty
 
-namesOnly :: [Name] -> NameSurface
-namesOnly names = NameSurface names Map.empty
+surfaceFromNames :: SymbolIndex -> [Name] -> NameSurface
+surfaceFromNames index names = normalizeSurface $ NameSurface
+  { surfaceNames = names
+  , surfaceNamespaces = Map.fromList
+      [ (name, namespacesForRoles roles)
+      | name <- names
+      , let roles = Map.findWithDefault Set.empty name $ symbolRoles index
+      ]
+  , surfaceChildren = symbolChildren index
+  }
+
+surfaceForRoles :: SymbolIndex -> [SymbolRole] -> [Name] -> NameSurface
+surfaceForRoles index requested names = normalizeSurface $ NameSurface
+  { surfaceNames = names
+  , surfaceNamespaces = Map.fromList
+      [ (name, namespacesForRoles $ Set.intersection accepted actual)
+      | name <- names
+      , let actual = Map.findWithDefault Set.empty name $ symbolRoles index
+      ]
+  , surfaceChildren = Map.empty
+  }
+ where
+  accepted = Set.fromList requested
+
+bundledSurface :: SymbolIndex -> Name -> [Name] -> NameSurface
+bundledSurface index parent children = normalizeSurface $ NameSurface
+  { surfaceNames = parent : children
+  , surfaceNamespaces = Map.unionWith Set.union
+      (surfaceNamespaces
+        $ surfaceForRoles index [TypeSymbol, BundledOwnerSymbol] [parent])
+      (surfaceNamespaces
+        $ surfaceForRoles index [ValueSymbol, ConstructorSymbol] children)
+  , surfaceChildren = Map.singleton parent children
+  }
+
+surfaceNamesIn :: ScopeNamespace -> NameSurface -> [Name]
+surfaceNamesIn AnyScope surface = surfaceNames surface
+surfaceNamesIn namespace surface =
+  [ name
+  | name <- surfaceNames surface
+  , namespace `Set.member` Map.findWithDefault Set.empty name
+      (surfaceNamespaces surface)
+  ]
+
+namespacesForRoles :: Set SymbolRole -> Set ScopeNamespace
+namespacesForRoles roles = Set.fromList
+  $ [TypeScope | not $ Set.null $ Set.intersection typeRoles roles]
+  ++ [ValueScope | not $ Set.null $ Set.intersection valueRoles roles]
+ where
+  typeRoles = Set.fromList [TypeSymbol, BundledOwnerSymbol]
+  valueRoles = Set.fromList [ValueSymbol, ConstructorSymbol]
 
 normalizeSurface :: NameSurface -> NameSurface
-normalizeSurface surface = NameSurface names
-  $ filterChildGroups names $ surfaceChildren surface
+normalizeSurface surface = NameSurface names namespaces children
  where
-  names = ordNub $ surfaceNames surface
+  names = ordNub
+    [ name
+    | name <- surfaceNames surface
+    , not $ Set.null $ namespaceOf name
+    ]
+  nameSet = Set.fromList names
+  namespaces = Map.restrictKeys
+    (Map.map (Set.delete AnyScope) $ surfaceNamespaces surface)
+    nameSet
+  namespaceOf name = Set.delete AnyScope
+    $ Map.findWithDefault Set.empty name $ surfaceNamespaces surface
+  children = Map.mapMaybeWithKey retain $ surfaceChildren surface
+  retain parent childNames
+    | TypeScope `Set.member` namespaceOf parent = Just
+        [ child
+        | child <- childNames
+        , ValueScope `Set.member` namespaceOf child
+        ]
+    | otherwise = Nothing
 
 mergeSurfaces :: [NameSurface] -> NameSurface
 mergeSurfaces surfaces = normalizeSurface $ NameSurface
   (concatMap surfaceNames surfaces)
+  (Map.unionsWith Set.union $ map surfaceNamespaces surfaces)
   (mergeChildGroups $ map surfaceChildren surfaces)
 
 intersectSurfaces :: NameSurface -> NameSurface -> NameSurface
-intersectSurfaces left right = normalizeSurface $ NameSurface names children
+intersectSurfaces left right = normalizeSurface
+  $ NameSurface (surfaceNames left) namespaces children
  where
-  rightNames = Set.fromList $ surfaceNames right
-  names = filter (`Set.member` rightNames) $ surfaceNames left
+  namespaces = Map.mergeWithKey intersectNamespaces
+    (const Map.empty) (const Map.empty)
+    (surfaceNamespaces left) (surfaceNamespaces right)
+  intersectNamespaces _ leftNamespaces rightNamespaces =
+    let shared = Set.intersection leftNamespaces rightNamespaces
+    in if Set.null shared then Nothing else Just shared
   children = Map.mergeWithKey intersectChildren
     (const Map.empty) (const Map.empty)
     (surfaceChildren left) (surfaceChildren right)
   intersectChildren _ leftChildren rightChildren = Just
     $ filter (`Set.member` Set.fromList rightChildren) leftChildren
 
-childGroupsFor :: SymbolIndex -> [Name] -> Map Name [Name]
-childGroupsFor index available = filterChildGroups available
-  $ symbolChildren index
-
-filterChildGroups :: [Name] -> Map Name [Name] -> Map Name [Name]
-filterChildGroups available = Map.mapMaybeWithKey retain
+subtractSurface :: NameSurface -> NameSurface -> NameSurface
+subtractSurface available removed = normalizeSurface available
+  { surfaceNamespaces = Map.mapWithKey subtractNamespaces
+      $ surfaceNamespaces available
+  }
  where
-  availableSet = Set.fromList available
-  retain parent children
-    | parent `Set.member` availableSet = Just
-        $ filter (`Set.member` availableSet) children
-    | otherwise = Nothing
+  subtractNamespaces name namespaces = Set.difference namespaces
+    $ Map.findWithDefault Set.empty name $ surfaceNamespaces removed
 
 mergeChildGroups :: [Map Name [Name]] -> Map Name [Name]
 mergeChildGroups = foldl' (Map.unionWith appendChildren) Map.empty
@@ -1322,23 +1344,14 @@ namespaceRoles namespace = case namespace of
   HSE.TypeNamespace _ -> [TypeSymbol]
   HSE.NoNamespace _ -> [TypeSymbol]
 
-mergeQualified :: [(ModuleName, [Name])] -> [(ModuleName, [Name])]
-mergeQualified = foldl' insert []
+mergeQualifiedSurfaces
+  :: [(ModuleName, NameSurface)]
+  -> [(ModuleName, NameSurface)]
+mergeQualifiedSurfaces = foldl' insert []
  where
   insert [] pair = [pair]
-  insert ((key, old) : rest) pair@(wanted, names)
-    | key == wanted = (key, ordNub $ old ++ names) : rest
-    | otherwise = (key, old) : insert rest pair
-
-mergeQualifiedChildren
-  :: [(ModuleName, Map Name [Name])]
-  -> [(ModuleName, Map Name [Name])]
-mergeQualifiedChildren = foldl' insert []
- where
-  insert [] pair = [pair]
-  insert ((key, old) : rest) pair@(wanted, children)
-    | key == wanted =
-        (key, mergeChildGroups [old, children]) : rest
+  insert ((key, old) : rest) pair@(wanted, surface)
+    | key == wanted = (key, mergeSurfaces [old, surface]) : rest
     | otherwise = (key, old) : insert rest pair
 
 importModuleName

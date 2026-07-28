@@ -64,7 +64,7 @@ instance (NFData ty, NFData details, NFData output) =>
 -- Clause patterns become leading lambda patterns, while a patternless value
 -- clause renders as its body.  Backends remain responsible for choosing local
 -- name preferences and qualification through 'RenderOptions'. The exported
--- The t'Candidate' constructor remains available for source compatibility, so
+-- t'Candidate' constructor remains available for source compatibility, so
 -- this boundary rejects caller-built outputs with free local identities or
 -- reused binder identities before they can be presented as checked source.
 renderCandidateExpression
@@ -100,8 +100,9 @@ validateCandidateScope = either (Left . renderScopeError) Right
   . candidateOutput
 
 -- Render errors deliberately do not carry the backend-specific local identity
--- type. Clients that need the offending identity can inspect 'candidateOutput'
--- with 'validateFunctionClauseScope' before rendering.
+-- type. Clients that need the offending identity can inspect the
+-- @candidateOutput@ field with
+-- 'validateFunctionClauseScope' before rendering.
 renderScopeError :: ScopeError local -> RenderError
 renderScopeError scopeError = case scopeError of
   UnboundLocal{} -> UnboundLocalIdentity

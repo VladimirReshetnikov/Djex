@@ -200,6 +200,8 @@ Library
     Djinn.Internal.Type
     Djinn.Internal.TypeFormula
     Language.Haskell.Djex.Command
+    Language.Haskell.Djex.Internal.DependencyGraph
+    Language.Haskell.Djex.Internal.ImplicitPrelude
     Language.Haskell.Djex.Package
     Language.Haskell.Djex.Text
     Language.Haskell.Djex.REPL.Command
@@ -257,6 +259,7 @@ Executable djex
 -- argv on every platform; a POSIX shell script cannot launch on Windows.
 Executable djex-fake-cabal
   import:         build-settings, directory-dep
+  Scope:          private
   Main-Is:        Main.hs
   Hs-Source-Dirs: test-support/fake-cabal
   Build-Depends:  filepath >= 1.4 && < 1.6
@@ -288,7 +291,7 @@ Test-Suite synthesis-tests
 -- The one library exposes the historical Djinn facade, its core API, and the
 -- checked adapter together.
 Test-Suite djinn-frontend-api-tests
-  import:         tasty-hunit-test
+  import:         tasty-hunit-test, directory-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: djinn/test-frontend-api

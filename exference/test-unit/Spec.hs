@@ -4265,6 +4265,68 @@ tests = testGroup "Exference"
             Left failure -> fail $ "unexpected duplicate-Main failure: "
               ++ show failure
             Right _ -> fail "duplicate implicit Main modules were accepted"
+      , testCase "ordinary import cycles fail independently of graph parity" $ do
+          let cyclicSources =
+                [ ("B.hs", unlines
+                    [ "module B (T) where"
+                    , "data T = BT"
+                    ])
+                , ("D.hs", unlines
+                    [ "module D (T) where"
+                    , "data T = DT"
+                    ])
+                , ("A.hs", unlines
+                    [ "module A (T) where"
+                    , "import B"
+                    , "import C"
+                    ])
+                , ("C.hs", unlines
+                    [ "module C (T) where"
+                    , "import D"
+                    , "import A"
+                    ])
+                , ("E.hs", unlines
+                    [ "module E where"
+                    , "import A"
+                    , "selected :: T"
+                    ])
+                ]
+              unrelated = ("F.hs", "module F where\n")
+              loadCycle sources = do
+                LoadReport result diagnostics <- parseModuleSources sources
+                diagnostics @?= []
+                case result of
+                  Left (CyclicModuleImports (failure :| rest)) -> do
+                    rest @?= []
+                    environmentLoadErrorDiagnostics
+                      (CyclicModuleImports $ failure :| []) @?=
+                        failure :| []
+                    pure failure
+                  Left failure -> fail $ "unexpected cycle failure: "
+                    ++ show failure
+                  Right _ -> fail "an ordinary import cycle was accepted"
+          baseFailure <- loadCycle cyclicSources
+          extendedFailure <- loadCycle $ cyclicSources ++ [unrelated]
+          extendedFailure @?= baseFailure
+          diagnosticCode baseFailure @?= Just "EXF_MODULE_CYCLE"
+          diagnosticSource baseFailure @?= Just "C.hs"
+          fmap (sourceLine . sourceStart) (diagnosticSpan baseFailure)
+            @?= Just 3
+          diagnosticContext baseFailure @?= ["A -> C -> A"]
+      , testCase "SOURCE imports break ordinary module cycles" $ do
+          _ <- expectSourceEnvironment
+            [ ("A.hs", unlines
+                [ "module A where"
+                , "import {-# SOURCE #-} B"
+                , "data A = A"
+                ])
+            , ("B.hs", unlines
+                [ "module B where"
+                , "import A"
+                , "data B = B"
+                ])
+            ]
+          pure ()
       , testGroup "source declaration import scope"
         [ testCase "a direct import disambiguates an unqualified type" $ do
             environment <- expectSourceEnvironment
@@ -4591,8 +4653,59 @@ tests = testGroup "Exference"
               $ validQualifiedName ["Use"] "selected"
             functionResult selected @?=
               TypeCons (validQualifiedName ["Data", "Text"] "Text")
-        , testCase "package imports cannot bind a same-spelled source module" $ do
-            messages <- expectBindingScopeFailure
+        , testCase "external hiding lists block bare and qualified names" $
+            forM_
+              [ ("import Data.External hiding (Hidden)", "Hidden")
+              , ( "import qualified Data.External as X hiding (Hidden)"
+                , "X.Hidden"
+                )
+              ] $ \(importDeclaration, typeName) -> do
+                failures <- expectBindingScopeFailure
+                  [ ("Use.hs", unlines
+                      [ "module Use where"
+                      , importDeclaration
+                      , "excluded :: " ++ typeName
+                      ])
+                  ]
+                assertBool (typeName ++ ": " ++ show failures)
+                  $ any ("is not in scope" `isInfixOf`) failures
+        , testCase "an external hiding route does not block another import" $ do
+            environment <- expectSourceEnvironment
+              [ ("Origin.hs", unlines
+                  [ "module Origin where"
+                  , "data Shared = SharedConstructor"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import Data.External hiding (Shared)"
+                  , "import Origin (Shared)"
+                  , "selected :: Shared"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons (validQualifiedName ["Origin"] "Shared")
+        , testCase "a loaded alias does not close an external alias" $ do
+            environment <- expectSourceEnvironment
+              [ ("Loaded.hs", unlines
+                  [ "module Loaded where"
+                  , "data Admitted = AdmittedConstructor"
+                  ])
+              , ("Use.hs", unlines
+                  [ "module Use where"
+                  , "import qualified Loaded as X (Admitted)"
+                  , "import qualified Data.External as X"
+                  , "selected :: X.External"
+                  ])
+              ]
+            selected <- sourceFunctionNamed environment
+              $ validQualifiedName ["Use"] "selected"
+            functionResult selected @?=
+              TypeCons
+                (validQualifiedName ["Data", "External"] "External")
+        , testCase "package imports fail before nominal scope projection" $ do
+            LoadReport result _ <- parseModuleSources
               [ ("A.hs", "module A where\ndata T = AT\n")
               , ("Use.hs", unlines
                   [ "{-# LANGUAGE PackageImports #-}"
@@ -4601,8 +4714,11 @@ tests = testGroup "Exference"
                   , "excluded :: T"
                   ])
               ]
-            assertBool (show messages)
-              $ any ("T is not in scope" `isInfixOf`) messages
+            occurrences <- expectUnsupportedVocabulary result
+            map unsupportedVocabularyForm occurrences @?=
+              [PackageQualifiedImport]
+            map (diagnosticSource . unsupportedVocabularyDiagnostic)
+              occurrences @?= [Just "Use.hs"]
         , testCase "loaded Prelude is implicit unless disabled" $ do
             let prelude = ("Prelude.hs", unlines
                   [ "module Prelude (Bool) where"
@@ -4635,6 +4751,62 @@ tests = testGroup "Exference"
               ]
             assertBool (show disabled)
               $ any ("Bool is not in scope" `isInfixOf`) disabled
+        , testCase "later LANGUAGE switches decide implicit Prelude" $ do
+            let prelude = ("Prelude.hs", unlines
+                  [ "module Prelude (Bool) where"
+                  , "data Bool = False | True"
+                  ])
+                support = ("Support.hs",
+                  "module Support where\ndata Marker = Marker\n")
+                sources switches =
+                  [ prelude
+                  , support
+                  , ("Use.hs", unlines
+                      [ "{-# LANGUAGE " ++ switches ++ " #-}"
+                      , "module Use where"
+                      , "import Support ()"
+                      , "selected :: Bool"
+                      ])
+                  ]
+            forM_
+              [ "NoImplicitPrelude, ImplicitPrelude"
+              , "RebindableSyntax, NoRebindableSyntax"
+              ] $ \switches -> do
+                _ <- expectSourceEnvironment $ sources switches
+                pure ()
+            forM_
+              [ "ImplicitPrelude, NoImplicitPrelude"
+              , "NoRebindableSyntax, RebindableSyntax"
+              ] $ \switches -> do
+                failures <- expectBindingScopeFailure $ sources switches
+                assertBool (switches ++ ": " ++ show failures)
+                  $ any ("Bool is not in scope" `isInfixOf`) failures
+        , testCase "later OPTIONS_GHC switches decide implicit Prelude" $ do
+            let prelude = ("Prelude.hs", unlines
+                  [ "module Prelude (Bool) where"
+                  , "data Bool = False | True"
+                  ])
+                sources switches =
+                  [ prelude
+                  , ("Use.hs", unlines
+                      [ "{-# OPTIONS_GHC " ++ switches ++ " #-}"
+                      , "module Use where"
+                      , "selected :: Bool"
+                      ])
+                  ]
+            forM_
+              [ "-XNoImplicitPrelude -XImplicitPrelude"
+              , "-fno-implicit-prelude -fimplicit-prelude"
+              ] $ \switches -> do
+                _ <- expectSourceEnvironment $ sources switches
+                pure ()
+            forM_
+              [ "-XImplicitPrelude -XNoImplicitPrelude"
+              , "-fimplicit-prelude -fno-implicit-prelude"
+              ] $ \switches -> do
+                failures <- expectBindingScopeFailure $ sources switches
+                assertBool (switches ++ ": " ++ show failures)
+                  $ any ("Bool is not in scope" `isInfixOf`) failures
         , testCase "parse-mode flags can suppress implicit Prelude" $
             withTemporaryFile (unlines
               [ "module Prelude (Bool) where"
@@ -4959,7 +5131,7 @@ tests = testGroup "Exference"
                 @?= map Just modulePaths
             Left failure -> fail $ "unexpected source failure: " ++ show failure
             Right _ -> fail "a malformed in-memory module was accepted"
-      , testCase "in-memory module parsing honors LANGUAGE pragmas" $ do
+      , testCase "unused package imports fail after LANGUAGE pragma parsing" $ do
           let modulePath = "/virtual/PackageImportSnapshot.hs"
               moduleSource = unlines
                 [ "{-# LANGUAGE PackageImports #-}"
@@ -4969,8 +5141,11 @@ tests = testGroup "Exference"
                 ]
           LoadReport result _ <- environmentFromSources
             [(modulePath, moduleSource)] []
-          _ <- expectRight result
-          pure ()
+          occurrences <- expectUnsupportedVocabulary result
+          map unsupportedVocabularyForm occurrences @?=
+            [PackageQualifiedImport]
+          map (diagnosticSource . unsupportedVocabularyDiagnostic)
+            occurrences @?= [Just modulePath]
       , testCase "explicit files accept no modules and order rating warnings" $
           do
             environmentDirectory <- getDataFileName "exference/environment"
@@ -5248,6 +5423,79 @@ tests = testGroup "Exference"
               , KindedInstanceBinder
               )
             ]
+      , testCase "default type-operator chains fail at their complete span" $ do
+          occurrences <- unsupportedFromSource $ unlines
+            [ "module DefaultTypeFixity where"
+            , "data A = A"
+            , "data B = B"
+            , "data C = C"
+            , "data a :<: b = Less"
+            , "data a :>: b = Greater"
+            , "ambiguous :: A :<: B :>: C"
+            ]
+          case occurrences of
+            [occurrence] -> do
+              unsupportedVocabularyForm occurrence @?=
+                UnparenthesizedTypeOperatorChain
+              let value = unsupportedVocabularyDiagnostic occurrence
+              diagnosticSpan value @?= Just (validSourceSpan 7 14 7 27)
+              diagnosticMessage value @?=
+                "unsupported source vocabulary: "
+                  ++ "unparenthesized type-operator chain"
+            _ -> fail $ "expected one type-operator occurrence, got "
+              ++ show occurrences
+      , testCase "opposing local type fixities cannot select a grouping" $
+          forM_
+            [ ("infixl 6 :<:", "infixr 5 :>:")
+            , ("infixr 5 :<:", "infixl 6 :>:")
+            ] $ \(leftFixity, rightFixity) -> do
+              occurrences <- unsupportedFromSource $ unlines
+                [ "module LocalTypeFixity where"
+                , "data A = A"
+                , "data B = B"
+                , "data C = C"
+                , "data a :<: b = Less"
+                , "data a :>: b = Greater"
+                , leftFixity
+                , rightFixity
+                , "ambiguous :: A :<: B :>: C"
+                ]
+              map unsupportedVocabularyForm occurrences @?=
+                [UnparenthesizedTypeOperatorChain]
+      , testCase "explicit type-operator groupings and one application load" $
+          do
+            environment <- expectSourceEnvironment
+              [ ("ParenthesizedTypeFixity.hs", unlines
+                  [ "module ParenthesizedTypeFixity where"
+                  , "data A = A"
+                  , "data B = B"
+                  , "data C = C"
+                  , "data a :<: b = Less"
+                  , "data a :>: b = Greater"
+                  , "infixl 6 :<:"
+                  , "infixr 5 :>:"
+                  , "single :: A :<: B"
+                  , "leftGrouped :: (A :<: B) :>: C"
+                  , "rightGrouped :: A :<: (B :>: C)"
+                  ])
+              ]
+            let local occurrence =
+                  validQualifiedName ["ParenthesizedTypeFixity"] occurrence
+                applied occurrence arguments =
+                  SharedType.applyTypeArguments
+                    (TypeCons $ local occurrence) arguments
+                a = TypeCons $ local "A"
+                b = TypeCons $ local "B"
+                c = TypeCons $ local "C"
+                left = applied ":<:" [a, b]
+                right = applied ":>:" [b, c]
+                resultOf occurrence = functionResult
+                  <$> sourceFunctionNamed environment (local occurrence)
+            resultOf "single" >>= (@?= left)
+            resultOf "leftGrouped" >>=
+              (@?= applied ":>:" [left, c])
+            resultOf "rightGrouped" >>=
+              (@?= applied ":<:" [a, right])
       , testCase "declaration vocabulary retains source order" $ do
           occurrences <- unsupportedFromSourceWith [HSE.PatternSynonyms]
             $ unlines
@@ -6099,7 +6347,7 @@ tests = testGroup "Exference"
       , testCase "checked recursion spans source modules" $
           withTemporaryFile (unlines
             [ "module MutualA where"
-            , "import MutualB (B)"
+            , "import {-# SOURCE #-} MutualB (B)"
             , "data A = MakeA B"
             ]) $ \firstPath ->
           withTemporaryFile (unlines
@@ -6122,7 +6370,8 @@ tests = testGroup "Exference"
                     ]
               -- The compatibility extractor still processes module-local
               -- batches, so this also proves the checked projection no longer
-              -- trusts those preliminary bits.
+              -- trusts those preliminary bits. The SOURCE edge makes the
+              -- mutually recursive declaration graph a valid module graph.
               mutualFlags parsed @?= [False, False]
               checked <- case checkSourceEnvironment parsed of
                 Left failure -> fail $ "unexpected sealing failure: "
@@ -6413,6 +6662,18 @@ tests = testGroup "Exference"
                 ("missing constraint-class diagnostic: " ++ show messages)
                 $ "unknown constraint class 'External.Constraint' used in the binding Warnings.constrained"
                     `elem` messages
+      , testCase "loader accepts infix classes at every constraint site" $ do
+          withTemporaryFile (unlines
+            [ "module OperatorClasses where"
+            , "class left :== right"
+            , "class (left :== right) => Child left right"
+            , "instance (left :== right) => Child left right"
+            , "constrained :: (left :== right) => left -> right"
+            ]) $ \modulePath -> do
+              (result, _) <- runLoad $ parseModules
+                [(haskellSrcExtsParseMode modulePath, modulePath)]
+              _ <- expectRight result
+              pure ()
       , testCase "loader retains constraints nested in constraint arguments" $ do
           withTemporaryFile (unlines
             [ "module Warnings where"
@@ -6644,6 +6905,21 @@ tests = testGroup "Exference"
                     (TypeArrow (TypeVar 0) (TypeVar 0)), _) ->
               className @?= name "Eq"
             Right result -> fail $ "unexpected elaboration: " ++ show result
+      , testCase "infix class constraints match their prefix form" $ do
+          infixResult <- expectRight
+            $ parseTypePure "(left :== right) => left -> right"
+          prefixResult <- expectRight
+            $ parseTypePure "((:==) left right) => left -> right"
+          infixResult @?= prefixResult
+          case infixResult of
+            ( TypeForall []
+                [HsConstraint className [TypeVar 0, TypeVar 1]]
+                (TypeArrow (TypeVar 0) (TypeVar 1))
+              , hints
+              ) -> do
+                className @?= name ":=="
+                hints @?= Map.fromList [("left", 0), ("right", 1)]
+            result -> fail $ "unexpected infix constraint: " ++ show result
       , testCase "infix type operators share prefix elaboration and aliases" $ do
           let operatorName = validQualifiedName ["TypeOwner"] ":*:"
               baseResolver = legacyTypeResolver Map.empty [operatorName]

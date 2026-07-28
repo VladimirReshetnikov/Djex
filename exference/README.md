@@ -458,7 +458,8 @@ named in the CLI, and `--short` now ranks by structural generated-expression
 size rather than rendered identifier length. Recoverable loader and session
 warnings are also written to stderr at every verbosity; informational loading
 summaries remain quiet by default and retain their historical stdout output
-under `--verbose`.
+under `--verbose`. Warnings accumulated before a later fatal inventory check
+remain visible instead of being discarded with the unusable environment.
 
 Exference's implicit instance variables become explicit binders at that shared
 boundary. Reverse lowering accepts exactly the free flexible variables of the

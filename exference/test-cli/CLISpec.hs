@@ -40,6 +40,8 @@ main = defaultMain $ testGroup "Exference CLI integration"
       testRecursionPolicy
   , testCase "loader warnings are visible without verbose mode"
       testLoaderWarningVisibility
+  , testCase "loader warnings survive fatal environment validation"
+      testLoaderWarningsBeforeFatal
   , testCase "session warnings are visible without verbose mode"
       testSessionWarningVisibility
   , testCase "missing environment directories fail closed" testMissingEnvironment
@@ -265,6 +267,28 @@ testLoaderWarningVisibility =
       $ not $ "warning: could not parse rating file:" `isInfixOf` output
     assertBool "informational loader summaries remain opt-in"
       $ not $ "environment info:" `isInfixOf` output
+
+testLoaderWarningsBeforeFatal :: Assertion
+testLoaderWarningsBeforeFatal =
+  withTemporaryEnvironment $ \environmentDirectory -> do
+    let ratingPath = environmentDirectory ++ "/Broken.ratings"
+    writeFile (environmentDirectory ++ "/Broken.hs") $ unlines
+      [ "module Broken where"
+      , "data T = MkT"
+      , "bad :: T T"
+      ]
+    writeFile ratingPath "Broken.bad not-a-finite-number"
+
+    (output, errors) <- runExferenceFailure
+      ["--envdir", environmentDirectory, "a -> a"]
+    assertContainsPath "a warning accumulated before validation remains visible"
+      (ratingPath ++ ": warning: could not parse rating file:") errors
+    assertEqual "the warning preceding a fatal load is emitted exactly once" 1
+      $ countOccurrences "warning: could not parse rating file:" errors
+    assertContains "the later fatal inventory diagnostic remains visible"
+      "error [EXF_SOURCE_INVENTORY]:" errors
+    assertBool "a fatally invalid environment cannot enter synthesis"
+      $ not $ "\\a -> a" `isInfixOf` output
 
 testSessionWarningVisibility :: Assertion
 testSessionWarningVisibility =

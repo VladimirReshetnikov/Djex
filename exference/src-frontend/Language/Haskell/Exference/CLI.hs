@@ -190,13 +190,16 @@ run flags inputs = do
     putStrLn $ "reading environment from " ++ environmentPath
   LoadReport environmentResult loaderDiagnostics <-
     environmentFromPath environmentPath
+  -- A loader can accumulate useful warnings before final inventory
+  -- validation fails. Emit them in production order even when the command
+  -- cannot continue, matching the merged frontend's report contract.
+  forM_ loaderDiagnostics $ emitLoadDiagnostic verbosity "environment"
   checkedEnvironment <- case environmentResult of
     Left failure -> fatal $ intercalate "\n"
       $ "could not load source environment:"
       : map renderDiagnostic
           (NonEmpty.toList $ environmentLoadErrorDiagnostics failure)
     Right value -> pure value
-  forM_ loaderDiagnostics $ emitLoadDiagnostic verbosity "environment"
   let sourceEnvironment = checkedSourceProjection checkedEnvironment
 
   policy <- either

@@ -49,12 +49,22 @@ derived projections of the shared authorities, not alternative source models.
 | `Language.Haskell.Synthesis.Kind` | Proper types, kind variables, and kind arrows. |
 | `Language.Haskell.Synthesis.Constraint` | Nominal class names applied to backend-neutral type arguments, with shared namespace validation and rendering. |
 | `Language.Haskell.Synthesis.Type` | The common variable/constructor/application/function/tuple/forall tree; canonicalization, validation, free-variable and binder queries, spines, and capture-avoiding substitution. |
+| `Language.Haskell.Synthesis.TypeAtom` | Opaque rank-N atoms with retained source structure, cached lexical alpha-normal identity, free-variable queries, and checked capture-avoiding mapping and substitution. |
 | `Language.Haskell.Synthesis.TypeRender` | Haskell-like rendering of the shared type tree and constraints with caller-supplied variable spellings and optional shared qualification policy. The original entry points remain fully qualified. |
 | `Language.Haskell.Synthesis.Declaration` | Synonym, datatype, abstract type, value, class, and instance declarations plus declaration-local validation and recursion analysis. |
 
 `Type` is the native source tree used by both checked adapters. Exference's
 historical `HsType` and constraint names are compatibility aliases and patterns;
 Djinn converts its historical raw syntax at its compatibility boundary.
+`TypeAtom` is the common operational boundary for a non-vacuous explicit
+`forall` reached below the prenex query prefix. Its key records binders by
+lexical scope and position, not by source spelling, while free variables remain
+nominal. Consequently Church encodings such as
+`forall result. (item -> result -> result) -> result -> result` compare equal
+after a consistent binder rename, including when stored inside a list, without
+granting either backend a higher-rank inference rule. The original type tree is
+retained separately so rendering and diagnostics do not expose the normalized
+key.
 
 ### Checked environments and elaboration
 

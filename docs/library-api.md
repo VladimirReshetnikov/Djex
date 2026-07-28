@@ -201,7 +201,17 @@ prefix as well as the textual contextual grammar. Explicit
 are then lowered capture-safely to Djinn's implicit monotype variables. The
 selected session validates every combined constraint against its class table
 and checks the goal and class arguments in one kind scope. Quantification below
-that prefix remains unsupported.
+that prefix is retained as a shared `TypeAtom`: Djinn treats it as one
+propositional atom and compares it by lexical alpha-equivalence without opening
+its context or body. Ordinary enclosing applications remain structural, so
+impredicative arguments are supported.
+
+Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
+representation. A sealed atom retains normalized source syntax, a cached
+alpha-normal key, and capture-avoiding free-variable substitution. Bound
+variables are keyed by lexical scope and binder position; free identities are
+not renamed away. This is intentionally an inert transport/equality feature,
+not rank-N inference or subsumption.
 
 Validated contexts do not contribute methods to proof search. This is the
 sound subset supported by Djinn's monomorphic propositional calculus: a query
@@ -316,6 +326,22 @@ Import the explicit source boundary in addition to the neutral adapter:
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.HaskellSrc
 ```
+
+Applications that compare engines should parse query text through the neutral
+source module instead of invoking backend parsers twice:
+
+```haskell
+import Language.Haskell.Djex.HaskellSrc
+```
+
+`parseSourceType` accepts any checked shared `Inventory`; its scoped variant
+also accepts the GHCi-style `ExferenceQueryScope` retained for compatibility.
+Both return `ParsedSourceType`, whose semantic field is a shared
+`Type (Variable Int)` and whose variable spellings and source location are
+detached metadata. `mkExferenceRequestWithCheckedTargetFromParsed` seals the
+Exference projection. Djinn clients can map variable identities and nominal
+names structurally, then call `mkDjinnRequest`, exactly as the unified REPL
+does.
 
 `loadExferenceSession directory` parses an explicit directory's Haskell modules
 and ratings, validates the complete shared inventory, and returns an

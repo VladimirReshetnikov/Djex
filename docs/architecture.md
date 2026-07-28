@@ -158,11 +158,13 @@ one private result-presentation operation, so selection, validation, rendering,
 residual constraints, evidence, truncation notices, and diagnostics cannot
 silently acquire two frontend interpretations.
 
-The REPL is a coordinator over two sessions, not a third synthesis engine and
-not a mutable union environment:
+The REPL is a coordinator over one source parser and two sessions, not a third
+synthesis engine and not a mutable union environment:
 
 ```text
 REPL state
+  |-- Djex source query parser
+  |     `-- one resolved, kind-checked shared Type plus source metadata
   |-- Djinn runtime
   |     |-- immutable standard-session fallback and axiom policy
   |     `-- Maybe checked projection of the current prompt scope
@@ -179,12 +181,24 @@ REPL state
   `-- active script-inclusion stack
 ```
 
-Switching the active backend changes routing only. Both-mode invokes the
-checked parsers and runners independently, labels each result, and continues to
-the second backend when the first reports a diagnostic. This preserves the
-different environment variable types, type grammars, class semantics, search
-controls, and evidence described below. No cross-backend cache or unchecked
-conversion is introduced by sharing a prompt.
+Switching the active backend changes routing only. When a source workspace is
+available, every mode parses, resolves, expands synonyms, and kind-checks the
+query once through `Language.Haskell.Djex.HaskellSrc`. The checked shared type
+is then projected structurally into Djinn's prompt vocabulary and Exference's
+tagged variable vocabulary. Both-mode labels each result and continues to the
+second backend when the first backend's lowering or search reports a
+diagnostic. A common parse or kind error is reported once. The historical
+backend parsers remain the compatibility fallback when the shared source
+runtime, or a requested Djinn scope projection, is unavailable.
+
+The two search projections share `TypeAtom` for quantified subtrees. Its
+retained source tree supports rendering and capture-avoiding substitution of
+free variables; its cached lexical alpha key owns equality and ordering.
+Binders use scope and declaration position, so spelling is irrelevant while
+reordering binders or changing a free variable is significant. Engines never
+decompose this atom. Applications, tuples, functions, and nominal constructors
+outside it retain their ordinary structure, which permits impredicative values
+such as `[(forall a. a -> a)]` without adding higher-rank subsumption.
 
 The Exference runtime is deliberately richer than a bare session. Source
 targets, ratings, prompt scope, and command policy are not recoverable from its

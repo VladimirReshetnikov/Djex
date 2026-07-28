@@ -13,8 +13,9 @@ claim of command-for-command compatibility.
 Djex is nevertheless not a drop-in GHCi evaluator. A bare line is a type that
 Djex should inhabit, not a Haskell expression to evaluate. The synthesis
 workspace reads type, data, class, instance, and signature information without
-compiling function bodies, and the two synthesis engines retain different
-parsers and search semantics. `:type` and `:kind` inspect that structural
+compiling function bodies. Loaded-workspace synthesis queries are parsed once
+into Djex's shared type tree; the two engines retain different lowering and
+search semantics. `:type` and `:kind` inspect that structural
 workspace without invoking synthesis or executing code. The deliberately
 explicit `:eval EXPRESSION` command is a separate boundary: it invokes the real
 GHC API and may compile and execute loaded Haskell code.
@@ -107,16 +108,18 @@ Backend commands distinguish persistent selection from one-query routing:
 Entering `:` repeats the last type with the backend selection recorded for
 that query; current rendering and search settings are used for the repeat.
 
-Both engines see the same loaded workspace. Exference parses its Haskell type
-grammar against the loaded source workspace and prompt module context, which
-control unqualified source names and the declarations available to its
-search. Djinn tracks the same module scope through a checked projection into
-its own declaration grammar (see
+Both engines see the same loaded workspace and the same parsed query. Djex
+parses the type once against the loaded source inventory and prompt module
+context, which control unqualified source names and the declarations available
+to search. Exference consumes that shared type directly. Djinn receives a
+structural projection whose constructor and class names use its checked prompt
+scope (see
 [the Djinn scope projection](#the-djinn-scope-projection)), so a datatype
 loaded with `:load` or exposed with `:module` is available to both backends.
-The engines still parse independently — Djinn's contextual type grammar has
-no qualified names, so a spelling can remain valid for only one backend or
-mean something supported by only one search engine.
+The historical backend parsers remain available to standalone compatibility
+clients and as a recovery path when the source runtime or requested Djinn
+projection is unavailable, but are not a source of disagreement during the
+normal loaded-workspace path.
 
 Both engines lower class obligations to the same shared
 `Constraint (Type variable)` representation, but a backend name still selects
@@ -128,6 +131,37 @@ whereas `Monad m => a -> m a` does not receive `return` as an implicit proof
 premise. Invalid or ill-kinded Djinn contexts are diagnosed; they are not
 silently discarded.
 
+### Rank-N and impredicative types
+
+The shared parser enables `RankNTypes` and `ImpredicativeTypes`. Quantification
+may therefore occur below arrows and type constructors, including a list of
+Church booleans:
+
+```haskell
+[(forall result. result -> result -> result)]
+```
+
+Only the leading quantifiers of the query itself are opened as ordinary search
+variables. Every nested `forall` is a shared opaque type atom: both engines can
+carry it through constructors, arrows, declarations, equality, substitution,
+and rendering, but neither engine looks inside it or applies higher-rank
+subsumption. For example, the Church-list encoding can be transported as a
+value even though search does not derive its eliminator laws:
+
+```haskell
+forall item. (forall result. (item -> result -> result) -> result -> result)
+          -> (forall answer. (item -> answer -> answer) -> answer -> answer)
+```
+
+Opaque atoms compare modulo lexical alpha-renaming. The two inner Church-list
+types above are therefore equal despite `result` becoming `answer`. Binder
+position, scope, and free-variable identity remain significant, so shadowing
+and impredicative wrappers cannot accidentally capture or conflate variables.
+Rendering chooses fresh binder spellings when a source hint would capture a
+free name. This is intentionally representation support rather than a new
+inference rule: higher-rank instantiation, subsumption, and type application
+are still outside both engines.
+
 In `both` mode Djex prints labelled sections in a deterministic order:
 
 ```text
@@ -137,12 +171,13 @@ In `both` mode Djex prints labelled sections in a deterministic order:
 ...
 ```
 
-Each backend parses and runs independently. A diagnostic from Djinn does not
-prevent Exference from running, or vice versa. The sessions share the module
-scope, but not type-variable identities, caches, or class-resolution policy;
-each seals its own independent projection of the loaded declarations. In
-particular, an empty Exference result is not upgraded to Djinn's proof-backed
-non-inhabitation evidence.
+The shared query is parsed and kind-checked once, so a source diagnostic is
+printed once. Backend lowering and search still run independently: a Djinn
+diagnostic does not prevent Exference from running, or vice versa. The sessions
+share the module scope, but not caches or class-resolution policy; each seals
+its own independent projection of the loaded declarations. In particular, an
+empty Exference result is not upgraded to Djinn's proof-backed non-inhabitation
+evidence.
 
 ## Commands
 
@@ -711,12 +746,12 @@ so the projection degrades rather than fails:
 - Instance declarations and classes with superclasses are omitted. Ordinary
   classes without superclasses remain available for validating Djinn query
   contexts.
-- A declaration with an explicit forall or residual constraints is omitted
-  from Djinn's axiom projection. Stripping a value's context and admitting it
-  as an unconditional proof premise would be unsound. This projection rule is
-  separate from the query boundary: a Djinn query may carry a prenex context,
-  and the checked library adapter also accepts leading `ForallType` binders,
-  provided the synthesized inhabitant is dictionary-independent.
+- A value whose leading `forall` chain retains class constraints is omitted
+  from Djinn's axiom projection. Stripping that context and admitting the value
+  as an unconditional proof premise would be unsound. Context-free leading
+  quantifiers are implicitized as Djinn assumptions, and nested rank-N atoms
+  remain intact. A Djinn query may also carry a prenex context, provided the
+  synthesized inhabitant is dictionary-independent.
 - Type constructors referenced from signatures but not declared in scope are
   stubbed as abstract types. A kind already inferred by the shared inventory is
   authoritative; an arity-derived kind is only the fallback for a genuinely

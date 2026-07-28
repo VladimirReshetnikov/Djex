@@ -159,12 +159,30 @@ The default prompt is `djex[djinn]>`. Entering a bare type synthesizes with
 the active backend selection; `:backend` changes that selection, while
 `:djinn TYPE`, `:exference TYPE`, and `:compare TYPE` select a backend for one
 query. Both-mode labels each engine's independent output and still runs the
-other engine if one rejects the type or fails. This resembles GHCi's colon
-commands, startup files, history, completion, and `:{`/`:}` input. Bare input
-is deliberately still a requested result type, not a Haskell expression, and
-each backend retains its own type grammar and semantics; the explicit `:eval`
-command is the separate boundary that compiles and executes an expression with
-real GHC.
+other engine if one rejects the checked type or fails. With a loaded source
+workspace, Djex parses, resolves, expands, and kind-checks the query once, then
+projects that shared type structurally into both engines; backend search and
+evidence semantics remain independent. This resembles GHCi's colon commands,
+startup files, history, completion, and `:{`/`:}` input. Bare input is
+deliberately still a requested result type, not a Haskell expression; the
+explicit `:eval` command is the separate boundary that compiles and executes
+an expression with real GHC.
+
+Initial rank-N support treats every nested explicitly quantified subtree as an
+inert atom. Alpha-renamed binders compare by lexical scope and declaration
+position, while free variables remain significant. Ordinary structure outside
+the atom is retained, including impredicative applications such as lists of
+Church booleans:
+
+```text
+:compare forall item. (forall result. (item -> result -> result) -> result -> result) -> (forall answer. (item -> answer -> answer) -> answer -> answer)
+:compare [(forall result. result -> result -> result)] -> [(forall answer. answer -> answer -> answer)]
+```
+
+This adds neither higher-rank subsumption nor inference inside a quantified
+body. Only the query's leading prenex scheme is opened by an engine. The
+examples use the same Church Boolean and Church List shapes as the
+[church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs).
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
 inspection command. It infers against term signatures in the current loaded
@@ -364,16 +382,17 @@ sealing a complete neutral `Environment`; only the historical REPL imports the
 private raw declaration snapshot, edit, and instance-method helpers.
 
 Both `DjinnRequest` and `DjinnCandidate` expose
-`DjinnType = Type DjinnTypeVariable`. `mkDjinnRequest` checks and canonicalizes
-prenex signatures, validates each context class header without entering its
+`DjinnType = Type DjinnTypeVariable`. `mkDjinnRequest` performs a bounded
+structural preflight, validates each context class header without entering its
 argument spine, and seals an opaque shared execution plan while retaining the
 caller's exact neutral query; `djinnRequestQuery` recovers that stable source
-view. Execution resolves each class in the selected session and checks its
-finite arity before traversing any argument spine. It then capture-safely lowers
+view. Execution resolves each class in the selected session and checks every
+finite arity, including contexts nested under a `forall`, before complete
+canonicalization traverses an argument spine. It then capture-safely lowers
 leading `ForallType` binders and normalizes the finite arguments, so known
 cyclic spines terminate without a global class-width limit. The goal and every
 constraint argument share one kind scope and synonym environment before the
-monomorphic goal enters formula compilation.
+operational goal enters formula compilation.
 
 Djinn deliberately does not add context methods to the proof environment.
 Treating a polymorphic method as one monomorphic premise made inhabitation
@@ -585,9 +604,9 @@ capability request, so an unknown excluded name is an intentional no-op; this
 also lets command defaults name optional recursion helpers without requiring
 every environment to define them. A rating override claims to change search,
 so a non-finite rating or a name unavailable after exclusion and capability
-filtering is a fatal structured diagnostic. Unsupported rank-N
-introduction/elimination and recursive-data elimination capabilities remain
-visible as structured omissions and warning diagnostics instead of
+filtering is a fatal structured diagnostic. Rank-N introduction and
+elimination signatures remain searchable through opaque atoms. Recursive-data
+elimination is still a structured omission and warning rather than silently
 disappearing per query; omission order follows introduction order and then
 elimination order.
 
@@ -614,6 +633,11 @@ explicit source boundary from the same dependency:
 import Language.Haskell.Djex.Exference
 import Language.Haskell.Djex.Exference.HaskellSrc
 ```
+
+Frontends which want to parse once and choose or compare engines import
+`Language.Haskell.Djex.HaskellSrc`. Its `ParsedSourceType` retains one shared
+semantic type plus detached spelling and source-location metadata; the legacy
+Exference parser functions delegate to this boundary.
 
 ### Generated output and rendering
 

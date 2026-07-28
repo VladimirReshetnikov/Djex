@@ -21,6 +21,8 @@ main = defaultMain $ testGroup "Djinn CLI integration"
     [ testCase "EOF exits a successful session" testEof
     , testCase "startup settings follow the library query defaults"
         testDefaultSettings
+    , testCase "clear restores the standard session and settings"
+        testClear
     , testCase "verbose help renders the package version"
         testVerboseHelpVersion
     , testCase "explicit RTS tuning reaches the application" testRtsOptions
@@ -72,6 +74,23 @@ testDefaultSettings = do
         ("cutoff=" ++ show (optionCutoff defaults)) output
     assertContains "choice budget follows the public default"
         ("budget=" ++ show defaultBudget) output
+
+testClear :: Assertion
+testClear = do
+    output <- runSession
+        [ ":set +multi"
+        , "temporary :: a"
+        , ":clear"
+        , ":help"
+        , ":environment"
+        , ":quit"
+        ]
+    assertContains "clear should restore the default alternatives setting"
+        "-multi" output
+    assertBool "clear should discard user declarations" $
+        not $ "temporary :: a" `isInfixOf` output
+    assertContains "clear should restore the standard declarations"
+        "data Bool = False | True" output
 
 testVerboseHelpVersion :: Assertion
 testVerboseHelpVersion = do

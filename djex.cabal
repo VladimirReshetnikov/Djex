@@ -291,7 +291,7 @@ Test-Suite synthesis-tests
 -- The one library exposes the historical Djinn facade, its core API, and the
 -- checked adapter together.
 Test-Suite djinn-frontend-api-tests
-  import:         tasty-hunit-test
+  import:         tasty-hunit-test, directory-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: djinn/test-frontend-api

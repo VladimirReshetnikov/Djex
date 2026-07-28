@@ -1664,7 +1664,16 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
             -- already gives its right operand a disjoint tagged namespace, so
             -- reserving persistent flexible IDs here could only introduce a
             -- spurious identifier-space truncation.
-            in eliminateEmpty <$ unifyRight vtResult matchParam
+            --
+            -- Empty elimination is one valid use of the value, but it is not
+            -- the only one. In particular, the shipped declaration corpus
+            -- represents abstract primitive types such as Int with no visible
+            -- constructors. Committing to @case x of {}@ here used to discard
+            -- the sibling in which @x@ is passed to another scoped provider.
+            -- Retain both proof branches just as the search does for other
+            -- alternative term constructions.
+            in (eliminateEmpty <|> defaultHandleRest)
+              <$ unifyRight vtResult matchParam
           mapFunc (DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] False) =
             fmap mapFunc1 $ unifyRight vtResult matchParam

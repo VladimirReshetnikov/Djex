@@ -174,6 +174,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testDjinnSelection
   , testCase "Exference renders through the installed environment"
       testExferenceRendering
+  , testCase "Exference keeps abstract arguments available to providers"
+      testExferenceAbstractProviderUse
   , testCase "Exference accepts an empty checked environment"
       testEmptyExferenceEnvironment
   , testCase "Exference recursion helpers require explicit command opt-in"
@@ -2969,6 +2971,20 @@ testExferenceRendering = do
     , "a -> a"
     ]
   assertEqual "Exference expression" "\\a -> a\n" expression
+
+testExferenceAbstractProviderUse :: Assertion
+testExferenceAbstractProviderUse = forM_
+    [ "(Int -> Int) -> Int -> Int"
+    , "(forall a. a -> a) -> Int -> Int"
+    ] $ \query -> do
+      expression <- assertSuccess
+        [ "exference", "--select", "first"
+        , "--render", "expression"
+        , query
+        ]
+      assertContains
+        ("provider became unusable after introducing Int for " ++ query)
+        "-> f" expression
 
 testEmptyExferenceEnvironment :: Assertion
 testEmptyExferenceEnvironment = withTemporaryEnvironment [] $ \directory -> do

@@ -241,11 +241,36 @@ tests = testGroup "Exference private engine boundaries"
             { E.input_goalType = TypeArrow (empty integer) integer
             , E.input_envDeconsS = [deconstructor]
             }
-      chunk <- lastCapacityChunk
-        (IdentifierCapacities 100 0 100) input
-      E.chunkStatus chunk @?= E.SearchStatus E.SearchExhausted 0 0
+      chunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 0 100) input
+      finalChunk <- lastChunk "empty elimination" chunks
+      E.chunkStatus finalChunk @?= E.SearchStatus E.SearchExhausted 0 0
       assertBool "empty elimination required a non-escaping flexible ID"
-        $ not $ null $ E.chunkElements chunk
+        $ not $ null $ concatMap E.chunkElements chunks
+  , testCase "empty deconstructors do not suppress provider use" $ do
+      let integer = TypeCons $ name "Int"
+          monomorphic = TypeArrow integer integer
+          polymorphic = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          emptyInteger = DeconstructorBinding integer [] False
+          assertProviderRemainsUsable provider = do
+            let input = identityInput
+                  { E.input_goalType = TypeArrow provider
+                      $ TypeArrow integer integer
+                  , E.input_envDeconsS = [emptyInteger]
+                  , E.input_maxSteps = 1024
+                  }
+            chunks <- expectRight
+              $ findExpressionsWithIdentifierCapacitiesEither
+                  (IdentifierCapacities 100 100 100) input
+            -- With unused parameters forbidden, every surviving term must use
+            -- both the provider and the Int argument. The eager empty-case
+            -- branch alone therefore cannot make this assertion pass.
+            assertBool
+              ("constructorless Int suppressed provider " ++ show provider)
+              $ not $ null $ concatMap E.chunkElements chunks
+      mapM_ assertProviderRemainsUsable [monomorphic, polymorphic]
   , testCase "scope identifier collisions are operational truncations" $ do
       chunk <- lastCapacityChunk
         (IdentifierCapacities 100 100 1) identityInput

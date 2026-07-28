@@ -22,10 +22,12 @@ module Language.Haskell.Djex.Djinn.Internal.Session
   , declareDjinnDeclaration
   , removeDjinnDeclaration
   , resolveDjinnInstanceMethods
+  , sessionClassArity
   , sessionPreparedEnvironment
   ) where
 
 import Data.Bifunctor (first)
+import qualified Data.Map.Strict as Map
 import Data.Void (Void)
 
 import Djinn.Core
@@ -45,8 +47,14 @@ import Language.Haskell.Synthesis.Diagnostic
   )
 import Language.Haskell.Synthesis.Environment (Environment)
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
-import Language.Haskell.Synthesis.Inventory (Inventory)
+import Language.Haskell.Synthesis.Inventory
+  ( Inventory
+  , inventoryKindAssumptions
+  )
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import Language.Haskell.Synthesis.KindInference
+  ( KindAssumptions (classParameterKinds) )
+import Language.Haskell.Synthesis.Name (Name)
 
 -- | The neutral declaration environment accepted by the Djinn adapter.
 -- Djinn uses textual source variables, while explicit declaration kinds are
@@ -185,6 +193,15 @@ resolveDjinnInstanceMethods
 resolveDjinnInstanceMethods (DjinnSession prepared) prerequisites target =
   first instanceResolutionFailure
     $ resolvePreparedInstanceMethods prepared prerequisites target
+
+-- | Look up the exact class width retained by the authoritative neutral
+-- inventory.  Exference derives the same query bound from the same shared
+-- kind assumptions; both adapters can therefore reject a cyclic or
+-- over-applied constraint spine before entering its elements.
+sessionClassArity :: DjinnSession -> Name -> Maybe Int
+sessionClassArity session name = length <$> Map.lookup name
+  (classParameterKinds $ inventoryKindAssumptions
+    $ djinnSessionInventory session)
 
 -- | Recover the prepared core projection for the facade's query worker. This
 -- accessor stays in the private module and is never re-exported by the stable

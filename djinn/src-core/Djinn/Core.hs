@@ -20,7 +20,7 @@ module Djinn.Core (
     -- * Names, types, and kinds
     HSymbol, HType, HKind, kStar, kArrow,
     parseHType, parseContextualHType, parseHKind, SynthesisTypeError(..),
-    normalizeSynthesisType,
+    normalizeSynthesisSignature, normalizeSynthesisType,
     toSynthesisType, fromSynthesisType,
     -- * Declarations
     Constructor, Declaration(..), SynthesisDeclaration,
@@ -258,8 +258,8 @@ requireName what valid name
 
 -- | A class constraint represented by the backend-neutral synthesis
 -- vocabulary.  Djinn retains ownership of class lookup, kind checking, and
--- the interpretation of methods as premises; only the finite nominal syntax
--- is shared with Exference.
+-- instance-generation policy; its ordinary inhabitation queries treat the
+-- finite nominal syntax as validation obligations rather than proof premises.
 type Context = Constraint HType
 
 -- | Build a context from Djinn's historical string class name.  Class
@@ -436,10 +436,7 @@ resolveSynthesisQueryContexts
     :: PreparedEnvironment
     -> (String, HKind, SharedType.Type HSymbol)
     -> [SynthesisContext]
-    -> Either DjinnQueryError
-        ( SharedType.Type HSymbol
-        , [[(HSymbol, SharedType.Type HSymbol)]]
-        )
+    -> Either DjinnQueryError (SharedType.Type HSymbol)
 resolveSynthesisQueryContexts prepared goalObligation contexts = do
     resolved <- queryFailure $
         mapM (lookupResolvedContext prepared) contexts
@@ -450,35 +447,13 @@ resolveSynthesisQueryContexts prepared goalObligation contexts = do
         [(kind, source) | (_, kind, source) <- obligations]
     case elaborated of
         [] -> internalQueryFailure "query elaboration dropped its goal"
-        elaboratedGoal : elaboratedArguments -> do
-            elaboratedContexts <-
-                attachElaboratedSynthesisArguments
-                    resolved elaboratedArguments
-            methods <- first DjinnInternalQueryFailure $
-                mapM (instantiateSynthesisContext prepared)
-                    elaboratedContexts
-            return (elaboratedGoal, methods)
+        elaboratedGoal : elaboratedArguments
+            | length elaboratedArguments == length obligations - 1 ->
+                return elaboratedGoal
+            | otherwise -> internalQueryFailure
+                "query elaboration changed the context-argument batch shape"
   where
     queryFailure = first DjinnQueryFailure
-
-attachElaboratedSynthesisArguments
-    :: [ResolvedSynthesisContext]
-    -> [SharedType.Type HSymbol]
-    -> Either DjinnQueryError [ResolvedSynthesisContext]
-attachElaboratedSynthesisArguments [] [] = Right []
-attachElaboratedSynthesisArguments [] _ =
-    internalQueryFailure "query elaboration returned extra context arguments"
-attachElaboratedSynthesisArguments (context : contexts) arguments = do
-    let arity = length $ resolvedParameters context
-        (current, remaining) = splitAt arity arguments
-    if length current /= arity then
-        internalQueryFailure "query elaboration dropped a context argument"
-    else do
-        rest <- attachElaboratedSynthesisArguments contexts remaining
-        let constraint = (resolvedConstraint context) {
-                constraintArguments = current
-                }
-        return (context {resolvedConstraint = constraint} : rest)
 
 synthesisArgumentObligations
     :: ResolvedSynthesisContext
@@ -501,21 +476,6 @@ checkSynthesisKindObligations
 checkSynthesisKindObligations prepared =
     checkKindObligationsWith $
         checkPreparedSynthesisTypesKinds prepared
-
-instantiateSynthesisContext
-    :: PreparedEnvironment
-    -> ResolvedSynthesisContext
-    -> Either String [(HSymbol, SharedType.Type HSymbol)]
-instantiateSynthesisContext prepared context =
-    instantiateContextMethods prepared context
-        (resolvedArguments context) elaborate
-  where
-    elaborate label methodType = case elaboratePreparedSynthesisTypes
-            prepared [(KStar, methodType)] of
-        Right [elaborated] -> Right elaborated
-        Right _ -> Left $
-            label ++ "internal elaboration changed the method batch shape"
-        Left message -> Left $ label ++ message
 
 -- Shared instantiate-and-kind-check step for one resolved context. Each
 -- method's non-class variables are implicitly quantified by that signature,
@@ -849,28 +809,25 @@ inhabitSynthesisResultPreparedChecked
     -> SharedType.Type HSymbol
     -> Either DjinnQueryError DjinnResult
 inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
-    (elaboratedGoal, contextMethods) <-
-        resolveSynthesisQueryContexts prepared
-            ( "goal type " ++ renderSynthesisType goal
-            , KStar
-            , goal
-            )
-            contexts
+    elaboratedGoal <- resolveSynthesisQueryContexts prepared
+        ( "goal type " ++ renderSynthesisType goal
+        , KStar
+        , goal
+        )
+        contexts
     let translate =
             preparedEnvironmentSynthesisFormulaTranslator prepared
         translateType label source =
             first (label ++) $ translate source
-        translateMethod (symbol, source) =
-            (,) (Symbol symbol) `fmap`
-                translateType ("method " ++ prHSymbolOp symbol ++ ": ")
-                    source
-    -- Every shared value above is checked, alias-free, and remains native to
-    -- the prepared inventory through formula compilation.
+    -- Contexts have been checked against the same inventory and kind scope as
+    -- the goal, but their methods are intentionally absent from proof search.
+    -- A class method is polymorphic in its method-local variables; translating
+    -- it to one monomorphic LJT premise made alpha-equivalent signatures
+    -- depend on source spelling. Djinn supports the sound, useful subset in
+    -- which the synthesized term does not require a class method.
     form <- translatorFailure $
         translateType "goal type: " elaboratedGoal
-    methodEnv <- translatorFailure $ concat `fmap`
-        mapM (mapM translateMethod) contextMethods
-    searchPreparedFormula options prepared target form methodEnv
+    searchPreparedFormula options prepared target form
   where
     translatorFailure = first DjinnInternalQueryFailure
 
@@ -908,18 +865,17 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
             "checked raw context projection failed: " ++ show failure
 
 -- Proof search is representation-independent once the checked source query
--- has become a formula and its instantiated context methods have become
--- premises. Both the native and raw entrances meet at this single worker.
+-- has become a formula. Both the native and raw entrances meet at this single
+-- worker; validated class contexts add no premises here.
 searchPreparedFormula
     :: QueryOptions
     -> PreparedEnvironment
     -> SharedGenerated.DefinitionName
     -> Formula
-    -> [(Symbol, Formula)]
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target form methodEnv = do
+searchPreparedFormula options prepared target form = do
     let name = SharedGenerated.definitionSpelling target
-        externalEnv = preparedEnvironmentFunctionPremises prepared ++ methodEnv
+        externalEnv = preparedEnvironmentFunctionPremises prepared
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
         mode = (defaultSearchMode

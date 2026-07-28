@@ -17,8 +17,7 @@ module Language.Haskell.Djex.Djinn.Internal.Request
   , mkDjinnRequest
   , mkDjinnRequestWithProvenance
   , djinnRequestQuery
-  , requestPlanGoal
-  , requestPlanContexts
+  , prepareDjinnRequest
   , withDjinnRequestProvenance
   , validateDjinnQueryType
   , validateDjinnQueryTypeWithProvenance
@@ -27,6 +26,7 @@ module Language.Haskell.Djex.Djinn.Internal.Request
 
 import Data.Bifunctor (first)
 
+import Djinn.Internal.Type (freshPrimedVariable)
 import Djinn.Core
   ( QueryOptions (..)
   , defaultQueryOptions
@@ -35,6 +35,7 @@ import qualified Djinn.Core as Core
 import Language.Haskell.Synthesis.Constraint
   ( Constraint
   , constraintClass
+  , validateKnownConstraintArityWith
   )
 import Language.Haskell.Synthesis.Diagnostic
   ( Diagnostic
@@ -55,12 +56,14 @@ import Language.Haskell.Synthesis.Query
   , cachedQueryCache
   , cachedQueryRequest
   , requestTypeSiteLabel
+  , requestContextualType
   , sealCachedQueryWithProvenance
   , validateRequestTarget
   , withCachedQueryProvenance
   , withRequestProvenance
   )
 import Language.Haskell.Synthesis.Type (Type)
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 -- | Djinn's source-level type-variable identity.
 --
@@ -73,7 +76,7 @@ type DjinnLocal = String
 
 -- | Source types accepted and returned by the stable Djinn adapter.
 -- Checked requests retain this shared representation through kind checking,
--- synonym elaboration, class-method instantiation, and formula compilation.
+-- synonym elaboration, context validation, and formula compilation.
 -- Djinn's historical raw type remains only at compatibility API boundaries.
 type DjinnType = Type DjinnTypeVariable
 
@@ -131,15 +134,63 @@ djinnRequestQuery
   -> QueryRequest DjinnType QueryOptions
 djinnRequestQuery (DjinnRequest query) = cachedQueryRequest query
 
--- | Recover the canonical goal consumed by the private query worker.
-requestPlanGoal :: DjinnRequest -> DjinnType
-requestPlanGoal = plannedGoal . djinnRequestPlan
+-- | Prepare the complete contextual signature against one sealed session.
+-- Known class widths are checked before entering caller-built argument
+-- spines. The explicit request contexts are then inserted beneath every
+-- leading forall in the goal, and those binders are erased to fresh implicit
+-- Djinn variables without conflating shadowed source binders.
+--
+-- The returned contexts are validation obligations only. Djinn deliberately
+-- does not turn class methods into monomorphic proof premises: doing so made
+-- inhabitation depend on method-local variable spellings and claimed a form
+-- of polymorphic method instantiation that the propositional core cannot
+-- represent.
+prepareDjinnRequest
+  :: (Name -> Maybe Int)
+  -> DjinnRequest
+  -> Either Diagnostic ([Constraint DjinnType], DjinnType)
+prepareDjinnRequest lookupClassArity request =
+  first (withDjinnRequestProvenance request) $ do
+    let query = djinnRequestQuery request
+        plan = djinnRequestPlan request
+        contextual = requestContextualType query
+          { requestGoal = plannedGoal plan
+          }
+        (_, combinedContexts, _) =
+          SharedType.splitLeadingForalls contextual
+    -- 'implicitizeLeadingForalls' collects every variable in the signature.
+    -- Bound all context spines first so that collection remains productive
+    -- even for adversarial caller-built cyclic argument lists.
+    mapM_ validateContextWidth combinedContexts
+    implicit <- first signatureLoweringFailure
+      $ fmap fst
+      $ SharedType.implicitizeLeadingForalls
+          (const (Nothing :: Maybe ())) freshVariable mempty contextual
+    let (_, embeddedContexts, body) =
+          SharedType.splitLeadingForalls implicit
+    contexts <- traverse prepareContext embeddedContexts
+    goal <- normalizeMonotype RequestGoal body
+    pure (contexts, goal)
+ where
+  freshVariable reserved variable = Just
+    $ fst $ freshPrimedVariable reserved variable
 
--- | Recover the exact contexts consumed by the private query worker.
--- The core resolves their classes and checks the known arity before entering
--- an argument spine, then normalizes the finite arguments for execution.
-requestPlanContexts :: DjinnRequest -> [Constraint DjinnType]
-requestPlanContexts = requestContexts . djinnRequestQuery
+  validateContextWidth context = do
+    _ <- validateRequestContext context
+    let className = constraintClass context
+    expected <- maybe (Left $ unknownContextClass className) Right
+      $ lookupClassArity className
+    validateKnownConstraintArityWith
+      (const $ Just expected)
+      contextArityFailure
+      context
+
+  prepareContext context = do
+    validateContextWidth context
+    normalized <- traverse
+      (normalizeMonotype RequestContextArgument)
+      context
+    validateRequestContext normalized
 
 -- | Attach a request's sealed provenance to a diagnostic.
 withDjinnRequestProvenance
@@ -186,6 +237,14 @@ normalizeRequestType
   -> Either Diagnostic DjinnType
 normalizeRequestType site = first
   (loweringFailure $ requestTypeSiteLabel site)
+  . Core.normalizeSynthesisSignature
+
+normalizeMonotype
+  :: RequestTypeSite
+  -> DjinnType
+  -> Either Diagnostic DjinnType
+normalizeMonotype site = first
+  (loweringFailure $ requestTypeSiteLabel site)
   . Core.normalizeSynthesisType
 
 -- Constraint is intentionally a more permissive neutral node than Djinn's
@@ -216,3 +275,22 @@ contextLoweringFailure :: String -> Diagnostic
 contextLoweringFailure failure = contextualDiagnostic Error
   "DJEX_DJINN_LOWER" "cannot lower the shared query to Djinn"
   ("context: " ++ failure)
+
+unknownContextClass :: Name -> Diagnostic
+unknownContextClass name = contextualDiagnostic Error
+  "DJEX_DJINN_QUERY" "Djinn rejected the query"
+  ("Class not found: " ++ renderCanonical name)
+
+contextArityFailure :: Name -> Int -> Int -> Diagnostic
+contextArityFailure name expected actual = contextualDiagnostic Error
+  "DJEX_DJINN_QUERY" "Djinn rejected the query"
+  ( "Class " ++ renderCanonical name ++ " expects " ++ show expected
+      ++ " type argument(s), but got " ++ show actual
+  )
+
+signatureLoweringFailure
+  :: SharedType.BinderNormalizationError String ()
+  -> Diagnostic
+signatureLoweringFailure = contextualDiagnostic Error
+  "DJEX_DJINN_LOWER" "cannot lower the shared query to Djinn"
+  . ("signature: " ++) . show

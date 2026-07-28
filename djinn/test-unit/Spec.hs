@@ -520,10 +520,13 @@ testCheckedDjinnSessionRebuilding = do
     classRequest <- expectShownRight $ Djex.mkDjinnRequest classRequestSource
     oldResult <- expectShownRight $ Djex.runDjinnQuery oldClass classRequest
     newResult <- expectShownRight $ Djex.runDjinnQuery newClass classRequest
-    assertEqual "the first sealed class index lost its method"
-        ["oldMethod"] (renderedExpressions oldResult)
-    assertEqual "a fresh session retained another session's class method"
-        ["newMethod"] (renderedExpressions newResult)
+    assertEqual "a class method became an essential proof premise"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch oldResult
+    assertEqual "a rebuilt session changed dictionary-independent search"
+        (SharedQuery.resultEvidence oldResult)
+        (SharedQuery.resultEvidence newResult)
+    assertEqual "an essential class method did not remain uninhabitable"
+        SharedQuery.ProvedUninhabitable $ SharedQuery.resultEvidence oldResult
     case Djex.runDjinnQuery withoutClass classRequest of
       Left failure -> assertBool "an absent class lost its lookup diagnostic"
             $ "Class not found: Selectable" `isInfixOf`
@@ -532,9 +535,6 @@ testCheckedDjinnSessionRebuilding = do
   where
     hasCandidates = not . null . SharedSearch.batchCandidates .
         SharedQuery.resultSearch
-    renderedExpressions = map (either show id
-        . Djex.renderDjinnCandidateExpression SharedGenerated.Unqualified)
-        . SharedSearch.batchCandidates . SharedQuery.resultSearch
 
 -- The library facade must make invalid environments unrepresentable and
 -- report search results honestly.
@@ -700,10 +700,24 @@ testCoreFacade = do
         standardEnvironment [context "Eq" [HTVar "a"]] "reflexive"
         (HTArrow (HTVar "a") (HTCon "Bool"))
     case reportOutcome reflexive of
-        Realized (best : _) ->
-            assertEqual "an Eq context supplies its method, ranked first"
-                "reflexive a = a == a" best
+        Realized candidates -> do
+            assertBool "an irrelevant context produced no inhabitant"
+                $ not $ null candidates
+            assertBool "a class method leaked into dictionary-independent search"
+                $ all (not . isInfixOf "==") candidates
         other -> fail $ "reflexive was not realized: " ++ show other
+    proofEnvironment <- expectRight $ do
+        withProof <- declare (DataType "Proof" [] []) emptyEnvironment
+        declare (ClassDecl "Witness" ["a"]
+            [("witness", HTCon "Proof")]) withProof
+    essentialA <- expectRight $ inhabit defaultQueryOptions proofEnvironment
+        [context "Witness" [HTVar "a"]] "essential" (HTCon "Proof")
+    essentialB <- expectRight $ inhabit defaultQueryOptions proofEnvironment
+        [context "Witness" [HTVar "b"]] "essential" (HTCon "Proof")
+    assertEqual "a type-class method was treated as an essential premise"
+        Unrealizable (reportOutcome essentialA)
+    assertEqual "alpha-renaming a context changed its proof power"
+        (reportOutcome essentialA) (reportOutcome essentialB)
 
 expectRight :: Either String a -> IO a
 expectRight = either fail return

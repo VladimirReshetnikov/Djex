@@ -5,6 +5,7 @@ module Djinn.Internal.Type
   , checkedDjinnTypeVariable
   , djinnTypeConstructorSymbol
   , freshPrimedVariable
+  , normalizeSynthesisSignature
   , normalizeSynthesisType
   , renderSynthesisType
   , toSynthesisType
@@ -14,6 +15,10 @@ module Djinn.Internal.Type
 import qualified Data.Set as Set
 
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
+import Language.Haskell.Synthesis.Constraint
+  ( Constraint (..)
+  , validateConstraintClassName
+  )
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -122,6 +127,45 @@ normalizeSynthesisType source = do
     SharedType.TupleType SharedName.Unboxed elements ->
       Left $ SynthesisUnboxedTupleUnsupported $ length elements
     SharedType.ForallType{} -> Left SynthesisForallUnsupported
+
+-- | Validate a prenex Djinn signature while retaining its leading binders and
+-- class context in the shared representation.  Djinn's proof calculus still
+-- consumes the monotype beneath that prefix; the checked request adapter
+-- erases the binders capture-safely and passes the constraints to the session
+-- for class, arity, and kind validation.
+--
+-- Quantification below an arrow, application, tuple, or constraint argument
+-- remains unsupported.  Keeping that boundary here lets parser-neutral
+-- callers use ordinary Haskell-shaped signatures without weakening the
+-- monotype invariant at formula compilation.
+normalizeSynthesisSignature
+  :: SharedType.Type HSymbol
+  -> Either SynthesisTypeError (SharedType.Type HSymbol)
+normalizeSynthesisSignature = normalizePrefix
+ where
+  normalizePrefix source = case source of
+    SharedType.ForallType binders constraints body -> do
+      validateBinders binders
+      mapM_ validateConstraintHeader constraints
+      SharedType.ForallType binders constraints <$> normalizePrefix body
+    monotype -> normalizeSynthesisType monotype
+
+  validateBinders binders = do
+    mapM_ checkedDjinnTypeVariable binders
+    case SharedCollection.firstDuplicate binders of
+      Just duplicate -> Left $ InvalidSynthesisType
+        $ SharedType.DuplicateForallVariable duplicate
+      Nothing -> Right ()
+
+  -- Do not enter an argument spine here. A programmatic caller may construct
+  -- a cyclic list, and only a sealed session knows the class arity with which
+  -- that list can be inspected productively. Argument types are normalized
+  -- after the bounded arity preflight in the request adapter.
+  validateConstraintHeader (Constraint className _) =
+    either
+      (Left . InvalidSynthesisType . SharedType.InvalidTypeConstraint)
+      Right
+      $ validateConstraintClassName className
 
 -- | Render a checked shared type with Djinn's historical source-like syntax.
 -- Keeping this projection native avoids constructing an 'HType' merely to

@@ -163,12 +163,14 @@ runDjinnQuery
   -> Either Diagnostic DjinnResult
 runDjinnQuery session request = do
   let query = djinnRequestQuery request
+  (contexts, goal) <- Request.prepareDjinnRequest
+    (Session.sessionClassArity session) request
   case Core.inhabitSynthesisResultPrepared
       (requestOptions query)
       (Session.sessionPreparedEnvironment session)
-      (Request.requestPlanContexts request)
+      contexts
       (requestTarget query)
-      (Request.requestPlanGoal request) of
+      goal of
     Left failure -> Left $
       djinnQueryFailure request failure
     Right result -> Right result

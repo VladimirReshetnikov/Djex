@@ -266,8 +266,8 @@ testClassKindEnforcement = do
         not $ "Error: class Independent:" `isInfixOf` output
     assertContains "a well-kinded phantom context still works"
         "good a = a" output
-    assertContains "a higher-kinded context still works"
-        "fine = return" output
+    assertContains "an essential higher-kinded method is not assumed"
+        "fine cannot be realized" output
 
 testDiagnosticRendering :: Assertion
 testDiagnosticRendering = do

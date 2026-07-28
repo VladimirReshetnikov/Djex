@@ -226,6 +226,70 @@ tests = testGroup "Djex facade"
             $ any ("expects 1 type argument(s), but got 2" `isInfixOf`)
             $ diagnosticContext failure
         Right _ -> fail "Djinn accepted a cyclic unary-class argument spine"
+      let embeddedQuery = query
+            { requestGoal = ForallType []
+                [Constraint className arguments]
+                argument
+            , requestContexts = []
+            }
+      embeddedSealed <- expectWithin "embedded Djinn request sealing"
+        $ evaluate $ mkDjinnRequest embeddedQuery
+      embeddedRequest <- expectRight embeddedSealed
+      embeddedResult <- expectWithin "embedded Djinn context arity validation"
+        $ evaluate $ runDjinnQuery session embeddedRequest
+      case embeddedResult of
+        Left failure -> do
+          diagnosticCode failure @?= Just "DJEX_DJINN_QUERY"
+          assertBool "an embedded context lost bounded arity validation"
+            $ any ("expects 1 type argument(s), but got 2" `isInfixOf`)
+            $ diagnosticContext failure
+        Right _ -> fail "Djinn accepted an embedded cyclic class spine"
+  , testCase "accept prenex Djinn constraints without assuming methods" $ do
+      session <- sealDjinnEnvironment standardEnvironment
+      targetName <- expectRight $ mkIdentifier "prenexIdentity"
+      target <- expectRight $ mkDefinitionName targetName
+      eqName <- expectRight $ mkIdentifier "Eq"
+      let variable = TypeVariable "a"
+          signature = ForallType ["a"]
+            [Constraint eqName [variable]]
+            (FunctionType variable variable)
+          query = QueryRequest
+            { requestTarget = target
+            , requestGoal = signature
+            , requestContexts = []
+            , requestOptions = defaultQueryOptions
+            }
+      request <- expectRight $ mkDjinnRequest query
+      djinnRequestQuery request @?= query
+      result <- expectRight $ runDjinnQuery session request
+      resultEvidence result @?= ValidatedCandidates
+      assertBool "a prenex irrelevant constraint hid the identity proof"
+        $ not $ null $ batchCandidates $ resultSearch result
+
+      binderlessTargetName <- expectRight $ mkIdentifier "binderlessIdentity"
+      binderlessTarget <- expectRight $ mkDefinitionName binderlessTargetName
+      let binderlessQuery = query
+            { requestTarget = binderlessTarget
+            , requestGoal = ForallType []
+                [Constraint eqName [variable]]
+                (FunctionType variable variable)
+            }
+      binderlessRequest <- expectRight $ mkDjinnRequest binderlessQuery
+      binderlessResult <- expectRight $
+        runDjinnQuery session binderlessRequest
+      resultEvidence binderlessResult @?= ValidatedCandidates
+
+      nestedTargetName <- expectRight $ mkIdentifier "nestedForall"
+      nestedTarget <- expectRight $ mkDefinitionName nestedTargetName
+      let nestedQuery = query
+            { requestTarget = nestedTarget
+            , requestGoal = FunctionType variable
+                $ ForallType ["b"] [] $ TypeVariable "b"
+            }
+      case mkDjinnRequest nestedQuery of
+        Left failure -> diagnosticCode failure @?=
+          Just "DJEX_DJINN_LOWER"
+        Right _ -> fail "Djinn accepted a forall below an arrow"
   , testCase "classify Djinn options without attributing type source" $ do
       session <- sealDjinnEnvironment standardEnvironment
       target <- expectRight $ mkIdentifier "invalidOptions"
@@ -298,8 +362,8 @@ tests = testGroup "Djex facade"
         defaultQueryOptions captureGoal
       captureResult <- expectRight $
         runDjinnQuery captureSession captureRequest
-      assertDjinnCandidateMentions "capture-safe instantiated method"
-        "capturePrepared" captureResult
+      batchCandidates (resultSearch captureResult) @?= []
+      resultEvidence captureResult @?= ProvedUninhabitable
 
       -- Use an otherwise uninhabited nominal result so the operator premise
       -- is mandatory. This pins the native Name -> proof-symbol projection to
@@ -334,8 +398,8 @@ tests = testGroup "Djex facade"
         defaultQueryOptions operatorGoal
       operatorResult <- expectRight $
         runDjinnQuery operatorSession operatorRequest
-      assertDjinnCandidateMentions "native operator method"
-        "(==)" operatorResult
+      batchCandidates (resultSearch operatorResult) @?= []
+      resultEvidence operatorResult @?= ProvedUninhabitable
 
       higherMethod <- expectRight $ parseHType "f a -> f a"
       higherEnvironment <- expectRight $ declare
@@ -1305,18 +1369,6 @@ assertDjinnCompatibility label environment session contexts options target goal 
   generatedReportCandidates compatibility @?= batchCandidates search
   generatedReportFormula compatibility @?= djinnTranslatedFormula metadata
   generatedReportProof compatibility @?= djinnFirstExploredProof metadata
-
-assertDjinnCandidateMentions :: String -> String -> DjinnResult -> IO ()
-assertDjinnCandidateMentions label needle result =
-  case batchCandidates $ resultSearch result of
-    candidate : _ -> case renderFunctionClause
-        (defaultRenderOptions id) (candidateOutput candidate) of
-      Left failure -> fail $ label ++ ": candidate did not render: "
-        ++ show failure
-      Right rendered -> assertBool
-        (label ++ ": candidate did not use " ++ needle ++ ": " ++ rendered)
-        $ needle `isInfixOf` rendered
-    [] -> fail $ label ++ ": query produced no candidate"
 
 sharedDjinnRequest
   :: Name

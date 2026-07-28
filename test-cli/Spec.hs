@@ -72,6 +72,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplTransactionalLoad
   , testCase "REPL source targets load canonically and dependency-first"
       testReplWorkspaceTargets
+  , testCase "REPL duplicate modules preserve first-seen target order"
+      testReplDuplicateModuleOrder
   , testCase "REPL source pragmas decide implicit Prelude in order"
       testReplImplicitPreludeOrder
   , testCase "REPL default environment keeps its full automatic context"
@@ -674,6 +676,43 @@ testReplWorkspaceTargets = withReplModuleFixture $ \root -> do
   assertContains "bare load clears the automatic context"
     "(no imports)" pathOutput
   assertNoCallStack pathErrors
+
+testReplDuplicateModuleOrder :: Assertion
+testReplDuplicateModuleOrder = withTemporaryEnvironment
+    [ ("empty/.keep", "")
+    , ("duplicates/First.hs", "module Repeated where\n")
+    , ("duplicates/Second.hs", "module Repeated where\n")
+    , ("duplicates/Third.hs", "module Repeated where\n")
+    ] $ \root -> do
+  canonicalRoot <- canonicalizePath root
+  let empty = canonicalRoot </> "empty"
+      duplicateRoot = canonicalRoot </> "duplicates"
+      first = duplicateRoot </> "First.hs"
+      second = duplicateRoot </> "Second.hs"
+      third = duplicateRoot </> "Third.hs"
+  (exitCode, output, errors) <- runRepl empty
+    [ ":load " ++ show [first, second, third]
+    , ":show modules"
+    ]
+  assertEqual "duplicate-module REPL exit" ExitSuccess exitCode
+  assertContains "duplicate modules reject the target transaction"
+    "Source workspace load failed; retaining previous sessions and settings."
+    output
+  assertContains "duplicate modules retain the prior empty workspace"
+    "(no modules loaded)" output
+  assertEqual "each later declaration receives one diagnostic" 2
+    $ countOccurrences "[DJEX_REPL_MODULE_DUPLICATE]" errors
+  assertContainsPath "the first target remains the original for the second"
+    (first ++ " and " ++ second) errors
+  assertContainsPath "the first target remains the original for the third"
+    (first ++ " and " ++ third) errors
+  assertBool "duplicate diagnostics retain caller order" $
+    case ( occurrenceOffset "Second.hs: error [DJEX_REPL_MODULE_DUPLICATE]" errors
+         , occurrenceOffset "Third.hs: error [DJEX_REPL_MODULE_DUPLICATE]" errors
+         ) of
+      (Just secondOffset, Just thirdOffset) -> secondOffset < thirdOffset
+      _ -> False
+  assertNoCallStack errors
 
 -- Workspace module views and source elaboration share the same ordered flag
 -- state. A later enabling spelling must reverse an earlier disabling spelling,

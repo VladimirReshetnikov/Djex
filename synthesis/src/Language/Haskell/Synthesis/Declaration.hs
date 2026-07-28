@@ -13,6 +13,7 @@ module Language.Haskell.Synthesis.Declaration
   , Declaration (..)
   , DeclarationError (..)
   , declarationSubjectName
+  , declarationOwnedNames
   , declarationTermSignatures
   , declarationTypeVariables
   , validateDeclaration
@@ -129,6 +130,18 @@ declarationSubjectName declaration = case declaration of
   ValueDeclaration signature -> valueName signature
   ClassDeclaration _ name _ _ _ -> name
   InstanceDeclaration _ _ _ headConstraint -> constraintClass headConstraint
+
+-- | Every name by which a declaration can be found: its nominal subject plus
+-- any data constructors or class methods it owns. Instances are found through
+-- the class at their head, consistently with 'declarationSubjectName'.
+declarationOwnedNames
+  :: Declaration typeVariable kindVariable annotation
+  -> [Name]
+declarationOwnedNames declaration =
+  declarationSubjectName declaration : case declaration of
+    DataTypeDeclaration _ _ _ constructors -> map constructorName constructors
+    ClassDeclaration _ _ _ _ methods -> map valueName methods
+    _ -> []
 
 -- | Every term introduced by one declaration, with its complete callable
 -- type.  Keeping this derivation beside the declaration grammar gives

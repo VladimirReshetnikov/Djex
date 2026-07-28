@@ -22,7 +22,6 @@ module Language.Haskell.Djex.REPL.DjinnScope
   ( DjinnAxiomPolicy (..)
   , DjinnProjection (..)
   , DjinnScopeOmission (..)
-  , declarationOwnedNames
   , projectDjinnScope
   , renderDjinnScopeOmission
   ) where
@@ -93,15 +92,6 @@ data DjinnScopeOmission = DjinnScopeOmission
 renderDjinnScopeOmission :: DjinnScopeOmission -> String
 renderDjinnScopeOmission omission =
   djinnOmissionSubject omission ++ ": " ++ djinnOmissionReason omission
-
--- | Every name a declaration makes usable: its subject plus constructors and
--- class methods. Shared by scope projection and the REPL's @:info@ lookup.
-declarationOwnedNames :: Declaration variable kind annotation -> [Name]
-declarationOwnedNames declaration =
-  declarationSubjectName declaration : case declaration of
-    DataTypeDeclaration _ _ _ constructors -> map constructorName constructors
-    ClassDeclaration _ _ _ _ methods -> map valueName methods
-    _ -> []
 
 -- Haskell permits a type/class and a value/constructor to share one
 -- occurrence spelling. Djinn's concrete grammar still needs both declarations

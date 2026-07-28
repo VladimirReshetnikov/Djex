@@ -528,19 +528,8 @@ checkWithContext assumptions typeParameters classParameters declaration =
       (checkDeclaration assumptions typeParameters classParameters declaration)
       state of
     Left failure -> Left $ DeclarationKindError
-      (declarationContext declaration) failure
+      (declarationSubjectName declaration) failure
     Right result -> Right result
-
-declarationContext
-  :: Declaration variable kindVariable annotation
-  -> Name
-declarationContext declaration = case declaration of
-  TypeSynonymDeclaration _ name _ _ -> name
-  DataTypeDeclaration _ name _ _ -> name
-  AbstractTypeDeclaration _ name _ -> name
-  ValueDeclaration signature -> valueName signature
-  ClassDeclaration _ name _ _ _ -> name
-  InstanceDeclaration _ _ _ headConstraint -> constraintClass headConstraint
 
 declarationTypes
   :: Declaration variable kindVariable annotation

@@ -737,20 +737,26 @@ workspaceImport path declaration =
 duplicateModuleDiagnostics
   :: [WorkspaceModule]
   -> Maybe (NonEmpty Diagnostic)
-duplicateModuleDiagnostics modules = NonEmpty.nonEmpty
-  [ withSource (parsedModulePath duplicate)
-      $ workspaceFailure
-          "DJEX_REPL_MODULE_DUPLICATE"
-          "duplicate source module"
-          ( parsedModuleName duplicate ++ " is declared by both "
-              ++ parsedModulePath original ++ " and "
-              ++ parsedModulePath duplicate
-          )
-  | group <- Map.elems $ Map.fromListWith (++)
-      [(parsedModuleName modul, [modul]) | modul <- modules]
-  , original : duplicates <- [group]
-  , duplicate <- duplicates
-  ]
+duplicateModuleDiagnostics = NonEmpty.nonEmpty . go Map.empty
+ where
+  -- Targets carry caller order. Keep the first declaration authoritative and
+  -- report every later occurrence at the point where it was encountered.
+  go _ [] = []
+  go originals (modul : remaining) =
+    case Map.lookup (parsedModuleName modul) originals of
+      Nothing -> go
+        (Map.insert (parsedModuleName modul) modul originals)
+        remaining
+      Just original ->
+        withSource (parsedModulePath modul)
+          (workspaceFailure
+            "DJEX_REPL_MODULE_DUPLICATE"
+            "duplicate source module"
+            ( parsedModuleName modul ++ " is declared by both "
+                ++ parsedModulePath original ++ " and "
+                ++ parsedModulePath modul
+            ))
+          : go originals remaining
 
 targetModuleMismatchDiagnostics
   :: [WorkspaceTarget]

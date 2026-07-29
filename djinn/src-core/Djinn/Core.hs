@@ -81,6 +81,15 @@ import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
 import Djinn.Internal.ProofToGenerated (termToGeneratedClause)
 import Djinn.Internal.Type
+import Djinn.Internal.TypeFormula
+    ( PolarizedFormulaPlans
+    , exactOpaqueFormulaPlan
+    , primaryFormulaPlan
+    , singleOpaqueFormulaPlans
+    , singleOpenFormulaPlans
+    , translatedFormula
+    , translationIncomplete
+    )
 
 ------------------------------------------------------------------
 -- Kinds
@@ -820,10 +829,8 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
         , goal
         )
         contexts
-    let translateOpaque =
-            preparedEnvironmentSynthesisFormulaTranslator prepared
-        translatePolarized =
-            preparedEnvironmentPolarizedSynthesisFormulaVariants prepared
+    let translatePlans =
+            preparedEnvironmentPolarizedSynthesisFormulaPlans prepared
         translateType translator label source =
             first (label ++) $ translator source
     -- Contexts have been checked against the same inventory and kind scope as
@@ -832,11 +839,9 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
     -- it to one monomorphic LJT premise made alpha-equivalent signatures
     -- depend on source spelling. Djinn supports the sound, useful subset in
     -- which the synthesized term does not require a class method.
-    opaqueForm <- translatorFailure $
-        translateType translateOpaque "goal type: " elaboratedGoal
-    polarized <- translatorFailure $
-        translateType translatePolarized "goal type: " elaboratedGoal
-    searchPreparedFormula options prepared target opaqueForm polarized
+    plans <- translatorFailure $
+        translateType translatePlans "goal type: " elaboratedGoal
+    searchPreparedFormula options prepared target plans
   where
     translatorFailure = first DjinnInternalQueryFailure
 
@@ -880,26 +885,29 @@ searchPreparedFormula
     :: QueryOptions
     -> PreparedEnvironment
     -> SharedGenerated.DefinitionName
-    -> Formula
-    -> [(Formula, Bool)]
+    -> PolarizedFormulaPlans
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target opaqueForm translations = do
+searchPreparedFormula options prepared target formulaPlans = do
     let (premises, premiseTranslationIncomplete) =
             preparedEnvironmentPolarizedFunctionPremises prepared
         collectAcrossPlans =
             optionAlternatives options || optionSorted options
-        rawPlans = case translations of
-            [] -> [(opaqueForm, False)]
-            (primaryForm, primaryIncomplete) : variants ->
-                let primarySound = not $
-                        primaryIncomplete || premiseTranslationIncomplete
-                    alternativeForms
-                        | primarySound = []
-                        | otherwise = opaqueForm : map fst variants
-                in (primaryForm, primarySound) :
-                    [ (formula, False)
-                    | formula <- alternativeForms
-                    ]
+        primary = primaryFormulaPlan formulaPlans
+        primarySound = not $
+            translationIncomplete primary || premiseTranslationIncomplete
+        alternativeForms
+            | primarySound = []
+            | otherwise =
+                exactOpaqueFormulaPlan formulaPlans :
+                map translatedFormula
+                    (singleOpaqueFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (singleOpenFormulaPlans formulaPlans)
+        rawPlans =
+            (translatedFormula primary, primarySound) :
+            [ (formula, False)
+            | formula <- alternativeForms
+            ]
         plans = SharedCollection.distinctOn fst rawPlans
     results <- runPlans collectAcrossPlans premises
         options (optionCutoff options) [] plans
@@ -925,12 +933,13 @@ searchPreparedFormula options prepared target opaqueForm translations = do
             else Right $ reverse completed'
 
 -- Goal plans are bounded linearly: the fully opened translation, the exact
--- opaque fallback, and then one independently opaque positive forall at a
--- time. Keeping the two historical plans first preserves their unsorted result
--- prefix. Global premises expose the same sound views simultaneously under
--- distinct internal proof identities, so one term may use different views at
--- different occurrences of a reusable source function. Every proof remains
--- checked against the exact goal formula that produced it.
+-- opaque fallback, one independently opaque positive forall at a time, and
+-- finally one independently opened branch among opaque siblings. Keeping the
+-- historical plans first preserves their unsorted result prefix. Global
+-- premises expose the same sound views simultaneously under distinct internal
+-- proof identities, so one term may use different views at different
+-- occurrences of a reusable source function. Every proof remains checked
+-- against the exact goal formula that produced it.
 
 -- One formula plan retains clauses before cross-plan de-duplication and
 -- ranking. 'formulaPlanProofCount' counts raw proofs before either operation,

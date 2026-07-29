@@ -521,6 +521,12 @@ tuples, sums, and datatype expansion preserve it. Outer applications
 containing an atom, such as
 `[(forall result. result -> result -> result)]`, retain their structure and
 compare alpha-equivalently without exposing the quantified body.
+The checked worker bounds composition with two occurrence-local frontiers:
+one site may stay opaque while its siblings open, or one site may open while
+unrelated siblings stay opaque. A nested selected site brings along only its
+required enclosing forall chain. Together with the fully opened and exact
+opaque plans, this covers every combination of three independent sites in
+linear rather than exponential space.
 `inhabitResult` then runs formula translation, budgeted proof search,
 independent proof checking, and constructs the shared `QueryResult` directly
 without choosing a renderer or passing through a backend-owned report envelope.
@@ -536,7 +542,10 @@ the shared operational vocabulary:
 `Truncated CandidateLimitReached` says that another proof was observed beyond
 `optionCutoff`. The latter inspects only that one overflow witness instead of
 forcing the remaining proof stream. This status remains separate from Djinn's
-proof-backed `Unrealizable` outcomes. `resolveInstanceMethods` jointly checks
+proof-backed `Unrealizable` outcomes. A finished search through an incomplete
+rank-N projection is likewise reported as undecided in the supported fragment,
+not as an internal error or a proof of non-inhabitation.
+`resolveInstanceMethods` jointly checks
 an instance target and all of its prerequisites before returning the target's
 instantiated methods. A query's goal and every class argument are likewise
 kind-checked together, so a free type variable has one kind throughout the
@@ -768,13 +777,14 @@ knowing before editing the source:
   Unsupported negative, constrained, and impredicative occurrences remain
   opaque, alpha-equated atoms. An empty incomplete search is inconclusive rather
   than proof of uninhabitability. Search tries the fully opened polarized view,
-  the historical exact-opaque view, and a linear family retaining one positive
-  forall occurrence opaquely at a time. A term can therefore combine one exact
-  transport with structural introduction at sibling occurrences, and reusable
-  loaded functions expose all of those sound views in one proof environment.
-  Djinn does not enumerate combinations of two or more opaque holes. Any
-  incomplete primary premise conservatively disables negative evidence for the
-  whole query.
+  the historical exact-opaque view, one plan retaining each positive forall
+  opaquely while its siblings open, and the dual plans opening one occurrence
+  while unrelated siblings stay opaque. The family is exhaustive for three
+  independent sites and grows linearly; it does not enumerate balanced subsets
+  such as two open and two opaque sites among four. Reusable loaded functions
+  expose all of those sound views in one proof environment. Any incomplete
+  primary premise conservatively disables negative evidence for the whole
+  query.
   Djinn does not implement general higher-rank instantiation or subsumption,
   and it ignores valid contexts for proof power; it also has no GADTs, type
   families, package instance import, or general type-class solver.

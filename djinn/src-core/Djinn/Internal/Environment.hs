@@ -10,8 +10,7 @@ module Djinn.Internal.Environment (
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentSynthesisFormulaTranslator,
-    preparedEnvironmentPolarizedSynthesisFormulaTranslator,
-    preparedEnvironmentPolarizedSynthesisFormulaVariants,
+    preparedEnvironmentPolarizedSynthesisFormulaPlans,
     preparedEnvironmentFunctionPremises,
     preparedEnvironmentPolarizedFunctionPremises,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
@@ -532,25 +531,14 @@ compileSynthesisFormula compiler =
     compileFormula synthesisFormulaTypeView compiler .
         SharedType.canonicalizeType
 
-compilePolarizedSynthesisFormula
+compilePolarizedSynthesisFormulaPlans
     :: Natural
     -> FormulaPolarity
     -> PreparedFormulaCompiler
     -> SharedType.Type HSymbol
-    -> Either String FormulaTranslation
-compilePolarizedSynthesisFormula namespace polarity compiler =
-    compilePolarizedFormula namespace polarity
-        synthesisFormulaTypeView synthesisFormulaTypeView compiler .
-            SharedType.canonicalizeType
-
-compilePolarizedSynthesisFormulaVariants
-    :: Natural
-    -> FormulaPolarity
-    -> PreparedFormulaCompiler
-    -> SharedType.Type HSymbol
-    -> Either String [FormulaTranslation]
-compilePolarizedSynthesisFormulaVariants namespace polarity compiler =
-    compilePolarizedFormulaVariants namespace polarity
+    -> Either String PolarizedFormulaPlans
+compilePolarizedSynthesisFormulaPlans namespace polarity compiler =
+    compilePolarizedFormulaPlans namespace polarity
         synthesisFormulaTypeView synthesisFormulaTypeView compiler .
             SharedType.canonicalizeType
 
@@ -611,18 +599,20 @@ sealPreparedEnvironment expansion = do
             fmap fst $ SharedType.implicitizeLeadingForalls
                 (const (Nothing :: Maybe ())) freshBinder mempty sourceType
         let (_, _, body) = SharedType.splitLeadingForalls implicit
-        opaqueFormula <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
-            compileSynthesisFormula compiler body
-        polarized <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
-            compilePolarizedSynthesisFormulaVariants namespace NegativeFormula
+        plans <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
+            compilePolarizedSynthesisFormulaPlans namespace NegativeFormula
                 compiler body
-        return (Symbol name, opaqueFormula, polarized)
+        return (Symbol name, plans)
 
-    opaquePremise (symbol, formula, _) = (symbol, formula)
-    polarizedPremiseVariants (symbol, opaqueFormula, translations) =
+    opaquePremise (symbol, plans) =
+        (symbol, exactOpaqueFormulaPlan plans)
+    polarizedPremiseVariants (symbol, plans) =
         [ (symbol, formula)
         | formula <- SharedCollection.distinctOn id $
-            map translatedFormula translations ++ [opaqueFormula]
+            map translatedFormula
+                (primaryFormulaPlan plans : singleOpaqueFormulaPlans plans) ++
+            [exactOpaqueFormulaPlan plans] ++
+            map translatedFormula (singleOpenFormulaPlans plans)
         ]
     primaryPremise variants = case variants of
         primary : _ -> [primary]
@@ -630,9 +620,8 @@ sealPreparedEnvironment expansion = do
     alternatePremises variants = case variants of
         _ : alternatives -> alternatives
         [] -> []
-    premiseTranslationIncomplete (_, _, translations) = case translations of
-        primary : _ -> translationIncomplete primary
-        [] -> True
+    premiseTranslationIncomplete (_, plans) =
+        translationIncomplete $ primaryFormulaPlan plans
 
     freshBinder reserved variable = Just
         $ fst $ freshPrimedVariable reserved variable
@@ -757,38 +746,17 @@ preparedEnvironmentSynthesisFormulaTranslator
         (PreparedEnvironment _ _ _ _ compiler) =
     compileSynthesisFormula compiler
 
--- | Translate a checked goal in positive position. The Boolean is true when
--- part of the source remains deliberately opaque and negative search evidence
--- must therefore be reported as inconclusive.
-preparedEnvironmentPolarizedSynthesisFormulaTranslator
+-- | Translate a checked positive goal into one nonempty, categorized plan
+-- family.  Consumers retain the historical primary/exact/single-opaque prefix
+-- and append the dual single-open frontier without guessing category boundaries
+-- in a flat list.
+preparedEnvironmentPolarizedSynthesisFormulaPlans
     :: PreparedEnvironment
     -> SharedType.Type HSymbol
-    -> Either String (Formula, Bool)
-preparedEnvironmentPolarizedSynthesisFormulaTranslator
-        (PreparedEnvironment _ _ _ _ compiler) source = do
-    translation <- compilePolarizedSynthesisFormula
-        0 PositiveFormula compiler source
-    return
-        ( translatedFormula translation
-        , translationIncomplete translation
-        )
-
--- | Translate a checked positive goal into the fully opened plan followed by
--- one plan for each independently opaque positive forall occurrence. The
--- exact all-opaque fallback remains available through
--- 'preparedEnvironmentSynthesisFormulaTranslator'.
-preparedEnvironmentPolarizedSynthesisFormulaVariants
-    :: PreparedEnvironment
-    -> SharedType.Type HSymbol
-    -> Either String [(Formula, Bool)]
-preparedEnvironmentPolarizedSynthesisFormulaVariants
-        (PreparedEnvironment _ _ _ _ compiler) source = do
-    translations <- compilePolarizedSynthesisFormulaVariants
-        0 PositiveFormula compiler source
-    return
-        [ (translatedFormula translation, translationIncomplete translation)
-        | translation <- translations
-        ]
+    -> Either String PolarizedFormulaPlans
+preparedEnvironmentPolarizedSynthesisFormulaPlans
+        (PreparedEnvironment _ _ _ _ compiler) =
+    compilePolarizedSynthesisFormulaPlans 0 PositiveFormula compiler
 
 projectPreparedInventory
     :: PreparedEnvironment

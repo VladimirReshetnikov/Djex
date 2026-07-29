@@ -1073,17 +1073,34 @@ testRankNTypeAtoms = do
         =<< expectRight (inhabit defaultQueryOptions hybridEnvironment []
             "mixedRankNDatatype" $ HTArrow (emptyScheme "input") hybridResult)
 
-    -- The plan family is intentionally linear rather than a power set. This
-    -- term needs two independently opaque result occurrences and a third
-    -- structural introduction, so it remains outside the bounded fragment.
-    twoOpaqueHoles <- runStableQuery stableSession "twoOpaqueRankNHoles"
+    -- The dual linear frontier opens one occurrence while retaining all of its
+    -- independent siblings opaquely.  For three sites this completes the full
+    -- choice cube without constructing a general power set.
+    runStableIdentity stableSession "twoOpaqueRankNHoles"
         $ "(forall a. a) -> (forall b. b -> q) -> "
         ++ "((forall c. c), (forall d. d -> q), (forall e. e -> e))"
-    assertEqual "the single-hole plan family unexpectedly opened two holes"
+
+    -- Reaching a selected nested site must also open its enclosing forall.
+    -- The two transport siblings remain opaque while both nodes on the nested
+    -- structural branch open.
+    runStableIdentity stableSession "nestedDualRankNFrontier"
+        $ "(forall a. a) -> (forall b. b -> q) -> "
+        ++ "((forall c. c), forall outer. "
+        ++ "((forall d. d -> q), (forall e. e -> e)))"
+
+    -- Four independent sites still have a middle layer outside the two linear
+    -- frontiers.  This query needs exactly two opaque and two opened choices,
+    -- so the bounded miss must stay inconclusive rather than becoming a false
+    -- refutation.
+    middleOpacityGap <- runStableQuery stableSession "middleOpacityRankNGap"
+        $ "(forall a. a) -> (forall b. b -> q) -> "
+        ++ "((forall c. c), (forall d. d -> q), "
+        ++ "(forall e. e -> e), (forall f. f -> f))"
+    assertEqual "the linear frontier unexpectedly covered a middle subset"
         [] $ SharedSearch.batchCandidates
-            $ SharedQuery.resultSearch twoOpaqueHoles
-    assertEqual "a multi-hole rank-N gap was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence twoOpaqueHoles
+            $ SharedQuery.resultSearch middleOpacityGap
+    assertEqual "a bounded middle-subset gap was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence middleOpacityGap
 
     -- Goal and premise translation are separate skolem scopes. Reusing the
     -- same internal proposition for both would admit the ill-typed proof
@@ -1258,6 +1275,61 @@ testComplementaryRankNPlans = do
         (SharedSearch.truncated SharedSearch.CandidateLimitReached)
         $ reportCompletion exactlyLimited
 
+    -- Existing plans retain their prefix, and the appended dual-frontier plan
+    -- receives only the global cutoff remainder.  The exact provider consumes
+    -- the sole allowance; probing the later structural proof must report
+    -- truncation without admitting it as a second candidate.
+    let emptyPoly binder = HTForall [binder] [] $ HTVar binder
+        rankNQ = HTCon "RankNQ"
+        emptyToQ binder = HTForall [binder] [] $
+            HTArrow (HTVar binder) rankNQ
+        dualGoal = HTArrow (emptyPoly "input") $
+            HTArrow (emptyToQ "consumer") $
+            HTTuple
+                [ emptyPoly "output"
+                , emptyToQ "producer"
+                , polyIdentity "identity"
+                ]
+    dualPlanEnvironment <- expectRight $ do
+        withQ <- declare (AbstractType "RankNQ" KStar) emptyEnvironment
+        declare (Function "dualProvider" dualGoal) withQ
+    dualCutoff <- run
+        unsortedOptions {optionCutoff = 1}
+        "boundDualFrontier" dualPlanEnvironment dualGoal
+    dualCutoffClauses <- realizedClauses
+        "globally bounded dual-frontier plans" dualCutoff
+    assertEqual "the appended plan received a fresh candidate cutoff"
+        1 $ length dualCutoffClauses
+    assertBool "the historical exact provider lost its result prefix"
+        $ any ("dualProvider" `isInfixOf`) dualCutoffClauses
+    assertEqual "a zero-allowance dual-frontier probe looked complete"
+        (SharedSearch.truncated SharedSearch.CandidateLimitReached)
+        $ reportCompletion dualCutoff
+
+    -- Choice-point fuel is global too.  Earlier plans consume enough of this
+    -- budget to stop before the final direct construction; resetting the
+    -- budget for that appended plan would incorrectly admit the construction.
+    dualBudgeted <- run
+        unsortedOptions {optionBudget = Just 150}
+        "budgetDualFrontier" dualPlanEnvironment dualGoal
+    dualBudgetedClauses <- realizedClauses
+        "choice-bounded dual-frontier plans" dualBudgeted
+    assertBool "choice-bounded dual-frontier search found no prefix"
+        $ not $ null dualBudgetedClauses
+    assertBool "the appended plan received a fresh choice budget"
+        $ all ("dualProvider" `isInfixOf`) dualBudgetedClauses
+    assertEqual "exhausted dual-frontier choice fuel looked complete"
+        (SharedSearch.truncated SharedSearch.ChoicePointLimitReached)
+        $ reportCompletion dualBudgeted
+
+    dualGenerous <- run
+        unsortedOptions {optionBudget = Just 1000}
+        "completeDualFrontier" dualPlanEnvironment dualGoal
+    dualGenerousClauses <- realizedClauses
+        "fully funded dual-frontier plans" dualGenerous
+    assertBool "the appended plan stayed unreachable with sufficient fuel"
+        $ any (not . isInfixOf "dualProvider") dualGenerousClauses
+
     budgeted <- run
         unsortedOptions {optionBudget = Just 9}
         "budgetAllRankNPlans" environment goal
@@ -1274,8 +1346,7 @@ testComplementaryRankNPlans = do
     -- Premise views coexist in one proof environment. The first parameter
     -- needs exact opaque transport while the second is constructed under a
     -- fresh skolem; a whole-premise strategy cannot use @consume@ this way.
-    let emptyPoly binder = HTForall [binder] [] $ HTVar binder
-        result = HTCon "RankNResult"
+    let result = HTCon "RankNResult"
         consumeType = HTArrow (emptyPoly "a") $
             HTArrow (polyIdentity "b") result
         mixedPremiseGoal = HTArrow (emptyPoly "x") result
@@ -1290,12 +1361,34 @@ testComplementaryRankNPlans = do
     assertBool "no mixed premise candidate used consume"
         $ any ("consume" `isInfixOf`) mixedPremiseClauses
 
+    -- The cached dual frontier is needed when one provider consumes two exact
+    -- rank-N transports and one structurally introduced polymorphic value.
+    -- Compiling only the goal's new views would leave this query unsupported.
+    let dualConsumeType = HTArrow (emptyPoly "a") $
+            HTArrow (emptyToQ "b") $
+            HTArrow (polyIdentity "c") result
+        dualPremiseGoal = HTArrow (emptyPoly "x") $
+            HTArrow (emptyToQ "y") result
+    dualPremiseEnvironment <- expectRight $ do
+        withResult <- declare
+            (AbstractType "RankNResult" KStar) emptyEnvironment
+        withQ <- declare (AbstractType "RankNQ" KStar) withResult
+        declare (Function "consumeDual" dualConsumeType) withQ
+    dualPremise <- run unsortedOptions
+        "dualPremiseRankNPlans" dualPremiseEnvironment dualPremiseGoal
+    dualPremiseClauses <- realizedClauses
+        "dual-frontier premise plans" dualPremise
+    assertBool "no cached dual-frontier candidate used consumeDual"
+        $ any ("consumeDual" `isInfixOf`) dualPremiseClauses
+
     -- Alternate aliases are appended after every declaration's primary view.
     -- Interleaving one function's variants before the next primary would
     -- perturb the historical depth-first result prefix and finite budgets.
     let orderedEnvironment = RawEnvironment.Environment
-            [("RankNResult", ([], HTAbstract "RankNResult" KStar, KStar))]
-            [ ("variantFirst", consumeType)
+            [ ("RankNResult", ([], HTAbstract "RankNResult" KStar, KStar))
+            , ("RankNQ", ([], HTAbstract "RankNQ" KStar, KStar))
+            ]
+            [ ("variantFirst", dualConsumeType)
             , ("directSecond", result)
             ]
             []
@@ -1306,6 +1399,20 @@ testComplementaryRankNPlans = do
     assertEqual "premise variants displaced a later primary declaration"
         [Symbol "variantFirst", Symbol "directSecond"]
         $ map fst $ take 2 orderedPremises
+    let opaqueOrderedPremises =
+            RawEnvironment.preparedEnvironmentFunctionPremises orderedPrepared
+        variantFormulas =
+            [ formula
+            | (Symbol name, formula) <- orderedPremises
+            , name == "variantFirst"
+            ]
+    case (opaqueOrderedPremises, variantFormulas) of
+        ((Symbol "variantFirst", exactVariantFormula) : _,
+                [_, _, _, _, observedExact, _, _, _]) ->
+            assertEqual "the exact premise moved behind the new dual frontier"
+                exactVariantFormula observedExact
+        unexpected -> fail $ "unexpected categorized premise family: " ++
+            show unexpected
   where
     run options target environment goal = expectRight $
         inhabit options environment [] target goal

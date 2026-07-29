@@ -44,6 +44,8 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testKeywordBoundaries
     , testCase "an expired search budget reports an undecided result"
         testSearchBudget
+    , testCase "bounded rank-N searches distinguish success from uncertainty"
+        testBoundedRankNSearch
     , testCase "class arguments are checked against inferred kinds"
         testClassKindEnforcement
     , testCase "structured query context is rendered once"
@@ -104,6 +106,8 @@ testVerboseHelpVersion = do
             ++ show welcomes
     assertBool "verbose help must not expose its source placeholder" $
         not $ "<package-version>" `isInfixOf` output
+    assertContains "verbose help qualifies completeness for rank-N types"
+        "Rank-N support is deliberately bounded" output
   where
     welcomePrefix = "Welcome to Djinn version "
 
@@ -296,6 +300,22 @@ testSearchBudget = do
         output
     assertContains "an unlimited search remains a decision procedure"
         "g cannot be realized" output
+
+testBoundedRankNSearch :: Assertion
+testBoundedRankNSearch = do
+    output <- runSession
+        [ "instantiate ? (forall a. a) -> b"
+        , "twoOpaque ? (forall a. a) -> (forall b. b -> q) -> " ++
+            "((forall c. c), (forall d. d -> q), (forall e. e -> e))"
+        , ":quit"
+        ]
+    assertContains "opaque rank-N elimination remains inconclusive"
+        ("instantiate: no proof found in the supported inference fragment; " ++
+            "inhabitation is undecided.") output
+    assertContains "the dual rank-N frontier solves two opaque siblings"
+        "twoOpaque a b = (a, b, \\c -> c)" output
+    assertBool "a valid inconclusive result was reported as an internal error"
+        $ not $ "Djinn returned no evidence" `isInfixOf` output
 
 testEof :: Assertion
 testEof = do

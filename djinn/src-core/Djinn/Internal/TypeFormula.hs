@@ -18,16 +18,20 @@ module Djinn.Internal.TypeFormula
     , FormulaTranslation
     , translatedFormula
     , translationIncomplete
+    , PolarizedFormulaPlans
+    , primaryFormulaPlan
+    , exactOpaqueFormulaPlan
+    , singleOpaqueFormulaPlans
+    , singleOpenFormulaPlans
     , prepareFormulaCompiler
     , compileFormula
-    , compilePolarizedFormula
-    , compilePolarizedFormulaVariants
+    , compilePolarizedFormulaPlans
     ) where
 
 import Control.Monad (zipWithM)
 import Data.Bifunctor (first)
 import Data.Graph (SCC(..), stronglyConnComp)
-import Data.List (intercalate, sortOn)
+import Data.List (intercalate, isSuffixOf, sortOn)
 import qualified Data.Map.Lazy as LazyMap
 import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
@@ -135,12 +139,46 @@ data FormulaTranslation = FormulaTranslation
     }
     deriving (Eq, Show)
 
+-- | One nonempty, deliberately bounded family of coherent translations.  The
+-- primary plan opens every supported positive forall.  The historical exact
+-- plan opens none; the two local frontiers differ from either extreme at one
+-- independently reachable occurrence.  Keeping the categories explicit lets
+-- goal search and prepared-premise caching preserve their established order
+-- without reconstructing it from an unlabelled list.
+data PolarizedFormulaPlans = PolarizedFormulaPlans
+    { primaryFormulaPlan :: FormulaTranslation
+    , exactOpaqueFormulaPlan :: Formula
+    , singleOpaqueFormulaPlans :: [FormulaTranslation]
+    , singleOpenFormulaPlans :: [FormulaTranslation]
+    }
+    deriving (Eq, Show)
+
 -- A definition origin plus the reverse source path is stable across alias
 -- expansion, duplicated arguments, datatype fields, and reopened forall
 -- bodies. It therefore identifies exactly one positive introduction choice
 -- without depending on source binder spelling.
 data ForallSite = ForallSite ExpansionOrigin [Natural]
     deriving (Eq, Ord, Show)
+
+-- Reverse occurrence paths extend at the front, so an enclosing site's path
+-- is a suffix of every reachable descendant.  Origin ancestry supplies the
+-- corresponding definition/opened-forall provenance; the path check keeps two
+-- copies of one substituted source occurrence distinct.
+forallSiteLeadsTo :: ForallSite -> ForallSite -> Bool
+forallSiteLeadsTo
+        (ForallSite ancestorOrigin ancestorPath)
+        (ForallSite descendantOrigin descendantPath) =
+    ancestorPath `isSuffixOf` descendantPath &&
+        originDescendsFrom ancestorOrigin descendantOrigin
+
+originDescendsFrom :: ExpansionOrigin -> ExpansionOrigin -> Bool
+originDescendsFrom ancestor descendant
+    | ancestor == descendant = True
+    | otherwise = case descendant of
+        DefinitionOrigin parent _ _ -> originDescendsFrom ancestor parent
+        OpenedForallOrigin parent _ -> originDescendsFrom ancestor parent
+        QueryOrigin{} -> False
+        DefinitionTemplateOrigin{} -> False
 
 data PreparedDefinition = PreparedDefinition
     String
@@ -209,49 +247,53 @@ compileFormula view prepared source = do
 -- | Compile the bounded rank-N fragment used by checked Djinn queries.
 -- Context-free foralls in positive position are opened with fresh rigid
 -- proposition names; unsupported occurrences stay alpha-stable opaque atoms.
--- The numeric namespace must be distinct for independently compiled goals
--- and premises so their locally introduced skolems cannot accidentally meet.
-compilePolarizedFormula
+-- Besides the two historical extremes, retain both linear frontiers: one
+-- opaque occurrence among opened siblings, and one opened occurrence (plus
+-- any enclosing forall chain needed to reach it) among opaque siblings.  This
+-- is exhaustive for three independent sites without constructing a power set.
+-- The numeric namespace must be distinct for independently compiled goals and
+-- premises so their locally introduced skolems cannot accidentally meet.
+compilePolarizedFormulaPlans
     :: Natural
     -> FormulaPolarity
     -> TypeView (SharedType.Type String)
     -> TypeView source
     -> PreparedFormulaCompiler
     -> source
-    -> Either String FormulaTranslation
-compilePolarizedFormula namespace polarity openedView view prepared source = do
-    expanded <- expansionTypeAt view QueryOrigin [] source
-    lowerExpansionType
-        (PolarizedForalls namespace polarity openedView Nothing)
-        prepared emptyExpansionPath [] expanded
-
--- | Compile a linearly bounded compositional extension of the polarized
--- fragment. The primary plan opens every supported positive forall. Each
--- following plan keeps exactly one such occurrence opaque while opening the
--- others; the exact all-opaque translation remains the separate historical
--- fallback. This fixes mixed structural/transport goals without an
--- exponential power set of occurrence choices.
-compilePolarizedFormulaVariants
-    :: Natural
-    -> FormulaPolarity
-    -> TypeView (SharedType.Type String)
-    -> TypeView source
-    -> PreparedFormulaCompiler
-    -> source
-    -> Either String [FormulaTranslation]
-compilePolarizedFormulaVariants namespace polarity openedView view prepared
+    -> Either String PolarizedFormulaPlans
+compilePolarizedFormulaPlans namespace polarity openedView view prepared
         source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
     primary <- lowerExpansionType
-        (PolarizedForalls namespace polarity openedView Nothing)
+        (PolarizedForalls namespace polarity openedView Set.empty)
         prepared emptyExpansionPath [] expanded
-    variants <- mapM (compileVariant expanded)
-        $ translationOpenableForalls primary
-    return $ primary : variants
+    exact <- translatedFormula <$> lowerExpansionType
+        OpaqueForalls prepared emptyExpansionPath [] expanded
+    let sites = translationOpenableForalls primary
+        allSites = Set.fromList sites
+    singleOpaque <- mapM
+        (compileSelection expanded . Set.singleton) sites
+    singleOpen <- case sites of
+        _ : _ : _ : _ -> mapM
+            (compileSelection expanded . opaqueExceptReachable allSites) sites
+        _ -> Right []
+    return PolarizedFormulaPlans
+        { primaryFormulaPlan = primary
+        , exactOpaqueFormulaPlan = exact
+        , singleOpaqueFormulaPlans = singleOpaque
+        , singleOpenFormulaPlans = singleOpen
+        }
   where
-    compileVariant expanded site = lowerExpansionType
-        (PolarizedForalls namespace polarity openedView $ Just site)
+    compileSelection expanded opaqueSites = lowerExpansionType
+        (PolarizedForalls namespace polarity openedView opaqueSites)
         prepared emptyExpansionPath [] expanded
+
+    -- Opening a nested target necessarily opens its enclosing forall chain.
+    -- Every unrelated site remains opaque, so this is the dual of selecting
+    -- one opaque site in the fully opened plan rather than an accidental exact
+    -- plan whenever the chosen occurrence is nested.
+    opaqueExceptReachable sites target = Set.filter
+        (not . (`forallSiteLeadsTo` target)) sites
 
 data ForallLowering
     = OpaqueForalls
@@ -259,7 +301,7 @@ data ForallLowering
         Natural
         FormulaPolarity
         (TypeView (SharedType.Type String))
-        (Maybe ForallSite)
+        (Set.Set ForallSite)
 
 lookupFormulaDefinition
     :: String
@@ -418,10 +460,10 @@ lowerForall
     -> Either String FormulaTranslation
 lowerForall lowering definitions path occurrencePath origin atom = case lowering of
     OpaqueForalls -> Right opaque
-    PolarizedForalls namespace PositiveFormula openedView selected ->
+    PolarizedForalls namespace PositiveFormula openedView opaqueSites ->
         case SharedTypeAtom.typeAtomType atom of
             SharedType.ForallType binders [] body
-                | selected == Just site -> Right incompleteOpaque
+                | site `Set.member` opaqueSites -> Right incompleteOpaque
                 | otherwise -> do
                     opened <- openForallBody
                         namespace occurrencePath origin binders body

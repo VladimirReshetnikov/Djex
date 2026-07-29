@@ -11,6 +11,7 @@ import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
 
 import Language.Haskell.Exference.Core.Candidate
   ( emptyExferenceSourceTypeVariableHints )
+import Language.Haskell.Exference.Core.ConstraintSolver (filterUnresolved)
 import Language.Haskell.Exference.Core.Expression (Expression (..))
 import Language.Haskell.Exference.Core.ExpressionCheck (checkExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -37,6 +38,7 @@ import Language.Haskell.Exference.Core.Internal.RigidScope
   , registerRigidScope
   , validateRigidSubstitutions
   )
+import Language.Haskell.Exference.Core.Internal.ScopedConstraint
 import Language.Haskell.Exference.Core.Internal.Testing
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( supplyFromIdentifiers )
@@ -74,6 +76,50 @@ tests = testGroup "Exference private engine boundaries"
         Right _ -> pure ()
         Left failure -> fail
           $ "a younger flexible variable was rejected: " ++ show failure
+  , testCase "scoped givens resolve only their own obligations" $ do
+      let className = name "C"
+          integer = TypeCons $ name "Int"
+          evidence = HsConstraint className [integer]
+          local = ScopedConstraint [evidence] evidence
+          sibling = ScopedConstraint [] evidence
+      staticClasses <- expectRight
+        $ mkStaticClassEnv [HsTypeClass className [0] []] []
+      resolveScopedConstraints filterUnresolved
+        (mkQueryClassEnv staticClasses []) [local, sibling]
+        @?= Just [sibling]
+  , testCase "scoped substitutions update givens and obligations together" $ do
+      let className = name "C"
+          integer = TypeCons $ name "Int"
+          evidence ty = HsConstraint className [ty]
+          original = ScopedConstraint
+            [evidence $ TypeVar 0]
+            (evidence $ TypeVar 1)
+          (_, substituted) = scopedConstraintApplySubsts
+            (IntMap.fromList [(0, integer), (1, integer)]) original
+      staticClasses <- expectRight
+        $ mkStaticClassEnv [HsTypeClass className [0] []] []
+      substituted @?= ScopedConstraint [evidence integer] (evidence integer)
+      resolveScopedConstraints filterUnresolved
+        (mkQueryClassEnv staticClasses []) [substituted]
+        @?= Just []
+  , testCase "scoped instance prerequisites retain their lexical givens" $ do
+      let baseName = name "Base"
+          derivedName = name "Derived"
+          integer = TypeCons $ name "Int"
+          base ty = HsConstraint baseName [ty]
+          derived ty = HsConstraint derivedName [ty]
+          instanceRule = HsInstance
+            [base $ TypeVar 0]
+            (derived $ TypeVar 0)
+          local = ScopedConstraint [base integer] (derived integer)
+          sibling = ScopedConstraint [] (derived integer)
+      staticClasses <- expectRight $ mkStaticClassEnv
+        [ HsTypeClass baseName [0] []
+        , HsTypeClass derivedName [0] []
+        ] [instanceRule]
+      resolveScopedConstraints filterUnresolved
+        (mkQueryClassEnv staticClasses []) [local, sibling]
+        @?= Just [ScopedConstraint [] $ base integer]
   , testCase "prepared queries consume one validated options witness" $ do
       environment <- expectRight $ sealLegacyEnvironment identityInput
       target <- checkedIdentifierTarget "singleOptionValidation"

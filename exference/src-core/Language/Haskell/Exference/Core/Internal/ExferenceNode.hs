@@ -35,6 +35,8 @@ import Language.Haskell.Exference.Core.RigidInstantiation
   (RigidInstantiationPlan)
 import Language.Haskell.Exference.Core.Internal.RigidScope
   (RigidScope)
+import Language.Haskell.Exference.Core.Internal.ScopedConstraint
+  (ScopedConstraint)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
@@ -50,7 +52,8 @@ data VarBinding = VarBinding {-# UNPACK #-} !TVarId HsType
 -- | A scoped variable together with the exposed arrow prefix of its type.
 -- A quantified result stays intact until a use site either forwards the exact
 -- opaque value or explicitly instantiates its leading forall chain. Function
--- constraints live in 'nodeConstraintGoals', not on lexical values.
+-- constraints become scope-annotated obligations in 'nodeConstraintGoals',
+-- not properties of lexical term values.
 data VarPBinding = VarPBinding
   { varPVariable :: !TVarId
   , varPResult :: HsType
@@ -108,17 +111,22 @@ requireValidScopes = either
 data ForallGoalMode
   = OpenLeadingForalls
   -- | Preserve historical opaque forwarding first, but permit a separate
-  -- lower-priority branch which introduces a context-free quantified value.
+  -- lower-priority branch which introduces a quantified value. Any direct
+  -- contexts become givens local to that goal.
   | TryForallIntroduction
   -- | Continue opening every layer of a nested chain once introduction won.
   | ContinueForallIntroduction
   deriving (Eq, Generic)
 
--- | An expression hole and the innermost lexical scope visible from it.
+-- | An expression hole, its innermost lexical term scope, and the class
+-- assumptions visible only while constructing that hole. Root-prenex givens
+-- remain in 'nodeQueryClassEnv'; this local list is for contextual rank-N
+-- introduction and must travel with every derived goal.
 data TGoal = TGoal
   { goalBinding :: VarBinding
   , goalScope :: !ScopeId
   , goalForallMode :: !ForallGoalMode
+  , goalGivenConstraints :: [HsConstraint]
   }
   deriving Generic
 
@@ -127,16 +135,21 @@ goalApplySubst ss | IntMap.null ss = id
                   | otherwise      = \goal -> goal
                       { goalBinding = varBindingApplySubsts ss
                           $ goalBinding goal
+                      , goalGivenConstraints = map
+                          (snd . constraintApplySubsts ss)
+                          $ goalGivenConstraints goal
                       }
 
 mkGoals :: ScopeId
+        -> [HsConstraint]
         -> [VarBinding]
         -> [TGoal]
-mkGoals sid = map (\binding -> TGoal binding sid TryForallIntroduction)
+mkGoals sid givens = map
+  (\binding -> TGoal binding sid TryForallIntroduction givens)
 
 data SearchNode = SearchNode
   { nodeGoals           :: Seq TGoal
-  , nodeConstraintGoals :: [HsConstraint]
+  , nodeConstraintGoals :: [ScopedConstraint]
   , nodeProvidedScopes  :: Scopes
   , nodeVarUses         :: IntMap.IntMap Natural
   , nodeFunctions       :: [FunctionBinding]

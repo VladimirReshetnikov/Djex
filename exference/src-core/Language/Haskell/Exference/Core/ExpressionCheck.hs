@@ -39,6 +39,13 @@ import Language.Haskell.Exference.Core.Internal.RigidScope
   , registerRigidScope
   , validateRigidSubstitutions
   )
+import Language.Haskell.Exference.Core.Internal.ScopedConstraint
+  ( ScopedConstraint (..)
+  , resolveScopedConstraints
+  , scopedConstraintApplySubsts
+  , scopedConstraintObligations
+  , scopedConstraints
+  )
 import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.Internal.Polytype
 import Language.Haskell.Exference.Core.RigidInstantiation
@@ -85,7 +92,8 @@ data CheckState = CheckState
   { checkFlexibleIds :: !FlexibleIdSupply
   , checkAliveFlexibleIds :: !IntSet.IntSet
   , checkSubstitutions :: !Substs
-  , checkConstraints :: [HsConstraint]
+  , checkLocalGivens :: [HsConstraint]
+  , checkConstraints :: [ScopedConstraint]
   , checkRigidPlan :: !RigidInstantiationPlan
   , checkRigidScope :: !RigidScope
   , checkCandidateRigidIds :: !IntSet.IntSet
@@ -281,6 +289,7 @@ checkValidatedExpression provenCandidateRigids
                 (expressionFlexibleIdentifiers expression)
         , checkAliveFlexibleIds = flexibleFreeIdentifiers checkedGoal
         , checkSubstitutions = IntMap.empty
+        , checkLocalGivens = []
         , checkConstraints = []
         , checkRigidPlan = rigidPlan
         , checkRigidScope = emptyRigidScope
@@ -297,15 +306,18 @@ checkValidatedExpression provenCandidateRigids
       unmatchedRigids = IntSet.toAscList $ IntSet.difference
         (checkCandidateRigidIds finalState)
         (IntMap.keysSet rigidAlpha)
-      inferredConstraints = map
-        ( fmap
-            ( SharedType.canonicalizeType
-            . applyRigidAlpha rigidAlpha
-            )
+      normalizeConstraint = fmap
+        ( SharedType.canonicalizeType
+        . applyRigidAlpha rigidAlpha
+        )
+      inferredScopedConstraints = map
+        ( normalizeScopedConstraint normalizeConstraint
         . snd
-        . constraintApplySubsts substitutions
+        . scopedConstraintApplySubsts substitutions
         )
         $ checkConstraints finalState
+      inferredConstraints = scopedConstraintObligations
+        inferredScopedConstraints
       -- The inferred side is canonicalized whenever the unifier bound a
       -- variable, so the caller-supplied side must be canonicalized too or a
       -- semantically equal application-form spelling would fail comparison.
@@ -318,10 +330,13 @@ checkValidatedExpression provenCandidateRigids
             expected
   unless (null unmatchedRigids) $ Left
     $ UnmatchedNestedRigidVariables unmatchedRigids
-  unresolved <- maybe
+  unresolvedScoped <- maybe
     (Left $ RefutableConstraints inferredConstraints)
-    (Right . Set.toAscList . Set.fromList)
-    (filterUnresolved augmentedEnvironment inferredConstraints)
+    Right
+    (resolveScopedConstraints filterUnresolved augmentedEnvironment
+      inferredScopedConstraints)
+  let unresolved = Set.toAscList $ Set.fromList
+        $ scopedConstraintObligations unresolvedScoped
   let escaping = escapingRigidConstraints
         (checkRigidScope finalState) unresolved
   unless (null escaping) $ Left $ EscapingRigidConstraints escaping
@@ -342,8 +357,7 @@ checkValidatedExpression provenCandidateRigids
       expectedType <- zonk $ SharedType.canonicalizeType rawExpected
       recordAliveType expectedType
       case (checkedExpression, expectedType) of
-        (_, TypeForall _ _ _)
-          | contextFreeLeadingChain expectedType ->
+        (_, TypeForall _ _ _) ->
           orElseTransactionally
             (infer variables checkedExpression
               >>= (`unifyTypes` expectedType))
@@ -359,12 +373,12 @@ checkValidatedExpression provenCandidateRigids
           >>= (`unifyTypes` expectedType)
 
     -- Choosing introduction commits to the complete leading chain, matching
-    -- search's continuation mode. A later constrained layer therefore blocks
-    -- the choice before any scope opens, and an inner opaque provider cannot
-    -- terminate a partially introduced chain.
+    -- search's continuation mode. Every layer's substituted contexts are
+    -- lexical givens only while checking its body; generated obligations keep
+    -- a snapshot of those givens so a sibling cannot consume them later.
     introduceExpectedForallChain variables checkedExpression source =
       case source of
-        TypeForall binders [] body -> do
+        TypeForall binders constraints body -> do
           instantiations <- mapM allocateCanonicalNestedRigid binders
           alive <- gets checkAliveFlexibleIds
           rigidScope <- gets checkRigidScope
@@ -373,18 +387,18 @@ checkValidatedExpression provenCandidateRigids
                 [ (binder, TypeConstant rigid)
                 | (binder, rigid) <- instantiations
                 ]
+              instantiatedConstraints = map
+                (snd . constraintApplySubsts substitutions) constraints
           modify' $ \current -> current
             { checkRigidScope = registerRigidScope alive rigids rigidScope
             , checkIntroducedRigidIds = IntSet.union
                 (IntSet.fromList rigids)
                 (checkIntroducedRigidIds current)
             }
-          introduceExpectedForallChain variables checkedExpression
+          withLocalGivens instantiatedConstraints
+            $ introduceExpectedForallChain variables checkedExpression
             $ snd $ applySubsts substitutions body
         body -> checkAgainst variables checkedExpression body
-
-    contextFreeLeadingChain ty = case SharedType.splitLeadingForalls ty of
-      (_, contexts, _) -> null contexts
 
     infer :: VariableEnvironment -> Expression -> Check HsType
     infer variables (ExpVar variable annotation) = do
@@ -484,8 +498,12 @@ checkValidatedExpression provenCandidateRigids
         let constraints = functionConstraints binding
         (freshType :| _, freshConstraints) <- freshenTypes
           (functionBindingType binding :| []) constraints
+        localGivens <- gets checkLocalGivens
         modify' $ \current -> current
-          { checkConstraints = freshConstraints ++ checkConstraints current }
+          { checkConstraints =
+              scopedConstraints localGivens freshConstraints
+                ++ checkConstraints current
+          }
         pure freshType
 
     -- Local polymorphic values are instantiated independently at every use.
@@ -497,6 +515,7 @@ checkValidatedExpression provenCandidateRigids
       case instantiateLeadingForallsWith allocateNamespace supply declared of
         Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
         Just (instantiated, constraints, nextSupply) -> do
+          localGivens <- gets checkLocalGivens
           modify' $ \current -> current
             { checkFlexibleIds = nextSupply
             , checkAliveFlexibleIds = IntSet.unions
@@ -504,7 +523,9 @@ checkValidatedExpression provenCandidateRigids
                 : flexibleFreeIdentifiers instantiated
                 : map (foldMap flexibleFreeIdentifiers . constraint_params)
                     constraints
-            , checkConstraints = constraints ++ checkConstraints current
+            , checkConstraints =
+                scopedConstraints localGivens constraints
+                  ++ checkConstraints current
             }
           pure instantiated
 
@@ -813,6 +834,28 @@ orElseTransactionally preferred fallback = StateT $ \initialState ->
   case runStateT preferred initialState of
     Right result -> Right result
     Left _ -> runStateT fallback initialState
+
+-- Nested forall contexts are evidence assumptions for exactly their body.
+-- Restore only the lexical-given component after checking; every substitution,
+-- rigid allocation, and scoped obligation produced by the body remains part
+-- of the successful checker state.
+withLocalGivens :: [HsConstraint] -> Check a -> Check a
+withLocalGivens givens action = do
+  outerGivens <- gets checkLocalGivens
+  modify' $ \current -> current
+    {checkLocalGivens = outerGivens ++ givens}
+  result <- action
+  modify' $ \current -> current {checkLocalGivens = outerGivens}
+  pure result
+
+normalizeScopedConstraint
+  :: (HsConstraint -> HsConstraint)
+  -> ScopedConstraint
+  -> ScopedConstraint
+normalizeScopedConstraint normalize
+    (ScopedConstraint givens obligation) = ScopedConstraint
+  (map normalize givens)
+  (normalize obligation)
 
 recordAliveType :: HsType -> Check ()
 recordAliveType ty = modify' $ \current -> current

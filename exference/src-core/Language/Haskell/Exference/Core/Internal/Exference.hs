@@ -69,6 +69,7 @@ import Language.Haskell.Exference.Core.Internal.RigidScope
   , nestedRigidProvenance
   , registerRigidScope
   )
+import Language.Haskell.Exference.Core.Internal.ScopedConstraint
 import Language.Haskell.Exference.Core.Internal.SearchControl
 import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceHeuristicsConfig (..)
@@ -434,7 +435,7 @@ findEngineBatchesWith allocators
     , findQueue = Q.singleton 0 $ ScheduledNode rootGoal rootSearchNode
     }
   t = forallify rawType
-  rootGoal = TGoal (VarBinding 0 t) initialScopeId OpenLeadingForalls
+  rootGoal = TGoal (VarBinding 0 t) initialScopeId OpenLeadingForalls []
   rootSearchNode = SearchNode
     { nodeGoals           = Seq.empty
     , nodeConstraintGoals = []
@@ -470,9 +471,11 @@ findEngineBatchesWith allocators
             $ queueSizeNatural newNodes)
       | solution <- potentialSolutions
       , let contxt = nodeQueryClassEnv solution
-      , remainingConstraints <- maybeToList
-                              $ filterUnresolved contxt
-                              $ nodeConstraintGoals solution
+      , remainingScopedConstraints <- maybeToList
+          $ resolveScopedConstraints filterUnresolved contxt
+          $ nodeConstraintGoals solution
+      , let remainingConstraints = scopedConstraintObligations
+              remainingScopedConstraints
       , null $ escapingRigidConstraints
           (nodeRigidScope solution) remainingConstraints
         -- if allowConstraints, unresolved constraints are allowed;
@@ -1305,7 +1308,7 @@ rateNode h s = priorityFromPenalty
 rateGoals :: ExferenceHeuristicsConfig -> Seq.Seq TGoal -> Penalty
 rateGoals h = sumScores . fmap rateGoal
   where
-    rateGoal (TGoal (VarBinding _ t) _ _) = typeComplexity h t
+    rateGoal (TGoal (VarBinding _ t) _ _ _) = typeComplexity h t
 
 -- TODO: actually measure performance with different values and derive these
 -- weights instead of relying on historically chosen defaults.
@@ -1361,7 +1364,7 @@ stateStep :: SearchAllocators
           -> TGoal
           -> StateT SearchNode SearchBranches ()
 stateStep allocators multiPM allowConstrs h
-    (TGoal (VarBinding var goalType) scopeId forallMode) = do
+    (TGoal (VarBinding var goalType) scopeId forallMode givenConstraints) = do
   -- This paragraph is evil, and hopefully temporary. (Scoping issues make it necessary.)
   contxt <- gets nodeQueryClassEnv
   constraintGoals' <- gets nodeConstraintGoals
@@ -1395,7 +1398,7 @@ stateStep allocators multiPM allowConstrs h
           -- may cause duplication of the goals (e.g. for the different cases
           -- in the pattern match).
           additionalGoals <- addScopePatternMatch
-            allocators multiPM g nextId newScopeId
+            allocators multiPM g nextId newScopeId givenConstraints
             $ map splitBinding
             $ reverse ts
           modify $ \node -> node
@@ -1427,23 +1430,26 @@ stateStep allocators multiPM allowConstrs h
       modify $ \node -> node
         { nodeGoals = TGoal
             (VarBinding var $ snd $ applySubsts substs t)
-            scopeId OpenLeadingForalls
+            scopeId OpenLeadingForalls givenConstraints
             Seq.<| nodeGoals node
         , nodeQueryClassEnv = addQueryClassEnv
             (snd . constraintApplySubsts substs <$> cs)
             (nodeQueryClassEnv node)
         }
 
-    -- Open one context-free nested forall layer with branch-local fresh
-    -- rigids. Unlike the query-root plan, this scope protects every flexible
-    -- variable which was allocated before the layer opened. A continuation
-    -- mode consumes the complete leading chain without exposing a partially
-    -- opened scheme to the ordinary opaque-provider branches.
+    -- Open one nested forall layer with branch-local fresh rigids. Its direct
+    -- contexts become lexical givens for this quantified body, rather than
+    -- node-wide assumptions which could leak into queued sibling goals.
+    -- Unlike the query-root plan, this scope protects every flexible variable
+    -- which was allocated before the layer opened. A continuation mode
+    -- consumes the complete leading chain without exposing a partially opened
+    -- scheme to the ordinary opaque-provider branches.
     introducedForallStep
       :: [TVarId]
+      -> [HsConstraint]
       -> HsType
       -> StateT SearchNode SearchBranches ()
-    introducedForallStep vs t = do
+    introducedForallStep vs contexts t = do
       plan <- gets nodeRigidPlan
       case searchAllocateNestedRigidInstantiations allocators vs plan of
         Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
@@ -1453,10 +1459,13 @@ stateStep allocators multiPM allowConstrs h
               substitutions = IntMap.fromList
                 [(binder, TypeConstant rigid)
                 | (binder, rigid) <- instantiations]
+              openedContexts = map
+                (snd . constraintApplySubsts substitutions) contexts
           modify $ \node -> node
             { nodeGoals = TGoal
                 (VarBinding var $ snd $ applySubsts substitutions t)
                 scopeId ContinueForallIntroduction
+                (givenConstraints ++ openedContexts)
                 Seq.<| nodeGoals node
             , nodeRigidPlan = nextPlan
             , nodeRigidScope = registerRigidScope alive rigids
@@ -1587,12 +1596,13 @@ stateStep allocators multiPM allowConstrs h
                 (ExpHole var))
                 (nodeExpression node)
             , nodeGoals = TGoal (VarBinding vParam d)
-                scopeId TryForallIntroduction
+                scopeId TryForallIntroduction givenConstraints
                 Seq.<| nodeGoals node
             }
           newScopeId <- builderAddScope allocators scopeId
           modify $ \node -> node
-            { nodeConstraintGoals = nodeConstraintGoals node <> provConstrs
+            { nodeConstraintGoals = nodeConstraintGoals node
+                <> scopedConstraints givenConstraints provConstrs
             , nodeDepth = addScore (nodeDepth node) depthModNoMatch
             , nodeLastStepBinding = applierName
             }
@@ -1603,6 +1613,7 @@ stateStep allocators multiPM allowConstrs h
             goalType
             var
             newScopeId
+            givenConstraints
             [splitBindingWithParameters ds $ VarBinding vResult provided]
           modify $ \node -> node
             { nodeGoals = nodeGoals node <> Seq.fromList additionalGoals }
@@ -1613,19 +1624,33 @@ stateStep allocators multiPM allowConstrs h
             substs = case applier of
               Left _  -> goalSS
               Right _ -> allSS
-            (applied1, constrs1) = mapM (constraintApplySubsts substs)
-                                        constraintGoals'
+            (applied1, constrs1) = mapM
+              (scopedConstraintApplySubsts substs) constraintGoals'
             constrs2 = map (snd . constraintApplySubsts provSS)
               provConstrs
+            currentGivens = map
+              (snd . constraintApplySubsts substs) givenConstraints
+            scopedConstrs2 = scopedConstraints currentGivens constrs2
         newConstraints <- lift $ maybeBranch $ if allowConstrs
-          then Just $ constrs1 ++ constrs2
+          then Just $ constrs1 ++ scopedConstrs2
           else if getAny applied1
-            then                   isPossible contxt (constrs1 ++ constrs2)
-            else (constrs1 ++) <$> isPossible contxt constrs2
+            then resolveScopedConstraints isPossible contxt
+              $ constrs1 ++ scopedConstrs2
+            else (constrs1 ++) <$> resolveScopedConstraints
+              isPossible contxt scopedConstrs2
         vars <- forM dependencies $ \_ -> builderAllocHole allocators
-        let newGoals = mkGoals scopeId $ zipWith VarBinding vars dependencies
+        let newGoals = mkGoals scopeId givenConstraints
+              $ zipWith VarBinding vars dependencies
             applyProviderSubstitution = case applier of
-              Left _ -> goalApplySubst provSS
+              -- Provider variables live in a disjoint temporary namespace,
+              -- while goal givens live in the persistent query namespace.
+              -- Apply this map only to the dependency type; applying it to the
+              -- whole TGoal could rewrite a numerically colliding local given.
+              Left _ -> \goal -> case goalBinding goal of
+                VarBinding dependencyVariable dependencyType -> goal
+                  { goalBinding = VarBinding dependencyVariable
+                      $ snd $ applySubsts provSS dependencyType
+                  }
               Right _ -> id
         modify $ \node -> node
           { nodeGoals = nodeGoals node
@@ -1645,16 +1670,11 @@ stateStep allocators multiPM allowConstrs h
     TypeArrow _ _ -> arrowStep goalType []
     TypeForall is cs t | forallMode == OpenLeadingForalls ->
       forallStep is cs t
-    TypeForall is [] t | forallMode == ContinueForallIntroduction ->
-      introducedForallStep is t
-    TypeForall is [] t
-      | forallMode == TryForallIntroduction
-      , contextFreeLeadingChain goalType ->
-        byProvided <|> byFunctionSimple <|> introducedForallStep is t
+    TypeForall is cs t | forallMode == ContinueForallIntroduction ->
+      introducedForallStep is cs t
+    TypeForall is cs t | forallMode == TryForallIntroduction ->
+      byProvided <|> byFunctionSimple <|> introducedForallStep is cs t
     _ -> byProvided <|> byFunctionSimple
- where
-  contextFreeLeadingChain ty = case SharedType.splitLeadingForalls ty of
-    (_, contexts, _) -> null contexts
 
 
 {-# INLINE addScopePatternMatch #-}
@@ -1671,11 +1691,13 @@ addScopePatternMatch :: SearchAllocators
                                --  form or another)
                      -> Int    -- goal id (hole id)
                      -> ScopeId -- scope for this goal
+                     -> [HsConstraint] -- lexical class givens for this goal
                      -> [VarPBinding]
                      -> StateT SearchNode SearchBranches [TGoal]
-addScopePatternMatch allocators multiPM goalType vid sid bindings = case bindings of
+addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
+  case bindings of
   [] -> return
-    [TGoal (VarBinding vid goalType) sid TryForallIntroduction]
+    [TGoal (VarBinding vid goalType) sid TryForallIntroduction givens]
   (b : bindingRest) -> do
     let v = varPVariable b
         vtResult = varPResult b
@@ -1685,7 +1707,7 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
       { nodeProvidedScopes = scopesAddPBinding sid b
           $ nodeProvidedScopes node }
     let defaultHandleRest = addScopePatternMatch
-          allocators multiPM goalType vid sid bindingRest
+          allocators multiPM goalType vid sid givens bindingRest
     case vtResult of
       TypeVar {}    -> defaultHandleRest -- dont pattern-match on variables, even if it unifies
       TypeArrow {}  ->
@@ -1761,6 +1783,7 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
                 goalType
                 vid
                 sid
+                givens
                 (reverse newBinds ++ bindingRest)
           mapFunc (DeconstructorBinding matchParam
               matchers@(_ : _) False)
@@ -1800,6 +1823,7 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
                     goalType
                     newVid
                     newSid
+                    givens
                     (newBinds ++ bindingRest)
           mapFunc _ = Nothing
             -- TODO: deconstructors for recursive data types.

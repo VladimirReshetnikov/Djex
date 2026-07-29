@@ -3734,6 +3734,141 @@ tests = testGroup "Exference"
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Right ()
+      , testCase "nested contextual forall givens discharge body obligations" $ do
+          let className = name "C"
+              evidence ty = HsConstraint className [ty]
+              token = TypeCons $ name "Token"
+              result = TypeCons $ name "Result"
+              consumeName = name "consumeContextual"
+              methodName = name "contextualMethod"
+              contextual = TypeForall [7] [evidence $ TypeVar 7]
+                $ TypeArrow (TypeVar 7) token
+              consume = FunctionBinding result consumeName 0 [] [contextual]
+              method = FunctionBinding token methodName 0
+                [evidence $ TypeVar 0] [TypeVar 0]
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          let contextualInput = identityInput
+                { input_goalType = result
+                , input_envFuncs = [consume, method]
+                , input_envClasses = staticClasses
+                , input_maxSteps = 500
+                }
+          (expression, residual, _) <- maybe
+            (fail "a nested contextual forall was not introduced") pure
+            $ findOneExpression contextualInput
+          residual @?= []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [consume, method] [] result [] expression @?= Right ()
+      , testCase "nested contextual givens retain superclass evidence" $ do
+          let baseName = name "Base"
+              derivedName = name "Derived"
+              base ty = HsConstraint baseName [ty]
+              derived ty = HsConstraint derivedName [ty]
+              token = TypeCons $ name "SuperclassToken"
+              result = TypeCons $ name "SuperclassResult"
+              consumeName = name "consumeSuperclassContext"
+              methodName = name "baseMethod"
+              contextual = TypeForall [7] [derived $ TypeVar 7]
+                $ TypeArrow (TypeVar 7) token
+              consume = FunctionBinding result consumeName 0 [] [contextual]
+              method = FunctionBinding token methodName 0
+                [base $ TypeVar 0] [TypeVar 0]
+              baseClass = HsTypeClass baseName [0] []
+              derivedClass = HsTypeClass derivedName [0]
+                [base $ TypeVar 0]
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [baseClass, derivedClass] []
+          let contextualInput = identityInput
+                { input_goalType = result
+                , input_envFuncs = [consume, method]
+                , input_envClasses = staticClasses
+                , input_maxSteps = 500
+                }
+          (expression, residual, _) <- maybe
+            (fail "a nested superclass context was not introduced") pure
+            $ findOneExpression contextualInput
+          residual @?= []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [consume, method] [] result [] expression @?= Right ()
+      , testCase "nested contextual chains preserve lexical shadowing" $ do
+          let outerName = name "Outer"
+              innerName = name "Inner"
+              outer ty = HsConstraint outerName [ty]
+              inner ty = HsConstraint innerName [ty]
+              bodyResult = TypeCons $ name "ShadowedContextBody"
+              result = TypeCons $ name "ShadowedContextResult"
+              consumeName = name "consumeShadowedContexts"
+              useBothName = name "useShadowedContexts"
+              -- Reusing binder 7 in the inner layer is intentional: its
+              -- context must refer to the inner skolem, while the outer arrow
+              -- parameter and given retain the outer skolem.
+              contextual = TypeForall [7] [outer $ TypeVar 7]
+                $ TypeArrow (TypeVar 7)
+                $ TypeForall [7] [inner $ TypeVar 7]
+                $ TypeArrow (TypeVar 7) bodyResult
+              consume = FunctionBinding result consumeName 0 [] [contextual]
+              useBoth = FunctionBinding bodyResult useBothName 0
+                [outer $ TypeVar 0, inner $ TypeVar 1]
+                [TypeVar 0, TypeVar 1]
+          staticClasses <- expectRight $ mkStaticClassEnv
+            [ HsTypeClass outerName [0] []
+            , HsTypeClass innerName [0] []
+            ] []
+          let contextualInput = identityInput
+                { input_goalType = result
+                , input_envFuncs = [consume, useBoth]
+                , input_envClasses = staticClasses
+                , input_maxSteps = 1000
+                }
+          (expression, residual, _) <- maybe
+            (fail "a shadowed contextual forall chain was not introduced")
+            pure
+            $ findOneExpression contextualInput
+          residual @?= []
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [consume, useBoth] [] result [] expression @?= Right ()
+      , testCase "binderless nested givens cannot discharge sibling work" $ do
+          let className = name "C"
+              integer = TypeCons $ name "Int"
+              unit = TypeTuple Boxed []
+              needed = TypeCons $ name "Needed"
+              result = TypeCons $ name "Result"
+              evidence = HsConstraint className [integer]
+              contextualUnit = TypeForall [] [evidence] unit
+              combine = FunctionBinding result (name "combineScoped") 0 []
+                [contextualUnit, needed]
+              unitValue = FunctionBinding unit (name "unitScoped") 0 [] []
+              needsEvidence = FunctionBinding needed (name "needsEvidence") 0
+                [evidence] []
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          let siblingInput = identityInput
+                { input_goalType = result
+                , input_envFuncs = [combine, unitValue, needsEvidence]
+                , input_envClasses = staticClasses
+                , input_allowConstraints = True
+                , input_maxSteps = 500
+                }
+          (expression, residual, _) <- maybe
+            (fail "the sibling-scope fixture produced no constrained result")
+            pure
+            $ findOneExpression siblingInput
+          residual @?= [evidence]
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [combine, unitValue, needsEvidence] [] result residual expression
+            @?= Right ()
+          let strictChunks = findExpressionsWithStats
+                siblingInput {input_allowConstraints = False}
+          case strictChunks of
+            [] -> fail "strict sibling search produced no progress batch"
+            firstChunk : remainingChunks -> do
+              assertBool
+                "strict sibling search returned a locally discharged candidate"
+                $ all (null . chunkElements) strictChunks
+              searchCompletion
+                  (chunkStatus $ lastElement firstChunk remainingChunks)
+                @?= SearchStepLimitReached
       , testCase "checker accepts breadth-first nested forall allocation" $ do
           let polymorphic = TypeForall [10] []
                 $ TypeArrow (TypeVar 10) (TypeVar 10)
@@ -8877,36 +9012,112 @@ tests = testGroup "Exference"
           checkExpression classes [] []
             (TypeArrow outer identityScheme) [] direct @?= Right ()
           checkExpression classes [consume] [] result [] applied @?= Right ()
-      , testCase "does not introduce constrained nested foralls" $ do
+      , testCase "contextual forall introduction uses substituted local givens" $ do
           let className = name "C"
+              evidence ty = HsConstraint className [ty]
               outer = TypeVar 4
+              result = TypeCons $ name "ContextualResult"
               constrained = TypeForall [2]
-                [HsConstraint className [TypeVar 2]]
-                $ TypeArrow (TypeVar 2) (TypeVar 2)
+                [evidence $ TypeVar 2]
+                $ TypeArrow (TypeVar 2) result
+              needCName = name "needContextualC"
+              needC = FunctionBinding result needCName 0
+                [evidence $ TypeVar 0] [TypeVar 0]
               expression = ExpLambda 1 (TypeConstant 0)
-                $ ExpLambda 2 (TypeConstant 0)
-                $ ExpVar 2 $ TypeConstant 0
+                $ ExpLambda 2 (TypeConstant 1)
+                $ ExpApply (ExpName needCName)
+                $ ExpVar 2 $ TypeConstant 1
           staticClasses <- expectRight
             $ mkStaticClassEnv [HsTypeClass className [0] []] []
-          case checkExpression (mkQueryClassEnv staticClasses []) [] []
-              (TypeArrow outer constrained) [] expression of
-            Left TypeMismatch{} -> pure ()
-            actual -> fail $ "checker introduced a constrained forall: "
+          let classes = mkQueryClassEnv staticClasses []
+          checkExpression classes [needC] []
+            (TypeArrow outer constrained) [] expression @?= Right ()
+
+          -- The generated call really depends on the nested dictionary: the
+          -- same body under a context-free forall must not validate.
+          let contextFree = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) result
+          case checkExpression classes [needC] []
+              (TypeArrow outer contextFree)
+              [evidence $ TypeConstant 1] expression of
+            Left (EscapingRigidConstraints constraints) ->
+              constraints @?= [evidence $ TypeConstant 1]
+            actual -> fail $ "checker accepted missing nested evidence: "
               ++ show actual
-      , testCase "does not partially introduce before a constrained suffix" $ do
+      , testCase "binderless contextual givens do not leak to siblings" $ do
           let className = name "C"
-              inner = TypeForall [3]
-                [HsConstraint className [TypeVar 3]]
-                $ TypeArrow (TypeVar 3) (TypeVar 3)
-              expected = TypeForall [2] [] inner
-              expression = ExpLambda 1 inner $ ExpVar 1 inner
+              evidence ty = HsConstraint className [ty]
+              outer = TypeVar 4
+              unit = TypeTuple Boxed []
+              result = TypeCons $ name "SiblingResult"
+              contextualUnit = TypeForall []
+                [evidence $ TypeVar 0] unit
+              unitName = name "contextualUnit"
+              unitBinding = FunctionBinding unit unitName 0 [] []
+              consumeName = name "consumeContextualSibling"
+              consume = FunctionBinding result consumeName 0 []
+                [contextualUnit, TypeVar 0]
+              needCName = name "needSiblingC"
+              needC = FunctionBinding (TypeVar 0) needCName 0
+                [evidence $ TypeVar 0] [TypeVar 0]
+              expression = ExpLambda 1 (TypeConstant 0)
+                $ ExpApply
+                    (ExpApply (ExpName consumeName) $ ExpName unitName)
+                $ ExpApply (ExpName needCName)
+                $ ExpVar 1 $ TypeConstant 0
           staticClasses <- expectRight
             $ mkStaticClassEnv [HsTypeClass className [0] []] []
-          case checkExpression (mkQueryClassEnv staticClasses []) [] []
-              (TypeArrow inner expected) [] expression of
-            Left TypeMismatch{} -> pure ()
+          checkExpression (mkQueryClassEnv staticClasses [])
+            [unitBinding, consume, needC] []
+            (TypeArrow outer result) [] expression @?=
+              Left (ConstraintMismatch []
+                [evidence $ TypeConstant 0])
+      , testCase "introduces a complete mixed contextual forall chain" $ do
+          let className = name "C"
+              evidence ty = HsConstraint className [ty]
+              outer = TypeVar 4
+              result = TypeCons $ name "MixedContextualResult"
+              inner = TypeForall [3] [evidence $ TypeVar 3]
+                $ TypeArrow (TypeVar 3) result
+              expected = TypeForall [2] [] inner
+              needCName = name "needMixedContextualC"
+              needC = FunctionBinding result needCName 0
+                [evidence $ TypeVar 0] [TypeVar 0]
+              expression = ExpLambda 1 (TypeConstant 0)
+                $ ExpLambda 2 (TypeConstant 2)
+                $ ExpApply (ExpName needCName)
+                $ ExpVar 2 $ TypeConstant 2
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          checkExpression (mkQueryClassEnv staticClasses []) [needC] []
+            (TypeArrow outer expected) [] expression @?= Right ()
+      , testCase "contextual nested obligations cannot leak as residuals" $ do
+          let givenName = name "C"
+              neededName = name "D"
+              given ty = HsConstraint givenName [ty]
+              needed ty = HsConstraint neededName [ty]
+              outer = TypeVar 4
+              result = TypeCons $ name "ContextualResidualResult"
+              contextual = TypeForall [2] [given $ TypeVar 2]
+                $ TypeArrow (TypeVar 2) result
+              needDName = name "needNestedD"
+              needD = FunctionBinding result needDName 0
+                [needed $ TypeVar 0] [TypeVar 0]
+              expression = ExpLambda 1 (TypeConstant 0)
+                $ ExpLambda 2 (TypeConstant 1)
+                $ ExpApply (ExpName needDName)
+                $ ExpVar 2 $ TypeConstant 1
+          staticClasses <- expectRight $ mkStaticClassEnv
+            [ HsTypeClass givenName [0] []
+            , HsTypeClass neededName [0] []
+            ] []
+          case checkExpression (mkQueryClassEnv staticClasses []) [needD] []
+              (TypeArrow outer contextual)
+              [needed $ TypeConstant 1] expression of
+            Left (EscapingRigidConstraints constraints) ->
+              constraints @?= [needed $ TypeConstant 1]
             actual -> fail
-              $ "checker partially introduced before a constrained suffix: "
+              $ "checker published a contextual nested obligation: "
               ++ show actual
       , testCase "forall introduction commits to the complete leading chain" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []

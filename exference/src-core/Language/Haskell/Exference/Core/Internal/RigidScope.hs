@@ -10,14 +10,19 @@
 module Language.Haskell.Exference.Core.Internal.RigidScope
   ( RigidEscape (..)
   , RigidScope
+  , NestedRigidProvenance
   , emptyRigidScope
   , registerRigidScope
+  , nestedRigidProvenance
+  , provenanceRigidIdentifiers
+  , escapingRigidConstraints
   , validateRigidSubstitutions
   ) where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
+import Control.DeepSeq (NFData (..))
 
 import Language.Haskell.Exference.Core.Types
 import qualified Language.Haskell.Synthesis.Type as SharedType
@@ -28,11 +33,26 @@ data RigidEscape = RigidEscape
   }
   deriving (Eq, Show)
 
-newtype RigidScope = RigidScope (IntMap.IntMap IntSet.IntSet)
+data RigidScope = RigidScope
+  (IntMap.IntMap IntSet.IntSet)
+  IntSet.IntSet
   deriving (Eq, Show)
 
+-- | Opaque capability identifying the annotation skolems allocated by one
+-- live search branch. The stable checker re-exports only the abstract type;
+-- construction remains behind the internal search boundary.
+newtype NestedRigidProvenance = NestedRigidProvenance IntSet.IntSet
+
+instance NFData RigidEscape where
+  rnf (RigidEscape flexible rigid) = rnf flexible `seq` rnf rigid
+
+instance NFData RigidScope where
+  rnf (RigidScope restrictions owned) =
+    rnf (IntMap.toAscList restrictions)
+      `seq` rnf (IntSet.toAscList owned)
+
 emptyRigidScope :: RigidScope
-emptyRigidScope = RigidScope IntMap.empty
+emptyRigidScope = RigidScope IntMap.empty IntSet.empty
 
 -- | Record one newly opened scope against precisely the flexible variables
 -- which are alive before its rigid constants are allocated.
@@ -41,15 +61,37 @@ registerRigidScope
   -> [TVarId]
   -> RigidScope
   -> RigidScope
-registerRigidScope alive rigids (RigidScope restrictions)
-  | IntSet.null rigidSet = RigidScope restrictions
-  | otherwise = RigidScope $ IntSet.foldl'
-      (\current variable ->
-        IntMap.insertWith IntSet.union variable rigidSet current)
-      restrictions
-      alive
+registerRigidScope alive rigids (RigidScope restrictions owned)
+  | IntSet.null rigidSet = RigidScope restrictions owned
+  | otherwise = RigidScope
+      (IntSet.foldl'
+        (\current variable ->
+          IntMap.insertWith IntSet.union variable rigidSet current)
+        restrictions
+        alive)
+      (IntSet.union rigidSet owned)
  where
   rigidSet = IntSet.fromList rigids
+
+-- | Seal the rigid spellings introduced by nested scopes in this branch for
+-- the independent candidate checker.
+nestedRigidProvenance :: RigidScope -> NestedRigidProvenance
+nestedRigidProvenance (RigidScope _ owned) = NestedRigidProvenance owned
+
+-- | Unwrap provenance only inside the checker implementation.
+provenanceRigidIdentifiers :: NestedRigidProvenance -> IntSet.IntSet
+provenanceRigidIdentifiers (NestedRigidProvenance identifiers) = identifiers
+
+-- | Residual obligations cannot carry a skolem owned by a dynamically opened
+-- scope to the top-level candidate boundary.  Keep ownership separately from
+-- old-flexible restrictions: a scope opened when no flexible variable is
+-- alive can still leak through a deferred class constraint.
+escapingRigidConstraints :: RigidScope -> [HsConstraint] -> [HsConstraint]
+escapingRigidConstraints (RigidScope _ owned) = filter escapes
+ where
+  escapes constraint = not $ IntSet.null $ IntSet.intersection owned
+    $ foldMap rigidIds $ constraint_params constraint
+  rigidIds = foldMap $ SharedType.foldRigidVariable IntSet.singleton
 
 -- | Validate one simultaneous unifier result and retain the age information
 -- implied by its flexible-variable edges.  Propagation reaches a fixed point
@@ -60,10 +102,10 @@ validateRigidSubstitutions
   :: RigidScope
   -> Substs
   -> Either RigidEscape RigidScope
-validateRigidSubstitutions (RigidScope initial) substitutions = do
+validateRigidSubstitutions (RigidScope initial owned) substitutions = do
   let propagated = closeRestrictions initial
   mapM_ (validateImage propagated) $ IntMap.toAscList substitutions
-  pure $ RigidScope propagated
+  pure $ RigidScope propagated owned
  where
   edges = IntMap.map (Set.toAscList . freeVars) substitutions
 

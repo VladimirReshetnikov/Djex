@@ -3187,9 +3187,12 @@ tests = testGroup "Exference"
           plan <- expectRight $ planRigidInstantiation
             (mkRigidInstantiationContext environment) [] goal
           rigidInstantiations plan @?= [(4, 0), (9, 1)]
+          show plan @?= "RigidInstantiationPlan [(4,0),(9,1)]"
           (nested, nestedPlan) <- expectRight
             $ allocateNestedRigidInstantiations [12, 13] plan
           nested @?= [(12, 2), (13, 3)]
+          show nestedPlan @?=
+            "RigidInstantiationPlan [(4,0),(9,1)] (advanced by 2)"
           (deeper, _) <- expectRight
             $ allocateNestedRigidInstantiations [14] nestedPlan
           deeper @?= [(14, 4)]
@@ -3653,7 +3656,7 @@ tests = testGroup "Exference"
           in validateExferenceInput identityInput
               { input_envFuncs = [binding] }
               @?= Left (InvalidClassConstraint $ InvalidClassName invalidName)
-      , testCase "nested forall goals remain opaque after root opening" $ do
+      , testCase "nested forall goals preserve forwarding and introduce values" $ do
           let polymorphic = TypeForall [0] [] (TypeVar 0)
               goal = TypeArrow polymorphic polymorphic
               input = ExferenceInput goal [] [] emptyClassEnv
@@ -3687,6 +3690,42 @@ tests = testGroup "Exference"
             Left failure -> fail
               $ "grouped rank-N search failed: " ++ show failure
             Right _ -> pure ()
+
+          -- Opaque forwarding remains the first path above, while a callback
+          -- with no polymorphic provider now takes the appended introduction
+          -- branch and synthesizes its quantified argument structurally.
+          let identityScheme = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) (TypeVar 2)
+              callbackGoal = TypeArrow
+                (TypeArrow identityScheme $ TypeVar 3)
+                (TypeVar 3)
+              callbackInput = identityInput
+                { input_goalType = callbackGoal
+                , input_maxSteps = 200
+                }
+          (callbackExpression, callbackResidual, _) <- maybe
+            (fail "a nested quantified callback was not introduced") pure
+            $ findOneExpression callbackInput
+          callbackResidual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            callbackGoal [] callbackExpression @?= Right ()
+
+          -- Arrow peeling can reveal a quantified result directly. The
+          -- unused ordinary argument is intentional; the synthesized value
+          -- must still be checked under the freshly opened rigid scope.
+          let directResultGoal = TypeArrow (TypeVar 4) identityScheme
+              directResultInput = identityInput
+                { input_goalType = directResultGoal
+                , input_allowUnused = True
+                , input_maxSteps = 100
+                }
+          (directExpression, directResidual, _) <- maybe
+            (fail "a direct nested forall result was not introduced") pure
+            $ findOneExpression directResultInput
+          directResidual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            directResultGoal [] directExpression @?= Right ()
+
           let nestedConstraint = HsConstraint (name "Inner") [TypeVar 1]
               outerConstraint = HsConstraint (name "Outer")
                 [TypeForall [1] [nestedConstraint] $ TypeVar 1]
@@ -3695,6 +3734,81 @@ tests = testGroup "Exference"
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Right ()
+      , testCase "checker accepts breadth-first nested forall allocation" $ do
+          let polymorphic = TypeForall [10] []
+                $ TypeArrow (TypeVar 10) (TypeVar 10)
+              pType = TypeCons $ name "P"
+              rType = TypeCons $ name "R"
+              output = TypeCons $ name "Out"
+              fName = name "f"
+              gName = name "g"
+              makePName = name "makeP"
+              f = FunctionBinding output fName 0 []
+                [rType, pType]
+              g = FunctionBinding rType gName 0 [] [pType]
+              makeP = FunctionBinding pType makePName 0 [] [polymorphic]
+              input = identityInput
+                { input_goalType = output
+                , input_envFuncs = [f, g, makeP]
+                , input_maxSteps = 1000
+                }
+              hasBreadthFirstCandidate candidate = case candidate of
+                ( ExpApply
+                    (ExpApply (ExpName selectedF)
+                      (ExpApply (ExpName selectedG)
+                        (ExpApply (ExpName innerMakeP) _)))
+                    (ExpApply (ExpName outerMakeP) _)
+                  , []
+                  , _
+                  ) -> selectedF == fName
+                    && selectedG == gName
+                    && innerMakeP == makePName
+                    && outerMakeP == makePName
+                _ -> False
+          candidates <- expectRight $ findExpressionsEither input
+          assertBool
+            "checker rejected search's breadth-first nested-rigid allocation"
+            $ any hasBreadthFirstCandidate candidates
+      , testCase "nested forall constraints cannot escape as residuals" $ do
+          let className = name "C"
+              evidence ty = HsConstraint className [ty]
+              inner = TypeCons $ name "Inner"
+              outer = TypeCons $ name "Outer"
+              consumeName = name "consume"
+              needCName = name "needC"
+              nestedParameter = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) inner
+              consume = FunctionBinding outer consumeName 0 []
+                [nestedParameter]
+              needC = FunctionBinding inner needCName 0
+                [evidence $ TypeVar 0] [TypeVar 0]
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          let nestedInput = identityInput
+                { input_goalType = outer
+                , input_envFuncs = [consume, needC]
+                , input_envClasses = staticClasses
+                , input_allowConstraints = True
+                , input_maxSteps = 300
+                }
+          nestedCandidates <- expectRight
+            $ findExpressionsEither nestedInput
+          assertBool
+            "a dynamically scoped skolem escaped through a residual constraint"
+            $ null nestedCandidates
+
+          -- A root-prenex skolem belongs to the query boundary, so its
+          -- residual obligation remains a valid caller-visible constraint.
+          let rootGoal = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) inner
+              rootInput = nestedInput
+                { input_goalType = rootGoal
+                , input_envFuncs = [needC]
+                }
+          (_, rootResidual, _) <- maybe
+            (fail "a root-prenex residual constraint was rejected") pure
+            $ findOneExpression rootInput
+          rootResidual @?= [evidence $ TypeConstant 0]
       , testCase "scoped provider foralls instantiate at monomorphic uses" $ do
           let integer = TypeCons $ name "Int"
               polymorphic = TypeForall [0] []
@@ -8384,6 +8498,25 @@ tests = testGroup "Exference"
                 $ ExpVar 7 (TypeConstant 1)
           checkExpressionWithRigidInstantiation localPlan classEnvironment
               [] [] goal [] conservativeIdentity @?= Right ()
+      , testCase "rejects an already-advanced checker plan" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let goal = TypeForall [4] []
+                $ TypeArrow (TypeVar 4) (TypeVar 4)
+              classEnvironment = mkQueryClassEnv staticClasses []
+              environment = EnvDictionary [] [] staticClasses
+          plan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext environment) [] goal
+          (_, advancedPlan) <- expectRight
+            $ allocateNestedRigidInstantiations [9] plan
+          case prepareExpressionCheckContext advancedPlan classEnvironment
+              [] [] goal of
+            Left failure -> failure @?=
+              RigidInstantiationPlanAlreadyAdvanced 1
+            Right _ -> fail "an already-advanced checker plan was accepted"
+          case prepareExpressionCheckContext plan classEnvironment [] [] goal of
+            Left failure -> fail $ "the original checker plan was rejected: "
+              ++ show failure
+            Right _ -> pure ()
       , testCase "preflights cyclic checker class and pattern arities" $ do
           let className = name "Unary"
               unary = HsTypeClass className [0] []
@@ -8702,6 +8835,158 @@ tests = testGroup "Exference"
               expression = ExpLambda 1 polymorphic $ ExpVar 1 polymorphic
           checkExpression (mkQueryClassEnv staticClasses []) [] []
             (TypeArrow renamed polymorphic) [] expression @?= Right ()
+      , testCase "keeps standalone annotation rigids nominal" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let unit = TypeTuple Boxed []
+              ignoreName = name "ignore"
+              ignore = FunctionBinding unit ignoreName 0 [] [TypeVar 0]
+              foreignRigid = TypeConstant 7
+              ordinary = ExpApply (ExpName ignoreName)
+                $ ExpLambda 1 foreignRigid $ ExpVar 1 foreignRigid
+              polymorphic = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) (TypeVar 2)
+              consumeName = name "consumePoly"
+              result = TypeCons $ name "Result"
+              consume = FunctionBinding result consumeName 0 [] [polymorphic]
+              impersonating = ExpApply (ExpName consumeName)
+                $ ExpLambda 2 foreignRigid $ ExpVar 2 foreignRigid
+              classes = mkQueryClassEnv staticClasses []
+          checkExpression classes [ignore] [] unit [] ordinary @?= Right ()
+          case checkExpression classes [consume] [] result [] impersonating of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail $ "an unproven annotation rigid was alpha-renamed: "
+              ++ show actual
+      , testCase "introduces context-free nested foralls bidirectionally" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let outer = TypeVar 4
+              identityScheme = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) (TypeVar 2)
+              rigidIdentity rigid local = ExpLambda local (TypeConstant rigid)
+                $ ExpVar local $ TypeConstant rigid
+              -- Root forallification consumes C0 for the free outer type;
+              -- the nested binder therefore consumes C1.
+              direct = ExpLambda 1 (TypeConstant 0) $ rigidIdentity 1 2
+              consumeName = name "consumePoly"
+              result = TypeCons $ name "Result"
+              consume = FunctionBinding result consumeName 0 []
+                [identityScheme]
+              applied = ExpApply (ExpName consumeName) $ rigidIdentity 0 3
+              classes = mkQueryClassEnv staticClasses []
+          -- Lambda bodies use their expected arrow result, and applications
+          -- use a known arrow parameter as a checking boundary.
+          checkExpression classes [] []
+            (TypeArrow outer identityScheme) [] direct @?= Right ()
+          checkExpression classes [consume] [] result [] applied @?= Right ()
+      , testCase "does not introduce constrained nested foralls" $ do
+          let className = name "C"
+              outer = TypeVar 4
+              constrained = TypeForall [2]
+                [HsConstraint className [TypeVar 2]]
+                $ TypeArrow (TypeVar 2) (TypeVar 2)
+              expression = ExpLambda 1 (TypeConstant 0)
+                $ ExpLambda 2 (TypeConstant 0)
+                $ ExpVar 2 $ TypeConstant 0
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          case checkExpression (mkQueryClassEnv staticClasses []) [] []
+              (TypeArrow outer constrained) [] expression of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail $ "checker introduced a constrained forall: "
+              ++ show actual
+      , testCase "does not partially introduce before a constrained suffix" $ do
+          let className = name "C"
+              inner = TypeForall [3]
+                [HsConstraint className [TypeVar 3]]
+                $ TypeArrow (TypeVar 3) (TypeVar 3)
+              expected = TypeForall [2] [] inner
+              expression = ExpLambda 1 inner $ ExpVar 1 inner
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          case checkExpression (mkQueryClassEnv staticClasses []) [] []
+              (TypeArrow inner expected) [] expression of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail
+              $ "checker partially introduced before a constrained suffix: "
+              ++ show actual
+      , testCase "forall introduction commits to the complete leading chain" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let inner = TypeForall [3] []
+                $ TypeArrow (TypeVar 3) (TypeVar 3)
+              expected = TypeForall [2] [] inner
+              expression = ExpLambda 1 inner $ ExpVar 1 inner
+          case checkExpression (mkQueryClassEnv staticClasses []) [] []
+              (TypeArrow inner expected) [] expression of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail
+              $ "checker stopped a chosen forall introduction early: "
+              ++ show actual
+      , testCase "rejects residual constraints containing nested skolems" $ do
+          let className = name "C"
+              evidence ty = HsConstraint className [ty]
+              inner = TypeCons $ name "Inner"
+              outer = TypeCons $ name "Outer"
+              consumeName = name "consume"
+              needCName = name "needC"
+              consume = FunctionBinding outer consumeName 0 []
+                [ TypeForall [1] []
+                    $ TypeArrow (TypeVar 1) inner
+                ]
+              needC = FunctionBinding inner needCName 0
+                [evidence $ TypeVar 0] [TypeVar 0]
+              nestedExpression = ExpApply (ExpName consumeName)
+                $ ExpLambda 1 (TypeConstant 0)
+                $ ExpApply (ExpName needCName)
+                $ ExpVar 1 (TypeConstant 0)
+              rootGoal = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) inner
+              rootExpression = ExpLambda 2 (TypeConstant 0)
+                $ ExpApply (ExpName needCName)
+                $ ExpVar 2 (TypeConstant 0)
+          staticClasses <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          let classes = mkQueryClassEnv staticClasses []
+          case checkExpression classes [consume, needC] [] outer
+              [evidence $ TypeConstant 0] nestedExpression of
+            Left (EscapingRigidConstraints escaping) ->
+              assertBool "the escape diagnostic lost the class obligation"
+                $ not $ null escaping
+            actual -> fail
+              $ "checker published a nested-skolem residual constraint: "
+              ++ show actual
+          checkExpression classes [needC] [] rootGoal
+            [evidence $ TypeConstant 0] rootExpression @?= Right ()
+      , testCase "rejects flexible variables escaping nested rigid scopes" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let result = TypeCons $ name "Result"
+              escapingName = name "consumeEscaping"
+              transitiveName = name "consumeTransitive"
+              sourceFlexible = TypeVar 5
+              escapingParameter = TypeForall [2] []
+                $ TypeArrow (TypeVar 2) sourceFlexible
+              transitiveParameter = TypeForall [3] []
+                $ TypeArrow sourceFlexible (TypeVar 3)
+              escapingConsumer = FunctionBinding result escapingName 0 []
+                [escapingParameter]
+              transitiveConsumer = FunctionBinding result transitiveName 0 []
+                [transitiveParameter]
+              escapingApplication = ExpApply (ExpName escapingName)
+                $ ExpLambda 2 (TypeConstant 0)
+                $ ExpVar 2 $ TypeConstant 0
+              -- Variable 9 is reserved from the generated annotation before
+              -- checking, but is not alive until after the forall opens. Its
+              -- equation with the older variable must still inherit the
+              -- older variable's rigid-scope restriction transitively.
+              transitiveEscape = ExpApply (ExpName transitiveName)
+                $ ExpLambda 4 (TypeVar 9)
+                $ ExpVar 4 $ TypeVar 9
+              classes = mkQueryClassEnv staticClasses []
+              rejects functions expression = case
+                  checkExpression classes functions [] result [] expression of
+                Left TypeMismatch{} -> pure ()
+                actual -> fail $ "checker accepted an escaping rigid: "
+                  ++ show actual
+          rejects [escapingConsumer] escapingApplication
+          rejects [transitiveConsumer] transitiveEscape
       , testCase "instantiates each polymorphic local occurrence independently" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"

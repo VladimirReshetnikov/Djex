@@ -7,14 +7,16 @@
 module Language.Haskell.Exference.Core.ExpressionCheck
   ( ExpressionCheckError (..)
   , ExpressionCheckContext
+  , NestedRigidProvenance
   , prepareExpressionCheckContext
   , checkExpressionInContext
+  , checkExpressionInContextWithNestedRigidProvenance
   , checkExpression
   , checkExpressionWithRigidInstantiation
   )
 where
 
-import Control.Monad (foldM, unless, when)
+import Control.Monad (foldM, unless, when, zipWithM_)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT (..), gets, modify', runStateT)
 import qualified Data.IntMap.Strict as IntMap
@@ -22,11 +24,21 @@ import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Expression
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
+import Language.Haskell.Exference.Core.Internal.RigidScope
+  ( RigidScope
+  , NestedRigidProvenance
+  , escapingRigidConstraints
+  , emptyRigidScope
+  , provenanceRigidIdentifiers
+  , registerRigidScope
+  , validateRigidSubstitutions
+  )
 import Language.Haskell.Exference.Core.Internal.VariableSupply
 import Language.Haskell.Exference.Core.Internal.Polytype
 import Language.Haskell.Exference.Core.RigidInstantiation
@@ -54,6 +66,9 @@ data ExpressionCheckError
   | RigidInstantiationFailure RigidInstantiationError
   | RigidInstantiationPlanMismatch [TVarId] [TVarId]
   | RigidInstantiationTargetCollision [TVarId]
+  | RigidInstantiationPlanAlreadyAdvanced Natural
+  | UnmatchedNestedRigidVariables [TVarId]
+  | EscapingRigidConstraints [HsConstraint]
   | FlexibleIdentifierSupplyExhausted
   | InvalidCheckType HsType SynthesisTypeError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
@@ -68,8 +83,15 @@ data ExpressionCheckError
 
 data CheckState = CheckState
   { checkFlexibleIds :: !FlexibleIdSupply
+  , checkAliveFlexibleIds :: !IntSet.IntSet
   , checkSubstitutions :: !Substs
   , checkConstraints :: [HsConstraint]
+  , checkRigidPlan :: !RigidInstantiationPlan
+  , checkRigidScope :: !RigidScope
+  , checkCandidateRigidIds :: !IntSet.IntSet
+  , checkIntroducedRigidIds :: !IntSet.IntSet
+  , checkRigidAlpha :: !(IntMap.IntMap TVarId)
+  , checkRigidAlphaInverse :: !(IntMap.IntMap TVarId)
   }
 
 -- | Fixed, independently validated inputs for checking many candidates from
@@ -82,6 +104,7 @@ data ExpressionCheckContext = ExpressionCheckContext
   [FunctionBinding]
   [DeconstructorBinding]
   (Map.Map QualifiedName Int)
+  RigidInstantiationPlan
 
 type VariableEnvironment = IntMap.IntMap HsType
 type Check a = StateT CheckState (Either ExpressionCheckError) a
@@ -108,7 +131,7 @@ checkExpression classEnvironment functions deconstructors goal expected expressi
         goal
   context <- prepareExpressionCheckContextUnchecked plan classEnvironment
     functions deconstructors goal
-  checkValidatedExpression context expected expression
+  checkValidatedExpression IntSet.empty context expected expression
 
 -- | Check using a precomputed forall-opening plan.
 --
@@ -131,7 +154,7 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
     expression
   context <- prepareValidatedExpressionCheckContext plan classEnvironment
     functions deconstructors goal
-  checkValidatedExpression context expected expression
+  checkValidatedExpression IntSet.empty context expected expression
 
 -- | Validate the query-stable half of an independent expression check once.
 --
@@ -177,6 +200,9 @@ prepareValidatedExpressionCheckContext plan classEnvironment functions
         (Set.toList $ qClassEnv_constraints classEnvironment) goal plan
   unless (null collisions) $ Left
     $ RigidInstantiationTargetCollision collisions
+  let advanced = nestedRigidInstantiationCount plan
+  unless (advanced == 0) $ Left
+    $ RigidInstantiationPlanAlreadyAdvanced advanced
   pure context
 
 -- | Validate and check only the residual constraints and generated tree that
@@ -188,7 +214,25 @@ checkExpressionInContext
   -> Either ExpressionCheckError ()
 checkExpressionInContext context expected expression = do
   validateCheckCandidateInputs context expected expression
-  checkValidatedExpression context expected expression
+  checkValidatedExpression IntSet.empty context expected expression
+
+-- | Check a live search candidate while treating only the rigid spellings
+-- owned by that branch's nested scopes as alpha-renamable annotation names.
+-- Type reconstruction, scope registration, substitutions, and residual
+-- validation are still repeated independently; the search scope supplies
+-- provenance, not typing evidence. Standalone callers use
+-- 'checkExpressionInContext', where every annotation-only rigid stays nominal.
+checkExpressionInContextWithNestedRigidProvenance
+  :: ExpressionCheckContext
+  -> NestedRigidProvenance
+  -> [HsConstraint]
+  -> Expression
+  -> Either ExpressionCheckError ()
+checkExpressionInContextWithNestedRigidProvenance context provenance expected
+    expression = do
+  validateCheckCandidateInputs context expected expression
+  checkValidatedExpression
+    (provenanceRigidIdentifiers provenance) context expected expression
 
 -- A standalone entrance either computed its own plan from these inputs or
 -- called 'prepareValidatedExpressionCheckContext'. Live search likewise keeps
@@ -210,34 +254,54 @@ prepareExpressionCheckContextUnchecked plan classEnvironment functions
     functions
     deconstructors
     (constructorArityIndex deconstructors)
+    plan
 
 -- Both public entrances establish the complete raw-input invariant before
 -- reaching this worker. Keeping planning outside it lets live search supply
 -- its exact sealed plan without making the standalone entrance inspect
 -- malformed raw values before their typed checker diagnostics are selected.
 checkValidatedExpression
-  :: ExpressionCheckContext
+  :: IntSet.IntSet
+  -> ExpressionCheckContext
   -> [HsConstraint]
   -> Expression
   -> Either ExpressionCheckError ()
-checkValidatedExpression
+checkValidatedExpression provenCandidateRigids
     (ExpressionCheckContext checkedGoal augmentedEnvironment
-      functions deconstructors _)
+      functions deconstructors _ rigidPlan)
     expected expression = do
-  let initialState = CheckState
+  let candidateRigids = IntSet.filter
+        (not . (`rigidInstantiationIdentifierIsReserved` rigidPlan))
+        $ IntSet.intersection provenCandidateRigids
+        $ expressionRigidIdentifiers expression
+      initialState = CheckState
         { checkFlexibleIds = supplyFromIdentifierSet
             $ IntSet.union
                 (flexibleIdentifiers checkedGoal)
                 (expressionFlexibleIdentifiers expression)
+        , checkAliveFlexibleIds = flexibleFreeIdentifiers checkedGoal
         , checkSubstitutions = IntMap.empty
         , checkConstraints = []
+        , checkRigidPlan = rigidPlan
+        , checkRigidScope = emptyRigidScope
+        , checkCandidateRigidIds = candidateRigids
+        , checkIntroducedRigidIds = IntSet.empty
+        , checkRigidAlpha = IntMap.empty
+        , checkRigidAlphaInverse = IntMap.empty
         }
   (_, finalState) <- runStateT
-    (infer IntMap.empty expression >>= (`unifyTypes` checkedGoal))
+    (checkAgainst IntMap.empty expression checkedGoal)
     initialState
   let substitutions = checkSubstitutions finalState
+      rigidAlpha = checkRigidAlpha finalState
+      unmatchedRigids = IntSet.toAscList $ IntSet.difference
+        (checkCandidateRigidIds finalState)
+        (IntMap.keysSet rigidAlpha)
       inferredConstraints = map
-        ( fmap SharedType.canonicalizeType
+        ( fmap
+            ( SharedType.canonicalizeType
+            . applyRigidAlpha rigidAlpha
+            )
         . snd
         . constraintApplySubsts substitutions
         )
@@ -246,14 +310,82 @@ checkValidatedExpression
       -- variable, so the caller-supplied side must be canonicalized too or a
       -- semantically equal application-form spelling would fail comparison.
       normalizedExpected = Set.toAscList $ Set.fromList
-        $ map (fmap SharedType.canonicalizeType) expected
+        $ map
+            (fmap
+              ( SharedType.canonicalizeType
+              . applyRigidAlpha rigidAlpha
+              ))
+            expected
+  unless (null unmatchedRigids) $ Left
+    $ UnmatchedNestedRigidVariables unmatchedRigids
   unresolved <- maybe
     (Left $ RefutableConstraints inferredConstraints)
     (Right . Set.toAscList . Set.fromList)
     (filterUnresolved augmentedEnvironment inferredConstraints)
+  let escaping = escapingRigidConstraints
+        (checkRigidScope finalState) unresolved
+  unless (null escaping) $ Left $ EscapingRigidConstraints escaping
   unless (unresolved == normalizedExpected)
     $ Left (ConstraintMismatch normalizedExpected unresolved)
   where
+    -- Checking is deliberately bidirectional only where the expected type
+    -- carries information which synthesis cannot recover. In particular, an
+    -- expected forall first gets one ordinary, transactional synthesis pass:
+    -- exact opaque forwarding and checked shallow subsumption must retain
+    -- priority over structural introduction, just as they do in search.
+    checkAgainst
+      :: VariableEnvironment
+      -> Expression
+      -> HsType
+      -> Check ()
+    checkAgainst variables checkedExpression rawExpected = do
+      expectedType <- zonk $ SharedType.canonicalizeType rawExpected
+      recordAliveType expectedType
+      case (checkedExpression, expectedType) of
+        (_, TypeForall _ _ _)
+          | contextFreeLeadingChain expectedType ->
+          orElseTransactionally
+            (infer variables checkedExpression
+              >>= (`unifyTypes` expectedType))
+            (introduceExpectedForallChain
+              variables checkedExpression expectedType)
+        (ExpLambda variable annotation body, TypeArrow parameter result) -> do
+          unifyTypes annotation parameter
+          checkAgainst
+            (IntMap.insert variable annotation variables)
+            body
+            result
+        _ -> infer variables checkedExpression
+          >>= (`unifyTypes` expectedType)
+
+    -- Choosing introduction commits to the complete leading chain, matching
+    -- search's continuation mode. A later constrained layer therefore blocks
+    -- the choice before any scope opens, and an inner opaque provider cannot
+    -- terminate a partially introduced chain.
+    introduceExpectedForallChain variables checkedExpression source =
+      case source of
+        TypeForall binders [] body -> do
+          instantiations <- mapM allocateCanonicalNestedRigid binders
+          alive <- gets checkAliveFlexibleIds
+          rigidScope <- gets checkRigidScope
+          let rigids = map snd instantiations
+              substitutions = IntMap.fromList
+                [ (binder, TypeConstant rigid)
+                | (binder, rigid) <- instantiations
+                ]
+          modify' $ \current -> current
+            { checkRigidScope = registerRigidScope alive rigids rigidScope
+            , checkIntroducedRigidIds = IntSet.union
+                (IntSet.fromList rigids)
+                (checkIntroducedRigidIds current)
+            }
+          introduceExpectedForallChain variables checkedExpression
+            $ snd $ applySubsts substitutions body
+        body -> checkAgainst variables checkedExpression body
+
+    contextFreeLeadingChain ty = case SharedType.splitLeadingForalls ty of
+      (_, contexts, _) -> null contexts
+
     infer :: VariableEnvironment -> Expression -> Check HsType
     infer variables (ExpVar variable annotation) = do
       declared <- maybe (throwCheck $ UnknownVariable variable) pure
@@ -281,14 +413,24 @@ checkValidatedExpression
         OrdinaryProviderUse ->
           unifyTypes declared' annotation' >> zonk declared'
     infer _ (ExpName name) = instantiateBinding name
-    infer variables (ExpLambda variable annotation body) =
-      TypeArrow annotation <$> infer (IntMap.insert variable annotation variables) body
+    infer variables (ExpLambda variable annotation body) = do
+      recordAliveType annotation
+      TypeArrow annotation
+        <$> infer (IntMap.insert variable annotation variables) body
     infer variables (ExpApply function argument) = do
       functionType <- infer variables function
-      argumentType <- infer variables argument
-      resultType <- freshTypeVariable
-      unifyTypes functionType (TypeArrow argumentType resultType)
-      zonk resultType
+      functionType' <- zonk functionType
+      case functionType' of
+        -- A known arrow is a checking boundary for its argument. This admits
+        -- a structurally introduced polymorphic argument without guessing a
+        -- polytype during ordinary synthesis.
+        TypeArrow parameter result ->
+          checkAgainst variables argument parameter >> zonk result
+        _ -> do
+          argumentType <- infer variables argument
+          resultType <- freshTypeVariable
+          unifyTypes functionType' (TypeArrow argumentType resultType)
+          zonk resultType
     infer _ (ExpHole variable) = throwCheck $ ExpressionHole variable
     infer variables (ExpLetMatch constructor patternVariables binding body) = do
       bindingType <- infer variables binding
@@ -303,8 +445,7 @@ checkValidatedExpression
         $ zip patternVariables fieldTypes
       infer checkedVariables body
     infer variables (ExpLet variable annotation binding body) = do
-      bindingType <- infer variables binding
-      unifyTypes annotation bindingType
+      checkAgainst variables binding annotation
       infer (IntMap.insert variable annotation variables) body
     infer variables (ExpCaseMatch scrutinee []) = do
       scrutineeType <- infer variables scrutinee >>= zonk
@@ -358,6 +499,11 @@ checkValidatedExpression
         Just (instantiated, constraints, nextSupply) -> do
           modify' $ \current -> current
             { checkFlexibleIds = nextSupply
+            , checkAliveFlexibleIds = IntSet.unions
+                $ checkAliveFlexibleIds current
+                : flexibleFreeIdentifiers instantiated
+                : map (foldMap flexibleFreeIdentifiers . constraint_params)
+                    constraints
             , checkConstraints = constraints ++ checkConstraints current
             }
           pure instantiated
@@ -464,7 +610,7 @@ validateCheckCandidateInputs
   -> Expression
   -> Either ExpressionCheckError ()
 validateCheckCandidateInputs
-    (ExpressionCheckContext _ classEnvironment _ _ constructorArities)
+    (ExpressionCheckContext _ classEnvironment _ _ constructorArities _)
     expected expression = do
   mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
   validateExpressionPatternArities constructorArities expression
@@ -658,13 +804,73 @@ validateExpressionPatternArities constructorArities = inspectExpression
 throwCheck :: ExpressionCheckError -> Check a
 throwCheck = lift . Left
 
+-- Run a preferred typing rule without publishing any of its allocations,
+-- constraints, or substitutions when it fails. This is what lets opaque
+-- forwarding keep precedence over forall introduction without contaminating
+-- the introduction branch with a half-finished inference attempt.
+orElseTransactionally :: Check a -> Check a -> Check a
+orElseTransactionally preferred fallback = StateT $ \initialState ->
+  case runStateT preferred initialState of
+    Right result -> Right result
+    Left _ -> runStateT fallback initialState
+
+recordAliveType :: HsType -> Check ()
+recordAliveType ty = modify' $ \current -> current
+  { checkAliveFlexibleIds = IntSet.union
+      (flexibleFreeIdentifiers ty)
+      (checkAliveFlexibleIds current)
+  }
+
+flexibleFreeIdentifiers :: HsType -> IntSet.IntSet
+flexibleFreeIdentifiers = IntSet.fromList . Set.toAscList . freeVars
+
+expressionRigidIdentifiers :: Expression -> IntSet.IntSet
+expressionRigidIdentifiers =
+  foldMap (rigidIdentifiers . snd) . expressionTypedLocals
+
+rigidIdentifiers :: HsType -> IntSet.IntSet
+rigidIdentifiers = foldMap
+  $ SharedType.foldRigidVariable IntSet.singleton
+
+-- Candidate annotations retain search's fresh skolem spellings. Reserve those
+-- spellings as a disjoint foreign namespace and allocate a checker-local
+-- canonical skolem instead; later type comparisons establish an injective
+-- alpha-renaming between the two. Skipping is finite because an expression
+-- contains only finitely many annotations.
+allocateCanonicalNestedRigid :: TVarId -> Check (TVarId, TVarId)
+allocateCanonicalNestedRigid binder = do
+  plan <- gets checkRigidPlan
+  case allocateNestedRigidInstantiations [binder] plan of
+    Left failure -> throwCheck $ RigidInstantiationFailure failure
+    Right ([(pairedBinder, rigid)], nextPlan)
+      | pairedBinder == binder -> do
+          modify' $ \current -> current {checkRigidPlan = nextPlan}
+          candidates <- gets checkCandidateRigidIds
+          if IntSet.member rigid candidates
+            then allocateCanonicalNestedRigid binder
+            else pure (binder, rigid)
+    Right (instantiations, _) -> throwCheck $ RigidInstantiationPlanMismatch
+      [binder] $ map fst instantiations
+
+applyRigidAlpha :: IntMap.IntMap TVarId -> HsType -> HsType
+applyRigidAlpha renaming = fmap rename
+ where
+  rename variable = case variable of
+    SharedType.FlexibleVariable{} -> variable
+    SharedType.RigidVariable identifier -> SharedType.RigidVariable
+      $ IntMap.findWithDefault identifier identifier renaming
+
 freshTypeVariable :: Check HsType
 freshTypeVariable = do
   supply <- gets checkFlexibleIds
   case allocateFreshIdentifier supply of
     Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
     Just (variable, nextSupply) -> do
-      modify' $ \current -> current {checkFlexibleIds = nextSupply}
+      modify' $ \current -> current
+        { checkFlexibleIds = nextSupply
+        , checkAliveFlexibleIds = IntSet.insert variable
+            $ checkAliveFlexibleIds current
+        }
       pure $ TypeVar variable
 
 -- Substitution is applied pointwise, so the nonempty output shape is the
@@ -684,14 +890,106 @@ freshenTypes types constraints = do
     , map (snd . constraintApplySubsts substitutions) constraints
     )
 
+-- Search and the checker may encounter independent nested goals in different
+-- orders. Their dynamically fresh rigid spellings are therefore compared up
+-- to one injective alpha-renaming, while every rigid reserved by the sealed
+-- root plan remains nominal. Structural alignment only discovers mappings;
+-- the ordinary unifier still owns all type compatibility decisions.
+alignRigidAlpha :: HsType -> HsType -> Check ()
+alignRigidAlpha originalLeft originalRight = go originalLeft originalRight
+ where
+  go left right = case (left, right) of
+    (TypeConstant candidateRigid, TypeConstant canonical) ->
+      alignPair candidateRigid canonical
+    (TypeArrow leftParameter leftResult,
+        TypeArrow rightParameter rightResult) ->
+      go leftParameter rightParameter >> go leftResult rightResult
+    (TypeApp leftFunction leftArgument,
+        TypeApp rightFunction rightArgument) ->
+      go leftFunction rightFunction >> go leftArgument rightArgument
+    (TypeTuple leftBoxity leftElements,
+        TypeTuple rightBoxity rightElements)
+      | leftBoxity == rightBoxity
+      , length leftElements == length rightElements ->
+          zipWithM_ go leftElements rightElements
+    (TypeForallNative _ leftConstraints leftBody,
+        TypeForallNative _ rightConstraints rightBody)
+      | length leftConstraints == length rightConstraints -> do
+          zipWithM_ alignConstraint leftConstraints rightConstraints
+          go leftBody rightBody
+    _ -> pure ()
+
+  alignConstraint left right
+    | length leftArguments == length rightArguments =
+        zipWithM_ go leftArguments rightArguments
+    | otherwise = pure ()
+   where
+    leftArguments = constraint_params left
+    rightArguments = constraint_params right
+
+  alignPair leftIdentifier rightIdentifier = do
+    candidates <- gets checkCandidateRigidIds
+    introduced <- gets checkIntroducedRigidIds
+    case
+        ( IntSet.member leftIdentifier candidates
+        , IntSet.member rightIdentifier candidates
+        , IntSet.member leftIdentifier introduced
+        , IntSet.member rightIdentifier introduced
+        ) of
+      (True, _, _, True) ->
+        bindRigidAlpha leftIdentifier rightIdentifier
+      (_, True, True, _) ->
+        bindRigidAlpha rightIdentifier leftIdentifier
+      _ -> pure ()
+
+  bindRigidAlpha candidateRigid canonical = do
+    forward <- gets checkRigidAlpha
+    backward <- gets checkRigidAlphaInverse
+    case
+        ( IntMap.lookup candidateRigid forward
+        , IntMap.lookup canonical backward
+        ) of
+      (Just existing, _) | existing /= canonical -> mismatch
+      (_, Just existing) | existing /= candidateRigid -> mismatch
+      (Just _, Just _) -> pure ()
+      _ -> do
+        let forward' = IntMap.insert candidateRigid canonical forward
+            backward' = IntMap.insert canonical candidateRigid backward
+        substitutions <- gets checkSubstitutions
+        rigidScope <- gets checkRigidScope
+        let substitutions' = IntMap.map
+              (applyRigidAlpha forward') substitutions
+        case validateRigidSubstitutions rigidScope substitutions' of
+          Left _ -> mismatch
+          Right nextRigidScope -> modify' $ \current -> current
+            { checkRigidAlpha = forward'
+            , checkRigidAlphaInverse = backward'
+            , checkSubstitutions = substitutions'
+            , checkRigidScope = nextRigidScope
+            }
+
+  mismatch = throwCheck $ TypeMismatch originalLeft originalRight
+
 unifyTypes :: HsType -> HsType -> Check ()
 unifyTypes left right = do
   left' <- zonk $ SharedType.canonicalizeType left
   right' <- zonk $ SharedType.canonicalizeType right
-  case unifyShared left' right' of
-    Nothing -> throwCheck $ TypeMismatch left' right'
-    Just substitutions -> mapM_ (uncurry bindVariable)
-      $ IntMap.toAscList substitutions
+  recordAliveType left'
+  recordAliveType right'
+  alignRigidAlpha left' right'
+  rigidAlpha <- gets checkRigidAlpha
+  let left'' = applyRigidAlpha rigidAlpha left'
+      right'' = applyRigidAlpha rigidAlpha right'
+  case unifyShared left'' right'' of
+    Nothing -> throwCheck $ TypeMismatch left'' right''
+    Just substitutions -> do
+      rigidScope <- gets checkRigidScope
+      case validateRigidSubstitutions rigidScope substitutions of
+        Left _ -> throwCheck $ TypeMismatch left'' right''
+        Right nextRigidScope -> do
+          modify' $ \current -> current
+            {checkRigidScope = nextRigidScope}
+          mapM_ (uncurry bindVariable) $ IntMap.toAscList substitutions
 
 bindVariable :: TVarId -> HsType -> Check ()
 bindVariable variable ty
@@ -705,8 +1003,10 @@ bindVariable variable ty
 zonk :: HsType -> Check HsType
 zonk ty = do
   substitutions <- gets checkSubstitutions
+  rigidAlpha <- gets checkRigidAlpha
   let (_, applied) = applySubsts substitutions ty
-      canonical = SharedType.canonicalizeType applied
+      canonical = SharedType.canonicalizeType
+        $ applyRigidAlpha rigidAlpha applied
   if canonical == ty then pure canonical else zonk canonical
 
 -- | Open the goal's leading prenex chain exactly as live search does,

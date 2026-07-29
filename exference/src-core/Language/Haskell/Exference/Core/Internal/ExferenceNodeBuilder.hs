@@ -13,6 +13,8 @@ import Language.Haskell.Exference.Core.Internal.FlexibleIds
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.SearchControl
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.Internal.RigidScope
+  (validateRigidSubstitutions)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import Control.Monad.Trans.Class (lift)
@@ -88,10 +90,21 @@ builderAddScope allocators parentId = do
 
 -- Apply substitutions to goals and scopes. Constraint goals are handled by
 -- the caller because their admissibility depends on the search branch.
-builderApplySubst :: Monad m => Substs -> StateT SearchNode m ()
-builderApplySubst substs =
-  modify $ \node -> node
-    { nodeGoals = fmap (goalApplySubst substs) (nodeGoals node)
-    , nodeProvidedScopes = scopesApplySubsts substs
-        (nodeProvidedScopes node)
-    }
+builderApplySubst
+  :: Substs
+  -- ^ Complete simultaneous unifier result, including temporary provider
+  -- variables whose age edges still matter.
+  -> Substs
+  -- ^ Substitutions which belong to the persistent search node.
+  -> StateT SearchNode SearchBranches ()
+builderApplySubst checkedSubstitutions appliedSubstitutions = do
+  rigidScope <- gets nodeRigidScope
+  case validateRigidSubstitutions rigidScope checkedSubstitutions of
+    Left _ -> lift $ maybeBranch Nothing
+    Right nextRigidScope -> modify $ \node -> node
+      { nodeGoals = fmap (goalApplySubst appliedSubstitutions)
+          (nodeGoals node)
+      , nodeProvidedScopes = scopesApplySubsts appliedSubstitutions
+          (nodeProvidedScopes node)
+      , nodeRigidScope = nextRigidScope
+      }

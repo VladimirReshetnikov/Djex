@@ -84,7 +84,7 @@ tests = testGroup "Exference private engine boundaries"
         target sourceHints environment query @?= Right ()
   , testCase "term identifier exhaustion truncates instead of colliding" $ do
       chunk <- lastCapacityChunk
-        (IdentifierCapacities 0 100 100) identityInput
+        (IdentifierCapacities 0 100 100 100) identityInput
       E.chunkStatus chunk @?=
         E.SearchStatus E.SearchIdentifierSpaceExhausted 0 0
       assertBool "an exhausted term-ID branch produced a candidate"
@@ -98,7 +98,7 @@ tests = testGroup "Exference private engine boundaries"
             { E.input_goalType = integer
             , E.input_envFuncs = [polymorphic, constant]
             }
-          capacities = IdentifierCapacities 100 0 100
+          capacities = IdentifierCapacities 100 0 100 100
       chunk <- lastCapacityChunk capacities input
       E.searchCompletion (E.chunkStatus chunk) @?=
         E.SearchIdentifierSpaceExhausted
@@ -135,11 +135,58 @@ tests = testGroup "Exference private engine boundaries"
       -- instantiation needs one additional spelling and must fail without
       -- wrapping or reusing the binder identity.
       chunk <- lastCapacityChunk
-        (IdentifierCapacities 100 1 100) input
+        (IdentifierCapacities 100 1 100 100) input
       E.chunkStatus chunk @?=
         E.SearchStatus E.SearchIdentifierSpaceExhausted 0 0
       assertBool "an exhausted forall instantiation produced a candidate"
         $ null $ E.chunkElements chunk
+  , testCase "nested forall introduction is checked and rigid-bounded" $ do
+      let result = TypeCons $ name "Result"
+          identityScheme = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          goal = TypeArrow
+            (TypeArrow identityScheme result)
+            result
+          input = identityInput
+            { E.input_goalType = goal
+            , E.input_maxSteps = 200
+            }
+      chunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 100 100 100) input
+      let expressions =
+            [ expression
+            | chunk <- chunks
+            , (expression, _, _) <- E.chunkElements chunk
+            ]
+      assertBool "the quantified callback produced no checked candidate"
+        $ not $ null expressions
+      mapM_ (\expression -> checkExpression
+          (mkQueryClassEnv emptyStaticClassEnv []) [] [] goal [] expression
+            @?= Right ())
+        expressions
+
+      exhausted <- lastCapacityChunk
+        (IdentifierCapacities 100 100 0 100) input
+      E.searchCompletion (E.chunkStatus exhausted) @?=
+        E.SearchIdentifierSpaceExhausted
+      assertBool "rigid exhaustion admitted a quantified callback"
+        $ null $ E.chunkElements exhausted
+  , testCase "nested forall skolems cannot escape through older variables" $ do
+      let boolean = TypeCons $ name "Bool"
+          callback = TypeForall [1] []
+            $ TypeArrow (TypeVar 1) (TypeVar 0)
+          use = FunctionBinding boolean (name "use") 0 [] [callback]
+          input = identityInput
+            { E.input_goalType = boolean
+            , E.input_envFuncs = [use]
+            , E.input_maxSteps = 200
+            }
+      chunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 100 100 100) input
+      assertBool "an older result meta captured a nested skolem"
+        $ null $ concatMap E.chunkElements chunks
   , testCase "bare provider foralls cross the checked result boundary" $ do
       let unit = TypeTuple Boxed []
           vacuousUnit = TypeForall [] [] unit
@@ -150,13 +197,13 @@ tests = testGroup "Exference private engine boundaries"
             }
       chunks <- expectRight
         $ findExpressionsWithIdentifierCapacitiesEither
-            (IdentifierCapacities 100 100 100) input
+            (IdentifierCapacities 100 100 100 100) input
       assertBool
         "forall a. a was mistaken for opaque forwarding at a flexible use"
         $ not $ null $ concatMap E.chunkElements chunks
       wrappedChunks <- expectRight
         $ findExpressionsWithIdentifierCapacitiesEither
-            (IdentifierCapacities 100 100 100)
+            (IdentifierCapacities 100 100 100 100)
             (input {E.input_goalType = TypeArrow polymorphic vacuousUnit})
       assertBool "a vacuous forall wrapper suppressed provider instantiation"
         $ not $ null $ concatMap E.chunkElements wrappedChunks
@@ -168,7 +215,7 @@ tests = testGroup "Exference private engine boundaries"
             $ TypeArrow (TypeVar 1) (TypeVar 1)
       quantifiedChunks <- expectRight
         $ findExpressionsWithIdentifierCapacitiesEither
-            (IdentifierCapacities 100 100 100)
+            (IdentifierCapacities 100 100 100 100)
             (input {E.input_goalType = TypeArrow polymorphic distinct})
       let quantifiedExpressions =
             [ expression
@@ -198,7 +245,7 @@ tests = testGroup "Exference private engine boundaries"
             TypeArrow polymorphicIdentity impredicativeRequested
       impredicativeChunks <- expectRight
         $ findExpressionsWithIdentifierCapacitiesEither
-            (IdentifierCapacities 100 100 100)
+            (IdentifierCapacities 100 100 100 100)
             (input {E.input_goalType = impredicativeGoal})
       let impredicativeExpressions =
             [ expression
@@ -297,7 +344,7 @@ tests = testGroup "Exference private engine boundaries"
             { E.input_goalType = TypeArrow (box integer) integer
             , E.input_envDeconsS = [deconstructor]
             }
-          capacities = IdentifierCapacities 100 0 100
+          capacities = IdentifierCapacities 100 0 100 100
           isBoxElimination candidate = case candidate of
             ( ExpLambda scrutinee _
                 (ExpLetMatch constructor [(field, annotation)]
@@ -333,7 +380,7 @@ tests = testGroup "Exference private engine boundaries"
             , E.input_multiPM = True
             , E.input_maxSteps = 200
             }
-          capacities = IdentifierCapacities 100 0 100
+          capacities = IdentifierCapacities 100 0 100 100
           returnsAnnotatedField (_, [(field, annotation)], body) =
             annotation == integer && body == ExpVar field annotation
           returnsAnnotatedField _ = False
@@ -364,7 +411,7 @@ tests = testGroup "Exference private engine boundaries"
             }
       chunks <- expectRight
         $ findExpressionsWithIdentifierCapacitiesEither
-            (IdentifierCapacities 100 0 100) input
+            (IdentifierCapacities 100 0 100 100) input
       finalChunk <- lastChunk "empty elimination" chunks
       E.chunkStatus finalChunk @?= E.SearchStatus E.SearchExhausted 0 0
       assertBool "empty elimination required a non-escaping flexible ID"
@@ -384,7 +431,7 @@ tests = testGroup "Exference private engine boundaries"
                   }
             chunks <- expectRight
               $ findExpressionsWithIdentifierCapacitiesEither
-                  (IdentifierCapacities 100 100 100) input
+                  (IdentifierCapacities 100 100 100 100) input
             -- With unused parameters forbidden, every surviving term must use
             -- both the provider and the Int argument. The eager empty-case
             -- branch alone therefore cannot make this assertion pass.
@@ -394,7 +441,7 @@ tests = testGroup "Exference private engine boundaries"
       mapM_ assertProviderRemainsUsable [monomorphic, polymorphic]
   , testCase "scope identifier collisions are operational truncations" $ do
       chunk <- lastCapacityChunk
-        (IdentifierCapacities 100 100 1) identityInput
+        (IdentifierCapacities 100 100 100 1) identityInput
       E.chunkStatus chunk @?=
         E.SearchStatus E.SearchIdentifierSpaceExhausted 0 0
   , testCase "exact progress retains simultaneous step and ID limits" $ do
@@ -410,7 +457,7 @@ tests = testGroup "Exference private engine boundaries"
             -- binding-expansion step under test.
             , E.input_maxSteps = 2
             }
-          capacities = IdentifierCapacities 100 0 100
+          capacities = IdentifierCapacities 100 0 100 100
       chunk <- lastCapacityChunk capacities input
       E.searchCompletion (E.chunkStatus chunk) @?=
         E.SearchIdentifierSpaceExhausted

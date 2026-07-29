@@ -11,6 +11,7 @@ module Language.Haskell.Exference.Core.Internal.VariableSupply
   , supplyFromIdentifiers
   , supplyFromIdentifierSet
   , identifierSupplySize
+  , reservedIdentifierSet
   , identifierIsReserved
   , maximumReservedIdentifier
   , reserveIdentifiers
@@ -49,6 +50,13 @@ supplyFromIdentifierSet = IdentifierSupply
 identifierSupplySize :: IdentifierSupply -> Natural
 identifierSupplySize (IdentifierSupply identifiers) =
   fromIntegral $ IntSet.size identifiers
+
+-- | The complete set of already allocated identifiers. Search uses this as
+-- the set of flexible variables alive before opening a nested rigid scope;
+-- the supply never reserves future variables, and retaining substituted-away
+-- IDs makes the escape check conservatively stable.
+reservedIdentifierSet :: IdentifierSupply -> IntSet.IntSet
+reservedIdentifierSet (IdentifierSupply identifiers) = identifiers
 
 identifierIsReserved :: Int -> IdentifierSupply -> Bool
 identifierIsReserved identifier (IdentifierSupply reserved) =

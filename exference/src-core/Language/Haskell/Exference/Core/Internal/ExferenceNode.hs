@@ -31,6 +31,10 @@ import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Score
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   (FlexibleIdSupply)
+import Language.Haskell.Exference.Core.RigidInstantiation
+  (RigidInstantiationPlan)
+import Language.Haskell.Exference.Core.Internal.RigidScope
+  (RigidScope)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
@@ -103,7 +107,11 @@ requireValidScopes = either
 -- opaque rank-N value reached below a type constructor or arrow.
 data ForallGoalMode
   = OpenLeadingForalls
-  | KeepForallsOpaque
+  -- | Preserve historical opaque forwarding first, but permit a separate
+  -- lower-priority branch which introduces a context-free quantified value.
+  | TryForallIntroduction
+  -- | Continue opening every layer of a nested chain once introduction won.
+  | ContinueForallIntroduction
   deriving (Eq, Generic)
 
 -- | An expression hole and the innermost lexical scope visible from it.
@@ -124,7 +132,7 @@ goalApplySubst ss | IntMap.null ss = id
 mkGoals :: ScopeId
         -> [VarBinding]
         -> [TGoal]
-mkGoals sid = map (\binding -> TGoal binding sid KeepForallsOpaque)
+mkGoals sid = map (\binding -> TGoal binding sid TryForallIntroduction)
 
 data SearchNode = SearchNode
   { nodeGoals           :: Seq TGoal
@@ -144,6 +152,8 @@ data SearchNode = SearchNode
     -- the remaining pairs avoids both counter overflow and disagreement with
     -- the independent checker when nested leading foralls shadow an ID.
   , nodeRigidInstantiations :: [(TVarId, TVarId)]
+  , nodeRigidPlan :: !RigidInstantiationPlan
+  , nodeRigidScope :: !RigidScope
   , nodeDepth           :: {-# UNPACK #-} !Penalty
   , nodeLastStepBinding :: Maybe QualifiedName
   }

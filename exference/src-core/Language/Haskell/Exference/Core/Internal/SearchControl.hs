@@ -32,6 +32,10 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( FlexibleIdSupply )
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Types (TVarId)
+import Language.Haskell.Exference.Core.RigidInstantiation
+  ( RigidInstantiationPlan
+  , allocateNestedRigidInstantiations
+  )
 
 -- | A representational resource limit that discarded one search branch.
 data BranchTruncation
@@ -77,6 +81,10 @@ data SearchAllocators = SearchAllocators
       :: [TVarId]
       -> FlexibleIdSupply
       -> Maybe (FlexibleRenaming, FlexibleIdSupply)
+  , searchAllocateNestedRigidInstantiations
+      :: [TVarId]
+      -> RigidInstantiationPlan
+      -> Maybe ([(TVarId, TVarId)], RigidInstantiationPlan)
   , searchAddScope
       :: forall binding.
          Scope.ScopeId
@@ -90,6 +98,9 @@ defaultSearchAllocators :: SearchAllocators
 defaultSearchAllocators = SearchAllocators
   { searchAllocateTermIdentifier = allocateTermIdentifier
   , searchAllocateFlexibleNamespace = allocateNamespace
+  , searchAllocateNestedRigidInstantiations = \binders plan ->
+      either (const Nothing) Just
+        $ allocateNestedRigidInstantiations binders plan
   , searchAddScope = Scope.addScope
   }
 

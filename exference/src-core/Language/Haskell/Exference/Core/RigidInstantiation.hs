@@ -13,6 +13,8 @@ module Language.Haskell.Exference.Core.RigidInstantiation
   , mkRigidInstantiationContext
   , RigidInstantiationPlan
   , rigidInstantiations
+  , rigidInstantiationIdentifierIsReserved
+  , nestedRigidInstantiationCount
   , allocateNestedRigidInstantiations
   , rigidInstantiationTargetCollisions
   , planRigidInstantiation
@@ -23,6 +25,7 @@ import Control.DeepSeq (NFData (rnf))
 import Control.Monad (foldM)
 import qualified Data.Map.Strict as Map
 import GHC.Generics (Generic)
+import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.Internal.VariableSupply
@@ -85,16 +88,52 @@ mkRigidInstantiationContext environment = RigidInstantiationContext
 data RigidInstantiationPlan = RigidInstantiationPlan
   [(TVarId, TVarId)]
   IdentifierSupply
-  deriving (Eq, Show)
+  !Natural
+  deriving Eq
+
+-- Preserve the historical public rendering of an unadvanced root plan while
+-- keeping the reserved namespace private. An advanced value is invalid at a
+-- checker-context boundary, but identifying its cursor distance is useful in
+-- diagnostics without dumping the potentially large environment reservation
+-- set.
+instance Show RigidInstantiationPlan where
+  showsPrec precedence
+      (RigidInstantiationPlan instantiations _ nestedCount) =
+    showParen (precedence > 10)
+      $ showString "RigidInstantiationPlan "
+      . showsPrec 11 instantiations
+      . if nestedCount == 0
+          then id
+          else showString " (advanced by "
+            . shows nestedCount
+            . showString ")"
 
 instance NFData RigidInstantiationPlan where
-  rnf (RigidInstantiationPlan instantiations supply) =
-    rnf instantiations `seq` rnf supply
+  rnf (RigidInstantiationPlan instantiations supply nestedCount) =
+    rnf instantiations `seq` rnf supply `seq` rnf nestedCount
 
 -- An ordinary projection prevents record-update syntax from replacing the
 -- checked lexical pairing while the constructor remains hidden.
 rigidInstantiations :: RigidInstantiationPlan -> [(TVarId, TVarId)]
-rigidInstantiations (RigidInstantiationPlan instantiations _) = instantiations
+rigidInstantiations (RigidInstantiationPlan instantiations _ _) = instantiations
+
+-- | Whether an identifier belongs to the sealed environment/query/root
+-- namespace of this plan.  Independent checking uses this observation to
+-- distinguish nominal rigid constants from alpha-renamable skolems which
+-- occur only in a generated candidate.
+rigidInstantiationIdentifierIsReserved
+  :: TVarId
+  -> RigidInstantiationPlan
+  -> Bool
+rigidInstantiationIdentifierIsReserved identifier
+    (RigidInstantiationPlan _ supply _) =
+  identifierIsReserved identifier supply
+
+-- | Number of rigid constants allocated after the fixed query-root plan.
+-- This observation exists for the private bounded allocator seam; production
+-- allocation is limited only by the complete finite identifier namespace.
+nestedRigidInstantiationCount :: RigidInstantiationPlan -> Natural
+nestedRigidInstantiationCount (RigidInstantiationPlan _ _ count) = count
 
 -- | Allocate fresh rigid constants for one nested quantified goal while
 -- retaining every environment, query, root-plan, and earlier nested
@@ -107,14 +146,17 @@ allocateNestedRigidInstantiations
       RigidInstantiationError
       ([(TVarId, TVarId)], RigidInstantiationPlan)
 allocateNestedRigidInstantiations binders
-    (RigidInstantiationPlan rootInstantiations supply) =
+    (RigidInstantiationPlan rootInstantiations supply nestedCount) =
   case allocateRigidInstantiations binders supply of
     Nothing -> Left $ RigidIdentifierSupplyExhausted
       (maximumReservedIdentifier supply)
       (SharedCount.saturatingNaturalToInt
         $ SharedCount.naturalLength binders)
     Just (nested, nextSupply) -> Right
-      (nested, RigidInstantiationPlan rootInstantiations nextSupply)
+      ( nested
+      , RigidInstantiationPlan rootInstantiations nextSupply
+          (nestedCount + SharedCount.naturalLength binders)
+      )
 
 -- | Rigid targets in a plan which are already occupied by an environment,
 -- query assumption, or goal occurrence.  A plan made against a conservative
@@ -160,7 +202,7 @@ planRigidInstantiation context extraConstraints goal = do
       maximumRigid
       (SharedCount.saturatingNaturalToInt $ SharedCount.naturalLength binders)
     Just (instantiations, finalSupply) -> Right
-      $ RigidInstantiationPlan instantiations finalSupply
+      $ RigidInstantiationPlan instantiations finalSupply 0
  where
   queryTypes = goal : concatMap constraint_params extraConstraints
   maximumRigid = SharedCollection.maximumPresent

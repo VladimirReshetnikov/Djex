@@ -63,6 +63,12 @@ import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
 import Language.Haskell.Exference.Core.Internal.Polytype
+import Language.Haskell.Exference.Core.Internal.RigidScope
+  ( escapingRigidConstraints
+  , emptyRigidScope
+  , nestedRigidProvenance
+  , registerRigidScope
+  )
 import Language.Haskell.Exference.Core.Internal.SearchControl
 import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceHeuristicsConfig (..)
@@ -443,6 +449,8 @@ findEngineBatchesWith allocators
     , nodeFlexibleIds     = supplyFromIdentifiers
         $ IntSet.toAscList $ flexibleIdentifiers t
     , nodeRigidInstantiations = rigidInstantiations rigidPlan
+    , nodeRigidPlan       = rigidPlan
+    , nodeRigidScope      = emptyRigidScope
     , nodeDepth           = 0.0
     , nodeLastStepBinding = Nothing
     }
@@ -465,6 +473,8 @@ findEngineBatchesWith allocators
       , remainingConstraints <- maybeToList
                               $ filterUnresolved contxt
                               $ nodeConstraintGoals solution
+      , null $ escapingRigidConstraints
+          (nodeRigidScope solution) remainingConstraints
         -- if allowConstraints, unresolved constraints are allowed;
         -- otherwise we discard this solution.
       , allowConstraints || null remainingConstraints
@@ -475,7 +485,7 @@ findEngineBatchesWith allocators
       , allowUnused || unusedVarCount==0
       , rawExpression <- [nodeExpression solution]
       , e <- maybeToList $ checkedSimplification
-          remainingConstraints rawExpression
+          (nodeRigidScope solution) remainingConstraints rawExpression
       , let d = normalizePenalty $ sumScores
               [ nodeDepth solution
               , multiplyScore (heuristics_unusedVar heuristics)
@@ -513,20 +523,23 @@ findEngineBatchesWith allocators
       -- repeating one of those tree traversals here would let the two result
       -- boundaries drift again. The raw term remains a safe fallback, but it
       -- too must pass that complete checker independently.
-      checkedSimplification constraints rawExpression = case
+      checkedSimplification rigidScope constraints rawExpression = case
           preparedCheckContext of
         Left _ -> Nothing
-        Right context -> firstChecked context candidates
+        Right context -> firstChecked rigidScope context candidates
        where
         simplified = simplifyExpression rawExpression
         candidates
           | simplified == rawExpression = [rawExpression]
           | otherwise = [simplified, rawExpression]
-        firstChecked _ [] = Nothing
-        firstChecked context (candidate : remainingCandidates) =
-          case checkExpressionInContext context constraints candidate of
+        firstChecked _ _ [] = Nothing
+        firstChecked candidateScope context
+            (candidate : remainingCandidates) =
+          case checkExpressionInContextWithNestedRigidProvenance
+              context (nestedRigidProvenance candidateScope)
+              constraints candidate of
             Right () -> Just candidate
-            Left _ -> firstChecked context remainingCandidates
+            Left _ -> firstChecked candidateScope context remainingCandidates
   helper :: FindExpressionsState -> Maybe (EngineBatch, FindExpressionsState)
   helper searchState | findSteps searchState >= maxSteps = Nothing
   helper searchState = runStateT (do
@@ -1421,6 +1434,38 @@ stateStep allocators multiPM allowConstrs h
             (nodeQueryClassEnv node)
         }
 
+    -- Open one context-free nested forall layer with branch-local fresh
+    -- rigids. Unlike the query-root plan, this scope protects every flexible
+    -- variable which was allocated before the layer opened. A continuation
+    -- mode consumes the complete leading chain without exposing a partially
+    -- opened scheme to the ordinary opaque-provider branches.
+    introducedForallStep
+      :: [TVarId]
+      -> HsType
+      -> StateT SearchNode SearchBranches ()
+    introducedForallStep vs t = do
+      plan <- gets nodeRigidPlan
+      case searchAllocateNestedRigidInstantiations allocators vs plan of
+        Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
+        Just (instantiations, nextPlan) -> do
+          alive <- gets $ reservedIdentifierSet . nodeFlexibleIds
+          let rigids = map snd instantiations
+              substitutions = IntMap.fromList
+                [(binder, TypeConstant rigid)
+                | (binder, rigid) <- instantiations]
+          modify $ \node -> node
+            { nodeGoals = TGoal
+                (VarBinding var $ snd $ applySubsts substitutions t)
+                scopeId ContinueForallIntroduction
+                Seq.<| nodeGoals node
+            , nodeRigidPlan = nextPlan
+            , nodeRigidScope = registerRigidScope alive rigids
+                $ nodeRigidScope node
+            , nodeDepth = addScore (nodeDepth node)
+                $ heuristics_functionGoalTransform h
+            , nodeLastStepBinding = Nothing
+            }
+
     -- try to resolve the goal by looking at the parameters in scope, i.e.
     -- the parameters accumulated by building the expression so far.
     -- e.g. for (\x -> (_ :: Int)), the goal can be filled by `x` if
@@ -1542,7 +1587,7 @@ stateStep allocators multiPM allowConstrs h
                 (ExpHole var))
                 (nodeExpression node)
             , nodeGoals = TGoal (VarBinding vParam d)
-                scopeId KeepForallsOpaque
+                scopeId TryForallIntroduction
                 Seq.<| nodeGoals node
             }
           newScopeId <- builderAddScope allocators scopeId
@@ -1585,7 +1630,7 @@ stateStep allocators multiPM allowConstrs h
         modify $ \node -> node
           { nodeGoals = nodeGoals node
               <> Seq.fromList (map applyProviderSubstitution newGoals) }
-        builderApplySubst substs
+        builderApplySubst allSS substs
         modify $ \node -> node
           { nodeExpression = fillExprHole var
               (foldl' ExpApply coreExp (map ExpHole vars))
@@ -1600,7 +1645,16 @@ stateStep allocators multiPM allowConstrs h
     TypeArrow _ _ -> arrowStep goalType []
     TypeForall is cs t | forallMode == OpenLeadingForalls ->
       forallStep is cs t
+    TypeForall is [] t | forallMode == ContinueForallIntroduction ->
+      introducedForallStep is t
+    TypeForall is [] t
+      | forallMode == TryForallIntroduction
+      , contextFreeLeadingChain goalType ->
+        byProvided <|> byFunctionSimple <|> introducedForallStep is t
     _ -> byProvided <|> byFunctionSimple
+ where
+  contextFreeLeadingChain ty = case SharedType.splitLeadingForalls ty of
+    (_, contexts, _) -> null contexts
 
 
 {-# INLINE addScopePatternMatch #-}
@@ -1621,7 +1675,7 @@ addScopePatternMatch :: SearchAllocators
                      -> StateT SearchNode SearchBranches [TGoal]
 addScopePatternMatch allocators multiPM goalType vid sid bindings = case bindings of
   [] -> return
-    [TGoal (VarBinding vid goalType) sid KeepForallsOpaque]
+    [TGoal (VarBinding vid goalType) sid TryForallIntroduction]
   (b : bindingRest) -> do
     let v = varPVariable b
         vtResult = varPResult b

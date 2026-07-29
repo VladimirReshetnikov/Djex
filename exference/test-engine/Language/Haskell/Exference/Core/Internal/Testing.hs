@@ -35,18 +35,22 @@ import Language.Haskell.Exference.Core.Score (Penalty)
 import Language.Haskell.Exference.Core.Types (HsType)
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( identifierSupplySize )
+import Language.Haskell.Exference.Core.RigidInstantiation
+  (nestedRigidInstantiationCount)
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 import Language.Haskell.Exference.Core.Internal.SearchControl
 import qualified Language.Haskell.Synthesis.Count as SharedCount
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import Language.Haskell.Synthesis.Generated (DefinitionName)
 
--- | Total capacities for the three independent dynamic search namespaces.
+-- | Total capacities for the four independent dynamic search namespaces.
 -- Term capacity excludes root hole zero; flexible and scope capacities include
--- identifiers already reserved by the checked root node.
+-- identifiers already reserved by the checked root node. Rigid capacity counts
+-- only nested skolems because the root plan is validated before search starts.
 data IdentifierCapacities = IdentifierCapacities
   { termIdentifierCapacity :: Natural
   , flexibleIdentifierCapacity :: Natural
+  , nestedRigidIdentifierCapacity :: Natural
   , scopeIdentifierCapacity :: Natural
   }
   deriving (Eq, Show)
@@ -147,6 +151,7 @@ finiteSearchAllocators :: IdentifierCapacities -> SearchAllocators
 finiteSearchAllocators capacities = defaultSearchAllocators
   { searchAllocateTermIdentifier = allocateTerm
   , searchAllocateFlexibleNamespace = allocateFlexible
+  , searchAllocateNestedRigidInstantiations = allocateRigid
   , searchAddScope = allocateScope
   }
  where
@@ -164,6 +169,15 @@ finiteSearchAllocators capacities = defaultSearchAllocators
     | otherwise = Nothing
    where
     requested = fromIntegral $ IntSet.size $ IntSet.fromList identifiers
+
+  allocateRigid binders plan
+    | nestedRigidInstantiationCount plan + requested
+        <= nestedRigidIdentifierCapacity capacities =
+          searchAllocateNestedRigidInstantiations
+            defaultSearchAllocators binders plan
+    | otherwise = Nothing
+   where
+    requested = SharedCount.naturalLength binders
 
   allocateScope parent scopes
     | occupied < scopeIdentifierCapacity capacities =

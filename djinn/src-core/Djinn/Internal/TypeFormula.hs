@@ -261,8 +261,11 @@ compileFormula view prepared source = do
         OpaqueForalls prepared emptyExpansionPath [] expanded
 
 -- | Compile the bounded rank-N fragment used by checked Djinn queries.
--- Context-free foralls in positive position are opened with fresh rigid
--- proposition names; unsupported occurrences stay alpha-stable opaque atoms.
+-- Foralls in positive position are opened with fresh rigid proposition names.
+-- Their already validated class contexts are deliberately ignored for proof
+-- power, consistently with Djinn's dictionary-independent treatment of the
+-- query's prenex context. Unsupported occurrences stay alpha-stable opaque
+-- atoms.
 -- Besides the two historical extremes, retain both linear frontiers: one
 -- opaque occurrence among opened siblings, and one opened occurrence (plus
 -- any enclosing forall chain needed to reach it) among opaque siblings.  This
@@ -479,7 +482,11 @@ lowerForall lowering definitions path occurrencePath origin atom = case lowering
     OpaqueForalls -> Right opaque
     PolarizedForalls namespace PositiveFormula openedView opaqueSites ->
         case SharedTypeAtom.typeAtomType atom of
-            SharedType.ForallType binders [] body
+            -- Context validation belongs to the checked request/session edge.
+            -- LJT receives only the body: accepting a contextual positive
+            -- forall therefore permits dictionary-independent introduction
+            -- without pretending that class methods are proof premises.
+            SharedType.ForallType binders _ body
                 | site `Set.member` opaqueSites -> Right incompleteOpaque
                 | otherwise -> do
                     (skolems, opened) <- openForallBody

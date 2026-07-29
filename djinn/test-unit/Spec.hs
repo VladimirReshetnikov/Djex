@@ -949,9 +949,10 @@ testSharedTypeAdapter = do
             (show raw) (SharedTypeRender.renderType id projected)
 
 -- The raw compatibility formula keeps rank-N types as alpha-stable atoms.
--- Checked queries additionally try a polarized translation: context-free
--- positive foralls open for introduction, while an opaque fallback retains
--- exact polymorphic transport and unsupported searches stay inconclusive.
+-- Checked queries additionally try a polarized translation: positive foralls
+-- open for dictionary-independent introduction, while an opaque fallback
+-- retains exact polymorphic transport and unsupported searches stay
+-- inconclusive.
 testRankNTypeAtoms :: IO ()
 testRankNTypeAtoms = do
     parsed <- expectRight $ parseHType
@@ -1009,6 +1010,48 @@ testRankNTypeAtoms = do
         "((forall a. a -> a) -> c) -> c"
     runStableIdentity stableSession "introduceRankNTuple"
         "c -> ((forall a. a -> a), (forall b. b -> b))"
+
+    -- A positive contextual forall follows the same introduction rule. Djinn
+    -- validates the context but deliberately withholds its methods, so these
+    -- inhabitants must remain dictionary-independent.
+    runStableIdentity stableSession "introduceContextualRankNResult"
+        "c -> (forall a. Eq a => a -> a)"
+    runStableIdentity stableSession "passContextualRankNArgument"
+        "((forall a. Eq a => a -> a) -> c) -> c"
+
+    -- The dual elimination stays opaque: using this hypothesis at @b@ would
+    -- require evidence for @Eq b@, which Djinn neither resolves nor invents.
+    constrainedHypothesis <- runStableQuery stableSession
+        "keepConstrainedRankNHypothesisOpaque"
+        "(forall a. Eq a => a) -> b"
+    assertEqual "a constrained rank-N hypothesis was instantiated without evidence"
+        [] $ SharedSearch.batchCandidates
+            $ SharedQuery.resultSearch constrainedHypothesis
+    assertEqual "an opaque constrained hypothesis produced false negative evidence"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence constrainedHypothesis
+
+    -- Opening the contextual result must not make a class method available to
+    -- LJT. Reporting a proof-backed miss distinguishes this from merely
+    -- retaining the positive forall as an incomplete opaque atom.
+    let rankNInput = SharedDeclaration.AbstractTypeDeclaration ()
+            (sharedName "RankNContextInput") SharedKind.ProperTypeKind
+        rankNProof = SharedDeclaration.AbstractTypeDeclaration ()
+            (sharedName "RankNContextProof") SharedKind.ProperTypeKind
+        witnessClass = SharedDeclaration.ClassDeclaration ()
+            (sharedName "RankNWitness")
+            [SharedDeclaration.TypeParameter "a" Nothing]
+            []
+            [ SharedDeclaration.ValueSignature () (sharedName "rankNWitness")
+                (SharedType.TypeConstructor $ sharedName "RankNContextProof")
+            ]
+    witnessSession <- sealDjinnSessionFrom stableSession
+        [rankNInput, rankNProof, witnessClass]
+    methodLeak <- runStableQuery witnessSession "doNotLeakNestedClassMethod"
+        "RankNContextInput -> (forall a. RankNWitness a => RankNContextProof)"
+    assertEqual "a nested contextual forall exposed its class method"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch methodLeak
+    assertEqual "a supported contextual result stayed opaque instead of opening"
+        SharedQuery.ProvedUninhabitable $ SharedQuery.resultEvidence methodLeak
 
     -- Positive opening alone cannot implement this transport: its argument
     -- stays opaque while its result opens with a fresh skolem. The legacy

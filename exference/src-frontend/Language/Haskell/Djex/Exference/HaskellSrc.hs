@@ -17,6 +17,8 @@ module Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSessionFromFilesWithPolicy
   , loadExferenceSessionFromSources
   , loadExferenceSessionFromSourcesWithPolicy
+  , loadExferenceSessionFromSourcesWithTypeVisibility
+  , loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
   , parseExferenceRequest
   , parseExferenceRequestInScope
   , parseExferenceRequestWithCheckedTarget
@@ -46,7 +48,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , checkedSourcePreparedInventory
   , environmentFromFiles
   , environmentFromPath
-  , environmentFromSources
+  , environmentFromSourcesWithTypeVisibility
   , environmentLoadErrorDiagnostics
   )
 import Language.Haskell.Synthesis.Diagnostic
@@ -195,9 +197,37 @@ loadExferenceSessionFromSourcesWithPolicy
   -> [(FilePath, String)]
   -> [(FilePath, String)]
   -> IO ExferenceSessionLoadReport
-loadExferenceSessionFromSourcesWithPolicy policy moduleSources ratingSources = do
+loadExferenceSessionFromSourcesWithPolicy policy moduleSources ratingSources =
+  loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
+    policy moduleSources ratingSources []
+
+-- | Snapshot counterpart of 'loadExferenceSession' for callers that have
+-- already captured a directory's optional constructorless-type visibility
+-- sidecars. A nonempty visibility list is one complete manifest for the exact
+-- module snapshot. The older source-snapshot entry points intentionally pass an
+-- empty list and retain ordinary Haskell empty-datatype semantics.
+loadExferenceSessionFromSourcesWithTypeVisibility
+  :: [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO ExferenceSessionLoadReport
+loadExferenceSessionFromSourcesWithTypeVisibility =
+  loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
+    defaultExferenceSessionPolicy
+
+-- | Policy-aware counterpart of
+-- 'loadExferenceSessionFromSourcesWithTypeVisibility'.
+loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
+  :: ExferenceSessionPolicy
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO ExferenceSessionLoadReport
+loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy policy moduleSources
+    ratingSources visibilitySources = do
   LoadReport sourceResult sourceDiagnostics <-
-    environmentFromSources moduleSources ratingSources
+    environmentFromSourcesWithTypeVisibility
+      moduleSources ratingSources visibilitySources
   pure $ sealSourceLoadReport policy sourceResult sourceDiagnostics
 
 sealSourceLoadReport

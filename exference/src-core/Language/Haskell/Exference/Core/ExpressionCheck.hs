@@ -268,6 +268,12 @@ checkValidatedExpression
           -- bind to the whole opaque atom, but denotes an instantiated use.
           unifyTypes declared' annotation'
           zonk declared'
+        -- Search records the requested context-free scheme on a
+        -- shallow-subsummed occurrence. Classification independently rechecks
+        -- that the local provider can instantiate to it without solving free
+        -- flexible variables; no temporary matcher substitution is part of
+        -- the generated expression.
+        SubsumedProviderForwarding -> zonk annotation'
         InstantiateProviderUse -> do
           instantiated <- instantiateScopedProvider declared'
           unifyTypes instantiated annotation'

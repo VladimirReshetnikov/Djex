@@ -1455,6 +1455,13 @@ stateStep allocators multiPM allowConstrs h
         -- instantiation.
         OpaqueProviderForwarding ->
           useProvider scheme provType [] dependencies exactUnification
+        -- A context-free provider scheme with no free flexible variables may
+        -- be more general than the requested scheme. The shared classifier has
+        -- already proved that relation with requested binders rigid, so no
+        -- temporary matcher substitution may escape into the live search node.
+        -- Record the requested scheme for the independent checker.
+        SubsumedProviderForwarding ->
+          useProvider goalType goalType [] [] $ Just IntMap.empty
         InstantiateProviderUse -> do
           supply <- gets nodeFlexibleIds
           case instantiateLeadingForallsWith

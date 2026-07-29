@@ -120,11 +120,21 @@ testKindFailure = do
 
 testRankNSearch :: Assertion
 testRankNSearch = do
-  output <- runExference
+  exactOutput <- runExference
     ["--first", "(forall a. a -> a) -> (forall b. b -> b)"]
-  assertContains "rank-N identity should use its opaque argument" "\\" output
+  assertContains "rank-N identity should use its opaque argument" "\\"
+    exactOutput
   assertBool "rank-N input was rejected at the checked search boundary"
-    (not $ "NestedForall" `isInfixOf` output)
+    (not $ "NestedForall" `isInfixOf` exactOutput)
+
+  subsumedOutput <- runExference
+    [ "--first"
+    , "(forall a b. a -> b -> a) -> (forall x. x -> x -> x)"
+    ]
+  assertContains "a more-general rank-N provider should be forwarded"
+    "\\" subsumedOutput
+  assertBool "shallow quantified subsumption was rejected"
+    $ not $ "NestedForall" `isInfixOf` subsumedOutput
 
 testInvalidVerbosity :: Assertion
 testInvalidVerbosity = do

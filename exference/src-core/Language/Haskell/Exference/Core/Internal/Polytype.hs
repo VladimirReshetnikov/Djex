@@ -6,6 +6,7 @@
 module Language.Haskell.Exference.Core.Internal.Polytype
   ( ProviderUseMode (..)
   , classifyProviderUse
+  , quantifiedProviderSubsumes
   , instantiateLeadingForallsWith
   )
 where
@@ -14,6 +15,7 @@ import Control.Monad (guard)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
   ( FlexibleRenaming
@@ -24,7 +26,13 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
   , reserveIdentifiers
   )
 import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.TypeUtils
+  ( alphaNormalizeForalls
+  , containsForall
+  )
+import Language.Haskell.Exference.Core.Unify (unifyRight)
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
 -- | How a scoped provider participates at one occurrence. Keeping this
 -- classification beside forall instantiation prevents search and independent
@@ -32,6 +40,7 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 data ProviderUseMode
   = OrdinaryProviderUse
   | OpaqueProviderForwarding
+  | SubsumedProviderForwarding
   | InstantiateProviderUse
   deriving (Eq, Show)
 
@@ -45,14 +54,54 @@ data ProviderUseMode
 classifyProviderUse :: HsType -> HsType -> ProviderUseMode
 classifyProviderUse rawProvider rawRequested =
   case peelVacuousForalls rawProvider of
-    TypeForallNative{} -> case peelVacuousForalls rawRequested of
-      TypeForallNative{} -> OpaqueProviderForwarding
+    provider@TypeForallNative{} -> case peelVacuousForalls rawRequested of
+      requested@TypeForallNative{}
+        | SharedTypeAtom.alphaEquivalentTypes provider requested ->
+            OpaqueProviderForwarding
+        | quantifiedProviderSubsumes provider requested ->
+            SubsumedProviderForwarding
+        | otherwise -> OpaqueProviderForwarding
       _ -> InstantiateProviderUse
     _ -> OrdinaryProviderUse
  where
   peelVacuousForalls (TypeForallNative [] [] body) =
     peelVacuousForalls body
   peelVacuousForalls ty = ty
+
+-- | Whether one context-free prenex scheme with no free flexible variables
+-- can be instantiated to another such requested scheme.
+--
+-- This is deliberately shallow predicative subsumption, not general rank-N
+-- subsumption.  The requested body is the rigid left side of 'unifyRight';
+-- only variables bound by the provider's leading forall may therefore be
+-- solved.  Requiring both complete schemes to have no free flexible variable
+-- prevents an ambient inference variable from being mistaken for one of those
+-- instantiable binders.  Ambient rigid constants are allowed and share their
+-- nominal namespace across both sides. Direct contexts are excluded until
+-- entailment between provider and requested constraints has an equally
+-- explicit rule.
+--
+-- Alpha-normalization is essential before the forall prefixes disappear: two
+-- successive layers may legally shadow the same source binder identity.
+quantifiedProviderSubsumes :: HsType -> HsType -> Bool
+quantifiedProviderSubsumes provider requested = case
+    (prepare provider, prepare requested) of
+  (Just providerBody, Just requestedBody) -> case
+      unifyRight requestedBody providerBody of
+    Just substitutions -> all (not . containsForall)
+      $ IntMap.elems substitutions
+    Nothing -> False
+  _ -> False
+ where
+  prepare source = do
+    guard $ Set.null $ freeVars source
+    normalized <- either (const Nothing) (Just . fst)
+      $ alphaNormalizeForalls IntSet.empty source
+    let (binders, constraints, body) =
+          SharedType.splitLeadingForalls normalized
+    guard $ not $ null binders
+    guard $ null constraints
+    pure body
 
 -- | Replace every binder in the complete leading forall chain with a fresh
 -- flexible variable. Direct contexts are returned as proof obligations in

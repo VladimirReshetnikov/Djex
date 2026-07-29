@@ -24,6 +24,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , environmentFromModuleAndRatings
   , environmentFromFiles
   , environmentFromSources
+  , environmentFromSourcesWithTypeVisibility
   , environmentFromPath
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
@@ -567,31 +568,40 @@ loadTypeVisibilityManifest
   :: [FilePath]
   -> Loader (Either EnvironmentLoadError (Maybe TypeVisibilityManifest))
 loadTypeVisibilityManifest [] = pure $ Right Nothing
-loadTypeVisibilityManifest paths@(primaryPath : _) = do
+loadTypeVisibilityManifest paths = do
   readResults <- lift $ mapM readOne paths
   case NonEmpty.nonEmpty $ lefts readResults of
     Just failures -> pure $ Left $ TypeVisibilityManifestErrors failures
-    Nothing -> do
-      let parsed = concatMap (uncurry parseTypeVisibilitySource)
-            $ rights readResults
-          parseFailures = lefts parsed
-          entries = rights parsed
-      case NonEmpty.nonEmpty parseFailures of
-        Just failures -> pure $ Left $ TypeVisibilityManifestErrors failures
-        Nothing -> case NonEmpty.nonEmpty
-            $ duplicateTypeVisibilityDiagnostics entries of
-          Just failures -> pure $ Left $ TypeVisibilityManifestErrors failures
-          Nothing -> pure $ Right $ Just TypeVisibilityManifest
-            { typeVisibilityManifestSource = primaryPath
-            , typeVisibilityManifestEntries = M.fromList
-                [(typeVisibilityName entry, entry) | entry <- entries]
-            }
+    Nothing -> pure $ parseTypeVisibilitySources $ rights readResults
  where
   readOne path = do
     result <- readTextFile path
     pure $ case result of
       Left failure -> Left failure
       Right contents -> Right (path, contents)
+
+-- Parse already captured sidecars through the same authority as the directory
+-- loader. The REPL uses this boundary so a workspace remains one immutable
+-- snapshot: session construction never reopens a manifest after its modules and
+-- ratings have been read.
+parseTypeVisibilitySources
+  :: [(FilePath, String)]
+  -> Either EnvironmentLoadError (Maybe TypeVisibilityManifest)
+parseTypeVisibilitySources [] = Right Nothing
+parseTypeVisibilitySources sources@((primaryPath, _) : _) = do
+  let parsed = concatMap (uncurry parseTypeVisibilitySource) sources
+      parseFailures = lefts parsed
+      entries = rights parsed
+  case NonEmpty.nonEmpty parseFailures of
+    Just failures -> Left $ TypeVisibilityManifestErrors failures
+    Nothing -> case NonEmpty.nonEmpty
+        $ duplicateTypeVisibilityDiagnostics entries of
+      Just failures -> Left $ TypeVisibilityManifestErrors failures
+      Nothing -> Right $ Just TypeVisibilityManifest
+        { typeVisibilityManifestSource = primaryPath
+        , typeVisibilityManifestEntries = M.fromList
+            [(typeVisibilityName entry, entry) | entry <- entries]
+        }
 
 applyTypeVisibilityManifest
   :: TypeVisibilityManifest
@@ -1828,23 +1838,45 @@ environmentFromFilesM modulePaths ratingPaths = do
 
 -- | Parse, rate, check, and seal exact in-memory source snapshots. Paths are
 -- retained solely as diagnostic/parser identities; neither modules nor
--- ratings are reopened. This is the single-snapshot boundary used by the
--- module-aware REPL.
+-- ratings are reopened. Callers needing catalogue visibility semantics use
+-- the explicit three-snapshot counterpart below.
 environmentFromSources
   :: [(FilePath, String)]
   -> [(FilePath, String)]
   -> IO (LoadReport CheckedSourceEnvironment)
-environmentFromSources moduleSources ratingSources = runLoader
-  $ environmentFromSourcesM moduleSources ratingSources
+environmentFromSources moduleSources ratingSources =
+  environmentFromSourcesWithTypeVisibility moduleSources ratingSources []
+
+-- | Parse, rate, classify constructorless types, check, and seal exact
+-- in-memory snapshots. A nonempty visibility list is one complete manifest for
+-- the supplied module set. The ordinary 'environmentFromSources' entry point
+-- deliberately supplies no manifest and retains normal Haskell empty-datatype
+-- semantics.
+environmentFromSourcesWithTypeVisibility
+  :: [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO (LoadReport CheckedSourceEnvironment)
+environmentFromSourcesWithTypeVisibility moduleSources ratingSources
+    visibilitySources = runLoader
+  $ environmentFromSourcesM moduleSources ratingSources visibilitySources
 
 environmentFromSourcesM
   :: [(FilePath, String)]
   -> [(FilePath, String)]
+  -> [(FilePath, String)]
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
-environmentFromSourcesM moduleSources ratingSources = do
+environmentFromSourcesM moduleSources ratingSources visibilitySources = do
   environmentResult <- parseModuleSourcesM moduleSources
-  finishEnvironmentLoad environmentResult
-    $ pure $ map ratingsFromSource ratingSources
+  case environmentResult of
+    Left failure -> pure $ Left failure
+    Right environment -> case parseTypeVisibilitySources visibilitySources of
+      Left failure -> pure $ Left failure
+      Right manifest -> finishEnvironmentLoadWith
+        (maybe checkSourceEnvironment
+          checkSourceEnvironmentWithTypeVisibility manifest)
+        (Right environment)
+        (pure $ map ratingsFromSource ratingSources)
 
 finishEnvironmentLoad
   :: Either EnvironmentLoadError SourceEnvironment

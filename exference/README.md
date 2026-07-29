@@ -227,12 +227,16 @@ pattern. Rank-N occurrences are validated across unused bindings, datatype
 fields, the complete class/instance environment, expected constraints, and
 generated annotations rather than only when inference happens to reach them.
 The checker and search use both the same opaque, alpha-aware unifier and the
-same explicit leading-forall provider-instantiation primitive. The latter acts
-at a scoped-value typing boundary; it does not make the unifier decompose a
-quantified body. They also share the higher-kinded view of structural functions
-and tuples, while tuple complexity replays the historical left-associated
-constructor/application accumulation exactly so floating-point rounding and
-saturation cannot perturb queue order.
+same scoped provider-use rules. An exact quantified occurrence remains opaque;
+a bounded rule can shallowly subsume one context-free prenex scheme to another;
+and a monomorphic occurrence freshly instantiates the provider's leading
+foralls. These are typing rules at a scoped-value boundary, not permission for
+the unifier to decompose a quantified body. Search records the requested scheme
+on a subsumed occurrence, and the independent checker reclassifies that
+occurrence instead of trusting the search result. They also share the
+higher-kinded view of structural functions and tuples, while tuple complexity
+replays the historical left-associated constructor/application accumulation
+exactly so floating-point rounding and saturation cannot perturb queue order.
 
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration
@@ -706,6 +710,21 @@ remains a sibling compatibility entrance for callers that already own an
 opaque `CheckedSourceEnvironment`; both entrances consume the same
 annotation-erased prepared witness and converge only at the one private sealer.
 No parser type is retained in the resulting session.
+
+Callers that already hold an exact in-memory directory snapshot can pass its
+module, rating, and visibility sources together to
+`environmentFromSourcesWithTypeVisibility`. The corresponding stable session
+entrances are `loadExferenceSessionFromSourcesWithTypeVisibility` and
+`loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy`. Their source
+lists are, in order, modules, ratings, and visibility snapshots; the
+policy-aware variant prepends its policy. A nonempty visibility list is one
+complete manifest for the supplied module snapshot, and none of these inputs
+is reopened from the filesystem. The older
+`environmentFromSources`, `loadExferenceSessionFromSources`, and
+`loadExferenceSessionFromSourcesWithPolicy` deliberately pass an empty
+visibility list. Like the explicit file loaders, they remain manifest-blind
+and preserve ordinary Haskell empty-datatype semantics.
+
 `ExferenceSessionPolicy` supplies exact-name exclusions and finite,
 signed rating overrides while the private search projection is built. Unknown
 override names, overrides for omitted or excluded bindings, and non-finite
@@ -866,11 +885,12 @@ datatype, missing entries, and arity drift fail closed with
 A comment is a line whose first non-whitespace character is `#`. Hashes later
 in a line remain part of legal symbolic names such as `Module.(:#)`.
 
-This interpretation is deliberately local to directory discovery. Explicit
-file and in-memory source APIs continue to give `data Empty` ordinary Haskell
-empty-datatype semantics. The installed manifest classifies the opaque
-base-library signature stubs as abstract and retains only `Data.Void.Void` and
-`GHC.Generics.V1` as genuine empty datatypes.
+This interpretation is used by directory discovery and by the explicit
+visibility-snapshot APIs described above. Legacy explicit-file and in-memory
+source APIs do not infer or discover a manifest; they continue to give
+`data Empty` ordinary Haskell empty-datatype semantics. The installed manifest
+classifies the opaque base-library signature stubs as abstract and retains only
+`Data.Void.Void` and `GHC.Generics.V1` as genuine empty datatypes.
 
 ## Experimental features
 
@@ -882,15 +902,39 @@ base-library signature stubs as abstract and retains only `Data.Void.Void` and
   scoped-value use site, an exposed leading `forall` is first eligible for an
   exact opaque match against a quantified goal, which preserves polymorphic
   forwarding. Empty-binder, empty-context forall wrappers are ignored for
-  this classification. At a monomorphic (non-quantified) goal, its binders are
-  instead instantiated with fresh flexible variables for that occurrence,
-  its direct contexts become proof obligations, and its arrow body participates
-  in ordinary search. Thus a value of type
+  this classification. If that exact match fails, Exference can also apply
+  shallow predicative subsumption when both sides are context-free prenex
+  schemes with no free flexible variables. Requested binders stay rigid; only
+  provider binders may be solved, and each solution must be a monotype. For
+  example, both of these requests can return `\f -> f`:
+
+  ```text
+  (forall a. a) -> (forall b. b -> b)
+  (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
+  ```
+
+  Ambient rigid constants are allowed and remain nominal. Non-exact schemes
+  with contexts, schemes containing free flexible variables, and matches that
+  would instantiate a provider binder with a polytype stay outside this rule.
+  In particular, it does not accept either directionally invalid specialization
+  or an impredicative one such as:
+
+  ```text
+  (forall ignored. Int -> Int) -> (forall x. x -> x)
+  (forall a. a -> a) ->
+    (forall x. (forall y. y -> y) -> (forall z. z -> z))
+  ```
+
+  At a monomorphic (non-quantified) goal, provider binders are instead
+  instantiated with fresh flexible variables for that occurrence, their direct
+  contexts become proof obligations, and the arrow body participates in
+  ordinary search. Thus a value of type
   `forall a. C a => a -> a` can be applied at `Int` when `C Int` is available,
   and a rank-N datatype field can participate after pattern elimination.
-  Quantifiers that have not reached one of these explicit introduction or
-  elimination boundaries remain alpha-aware `TypeAtom`s. This limited rule
-  does not provide general higher-rank subsumption, polymorphic let
+  Quantifiers that have not reached one of these explicit boundaries remain
+  alpha-aware `TypeAtom`s. Nested quantified subtrees may still compare exactly,
+  but shallow subsumption never recurses into them. These limited rules do not
+  provide deep or general higher-rank subsumption, polymorphic let
   generalization, or visible type application.
 
 ## Other known (technical) issues

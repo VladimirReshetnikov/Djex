@@ -133,6 +133,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentLoadErrorDiagnostics
   , environmentFromFiles
   , environmentFromSources
+  , environmentFromSourcesWithTypeVisibility
   , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
@@ -3743,13 +3744,22 @@ tests = testGroup "Exference"
             (TypeArrow polymorphic vacuousUnit) [] wrappedExpression @?= Right ()
           let distinctPolymorphic = TypeForall [1] []
                 $ TypeArrow (TypeVar 1) (TypeVar 1)
-              impredicativeGoal =
+              quantifiedGoal =
                 TypeArrow polymorphic distinctPolymorphic
-          case findOneExpression $ input {input_goalType = impredicativeGoal} of
-            Nothing -> pure ()
-            Just (unexpected, _, _) -> fail
-              $ "provider elimination crossed a quantified goal: "
+          (quantifiedExpression, quantifiedResidual, _) <- maybe
+            (fail "a more-general provider did not subsume a quantified goal")
+            pure
+            $ findOneExpression $ input {input_goalType = quantifiedGoal}
+          quantifiedResidual @?= []
+          case quantifiedExpression of
+            ExpLambda binder declared (ExpVar returned annotation) -> do
+              returned @?= binder
+              declared @?= polymorphic
+              annotation @?= distinctPolymorphic
+            unexpected -> fail $ "unexpected subsumed provider expression: "
               ++ showExpression unexpected
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            quantifiedGoal [] quantifiedExpression @?= Right ()
       , testCase "provider forall contexts become proof obligations" $ do
           let className = name "C"
               integer = TypeCons $ name "Int"
@@ -7004,6 +7014,19 @@ tests = testGroup "Exference"
                 , Just dataName <-
                     [typeConstructorHead $ deconstructorInput deconstructor]
                 ]
+          LoadReport legacySnapshotResult _ <- environmentFromSources
+            [("Fixture.hs", moduleSource)] []
+          legacySnapshot <- checkedSourceProjection
+            <$> expectRight legacySnapshotResult
+          legacyTokenName <- expectRight
+            $ mkQualifiedName ["Fixture"] "Token"
+          assertBool "the legacy snapshot API stopped treating constructorless data normally"
+            $ legacyTokenName `elem`
+              [ dataName
+              | deconstructor <- sourceDeconstructors legacySnapshot
+              , Just dataName <-
+                  [typeConstructorHead $ deconstructorInput deconstructor]
+              ]
           withTemporaryDirectoryFiles
               [ ("Fixture.hs", moduleSource)
               , ("types.visibility", visibilitySource)
@@ -7042,6 +7065,29 @@ tests = testGroup "Exference"
               Just SharedDeclaration.DataTypeDeclaration{} -> pure ()
               declaration -> fail $ "Empty was not concrete: "
                 ++ show declaration
+            LoadReport snapshotResult _ <-
+              environmentFromSourcesWithTypeVisibility
+                [("Fixture.hs", moduleSource)] []
+                [("types.visibility", visibilitySource)]
+            snapshot <- expectRight snapshotResult
+            let snapshotDeclarations = SharedEnvironment.typeDeclarationMap
+                  $ SharedInventory.inventoryEnvironment
+                  $ checkedSourceInventory snapshot
+                snapshotDeconstructors =
+                  [ dataName
+                  | deconstructor <- sourceDeconstructors
+                      $ checkedSourceProjection snapshot
+                  , Just dataName <-
+                      [typeConstructorHead $ deconstructorInput deconstructor]
+                  ]
+            case Map.lookup tokenName snapshotDeclarations of
+              Just SharedDeclaration.AbstractTypeDeclaration{} -> pure ()
+              declaration -> fail $ "snapshot Token was not abstract: "
+                ++ show declaration
+            assertBool "snapshot abstract Token retained an eliminator"
+              $ tokenName `notElem` snapshotDeconstructors
+            assertBool "snapshot empty Empty lost its eliminator"
+              $ emptyName `elem` snapshotDeconstructors
       , testCase "visibility manifests reject every catalogue mismatch" $ do
           let moduleSource = unlines
                 [ "{-# LANGUAGE EmptyDataDecls #-}"
@@ -8686,17 +8732,40 @@ tests = testGroup "Exference"
                 $ ExpVar 1 $ TypeForall [] [] $ TypeVar 2
           checkExpression (mkQueryClassEnv staticClasses []) [] []
             (TypeArrow polymorphic vacuousUnit) [] wrappedOccurrence @?= Right ()
-      , testCase "a quantified occurrence annotation requests exact forwarding" $ do
+      , testCase "a quantified occurrence annotation requests checked subsumption" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let polymorphic = TypeForall [0] [] $ TypeVar 0
               distinct = TypeForall [1] []
                 $ TypeArrow (TypeVar 1) (TypeVar 1)
               expression = ExpLambda 1 polymorphic $ ExpVar 1 distinct
-          case checkExpression (mkQueryClassEnv staticClasses []) [] []
-              (TypeArrow polymorphic distinct) [] expression of
-            Left TypeMismatch{} -> pure ()
-            actual -> fail $ "checker impredicatively opened an exact use: "
-              ++ show actual
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow polymorphic distinct) [] expression @?= Right ()
+
+          let integer = TypeCons $ name "Int"
+              lessGeneral = TypeForall [2] []
+                $ TypeArrow integer integer
+              universalIdentity = TypeForall [3] []
+                $ TypeArrow (TypeVar 3) (TypeVar 3)
+              lessGeneralUse = ExpLambda 2 lessGeneral
+                $ ExpVar 2 universalIdentity
+              providerIdentity = TypeForall [4] []
+                $ TypeArrow (TypeVar 4) (TypeVar 4)
+              impredicative = TypeForall [5] []
+                $ TypeArrow
+                    (TypeForall [6] []
+                      $ TypeArrow (TypeVar 6) (TypeVar 6))
+                    (TypeForall [7] []
+                      $ TypeArrow (TypeVar 7) (TypeVar 7))
+              impredicativeUse = ExpLambda 3 providerIdentity
+                $ ExpVar 3 impredicative
+              rejects candidateGoal candidate = case checkExpression
+                  (mkQueryClassEnv staticClasses []) [] [] candidateGoal []
+                  candidate of
+                Left TypeMismatch{} -> pure ()
+                actual -> fail $ "checker accepted invalid quantified subsumption: "
+                  ++ show actual
+          rejects (TypeArrow lessGeneral universalIdentity) lessGeneralUse
+          rejects (TypeArrow providerIdentity impredicative) impredicativeUse
       , testCase "rejects an invalid monomorphic provider annotation" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"

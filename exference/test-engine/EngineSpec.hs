@@ -26,7 +26,9 @@ import Language.Haskell.Exference.Core.Internal.Options
   , defaultHeuristicsConfig
   )
 import Language.Haskell.Exference.Core.Internal.Polytype
-  ( instantiateLeadingForallsWith )
+  ( instantiateLeadingForallsWith
+  , quantifiedProviderSubsumes
+  )
 import Language.Haskell.Exference.Core.Internal.Testing
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( supplyFromIdentifiers )
@@ -140,8 +142,58 @@ tests = testGroup "Exference private engine boundaries"
         $ findExpressionsWithIdentifierCapacitiesEither
             (IdentifierCapacities 100 100 100)
             (input {E.input_goalType = TypeArrow polymorphic distinct})
-      assertBool "provider elimination crossed a quantified goal"
-        $ null $ concatMap E.chunkElements quantifiedChunks
+      let quantifiedExpressions =
+            [ expression
+            | chunk <- quantifiedChunks
+            , (expression, _, _) <- E.chunkElements chunk
+            ]
+          requestedOccurrence expression = case expression of
+            ExpLambda _ declared (ExpVar _ annotation) ->
+              declared == polymorphic && annotation == distinct
+            _ -> False
+      assertBool "a more-general provider did not subsume a quantified goal"
+        $ any requestedOccurrence quantifiedExpressions
+      mapM_ (\expression -> checkExpression
+          (mkQueryClassEnv emptyStaticClassEnv []) [] []
+          (TypeArrow polymorphic distinct) [] expression @?= Right ())
+        quantifiedExpressions
+  , testCase "quantified provider subsumption stays shallow and predicative" $ do
+      let integer = TypeCons $ name "Int"
+          provider = TypeForall [0, 1] []
+            $ TypeArrow (TypeVar 0)
+            $ TypeArrow (TypeVar 1) (TypeVar 0)
+          specialization = TypeForall [2] []
+            $ TypeArrow (TypeVar 2)
+            $ TypeArrow (TypeVar 2) (TypeVar 2)
+          wrongResult = TypeForall [2, 3] []
+            $ TypeArrow (TypeVar 2)
+            $ TypeArrow (TypeVar 3) (TypeVar 3)
+          lessGeneral = TypeForall [0] []
+            $ TypeArrow integer integer
+          ordinaryIdentity = TypeForall [2] []
+            $ TypeArrow (TypeVar 2) (TypeVar 2)
+          impredicative = TypeForall [2] []
+            $ TypeArrow
+                (TypeForall [3] [] $ TypeArrow (TypeVar 3) (TypeVar 3))
+                (TypeForall [4] [] $ TypeArrow (TypeVar 4) (TypeVar 4))
+          providerIdentity = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          freeProvider = TypeForall [0] []
+            $ TypeArrow (TypeVar 9) (TypeVar 0)
+          freeRequested = TypeForall [1] []
+            $ TypeArrow (TypeVar 9) (TypeVar 1)
+          contextual variable = TypeForall [variable]
+            [HsConstraint (name "C") [TypeVar variable]]
+            $ TypeVar variable
+          rigidProvider = TypeForall [9] [] $ TypeConstant 0
+          collidingRequested = TypeForall [0] [] $ TypeVar 0
+      quantifiedProviderSubsumes provider specialization @?= True
+      quantifiedProviderSubsumes provider wrongResult @?= False
+      quantifiedProviderSubsumes lessGeneral ordinaryIdentity @?= False
+      quantifiedProviderSubsumes providerIdentity impredicative @?= False
+      quantifiedProviderSubsumes freeProvider freeRequested @?= False
+      quantifiedProviderSubsumes (contextual 0) (contextual 1) @?= False
+      quantifiedProviderSubsumes rigidProvider collidingRequested @?= False
   , testCase "provider forall opening preserves nested lexical scopes" $ do
       let outerClass = name "Outer"
           innerClass = name "Inner"

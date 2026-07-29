@@ -823,7 +823,7 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
     let translateOpaque =
             preparedEnvironmentSynthesisFormulaTranslator prepared
         translatePolarized =
-            preparedEnvironmentPolarizedSynthesisFormulaTranslator prepared
+            preparedEnvironmentPolarizedSynthesisFormulaVariants prepared
         translateType translator label source =
             first (label ++) $ translator source
     -- Contexts have been checked against the same inventory and kind scope as
@@ -881,46 +881,60 @@ searchPreparedFormula
     -> PreparedEnvironment
     -> SharedGenerated.DefinitionName
     -> Formula
-    -> (Formula, Bool)
+    -> [(Formula, Bool)]
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target opaqueForm
-        (polarizedForm, goalTranslationIncomplete) = do
-    let opaquePremises = preparedEnvironmentFunctionPremises prepared
-        (polarizedPremises, premiseTranslationIncomplete) =
+searchPreparedFormula options prepared target opaqueForm translations = do
+    let (premises, premiseTranslationIncomplete) =
             preparedEnvironmentPolarizedFunctionPremises prepared
-        translationIncomplete =
-            goalTranslationIncomplete || premiseTranslationIncomplete
-        polarizedPlanIsOpaquePlan =
-            polarizedForm == opaqueForm &&
-                polarizedPremises == opaquePremises
         collectAcrossPlans =
             optionAlternatives options || optionSorted options
-    polarizedResult <- searchPreparedFormulaPlan
-        options (optionCutoff options) target
-        polarizedPremises polarizedForm
-        (not translationIncomplete)
-    opaqueResult <-
-        if translationIncomplete &&
-            not polarizedPlanIsOpaquePlan &&
-            formulaPlanFinished polarizedResult &&
-            (collectAcrossPlans || null (formulaPlanClauses polarizedResult))
-        then Just <$> searchPreparedFormulaPlan
-            options {
-                optionBudget = formulaPlanRemainingBudget polarizedResult
-                }
-            (optionCutoff options - formulaPlanProofCount polarizedResult)
-            target opaquePremises opaqueForm False
-        else return Nothing
-    mergeFormulaPlanResults options polarizedResult opaqueResult
+        rawPlans = case translations of
+            [] -> [(opaqueForm, False)]
+            (primaryForm, primaryIncomplete) : variants ->
+                let primarySound = not $
+                        primaryIncomplete || premiseTranslationIncomplete
+                    alternativeForms
+                        | primarySound = []
+                        | otherwise = opaqueForm : map fst variants
+                in (primaryForm, primarySound) :
+                    [ (formula, False)
+                    | formula <- alternativeForms
+                    ]
+        plans = SharedCollection.distinctOn fst rawPlans
+    results <- runPlans collectAcrossPlans premises
+        options (optionCutoff options) [] plans
+    mergeFormulaPlanResults options results
+  where
+    runPlans _ _ _ _ completed [] = Right $ reverse completed
+    runPlans collect premises currentOptions candidateLimit completed
+            ((form, negativeEvidenceSound) : remaining) = do
+        result <- searchPreparedFormulaPlan
+            currentOptions candidateLimit target premises form
+            negativeEvidenceSound
+        let completed' = result : completed
+            nextLimit = candidateLimit - formulaPlanProofCount result
+            continue =
+                formulaPlanFinished result &&
+                (collect || null (formulaPlanClauses result))
+        if continue
+            then runPlans collect premises
+                currentOptions {
+                    optionBudget = formulaPlanRemainingBudget result
+                    }
+                nextLimit completed' remaining
+            else Right $ reverse completed'
 
--- The two translations are coherent whole-query plans. Their checked
--- candidates can be unioned, but formula fragments cannot be mixed: a term
--- requiring opaque transport at one positive forall and structural
--- introduction at another may therefore remain inconclusive.
+-- Goal plans are bounded linearly: the fully opened translation, the exact
+-- opaque fallback, and then one independently opaque positive forall at a
+-- time. Keeping the two historical plans first preserves their unsorted result
+-- prefix. Global premises expose the same sound views simultaneously under
+-- distinct internal proof identities, so one term may use different views at
+-- different occurrences of a reusable source function. Every proof remains
+-- checked against the exact goal formula that produced it.
 
 -- One formula plan retains clauses before cross-plan de-duplication and
 -- ranking. 'formulaPlanProofCount' counts raw proofs before either operation,
--- which makes the caller's cutoff global even when two translations run.
+-- which makes the caller's cutoff global across every translation.
 data FormulaPlanResult = FormulaPlanResult
     { formulaPlanFormula :: String
     , formulaPlanFirstProof :: Maybe String
@@ -1044,25 +1058,22 @@ formulaPlanFinished result =
 -- candidates are ranked once. Proof checking remains plan-local above.
 mergeFormulaPlanResults
     :: QueryOptions
-    -> FormulaPlanResult
-    -> Maybe FormulaPlanResult
+    -> [FormulaPlanResult]
     -> Either DjinnQueryError DjinnResult
-mergeFormulaPlanResults options polarized opaque =
-    makeDjinnResult
-        (formulaPlanFormula metadataPlan)
-        (formulaPlanFirstProof metadataPlan)
-        (formulaPlanCompletion terminalPlan)
-        candidates
-        evidence
+mergeFormulaPlanResults _ [] = internalQueryFailure
+    "rank-N formula planning produced no search plan"
+mergeFormulaPlanResults options results = makeDjinnResult
+    (formulaPlanFormula metadataPlan)
+    (formulaPlanFirstProof metadataPlan)
+    (formulaPlanCompletion terminalPlan)
+    candidates
+    evidence
   where
-    terminalPlan = case opaque of
-        Just result -> result
-        Nothing -> polarized
-    metadataPlan
-        | not $ null $ formulaPlanClauses polarized = polarized
-        | otherwise = terminalPlan
-    mergedClauses = formulaPlanClauses polarized ++
-        maybe [] formulaPlanClauses opaque
+    terminalPlan = last results
+    metadataPlan = case filter (not . null . formulaPlanClauses) results of
+        result : _ -> result
+        [] -> terminalPlan
+    mergedClauses = concatMap formulaPlanClauses results
     distinctClauses = SharedCollection.distinctOn id mergedClauses
     unrankedCandidates = map makeCandidate distinctClauses
     candidates

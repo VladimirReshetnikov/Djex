@@ -609,6 +609,9 @@ testReplRankNQueries = withTemporaryEnvironment [] $ \directory -> do
         ++ "(item -> answer -> answer) -> answer -> answer)"
     , ":compare [(forall result. result -> result -> result)] "
         ++ "-> [(forall answer. answer -> answer -> answer)]"
+    , ":djinn (forall input. input) -> "
+        ++ "((forall transported. transported), "
+        ++ "(forall identity. identity -> identity))"
     ]
   assertEqual "rank-N REPL exit" ExitSuccess exitCode
   assertEqual "both engines run both rank-N queries" 2
@@ -619,6 +622,8 @@ testReplRankNQueries = withTemporaryEnvironment [] $ \directory -> do
     $ countOccurrences "-- Djinn\n\\" output
   assertEqual "Exference finds both alpha-renamed identities" 2
     $ countOccurrences "-- Exference\n\\" output
+  assertContains "Djinn did not compose opaque transport with introduction"
+    "\\a -> (a, \\b -> b)" output
   assertBool ("rank-N REPL emitted an error:\n" ++ errors) $
     not $ "error" `isInfixOf` map toLower errors
 

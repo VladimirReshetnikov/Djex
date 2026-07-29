@@ -11,6 +11,7 @@ module Djinn.Internal.Environment (
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentSynthesisFormulaTranslator,
     preparedEnvironmentPolarizedSynthesisFormulaTranslator,
+    preparedEnvironmentPolarizedSynthesisFormulaVariants,
     preparedEnvironmentFunctionPremises,
     preparedEnvironmentPolarizedFunctionPremises,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
@@ -83,9 +84,10 @@ data PreparedEnvironment = PreparedEnvironment
     PreparedPolarizedPremises
     PreparedFormulaCompiler
 
--- A premise whose translation kept a forall opaque is still safe to use: it
--- merely supports fewer eliminations than the source type. The aggregate bit
--- prevents that deliberately incomplete search space from proving a negative.
+-- Alternate opaque views of a premise are safe and do not themselves weaken
+-- negative evidence. The aggregate bit records only whether a declaration's
+-- primary polarized translation was incomplete; exhaustion of that primary
+-- approximation must not prove a negative about the source environment.
 data PreparedPolarizedPremises = PreparedPolarizedPremises
     [(Symbol, Formula)]
     Bool
@@ -541,6 +543,17 @@ compilePolarizedSynthesisFormula namespace polarity compiler =
         synthesisFormulaTypeView synthesisFormulaTypeView compiler .
             SharedType.canonicalizeType
 
+compilePolarizedSynthesisFormulaVariants
+    :: Natural
+    -> FormulaPolarity
+    -> PreparedFormulaCompiler
+    -> SharedType.Type HSymbol
+    -> Either String [FormulaTranslation]
+compilePolarizedSynthesisFormulaVariants namespace polarity compiler =
+    compilePolarizedFormulaVariants namespace polarity
+        synthesisFormulaTypeView synthesisFormulaTypeView compiler .
+            SharedType.canonicalizeType
+
 synthesisFormulaTypeSymbol :: SharedName.Name -> Either String HSymbol
 synthesisFormulaTypeSymbol = first show . djinnTypeConstructorSymbol
 
@@ -561,8 +574,11 @@ sealPreparedEnvironment expansion = do
                 expandedDeclarations
             ]
     let premises = map opaquePremise translatedPremises
+        premiseVariantGroups = map polarizedPremiseVariants translatedPremises
         polarizedPremises = PreparedPolarizedPremises
-            (map polarizedPremise translatedPremises)
+            ( concatMap primaryPremise premiseVariantGroups ++
+                concatMap alternatePremises premiseVariantGroups
+            )
             (any premiseTranslationIncomplete translatedPremises)
     let classIndex = SharedClass.prepareClassIndex inventory
     -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
@@ -598,15 +614,25 @@ sealPreparedEnvironment expansion = do
         opaqueFormula <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
             compileSynthesisFormula compiler body
         polarized <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
-            compilePolarizedSynthesisFormula namespace NegativeFormula
+            compilePolarizedSynthesisFormulaVariants namespace NegativeFormula
                 compiler body
         return (Symbol name, opaqueFormula, polarized)
 
     opaquePremise (symbol, formula, _) = (symbol, formula)
-    polarizedPremise (symbol, _, translation) =
-        (symbol, translatedFormula translation)
-    premiseTranslationIncomplete (_, _, translation) =
-        translationIncomplete translation
+    polarizedPremiseVariants (symbol, opaqueFormula, translations) =
+        [ (symbol, formula)
+        | formula <- SharedCollection.distinctOn id $
+            map translatedFormula translations ++ [opaqueFormula]
+        ]
+    primaryPremise variants = case variants of
+        primary : _ -> [primary]
+        [] -> []
+    alternatePremises variants = case variants of
+        _ : alternatives -> alternatives
+        [] -> []
+    premiseTranslationIncomplete (_, _, translations) = case translations of
+        primary : _ -> translationIncomplete primary
+        [] -> True
 
     freshBinder reserved variable = Just
         $ fst $ freshPrimedVariable reserved variable
@@ -707,8 +733,9 @@ preparedEnvironmentFunctionPremises
 preparedEnvironmentFunctionPremises
         (PreparedEnvironment _ _ premises _ _) = premises
 
--- | Premises for the polarized rank-N plan, paired with whether that plan had
--- to leave any quantified subtree opaque.
+-- | Every sound rank-N view of each premise, with all historical primary views
+-- first in declaration order, paired with whether any primary translation had
+-- to leave a quantified subtree opaque.
 preparedEnvironmentPolarizedFunctionPremises
     :: PreparedEnvironment
     -> ([(Symbol, Formula)], Bool)
@@ -745,6 +772,23 @@ preparedEnvironmentPolarizedSynthesisFormulaTranslator
         ( translatedFormula translation
         , translationIncomplete translation
         )
+
+-- | Translate a checked positive goal into the fully opened plan followed by
+-- one plan for each independently opaque positive forall occurrence. The
+-- exact all-opaque fallback remains available through
+-- 'preparedEnvironmentSynthesisFormulaTranslator'.
+preparedEnvironmentPolarizedSynthesisFormulaVariants
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> Either String [(Formula, Bool)]
+preparedEnvironmentPolarizedSynthesisFormulaVariants
+        (PreparedEnvironment _ _ _ _ compiler) source = do
+    translations <- compilePolarizedSynthesisFormulaVariants
+        0 PositiveFormula compiler source
+    return
+        [ (translatedFormula translation, translationIncomplete translation)
+        | translation <- translations
+        ]
 
 projectPreparedInventory
     :: PreparedEnvironment

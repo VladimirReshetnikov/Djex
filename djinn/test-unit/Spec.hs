@@ -966,6 +966,7 @@ testRankNTypeAtoms = do
 
     let poly binder = HTForall [binder] []
             $ HTArrow (HTVar binder) (HTVar binder)
+        emptyScheme binder = HTForall [binder] [] $ HTVar binder
         list element = HTApp (HTCon "[]") element
         withFree binder free = HTForall [binder] []
             $ HTArrow (HTVar binder) (HTVar free)
@@ -1025,16 +1026,64 @@ testRankNTypeAtoms = do
     assertEqual "unsupported opaque rank-N search was falsely refuted"
         SharedQuery.NoEvidence $ SharedQuery.resultEvidence unsupported
 
-    -- Plans are whole-query alternatives rather than a compositional mix.
-    -- One can transport the first tuple field opaquely and the other can
-    -- introduce the second field structurally, but neither currently does
-    -- both. This known boundary must remain inconclusive, not a refutation.
-    mixed <- runStableQuery stableSession "mixedRankNStrategies"
+    -- One occurrence-local opaque choice can now coexist with structural
+    -- introduction at a sibling forall. This is the first compositional
+    -- rank-N goal that neither former whole-query plan could inhabit.
+    runStableIdentity stableSession "mixedRankNStrategies"
         "(forall a. a) -> ((forall b. b), (forall c. c -> c))"
-    assertEqual "whole-plan rank-N approximations unexpectedly mixed fragments"
-        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch mixed
-    assertEqual "a bounded mixed-strategy gap was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence mixed
+    runStableIdentity stableSession "mixedNestedRankNStrategies"
+        $ "(forall a. a) -> forall outer. "
+        ++ "((forall b. b), outer -> outer)"
+
+    -- Equal-looking sites keep distinct occurrence paths. With alternatives
+    -- enabled, either result can transport the argument while its sibling is
+    -- introduced structurally; collapsing the sites would lose one clause.
+    duplicateSites <- expectRight $ inhabit
+        defaultQueryOptions {optionAlternatives = True}
+        emptyEnvironment [] "duplicateRankNSites"
+        $ HTArrow (poly "input")
+        $ HTTuple [poly "left", poly "right"]
+    duplicateSiteClauses <- case reportOutcome duplicateSites of
+        Realized clauses -> pure clauses
+        outcome -> fail $ "duplicated rank-N sites failed: " ++ show outcome
+    assertEqual "alpha-equal forall sites were not occurrence-distinct"
+        4 $ length duplicateSiteClauses
+
+    -- Definition expansion must retain the same occurrence identity. The
+    -- synonym rearranges its parameters, and the datatype stores the two
+    -- strategies in fields, so neither direct query-tree paths nor binder
+    -- spelling alone can identify the selected opaque site.
+    let flipBody = HTTuple [HTVar "second", HTVar "first"]
+        flipType first second = HTApp
+            (HTApp (HTCon "RankNFlip") first) second
+        hybridResult = HTCon "RankNHybrid"
+    hybridEnvironment <- expectRight $ do
+        withFlip <- declare
+            (TypeSynonym "RankNFlip" ["first", "second"] flipBody)
+            standardEnvironment
+        declare
+            (DataType "RankNHybrid" []
+                [("RankNHybrid", [emptyScheme "stored", poly "identity"])])
+            withFlip
+    assertRealized "rank-N strategy through a rearranging synonym"
+        =<< expectRight (inhabit defaultQueryOptions hybridEnvironment []
+            "mixedRankNSynonym" $ HTArrow (emptyScheme "input")
+                $ flipType (poly "identity") (emptyScheme "output"))
+    assertRealized "rank-N strategy through datatype fields"
+        =<< expectRight (inhabit defaultQueryOptions hybridEnvironment []
+            "mixedRankNDatatype" $ HTArrow (emptyScheme "input") hybridResult)
+
+    -- The plan family is intentionally linear rather than a power set. This
+    -- term needs two independently opaque result occurrences and a third
+    -- structural introduction, so it remains outside the bounded fragment.
+    twoOpaqueHoles <- runStableQuery stableSession "twoOpaqueRankNHoles"
+        $ "(forall a. a) -> (forall b. b -> q) -> "
+        ++ "((forall c. c), (forall d. d -> q), (forall e. e -> e))"
+    assertEqual "the single-hole plan family unexpectedly opened two holes"
+        [] $ SharedSearch.batchCandidates
+            $ SharedQuery.resultSearch twoOpaqueHoles
+    assertEqual "a multi-hole rank-N gap was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence twoOpaqueHoles
 
     -- Goal and premise translation are separate skolem scopes. Reusing the
     -- same internal proposition for both would admit the ill-typed proof
@@ -1131,6 +1180,9 @@ testComplementaryRankNPlans = do
             HTArrow (HTVar binder) $
                 HTArrow (HTVar binder) (HTVar binder)
         churchType binder = HTArrow token $ churchChoice binder
+        polyIdentity binder = HTForall [binder] [] $
+            HTArrow (HTVar binder) (HTVar binder)
+        identityType binder = HTArrow token $ polyIdentity binder
         goal = churchType "answer"
         unsortedOptions = defaultQueryOptions {
             optionAlternatives = True,
@@ -1186,6 +1238,26 @@ testComplementaryRankNPlans = do
         (SharedSearch.truncated SharedSearch.CandidateLimitReached)
         $ reportCompletion limited
 
+    -- Consuming the limit exactly is not proof that later plans are empty.
+    -- A zero-allowance probe must still discover their first raw proof and
+    -- report truncation without admitting another candidate.
+    exactlyLimitedEnvironment <- expectRight $ do
+        withToken <- declare (AbstractType "Token" KStar) emptyEnvironment
+        declare (Function "polyIdentity" $ identityType "result") withToken
+    exactlyLimited <- run
+        unsortedOptions {optionCutoff = 1}
+        "exactlyBoundRankNPlans" exactlyLimitedEnvironment
+        $ identityType "answer"
+    exactlyLimitedClauses <- realizedClauses
+        "exactly bounded rank-N plans" exactlyLimited
+    assertEqual "the exact cutoff admitted a later-plan candidate"
+        1 $ length exactlyLimitedClauses
+    assertBool "the zero-allowance probe admitted its provider candidate"
+        $ all (not . isInfixOf "polyIdentity") exactlyLimitedClauses
+    assertEqual "an unsearched later rank-N plan was reported as complete"
+        (SharedSearch.truncated SharedSearch.CandidateLimitReached)
+        $ reportCompletion exactlyLimited
+
     budgeted <- run
         unsortedOptions {optionBudget = Just 9}
         "budgetAllRankNPlans" environment goal
@@ -1198,6 +1270,42 @@ testComplementaryRankNPlans = do
     assertEqual "the opaque plan incorrectly received a fresh choice budget"
         (SharedSearch.truncated SharedSearch.ChoicePointLimitReached)
         $ reportCompletion budgeted
+
+    -- Premise views coexist in one proof environment. The first parameter
+    -- needs exact opaque transport while the second is constructed under a
+    -- fresh skolem; a whole-premise strategy cannot use @consume@ this way.
+    let emptyPoly binder = HTForall [binder] [] $ HTVar binder
+        result = HTCon "RankNResult"
+        consumeType = HTArrow (emptyPoly "a") $
+            HTArrow (polyIdentity "b") result
+        mixedPremiseGoal = HTArrow (emptyPoly "x") result
+    mixedPremiseEnvironment <- expectRight $ do
+        withResult <- declare
+            (AbstractType "RankNResult" KStar) emptyEnvironment
+        declare (Function "consume" consumeType) withResult
+    mixedPremise <- run unsortedOptions
+        "mixedPremiseRankNPlans" mixedPremiseEnvironment mixedPremiseGoal
+    mixedPremiseClauses <- realizedClauses
+        "occurrence-local premise plans" mixedPremise
+    assertBool "no mixed premise candidate used consume"
+        $ any ("consume" `isInfixOf`) mixedPremiseClauses
+
+    -- Alternate aliases are appended after every declaration's primary view.
+    -- Interleaving one function's variants before the next primary would
+    -- perturb the historical depth-first result prefix and finite budgets.
+    let orderedEnvironment = RawEnvironment.Environment
+            [("RankNResult", ([], HTAbstract "RankNResult" KStar, KStar))]
+            [ ("variantFirst", consumeType)
+            , ("directSecond", result)
+            ]
+            []
+    orderedPrepared <- expectShownRight $ prepareEnvironment orderedEnvironment
+    let (orderedPremises, _) =
+            RawEnvironment.preparedEnvironmentPolarizedFunctionPremises
+                orderedPrepared
+    assertEqual "premise variants displaced a later primary declaration"
+        [Symbol "variantFirst", Symbol "directSecond"]
+        $ map fst $ take 2 orderedPremises
   where
     run options target environment goal = expectRight $
         inhabit options environment [] target goal

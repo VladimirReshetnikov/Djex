@@ -21,6 +21,7 @@ module Djinn.Internal.TypeFormula
     , prepareFormulaCompiler
     , compileFormula
     , compilePolarizedFormula
+    , compilePolarizedFormulaVariants
     ) where
 
 import Control.Monad (zipWithM)
@@ -130,8 +131,16 @@ data FormulaPolarity
 data FormulaTranslation = FormulaTranslation
     { translatedFormula :: Formula
     , translationIncomplete :: Bool
+    , translationOpenableForalls :: [ForallSite]
     }
     deriving (Eq, Show)
+
+-- A definition origin plus the reverse source path is stable across alias
+-- expansion, duplicated arguments, datatype fields, and reopened forall
+-- bodies. It therefore identifies exactly one positive introduction choice
+-- without depending on source binder spelling.
+data ForallSite = ForallSite ExpansionOrigin [Natural]
+    deriving (Eq, Ord, Show)
 
 data PreparedDefinition = PreparedDefinition
     String
@@ -212,7 +221,36 @@ compilePolarizedFormula
     -> Either String FormulaTranslation
 compilePolarizedFormula namespace polarity openedView view prepared source = do
     expanded <- expansionTypeAt view QueryOrigin [] source
-    lowerExpansionType (PolarizedForalls namespace polarity openedView)
+    lowerExpansionType
+        (PolarizedForalls namespace polarity openedView Nothing)
+        prepared emptyExpansionPath [] expanded
+
+-- | Compile a linearly bounded compositional extension of the polarized
+-- fragment. The primary plan opens every supported positive forall. Each
+-- following plan keeps exactly one such occurrence opaque while opening the
+-- others; the exact all-opaque translation remains the separate historical
+-- fallback. This fixes mixed structural/transport goals without an
+-- exponential power set of occurrence choices.
+compilePolarizedFormulaVariants
+    :: Natural
+    -> FormulaPolarity
+    -> TypeView (SharedType.Type String)
+    -> TypeView source
+    -> PreparedFormulaCompiler
+    -> source
+    -> Either String [FormulaTranslation]
+compilePolarizedFormulaVariants namespace polarity openedView view prepared
+        source = do
+    expanded <- expansionTypeAt view QueryOrigin [] source
+    primary <- lowerExpansionType
+        (PolarizedForalls namespace polarity openedView Nothing)
+        prepared emptyExpansionPath [] expanded
+    variants <- mapM (compileVariant expanded)
+        $ translationOpenableForalls primary
+    return $ primary : variants
+  where
+    compileVariant expanded site = lowerExpansionType
+        (PolarizedForalls namespace polarity openedView $ Just site)
         prepared emptyExpansionPath [] expanded
 
 data ForallLowering
@@ -221,6 +259,7 @@ data ForallLowering
         Natural
         FormulaPolarity
         (TypeView (SharedType.Type String))
+        (Maybe ForallSite)
 
 lookupFormulaDefinition
     :: String
@@ -354,6 +393,7 @@ lowerExpansionType lowering definitions path occurrencePath source = case source
         return $ FormulaTranslation
             (Disj $ map fst translated)
             (any (translationIncomplete . snd) translated)
+            (concatMap (translationOpenableForalls . snd) translated)
     _ -> lowerApplication lowering definitions path occurrencePath source
   where
     lowerChild index = lowerExpansionType lowering definitions path
@@ -378,21 +418,28 @@ lowerForall
     -> Either String FormulaTranslation
 lowerForall lowering definitions path occurrencePath origin atom = case lowering of
     OpaqueForalls -> Right opaque
-    PolarizedForalls namespace PositiveFormula openedView ->
+    PolarizedForalls namespace PositiveFormula openedView selected ->
         case SharedTypeAtom.typeAtomType atom of
-            SharedType.ForallType binders [] body -> do
-                opened <- openForallBody
-                    namespace occurrencePath origin binders body
-                expanded <- expansionTypeAt openedView
-                    (OpenedForallOrigin origin) [] opened
-                lowerExpansionType lowering definitions path
-                    occurrencePath expanded
-            _ -> Right $ opaque { translationIncomplete = True }
-    PolarizedForalls _ NegativeFormula _ ->
-        Right $ opaque { translationIncomplete = True }
+            SharedType.ForallType binders [] body
+                | selected == Just site -> Right incompleteOpaque
+                | otherwise -> do
+                    opened <- openForallBody
+                        namespace occurrencePath origin binders body
+                    expanded <- expansionTypeAt openedView
+                        (OpenedForallOrigin origin) [] opened
+                    translation <- lowerExpansionType lowering definitions path
+                        occurrencePath expanded
+                    return translation
+                        { translationOpenableForalls = site
+                            : translationOpenableForalls translation
+                        }
+            _ -> Right incompleteOpaque
+    PolarizedForalls _ NegativeFormula _ _ -> Right incompleteOpaque
   where
+    site = ForallSite origin occurrencePath
     opaque = completeTranslation $ PVar $ opaqueTypeSymbol
         $ SharedTypeAtom.typeAtomType atom
+    incompleteOpaque = opaque {translationIncomplete = True}
 
 -- Opening happens after removing the forall wrapper, so its binders are free
 -- in @body@ and ordinary capture-avoiding substitution can replace them. The
@@ -431,7 +478,7 @@ openForallBody namespace occurrencePath origin binders body = first show $
         | otherwise = candidate
 
 completeTranslation :: Formula -> FormulaTranslation
-completeTranslation formula = FormulaTranslation formula False
+completeTranslation formula = FormulaTranslation formula False []
 
 combineTranslations
     :: ([Formula] -> Formula)
@@ -440,6 +487,7 @@ combineTranslations
 combineTranslations constructor translations = FormulaTranslation
     (constructor $ map translatedFormula translations)
     (any translationIncomplete translations)
+    (concatMap translationOpenableForalls translations)
 
 combineBinary
     :: (Formula -> Formula -> Formula)
@@ -449,12 +497,13 @@ combineBinary
 combineBinary constructor left right = FormulaTranslation
     (constructor (translatedFormula left) $ translatedFormula right)
     (translationIncomplete left || translationIncomplete right)
+    (translationOpenableForalls left ++ translationOpenableForalls right)
 
 reverseFormulaPolarity :: ForallLowering -> ForallLowering
 reverseFormulaPolarity lowering = case lowering of
     OpaqueForalls -> OpaqueForalls
-    PolarizedForalls namespace polarity openedView ->
-        PolarizedForalls namespace reversed openedView
+    PolarizedForalls namespace polarity openedView selected ->
+        PolarizedForalls namespace reversed openedView selected
       where
         reversed = case polarity of
             PositiveFormula -> NegativeFormula
@@ -490,8 +539,8 @@ lowerApplication lowering definitions path occurrencePath source =
     atom = do
         normalized <- normalizeExpansionAliases definitions path source
         formula <- PVar <$> expansionSymbol normalized
-        return $ FormulaTranslation formula $
-            polarizedOpaqueForall lowering normalized
+        return $ FormulaTranslation formula
+            (polarizedOpaqueForall lowering normalized) []
 
 polarizedOpaqueForall :: ForallLowering -> ExpansionType -> Bool
 polarizedOpaqueForall lowering source = case lowering of

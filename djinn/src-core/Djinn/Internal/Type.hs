@@ -144,7 +144,9 @@ normalizeSynthesisType source = do
 
 -- | Perform the session-independent, bounded validation of a Djinn signature.
 -- Leading quantifiers are later implicitized by the request adapter; nested
--- quantifiers remain in the shared tree and become opaque formula atoms.
+-- quantifiers remain in the shared tree. Checked formula compilation can open
+-- context-free positive occurrences, while unsupported occurrences remain
+-- alpha-aware opaque atoms.
 -- Constraint argument spines deliberately remain untouched here because only
 -- a prepared session owns the finite class arities needed to inspect them
 -- productively.

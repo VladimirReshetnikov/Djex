@@ -195,10 +195,15 @@ The two search projections share `TypeAtom` for quantified subtrees. Its
 retained source tree supports rendering and capture-avoiding substitution of
 free variables; its cached lexical alpha key owns equality and ordering.
 Binders use scope and declaration position, so spelling is irrelevant while
-reordering binders or changing a free variable is significant. Engines never
-decompose this atom. Applications, tuples, functions, and nominal constructors
-outside it retain their ordinary structure, which permits impredicative values
-such as `[(forall a. a -> a)]` without adding higher-rank subsumption.
+reordering binders or changing a free variable is significant. Ordinary
+unification never decomposes an atom. Instead, the two engines own explicit,
+bounded rules at different architectural boundaries: Djinn's polarized formula
+compiler may reopen a context-free atom for positive introduction, while
+Exference may instantiate a scoped provider's leading binders immediately
+before ordinary type unification. Every other occurrence remains opaque.
+Applications, tuples, functions, and nominal constructors outside it retain
+their ordinary structure, which permits impredicative values such as
+`[(forall a. a -> a)]` without claiming general higher-rank subsumption.
 
 The Exference runtime is deliberately richer than a bare session. Source
 targets, ratings, prompt scope, and command policy are not recoverable from its

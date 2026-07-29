@@ -62,6 +62,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplPackageCommands
   , testCase "REPL keeps both backend sessions and settings alive"
       testReplSharedSession
+  , testCase "REPL setting signs and diagnostics follow their command domains"
+      testReplSettingSignsAndDiagnostics
   , testCase "REPL shares Church rank-N and impredicative queries"
       testReplRankNQueries
   , testCase "REPL retains safe Djinn rank-N axioms"
@@ -84,6 +86,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplImplicitPreludeOrder
   , testCase "REPL default environment keeps its full automatic context"
       testReplDefaultEnvironmentScope
+  , testCase "REPL Djinn projection distinguishes abstract and empty types"
+      testReplDjinnConstructorlessVisibility
   , testCase "REPL reload refreshes derived module target spellings"
       testReplReloadTargetSpelling
   , testCase "REPL named symlink aliases retain every expectation"
@@ -172,6 +176,10 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testDjinnSelection
   , testCase "Exference renders through the installed environment"
       testExferenceRendering
+  , testCase "Exference keeps abstract arguments available to providers"
+      testExferenceAbstractProviderUse
+  , testCase "Exference distinguishes bundled opaque types from real empties"
+      testExferenceConstructorlessVisibility
   , testCase "Exference accepts an empty checked environment"
       testEmptyExferenceEnvironment
   , testCase "Exference recursion helpers require explicit command opt-in"
@@ -519,6 +527,80 @@ testReplSharedSession = withTemporaryEnvironment [] $ \directory -> do
   assertBool "successful shared session emitted an error" $
     not $ "error" `isInfixOf` map toLower errors
 
+testReplSettingSignsAndDiagnostics :: Assertion
+testReplSettingSignsAndDiagnostics = withTemporaryEnvironment [] $ \directory -> do
+  let nonBooleanSettings =
+        [ "backend"
+        , "target"
+        , "select"
+        , "render"
+        , "qualification"
+        , "prompt"
+        , "candidate-limit"
+        , "choice-budget"
+        , "constraint-deferral-steps"
+        , "max-steps"
+        , "max-queue"
+        , "max-depth"
+        ]
+      signedSettings = zipWith
+        (\sign setting -> ":set " ++ [sign] ++ setting)
+        (cycle "+-") nonBooleanSettings
+  (settingExit, settingOutput, settingErrors) <- runRepl directory $
+    [ ":set target retained"
+    , ":set prompt retained-prompt"
+    ] ++ signedSettings ++
+    [ ":set +allow-unused"
+    , ":show settings"
+    , ":help set"
+    ]
+  assertEqual "setting-sign REPL exit" ExitSuccess settingExit
+  assertEqual "every non-boolean sign form is rejected before value parsing"
+    (length nonBooleanSettings)
+    $ countOccurrences
+        "sign forms are available only for boolean settings" settingErrors
+  assertEqual "each rejected sign form is a setting diagnostic"
+    (length nonBooleanSettings)
+    $ countOccurrences "[DJEX_REPL_SETTING]" settingErrors
+  assertContains "a rejected target sign retains the preceding target"
+    "target = retained" settingOutput
+  assertContains "a rejected prompt sign retains the preceding prompt"
+    "prompt = \"retained-prompt\"" settingOutput
+  assertContains "a boolean sign form remains accepted"
+    "allow-unused = on" settingOutput
+  assertContains "setting help documents the sign restriction"
+    "sign forms are rejected for non-boolean settings" settingOutput
+  assertNoCallStack settingErrors
+
+  (commandExit, commandOutput, commandErrors) <- runRepl directory
+    [ ":backend exference"
+    , ":backend wat"
+    , ":backend"
+    , ":help wat"
+    , ":show wat"
+    , ":history -1"
+    , ":info _"
+    , ":info NotLoaded"
+    ]
+  assertEqual "command-diagnostic REPL exit" ExitSuccess commandExit
+  assertContains "an invalid backend does not replace the active backend"
+    "Active backend: exference" commandOutput
+  assertEqual "the backend query still reports the preceding selection" 2
+    $ countOccurrences "exference\n" commandOutput
+  assertEqual "backend failures use the backend family" 1
+    $ countOccurrences "[DJEX_REPL_BACKEND]" commandErrors
+  assertEqual "unknown help subjects use the command family" 1
+    $ countOccurrences "[DJEX_REPL_COMMAND]" commandErrors
+  assertEqual "unknown show subjects use the show family" 1
+    $ countOccurrences "[DJEX_REPL_SHOW]" commandErrors
+  assertEqual "invalid history counts use the history family" 1
+    $ countOccurrences "[DJEX_REPL_HISTORY]" commandErrors
+  assertEqual "invalid and unavailable info names use the info family" 2
+    $ countOccurrences "[DJEX_REPL_INFO]" commandErrors
+  assertBool "a non-setting command failure was mislabeled as a setting" $
+    not $ "[DJEX_REPL_SETTING]" `isInfixOf` commandErrors
+  assertNoCallStack commandErrors
+
 testReplRankNQueries :: Assertion
 testReplRankNQueries = withTemporaryEnvironment [] $ \directory -> do
   (exitCode, output, errors) <- runRepl directory
@@ -529,6 +611,9 @@ testReplRankNQueries = withTemporaryEnvironment [] $ \directory -> do
         ++ "(item -> answer -> answer) -> answer -> answer)"
     , ":compare [(forall result. result -> result -> result)] "
         ++ "-> [(forall answer. answer -> answer -> answer)]"
+    , ":djinn (forall input. input) -> "
+        ++ "((forall transported. transported), "
+        ++ "(forall identity. identity -> identity))"
     ]
   assertEqual "rank-N REPL exit" ExitSuccess exitCode
   assertEqual "both engines run both rank-N queries" 2
@@ -539,6 +624,8 @@ testReplRankNQueries = withTemporaryEnvironment [] $ \directory -> do
     $ countOccurrences "-- Djinn\n\\" output
   assertEqual "Exference finds both alpha-renamed identities" 2
     $ countOccurrences "-- Exference\n\\" output
+  assertContains "Djinn did not compose opaque transport with introduction"
+    "\\a -> (a, \\b -> b)" output
   assertBool ("rank-N REPL emitted an error:\n" ++ errors) $
     not $ "error" `isInfixOf` map toLower errors
 
@@ -557,6 +644,10 @@ testReplRankNAxioms = withTemporaryEnvironment
   (exitCode, output, errors) <- runRepl directory
     [ ":backend djinn"
     , ":set djinn-axioms on"
+    -- Positive forall introduction now yields a structural candidate before
+    -- the loaded axiom. Enumerate alternatives so this remains a test of axiom
+    -- searchability rather than of the first-candidate ordering policy.
+    , ":set select all"
     , ":set render expression"
     , ":set qualification none"
     , "Token -> (forall answer. answer -> answer -> answer)"
@@ -838,20 +929,49 @@ testReplDefaultEnvironmentScope = do
     ["repl", "--backend", "exference"] $ unlines
       [ ":set prompt \"\""
       , ":set render expression"
+      , ":set select first"
+      , ":set max-steps 4"
+      , "Int -> Int"
+      , "Int -> Data.Void.Void"
+      , ":reload"
+      , "Int -> Int"
+      , "Int -> Data.Void.Void"
       , ":set select best"
       , ":set max-steps 16"
       , "a -> Data.Maybe.Maybe a"
       , ":quit"
       ]
   assertEqual "default environment REPL exit" ExitSuccess exitCode
+  assertEqual "abstract Int stays provider-usable across load and reload" 2
+    $ countOccurrences "\\i1 -> i1" output
+  assertEqual "abstract Int cannot eliminate into Void after load or reload" 2
+    $ countOccurrences "[DJEX_EXF_NO_RESULT]" errors
+  assertBool "abstract Int regained bogus empty elimination after a load" $
+    not $ "case i1 of {}" `isInfixOf` output
   -- The first bounded result is Applicative.pure rather than Just; either is
   -- impossible in the historical broken state whose context held Data.Word
   -- alone. Keeping the bound small makes this startup regression inexpensive.
   assertContains
     ("default directory context retains non-final modules: " ++ output ++ errors)
     "Control.Applicative.pure" output
-  assertBool "default environment lost its searchable module context" $
-    not $ "DJEX_EXF_NO_RESULT" `isInfixOf` errors
+  assertNoCallStack errors
+
+testReplDjinnConstructorlessVisibility :: Assertion
+testReplDjinnConstructorlessVisibility = do
+  (exitCode, output, errors) <- runDjexInput
+    ["repl", "--backend", "djinn"] $ unlines
+      [ ":set prompt \"\""
+      , ":set render expression"
+      , ":set qualification none"
+      , "Data.Void.Void -> Int"
+      , "Int -> Data.Void.Void"
+      , ":quit"
+      ]
+  assertEqual "constructorless-type Djinn REPL exit" ExitSuccess exitCode
+  assertEqual "only genuine Void supports empty-case elimination" 1
+    $ countOccurrences "case a of {}" output
+  assertEqual "abstract Int cannot eliminate into Void" 1
+    $ countOccurrences "[DJEX_DJINN_UNINHABITABLE]" errors
   assertNoCallStack errors
 
 testReplReloadTargetSpelling :: Assertion
@@ -1996,6 +2116,7 @@ testReplDjinnReferenceNamespaces = withTemporaryEnvironment
     , ":set render expression"
     , ":set qualification none"
     , "Missing -> Target"
+    , "Target -> Missing"
     , ":show environment"
     , ":show omissions"
     ]
@@ -2004,10 +2125,11 @@ testReplDjinnReferenceNamespaces = withTemporaryEnvironment
     ("same-named type stub keeps the value axiom usable: " ++ output ++ errors)
     "bridge" output
   assertContains "the distinct type stub enters the projected environment"
-    "4 declarations (projected from the module scope, 1 omissions)" output
-  assertContains "the unrelated empty datatype is the sole compromise"
-    ("Target: declared without constructors; projected as an abstract type")
-    output
+    "4 declarations (projected from the module scope, 0 omissions)" output
+  assertContains "the genuine empty datatype supports absurd elimination"
+    "case a of {}" output
+  assertContains "the genuine empty datatype requires no projection compromise"
+    "-- Djinn scope projection\n(no omissions)" output
   assertBool "cross-namespace reference forced the standard fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output
@@ -2889,6 +3011,66 @@ testExferenceRendering = do
     , "a -> a"
     ]
   assertEqual "Exference expression" "\\a -> a\n" expression
+
+testExferenceAbstractProviderUse :: Assertion
+testExferenceAbstractProviderUse = forM_
+    [ "(Int -> Int) -> Int -> Int"
+    , "(forall a. a -> a) -> Int -> Int"
+    ] $ \query -> do
+      expression <- assertSuccess
+        [ "exference", "--select", "first"
+        , "--render", "expression"
+        , query
+        ]
+      assertContains
+        ("provider became unusable after introducing Int for " ++ query)
+        "-> f" expression
+
+testExferenceConstructorlessVisibility :: Assertion
+testExferenceConstructorlessVisibility = do
+  forM_
+      [ "Int -> Int"
+      , "Data.Map.Map Int Bool -> Data.Map.Map Int Bool"
+      , "Data.Monoid.Alt Data.Maybe.Maybe Int -> "
+          ++ "Data.Monoid.Alt Data.Maybe.Maybe Int"
+      , "GHC.Generics.Rec1 Data.Maybe.Maybe Int -> "
+          ++ "GHC.Generics.Rec1 Data.Maybe.Maybe Int"
+      , "GHC.Generics.M1 Int Int Data.Maybe.Maybe Int -> "
+          ++ "GHC.Generics.M1 Int Int Data.Maybe.Maybe Int"
+      ] $ \query -> do
+    (exitCode, output, errors) <- runDjex
+      [ "exference", "--select", "first"
+      , "--render", "expression"
+      , query
+      ]
+    assertEqual ("abstract-type search stderr: " ++ errors)
+      ExitSuccess exitCode
+    assertBool
+      ("bundled opaque type admitted empty elimination for " ++ query
+        ++ ": " ++ output)
+      $ not $ "case " `isInfixOf` output
+    assertBool ("opaque-type search returned no candidate: " ++ errors)
+      $ not $ "DJEX_EXF_NO_RESULT" `isInfixOf` errors
+    assertBool ("opaque-type search truncated before its identity: " ++ errors)
+      $ not $ "DJEX_SEARCH_TRUNCATED" `isInfixOf` errors
+    assertBool "opaque-type identity rendered no expression" $ not $ null output
+
+  withTemporaryEnvironment
+      [("Empty.hs", unlines
+        [ "{-# LANGUAGE EmptyDataDecls #-}"
+        , "module Fixture where"
+        , "data Empty"
+        ])] $ \directory -> do
+    expression <- assertSuccess
+      [ "exference", "--environment", directory
+      , "--select", "first"
+      , "--render", "expression"
+      , "Fixture.Empty -> a"
+      ]
+    assertContains "a user-declared empty type lost empty elimination"
+      "case " expression
+    assertContains "the generated elimination is not an empty case"
+      "of {}" expression
 
 testEmptyExferenceEnvironment :: Assertion
 testEmptyExferenceEnvironment = withTemporaryEnvironment [] $ \directory -> do

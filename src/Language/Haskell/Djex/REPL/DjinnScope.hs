@@ -254,11 +254,11 @@ shapeDeclarations inferredKinds policy axiomSelectors allSelectors
       | otherwise -> skip
     DataTypeDeclaration annotation name parameters constructors
       | not $ isTypeVisible name -> skip
-      -- A constructor-less datatype is how source environments spell an
-      -- opaque primitive. Treating it as genuinely empty would let Djinn
-      -- prove anything from it by absurd elimination.
-      | null constructors -> degradeToAbstract annotation name parameters
-          "declared without constructors; projected as an abstract type"
+      -- Visibility-aware source loading has already distinguished an abstract
+      -- catalogue stub from a genuine empty datatype.  The former reaches us
+      -- as 'AbstractTypeDeclaration'; retaining an empty declaration here is
+      -- therefore both safe and necessary for Djinn's explicit empty-case
+      -- elimination.
       | all (isValueVisible . constructorName) constructors -> keep declaration
       | otherwise -> degradeToAbstract annotation name parameters
           "some constructors are hidden; projected as an abstract type"

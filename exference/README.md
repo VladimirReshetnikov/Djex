@@ -72,9 +72,9 @@ independent input namespaces, while `unifyShared` applies one occurs-checked
 substitution to a common namespace. The historical `unify` name remains a
 compatibility alias for `unifyDisjoint`. All three operate directly on the
 native shared type tree, canonicalize saturated functions and tuples before
-solving, reject quantifiers at any depth through the shared type and
-constraint-argument inspection authority, and canonicalize their projected
-substitutions. Declaration ingress and egress likewise use one checked native
+solving, and represent every quantified subtree as an alpha-aware opaque atom.
+They can compare or bind that whole atom but never decompose its quantified
+body. Declaration ingress and egress likewise use one checked native
 type/constraint operation; the former converted/lowered pair was only a name
 distinction after `HsType` became the shared tree. The right-directed matcher
 uses the same tagged solver while
@@ -226,11 +226,17 @@ duplicate local identities before its inference map can hide a malformed
 pattern. Rank-N occurrences are validated across unused bindings, datatype
 fields, the complete class/instance environment, expected constraints, and
 generated annotations rather than only when inference happens to reach them.
-The checker and search use the same opaque, alpha-aware unifier, so neither can
-erase or decompose a quantified body. They also share the higher-kinded view of
-structural functions and tuples, while tuple complexity replays the historical
-left-associated constructor/application accumulation exactly so floating-point
-rounding and saturation cannot perturb queue order.
+The checker and search use both the same opaque, alpha-aware unifier and the
+same scoped provider-use rules. An exact quantified occurrence remains opaque;
+a bounded rule can shallowly subsume one context-free prenex scheme to another;
+and a monomorphic occurrence freshly instantiates the provider's leading
+foralls. These are typing rules at a scoped-value boundary, not permission for
+the unifier to decompose a quantified body. Search records the requested scheme
+on a subsumed occurrence, and the independent checker reclassifies that
+occurrence instead of trusting the search result. They also share the
+higher-kinded view of structural functions and tuples, while tuple complexity
+replays the historical left-associated constructor/application accumulation
+exactly so floating-point rounding and saturation cannot perturb queue order.
 
 `Language.Haskell.Exference.Core.Declaration` converts function bindings,
 classes, instances, and deconstructor/data records to the shared declaration
@@ -440,8 +446,10 @@ external type names after reporting them as warnings.
 Synonym kinds are frozen after their defining declarations and before values
 or instances are checked, so an operational use cannot retroactively make an
 unused phantom parameter higher-kinded. Open inventories continue to let empty
-datatype stubs acquire a missing kind shape from instances; the packaged
-environment uses that compatibility rule for abstract base-library types.
+datatype stubs acquire a missing kind shape from instances. The packaged
+environment first uses that rule to infer the complete kind of each opaque
+base-library stub, then replaces the stub with an abstract declaration before
+building Exference's elimination environment.
 Kind assumptions currently generalize only a wholly unconstrained class
 parameter. The shared IR cannot yet retain a partially polymorphic scheme such
 as `k -> Type`; an unresolved variable below a fixed outer kind shape therefore
@@ -702,6 +710,21 @@ remains a sibling compatibility entrance for callers that already own an
 opaque `CheckedSourceEnvironment`; both entrances consume the same
 annotation-erased prepared witness and converge only at the one private sealer.
 No parser type is retained in the resulting session.
+
+Callers that already hold an exact in-memory directory snapshot can pass its
+module, rating, and visibility sources together to
+`environmentFromSourcesWithTypeVisibility`. The corresponding stable session
+entrances are `loadExferenceSessionFromSourcesWithTypeVisibility` and
+`loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy`. Their source
+lists are, in order, modules, ratings, and visibility snapshots; the
+policy-aware variant prepends its policy. A nonempty visibility list is one
+complete manifest for the supplied module snapshot, and none of these inputs
+is reopened from the filesystem. The older
+`environmentFromSources`, `loadExferenceSessionFromSources`, and
+`loadExferenceSessionFromSourcesWithPolicy` deliberately pass an empty
+visibility list. Like the explicit file loaders, they remain manifest-blind
+and preserve ordinary Haskell empty-datatype semantics.
+
 `ExferenceSessionPolicy` supplies exact-name exclusions and finite,
 signed rating overrides while the private search projection is built. Unknown
 override names, overrides for omitted or excluded bindings, and non-finite
@@ -727,19 +750,22 @@ projection, so substitutions returned for either side are closed even when the
 two inputs reuse numeric IDs. The root query's prenex `forall` layers use the
 same rigid-ID order in search and the independent checker. Quantifiers reached
 under an arrow, constructor, tuple, constraint, or spawned search goal remain
-opaque, and type rendering uses one capture-safe source-name plan for
-quantifiers, constraints, and body occurrences.
+opaque to structural unification. When lambda introduction or pattern
+elimination exposes one as the leading type of a scoped provider, the explicit
+use-site rule described below may instantiate it. Type rendering uses one
+capture-safe source-name plan for quantifiers, constraints, and body
+occurrences.
 
-The status-bearing search API is `findExpressionsWithStatsEither`. It retains
-structured input failures and distinguishes a genuinely exhausted search space
-from a step-limited search and one made incomplete by queue/depth pruning. The
+The raw status-bearing API `findExpressionsWithStatsEither` retains structured
+input failures and distinguishes a genuinely exhausted search space from a
+step-limited search and one made incomplete by queue/depth pruning. Its
 validator also rejects negative step counts for delayed constraint solving,
 rather than accepting a setting whose threshold can never be reached. It checks
 every goal, binding, deconstructor, and explicit constraint argument through
 the shared type vocabulary. Rank-N occurrences that the historical filter
-overlooked are now retained as opaque atoms. It is retained for historical clients
-that require raw expressions and compatibility status values; new core code
-should use `findQueryResultsInEnvironmentEither`, whose private checked engine batches
+overlooked are retained as opaque atoms. This API remains for clients that need
+raw expressions and compatibility status values; new core code should use
+`findQueryResultsInEnvironmentEither`, whose private checked engine batches
 provide exact shared progress without reinterpreting raw status. Neither API
 turns heuristic exhaustion into a logical uninhabitability claim. The
 historical list-returning entry points are deprecated compatibility adapters
@@ -822,7 +848,9 @@ any / the right solution. Some common current limitations are:
 - Nonrecursive empty datatypes are always eligible for elimination, independent
   of the multiple-constructor flag. A value of an empty datatype can therefore
   satisfy any result type through an empty `case`; rendered source uses
-  `case value of {}` and requires GHC's `EmptyCase` extension;
+  `case value of {}` and requires GHC's `EmptyCase` extension. A
+  constructorless declaration is not automatically assumed empty in a curated
+  directory that supplies the visibility manifest described below;
 - Recursive datatypes remain valid input, but recursive deconstructors are
   currently omitted from search with a structured
   `RecursiveDataEliminationUnsupported` warning rather than risking an
@@ -830,18 +858,84 @@ any / the right solution. Some common current limitations are:
   list deconstructor, so HSE-loaded sessions report the limitation explicitly;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
 
+### Constructorless declarations in curated directories
+
+`environmentFromPath` discovers optional `*.visibility` sidecars alongside
+the directory's `*.hs` and `*.ratings` files. Each non-comment line has one of
+these forms:
+
+```text
+abstract Module.Type ARITY PARAMETER_KIND...
+empty Module.Type ARITY PARAMETER_KIND...
+```
+
+`abstract` means that the source catalogue omitted the runtime constructors;
+the type keeps the exact manifest kind checked against the complete source
+inventory but has no Exference deconstructor. `empty` asserts a genuinely
+uninhabited Haskell datatype and retains empty-case elimination. Each source
+parameter has one ground kind token: `Type`, or a fully parenthesized arrow
+such as `(Type->Type)`. Explicit kinds preserve otherwise unconstrained
+higher-kinded parameters and are checked by resealing the source inventory.
+If any visibility sidecar is present, every constructorless datatype must be
+classified exactly once.
+Duplicate or malformed entries, unknown names, entries naming an inhabited
+datatype, missing entries, and arity drift fail closed with
+`EXF_TYPE_VISIBILITY` diagnostics.
+
+A comment is a line whose first non-whitespace character is `#`. Hashes later
+in a line remain part of legal symbolic names such as `Module.(:#)`.
+
+This interpretation is used by directory discovery and by the explicit
+visibility-snapshot APIs described above. Legacy explicit-file and in-memory
+source APIs do not infer or discover a manifest; they continue to give
+`data Empty` ordinary Haskell empty-datatype semantics. The installed manifest
+classifies the opaque base-library signature stubs as abstract and retains only
+`Data.Void.Void` and `GHC.Generics.V1` as genuine empty datatypes.
+
 ## Experimental features
 
 - Pattern-matching on multi-constructor data types can be enabled via
   `-c` / `--patternMatchMC`, but can reduce performance significantly for
   non-trivial queries. It is intentionally not part of the default search
   policy while that branch of the core algorithm remains expensive.
-- Chains of outer (prenex) `forall`s are opened only at the query root. Nested
-  rank-N positions and impredicative constructor arguments are supported as
-  inert `TypeAtom`s, shared with Djinn. Their quantified bodies compare modulo
-  lexical alpha-renaming but are never decomposed by unification. This does not
-  implement higher-rank subsumption or visible type application; it replaces
-  the historical unsound behavior that erased some nested quantifiers.
+- Chains of outer (prenex) `forall`s are opened rigidly at the query root. At a
+  scoped-value use site, an exposed leading `forall` is first eligible for an
+  exact opaque match against a quantified goal, which preserves polymorphic
+  forwarding. Empty-binder, empty-context forall wrappers are ignored for
+  this classification. If that exact match fails, Exference can also apply
+  shallow predicative subsumption when both sides are context-free prenex
+  schemes with no free flexible variables. Requested binders stay rigid; only
+  provider binders may be solved, and each solution must be a monotype. For
+  example, both of these requests can return `\f -> f`:
+
+  ```text
+  (forall a. a) -> (forall b. b -> b)
+  (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
+  ```
+
+  Ambient rigid constants are allowed and remain nominal. Non-exact schemes
+  with contexts, schemes containing free flexible variables, and matches that
+  would instantiate a provider binder with a polytype stay outside this rule.
+  In particular, it does not accept either directionally invalid specialization
+  or an impredicative one such as:
+
+  ```text
+  (forall ignored. Int -> Int) -> (forall x. x -> x)
+  (forall a. a -> a) ->
+    (forall x. (forall y. y -> y) -> (forall z. z -> z))
+  ```
+
+  At a monomorphic (non-quantified) goal, provider binders are instead
+  instantiated with fresh flexible variables for that occurrence, their direct
+  contexts become proof obligations, and the arrow body participates in
+  ordinary search. Thus a value of type
+  `forall a. C a => a -> a` can be applied at `Int` when `C Int` is available,
+  and a rank-N datatype field can participate after pattern elimination.
+  Quantifiers that have not reached one of these explicit boundaries remain
+  alpha-aware `TypeAtom`s. Nested quantified subtrees may still compare exactly,
+  but shallow subsumption never recurses into them. These limited rules do not
+  provide deep or general higher-rank subsumption, polymorphic let
+  generalization, or visible type application.
 
 ## Other known (technical) issues
 

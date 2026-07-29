@@ -61,10 +61,11 @@ Djinn converts its historical raw syntax at its compatibility boundary.
 lexical scope and position, not by source spelling, while free variables remain
 nominal. Consequently Church encodings such as
 `forall result. (item -> result -> result) -> result -> result` compare equal
-after a consistent binder rename, including when stored inside a list, without
-granting either backend a higher-rank inference rule. The original type tree is
-retained separately so rendering and diagnostics do not expose the normalized
-key.
+after a consistent binder rename, including when stored inside a list.
+`TypeAtom` itself defines no typing rule: Djinn and Exference may reopen the
+retained tree only at their documented positive-introduction and scoped-use
+elimination boundaries. The original type tree is retained separately so
+rendering and diagnostics do not expose the normalized key.
 
 ### Checked environments and elaboration
 

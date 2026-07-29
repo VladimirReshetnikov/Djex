@@ -19,6 +19,7 @@ module Language.Haskell.Djex.REPL.Workspace
   , workspaceModules
   , workspaceModuleSources
   , workspaceRatingSources
+  , workspaceTypeVisibilitySources
   , workspaceUnresolvedImportsWithSources
   , workspaceModuleName
   , workspaceModulePath
@@ -91,6 +92,7 @@ data SourceWorkspace = SourceWorkspace
   { sourceWorkspaceTargets :: [WorkspaceTarget]
   , sourceWorkspaceModules :: [WorkspaceModule]
   , sourceWorkspaceRatings :: [(FilePath, String)]
+  , sourceWorkspaceTypeVisibilities :: [(FilePath, String)]
   , sourceWorkspaceAutomaticTarget :: Maybe TargetKey
   }
 
@@ -103,6 +105,7 @@ data WorkspaceTarget = WorkspaceTarget
   , targetModuleSpellings :: [String]
   , targetSourceFiles :: [FilePath]
   , targetRatings :: [FilePath]
+  , targetTypeVisibilities :: [FilePath]
   }
 
 -- | A parsed ordinary Haskell module.  Dependency metadata stays private so
@@ -227,6 +230,13 @@ workspaceModuleSources = map snapshot . workspaceModules
 -- deterministic target/directory order.
 workspaceRatingSources :: SourceWorkspace -> [(FilePath, String)]
 workspaceRatingSources = sourceWorkspaceRatings
+
+-- | Exact, fully evaluated constructorless-type visibility sidecars read with
+-- the workspace snapshot, in deterministic target/directory order. Only
+-- directory targets discover sidecars; loading a source file or module name
+-- never gives an adjacent manifest implicit authority.
+workspaceTypeVisibilitySources :: SourceWorkspace -> [(FilePath, String)]
+workspaceTypeVisibilitySources = sourceWorkspaceTypeVisibilities
 
 -- | Non-package imports for which dependency discovery found no local source
 -- module. Path/importer/imported triples retain dependency-first module order
@@ -385,6 +395,7 @@ fileTarget root starred path = WorkspaceTarget
   , targetModuleSpellings = []
   , targetSourceFiles = [path]
   , targetRatings = []
+  , targetTypeVisibilities = []
   }
 
 admitDirectory
@@ -396,14 +407,14 @@ admitDirectory starred source = do
   -- 'buildWorkspace' refreshes every admitted target immediately. Deferring
   -- traversal until that common pass prevents a new directory from being
   -- walked twice before its first immutable snapshot is returned.
-  pure $ fmap (\path -> directoryTarget starred path ([], [])) canonical
+  pure $ fmap (\path -> directoryTarget starred path ([], [], [])) canonical
 
 directoryTarget
   :: Bool
   -> FilePath
-  -> ([FilePath], [FilePath])
+  -> ([FilePath], [FilePath], [FilePath])
   -> WorkspaceTarget
-directoryTarget starred path (sources, ratings) = WorkspaceTarget
+directoryTarget starred path (sources, ratings, visibilities) = WorkspaceTarget
   { targetLocator = TargetLocator
       { locatorKind = DirectoryTarget
       , locatorPath = path
@@ -415,6 +426,7 @@ directoryTarget starred path (sources, ratings) = WorkspaceTarget
   , targetModuleSpellings = []
   , targetSourceFiles = sources
   , targetRatings = ratings
+  , targetTypeVisibilities = visibilities
   }
 
 admitNamedModule
@@ -443,6 +455,7 @@ admitNamedModule root starred source = case checkedModuleName source of
         , targetModuleSpellings = [source]
         , targetSourceFiles = [path]
         , targetRatings = []
+        , targetTypeVisibilities = []
         }
 
 checkedModuleName :: String -> Either Diagnostic [String]
@@ -465,15 +478,22 @@ canonicalPath summary path = do
 
 directoryContents
   :: FilePath
-  -> IO (Either (NonEmpty Diagnostic) ([FilePath], [FilePath]))
+  -> IO
+      (Either
+        (NonEmpty Diagnostic)
+        ([FilePath], [FilePath], [FilePath]))
 directoryContents root = do
   result <- go Set.empty root
   pure $ fmap finish result
  where
-  finish (_, sources, ratings) = (stableNub sources, stableNub ratings)
+  finish (_, sources, ratings, visibilities) =
+    ( stableNub sources
+    , stableNub ratings
+    , stableNub visibilities
+    )
 
   go visited directory
-    | directory `Set.member` visited = pure $ Right (visited, [], [])
+    | directory `Set.member` visited = pure $ Right (visited, [], [], [])
     | otherwise = do
         listed <- tryIOError $ listDirectory directory
         case listed of
@@ -481,11 +501,11 @@ directoryContents root = do
             "DJEX_REPL_TARGET_IO" "cannot read source directory"
             directory $ show failure
           Right entries -> walk (Set.insert directory visited)
-            [] [] $ map (directory </>) $ sort entries
+            [] [] [] $ map (directory </>) $ sort entries
 
-  walk visited sources ratings [] = pure $ Right
-    (visited, sources, ratings)
-  walk visited sources ratings (path : remaining) = do
+  walk visited sources ratings visibilities [] = pure $ Right
+    (visited, sources, ratings, visibilities)
+  walk visited sources ratings visibilities (path : remaining) = do
     inspected <- tryIOError $ do
       symbolic <- pathIsSymbolicLink path
       isDirectory <- doesDirectoryExist path
@@ -497,8 +517,10 @@ directoryContents root = do
         path $ show failure
       -- Directory links are never part of an admitted tree. Besides keeping
       -- traversal bounded by the canonical root, this makes cycles harmless.
-      -- Links to regular source/rating files remain valid explicit contents.
-      Right (True, True, _) -> walk visited sources ratings remaining
+      -- Links to regular source/rating/visibility files remain valid explicit
+      -- contents.
+      Right (True, True, _) ->
+        walk visited sources ratings visibilities remaining
       Right (_, True, _) -> do
         canonical <- canonicalPath "cannot resolve source subdirectory" path
         case canonical of
@@ -507,10 +529,12 @@ directoryContents root = do
             nested <- go visited directory
             case nested of
               Left failures -> pure $ Left failures
-              Right (afterNested, nestedSources, nestedRatings) -> walk
+              Right (afterNested, nestedSources, nestedRatings,
+                  nestedVisibilities) -> walk
                 afterNested
                 (sources ++ nestedSources)
                 (ratings ++ nestedRatings)
+                (visibilities ++ nestedVisibilities)
                 remaining
       Right (_, _, True) -> do
         canonical <- canonicalPath "cannot resolve source-directory file" path
@@ -518,17 +542,22 @@ directoryContents root = do
           Left failures -> pure $ Left failures
           Right file
             | isSourceFile file -> walk visited
-                (sources ++ [file]) ratings remaining
+                (sources ++ [file]) ratings visibilities remaining
             | isRatingFile file -> walk visited sources
-                (ratings ++ [file]) remaining
-            | otherwise -> walk visited sources ratings remaining
-      Right _ -> walk visited sources ratings remaining
+                (ratings ++ [file]) visibilities remaining
+            | isTypeVisibilityFile file -> walk visited sources ratings
+                (visibilities ++ [file]) remaining
+            | otherwise -> walk visited sources ratings visibilities remaining
+      Right _ -> walk visited sources ratings visibilities remaining
 
 isSourceFile :: FilePath -> Bool
 isSourceFile path = takeExtension path `elem` [".hs", ".lhs"]
 
 isRatingFile :: FilePath -> Bool
 isRatingFile path = takeExtension path == ".ratings"
+
+isTypeVisibilityFile :: FilePath -> Bool
+isTypeVisibilityFile path = takeExtension path == ".visibility"
 
 refreshTarget
   :: WorkspaceTarget
@@ -556,11 +585,17 @@ refreshTarget target = case locatorKind locator of
         "DJEX_REPL_TARGET_NOT_FOUND" "source file no longer exists"
         (locatorPath locator) "reload retains canonical target paths"
       Right True -> Right target
-        {targetSourceFiles = [locatorPath locator], targetRatings = []}
+        { targetSourceFiles = [locatorPath locator]
+        , targetRatings = []
+        , targetTypeVisibilities = []
+        }
  where
   locator = targetLocator target
-  updatedDirectory value (sources, ratings) = value
-    {targetSourceFiles = sources, targetRatings = ratings}
+  updatedDirectory value (sources, ratings, visibilities) = value
+    { targetSourceFiles = sources
+    , targetRatings = ratings
+    , targetTypeVisibilities = visibilities
+    }
 
 buildWorkspace
   :: [TargetKey]
@@ -600,13 +635,19 @@ finishWorkspace automaticPreferences targets explicitPaths discovered = case
         automatic = automaticTargetKey
           automaticPreferences annotatedTargets discovered
         ratingPaths = stableNub $ concatMap targetRatings annotatedTargets
+        visibilityPaths = stableNub
+          $ concatMap targetTypeVisibilities annotatedTargets
     ratingResults <- mapM readRatingSnapshot ratingPaths
-    pure $ case collectResults ratingResults of
-      Left failures -> Left failures
-      Right ratings -> Right SourceWorkspace
+    visibilityResults <- mapM readTypeVisibilitySnapshot visibilityPaths
+    pure $ case (collectResults ratingResults,
+        collectResults visibilityResults) of
+      (Left failures, _) -> Left failures
+      (_, Left failures) -> Left failures
+      (Right ratings, Right visibilities) -> Right SourceWorkspace
         { sourceWorkspaceTargets = annotatedTargets
         , sourceWorkspaceModules = ordered
         , sourceWorkspaceRatings = ratings
+        , sourceWorkspaceTypeVisibilities = visibilities
         , sourceWorkspaceAutomaticTarget = automatic
         }
 
@@ -653,11 +694,25 @@ workspaceModuleFromSyntax path source syntax = case syntax of
 readRatingSnapshot
   :: FilePath
   -> IO (Either (NonEmpty Diagnostic) (FilePath, String))
-readRatingSnapshot path = do
+readRatingSnapshot = readAuxiliarySnapshot
+  "DJEX_REPL_RATING_READ" "cannot read rating file"
+
+readTypeVisibilitySnapshot
+  :: FilePath
+  -> IO (Either (NonEmpty Diagnostic) (FilePath, String))
+readTypeVisibilitySnapshot = readAuxiliarySnapshot
+  "DJEX_REPL_VISIBILITY_READ" "cannot read type visibility manifest"
+
+readAuxiliarySnapshot
+  :: String
+  -> String
+  -> FilePath
+  -> IO (Either (NonEmpty Diagnostic) (FilePath, String))
+readAuxiliarySnapshot code summary path = do
   loaded <- strictReadWorkspaceText path
   pure $ case loaded of
     Left failure -> singletonFailure
-      "DJEX_REPL_RATING_READ" "cannot read rating file" path $ show failure
+      code summary path $ show failure
     Right source -> Right (path, source)
 
 -- Keep lazy String IO entirely inside the IOException boundary. The returned

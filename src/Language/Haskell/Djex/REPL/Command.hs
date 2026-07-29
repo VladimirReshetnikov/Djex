@@ -16,6 +16,7 @@ module Language.Haskell.Djex.REPL.Command
   , CompletionDomain (..)
   , ReplSetting (..)
   , replSettingName
+  , replSettingIsBoolean
   , parseReplSetting
   , parseReplInput
   , parseReplBackend
@@ -185,6 +186,21 @@ replSettingName setting = case setting of
   MaximumQueueSetting -> "max-queue"
   MaximumDepthSetting -> "max-depth"
   FixSetting -> "fix"
+
+-- | Whether a setting accepts GHCi-style @+NAME@ and @-NAME@ forms.
+--
+-- This predicate is the semantic owner used by both command execution and
+-- completion. Keeping sign eligibility on the setting type prevents a newly
+-- added non-boolean option from accidentally accepting @on@ or @off@ merely
+-- because the invocation happened to use a sign.
+replSettingIsBoolean :: ReplSetting -> Bool
+replSettingIsBoolean setting = case setting of
+  DjinnAxiomsSetting -> True
+  AllowUnusedSetting -> True
+  AllowConstraintsSetting -> True
+  MultiConstructorPatternsSetting -> True
+  FixSetting -> True
+  _ -> False
 
 parseReplSetting :: String -> Either String ReplSetting
 parseReplSetting source = case filter ((== normalize source) . replSettingName)
@@ -478,12 +494,10 @@ settingNames :: [String]
 settingNames = map replSettingName [minBound .. maxBound]
 
 booleanSettingNames :: [String]
-booleanSettingNames = map replSettingName
-  [ DjinnAxiomsSetting
-  , AllowUnusedSetting
-  , AllowConstraintsSetting
-  , MultiConstructorPatternsSetting
-  , FixSetting
+booleanSettingNames =
+  [ replSettingName setting
+  | setting <- [minBound .. maxBound]
+  , replSettingIsBoolean setting
   ]
 
 showNames :: [String]
@@ -615,6 +629,7 @@ setDetails :: [String]
 setDetails =
   [ "  settings: " ++ intercalate ", " settingNames
   , "  booleans also accept :set +NAME and :set -NAME"
+  , "  sign forms are rejected for non-boolean settings"
   ]
 
 typeDetails :: [String]

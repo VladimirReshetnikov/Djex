@@ -393,6 +393,10 @@ formatDjinnResult prType s name ctx goal result =
               Right ["-- " ++ name ++
                   ": no proof found within budget " ++
                   show (budget s) ++ "; inhabitation is undecided."]
+          SharedSearch.ObservedFinished ->
+              Right ["-- " ++ name ++
+                  ": no proof found in the supported inference fragment; " ++
+                  "inhabitation is undecided."]
           _ -> Left $ "Djinn returned no evidence after " ++ show progress
       RequiresTargetReference -> Right ["-- " ++ name ++
           " cannot be safely realized without a recursive self-reference."]

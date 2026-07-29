@@ -367,16 +367,19 @@ The Boolean settings use `+name` to enable and `-name` to disable them:
 | `multi` | off | Print alternative, de-duplicated solutions. |
 | `sorted` | on | Rank by the fraction of unused binders, then binder count. |
 | `debug` | off | Print the translated formula and internal proof term. |
-| `cutoff=N` | `200` | Consider at most positive `N` proof candidates. |
+| `cutoff=N` | `200` | Consider at most positive `N` proof candidates across all formula plans. |
 | `budget=N` | `0` | Explore at most `N` proof-search steps; `0` is unlimited. |
 
-With the default unlimited budget, proof search is a decision procedure:
-"cannot be realized" is a proof of uninhabitedness. A positive budget bounds
-the work instead; if it expires before any proof is found, Djinn reports
+With the default unlimited budget and complete formula coverage, proof search
+is a decision procedure: "cannot be realized" is a proof of uninhabitedness.
+A positive budget bounds the work instead; if it expires before any proof is
+found, Djinn reports
 `no proof found within budget N; inhabitation is undecided` rather than
-claiming unprovability. Any follow-up search used solely to refine a
-self-reference diagnostic receives only the first search's unspent fuel, so
-the setting remains a total per-query bound rather than a per-pass allowance.
+claiming unprovability. A self-reference diagnostic search or complementary
+rank-N formula plan receives only the earlier search's unspent choice fuel;
+the complementary plan also receives only the remaining proof cutoff. Each
+setting therefore remains a total per-query bound rather than a per-pass
+allowance.
 
 For example:
 
@@ -510,11 +513,20 @@ applying Djinn's narrower variable, constructor, and tuple policy and
 delegating to the native query worker. The stable shared-type request boundary
 accepts explicit quantification at every type position. It implicitizes the
 leading `ForallType` binders and constraints of a query as before, while every
-nested quantifier becomes a shared `TypeAtom`: one opaque proposition whose
-identity is its lexical alpha-normal form. Outer applications containing an
-atom, such as `[(forall result. result -> result -> result)]`, retain their
-structure and compare alpha-equivalently without exposing the quantified body
-to proof search.
+nested quantifier first becomes a shared `TypeAtom` whose identity is its
+lexical alpha-normal form. The ordinary formula plan retains that atom as one
+proposition. A second, polarized plan reopens a context-free atom in positive
+position with occurrence-scoped skolems; arrow domains reverse polarity, while
+tuples, sums, and datatype expansion preserve it. Outer applications
+containing an atom, such as
+`[(forall result. result -> result -> result)]`, retain their structure and
+compare alpha-equivalently without exposing the quantified body.
+The checked worker bounds composition with two occurrence-local frontiers:
+one site may stay opaque while its siblings open, or one site may open while
+unrelated siblings stay opaque. A nested selected site brings along only its
+required enclosing forall chain. Together with the fully opened and exact
+opaque plans, this covers every combination of three independent sites in
+linear rather than exponential space.
 `inhabitResult` then runs formula translation, budgeted proof search,
 independent proof checking, and constructs the shared `QueryResult` directly
 without choosing a renderer or passing through a backend-owned report envelope.
@@ -530,7 +542,10 @@ the shared operational vocabulary:
 `Truncated CandidateLimitReached` says that another proof was observed beyond
 `optionCutoff`. The latter inspects only that one overflow witness instead of
 forcing the remaining proof stream. This status remains separate from Djinn's
-proof-backed `Unrealizable` outcomes. `resolveInstanceMethods` jointly checks
+proof-backed `Unrealizable` outcomes. A finished search through an incomplete
+rank-N projection is likewise reported as undecided in the supported fragment,
+not as an internal error or a proof of non-inhabitation.
+`resolveInstanceMethods` jointly checks
 an instance target and all of its prerequisites before returning the target's
 instantiated methods. A query's goal and every class argument are likewise
 kind-checked together, so a free type variable has one kind throughout the
@@ -757,11 +772,22 @@ knowing before editing the source:
 ## Important limitations
 
 - Djinn implements propositional intuitionistic reasoning, not the full Haskell
-  type system. A query's prenex `forall`/constraint prefix is elaborated, while
-  nested rank-N and impredicative types are retained only as opaque,
-  alpha-equated atoms. Djinn does not implement higher-rank instantiation or
-  subsumption, and it ignores valid contexts for proof power; it also has no
-  GADTs, type families, package instance import, or general type-class solver.
+  type system. A query's prenex `forall`/constraint prefix is elaborated, and a
+  context-free nested forall can be introduced in a positive formula position.
+  Unsupported negative, constrained, and impredicative occurrences remain
+  opaque, alpha-equated atoms. An empty incomplete search is inconclusive rather
+  than proof of uninhabitability. Search tries the fully opened polarized view,
+  the historical exact-opaque view, one plan retaining each positive forall
+  opaquely while its siblings open, and the dual plans opening one occurrence
+  while unrelated siblings stay opaque. The family is exhaustive for three
+  independent sites and grows linearly; it does not enumerate balanced subsets
+  such as two open and two opaque sites among four. Reusable loaded functions
+  expose all of those sound views in one proof environment. Any incomplete
+  primary premise conservatively disables negative evidence for the whole
+  query.
+  Djinn does not implement general higher-rank instantiation or subsumption,
+  and it ignores valid contexts for proof power; it also has no GADTs, type
+  families, package instance import, or general type-class solver.
 - Added functions are used at exactly their declared type; their polymorphic
   type variables are not freshly instantiated at each use.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract

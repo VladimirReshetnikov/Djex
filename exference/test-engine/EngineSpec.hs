@@ -10,6 +10,7 @@ import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
 import Language.Haskell.Exference.Core.Candidate
   ( emptyExferenceSourceTypeVariableHints )
 import Language.Haskell.Exference.Core.Expression (Expression (..))
+import Language.Haskell.Exference.Core.ExpressionCheck (checkExpression)
 import Language.Haskell.Exference.Core.FunctionBinding
   ( ConstructorBinding (..)
   , DeconstructorBinding (..)
@@ -17,12 +18,20 @@ import Language.Haskell.Exference.Core.FunctionBinding
   , FunctionBinding (..)
   )
 import qualified Language.Haskell.Exference.Core.Internal.Exference as E
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  ( allocateNamespace )
 import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceHeuristicsConfig (..)
   , ExferenceOptions (..)
   , defaultHeuristicsConfig
   )
+import Language.Haskell.Exference.Core.Internal.Polytype
+  ( instantiateLeadingForallsWith
+  , quantifiedProviderSubsumes
+  )
 import Language.Haskell.Exference.Core.Internal.Testing
+import Language.Haskell.Exference.Core.Internal.VariableSupply
+  ( supplyFromIdentifiers )
 import Language.Haskell.Exference.Core.Score (Penalty (..))
 import qualified Language.Haskell.Exference.Core.Score as Score
 import Language.Haskell.Exference.Core.Types
@@ -85,6 +94,129 @@ tests = testGroup "Exference private engine boundaries"
         $ all ((== target) . Generated.clauseName
             . SharedCandidate.candidateOutput)
         $ SharedSearch.batchCandidates batch
+  , testCase "provider forall exhaustion truncates the affected branch" $ do
+      let integer = TypeCons $ name "Int"
+          polymorphic = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          input = identityInput
+            { E.input_goalType =
+                TypeArrow polymorphic $ TypeArrow integer integer
+            , E.input_maxSteps = 100
+            }
+      -- Binder 0 already occupies the only flexible slot. Per-use
+      -- instantiation needs one additional spelling and must fail without
+      -- wrapping or reusing the binder identity.
+      chunk <- lastCapacityChunk
+        (IdentifierCapacities 100 1 100) input
+      E.chunkStatus chunk @?=
+        E.SearchStatus E.SearchIdentifierSpaceExhausted 0 0
+      assertBool "an exhausted forall instantiation produced a candidate"
+        $ null $ E.chunkElements chunk
+  , testCase "bare provider foralls cross the checked result boundary" $ do
+      let unit = TypeTuple Boxed []
+          vacuousUnit = TypeForall [] [] unit
+          polymorphic = TypeForall [0] [] $ TypeVar 0
+          input = identityInput
+            { E.input_goalType = TypeArrow polymorphic unit
+            , E.input_maxSteps = 100
+            }
+      chunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 100 100) input
+      assertBool
+        "forall a. a was mistaken for opaque forwarding at a flexible use"
+        $ not $ null $ concatMap E.chunkElements chunks
+      wrappedChunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 100 100)
+            (input {E.input_goalType = TypeArrow polymorphic vacuousUnit})
+      assertBool "a vacuous forall wrapper suppressed provider instantiation"
+        $ not $ null $ concatMap E.chunkElements wrappedChunks
+      let wrappedOccurrence = ExpLambda 1 polymorphic
+            $ ExpVar 1 $ TypeForall [] [] $ TypeVar 2
+      checkExpression (mkQueryClassEnv emptyStaticClassEnv []) [] []
+        (TypeArrow polymorphic vacuousUnit) [] wrappedOccurrence @?= Right ()
+      let distinct = TypeForall [1] []
+            $ TypeArrow (TypeVar 1) (TypeVar 1)
+      quantifiedChunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 100 100)
+            (input {E.input_goalType = TypeArrow polymorphic distinct})
+      let quantifiedExpressions =
+            [ expression
+            | chunk <- quantifiedChunks
+            , (expression, _, _) <- E.chunkElements chunk
+            ]
+          requestedOccurrence expression = case expression of
+            ExpLambda _ declared (ExpVar _ annotation) ->
+              declared == polymorphic && annotation == distinct
+            _ -> False
+      assertBool "a more-general provider did not subsume a quantified goal"
+        $ any requestedOccurrence quantifiedExpressions
+      mapM_ (\expression -> checkExpression
+          (mkQueryClassEnv emptyStaticClassEnv []) [] []
+          (TypeArrow polymorphic distinct) [] expression @?= Right ())
+        quantifiedExpressions
+  , testCase "quantified provider subsumption stays shallow and predicative" $ do
+      let integer = TypeCons $ name "Int"
+          provider = TypeForall [0, 1] []
+            $ TypeArrow (TypeVar 0)
+            $ TypeArrow (TypeVar 1) (TypeVar 0)
+          specialization = TypeForall [2] []
+            $ TypeArrow (TypeVar 2)
+            $ TypeArrow (TypeVar 2) (TypeVar 2)
+          wrongResult = TypeForall [2, 3] []
+            $ TypeArrow (TypeVar 2)
+            $ TypeArrow (TypeVar 3) (TypeVar 3)
+          lessGeneral = TypeForall [0] []
+            $ TypeArrow integer integer
+          ordinaryIdentity = TypeForall [2] []
+            $ TypeArrow (TypeVar 2) (TypeVar 2)
+          impredicative = TypeForall [2] []
+            $ TypeArrow
+                (TypeForall [3] [] $ TypeArrow (TypeVar 3) (TypeVar 3))
+                (TypeForall [4] [] $ TypeArrow (TypeVar 4) (TypeVar 4))
+          providerIdentity = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          freeProvider = TypeForall [0] []
+            $ TypeArrow (TypeVar 9) (TypeVar 0)
+          freeRequested = TypeForall [1] []
+            $ TypeArrow (TypeVar 9) (TypeVar 1)
+          contextual variable = TypeForall [variable]
+            [HsConstraint (name "C") [TypeVar variable]]
+            $ TypeVar variable
+          rigidProvider = TypeForall [9] [] $ TypeConstant 0
+          collidingRequested = TypeForall [0] [] $ TypeVar 0
+      quantifiedProviderSubsumes provider specialization @?= True
+      quantifiedProviderSubsumes provider wrongResult @?= False
+      quantifiedProviderSubsumes lessGeneral ordinaryIdentity @?= False
+      quantifiedProviderSubsumes providerIdentity impredicative @?= False
+      quantifiedProviderSubsumes freeProvider freeRequested @?= False
+      quantifiedProviderSubsumes (contextual 0) (contextual 1) @?= False
+      quantifiedProviderSubsumes rigidProvider collidingRequested @?= False
+  , testCase "provider forall opening preserves nested lexical scopes" $ do
+      let outerClass = name "Outer"
+          innerClass = name "Inner"
+          evidence className variable = HsConstraint className [variable]
+          shadowed = TypeForall [0] [evidence outerClass $ TypeVar 0]
+            $ TypeForall [0] [evidence innerClass $ TypeVar 0]
+            $ TypeVar 0
+      case instantiateLeadingForallsWith
+          allocateNamespace (supplyFromIdentifiers []) shadowed of
+        Just
+            ( TypeVar bodyIdentifier
+            , [ HsConstraint outerName [TypeVar outerIdentifier]
+              , HsConstraint innerName [TypeVar innerIdentifier]
+              ]
+            , _
+            ) -> do
+          outerName @?= outerClass
+          innerName @?= innerClass
+          assertBool "shadowed forall binders reused one fresh identity"
+            $ outerIdentifier /= innerIdentifier
+          bodyIdentifier @?= innerIdentifier
+        actual -> fail $ "unexpected shadowed-forall instantiation: "
+          ++ show actual
   , testCase "generic deconstructors need no persistent flexible IDs" $ do
       let integer = TypeCons $ name "Int"
           box argument = TypeApp (TypeCons $ name "Box") argument
@@ -161,11 +293,36 @@ tests = testGroup "Exference private engine boundaries"
             { E.input_goalType = TypeArrow (empty integer) integer
             , E.input_envDeconsS = [deconstructor]
             }
-      chunk <- lastCapacityChunk
-        (IdentifierCapacities 100 0 100) input
-      E.chunkStatus chunk @?= E.SearchStatus E.SearchExhausted 0 0
+      chunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 0 100) input
+      finalChunk <- lastChunk "empty elimination" chunks
+      E.chunkStatus finalChunk @?= E.SearchStatus E.SearchExhausted 0 0
       assertBool "empty elimination required a non-escaping flexible ID"
-        $ not $ null $ E.chunkElements chunk
+        $ not $ null $ concatMap E.chunkElements chunks
+  , testCase "empty deconstructors do not suppress provider use" $ do
+      let integer = TypeCons $ name "Int"
+          monomorphic = TypeArrow integer integer
+          polymorphic = TypeForall [0] []
+            $ TypeArrow (TypeVar 0) (TypeVar 0)
+          emptyInteger = DeconstructorBinding integer [] False
+          assertProviderRemainsUsable provider = do
+            let input = identityInput
+                  { E.input_goalType = TypeArrow provider
+                      $ TypeArrow integer integer
+                  , E.input_envDeconsS = [emptyInteger]
+                  , E.input_maxSteps = 1024
+                  }
+            chunks <- expectRight
+              $ findExpressionsWithIdentifierCapacitiesEither
+                  (IdentifierCapacities 100 100 100) input
+            -- With unused parameters forbidden, every surviving term must use
+            -- both the provider and the Int argument. The eager empty-case
+            -- branch alone therefore cannot make this assertion pass.
+            assertBool
+              ("constructorless Int suppressed provider " ++ show provider)
+              $ not $ null $ concatMap E.chunkElements chunks
+      mapM_ assertProviderRemainsUsable [monomorphic, polymorphic]
   , testCase "scope identifier collisions are operational truncations" $ do
       chunk <- lastCapacityChunk
         (IdentifierCapacities 100 100 1) identityInput

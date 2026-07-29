@@ -81,6 +81,15 @@ import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
 import Djinn.Internal.ProofToGenerated (termToGeneratedClause)
 import Djinn.Internal.Type
+import Djinn.Internal.TypeFormula
+    ( PolarizedFormulaPlans
+    , exactOpaqueFormulaPlan
+    , primaryFormulaPlan
+    , singleOpaqueFormulaPlans
+    , singleOpenFormulaPlans
+    , translatedFormula
+    , translationIncomplete
+    )
 
 ------------------------------------------------------------------
 -- Kinds
@@ -95,8 +104,9 @@ kArrow = KArrow
 
 -- | Parse a type in Djinn's Haskell-like syntax, requiring the whole input to
 -- be consumed. Explicit @forall@ is accepted at any type position, including
--- inside constructor applications; proof search treats each nested quantified
--- subtree as one inert, alpha-aware atom.
+-- inside constructor applications. Checked queries reopen context-free
+-- positive occurrences in the polarized formula plan; raw conversion and
+-- unsupported occurrences retain one inert, alpha-aware atom.
 parseHType :: String -> Either String HType
 parseHType = parseWith pHType "type"
 
@@ -568,8 +578,9 @@ data QueryOptions = QueryOptions {
     -- | Rank solutions by the fraction of unused binders, then binder
     -- count; implies collecting alternatives.
     optionSorted :: Bool,
-    -- | Maximum number of candidate proofs considered (positive). Observing
-    -- one more proof reports 'SharedSearch.CandidateLimitReached'.
+    -- | Maximum number of candidate proofs considered across all formula
+    -- plans (positive). Observing one more proof reports
+    -- 'SharedSearch.CandidateLimitReached'.
     optionCutoff :: Int,
     -- | Choice-point budget; 'Nothing' keeps the search a complete
     -- decision procedure.
@@ -662,7 +673,8 @@ data QueryOutcome
     -- | The only assumption that could realize the goal is the target
     -- name itself, which would print as general recursion.
     | UnrealizableWithoutSelfReference
-    -- | The search budget expired first; inhabitation is undecided.
+    -- | The search budget expired or formula coverage remained incomplete;
+    -- inhabitation is undecided.
     | Undecided
     deriving (Eq, Show)
 
@@ -717,11 +729,11 @@ inhabit options environment contexts name goal = do
 -- a rendering policy. The exact checked target becomes the candidate clause
 -- name and the proof core constructs the shared result envelope directly.
 --
--- At most @optionCutoff + 1@ proofs are observed.  The extra observation is
--- solely a truncation witness: when present, neither the remaining proof
--- stream nor 'searchExhausted' is forced.  When absent, reaching the end of
--- the prefix has already established whether proof search finished or spent
--- its choice-point budget.
+-- Across all candidate-producing formula plans, at most @optionCutoff + 1@
+-- proofs are observed. The extra observation is solely a truncation witness:
+-- when present, neither the remaining proof stream nor 'searchExhausted' is
+-- forced. When absent, reaching the end of the prefix has already established
+-- whether proof search finished or spent its choice-point budget.
 inhabitResult
     :: QueryOptions
     -> Environment
@@ -817,19 +829,19 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
         , goal
         )
         contexts
-    let translate =
-            preparedEnvironmentSynthesisFormulaTranslator prepared
-        translateType label source =
-            first (label ++) $ translate source
+    let translatePlans =
+            preparedEnvironmentPolarizedSynthesisFormulaPlans prepared
+        translateType translator label source =
+            first (label ++) $ translator source
     -- Contexts have been checked against the same inventory and kind scope as
     -- the goal, but their methods are intentionally absent from proof search.
     -- A class method is polymorphic in its method-local variables; translating
     -- it to one monomorphic LJT premise made alpha-equivalent signatures
     -- depend on source spelling. Djinn supports the sound, useful subset in
     -- which the synthesized term does not require a class method.
-    form <- translatorFailure $
-        translateType "goal type: " elaboratedGoal
-    searchPreparedFormula options prepared target form
+    plans <- translatorFailure $
+        translateType translatePlans "goal type: " elaboratedGoal
+    searchPreparedFormula options prepared target plans
   where
     translatorFailure = first DjinnInternalQueryFailure
 
@@ -873,11 +885,91 @@ searchPreparedFormula
     :: QueryOptions
     -> PreparedEnvironment
     -> SharedGenerated.DefinitionName
-    -> Formula
+    -> PolarizedFormulaPlans
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target form = do
+searchPreparedFormula options prepared target formulaPlans = do
+    let (premises, premiseTranslationIncomplete) =
+            preparedEnvironmentPolarizedFunctionPremises prepared
+        collectAcrossPlans =
+            optionAlternatives options || optionSorted options
+        primary = primaryFormulaPlan formulaPlans
+        primarySound = not $
+            translationIncomplete primary || premiseTranslationIncomplete
+        alternativeForms
+            | primarySound = []
+            | otherwise =
+                exactOpaqueFormulaPlan formulaPlans :
+                map translatedFormula
+                    (singleOpaqueFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (singleOpenFormulaPlans formulaPlans)
+        rawPlans =
+            (translatedFormula primary, primarySound) :
+            [ (formula, False)
+            | formula <- alternativeForms
+            ]
+        plans = SharedCollection.distinctOn fst rawPlans
+    results <- runPlans collectAcrossPlans premises
+        options (optionCutoff options) [] plans
+    mergeFormulaPlanResults options results
+  where
+    runPlans _ _ _ _ completed [] = Right $ reverse completed
+    runPlans collect premises currentOptions candidateLimit completed
+            ((form, negativeEvidenceSound) : remaining) = do
+        result <- searchPreparedFormulaPlan
+            currentOptions candidateLimit target premises form
+            negativeEvidenceSound
+        let completed' = result : completed
+            nextLimit = candidateLimit - formulaPlanProofCount result
+            continue =
+                formulaPlanFinished result &&
+                (collect || null (formulaPlanClauses result))
+        if continue
+            then runPlans collect premises
+                currentOptions {
+                    optionBudget = formulaPlanRemainingBudget result
+                    }
+                nextLimit completed' remaining
+            else Right $ reverse completed'
+
+-- Goal plans are bounded linearly: the fully opened translation, the exact
+-- opaque fallback, one independently opaque positive forall at a time, and
+-- finally one independently opened branch among opaque siblings. Keeping the
+-- historical plans first preserves their unsorted result prefix. Global
+-- premises expose the same sound views simultaneously under distinct internal
+-- proof identities, so one term may use different views at different
+-- occurrences of a reusable source function. Every proof remains checked
+-- against the exact goal formula that produced it.
+
+-- One formula plan retains clauses before cross-plan de-duplication and
+-- ranking. 'formulaPlanProofCount' counts raw proofs before either operation,
+-- which makes the caller's cutoff global across every translation.
+data FormulaPlanResult = FormulaPlanResult
+    { formulaPlanFormula :: String
+    , formulaPlanFirstProof :: Maybe String
+    , formulaPlanCompletion :: SharedSearch.Completion
+    , formulaPlanClauses ::
+        [SharedGenerated.FunctionClause HSymbol]
+    , formulaPlanEvidence :: SharedQuery.QueryEvidence
+    , formulaPlanRemainingBudget :: Maybe Integer
+    , formulaPlanProofCount :: Int
+    }
+
+-- | One proof-search plan. The final flag authorizes logical negative
+-- evidence only when translation covered every quantified subtree. Checked
+-- proofs remain useful under an incomplete plan, but absence of one does not
+-- establish that the original Haskell type is uninhabited.
+searchPreparedFormulaPlan
+    :: QueryOptions
+    -> Int
+    -> SharedGenerated.DefinitionName
+    -> [(Symbol, Formula)]
+    -> Formula
+    -> Bool
+    -> Either DjinnQueryError FormulaPlanResult
+searchPreparedFormulaPlan options candidateLimit target externalEnv form
+        negativeEvidenceSound = do
     let name = SharedGenerated.definitionSpelling target
-        externalEnv = preparedEnvironmentFunctionPremises prepared
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
         mode = (defaultSearchMode
@@ -892,6 +984,8 @@ searchPreparedFormula options prepared target form = do
         [] -> do
             failure <-
                 if searchExhausted outcome then
+                    return Undecided
+                else if not negativeEvidenceSound then
                     return Undecided
                 else if not (targetWasExcluded proofEnv) then
                     return Unrealizable
@@ -917,18 +1011,22 @@ searchPreparedFormula options prepared target form = do
                                 checkProof diagnosticEnv form diagnosticProof
                             return UnrealizableWithoutSelfReference
                         [] -> return Unrealizable
-            makeDjinnResult
-                (show form)
-                Nothing
-                (queryCompletion outcome)
-                []
-                (outcomeEvidence failure)
-        proofs@(p : _) -> do
-            -- Bound the raw proof stream before checking, conversion, ranking,
-            -- or de-duplication.  In particular, duplicate printed clauses
-            -- still consume the documented proof-candidate cutoff.
+            return FormulaPlanResult {
+                formulaPlanFormula = show form,
+                formulaPlanFirstProof = Nothing,
+                formulaPlanCompletion = queryCompletion outcome,
+                formulaPlanClauses = [],
+                formulaPlanEvidence = outcomeEvidence failure,
+                formulaPlanRemainingBudget = remainingSearchBudget outcome,
+                formulaPlanProofCount = 0
+                }
+        proofs@(_ : _) -> do
+            -- Bound the raw proof stream before checking and conversion. The
+            -- outer worker subtracts this count before a complementary plan,
+            -- so duplicate printed clauses and both translations consume the
+            -- same documented proof-candidate cutoff.
             let (internalProofs, overflow) =
-                    splitAt (optionCutoff options) proofs
+                    splitAt candidateLimit proofs
                 candidateLimitReached = not $ null overflow
             -- Every candidate must check against the requested formula
             -- before display names are restored and it is rendered.
@@ -940,30 +1038,61 @@ searchPreparedFormula options prepared target form = do
                     (termToGeneratedClause target .
                         restoreProofTerm proofEnv)
                     internalProofs
-            -- The checked shared clause is the stable output authority. Keep
-            -- the historical stable ratio-then-count ordering, then discard
-            -- structurally identical outputs without retaining HClause as a
-            -- parallel candidate representation. This structural dedup works
-            -- only because proof lowering already baked canonical display
-            -- names into every clause (see niceNames): alpha-equivalent
-            -- proofs arrive spelled identically.
-            let scored clause = (candidateDetails clause, clause)
-                clauses = SharedCollection.distinctOn id $
-                    if optionSorted options then
-                        map snd $ sortOn fst $ map scored generatedClauses
-                    else
-                        generatedClauses
-                candidates = map makeCandidate clauses
+            let firstProof = case internalProofs of
+                    firstProofTerm : _ -> Just $ show firstProofTerm
+                    [] -> Nothing
                 completion
                     | candidateLimitReached = SharedSearch.truncated
                         SharedSearch.CandidateLimitReached
                     | otherwise = queryCompletion outcome
-            makeDjinnResult
-                (show form)
-                (Just $ show p)
-                completion
-                candidates
-                SharedQuery.ValidatedCandidates
+                evidence = case generatedClauses of
+                    [] -> SharedQuery.NoEvidence
+                    _ : _ -> SharedQuery.ValidatedCandidates
+            return FormulaPlanResult {
+                formulaPlanFormula = show form,
+                formulaPlanFirstProof = firstProof,
+                formulaPlanCompletion = completion,
+                formulaPlanClauses = generatedClauses,
+                formulaPlanEvidence = evidence,
+                formulaPlanRemainingBudget = remainingSearchBudget outcome,
+                formulaPlanProofCount = length internalProofs
+                }
+
+formulaPlanFinished :: FormulaPlanResult -> Bool
+formulaPlanFinished result =
+    formulaPlanCompletion result == SharedSearch.Finished
+
+-- Build the public result only after all requested plans have run. Clauses
+-- are structurally de-duplicated across the union, then the surviving
+-- candidates are ranked once. Proof checking remains plan-local above.
+mergeFormulaPlanResults
+    :: QueryOptions
+    -> [FormulaPlanResult]
+    -> Either DjinnQueryError DjinnResult
+mergeFormulaPlanResults _ [] = internalQueryFailure
+    "rank-N formula planning produced no search plan"
+mergeFormulaPlanResults options results = makeDjinnResult
+    (formulaPlanFormula metadataPlan)
+    (formulaPlanFirstProof metadataPlan)
+    (formulaPlanCompletion terminalPlan)
+    candidates
+    evidence
+  where
+    terminalPlan = last results
+    metadataPlan = case filter (not . null . formulaPlanClauses) results of
+        result : _ -> result
+        [] -> terminalPlan
+    mergedClauses = concatMap formulaPlanClauses results
+    distinctClauses = SharedCollection.distinctOn id mergedClauses
+    unrankedCandidates = map makeCandidate distinctClauses
+    candidates
+        | optionSorted options = sortOn
+            SharedCandidate.candidateDetails unrankedCandidates
+        | otherwise = unrankedCandidates
+    evidence = case candidates of
+        _ : _ -> SharedQuery.ValidatedCandidates
+        [] -> formulaPlanEvidence terminalPlan
+
 candidateDetails
     :: SharedGenerated.FunctionClause HSymbol
     -> DjinnCandidateDetails

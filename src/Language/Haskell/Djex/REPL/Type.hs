@@ -46,12 +46,11 @@ import qualified Language.Haskell.Exts.Syntax as HSE
 
 import Language.Haskell.Djex.Exference
   ( ExferenceSession
-  , defaultExferenceOptions
-  , exferenceRequestQuery
+  , exferenceSessionInventory
   )
-import Language.Haskell.Djex.Exference.HaskellSrc
-  ( ExferenceQueryScope (..)
-  , parseExferenceRequestWithCheckedTargetInScope
+import Language.Haskell.Djex.HaskellSrc
+  ( parseSourceTypeInScope
+  , parsedSourceType
   )
 import qualified Language.Haskell.Djex.Exference.Internal.Session
   as ExferenceSession
@@ -86,7 +85,6 @@ import Language.Haskell.Synthesis.Diagnostic
   , withContext
   , withSourceLocation
   )
-import Language.Haskell.Synthesis.Generated (DefinitionName)
 import Language.Haskell.Synthesis.Name
   ( Boxity (..)
   , Name
@@ -109,8 +107,6 @@ import Language.Haskell.Synthesis.Name
   )
 import Language.Haskell.Synthesis.Qualification
   ( Qualification (..) )
-import Language.Haskell.Synthesis.Query
-  ( QueryRequest (requestGoal) )
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import Language.Haskell.Synthesis.Type
   ( Type (..)
@@ -132,7 +128,6 @@ data InferredExpression = InferredExpression
 data TypeContext = TypeContext
   { contextSession :: ExferenceSession
   , contextScope :: ReplScope
-  , contextTarget :: DefinitionName
   , contextSourceName :: FilePath
   , contextSourceText :: String
   , contextTermSchemes :: Map Name HsType
@@ -155,13 +150,12 @@ type Infer = StateT InferState (Either Diagnostic)
 inferExpressionType
   :: ExferenceSession
   -> ReplScope
-  -> DefinitionName
   -> TypeDefaulting
   -> FilePath
   -> String
   -> Either Diagnostic InferredExpression
-inferExpressionType session scope target defaulting sourceName source = do
-  context <- prepareContext session scope target sourceName source
+inferExpressionType session scope defaulting sourceName source = do
+  context <- prepareContext session scope sourceName source
   expression <- parseExpression context
   case (defaulting, bareGlobal expression) of
     (PreserveTypeVariables, Just name) -> do
@@ -179,15 +173,13 @@ inferExpressionType session scope target defaulting sourceName source = do
 prepareContext
   :: ExferenceSession
   -> ReplScope
-  -> DefinitionName
   -> FilePath
   -> String
   -> Either Diagnostic TypeContext
-prepareContext session scope target sourceName source = do
+prepareContext session scope sourceName source = do
   pure TypeContext
     { contextSession = session
     , contextScope = scope
-    , contextTarget = target
     , contextSourceName = sourceName
     , contextSourceText = source
     , contextTermSchemes = schemes
@@ -909,27 +901,17 @@ parseAnnotationScheme
   -> HSE.Type HSELocation.SrcSpanInfo
   -> Either Diagnostic HsType
 parseAnnotationScheme context signature = do
-  request <- firstAnnotation $ parseExferenceRequestWithCheckedTargetInScope
-    (contextSession context)
-    defaultExferenceOptions
-    (contextTarget context)
-    (queryScope $ contextScope context)
+  parsed <- firstAnnotation $ parseSourceTypeInScope
+    (exferenceSessionInventory $ contextSession context)
+    (scopeExferenceQueryScope $ contextScope context)
     (contextSourceName context)
     (HSEPretty.prettyPrint signature)
-  pure $ requestGoal $ exferenceRequestQuery request
+  pure $ parsedSourceType parsed
  where
   firstAnnotation = either
     (Left . withContext "while checking an expression type signature"
       . withCode "DJEX_REPL_TYPE_ANNOTATION")
     Right
-
-queryScope :: ReplScope -> ExferenceQueryScope
-queryScope scope = ExferenceQueryScope
-  { exferenceQueryCurrentModule = scopeCurrentModule scope
-  , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames scope
-  , exferenceQueryModuleAliases = scopeQualifierAliases scope
-  , exferenceQueryQualifiedNames = scopeQualifiedTypeNames scope
-  }
 
 addUnaryConstraint :: TypeContext -> String -> HsType -> Infer ()
 addUnaryConstraint context classSource argument = do

@@ -62,6 +62,7 @@ import Language.Haskell.Exference.Core.Unify
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.ExferenceNode
 import Language.Haskell.Exference.Core.Internal.ExferenceNodeBuilder
+import Language.Haskell.Exference.Core.Internal.Polytype
 import Language.Haskell.Exference.Core.Internal.SearchControl
 import Language.Haskell.Exference.Core.Internal.Options
   ( ExferenceHeuristicsConfig (..)
@@ -1433,23 +1434,53 @@ stateStep allocators multiPM allowConstrs h
         provId = varPVariable provided
         provType = varPResult provided
         dependencies = varPParameters provided
-      byGenericUnify
-        (Right (provId, SharedType.functionType dependencies provType))
-        provType
-        -- Query constraints describe dictionaries supplied by the caller;
-        -- using a scoped value must not turn that evidence back into a proof
-        -- obligation. Any constraints from a partial environment-function
-        -- application were recorded on 'nodeConstraintGoals' when that
-        -- application was introduced.
-        []
-        dependencies
-        (heuristics_stepProvidedGood h)
-        (heuristics_stepProvidedBad h)
-        -- Scoped bindings and the goal already inhabit the search node's
-        -- shared flexible-variable namespace; only the binding's quantified
-        -- variables were freshened above.  A disjoint-namespace unifier
-        -- would incorrectly accept a recursive equation such as @a ~ F a@.
-        ((\substs -> (substs, substs)) <$> unifyShared goalType provType)
+        scheme = SharedType.functionType dependencies provType
+        exactUnification = unifyShared goalType provType
+        useProvider annotation providedType constraints parameters unification =
+          byGenericUnify
+            (Right (provId, annotation))
+            providedType
+            constraints
+            parameters
+            (heuristics_stepProvidedGood h)
+            (heuristics_stepProvidedBad h)
+            -- Scoped bindings and the goal inhabit one flexible-variable
+            -- namespace. A disjoint unifier would incorrectly accept a
+            -- recursive equation such as @a ~ F a@.
+            ((\substs -> (substs, substs)) <$> unification)
+      case classifyProviderUse scheme goalType of
+        -- Both semantic roots explicitly request an opaque polytype
+        -- comparison. Merely unifying a flexible monotype goal with the
+        -- provider atom is not forwarding and must not suppress per-use
+        -- instantiation.
+        OpaqueProviderForwarding ->
+          useProvider scheme provType [] dependencies exactUnification
+        -- A context-free provider scheme with no free flexible variables may
+        -- be more general than the requested scheme. The shared classifier has
+        -- already proved that relation with requested binders rigid, so no
+        -- temporary matcher substitution may escape into the live search node.
+        -- Record the requested scheme for the independent checker.
+        SubsumedProviderForwarding ->
+          useProvider goalType goalType [] [] $ Just IntMap.empty
+        InstantiateProviderUse -> do
+          supply <- gets nodeFlexibleIds
+          case instantiateLeadingForallsWith
+              (searchAllocateFlexibleNamespace allocators)
+              supply
+              scheme of
+            Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
+            Just (instantiated, constraints, nextSupply) -> do
+              modify $ \node -> node {nodeFlexibleIds = nextSupply}
+              let (instantiatedResult, instantiatedParameters) =
+                    splitArrowChain instantiated
+              useProvider
+                instantiated
+                instantiatedResult
+                constraints
+                instantiatedParameters
+                (unifyShared goalType instantiatedResult)
+        OrdinaryProviderUse ->
+          useProvider scheme provType [] dependencies exactUnification
 
     -- try to resolve the goal by looking at functions from the environment.
     byFunctionSimple :: StateT SearchNode SearchBranches ()
@@ -1640,7 +1671,16 @@ addScopePatternMatch allocators multiPM goalType vid sid bindings = case binding
             -- already gives its right operand a disjoint tagged namespace, so
             -- reserving persistent flexible IDs here could only introduce a
             -- spurious identifier-space truncation.
-            in eliminateEmpty <$ unifyRight vtResult matchParam
+            --
+            -- Empty elimination is one valid use of the value, but it is not
+            -- the only one. In particular, the shipped declaration corpus
+            -- represents abstract primitive types such as Int with no visible
+            -- constructors. Committing to @case x of {}@ here used to discard
+            -- the sibling in which @x@ is passed to another scoped provider.
+            -- Retain both proof branches just as the search does for other
+            -- alternative term constructions.
+            in (eliminateEmpty <|> defaultHandleRest)
+              <$ unifyRight vtResult matchParam
           mapFunc (DeconstructorBinding matchParam
                     [ConstructorBinding matchId matchRs] False) =
             fmap mapFunc1 $ unifyRight vtResult matchParam

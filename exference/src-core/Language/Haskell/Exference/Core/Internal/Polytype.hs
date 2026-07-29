@@ -1,0 +1,148 @@
+-- | Explicit forall elimination at scoped-value use sites.
+--
+-- The first-order unifier deliberately treats quantified subtrees as atoms.
+-- Opening a provider is a typing rule, not a unification rule, so search and
+-- the independent expression checker share that operation here.
+module Language.Haskell.Exference.Core.Internal.Polytype
+  ( ProviderUseMode (..)
+  , classifyProviderUse
+  , quantifiedProviderSubsumes
+  , instantiateLeadingForallsWith
+  )
+where
+
+import Control.Monad (guard)
+import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
+
+import Language.Haskell.Exference.Core.Internal.FlexibleIds
+  ( FlexibleRenaming
+  , flexibleIdentifiers
+  )
+import Language.Haskell.Exference.Core.Internal.VariableSupply
+  ( FlexibleIdSupply
+  , reserveIdentifiers
+  )
+import Language.Haskell.Exference.Core.Types
+import Language.Haskell.Exference.Core.TypeUtils
+  ( alphaNormalizeForalls
+  , containsForall
+  )
+import Language.Haskell.Exference.Core.Unify (unifyRight)
+import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
+
+-- | How a scoped provider participates at one occurrence. Keeping this
+-- classification beside forall instantiation prevents search and independent
+-- checking from assigning different meanings to the same annotation shape.
+data ProviderUseMode
+  = OrdinaryProviderUse
+  | OpaqueProviderForwarding
+  | SubsumedProviderForwarding
+  | InstantiateProviderUse
+  deriving (Eq, Show)
+
+-- | Classify a provider against the type requested at its occurrence.
+--
+-- Empty-binder, empty-context forall wrappers are semantic no-ops to opaque
+-- atom construction and unification. Peel exactly those wrappers before
+-- inspecting either root, so a vacuously wrapped monotype does not accidentally
+-- request opaque forwarding. A binderless wrapper with a context remains
+-- significant and is not peeled.
+classifyProviderUse :: HsType -> HsType -> ProviderUseMode
+classifyProviderUse rawProvider rawRequested =
+  case peelVacuousForalls rawProvider of
+    provider@TypeForallNative{} -> case peelVacuousForalls rawRequested of
+      requested@TypeForallNative{}
+        | SharedTypeAtom.alphaEquivalentTypes provider requested ->
+            OpaqueProviderForwarding
+        | quantifiedProviderSubsumes provider requested ->
+            SubsumedProviderForwarding
+        | otherwise -> OpaqueProviderForwarding
+      _ -> InstantiateProviderUse
+    _ -> OrdinaryProviderUse
+ where
+  peelVacuousForalls (TypeForallNative [] [] body) =
+    peelVacuousForalls body
+  peelVacuousForalls ty = ty
+
+-- | Whether one context-free prenex scheme with no free flexible variables
+-- can be instantiated to another such requested scheme.
+--
+-- This is deliberately shallow predicative subsumption, not general rank-N
+-- subsumption.  The requested body is the rigid left side of 'unifyRight';
+-- only variables bound by the provider's leading forall may therefore be
+-- solved.  Requiring both complete schemes to have no free flexible variable
+-- prevents an ambient inference variable from being mistaken for one of those
+-- instantiable binders.  Ambient rigid constants are allowed and share their
+-- nominal namespace across both sides. Direct contexts are excluded until
+-- entailment between provider and requested constraints has an equally
+-- explicit rule.
+--
+-- Alpha-normalization is essential before the forall prefixes disappear: two
+-- successive layers may legally shadow the same source binder identity.
+quantifiedProviderSubsumes :: HsType -> HsType -> Bool
+quantifiedProviderSubsumes provider requested = case
+    (prepare provider, prepare requested) of
+  (Just providerBody, Just requestedBody) -> case
+      unifyRight requestedBody providerBody of
+    Just substitutions -> all (not . containsForall)
+      $ IntMap.elems substitutions
+    Nothing -> False
+  _ -> False
+ where
+  prepare source = do
+    guard $ Set.null $ freeVars source
+    normalized <- either (const Nothing) (Just . fst)
+      $ alphaNormalizeForalls IntSet.empty source
+    let (binders, constraints, body) =
+          SharedType.splitLeadingForalls normalized
+    guard $ not $ null binders
+    guard $ null constraints
+    pure body
+
+-- | Replace every binder in the complete leading forall chain with a fresh
+-- flexible variable. Direct contexts are returned as proof obligations in
+-- outer-to-inner order; a forall below an arrow or other type boundary stays
+-- opaque.
+--
+-- The caller supplies the namespace allocator so live search keeps its finite
+-- test seam while the checker uses the production allocator. All source IDs
+-- are reserved before allocation: after a binder is erased, reusing its old
+-- spelling could capture a free occurrence or conflate shadowed layers.
+-- Checked Exference inputs guarantee flexible, duplicate-free binder lists;
+-- 'Nothing' therefore denotes identifier-space exhaustion at call sites.
+instantiateLeadingForallsWith
+  :: ([TVarId]
+      -> FlexibleIdSupply
+      -> Maybe (FlexibleRenaming, FlexibleIdSupply))
+  -> FlexibleIdSupply
+  -> HsType
+  -> Maybe (HsType, [HsConstraint], FlexibleIdSupply)
+instantiateLeadingForallsWith allocate initialSupply source =
+  go reservedSupply [] source
+ where
+  reservedSupply = reserveIdentifiers
+    (IntSet.toAscList $ flexibleIdentifiers source)
+    initialSupply
+
+  go supply contextChunks (TypeForallNative binders contexts body) = do
+    identifiers <- traverse SharedType.flexibleVariableIdentity binders
+    guard $ IntSet.size (IntSet.fromList identifiers) == length identifiers
+    (renaming, nextSupply) <- allocate identifiers supply
+    -- This must be a lexical rename, not a whole-namespace traversal: an
+    -- inner forall may deliberately shadow the same nominal binder ID.
+    let scopedRenaming = Map.fromList
+          [ ( SharedType.FlexibleVariable old
+            , SharedType.FlexibleVariable fresh
+            )
+          | (old, fresh) <- IntMap.toAscList renaming
+          ]
+        rename = SharedType.renameScopedVariables scopedRenaming
+    go nextSupply
+      (map (fmap rename) contexts : contextChunks)
+      (rename body)
+  go supply contextChunks body = Just
+    (body, concat $ reverse contextChunks, supply)

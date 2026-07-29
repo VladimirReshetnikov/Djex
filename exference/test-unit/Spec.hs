@@ -18,7 +18,12 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
-import System.Directory (getTemporaryDirectory, removeFile)
+import System.Directory
+  ( createDirectory
+  , getTemporaryDirectory
+  , removeFile
+  , removePathForcibly
+  )
 import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
@@ -128,6 +133,7 @@ import Language.Haskell.Exference.EnvironmentParser
   , environmentLoadErrorDiagnostics
   , environmentFromFiles
   , environmentFromSources
+  , environmentFromSourcesWithTypeVisibility
   , environmentFromModule
   , environmentFromModuleAndRatings
   , environmentFromPath
@@ -3651,6 +3657,21 @@ tests = testGroup "Exference"
             Right expressions -> assertBool
               "rank-N identity did not use its opaque scoped argument"
               $ not $ null expressions
+          case findOneExpression input of
+            Just
+                ( ExpLambda binder declared (ExpVar returned occurrence)
+                , residual
+                , _
+                ) -> do
+              returned @?= binder
+              declared @?= polymorphic
+              occurrence @?= polymorphic
+              residual @?= []
+            Nothing -> fail "exact opaque forwarding produced no expression"
+            Just (expression, residual, _) -> fail
+              $ "unexpected exact opaque forwarding result: "
+              ++ showExpression expression
+              ++ " with constraints " ++ show residual
           case findExpressionsWithStatsEither input of
             Left failure -> fail
               $ "checked rank-N chunk search failed: " ++ show failure
@@ -3667,6 +3688,138 @@ tests = testGroup "Exference"
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Right ()
+      , testCase "scoped provider foralls instantiate at monomorphic uses" $ do
+          let integer = TypeCons $ name "Int"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              goal = TypeArrow polymorphic $ TypeArrow integer integer
+              input = identityInput
+                { input_goalType = goal
+                , input_maxSteps = 100
+                }
+          (expression, residual, _) <- maybe
+            (fail "a polymorphic scoped identity was not instantiated") pure
+            $ findOneExpression input
+          residual @?= []
+          case expression of
+            -- Eta reduction is sound here because the occurrence annotation
+            -- records the monomorphic instantiation independently of the
+            -- lambda binder's declared scheme.
+            ExpLambda binder declared (ExpVar returned instantiated) -> do
+              returned @?= binder
+              declared @?= polymorphic
+              assertBool
+                ("unexpected provider instantiation: "
+                  ++ showHsType Map.empty instantiated)
+                $ case unifyShared instantiated
+                    (TypeArrow integer integer) of
+                    Just _ -> True
+                    Nothing -> False
+            _ -> fail $ "unexpected provider elimination result: "
+              ++ showExpression expression
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+      , testCase "bare forall providers instantiate flexible occurrences" $ do
+          let unit = TypeTuple Boxed []
+              vacuousUnit = TypeForall [] [] unit
+              polymorphic = TypeForall [0] [] $ TypeVar 0
+              goal = TypeArrow polymorphic unit
+              input = identityInput
+                { input_goalType = goal
+                , input_maxSteps = 100
+                }
+          (expression, residual, _) <- maybe
+            (fail "forall a. a was not instantiated at unit") pure
+            $ findOneExpression input
+          residual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
+          (wrappedExpression, wrappedResidual, _) <- maybe
+            (fail "a vacuous forall wrapper suppressed provider instantiation")
+            pure
+            $ findOneExpression
+            $ input {input_goalType = TypeArrow polymorphic vacuousUnit}
+          wrappedResidual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            (TypeArrow polymorphic vacuousUnit) [] wrappedExpression @?= Right ()
+          let distinctPolymorphic = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              quantifiedGoal =
+                TypeArrow polymorphic distinctPolymorphic
+          (quantifiedExpression, quantifiedResidual, _) <- maybe
+            (fail "a more-general provider did not subsume a quantified goal")
+            pure
+            $ findOneExpression $ input {input_goalType = quantifiedGoal}
+          quantifiedResidual @?= []
+          case quantifiedExpression of
+            ExpLambda binder declared (ExpVar returned annotation) -> do
+              returned @?= binder
+              declared @?= polymorphic
+              annotation @?= distinctPolymorphic
+            unexpected -> fail $ "unexpected subsumed provider expression: "
+              ++ showExpression unexpected
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            quantifiedGoal [] quantifiedExpression @?= Right ()
+      , testCase "provider forall contexts become proof obligations" $ do
+          let className = name "C"
+              integer = TypeCons $ name "Int"
+              evidence variable = HsConstraint className [variable]
+              polymorphic = TypeForall [0] [evidence $ TypeVar 0]
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              goal = TypeArrow polymorphic $ TypeArrow integer integer
+          withoutInstance <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          withInstance <- expectRight
+            $ mkStaticClassEnv
+                [HsTypeClass className [0] []]
+                [HsInstance [] $ evidence integer]
+          let input environment = identityInput
+                { input_goalType = goal
+                , input_envClasses = environment
+                , input_maxSteps = 100
+                }
+              exactInput = (input withoutInstance)
+                {input_goalType = TypeArrow polymorphic polymorphic}
+          case findOneExpression exactInput of
+            Just (_, exactResidual, _) -> exactResidual @?= []
+            Nothing -> fail
+              "exact polymorphic forwarding incorrectly required C evidence"
+          case findOneExpression $ input withoutInstance of
+            Nothing -> pure ()
+            Just (unexpected, _, _) -> fail
+              $ "an unresolved provider context produced "
+              ++ showExpression unexpected
+          (_, residual, _) <- maybe
+            (fail "residual provider context was discarded") pure
+            $ findOneExpression
+            $ (input withoutInstance) {input_allowConstraints = True}
+          residual @?= [evidence integer]
+          (expression, solved, _) <- maybe
+            (fail "a matching instance did not solve the provider context") pure
+            $ findOneExpression $ input withInstance
+          solved @?= []
+          checkExpression (mkQueryClassEnv withInstance []) [] []
+            goal [] expression @?= Right ()
+      , testCase "rank-N fields instantiate after pattern elimination" $ do
+          let integer = TypeCons $ name "Int"
+              boxType = TypeCons $ name "PolyBox"
+              constructor = name "PolyBox"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              deconstructor = DeconstructorBinding boxType
+                [ConstructorBinding constructor [polymorphic]] False
+              goal = TypeArrow boxType $ TypeArrow integer integer
+              input = identityInput
+                { input_goalType = goal
+                , input_envDeconsS = [deconstructor]
+                , input_maxSteps = 100
+                }
+          (expression, residual, _) <- maybe
+            (fail "a rank-N field could not be selected and instantiated") pure
+            $ findOneExpression input
+          residual @?= []
+          checkExpression (mkQueryClassEnv emptyClassEnv []) []
+            [deconstructor] goal [] expression @?= Right ()
       , testCase "generic constructors instantiate impredicatively" $ do
           let polymorphic = TypeForall [0] []
                 $ TypeArrow (TypeVar 0) (TypeVar 0)
@@ -6764,6 +6917,274 @@ tests = testGroup "Exference"
                 $ SharedInventory.inventoryKindAssumptions inventory) @?=
             Just (SharedKind.FunctionKind
               SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
+      , testCase "the shipped catalogue distinguishes opaque and empty types" $ do
+          environmentDirectory <- getDataFileName "exference/environment"
+          (sourceEnvironmentResult, _) <- runLoad
+            $ environmentFromPath environmentDirectory
+          checkedEnvironment <- expectRight sourceEnvironmentResult
+          intName <- expectRight $ mkQualifiedName ["Data", "Int"] "Int"
+          mapName <- expectRight $ mkQualifiedName ["Data", "Map"] "Map"
+          altName <- expectRight $ mkQualifiedName ["Data", "Monoid"] "Alt"
+          voidName <- expectRight $ mkQualifiedName ["Data", "Void"] "Void"
+          v1Name <- expectRight $ mkQualifiedName ["GHC", "Generics"] "V1"
+          rec1Name <- expectRight $ mkQualifiedName ["GHC", "Generics"] "Rec1"
+          m1Name <- expectRight $ mkQualifiedName ["GHC", "Generics"] "M1"
+          let shared = SharedInventory.inventoryEnvironment
+                $ checkedSourceInventory checkedEnvironment
+              declarations = SharedEnvironment.typeDeclarationMap shared
+              emptyDeclarationNames = Set.fromList
+                [ typeName
+                | SharedDeclaration.DataTypeDeclaration
+                    _ typeName _ [] <- Map.elems declarations
+                ]
+              projection = checkedSourceProjection checkedEnvironment
+              deconstructorNames =
+                [ dataName
+                | deconstructor <- sourceDeconstructors projection
+                , Just dataName <-
+                    [typeConstructorHead $ deconstructorInput deconstructor]
+                ]
+              assertAbstract expectedName expectedKind =
+                case Map.lookup expectedName declarations of
+                  Just (SharedDeclaration.AbstractTypeDeclaration
+                      _ actualName actualKind) -> do
+                    actualName @?= expectedName
+                    actualKind @?= expectedKind
+                  declaration -> fail $ "expected abstract declaration for "
+                    ++ show expectedName ++ ", got " ++ show declaration
+              assertEmpty expectedName =
+                case Map.lookup expectedName declarations of
+                  Just (SharedDeclaration.DataTypeDeclaration
+                      _ actualName _ constructors) -> do
+                    actualName @?= expectedName
+                    constructors @?= []
+                  declaration -> fail $ "expected empty declaration for "
+                    ++ show expectedName ++ ", got " ++ show declaration
+              proper = SharedKind.ProperTypeKind
+              unary = SharedKind.FunctionKind proper proper
+              unaryWrapper = SharedKind.FunctionKind unary
+                $ SharedKind.FunctionKind proper proper
+              metadataWrapper = SharedKind.FunctionKind proper
+                $ SharedKind.FunctionKind proper
+                $ SharedKind.FunctionKind unary
+                $ SharedKind.FunctionKind proper proper
+          assertAbstract intName proper
+          assertAbstract mapName
+            $ SharedKind.FunctionKind proper
+            $ SharedKind.FunctionKind proper proper
+          assertAbstract altName unaryWrapper
+          assertAbstract rec1Name unaryWrapper
+          assertAbstract m1Name metadataWrapper
+          assertEmpty voidName
+          assertEmpty v1Name
+          emptyDeclarationNames @?= Set.fromList [voidName, v1Name]
+          assertBool "opaque Int retained an empty-case deconstructor"
+            $ intName `notElem` deconstructorNames
+          assertBool "opaque Map retained an empty-case deconstructor"
+            $ mapName `notElem` deconstructorNames
+          assertBool "real Void lost its empty-case deconstructor"
+            $ voidName `elem` deconstructorNames
+          assertBool "real V1 lost its empty-case deconstructor"
+            $ v1Name `elem` deconstructorNames
+      , testCase "visibility sidecars are path-local and preserve real empties" $ do
+          let moduleSource = unlines
+                [ "{-# LANGUAGE EmptyDataDecls #-}"
+                , "{-# LANGUAGE MagicHash #-}"
+                , "{-# LANGUAGE TypeOperators #-}"
+                , "module Fixture where"
+                , "data Token a"
+                , "data Empty"
+                , "data left :# right"
+                ]
+              visibilitySource = unlines
+                [ "abstract Fixture.Token 1 Type"
+                , "empty Fixture.Empty 0"
+                , "abstract Fixture.(:#) 2 Type Type"
+                ]
+          withTemporaryDirectoryFiles
+              [("Fixture.hs", moduleSource)] $ \plainDirectory -> do
+            (plainResult, _) <- runLoad
+              $ environmentFromPath plainDirectory
+            plain <- checkedSourceProjection <$> expectRight plainResult
+            tokenName <- expectRight $ mkQualifiedName ["Fixture"] "Token"
+            assertBool "a source-only empty declaration became abstract"
+              $ tokenName `elem`
+                [ dataName
+                | deconstructor <- sourceDeconstructors plain
+                , Just dataName <-
+                    [typeConstructorHead $ deconstructorInput deconstructor]
+                ]
+          LoadReport legacySnapshotResult _ <- environmentFromSources
+            [("Fixture.hs", moduleSource)] []
+          legacySnapshot <- checkedSourceProjection
+            <$> expectRight legacySnapshotResult
+          legacyTokenName <- expectRight
+            $ mkQualifiedName ["Fixture"] "Token"
+          assertBool "the legacy snapshot API stopped treating constructorless data normally"
+            $ legacyTokenName `elem`
+              [ dataName
+              | deconstructor <- sourceDeconstructors legacySnapshot
+              , Just dataName <-
+                  [typeConstructorHead $ deconstructorInput deconstructor]
+              ]
+          withTemporaryDirectoryFiles
+              [ ("Fixture.hs", moduleSource)
+              , ("types.visibility", visibilitySource)
+              ] $ \classifiedDirectory -> do
+            (classifiedResult, _) <- runLoad
+              $ environmentFromPath classifiedDirectory
+            checked <- expectRight classifiedResult
+            tokenName <- expectRight $ mkQualifiedName ["Fixture"] "Token"
+            emptyName <- expectRight $ mkQualifiedName ["Fixture"] "Empty"
+            operatorName <- expectRight $ mkQualifiedName ["Fixture"] "(:#)"
+            let projection = checkedSourceProjection checked
+                deconstructorNames =
+                  [ dataName
+                  | deconstructor <- sourceDeconstructors projection
+                  , Just dataName <-
+                      [typeConstructorHead $ deconstructorInput deconstructor]
+                  ]
+                declarations = SharedEnvironment.typeDeclarationMap
+                  $ SharedInventory.inventoryEnvironment
+                  $ checkedSourceInventory checked
+            assertBool "abstract Token retained an eliminator"
+              $ tokenName `notElem` deconstructorNames
+            assertBool "a hash type operator was truncated as a comment"
+              $ operatorName `notElem` deconstructorNames
+            assertBool "explicitly empty Empty lost its eliminator"
+              $ emptyName `elem` deconstructorNames
+            case Map.lookup tokenName declarations of
+              Just SharedDeclaration.AbstractTypeDeclaration{} -> pure ()
+              declaration -> fail $ "Token was not abstract: "
+                ++ show declaration
+            case Map.lookup operatorName declarations of
+              Just SharedDeclaration.AbstractTypeDeclaration{} -> pure ()
+              declaration -> fail $ "(:#) was not abstract: "
+                ++ show declaration
+            case Map.lookup emptyName declarations of
+              Just SharedDeclaration.DataTypeDeclaration{} -> pure ()
+              declaration -> fail $ "Empty was not concrete: "
+                ++ show declaration
+            LoadReport snapshotResult _ <-
+              environmentFromSourcesWithTypeVisibility
+                [("Fixture.hs", moduleSource)] []
+                [("types.visibility", visibilitySource)]
+            snapshot <- expectRight snapshotResult
+            let snapshotDeclarations = SharedEnvironment.typeDeclarationMap
+                  $ SharedInventory.inventoryEnvironment
+                  $ checkedSourceInventory snapshot
+                snapshotDeconstructors =
+                  [ dataName
+                  | deconstructor <- sourceDeconstructors
+                      $ checkedSourceProjection snapshot
+                  , Just dataName <-
+                      [typeConstructorHead $ deconstructorInput deconstructor]
+                  ]
+            case Map.lookup tokenName snapshotDeclarations of
+              Just SharedDeclaration.AbstractTypeDeclaration{} -> pure ()
+              declaration -> fail $ "snapshot Token was not abstract: "
+                ++ show declaration
+            assertBool "snapshot abstract Token retained an eliminator"
+              $ tokenName `notElem` snapshotDeconstructors
+            assertBool "snapshot empty Empty lost its eliminator"
+              $ emptyName `elem` snapshotDeconstructors
+      , testCase "visibility manifests reject every catalogue mismatch" $ do
+          let moduleSource = unlines
+                [ "{-# LANGUAGE EmptyDataDecls #-}"
+                , "module Fixture where"
+                , "data Token a"
+                , "data Empty"
+                , "data Full = Full"
+                ]
+              cases =
+                [ ( "classification"
+                  , [ "opaque Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "unknown classification"
+                  )
+                , ( "unqualified"
+                  , [ "abstract Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "must be module-qualified"
+                  )
+                , ( "malformed arity"
+                  , [ "abstract Fixture.Token nope Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "invalid nonnegative type arity"
+                  )
+                , ( "kind count"
+                  , [ "abstract Fixture.Token 1"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "requires 1 parameter kind, but found 0"
+                  )
+                , ( "invalid kind"
+                  , [ "abstract Fixture.Token 1 Type->Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "invalid parameter kind"
+                  )
+                , ( "duplicate"
+                  , [ "abstract Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    , "abstract Fixture.Token 1 Type"
+                    ]
+                  , "duplicate classification for Fixture.Token"
+                  )
+                , ( "unknown"
+                  , [ "abstract Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    , "abstract Fixture.Missing 0"
+                    ]
+                  , "unknown datatype Fixture.Missing"
+                  )
+                , ( "nonempty"
+                  , [ "abstract Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    , "abstract Fixture.Full 0"
+                    ]
+                  , "has constructors and cannot be classified as abstract"
+                  )
+                , ( "arity"
+                  , [ "abstract Fixture.Token 2 Type Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "arity mismatch for Fixture.Token"
+                  )
+                , ( "incomplete"
+                  , ["abstract Fixture.Token 1 Type"]
+                  , "missing classification for Fixture.Empty"
+                  )
+                ]
+          forM_ cases $ \(label, manifestLines, expectedMessage) ->
+            withTemporaryDirectoryFiles
+                [ ("Fixture.hs", moduleSource)
+                , ("types.visibility", unlines manifestLines)
+                ] $ \environmentDirectory -> do
+              (result, _) <- runLoad
+                $ environmentFromPath environmentDirectory
+              failures <- case result of
+                Left (TypeVisibilityManifestErrors values) -> pure values
+                Left failure -> fail $ label ++ " produced the wrong failure: "
+                  ++ show failure
+                Right _ -> fail $ label ++ " manifest was accepted"
+              let rendered = environmentLoadErrorDiagnostics
+                    $ TypeVisibilityManifestErrors failures
+              assertBool (label ++ " diagnostic omitted its reason")
+                $ any (isInfixOf expectedMessage . diagnosticMessage)
+                $ NonEmpty.toList rendered
+              case label of
+                "incomplete" -> pure ()
+                _ -> assertBool
+                  (label ++ " manifest diagnostic lost its line span")
+                  $ any ((/= Nothing) . diagnosticSpan)
+                  $ NonEmpty.toList rendered
+              assertBool (label ++ " diagnostic lost its stable code")
+                $ all ((== Just "EXF_TYPE_VISIBILITY") . diagnosticCode)
+                $ NonEmpty.toList rendered
       , testCase "built-in constructors retain configured search penalties" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           (sourceEnvironmentResult, _) <- runLoad
@@ -8274,6 +8695,90 @@ tests = testGroup "Exference"
               expression = ExpLambda 1 polymorphic $ ExpVar 1 polymorphic
           checkExpression (mkQueryClassEnv staticClasses []) [] []
             (TypeArrow renamed polymorphic) [] expression @?= Right ()
+      , testCase "instantiates each polymorphic local occurrence independently" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              result = TypeCons $ name "Result"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              combineName = name "combine"
+              integerName = name "integer"
+              booleanName = name "boolean"
+              functions =
+                [ FunctionBinding result combineName 0 [] [integer, boolean]
+                , FunctionBinding integer integerName 0 [] []
+                , FunctionBinding boolean booleanName 0 [] []
+                ]
+              use local ty value = ExpApply
+                (ExpVar local $ TypeArrow ty ty)
+                (ExpName value)
+              expression = ExpLambda 1 polymorphic
+                $ ExpApply
+                    (ExpApply (ExpName combineName)
+                      $ use 1 integer integerName)
+                    (use 1 boolean booleanName)
+          checkExpression (mkQueryClassEnv staticClasses []) functions []
+            (TypeArrow polymorphic result) [] expression @?= Right ()
+      , testCase "a flexible occurrence annotation requests instantiation" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let unit = TypeTuple Boxed []
+              polymorphic = TypeForall [0] [] $ TypeVar 0
+              expression = ExpLambda 1 polymorphic $ ExpVar 1 (TypeVar 2)
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow polymorphic unit) [] expression @?= Right ()
+          let vacuousUnit = TypeForall [] [] unit
+              wrappedOccurrence = ExpLambda 1 polymorphic
+                $ ExpVar 1 $ TypeForall [] [] $ TypeVar 2
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow polymorphic vacuousUnit) [] wrappedOccurrence @?= Right ()
+      , testCase "a quantified occurrence annotation requests checked subsumption" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let polymorphic = TypeForall [0] [] $ TypeVar 0
+              distinct = TypeForall [1] []
+                $ TypeArrow (TypeVar 1) (TypeVar 1)
+              expression = ExpLambda 1 polymorphic $ ExpVar 1 distinct
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow polymorphic distinct) [] expression @?= Right ()
+
+          let integer = TypeCons $ name "Int"
+              lessGeneral = TypeForall [2] []
+                $ TypeArrow integer integer
+              universalIdentity = TypeForall [3] []
+                $ TypeArrow (TypeVar 3) (TypeVar 3)
+              lessGeneralUse = ExpLambda 2 lessGeneral
+                $ ExpVar 2 universalIdentity
+              providerIdentity = TypeForall [4] []
+                $ TypeArrow (TypeVar 4) (TypeVar 4)
+              impredicative = TypeForall [5] []
+                $ TypeArrow
+                    (TypeForall [6] []
+                      $ TypeArrow (TypeVar 6) (TypeVar 6))
+                    (TypeForall [7] []
+                      $ TypeArrow (TypeVar 7) (TypeVar 7))
+              impredicativeUse = ExpLambda 3 providerIdentity
+                $ ExpVar 3 impredicative
+              rejects candidateGoal candidate = case checkExpression
+                  (mkQueryClassEnv staticClasses []) [] [] candidateGoal []
+                  candidate of
+                Left TypeMismatch{} -> pure ()
+                actual -> fail $ "checker accepted invalid quantified subsumption: "
+                  ++ show actual
+          rejects (TypeArrow lessGeneral universalIdentity) lessGeneralUse
+          rejects (TypeArrow providerIdentity impredicative) impredicativeUse
+      , testCase "rejects an invalid monomorphic provider annotation" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              invalidUse = TypeArrow integer boolean
+              expression = ExpLambda 1 polymorphic $ ExpVar 1 invalidUse
+          case checkExpression (mkQueryClassEnv staticClasses []) [] []
+              (TypeArrow polymorphic invalidUse) [] expression of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail $ "checker accepted an inconsistent forall use: "
+              ++ show actual
       , testCase "empty cases require a matching empty deconstructor" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let emptyType = TypeCons $ name "Empty"
@@ -8954,6 +9459,25 @@ withTemporaryFile source action = do
       hClose handle
       pure path)
     removeFile
+    action
+
+withTemporaryDirectoryFiles
+  :: [(FilePath, String)]
+  -> (FilePath -> IO a)
+  -> IO a
+withTemporaryDirectoryFiles files action = do
+  temporaryDirectory <- getTemporaryDirectory
+  bracket
+    (do
+      (path, handle) <- openTempFile temporaryDirectory
+        "exference-loader-environment"
+      hClose handle
+      removeFile path
+      createDirectory path
+      forM_ files $ \(fileName, contents) ->
+        writeFile (path ++ "/" ++ fileName) contents
+      pure path)
+    removePathForcibly
     action
 
 classEnvironmentFromSources

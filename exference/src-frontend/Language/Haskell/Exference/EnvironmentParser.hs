@@ -24,6 +24,7 @@ module Language.Haskell.Exference.EnvironmentParser
   , environmentFromModuleAndRatings
   , environmentFromFiles
   , environmentFromSources
+  , environmentFromSourcesWithTypeVisibility
   , environmentFromPath
   , toSynthesisSourceEnvironment
   , toSynthesisSourceInventory
@@ -68,13 +69,17 @@ import Language.Haskell.Synthesis.Diagnostic
   , codedDiagnostic
   , contextualDiagnostic
   , diagnostic
+  , mkSourcePosition
+  , mkSourceSpan
   , withCode
   , withSource
+  , withSpan
   )
 
 import Control.DeepSeq
 
 import Control.Monad ( forM_ )
+import Data.Char (isSpace)
 import Data.List ( intercalate, sort, sortOn, isSuffixOf )
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NonEmpty
@@ -101,7 +106,7 @@ import Control.Monad.Trans.Except (runExceptT, throwE)
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as S
-import Data.Void (absurd)
+import Data.Void (Void, absurd)
 import Text.Read ( readMaybe )
 import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Count as SharedCount
@@ -110,6 +115,7 @@ import qualified Language.Haskell.Synthesis.Declaration as SharedDeclaration
 import qualified Language.Haskell.Synthesis.Environment as SharedEnvironment
 import qualified Language.Haskell.Synthesis.KindInference as SharedKindInference
 import qualified Language.Haskell.Synthesis.Inventory as SharedInventory
+import qualified Language.Haskell.Synthesis.Kind as SharedKind
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeSynonym as SharedTypeSynonym
 
@@ -195,10 +201,12 @@ checkedSourceProjection (CheckedSourceEnvironment prepared synonyms) =
     $ SharedTypeSynonym.preparedInventory
     $ preparedSynthesisWitness prepared
   dataNames =
-    [ name
-    | SharedDeclaration.DataTypeDeclaration _ name _ _ <-
-        SharedEnvironment.environmentDeclarations shared
-    ]
+    concatMap declarationTypeName
+      $ SharedEnvironment.environmentDeclarations shared
+  declarationTypeName declaration = case declaration of
+    SharedDeclaration.DataTypeDeclaration _ name _ _ -> [name]
+    SharedDeclaration.AbstractTypeDeclaration _ name _ -> [name]
+    _ -> []
   methodOwners = M.fromList
     [ (SharedDeclaration.valueName method, owner)
     | SharedDeclaration.ClassDeclaration _ owner _ _ methods <-
@@ -292,6 +300,10 @@ data EnvironmentLoadError
   -- table, which has no source location even in principle; they keep the
   -- bare string channel deliberately.
   | BuiltInEnvironmentErrors (NonEmpty String)
+  | TypeVisibilityManifestErrors (NonEmpty Diagnostic)
+    -- ^ A path-local sidecar was unreadable, malformed, incomplete, or did
+    -- not agree exactly with the constructorless datatype declarations in
+    -- the same directory.
   | InvalidSourceInventory SynthesisEnvironmentError
   deriving (Eq, Show)
 
@@ -330,6 +342,8 @@ environmentLoadErrorDiagnostics failure = case failure of
     "EXF_BUILTIN_ENVIRONMENT"
     "could not construct Exference's built-in source environment"
     errors
+  TypeVisibilityManifestErrors errors ->
+    fmap (withCode "EXF_TYPE_VISIBILITY") errors
   InvalidSourceInventory inventoryFailure -> oneDiagnostic
     "EXF_SOURCE_INVENTORY"
     "the source environment failed shared inventory validation"
@@ -390,6 +404,367 @@ captureIO path action = first
 readTextFile :: FilePath -> IO (Either Diagnostic String)
 readTextFile path = captureIO path
   $ readFile path >>= evaluate . force
+
+-- Constructorless declarations are ambiguous in a hand-written signature
+-- catalogue: some denote genuine empty datatypes (and therefore justify an
+-- empty case), while most stand in for opaque runtime types whose constructors
+-- merely are not listed. Haskell syntax cannot express that distinction, so a
+-- directory may carry an explicit, path-local manifest.
+data TypeVisibility
+  = AbstractTypeVisibility
+  | EmptyTypeVisibility
+  deriving (Eq, Show)
+
+data TypeVisibilityEntry = TypeVisibilityEntry
+  { typeVisibility :: TypeVisibility
+  , typeVisibilityName :: QualifiedName
+  , typeVisibilityArity :: Int
+  , typeVisibilityParameterKinds :: [SharedKind.Kind Void]
+  , typeVisibilitySource :: FilePath
+  , typeVisibilityLine :: Int
+  , typeVisibilityLineLength :: Int
+  }
+  deriving (Eq, Show)
+
+data TypeVisibilityManifest = TypeVisibilityManifest
+  { typeVisibilityManifestSource :: FilePath
+  , typeVisibilityManifestEntries
+      :: M.Map QualifiedName TypeVisibilityEntry
+  }
+  deriving (Eq, Show)
+
+parseTypeVisibilitySource
+  :: FilePath
+  -> String
+  -> [Either Diagnostic TypeVisibilityEntry]
+parseTypeVisibilitySource path source =
+  [ parseLine lineNumber line
+  | (lineNumber, line) <- zip [1 ..] $ lines source
+  , not $ commentOnly line
+  ]
+ where
+  -- A hash is legal in a symbolic Haskell type name. Treat it as a comment
+  -- marker only when it is the first non-whitespace character, rather than
+  -- truncating names such as @Fixture.(:#)@.
+  commentOnly line = case dropWhile isSpace line of
+    [] -> True
+    '#' : _ -> True
+    _ -> False
+
+  parseLine lineNumber line = case words line of
+    visibilitySource : nameSource : aritySource : kindSources -> do
+      visibility <- case visibilitySource of
+        "abstract" -> Right AbstractTypeVisibility
+        "empty" -> Right EmptyTypeVisibility
+        _ -> Left $ lineDiagnostic lineNumber line
+          $ "unknown classification " ++ show visibilitySource
+            ++ "; expected 'abstract' or 'empty'"
+      typeName <- case SharedName.parseName nameSource of
+        Left failure -> Left $ lineDiagnostic lineNumber line
+          $ "invalid type name " ++ show nameSource ++ ": "
+            ++ SharedName.renderNameError failure
+        Right parsed
+          | SharedName.nameModule parsed == Nothing ->
+              Left $ lineDiagnostic lineNumber line
+                $ "type name " ++ show nameSource
+                  ++ " must be module-qualified"
+          | otherwise -> Right parsed
+      arity <- case readMaybe aritySource :: Maybe Int of
+        Just value | value >= 0 -> Right value
+        _ -> Left $ lineDiagnostic lineNumber line
+          $ "invalid nonnegative type arity " ++ show aritySource
+      if length kindSources == arity then Right () else Left $
+        lineDiagnostic lineNumber line
+          $ "type arity " ++ show arity ++ " requires " ++ show arity
+              ++ " parameter kind" ++ (if arity == 1 then "" else "s")
+              ++ ", but found " ++ show (length kindSources)
+      parameterKinds <- mapM
+        (first (lineDiagnostic lineNumber line) . parseVisibilityKind)
+        kindSources
+      Right TypeVisibilityEntry
+        { typeVisibility = visibility
+        , typeVisibilityName = typeName
+        , typeVisibilityArity = arity
+        , typeVisibilityParameterKinds = parameterKinds
+        , typeVisibilitySource = path
+        , typeVisibilityLine = lineNumber
+        , typeVisibilityLineLength = length line
+        }
+    _ -> Left $ lineDiagnostic lineNumber line
+      "expected: abstract|empty Module.Type ARITY PARAMETER_KIND..."
+
+  lineDiagnostic lineNumber line = manifestLineDiagnostic
+    path lineNumber (length line)
+
+-- Kind tokens contain no whitespace, so manifest fields remain unambiguous.
+-- Arrows are fully parenthesized; this small grammar is deliberately limited
+-- to the ground kinds that a sealed source inventory can retain.
+parseVisibilityKind :: String -> Either String (SharedKind.Kind Void)
+parseVisibilityKind source = case parseKind source of
+  Just (kind, []) -> Right kind
+  _ -> Left $ "invalid parameter kind " ++ show source
+    ++ "; expected Type or a fully parenthesized arrow such as (Type->Type)"
+ where
+  parseKind input = case input of
+    'T' : 'y' : 'p' : 'e' : rest ->
+      Just (SharedKind.ProperTypeKind, rest)
+    '(' : rest -> do
+      (argument, afterArgument) <- parseKind rest
+      afterArrow <- case afterArgument of
+        '-' : '>' : suffix -> Just suffix
+        _ -> Nothing
+      (result, afterResult) <- parseKind afterArrow
+      suffix <- case afterResult of
+        ')' : remaining -> Just remaining
+        _ -> Nothing
+      Just (SharedKind.FunctionKind argument result, suffix)
+    _ -> Nothing
+
+visibilityConstructorKind
+  :: TypeVisibilityEntry
+  -> SharedKind.Kind Void
+visibilityConstructorKind entry = foldr SharedKind.FunctionKind
+  SharedKind.ProperTypeKind
+  $ typeVisibilityParameterKinds entry
+
+duplicateTypeVisibilityDiagnostics
+  :: [TypeVisibilityEntry]
+  -> [Diagnostic]
+duplicateTypeVisibilityDiagnostics = go M.empty
+ where
+  go _ [] = []
+  go seen (entry : rest) = case M.lookup name seen of
+    Nothing -> go (M.insert name entry seen) rest
+    Just original -> entryDiagnostic entry
+      ("duplicate classification for " ++ SharedName.renderCanonical name
+        ++ "; first classified at " ++ typeVisibilitySource original
+        ++ ":" ++ show (typeVisibilityLine original))
+      : go seen rest
+   where
+    name = typeVisibilityName entry
+
+entryDiagnostic :: TypeVisibilityEntry -> String -> Diagnostic
+entryDiagnostic entry = manifestLineDiagnostic
+  (typeVisibilitySource entry)
+  (typeVisibilityLine entry)
+  (typeVisibilityLineLength entry)
+
+manifestLineDiagnostic :: FilePath -> Int -> Int -> String -> Diagnostic
+manifestLineDiagnostic path lineNumber lineLength message =
+  attachSpan $ withSource path $ diagnostic Error
+    $ "type visibility manifest line " ++ show lineNumber ++ ": " ++ message
+ where
+  attachSpan value = case do
+      start <- mkSourcePosition lineNumber 1
+      end <- mkSourcePosition lineNumber endColumn
+      mkSourceSpan start end of
+    Right span' -> withSpan span' value
+    Left _ -> value
+  endColumn
+    | lineLength == maxBound = maxBound
+    | otherwise = lineLength + 1
+
+loadTypeVisibilityManifest
+  :: [FilePath]
+  -> Loader (Either EnvironmentLoadError (Maybe TypeVisibilityManifest))
+loadTypeVisibilityManifest [] = pure $ Right Nothing
+loadTypeVisibilityManifest paths = do
+  readResults <- lift $ mapM readOne paths
+  case NonEmpty.nonEmpty $ lefts readResults of
+    Just failures -> pure $ Left $ TypeVisibilityManifestErrors failures
+    Nothing -> pure $ parseTypeVisibilitySources $ rights readResults
+ where
+  readOne path = do
+    result <- readTextFile path
+    pure $ case result of
+      Left failure -> Left failure
+      Right contents -> Right (path, contents)
+
+-- Parse already captured sidecars through the same authority as the directory
+-- loader. The REPL uses this boundary so a workspace remains one immutable
+-- snapshot: session construction never reopens a manifest after its modules and
+-- ratings have been read.
+parseTypeVisibilitySources
+  :: [(FilePath, String)]
+  -> Either EnvironmentLoadError (Maybe TypeVisibilityManifest)
+parseTypeVisibilitySources [] = Right Nothing
+parseTypeVisibilitySources sources@((primaryPath, _) : _) = do
+  let parsed = concatMap (uncurry parseTypeVisibilitySource) sources
+      parseFailures = lefts parsed
+      entries = rights parsed
+  case NonEmpty.nonEmpty parseFailures of
+    Just failures -> Left $ TypeVisibilityManifestErrors failures
+    Nothing -> case NonEmpty.nonEmpty
+        $ duplicateTypeVisibilityDiagnostics entries of
+      Just failures -> Left $ TypeVisibilityManifestErrors failures
+      Nothing -> Right $ Just TypeVisibilityManifest
+        { typeVisibilityManifestSource = primaryPath
+        , typeVisibilityManifestEntries = M.fromList
+            [(typeVisibilityName entry, entry) | entry <- entries]
+        }
+
+applyTypeVisibilityManifest
+  :: TypeVisibilityManifest
+  -> SourceEnvironment
+  -> Either
+      (NonEmpty Diagnostic)
+      (SourceEnvironment, S.Set QualifiedName)
+applyTypeVisibilityManifest manifest environment =
+  case NonEmpty.nonEmpty validationFailures of
+    Just failures -> Left failures
+    Nothing -> Right
+      ( environment
+          { sourceDeconstructors =
+              filter (not . isAbstractDeconstructor)
+                $ sourceDeconstructors environment
+          }
+      , abstractNames
+      )
+ where
+  entries = typeVisibilityManifestEntries manifest
+  dataDefinitions = M.fromListWith (flip (++))
+    [ (name, [(arity, null $ deconstructorConstructors deconstructor)])
+    | deconstructor <- sourceDeconstructors environment
+    , Just (name, arity) <- [sourceDataIdentity deconstructor]
+    ]
+  emptyNames = S.fromList
+    [ name
+    | (name, definitions) <- M.toList dataDefinitions
+    , any snd definitions
+    ]
+  validationFailures =
+    concatMap validateEntry (M.elems entries)
+      ++ [ withSource (typeVisibilityManifestSource manifest)
+            $ diagnostic Error
+            $ "type visibility manifest is incomplete; missing classification for "
+                ++ SharedName.renderCanonical name
+         | name <- S.toAscList
+             $ emptyNames S.\\ M.keysSet entries
+         ]
+
+  validateEntry entry = case M.lookup name dataDefinitions of
+    Nothing -> [entryDiagnostic entry
+      $ "unknown datatype " ++ SharedName.renderCanonical name]
+    Just definitions -> let declaredArities = S.fromList $ map fst definitions
+      in
+        [ entryDiagnostic entry
+            $ "datatype " ++ SharedName.renderCanonical name
+                ++ " has constructors and cannot be classified as "
+                ++ visibilitySpelling (typeVisibility entry)
+        | any (not . snd) definitions
+        ] ++
+        [ entryDiagnostic entry
+            $ "arity mismatch for " ++ SharedName.renderCanonical name
+                ++ ": manifest says " ++ show (typeVisibilityArity entry)
+                ++ ", declaration says " ++ intercalate "/"
+                  (map show $ S.toAscList declaredArities)
+        | typeVisibilityArity entry `S.notMember` declaredArities
+        ]
+   where
+    name = typeVisibilityName entry
+
+  visibilitySpelling visibility = case visibility of
+    AbstractTypeVisibility -> "abstract"
+    EmptyTypeVisibility -> "empty"
+
+  isAbstractDeconstructor deconstructor = case
+      sourceDataIdentity deconstructor of
+    Just (name, _)
+      | Just entry <- M.lookup name entries ->
+          typeVisibility entry == AbstractTypeVisibility
+    _ -> False
+
+  abstractNames = S.fromList
+    [ name
+    | deconstructor <- sourceDeconstructors environment
+    , null $ deconstructorConstructors deconstructor
+    , Just (name, _) <- [sourceDataIdentity deconstructor]
+    , Just entry <- [M.lookup name entries]
+    , typeVisibility entry == AbstractTypeVisibility
+    ]
+
+-- Extracted datatype heads are nominal applications to one free variable per
+-- source parameter. Kind validation still happens at inventory sealing; this
+-- small view exists only to compare the manifest's independently recorded
+-- arity before any abstract deconstructor is removed.
+sourceDataIdentity :: DeconstructorBinding -> Maybe (QualifiedName, Int)
+sourceDataIdentity deconstructor = case SharedType.applicationSpine body of
+  (TypeCons name, arguments) -> Just (name, length arguments)
+  _ -> Nothing
+ where
+  (_, _, body) = SharedType.splitLeadingForalls
+    $ deconstructorInput deconstructor
+
+checkSourceEnvironmentWithTypeVisibility
+  :: TypeVisibilityManifest
+  -> SourceEnvironment
+  -> Either EnvironmentLoadError CheckedSourceEnvironment
+checkSourceEnvironmentWithTypeVisibility manifest environment = do
+  (concreteEnvironment, abstractNames) <-
+    first TypeVisibilityManifestErrors
+      $ applyTypeVisibilityManifest manifest environment
+  -- First validate and infer the ordinary declaration graph. The manifest's
+  -- explicit parameter kinds then replace abstract stubs before a second seal:
+  -- this recovers higher-kinded parameters that have no active source use,
+  -- while any kind contradicted by a real signature or instance fails closed.
+  sourceInventory <- first InvalidSourceInventory
+    $ toSynthesisSourceInventory environment
+  abstractInventory <- abstractTypeVisibilityInventory
+    manifest abstractNames sourceInventory
+  prepared <- first InvalidSourceInventory
+    $ prepareSourceSynthesisInventory abstractInventory
+  projected <- first InvalidSourceInventory
+    $ normalizeBackendProjection prepared concreteEnvironment
+  pure $ CheckedSourceEnvironment projected
+    (sourceTypeSynonyms environment)
+
+abstractTypeVisibilityInventory
+  :: TypeVisibilityManifest
+  -> S.Set QualifiedName
+  -> SynthesisInventory
+  -> Either EnvironmentLoadError SynthesisInventory
+abstractTypeVisibilityInventory manifest abstractNames inventory =
+  case NonEmpty.nonEmpty emptyKindFailures of
+    Just failures -> Left $ TypeVisibilityManifestErrors failures
+    Nothing -> first manifestKindFailure $ sealSynthesisInventory declarations
+ where
+  entries = typeVisibilityManifestEntries manifest
+  declarations = map replaceDeclaration
+    $ SharedEnvironment.environmentDeclarations
+    $ SharedInventory.inventoryEnvironment inventory
+  inferredKinds = SharedKindInference.typeConstructorKinds
+    $ SharedInventory.inventoryKindAssumptions inventory
+  emptyKindFailures = concatMap validateEmptyKind $ M.elems entries
+
+  validateEmptyKind entry = case typeVisibility entry of
+    AbstractTypeVisibility -> []
+    EmptyTypeVisibility -> case M.lookup
+        (typeVisibilityName entry) inferredKinds of
+      Nothing -> [entryDiagnostic entry
+        $ "could not recover the inferred kind of empty datatype "
+            ++ SharedName.renderCanonical (typeVisibilityName entry)]
+      Just inferred
+        | inferred == visibilityConstructorKind entry -> []
+        | otherwise -> [entryDiagnostic entry
+            $ "kind mismatch for empty datatype "
+                ++ SharedName.renderCanonical (typeVisibilityName entry)
+                ++ ": manifest says "
+                ++ show (visibilityConstructorKind entry)
+                ++ ", declaration infers " ++ show inferred]
+
+  replaceDeclaration declaration = case declaration of
+    SharedDeclaration.DataTypeDeclaration _ name _ _
+      | name `S.member` abstractNames
+      , Just entry <- M.lookup name entries ->
+          SharedDeclaration.AbstractTypeDeclaration
+            NoDeclarationMetadata name $ visibilityConstructorKind entry
+    _ -> declaration
+
+  manifestKindFailure failure = TypeVisibilityManifestErrors $
+    (withSource (typeVisibilityManifestSource manifest)
+      $ diagnostic Error
+      $ "type visibility kinds are inconsistent with the source inventory: "
+          ++ show failure) NonEmpty.:| []
 
 checkSourceEnvironment
   :: SourceEnvironment
@@ -1463,35 +1838,67 @@ environmentFromFilesM modulePaths ratingPaths = do
 
 -- | Parse, rate, check, and seal exact in-memory source snapshots. Paths are
 -- retained solely as diagnostic/parser identities; neither modules nor
--- ratings are reopened. This is the single-snapshot boundary used by the
--- module-aware REPL.
+-- ratings are reopened. Callers needing catalogue visibility semantics use
+-- the explicit three-snapshot counterpart below.
 environmentFromSources
   :: [(FilePath, String)]
   -> [(FilePath, String)]
   -> IO (LoadReport CheckedSourceEnvironment)
-environmentFromSources moduleSources ratingSources = runLoader
-  $ environmentFromSourcesM moduleSources ratingSources
+environmentFromSources moduleSources ratingSources =
+  environmentFromSourcesWithTypeVisibility moduleSources ratingSources []
+
+-- | Parse, rate, classify constructorless types, check, and seal exact
+-- in-memory snapshots. A nonempty visibility list is one complete manifest for
+-- the supplied module set. The ordinary 'environmentFromSources' entry point
+-- deliberately supplies no manifest and retains normal Haskell empty-datatype
+-- semantics.
+environmentFromSourcesWithTypeVisibility
+  :: [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO (LoadReport CheckedSourceEnvironment)
+environmentFromSourcesWithTypeVisibility moduleSources ratingSources
+    visibilitySources = runLoader
+  $ environmentFromSourcesM moduleSources ratingSources visibilitySources
 
 environmentFromSourcesM
   :: [(FilePath, String)]
   -> [(FilePath, String)]
+  -> [(FilePath, String)]
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
-environmentFromSourcesM moduleSources ratingSources = do
+environmentFromSourcesM moduleSources ratingSources visibilitySources = do
   environmentResult <- parseModuleSourcesM moduleSources
-  finishEnvironmentLoad environmentResult
-    $ pure $ map ratingsFromSource ratingSources
+  case environmentResult of
+    Left failure -> pure $ Left failure
+    Right environment -> case parseTypeVisibilitySources visibilitySources of
+      Left failure -> pure $ Left failure
+      Right manifest -> finishEnvironmentLoadWith
+        (maybe checkSourceEnvironment
+          checkSourceEnvironmentWithTypeVisibility manifest)
+        (Right environment)
+        (pure $ map ratingsFromSource ratingSources)
 
 finishEnvironmentLoad
   :: Either EnvironmentLoadError SourceEnvironment
   -> Loader [Either Diagnostic [(QualifiedName, Penalty)]]
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
-finishEnvironmentLoad environmentResult loadRatings = case environmentResult of
-  Left failure -> pure $ Left failure
-  Right environment -> do
-    ratingResults <- loadRatings
-    forM_ (lefts ratingResults)
-      $ tell . (: []) . ratingFailureDiagnostic
-    rateAndCheckEnvironment (concat $ rights ratingResults) environment
+finishEnvironmentLoad = finishEnvironmentLoadWith checkSourceEnvironment
+
+finishEnvironmentLoadWith
+  :: (SourceEnvironment
+      -> Either EnvironmentLoadError CheckedSourceEnvironment)
+  -> Either EnvironmentLoadError SourceEnvironment
+  -> Loader [Either Diagnostic [(QualifiedName, Penalty)]]
+  -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
+finishEnvironmentLoadWith checkEnvironment environmentResult loadRatings =
+  case environmentResult of
+    Left failure -> pure $ Left failure
+    Right environment -> do
+      ratingResults <- loadRatings
+      forM_ (lefts ratingResults)
+        $ tell . (: []) . ratingFailureDiagnostic
+      rateAndCheckEnvironmentWith checkEnvironment
+        (concat $ rights ratingResults) environment
 
 
 environmentFromPath
@@ -1514,13 +1921,31 @@ environmentFromPathM p = do
             $ sort $ filter (".hs" `isSuffixOf`) files
           ratingPaths = map (p </>)
             $ sort $ filter (".ratings" `isSuffixOf`) files
-      environmentFromFilesM modules ratingPaths
+          visibilityPaths = map (p </>)
+            $ sort $ filter (".visibility" `isSuffixOf`) files
+      environmentResult <- parseModulesM
+        [ (haskellSrcExtsParseMode modulePath, modulePath)
+        | modulePath <- modules
+        ]
+      case environmentResult of
+        Left failure -> pure $ Left failure
+        Right environment -> do
+          manifestResult <- loadTypeVisibilityManifest visibilityPaths
+          case manifestResult of
+            Left failure -> pure $ Left failure
+            Right manifest -> finishEnvironmentLoadWith
+              (maybe checkSourceEnvironment
+                checkSourceEnvironmentWithTypeVisibility manifest)
+              (Right environment)
+              (lift $ mapM ratingsFromFile ratingPaths)
 
-rateAndCheckEnvironment
-  :: [(QualifiedName, Penalty)]
+rateAndCheckEnvironmentWith
+  :: (SourceEnvironment
+      -> Either EnvironmentLoadError CheckedSourceEnvironment)
+  -> [(QualifiedName, Penalty)]
   -> SourceEnvironment
   -> Loader (Either EnvironmentLoadError CheckedSourceEnvironment)
-rateAndCheckEnvironment ratings environment = do
+rateAndCheckEnvironmentWith checkEnvironment ratings environment = do
   let (ratedEnvironment, warnings) = applyRatings ratings environment
   tell warnings
-  pure $ checkSourceEnvironment ratedEnvironment
+  pure $ checkEnvironment ratedEnvironment

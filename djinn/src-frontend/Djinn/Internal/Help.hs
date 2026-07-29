@@ -26,9 +26,11 @@ verboseHelp = "\
 \   sel ((_, a), (b, _)) = (a, b)\n\
 \   Djinn> cast ? a->b\n\
 \   -- cast cannot be realized.\n\
-\  Djinn will always find a (total) function if one exists.  (The worst\n\
-\case complexity is bad, but unlikely for typical examples.)  If no\n\
-\function exists Djinn will always terminate and say so.\n\
+\  Within its rank-1 propositional fragment, Djinn will always find a (total)\n\
+\function if one exists.  (The worst case complexity is bad, but unlikely for\n\
+\typical examples.)  Rank-N support is deliberately bounded; outside that\n\
+\supported fragment Djinn reports inhabitation as undecided instead of claiming\n\
+\that no function exists.\n\
 \  When multiple implementations of the type exist, Djinn will only\n\
 \give one of them.  Example:\n\
 \  Djinn> f ? a->a->a\n\

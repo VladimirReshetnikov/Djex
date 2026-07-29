@@ -11,6 +11,8 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   , loadExferenceSessionFromFilesWithPolicy
   , loadExferenceSessionFromSources
   , loadExferenceSessionFromSourcesWithPolicy
+  , loadExferenceSessionFromSourcesWithTypeVisibility
+  , loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
   , loadExferenceSessionWithPolicy
   , parseExferenceRequestInScope
   , parseExferenceRequestWithCheckedTargetInScope
@@ -34,6 +36,8 @@ main = defaultMain $ testGroup "Exference frontend import surface"
       loadExferenceSessionFromFilesWithPolicy `seq`
       loadExferenceSessionFromSources `seq`
       loadExferenceSessionFromSourcesWithPolicy `seq`
+      loadExferenceSessionFromSourcesWithTypeVisibility `seq`
+      loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy `seq`
       loadExferenceSessionWithPolicy `seq`
       ExferenceQueryScope Nothing [] [] [] `seq`
       parseExferenceRequestInScope `seq`

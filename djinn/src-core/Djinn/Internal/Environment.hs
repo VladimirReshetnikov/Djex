@@ -87,9 +87,13 @@ data PreparedEnvironment = PreparedEnvironment
 -- negative evidence. The aggregate bit records only whether a declaration's
 -- primary polarized translation was incomplete; exhaustion of that primary
 -- approximation must not prove a negative about the source environment.
+-- The spellings collect every premise-scope type variable and opened-forall
+-- skolem so query-time instantiation policy can reuse them as candidates
+-- without reparsing rendered atoms.
 data PreparedPolarizedPremises = PreparedPolarizedPremises
     [(Symbol, Formula)]
     Bool
+    [String]
 
 -- Historical context APIs wrap final methods in 'HType' only at their
 -- compatibility edge; native queries never cross this projection.
@@ -568,6 +572,8 @@ sealPreparedEnvironment expansion = do
                 concatMap alternatePremises premiseVariantGroups
             )
             (any premiseTranslationIncomplete translatedPremises)
+            (SharedCollection.distinctOn id $
+                concatMap premiseCandidateSpellings translatedPremises)
     let classIndex = SharedClass.prepareClassIndex inventory
     -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
     -- ground kind. Check that backend-specific requirement at sealing while
@@ -602,11 +608,14 @@ sealPreparedEnvironment expansion = do
         plans <- first (("function " ++ prHSymbolOp name ++ ": ") ++) $
             compilePolarizedSynthesisFormulaPlans namespace NegativeFormula
                 compiler body
-        return (Symbol name, plans)
+        let spellings =
+                SharedType.freeVariablesInFirstOccurrenceOrder body ++
+                polarizedFormulaPlanSkolems plans
+        return (Symbol name, plans, spellings)
 
-    opaquePremise (symbol, plans) =
+    opaquePremise (symbol, plans, _) =
         (symbol, exactOpaqueFormulaPlan plans)
-    polarizedPremiseVariants (symbol, plans) =
+    polarizedPremiseVariants (symbol, plans, _) =
         [ (symbol, formula)
         | formula <- SharedCollection.distinctOn id $
             map translatedFormula
@@ -620,8 +629,9 @@ sealPreparedEnvironment expansion = do
     alternatePremises variants = case variants of
         _ : alternatives -> alternatives
         [] -> []
-    premiseTranslationIncomplete (_, plans) =
+    premiseTranslationIncomplete (_, plans, _) =
         translationIncomplete $ primaryFormulaPlan plans
+    premiseCandidateSpellings (_, _, spellings) = spellings
 
     freshBinder reserved variable = Just
         $ fst $ freshPrimedVariable reserved variable
@@ -724,14 +734,15 @@ preparedEnvironmentFunctionPremises
 
 -- | Every sound rank-N view of each premise, with all historical primary views
 -- first in declaration order, paired with whether any primary translation had
--- to leave a quantified subtree opaque.
+-- to leave a quantified subtree opaque, and with the premise-scope variable
+-- and skolem spellings available to query-time instantiation policy.
 preparedEnvironmentPolarizedFunctionPremises
     :: PreparedEnvironment
-    -> ([(Symbol, Formula)], Bool)
+    -> ([(Symbol, Formula)], Bool, [String])
 preparedEnvironmentPolarizedFunctionPremises
         (PreparedEnvironment _ _ _
-            (PreparedPolarizedPremises premises incomplete) _) =
-        (premises, incomplete)
+            (PreparedPolarizedPremises premises incomplete spellings) _) =
+        (premises, incomplete, spellings)
 
 -- | Translate a checked shared type directly. Stable raw and native queries
 -- meet here after raw compatibility validation and use the exact same

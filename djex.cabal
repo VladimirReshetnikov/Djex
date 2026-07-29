@@ -198,6 +198,7 @@ Library
     Djinn.Internal.Declaration
     Djinn.Internal.HCheck.Implementation
     Djinn.Internal.Help
+    Djinn.Internal.Instantiation
     Djinn.Internal.ProofToGenerated
     Djinn.Internal.REPL
     Djinn.Internal.Type

@@ -146,19 +146,27 @@ one complementary rank-N rule family apiece:
 
 - Djinn introduces a context-free `forall` in a positive formula position.
   Arrow results, tuples, and datatype structure preserve polarity; crossing an
-  arrow parameter reverses it.
+  arrow parameter reverses it. Djinn also eliminates a hypothesis-side
+  context-free chain of at most three leading binders by instantiating it at
+  candidates the sequent itself supplies — goal variables, opened-forall
+  skolems, premise-scope variables, and quantified atoms the query already
+  mentions, the last giving a guarded form of impredicative instantiation.
 - Exference instantiates the complete leading `forall` chain of a scoped value
   freshly at each monomorphic use. Its direct contexts become proof
   obligations. Exact polymorphic forwarding takes priority. A context-free
   quantified provider with no free flexible variables may also be forwarded to
-  a less-general such goal when shallow predicative instantiation proves the
-  relation without solving ambient inference variables.
+  a less-general such goal when shallow instantiation proves the relation
+  without solving ambient inference variables; a provider binder may be solved
+  impredicatively with a quantified subtree the requested scheme itself
+  supplies.
 
 For example:
 
 ```haskell
 c -> (forall a. a -> a)
 ((forall a. a -> a) -> c) -> c
+(forall a. a -> a) -> b -> b
+(forall a. a -> Maybe a) -> (forall b. b -> b) -> Maybe (forall b. b -> b)
 (forall a. a -> a) -> Int -> Int
 (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
@@ -181,7 +189,8 @@ and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
 polymorphic-let generalization, or visible type application. In particular,
-Djinn keeps unsupported negative occurrences opaque; if that approximation
+Djinn keeps constrained hypothesis occurrences and chains beyond three binders
+opaque; if the bounded approximation
 finds no term, the result is inconclusive rather than a proof of
 uninhabitability. Its plan family is deliberately linear: fully opened,
 exactly opaque, one plan per positive occurrence retained opaquely while the
@@ -190,11 +199,18 @@ siblings stay opaque. Opening a nested occurrence includes its enclosing
 forall chain. A single proof can therefore mix exact transport with structural
 introduction at sibling occurrences; the family covers every combination of
 three independent sites with at most `2n + 2` categorized plans for `n` sites.
-It still omits balanced subsets such as exactly two open and two opaque sites
-among four. Reusable loaded premises expose the same sound views
+When instantiation axioms exist, the same plans are appended once more with
+those axioms available, after every historical plan and under the shared
+cutoff and fuel, so previously decided queries keep their exact results and
+rankings. The base family still omits balanced subsets such as exactly two
+open and two opaque sites
+among four, though instantiable hypotheses often cover such middle subsets
+through the appended axiom plans. Reusable loaded premises expose the same
+sound views
 simultaneously. An incomplete primary premise also conservatively disables
 negative evidence for the whole query, even when that premise would turn out
-to be irrelevant.
+to be irrelevant. Generated code that transports quantified atoms or uses
+impredicative instances may require `RankNTypes` and `ImpredicativeTypes`.
 
 In `both` mode Djex prints labelled sections in a deterministic order:
 

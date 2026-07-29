@@ -307,13 +307,16 @@ testBoundedRankNSearch = do
         [ "instantiate ? (forall a. a) -> b"
         , "twoOpaque ? (forall a. a) -> (forall b. b -> q) -> " ++
             "((forall c. c), (forall d. d -> q), (forall e. e -> e))"
+        , "inconclusive ? (forall a b c d. a -> (a, b, c, d)) -> e"
         , ":quit"
         ]
-    assertContains "opaque rank-N elimination remains inconclusive"
-        ("instantiate: no proof found in the supported inference fragment; " ++
-            "inhabitation is undecided.") output
+    assertContains "hypothesis instantiation realizes the opaque elimination"
+        "instantiate a = a" output
     assertContains "the dual rank-N frontier solves two opaque siblings"
         "twoOpaque a b = (a, b, \\c -> c)" output
+    assertContains "an uninstantiable rank-N chain remains inconclusive"
+        ("inconclusive: no proof found in the supported inference fragment; " ++
+            "inhabitation is undecided.") output
     assertBool "a valid inconclusive result was reported as an internal error"
         $ not $ "Djinn returned no evidence" `isInfixOf` output
 

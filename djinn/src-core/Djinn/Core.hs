@@ -76,6 +76,12 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
 import Djinn.Internal.HTypes
+import Djinn.Internal.Instantiation
+    ( eliminateInstantiationEvidence
+    , instantiationAxiomPremises
+    , instantiationAxiomSymbols
+    , instantiationAxioms
+    )
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
@@ -84,6 +90,7 @@ import Djinn.Internal.Type
 import Djinn.Internal.TypeFormula
     ( PolarizedFormulaPlans
     , exactOpaqueFormulaPlan
+    , polarizedFormulaPlanSkolems
     , primaryFormulaPlan
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
@@ -841,7 +848,9 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
     -- which the synthesized term does not require a class method.
     plans <- translatorFailure $
         translateType translatePlans "goal type: " elaboratedGoal
-    searchPreparedFormula options prepared target plans
+    searchPreparedFormula options prepared target
+        (SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal)
+        plans
   where
     translatorFailure = first DjinnInternalQueryFailure
 
@@ -880,15 +889,17 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
 
 -- Proof search is representation-independent once the checked source query
 -- has become a formula. Both the native and raw entrances meet at this single
--- worker; validated class contexts add no premises here.
+-- worker; validated class contexts add no premises here, while bounded
+-- hypothesis-instantiation axioms join every plan under erased evidence.
 searchPreparedFormula
     :: QueryOptions
     -> PreparedEnvironment
     -> SharedGenerated.DefinitionName
+    -> [HSymbol]
     -> PolarizedFormulaPlans
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target formulaPlans = do
-    let (premises, premiseTranslationIncomplete) =
+searchPreparedFormula options prepared target goalVariables formulaPlans = do
+    let (premises, premiseTranslationIncomplete, premiseSpellings) =
             preparedEnvironmentPolarizedFunctionPremises prepared
         collectAcrossPlans =
             optionAlternatives options || optionSorted options
@@ -909,23 +920,50 @@ searchPreparedFormula options prepared target formulaPlans = do
             | formula <- alternativeForms
             ]
         plans = SharedCollection.distinctOn fst rawPlans
-    results <- runPlans collectAcrossPlans premises
-        options (optionCutoff options) [] plans
+        -- The candidate spellings are source-level facts: the goal's free
+        -- variables, every opened-forall skolem of the goal plans, and the
+        -- sealed premise scopes. No rendered atom text is parsed back.
+        axioms = instantiationAxioms
+            (preparedEnvironmentSynthesisFormulaTranslator prepared)
+            (goalVariables ++
+                polarizedFormulaPlanSkolems formulaPlans ++
+                premiseSpellings)
+            (map fst rawPlans)
+            (map snd premises)
+        axiomSymbols = instantiationAxiomSymbols axioms
+        axiomPremises = instantiationAxiomPremises axioms
+        -- Instantiation axioms search only after every historical plan, and
+        -- under the shared global cutoff and fuel. Running them first would
+        -- let one polymorphic hypothesis flood the candidate stream and
+        -- starve the frontier plans whose exact-transport candidates rank
+        -- best. A query the historical family already decides therefore
+        -- keeps its exact results, ranking, and completion behavior.
+        searchPlans =
+            [ (premises, Set.empty, form, sound)
+            | (form, sound) <- plans
+            ] ++
+            [ (premises ++ axiomPremises, axiomSymbols, form, False)
+            | not (null axiomPremises)
+            , (form, _) <- plans
+            ]
+    results <- runPlans collectAcrossPlans
+        options (optionCutoff options) [] searchPlans
     mergeFormulaPlanResults options results
   where
-    runPlans _ _ _ _ completed [] = Right $ reverse completed
-    runPlans collect premises currentOptions candidateLimit completed
-            ((form, negativeEvidenceSound) : remaining) = do
+    runPlans _ _ _ completed [] = Right $ reverse completed
+    runPlans collect currentOptions candidateLimit completed
+            ((planPremises, axiomSymbols, form, negativeEvidenceSound)
+                : remaining) = do
         result <- searchPreparedFormulaPlan
-            currentOptions candidateLimit target premises form
-            negativeEvidenceSound
+            currentOptions candidateLimit target planPremises axiomSymbols
+            form negativeEvidenceSound
         let completed' = result : completed
             nextLimit = candidateLimit - formulaPlanProofCount result
             continue =
                 formulaPlanFinished result &&
                 (collect || null (formulaPlanClauses result))
         if continue
-            then runPlans collect premises
+            then runPlans collect
                 currentOptions {
                     optionBudget = formulaPlanRemainingBudget result
                     }
@@ -958,17 +996,21 @@ data FormulaPlanResult = FormulaPlanResult
 -- | One proof-search plan. The final flag authorizes logical negative
 -- evidence only when translation covered every quantified subtree. Checked
 -- proofs remain useful under an incomplete plan, but absence of one does not
--- establish that the original Haskell type is uninhabited.
+-- establish that the original Haskell type is uninhabited. Instantiation
+-- axioms participate in search and proof checking under their reserved
+-- symbols; their evidence is erased only after checking, immediately before
+-- the proof becomes generated code.
 searchPreparedFormulaPlan
     :: QueryOptions
     -> Int
     -> SharedGenerated.DefinitionName
     -> [(Symbol, Formula)]
+    -> Set.Set Symbol
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
-searchPreparedFormulaPlan options candidateLimit target externalEnv form
-        negativeEvidenceSound = do
+searchPreparedFormulaPlan options candidateLimit target externalEnv
+        axiomSymbols form negativeEvidenceSound = do
     let name = SharedGenerated.definitionSpelling target
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
@@ -1036,6 +1078,7 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv form
                 "cannot construct generated clause" $
                 mapM
                     (termToGeneratedClause target .
+                        eliminateInstantiationEvidence axiomSymbols .
                         restoreProofTerm proofEnv)
                     internalProofs
             let firstProof = case internalProofs of

@@ -18,11 +18,13 @@ module Djinn.Internal.TypeFormula
     , FormulaTranslation
     , translatedFormula
     , translationIncomplete
+    , translationIntroducedSkolems
     , PolarizedFormulaPlans
     , primaryFormulaPlan
     , exactOpaqueFormulaPlan
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
+    , polarizedFormulaPlanSkolems
     , prepareFormulaCompiler
     , compileFormula
     , compilePolarizedFormulaPlans
@@ -132,10 +134,14 @@ data FormulaPolarity
 -- | A polarized formula plus an honesty bit. 'translationIncomplete' means
 -- that at least one quantified subtree had to remain opaque. Proofs are still
 -- sound, but an empty proof search is not a refutation of the Haskell type.
+-- 'translationIntroducedSkolems' lists the fresh rigid variables allocated by
+-- opened positive foralls; instantiation policy treats them as ordinary
+-- sequent variables without reparsing rendered atom spellings.
 data FormulaTranslation = FormulaTranslation
     { translatedFormula :: Formula
     , translationIncomplete :: Bool
     , translationOpenableForalls :: [ForallSite]
+    , translationIntroducedSkolems :: [String]
     }
     deriving (Eq, Show)
 
@@ -152,6 +158,16 @@ data PolarizedFormulaPlans = PolarizedFormulaPlans
     , singleOpenFormulaPlans :: [FormulaTranslation]
     }
     deriving (Eq, Show)
+
+-- | Every skolem variable introduced by any plan of this family, in plan
+-- order. Frontier plans reuse the primary expansion and namespace, so their
+-- spellings repeat primary skolems; duplicates are harmless because the
+-- consumer deduplicates candidate spellings.
+polarizedFormulaPlanSkolems :: PolarizedFormulaPlans -> [String]
+polarizedFormulaPlanSkolems plans =
+    translationIntroducedSkolems (primaryFormulaPlan plans) ++
+    concatMap translationIntroducedSkolems
+        (singleOpaqueFormulaPlans plans ++ singleOpenFormulaPlans plans)
 
 -- A definition origin plus the reverse source path is stable across alias
 -- expansion, duplicated arguments, datatype fields, and reopened forall
@@ -436,6 +452,7 @@ lowerExpansionType lowering definitions path occurrencePath source = case source
             (Disj $ map fst translated)
             (any (translationIncomplete . snd) translated)
             (concatMap (translationOpenableForalls . snd) translated)
+            (concatMap (translationIntroducedSkolems . snd) translated)
     _ -> lowerApplication lowering definitions path occurrencePath source
   where
     lowerChild index = lowerExpansionType lowering definitions path
@@ -465,7 +482,7 @@ lowerForall lowering definitions path occurrencePath origin atom = case lowering
             SharedType.ForallType binders [] body
                 | site `Set.member` opaqueSites -> Right incompleteOpaque
                 | otherwise -> do
-                    opened <- openForallBody
+                    (skolems, opened) <- openForallBody
                         namespace occurrencePath origin binders body
                     expanded <- expansionTypeAt openedView
                         (OpenedForallOrigin origin) [] opened
@@ -474,6 +491,8 @@ lowerForall lowering definitions path occurrencePath origin atom = case lowering
                     return translation
                         { translationOpenableForalls = site
                             : translationOpenableForalls translation
+                        , translationIntroducedSkolems = skolems
+                            ++ translationIntroducedSkolems translation
                         }
             _ -> Right incompleteOpaque
     PolarizedForalls _ NegativeFormula _ _ -> Right incompleteOpaque
@@ -487,25 +506,33 @@ lowerForall lowering definitions path occurrencePath origin atom = case lowering
 -- in @body@ and ordinary capture-avoiding substitution can replace them. The
 -- private '$' namespace cannot be produced by Djinn's checked source parser;
 -- the reservation walk also protects programmatically constructed inputs.
+-- The allocated skolem spellings are returned so instantiation policy can
+-- treat them as sequent variables without reparsing rendered atoms.
 openForallBody
     :: Natural
     -> [Natural]
     -> ExpansionOrigin
     -> [String]
     -> SharedType.Type String
-    -> Either String (SharedType.Type String)
-openForallBody namespace occurrencePath origin binders body = first show $
-    SharedType.substituteTypeVariables allocateShadow Set.empty replacements body
+    -> Either String ([String], SharedType.Type String)
+openForallBody namespace occurrencePath origin binders body = do
+    opened <- first show $ SharedType.substituteTypeVariables
+        allocateShadow Set.empty replacements body
+    return (map snd assignments, opened)
   where
     source = SharedType.ForallType binders [] body
-    (_, replacements) = foldl allocateSkolem
-        (foldMap Set.singleton source, Map.empty)
+    (_, assignments) = foldl allocateSkolem
+        (foldMap Set.singleton source, [])
         $ zip [0 :: Natural ..] binders
+    replacements = Map.fromList
+        [ (binder, SharedType.TypeVariable fresh)
+        | (binder, fresh) <- assignments
+        ]
 
-    allocateSkolem (reserved, substitutions) (index, binder) =
+    allocateSkolem (reserved, chosen) (index, binder) =
         let fresh = chooseFresh reserved $ skolemBase index
         in ( Set.insert fresh reserved
-           , Map.insert binder (SharedType.TypeVariable fresh) substitutions
+           , chosen ++ [(binder, fresh)]
            )
 
     skolemBase index = "$djinn$skolem$" ++ show namespace ++ "$" ++
@@ -520,7 +547,7 @@ openForallBody namespace occurrencePath origin binders body = first show $
         | otherwise = candidate
 
 completeTranslation :: Formula -> FormulaTranslation
-completeTranslation formula = FormulaTranslation formula False []
+completeTranslation formula = FormulaTranslation formula False [] []
 
 combineTranslations
     :: ([Formula] -> Formula)
@@ -530,6 +557,7 @@ combineTranslations constructor translations = FormulaTranslation
     (constructor $ map translatedFormula translations)
     (any translationIncomplete translations)
     (concatMap translationOpenableForalls translations)
+    (concatMap translationIntroducedSkolems translations)
 
 combineBinary
     :: (Formula -> Formula -> Formula)
@@ -540,6 +568,7 @@ combineBinary constructor left right = FormulaTranslation
     (constructor (translatedFormula left) $ translatedFormula right)
     (translationIncomplete left || translationIncomplete right)
     (translationOpenableForalls left ++ translationOpenableForalls right)
+    (translationIntroducedSkolems left ++ translationIntroducedSkolems right)
 
 reverseFormulaPolarity :: ForallLowering -> ForallLowering
 reverseFormulaPolarity lowering = case lowering of
@@ -582,7 +611,7 @@ lowerApplication lowering definitions path occurrencePath source =
         normalized <- normalizeExpansionAliases definitions path source
         formula <- PVar <$> expansionSymbol normalized
         return $ FormulaTranslation formula
-            (polarizedOpaqueForall lowering normalized) []
+            (polarizedOpaqueForall lowering normalized) [] []
 
 polarizedOpaqueForall :: ForallLowering -> ExpansionType -> Bool
 polarizedOpaqueForall lowering source = case lowering of

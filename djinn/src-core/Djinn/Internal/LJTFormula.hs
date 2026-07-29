@@ -3,7 +3,7 @@
 -- See LICENSE for licensing details.
 --
 module Djinn.Internal.LJTFormula (
-    Symbol(Symbol), opaqueTypeSymbol, symbolSpelling,
+    Symbol(Symbol), opaqueTypeSymbol, opaqueSymbolSource, symbolSpelling,
     Formula(..), (<->), (&), (|:), fnot, false, true,
     formulaSymbols,
     ConsDesc(..), Term(..), applys, validateTermMetadata,
@@ -49,6 +49,15 @@ instance Ord Symbol where
 -- gives the selected subtree alpha-aware identity.
 opaqueTypeSymbol :: Type String -> Symbol
 opaqueTypeSymbol source = OpaqueTypeSymbol source $ alphaTypeKey source
+
+-- | Project the exact shared source tree sealed inside an opaque atom.
+-- Ordinary propositional atoms carry only a spelling and yield 'Nothing'.
+-- Instantiation policy uses this to recover a quantified hypothesis type
+-- without reparsing rendered text.
+opaqueSymbolSource :: Symbol -> Maybe (Type String)
+opaqueSymbolSource symbol = case symbol of
+    Symbol _ -> Nothing
+    OpaqueTypeSymbol source _ -> Just source
 
 -- | Source-like display spelling. Proof terms contain only the ordinary
 -- constructor, but keeping this projection total makes invariant failures

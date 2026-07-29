@@ -8758,6 +8758,16 @@ tests = testGroup "Exference"
                       $ TypeArrow (TypeVar 7) (TypeVar 7))
               impredicativeUse = ExpLambda 3 providerIdentity
                 $ ExpVar 3 impredicative
+              -- The two quantified atoms differ (the second mentions the
+              -- requested binder), so no single binder image covers both.
+              correlatedImpredicative = TypeForall [5] []
+                $ TypeArrow
+                    (TypeForall [6] []
+                      $ TypeArrow (TypeVar 6) (TypeVar 6))
+                    (TypeForall [7] []
+                      $ TypeArrow (TypeVar 7) (TypeVar 5))
+              correlatedImpredicativeUse = ExpLambda 3 providerIdentity
+                $ ExpVar 3 correlatedImpredicative
               rejects candidateGoal candidate = case checkExpression
                   (mkQueryClassEnv staticClasses []) [] [] candidateGoal []
                   candidate of
@@ -8765,7 +8775,14 @@ tests = testGroup "Exference"
                 actual -> fail $ "checker accepted invalid quantified subsumption: "
                   ++ show actual
           rejects (TypeArrow lessGeneral universalIdentity) lessGeneralUse
-          rejects (TypeArrow providerIdentity impredicative) impredicativeUse
+          -- Guarded impredicativity: the provider binder is solved with the
+          -- quantified atom the requested scheme itself supplies, so this
+          -- occurrence now checks; inventing a quantifier still fails.
+          checkExpression (mkQueryClassEnv staticClasses []) [] []
+            (TypeArrow providerIdentity impredicative) [] impredicativeUse
+            @?= Right ()
+          rejects (TypeArrow providerIdentity correlatedImpredicative)
+            correlatedImpredicativeUse
       , testCase "rejects an invalid monomorphic provider annotation" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let integer = TypeCons $ name "Int"

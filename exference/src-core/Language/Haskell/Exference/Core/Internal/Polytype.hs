@@ -71,7 +71,7 @@ classifyProviderUse rawProvider rawRequested =
 -- | Whether one context-free prenex scheme with no free flexible variables
 -- can be instantiated to another such requested scheme.
 --
--- This is deliberately shallow predicative subsumption, not general rank-N
+-- This is deliberately shallow subsumption, not general rank-N
 -- subsumption.  The requested body is the rigid left side of 'unifyRight';
 -- only variables bound by the provider's leading forall may therefore be
 -- solved.  Requiring both complete schemes to have no free flexible variable
@@ -81,6 +81,14 @@ classifyProviderUse rawProvider rawRequested =
 -- entailment between provider and requested constraints has an equally
 -- explicit rule.
 --
+-- A provider binder may be solved impredicatively, but only in the guarded
+-- Quick-Look sense: the polytype image must already occur as a quantified
+-- subtree of the requested scheme itself.  First-order unification against
+-- the rigid requested side yields exactly such subtrees, so the explicit
+-- membership check documents and defends the principle rather than
+-- restricting it further: no polytype is ever invented, and the search never
+-- guesses a quantifier the query did not supply.
+--
 -- Alpha-normalization is essential before the forall prefixes disappear: two
 -- successive layers may legally shadow the same source binder identity.
 quantifiedProviderSubsumes :: HsType -> HsType -> Bool
@@ -88,7 +96,8 @@ quantifiedProviderSubsumes provider requested = case
     (prepare provider, prepare requested) of
   (Just providerBody, Just requestedBody) -> case
       unifyRight requestedBody providerBody of
-    Just substitutions -> all (not . containsForall)
+    Just substitutions -> all
+      (admissibleInstantiation requestedBody)
       $ IntMap.elems substitutions
     Nothing -> False
   _ -> False
@@ -102,6 +111,29 @@ quantifiedProviderSubsumes provider requested = case
     guard $ not $ null binders
     guard $ null constraints
     pure body
+
+  admissibleInstantiation requestedBody image =
+    not (containsForall image)
+      || any (SharedTypeAtom.alphaEquivalentTypes image)
+          (quantifiedSubtrees requestedBody)
+
+-- Every subtree containing quantification, in structural order. These are the
+-- only polytypes a guarded impredicative instantiation may produce, so the
+-- membership test above stays linear in the requested scheme's size.
+quantifiedSubtrees :: HsType -> [HsType]
+quantifiedSubtrees source =
+  [subtree | subtree <- subtrees source, containsForall subtree]
+ where
+  subtrees ty = ty : case ty of
+    TypeVar{} -> []
+    TypeConstant{} -> []
+    TypeCons{} -> []
+    TypeArrow parameter result -> subtrees parameter ++ subtrees result
+    TypeApp function argument -> subtrees function ++ subtrees argument
+    TypeTuple _ elements -> concatMap subtrees elements
+    TypeForallNative _ constraints body ->
+      concatMap subtrees (concatMap constraint_params constraints)
+        ++ subtrees body
 
 -- | Replace every binder in the complete leading forall chain with a fresh
 -- flexible variable. Direct contexts are returned as proof obligations in

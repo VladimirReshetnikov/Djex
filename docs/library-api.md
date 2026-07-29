@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive, context-free introduction through linear occurrence frontiers | Scoped-provider instantiation, plus shallow predicative quantified-provider subsumption |
+| Bounded rank-N rule | Positive, context-free introduction through linear occurrence frontiers, plus bounded hypothesis instantiation at sequent-supplied candidates | Scoped-provider instantiation, plus shallow predicative quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -213,7 +213,13 @@ enclosing chain. Prepared functions cache the same views under distinct
 internal proof identities, allowing a reusable source function to be used at
 different sound views in one term. The family is exhaustive for three
 independent occurrences but does not enumerate balanced subsets such as two
-open and two opaque occurrences among four. If the primary projection is
+open and two opaque occurrences among four. When a hypothesis-side
+context-free chain of at most three binders exists, the same plans run once
+more with bounded instantiation axioms appended after every historical plan:
+each axiom eliminates that chain completely at a candidate tuple drawn from
+the sequent's variables, opened-forall skolems, premise scopes, and already
+mentioned quantified atoms, and its generated evidence is the hypothesis
+expression itself. If the primary projection is
 incomplete, an empty search carries no negative evidence. Ordinary enclosing
 applications remain structural, so impredicative arguments are supported.
 
@@ -223,7 +229,8 @@ alpha-normal key, and capture-avoiding free-variable substitution. Bound
 variables are keyed by lexical scope and binder position; free identities are
 not renamed away. The representation itself remains an inert transport/equality
 feature. Each backend must opt into explicit typing rules: positive
-introduction in Djinn; or fresh per-use provider instantiation and shallow
+introduction and bounded hypothesis instantiation in Djinn; or fresh per-use
+provider instantiation and shallow
 subsumption between context-free quantified schemes with no free flexible
 variables in Exference. Neither backend implements general rank-N subsumption.
 
@@ -231,8 +238,10 @@ At an Exference scoped-value occurrence, exact alpha-aware quantified
 forwarding is tried first, including exact constrained schemes. A non-exact
 quantified request may then use the shallow rule only when both prenex schemes
 have no direct context or free flexible variable. The matcher treats requested
-binders as rigid, solves only provider binders, and rejects every solution that
-contains a nested `forall`; ambient rigid constants remain nominal. Search
+binders as rigid and solves only provider binders; a solution may be a
+monotype or, impredicatively, a quantified subtree that already occurs in the
+requested scheme itself — no polytype is invented. Ambient rigid constants
+remain nominal. Search
 records the requested occurrence annotation without importing matcher state,
 and independent expression checking classifies the occurrence again. A
 non-quantified request instead freshly instantiates the complete leading

@@ -774,20 +774,33 @@ knowing before editing the source:
 - Djinn implements propositional intuitionistic reasoning, not the full Haskell
   type system. A query's prenex `forall`/constraint prefix is elaborated, and a
   context-free nested forall can be introduced in a positive formula position.
-  Unsupported negative, constrained, and impredicative occurrences remain
+  A hypothesis-side context-free forall of at most three leading binders can
+  additionally be eliminated through bounded instantiation axioms: the chain is
+  instantiated completely at candidates the sequent itself supplies (goal
+  variables, opened-forall skolems, premise-scope variables, and quantified
+  atoms already present, the last giving guarded impredicative instantiation),
+  and the generated evidence is the hypothesis expression itself. Constrained
+  occurrences, longer chains, and candidates outside that vocabulary remain
   opaque, alpha-equated atoms. An empty incomplete search is inconclusive rather
   than proof of uninhabitability. Search tries the fully opened polarized view,
   the historical exact-opaque view, one plan retaining each positive forall
   opaquely while its siblings open, and the dual plans opening one occurrence
-  while unrelated siblings stay opaque. The family is exhaustive for three
+  while unrelated siblings stay opaque; when instantiation axioms exist, the
+  same plans are appended once more with those axioms available, after every
+  historical plan and under the shared cutoff and fuel. The base family is
+  exhaustive for three
   independent sites and grows linearly; it does not enumerate balanced subsets
-  such as two open and two opaque sites among four. Reusable loaded functions
+  such as two open and two opaque sites among four, although instantiable
+  hypotheses often cover such middle subsets through the appended axiom plans.
+  Reusable loaded functions
   expose all of those sound views in one proof environment. Any incomplete
   primary premise conservatively disables negative evidence for the whole
   query.
-  Djinn does not implement general higher-rank instantiation or subsumption,
+  Djinn does not implement general higher-rank subsumption,
   and it ignores valid contexts for proof power; it also has no GADTs, type
-  families, package instance import, or general type-class solver.
+  families, package instance import, or general type-class solver. Generated
+  code that transports quantified atoms or uses impredicative instances may
+  require `RankNTypes` and `ImpredicativeTypes` to compile.
 - Added functions are used at exactly their declared type; their polymorphic
   type variables are not freshly instantiated at each use.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract

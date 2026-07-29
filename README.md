@@ -173,7 +173,12 @@ an expression with real GHC.
 Rank-N support now has two deliberately bounded backend rule families. Djinn can
 introduce a context-free `forall` in a positive position: arrow results,
 products, and datatype fields preserve that position, while each arrow
-parameter reverses it. Exference can eliminate the complete leading `forall`
+parameter reverses it. Djinn can also eliminate a hypothesis-side context-free
+`forall` of up to three leading binders by instantiating its complete chain at
+sequent-supplied candidates: the goal's type variables, the skolems of opened
+positive occurrences, premise-scope variables, and — as a guarded form of
+impredicativity — any quantified atom the query itself already mentions.
+Exference can eliminate the complete leading `forall`
 chain of a scoped value at a monomorphic use site, freshly and independently
 for each occurrence; direct contexts become ordinary proof obligations.
 Exference can also forward a context-free quantified provider with no free
@@ -183,6 +188,8 @@ alone proves the relation. This covers, for example:
 ```text
 :djinn c -> (forall a. a -> a)
 :djinn ((forall a. a -> a) -> c) -> c
+:djinn (forall a. a -> a) -> b -> b
+:djinn (forall a. a -> Maybe a) -> (forall b. b -> b) -> Maybe (forall b. b -> b)
 :exference (forall a. a -> a) -> Int -> Int
 :exference (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
@@ -210,7 +217,12 @@ Loaded functions expose those sound views together, so a reusable premise can
 be consumed at different views in one proof. This is exhaustive for three
 independent sites, with at most `2n + 2` categorized plans for `n` sites, but it
 does not enumerate the power set: for four independent sites, a proof requiring
-exactly two open and two opaque occurrences may remain inconclusive. An
+exactly two open and two opaque occurrences may remain inconclusive. When the
+transported hypotheses are instantiable, the appended hypothesis-instantiation
+plans cover many such middle subsets, but chains beyond three binders,
+constrained chains, and candidates outside the sequent's own vocabulary stay
+out of reach, and the instantiation closure is capped per scheme and per
+query. Those caps lose completeness only, never soundness. An
 incomplete primary premise also makes negative evidence conservative for the
 whole query. The examples use the same
 Church Boolean and Church List shapes as the

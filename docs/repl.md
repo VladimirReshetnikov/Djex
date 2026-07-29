@@ -155,8 +155,10 @@ one complementary rank-N rule family apiece:
   freshly at each monomorphic use. Its direct contexts become proof
   obligations. Exact polymorphic forwarding takes priority. A context-free
   quantified provider with no free flexible variables may also be forwarded to
-  a less-general such goal when shallow predicative instantiation proves the
-  relation without solving ambient inference variables.
+  a less-general such goal when shallow instantiation proves the relation
+  without solving ambient inference variables; a provider binder may be solved
+  impredicatively with a quantified subtree the requested scheme itself
+  supplies.
 
 For example:
 

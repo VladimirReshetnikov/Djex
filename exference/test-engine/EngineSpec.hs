@@ -157,7 +157,38 @@ tests = testGroup "Exference private engine boundaries"
           (mkQueryClassEnv emptyStaticClassEnv []) [] []
           (TypeArrow polymorphic distinct) [] expression @?= Right ())
         quantifiedExpressions
-  , testCase "quantified provider subsumption stays shallow and predicative" $ do
+      -- Guarded impredicativity end to end: the requested scheme itself
+      -- supplies the quantified atom the provider binder is solved with,
+      -- and the independent checker accepts every emitted candidate.
+      let impredicativeRequested = TypeForall [3] []
+            $ TypeArrow
+                (TypeForall [4] [] $ TypeArrow (TypeVar 4) (TypeVar 4))
+                (TypeForall [5] [] $ TypeArrow (TypeVar 5) (TypeVar 5))
+          polymorphicIdentity = TypeForall [1] []
+            $ TypeArrow (TypeVar 1) (TypeVar 1)
+          impredicativeGoal =
+            TypeArrow polymorphicIdentity impredicativeRequested
+      impredicativeChunks <- expectRight
+        $ findExpressionsWithIdentifierCapacitiesEither
+            (IdentifierCapacities 100 100 100)
+            (input {E.input_goalType = impredicativeGoal})
+      let impredicativeExpressions =
+            [ expression
+            | chunk <- impredicativeChunks
+            , (expression, _, _) <- E.chunkElements chunk
+            ]
+          impredicativeOccurrence expression = case expression of
+            ExpLambda _ declared (ExpVar _ annotation) ->
+              declared == polymorphicIdentity
+                && annotation == impredicativeRequested
+            _ -> False
+      assertBool "guarded impredicative subsumption found no forwarding"
+        $ any impredicativeOccurrence impredicativeExpressions
+      mapM_ (\expression -> checkExpression
+          (mkQueryClassEnv emptyStaticClassEnv []) [] []
+          impredicativeGoal [] expression @?= Right ())
+        impredicativeExpressions
+  , testCase "quantified provider subsumption stays shallow with guarded impredicativity" $ do
       let integer = TypeCons $ name "Int"
           provider = TypeForall [0, 1] []
             $ TypeArrow (TypeVar 0)
@@ -176,6 +207,12 @@ tests = testGroup "Exference private engine boundaries"
             $ TypeArrow
                 (TypeForall [3] [] $ TypeArrow (TypeVar 3) (TypeVar 3))
                 (TypeForall [4] [] $ TypeArrow (TypeVar 4) (TypeVar 4))
+          -- The two quantified atoms differ (the second mentions the
+          -- requested binder), so one provider binder cannot cover both.
+          correlatedImpredicative = TypeForall [2] []
+            $ TypeArrow
+                (TypeForall [3] [] $ TypeArrow (TypeVar 3) (TypeVar 3))
+                (TypeForall [4] [] $ TypeArrow (TypeVar 4) (TypeVar 2))
           providerIdentity = TypeForall [0] []
             $ TypeArrow (TypeVar 0) (TypeVar 0)
           freeProvider = TypeForall [0] []
@@ -190,7 +227,11 @@ tests = testGroup "Exference private engine boundaries"
       quantifiedProviderSubsumes provider specialization @?= True
       quantifiedProviderSubsumes provider wrongResult @?= False
       quantifiedProviderSubsumes lessGeneral ordinaryIdentity @?= False
-      quantifiedProviderSubsumes providerIdentity impredicative @?= False
+      -- Guarded impredicativity: the binder is solved with a quantified
+      -- atom, but only one the requested scheme itself supplies.
+      quantifiedProviderSubsumes providerIdentity impredicative @?= True
+      quantifiedProviderSubsumes providerIdentity correlatedImpredicative
+        @?= False
       quantifiedProviderSubsumes freeProvider freeRequested @?= False
       quantifiedProviderSubsumes (contextual 0) (contextual 1) @?= False
       quantifiedProviderSubsumes rigidProvider collidingRequested @?= False

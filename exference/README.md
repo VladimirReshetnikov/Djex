@@ -903,26 +903,33 @@ classifies the opaque base-library signature stubs as abstract and retains only
   exact opaque match against a quantified goal, which preserves polymorphic
   forwarding. Empty-binder, empty-context forall wrappers are ignored for
   this classification. If that exact match fails, Exference can also apply
-  shallow predicative subsumption when both sides are context-free prenex
+  shallow subsumption when both sides are context-free prenex
   schemes with no free flexible variables. Requested binders stay rigid; only
-  provider binders may be solved, and each solution must be a monotype. For
-  example, both of these requests can return `\f -> f`:
+  provider binders may be solved, and each solution is either a monotype or —
+  in the guarded Quick-Look sense — a quantified subtree the requested scheme
+  itself already contains. No polytype is ever invented. For
+  example, all of these requests can return `\f -> f`:
 
   ```text
   (forall a. a) -> (forall b. b -> b)
   (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
+  (forall a. a -> a) ->
+    (forall x. (forall y. y -> y) -> (forall z. z -> z))
   ```
 
-  Ambient rigid constants are allowed and remain nominal. Non-exact schemes
-  with contexts, schemes containing free flexible variables, and matches that
-  would instantiate a provider binder with a polytype stay outside this rule.
-  In particular, it does not accept either directionally invalid specialization
-  or an impredicative one such as:
+  The last one instantiates the provider binder impredicatively at the
+  requested scheme's own quantified atom; the generated code may need
+  `ImpredicativeTypes` to compile. Ambient rigid constants are allowed and
+  remain nominal. Non-exact schemes
+  with contexts and schemes containing free flexible variables stay outside
+  this rule.
+  In particular, it does not accept directionally invalid specialization
+  or a request whose quantified atoms cannot share one binder image:
 
   ```text
   (forall ignored. Int -> Int) -> (forall x. x -> x)
   (forall a. a -> a) ->
-    (forall x. (forall y. y -> y) -> (forall z. z -> z))
+    (forall x. (forall y. y -> y) -> (forall z. z -> x))
   ```
 
   At a monomorphic (non-quantified) goal, provider binders are instead

@@ -182,8 +182,9 @@ Exference can eliminate the complete leading `forall`
 chain of a scoped value at a monomorphic use site, freshly and independently
 for each occurrence; direct contexts become ordinary proof obligations.
 Exference can also forward a context-free quantified provider with no free
-flexible variables to a less-general such goal when predicative instantiation
-alone proves the relation. This covers, for example:
+flexible variables to a less-general such goal; provider binders are solved
+with monotypes or, in the guarded Quick-Look sense, with quantified subtrees
+the requested scheme itself supplies. This covers, for example:
 
 ```text
 :djinn c -> (forall a. a -> a)

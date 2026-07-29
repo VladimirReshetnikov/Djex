@@ -1,4 +1,4 @@
-# Djinn hypothesis instantiation — 2026-07-29
+# Hypothesis instantiation and guarded impredicativity — 2026-07-29
 
 ## Scope
 
@@ -107,3 +107,58 @@ plan, not GHC's elaboration. Candidate quality inside the axiom plans is
 unranked beyond the existing unused-binder ordering, so degenerate
 bottom-driven instances can appear among alternatives; they are sound, and the
 appended ordering keeps them out of every historical prefix.
+
+## Exference: guarded impredicative provider subsumption
+
+The shallow quantified-provider rule used to reject every substitution image
+containing a `forall`. That predicativity restriction was stricter than the
+rule's own mechanics: the requested body is the rigid left side of
+`unifyRight`, so a provider binder's image is always an exact subtree of the
+requested scheme — first-order unification cannot assemble a new polytype.
+The restriction is therefore replaced with an explicit Quick-Look-style
+guard: an image may contain quantification when it occurs, up to alpha
+equivalence, as a quantified subtree of the requested scheme itself. The
+guard is presently equivalent to dropping the check, but it documents and
+defends the principle against future matcher changes: no quantifier the query
+did not supply is ever invented.
+
+This turns, for example,
+
+```text
+(forall a. a -> a) ->
+  (forall x. (forall y. y -> y) -> (forall z. z -> z))
+```
+
+into a realized forwarding `\f -> f` in both search and the independent
+checker, which share the classifier by construction. A requested scheme whose
+quantified atoms cannot share one binder image (for instance when the second
+atom mentions the requested binder) still fails, as do wrong-direction
+specializations, contexts, and free flexible variables. Generated impredicative
+forwardings may require `ImpredicativeTypes`.
+
+## Next slice: Exference goal-side forall introduction
+
+The remaining large asymmetry is Exference's inability to synthesize a new
+polymorphic value: a subgoal that is itself a quantified atom — a rank-2
+provider argument such as the callback of
+`((forall a. a -> a) -> c) -> c`, or `runST`'s `forall s. ST s a` — is only
+ever satisfied by forwarding or subsumption, never by introduction. Probing
+confirms the callback example exhausts the full default step budget without a
+solution.
+
+The sound design mirrors the engine's existing query-root opening but must
+add scope discipline. Opening a subgoal's leading chain with fresh rigid
+constants is unsound without an escape check: an ambient flexible variable
+that predates the opened scope must never be solved to a type mentioning the
+new rigids, directly or through later promotion. Because all ambient bindings
+flow through one application point in the search step, the check can be
+implemented as GHC-style level tracking: record, per dynamically allocated
+rigid, the flexible variables alive at its creation; reject any binding of an
+older variable to a type containing that rigid; and propagate age through
+binding images. The independent checker needs the dual change, because its
+bottom-up inference has no generalization step today: filling a
+quantified-atom hole with a lambda must open the expected scheme with fresh
+rigids under the same escape rule. Both sides must change together, and the
+node state, renderer annotations, and identifier-capacity accounting all
+participate, so this is deliberately its own future slice rather than a rider
+on this one.

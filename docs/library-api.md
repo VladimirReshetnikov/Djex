@@ -238,8 +238,10 @@ At an Exference scoped-value occurrence, exact alpha-aware quantified
 forwarding is tried first, including exact constrained schemes. A non-exact
 quantified request may then use the shallow rule only when both prenex schemes
 have no direct context or free flexible variable. The matcher treats requested
-binders as rigid, solves only provider binders, and rejects every solution that
-contains a nested `forall`; ambient rigid constants remain nominal. Search
+binders as rigid and solves only provider binders; a solution may be a
+monotype or, impredicatively, a quantified subtree that already occurs in the
+requested scheme itself — no polytype is invented. Ambient rigid constants
+remain nominal. Search
 records the requested occurrence annotation without importing matcher state,
 and independent expression checking classifies the occurrence again. A
 non-quantified request instead freshly instantiates the complete leading

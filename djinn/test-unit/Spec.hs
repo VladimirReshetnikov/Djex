@@ -1016,14 +1016,27 @@ testRankNTypeAtoms = do
     runStableIdentity stableSession "transportEmptyPolytype"
         "(forall a. a) -> (forall b. b)"
 
-    -- Instantiating a negative forall is outside this bounded fragment. It is
-    -- semantically inhabited (apply the argument at @b@), so the incomplete
-    -- search must not manufacture a proof of uninhabitability.
-    unsupported <- runStableQuery stableSession "instantiateOpaqueRankN"
+    -- Bounded hypothesis instantiation realizes the classic negative-forall
+    -- eliminations: the polymorphic hypothesis is used at sequent variables
+    -- (including goal skolems), and the generated evidence is the hypothesis
+    -- expression itself because GHC re-instantiates value occurrences.
+    runStableIdentity stableSession "instantiateOpaqueRankN"
         "(forall a. a) -> b"
-    assertEqual "unsupported rank-N elimination unexpectedly found a candidate"
+    runStableIdentity stableSession "applyPolymorphicIdentity"
+        "(forall a. a -> a) -> b -> b"
+    runStableIdentity stableSession "instantiateTwoSiblingInstances"
+        "(forall a. a -> a) -> (b, c) -> (c, b)"
+    runStableIdentity stableSession "instantiateAtGoalSkolem"
+        "forall b. (forall a. a -> a) -> b -> b"
+
+    -- A leading chain longer than the instantiation binder bound stays
+    -- opaque. The honest inconclusive answer is retained: no candidate is
+    -- invented and no refutation is manufactured.
+    unsupported <- runStableQuery stableSession "fourBinderOpaqueRankN"
+        "(forall a b c d. a -> (a, b, c, d)) -> e"
+    assertEqual "an uninstantiable rank-N chain unexpectedly found a candidate"
         [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch unsupported
-    assertEqual "unsupported opaque rank-N search was falsely refuted"
+    assertEqual "an uninstantiable opaque rank-N search was falsely refuted"
         SharedQuery.NoEvidence $ SharedQuery.resultEvidence unsupported
 
     -- One occurrence-local opaque choice can now coexist with structural
@@ -1046,8 +1059,11 @@ testRankNTypeAtoms = do
     duplicateSiteClauses <- case reportOutcome duplicateSites of
         Realized clauses -> pure clauses
         outcome -> fail $ "duplicated rank-N sites failed: " ++ show outcome
+    -- The historical four combinations of {opaque transport, structural
+    -- introduction} per site remain, and the axiom plans add the guarded
+    -- impredicative self-applications @a a@ at either or both sites.
     assertEqual "alpha-equal forall sites were not occurrence-distinct"
-        4 $ length duplicateSiteClauses
+        9 $ length duplicateSiteClauses
 
     -- Definition expansion must retain the same occurrence identity. The
     -- synonym rearranges its parameters, and the datatype stores the two
@@ -1088,13 +1104,25 @@ testRankNTypeAtoms = do
         ++ "((forall c. c), forall outer. "
         ++ "((forall d. d -> q), (forall e. e -> e)))"
 
-    -- Four independent sites still have a middle layer outside the two linear
-    -- frontiers.  This query needs exactly two opaque and two opened choices,
-    -- so the bounded miss must stay inconclusive rather than becoming a false
-    -- refutation.
-    middleOpacityGap <- runStableQuery stableSession "middleOpacityRankNGap"
+    -- Four independent sites have a middle layer outside the two linear
+    -- frontiers, but instantiable hypotheses now rescue this example: every
+    -- transport component is derivable by instantiating a hypothesis at the
+    -- opened siblings' skolems, so the appended axiom plans realize it.
+    runStableIdentity stableSession "middleOpacityRankNGap"
         $ "(forall a. a) -> (forall b. b -> q) -> "
         ++ "((forall c. c), (forall d. d -> q), "
+        ++ "(forall e. e -> e), (forall f. f -> f))"
+
+    -- With hypotheses beyond the instantiation binder bound, the original
+    -- middle-subset gap is still observable: two components need exact
+    -- opaque transport while two need structural opening, and no bounded
+    -- plan or axiom covers that balanced choice. The miss must stay
+    -- inconclusive rather than becoming a false refutation.
+    middleOpacityGap <- runStableQuery stableSession "wideMiddleOpacityRankNGap"
+        $ "(forall a b c d. (a, b, c, d)) -> "
+        ++ "(forall s t u v. (s, t, u, v) -> q) -> "
+        ++ "((forall w x y z. (w, x, y, z)), "
+        ++ "(forall s t u v. (s, t, u, v) -> q), "
         ++ "(forall e. e -> e), (forall f. f -> f))"
     assertEqual "the linear frontier unexpectedly covered a middle subset"
         [] $ SharedSearch.batchCandidates
@@ -1214,12 +1242,16 @@ testComplementaryRankNPlans = do
         withToken <- declare (AbstractType "Token" KStar) emptyEnvironment
         declare (Function "church" $ churchType "result") withToken
 
-    complete <- run unsortedOptions "allRankNPlans" environment goal
+    -- The appended instantiation-axiom plans add the provider's instantiated
+    -- applications to the historical three-candidate union, so the complete
+    -- family needs a larger cutoff to finish.
+    complete <- run
+        unsortedOptions {optionCutoff = 60} "allRankNPlans" environment goal
     assertEqual "complementary plans did not finish within the global cutoff"
         SharedSearch.Finished $ reportCompletion complete
     allClauses <- realizedClauses "complementary rank-N plans" complete
     assertEqual "the plan union lost or duplicated a candidate"
-        3 $ length allClauses
+        7 $ length allClauses
     assertBool "the opaque church candidate disappeared behind polarized hits"
         $ any ("church" `isInfixOf`) allClauses
 
@@ -1393,7 +1425,7 @@ testComplementaryRankNPlans = do
             ]
             []
     orderedPrepared <- expectShownRight $ prepareEnvironment orderedEnvironment
-    let (orderedPremises, _) =
+    let (orderedPremises, _, _) =
             RawEnvironment.preparedEnvironmentPolarizedFunctionPremises
                 orderedPrepared
     assertEqual "premise variants displaced a later primary declaration"

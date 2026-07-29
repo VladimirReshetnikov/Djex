@@ -307,6 +307,23 @@ tests = testGroup "Djex facade"
       assertBool "alpha-renamed rank-N identity produced no proof"
         $ not $ null $ batchCandidates $ resultSearch nestedResult
 
+      contextualTargetName <- expectRight
+        $ mkIdentifier "contextualRankNCallback"
+      contextualTarget <- expectRight
+        $ mkDefinitionName contextualTargetName
+      let contextualQuery = query
+            { requestTarget = contextualTarget
+            , requestGoal = FunctionType
+                (FunctionType signature $ TypeVariable "result")
+                (TypeVariable "result")
+            }
+      contextualRequest <- expectRight $ mkDjinnRequest contextualQuery
+      contextualResult <- expectRight
+        $ runDjinnQuery session contextualRequest
+      resultEvidence contextualResult @?= ValidatedCandidates
+      assertBool "Djinn did not introduce a contextual rank-N callback"
+        $ not $ null $ batchCandidates $ resultSearch contextualResult
+
       impredicativeTargetName <- expectRight
         $ mkIdentifier "impredicativeIdentity"
       impredicativeTarget <- expectRight
@@ -517,6 +534,50 @@ tests = testGroup "Djex facade"
       candidate <- firstExferenceCandidate =<< expectRight
         (runExferenceQuery session request)
       definitionName (clauseName $ candidateOutput candidate) @?= target
+  , testCase "consume nested Exference contexts through the stable facade" $ do
+      className <- expectRight $ mkIdentifier "C"
+      tokenName <- expectRight $ mkIdentifier "ContextToken"
+      resultName <- expectRight $ mkIdentifier "ContextResult"
+      consumeName <- expectRight $ parseName "Fixture.consumeContext"
+      methodName <- expectRight $ parseName "Fixture.contextMethod"
+      target <- expectRight $ mkIdentifier "contextualCallback"
+      let outerVariable = FlexibleVariable 0
+          nestedVariable = FlexibleVariable 1
+          outerType = TypeVariable outerVariable
+          nestedType = TypeVariable nestedVariable
+          tokenType = TypeConstructor tokenName
+          resultType = TypeConstructor resultName
+          contextual = ForallType [nestedVariable]
+            [Constraint className [nestedType]]
+            $ FunctionType nestedType tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , AbstractTypeDeclaration () resultName ProperTypeKind
+            , ClassDeclaration () className
+                [TypeParameter outerVariable Nothing] [] []
+            , ValueDeclaration $ ValueSignature () consumeName
+                $ FunctionType contextual resultType
+            , ValueDeclaration $ ValueSignature () methodName
+                $ ForallType [outerVariable]
+                    [Constraint className [outerType]]
+                    $ FunctionType outerType tokenType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions {exferenceMaximumSteps = 500}
+        target "contextual-rank-n" "ContextResult"
+      candidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      candidateResidualConstraints candidate @?= []
+      case candidateOutput candidate of
+        FunctionClause _ _ body -> do
+          assertBool "contextual callback did not use its consumer"
+            $ referencesGlobal consumeName body
+          assertBool "nested class evidence did not enable the method"
+            $ referencesGlobal methodName body
   , testCase "preserve exact Exference requests behind one canonical plan" $ do
       environment <- expectRight
         (mkEnvironment [] :: Either

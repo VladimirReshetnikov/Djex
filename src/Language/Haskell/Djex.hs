@@ -102,7 +102,7 @@ data Capability
   | PrenexPolymorphism
     -- ^ Leading binders are accepted at the checked search edge.
   | RankNIntroduction
-    -- ^ A quantified type in a supported positive position can be
+    -- ^ A context-free quantified type at a supported goal boundary can be
     -- constructed by introducing its binders and synthesizing its body.
   | RankNElimination
     -- ^ A quantified local value can be instantiated at a supported
@@ -146,6 +146,7 @@ backendInfo ExferenceBackend = BackendInfo
   , backendCapabilities =
       [ HeuristicSearch
       , PrenexPolymorphism
+      , RankNIntroduction
       , RankNElimination
       , OpaqueRankNTypes
       , ImpredicativeTypes

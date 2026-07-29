@@ -230,10 +230,13 @@ The checker and search use both the same opaque, alpha-aware unifier and the
 same scoped provider-use rules. An exact quantified occurrence remains opaque;
 a bounded rule can shallowly subsume one context-free prenex scheme to another;
 and a monomorphic occurrence freshly instantiates the provider's leading
-foralls. These are typing rules at a scoped-value boundary, not permission for
-the unifier to decompose a quantified body. Search records the requested scheme
-on a subsumed occurrence, and the independent checker reclassifies that
-occurrence instead of trusting the search result. They also share the
+foralls. A context-free quantified expected type can also open with fresh
+branch-local rigids so its body is checked structurally, after the ordinary
+opaque provider routes have been tried. These are explicit typing rules, not
+permission for the unifier to decompose a quantified body. Search records the
+requested scheme on a subsumed occurrence, and the independent checker
+reclassifies or structurally checks that occurrence instead of trusting the
+search result. They also share the
 higher-kinded view of structural functions and tuples, while tuple complexity
 replays the historical left-associated constructor/application accumulation
 exactly so floating-point rounding and saturation cannot perturb queue order.
@@ -938,11 +941,37 @@ classifies the opaque base-library signature stubs as abstract and retains only
   ordinary search. Thus a value of type
   `forall a. C a => a -> a` can be applied at `Int` when `C Int` is available,
   and a rank-N datatype field can participate after pattern elimination.
+  A nested context-free quantified type exposed as a goal can now be
+  constructed as well. For example, the callback request
+
+  ```text
+  ((forall a. a -> a) -> result) -> result
+  ```
+
+  can synthesize the quantified identity argument rather than requiring a
+  polymorphic provider already in scope. Exact forwarding and shallow
+  subsumption retain priority; the structural branch opens the complete
+  context-free leading chain with fresh branch-local rigid constants and then
+  searches the body. At every opened layer, flexible variables that already
+  existed are forbidden from acquiring its rigids, including indirectly
+  through later flexible substitutions. The independent expression checker
+  repeats that dynamic allocation and escape check instead of trusting search.
+  Search-owned local rigid spellings are matched injectively up to
+  alpha-renaming, so its breadth-first goal queue need not agree with the
+  checker's tree traversal order; environment, root, and standalone caller
+  rigids remain nominal. An unresolved constraint containing a nested skolem
+  is rejected rather than published as a top-level obligation. A contextual
+  nested `forall` remains opaque, while
+  exhaustion of the finite identifier namespace truncates only the affected
+  search branch.
   Quantifiers that have not reached one of these explicit boundaries remain
   alpha-aware `TypeAtom`s. Nested quantified subtrees may still compare exactly,
   but shallow subsumption never recurses into them. These limited rules do not
   provide deep or general higher-rank subsumption, polymorphic let
   generalization, or visible type application.
+
+  The soundness boundary and its regression matrix are detailed in the
+  [2026-07-29 forall-introduction report](../docs/reports/2026-07-29-exference-forall-introduction.md).
 
 ## Other known (technical) issues
 

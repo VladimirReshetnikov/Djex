@@ -67,13 +67,14 @@ library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
 boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
-the two engines continue converging. The latest rank-N inference findings,
-REPL corrections, architectural decisions, and retained semantic differences
-are recorded in the
-[2026-07-28 rank-N inference review](docs/reports/2026-07-28-rank-n-inference-review.md).
-The preceding convergence work is recorded in the
-[2026-07-27 source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md)
-and its preceding
+the two engines continue converging. The context-free Exference introduction
+rule and Djinn quantified-wrapper follow-up are recorded in the
+[2026-07-29 forall-introduction report](docs/reports/2026-07-29-exference-forall-introduction.md).
+The preceding work is recorded in the
+[hypothesis-instantiation report](docs/reports/2026-07-29-hypothesis-instantiation.md),
+[rank-N inference review](docs/reports/2026-07-28-rank-n-inference-review.md),
+[2026-07-27 source-semantics follow-up](docs/reports/2026-07-27-source-semantics-follow-up.md),
+and
 [unification review](docs/reports/2026-07-27-unification-review.md).
 The earlier [post-merge code review](docs/reports/2026-07-21-post-merge-code-review.md),
 [final convergence review](docs/reports/2026-07-17-final-convergence-review.md),
@@ -170,17 +171,28 @@ deliberately still a requested result type, not a Haskell expression; the
 explicit `:eval` command is the separate boundary that compiles and executes
 an expression with real GHC.
 
-Rank-N support now has two deliberately bounded backend rule families. Djinn can
-introduce a context-free `forall` in a positive position: arrow results,
-products, and datatype fields preserve that position, while each arrow
-parameter reverses it. Djinn can also eliminate a hypothesis-side context-free
-`forall` of up to three leading binders by instantiating its complete chain at
-sequent-supplied candidates: the goal's type variables, the skolems of opened
-positive occurrences, premise-scope variables, and — as a guarded form of
-impredicativity — any quantified atom the query itself already mentions.
-Exference can eliminate the complete leading `forall`
-chain of a scoped value at a monomorphic use site, freshly and independently
-for each occurrence; direct contexts become ordinary proof obligations.
+Rank-N support now uses deliberately bounded, backend-specific rule families.
+Djinn can introduce a context-free `forall` in a positive position: arrow
+results, products, and datatype fields preserve that position, while each
+arrow parameter reverses it. Djinn can also eliminate a hypothesis-side
+context-free `forall` of up to three leading binders by instantiating its
+complete chain at sequent-supplied candidates: the goal's type variables, the
+skolems of opened positive occurrences, premise-scope variables, and — as a
+guarded form of impredicativity — any query-supplied subtree that is
+independent of enclosing binders and contains quantification, including a
+structural wrapper around a quantified atom. Exference can introduce a
+context-free nested `forall` once ordinary search exposes it as a goal, for
+example as a callback argument or an arrow result.
+It opens the complete leading chain with branch-local fresh rigid constants,
+synthesizes the body, and rejects any direct or indirect substitution that
+would let a rigid escape through a flexible variable from an older scope.
+Generated local skolem spellings compare up to a scope-owned alpha-renaming,
+but environment and root constants remain nominal; unresolved constraints
+containing a nested skolem cannot escape as result obligations. Contextual
+nested foralls remain opaque. Exference can also eliminate the complete
+leading `forall` chain of a scoped value at a monomorphic use site, freshly and
+independently for each occurrence; direct contexts become ordinary proof
+obligations.
 Exference can also forward a context-free quantified provider with no free
 flexible variables to a less-general such goal; provider binders are solved
 with monotypes or, in the guarded Quick-Look sense, with quantified subtrees
@@ -191,6 +203,8 @@ the requested scheme itself supplies. This covers, for example:
 :djinn ((forall a. a -> a) -> c) -> c
 :djinn (forall a. a -> a) -> b -> b
 :djinn (forall a. a -> Maybe a) -> (forall b. b -> b) -> Maybe (forall b. b -> b)
+:djinn (forall a. f a) -> f (Maybe (forall b. b -> b))
+:exference ((forall a. a -> a) -> result) -> result
 :exference (forall a. a -> a) -> Int -> Int
 :exference (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
@@ -209,7 +223,9 @@ booleans:
 This is not general higher-rank subsumption, polymorphic-let generalization, or
 visible type application. Unsupported Djinn positions remain opaque and make
 an otherwise empty search inconclusive rather than manufacturing a logical
-refutation. Djinn searches a linearly bounded family: the fully opened
+refutation; Exference likewise leaves contextual nested goals opaque and
+treats finite identifier or search-budget exhaustion as truncation, not
+negative evidence. Djinn searches a linearly bounded family: the fully opened
 polarized plan, the historical exact-opaque plan, and one plan for each single
 positive `forall` retained opaquely while its siblings open, plus the dual
 frontier in which one occurrence opens and unrelated siblings remain opaque.

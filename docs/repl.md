@@ -142,15 +142,23 @@ Church booleans:
 ```
 
 Both engines open the leading quantifiers of the query itself. They also expose
-one complementary rank-N rule family apiece:
+deliberately bounded rank-N rule families:
 
 - Djinn introduces a context-free `forall` in a positive formula position.
   Arrow results, tuples, and datatype structure preserve polarity; crossing an
   arrow parameter reverses it. Djinn also eliminates a hypothesis-side
   context-free chain of at most three leading binders by instantiating it at
   candidates the sequent itself supplies — goal variables, opened-forall
-  skolems, premise-scope variables, and quantified atoms the query already
-  mentions, the last giving a guarded form of impredicative instantiation.
+  skolems, premise-scope variables, and query-supplied subtrees that are
+  independent of enclosing binders and contain quantification, including
+  wrappers around quantified atoms. The last family gives a guarded form of
+  impredicative instantiation.
+- Exference can introduce a nested context-free `forall` when it reaches an
+  active goal, such as a callback argument or arrow result. It opens the
+  complete leading chain with branch-local fresh rigids and synthesizes the
+  body. Flexible variables from an older scope may not be solved directly or
+  indirectly to those rigids, so skolems cannot escape. Contextual nested
+  foralls remain opaque.
 - Exference instantiates the complete leading `forall` chain of a scoped value
   freshly at each monomorphic use. Its direct contexts become proof
   obligations. Exact polymorphic forwarding takes priority. A context-free
@@ -167,6 +175,8 @@ c -> (forall a. a -> a)
 ((forall a. a -> a) -> c) -> c
 (forall a. a -> a) -> b -> b
 (forall a. a -> Maybe a) -> (forall b. b -> b) -> Maybe (forall b. b -> b)
+(forall a. f a) -> f (Maybe (forall b. b -> b))
+((forall a. a -> a) -> result) -> result
 (forall a. a -> a) -> Int -> Int
 (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
@@ -188,7 +198,9 @@ position, scope, and free-variable identity remain significant, so shadowing
 and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
-polymorphic-let generalization, or visible type application. In particular,
+polymorphic-let generalization, or visible type application. Exference leaves
+nested contextual goals opaque, and finite identifier or search-budget
+exhaustion is an inconclusive truncation. In particular,
 Djinn keeps constrained hypothesis occurrences and chains beyond three binders
 opaque; if the bounded approximation
 finds no term, the result is inconclusive rather than a proof of

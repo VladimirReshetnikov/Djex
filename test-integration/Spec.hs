@@ -81,6 +81,7 @@ tests = testGroup "Djex facade"
       backendCapabilities (backendInfo ExferenceBackend) @?=
         [ HeuristicSearch
         , PrenexPolymorphism
+        , RankNIntroduction
         , RankNElimination
         , OpaqueRankNTypes
         , ImpredicativeTypes
@@ -504,6 +505,18 @@ tests = testGroup "Djex facade"
           exferenceResultBindingUsages result @?=
             exferenceBatchBindingUsages metadata
         [] -> fail "Exference found no identity candidate"
+  , testCase "introduce nested Exference foralls through the stable facade" $ do
+      checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
+      session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
+      target <- expectRight $ mkIdentifier "rankNCallback"
+      request <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions {exferenceMaximumSteps = 200}
+        target
+        "rank-n-introduction"
+        "((forall a. a -> a) -> result) -> result"
+      candidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      definitionName (clauseName $ candidateOutput candidate) @?= target
   , testCase "preserve exact Exference requests behind one canonical plan" $ do
       environment <- expectRight
         (mkEnvironment [] :: Either

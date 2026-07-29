@@ -142,14 +142,17 @@ Church booleans:
 ```
 
 Both engines open the leading quantifiers of the query itself. They also expose
-one complementary rank-N rule apiece:
+one complementary rank-N rule family apiece:
 
 - Djinn introduces a context-free `forall` in a positive formula position.
   Arrow results, tuples, and datatype structure preserve polarity; crossing an
   arrow parameter reverses it.
 - Exference instantiates the complete leading `forall` chain of a scoped value
   freshly at each monomorphic use. Its direct contexts become proof
-  obligations. An exact polymorphic forwarding use takes priority.
+  obligations. Exact polymorphic forwarding takes priority. A context-free
+  quantified provider with no free flexible variables may also be forwarded to
+  a less-general such goal when shallow predicative instantiation proves the
+  relation without solving ambient inference variables.
 
 For example:
 
@@ -157,6 +160,7 @@ For example:
 c -> (forall a. a -> a)
 ((forall a. a -> a) -> c) -> c
 (forall a. a -> a) -> Int -> Int
+(forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
 
 Every nested `forall` outside those boundaries is a shared opaque type atom.
@@ -180,13 +184,15 @@ polymorphic-let generalization, or visible type application. In particular,
 Djinn keeps unsupported negative occurrences opaque; if that approximation
 finds no term, the result is inconclusive rather than a proof of
 uninhabitability. Its plan family is deliberately linear: fully opened,
-exactly opaque, and one plan per positive occurrence retained opaquely while
-the others open. A single proof can therefore mix one exact transport with
-structural introduction at a sibling occurrence; for example,
-`(forall a. a) -> ((forall b. b), (forall c. c -> c))` now yields
-`\x -> (x, \y -> y)`. Reusable loaded premises expose the same sound views
-simultaneously. Two or more independently opaque holes remain outside this
-bounded fragment. An incomplete primary premise also conservatively disables
+exactly opaque, one plan per positive occurrence retained opaquely while the
+others open, and the dual plans opening one occurrence while unrelated
+siblings stay opaque. Opening a nested occurrence includes its enclosing
+forall chain. A single proof can therefore mix exact transport with structural
+introduction at sibling occurrences; the family covers every combination of
+three independent sites with at most `2n + 2` categorized plans for `n` sites.
+It still omits balanced subsets such as exactly two open and two opaque sites
+among four. Reusable loaded premises expose the same sound views
+simultaneously. An incomplete primary premise also conservatively disables
 negative evidence for the whole query, even when that premise would turn out
 to be irrelevant.
 
@@ -770,10 +776,10 @@ so the projection degrades rather than fails:
   unqualified spelling is ambiguous in scope is omitted.
 - Recursive datatypes and datatypes with hidden constructors are projected as
   opaque abstract types, keeping their signatures usable without giving LJT
-  an elimination it cannot decide. A datatype declared without constructors
-  is treated the same way: source environments spell opaque primitives that
-  way, and a genuinely empty projection would let Djinn prove anything from
-  such a type by absurd elimination. Every such degradation retains the exact
+  an elimination it cannot decide. Constructorless catalogue stubs have
+  already become explicit abstract declarations at the visibility-aware source
+  boundary, while genuine zero-constructor datatypes remain concrete and keep
+  Djinn's explicit empty-case elimination. Every degradation retains the exact
   kind inferred by the shared source inventory, including higher-kinded
   parameters.
 - Instance declarations and classes with superclasses are omitted. Ordinary
@@ -844,10 +850,13 @@ is available until a `:load` succeeds.
 `:load`, `:add`, `:unadd`, `:reload`, and a change to `fix` first resolve and
 parse every affected source, build the complete neutral inventory, apply
 ratings and session policy, derive the prompt scope, and seal the replacement.
-Each module and rating file is read strictly once per attempt. Dependency
-discovery, retained module syntax, export visibility, ratings, and the sealed
-inventory all consume that same immutable text snapshot, so an edit racing a
-load cannot publish a session assembled from two file versions.
+Each module, rating file, and directory target's `*.visibility` manifest is
+read strictly once per attempt. Dependency discovery, retained module syntax,
+export visibility, constructorless-type classification, ratings, and the
+sealed inventory all consume that same immutable text snapshot, so an edit
+racing a load cannot publish a session assembled from different file versions.
+Loading an individual source file or named module does not implicitly grant an
+adjacent manifest authority; only an admitted directory discovers sidecars.
 Only then are the target set, dependency closure, context, and searchable
 session published together. On failure the prior workspace, backend sessions,
 context, fix policy, and search settings remain active. The failed attempt's

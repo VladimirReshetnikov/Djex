@@ -170,18 +170,21 @@ deliberately still a requested result type, not a Haskell expression; the
 explicit `:eval` command is the separate boundary that compiles and executes
 an expression with real GHC.
 
-Rank-N support now has two deliberately bounded inference rules. Djinn can
+Rank-N support now has two deliberately bounded backend rule families. Djinn can
 introduce a context-free `forall` in a positive position: arrow results,
 products, and datatype fields preserve that position, while each arrow
 parameter reverses it. Exference can eliminate the complete leading `forall`
 chain of a scoped value at a monomorphic use site, freshly and independently
-for each occurrence; direct contexts become ordinary proof obligations. This
-covers, for example:
+for each occurrence; direct contexts become ordinary proof obligations.
+Exference can also forward a context-free quantified provider with no free
+flexible variables to a less-general such goal when predicative instantiation
+alone proves the relation. This covers, for example:
 
 ```text
 :djinn c -> (forall a. a -> a)
 :djinn ((forall a. a -> a) -> c) -> c
 :exference (forall a. a -> a) -> Int -> Int
+:exference (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
 
 Every quantified subtree outside those explicit boundaries remains an opaque
@@ -200,13 +203,16 @@ visible type application. Unsupported Djinn positions remain opaque and make
 an otherwise empty search inconclusive rather than manufacturing a logical
 refutation. Djinn searches a linearly bounded family: the fully opened
 polarized plan, the historical exact-opaque plan, and one plan for each single
-positive `forall` retained opaquely while its siblings open. Loaded functions
-expose those sound views together, so a reusable premise can be consumed at
-different views in one proof. This now synthesizes
-`(forall a. a) -> ((forall b. b), (forall c. c -> c))`. Djinn deliberately
-does not enumerate the power set of occurrences; a proof needing two separate
-opaque holes may remain inconclusive. An incomplete primary premise also makes
-negative evidence conservative for the whole query. The examples use the same
+positive `forall` retained opaquely while its siblings open, plus the dual
+frontier in which one occurrence opens and unrelated siblings remain opaque.
+Opening a nested occurrence also opens the enclosing chain needed to reach it.
+Loaded functions expose those sound views together, so a reusable premise can
+be consumed at different views in one proof. This is exhaustive for three
+independent sites, with at most `2n + 2` categorized plans for `n` sites, but it
+does not enumerate the power set: for four independent sites, a proof requiring
+exactly two open and two opaque occurrences may remain inconclusive. An
+incomplete primary premise also makes negative evidence conservative for the
+whole query. The examples use the same
 Church Boolean and Church List shapes as the
 [church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs).
 
@@ -546,9 +552,14 @@ present it must classify every constructorless datatype exactly once; unknown,
 inhabited, duplicate, missing, kind-invalid, or arity-mismatched entries fail
 with `EXF_TYPE_VISIBILITY`. Abstract entries retain the explicit checked kind
 but contribute no pattern-match deconstructor, while empty entries continue to
-support `case value of {}`. This convention is intentionally limited to
-`environmentFromPath` and the installed default loader: explicit file and
-snapshot APIs preserve normal Haskell semantics for user-written `data Empty`.
+support `case value of {}`. Directory loading, the installed default loader,
+and unified-REPL directory targets apply this convention. Snapshot-owning
+clients can opt in explicitly with
+`environmentFromSourcesWithTypeVisibility` or
+`loadExferenceSessionFromSourcesWithTypeVisibility` (and its policy-aware
+counterpart). Ordinary explicit-file and source-snapshot APIs remain
+manifest-blind and preserve normal Haskell semantics for user-written
+`data Empty`.
 The bundled catalogue marks `Data.Void.Void` and `GHC.Generics.V1` as empty and
 its constructor-omitting base-library stubs as abstract.
 

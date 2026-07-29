@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive, context-free introduction | Non-quantified scoped-provider elimination |
+| Bounded rank-N rule | Positive, context-free introduction through linear occurrence frontiers | Scoped-provider instantiation, plus shallow predicative quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -206,22 +206,37 @@ that prefix is retained as a shared `TypeAtom`. Djinn's ordinary formula
 projection treats it as one proposition and compares it by lexical
 alpha-equivalence. The checked query worker also tries a polarized projection
 that opens context-free atoms in positive positions, the historical exact
-opaque projection, and a linear family in which one positive occurrence stays
-opaque while its siblings open. Prepared functions cache the same views under
-distinct internal proof identities, allowing a reusable source function to be
-used at different sound views in one term. The family does not enumerate two
-or more simultaneous opaque choices. If the primary projection is incomplete,
-an empty search carries no negative evidence. Ordinary enclosing applications
-remain structural, so impredicative arguments are supported.
+opaque projection, and two linear occurrence frontiers: one positive occurrence
+may stay opaque while its siblings open, or one may open while unrelated
+siblings stay opaque. Selecting a nested occurrence also opens its required
+enclosing chain. Prepared functions cache the same views under distinct
+internal proof identities, allowing a reusable source function to be used at
+different sound views in one term. The family is exhaustive for three
+independent occurrences but does not enumerate balanced subsets such as two
+open and two opaque occurrences among four. If the primary projection is
+incomplete, an empty search carries no negative evidence. Ordinary enclosing
+applications remain structural, so impredicative arguments are supported.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
 representation. A sealed atom retains normalized source syntax, a cached
 alpha-normal key, and capture-avoiding free-variable substitution. Bound
 variables are keyed by lexical scope and binder position; free identities are
-not renamed away. The representation itself remains an inert
-transport/equality feature. Each backend must opt into an explicit typing rule:
-positive introduction in Djinn, or fresh per-use provider instantiation in
-Exference. Neither rule is general rank-N subsumption.
+not renamed away. The representation itself remains an inert transport/equality
+feature. Each backend must opt into explicit typing rules: positive
+introduction in Djinn; or fresh per-use provider instantiation and shallow
+subsumption between context-free quantified schemes with no free flexible
+variables in Exference. Neither backend implements general rank-N subsumption.
+
+At an Exference scoped-value occurrence, exact alpha-aware quantified
+forwarding is tried first, including exact constrained schemes. A non-exact
+quantified request may then use the shallow rule only when both prenex schemes
+have no direct context or free flexible variable. The matcher treats requested
+binders as rigid, solves only provider binders, and rejects every solution that
+contains a nested `forall`; ambient rigid constants remain nominal. Search
+records the requested occurrence annotation without importing matcher state,
+and independent expression checking classifies the occurrence again. A
+non-quantified request instead freshly instantiates the complete leading
+provider chain and turns its direct contexts into proof obligations.
 
 Validated contexts do not contribute methods to proof search. This is the
 sound subset supported by Djinn's monomorphic propositional calculus: a query
@@ -360,7 +375,7 @@ Djex's installed environment; `defaultExferenceEnvironmentPath` exposes that
 resolved path when an application needs to display or inspect it. The
 policy-aware default loader is `loadDefaultExferenceSessionWithPolicy`.
 
-This directory-only path also discovers `*.visibility` files. A manifest line
+Directory paths also discover `*.visibility` files. A manifest line
 is `abstract|empty Module.Type ARITY PARAMETER_KIND...`; kinds use `Type` and
 fully parenthesized arrows such as `(Type->Type)`. If a manifest is present it
 is a complete, exact classification of the directory's constructorless
@@ -368,8 +383,10 @@ datatypes. Abstract entries retain their explicit checked kinds but have no
 Exference eliminator. Empty entries remain concrete empty datatypes. Malformed,
 duplicate, missing, unknown, inhabited, kind-invalid, or arity-mismatched
 entries are fatal `EXF_TYPE_VISIBILITY` diagnostics. The explicit-file and
-in-memory functions below do not discover this sidecar and therefore retain
-ordinary Haskell empty-datatype semantics.
+ordinary in-memory functions below do not discover or apply this sidecar and
+therefore retain ordinary Haskell empty-datatype semantics. The unified REPL
+captures manifests belonging to directory targets in the same immutable
+snapshot as modules and ratings, then uses the opt-in snapshot boundary below.
 
 Module-aware callers that already own discovery and dependency ordering can
 use the explicit-file boundary:
@@ -396,12 +413,27 @@ loadExferenceSessionFromSourcesWithPolicy
   -> [(FilePath, String)]
   -> [(FilePath, String)]
   -> IO ExferenceSessionLoadReport
+
+loadExferenceSessionFromSourcesWithTypeVisibility
+  :: [(FilePath, String)] -- already-read modules
+  -> [(FilePath, String)] -- already-read ratings
+  -> [(FilePath, String)] -- already-read visibility manifests
+  -> IO ExferenceSessionLoadReport
+
+loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
+  :: ExferenceSessionPolicy
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> [(FilePath, String)]
+  -> IO ExferenceSessionLoadReport
 ```
 
-These functions run the same read, parse, inventory, rating, and sealing
+These functions run the same parse, inventory, rating, and sealing
 pipeline as directory loading. The `FromSources` variants never reopen their
 paths; paths are retained as parser filenames and diagnostic provenance. They
 are appropriate when a caller already owns an immutable filesystem snapshot.
+The explicitly named `WithTypeVisibility` variants apply their third snapshot
+as one complete manifest; the older variants pass no manifest deliberately.
 None of these functions discover dependencies: the caller owns the complete
 ordered source closure. They do use the `import` declarations inside that
 closure to elaborate types, classes, instances, constructors, and value or
@@ -421,9 +453,17 @@ environmentFromSources
   :: [(FilePath, String)]
   -> [(FilePath, String)]
   -> IO (LoadReport CheckedSourceEnvironment)
+
+environmentFromSourcesWithTypeVisibility
+  :: [(FilePath, String)] -- modules
+  -> [(FilePath, String)] -- ratings
+  -> [(FilePath, String)] -- visibility manifests
+  -> IO (LoadReport CheckedSourceEnvironment)
 ```
 
-These functions have the same ordered snapshot and diagnostic-path contract.
+These functions have the same ordered snapshot and diagnostic-path contract;
+the explicitly named visibility variant has the same opt-in manifest semantics
+as the stable session facade.
 
 Always inspect both report fields:
 

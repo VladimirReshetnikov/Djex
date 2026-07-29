@@ -94,6 +94,7 @@ import Language.Haskell.Exference.Core.FunctionBinding
   )
 import Language.Haskell.Exference.Core.RigidInstantiation
   ( RigidInstantiationError (..)
+  , allocateNestedRigidInstantiations
   , mkRigidInstantiationContext
   , planRigidInstantiation
   , rigidInstantiations
@@ -3186,6 +3187,12 @@ tests = testGroup "Exference"
           plan <- expectRight $ planRigidInstantiation
             (mkRigidInstantiationContext environment) [] goal
           rigidInstantiations plan @?= [(4, 0), (9, 1)]
+          (nested, nestedPlan) <- expectRight
+            $ allocateNestedRigidInstantiations [12, 13] plan
+          nested @?= [(12, 2), (13, 3)]
+          (deeper, _) <- expectRight
+            $ allocateNestedRigidInstantiations [14] nestedPlan
+          deeper @?= [(14, 4)]
       , testCase "rigid planning pairs a wide binder layer directly" $ do
           let binders = [0 .. 4095]
               goal = TypeForall binders []

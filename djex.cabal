@@ -229,6 +229,7 @@ Library
     Language.Haskell.Exference.Core.Internal.Exference
     Language.Haskell.Exference.Core.Internal.Options
     Language.Haskell.Exference.Core.Internal.Polytype
+    Language.Haskell.Exference.Core.Internal.RigidScope
     Language.Haskell.Exference.Core.Internal.SearchControl
     Language.Haskell.Exference.Core.Internal.SourceNames
     Language.Haskell.Exference.Core.Internal.VariableSupply
@@ -419,6 +420,7 @@ Test-Suite exference-engine-tests
     Language.Haskell.Exference.Core.Internal.FlexibleIds
     Language.Haskell.Exference.Core.Internal.Options
     Language.Haskell.Exference.Core.Internal.Polytype
+    Language.Haskell.Exference.Core.Internal.RigidScope
     Language.Haskell.Exference.Core.Internal.Scope
     Language.Haskell.Exference.Core.Internal.SearchControl
     Language.Haskell.Exference.Core.Internal.SourceNames

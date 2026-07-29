@@ -13,6 +13,7 @@ module Language.Haskell.Exference.Core.RigidInstantiation
   , mkRigidInstantiationContext
   , RigidInstantiationPlan
   , rigidInstantiations
+  , allocateNestedRigidInstantiations
   , rigidInstantiationTargetCollisions
   , planRigidInstantiation
   , splitRigidInstantiationLayer
@@ -28,6 +29,7 @@ import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( IdentifierSupply
   , allocateFreshNonNegativeIdentifier
   , identifierIsReserved
+  , maximumReservedIdentifier
   , reserveIdentifiers
   , supplyFromIdentifiers
   )
@@ -80,17 +82,39 @@ mkRigidInstantiationContext environment = RigidInstantiationContext
 -- exact lexical order in which Exference opens the leading forall chain.
 --
 -- The constructor is private so the pairing cannot drift from 'forallify'.
-newtype RigidInstantiationPlan = RigidInstantiationPlan
+data RigidInstantiationPlan = RigidInstantiationPlan
   [(TVarId, TVarId)]
+  IdentifierSupply
   deriving (Eq, Show)
 
 instance NFData RigidInstantiationPlan where
-  rnf (RigidInstantiationPlan instantiations) = rnf instantiations
+  rnf (RigidInstantiationPlan instantiations supply) =
+    rnf instantiations `seq` rnf supply
 
 -- An ordinary projection prevents record-update syntax from replacing the
 -- checked lexical pairing while the constructor remains hidden.
 rigidInstantiations :: RigidInstantiationPlan -> [(TVarId, TVarId)]
-rigidInstantiations (RigidInstantiationPlan instantiations) = instantiations
+rigidInstantiations (RigidInstantiationPlan instantiations _) = instantiations
+
+-- | Allocate fresh rigid constants for one nested quantified goal while
+-- retaining every environment, query, root-plan, and earlier nested
+-- reservation.  The opaque plan is used as a branch-local supply so search
+-- and independent checking can replay the same deterministic allocation.
+allocateNestedRigidInstantiations
+  :: [TVarId]
+  -> RigidInstantiationPlan
+  -> Either
+      RigidInstantiationError
+      ([(TVarId, TVarId)], RigidInstantiationPlan)
+allocateNestedRigidInstantiations binders
+    (RigidInstantiationPlan rootInstantiations supply) =
+  case allocateRigidInstantiations binders supply of
+    Nothing -> Left $ RigidIdentifierSupplyExhausted
+      (maximumReservedIdentifier supply)
+      (SharedCount.saturatingNaturalToInt
+        $ SharedCount.naturalLength binders)
+    Just (nested, nextSupply) -> Right
+      (nested, RigidInstantiationPlan rootInstantiations nextSupply)
 
 -- | Rigid targets in a plan which are already occupied by an environment,
 -- query assumption, or goal occurrence.  A plan made against a conservative
@@ -135,7 +159,8 @@ planRigidInstantiation context extraConstraints goal = do
     Nothing -> Left $ RigidIdentifierSupplyExhausted
       maximumRigid
       (SharedCount.saturatingNaturalToInt $ SharedCount.naturalLength binders)
-    Just instantiations -> Right $ RigidInstantiationPlan instantiations
+    Just (instantiations, finalSupply) -> Right
+      $ RigidInstantiationPlan instantiations finalSupply
  where
   queryTypes = goal : concatMap constraint_params extraConstraints
   maximumRigid = SharedCollection.maximumPresent
@@ -148,8 +173,9 @@ planRigidInstantiation context extraConstraints goal = do
 allocateRigidInstantiations
   :: [TVarId]
   -> IdentifierSupply
-  -> Maybe [(TVarId, TVarId)]
-allocateRigidInstantiations binders initialSupply = fmap (reverse . fst)
+  -> Maybe ([(TVarId, TVarId)], IdentifierSupply)
+allocateRigidInstantiations binders initialSupply =
+  fmap (\(pairs, supply) -> (reverse pairs, supply))
   $ foldM allocate ([], initialSupply) binders
  where
   allocate (instantiations, supply) binder = do

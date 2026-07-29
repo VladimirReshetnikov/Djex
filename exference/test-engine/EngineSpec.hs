@@ -1,6 +1,8 @@
 module Main (main) where
 
 import qualified Data.Map.Strict as Map
+import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
@@ -29,6 +31,12 @@ import Language.Haskell.Exference.Core.Internal.Polytype
   ( instantiateLeadingForallsWith
   , quantifiedProviderSubsumes
   )
+import Language.Haskell.Exference.Core.Internal.RigidScope
+  ( RigidEscape (..)
+  , emptyRigidScope
+  , registerRigidScope
+  , validateRigidSubstitutions
+  )
 import Language.Haskell.Exference.Core.Internal.Testing
 import Language.Haskell.Exference.Core.Internal.VariableSupply
   ( supplyFromIdentifiers )
@@ -46,7 +54,27 @@ main = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "Exference private engine boundaries"
-  [ testCase "prepared queries consume one validated options witness" $ do
+  [ testCase "rigid scopes reject direct and propagated skolem escapes" $ do
+      let opened = registerRigidScope
+            (IntSet.singleton 0) [7] emptyRigidScope
+      validateRigidSubstitutions opened
+        (IntMap.singleton 0 $ TypeConstant 7) @?=
+          Left (RigidEscape 0 7)
+      propagated <- expectRight $ validateRigidSubstitutions opened
+        (IntMap.singleton 0 $ TypeVar 1)
+      validateRigidSubstitutions propagated
+        (IntMap.singleton 1 $ TypeConstant 7) @?=
+          Left (RigidEscape 1 7)
+      validateRigidSubstitutions opened
+        (IntMap.fromList
+          [(0, TypeVar 1), (1, TypeConstant 7)]) @?=
+            Left (RigidEscape 1 7)
+      case validateRigidSubstitutions opened
+          (IntMap.singleton 2 $ TypeConstant 7) of
+        Right _ -> pure ()
+        Left failure -> fail
+          $ "a younger flexible variable was rejected: " ++ show failure
+  , testCase "prepared queries consume one validated options witness" $ do
       environment <- expectRight $ sealLegacyEnvironment identityInput
       target <- checkedIdentifierTarget "singleOptionValidation"
       let query = legacyInputQuery identityInput

@@ -442,8 +442,10 @@ external type names after reporting them as warnings.
 Synonym kinds are frozen after their defining declarations and before values
 or instances are checked, so an operational use cannot retroactively make an
 unused phantom parameter higher-kinded. Open inventories continue to let empty
-datatype stubs acquire a missing kind shape from instances; the packaged
-environment uses that compatibility rule for abstract base-library types.
+datatype stubs acquire a missing kind shape from instances. The packaged
+environment first uses that rule to infer the complete kind of each opaque
+base-library stub, then replaces the stub with an abstract declaration before
+building Exference's elimination environment.
 Kind assumptions currently generalize only a wholly unconstrained class
 parameter. The shared IR cannot yet retain a partially polymorphic scheme such
 as `k -> Type`; an unresolved variable below a fixed outer kind shape therefore
@@ -827,13 +829,48 @@ any / the right solution. Some common current limitations are:
 - Nonrecursive empty datatypes are always eligible for elimination, independent
   of the multiple-constructor flag. A value of an empty datatype can therefore
   satisfy any result type through an empty `case`; rendered source uses
-  `case value of {}` and requires GHC's `EmptyCase` extension;
+  `case value of {}` and requires GHC's `EmptyCase` extension. A
+  constructorless declaration is not automatically assumed empty in a curated
+  directory that supplies the visibility manifest described below;
 - Recursive datatypes remain valid input, but recursive deconstructors are
   currently omitted from search with a structured
   `RecursiveDataEliminationUnsupported` warning rather than risking an
   unsound or divergent elimination projection. This includes the built-in
   list deconstructor, so HSE-loaded sessions report the limitation explicitly;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
+
+### Constructorless declarations in curated directories
+
+`environmentFromPath` discovers optional `*.visibility` sidecars alongside
+the directory's `*.hs` and `*.ratings` files. Each non-comment line has one of
+these forms:
+
+```text
+abstract Module.Type ARITY PARAMETER_KIND...
+empty Module.Type ARITY PARAMETER_KIND...
+```
+
+`abstract` means that the source catalogue omitted the runtime constructors;
+the type keeps the exact manifest kind checked against the complete source
+inventory but has no Exference deconstructor. `empty` asserts a genuinely
+uninhabited Haskell datatype and retains empty-case elimination. Each source
+parameter has one ground kind token: `Type`, or a fully parenthesized arrow
+such as `(Type->Type)`. Explicit kinds preserve otherwise unconstrained
+higher-kinded parameters and are checked by resealing the source inventory.
+If any visibility sidecar is present, every constructorless datatype must be
+classified exactly once.
+Duplicate or malformed entries, unknown names, entries naming an inhabited
+datatype, missing entries, and arity drift fail closed with
+`EXF_TYPE_VISIBILITY` diagnostics.
+
+A comment is a line whose first non-whitespace character is `#`. Hashes later
+in a line remain part of legal symbolic names such as `Module.(:#)`.
+
+This interpretation is deliberately local to directory discovery. Explicit
+file and in-memory source APIs continue to give `data Empty` ordinary Haskell
+empty-datatype semantics. The installed manifest classifies the opaque
+base-library signature stubs as abstract and retains only `Data.Void.Void` and
+`GHC.Generics.V1` as genuine empty datatypes.
 
 ## Experimental features
 

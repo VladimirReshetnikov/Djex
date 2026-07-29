@@ -40,6 +40,7 @@ Extra-Source-Files:
 Data-Files:
   exference/environment/*.hs
   exference/environment/*.ratings
+  exference/environment/*.visibility
 
 source-repository head
   type:     git

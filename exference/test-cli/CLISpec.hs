@@ -94,7 +94,7 @@ testIdentity = do
   -- instead of assuming that an unqualified Prelude.id is available.
   assertContains "identity should be synthesized" "\\a -> a" output
   assertContains "candidate metrics should describe the emitted queue state"
-    "(depth 0.42000000000000004, 3 steps, 167 final queue size)" output
+    "(depth 0.42000000000000004, 3 steps, 149 final queue size)" output
   assertBool "a final queue size must not be reported as a historical maximum"
     (not $ "max pqueue size" `isInfixOf` output)
   assertBool "the adapter's internal clause target must stay hidden"

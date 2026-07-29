@@ -176,6 +176,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testExferenceRendering
   , testCase "Exference keeps abstract arguments available to providers"
       testExferenceAbstractProviderUse
+  , testCase "Exference distinguishes bundled opaque types from real empties"
+      testExferenceConstructorlessVisibility
   , testCase "Exference accepts an empty checked environment"
       testEmptyExferenceEnvironment
   , testCase "Exference recursion helpers require explicit command opt-in"
@@ -2985,6 +2987,52 @@ testExferenceAbstractProviderUse = forM_
       assertContains
         ("provider became unusable after introducing Int for " ++ query)
         "-> f" expression
+
+testExferenceConstructorlessVisibility :: Assertion
+testExferenceConstructorlessVisibility = do
+  forM_
+      [ "Int -> Int"
+      , "Data.Map.Map Int Bool -> Data.Map.Map Int Bool"
+      , "Data.Monoid.Alt Data.Maybe.Maybe Int -> "
+          ++ "Data.Monoid.Alt Data.Maybe.Maybe Int"
+      , "GHC.Generics.Rec1 Data.Maybe.Maybe Int -> "
+          ++ "GHC.Generics.Rec1 Data.Maybe.Maybe Int"
+      , "GHC.Generics.M1 Int Int Data.Maybe.Maybe Int -> "
+          ++ "GHC.Generics.M1 Int Int Data.Maybe.Maybe Int"
+      ] $ \query -> do
+    (exitCode, output, errors) <- runDjex
+      [ "exference", "--select", "first"
+      , "--render", "expression"
+      , query
+      ]
+    assertEqual ("abstract-type search stderr: " ++ errors)
+      ExitSuccess exitCode
+    assertBool
+      ("bundled opaque type admitted empty elimination for " ++ query
+        ++ ": " ++ output)
+      $ not $ "case " `isInfixOf` output
+    assertBool ("opaque-type search returned no candidate: " ++ errors)
+      $ not $ "DJEX_EXF_NO_RESULT" `isInfixOf` errors
+    assertBool ("opaque-type search truncated before its identity: " ++ errors)
+      $ not $ "DJEX_SEARCH_TRUNCATED" `isInfixOf` errors
+    assertBool "opaque-type identity rendered no expression" $ not $ null output
+
+  withTemporaryEnvironment
+      [("Empty.hs", unlines
+        [ "{-# LANGUAGE EmptyDataDecls #-}"
+        , "module Fixture where"
+        , "data Empty"
+        ])] $ \directory -> do
+    expression <- assertSuccess
+      [ "exference", "--environment", directory
+      , "--select", "first"
+      , "--render", "expression"
+      , "Fixture.Empty -> a"
+      ]
+    assertContains "a user-declared empty type lost empty elimination"
+      "case " expression
+    assertContains "the generated elimination is not an empty case"
+      "of {}" expression
 
 testEmptyExferenceEnvironment :: Assertion
 testEmptyExferenceEnvironment = withTemporaryEnvironment [] $ \directory -> do

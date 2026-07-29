@@ -18,7 +18,12 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Data.Void (Void)
 import Numeric.Natural (Natural)
-import System.Directory (getTemporaryDirectory, removeFile)
+import System.Directory
+  ( createDirectory
+  , getTemporaryDirectory
+  , removeFile
+  , removePathForcibly
+  )
 import System.IO (hClose, hPutStr, openTempFile)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
@@ -6902,6 +6907,238 @@ tests = testGroup "Exference"
                 $ SharedInventory.inventoryKindAssumptions inventory) @?=
             Just (SharedKind.FunctionKind
               SharedKind.ProperTypeKind SharedKind.ProperTypeKind)
+      , testCase "the shipped catalogue distinguishes opaque and empty types" $ do
+          environmentDirectory <- getDataFileName "exference/environment"
+          (sourceEnvironmentResult, _) <- runLoad
+            $ environmentFromPath environmentDirectory
+          checkedEnvironment <- expectRight sourceEnvironmentResult
+          intName <- expectRight $ mkQualifiedName ["Data", "Int"] "Int"
+          mapName <- expectRight $ mkQualifiedName ["Data", "Map"] "Map"
+          altName <- expectRight $ mkQualifiedName ["Data", "Monoid"] "Alt"
+          voidName <- expectRight $ mkQualifiedName ["Data", "Void"] "Void"
+          v1Name <- expectRight $ mkQualifiedName ["GHC", "Generics"] "V1"
+          rec1Name <- expectRight $ mkQualifiedName ["GHC", "Generics"] "Rec1"
+          m1Name <- expectRight $ mkQualifiedName ["GHC", "Generics"] "M1"
+          let shared = SharedInventory.inventoryEnvironment
+                $ checkedSourceInventory checkedEnvironment
+              declarations = SharedEnvironment.typeDeclarationMap shared
+              emptyDeclarationNames = Set.fromList
+                [ typeName
+                | SharedDeclaration.DataTypeDeclaration
+                    _ typeName _ [] <- Map.elems declarations
+                ]
+              projection = checkedSourceProjection checkedEnvironment
+              deconstructorNames =
+                [ dataName
+                | deconstructor <- sourceDeconstructors projection
+                , Just dataName <-
+                    [typeConstructorHead $ deconstructorInput deconstructor]
+                ]
+              assertAbstract expectedName expectedKind =
+                case Map.lookup expectedName declarations of
+                  Just (SharedDeclaration.AbstractTypeDeclaration
+                      _ actualName actualKind) -> do
+                    actualName @?= expectedName
+                    actualKind @?= expectedKind
+                  declaration -> fail $ "expected abstract declaration for "
+                    ++ show expectedName ++ ", got " ++ show declaration
+              assertEmpty expectedName =
+                case Map.lookup expectedName declarations of
+                  Just (SharedDeclaration.DataTypeDeclaration
+                      _ actualName _ constructors) -> do
+                    actualName @?= expectedName
+                    constructors @?= []
+                  declaration -> fail $ "expected empty declaration for "
+                    ++ show expectedName ++ ", got " ++ show declaration
+              proper = SharedKind.ProperTypeKind
+              unary = SharedKind.FunctionKind proper proper
+              unaryWrapper = SharedKind.FunctionKind unary
+                $ SharedKind.FunctionKind proper proper
+              metadataWrapper = SharedKind.FunctionKind proper
+                $ SharedKind.FunctionKind proper
+                $ SharedKind.FunctionKind unary
+                $ SharedKind.FunctionKind proper proper
+          assertAbstract intName proper
+          assertAbstract mapName
+            $ SharedKind.FunctionKind proper
+            $ SharedKind.FunctionKind proper proper
+          assertAbstract altName unaryWrapper
+          assertAbstract rec1Name unaryWrapper
+          assertAbstract m1Name metadataWrapper
+          assertEmpty voidName
+          assertEmpty v1Name
+          emptyDeclarationNames @?= Set.fromList [voidName, v1Name]
+          assertBool "opaque Int retained an empty-case deconstructor"
+            $ intName `notElem` deconstructorNames
+          assertBool "opaque Map retained an empty-case deconstructor"
+            $ mapName `notElem` deconstructorNames
+          assertBool "real Void lost its empty-case deconstructor"
+            $ voidName `elem` deconstructorNames
+          assertBool "real V1 lost its empty-case deconstructor"
+            $ v1Name `elem` deconstructorNames
+      , testCase "visibility sidecars are path-local and preserve real empties" $ do
+          let moduleSource = unlines
+                [ "{-# LANGUAGE EmptyDataDecls #-}"
+                , "{-# LANGUAGE MagicHash #-}"
+                , "{-# LANGUAGE TypeOperators #-}"
+                , "module Fixture where"
+                , "data Token a"
+                , "data Empty"
+                , "data left :# right"
+                ]
+              visibilitySource = unlines
+                [ "abstract Fixture.Token 1 Type"
+                , "empty Fixture.Empty 0"
+                , "abstract Fixture.(:#) 2 Type Type"
+                ]
+          withTemporaryDirectoryFiles
+              [("Fixture.hs", moduleSource)] $ \plainDirectory -> do
+            (plainResult, _) <- runLoad
+              $ environmentFromPath plainDirectory
+            plain <- checkedSourceProjection <$> expectRight plainResult
+            tokenName <- expectRight $ mkQualifiedName ["Fixture"] "Token"
+            assertBool "a source-only empty declaration became abstract"
+              $ tokenName `elem`
+                [ dataName
+                | deconstructor <- sourceDeconstructors plain
+                , Just dataName <-
+                    [typeConstructorHead $ deconstructorInput deconstructor]
+                ]
+          withTemporaryDirectoryFiles
+              [ ("Fixture.hs", moduleSource)
+              , ("types.visibility", visibilitySource)
+              ] $ \classifiedDirectory -> do
+            (classifiedResult, _) <- runLoad
+              $ environmentFromPath classifiedDirectory
+            checked <- expectRight classifiedResult
+            tokenName <- expectRight $ mkQualifiedName ["Fixture"] "Token"
+            emptyName <- expectRight $ mkQualifiedName ["Fixture"] "Empty"
+            operatorName <- expectRight $ mkQualifiedName ["Fixture"] "(:#)"
+            let projection = checkedSourceProjection checked
+                deconstructorNames =
+                  [ dataName
+                  | deconstructor <- sourceDeconstructors projection
+                  , Just dataName <-
+                      [typeConstructorHead $ deconstructorInput deconstructor]
+                  ]
+                declarations = SharedEnvironment.typeDeclarationMap
+                  $ SharedInventory.inventoryEnvironment
+                  $ checkedSourceInventory checked
+            assertBool "abstract Token retained an eliminator"
+              $ tokenName `notElem` deconstructorNames
+            assertBool "a hash type operator was truncated as a comment"
+              $ operatorName `notElem` deconstructorNames
+            assertBool "explicitly empty Empty lost its eliminator"
+              $ emptyName `elem` deconstructorNames
+            case Map.lookup tokenName declarations of
+              Just SharedDeclaration.AbstractTypeDeclaration{} -> pure ()
+              declaration -> fail $ "Token was not abstract: "
+                ++ show declaration
+            case Map.lookup operatorName declarations of
+              Just SharedDeclaration.AbstractTypeDeclaration{} -> pure ()
+              declaration -> fail $ "(:#) was not abstract: "
+                ++ show declaration
+            case Map.lookup emptyName declarations of
+              Just SharedDeclaration.DataTypeDeclaration{} -> pure ()
+              declaration -> fail $ "Empty was not concrete: "
+                ++ show declaration
+      , testCase "visibility manifests reject every catalogue mismatch" $ do
+          let moduleSource = unlines
+                [ "{-# LANGUAGE EmptyDataDecls #-}"
+                , "module Fixture where"
+                , "data Token a"
+                , "data Empty"
+                , "data Full = Full"
+                ]
+              cases =
+                [ ( "classification"
+                  , [ "opaque Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "unknown classification"
+                  )
+                , ( "unqualified"
+                  , [ "abstract Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "must be module-qualified"
+                  )
+                , ( "malformed arity"
+                  , [ "abstract Fixture.Token nope Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "invalid nonnegative type arity"
+                  )
+                , ( "kind count"
+                  , [ "abstract Fixture.Token 1"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "requires 1 parameter kind, but found 0"
+                  )
+                , ( "invalid kind"
+                  , [ "abstract Fixture.Token 1 Type->Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "invalid parameter kind"
+                  )
+                , ( "duplicate"
+                  , [ "abstract Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    , "abstract Fixture.Token 1 Type"
+                    ]
+                  , "duplicate classification for Fixture.Token"
+                  )
+                , ( "unknown"
+                  , [ "abstract Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    , "abstract Fixture.Missing 0"
+                    ]
+                  , "unknown datatype Fixture.Missing"
+                  )
+                , ( "nonempty"
+                  , [ "abstract Fixture.Token 1 Type"
+                    , "empty Fixture.Empty 0"
+                    , "abstract Fixture.Full 0"
+                    ]
+                  , "has constructors and cannot be classified as abstract"
+                  )
+                , ( "arity"
+                  , [ "abstract Fixture.Token 2 Type Type"
+                    , "empty Fixture.Empty 0"
+                    ]
+                  , "arity mismatch for Fixture.Token"
+                  )
+                , ( "incomplete"
+                  , ["abstract Fixture.Token 1 Type"]
+                  , "missing classification for Fixture.Empty"
+                  )
+                ]
+          forM_ cases $ \(label, manifestLines, expectedMessage) ->
+            withTemporaryDirectoryFiles
+                [ ("Fixture.hs", moduleSource)
+                , ("types.visibility", unlines manifestLines)
+                ] $ \environmentDirectory -> do
+              (result, _) <- runLoad
+                $ environmentFromPath environmentDirectory
+              failures <- case result of
+                Left (TypeVisibilityManifestErrors values) -> pure values
+                Left failure -> fail $ label ++ " produced the wrong failure: "
+                  ++ show failure
+                Right _ -> fail $ label ++ " manifest was accepted"
+              let rendered = environmentLoadErrorDiagnostics
+                    $ TypeVisibilityManifestErrors failures
+              assertBool (label ++ " diagnostic omitted its reason")
+                $ any (isInfixOf expectedMessage . diagnosticMessage)
+                $ NonEmpty.toList rendered
+              case label of
+                "incomplete" -> pure ()
+                _ -> assertBool
+                  (label ++ " manifest diagnostic lost its line span")
+                  $ any ((/= Nothing) . diagnosticSpan)
+                  $ NonEmpty.toList rendered
+              assertBool (label ++ " diagnostic lost its stable code")
+                $ all ((== Just "EXF_TYPE_VISIBILITY") . diagnosticCode)
+                $ NonEmpty.toList rendered
       , testCase "built-in constructors retain configured search penalties" $ do
           environmentDirectory <- getDataFileName "exference/environment"
           (sourceEnvironmentResult, _) <- runLoad
@@ -9153,6 +9390,25 @@ withTemporaryFile source action = do
       hClose handle
       pure path)
     removeFile
+    action
+
+withTemporaryDirectoryFiles
+  :: [(FilePath, String)]
+  -> (FilePath -> IO a)
+  -> IO a
+withTemporaryDirectoryFiles files action = do
+  temporaryDirectory <- getTemporaryDirectory
+  bracket
+    (do
+      (path, handle) <- openTempFile temporaryDirectory
+        "exference-loader-environment"
+      hClose handle
+      removeFile path
+      createDirectory path
+      forM_ files $ \(fileName, contents) ->
+        writeFile (path ++ "/" ++ fileName) contents
+      pure path)
+    removePathForcibly
     action
 
 classEnvironmentFromSources

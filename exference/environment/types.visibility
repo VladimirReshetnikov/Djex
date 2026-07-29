@@ -1,0 +1,64 @@
+# Constructorless declarations in this curated signature catalogue need an
+# explicit meaning. "abstract" hides unavailable runtime constructors;
+# "empty" asserts that the Haskell datatype truly has no constructors. The
+# arity is followed by one ground kind per source parameter. This makes both
+# catalogue drift and otherwise unconstrained higher-kinded parameters explicit.
+abstract Control.Applicative.WrappedMonad 2 (Type->Type) Type
+abstract Control.Applicative.WrappedArrow 3 (Type->(Type->Type)) Type Type
+abstract Control.Applicative.ZipList 1 Type
+abstract Control.Concurrent.STM.STM 1 Type
+abstract Control.Exception.Handler 1 Type
+abstract Control.Monad.ST.ST 2 Type Type
+abstract Data.Char.Char 0
+abstract Data.Complex.Complex 1 Type
+abstract Data.Data.DataType 0
+abstract Data.Data.Constr 0
+abstract Data.Data.DataRep 0
+abstract Data.Data.ConstrRep 0
+abstract Data.Data.Fixity 0
+abstract Data.Functor.Const.Const 2 Type Type
+abstract Data.Functor.Identity.Identity 1 Type
+abstract Data.Int.Int 0
+abstract Data.Int.Int8 0
+abstract Data.Int.Int16 0
+abstract Data.Int.Int32 0
+abstract Data.Int.Int64 0
+abstract Data.Map.Map 2 Type Type
+abstract Data.Monoid.Dual 1 Type
+abstract Data.Monoid.Endo 1 Type
+abstract Data.Monoid.All 0
+abstract Data.Monoid.Any 0
+abstract Data.Monoid.Sum 1 Type
+abstract Data.Monoid.Product 1 Type
+abstract Data.Monoid.First 1 Type
+abstract Data.Monoid.Last 1 Type
+abstract Data.Monoid.Alt 2 (Type->Type) Type
+abstract Data.Ord.Down 1 Type
+abstract Data.Ratio.Ratio 1 Type
+abstract Data.Text.Text 0
+abstract Data.Typeable.TypeRep 0
+abstract Data.Word.Word 0
+abstract Data.Word.Word8 0
+abstract Data.Word.Word16 0
+abstract Data.Word.Word32 0
+abstract Data.Word.Word64 0
+empty Data.Void.Void 0
+empty GHC.Generics.V1 1 Type
+abstract GHC.Generics.U1 1 Type
+abstract GHC.Generics.Par1 1 Type
+abstract GHC.Generics.Rec1 2 (Type->Type) Type
+abstract GHC.Generics.K1 3 Type Type Type
+abstract GHC.Generics.M1 4 Type Type (Type->Type) Type
+abstract Prelude.Float 0
+abstract Prelude.Double 0
+abstract Prelude.Integer 0
+abstract Prelude.Ordering 0
+abstract System.Console.GetOpt.ArgDescr 1 Type
+abstract System.Console.GetOpt.OptDescr 1 Type
+abstract System.Console.GetOpt.ArgOrder 1 Type
+abstract System.IO.IO 1 Type
+abstract Text.ParserCombinators.ReadP.ReadP 1 Type
+abstract Text.ParserCombinators.ReadPrec.ReadPrec 1 Type
+abstract Text.Read.ReadS 0
+abstract Text.Read.Lexeme 0
+abstract Text.Show.ShowS 0

@@ -135,8 +135,9 @@ loadDefaultExferenceSessionWithPolicy
 loadDefaultExferenceSessionWithPolicy policy =
   defaultExferenceEnvironmentPath >>= loadExferenceSessionWithPolicy policy
 
--- | Load a directory of source modules and ratings, validate its complete
--- inventory, and seal an Exference session with the default policy.
+-- | Load a directory of source modules, ratings, and an optional path-local
+-- constructorless-type visibility manifest; validate its complete inventory;
+-- and seal an Exference session with the default policy.
 loadExferenceSession :: FilePath -> IO ExferenceSessionLoadReport
 loadExferenceSession = loadExferenceSessionWithPolicy
   defaultExferenceSessionPolicy

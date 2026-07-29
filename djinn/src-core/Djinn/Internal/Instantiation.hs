@@ -147,7 +147,7 @@ instantiationAxioms translator variableSpellings goalFormulas
     quantifiedCandidates =
         distinctOn SharedTypeAtom.alphaTypeKey $
         sortOn (SharedTypeRender.renderType id) $
-        concatMap closedForallSubtrees opaqueSources
+        concatMap closedQuantifiedSubtrees opaqueSources
     candidates = variableCandidates ++ quantifiedCandidates
     initialSchemes = distinctOn schemeKey
         [ scheme
@@ -161,33 +161,46 @@ instantiationAxioms translator variableSpellings goalFormulas
             buildAxiomFormulas translator candidates initialSchemes
         ]
 
--- Quantified subtrees usable as instantiation arguments. A nested forall
--- whose body mentions an enclosing binder is not a sequent-level type, so
--- only subtrees closed under the whole atom's free variables qualify.
-closedForallSubtrees
+-- Quantified subtrees and their impredicative wrappers are usable as
+-- instantiation arguments. A nested forall whose body mentions an enclosing
+-- binder is not a sequent-level type, so only subtrees closed under the whole
+-- atom's free variables qualify.
+closedQuantifiedSubtrees
     :: SharedType.Type String -> [SharedType.Type String]
-closedForallSubtrees source =
+closedQuantifiedSubtrees source =
     [ subtree
-    | subtree <- forallSubtrees source
+    | subtree <- quantifiedSubtrees source
     , SharedType.freeVariables subtree `Set.isSubsetOf` sourceFree
     ]
   where
     sourceFree = SharedType.freeVariables source
 
-forallSubtrees :: SharedType.Type String -> [SharedType.Type String]
-forallSubtrees source = case source of
+-- Every subtree which contains an explicit forall, including structural
+-- ancestors such as @Maybe (forall a. a -> a)@. The containing wrapper is a
+-- query-supplied type just as surely as the quantified atom itself; retaining
+-- it lets guarded impredicative instantiation use the complete supplied shape
+-- without guessing a new quantifier.
+quantifiedSubtrees :: SharedType.Type String -> [SharedType.Type String]
+quantifiedSubtrees source = case source of
     SharedType.TypeVariable{} -> []
     SharedType.TypeConstructor{} -> []
     SharedType.TypeApplication function argument ->
-        forallSubtrees function ++ forallSubtrees argument
+        containing source $
+            quantifiedSubtrees function ++ quantifiedSubtrees argument
     SharedType.FunctionType parameter result ->
-        forallSubtrees parameter ++ forallSubtrees result
-    SharedType.TupleType _ elements -> concatMap forallSubtrees elements
+        containing source $
+            quantifiedSubtrees parameter ++ quantifiedSubtrees result
+    SharedType.TupleType _ elements -> containing source $
+        concatMap quantifiedSubtrees elements
     SharedType.ForallType _ constraints body ->
         source :
-            concatMap forallSubtrees
+            concatMap quantifiedSubtrees
                 (concatMap constraintArguments constraints) ++
-            forallSubtrees body
+            quantifiedSubtrees body
+  where
+    containing wrapper nested
+        | null nested = []
+        | otherwise = wrapper : nested
 
 -- Worklist over schemes. Instantiating a scheme can expose a strictly
 -- shallower hypothesis-side forall in its own body; such discoveries join the

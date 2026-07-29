@@ -1028,6 +1028,8 @@ testRankNTypeAtoms = do
         "(forall a. a -> a) -> (b, c) -> (c, b)"
     runStableIdentity stableSession "instantiateAtGoalSkolem"
         "forall b. (forall a. a -> a) -> b -> b"
+    runStableIdentity stableSession "instantiateAtImpredicativeWrapper"
+        "(forall a. f a) -> f (Maybe (forall b. b -> b))"
 
     -- A leading chain longer than the instantiation binder bound stays
     -- opaque. The honest inconclusive answer is retained: no candidate is

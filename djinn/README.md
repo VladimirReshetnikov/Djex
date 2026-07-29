@@ -215,6 +215,12 @@ premises. Thus `Eq a => a -> a` can produce the identity function, but
 constraint. A query whose only implementation needs a class method remains
 uninhabitable.
 
+The same policy applies when a validated context appears on a positive nested
+`forall`. For example, `c -> (forall a. Eq a => a -> a)` can introduce the
+quantifier and synthesize the identity body, but it cannot use `(==)` as an LJT
+premise. Constrained hypothesis-side schemes remain opaque: admitting them as
+unconditional assumptions would erase a dictionary requirement.
+
 This boundary avoids pretending that Djinn's monomorphic propositional core can
 instantiate a polymorphic method. The former premise model also made
 alpha-equivalent queries depend on the spelling of method-local type variables.
@@ -515,9 +521,10 @@ accepts explicit quantification at every type position. It implicitizes the
 leading `ForallType` binders and constraints of a query as before, while every
 nested quantifier first becomes a shared `TypeAtom` whose identity is its
 lexical alpha-normal form. The ordinary formula plan retains that atom as one
-proposition. A second, polarized plan reopens a context-free atom in positive
-position with occurrence-scoped skolems; arrow domains reverse polarity, while
-tuples, sums, and datatype expansion preserve it. Outer applications
+proposition. A second, polarized plan reopens an atom in positive position with
+occurrence-scoped skolems, including an atom with a validated class context;
+arrow domains reverse polarity, while tuples, sums, and datatype expansion
+preserve it. The context contributes no LJT premises. Outer applications
 containing an atom, such as
 `[(forall result. result -> result -> result)]`, retain their structure and
 compare alpha-equivalently without exposing the quantified body.
@@ -773,16 +780,18 @@ knowing before editing the source:
 
 - Djinn implements propositional intuitionistic reasoning, not the full Haskell
   type system. A query's prenex `forall`/constraint prefix is elaborated, and a
-  context-free nested forall can be introduced in a positive formula position.
+  nested forall, including one with a validated context, can be introduced in a
+  positive formula position when its body is dictionary-independent.
   A hypothesis-side context-free forall of at most three leading binders can
   additionally be eliminated through bounded instantiation axioms: the chain is
   instantiated completely at candidates the sequent itself supplies (goal
   variables, opened-forall skolems, premise-scope variables, and quantified
   atoms already present, the last giving guarded impredicative instantiation),
   and the generated evidence is the hypothesis expression itself. Constrained
-  occurrences, longer chains, and candidates outside that vocabulary remain
-  opaque, alpha-equated atoms. An empty incomplete search is inconclusive rather
-  than proof of uninhabitability. Search tries the fully opened polarized view,
+  hypothesis occurrences, longer eliminable chains, and candidates outside that
+  vocabulary remain opaque, alpha-equated atoms. An empty incomplete search is
+  inconclusive rather than proof of uninhabitability. Search tries the fully
+  opened polarized view,
   the historical exact-opaque view, one plan retaining each positive forall
   opaquely while its siblings open, and the dual plans opening one occurrence
   while unrelated siblings stay opaque; when instantiation axioms exist, the

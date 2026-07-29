@@ -197,12 +197,18 @@ free variables; its cached lexical alpha key owns equality and ordering.
 Binders use scope and declaration position, so spelling is irrelevant while
 reordering binders or changing a free variable is significant. Ordinary
 unification never decomposes an atom. Instead, the two engines own explicit,
-bounded rules at different architectural boundaries: Djinn's polarized formula
-compiler may reopen a context-free atom for positive introduction, while
-Exference may instantiate a scoped provider's leading binders immediately
-before ordinary type unification. Every other occurrence remains opaque.
-Applications, tuples, functions, and nominal constructors outside it retain
-their ordinary structure, which permits impredicative values such as
+bounded rules at different architectural boundaries. Djinn's polarized formula
+compiler may reopen a positive forall, including a contextual one; the
+validated context contributes no LJT premises, so generated inhabitants remain
+dictionary-independent. Exference may open an exposed goal's complete leading
+forall chain, substitute fresh rigids through each layer's contexts and body,
+and make those contexts lexical givens only for that body. Deferred obligations
+retain their exact given snapshot, preventing binderless or sibling evidence
+leakage. Exference may also instantiate a scoped provider's leading binders
+immediately before ordinary type unification. Quantifiers outside these
+explicit boundaries remain opaque.
+Structure surrounding those opaque quantifiers retains its ordinary form,
+which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.
 
 The Exference runtime is deliberately richer than a bare session. Source

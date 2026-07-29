@@ -1,5 +1,12 @@
 # Rank-N inference and convergence review — 2026-07-28
 
+> **Historical snapshot.** Follow-ups on 2026-07-29 added bounded Djinn
+> [hypothesis instantiation](2026-07-29-hypothesis-instantiation.md), the first
+> Exference [goal-introduction rule](2026-07-29-exference-forall-introduction.md),
+> and then
+> [contextual positive introduction](2026-07-29-contextual-rank-n-introduction.md)
+> in both engines. The rule table below records the earlier review boundary.
+
 ## Scope
 
 This review followed quantified types from the shared `Type`/`TypeAtom`

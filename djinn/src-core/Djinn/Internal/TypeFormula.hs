@@ -720,7 +720,8 @@ substituteExpansion replacements source = case source of
 -- a nested forall. Substitute them through the shared capture-avoiding worker,
 -- then rebuild the atom and its cached alpha key. Substitution itself does not
 -- inspect the quantified body logically; polarized lowering may later reopen
--- a context-free occurrence in positive position.
+-- a validated occurrence in positive position, ignoring its context for proof
+-- power under Djinn's dictionary-independent policy.
 substituteExpansionAtom
     :: LazyMap.Map String ExpansionType
     -> SharedTypeAtom.TypeAtom String

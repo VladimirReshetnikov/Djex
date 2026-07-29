@@ -144,21 +144,25 @@ Church booleans:
 Both engines open the leading quantifiers of the query itself. They also expose
 deliberately bounded rank-N rule families:
 
-- Djinn introduces a context-free `forall` in a positive formula position.
-  Arrow results, tuples, and datatype structure preserve polarity; crossing an
-  arrow parameter reverses it. Djinn also eliminates a hypothesis-side
+- Djinn introduces a `forall`, including one with a validated class context,
+  in a positive formula position. Arrow results, tuples, and datatype structure
+  preserve polarity; crossing an arrow parameter reverses it. Context methods
+  are not LJT premises, so the body must be dictionary-independent. Djinn also
+  eliminates a hypothesis-side
   context-free chain of at most three leading binders by instantiating it at
   candidates the sequent itself supplies — goal variables, opened-forall
   skolems, premise-scope variables, and query-supplied subtrees that are
   independent of enclosing binders and contain quantification, including
   wrappers around quantified atoms. The last family gives a guarded form of
   impredicative instantiation.
-- Exference can introduce a nested context-free `forall` when it reaches an
-  active goal, such as a callback argument or arrow result. It opens the
-  complete leading chain with branch-local fresh rigids and synthesizes the
-  body. Flexible variables from an older scope may not be solved directly or
-  indirectly to those rigids, so skolems cannot escape. Contextual nested
-  foralls remain opaque.
+- Exference can introduce a nested `forall`, with or without class contexts,
+  when it reaches an active goal such as a callback argument or arrow result.
+  It opens the complete leading chain with branch-local fresh rigids. Each
+  substituted context is a lexical given for that body only, and each deferred
+  obligation records its own given snapshot. Local methods, superclasses, and
+  instances can therefore discharge body work without evidence leaking into a
+  sibling goal. Flexible variables from an older scope may not be solved
+  directly or indirectly to those rigids, so skolems cannot escape.
 - Exference instantiates the complete leading `forall` chain of a scoped value
   freshly at each monomorphic use. Its direct contexts become proof
   obligations. Exact polymorphic forwarding takes priority. A context-free
@@ -172,6 +176,7 @@ For example:
 
 ```haskell
 c -> (forall a. a -> a)
+c -> (forall a. Eq a => a -> a)
 ((forall a. a -> a) -> c) -> c
 (forall a. a -> a) -> b -> b
 (forall a. a -> Maybe a) -> (forall b. b -> b) -> Maybe (forall b. b -> b)
@@ -198,9 +203,10 @@ position, scope, and free-variable identity remain significant, so shadowing
 and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
-polymorphic-let generalization, or visible type application. Exference leaves
-nested contextual goals opaque, and finite identifier or search-budget
-exhaustion is an inconclusive truncation. In particular,
+polymorphic-let generalization, or visible type application. Exference does not
+perform non-exact subsumption between contextual schemes, while unexposed
+quantified atoms remain opaque; finite identifier or search-budget exhaustion
+is an inconclusive truncation. In particular,
 Djinn keeps constrained hypothesis occurrences and chains beyond three binders
 opaque; if the bounded approximation
 finds no term, the result is inconclusive rather than a proof of
@@ -818,9 +824,10 @@ so the projection degrades rather than fails:
   as an unconditional proof premise would be unsound. Context-free leading
   quantifiers are implicitized as Djinn assumptions, and nested rank-N atoms
   remain intact at the projection boundary. Djinn's polarized formula
-  translation may subsequently open a context-free atom in a supported
-  positive position. A Djinn query may also carry a prenex context, provided
-  the synthesized inhabitant is dictionary-independent.
+  translation may subsequently open a supported positive atom even when its
+  context is nonempty; that context is validated but supplies no proof premise.
+  A Djinn query may also carry a prenex context, provided the synthesized
+  inhabitant is dictionary-independent.
 - Type constructors referenced from signatures but not declared in scope are
   stubbed as abstract types. A kind already inferred by the shared inventory is
   authoritative; an arity-derived kind is only the fallback for a genuinely

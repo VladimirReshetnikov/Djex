@@ -111,9 +111,10 @@ kArrow = KArrow
 
 -- | Parse a type in Djinn's Haskell-like syntax, requiring the whole input to
 -- be consumed. Explicit @forall@ is accepted at any type position, including
--- inside constructor applications. Checked queries reopen context-free
--- positive occurrences in the polarized formula plan; raw conversion and
--- unsupported occurrences retain one inert, alpha-aware atom.
+-- inside constructor applications. Checked queries reopen validated positive
+-- occurrences in the polarized formula plan, including contextual ones under
+-- dictionary-independent semantics; raw conversion and unsupported
+-- occurrences retain one inert, alpha-aware atom.
 parseHType :: String -> Either String HType
 parseHType = parseWith pHType "type"
 

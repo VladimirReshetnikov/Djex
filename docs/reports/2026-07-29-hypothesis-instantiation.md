@@ -1,5 +1,11 @@
 # Hypothesis instantiation and guarded impredicativity — 2026-07-29
 
+> **Historical snapshot.** This report records the hypothesis-instantiation
+> slice before goal-side contexts were supported. The completed follow-ups add
+> Exference goal introduction and then
+> [contextual positive introduction](2026-07-29-contextual-rank-n-introduction.md)
+> in both engines; Djinn's hypothesis-side rule remains context-free.
+
 ## Scope
 
 The 2026-07-28 review left one deliberate asymmetry in Djinn's bounded rank-N

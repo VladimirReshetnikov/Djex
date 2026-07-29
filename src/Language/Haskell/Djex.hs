@@ -102,8 +102,10 @@ data Capability
   | PrenexPolymorphism
     -- ^ Leading binders are accepted at the checked search edge.
   | RankNIntroduction
-    -- ^ A context-free quantified type at a supported goal boundary can be
-    -- constructed by introducing its binders and synthesizing its body.
+    -- ^ A quantified type at a supported goal boundary can be constructed by
+    -- introducing its binders and synthesizing its body. Exference scopes
+    -- direct contexts as lexical givens; Djinn admits only
+    -- dictionary-independent bodies.
   | RankNElimination
     -- ^ A quantified local value can be instantiated at a supported
     -- non-quantified use site.

@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive, context-free introduction through linear occurrence frontiers, plus bounded hypothesis instantiation at sequent-supplied candidates | Context-free quantified-goal introduction with escape-checked skolems, scoped-provider instantiation, and guarded shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through linear occurrence frontiers; plus context-free bounded hypothesis instantiation at sequent-supplied candidates | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -205,8 +205,9 @@ and checks the goal and class arguments in one kind scope. Quantification below
 that prefix is retained as a shared `TypeAtom`. Djinn's ordinary formula
 projection treats it as one proposition and compares it by lexical
 alpha-equivalence. The checked query worker also tries a polarized projection
-that opens context-free atoms in positive positions, the historical exact
-opaque projection, and two linear occurrence frontiers: one positive occurrence
+that opens atoms in positive positions, including atoms with validated class
+contexts, the historical exact opaque projection, and two linear occurrence
+frontiers: one positive occurrence
 may stay opaque while its siblings open, or one may open while unrelated
 siblings stay opaque. Selecting a nested occurrence also opens its required
 enclosing chain. Prepared functions cache the same views under distinct
@@ -220,9 +221,11 @@ each axiom eliminates that chain completely at a candidate tuple drawn from
 the sequent's variables, opened-forall skolems, premise scopes, and already
 mentioned subtrees that are independent of enclosing binders and contain
 quantification, including structural wrappers around quantified atoms. Each
-axiom's generated evidence is the hypothesis expression itself. If the
-primary projection is incomplete, an empty search carries no negative
-evidence. Ordinary enclosing
+axiom's generated evidence is the hypothesis expression itself. Positive
+contexts do not become LJT premises: as at the prenex query boundary, Djinn can
+only construct a dictionary-independent body. Constrained hypothesis-side
+schemes remain opaque. If the primary projection is incomplete, an empty search
+carries no negative evidence. Ordinary enclosing
 applications remain structural, so impredicative arguments are supported.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
@@ -231,21 +234,29 @@ alpha-normal key, and capture-avoiding free-variable substitution. Bound
 variables are keyed by lexical scope and binder position; free identities are
 not renamed away. The representation itself remains an inert transport/equality
 feature. Each backend must opt into explicit typing rules: positive
-introduction and bounded hypothesis instantiation in Djinn; or fresh per-use
-provider instantiation, context-free quantified-goal introduction, and shallow
-subsumption between context-free quantified schemes with no free flexible
-variables in Exference. Neither backend implements general rank-N subsumption.
+introduction (with validated contexts ignored for proof power) and bounded
+context-free hypothesis instantiation in Djinn; or fresh per-use provider
+instantiation, contextual quantified-goal introduction, and shallow subsumption
+between context-free quantified schemes with no free flexible variables in
+Exference. Neither backend implements general rank-N subsumption.
 
-When ordinary Exference search exposes a nested context-free `forall` as an
-active goal, it can open the complete leading chain with branch-local fresh
-rigid constants and synthesize the body. Every flexible variable alive before
-a layer opens is barred from later containing that layer's rigids; the escape
-check follows flexible-to-flexible substitution edges to a fixed point, so an
+When ordinary Exference search exposes a nested `forall` as an active goal, it
+can open the complete leading chain with branch-local fresh rigid constants and
+synthesize the body. A layer's substituted context becomes lexical givens for
+that descendant body, including binderless contextual layers. Each generated
+obligation snapshots its own givens and is resolved independently under those
+givens plus the root class environment; substitutions update both halves, and
+instance prerequisites retain the same lexical scope. This permits local
+methods and superclass entailment without allowing evidence to discharge an
+unrelated sibling obligation. Every flexible variable alive before a layer
+opens is barred from later containing that layer's rigids; the escape check
+follows flexible-to-flexible substitution edges to a fixed point, so an
 indirect assignment cannot smuggle out a skolem. The independent expression
-checker repeats the same allocation and escape discipline at expected-type
-boundaries. Exact forwarding and checked shallow subsumption keep their
-existing priority, contextual nested foralls remain opaque, and identifier or
-search-budget exhaustion loses completeness rather than soundness.
+checker repeats the same allocation, evidence scoping, and escape discipline at
+expected-type boundaries. Exact forwarding and checked context-free shallow
+subsumption keep their existing priority; non-exact contextual subsumption
+remains outside the rule, and identifier or search-budget exhaustion loses
+completeness rather than soundness.
 Search-generated annotation skolems carry scope-owned provenance and are
 compared up to an injective alpha-renaming because search and checking may
 visit independent goals in different orders; environment, query, and

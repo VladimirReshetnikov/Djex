@@ -1,5 +1,10 @@
 # Exference context-free forall introduction — 2026-07-29
 
+> **Historical snapshot.** This report records the first context-free goal-side
+> rule and its limits at that point. The later
+> [contextual rank-N introduction report](2026-07-29-contextual-rank-n-introduction.md)
+> extends the rule with lexical givens and per-obligation evidence provenance.
+
 ## Scope and outcome
 
 Exference already preserved every nested quantified type as an alpha-aware

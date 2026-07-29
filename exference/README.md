@@ -230,9 +230,11 @@ The checker and search use both the same opaque, alpha-aware unifier and the
 same scoped provider-use rules. An exact quantified occurrence remains opaque;
 a bounded rule can shallowly subsume one context-free prenex scheme to another;
 and a monomorphic occurrence freshly instantiates the provider's leading
-foralls. A context-free quantified expected type can also open with fresh
-branch-local rigids so its body is checked structurally, after the ordinary
-opaque provider routes have been tried. These are explicit typing rules, not
+foralls. A quantified expected type, including one with direct contexts, can
+also open with fresh branch-local rigids so its body is checked structurally,
+after the ordinary opaque provider routes have been tried. Its substituted
+contexts are lexical givens for that body, not ambient evidence for sibling
+work. These are explicit typing rules, not
 permission for the unifier to decompose a quantified body. Search records the
 requested scheme on a subsumed occurrence, and the independent checker
 reclassifies or structurally checks that occurrence instead of trusting the
@@ -941,27 +943,37 @@ classifies the opaque base-library signature stubs as abstract and retains only
   ordinary search. Thus a value of type
   `forall a. C a => a -> a` can be applied at `Int` when `C Int` is available,
   and a rank-N datatype field can participate after pattern elimination.
-  A nested context-free quantified type exposed as a goal can now be
-  constructed as well. For example, the callback request
+  A nested quantified type exposed as a goal can now be constructed as well,
+  including a contextual type whose body needs its local evidence. For example,
+  the callback request
 
   ```text
   ((forall a. a -> a) -> result) -> result
   ```
 
   can synthesize the quantified identity argument rather than requiring a
-  polymorphic provider already in scope. Exact forwarding and shallow
-  subsumption retain priority; the structural branch opens the complete
-  context-free leading chain with fresh branch-local rigid constants and then
-  searches the body. At every opened layer, flexible variables that already
-  existed are forbidden from acquiring its rigids, including indirectly
-  through later flexible substitutions. The independent expression checker
-  repeats that dynamic allocation and escape check instead of trusting search.
+  polymorphic provider already in scope. Exact forwarding and context-free
+  shallow subsumption retain priority; the structural branch opens the complete
+  leading chain with fresh branch-local rigid constants and then searches the
+  body. Each layer substitutes the same rigids through its contexts and body.
+  The contexts become lexical givens only for that descendant goal, including
+  when a layer has no binders. Every deferred class obligation snapshots the
+  givens active where it arose; substitutions update both the givens and the
+  obligation, and instance prerequisites preserve that snapshot. Resolution
+  therefore supports local methods and superclass entailment without allowing
+  a nested context to solve an unrelated sibling obligation.
+
+  At every opened layer, flexible variables that already existed are forbidden
+  from acquiring its rigids, including indirectly through later flexible
+  substitutions. The independent expression checker repeats the dynamic
+  allocation, lexical evidence scope, and escape check instead of trusting
+  search.
   Search-owned local rigid spellings are matched injectively up to
   alpha-renaming, so its breadth-first goal queue need not agree with the
   checker's tree traversal order; environment, root, and standalone caller
   rigids remain nominal. An unresolved constraint containing a nested skolem
-  is rejected rather than published as a top-level obligation. A contextual
-  nested `forall` remains opaque, while
+  is rejected rather than published as a top-level obligation. Non-exact
+  subsumption between contextual quantified schemes remains unsupported, while
   exhaustion of the finite identifier namespace truncates only the affected
   search branch.
   Quantifiers that have not reached one of these explicit boundaries remain
@@ -970,8 +982,11 @@ classifies the opaque base-library signature stubs as abstract and retains only
   provide deep or general higher-rank subsumption, polymorphic let
   generalization, or visible type application.
 
-  The soundness boundary and its regression matrix are detailed in the
-  [2026-07-29 forall-introduction report](../docs/reports/2026-07-29-exference-forall-introduction.md).
+  The contextual evidence boundary and its regression matrix are detailed in
+  the
+  [2026-07-29 contextual rank-N report](../docs/reports/2026-07-29-contextual-rank-n-introduction.md).
+  The original context-free rule is recorded in the
+  [forall-introduction report](../docs/reports/2026-07-29-exference-forall-introduction.md).
 
 ## Other known (technical) issues
 

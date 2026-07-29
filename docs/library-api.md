@@ -205,11 +205,14 @@ and checks the goal and class arguments in one kind scope. Quantification below
 that prefix is retained as a shared `TypeAtom`. Djinn's ordinary formula
 projection treats it as one proposition and compares it by lexical
 alpha-equivalence. The checked query worker also tries a polarized projection
-that opens context-free atoms in positive positions and runs the exact opaque
-plan when needed or when collecting complementary alternatives. If either
-projection is incomplete, an empty search carries no negative evidence.
-Ordinary enclosing applications remain structural, so impredicative arguments
-are supported.
+that opens context-free atoms in positive positions, the historical exact
+opaque projection, and a linear family in which one positive occurrence stays
+opaque while its siblings open. Prepared functions cache the same views under
+distinct internal proof identities, allowing a reusable source function to be
+used at different sound views in one term. The family does not enumerate two
+or more simultaneous opaque choices. If the primary projection is incomplete,
+an empty search carries no negative evidence. Ordinary enclosing applications
+remain structural, so impredicative arguments are supported.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
 representation. A sealed atom retains normalized source syntax, a cached
@@ -356,6 +359,17 @@ and ratings, validates the complete shared inventory, and returns an
 Djex's installed environment; `defaultExferenceEnvironmentPath` exposes that
 resolved path when an application needs to display or inspect it. The
 policy-aware default loader is `loadDefaultExferenceSessionWithPolicy`.
+
+This directory-only path also discovers `*.visibility` files. A manifest line
+is `abstract|empty Module.Type ARITY PARAMETER_KIND...`; kinds use `Type` and
+fully parenthesized arrows such as `(Type->Type)`. If a manifest is present it
+is a complete, exact classification of the directory's constructorless
+datatypes. Abstract entries retain their explicit checked kinds but have no
+Exference eliminator. Empty entries remain concrete empty datatypes. Malformed,
+duplicate, missing, unknown, inhabited, kind-invalid, or arity-mismatched
+entries are fatal `EXF_TYPE_VISIBILITY` diagnostics. The explicit-file and
+in-memory functions below do not discover this sidecar and therefore retain
+ordinary Haskell empty-datatype semantics.
 
 Module-aware callers that already own discovery and dependency ordering can
 use the explicit-file boundary:

@@ -767,10 +767,14 @@ knowing before editing the source:
   context-free nested forall can be introduced in a positive formula position.
   Unsupported negative, constrained, and impredicative occurrences remain
   opaque, alpha-equated atoms. An empty incomplete search is inconclusive rather
-  than proof of uninhabitability. The opaque and polarized translations are
-  whole-query alternatives: one term cannot yet mix opaque forwarding at one
-  positive forall with structural introduction at another. Any incomplete
-  cached premise conservatively disables negative evidence for the whole query.
+  than proof of uninhabitability. Search tries the fully opened polarized view,
+  the historical exact-opaque view, and a linear family retaining one positive
+  forall occurrence opaquely at a time. A term can therefore combine one exact
+  transport with structural introduction at sibling occurrences, and reusable
+  loaded functions expose all of those sound views in one proof environment.
+  Djinn does not enumerate combinations of two or more opaque holes. Any
+  incomplete primary premise conservatively disables negative evidence for the
+  whole query.
   Djinn does not implement general higher-rank instantiation or subsumption,
   and it ignores valid contexts for proof power; it also has no GADTs, type
   families, package instance import, or general type-class solver.

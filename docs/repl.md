@@ -179,13 +179,16 @@ free name. These bounded rules do not add general higher-rank subsumption,
 polymorphic-let generalization, or visible type application. In particular,
 Djinn keeps unsupported negative occurrences opaque; if that approximation
 finds no term, the result is inconclusive rather than a proof of
-uninhabitability. Its polarized and opaque translations are complementary
-whole-query plans. Djex merges their candidate sets when alternative collection
-or ranking is requested, but a single proof cannot use positive opening at one
-occurrence and opaque forwarding at another. For example,
-`(forall a. a) -> ((forall b. b), (forall c. c -> c))` remains inconclusive.
-An incomplete cached premise also conservatively disables negative evidence
-for the whole query, even when that premise would turn out to be irrelevant.
+uninhabitability. Its plan family is deliberately linear: fully opened,
+exactly opaque, and one plan per positive occurrence retained opaquely while
+the others open. A single proof can therefore mix one exact transport with
+structural introduction at a sibling occurrence; for example,
+`(forall a. a) -> ((forall b. b), (forall c. c -> c))` now yields
+`\x -> (x, \y -> y)`. Reusable loaded premises expose the same sound views
+simultaneously. Two or more independently opaque holes remain outside this
+bounded fragment. An incomplete primary premise also conservatively disables
+negative evidence for the whole query, even when that premise would turn out
+to be irrelevant.
 
 In `both` mode Djex prints labelled sections in a deterministic order:
 

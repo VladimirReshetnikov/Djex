@@ -13,7 +13,7 @@ rules rather than a general higher-rank solver:
 
 | Engine | New rule | Still opaque |
 | --- | --- | --- |
-| Djinn | Introduce a context-free `forall` in positive formula position. Arrow domains reverse polarity; tuples, sums, and expanded datatype structure preserve it. | Negative or constrained foralls, and quantified children of otherwise opaque applications. |
+| Djinn | Introduce a context-free `forall` in positive formula position, or retain one such occurrence opaquely while opening its siblings. Arrow domains reverse polarity; tuples, sums, and expanded datatype structure preserve it. | Negative or constrained foralls, quantified children of otherwise opaque applications, and combinations requiring two or more independently opaque positive occurrences. |
 | Exference | Freshly instantiate a scoped provider's complete leading forall chain at a non-quantified use site. Direct contexts become proof obligations. | Quantified goals other than exact alpha-aware forwarding, and foralls not exposed at a provider-use boundary. |
 
 Both rules retain the shared `TypeAtom` as the default boundary. Ordinary
@@ -34,11 +34,14 @@ unification does not decompose an atom.
    prepared-premise translations use disjoint namespaces, and definition
    expansion retains the originating occurrence path.
 
-3. **Djinn's polarized and opaque plans are complementary.** Positive opening
-   finds structural inhabitants; the opaque plan preserves exact polymorphic
-   transport and loaded axioms. Alternative enumeration now retains candidates
-   from both completed plans while sharing resource limits and de-duplicating
-   the common output representation.
+3. **Djinn's structural and opaque views compose in a bounded way.** Positive
+   opening finds structural inhabitants; exact opacity preserves polymorphic
+   transport and loaded axioms. Search now retains the historical fully opened
+   and exact plans, then adds one plan per positive forall occurrence kept
+   opaque while its siblings open. The number of plans is linear rather than a
+   power set. Reusable loaded premises expose all corresponding sound views
+   under separate proof identities, while candidates share resource limits and
+   are de-duplicated in the common output representation.
 
 4. **Exference could not use a local polymorphic provider monomorphically.**
    `byProvided` compared only the complete opaque scheme. A shared helper now
@@ -68,20 +71,31 @@ unification does not decompose an atom.
    the two bounded inference rules, and unsupported general subsumption.
 
 8. **Empty-type elimination suppressed ordinary provider use.** The bundled
-   environment intentionally exposes abstract primitives such as `Int` without
-   constructors. Exference treated every such binding as a mandatory empty-case
-   elimination, so introducing an `Int` argument discarded the sibling search
-   in which that value was passed to a provider—including a freshly instantiated
-   rank-N provider. Empty elimination and ordinary scoped use are now alternative
-   proof branches.
+   catalogue contains constructorless declarations, and Exference treated an
+   empty deconstructor as a mandatory branch. Introducing such an argument
+   discarded the sibling search in which the value was passed to a provider,
+   including a freshly instantiated rank-N provider. Empty elimination and
+   ordinary scoped use are now alternative proof branches.
+
+9. **The bundled catalogue confused hidden constructors with no constructors.**
+   Most constructorless declarations are abstract signature stubs such as
+   `Int`, `Char`, `Map`, and `TypeRep`; only `Void` and `V1` in the shipped set
+   are genuinely empty. Lowering every stub as an empty datatype admitted
+   bogus inhabitants such as `\x -> case x of {}` for `Int -> Bool`. A
+   path-local visibility manifest now classifies every constructorless shipped
+   declaration as `abstract` or `empty`, records its arity and ground parameter
+   kinds, and is validated completely at load time. Explicit kinds preserve
+   unconstrained higher-kinded stubs such as `Alt`, `Rec1`, and `M1`. Abstract
+   entries enter the neutral Inventory but never receive a backend eliminator.
+   User source without a manifest retains normal `EmptyDataDecls` semantics.
 
 ## Architecture decisions
 
 - `Language.Haskell.Synthesis.TypeAtom` remains the only alpha-equivalence and
   capture-avoiding transport authority for opaque quantified subtrees.
 - Djinn owns polarity because it is a property of formula translation. Sealed
-  environments cache both opaque and polarized premise plans; query search
-  never reparses or rebuilds the environment.
+  environments cache the primary, single-opaque-occurrence, and exact premise
+  views once; query search never reparses or rebuilds the environment.
 - Exference owns provider opening in one private `Internal.Polytype` module.
   Search supplies its finite test allocator, while checking supplies the
   production allocator. This keeps freshening, context order, lexical
@@ -104,15 +118,16 @@ negative forall; Exference does not synthesize a new polymorphic value for a
 provider argument. Those cases remain explicit opaque boundaries or
 inconclusive searches rather than being flattened unsafely.
 
-Djinn's polarized and opaque translations are whole-query plans. Candidate
-sets from the two plans are merged when alternatives are requested, but one
-proof cannot combine positive opening at one occurrence with exact opaque
-forwarding at another. For example,
-`(forall a. a) -> ((forall b. b), (forall c. c -> c))` remains inconclusive.
-Likewise, one incomplete cached premise conservatively disables negative
-evidence for the whole query, even if a relevance analysis could later prove
-that premise unnecessary. Both restrictions lose completeness, never
-soundness.
+Djinn's occurrence-local extension permits one opaque positive occurrence in
+an otherwise opened plan. Thus
+`(forall a. a) -> ((forall b. b), (forall c. c -> c))` is inhabited, but a
+query needing two independent opaque result occurrences plus another opened
+occurrence remains inconclusive. Enumerating the full power set would make
+negative searches exponential, so this is an explicit completeness boundary.
+Likewise, one incomplete primary cached premise conservatively disables
+negative evidence for the whole query, even if a relevance analysis could
+later prove that premise unnecessary. Both restrictions lose completeness,
+never soundness.
 
 Large mechanical module splits were not mixed into the inference change. The
 review extracted only policy with a forced shared invariant—the Exference
@@ -122,10 +137,13 @@ remain locally reviewable.
 ## Regression coverage
 
 The focused suites cover positive Djinn results and tuples, double polarity,
-exact opaque transport, incomplete-search evidence, skolem isolation, direct
-and repeated Exference provider use, contextual providers, instance discharge,
+exact opaque transport, single-occurrence mixing through direct, nested,
+synonym, datatype, duplicated, and loaded-premise paths, global cutoff/fuel,
+incomplete-search evidence, and skolem isolation. Exference coverage includes
+direct and repeated provider use, contextual providers, instance discharge,
 rank-N fields, exact forwarding, vacuous wrappers, lexical shadowing, invalid
 annotations, quantified-goal exclusion, and finite identifier exhaustion. The
-CLI suite covers GHCi-style setting signs, transactional state, diagnostic
-ownership, shared parsing, loaded Djinn rank-N axioms, and monomorphic and
-polymorphic provider use over abstract constructorless types.
+loader suites validate complete visibility manifests and preserve true user
+empty datatypes; CLI regressions reject false empty cases for bundled abstract
+types. The REPL suite covers GHCi-style setting signs, transactional state,
+diagnostic ownership, shared parsing, and loaded Djinn rank-N axioms.

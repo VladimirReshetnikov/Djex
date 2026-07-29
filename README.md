@@ -198,12 +198,16 @@ booleans:
 This is not general higher-rank subsumption, polymorphic-let generalization, or
 visible type application. Unsupported Djinn positions remain opaque and make
 an otherwise empty search inconclusive rather than manufacturing a logical
-refutation. Djinn's polarized and opaque translations are whole-query plans:
-their candidate sets are merged when alternatives or ranking are requested,
-but one proof cannot mix the two strategies at separate forall occurrences. An
-incomplete cached premise also makes negative evidence conservative for the
-whole query. The examples use the same Church Boolean and Church List shapes as
-the
+refutation. Djinn searches a linearly bounded family: the fully opened
+polarized plan, the historical exact-opaque plan, and one plan for each single
+positive `forall` retained opaquely while its siblings open. Loaded functions
+expose those sound views together, so a reusable premise can be consumed at
+different views in one proof. This now synthesizes
+`(forall a. a) -> ((forall b. b), (forall c. c -> c))`. Djinn deliberately
+does not enumerate the power set of occurrences; a proof needing two separate
+opaque holes may remain inconclusive. An incomplete primary premise also makes
+negative evidence conservative for the whole query. The examples use the same
+Church Boolean and Church List shapes as the
 [church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs).
 
 `:type EXPRESSION` (or `:t EXPRESSION`) is a separate, non-evaluating
@@ -533,6 +537,20 @@ All file and snapshot loaders reject duplicate logical modules before building
 scope maps. This includes multiple headerless files, which all declare
 `Main`; each later occurrence receives an `EXF_MODULE_DUPLICATE` diagnostic
 that identifies the first source.
+
+Directory discovery also recognizes optional `*.visibility` manifests for
+hand-written signature catalogues. Lines use
+`abstract|empty Module.Type ARITY PARAMETER_KIND...`; parameter kinds are
+`Type` or fully parenthesized arrows such as `(Type->Type)`. Once a manifest is
+present it must classify every constructorless datatype exactly once; unknown,
+inhabited, duplicate, missing, kind-invalid, or arity-mismatched entries fail
+with `EXF_TYPE_VISIBILITY`. Abstract entries retain the explicit checked kind
+but contribute no pattern-match deconstructor, while empty entries continue to
+support `case value of {}`. This convention is intentionally limited to
+`environmentFromPath` and the installed default loader: explicit file and
+snapshot APIs preserve normal Haskell semantics for user-written `data Empty`.
+The bundled catalogue marks `Data.Void.Void` and `GHC.Generics.V1` as empty and
+its constructor-omitting base-library stubs as abstract.
 
 The source boundary tags class methods with their qualified owner, nests
 them under the common class declaration for validation, and lowers each

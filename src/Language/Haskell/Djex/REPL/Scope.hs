@@ -25,6 +25,7 @@ module Language.Haskell.Djex.REPL.Scope
   , scopeQualifiedTypeNames
   , scopeQualifierAliases
   , scopeCurrentModule
+  , scopeExferenceQueryScope
   , resolveScopeNameAmong
   , renderScopeImports
   , renderScopeModules
@@ -50,6 +51,7 @@ import qualified Language.Haskell.Exts.Syntax as HSE
 
 import Language.Haskell.Djex.Internal.ImplicitPrelude
   ( implicitPreludeEnabled )
+import Language.Haskell.Djex.HaskellSrc (ExferenceQueryScope (..))
 import Language.Haskell.Djex.REPL.Command (ModuleChange (..))
 import Language.Haskell.Djex.REPL.Workspace
   ( SourceWorkspace
@@ -162,6 +164,17 @@ scopeQualifierAliases = replScopeAliases
 -- of giving one module an arbitrary lookup priority.
 scopeCurrentModule :: ReplScope -> Maybe ModuleName
 scopeCurrentModule = replScopeCurrentModule
+
+-- | Project the prompt's exact type namespace once for every scoped parser.
+-- Keeping this beside 'ReplScope' prevents synthesis queries and @:type@
+-- annotations from drifting to subtly different import/qualification rules.
+scopeExferenceQueryScope :: ReplScope -> ExferenceQueryScope
+scopeExferenceQueryScope context = ExferenceQueryScope
+  { exferenceQueryCurrentModule = scopeCurrentModule context
+  , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames context
+  , exferenceQueryModuleAliases = scopeQualifierAliases context
+  , exferenceQueryQualifiedNames = scopeQualifiedTypeNames context
+  }
 
 -- | Resolve one prompt spelling inside a caller-selected Haskell namespace.
 --

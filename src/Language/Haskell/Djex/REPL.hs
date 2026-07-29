@@ -77,12 +77,11 @@ import Language.Haskell.Djex.Exference.HaskellSrc
   ( ExferenceSessionLoadReport (..)
   , defaultExferenceEnvironmentPath
   , exferenceCommandSessionPolicy
-  , loadExferenceSessionFromSourcesWithPolicy
+  , loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
   , mkExferenceRequestWithCheckedTargetFromParsed
   )
 import Language.Haskell.Djex.HaskellSrc
-  ( ExferenceQueryScope (..)
-  , ParsedSourceType
+  ( ParsedSourceType
   , parseSourceTypeInScope
   , parsedSourceType
   )
@@ -637,7 +636,7 @@ runResolvedQuery sourceName selected typeSource state = do
     Just (session, context)
       | sharedProjectionAvailable -> case parseSourceTypeInScope
           (exferenceSessionInventory session)
-          (queryScope context) sourceName typeSource of
+          (scopeExferenceQueryScope context) sourceName typeSource of
         Left failure -> emitDiagnostic failure
         Right parsed -> runParsedSelection session parsed
     _ -> runLegacySelection
@@ -718,14 +717,6 @@ projectParsedTypeToDjinn state = mapTypeNames projectName
     $ djinnProjection $ djinnRuntime state
   projectName name = Map.findWithDefault name name promptNames
 
-queryScope :: ReplScope -> ExferenceQueryScope
-queryScope context = ExferenceQueryScope
-  { exferenceQueryCurrentModule = scopeCurrentModule context
-  , exferenceQueryVisibleNames = scopeUnqualifiedTypeNames context
-  , exferenceQueryModuleAliases = scopeQualifierAliases context
-  , exferenceQueryQualifiedNames = scopeQualifiedTypeNames context
-  }
-
 -- The legacy runners remain the fallback when no shared source inventory is
 -- available. With a loaded workspace, 'runResolvedQuery' parses once above
 -- and feeds the exact checked type to both engines.
@@ -751,7 +742,7 @@ runExferenceInteractive sourceName typeSource state = case runtimeState of
         session
         (exferenceSearchOptions state)
         (resultTarget state)
-        (queryScope context)
+        (scopeExferenceQueryScope context)
         sourceName
         typeSource
   _ -> replFailure "DJEX_REPL_EXFERENCE_UNAVAILABLE"
@@ -778,7 +769,7 @@ showExpressionType sourceName defaulting expression state = case
     , exferenceRuntimeScope runtime
     ) of
   (Just session, Just scope) -> case inferExpressionType
-      session scope (resultTarget state) defaulting sourceName expression of
+      session scope defaulting sourceName expression of
     Left failure -> emitDiagnostic failure
     Right inferred -> putStrLn $ inferredExpressionSource inferred ++ " :: "
       ++ renderInferredType
@@ -908,10 +899,11 @@ attemptWorkspaceLoad allowFix retention previousScope workspace =
       emitDiagnostic failure
       pure $ failedLoadAttempt targets (Just workspace) [failure]
     Right policy -> do
-      report <- loadExferenceSessionFromSourcesWithPolicy
+      report <- loadExferenceSessionFromSourcesWithTypeVisibilityWithPolicy
         policy
         (workspaceModuleSources workspace)
         (workspaceRatingSources workspace)
+        (workspaceTypeVisibilitySources workspace)
       let advisory = workspaceImportDiagnostics workspace
             ++ exferenceSessionLoadDiagnostics report
           fatal = either toList (const [])

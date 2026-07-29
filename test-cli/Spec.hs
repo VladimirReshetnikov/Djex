@@ -86,6 +86,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplImplicitPreludeOrder
   , testCase "REPL default environment keeps its full automatic context"
       testReplDefaultEnvironmentScope
+  , testCase "REPL Djinn projection distinguishes abstract and empty types"
+      testReplDjinnConstructorlessVisibility
   , testCase "REPL reload refreshes derived module target spellings"
       testReplReloadTargetSpelling
   , testCase "REPL named symlink aliases retain every expectation"
@@ -927,20 +929,49 @@ testReplDefaultEnvironmentScope = do
     ["repl", "--backend", "exference"] $ unlines
       [ ":set prompt \"\""
       , ":set render expression"
+      , ":set select first"
+      , ":set max-steps 4"
+      , "Int -> Int"
+      , "Int -> Data.Void.Void"
+      , ":reload"
+      , "Int -> Int"
+      , "Int -> Data.Void.Void"
       , ":set select best"
       , ":set max-steps 16"
       , "a -> Data.Maybe.Maybe a"
       , ":quit"
       ]
   assertEqual "default environment REPL exit" ExitSuccess exitCode
+  assertEqual "abstract Int stays provider-usable across load and reload" 2
+    $ countOccurrences "\\i1 -> i1" output
+  assertEqual "abstract Int cannot eliminate into Void after load or reload" 2
+    $ countOccurrences "[DJEX_EXF_NO_RESULT]" errors
+  assertBool "abstract Int regained bogus empty elimination after a load" $
+    not $ "case i1 of {}" `isInfixOf` output
   -- The first bounded result is Applicative.pure rather than Just; either is
   -- impossible in the historical broken state whose context held Data.Word
   -- alone. Keeping the bound small makes this startup regression inexpensive.
   assertContains
     ("default directory context retains non-final modules: " ++ output ++ errors)
     "Control.Applicative.pure" output
-  assertBool "default environment lost its searchable module context" $
-    not $ "DJEX_EXF_NO_RESULT" `isInfixOf` errors
+  assertNoCallStack errors
+
+testReplDjinnConstructorlessVisibility :: Assertion
+testReplDjinnConstructorlessVisibility = do
+  (exitCode, output, errors) <- runDjexInput
+    ["repl", "--backend", "djinn"] $ unlines
+      [ ":set prompt \"\""
+      , ":set render expression"
+      , ":set qualification none"
+      , "Data.Void.Void -> Int"
+      , "Int -> Data.Void.Void"
+      , ":quit"
+      ]
+  assertEqual "constructorless-type Djinn REPL exit" ExitSuccess exitCode
+  assertEqual "only genuine Void supports empty-case elimination" 1
+    $ countOccurrences "case a of {}" output
+  assertEqual "abstract Int cannot eliminate into Void" 1
+    $ countOccurrences "[DJEX_DJINN_UNINHABITABLE]" errors
   assertNoCallStack errors
 
 testReplReloadTargetSpelling :: Assertion
@@ -2085,6 +2116,7 @@ testReplDjinnReferenceNamespaces = withTemporaryEnvironment
     , ":set render expression"
     , ":set qualification none"
     , "Missing -> Target"
+    , "Target -> Missing"
     , ":show environment"
     , ":show omissions"
     ]
@@ -2093,10 +2125,11 @@ testReplDjinnReferenceNamespaces = withTemporaryEnvironment
     ("same-named type stub keeps the value axiom usable: " ++ output ++ errors)
     "bridge" output
   assertContains "the distinct type stub enters the projected environment"
-    "4 declarations (projected from the module scope, 1 omissions)" output
-  assertContains "the unrelated empty datatype is the sole compromise"
-    ("Target: declared without constructors; projected as an abstract type")
-    output
+    "4 declarations (projected from the module scope, 0 omissions)" output
+  assertContains "the genuine empty datatype supports absurd elimination"
+    "case a of {}" output
+  assertContains "the genuine empty datatype requires no projection compromise"
+    "-- Djinn scope projection\n(no omissions)" output
   assertBool "cross-namespace reference forced the standard fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output

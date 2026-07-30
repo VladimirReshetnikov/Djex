@@ -70,6 +70,9 @@ property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. Contextual goal introduction and its
 lexical evidence boundary are recorded in the
 [2026-07-29 contextual rank-N report](docs/reports/2026-07-29-contextual-rank-n-introduction.md).
+The bounded generated-term and Exference provider-use extension is recorded in
+the
+[2026-07-29 visible type application report](docs/reports/2026-07-29-visible-type-application.md).
 The preceding context-free Exference rule and Djinn quantified-wrapper
 follow-up are recorded in the
 [2026-07-29 forall-introduction report](docs/reports/2026-07-29-exference-forall-introduction.md).
@@ -201,6 +204,14 @@ also eliminate the complete leading `forall` chain of a scoped value at a
 monomorphic use site, freshly and
 independently for each occurrence; direct contexts become ordinary proof
 obligations.
+For a constrained scoped provider, a separate evidence-directed branch can
+make that instantiation visible when an explicit ground instance head fixes
+its complete leading binder prefix. It emits closed applications such as
+`provider @Int`; every specified argument is a variable-free, `forall`-free
+monotype. The ordinary implicit branch remains available, and global bindings
+retain their existing implicit behavior. The shared generated-expression tree
+also represents the inferred argument `@_`, although Exference search itself
+emits only specified ground arguments from this rule.
 Exference can also forward a context-free quantified provider with no free
 flexible variables to a less-general such goal; provider binders are solved
 with monotypes or, in the guarded Quick-Look sense, with quantified subtrees
@@ -230,7 +241,10 @@ booleans:
 ```
 
 This is not general higher-rank subsumption, polymorphic-let generalization, or
-visible type application. Unsupported Djinn positions remain opaque and make
+general visible type application. In particular, open arguments such as `@a`
+and impredicative type arguments remain unsupported. Djinn search does not gain
+the Exference rule, and its historical expression projection rejects the new
+generated node explicitly. Unsupported Djinn positions remain opaque and make
 an otherwise empty search inconclusive rather than manufacturing a logical
 refutation. Exference still does not perform non-exact subsumption between
 contextual schemes; quantified types outside an exposed goal/provider boundary
@@ -757,7 +771,12 @@ shape as those candidates: checker-specific type annotations inhabit a
 private local payload, the historical `ExpVar`/`ExpLambda`/`ExpLet`/case
 constructors are bundled bidirectional compatibility patterns over that
 tree, and erasing annotations is a functor projection rather than a
-recursive conversion. Djinn's LJT lowering constructs and simplifies that
+recursive conversion. Its bounded visible-type-application node accepts `@_`
+or a checked closed, variable-free, `forall`-free monotype and renders with
+Haskell's required type-argument parentheses. Compiling such a candidate
+requires `TypeApplications`; the surrounding provider signature will commonly
+also require `RankNTypes`, and an ambiguous contextual signature may require
+`AllowAmbiguousTypes`. Djinn's LJT lowering constructs and simplifies that
 same shared generated `Expression`/`Pattern` tree directly; `HExpr` and
 `HPat` remain only as projections for historical low-level callers.
 Incremental hole filling, capture-safe let cleanup, and eta reduction live

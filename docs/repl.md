@@ -171,6 +171,14 @@ deliberately bounded rank-N rule families:
   without solving ambient inference variables; a provider binder may be solved
   impredicatively with a quantified subtree the requested scheme itself
   supplies.
+- For a constrained scoped rank-N provider, Exference has an additional
+  evidence-directed branch when a matching explicit ground instance head
+  determines the complete leading binder prefix. That branch emits specified
+  closed applications such as `provider @Int`; its type arguments are
+  variable-free, `forall`-free monotypes. The ordinary implicit branch remains
+  available and global bindings retain their existing behavior. Shared
+  generated syntax can also carry the inferred argument `@_`, but Exference
+  search emits only specified ground arguments from this rule.
 
 For example:
 
@@ -203,10 +211,13 @@ position, scope, and free-variable identity remain significant, so shadowing
 and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
-polymorphic-let generalization, or visible type application. Exference does not
-perform non-exact subsumption between contextual schemes, while unexposed
-quantified atoms remain opaque; finite identifier or search-budget exhaustion
-is an inconclusive truncation. In particular,
+polymorphic-let generalization, or general visible type application. Open type
+arguments such as `@a` and impredicative type arguments remain unsupported.
+Djinn search does not gain the Exference ground-instantiation rule, and its
+historical expression projection rejects visible type application explicitly.
+Exference does not perform non-exact subsumption between contextual schemes,
+while unexposed quantified atoms remain opaque; finite identifier or
+search-budget exhaustion is an inconclusive truncation. In particular,
 Djinn keeps constrained hypothesis occurrences and chains beyond three binders
 opaque; if the bounded approximation
 finds no term, the result is inconclusive rather than a proof of
@@ -229,6 +240,9 @@ simultaneously. An incomplete primary premise also conservatively disables
 negative evidence for the whole query, even when that premise would turn out
 to be irrelevant. Generated code that transports quantified atoms or uses
 impredicative instances may require `RankNTypes` and `ImpredicativeTypes`.
+A generated visible application requires `TypeApplications`; its surrounding
+rank-N provider signature commonly also requires `RankNTypes`, and an ambiguous
+contextual signature may require `AllowAmbiguousTypes`.
 
 In `both` mode Djex prints labelled sections in a deterministic order:
 
@@ -669,8 +683,8 @@ Forms that require semantics outside this structural inferencer are rejected
 explicitly. These include `let` and local `where` declarations, guarded case
 alternatives, multi-way `if`, `do`/`mdo`, record construction, update, and
 patterns, comprehensions and parallel arrays, unboxed sums, overloaded labels,
-implicit parameters, visible type application, Template Haskell and
-quasiquotes, arrow and XML syntax, typed holes, primitive literals, and
+implicit parameters, caller-written visible type application, Template Haskell
+and quasiquotes, arrow and XML syntax, typed holes, primitive literals, and
 `n+k`, view, or regular patterns. Polymorphic expression and pattern
 annotations are also rejected until the inferencer has skolemization and
 context-entailment support. An unsupported form reports a structured diagnostic

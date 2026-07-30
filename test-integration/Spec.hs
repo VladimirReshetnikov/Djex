@@ -5,14 +5,19 @@ module Main (main) where
 import Control.Exception
   ( AsyncException (ThreadKilled)
   , SomeException
+  , bracket
   , evaluate
   , fromException
   , throw
   , try
   )
 import Data.Either (isRight)
-import Data.List (isInfixOf, nub)
+import Data.List (isInfixOf, isPrefixOf, nub)
 import qualified Data.Map.Strict as Map
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.Exit (ExitCode (ExitSuccess))
+import System.IO (hClose, hPutStr, openTempFile)
+import System.Process (readProcessWithExitCode)
 import System.Timeout (timeout)
 import Djinn.Core
   ( Context
@@ -491,6 +496,61 @@ tests = testGroup "Djex facade"
       qualifier <- expectRight $ mkModuleName "External"
       target <- expectRight $ mkQualifiedIdentifier qualifier "answer"
       mkDefinitionName target @?= Left (InvalidFunctionName target)
+  , testCase "render closed visible instantiation accepted by GHC 9.12" $ do
+      targetName <- expectRight $ mkIdentifier "use"
+      checkedTarget <- expectRight $ mkDefinitionName targetName
+      integerName <- expectRight $ mkIdentifier "Int"
+      integerArgument <- expectRight $ specifiedVisibleTypeArgument
+        (TypeConstructor integerName :: Type String)
+      let instantiatedProvider = VisibleTypeApplication
+            (Local "provider") integerArgument
+          clause = FunctionClause checkedTarget [Bind "provider"]
+            instantiatedProvider
+          renderOptions =
+            (defaultRenderOptions id) {renderQualification = Unqualified}
+      renderExpression renderOptions
+          (Lambda [Bind "provider"] instantiatedProvider) @?=
+        Right "\\provider -> provider @Int"
+      rendered <- expectRight $ renderFunctionClause renderOptions clause
+      rendered @?= "use provider = provider @Int"
+
+      (versionExit, versionOutput, versionErrors) <-
+        readProcessWithExitCode "ghc" ["--numeric-version"] ""
+      assertEqual
+        ("cannot inspect installed GHC version: " ++ versionErrors)
+        ExitSuccess versionExit
+      assertBool
+        ("integration fixture requires GHC 9.12, got " ++ show versionOutput)
+        $ "9.12." `isPrefixOf` versionOutput
+
+      let fixture = unlines
+            [ "module VisibleTypeApplicationFixture where"
+            , ""
+            , "data Token = Token"
+            , ""
+            , "class C a"
+            , ""
+            , "instance C Int"
+            , ""
+            , "use :: (forall a. C a => Token) -> Token"
+            , rendered
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected generated visible type application\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors)
+          ExitSuccess exitCode
   , testCase "run a checked Exference session through the shared envelope" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked
@@ -1541,6 +1601,7 @@ referencesGlobal target expression = case expression of
   Lambda _ body -> referencesGlobal target body
   Apply function argument ->
     referencesGlobal target function || referencesGlobal target argument
+  VisibleTypeApplication function _ -> referencesGlobal target function
   Tuple elements -> any (referencesGlobal target) elements
   Hole _ -> False
   Let _ value body ->
@@ -1561,3 +1622,23 @@ expectRight :: Show error => Either error value -> IO value
 expectRight result = case result of
   Left failure -> fail $ show failure
   Right value -> pure value
+
+withTemporaryHaskellModule
+  :: String
+  -> (FilePath -> IO value)
+  -> IO value
+withTemporaryHaskellModule source action = do
+  temporaryDirectory <- getTemporaryDirectory
+  bracket
+    (openTempFile temporaryDirectory "djex-visible-type-application.hs")
+    cleanup
+    $ \(sourcePath, handle) -> do
+        hPutStr handle source
+        hClose handle
+        action sourcePath
+ where
+  cleanup (sourcePath, handle) = do
+    _ <- tryClose handle
+    removeFile sourcePath
+
+  tryClose handle = try (hClose handle) :: IO (Either IOError ())

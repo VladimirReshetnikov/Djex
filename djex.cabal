@@ -273,13 +273,15 @@ Executable djex-fake-cabal
   Build-Depends:  filepath >= 1.4 && < 1.6
 
 Test-Suite djex-tests
-  import:         tasty-hunit-test, containers-dep
+  import:         tasty-hunit-test, containers-dep, directory-dep
   Type:           exitcode-stdio-1.0
   Main-Is:        Spec.hs
   Hs-Source-Dirs: test-integration
   -- This integration suite deliberately crosses the stable facade, both raw
   -- search APIs, and the HSE compatibility API.
-  Build-Depends:    djex
+  Build-Depends:
+    djex,
+    process >= 1.6 && < 1.7
 
 Test-Suite djex-cli-tests
   import:         cli-test

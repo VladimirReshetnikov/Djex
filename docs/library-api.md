@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through linear occurrence frontiers; plus context-free bounded hypothesis instantiation at sequent-supplied candidates | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through linear occurrence frontiers; plus context-free bounded hypothesis instantiation at sequent-supplied candidates | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -276,6 +276,32 @@ records the requested occurrence annotation without importing matcher state,
 and independent expression checking classifies the occurrence again. A
 non-quantified request instead freshly instantiates the complete leading
 provider chain and turns its direct contexts into proof obligations.
+
+For a constrained scoped rank-N provider, Exference also tries one bounded
+evidence-directed construction. A direct provider constraint must match an
+explicit instance head whose arguments are closed ground monotypes, and that
+single match must determine the provider's complete leading binder prefix.
+Search can then emit a left-associated chain such as `provider @Int`, carrying
+the instantiated contexts through the ordinary obligation resolver. The
+ordinary implicit per-use branch remains available, and global bindings do not
+participate in this construction.
+
+The shared generated-term API represents this with
+`VisibleTypeApplication` and an abstract `VisibleTypeArgument`.
+`inferredVisibleTypeArgument` renders as `@_`;
+`specifiedVisibleTypeArgument` accepts only a structurally valid,
+variable-free, `forall`-free monotype. The independent Exference checker
+consumes one flexible leading binder for each node and accepts either bounded
+form, but the search rule above emits only specified ground arguments. Open
+arguments such as `@a`, quantified type arguments, and general impredicative
+visible instantiation remain outside the API invariant. Djinn search gains no
+corresponding rule, and its historical `HExpr` projection rejects a shared
+visible-type-application node instead of erasing it.
+
+Candidate source containing such a node must be compiled with
+`TypeApplications`. Its enclosing signature will commonly also need
+`RankNTypes`; an ambiguous contextual provider such as
+`forall a. C a => Token` may additionally need `AllowAmbiguousTypes`.
 
 Validated contexts do not contribute methods to proof search. This is the
 sound subset supported by Djinn's monomorphic propositional calculus: a query
@@ -669,7 +695,10 @@ the result alongside `renderExferenceCandidateExpression` or
 For custom presentation, use `candidateOutput` to obtain the shared
 `FunctionClause` and the operations in
 `Language.Haskell.Synthesis.Generated`. Scope validation and collision-safe
-local naming remain part of that shared rendering boundary. In particular,
+local naming remain part of that shared rendering boundary. Visible type
+applications preserve the selected qualification policy and parenthesize
+compound closed type arguments, so a type application such as `Maybe Int`
+renders as `@(Maybe Int)` rather than changing the Haskell parse. In particular,
 `Candidate` keeps a public constructor for compatibility, so the stable
 expression and definition helpers validate the complete clause on every call;
 caller-forged free local identities and duplicate pattern-binder identities

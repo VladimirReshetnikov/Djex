@@ -10,7 +10,7 @@ import Data.List (intercalate, isInfixOf)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Void (Void)
+import Data.Void (Void, absurd)
 import Numeric.Natural (Natural)
 import Language.Haskell.Synthesis.Candidate
 import qualified Language.Haskell.Synthesis.Class as Class
@@ -4089,6 +4089,32 @@ generatedTests = testGroup "generated syntax"
       validateExpressionScope
           (Lambda [Bind (0 :: Int)] $ Lambda [Bind 0] $ Local 0)
         @?= Left (DuplicatePatternBinder 0)
+  , testCase "bound visible type arguments exclude variables and foralls" $ do
+      let integer, boolean :: SharedType.Type String
+          integer = SharedType.TypeConstructor $ right $ mkIdentifier "Int"
+          boolean = SharedType.TypeConstructor $ right $ mkIdentifier "Bool"
+          source :: SharedType.Type String
+          source = SharedType.TypeApplication
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor functionName) integer)
+            boolean
+          malformed = SharedType.TupleType Boxed [integer]
+          quantified = SharedType.ForallType ["a"] []
+            $ SharedType.TypeVariable "a"
+      specified <- case specifiedVisibleTypeArgument source of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      visibleTypeArgumentType inferredVisibleTypeArgument @?= Nothing
+      (fmap (absurd :: Void -> String) <$>
+          visibleTypeArgumentType specified) @?=
+        Just (SharedType.FunctionType integer boolean)
+      specifiedVisibleTypeArgument (SharedType.TypeVariable "a") @?=
+        Left (VisibleTypeArgumentVariable "a")
+      specifiedVisibleTypeArgument quantified @?=
+        Left VisibleTypeArgumentForall
+      specifiedVisibleTypeArgument malformed @?=
+        Left (InvalidVisibleTypeArgument
+          $ SharedType.InvalidTupleTypeArity Boxed 1)
   , testCase "map, fold, traverse, and force every local occurrence" $ do
       let constructor = right $ mkIdentifier "Just"
           simple = Lambda [Bind (1 :: Int)] (Local 1)
@@ -4104,6 +4130,45 @@ generatedTests = testGroup "generated syntax"
           simple
         @?= Just (Lambda [Bind "1"] (Local "1"))
       _ <- evaluate $ force expression
+      pure ()
+  , testCase "visible type applications preserve every term-local operation" $ do
+      let argument = inferredVisibleTypeArgument
+          function :: Expression Int
+          function = Global $ right $ mkIdentifier "function"
+          groundInteger :: SharedType.Type String
+          groundInteger = SharedType.TypeConstructor
+            $ right $ mkIdentifier "Int"
+          specifiedInteger = right
+            $ specifiedVisibleTypeArgument groundInteger
+          source = VisibleTypeApplication
+            (Lambda [Bind (1 :: Int)] $ Apply (Local 1) (Hole 2)) argument
+          mapped = VisibleTypeApplication
+            (Lambda [Bind (11 :: Int)] $ Apply (Local 11) (Hole 12)) argument
+          filled = VisibleTypeApplication
+            (Lambda [Bind (1 :: Int)] $ Apply (Local 1) function) argument
+          eta = Lambda [Bind (1 :: Int)]
+            $ Apply (VisibleTypeApplication function argument) (Local 1)
+      fmap (+ 10) source @?= mapped
+      toList source @?= [1, 1, 2]
+      expressionBindingSites source @?= [Just 1]
+      expressionFreeLocalIdentitiesBy id source @?= Set.empty
+      expressionHoles source @?= [2]
+      expressionGlobals source @?= []
+      validateExpressionScope source @?= Right ()
+      validateExpressionSyntax source @?= Right ()
+      fillExpressionHole 2 function source @?= filled
+      substituteExpressionLocalBy id 1 function
+          (VisibleTypeApplication (Local (1 :: Int)) argument) @?=
+        Just (VisibleTypeApplication function argument)
+      simplifyExpressionBy id eta @?=
+        VisibleTypeApplication function argument
+      assertBool "type application changed lexical alpha-equivalence"
+        $ alphaEquivalentExpression source source
+      assertBool "distinct visible type arguments compared equal"
+        $ not $ alphaEquivalentExpression
+            (VisibleTypeApplication function argument)
+            (VisibleTypeApplication function specifiedInteger)
+      _ <- evaluate $ force source
       pure ()
   , testCase "allocate locals against globals and explicit reservations" $ do
       let namespace = right $ mkModuleName "M"
@@ -4332,6 +4397,37 @@ generatedTests = testGroup "generated syntax"
               Tuple [Global true, Global false]
       renderExpression (defaultRenderOptions (const "x")) expression @?=
         Right "\\x -> x + (True, False)"
+  , testCase "render bounded visible type applications with exact precedence" $ do
+      let namespace = right $ mkModuleName "Data.Maybe"
+          maybeName = right $ mkQualifiedIdentifier namespace "Maybe"
+          integerName = right $ mkIdentifier "Int"
+          functionName' = right $ mkIdentifier "function"
+          consumeName = right $ mkIdentifier "consume"
+          valueName = right $ mkIdentifier "value"
+          maybeInteger :: SharedType.Type String
+          maybeInteger = SharedType.TypeApplication
+            (SharedType.TypeConstructor maybeName)
+            (SharedType.TypeConstructor integerName)
+          specified = right $ specifiedVisibleTypeArgument maybeInteger
+          applied :: Expression Int
+          applied = VisibleTypeApplication (Global functionName') specified
+          inferred = VisibleTypeApplication applied inferredVisibleTypeArgument
+          options qualification = RenderOptions qualification show []
+      renderExpression (options Unqualified) inferred @?=
+        Right "function @(Maybe Int) @_"
+      renderExpression (options FullyQualified) inferred @?=
+        Right "function @(Data.Maybe.Maybe Int) @_"
+      renderExpression (options Unqualified)
+          (Apply applied $ Global valueName) @?=
+        Right "function @(Maybe Int) value"
+      renderExpression (options Unqualified)
+          (Apply (Global consumeName) applied) @?=
+        Right "consume (function @(Maybe Int))"
+      renderExpression (defaultRenderOptions $ const "x")
+          (VisibleTypeApplication
+            (Lambda [Bind (0 :: Int)] $ Local 0)
+            inferredVisibleTypeArgument) @?=
+        Right "(\\x -> x) @_"
   , testCase "render an empty case with explicit braces" $ do
       let eliminate = right $ mkIdentifier "eliminate"
           checkedEliminate = right $ mkDefinitionName eliminate
@@ -4595,6 +4691,7 @@ generatedTests = testGroup "generated syntax"
       let leaf = Local (0 :: Int)
           identity = Lambda [Bind 0] leaf
           application = Apply identity identity
+          visible = VisibleTypeApplication leaf inferredVisibleTypeArgument
           composite = Let (Bind 1) (Tuple [Hole 1, leaf])
             $ Case leaf
                 [ (Wildcard, application)
@@ -4604,6 +4701,7 @@ generatedTests = testGroup "generated syntax"
             [ (leaf, 1)
             , (identity, 2)
             , (application, 5)
+            , (visible, 2)
             , (composite, 12)
             ]
       forM_ examples $ \(expression, expected) -> do

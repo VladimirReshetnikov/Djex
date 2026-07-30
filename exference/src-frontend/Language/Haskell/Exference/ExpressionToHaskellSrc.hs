@@ -13,6 +13,7 @@ import Control.Monad.Trans.Reader (ReaderT, ask, runReaderT)
 import Data.Bifunctor (first)
 import Data.Map (Map)
 import qualified Data.Map as Map
+import Data.Void (Void, absurd)
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
 import Language.Haskell.Exts.Syntax
 
@@ -21,6 +22,7 @@ import qualified Language.Haskell.Exference.Core.Types as T
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Qualification as SharedQualification
+import qualified Language.Haskell.Synthesis.Type as SharedType
 
 type HsExp = Exp SrcSpanInfo
 type HsDecl = Decl SrcSpanInfo
@@ -186,6 +188,12 @@ convertInternal qualification precedence (Generated.Lambda patterns body) = do
   convertedBody <- convertInternal qualification 0 body
   pure $ parenthesize (precedence >= 1)
     $ Lambda noLoc convertedPatterns convertedBody
+convertInternal qualification precedence
+    (Generated.VisibleTypeApplication function argument) = do
+  convertedFunction <- convertInternal qualification 2 function
+  let convertedArgument = visibleTypeArgument qualification argument
+  pure $ parenthesize (precedence >= 3)
+    $ App noLoc convertedFunction $ TypeApp noLoc convertedArgument
 convertInternal qualification precedence application@Generated.Apply{} =
   gatherApplications application []
  where
@@ -304,6 +312,57 @@ variableExpression = Var noLoc . UnQual noLoc . Ident noLoc
 
 variablePattern :: String -> Pat SrcSpanInfo
 variablePattern = PVar noLoc . Ident noLoc
+
+visibleTypeArgument
+  :: Generated.Qualification
+  -> Generated.VisibleTypeArgument
+  -> Type SrcSpanInfo
+visibleTypeArgument qualification argument = case
+    Generated.visibleTypeArgumentType argument of
+  Nothing -> TyWildCard noLoc Nothing
+  Just typeExpression -> atomicVisibleTypeArgument
+    $ closedMonotype qualification typeExpression
+
+-- Visible type application accepts one atomic type after the @. Structural
+-- constructors, tuples, and list sugar are already atomic; applications and
+-- arrows need an explicit node so pretty-printing cannot change the parse.
+atomicVisibleTypeArgument :: Type SrcSpanInfo -> Type SrcSpanInfo
+atomicVisibleTypeArgument typeExpression = case typeExpression of
+  TyCon{} -> typeExpression
+  TyTuple{} -> typeExpression
+  TyList{} -> typeExpression
+  _ -> TyParen noLoc typeExpression
+
+-- The shared smart constructor has already excluded variables and forall
+-- layers. Keeping this conversion structural avoids a render/parse round trip
+-- and applies the expression's exact qualification policy to nominal types.
+closedMonotype
+  :: Generated.Qualification
+  -> SharedType.Type Void
+  -> Type SrcSpanInfo
+closedMonotype qualification typeExpression = case typeExpression of
+  SharedType.TypeVariable variable -> absurd variable
+  SharedType.TypeConstructor name -> TyCon noLoc $ toQName qualification name
+  SharedType.TypeApplication (SharedType.TypeConstructor name) argument
+    | SharedName.nameSpecial name == Just SharedName.ListConstructor ->
+        TyList noLoc $ closedMonotype qualification argument
+  SharedType.TypeApplication function argument -> TyApp noLoc
+    (closedMonotype qualification function)
+    (closedMonotype qualification argument)
+  SharedType.FunctionType parameter result -> TyFun noLoc
+    (closedMonotype qualification parameter)
+    (closedMonotype qualification result)
+  SharedType.TupleType boxity elements -> TyTuple noLoc
+    (case boxity of
+      SharedName.Boxed -> Boxed
+      SharedName.Unboxed -> Unboxed)
+    (map (closedMonotype qualification) elements)
+  -- This branch is unreachable for an abstract 'VisibleTypeArgument'. The
+  -- empty-binder fallback keeps the helper total over its visible structure;
+  -- a nonempty binder has the uninhabited variable identity.
+  SharedType.ForallType variables _ body -> case variables of
+    variable : _ -> absurd variable
+    [] -> closedMonotype qualification body
 
 toQName :: Generated.Qualification -> SharedName.Name -> QName SrcSpanInfo
 toQName qualification name = case SharedName.nameOccurrence name of

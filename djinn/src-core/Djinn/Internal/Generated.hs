@@ -103,6 +103,8 @@ fromGeneratedExpression expression = case expression of
   Generated.Apply function argument -> HEApply
     <$> fromGeneratedExpression function
     <*> fromGeneratedExpression argument
+  Generated.VisibleTypeApplication{} -> Left $
+    "Djinn compatibility expressions cannot represent visible type applications"
   Generated.Tuple elements -> HETuple <$> mapM fromGeneratedExpression elements
   Generated.Hole{} -> Left $
     "Djinn compatibility expressions cannot represent generated holes"

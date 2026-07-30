@@ -15,6 +15,11 @@ module Language.Haskell.Synthesis.Generated
   , definitionName
   , definitionSpelling
   , Pattern (..)
+  , VisibleTypeArgument
+  , VisibleTypeArgumentError (..)
+  , inferredVisibleTypeArgument
+  , specifiedVisibleTypeArgument
+  , visibleTypeArgumentType
   , Expression (..)
   , FunctionClause (..)
   , Qualification (..)
@@ -59,12 +64,14 @@ module Language.Haskell.Synthesis.Generated
 import Prelude hiding ((<>))
 
 import Control.DeepSeq (NFData (rnf))
+import qualified Data.Bifunctor as Bifunctor
 import Data.Foldable (toList)
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Void (Void, absurd)
 import GHC.Generics (Generic)
 import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Count (saturatingNaturalToInt)
@@ -76,6 +83,8 @@ import Language.Haskell.Synthesis.Qualification
   , renderNameInfix
   , renderNamePrefix
   )
+import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 import Numeric.Natural (Natural)
 import Text.PrettyPrint.HughesPJ
   ( Doc
@@ -136,6 +145,74 @@ data Pattern local
 
 instance NFData local => NFData (Pattern local)
 
+-- | One checked visible type argument in generated term syntax.
+--
+-- The representation is deliberately abstract. An inferred argument renders
+-- as @\@_@. A specified argument retains a canonical, structurally validated
+-- monotype with neither variables nor forall layers. This bounded vocabulary
+-- lets generated terms make closed instantiations explicit without inventing
+-- a type-variable scope that their enclosing 'FunctionClause' does not carry.
+data VisibleTypeArgument
+  = InferredVisibleTypeArgument
+  | SpecifiedVisibleTypeArgument (SharedType.Type Void)
+  deriving (Eq, Ord, Show)
+
+instance NFData VisibleTypeArgument where
+  rnf InferredVisibleTypeArgument = ()
+  rnf (SpecifiedVisibleTypeArgument typeExpression) = rnf typeExpression
+
+-- | Why a source type cannot become a bounded visible type argument.
+-- Structural validation runs before the bounded-vocabulary check, so malformed
+-- caller-built types retain the shared type error that made them invalid.
+data VisibleTypeArgumentError variable
+  = InvalidVisibleTypeArgument (SharedType.TypeError variable)
+  | VisibleTypeArgumentVariable variable
+  | VisibleTypeArgumentForall
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData variable => NFData (VisibleTypeArgumentError variable)
+
+-- | The inferred visible type argument @\@_@.
+inferredVisibleTypeArgument :: VisibleTypeArgument
+inferredVisibleTypeArgument = InferredVisibleTypeArgument
+
+-- | Check and erase a variable-free monotype into the bounded generated-term
+-- vocabulary. Saturated arrows and tuples are canonicalized by the shared type
+-- boundary before the safe 'Void'-indexed representation is retained.
+specifiedVisibleTypeArgument
+  :: Ord variable
+  => SharedType.Type variable
+  -> Either (VisibleTypeArgumentError variable) VisibleTypeArgument
+specifiedVisibleTypeArgument source = do
+  canonical <- Bifunctor.first InvalidVisibleTypeArgument
+    $ SharedType.normalizeType source
+  SpecifiedVisibleTypeArgument <$> eraseVariables canonical
+ where
+  eraseVariables typeExpression = case typeExpression of
+    SharedType.TypeVariable variable ->
+      Left $ VisibleTypeArgumentVariable variable
+    SharedType.TypeConstructor name ->
+      Right $ SharedType.TypeConstructor name
+    SharedType.TypeApplication function argument ->
+      SharedType.TypeApplication
+        <$> eraseVariables function
+        <*> eraseVariables argument
+    SharedType.FunctionType parameter result ->
+      SharedType.FunctionType
+        <$> eraseVariables parameter
+        <*> eraseVariables result
+    SharedType.TupleType boxity elements ->
+      SharedType.TupleType boxity <$> traverse eraseVariables elements
+    SharedType.ForallType{} -> Left VisibleTypeArgumentForall
+
+-- | Recover the specified closed monotype, or 'Nothing' for @\@_@.
+visibleTypeArgumentType
+  :: VisibleTypeArgument
+  -> Maybe (SharedType.Type Void)
+visibleTypeArgumentType argument = case argument of
+  InferredVisibleTypeArgument -> Nothing
+  SpecifiedVisibleTypeArgument typeExpression -> Just typeExpression
+
 -- | Surface expression tree after backend-specific checking.
 --
 -- 'Hole' is retained for Exference's inspectable intermediate candidates; a
@@ -145,6 +222,7 @@ data Expression local
   | Global Name
   | Lambda [Pattern local] (Expression local)
   | Apply (Expression local) (Expression local)
+  | VisibleTypeApplication (Expression local) VisibleTypeArgument
   | Tuple [Expression local]
   | Hole local
   | Let (Pattern local) (Expression local) (Expression local)
@@ -258,6 +336,7 @@ expressionBindingSites expression = case expression of
     concatMap patternBindingSites patterns ++ expressionBindingSites body
   Apply function argument ->
     expressionBindingSites function ++ expressionBindingSites argument
+  VisibleTypeApplication function _ -> expressionBindingSites function
   Tuple elements -> concatMap expressionBindingSites elements
   Hole{} -> []
   Let pattern binding body ->
@@ -293,6 +372,7 @@ expressionFreeLocalIdentitiesBy identity = free
     Global{} -> Set.empty
     Lambda patterns body -> removePatternBinders patterns $ free body
     Apply function argument -> free function `Set.union` free argument
+    VisibleTypeApplication function _ -> free function
     Tuple elements -> Set.unions $ map free elements
     Hole{} -> Set.empty
     Let pattern binding body -> free binding `Set.union`
@@ -328,6 +408,8 @@ fillExpressionHole selected replacement = fill
   fill original@Global{} = original
   fill (Lambda patterns body) = Lambda patterns $ fill body
   fill (Apply function argument) = Apply (fill function) (fill argument)
+  fill (VisibleTypeApplication function argument) =
+    VisibleTypeApplication (fill function) argument
   fill (Tuple elements) = Tuple $ map fill elements
   fill (Let pattern binding body) =
     Let pattern (fill binding) (fill body)
@@ -360,6 +442,8 @@ substituteExpressionLocalBy identity selected replacement = replace
     Lambda patterns body -> Lambda patterns <$> underPatterns patterns body
     Apply function argument ->
       Apply <$> replace function <*> replace argument
+    VisibleTypeApplication function argument ->
+      (`VisibleTypeApplication` argument) <$> replace function
     Tuple elements -> Tuple <$> traverse replace elements
     original@Hole{} -> Just original
     Let pattern binding body -> Let pattern
@@ -409,6 +493,10 @@ alphaEquivalentExpression = equivalent [] []
     (Apply leftFunction leftArgument, Apply rightFunction rightArgument) ->
       equivalent forward reverseBindings leftFunction rightFunction
         && equivalent forward reverseBindings leftArgument rightArgument
+    ( VisibleTypeApplication leftFunction leftArgument
+      , VisibleTypeApplication rightFunction rightArgument
+      ) -> leftArgument == rightArgument
+        && equivalent forward reverseBindings leftFunction rightFunction
     (Tuple leftElements, Tuple rightElements) ->
       equivalentList forward reverseBindings leftElements rightElements
     (Hole leftLocal, Hole rightLocal) -> leftLocal == rightLocal
@@ -517,6 +605,8 @@ projectFieldSelectors selectors clause
     Hole local -> Hole local
     Lambda patterns body -> Lambda patterns $ rewrite body
     Apply function argument -> Apply (rewrite function) (rewrite argument)
+    VisibleTypeApplication function argument ->
+      VisibleTypeApplication (rewrite function) argument
     Tuple elements -> Tuple $ map rewrite elements
     Let pattern bound body -> Let pattern (rewrite bound) (rewrite body)
     Case scrutinee alternatives -> Case (rewrite scrutinee)
@@ -550,6 +640,8 @@ projectFieldSelectors selectors clause
           Lambda patterns body -> Lambda patterns $ replace body
           Apply function argument ->
             Apply (replace function) (replace argument)
+          VisibleTypeApplication function argument ->
+            VisibleTypeApplication (replace function) argument
           Tuple elements -> Tuple $ map replace elements
           Let pattern inner body -> Let pattern (replace inner) (replace body)
           Case scrutinee alternatives -> Case (replace scrutinee)
@@ -723,6 +815,8 @@ renameLocals renamings = rename $ Map.fromList renamings
       $ rename (underPatterns replacements patterns) body
     Apply function argument -> Apply
       (rename replacements function) (rename replacements argument)
+    VisibleTypeApplication function argument ->
+      VisibleTypeApplication (rename replacements function) argument
     Tuple elements -> Tuple $ map (rename replacements) elements
     original@Hole{} -> original
     Let pattern binding body -> Let pattern
@@ -764,6 +858,8 @@ simplifyExpressionCases expression = case expression of
   Apply function argument -> Apply
     (simplifyExpressionCases function)
     (simplifyExpressionCases argument)
+  VisibleTypeApplication function argument ->
+    VisibleTypeApplication (simplifyExpressionCases function) argument
   Tuple elements -> Tuple $ map simplifyExpressionCases elements
   original@Hole{} -> original
   Let pattern binding body -> Let pattern
@@ -800,6 +896,8 @@ normalizeExpressionPatterns = normalize Map.empty
         $ normalize (underPatterns renamings patterns aliases) body
     Apply function argument ->
       Apply (normalize renamings function) (normalize renamings argument)
+    VisibleTypeApplication function argument ->
+      VisibleTypeApplication (normalize renamings function) argument
     Tuple elements -> Tuple $ map (normalize renamings) elements
     original@Hole{} -> original
     Let pattern binding body ->
@@ -869,6 +967,9 @@ discardUnusedPatternBindingsBy identity expression = fst $ discard expression
       in ( Apply function' argument'
          , freeInFunction `Set.union` freeInArgument
          )
+    VisibleTypeApplication function argument ->
+      let (function', freeInFunction) = discard function
+      in (VisibleTypeApplication function' argument, freeInFunction)
     Tuple elements ->
       let (elements', freeInElements) = unzip $ map discard elements
       in (Tuple elements', Set.unions freeInElements)
@@ -956,6 +1057,8 @@ simplifyExpressionBy identity = simplifyEta . simplifyLets
     Lambda patterns body -> Lambda patterns $ simplifyLets body
     Apply function argument ->
       Apply (simplifyLets function) (simplifyLets argument)
+    VisibleTypeApplication function argument ->
+      VisibleTypeApplication (simplifyLets function) argument
     Tuple elements -> Tuple $ map simplifyLets elements
     original@Hole{} -> original
     Let pattern binding body -> case pattern of
@@ -982,6 +1085,8 @@ simplifyExpressionBy identity = simplifyEta . simplifyLets
     Lambda patterns body -> Lambda patterns $ simplifyEta body
     Apply function argument ->
       Apply (simplifyEta function) (simplifyEta argument)
+    VisibleTypeApplication function argument ->
+      VisibleTypeApplication (simplifyEta function) argument
     Tuple elements -> Tuple $ map simplifyEta elements
     original@Hole{} -> original
     Let pattern binding body ->
@@ -1006,6 +1111,7 @@ simplifyExpressionBy identity = simplifyEta . simplifyLets
     Apply function argument -> combineOccurrences
       (occurrencesOf selected function)
       (occurrencesOf selected argument)
+    VisibleTypeApplication function _ -> occurrencesOf selected function
     Tuple elements -> foldr
       (combineOccurrences . occurrencesOf selected)
       Unused
@@ -1128,6 +1234,7 @@ validateExpression bound expression = case expression of
     validateExpression extended body
   Apply function argument ->
     validateExpression bound function >> validateExpression bound argument
+  VisibleTypeApplication function _ -> validateExpression bound function
   Tuple elements -> mapM_ (validateExpression bound) elements
   Hole{} -> Right ()
   Let pattern binding body -> do
@@ -1298,6 +1405,7 @@ validateExpressionSyntax expression = case expression of
     mapM_ validatePatternSyntax patterns >> validateExpressionSyntax body
   Apply function argument ->
     validateExpressionSyntax function >> validateExpressionSyntax argument
+  VisibleTypeApplication function _ -> validateExpressionSyntax function
   Tuple elements -> do
     validateTupleArity InvalidTupleExpressionArity elements
     mapM_ validateExpressionSyntax elements
@@ -1343,6 +1451,7 @@ expressionSizeNatural expression = 1 + case expression of
   Lambda _ body -> expressionSizeNatural body
   Apply function argument ->
     expressionSizeNatural function + expressionSizeNatural argument
+  VisibleTypeApplication function _ -> expressionSizeNatural function
   Tuple elements -> sumExpressionSizes elements
   Hole{} -> 0
   Let _ value body ->
@@ -1432,6 +1541,10 @@ ppExpression options names precedence expression = case expression of
       , nest 2 $ ppExpression options names 0 body
       ]
   application@Apply{} -> ppApplication options names precedence application
+  VisibleTypeApplication function argument ->
+    parenthesize (precedence > 11) $
+      ppExpression options names 11 function <+>
+        text ('@' : renderVisibleTypeArgument qualification argument)
   Tuple elements -> parens $ fsep $ punctuate comma
     $ map (ppExpression options names 0) elements
   Hole local -> text $ '_' : localName options names local
@@ -1451,6 +1564,13 @@ ppExpression options names precedence expression = case expression of
     ppAlternative (pattern, body) =
       ppPattern options names 0 pattern <+> text "->" <+>
         ppExpression options names 0 body
+
+renderVisibleTypeArgument :: Qualification -> VisibleTypeArgument -> String
+renderVisibleTypeArgument qualification argument = case
+    visibleTypeArgumentType argument of
+  Nothing -> "_"
+  Just typeExpression -> SharedTypeRender.showsTypeWithQualification
+    qualification absurd 2 typeExpression ""
 
 ppApplication
   :: Ord local
@@ -1562,6 +1682,7 @@ expressionHoles expression = case expression of
   Lambda _ body -> expressionHoles body
   Apply function argument ->
     expressionHoles function ++ expressionHoles argument
+  VisibleTypeApplication function _ -> expressionHoles function
   Tuple elements -> concatMap expressionHoles elements
   Hole local -> [local]
   Let _ binding body ->
@@ -1580,6 +1701,7 @@ expressionGlobals expression = case expression of
     concatMap patternGlobals patterns ++ expressionGlobals body
   Apply function argument ->
     expressionGlobals function ++ expressionGlobals argument
+  VisibleTypeApplication function _ -> expressionGlobals function
   Tuple elements -> concatMap expressionGlobals elements
   Hole{} -> []
   Let pattern binding body ->

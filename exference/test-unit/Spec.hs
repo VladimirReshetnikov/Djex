@@ -8225,6 +8225,128 @@ tests = testGroup "Exference"
                     (HSE.UnGuardedRhs _
                       (HSE.Tuple _ HSE.Boxed [_, _])) Nothing]) -> pure ()
             result -> fail $ "unexpected generated expression: " ++ show result
+      , testCase "shared conversion retains bounded visible type applications" $ do
+          functionGlobal <- expectRight $ SharedName.mkIdentifier "function"
+          valueName <- expectRight $ SharedName.mkIdentifier "value"
+          namespace <- expectRight $ SharedName.mkModuleName "Data.Maybe"
+          maybeName <- expectRight
+            $ SharedName.mkQualifiedIdentifier namespace "Maybe"
+          integerName <- expectRight $ SharedName.mkIdentifier "Int"
+          specified <- expectRight $ Generated.specifiedVisibleTypeArgument
+            (SharedType.TypeApplication
+              (SharedType.TypeConstructor maybeName)
+              (SharedType.TypeConstructor integerName)
+              :: SharedType.Type Void)
+          let options = Generated.defaultRenderOptions show
+              inferredExpression :: Generated.Expression Int
+              inferredExpression = Generated.Apply
+                (Generated.VisibleTypeApplication
+                  (Generated.Global functionGlobal)
+                  Generated.inferredVisibleTypeArgument)
+                (Generated.Global valueName)
+              specifiedExpression :: Generated.Expression Int
+              specifiedExpression = Generated.VisibleTypeApplication
+                (Generated.Global functionGlobal) specified
+          inferred <- expectRight
+            $ generatedExpressionToHaskellSrc options inferredExpression
+          case inferred of
+            HSE.App _
+                (HSE.App _
+                  (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ "function")))
+                  (HSE.TypeApp _ (HSE.TyWildCard _ Nothing)))
+                (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ "value"))) -> pure ()
+            expression -> fail $ "unexpected inferred type application: "
+              ++ show expression
+          converted <- expectRight
+            $ generatedExpressionToHaskellSrc options specifiedExpression
+          case converted of
+            HSE.App _
+                (HSE.Var _ (HSE.UnQual _ (HSE.Ident _ "function")))
+                (HSE.TypeApp _
+                  (HSE.TyParen _
+                    (HSE.TyApp _
+                      (HSE.TyCon _
+                        (HSE.Qual _ (HSE.ModuleName _ "Data.Maybe")
+                          (HSE.Ident _ "Maybe")))
+                      (HSE.TyCon _
+                        (HSE.UnQual _ (HSE.Ident _ "Int")))))) ->
+                HSE.prettyPrint converted @?=
+                  "function @(Data.Maybe.Maybe Int)"
+            expression -> fail $ "unexpected specified type application: "
+              ++ show expression
+      , testCase "shared conversion parenthesizes only non-atomic type arguments" $ do
+          functionGlobal <- expectRight $ SharedName.mkIdentifier "function"
+          integerName <- expectRight $ SharedName.mkIdentifier "Int"
+          booleanName <- expectRight $ SharedName.mkIdentifier "Bool"
+          let integer = SharedType.TypeConstructor integerName
+                :: SharedType.Type Void
+              boolean = SharedType.TypeConstructor booleanName
+              function = SharedType.FunctionType integer boolean
+              tuple = SharedType.TupleType SharedName.Boxed [integer, boolean]
+              list = SharedType.TypeApplication
+                (SharedType.TypeConstructor SharedName.listName) integer
+              options :: Generated.RenderOptions Int
+              options = Generated.defaultRenderOptions show
+              parseMode = HSE.ParseMode
+                "visible-type-application.hs"
+                HSE.Haskell2010
+                [HSE.EnableExtension HSE.TypeApplications]
+                False False Nothing False
+              convert source = do
+                argument <- expectRight
+                  $ Generated.specifiedVisibleTypeArgument source
+                expectRight $ generatedExpressionToHaskellSrc options
+                  $ Generated.VisibleTypeApplication
+                      (Generated.Global functionGlobal) argument
+              extract expression = case expression of
+                HSE.App _ _ (HSE.TypeApp _ typeExpression) ->
+                  pure typeExpression
+                unexpected -> fail $ "unexpected type application: "
+                  ++ show unexpected
+          atomicExpression <- convert integer
+          functionExpression <- convert function
+          tupleExpression <- convert tuple
+          listExpression <- convert list
+          atomicType <- extract atomicExpression
+          functionType <- extract functionExpression
+          tupleType <- extract tupleExpression
+          listType <- extract listExpression
+          case atomicType of
+            HSE.TyCon{} -> pure ()
+            unexpected -> fail $ "atomic type was parenthesized: "
+              ++ show unexpected
+          case functionType of
+            HSE.TyParen _ HSE.TyFun{} -> pure ()
+            unexpected -> fail $ "function type was not parenthesized: "
+              ++ show unexpected
+          case tupleType of
+            HSE.TyTuple{} -> pure ()
+            unexpected -> fail $ "tuple type was unnecessarily parenthesized: "
+              ++ show unexpected
+          case listType of
+            HSE.TyList{} -> pure ()
+            unexpected -> fail $ "list type was unnecessarily parenthesized: "
+              ++ show unexpected
+          map HSE.prettyPrint
+              [ atomicExpression
+              , functionExpression
+              , tupleExpression
+              , listExpression
+              ] @?=
+            [ "function @Int"
+            , "function @(Int -> Bool)"
+            , "function @(Int, Bool)"
+            , "function @[Int]"
+            ]
+          [ atomicExpression
+            , functionExpression
+            , tupleExpression
+            , listExpression
+            ] `forM_` \expression ->
+              case HSE.parseExpWithMode parseMode $ HSE.prettyPrint expression of
+                HSE.ParseOk{} -> pure ()
+                failure -> fail $ "visible type application did not reparse: "
+                  ++ show failure
       , testCase "shared conversion reports lexical scope failures" $
           generatedExpressionToHaskellSrc
               (Generated.defaultRenderOptions show)

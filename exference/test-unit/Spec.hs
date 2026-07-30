@@ -4056,6 +4056,151 @@ tests = testGroup "Exference"
           solved @?= []
           checkExpression (mkQueryClassEnv withInstance []) [] []
             goal [] expression @?= Right ()
+      , testCase "ground evidence emits a checked visible provider application" $ do
+          let className = name "C"
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              token = TypeCons $ name "Token"
+              evidence ty = HsConstraint className [ty]
+              provider = TypeForall [0] [evidence $ TypeVar 0] token
+              goal = TypeArrow provider token
+          withoutInstance <- expectRight
+            $ mkStaticClassEnv [HsTypeClass className [0] []] []
+          withInstance <- expectRight
+            $ mkStaticClassEnv
+                [HsTypeClass className [0] []]
+                [HsInstance [] $ evidence integer]
+          integerArgument <- expectRight
+            $ Generated.specifiedVisibleTypeArgument integer
+          booleanArgument <- expectRight
+            $ Generated.specifiedVisibleTypeArgument boolean
+          let input environment = identityInput
+                { input_goalType = goal
+                , input_envClasses = environment
+                , input_maxSteps = 100
+                }
+              isExplicit expected (candidate, residual, _) =
+                null residual && case candidate of
+                  ExpLambda binder declared
+                      (ExpTypeApply (ExpVar returned annotation) argument) ->
+                    binder == returned
+                      && declared == provider
+                      && annotation == provider
+                      && argument == expected
+                  _ -> False
+          unsupported <- expectRight $ findExpressionsEither
+            $ input withoutInstance
+          assertBool
+            "visible instantiation was invented without ground evidence"
+            $ not $ any (isExplicit integerArgument) unsupported
+          candidates <- expectRight $ findExpressionsEither $ input withInstance
+          (expression, residual, _) <- maybe
+            (fail "ground instance evidence did not produce provider @Int")
+            pure
+            $ find (isExplicit integerArgument) candidates
+          residual @?= []
+          checkExpression (mkQueryClassEnv withInstance []) [] []
+            goal [] expression @?= Right ()
+
+          let wrong = ExpLambda 10 provider
+                $ ExpTypeApply (ExpVar 10 provider) booleanArgument
+          checkExpression (mkQueryClassEnv withInstance []) [] []
+              goal [] wrong @?=
+            Left (ConstraintMismatch [] [evidence boolean])
+          let appliedMonotype = ExpLambda 10 integer
+                $ ExpTypeApply (ExpVar 10 integer) integerArgument
+          checkExpression (mkQueryClassEnv withInstance []) [] []
+              (TypeArrow integer integer) [] appliedMonotype @?=
+            Left (VisibleTypeApplicationToMonotype integer)
+
+          let callableProvider = TypeForall [0]
+                [evidence $ TypeVar 0]
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              callableGoal = TypeArrow callableProvider
+                $ TypeArrow integer integer
+          ordered <- expectRight $ findExpressionsEither
+            $ (input withInstance) {input_goalType = callableGoal}
+          let isOrdinary (candidate, candidateResidual, _) =
+                null candidateResidual && case candidate of
+                  ExpLambda _ _ ExpVar{} -> True
+                  _ -> False
+          case find isOrdinary ordered of
+            Just
+                ( ExpLambda binder declared (ExpVar returned annotation)
+                , ordinaryResidual
+                , _
+                ) -> do
+                binder @?= returned
+                declared @?= callableProvider
+                assertBool "ordinary sibling lost its Int specialization"
+                  $ case unifyShared annotation
+                      (TypeArrow integer integer) of
+                    Just _ -> True
+                    Nothing -> False
+                ordinaryResidual @?= []
+            _ -> fail
+              "ground visible instantiation suppressed the ordinary sibling"
+      , testCase "visible applications preserve every leading context layer" $ do
+          let outerClass = name "Outer"
+              firstClass = name "First"
+              betweenClass = name "Between"
+              pickClass = name "Pick"
+              trailingClass = name "Trailing"
+              integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              token = TypeCons $ name "Token"
+              unary className ty = HsConstraint className [ty]
+              pick left right = HsConstraint pickClass [left, right]
+              provider =
+                TypeForall [] [unary outerClass integer]
+                  $ TypeForall [0] [unary firstClass $ TypeVar 0]
+                  $ TypeForall [] [unary betweenClass $ TypeVar 0]
+                  $ TypeForall [1] [pick (TypeVar 0) (TypeVar 1)]
+                  $ TypeForall [] [unary trailingClass $ TypeVar 1]
+                    token
+              goal = TypeArrow provider token
+              classes =
+                [ HsTypeClass outerClass [0] []
+                , HsTypeClass firstClass [0] []
+                , HsTypeClass betweenClass [0] []
+                , HsTypeClass pickClass [0, 1] []
+                , HsTypeClass trailingClass [0] []
+                ]
+              instances = map (HsInstance [])
+                [ unary outerClass integer
+                , unary firstClass integer
+                , unary betweenClass integer
+                , pick integer boolean
+                , unary trailingClass boolean
+                ]
+          environment <- expectRight $ mkStaticClassEnv classes instances
+          integerArgument <- expectRight
+            $ Generated.specifiedVisibleTypeArgument integer
+          booleanArgument <- expectRight
+            $ Generated.specifiedVisibleTypeArgument boolean
+          candidates <- expectRight $ findExpressionsEither identityInput
+            { input_goalType = goal
+            , input_envClasses = environment
+            , input_maxSteps = 200
+            }
+          let isLayered (candidate, residual, _) =
+                null residual && case candidate of
+                  ExpLambda binder declared
+                      (ExpTypeApply
+                        (ExpTypeApply (ExpVar returned annotation) firstArgument)
+                        secondArgument) ->
+                    binder == returned
+                      && declared == provider
+                      && annotation == provider
+                      && firstArgument == integerArgument
+                      && secondArgument == booleanArgument
+                  _ -> False
+          (expression, _, _) <- maybe
+            (fail "outer, between, or trailing contexts blocked @Int @Bool")
+            pure
+            $ find isLayered candidates
+          checkExpression (mkQueryClassEnv environment []) [] []
+            goal [] expression @?= Right ()
       , testCase "rank-N fields instantiate after pattern elimination" $ do
           let integer = TypeCons $ name "Int"
               boxType = TypeCons $ name "PolyBox"

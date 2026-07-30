@@ -24,6 +24,7 @@ import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import Data.Void (absurd)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Expression
@@ -77,6 +78,8 @@ data ExpressionCheckError
   | UnmatchedNestedRigidVariables [TVarId]
   | EscapingRigidConstraints [HsConstraint]
   | FlexibleIdentifierSupplyExhausted
+  | VisibleTypeApplicationToMonotype HsType
+  | VisibleTypeApplicationRigidBinder SynthesisVariable
   | InvalidCheckType HsType SynthesisTypeError
   | InvalidCheckConstraint HsConstraint SynthesisTypeError
   | InvalidCheckClassConstraint ClassEnvError
@@ -445,6 +448,9 @@ checkValidatedExpression provenCandidateRigids
           resultType <- freshTypeVariable
           unifyTypes functionType' (TypeArrow argumentType resultType)
           zonk resultType
+    infer variables (ExpTypeApply function argument) = do
+      functionType <- infer variables function >>= zonk
+      instantiateVisibleTypeArgument argument functionType
     infer _ (ExpHole variable) = throwCheck $ ExpressionHole variable
     infer variables (ExpLetMatch constructor patternVariables binding body) = do
       bindingType <- infer variables binding
@@ -528,6 +534,94 @@ checkValidatedExpression provenCandidateRigids
                   ++ checkConstraints current
             }
           pure instantiated
+
+    -- Visible application consumes exactly one binder. Contexts attached to
+    -- a multi-binder layer become obligations only after its last binder has
+    -- been selected, matching GHC's specified-binder application order.
+    instantiateVisibleTypeArgument argument = consume []
+     where
+      -- Binderless contextual wrappers are semantically outside the next
+      -- quantified layer. Preserve them without substituting the inner binder
+      -- into an unrelated free variable that happens to reuse its identity.
+      consume outerContexts
+          (TypeForallNative [] contexts body) =
+        consume (outerContexts ++ contexts) body
+      consume outerContexts
+          (TypeForallNative (binder : remainingBinders) contexts body) = do
+        maybe
+          (throwCheck $ VisibleTypeApplicationRigidBinder binder)
+          (const $ pure ())
+          $ SharedType.flexibleVariableIdentity binder
+        replacement <- case SharedGenerated.visibleTypeArgumentType argument of
+          Nothing -> freshTypeVariable
+          Just ground -> pure $ absurd <$> ground
+        let substitute = substituteScopedVariable binder replacement
+            instantiatedContexts = map (fmap substitute) contexts
+            instantiatedBody = substitute body
+        if null remainingBinders
+          then finishLayer
+            (outerContexts ++ instantiatedContexts)
+            instantiatedBody
+          else do
+            let quantified = TypeForallNative remainingBinders
+                  instantiatedContexts instantiatedBody
+                remaining = case outerContexts of
+                  [] -> quantified
+                  _ -> TypeForallNative [] outerContexts quantified
+            recordAliveType remaining
+            pure remaining
+      consume _ source =
+        throwCheck $ VisibleTypeApplicationToMonotype source
+
+      -- A binderless wrapper after the final binder belongs to the same
+      -- leading contextual chain. If another binder follows, retain every
+      -- accumulated context outside it for the next visible application. If
+      -- no binder follows, discharge the complete chain and return its body.
+      finishLayer contexts body = case peelBinderlessContexts [] body of
+        (_, TypeForallNative (_ : _) _ _) -> do
+          let remaining = case contexts of
+                [] -> body
+                _ -> TypeForallNative [] contexts body
+          recordAliveType remaining
+          pure remaining
+        (trailingContexts, monotype) -> do
+          localGivens <- gets checkLocalGivens
+          modify' $ \current -> current
+            { checkConstraints =
+                scopedConstraints localGivens (contexts ++ trailingContexts)
+                  ++ checkConstraints current
+            }
+          recordAliveType monotype
+          pure monotype
+
+      peelBinderlessContexts contexts
+          (TypeForallNative [] nestedContexts nestedBody) =
+        peelBinderlessContexts (contexts ++ nestedContexts) nestedBody
+      peelBinderlessContexts contexts body = (contexts, body)
+
+    -- Replace occurrences owned by this forall layer while respecting a
+    -- nested layer that deliberately shadows the same nominal binder.
+    substituteScopedVariable binder replacement typeExpression =
+      case typeExpression of
+        SharedType.TypeVariable variable
+          | variable == binder -> replacement
+          | otherwise -> typeExpression
+        SharedType.TypeConstructor{} -> typeExpression
+        SharedType.TypeApplication typeFunction typeArgument ->
+          SharedType.TypeApplication
+            (substituteScopedVariable binder replacement typeFunction)
+            (substituteScopedVariable binder replacement typeArgument)
+        SharedType.FunctionType parameter result -> SharedType.FunctionType
+          (substituteScopedVariable binder replacement parameter)
+          (substituteScopedVariable binder replacement result)
+        SharedType.TupleType boxity elements -> SharedType.TupleType boxity
+          $ map (substituteScopedVariable binder replacement) elements
+        SharedType.ForallType binders nestedContexts nestedBody
+          | binder `elem` binders -> typeExpression
+          | otherwise -> SharedType.ForallType binders
+              (map (fmap $ substituteScopedVariable binder replacement)
+                nestedContexts)
+              (substituteScopedVariable binder replacement nestedBody)
 
     instantiateConstructor name scrutineeType = case
         [ (deconstructorInput deconstructor, constructorFields alternative)
@@ -798,6 +892,8 @@ validateExpressionPatternArities constructorArities = inspectExpression
       mapM_ inspectPattern patterns >> inspectExpression body
     SharedGenerated.Apply function argument ->
       inspectExpression function >> inspectExpression argument
+    SharedGenerated.VisibleTypeApplication function _ ->
+      inspectExpression function
     SharedGenerated.Tuple elements -> mapM_ inspectExpression elements
     SharedGenerated.Hole{} -> Right ()
     SharedGenerated.Let pattern binding body ->

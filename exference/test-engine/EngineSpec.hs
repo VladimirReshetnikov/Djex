@@ -29,7 +29,9 @@ import Language.Haskell.Exference.Core.Internal.Options
   , defaultHeuristicsConfig
   )
 import Language.Haskell.Exference.Core.Internal.Polytype
-  ( instantiateLeadingForallsWith
+  ( GroundProviderInstantiation (..)
+  , groundProviderInstantiations
+  , instantiateLeadingForallsWith
   , quantifiedProviderSubsumes
   )
 import Language.Haskell.Exference.Core.Internal.RigidScope
@@ -379,6 +381,40 @@ tests = testGroup "Exference private engine boundaries"
           bodyIdentifier @?= innerIdentifier
         actual -> fail $ "unexpected shadowed-forall instantiation: "
           ++ show actual
+  , testCase "ground provider evidence separates free and bound identities" $ do
+      let outerClass = name "Outer"
+          innerClass = name "Inner"
+          integer = TypeCons $ name "Int"
+          boolean = TypeCons $ name "Bool"
+          token = TypeCons $ name "Token"
+          evidence className ty = HsConstraint className [ty]
+          provider =
+            TypeForall [] [evidence outerClass $ TypeVar 0]
+              $ TypeForall [0] [evidence innerClass $ TypeVar 0]
+                token
+          classes =
+            [ HsTypeClass outerClass [0] []
+            , HsTypeClass innerClass [0] []
+            ]
+      outerOnly <- expectRight $ mkStaticClassEnv classes
+        [HsInstance [] $ evidence outerClass integer]
+      complete <- expectRight $ mkStaticClassEnv classes
+        [ HsInstance [] $ evidence outerClass integer
+        , HsInstance [] $ evidence innerClass boolean
+        ]
+      groundProviderInstantiations
+          (mkQueryClassEnv outerOnly []) provider @?= []
+      groundProviderInstantiations
+          (mkQueryClassEnv complete []) provider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = [boolean]
+            , groundProviderType = token
+            , groundProviderConstraints =
+                [ evidence outerClass $ TypeVar 0
+                , evidence innerClass boolean
+                ]
+            }
+        ]
   , testCase "generic deconstructors need no persistent flexible IDs" $ do
       let integer = TypeCons $ name "Int"
           box argument = TypeApp (TypeCons $ name "Box") argument

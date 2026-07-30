@@ -1490,9 +1490,11 @@ stateStep allocators multiPM allowConstrs h
         dependencies = varPParameters provided
         scheme = SharedType.functionType dependencies provType
         exactUnification = unifyShared goalType provType
-        useProvider annotation providedType constraints parameters unification =
+        useProviderWith
+            typeArguments annotation providedType constraints parameters
+            unification =
           byGenericUnify
-            (Right (provId, annotation))
+            (Right (provId, annotation, typeArguments))
             providedType
             constraints
             parameters
@@ -1502,6 +1504,7 @@ stateStep allocators multiPM allowConstrs h
             -- namespace. A disjoint unifier would incorrectly accept a
             -- recursive equation such as @a ~ F a@.
             ((\substs -> (substs, substs)) <$> unification)
+        useProvider = useProviderWith []
       case classifyProviderUse scheme goalType of
         -- Both semantic roots explicitly request an opaque polytype
         -- comparison. Merely unifying a flexible monotype goal with the
@@ -1516,23 +1519,47 @@ stateStep allocators multiPM allowConstrs h
         -- Record the requested scheme for the independent checker.
         SubsumedProviderForwarding ->
           useProvider goalType goalType [] [] $ Just IntMap.empty
-        InstantiateProviderUse -> do
-          supply <- gets nodeFlexibleIds
-          case instantiateLeadingForallsWith
-              (searchAllocateFlexibleNamespace allocators)
-              supply
-              scheme of
-            Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
-            Just (instantiated, constraints, nextSupply) -> do
-              modify $ \node -> node {nodeFlexibleIds = nextSupply}
-              let (instantiatedResult, instantiatedParameters) =
-                    splitArrowChain instantiated
-              useProvider
-                instantiated
-                instantiatedResult
-                constraints
-                instantiatedParameters
-                (unifyShared goalType instantiatedResult)
+        InstantiateProviderUse ->
+          ordinaryInstantiation <|> visibleGroundInstantiation
+          where
+          ordinaryInstantiation = do
+            supply <- gets nodeFlexibleIds
+            case instantiateLeadingForallsWith
+                (searchAllocateFlexibleNamespace allocators)
+                supply
+                scheme of
+              Nothing -> lift $ truncateBranch BranchIdentifierSpaceExhausted
+              Just (instantiated, constraints, nextSupply) -> do
+                modify $ \node -> node {nodeFlexibleIds = nextSupply}
+                let (instantiatedResult, instantiatedParameters) =
+                      splitArrowChain instantiated
+                useProvider
+                  instantiated
+                  instantiatedResult
+                  constraints
+                  instantiatedParameters
+                  (unifyShared goalType instantiatedResult)
+
+          -- A separate evidence-directed branch selects only closed monotypes
+          -- already named by explicit instance heads. The ordinary branch
+          -- remains available and never gains unnecessary visible syntax.
+          visibleGroundInstantiation = do
+            instantiation <- lift . chooseBranches
+              $ groundProviderInstantiations contxt scheme
+            typeArguments <- maybe mzero pure
+              $ traverse
+                  (either (const Nothing) Just
+                    . SharedGenerated.specifiedVisibleTypeArgument)
+                  (groundProviderArguments instantiation)
+            let (instantiatedResult, instantiatedParameters) =
+                  splitArrowChain $ groundProviderType instantiation
+            useProviderWith
+              typeArguments
+              scheme
+              instantiatedResult
+              (groundProviderConstraints instantiation)
+              instantiatedParameters
+              (unifyShared goalType instantiatedResult)
         OrdinaryProviderUse ->
           useProvider scheme provType [] dependencies exactUnification
 
@@ -1556,7 +1583,10 @@ stateStep allocators multiPM allowConstrs h
         (unifyDisjoint goalType provType)
 
     -- on code for byProvided and byFunctionSimple
-    byGenericUnify :: Either QualifiedName (TVarId, HsType)
+    byGenericUnify
+                   :: Either QualifiedName
+                        (TVarId, HsType,
+                          [SharedGenerated.VisibleTypeArgument])
                    -> HsType
                    -> [HsConstraint]
                    -> [HsType]
@@ -1572,10 +1602,13 @@ stateStep allocators multiPM allowConstrs h
                    depthModNoMatch
       = maybe noUnify $ uncurry byUnified
      where
-      (applierName, applierVariable) = case applier of
-        Left name -> (Just name, Nothing)
-        Right variable -> (Nothing, Just variable)
-      coreExp = either ExpName (uncurry ExpVar) applier
+      (applierName, applierVariable, coreExp) = case applier of
+        Left name -> (Just name, Nothing, ExpName name)
+        Right (variable, annotation, typeArguments) ->
+          ( Nothing
+          , Just (variable, annotation)
+          , foldl' ExpTypeApply (ExpVar variable annotation) typeArguments
+          )
 
       noUnify :: StateT SearchNode SearchBranches ()
       noUnify = case dependencies of

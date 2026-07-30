@@ -5,13 +5,16 @@
 -- the independent expression checker share that operation here.
 module Language.Haskell.Exference.Core.Internal.Polytype
   ( ProviderUseMode (..)
+  , GroundProviderInstantiation (..)
   , classifyProviderUse
   , quantifiedProviderSubsumes
   , instantiateLeadingForallsWith
+  , groundProviderInstantiations
   )
 where
 
 import Control.Monad (guard)
+import Data.Foldable (toList)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
@@ -30,7 +33,12 @@ import Language.Haskell.Exference.Core.TypeUtils
   ( alphaNormalizeForalls
   , containsForall
   )
-import Language.Haskell.Exference.Core.Unify (unifyRight)
+import Language.Haskell.Exference.Core.Unify
+  ( TypeEq (..)
+  , unifyRight
+  , unifyRightEqs
+  )
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
@@ -42,6 +50,20 @@ data ProviderUseMode
   | OpaqueProviderForwarding
   | SubsumedProviderForwarding
   | InstantiateProviderUse
+  deriving (Eq, Show)
+
+-- | One evidence-directed visible instantiation of a scoped provider.
+--
+-- Every argument is a closed monotype already present in a validated instance
+-- head.  Search therefore neither invents a type nor needs a source spelling
+-- for a free type variable.  The instantiated body and its direct obligations
+-- are cached beside the ordered arguments so expression construction and
+-- constraint solving consume exactly the same witness.
+data GroundProviderInstantiation = GroundProviderInstantiation
+  { groundProviderArguments :: [HsType]
+  , groundProviderType :: HsType
+  , groundProviderConstraints :: [HsConstraint]
+  }
   deriving (Eq, Show)
 
 -- | Classify a provider against the type requested at its occurrence.
@@ -178,3 +200,109 @@ instantiateLeadingForallsWith allocate initialSupply source =
       (rename body)
   go supply contextChunks body = Just
     (body, concat $ reverse contextChunks, supply)
+
+-- | Enumerate the finite closed instantiations justified by explicit instance
+-- heads in the current class environment.
+--
+-- A single direct provider constraint must match one ground instance head and
+-- determine every binder in the complete leading forall chain. Other direct
+-- constraints are retained as ordinary obligations and must still be solved.
+-- Requiring one head to close the whole prefix deliberately avoids a product
+-- search over unrelated instance choices; later rules may broaden that bound
+-- without changing the evidence represented here. Evidence matching uses an
+-- alpha-normalized view of the complete prefix, so a free variable outside a
+-- later binder's scope cannot be confused with that binder and legal shadowing
+-- across successive layers remains positional.
+groundProviderInstantiations
+  :: QueryClassEnv
+  -> HsType
+  -> [GroundProviderInstantiation]
+groundProviderInstantiations environment source =
+  SharedCollection.distinctOn groundProviderArguments $ do
+    normalized <- either (const []) (pure . fst)
+      $ alphaNormalizeForalls IntSet.empty source
+    let (binders, constraints, _) =
+          SharedType.splitLeadingForalls normalized
+        binderIdentifiers =
+          traverse SharedType.flexibleVariableIdentity binders
+    binder <- maybe [] pure binderIdentifiers
+    guard $ not $ null binder
+    providerConstraint <- constraints
+    instanceDeclaration <- sClassEnv_explicitInstances
+      $ qClassEnv_env environment
+    let instanceHead = instance_head instanceDeclaration
+    guard $ constraint_tclass providerConstraint
+      == constraint_tclass instanceHead
+    let providerArguments = constraint_params providerConstraint
+        instanceArguments = constraint_params instanceHead
+        expectedArity = length providerArguments
+    guard $ length instanceArguments == expectedArity
+    guard $ all isGroundMonotype instanceArguments
+    substitutions <- maybe [] pure $ unifyRightEqs
+      $ zipWith TypeEq instanceArguments providerArguments
+    guard $ IntSet.fromList (IntMap.keys substitutions)
+      == IntSet.fromList binder
+    orderedArguments <- maybe [] pure
+      $ traverse (`IntMap.lookup` substitutions) binder
+    guard $ all isGroundMonotype orderedArguments
+    (instantiated, instantiatedConstraints) <- maybe [] pure
+      $ instantiateLeadingForallsAtGround orderedArguments source
+    pure GroundProviderInstantiation
+      { groundProviderArguments = orderedArguments
+      , groundProviderType = instantiated
+      , groundProviderConstraints = instantiatedConstraints
+      }
+
+-- Replace a complete leading prefix with an ordered collection of closed
+-- monotypes. Closed replacements cannot be captured, so deleting shadowed
+-- binder identities is sufficient for capture avoidance at nested layers.
+instantiateLeadingForallsAtGround
+  :: [HsType]
+  -> HsType
+  -> Maybe (HsType, [HsConstraint])
+instantiateLeadingForallsAtGround arguments source =
+  go arguments [] source
+ where
+  go remaining contextChunks (TypeForallNative binders contexts body) = do
+    identifiers <- traverse SharedType.flexibleVariableIdentity binders
+    guard $ IntSet.size (IntSet.fromList identifiers) == length identifiers
+    let (currentArguments, laterArguments) =
+          splitAt (length identifiers) remaining
+    guard $ length currentArguments == length identifiers
+    guard $ all isGroundMonotype currentArguments
+    let substitutions = Map.fromList
+          $ zip (map SharedType.FlexibleVariable identifiers) currentArguments
+        substitute = substituteGroundVariables substitutions
+    go laterArguments
+      (map (fmap substitute) contexts : contextChunks)
+      (substitute body)
+  go [] contextChunks body = Just
+    (body, concat $ reverse contextChunks)
+  go _ _ _ = Nothing
+
+substituteGroundVariables
+  :: Map.Map SynthesisVariable HsType
+  -> HsType
+  -> HsType
+substituteGroundVariables substitutions source = case source of
+  SharedType.TypeVariable variable ->
+    Map.findWithDefault source variable substitutions
+  SharedType.TypeConstructor{} -> source
+  SharedType.TypeApplication function argument -> SharedType.TypeApplication
+    (substituteGroundVariables substitutions function)
+    (substituteGroundVariables substitutions argument)
+  SharedType.FunctionType parameter result -> SharedType.FunctionType
+    (substituteGroundVariables substitutions parameter)
+    (substituteGroundVariables substitutions result)
+  SharedType.TupleType boxity elements -> SharedType.TupleType boxity
+    $ map (substituteGroundVariables substitutions) elements
+  SharedType.ForallType binders constraints body ->
+    let visible = foldr Map.delete substitutions binders
+    in SharedType.ForallType binders
+      (map (fmap $ substituteGroundVariables visible) constraints)
+      (substituteGroundVariables visible body)
+
+isGroundMonotype :: HsType -> Bool
+isGroundMonotype typeExpression =
+  null (toList typeExpression)
+    && not (SharedType.containsForall typeExpression)

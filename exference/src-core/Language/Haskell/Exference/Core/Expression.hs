@@ -15,6 +15,7 @@ module Language.Haskell.Exference.Core.Expression
       , ExpName
       , ExpLambda
       , ExpApply
+      , ExpTypeApply
       , ExpHole
       , ExpLetMatch
       , ExpLet
@@ -80,6 +81,19 @@ pattern ExpApply function argument <-
   ExpApply (Expression function) (Expression argument) =
     Expression $ Generated.Apply function argument
 
+-- | One bounded visible type application. The shared argument is either @\@_@
+-- or a checked variable-free monotype, so it carries no Exference-local type
+-- identity into the stable generated tree.
+pattern ExpTypeApply
+  :: Expression
+  -> Generated.VisibleTypeArgument
+  -> Expression
+pattern ExpTypeApply function argument <-
+  (matchTypeApply -> Just (function, argument))
+ where
+  ExpTypeApply (Expression function) argument = Expression
+    $ Generated.VisibleTypeApplication function argument
+
 pattern ExpHole :: TVarId -> Expression
 pattern ExpHole variable =
   Expression (Generated.Hole (AnnotatedLocal variable Nothing))
@@ -124,7 +138,7 @@ pattern ExpCaseMatch scrutinee alternatives <-
   ExpCaseMatch (Expression scrutinee) alternatives = Expression
     $ Generated.Case scrutinee $ map generatedAlternative alternatives
 
-{-# COMPLETE ExpVar, ExpName, ExpLambda, ExpApply, ExpHole, ExpLetMatch,
+{-# COMPLETE ExpVar, ExpName, ExpLambda, ExpApply, ExpTypeApply, ExpHole, ExpLetMatch,
              ExpLet, ExpCaseMatch #-}
 
 annotated :: TVarId -> HsType -> AnnotatedLocal
@@ -153,6 +167,14 @@ matchApply :: Expression -> Maybe (Expression, Expression)
 matchApply (Expression expression) = case expression of
   Generated.Apply function argument ->
     Just (Expression function, Expression argument)
+  _ -> Nothing
+
+matchTypeApply
+  :: Expression
+  -> Maybe (Expression, Generated.VisibleTypeArgument)
+matchTypeApply (Expression expression) = case expression of
+  Generated.VisibleTypeApplication function argument ->
+    Just (Expression function, argument)
   _ -> Nothing
 
 matchLetMatch

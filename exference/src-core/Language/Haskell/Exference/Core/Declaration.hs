@@ -17,6 +17,8 @@ module Language.Haskell.Exference.Core.Declaration
   , projectSynthesisInventory
   , preparedSynthesisWitness
   , preparedSynthesisBackend
+  , preparedSynthesisSchemes
+  , validatePreparedFunctionSchemes
   , erasePreparedSynthesisAnnotations
   , deriveRecursiveDataMetadata
   , toSynthesisTypeSynonym
@@ -95,6 +97,7 @@ type SynthesisInventory = SharedInventory.Inventory
 data PreparedSynthesisInventory annotation = PreparedSynthesisInventory
   (SharedTypeSynonym.PreparedInventory SynthesisVariable annotation)
   EnvDictionary
+  (Map.Map QualifiedName HsType)
 
 -- | Per-declaration conversion failures. Whole-environment, inventory, and
 -- projection failures live in 'SynthesisEnvironmentError', which nests this
@@ -141,6 +144,7 @@ data SynthesisEnvironmentError
       [QualifiedName] -- ^ Ordered prepared-backend multiset.
   | InvalidPreparedBindingPenalty QualifiedName Penalty
   | PreparedDataMetadataMissing SharedName.Name
+  | PreparedFunctionSchemeMismatch QualifiedName
   | InvalidSharedEnvironment
       (SharedEnvironment.EnvironmentError SynthesisVariable)
   | ClassEnvironmentConversionError ClassEnvError
@@ -171,11 +175,13 @@ prepareSynthesisInventory inventory = do
     $ SharedTypeSynonym.prepareInventoryExpansion
         freshSynthesisVariable inventory
   backend <- prepareSearchEnvironment expansion
+  schemes <- prepareFunctionSchemes expansion backend
   let prepared =
         SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
   -- Evaluate the projection before storing it. Otherwise its thunk would keep
   -- the transient expanded declarations alive through this long-lived wrapper.
-  prepared `seq` pure (PreparedSynthesisInventory prepared backend)
+  prepared `seq` schemes `seq`
+    pure (PreparedSynthesisInventory prepared backend schemes)
  where
   promoteExpansionError failure = case failure of
     SharedTypeSynonym.InventorySynonymPreparationError cause ->
@@ -207,7 +213,7 @@ projectSynthesisInventory
   -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory annotation)
 projectSynthesisInventory functionProjection dataProjection
-    (PreparedSynthesisInventory prepared backend) = do
+    (PreparedSynthesisInventory prepared backend schemes) = do
   let preparedFunctions = environmentFunctions backend
       sourceBindingNames = sort $ map fst functionProjection
       preparedBindingNames = sort $ map functionName preparedFunctions
@@ -253,6 +259,7 @@ projectSynthesisInventory functionProjection dataProjection
       { environmentFunctions = functions
       , environmentDeconstructors = deconstructors
       })
+    schemes
 
 -- | The shared inventory/alias witness retained after the backend projection
 -- has been consumed. The foundation's 'SharedTypeSynonym.preparedInventory'
@@ -265,14 +272,23 @@ projectSynthesisInventory functionProjection dataProjection
 preparedSynthesisWitness
   :: PreparedSynthesisInventory annotation
   -> SharedTypeSynonym.PreparedInventory SynthesisVariable annotation
-preparedSynthesisWitness (PreparedSynthesisInventory prepared _) = prepared
+preparedSynthesisWitness (PreparedSynthesisInventory prepared _ _) = prepared
 
 -- | The canonical or safely reordered/rated backend owned by the witness.
 preparedSynthesisBackend
   :: PreparedSynthesisInventory annotation
   -> EnvDictionary
 preparedSynthesisBackend
-    (PreparedSynthesisInventory _ backend) = backend
+    (PreparedSynthesisInventory _ backend _) = backend
+
+-- | Exact alias-expanded, declaration-normalized schemes corresponding to
+-- ordinary value bindings in the prepared backend.  Unlike
+-- 'FunctionBinding', this sidecar retains specified leading binder order for
+-- checked visible type application.
+preparedSynthesisSchemes
+  :: PreparedSynthesisInventory annotation
+  -> Map.Map QualifiedName HsType
+preparedSynthesisSchemes (PreparedSynthesisInventory _ _ schemes) = schemes
 
 -- | Erase frontend annotations without rebuilding the inventory, synonym
 -- table, or projected backend. The resulting witness has exactly the same
@@ -281,8 +297,8 @@ erasePreparedSynthesisAnnotations
   :: PreparedSynthesisInventory annotation
   -> PreparedSynthesisInventory ()
 erasePreparedSynthesisAnnotations
-    (PreparedSynthesisInventory prepared backend) =
-  PreparedSynthesisInventory (fmap (const ()) prepared) backend
+    (PreparedSynthesisInventory prepared backend schemes) =
+  PreparedSynthesisInventory (fmap (const ()) prepared) backend schemes
 
 -- Attach alias-aware recursion flags derived by the canonical core lowerer to
 -- the opaque prepared inventory. Every concrete datatype must have one backend
@@ -292,7 +308,7 @@ normalizePreparedDataMetadata
   -> Either SynthesisEnvironmentError
       (PreparedSynthesisInventory DeclarationMetadata)
 normalizePreparedDataMetadata
-    (PreparedSynthesisInventory prepared backend) = do
+    (PreparedSynthesisInventory prepared backend schemes) = do
   metadata <- Map.fromList <$> mapM entry
     (environmentDeconstructors backend)
   mapM_ (requireMetadata metadata)
@@ -302,7 +318,7 @@ normalizePreparedDataMetadata
   let adjusted =
         SharedTypeSynonym.adjustPreparedInventoryDataTypeAnnotations
           (attachMetadata metadata) prepared
-  pure $ PreparedSynthesisInventory adjusted backend
+  pure $ PreparedSynthesisInventory adjusted backend schemes
  where
   entry deconstructor = do
     name <- first SynthesisEnvironmentDeclarationError
@@ -348,6 +364,75 @@ prepareSearchEnvironment expansion = do
   fmap fst $ lowerSynthesisDeclarations IncludeDerivedBindings
     fromSynthesisClassDeclarationWithMethods
     [declaration | Just declaration <- prepared]
+
+-- Retain only exact ordinary-value schemes, after the same alias expansion
+-- and declaration-local variable normalization used by the backend lowerer.
+-- Re-running the value lowering here is intentional: equality with the
+-- corresponding prepared binding proves that the sidecar has not drifted in
+-- name, variable namespace, context, parameter order, or residual result.
+-- Constructors and class methods are derived bindings and therefore have no
+-- independent source scheme in this sidecar.
+prepareFunctionSchemes
+  :: SharedTypeSynonym.PreparedInventoryExpansion
+      SynthesisVariable annotation
+  -> EnvDictionary
+  -> Either SynthesisEnvironmentError (Map.Map QualifiedName HsType)
+prepareFunctionSchemes expansion backend =
+  do
+    schemes <- foldM retain Map.empty normalized
+    case validatePreparedFunctionSchemes
+        (environmentFunctions backend) schemes of
+      Left name -> Left $ PreparedFunctionSchemeMismatch name
+      Right () -> Right schemes
+ where
+  normalized = map
+    (normalizeDeclarationVariables . fmap (const ()))
+    $ SharedTypeSynonym.inventoryExpansionDeclarations expansion
+
+  retain schemes declaration = case declaration of
+    SharedDeclaration.ValueDeclaration signature -> do
+      let name = SharedDeclaration.valueName signature
+      scheme <- first SynthesisEnvironmentDeclarationError
+        $ checkedType $ SharedDeclaration.valueType signature
+      Right $ Map.insert name scheme schemes
+    _ -> Right schemes
+
+-- | Verify that every exact scheme is the source-level view of one supplied
+-- flat binding.  Missing sidecar entries are permitted because constructors,
+-- class methods, and compatibility bindings have no independently proven
+-- specified-binder provenance.  Extra keys, malformed schemes, and any drift
+-- in context, parameter order, result, or variable namespace fail closed.
+-- Binding identity validation must run first so the name index is injective.
+-- Penalties are intentionally ignored: safe source projection may rerate a
+-- binding without changing its type.
+validatePreparedFunctionSchemes
+  :: [FunctionBinding]
+  -> Map.Map QualifiedName HsType
+  -> Either QualifiedName ()
+validatePreparedFunctionSchemes functions schemes =
+  mapM_ validate $ Map.toList schemes
+ where
+  bindings = Map.fromList
+    [ (functionName binding, binding)
+    | binding <- functions
+    ]
+
+  validate (name, scheme) = case
+      (Map.lookup name bindings, lowerScheme name scheme) of
+    (Just actual, Right expected)
+      | withoutPenalty actual == expected -> Right ()
+    _ -> Left name
+
+  withoutPenalty binding = binding {functionPenalty = 0}
+
+  lowerScheme name scheme = do
+    prepared <- prepareSearchDeclaration Set.empty
+      $ SharedDeclaration.ValueDeclaration
+      $ SharedDeclaration.ValueSignature () name scheme
+    case prepared of
+      Just value@SharedDeclaration.ValueDeclaration{} ->
+        fromSynthesisFunctionBinding value
+      _ -> Left ExpectedValueDeclaration
 
 type SearchSynthesisDeclaration = SharedDeclaration.Declaration
   SynthesisVariable Void ()

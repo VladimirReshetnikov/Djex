@@ -40,6 +40,7 @@ import Language.Haskell.Exference.Core.Internal.ScopedConstraint
 import qualified Language.Haskell.Exference.Core.Internal.Scope as Scope
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.Map.Strict as Map
 import Data.Sequence
 import Numeric.Natural (Natural)
 
@@ -153,6 +154,14 @@ data SearchNode = SearchNode
   , nodeProvidedScopes  :: Scopes
   , nodeVarUses         :: IntMap.IntMap Natural
   , nodeFunctions       :: [FunctionBinding]
+  , nodeFunctionSchemes :: Map.Map QualifiedName HsType
+    -- ^ Exact specified leading-forall schemes retained by the checked stable
+    -- inventory.  Compatibility inputs deliberately leave this empty because
+    -- their flattened 'FunctionBinding' values cannot prove binder order.
+  , nodeVisibleTypeCandidates :: [HsType]
+    -- ^ Closed query subtrees proven to occupy proper-type positions.  These
+    -- may explicitly instantiate a context-free foreign scheme whose binder
+    -- is otherwise absent from its result.
   , nodeDeconstructors  :: [DeconstructorBinding]
   , nodeQueryClassEnv   :: QueryClassEnv
   , nodeExpression      :: Expression

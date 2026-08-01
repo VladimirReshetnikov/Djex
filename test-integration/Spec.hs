@@ -12,7 +12,7 @@ import Control.Exception
   , try
   )
 import Data.Either (isRight)
-import Data.List (isInfixOf, isPrefixOf, nub, tails)
+import Data.List (find, isInfixOf, isPrefixOf, nub, tails)
 import qualified Data.Map.Strict as Map
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode (ExitSuccess))
@@ -902,6 +902,207 @@ tests = testGroup "Djex facade"
             $ referencesGlobal consumeName body
           assertBool "nested class evidence did not enable the method"
             $ referencesGlobal methodName body
+  , testCase "instantiate an alias-expanded loaded Exference provider visibly" $ do
+      integerName <- expectRight $ mkIdentifier "Int"
+      tokenName <- expectRight $ mkIdentifier "Token"
+      aliasName <- expectRight $ mkIdentifier "Identity"
+      className <- expectRight $ mkIdentifier "C"
+      globalName <- expectRight $ mkIdentifier "global"
+      targetName <- expectRight $ mkIdentifier "use"
+      target <- expectRight $ mkDefinitionName targetName
+      integerArgument <- expectRight $ specifiedVisibleTypeArgument
+        (TypeConstructor integerName :: Type ExferenceTypeVariable)
+      let variable = FlexibleVariable 0
+          variableType = TypeVariable variable
+          integerType = TypeConstructor integerName
+          tokenType = TypeConstructor tokenName
+          aliased argument = TypeApplication
+            (TypeConstructor aliasName) argument
+          providerConstraint = Constraint className
+            [aliased variableType]
+          declarations =
+            [ AbstractTypeDeclaration () integerName ProperTypeKind
+            , AbstractTypeDeclaration () tokenName ProperTypeKind
+            , TypeSynonymDeclaration () aliasName
+                [TypeParameter variable Nothing] variableType
+            , ClassDeclaration () className
+                [TypeParameter variable Nothing] [] []
+            , InstanceDeclaration () [] []
+                $ Constraint className [integerType]
+            , ValueDeclaration $ ValueSignature () globalName
+                $ ForallType [variable] [providerConstraint] tokenType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 128}
+        }
+      results <- expectRight $ runExferenceQuery session request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          isVisibleGlobal candidate = case candidateOutput candidate of
+            FunctionClause _ []
+                (VisibleTypeApplication (Global occurrence) argument) ->
+              occurrence == globalName && argument == integerArgument
+            _ -> False
+      candidate <- maybe
+        (fail "loaded global did not preserve its instance-selected @Int")
+        pure
+        $ find isVisibleGlobal candidates
+      candidateResidualConstraints candidate @?= []
+      rendered <- expectRight
+        $ renderExferenceCandidateDefinition Unqualified candidate
+      rendered @?= "use = global @Int"
+
+      let fixture = unlines
+            [ "module LoadedVisibleProviderFixture where"
+            , ""
+            , "data Token = Token"
+            , ""
+            , "type Identity a = a"
+            , ""
+            , "class C a"
+            , "instance C Int"
+            , ""
+            , "global :: forall a. C (Identity a) => Token"
+            , "global = error \"fixture\""
+            , ""
+            , rendered
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected loaded visible provider specialization\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors)
+          ExitSuccess exitCode
+  , testCase "specialize a context-free loaded provider from the query" $ do
+      seedName <- expectRight $ mkIdentifier "Seed"
+      tokenName <- expectRight $ mkIdentifier "Token"
+      globalName <- expectRight $ mkIdentifier "global"
+      targetName <- expectRight $ mkIdentifier "use"
+      target <- expectRight $ mkDefinitionName targetName
+      seedArgument <- expectRight $ specifiedVisibleTypeArgument
+        (TypeConstructor seedName :: Type ExferenceTypeVariable)
+      let variable = FlexibleVariable 0
+          seedType = TypeConstructor seedName
+          tokenType = TypeConstructor tokenName
+          declarations =
+            [ AbstractTypeDeclaration () seedName ProperTypeKind
+            , AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () globalName
+                $ ForallType [variable] [] tokenType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType seedType tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceAllowUnused = True
+            , exferenceMaximumSteps = 256
+            }
+        }
+      results <- expectRight $ runExferenceQuery session request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          isVisibleGlobal candidate = case candidateOutput candidate of
+            FunctionClause _ [_]
+                (VisibleTypeApplication (Global occurrence) argument) ->
+              occurrence == globalName && argument == seedArgument
+            _ -> False
+      candidate <- maybe
+        (fail "query-supplied Seed did not produce loaded global @Seed")
+        pure
+        $ find isVisibleGlobal candidates
+      candidateResidualConstraints candidate @?= []
+      rendered <- expectRight
+        $ renderExferenceCandidateDefinition Unqualified candidate
+
+      let fixture = unlines
+            [ "module QuerySelectedVisibleProviderFixture where"
+            , ""
+            , "data Seed = Seed"
+            , "data Token = Token"
+            , ""
+            , "global :: forall a. Token"
+            , "global = Token"
+            , ""
+            , "use :: Seed -> Token"
+            , rendered
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected query-selected visible provider specialization\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\ngenerated:\n" ++ rendered)
+          ExitSuccess exitCode
+  , testCase "do not guess visible arguments for non-vacuous providers" $ do
+      seedName <- expectRight $ mkIdentifier "Seed"
+      tokenName <- expectRight $ mkIdentifier "Token"
+      globalName <- expectRight $ mkIdentifier "consume"
+      targetName <- expectRight $ mkIdentifier "use"
+      target <- expectRight $ mkDefinitionName targetName
+      let variable = FlexibleVariable 0
+          variableType = TypeVariable variable
+          seedType = TypeConstructor seedName
+          tokenType = TypeConstructor tokenName
+          declarations =
+            [ AbstractTypeDeclaration () seedName ProperTypeKind
+            , AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () globalName
+                $ ForallType [variable] []
+                $ FunctionType variableType tokenType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType seedType tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            {exferenceMaximumSteps = 256}
+        }
+      results <- expectRight $ runExferenceQuery session request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          bodies = [body | candidate <- candidates,
+            FunctionClause _ _ body <- [candidateOutput candidate]]
+      assertBool "ordinary loaded provider application disappeared"
+        $ any (referencesGlobal globalName) bodies
+      assertBool "query guessing visibly instantiated a non-vacuous binder"
+        $ not $ any (referencesVisibleGlobal globalName) bodies
   , testCase "preserve exact Exference requests behind one canonical plan" $ do
       environment <- expectRight
         (mkEnvironment [] :: Either
@@ -1900,6 +2101,25 @@ referencesGlobal target expression = case expression of
   Case scrutinee alternatives ->
     referencesGlobal target scrutinee ||
       any (referencesGlobal target . snd) alternatives
+
+referencesVisibleGlobal :: Name -> Expression local -> Bool
+referencesVisibleGlobal target expression = case expression of
+  Local _ -> False
+  Global _ -> False
+  Lambda _ body -> referencesVisibleGlobal target body
+  Apply function argument ->
+    referencesVisibleGlobal target function ||
+      referencesVisibleGlobal target argument
+  VisibleTypeApplication (Global name) _ -> name == target
+  VisibleTypeApplication function _ -> referencesVisibleGlobal target function
+  Tuple elements -> any (referencesVisibleGlobal target) elements
+  Hole _ -> False
+  Let _ value body ->
+    referencesVisibleGlobal target value ||
+      referencesVisibleGlobal target body
+  Case scrutinee alternatives ->
+    referencesVisibleGlobal target scrutinee ||
+      any (referencesVisibleGlobal target . snd) alternatives
 
 firstExferenceCandidate :: [ExferenceResult] -> IO ExferenceCandidate
 firstExferenceCandidate results = case

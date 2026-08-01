@@ -9045,6 +9045,24 @@ tests = testGroup "Exference"
             Left failure -> failure @?=
               RigidInstantiationPlanMismatch [9] [8]
             Right _ -> fail "a mismatched checker plan was accepted"
+      , testCase "rejects forged exact global schemes" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let integer = TypeCons $ name "Int"
+              boolean = TypeCons $ name "Bool"
+              bindingName = name "forged"
+              binding = FunctionBinding boolean bindingName 0 [] []
+              forgedScheme = TypeForall [0] [] $ TypeVar 0
+              classEnvironment = mkQueryClassEnv staticClasses []
+              environment = EnvDictionary [binding] [] staticClasses
+          plan <- expectRight $ planRigidInstantiation
+            (mkRigidInstantiationContext environment) [] integer
+          case prepareExpressionCheckContextWithSchemes plan
+              classEnvironment [binding] []
+              (Map.singleton bindingName forgedScheme) integer of
+            Left failure -> failure @?=
+              InvalidCheckFunctionScheme bindingName
+            Right _ -> fail
+              "the public checker accepted a scheme unrelated to its binding"
       , testCase "rejects a checker plan allocated for another environment" $ do
           staticClasses <- expectRight $ mkStaticClassEnv [] []
           let goal = TypeForall [0] []

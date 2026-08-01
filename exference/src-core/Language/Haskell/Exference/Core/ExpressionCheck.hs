@@ -9,6 +9,7 @@ module Language.Haskell.Exference.Core.ExpressionCheck
   , ExpressionCheckContext
   , NestedRigidProvenance
   , prepareExpressionCheckContext
+  , prepareExpressionCheckContextWithSchemes
   , checkExpressionInContext
   , checkExpressionInContextWithNestedRigidProvenance
   , checkExpression
@@ -28,6 +29,8 @@ import Data.Void (absurd)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Expression
+import Language.Haskell.Exference.Core.Declaration
+  ( validatePreparedFunctionSchemes )
 import Language.Haskell.Exference.Core.FunctionBinding
 import Language.Haskell.Exference.Core.ConstraintSolver
 import Language.Haskell.Exference.Core.Internal.FlexibleIds
@@ -86,6 +89,7 @@ data ExpressionCheckError
   | InvalidCheckEnvironmentBindings EnvironmentDuplicateError
   | InvalidCheckEnvironmentRatings EnvironmentRatingError
   | InvalidCheckEnvironmentSyntax EnvironmentSyntaxError
+  | InvalidCheckFunctionScheme QualifiedName
   | InvalidCheckExpressionScope (SharedGenerated.ScopeError TVarId)
   | InvalidCheckExpressionSyntax SharedGenerated.RenderError
   | InvalidCheckDeconstructor DeconstructorValidationError
@@ -114,6 +118,7 @@ data ExpressionCheckContext = ExpressionCheckContext
   QueryClassEnv
   [FunctionBinding]
   [DeconstructorBinding]
+  (Map.Map QualifiedName HsType)
   (Map.Map QualifiedName Int)
   RigidInstantiationPlan
 
@@ -141,7 +146,7 @@ checkExpression classEnvironment functions deconstructors goal expected expressi
         (Set.toList $ qClassEnv_constraints classEnvironment)
         goal
   context <- prepareExpressionCheckContextUnchecked plan classEnvironment
-    functions deconstructors goal
+    functions deconstructors Map.empty goal
   checkValidatedExpression IntSet.empty context expected expression
 
 -- | Check using a precomputed forall-opening plan.
@@ -164,7 +169,7 @@ checkExpressionWithRigidInstantiation plan classEnvironment functions
   validateCheckInputs classEnvironment functions deconstructors goal expected
     expression
   context <- prepareValidatedExpressionCheckContext plan classEnvironment
-    functions deconstructors goal
+    functions deconstructors Map.empty goal
   checkValidatedExpression IntSet.empty context expected expression
 
 -- | Validate the query-stable half of an independent expression check once.
@@ -183,10 +188,30 @@ prepareExpressionCheckContext
   -> HsType
   -> Either ExpressionCheckError ExpressionCheckContext
 prepareExpressionCheckContext plan classEnvironment functions deconstructors
-    goal = do
+    goal = prepareExpressionCheckContextWithSchemes plan classEnvironment
+      functions deconstructors Map.empty goal
+
+-- | Stable-session counterpart retaining exact specified forall schemes for
+-- global visible type application.  The map is derived from the same checked
+-- inventory as the flattened search bindings; compatibility callers, which
+-- cannot prove binder order, continue through 'prepareExpressionCheckContext'
+-- with an empty map.
+prepareExpressionCheckContextWithSchemes
+  :: RigidInstantiationPlan
+  -> QueryClassEnv
+  -> [FunctionBinding]
+  -> [DeconstructorBinding]
+  -> Map.Map QualifiedName HsType
+  -> HsType
+  -> Either ExpressionCheckError ExpressionCheckContext
+prepareExpressionCheckContextWithSchemes plan classEnvironment functions
+    deconstructors schemes goal = do
   validateCheckContextInputs classEnvironment functions deconstructors goal
+  case validatePreparedFunctionSchemes functions schemes of
+    Left name -> Left $ InvalidCheckFunctionScheme name
+    Right () -> Right ()
   prepareValidatedExpressionCheckContext plan classEnvironment functions
-    deconstructors goal
+    deconstructors schemes goal
 
 -- Raw public entrances have already established the complete fixed-input
 -- invariant before reaching this worker. Instantiate first so the historical
@@ -199,12 +224,13 @@ prepareValidatedExpressionCheckContext
   -> QueryClassEnv
   -> [FunctionBinding]
   -> [DeconstructorBinding]
+  -> Map.Map QualifiedName HsType
   -> HsType
   -> Either ExpressionCheckError ExpressionCheckContext
 prepareValidatedExpressionCheckContext plan classEnvironment functions
-    deconstructors goal = do
+    deconstructors schemes goal = do
   context <- prepareExpressionCheckContextUnchecked plan classEnvironment
-    functions deconstructors goal
+    functions deconstructors schemes goal
   let planningContext = mkRigidInstantiationContext $ EnvDictionary
         functions deconstructors $ qClassEnv_env classEnvironment
       collisions = rigidInstantiationTargetCollisions planningContext
@@ -254,16 +280,18 @@ prepareExpressionCheckContextUnchecked
   -> QueryClassEnv
   -> [FunctionBinding]
   -> [DeconstructorBinding]
+  -> Map.Map QualifiedName HsType
   -> HsType
   -> Either ExpressionCheckError ExpressionCheckContext
 prepareExpressionCheckContextUnchecked plan classEnvironment functions
-    deconstructors goal = do
+    deconstructors schemes goal = do
   (checkedGoal, openedConstraints) <- instantiateGoal plan goal
   pure $ ExpressionCheckContext
     checkedGoal
     (addQueryClassEnv openedConstraints classEnvironment)
     functions
     deconstructors
+    schemes
     (constructorArityIndex deconstructors)
     plan
 
@@ -279,7 +307,7 @@ checkValidatedExpression
   -> Either ExpressionCheckError ()
 checkValidatedExpression provenCandidateRigids
     (ExpressionCheckContext checkedGoal augmentedEnvironment
-      functions deconstructors _ rigidPlan)
+      functions deconstructors functionSchemes _ rigidPlan)
     expected expression = do
   let candidateRigids = IntSet.filter
         (not . (`rigidInstantiationIdentifierIsReserved` rigidPlan))
@@ -449,7 +477,13 @@ checkValidatedExpression provenCandidateRigids
           unifyTypes functionType' (TypeArrow argumentType resultType)
           zonk resultType
     infer variables (ExpTypeApply function argument) = do
-      functionType <- infer variables function >>= zonk
+      functionType <- case function of
+        -- Ordinary global inference intentionally keeps using the flattened
+        -- binding.  A visible application, however, must start from the exact
+        -- specified scheme or it would try to apply a type argument to the
+        -- already-instantiated monotype.
+        ExpName name -> visibleBindingScheme name >>= zonk
+        _ -> infer variables function >>= zonk
       instantiateVisibleTypeArgument argument functionType
     infer _ (ExpHole variable) = throwCheck $ ExpressionHole variable
     infer variables (ExpLetMatch constructor patternVariables binding body) = do
@@ -511,6 +545,13 @@ checkValidatedExpression provenCandidateRigids
                 ++ checkConstraints current
           }
         pure freshType
+
+    visibleBindingScheme name = case
+        [binding | binding <- functions, functionName binding == name] of
+      [] -> throwCheck $ UnknownBinding name
+      _ : _ -> case Map.lookup name functionSchemes of
+        Nothing -> instantiateBinding name
+        Just scheme -> recordAliveType scheme >> pure scheme
 
     -- Local polymorphic values are instantiated independently at every use.
     -- Their direct forall contexts become ordinary checker obligations. The
@@ -725,7 +766,7 @@ validateCheckCandidateInputs
   -> Expression
   -> Either ExpressionCheckError ()
 validateCheckCandidateInputs
-    (ExpressionCheckContext _ classEnvironment _ _ constructorArities _)
+    (ExpressionCheckContext _ classEnvironment _ _ _ constructorArities _)
     expected expression = do
   mapM_ (validateCheckConstraint classEnvironment QueryConstraint) expected
   validateExpressionPatternArities constructorArities expression

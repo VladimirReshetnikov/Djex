@@ -10,6 +10,7 @@ module Language.Haskell.Exference.Core.Internal.Polytype
   , quantifiedProviderSubsumes
   , instantiateLeadingForallsWith
   , groundProviderInstantiations
+  , candidateProviderInstantiations
   )
 where
 
@@ -249,6 +250,57 @@ groundProviderInstantiations environment source =
       $ instantiateLeadingForallsAtGround orderedArguments source
     pure GroundProviderInstantiation
       { groundProviderArguments = orderedArguments
+      , groundProviderType = instantiated
+      , groundProviderConstraints = instantiatedConstraints
+      }
+
+-- | Enumerate explicit instantiations of a context-free provider from a
+-- caller-supplied list of closed proper types.  This complements
+-- 'groundProviderInstantiations': a foreign frontend may intentionally erase
+-- dictionary binders while retaining an otherwise ambiguous type binder (Lean
+-- class-instance arguments are one example), so no Haskell instance head is
+-- available to select it.  The caller owns the kind proof for every candidate;
+-- this worker only enforces the shared closed-monotype boundary and a finite
+-- prefix.
+--
+-- The complete leading binder chain is instantiated in source order.  Four is
+-- the same practical rank-N bound used by the neighboring Djinn rule, and the
+-- tuple cap prevents a wide query vocabulary from turning one global lookup
+-- into an unbounded product search.
+candidateProviderInstantiations
+  :: [HsType]
+  -> HsType
+  -> [GroundProviderInstantiation]
+candidateProviderInstantiations rawCandidates source =
+  take 32 $ SharedCollection.distinctOn groundProviderArguments $ do
+    guard $ Set.null $ freeVars source
+    normalized <- either (const []) (pure . fst)
+      $ alphaNormalizeForalls IntSet.empty source
+    let (binders, constraints, body) =
+          SharedType.splitLeadingForalls normalized
+        binderIdentifiers =
+          traverse SharedType.flexibleVariableIdentity binders
+    orderedBinders <- maybe [] pure binderIdentifiers
+    guard $ not $ null orderedBinders
+    guard $ length orderedBinders <= 4
+    guard $ null constraints
+    -- Query-selected arguments exist only for the foreign-erasure case: the
+    -- source binder has no surviving term-level type occurrence from which
+    -- ordinary unification could infer it.  Besides avoiding redundant
+    -- siblings for ordinary polymorphic functions, this fails closed for a
+    -- higher-kinded binder whose kind is not represented in HsType itself.
+    guard $ all (`Set.notMember` freeVars body) orderedBinders
+    let candidates = SharedCollection.distinctOn
+          SharedTypeAtom.alphaTypeKey
+          [ candidate
+          | candidate <- rawCandidates
+          , isGroundMonotype candidate
+          ]
+    arguments <- sequence $ replicate (length orderedBinders) candidates
+    (instantiated, instantiatedConstraints) <- maybe [] pure
+      $ instantiateLeadingForallsAtGround arguments normalized
+    pure GroundProviderInstantiation
+      { groundProviderArguments = arguments
       , groundProviderType = instantiated
       , groundProviderConstraints = instantiatedConstraints
       }

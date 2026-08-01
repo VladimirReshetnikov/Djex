@@ -31,6 +31,7 @@ module Language.Haskell.Exference.Core.Internal.Exference
   , ExferenceInputError (..)
   , isExferenceOptionError
   , mkExferenceEnvironment
+  , mkExferenceEnvironmentWithSchemes
   , checkExferenceOptions
   , validateExferenceOptions
   , validateExferenceQuery
@@ -43,6 +44,8 @@ where
 import Language.Haskell.Exference.Core.Types
 import Language.Haskell.Exference.Core.TypeUtils
 import Language.Haskell.Exference.Core.Expression
+import Language.Haskell.Exference.Core.Declaration
+  ( validatePreparedFunctionSchemes )
 import Language.Haskell.Exference.Core.Internal.Candidate
   ( ExferenceCandidate
   , ExferenceSourceTypeVariableHintError
@@ -97,7 +100,7 @@ import Control.Monad ( mzero, forM )
 import Control.Applicative ( (<|>) )
 import Data.List ( find, partition, sortBy, unfoldr )
 import Data.Monoid ( Any(..) )
-import Data.Foldable ( traverse_ )
+import Data.Foldable ( toList, traverse_ )
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import Numeric.Natural (Natural)
 import Control.Monad.Trans.Class ( lift )
@@ -143,6 +146,7 @@ data ExferenceInput = ExferenceInput
 data ExferenceEnvironment = ExferenceEnvironment
   !EnvDictionary
   !RigidInstantiationContext
+  !(M.Map QualifiedName HsType)
 
 -- | The query-varying half of an Exference search input.
 --
@@ -188,6 +192,7 @@ data ExferenceInputError
   | InvalidGeneratedBinding QualifiedName SharedGenerated.RenderError
   | InvalidGeneratedConstructor QualifiedName SharedGenerated.RenderError
   | DuplicateFunctionNames [QualifiedName]
+  | InvalidFunctionScheme QualifiedName
   | DuplicateDeconstructorNames [QualifiedName]
   | DuplicateConstructorNames [QualifiedName]
   | InvalidClassConstraint ClassEnvError
@@ -218,6 +223,7 @@ isExferenceOptionError failure = case failure of
   InvalidGeneratedBinding{} -> False
   InvalidGeneratedConstructor{} -> False
   DuplicateFunctionNames{} -> False
+  InvalidFunctionScheme{} -> False
   DuplicateDeconstructorNames{} -> False
   DuplicateConstructorNames{} -> False
   InvalidClassConstraint{} -> False
@@ -258,6 +264,8 @@ renderExferenceInputError failure = case failure of
     "InvalidGeneratedConstructor" [show name, show renderFailure]
   DuplicateFunctionNames names ->
     constructor "DuplicateFunctionNames" [show names]
+  InvalidFunctionScheme name ->
+    constructor "InvalidFunctionScheme" [show name]
   DuplicateDeconstructorNames names ->
     constructor "DuplicateDeconstructorNames" [show names]
   DuplicateConstructorNames names ->
@@ -397,7 +405,7 @@ findEngineBatchesWith allocators
       { environmentFunctions = allFunctions
       , environmentDeconstructors = deconss'
       , environmentClasses = sClassEnv
-      } _)
+      } _ allFunctionSchemes)
       ExferenceQuery
       { queryGoalType = rawType
       , queryExcludedBindings = excludedBindings
@@ -421,10 +429,31 @@ findEngineBatchesWith allocators
   funcs = filter bindingAvailable allFunctions
   bindingAvailable binding = functionName binding
     `S.notMember` excludedBindings
+  functionSchemes = M.filterWithKey
+    (\name _ -> name `S.notMember` excludedBindings)
+    allFunctionSchemes
+
+  -- Only roots which the checked query uses in a proper-type position become
+  -- candidates for an otherwise unconstrained visible binder.  In an
+  -- application the argument kind is not recoverable from this first-order
+  -- core, so the traversal retains the complete application but deliberately
+  -- does not descend into its function or argument.  Arrow and tuple children
+  -- are independently known to have kind Type.
+  properTypeCandidates = L.nub $ filter groundMonotype
+    $ properSubtrees t
+  properSubtrees source = case source of
+    TypeArrow parameter result ->
+      properSubtrees parameter ++ properSubtrees result ++ [source]
+    TypeTuple _ elements -> concatMap properSubtrees elements ++ [source]
+    TypeForall _ _ body -> properSubtrees body
+    TypeApp{} -> [source]
+    _ -> [source]
+  groundMonotype source =
+    null (toList source) && not (SharedType.containsForall source)
 
   rootClassEnvironment = mkQueryClassEnv sClassEnv []
-  preparedCheckContext = prepareExpressionCheckContext
-    rigidPlan rootClassEnvironment funcs deconss' t
+  preparedCheckContext = prepareExpressionCheckContextWithSchemes
+    rigidPlan rootClassEnvironment funcs deconss' functionSchemes t
 
   rootFindExpressionState = FindExpressionsState
     { findSteps = 0
@@ -442,6 +471,8 @@ findEngineBatchesWith allocators
     , nodeProvidedScopes  = initialScopes
     , nodeVarUses         = IntMap.empty
     , nodeFunctions       = funcs
+    , nodeFunctionSchemes = functionSchemes
+    , nodeVisibleTypeCandidates = properTypeCandidates
     , nodeDeconstructors  = deconss'
     , nodeQueryClassEnv   = rootClassEnvironment
     , nodeExpression      = ExpHole 0
@@ -827,7 +858,7 @@ prepareExferenceInput input = do
       rigidContext = mkRigidInstantiationContext canonicalEnvironment
   rigidPlan <- prepareRigidInstantiation rigidContext canonicalQuery
   pure $ CheckedExferenceQuery
-    (ExferenceEnvironment canonicalEnvironment rigidContext)
+    (ExferenceEnvironment canonicalEnvironment rigidContext M.empty)
     canonicalQuery
     rigidPlan
  where
@@ -850,7 +881,29 @@ mkExferenceEnvironment environment = do
   validateExferenceEnvironment environment
   let canonicalEnvironment = canonicalizeEnvironment environment
   pure $ ExferenceEnvironment canonicalEnvironment
-    $ mkRigidInstantiationContext canonicalEnvironment
+    (mkRigidInstantiationContext canonicalEnvironment) M.empty
+
+-- | Seal a stable environment together with the exact specified schemes from
+-- the same checked declaration inventory.  The ordinary compatibility
+-- constructor cannot recover binder order from a flattened 'FunctionBinding'
+-- and therefore leaves this map empty.  This Cabal-private entrance is used by
+-- the parser-neutral Djex session, which owns that provenance already.
+mkExferenceEnvironmentWithSchemes
+  :: EnvDictionary
+  -> M.Map QualifiedName HsType
+  -> Either ExferenceInputError ExferenceEnvironment
+mkExferenceEnvironmentWithSchemes environment schemes = do
+  validateExferenceEnvironment environment
+  validateInputTypes $ M.elems schemes
+  case validatePreparedFunctionSchemes
+      (environmentFunctions environment) schemes of
+    Left name -> Left $ InvalidFunctionScheme name
+    Right () -> Right ()
+  let canonicalEnvironment = canonicalizeEnvironment environment
+      canonicalSchemes = M.map canonicalize
+        schemes
+  pure $ ExferenceEnvironment canonicalEnvironment
+    (mkRigidInstantiationContext canonicalEnvironment) canonicalSchemes
 
 -- | Validate the varying part of a search against an already sealed
 -- environment and retain its exact rigid-instantiation plan. Excluding
@@ -873,7 +926,7 @@ prepareExferenceQueryWithCheckedOptions
   -> ExferenceQuery
   -> Either ExferenceInputError CheckedExferenceQuery
 prepareExferenceQueryWithCheckedOptions
-    sealed@(ExferenceEnvironment environment rigidContext)
+    sealed@(ExferenceEnvironment environment rigidContext _)
     (CheckedExferenceOptions options) uncheckedQuery = do
   validateQueryInputWidths environment query
   validateQueryClassConstraints environment query
@@ -1573,18 +1626,51 @@ stateStep allocators multiPM allowConstrs h
       let
         rename = renameFlexibleType renaming
         provType = rename $ functionResult binding
-      byGenericUnify
-        (Left $ functionName binding)
-        provType
-        (map (renameFlexibleConstraint renaming) $ functionConstraints binding)
-        (map rename $ functionParameters binding)
-        (addScore (heuristics_stepEnvGood h) $ functionPenalty binding)
-        (addScore (heuristics_stepEnvBad h) $ functionPenalty binding)
-        (unifyDisjoint goalType provType)
+        constraints = map (renameFlexibleConstraint renaming)
+          $ functionConstraints binding
+        parameters = map rename $ functionParameters binding
+        good = addScore (heuristics_stepEnvGood h)
+          $ functionPenalty binding
+        bad = addScore (heuristics_stepEnvBad h)
+          $ functionPenalty binding
+        useGlobal typeArguments providedType providedConstraints
+            providedParameters =
+          byGenericUnify
+            (Left (functionName binding, typeArguments))
+            providedType
+            providedConstraints
+            providedParameters
+            good
+            bad
+            (unifyDisjoint goalType providedType)
+        ordinary = useGlobal [] provType constraints parameters
+        visible = do
+          source <- maybe mzero pure =<< gets
+            (M.lookup (functionName binding) . nodeFunctionSchemes)
+          candidates <- gets nodeVisibleTypeCandidates
+          let instantiations = L.nub $
+                groundProviderInstantiations contxt source ++
+                candidateProviderInstantiations candidates source
+          instantiation <- lift $ chooseBranches instantiations
+          typeArguments <- maybe mzero pure
+            $ traverse
+                (either (const Nothing) Just
+                  . SharedGenerated.specifiedVisibleTypeArgument)
+                (groundProviderArguments instantiation)
+          let (instantiatedResult, instantiatedParameters) =
+                splitArrowChain $ groundProviderType instantiation
+          useGlobal
+            typeArguments
+            instantiatedResult
+            (groundProviderConstraints instantiation)
+            instantiatedParameters
+      ordinary <|> visible
 
     -- on code for byProvided and byFunctionSimple
     byGenericUnify
-                   :: Either QualifiedName
+                   :: Either
+                        (QualifiedName,
+                          [SharedGenerated.VisibleTypeArgument])
                         (TVarId, HsType,
                           [SharedGenerated.VisibleTypeArgument])
                    -> HsType
@@ -1603,7 +1689,11 @@ stateStep allocators multiPM allowConstrs h
       = maybe noUnify $ uncurry byUnified
      where
       (applierName, applierVariable, coreExp) = case applier of
-        Left name -> (Just name, Nothing, ExpName name)
+        Left (name, typeArguments) ->
+          ( Just name
+          , Nothing
+          , foldl' ExpTypeApply (ExpName name) typeArguments
+          )
         Right (variable, annotation, typeArguments) ->
           ( Nothing
           , Just (variable, annotation)

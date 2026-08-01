@@ -39,13 +39,14 @@ import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
 
-import Language.Haskell.Exference.Core (mkExferenceEnvironment)
 import qualified Language.Haskell.Exference.Core as Core
+import qualified Language.Haskell.Exference.Core.Internal.Exference as CoreInternal
 import Language.Haskell.Exference.Core.Declaration
   ( PreparedSynthesisInventory
   , freshSynthesisVariable
   , prepareSynthesisInventory
   , preparedSynthesisBackend
+  , preparedSynthesisSchemes
   , preparedSynthesisWitness
   )
 import Language.Haskell.Exference.Core.FunctionBinding
@@ -156,6 +157,7 @@ instance NFData ExferenceOmission
 data ExferenceSession = ExferenceSession
   { searchView :: Core.ExferenceEnvironment
   , reusableSearchView :: EnvDictionary
+  , reusableSearchSchemesView :: Map Name HsType
   , preparedView :: PreparedInventory SynthesisVariable ()
   , inspectionTermSchemesView :: Map Name HsType
   , inspectionClassesView :: QueryClassEnv
@@ -249,10 +251,6 @@ sealPreparedEnvironment policy prepared = do
             then [ExcludedByPolicy]
             else []
         ]
-  searchEnvironment <- first
-    (shownErrorDiagnostic "DJEX_EXF_ENV"
-      "cannot seal the Exference session environment")
-    $ mkExferenceEnvironment supportedBackend
   let foundation = preparedSynthesisWitness prepared
       inspectionEnvironment = inventoryEnvironment
         $ preparedInventory foundation
@@ -262,10 +260,22 @@ sealPreparedEnvironment policy prepared = do
         [ (valueName signature, valueType signature)
         | signature <- inspectionSignatures
         ]
+      supportedNames = Set.fromList
+        $ map functionName supportedFunctions
+      supportedSchemes = Map.filterWithKey
+        (\name _ -> name `Set.member` supportedNames)
+        $ preparedSynthesisSchemes prepared
       inspectionClasses = mkQueryClassEnv (environmentClasses backend) []
+  searchEnvironment <- first
+    (shownErrorDiagnostic "DJEX_EXF_ENV"
+      "cannot seal the Exference session environment")
+    $ CoreInternal.mkExferenceEnvironmentWithSchemes
+        supportedBackend supportedSchemes
+  let
       session = ExferenceSession
         { searchView = searchEnvironment
         , reusableSearchView = supportedBackend
+        , reusableSearchSchemesView = supportedSchemes
         , preparedView = foundation
         , inspectionTermSchemesView = inspectionTermSchemes
         , inspectionClassesView = inspectionClasses
@@ -297,6 +307,7 @@ scopeExferenceSession
   -> Either Diagnostic ExferenceSession
 scopeExferenceSession visible session = do
   let source = reusableSearchView session
+      sourceSchemes = reusableSearchSchemesView session
       functions = filter
         (nameVisible . functionName)
         $ environmentFunctions source
@@ -320,11 +331,15 @@ scopeExferenceSession visible session = do
         { environmentFunctions = functions
         , environmentDeconstructors = deconstructors
         }
+      scopedNames = Set.fromList $ map functionName functions
+      scopedSchemes = Map.filterWithKey
+        (\name _ -> name `Set.member` scopedNames) sourceSchemes
   searchEnvironment <- first
     (shownErrorDiagnostic "DJEX_EXF_SCOPE"
       "cannot seal the interactive Exference scope")
-    $ mkExferenceEnvironment scoped
-  scoped `deepseq` pure session {searchView = searchEnvironment}
+    $ CoreInternal.mkExferenceEnvironmentWithSchemes scoped scopedSchemes
+  scoped `deepseq` scopedSchemes `deepseq` pure session
+    { searchView = searchEnvironment }
 
 applyRatingOverrides
   :: Map Name Penalty

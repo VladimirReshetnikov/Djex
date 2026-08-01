@@ -1521,6 +1521,12 @@ testRecursiveDataIntroduction = do
         recursive $ SharedType.TypeConstructor seedName
     assertUndecided "seedless recursive introduction" seedless
 
+    sameComponentNested <- run session "sameComponentNested" $
+        SharedType.FunctionType (SharedType.TypeConstructor seedName)
+            (recursive $ recursive $ SharedType.TypeConstructor seedName)
+    assertUndecided "same recursive component through a type argument"
+        sameComponentNested
+
     let peirceA = SharedType.TypeVariable "a"
         peirceB = SharedType.TypeVariable "b"
         peirce = SharedType.FunctionType
@@ -1560,10 +1566,13 @@ testRecursiveDataIntroduction = do
             [SharedDeclaration.DataConstructor () (sharedName "ToEven")
                 [oddType]]
         oddDeclaration = SharedDeclaration.DataTypeDeclaration () oddName []
-            [SharedDeclaration.DataConstructor () (sharedName "ToOdd")
-                [evenType]]
+            [ SharedDeclaration.DataConstructor () (sharedName "ToOdd")
+                [evenType]
+            , SharedDeclaration.DataConstructor () (sharedName "OddFromSeed")
+                [SharedType.TypeConstructor seedName]
+            ]
     mutualEnvironment <- mkNeutralDjinnEnvironment
-        [evenDeclaration, oddDeclaration]
+        [seedDeclaration, evenDeclaration, oddDeclaration]
     mutualSession <- expectShownRight $ Djex.mkDjinnSession mutualEnvironment
     mutualIntroduced <- run mutualSession "introduceMutual" $
         SharedType.FunctionType oddType evenType
@@ -1574,6 +1583,43 @@ testRecursiveDataIntroduction = do
         $ any (`elem` mutualSources) ["ToEven", "\\a -> ToEven a"]
     mutual <- run mutualSession "seedlessMutual" evenType
     assertUndecided "mutually recursive introduction" mutual
+    mutualFromSeed <- run mutualSession "mutualFromSeed" $
+        SharedType.FunctionType (SharedType.TypeConstructor seedName) evenType
+    assertUndecided "same mutual component through a distinct head"
+        mutualFromSeed
+
+    -- Independent recursive components may each contribute one positive
+    -- constructor layer.  Treating the first recursive head as a global path
+    -- stop loses this finite inhabitant even though neither component is
+    -- reopened.
+    let innerName = sharedName "NestedInner"
+        innerType = SharedType.TypeConstructor innerName
+        innerBaseName = sharedName "InnerBase"
+        innerAgainName = sharedName "InnerAgain"
+        innerDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            innerName []
+            [ SharedDeclaration.DataConstructor () innerBaseName []
+            , SharedDeclaration.DataConstructor () innerAgainName [innerType]
+            ]
+        outerName = sharedName "NestedOuter"
+        outerType = SharedType.TypeConstructor outerName
+        outerFromInnerName = sharedName "OuterFromInner"
+        outerAgainName = sharedName "OuterAgain"
+        outerDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            outerName []
+            [ SharedDeclaration.DataConstructor () outerFromInnerName
+                [innerType]
+            , SharedDeclaration.DataConstructor () outerAgainName [outerType]
+            ]
+    nestedEnvironment <- mkNeutralDjinnEnvironment
+        [innerDeclaration, outerDeclaration]
+    nestedSession <- expectShownRight $ Djex.mkDjinnSession nestedEnvironment
+    nested <- run nestedSession "introduceNestedRecursive" outerType
+    nestedSources <- renderCandidates nested
+    assertBool
+        ("independent recursive components did not compose one layer each: "
+            ++ show nestedSources)
+        $ "OuterFromInner InnerBase" `elem` nestedSources
   where
     run session targetSpelling goal = do
         target <- expectShownRight $ SharedGenerated.mkDefinitionName $

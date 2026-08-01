@@ -110,17 +110,47 @@ data ExpansionOrigin
 data ExpansionFrame = ExpansionFrame String ExpansionOrigin
 
 data ExpansionPath =
-    ExpansionPath [ExpansionFrame] (Set.Set ExpansionOrigin)
+    ExpansionPath
+        [ExpansionFrame]
+        (Set.Set ExpansionOrigin)
+        (Set.Set String)
+        -- ^ recursive component representatives already opened on this
+        -- logical lowering path
 
 emptyExpansionPath :: ExpansionPath
-emptyExpansionPath = ExpansionPath [] Set.empty
+emptyExpansionPath = ExpansionPath [] Set.empty Set.empty
 
 pushExpansion
     :: String -> ExpansionOrigin -> ExpansionPath -> ExpansionPath
-pushExpansion name origin (ExpansionPath frames active) =
+pushExpansion name origin (ExpansionPath frames active recursiveComponents) =
     ExpansionPath
         (ExpansionFrame name origin : frames)
         (Set.insert origin active)
+        recursiveComponents
+
+rememberRecursiveComponent
+    :: PreparedFormulaCompiler
+    -> String
+    -> ExpansionPath
+    -> ExpansionPath
+rememberRecursiveComponent definitions name
+        (ExpansionPath frames active recursiveComponents) =
+    ExpansionPath frames active $ Set.insert component recursiveComponents
+  where
+    -- The preparation invariant indexes every admitted recursive head.  The
+    -- head itself is a collision-free singleton fallback for defensive
+    -- package-internal callers should that invariant ever change.
+    component = case formulaDefinitionRecursiveComponent name definitions of
+        Just preparedComponent -> preparedComponent
+        Nothing -> name
+
+resumeExpansionArgument
+    :: ExpansionPath -> ExpansionPath -> ExpansionPath
+resumeExpansionArgument
+        (ExpansionPath _ _ currentComponents)
+        (ExpansionPath originFrames originActive originComponents) =
+    ExpansionPath originFrames originActive $
+        Set.union currentComponents originComponents
 
 -- | The complete first-binding table after source representations have been
 -- discarded.  A checked environment stores one value and translates both raw
@@ -129,6 +159,9 @@ data PreparedFormulaCompiler = PreparedFormulaCompiler
     (Map.Map String ([String], ExpansionType))
     (Set.Set String)
     (Set.Set String)
+    (Map.Map String String)
+    -- ^ recursive datatype head -> source-order representative of its
+    -- alias-normalized definition-graph SCC
 
 -- | Variance at the current formula node. A function parameter reverses it;
 -- products, sums, and definition expansion preserve it.
@@ -245,7 +278,7 @@ prepareFormulaCompilerWithRecursiveData
     -> Either String PreparedFormulaCompiler
 prepareFormulaCompilerWithRecursiveData requestedRecursiveData view supplied = do
     definitions <- mapM (prepareDefinition view) selected
-    let prepared = PreparedFormulaCompiler
+    let preliminary = PreparedFormulaCompiler
             (Map.fromList
                 [(name, (parameters, body)) |
                     PreparedDefinition name parameters body _ <- definitions])
@@ -253,8 +286,18 @@ prepareFormulaCompilerWithRecursiveData requestedRecursiveData view supplied = d
                 [name |
                     PreparedDefinition name _ _ True <- definitions])
             recursiveData
-    validateDefinitionExpansion recursiveData definitions prepared
-    return prepared
+            Map.empty
+    references <- validateDefinitionExpansion
+        recursiveData definitions preliminary
+    return $ PreparedFormulaCompiler
+        (Map.fromList
+            [(name, (parameters, body)) |
+                PreparedDefinition name parameters body _ <- definitions])
+        (Set.fromList
+            [name |
+                PreparedDefinition name _ _ True <- definitions])
+        recursiveData
+        (recursiveDataComponents recursiveData definitions references)
   where
     selected = firstBindings supplied
     dataNames = Set.fromList
@@ -430,18 +473,25 @@ lookupFormulaDefinition
     :: String
     -> PreparedFormulaCompiler
     -> Maybe ([String], ExpansionType)
-lookupFormulaDefinition name (PreparedFormulaCompiler definitions _ _) =
+lookupFormulaDefinition name (PreparedFormulaCompiler definitions _ _ _) =
     Map.lookup name definitions
 
 formulaDefinitionIsAlias
     :: String -> PreparedFormulaCompiler -> Bool
-formulaDefinitionIsAlias name (PreparedFormulaCompiler _ aliases _) =
+formulaDefinitionIsAlias name (PreparedFormulaCompiler _ aliases _ _) =
     name `Set.member` aliases
 
 formulaDefinitionIsRecursiveData
     :: String -> PreparedFormulaCompiler -> Bool
-formulaDefinitionIsRecursiveData name (PreparedFormulaCompiler _ _ recursive) =
+formulaDefinitionIsRecursiveData
+        name (PreparedFormulaCompiler _ _ recursive _) =
     name `Set.member` recursive
+
+formulaDefinitionRecursiveComponent
+    :: String -> PreparedFormulaCompiler -> Maybe String
+formulaDefinitionRecursiveComponent
+        name (PreparedFormulaCompiler _ _ _ components) =
+    Map.lookup name components
 
 -- Reverse tree paths make child extension constant-time. Constructor and
 -- field positions are both included, so two equal spellings in one finite
@@ -544,7 +594,8 @@ lowerExpansionType
     -> Either String FormulaTranslation
 lowerExpansionType lowering definitions path occurrencePath source = case source of
     ExpansionArgument origin argument ->
-        lowerExpansionType lowering definitions origin occurrencePath argument
+        lowerExpansionType lowering definitions
+            (resumeExpansionArgument path origin) occurrencePath argument
     ExpansionTuple types -> do
         translated <- zipWithM
             (\index -> lowerChild index) [0 ..] types
@@ -717,27 +768,31 @@ lowerApplication lowering definitions path occurrencePath source =
                 _ -> atom False
         _ -> atom False
   where
-    -- Recursive data is deliberately asymmetric. The first positive recursive
-    -- occurrence on an expansion path may expose one constructor layer;
-    -- recursive fields beneath it, negative occurrences, and the exact/legacy
-    -- view retain the complete application as one atom.
+    -- Recursive data is deliberately asymmetric. Each recursive component on
+    -- a positive expansion path may expose one constructor layer; a field that
+    -- would reopen that component, every negative occurrence, and the
+    -- exact/legacy view retain the complete application as one atom.
     -- Every such decision is incomplete: the bounded positive view omitted a
     -- deeper layer, while the atomized view omitted constructor structure.
     lowerRecursiveData name origin parameters body arguments
-        | recursiveDataCanUnfold lowering definitions path =
+        | recursiveDataCanUnfold lowering definitions name path =
             expandAndLower True name origin parameters body arguments
         | otherwise = atom True
 
     expandAndLower forceIncomplete name origin parameters body arguments = do
         expanded <- expandDefinitionStep definitions path
             name origin parameters body arguments
+        let descentPath = pushExpansion name origin $
+                if forceIncomplete
+                    then rememberRecursiveComponent definitions name path
+                    else path
         translation <- case expanded of
             ExpansionUnion [] -> do
                 normalized <- normalizeExpansionAliases
                     definitions path source
                 completeTranslation . Empty <$> expansionSymbol normalized
             _ -> lowerExpansionType lowering definitions
-                (pushExpansion name origin path)
+                descentPath
                 occurrencePath expanded
         return $ if forceIncomplete
             then translation {translationIncomplete = True}
@@ -752,21 +807,29 @@ lowerApplication lowering definitions path occurrencePath source =
 recursiveDataCanUnfold
     :: ForallLowering
     -> PreparedFormulaCompiler
+    -> String
     -> ExpansionPath
     -> Bool
-recursiveDataCanUnfold lowering definitions path = case lowering of
+recursiveDataCanUnfold lowering definitions name path = case lowering of
     PolarizedForalls _ PositiveFormula _ _ ->
-        not $ expansionPathContainsRecursiveData definitions path
+        not $ expansionPathContainsRecursiveComponent definitions name path
     OpaqueForalls -> False
     PolarizedForalls _ NegativeFormula _ _ -> False
 
-expansionPathContainsRecursiveData
-    :: PreparedFormulaCompiler -> ExpansionPath -> Bool
-expansionPathContainsRecursiveData definitions (ExpansionPath frames _) =
-    any isRecursiveDataFrame frames
-  where
-    isRecursiveDataFrame (ExpansionFrame name _) =
-        formulaDefinitionIsRecursiveData name definitions
+-- Each recursive SCC may expose one positive constructor layer along a path.
+-- A field in an independent recursive component can therefore contribute its
+-- own finite layer, while direct, alias-hidden, and mutual recursion stop as
+-- soon as the path would reopen the same component.
+expansionPathContainsRecursiveComponent
+    :: PreparedFormulaCompiler -> String -> ExpansionPath -> Bool
+expansionPathContainsRecursiveComponent definitions name
+        (ExpansionPath _ _ openedComponents) = case
+            formulaDefinitionRecursiveComponent name definitions of
+    Just component -> component `Set.member` openedComponents
+    -- Every admitted recursive datatype is indexed during preparation.  Keep
+    -- the old global bound as a conservative fallback if that invariant ever
+    -- changes internally.
+    Nothing -> not $ Set.null openedComponents
 
 polarizedOpaqueForall :: ForallLowering -> ExpansionType -> Bool
 polarizedOpaqueForall lowering source = case lowering of
@@ -929,8 +992,8 @@ rejectActiveExpansion
     -> ExpansionOrigin
     -> Either String ()
 rejectActiveExpansion
-        (PreparedFormulaCompiler _ aliasNames _)
-        (ExpansionPath frames active)
+        (PreparedFormulaCompiler _ aliasNames _ _)
+        (ExpansionPath frames active _)
         name
         origin
     | origin `Set.notMember` active = Right ()
@@ -970,7 +1033,8 @@ foldExpansionAliases
     -> Either String result
 foldExpansionAliases definitions algebra path source = case source of
     ExpansionArgument origin argument ->
-        foldExpansionAliases definitions algebra origin argument
+        foldExpansionAliases definitions algebra
+            (resumeExpansionArgument path origin) argument
     ExpansionApp _ _ -> foldApplication
     ExpansionCon _ _ -> foldApplication
     ExpansionVar variable -> Right $ algebraVariable algebra variable
@@ -1132,13 +1196,14 @@ validateDefinitionExpansion
     :: Set.Set String
     -> [PreparedDefinition]
     -> PreparedFormulaCompiler
-    -> Either String ()
+    -> Either String (Map.Map String (Set.Set String))
 validateDefinitionExpansion recursiveData definitions prepared = do
     rejectFirstCycle True Set.empty aliases aliasReferences
     summaries <- Map.fromList `fmap` mapM summarizeDefinition definitions
     let summarizedReferences definition = Map.findWithDefault Set.empty
             (preparedDefinitionName definition) summaries
     rejectFirstCycle False recursiveData definitions summarizedReferences
+    return summaries
   where
     aliases = filter preparedDefinitionIsAlias definitions
     aliasNames = Set.fromList $ map preparedDefinitionName aliases
@@ -1153,6 +1218,38 @@ validateDefinitionExpansion recursiveData definitions prepared = do
                 prepared emptyExpansionPath $
                     preparedDefinitionBody definition
         return (name, summary)
+
+-- Index every admitted recursive datatype by the source-first representative
+-- of its alias-normalized definition-graph component.  Marked acyclic data
+-- remain singleton components, preserving the low-level preparation API's
+-- defensive behavior even though checked environments normally mark only
+-- genuinely recursive heads.
+recursiveDataComponents
+    :: Set.Set String
+    -> [PreparedDefinition]
+    -> Map.Map String (Set.Set String)
+    -> Map.Map String String
+recursiveDataComponents recursiveData definitions references = Map.fromList
+    [ (name, representative)
+    | component <- stronglyConnComp graph
+    , let names = case component of
+            AcyclicSCC name -> [name]
+            CyclicSCC members -> members
+    , Just representative <- [listToMaybe $ sortOn position names]
+    , name <- names
+    ]
+  where
+    positions = Map.fromList $ zip
+        (map preparedDefinitionName definitions) [0 :: Natural ..]
+    position name = Map.findWithDefault fallbackPosition name positions
+    fallbackPosition = 1 + maximum (0 : Map.elems positions)
+    graph =
+        [ (name, name, Set.toAscList $ Set.intersection recursiveData $
+            Map.findWithDefault Set.empty name references)
+        | definition <- definitions
+        , let name = preparedDefinitionName definition
+        , name `Set.member` recursiveData
+        ]
 
 rejectFirstCycle
     :: Bool

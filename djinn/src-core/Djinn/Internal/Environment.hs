@@ -621,7 +621,9 @@ sealPreparedEnvironment expansion = do
             map translatedFormula
                 (primaryFormulaPlan plans : singleOpaqueFormulaPlans plans) ++
             [exactOpaqueFormulaPlan plans] ++
-            map translatedFormula (singleOpenFormulaPlans plans)
+            map translatedFormula (singleOpenFormulaPlans plans) ++
+            map translatedFormula (pairOpaqueFormulaPlans plans) ++
+            map translatedFormula (pairOpenFormulaPlans plans)
         ]
     primaryPremise variants = case variants of
         primary : _ -> [primary]
@@ -758,9 +760,9 @@ preparedEnvironmentSynthesisFormulaTranslator
     compileSynthesisFormula compiler
 
 -- | Translate a checked positive goal into one nonempty, categorized plan
--- family.  Consumers retain the historical primary/exact/single-opaque prefix
--- and append the dual single-open frontier without guessing category boundaries
--- in a flat list.
+-- family.  Consumers retain the historical primary/exact/singleton prefix and
+-- append the pairwise quadratic tail without guessing category boundaries in a
+-- flat list.
 preparedEnvironmentPolarizedSynthesisFormulaPlans
     :: PreparedEnvironment
     -> SharedType.Type HSymbol

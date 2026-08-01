@@ -92,6 +92,8 @@ import Djinn.Internal.TypeFormula
     , exactOpaqueFormulaPlan
     , polarizedFormulaPlanSkolems
     , primaryFormulaPlan
+    , pairOpaqueFormulaPlans
+    , pairOpenFormulaPlans
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
     , translatedFormula
@@ -914,7 +916,11 @@ searchPreparedFormula options prepared target goalVariables formulaPlans = do
                 map translatedFormula
                     (singleOpaqueFormulaPlans formulaPlans) ++
                 map translatedFormula
-                    (singleOpenFormulaPlans formulaPlans)
+                    (singleOpenFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (pairOpaqueFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (pairOpenFormulaPlans formulaPlans)
         rawPlans =
             (translatedFormula primary, primarySound) :
             [ (formula, False)
@@ -971,14 +977,14 @@ searchPreparedFormula options prepared target goalVariables formulaPlans = do
                 nextLimit completed' remaining
             else Right $ reverse completed'
 
--- Goal plans are bounded linearly: the fully opened translation, the exact
--- opaque fallback, one independently opaque positive forall at a time, and
--- finally one independently opened branch among opaque siblings. Keeping the
--- historical plans first preserves their unsorted result prefix. Global
--- premises expose the same sound views simultaneously under distinct internal
--- proof identities, so one term may use different views at different
--- occurrences of a reusable source function. Every proof remains checked
--- against the exact goal formula that produced it.
+-- Goal plans retain their historical linear prefix: the fully opened
+-- translation, the exact opaque fallback, one independently opaque positive
+-- forall at a time, and one independently opened branch among opaque siblings.
+-- Pairwise opaque and pairwise open choices form a deterministic quadratic
+-- tail. Global premises expose the same sound views simultaneously under
+-- distinct internal proof identities, so one term may use different views at
+-- different occurrences of a reusable source function. Every proof remains
+-- checked against the exact goal formula that produced it.
 
 -- One formula plan retains clauses before cross-plan de-duplication and
 -- ranking. 'formulaPlanProofCount' counts raw proofs before either operation,

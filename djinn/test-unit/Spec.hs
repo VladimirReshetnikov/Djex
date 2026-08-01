@@ -1158,22 +1158,91 @@ testRankNTypeAtoms = do
         ++ "((forall c. c), (forall d. d -> q), "
         ++ "(forall e. e -> e), (forall f. f -> f))"
 
-    -- With hypotheses beyond the instantiation binder bound, the original
-    -- middle-subset gap is still observable: two components need exact
-    -- opaque transport while two need structural opening, and no bounded
-    -- plan or axiom covers that balanced choice. The miss must stay
-    -- inconclusive rather than becoming a false refutation.
-    middleOpacityGap <- runStableQuery stableSession "wideMiddleOpacityRankNGap"
+    -- Four-binder hypotheses stay beyond the instantiation-axiom bound, so
+    -- this inhabitant specifically needs the pairwise frontier: two components
+    -- use exact opaque transport while two sibling identities open
+    -- structurally.
+    runStableIdentity stableSession "wideMiddleOpacityRankNPair"
         $ "(forall a b c d. (a, b, c, d)) -> "
         ++ "(forall s t u v. (s, t, u, v) -> q) -> "
         ++ "((forall w x y z. (w, x, y, z)), "
         ++ "(forall s t u v. (s, t, u, v) -> q), "
         ++ "(forall e. e -> e), (forall f. f -> f))"
-    assertEqual "the linear frontier unexpectedly covered a middle subset"
+
+    -- The dual pairwise frontier is independently necessary at five sites:
+    -- three schemes remain opaque while exactly two identities open. Together
+    -- with the historical extremes and singleton frontiers, this completes
+    -- every independent choice subset through five sites.
+    runStableIdentity stableSession "dualWideMiddleOpacityRankNPair"
+        $ "(forall a b c d. (a, b, c, d)) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> q) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> r) -> "
+        ++ "((forall w x y z. (w, x, y, z)), "
+        ++ "(forall w x y z. (w, x, y, z) -> q), "
+        ++ "(forall w x y z. (w, x, y, z) -> r), "
+        ++ "(forall e. e -> e), (forall f. f -> f))"
+
+    -- Selecting two nested targets opens both of their required ancestor
+    -- chains. The three wide siblings must remain exact, so neither a singleton
+    -- plan nor a pair selection which forgets ancestry can inhabit this type.
+    runStableIdentity stableSession "nestedWideMiddleOpacityRankNPair"
+        $ "(forall a b c d. (a, b, c, d)) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> q) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> r) -> "
+        ++ "((forall w x y z. (w, x, y, z)), "
+        ++ "(forall w x y z. (w, x, y, z) -> q), "
+        ++ "(forall w x y z. (w, x, y, z) -> r), "
+        ++ "(forall outer. (outer -> outer, "
+        ++ "forall inner. inner -> inner)), "
+        ++ "(forall other. (other -> other, "
+        ++ "forall deep. deep -> deep)))"
+
+    -- Six independent sites still have one deliberately omitted central
+    -- layer. Three exact transports plus three structural identities require a
+    -- 3/3 selection, so the quadratic family must remain inconclusive instead
+    -- of claiming a refutation.
+    centralOpacityGap <- runStableQuery stableSession
+        "sixSiteCentralOpacityRankNGap"
+        $ "(forall a b c d. (a, b, c, d)) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> q) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> r) -> "
+        ++ "((forall w x y z. (w, x, y, z)), "
+        ++ "(forall w x y z. (w, x, y, z) -> q), "
+        ++ "(forall w x y z. (w, x, y, z) -> r), "
+        ++ "(forall e. e -> e), (forall f. f -> f), "
+        ++ "(forall g. g -> g))"
+    assertEqual "the quadratic frontier unexpectedly covered a 3/3 subset"
         [] $ SharedSearch.batchCandidates
-            $ SharedQuery.resultSearch middleOpacityGap
-    assertEqual "a bounded middle-subset gap was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence middleOpacityGap
+            $ SharedQuery.resultSearch centralOpacityGap
+    assertEqual "a bounded central-subset gap was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence centralOpacityGap
+
+    -- Prepared global premises cache the same pairwise views as a goal.  The
+    -- only route to the abstract result is to call this loaded consumer with
+    -- two exact wide schemes and two structurally introduced identities.
+    let wideValue = "(forall a b c d. (a, b, c, d))"
+        wideConsumer =
+            "(forall s t u v. (s, t, u, v) -> PairwisePremiseQ)"
+        pairArgument = "(" ++ wideValue ++ ", " ++ wideConsumer
+            ++ ", (forall e. e -> e), (forall f. f -> f))"
+    pairConsumer <- expectRight $ parseHType
+        $ pairArgument ++ " -> PairwisePremiseResult"
+    pairGoal <- expectRight $ parseHType
+        $ wideValue ++ " -> " ++ wideConsumer
+        ++ " -> PairwisePremiseResult"
+    pairEnvironment <- expectRight $ do
+        withQ <- declare (AbstractType "PairwisePremiseQ" KStar)
+            standardEnvironment
+        withResult <- declare
+            (AbstractType "PairwisePremiseResult" KStar) withQ
+        declare (Function "consumePairwise" pairConsumer) withResult
+    pairReport <- expectRight $ inhabit defaultQueryOptions pairEnvironment []
+        "usePairwisePreparedPremise" pairGoal
+    pairClauses <- case reportOutcome pairReport of
+        Realized clauses -> pure clauses
+        outcome -> fail $ "pairwise prepared premise failed: " ++ show outcome
+    assertBool "the pairwise prepared premise was not used"
+        $ any ("consumePairwise" `isInfixOf`) pairClauses
 
     -- Goal and premise translation are separate skolem scopes. Reusing the
     -- same internal proposition for both would admit the ill-typed proof

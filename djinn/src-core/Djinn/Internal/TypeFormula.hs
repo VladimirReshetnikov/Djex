@@ -24,6 +24,8 @@ module Djinn.Internal.TypeFormula
     , exactOpaqueFormulaPlan
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
+    , pairOpaqueFormulaPlans
+    , pairOpenFormulaPlans
     , polarizedFormulaPlanSkolems
     , prepareFormulaCompiler
     , compileFormula
@@ -147,15 +149,18 @@ data FormulaTranslation = FormulaTranslation
 
 -- | One nonempty, deliberately bounded family of coherent translations.  The
 -- primary plan opens every supported positive forall.  The historical exact
--- plan opens none; the two local frontiers differ from either extreme at one
--- independently reachable occurrence.  Keeping the categories explicit lets
--- goal search and prepared-premise caching preserve their established order
--- without reconstructing it from an unlabelled list.
+-- plan opens none; the first two local frontiers differ from either extreme at
+-- one independently reachable occurrence.  Two quadratic tail frontiers make
+-- the corresponding choice at an unordered pair of sites.  Keeping the
+-- categories explicit lets goal search and prepared-premise caching preserve
+-- their established order without reconstructing it from an unlabelled list.
 data PolarizedFormulaPlans = PolarizedFormulaPlans
     { primaryFormulaPlan :: FormulaTranslation
     , exactOpaqueFormulaPlan :: Formula
     , singleOpaqueFormulaPlans :: [FormulaTranslation]
     , singleOpenFormulaPlans :: [FormulaTranslation]
+    , pairOpaqueFormulaPlans :: [FormulaTranslation]
+    , pairOpenFormulaPlans :: [FormulaTranslation]
     }
     deriving (Eq, Show)
 
@@ -167,7 +172,8 @@ polarizedFormulaPlanSkolems :: PolarizedFormulaPlans -> [String]
 polarizedFormulaPlanSkolems plans =
     translationIntroducedSkolems (primaryFormulaPlan plans) ++
     concatMap translationIntroducedSkolems
-        (singleOpaqueFormulaPlans plans ++ singleOpenFormulaPlans plans)
+        (singleOpaqueFormulaPlans plans ++ singleOpenFormulaPlans plans ++
+            pairOpaqueFormulaPlans plans ++ pairOpenFormulaPlans plans)
 
 -- A definition origin plus the reverse source path is stable across alias
 -- expansion, duplicated arguments, datatype fields, and reopened forall
@@ -266,10 +272,12 @@ compileFormula view prepared source = do
 -- power, consistently with Djinn's dictionary-independent treatment of the
 -- query's prenex context. Unsupported occurrences stay alpha-stable opaque
 -- atoms.
--- Besides the two historical extremes, retain both linear frontiers: one
+-- Besides the two historical extremes, retain both singleton frontiers: one
 -- opaque occurrence among opened siblings, and one opened occurrence (plus
--- any enclosing forall chain needed to reach it) among opaque siblings.  This
--- is exhaustive for three independent sites without constructing a power set.
+-- any enclosing forall chain needed to reach it) among opaque siblings.  Two
+-- pairwise tail frontiers make the same choices at unordered pairs.  This is
+-- exhaustive for five independent sites without constructing a power set; its
+-- additional plan count is quadratic rather than exponential.
 -- The numeric namespace must be distinct for independently compiled goals and
 -- premises so their locally introduced skolems cannot accidentally meet.
 compilePolarizedFormulaPlans
@@ -296,11 +304,22 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         _ : _ : _ : _ -> mapM
             (compileSelection expanded . opaqueExceptReachable allSites) sites
         _ -> Right []
+    let sitePairs = unorderedPairs sites
+    pairOpaque <- case sites of
+        _ : _ : _ : _ -> mapM
+            (compileSelection expanded . Set.fromList . pairMembers) sitePairs
+        _ -> Right []
+    pairOpen <- case sites of
+        _ : _ : _ : _ : _ -> mapM
+            (compileSelection expanded . opaqueExceptPair allSites) sitePairs
+        _ -> Right []
     return PolarizedFormulaPlans
         { primaryFormulaPlan = primary
         , exactOpaqueFormulaPlan = exact
         , singleOpaqueFormulaPlans = singleOpaque
         , singleOpenFormulaPlans = singleOpen
+        , pairOpaqueFormulaPlans = pairOpaque
+        , pairOpenFormulaPlans = pairOpen
         }
   where
     compileSelection expanded opaqueSites = lowerExpansionType
@@ -313,6 +332,21 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
     -- plan whenever the chosen occurrence is nested.
     opaqueExceptReachable sites target = Set.filter
         (not . (`forallSiteLeadsTo` target)) sites
+
+    -- Opening either nested target necessarily opens the union of both
+    -- ancestor chains.  Unrelated occurrences remain opaque, making this the
+    -- exact dual of selecting two opaque sites in the fully opened plan.
+    opaqueExceptPair sites (firstSite, secondSite) = Set.filter
+        (\site -> not
+            (site `forallSiteLeadsTo` firstSite ||
+                site `forallSiteLeadsTo` secondSite))
+        sites
+
+    pairMembers (firstSite, secondSite) = [firstSite, secondSite]
+
+    unorderedPairs [] = []
+    unorderedPairs (firstSite : remaining) =
+        map ((,) firstSite) remaining ++ unorderedPairs remaining
 
 data ForallLowering
     = OpaqueForalls

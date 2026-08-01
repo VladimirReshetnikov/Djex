@@ -19,7 +19,8 @@ import Djinn.Core (
     SynthesisTypeError(..),
     classDeclarations, declare, defaultQueryOptions, emptyEnvironment,
     functionDeclarations, generatedReportCandidates,
-    generatedReportCompletion, inhabit, inhabitGenerated, inhabitResult,
+    generatedReportCompletion, generatedReportEvidence,
+    inhabit, inhabitGenerated, inhabitResult,
     inhabitGeneratedPrepared, inhabitResultPrepared,
     inhabitSynthesisResultPrepared,
     kArrow, kStar, optionAlternatives, optionBudget, optionCutoff, optionSorted,
@@ -95,6 +96,8 @@ tests =
           testRankNTypeAtoms)
     , ("retain nominal parametric-data transport beside structural search",
           testNominalParametricDataPlans)
+    , ("introduce recursive data without enabling recursive elimination",
+          testRecursiveDataIntroduction)
     , ("preserve nominal parametric-data projection boundaries",
           testNominalDataProjectionBoundaries)
     , ("reach nominal parametric data behind a closed goal",
@@ -124,7 +127,7 @@ tests =
           testRawTypeExpansionCycles)
     , ("preserve raw expansion substitution semantics",
           testRawExpansionSubstitution)
-    , ("preflight raw environment recursion after alias expansion",
+    , ("prepare raw recursive data after alias expansion",
           testRawEnvironmentRecursionPreflight)
     , ("validate unused synonyms before recursion preflight",
           testPreparedSynonymValidationOwnership)
@@ -573,9 +576,17 @@ testCoreFacade = do
     assertLeft "a duplicate type parameter is rejected"
         (declare (TypeSynonym "Pair" ["a", "a"]
             (HTTuple [HTVar "a", HTVar "a"])) emptyEnvironment)
-    assertLeft "a recursive data type is rejected"
-        (declare (DataType "Nat" []
-            [("Zero", []), ("Succ", [HTCon "Nat"])]) emptyEnvironment)
+    recursiveEnvironment <- expectRight $
+        declare (DataType "Nat" []
+            [("Zero", []), ("Succ", [HTCon "Nat"])]) emptyEnvironment
+    recursiveReport <- expectRight $ inhabit defaultQueryOptions
+        recursiveEnvironment [] "zeroNat" $ HTCon "Nat"
+    case reportOutcome recursiveReport of
+        Realized clauses -> assertBool
+            "a recursive datatype lost its visible base constructor"
+            $ any ("Zero" `isInfixOf`) clauses
+        outcome -> fail $ "recursive constructor introduction failed: "
+            ++ show outcome
     assertLeft "a constructor owned by another type is rejected"
         (declare (DataType "MyBool" [] [("True", [])])
             standardEnvironment)
@@ -1447,6 +1458,147 @@ testRankNTypeAtoms = do
         request <- expectShownRight $ Djex.parseDjinnRequest session
             defaultQueryOptions target (targetSpelling ++ ".djinn") source
         expectShownRight $ Djex.runDjinnQuery session request
+
+-- Recursive datatypes retain real constructor introduction in the bounded
+-- positive projection. Recursive inputs and every recursive field below that
+-- first layer remain opaque, so forwarding is available through the
+-- complementary exact plan but case elimination and logical refutation are
+-- deliberately withheld.
+testRecursiveDataIntroduction :: IO ()
+testRecursiveDataIntroduction = do
+    let recursiveName = sharedName "RecursiveBox"
+        doneName = sharedName "Done"
+        againName = sharedName "Again"
+        seedName = sharedName "RecursiveSeed"
+        parameter = SharedDeclaration.TypeParameter "parameter" Nothing
+        parameterType = SharedType.TypeVariable "parameter"
+        recursive element = SharedType.TypeApplication
+            (SharedType.TypeConstructor recursiveName) element
+        polymorphic binder = SharedType.ForallType [binder] [] $
+            SharedType.FunctionType
+                (SharedType.FunctionType
+                    (SharedType.TypeConstructor seedName)
+                    (SharedType.TypeVariable binder))
+                (SharedType.TypeVariable binder)
+        recursiveDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            recursiveName [parameter]
+            [ SharedDeclaration.DataConstructor () doneName [parameterType]
+            , SharedDeclaration.DataConstructor () againName
+                [recursive parameterType]
+            ]
+        seedDeclaration = SharedDeclaration.AbstractTypeDeclaration ()
+            seedName SharedKind.ProperTypeKind
+    environment <- mkNeutralDjinnEnvironment
+        [seedDeclaration, recursiveDeclaration]
+    session <- expectShownRight $ Djex.mkDjinnSession environment
+
+    introduced <- run session "introduceRecursiveRankN" $
+        SharedType.FunctionType (polymorphic "source")
+            (recursive $ polymorphic "target")
+    introducedSources <- renderCandidates introduced
+    assertBool
+        ("recursive constructor lost impredicative forwarding: "
+            ++ show introducedSources)
+        $ any (`elem` introducedSources) ["Done", "\\a -> Done a"]
+
+    forwarded <- run session "forwardRecursive" $
+        SharedType.FunctionType
+            (recursive $ polymorphic "source")
+            (recursive $ polymorphic "target")
+    forwardedSources <- renderCandidates forwarded
+    assertBool
+        ("the exact recursive-opaque plan lost identity: "
+            ++ show forwardedSources)
+        $ "\\a -> a" `elem` forwardedSources
+
+    eliminated <- run session "eliminateRecursive" $
+        SharedType.FunctionType
+            (recursive $ SharedType.TypeConstructor seedName)
+            (SharedType.TypeConstructor seedName)
+    assertUndecided "recursive elimination" eliminated
+
+    seedless <- run session "seedlessRecursive" $
+        recursive $ SharedType.TypeConstructor seedName
+    assertUndecided "seedless recursive introduction" seedless
+
+    let peirceA = SharedType.TypeVariable "a"
+        peirceB = SharedType.TypeVariable "b"
+        peirce = SharedType.FunctionType
+            (SharedType.FunctionType
+                (SharedType.FunctionType peirceA peirceB) peirceA)
+            peirceA
+    baselineEnvironment <- mkNeutralDjinnEnvironment [seedDeclaration]
+    baselineSession <- expectShownRight $
+        Djex.mkDjinnSession baselineEnvironment
+    baselinePeirce <- run baselineSession "baselinePeirce" peirce
+    unrelatedPeirce <- run session "unrelatedRecursivePeirce" peirce
+    mapM_ (\(description, result) -> do
+        assertEqual (description ++ " lost negative evidence")
+            SharedQuery.ProvedUninhabitable $ SharedQuery.resultEvidence result
+        assertEqual (description ++ " did not finish operationally")
+            (SharedSearch.Completed SharedSearch.Finished)
+            $ SharedSearch.batchProgress $ SharedQuery.resultSearch result)
+        [ ("baseline Peirce search", baselinePeirce)
+        , ("unrelated recursive SCC", unrelatedPeirce)
+        ]
+
+    let loopName = sharedName "Loop"
+        loopType = SharedType.TypeConstructor loopName
+        loopDeclaration = SharedDeclaration.DataTypeDeclaration () loopName []
+            [SharedDeclaration.DataConstructor () (sharedName "MkLoop")
+                [loopType]]
+    loopEnvironment <- mkNeutralDjinnEnvironment [loopDeclaration]
+    loopSession <- expectShownRight $ Djex.mkDjinnSession loopEnvironment
+    loop <- run loopSession "seedlessLoop" loopType
+    assertUndecided "cyclic-only recursive introduction" loop
+
+    let evenName = sharedName "EvenLoop"
+        oddName = sharedName "OddLoop"
+        evenType = SharedType.TypeConstructor evenName
+        oddType = SharedType.TypeConstructor oddName
+        evenDeclaration = SharedDeclaration.DataTypeDeclaration () evenName []
+            [SharedDeclaration.DataConstructor () (sharedName "ToEven")
+                [oddType]]
+        oddDeclaration = SharedDeclaration.DataTypeDeclaration () oddName []
+            [SharedDeclaration.DataConstructor () (sharedName "ToOdd")
+                [evenType]]
+    mutualEnvironment <- mkNeutralDjinnEnvironment
+        [evenDeclaration, oddDeclaration]
+    mutualSession <- expectShownRight $ Djex.mkDjinnSession mutualEnvironment
+    mutualIntroduced <- run mutualSession "introduceMutual" $
+        SharedType.FunctionType oddType evenType
+    mutualSources <- renderCandidates mutualIntroduced
+    assertBool
+        ("mutual recursion lost one-layer constructor introduction: "
+            ++ show mutualSources)
+        $ any (`elem` mutualSources) ["ToEven", "\\a -> ToEven a"]
+    mutual <- run mutualSession "seedlessMutual" evenType
+    assertUndecided "mutually recursive introduction" mutual
+  where
+    run session targetSpelling goal = do
+        target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+            sharedName targetSpelling
+        request <- expectShownRight $ Djex.mkDjinnRequest SharedQuery.QueryRequest
+            { SharedQuery.requestTarget = target
+            , SharedQuery.requestGoal = goal
+            , SharedQuery.requestContexts = []
+            , SharedQuery.requestOptions = defaultQueryOptions
+            }
+        expectShownRight $ Djex.runDjinnQuery session request
+
+    renderCandidates result = mapM
+        (expectShownRight . Djex.renderDjinnCandidateExpression
+            SharedGenerated.Unqualified)
+        $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
+    assertUndecided description result = do
+        assertEqual (description ++ " invented a candidate") []
+            $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+        assertEqual (description ++ " produced unsound negative evidence")
+            SharedQuery.NoEvidence $ SharedQuery.resultEvidence result
+        assertEqual (description ++ " did not exhaust its bounded plans")
+            (SharedSearch.Completed SharedSearch.Finished)
+            $ SharedSearch.batchProgress $ SharedQuery.resultSearch result
 
 -- A declared datatype normally lowers to its constructor sum, which is still
 -- the primary Djinn search vocabulary. The complementary nominal projection
@@ -2537,7 +2689,7 @@ testNeutralDjinnPreparation = do
                 , dataType "AliasLoop" [identityUse "AliasLoop"]
                 ])
             ]
-    mapM_ assertRecursiveRejection recursiveCases
+    mapM_ assertRecursiveAcceptance recursiveCases
 
     -- Kind inference alone accepts this partially applied synonym: Pair Bool
     -- has kind * -> *, exactly the argument kind expected by Higher.  Djinn's
@@ -2574,10 +2726,12 @@ testNeutralDjinnPreparation = do
     _ <- expectShownRight $ Djex.mkDjinnSession saturationEnvironment
     mapM_ (assertUnsaturatedRejection saturationBase) saturationCases
   where
-    assertRecursiveRejection (description, declarations) = do
+    assertRecursiveAcceptance (description, declarations) = do
         environment <- mkNeutralDjinnEnvironment declarations
-        assertDjinnSessionRejected description
-            $ Djex.mkDjinnSession environment
+        session <- expectShownRight $ Djex.mkDjinnSession environment
+        assertEqual
+            (description ++ " changed the authoritative neutral environment")
+            environment $ Djex.djinnSessionEnvironment session
 
     assertUnsaturatedRejection base (description, declaration) = do
         environment <- mkNeutralDjinnEnvironment $ base ++ [declaration]
@@ -2746,15 +2900,6 @@ mkNeutralDjinnEnvironment
     -> IO Djex.DjinnEnvironment
 mkNeutralDjinnEnvironment = expectShownRight .
     SharedEnvironment.mkEnvironment
-
-assertDjinnSessionRejected
-    :: String
-    -> Either SharedDiagnostic.Diagnostic Djex.DjinnSession
-    -> IO ()
-assertDjinnSessionRejected description result = case result of
-    Left failure -> assertEqual (description ++ " has the environment code")
-        (Just "DJEX_DJINN_ENV") (SharedDiagnostic.diagnosticCode failure)
-    Right _ -> fail $ description ++ ": a recursive datatype reached Djinn"
 
 -- Raw Environment is a compatibility input, not a second kind authority.
 -- In particular, callers of the internal constructor can forge stale class
@@ -3423,9 +3568,9 @@ testRawExpansionSubstitution = do
         (hTypeToFormula wideDefinition wideQuery)
 
 -- Raw Environment constructors remain available to explicit low-level
--- clients. Their checked preparation must apply the same expand-first
--- recursion policy as neutral Djinn sessions: real data cycles fail, while a
--- phantom alias can erase a merely apparent surface edge.
+-- clients. Their checked preparation applies the same expand-first recursion
+-- policy as neutral Djinn sessions: real data cycles receive bounded positive
+-- lowering, while a phantom alias still erases a merely apparent surface edge.
 testRawEnvironmentRecursionPreflight :: IO ()
 testRawEnvironmentRecursionPreflight = do
     let direct = RawEnvironment.Environment
@@ -3449,8 +3594,28 @@ testRawEnvironmentRecursionPreflight = do
                 KArrow (KArrow KStar KStar) $ KArrow KStar KStar))
             ] [] []
 
-    assertRecursiveDataRejection "direct raw data recursion" "D" direct
-    assertRecursiveDataRejection "mixed raw alias/data recursion" "D" mixed
+    directPrepared <- case prepareEnvironment direct of
+        Left failure -> fail $ "direct raw data recursion was rejected: " ++
+            show failure
+        Right prepared -> pure prepared
+    mixedPrepared <- case prepareEnvironment mixed of
+        Left failure -> fail $
+            "mixed raw alias/data recursion was rejected: " ++ show failure
+        Right prepared -> pure prepared
+    mapM_ (\(description, prepared) -> case
+            inhabitGeneratedPrepared defaultQueryOptions prepared []
+                "seedless" $ HTCon "D" of
+        Left failure -> fail $ description ++ " did not terminate: " ++ failure
+        Right report -> do
+            assertEqual (description ++ " invented a seed") []
+                $ generatedReportCandidates report
+            assertEqual (description ++ " produced unsound negative evidence")
+                SharedQuery.NoEvidence $ generatedReportEvidence report
+            assertEqual (description ++ " did not exhaust its bounded plans")
+                SharedSearch.Finished $ generatedReportCompletion report)
+        [ ("direct raw recursive search", directPrepared)
+        , ("alias-exposed raw recursive search", mixedPrepared)
+        ]
     case prepareEnvironment phantom of
         Left failure -> fail $ "phantom alias invented raw recursion: " ++
             show failure
@@ -3467,15 +3632,6 @@ testRawEnvironmentRecursionPreflight = do
         Left failure -> fail $
             "cached formula translation rejected finite nesting: " ++ failure
         Right _ -> return ()
-  where
-    assertRecursiveDataRejection description expected environment =
-        case prepareEnvironment environment of
-            Left (RecursiveSynthesisDataTypes names) ->
-                assertEqual description [sharedName expected] names
-            Left failure -> fail $ description ++
-                " produced the wrong failure: " ++ show failure
-            Right _ -> fail $ description ++ " reached a prepared environment"
-
 -- The recursion preflight may retain synonym declarations verbatim because
 -- the prepared synonym table owns whole-table validation. Keep that ownership
 -- explicit: even an otherwise unused bad synonym must fail in the first phase.

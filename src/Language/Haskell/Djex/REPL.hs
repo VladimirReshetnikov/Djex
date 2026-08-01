@@ -182,6 +182,7 @@ refreshDjinnProjection state = case
         records
         (typeConstructorKinds $ inventoryKindAssumptions
           $ exferenceSessionInventory baseSession)
+        (ExferenceSession.sessionRecursiveDataTypeNames baseSession)
         (scopeProjectionDeclarations baseSession)
         visibleTypes
         visibleValues of

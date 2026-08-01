@@ -1004,7 +1004,7 @@ tests = testGroup "Djex facade"
       _ <- firstExferenceCandidate =<< expectRight
         (runExferenceQuery session shared)
       pure ()
-  , testCase "apply distinct recursion policies to one shared analysis" $ do
+  , testCase "apply backend recursion policies to one shared analysis" $ do
       intName <- expectRight $ parseName "Int"
       aliasName <- expectRight $ parseName "Alias"
       phantomName <- expectRight $ parseName "Phantom"
@@ -1034,9 +1034,10 @@ tests = testGroup "Djex facade"
       djinnRecursiveEnvironment <- expectRight
         (mkEnvironment djinnRecursiveDeclarations :: Either
           (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
-      case mkDjinnSession djinnRecursiveEnvironment of
-        Left failure -> diagnosticCode failure @?= Just "DJEX_DJINN_ENV"
-        Right _ -> fail "Djinn accepted alias-hidden datatype recursion"
+      -- Djinn now consumes the shared alias-expanded recursive classification
+      -- to retain bounded constructor introduction.  Session sealing must not
+      -- rediscover the source spelling as an unsupported recursive graph.
+      _ <- expectRight $ mkDjinnSession djinnRecursiveEnvironment
 
       let exferenceVariable = FlexibleVariable 0
           exferenceDeclarations =

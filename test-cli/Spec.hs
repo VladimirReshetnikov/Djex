@@ -138,6 +138,14 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplDjinnHigherKindStub
   , testCase "REPL Djinn projection preserves recursive higher-kinded types"
       testReplDjinnRecursiveHigherKind
+  , testCase "REPL recursive constructors forward rank-N arguments"
+      testReplRecursiveRankNConstructors
+  , testCase "REPL detects alias-hidden recursive record selectors"
+      testReplDjinnAliasRecursiveRecord
+  , testCase "REPL never introduces hidden recursive constructors"
+      testReplDjinnHiddenRecursiveConstructors
+  , testCase "REPL reports only surviving recursive constructors"
+      testReplDjinnRepairedRecursiveConstructors
   , testCase "REPL Djinn projection preserves opaque higher-kinded types"
       testReplDjinnHiddenHigherKind
   , testCase "REPL Djinn projection retains classes after shedding methods"
@@ -2171,9 +2179,10 @@ testReplDjinnHigherKindStub = withTemporaryEnvironment
     not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
   assertNoCallStack errors
 
--- Djinn cannot structurally eliminate recursive datatypes, but making @Fix@
--- opaque must not weaken its inferred @(* -> *) -> *@ kind to @* -> *@. The
--- latter rejects the otherwise valid @Fix Maybe@ query before proof search.
+-- Djinn cannot structurally eliminate recursive datatypes, but its bounded
+-- positive projection can still introduce a visible constructor. Retaining
+-- the declaration must also preserve @Fix :: (* -> *) -> *@ rather than
+-- weakening it to @* -> *@.
 testReplDjinnRecursiveHigherKind :: Assertion
 testReplDjinnRecursiveHigherKind = withTemporaryEnvironment
     [("RecursiveHigherKind.hs", unlines
@@ -2186,19 +2195,142 @@ testReplDjinnRecursiveHigherKind = withTemporaryEnvironment
     , ":set render expression"
     , ":set qualification none"
     , "Fix Maybe -> Fix Maybe"
+    , "Maybe (Fix Maybe) -> Fix Maybe"
     , ":show omissions"
     ]
   assertEqual "recursive higher-kinded Djinn REPL exit" ExitSuccess exitCode
-  assertContains
-    ("Fix Maybe remains a valid Djinn query: " ++ output ++ errors)
-    "\\a -> a" output
-  assertContains "recursive Fix is deliberately projected opaquely"
-    "Fix: recursive datatype; projected as an abstract type" output
+  assertEqual
+    ("Fix Maybe remains well-kinded and constructible: " ++ output ++ errors)
+    2 $ countOccurrences "\\_ -> Fix Nothing" output
+  assertContains "recursive Fix reports its deliberate elimination boundary"
+    ("Fix: recursive datatype; constructors are introduction-only in Djinn")
+    output
   assertBool "recursive kind loss forced the standard-environment fallback" $
     not $ "Djinn falls back to its standard checked environment" `isInfixOf`
       output
   assertBool "recursive kind loss emitted a projection diagnostic" $
     not $ "DJEX_REPL_DJINN_PROJECTION" `isInfixOf` errors
+  assertNoCallStack errors
+
+-- The source frontend, shared scope, and both engines must agree on the same
+-- recursive family application containing an impredicative argument. The
+-- quantified payload has no closed total inhabitant, so @Done@ can succeed
+-- only by forwarding the supplied value.
+testReplRecursiveRankNConstructors :: Assertion
+testReplRecursiveRankNConstructors = withTemporaryEnvironment
+    [("RecursiveRankN.hs", unlines
+      [ "module RecursiveRankN (Rec(..), Seed) where"
+      , "data Rec a = Done a | Again (Rec a)"
+      , "data Seed = Seed"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import RecursiveRankN (Rec(..), Seed)"
+    , ":set render expression"
+    , ":set qualification none"
+    , ":set max-steps 128"
+    , ":backend djinn"
+    , rankNGoal
+    , ":backend exference"
+    , rankNGoal
+    ]
+  assertEqual "recursive rank-N constructor REPL exit" ExitSuccess exitCode
+  assertEqual
+    ("both engines must forward through Done: " ++ output ++ errors)
+    2 $ countOccurrences "Done" output
+  assertNoCallStack errors
+ where
+  rankNGoal =
+    "(forall x. (Seed -> x) -> x) -> Rec (forall y. (Seed -> y) -> y)"
+
+-- Recursive classification must follow the prepared synonym expansion used by
+-- both engines. Otherwise @Rec@ looks nonrecursive here, its selector is
+-- withheld as structurally redundant, and Djinn loses the only supported path
+-- to @Result@ once core lowering correctly refuses recursive elimination.
+testReplDjinnAliasRecursiveRecord :: Assertion
+testReplDjinnAliasRecursiveRecord = withTemporaryEnvironment
+    [("AliasRecursive.hs", unlines
+      [ "module AliasRecursive where"
+      , "data Result = Result"
+      , "type Self = Rec"
+      , "data Rec = MkRec { payload :: Result, next :: Self }"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Rec -> Result"
+    , ":show omissions"
+    ]
+  assertEqual "alias-recursive record REPL exit" ExitSuccess exitCode
+  assertContains
+    ("alias-hidden recursion lost its visible selector: " ++ output ++ errors)
+    "payload" output
+  assertContains "alias-hidden recursion reports its elimination boundary"
+    ("Rec: recursive datatype; constructors are introduction-only in Djinn")
+    output
+  assertNoCallStack errors
+
+-- Constructor introduction follows the value namespace exactly. A recursive
+-- type imported abstractly remains abstract even though the authoritative
+-- inventory knows the complete declaration and its recursive SCC.
+testReplDjinnHiddenRecursiveConstructors :: Assertion
+testReplDjinnHiddenRecursiveConstructors = withTemporaryEnvironment
+    [("HiddenRecursive.hs", unlines
+      [ "module HiddenRecursive (Rec) where"
+      , "data Rec a = Done a | Again (Rec a)"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import HiddenRecursive (Rec)"
+    , ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "a -> Rec a"
+    , ":show omissions"
+    ]
+  assertEqual "hidden recursive constructor REPL exit" ExitSuccess exitCode
+  assertContains "constructor-hidden recursion remains abstract"
+    ("HiddenRecursive.Rec: some constructors are hidden; projected as an"
+      ++ " abstract type") output
+  assertBool "a hidden recursive constructor entered Djinn search" $
+    not ("Done" `isInfixOf` output || "Again" `isInfixOf` output)
+  assertBool "an already-abstract projection gained a recursive omission" $
+    not $ "constructors are introduction-only" `isInfixOf` output
+  assertContains "constructor-hidden recursion remains uninhabitable"
+    "[DJEX_DJINN_UNINHABITABLE]" errors
+  assertNoCallStack errors
+
+-- A datatype can initially retain all of its visible constructors and still
+-- be degraded by the later closed-scope repair when a constructor field names
+-- an unexported qualified type. The omission summary must describe the final
+-- abstract projection, not constructors which no longer entered the session.
+testReplDjinnRepairedRecursiveConstructors :: Assertion
+testReplDjinnRepairedRecursiveConstructors = withTemporaryEnvironment
+    [("RepairedRecursive.hs", unlines
+      [ "module RepairedRecursive (Rec(..)) where"
+      , "data Hidden = Hidden"
+      , "data Rec = Done | Again Hidden Rec"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import RepairedRecursive (Rec(..))"
+    , ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Rec"
+    , ":show omissions"
+    ]
+  assertEqual "repaired recursive constructor REPL exit" ExitSuccess exitCode
+  assertContains "the unexported field forces an abstract projection"
+    ("Rec: its constructors mention RepairedRecursive.Hidden, which is outside"
+      ++ " the Djinn scope; projected as an abstract type") output
+  assertBool "a repaired datatype retained a stale constructor boundary" $
+    not $ "constructors are introduction-only" `isInfixOf` output
+  assertBool "a repaired recursive constructor entered Djinn search" $
+    not ("Done" `isInfixOf` output || "Again" `isInfixOf` output)
+  assertContains "the repaired abstract recursion remains uninhabitable"
+    "[DJEX_DJINN_UNINHABITABLE]" errors
   assertNoCallStack errors
 
 -- Exporting a datatype without its constructors triggers the earlier scope

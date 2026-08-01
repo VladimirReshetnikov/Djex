@@ -3536,6 +3536,58 @@ tests = testGroup "Exference"
             Left failure -> fail
               $ "valid deconstructors failed environment sealing: " ++ show failure
             Right _ -> pure ()
+      , testCase "recursive constructors accept impredicative parameters" $ do
+          let recursiveName = name "Rec"
+              doneName = name "Done"
+              recursive parameter = TypeApp
+                (TypeCons recursiveName) parameter
+              seed = TypeCons $ name "Seed"
+              -- This Church encoding of an opaque Seed has no closed total
+              -- inhabitant. Finding Done therefore requires forwarding the
+              -- supplied impredicative value rather than synthesizing a
+              -- replacement inside the constructor.
+              polymorphic = TypeForall [0] [] $ TypeArrow
+                (TypeArrow seed $ TypeVar 0) (TypeVar 0)
+              genericRecursive = recursive $ TypeVar 1
+              deconstructor = DeconstructorBinding genericRecursive
+                [ ConstructorBinding doneName [TypeVar 1]
+                , ConstructorBinding (name "Again") [genericRecursive]
+                ] True
+              constructors =
+                [ FunctionBinding genericRecursive doneName 0 [] [TypeVar 1]
+                , FunctionBinding genericRecursive (name "Again") 0 []
+                    [genericRecursive]
+                ]
+              goal = TypeArrow polymorphic $ recursive polymorphic
+              input = identityInput
+                { input_goalType = goal
+                , input_envFuncs = constructors
+                , input_envDeconsS = [deconstructor]
+                , input_maxSteps = 128
+                }
+              isDoneCandidate candidate = case candidate of
+                (ExpName selectedDone, [], _) -> selectedDone == doneName
+                ( ExpLambda binder declared
+                    (ExpApply (ExpName selectedDone)
+                      (ExpVar returned occurrence))
+                  , []
+                  , _
+                  ) -> selectedDone == doneName
+                    && returned == binder
+                    && declared == polymorphic
+                    && occurrence == polymorphic
+                _ -> False
+          candidates <- expectRight $ findExpressionsEither input
+          (expression, _, _) <- maybe
+            (fail $ "recursive Done could not consume an impredicative argument: "
+              ++ show
+                [ (showExpression candidate, residual)
+                | (candidate, residual, _) <- candidates
+                ])
+            pure
+            $ find isDoneCandidate candidates
+          checkExpression (mkQueryClassEnv emptyClassEnv []) constructors
+            [deconstructor] goal [] expression @?= Right ()
       , testCase "recursive deconstructors expose exactly one eager layer" $ do
           let natural = TypeCons $ name "Natural"
               result = TypeCons $ name "Result"

@@ -37,6 +37,7 @@ import qualified Djinn.Core as DjinnCore
 import qualified Djinn.Internal.Declaration as DjinnDeclaration
 import Language.Haskell.Djex.Djinn.Internal.Session
   ( DjinnSession
+  , djinnSessionEnvironment
   , mkDjinnSessionChecked
   )
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
@@ -46,7 +47,10 @@ import Language.Haskell.Synthesis.Diagnostic
   , Severity (Error)
   , contextualDiagnostic
   )
-import Language.Haskell.Synthesis.Environment (mkEnvironment)
+import Language.Haskell.Synthesis.Environment
+  ( environmentDeclarations
+  , mkEnvironment
+  )
 import Language.Haskell.Synthesis.Kind (Kind (..))
 import Language.Haskell.Synthesis.Name
   ( Name
@@ -136,16 +140,17 @@ projectDjinnScope
   -> [(Name, [(Name, [Name])])]
   -> Map.Map Name (Kind Void)
   -- ^ Authoritative ground kinds inferred by the shared source inventory.
+  -> Set.Set Name
+  -- ^ Datatype heads classified recursive after source synonym expansion.
   -> [ScopeDeclaration]
   -> Set.Set Name
   -- ^ Canonical types/classes visible unqualified in the prompt scope.
   -> Set.Set Name
   -- ^ Canonical values/constructors visible unqualified in the prompt scope.
   -> Either Diagnostic DjinnProjection
-projectDjinnScope policy records inferredKinds declarations
+projectDjinnScope policy records inferredKinds recursive declarations
     visibleTypes visibleValues = do
-  let recursive = recursiveDataTypeNames declarations
-      fullyEliminable = Set.fromList
+  let fullyEliminable = Set.fromList
         [ name
         | DataTypeDeclaration _ name _ constructors <- declarations
         , name `Set.member` visibleTypes
@@ -175,6 +180,11 @@ projectDjinnScope policy records inferredKinds declarations
       -- keys still describe out-of-scope references, and renamed keys make
       -- the same inferred facts available to every later repair pass.
       projectionKinds = renamedInferredKinds forward inferredKinds
+      recursivePromptNames = Set.fromList
+        [ promptName
+        | canonicalName <- Set.toAscList recursive
+        , Just promptName <- [Map.lookup canonicalName forward]
+        ]
       fieldSelectors = Map.fromList
         [ ((renamedConstructor, index), renamedSelector)
         | (_, constructors) <- records
@@ -184,14 +194,15 @@ projectDjinnScope policy records inferredKinds declarations
         , selector `Set.member` visibleValues
         , Just renamedSelector <- [unqualifyName selector]
         ]
-      (grounded, recursionOmissions) =
-        degradeRecursiveDataTypes projectionKinds renamed
-      (admitted, admissionOmissions) = admitDeclarations grounded
+      (admitted, admissionOmissions) = admitDeclarations renamed
       (stubbed, stubOmissions) =
         stubUnknownReferences projectionKinds admitted
   (resolved, referenceOmissions) <-
     resolveScopeReferences projectionKinds stubbed
   (session, sealOmissions) <- sealWithRepairs projectionKinds resolved
+  let recursionOmissions = recursiveDataTypeIntroductionOmissions
+        recursivePromptNames
+        (environmentDeclarations $ djinnSessionEnvironment session)
   pure DjinnProjection
     { djinnProjectionSession = session
     , djinnProjectionOmissions = concat
@@ -396,26 +407,23 @@ onDeclarationNames rename declaration = case declaration of
     ForallType binders constraints body' ->
       ForallType binders (map onConstraint constraints) (onType body')
 
--- Djinn's LJT calculus cannot eliminate recursive datatypes, so they stay
--- available as opaque abstract types instead of disappearing from signatures.
-degradeRecursiveDataTypes
-  :: Map.Map Name (Kind Void)
+-- Djinn's bounded recursive projection retains constructor introduction but
+-- deliberately withholds structural elimination. Describe that compromise
+-- from the final sealed declaration stream: a later scope or sealing repair
+-- may have degraded the datatype to abstract, in which case no constructors
+-- remain and the repair's omission is the only accurate user-facing account.
+recursiveDataTypeIntroductionOmissions
+  :: Set.Set Name
   -> [ScopeDeclaration]
-  -> ([ScopeDeclaration], [DjinnScopeOmission])
-degradeRecursiveDataTypes inferredKinds declarations
-  | Set.null recursive = (declarations, [])
-  | otherwise = unzipOmissions $ map degrade declarations
+  -> [DjinnScopeOmission]
+recursiveDataTypeIntroductionOmissions recursive = mapMaybe describe
  where
-  recursive = recursiveDataTypeNames declarations
-  degrade declaration = case declaration of
-    DataTypeDeclaration annotation name parameters _
-      | name `Set.member` recursive ->
-          ( AbstractTypeDeclaration annotation name
-              (inferredDataTypeKind inferredKinds name parameters)
-          , Just $ DjinnScopeOmission (renderCanonical name)
-              "recursive datatype; projected as an abstract type"
-          )
-    _ -> (declaration, Nothing)
+  describe declaration = case declaration of
+    DataTypeDeclaration _ name _ _
+      | name `Set.member` recursive -> Just $ DjinnScopeOmission
+          (renderCanonical name)
+          "recursive datatype; constructors are introduction-only in Djinn"
+    _ -> Nothing
 
 unzipOmissions
   :: [(declaration, Maybe DjinnScopeOmission)]

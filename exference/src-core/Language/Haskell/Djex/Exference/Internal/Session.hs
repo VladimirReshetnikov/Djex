@@ -25,6 +25,7 @@ module Language.Haskell.Djex.Exference.Internal.Session
   , checkSessionTypeSynonymInspectionSaturation
   , normalizeSessionTypeSynonyms
   , exferenceSessionInventory
+  , sessionRecursiveDataTypeNames
   , sessionInspectionTermSchemes
   , sessionInspectionClasses
   , sessionOmissions
@@ -63,6 +64,7 @@ import Language.Haskell.Exference.Core.Types
   , SynthesisVariable
   , mkQueryClassEnv
   )
+import Language.Haskell.Exference.Core.TypeUtils (typeConstructorHead)
 import Language.Haskell.Synthesis.Declaration
   ( ValueSignature (..)
   , declarationTermSignatures
@@ -414,6 +416,18 @@ exferenceSessionInventory
   :: ExferenceSession
   -> ExferenceInventory
 exferenceSessionInventory = preparedInventory . preparedView
+
+-- | Exact datatype heads classified as recursive after synonym expansion.
+-- The reusable source projection carries the flags derived from the prepared
+-- inventory's transient expanded view, so interactive frontends can apply
+-- elimination policy without repeating or approximating that graph analysis.
+sessionRecursiveDataTypeNames :: ExferenceSession -> Set.Set Name
+sessionRecursiveDataTypeNames session = Set.fromList
+  [ name
+  | deconstructor <- environmentDeconstructors $ reusableSearchView session
+  , deconstructorRecursive deconstructor
+  , Just name <- [typeConstructorHead $ deconstructorInput deconstructor]
+  ]
 
 -- | Complete term schemes retained for non-synthesizing inspection. This view
 -- is derived once from the authoritative inventory, before search policy can

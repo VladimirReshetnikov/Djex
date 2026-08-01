@@ -30,6 +30,7 @@ module Djinn.Internal.TypeFormula
     , tripleOpenFormulaPlans
     , polarizedFormulaPlanSkolems
     , prepareFormulaCompiler
+    , prepareFormulaCompilerWithRecursiveData
     , compileFormula
     , compilePolarizedFormulaPlans
     ) where
@@ -127,6 +128,7 @@ pushExpansion name origin (ExpansionPath frames active) =
 data PreparedFormulaCompiler = PreparedFormulaCompiler
     (Map.Map String ([String], ExpansionType))
     (Set.Set String)
+    (Set.Set String)
 
 -- | Variance at the current formula node. A function parameter reverses it;
 -- products, sums, and definition expansion preserve it.
@@ -136,8 +138,10 @@ data FormulaPolarity
     deriving (Eq, Show)
 
 -- | A polarized formula plus an honesty bit. 'translationIncomplete' means
--- that at least one quantified subtree had to remain opaque. Proofs are still
--- sound, but an empty proof search is not a refutation of the Haskell type.
+-- that at least one quantified subtree remained opaque or a recursive
+-- datatype was unfolded/atomized only to the configured positive bound.
+-- Proofs are still sound, but an empty proof search is not a refutation of the
+-- Haskell type.
 -- 'translationIntroducedSkolems' lists the fresh rigid variables allocated by
 -- opened positive foralls; instantiation policy treats them as ordinary
 -- sequent variables without reparsing rendered atom spellings.
@@ -214,16 +218,33 @@ data PreparedDefinition = PreparedDefinition
     ExpansionType
     Bool
 
--- | Validate a definition table once.  Recursive synonym, datatype, and
--- mixed expansion components are invalid input rather than an excuse for the
--- low-level operation to diverge.  Per-query translation retains the separate
--- occurrence guard needed by arbitrary higher-order raw inputs.
+-- | Validate a definition table once under the historical policy which rejects
+-- every recursive expansion component.  Checked environments which have
+-- already classified recursive datatypes use
+-- 'prepareFormulaCompilerWithRecursiveData' instead.
 prepareFormulaCompiler
     :: TypeView source
     -> [FormulaDefinition source]
     -> Either String PreparedFormulaCompiler
-prepareFormulaCompiler view supplied = do
-    definitions <- mapM (prepareDefinition view) $ firstBindings supplied
+prepareFormulaCompiler = prepareFormulaCompilerWithRecursiveData Set.empty
+
+-- | Validate a definition table while admitting an already checked set of
+-- recursive datatype heads. Synonym cycles and every cycle containing an
+-- unmarked definition remain errors. Marked datatypes stay in the definition
+-- cache so polarized query compilation can expose one positive constructor
+-- layer; conservative and negative translations retain their complete
+-- applications as opaque atoms.
+--
+-- Names which do not select a first-binding 'FormulaData' declaration are
+-- ignored. The caller therefore cannot weaken synonym validation by
+-- accidentally or maliciously marking an alias as recursive data.
+prepareFormulaCompilerWithRecursiveData
+    :: Set.Set String
+    -> TypeView source
+    -> [FormulaDefinition source]
+    -> Either String PreparedFormulaCompiler
+prepareFormulaCompilerWithRecursiveData requestedRecursiveData view supplied = do
+    definitions <- mapM (prepareDefinition view) selected
     let prepared = PreparedFormulaCompiler
             (Map.fromList
                 [(name, (parameters, body)) |
@@ -231,8 +252,14 @@ prepareFormulaCompiler view supplied = do
             (Set.fromList
                 [name |
                     PreparedDefinition name _ _ True <- definitions])
-    validateDefinitionExpansion definitions prepared
+            recursiveData
+    validateDefinitionExpansion recursiveData definitions prepared
     return prepared
+  where
+    selected = firstBindings supplied
+    dataNames = Set.fromList
+        [name | FormulaData name _ _ <- selected]
+    recursiveData = Set.intersection requestedRecursiveData dataNames
 
 prepareDefinition
     :: TypeView source
@@ -301,6 +328,9 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
     primary <- lowerExpansionType
         (PolarizedForalls namespace polarity openedView Set.empty)
         prepared emptyExpansionPath [] expanded
+    -- Exact opacity applies to recursive data as well as quantified subtrees.
+    -- This complementary view preserves forwarding such as @Rec a -> Rec a@
+    -- when the primary positive view exposes one constructor layer.
     exact <- translatedFormula <$> lowerExpansionType
         OpaqueForalls prepared emptyExpansionPath [] expanded
     let sites = translationOpenableForalls primary
@@ -400,13 +430,18 @@ lookupFormulaDefinition
     :: String
     -> PreparedFormulaCompiler
     -> Maybe ([String], ExpansionType)
-lookupFormulaDefinition name (PreparedFormulaCompiler definitions _) =
+lookupFormulaDefinition name (PreparedFormulaCompiler definitions _ _) =
     Map.lookup name definitions
 
 formulaDefinitionIsAlias
     :: String -> PreparedFormulaCompiler -> Bool
-formulaDefinitionIsAlias name (PreparedFormulaCompiler _ aliases) =
+formulaDefinitionIsAlias name (PreparedFormulaCompiler _ aliases _) =
     name `Set.member` aliases
+
+formulaDefinitionIsRecursiveData
+    :: String -> PreparedFormulaCompiler -> Bool
+formulaDefinitionIsRecursiveData name (PreparedFormulaCompiler _ _ recursive) =
+    name `Set.member` recursive
 
 -- Reverse tree paths make child extension constant-time. Constructor and
 -- field positions are both included, so two equal spellings in one finite
@@ -673,26 +708,65 @@ lowerApplication lowering definitions path occurrencePath source =
         (ExpansionCon name origin, arguments) ->
             case lookupFormulaDefinition name definitions of
                 Just (parameters, body)
-                    | length parameters == length arguments -> do
-                        expanded <- expandDefinitionStep definitions path
-                            name origin parameters body arguments
-                        case expanded of
-                            ExpansionUnion [] -> do
-                                normalized <- normalizeExpansionAliases
-                                    definitions path source
-                                completeTranslation . Empty <$>
-                                    expansionSymbol normalized
-                            _ -> lowerExpansionType lowering definitions
-                                (pushExpansion name origin path)
-                                occurrencePath expanded
-                _ -> atom
-        _ -> atom
+                    | length parameters == length arguments ->
+                        if formulaDefinitionIsRecursiveData name definitions
+                            then lowerRecursiveData
+                                name origin parameters body arguments
+                            else expandAndLower False
+                                name origin parameters body arguments
+                _ -> atom False
+        _ -> atom False
   where
-    atom = do
+    -- Recursive data is deliberately asymmetric. The first positive recursive
+    -- occurrence on an expansion path may expose one constructor layer;
+    -- recursive fields beneath it, negative occurrences, and the exact/legacy
+    -- view retain the complete application as one atom.
+    -- Every such decision is incomplete: the bounded positive view omitted a
+    -- deeper layer, while the atomized view omitted constructor structure.
+    lowerRecursiveData name origin parameters body arguments
+        | recursiveDataCanUnfold lowering definitions path =
+            expandAndLower True name origin parameters body arguments
+        | otherwise = atom True
+
+    expandAndLower forceIncomplete name origin parameters body arguments = do
+        expanded <- expandDefinitionStep definitions path
+            name origin parameters body arguments
+        translation <- case expanded of
+            ExpansionUnion [] -> do
+                normalized <- normalizeExpansionAliases
+                    definitions path source
+                completeTranslation . Empty <$> expansionSymbol normalized
+            _ -> lowerExpansionType lowering definitions
+                (pushExpansion name origin path)
+                occurrencePath expanded
+        return $ if forceIncomplete
+            then translation {translationIncomplete = True}
+            else translation
+
+    atom forceIncomplete = do
         normalized <- normalizeExpansionAliases definitions path source
         formula <- PVar <$> expansionSymbol normalized
         return $ FormulaTranslation formula
-            (polarizedOpaqueForall lowering normalized) [] []
+            (forceIncomplete || polarizedOpaqueForall lowering normalized) [] []
+
+recursiveDataCanUnfold
+    :: ForallLowering
+    -> PreparedFormulaCompiler
+    -> ExpansionPath
+    -> Bool
+recursiveDataCanUnfold lowering definitions path = case lowering of
+    PolarizedForalls _ PositiveFormula _ _ ->
+        not $ expansionPathContainsRecursiveData definitions path
+    OpaqueForalls -> False
+    PolarizedForalls _ NegativeFormula _ _ -> False
+
+expansionPathContainsRecursiveData
+    :: PreparedFormulaCompiler -> ExpansionPath -> Bool
+expansionPathContainsRecursiveData definitions (ExpansionPath frames _) =
+    any isRecursiveDataFrame frames
+  where
+    isRecursiveDataFrame (ExpansionFrame name _) =
+        formulaDefinitionIsRecursiveData name definitions
 
 polarizedOpaqueForall :: ForallLowering -> ExpansionType -> Bool
 polarizedOpaqueForall lowering source = case lowering of
@@ -855,7 +929,7 @@ rejectActiveExpansion
     -> ExpansionOrigin
     -> Either String ()
 rejectActiveExpansion
-        (PreparedFormulaCompiler _ aliasNames)
+        (PreparedFormulaCompiler _ aliasNames _)
         (ExpansionPath frames active)
         name
         origin
@@ -1055,15 +1129,16 @@ referenceExpansionAlgebra interesting = ExpansionAlgebra
 -- active-name guard falsely rejects finite @Id (Id a)@. Synonym SCCs are found
 -- before normalization; datatype SCCs are classified from alias-free fields.
 validateDefinitionExpansion
-    :: [PreparedDefinition]
+    :: Set.Set String
+    -> [PreparedDefinition]
     -> PreparedFormulaCompiler
     -> Either String ()
-validateDefinitionExpansion definitions prepared = do
-    rejectFirstCycle True aliases aliasReferences
+validateDefinitionExpansion recursiveData definitions prepared = do
+    rejectFirstCycle True Set.empty aliases aliasReferences
     summaries <- Map.fromList `fmap` mapM summarizeDefinition definitions
     let summarizedReferences definition = Map.findWithDefault Set.empty
             (preparedDefinitionName definition) summaries
-    rejectFirstCycle False definitions summarizedReferences
+    rejectFirstCycle False recursiveData definitions summarizedReferences
   where
     aliases = filter preparedDefinitionIsAlias definitions
     aliasNames = Set.fromList $ map preparedDefinitionName aliases
@@ -1081,20 +1156,22 @@ validateDefinitionExpansion definitions prepared = do
 
 rejectFirstCycle
     :: Bool
+    -> Set.Set String
     -> [PreparedDefinition]
     -> (PreparedDefinition -> Set.Set String)
     -> Either String ()
-rejectFirstCycle synonymsOnly definitions references =
-    case firstRecursiveComponent definitions references of
+rejectFirstCycle synonymsOnly allowed definitions references =
+    case firstRecursiveComponent allowed definitions references of
         Nothing -> Right ()
         Just names -> Left $
             recursiveDefinitionsMessage synonymsOnly names
 
 firstRecursiveComponent
-    :: [PreparedDefinition]
+    :: Set.Set String
+    -> [PreparedDefinition]
     -> (PreparedDefinition -> Set.Set String)
     -> Maybe [String]
-firstRecursiveComponent definitions references =
+firstRecursiveComponent allowed definitions references =
     listToMaybe $ sortOn componentPosition orderedCycles
   where
     positions = Map.fromList $ zip
@@ -1107,7 +1184,8 @@ firstRecursiveComponent definitions references =
             CyclicSCC names <- stronglyConnComp
                 [(name, name, Set.toAscList $ references definition) |
                     definition <- definitions,
-                    let name = preparedDefinitionName definition]]
+                    let name = preparedDefinitionName definition],
+            not $ Set.fromList names `Set.isSubsetOf` allowed]
 
 recursiveDefinitionsMessage :: Bool -> [String] -> String
 recursiveDefinitionsMessage synonymsOnly names =

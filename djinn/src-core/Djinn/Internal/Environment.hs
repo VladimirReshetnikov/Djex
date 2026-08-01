@@ -219,7 +219,8 @@ synthesisInventory declarations =
 -- context arguments, and instantiated methods consume the cached result.
 -- Alias expansion and recursive-datatype classification use the same neutral
 -- preflight as 'prepareSynthesisEnvironment', so even a raw constructor-forged
--- environment cannot send a recursive expansion graph into formula lowering.
+-- environment can send only classified datatype recursion into the bounded
+-- formula lowering path; synonym and unclassified mixed cycles still fail.
 prepareEnvironment
     :: Environment
     -> Either SynthesisEnvironmentError PreparedEnvironment
@@ -461,24 +462,18 @@ synthesisDeclarationOwner declaration = case declaration of
     SharedDeclaration.InstanceDeclaration{} -> Left $
         SynthesisEnvironmentDeclarationError InstanceDeclarationUnsupported
 
--- Use the foundation's single prepared-and-expanded view before applying
--- Djinn's stricter no-recursive-datatypes policy. Keep projecting both shared
--- synonym phases to the historical raw error constructor; Exference's public
--- vocabulary already preserves the additional declaration attribution.
+-- Use the foundation's single prepared-and-expanded view for both synonym
+-- validation and recursive-datatype classification. The exact recursive set
+-- is retained for bounded proof-formula lowering instead of rejecting the
+-- authoritative inventory or rebuilding a second dependency graph here.
 prepareInventoryExpansion
     :: SynthesisInventory
     -> Either SynthesisEnvironmentError
         PreparedInventoryExpansion
-prepareInventoryExpansion inventory = do
-    expansion <- first promoteExpansionError $
+prepareInventoryExpansion inventory =
+    first promoteExpansionError $
         SharedTypeSynonym.prepareInventoryExpansion
             freshDjinnTypeVariable inventory
-    let recursiveNames =
-            SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
-    if Set.null recursiveNames then
-        return expansion
-    else
-        Left $ RecursiveSynthesisDataTypes $ Set.toAscList recursiveNames
   where
     promoteExpansionError failure = case failure of
         SharedTypeSynonym.InventorySynonymPreparationError cause ->
@@ -493,14 +488,17 @@ type PreparedInventoryExpansion =
 -- Build the formula-definition cache from the same transient declaration
 -- stream used for recursion classification. Synonyms retain their checked
 -- source bodies; every other declaration has already had aliases expanded.
--- Source order is significant for deterministic recursive-component errors.
+-- Source order remains significant for deterministic errors from synonym or
+-- otherwise-invalid recursive components.
 prepareSynthesisFormulaCompiler
-    :: [SharedDeclaration.Declaration HSymbol kindVariable annotation]
+    :: Set.Set HSymbol
+    -> [SharedDeclaration.Declaration HSymbol kindVariable annotation]
     -> Either String PreparedFormulaCompiler
-prepareSynthesisFormulaCompiler declarations = do
+prepareSynthesisFormulaCompiler recursiveData declarations = do
     definitions <- concat `fmap`
         mapM synthesisFormulaDefinition declarations
-    prepareFormulaCompiler synthesisFormulaTypeView definitions
+    prepareFormulaCompilerWithRecursiveData recursiveData
+        synthesisFormulaTypeView definitions
 
 -- Build the complementary nominal-family compiler from the same checked
 -- declaration stream. Synonyms remain definitions so aliases still normalize
@@ -513,12 +511,14 @@ prepareSynthesisFormulaCompiler declarations = do
 -- only; the structural compiler above remains authoritative for constructor
 -- introduction and elimination.
 prepareNominalSynthesisFormulaCompiler
-    :: [SharedDeclaration.Declaration HSymbol kindVariable annotation]
+    :: Set.Set HSymbol
+    -> [SharedDeclaration.Declaration HSymbol kindVariable annotation]
     -> Either String PreparedFormulaCompiler
-prepareNominalSynthesisFormulaCompiler declarations = do
+prepareNominalSynthesisFormulaCompiler recursiveData declarations = do
     definitions <- concat `fmap`
         mapM nominalFormulaDefinition declarations
-    prepareFormulaCompiler synthesisFormulaTypeView definitions
+    prepareFormulaCompilerWithRecursiveData recursiveData
+        synthesisFormulaTypeView definitions
   where
     nominalFormulaDefinition declaration = case declaration of
         SharedDeclaration.DataTypeDeclaration _ _ (_ : _) _ -> Right []
@@ -790,10 +790,14 @@ sealPreparedEnvironment
     :: PreparedInventoryExpansion
     -> Either SynthesisEnvironmentError PreparedEnvironment
 sealPreparedEnvironment expansion = do
+    recursiveData <- first InvalidSynthesisFormulaDefinitions $
+        Set.fromList `fmap` mapM synthesisFormulaTypeSymbol
+            (Set.toAscList recursiveDataNames)
     compiler <- first InvalidSynthesisFormulaDefinitions $
-        prepareSynthesisFormulaCompiler expandedDeclarations
+        prepareSynthesisFormulaCompiler recursiveData expandedDeclarations
     nominalCompiler <- first InvalidSynthesisFormulaDefinitions $
-        prepareNominalSynthesisFormulaCompiler expandedDeclarations
+        prepareNominalSynthesisFormulaCompiler recursiveData
+            expandedDeclarations
     -- Moving an invariant translation failure from query execution to sealing
     -- is deliberate. Kind checking plus whole-definition graph validation
     -- excludes such failures for supported declarations, and eager preparation
@@ -833,6 +837,8 @@ sealPreparedEnvironment expansion = do
         SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
     expandedDeclarations =
         SharedTypeSynonym.inventoryExpansionDeclarations expansion
+    recursiveDataNames =
+        SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
     inventory = SharedTypeSynonym.preparedInventory prepared
     parametricDataNames = Set.fromList
         [ name

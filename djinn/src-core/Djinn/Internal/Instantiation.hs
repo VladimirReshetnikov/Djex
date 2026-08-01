@@ -42,7 +42,13 @@ import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
 -- Exference's provider rule. Longer chains multiply the candidate tuple space
 -- without matching realistic queries, so they stay opaque.
 maxInstantiationBinders :: Int
-maxInstantiationBinders = 3
+maxInstantiationBinders = 4
+
+-- The original one- through three-binder rule enumerated a lexically sorted
+-- Cartesian product. Keep that exact prefix so widening the rule cannot
+-- perturb already documented candidates or rankings.
+maxCartesianInstantiationBinders :: Int
+maxCartesianInstantiationBinders = 3
 
 -- Axioms are premises in every plan of the query, so their count bounds both
 -- formula size and search branching. The caps are deliberate completeness
@@ -142,13 +148,21 @@ instantiationAxioms translator variableSpellings goalFormulas
         | (_, symbol) <- atoms
         , Just source <- [opaqueSymbolSource symbol]
         ]
-    variableCandidates = map SharedType.TypeVariable $
+    sourceVariableCandidates = map SharedType.TypeVariable $
+        distinctOn id variableSpellings
+    historicalVariableCandidates = map SharedType.TypeVariable $
         distinctOn id $ sort variableSpellings
     quantifiedCandidates =
         distinctOn SharedTypeAtom.alphaTypeKey $
         sortOn (SharedTypeRender.renderType id) $
         concatMap closedQuantifiedSubtrees opaqueSources
-    candidates = variableCandidates ++ quantifiedCandidates
+    historicalCandidates =
+        historicalVariableCandidates ++ quantifiedCandidates
+    -- The callers supply source first-occurrence order: goal variables first,
+    -- then opened skolems and sealed premise scopes. Retain that order for the
+    -- new four-binder heuristics so alpha-renaming cannot reshuffle useful
+    -- source-ordered runs merely because their spellings sort differently.
+    wideCandidates = sourceVariableCandidates ++ quantifiedCandidates
     initialSchemes = distinctOn schemeKey
         [ scheme
         | (HypothesisSide, symbol) <- atoms
@@ -158,7 +172,8 @@ instantiationAxioms translator variableSpellings goalFormulas
     premises =
         [ (Symbol $ "$djinn$instantiation$" ++ show index, formula)
         | (index, formula) <- zip [0 :: Int ..] $
-            buildAxiomFormulas translator candidates initialSchemes
+            buildAxiomFormulas translator historicalCandidates wideCandidates
+                initialSchemes
         ]
 
 -- Quantified subtrees and their impredicative wrappers are usable as
@@ -213,9 +228,11 @@ data InstantiationJob
 buildAxiomFormulas
     :: (SharedType.Type String -> Either String Formula)
     -> [SharedType.Type String]
+    -> [SharedType.Type String]
     -> [InstantiationScheme]
     -> [Formula]
-buildAxiomFormulas translator candidates initialSchemes = loop
+buildAxiomFormulas translator historicalCandidates wideCandidates
+        initialSchemes = loop
     (Set.fromList $ map schemeKey initialSchemes)
     Set.empty
     maxInstantiationAttempts
@@ -255,7 +272,49 @@ buildAxiomFormulas translator candidates initialSchemes = loop
                 _ -> loop seenSchemes seenAxioms (attempts - 1) allowance
                     (AxiomJob scheme schemeAllowance tuples : jobs)
 
-    candidateTuples arity = sequence $ replicate arity candidates
+    -- One- through three-binder schemes retain their exact historical lexical
+    -- Cartesian order. Four-binder schemes need a useful bounded prefix: draw
+    -- fairly from source-order windows, repeated arguments, sparse monotone
+    -- selections, and the complete Cartesian tail. Edge-first ordering keeps
+    -- a useful late goal variable from being hidden by unrelated source
+    -- variables, while round-robin merging prevents any one family from
+    -- consuming the full per-scheme allowance.
+    candidateTuples arity
+        | arity <= maxCartesianInstantiationBinders =
+            sequence $ replicate arity historicalCandidates
+        | otherwise = distinctOn id $ roundRobin
+            [ edgeFirst $ candidateWindows arity wideCandidates
+            , map (replicate arity) $ edgeFirst wideCandidates
+            , roundRobin
+                [ orderedSelections arity wideCandidates
+                , orderedSelections arity $ reverse wideCandidates
+                ]
+            , sequence $ replicate arity wideCandidates
+            ]
+
+    candidateWindows arity values
+        | arity <= 0 = [[]]
+        | otherwise = case splitAt arity values of
+            (window, _)
+                | length window == arity ->
+                    window : candidateWindows arity (drop 1 values)
+            _ -> []
+
+    orderedSelections 0 _ = [[]]
+    orderedSelections _ [] = []
+    orderedSelections count (value : values) =
+        map (value :)
+            (orderedSelections (count - 1) values) ++
+        orderedSelections count values
+
+    edgeFirst values = distinctOn id $ roundRobin [values, reverse values]
+
+    roundRobin streams = case
+            [ (value, remaining)
+            | value : remaining <- streams
+            ] of
+        [] -> []
+        active -> map fst active ++ roundRobin (map snd active)
 
     schemeAxiom scheme arguments = do
         instantiated <- rightToMaybe $

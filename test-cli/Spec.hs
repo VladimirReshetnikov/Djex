@@ -142,6 +142,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplRecursiveRankNConstructors
   , testCase "REPL detects alias-hidden recursive record selectors"
       testReplDjinnAliasRecursiveRecord
+  , testCase "REPL excludes hidden recursive record selectors"
+      testReplDjinnHiddenRecursiveSelector
   , testCase "REPL never introduces hidden recursive constructors"
       testReplDjinnHiddenRecursiveConstructors
   , testCase "REPL reports only surviving recursive constructors"
@@ -2229,15 +2231,18 @@ testReplRecursiveRankNConstructors = withTemporaryEnvironment
     , ":set render expression"
     , ":set qualification none"
     , ":set max-steps 128"
-    , ":backend djinn"
-    , rankNGoal
-    , ":backend exference"
-    , rankNGoal
+    , ":compare " ++ rankNGoal
     ]
   assertEqual "recursive rank-N constructor REPL exit" ExitSuccess exitCode
+  assertEqual "the shared query runs Djinn exactly once" 1
+    $ countOccurrences "-- Djinn" output
+  assertEqual "the shared query runs Exference exactly once" 1
+    $ countOccurrences "-- Exference" output
   assertEqual
     ("both engines must forward through Done: " ++ output ++ errors)
     2 $ countOccurrences "Done" output
+  assertBool ("recursive rank-N comparison emitted an error: " ++ errors) $
+    not $ "error" `isInfixOf` map toLower errors
   assertNoCallStack errors
  where
   rankNGoal =
@@ -2269,6 +2274,36 @@ testReplDjinnAliasRecursiveRecord = withTemporaryEnvironment
   assertContains "alias-hidden recursion reports its elimination boundary"
     ("Rec: recursive datatype; constructors are introduction-only in Djinn")
     output
+  assertNoCallStack errors
+
+-- Recursive records cannot be eliminated structurally, so a visible selector
+-- is intentionally admitted as an axiom. That exception must still obey the
+-- value namespace: importing the constructor without its field labels cannot
+-- make an unimported selector available to proof search.
+testReplDjinnHiddenRecursiveSelector :: Assertion
+testReplDjinnHiddenRecursiveSelector = withTemporaryEnvironment
+    [("HiddenRecursiveSelector.hs", unlines
+      [ "module HiddenRecursiveSelector (Result, Rec(MkRec)) where"
+      , "data Result = Result"
+      , "data Rec = MkRec { hiddenResult :: Result, next :: Rec }"
+      ])] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":module"
+    , "import HiddenRecursiveSelector (Result, Rec(MkRec))"
+    , ":backend djinn"
+    , ":set render expression"
+    , ":set qualification none"
+    , "Rec -> Result"
+    , ":show omissions"
+    ]
+  assertEqual "hidden recursive selector REPL exit" ExitSuccess exitCode
+  assertContains "the recursive record keeps its honest elimination boundary"
+    ("Rec: recursive datatype; constructors are introduction-only in Djinn")
+    output
+  assertBool "an unimported recursive selector entered Djinn search" $
+    not $ "hiddenResult" `isInfixOf` output
+  assertContains "the hidden selector leaves recursive elimination undecided"
+    "[DJEX_DJINN_UNDECIDED]" errors
   assertNoCallStack errors
 
 -- Constructor introduction follows the value namespace exactly. A recursive

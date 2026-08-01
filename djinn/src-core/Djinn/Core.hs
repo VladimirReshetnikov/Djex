@@ -94,6 +94,8 @@ import Djinn.Internal.TypeFormula
     , primaryFormulaPlan
     , pairOpaqueFormulaPlans
     , pairOpenFormulaPlans
+    , tripleOpaqueFormulaPlans
+    , tripleOpenFormulaPlans
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
     , translatedFormula
@@ -920,7 +922,11 @@ searchPreparedFormula options prepared target goalVariables formulaPlans = do
                 map translatedFormula
                     (pairOpaqueFormulaPlans formulaPlans) ++
                 map translatedFormula
-                    (pairOpenFormulaPlans formulaPlans)
+                    (pairOpenFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (tripleOpaqueFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (tripleOpenFormulaPlans formulaPlans)
         rawPlans =
             (translatedFormula primary, primarySound) :
             [ (formula, False)
@@ -935,7 +941,7 @@ searchPreparedFormula options prepared target goalVariables formulaPlans = do
             (goalVariables ++
                 polarizedFormulaPlanSkolems formulaPlans ++
                 premiseSpellings)
-            (map fst rawPlans)
+            (map fst plans)
             (map snd premises)
         axiomSymbols = instantiationAxiomSymbols axioms
         axiomPremises = instantiationAxiomPremises axioms

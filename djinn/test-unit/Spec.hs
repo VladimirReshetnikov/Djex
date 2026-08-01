@@ -1197,12 +1197,11 @@ testRankNTypeAtoms = do
         ++ "(forall other. (other -> other, "
         ++ "forall deep. deep -> deep)))"
 
-    -- Six independent sites still have one deliberately omitted central
-    -- layer. Three exact transports plus three structural identities require a
-    -- 3/3 selection, so the quadratic family must remain inconclusive instead
-    -- of claiming a refutation.
-    centralOpacityGap <- runStableQuery stableSession
-        "sixSiteCentralOpacityRankNGap"
+    -- The cubic frontier closes the first former pairwise gap. Four-binder
+    -- hypotheses stay beyond the instantiation-axiom bound, so three exact
+    -- transports plus three structural identities specifically require a 3/3
+    -- selection.
+    runStableIdentity stableSession "sixSiteCentralOpacityRankNTriple"
         $ "(forall a b c d. (a, b, c, d)) -> "
         ++ "(forall a b c d. (a, b, c, d) -> q) -> "
         ++ "(forall a b c d. (a, b, c, d) -> r) -> "
@@ -1211,11 +1210,59 @@ testRankNTypeAtoms = do
         ++ "(forall w x y z. (w, x, y, z) -> r), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g))"
-    assertEqual "the quadratic frontier unexpectedly covered a 3/3 subset"
+
+    -- At seven sites the dual triple frontier is independently necessary:
+    -- four schemes remain exact while exactly three identities open. Together
+    -- with the historical, singleton, and pair frontiers this completes every
+    -- independent choice subset through seven sites.
+    runStableIdentity stableSession "sevenSiteTripleOpenRankN"
+        $ "(forall a b c d. (a, b, c, d)) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> q) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> r) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> z) -> "
+        ++ "((forall w x y z. (w, x, y, z)), "
+        ++ "(forall w x y z. (w, x, y, z) -> q), "
+        ++ "(forall w x y z. (w, x, y, z) -> r), "
+        ++ "(forall w x y v. (w, x, y, v) -> z), "
+        ++ "(forall e. e -> e), (forall f. f -> f), "
+        ++ "(forall g. g -> g))"
+
+    -- Selecting three nested targets opens their shared enclosing forall as
+    -- well. This reaches a four-open/four-opaque formula at eight recorded
+    -- sites without adding an unrestricted fourth-order frontier.
+    runStableIdentity stableSession "nestedTripleRankNFrontier"
+        $ "(forall a b c d. (a, b, c, d)) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> q) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> r) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> z) -> "
+        ++ "((forall w x y v. (w, x, y, v)), "
+        ++ "(forall w x y v. (w, x, y, v) -> q), "
+        ++ "(forall w x y v. (w, x, y, v) -> r), "
+        ++ "(forall w x y v. (w, x, y, v) -> z), "
+        ++ "(forall outer. ((forall e. e -> e), "
+        ++ "(forall f. f -> f), (forall g. g -> g))))"
+
+    -- Eight independent sites retain one deliberately omitted central layer.
+    -- Four exact transports plus four structural identities require a flat
+    -- 4/4 selection, so the cubic family must remain inconclusive rather than
+    -- claiming a refutation.
+    quarticOpacityGap <- runStableQuery stableSession
+        "eightSiteCentralOpacityRankNGap"
+        $ "(forall a b c d. (a, b, c, d)) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> q) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> r) -> "
+        ++ "(forall a b c d. (a, b, c, d) -> z) -> "
+        ++ "((forall w x y v. (w, x, y, v)), "
+        ++ "(forall w x y v. (w, x, y, v) -> q), "
+        ++ "(forall w x y v. (w, x, y, v) -> r), "
+        ++ "(forall w x y v. (w, x, y, v) -> z), "
+        ++ "(forall e. e -> e), (forall f. f -> f), "
+        ++ "(forall g. g -> g), (forall h. h -> h))"
+    assertEqual "the cubic frontier unexpectedly covered a flat 4/4 subset"
         [] $ SharedSearch.batchCandidates
-            $ SharedQuery.resultSearch centralOpacityGap
-    assertEqual "a bounded central-subset gap was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence centralOpacityGap
+            $ SharedQuery.resultSearch quarticOpacityGap
+    assertEqual "a bounded quartic-subset gap was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence quarticOpacityGap
 
     -- Prepared global premises cache the same pairwise views as a goal.  The
     -- only route to the abstract result is to call this loaded consumer with
@@ -1243,6 +1290,34 @@ testRankNTypeAtoms = do
         outcome -> fail $ "pairwise prepared premise failed: " ++ show outcome
     assertBool "the pairwise prepared premise was not used"
         $ any ("consumePairwise" `isInfixOf`) pairClauses
+
+    -- Prepared global premises retain the cubic views too. The consumer needs
+    -- three exact four-binder values and three structurally introduced
+    -- identities, so no historical or pairwise premise variant can call it.
+    let wideConsumerR =
+            "(forall s t u v. (s, t, u, v) -> TriplePremiseR)"
+        tripleArgument = "(" ++ wideValue ++ ", " ++ wideConsumer ++ ", "
+            ++ wideConsumerR ++ ", (forall e. e -> e), "
+            ++ "(forall f. f -> f), (forall g. g -> g))"
+    tripleConsumer <- expectRight $ parseHType
+        $ tripleArgument ++ " -> TriplePremiseResult"
+    tripleGoal <- expectRight $ parseHType
+        $ wideValue ++ " -> " ++ wideConsumer ++ " -> " ++ wideConsumerR
+        ++ " -> TriplePremiseResult"
+    tripleEnvironment <- expectRight $ do
+        withQ <- declare (AbstractType "PairwisePremiseQ" KStar)
+            standardEnvironment
+        withR <- declare (AbstractType "TriplePremiseR" KStar) withQ
+        withResult <- declare
+            (AbstractType "TriplePremiseResult" KStar) withR
+        declare (Function "consumeTriple" tripleConsumer) withResult
+    tripleReport <- expectRight $ inhabit defaultQueryOptions tripleEnvironment []
+        "useTriplePreparedPremise" tripleGoal
+    tripleClauses <- case reportOutcome tripleReport of
+        Realized clauses -> pure clauses
+        outcome -> fail $ "triple prepared premise failed: " ++ show outcome
+    assertBool "the triple prepared premise was not used"
+        $ any ("consumeTriple" `isInfixOf`) tripleClauses
 
     -- Goal and premise translation are separate skolem scopes. Reusing the
     -- same internal proposition for both would admit the ill-typed proof

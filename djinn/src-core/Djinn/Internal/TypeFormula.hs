@@ -26,6 +26,8 @@ module Djinn.Internal.TypeFormula
     , singleOpenFormulaPlans
     , pairOpaqueFormulaPlans
     , pairOpenFormulaPlans
+    , tripleOpaqueFormulaPlans
+    , tripleOpenFormulaPlans
     , polarizedFormulaPlanSkolems
     , prepareFormulaCompiler
     , compileFormula
@@ -150,10 +152,11 @@ data FormulaTranslation = FormulaTranslation
 -- | One nonempty, deliberately bounded family of coherent translations.  The
 -- primary plan opens every supported positive forall.  The historical exact
 -- plan opens none; the first two local frontiers differ from either extreme at
--- one independently reachable occurrence.  Two quadratic tail frontiers make
--- the corresponding choice at an unordered pair of sites.  Keeping the
--- categories explicit lets goal search and prepared-premise caching preserve
--- their established order without reconstructing it from an unlabelled list.
+-- one independently reachable occurrence.  Quadratic and cubic tail frontiers
+-- make the corresponding choice at unordered pairs and triples of sites.
+-- Keeping the categories explicit lets goal search and prepared-premise
+-- caching preserve their established order without reconstructing it from an
+-- unlabelled list.
 data PolarizedFormulaPlans = PolarizedFormulaPlans
     { primaryFormulaPlan :: FormulaTranslation
     , exactOpaqueFormulaPlan :: Formula
@@ -161,19 +164,22 @@ data PolarizedFormulaPlans = PolarizedFormulaPlans
     , singleOpenFormulaPlans :: [FormulaTranslation]
     , pairOpaqueFormulaPlans :: [FormulaTranslation]
     , pairOpenFormulaPlans :: [FormulaTranslation]
+    , tripleOpaqueFormulaPlans :: [FormulaTranslation]
+    , tripleOpenFormulaPlans :: [FormulaTranslation]
     }
     deriving (Eq, Show)
 
--- | Every skolem variable introduced by any plan of this family, in plan
--- order. Frontier plans reuse the primary expansion and namespace, so their
--- spellings repeat primary skolems; duplicates are harmless because the
--- consumer deduplicates candidate spellings.
+-- | Every distinct skolem spelling introduced by any plan of this family, in
+-- first-plan order. Frontier plans reuse the primary expansion and namespace,
+-- so central deduplication prevents the polynomial tail from multiplying the
+-- instantiation candidate inventory.
 polarizedFormulaPlanSkolems :: PolarizedFormulaPlans -> [String]
-polarizedFormulaPlanSkolems plans =
+polarizedFormulaPlanSkolems plans = SharedCollection.distinctOn id $
     translationIntroducedSkolems (primaryFormulaPlan plans) ++
     concatMap translationIntroducedSkolems
         (singleOpaqueFormulaPlans plans ++ singleOpenFormulaPlans plans ++
-            pairOpaqueFormulaPlans plans ++ pairOpenFormulaPlans plans)
+            pairOpaqueFormulaPlans plans ++ pairOpenFormulaPlans plans ++
+            tripleOpaqueFormulaPlans plans ++ tripleOpenFormulaPlans plans)
 
 -- A definition origin plus the reverse source path is stable across alias
 -- expansion, duplicated arguments, datatype fields, and reopened forall
@@ -274,10 +280,11 @@ compileFormula view prepared source = do
 -- atoms.
 -- Besides the two historical extremes, retain both singleton frontiers: one
 -- opaque occurrence among opened siblings, and one opened occurrence (plus
--- any enclosing forall chain needed to reach it) among opaque siblings.  Two
--- pairwise tail frontiers make the same choices at unordered pairs.  This is
--- exhaustive for five independent sites without constructing a power set; its
--- additional plan count is quadratic rather than exponential.
+-- any enclosing forall chain needed to reach it) among opaque siblings.
+-- Pairwise and triple tail frontiers make the same choices at unordered pairs
+-- and triples. This is exhaustive for seven independent sites without
+-- constructing a power set; its additional plan count is cubic rather than
+-- exponential.
 -- The numeric namespace must be distinct for independently compiled goals and
 -- premises so their locally introduced skolems cannot accidentally meet.
 compilePolarizedFormulaPlans
@@ -300,19 +307,25 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         allSites = Set.fromList sites
     singleOpaque <- mapM
         (compileSelection expanded . Set.singleton) sites
-    singleOpen <- case sites of
-        _ : _ : _ : _ -> mapM
+    singleOpen <- if atLeast 3 sites then mapM
             (compileSelection expanded . opaqueExceptReachable allSites) sites
-        _ -> Right []
+        else Right []
     let sitePairs = unorderedPairs sites
-    pairOpaque <- case sites of
-        _ : _ : _ : _ -> mapM
+    pairOpaque <- if atLeast 4 sites then mapM
             (compileSelection expanded . Set.fromList . pairMembers) sitePairs
-        _ -> Right []
-    pairOpen <- case sites of
-        _ : _ : _ : _ : _ -> mapM
+        else Right []
+    pairOpen <- if atLeast 5 sites then mapM
             (compileSelection expanded . opaqueExceptPair allSites) sitePairs
-        _ -> Right []
+        else Right []
+    let siteTriples = unorderedTriples sites
+    tripleOpaque <- if atLeast 6 sites then mapM
+            (compileSelection expanded . Set.fromList . tripleMembers)
+            siteTriples
+        else Right []
+    tripleOpen <- if atLeast 7 sites then mapM
+            (compileSelection expanded . opaqueExceptTriple allSites)
+            siteTriples
+        else Right []
     return PolarizedFormulaPlans
         { primaryFormulaPlan = primary
         , exactOpaqueFormulaPlan = exact
@@ -320,6 +333,8 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         , singleOpenFormulaPlans = singleOpen
         , pairOpaqueFormulaPlans = pairOpaque
         , pairOpenFormulaPlans = pairOpen
+        , tripleOpaqueFormulaPlans = tripleOpaque
+        , tripleOpenFormulaPlans = tripleOpen
         }
   where
     compileSelection expanded opaqueSites = lowerExpansionType
@@ -344,9 +359,34 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
 
     pairMembers (firstSite, secondSite) = [firstSite, secondSite]
 
+    -- The triple dual follows the same ancestry rule as the singleton and
+    -- pair frontiers: reaching a nested target opens every enclosing forall.
+    opaqueExceptTriple sites (firstSite, secondSite, thirdSite) = Set.filter
+        (\site -> not
+            (site `forallSiteLeadsTo` firstSite ||
+                site `forallSiteLeadsTo` secondSite ||
+                site `forallSiteLeadsTo` thirdSite))
+        sites
+
+    tripleMembers (firstSite, secondSite, thirdSite) =
+        [firstSite, secondSite, thirdSite]
+
     unorderedPairs [] = []
     unorderedPairs (firstSite : remaining) =
         map ((,) firstSite) remaining ++ unorderedPairs remaining
+
+    unorderedTriples [] = []
+    unorderedTriples (firstSite : remaining) =
+        [ (firstSite, secondSite, thirdSite)
+        | (secondSite, thirdSite) <- unorderedPairs remaining
+        ] ++ unorderedTriples remaining
+
+    atLeast :: Int -> [element] -> Bool
+    atLeast count = go count
+      where
+        go remaining _ | remaining <= 0 = True
+        go _ [] = False
+        go remaining (_ : rest) = go (remaining - 1) rest
 
 data ForallLowering
     = OpaqueForalls

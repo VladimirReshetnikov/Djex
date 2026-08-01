@@ -835,6 +835,9 @@ knowing before editing the source:
   With `token :: Token` and `poly :: Token -> (forall a. D a)` loaded too, a
   closed `R` goal can compose globally as `finish (poly token)`; the backward
   slice follows matching loaded results and their specialized input demands.
+  Those nominal candidates deliberately follow the complete structural
+  prefix. Request alternatives when an earlier constructor inhabitant such as
+  `EmptyD` or `R` would otherwise satisfy first-result search.
   Loaded tuple elements and positive function results are projection routes as
   well. Datatype fields become routes only from an available value of their
   actual owner and are specialized at that occurrence's type arguments;

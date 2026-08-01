@@ -54,6 +54,11 @@ matches loaded result types backward from `R`, specializes their variables,
 and adds their argument demands until it reaches `D`. Merely sealing the same
 declarations must not activate nominal work for an unrelated goal.
 
+All three nominal candidates deliberately follow the complete historical
+structural prefix. A request must enable alternatives when an earlier
+constructor inhabitant such as `EmptyD` or `R` would otherwise end first-result
+search before the nominal family.
+
 These examples require two existing bounded features to cooperate. The source
 hypothesis has a context-free leading `forall`, and its complete binder chain
 is instantiated at the quantified subtree already supplied by the sequent.

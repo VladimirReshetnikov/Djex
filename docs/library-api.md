@@ -288,6 +288,10 @@ above in the prepared environment, a request for `R` can return
 current demand, specializes matched variables, and adds the providers' domains
 to the next demand frontier.
 
+These examples describe candidates from the later nominal family. Set
+`optionAlternatives = True` when an earlier structural constructor inhabitant
+would otherwise end first-result search before that family is reached.
+
 See the
 [nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md)
 for the proof-policy and regression boundary.

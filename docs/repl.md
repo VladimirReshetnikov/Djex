@@ -219,6 +219,10 @@ Djinn can find all three forms:
 R                                        -- finish (poly token)
 ```
 
+Run `:set select all` (or `:set select best`) to inspect these later nominal
+candidates when `EmptyD` or `R` supplies an earlier structural inhabitant. The
+interactive default `select = first` may stop before the nominal family.
+
 The slice is computed after synonym expansion, so aliases of `D` are
 transparent. Nullary datatypes keep their structural constructor formula, and
 unrelated parameterized declarations do not add nominal plans to the query.
@@ -250,10 +254,12 @@ position, scope, and free-variable identity remain significant, so shadowing
 and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
-polymorphic-let generalization, or general visible type application. Open type
-arguments such as `@a` and impredicative type arguments remain unsupported.
-Djinn search does not gain the Exference ground-instantiation rule, and its
-historical expression projection rejects visible type application explicitly.
+polymorphic-let generalization, or general visible type application. Explicitly
+visible open arguments such as `@a` and visible impredicative type arguments
+remain unsupported; the nominal rule above performs only bounded implicit
+instantiation from the sequent's candidate vocabulary. Djinn search does not
+gain the Exference ground-instantiation rule, and its historical expression
+projection rejects visible type application explicitly.
 Exference does not perform non-exact subsumption between contextual schemes,
 while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,

@@ -267,6 +267,11 @@ consumer, and a closed global provider/consumer chain:
 R                                        -- finish (poly token)
 ```
 
+These nominal candidates follow the complete structural prefix. Use
+`:set select all` (or `:set select best`) to inspect them when `EmptyD` or
+`R` already supplies an earlier structural inhabitant; the interactive default
+`select = first` may stop before the nominal family.
+
 Synonyms are expanded before the slice is computed, so an alias of `D` is
 transparent. A nullary datatype keeps only its historical structural
 constructor view. Unrelated parameterized declarations do not activate or
@@ -309,9 +314,11 @@ booleans:
 ```
 
 This is not general higher-rank subsumption, polymorphic-let generalization, or
-general visible type application. In particular, open arguments such as `@a`
-and impredicative type arguments remain unsupported. Djinn search does not gain
-the Exference rule, and its historical expression projection rejects the new
+general visible type application. Explicitly visible open arguments such as
+`@a` and visible impredicative type arguments remain unsupported; the nominal
+rule above performs only bounded implicit instantiation from the sequent's
+candidate vocabulary. Djinn search does not gain the Exference visible-
+application rule, and its historical expression projection rejects the new
 generated node explicitly. Unsupported Djinn positions remain opaque and make
 an otherwise empty search inconclusive rather than manufacturing a logical
 refutation. Exference still does not perform non-exact subsumption between

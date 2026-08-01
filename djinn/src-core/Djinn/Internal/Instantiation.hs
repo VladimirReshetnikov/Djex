@@ -24,6 +24,7 @@ module Djinn.Internal.Instantiation
     , instantiationAxioms
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
+    , usesInstantiationEvidence
     , eliminateInstantiationEvidence
     ) where
 
@@ -354,6 +355,21 @@ instantiateSchemeBody scheme arguments =
         choose candidate
             | candidate `Set.member` reserved = choose $ candidate ++ "'"
             | otherwise = candidate
+
+-- | Whether a checked proof actually refers to one of the query's erased
+-- instantiation axioms. Merely having axioms in the proof environment must not
+-- perturb historical simplification for proofs which do not consume them.
+usesInstantiationEvidence :: Set.Set Symbol -> Term -> Bool
+usesInstantiationEvidence axioms
+    | Set.null axioms = const False
+    | otherwise = go
+  where
+    go term = case term of
+        Var symbol -> symbol `Set.member` axioms
+        Lam _ body -> go body
+        Apply function argument -> go function || go argument
+        Xsel _ _ expression -> go expression
+        _ -> False
 
 -- | Erase instantiation-axiom evidence from a checked proof before code
 -- generation. Semantically every axiom is the identity function: an applied

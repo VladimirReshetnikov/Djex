@@ -51,11 +51,13 @@ module Language.Haskell.Synthesis.Generated
   , substituteExpressionLocalBy
   , alphaEquivalentExpression
   , projectFieldSelectors
+  , projectFieldSelectorsWithoutEta
   , simplifyCaseExpression
   , simplifyExpressionCases
   , normalizeExpressionPatterns
   , discardUnusedPatternBindingsBy
   , simplifyExpressionBy
+  , simplifyExpressionWithoutEtaBy
   , expressionHoles
   , expressionSizeNatural
   , expressionSize
@@ -662,10 +664,30 @@ projectFieldSelectors
   => Map (Name, Int) Name
   -> FunctionClause local
   -> FunctionClause local
-projectFieldSelectors selectors clause
+projectFieldSelectors = projectFieldSelectorsWithEta True
+
+-- | Apply the same record-selector rewrites as 'projectFieldSelectors' while
+-- retaining the clause's eta expansion. Djinn uses this after erased rank-N
+-- evidence has crossed proof checking; presentation must not recreate a
+-- simplified-subsumption error by contracting that checked boundary.
+projectFieldSelectorsWithoutEta
+  :: Eq local
+  => Map (Name, Int) Name
+  -> FunctionClause local
+  -> FunctionClause local
+projectFieldSelectorsWithoutEta = projectFieldSelectorsWithEta False
+
+projectFieldSelectorsWithEta
+  :: Eq local
+  => Bool
+  -> Map (Name, Int) Name
+  -> FunctionClause local
+  -> FunctionClause local
+projectFieldSelectorsWithEta contractEta selectors clause
   | Map.null selectors = clause
   | rewritten == clauseBody clause = clause
-  | otherwise = etaContractClause clause {clauseBody = rewritten}
+  | contractEta = etaContractClause clause {clauseBody = rewritten}
+  | otherwise = clause {clauseBody = rewritten}
  where
   rewritten = converge (8 :: Int) $ clauseBody clause
   converge fuel body
@@ -676,9 +698,11 @@ projectFieldSelectors selectors clause
     next = rewrite body
 
   rewrite expression = case descend expression of
-    Case scrutinee [(Constructor constructor patterns, Local result)]
-      | Just selector <- fieldSelector constructor patterns result ->
-          Apply (Global selector) scrutinee
+    Case scrutinee [(Constructor constructor patterns, body)]
+      | (Local result, arguments) <- expressionApplicationSpine body
+      , Just selector <- fieldSelector constructor patterns result
+      , argumentsIndependentOf patterns arguments ->
+          foldl Apply (Apply (Global selector) scrutinee) arguments
     Let pattern bound body -> rewriteLet pattern bound body
     other -> other
 
@@ -759,6 +783,9 @@ projectFieldSelectors selectors clause
     Bind _ -> True
     Wildcard -> True
     _ -> False
+
+  argumentsIndependentOf patterns = all $ \argument ->
+    all (`notElem` toList argument) $ concatMap toList patterns
 
 etaContractClause :: Eq local => FunctionClause local -> FunctionClause local
 etaContractClause clause = case
@@ -1132,7 +1159,27 @@ simplifyExpressionBy
   => (local -> identity)
   -> Expression local
   -> Expression local
-simplifyExpressionBy identity = simplifyEta . simplifyLets
+simplifyExpressionBy = simplifyExpressionWithEtaBy True
+
+-- | Apply the binding cleanup from 'simplifyExpressionBy' without eta
+-- contraction. Backends use this narrow variant when an eta-expanded term is
+-- carrying evidence which disappears before rendering, so the ordinary
+-- untyped eta law would not preserve Haskell's higher-rank subsumption rules.
+simplifyExpressionWithoutEtaBy
+  :: Ord identity
+  => (local -> identity)
+  -> Expression local
+  -> Expression local
+simplifyExpressionWithoutEtaBy = simplifyExpressionWithEtaBy False
+
+simplifyExpressionWithEtaBy
+  :: Ord identity
+  => Bool
+  -> (local -> identity)
+  -> Expression local
+  -> Expression local
+simplifyExpressionWithEtaBy contractEta identity =
+  (if contractEta then simplifyEta else id) . simplifyLets
  where
   simplifyLets expression = case expression of
     original@Local{} -> original

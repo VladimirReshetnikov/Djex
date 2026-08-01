@@ -10,6 +10,7 @@ module Djinn.Internal.Generated
   , HExpr (..)
   , hPrClause
   , renderGeneratedClause
+  , deduplicateEtaEquivalentClauses
   , toGeneratedClause
   , toGeneratedClauseWithName
   , fromGeneratedExpression
@@ -61,6 +62,41 @@ renderGeneratedClause generated = do
   where
     renderOptions = Generated.RenderOptions
       Generated.FullyQualified id []
+
+-- | Remove alpha-equivalent clauses after comparing their fully eta-normal
+-- denotations, while retaining the first checked spelling unchanged.
+--
+-- Function clauses and lambdas store multiple binders in one pattern group,
+-- whereas the generic eta reducer contracts a unary lambda. Split every group
+-- into a nested unary suffix in the private comparison key so @f@ and
+-- @\x y -> f x y@ compare alike without contracting the surviving clause.
+deduplicateEtaEquivalentClauses
+  :: Ord local
+  => [Generated.FunctionClause local]
+  -> [Generated.FunctionClause local]
+deduplicateEtaEquivalentClauses = distinctBy etaAlphaEquivalent
+ where
+  etaAlphaEquivalent left right = Generated.alphaEquivalentExpression
+    (etaNormalExpression left) (etaNormalExpression right)
+
+  etaNormalExpression = Generated.simplifyExpressionBy id
+    . splitLambdaGroups
+    . Generated.functionClauseExpression
+
+  splitLambdaGroups = Generated.rewriteExpressionBottomUp $ \expression ->
+    case expression of
+      Generated.Lambda patterns body -> foldr
+        (\pattern nested -> Generated.Lambda [pattern] nested)
+        body patterns
+      other -> other
+
+  distinctBy _ [] = []
+  distinctBy equivalent (firstClause : remaining) =
+    firstClause : distinctBy equivalent
+      [ clause
+      | clause <- remaining
+      , not $ equivalent firstClause clause
+      ]
 
 -- | Erase Djinn's post-proof Haskell tree into the shared generated-code AST.
 -- Bound variables become backend-owned local identities; every free value and

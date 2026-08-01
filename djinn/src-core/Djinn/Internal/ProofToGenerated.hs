@@ -7,6 +7,7 @@
 module Djinn.Internal.ProofToGenerated
   ( termToGeneratedExpression
   , termToGeneratedClause
+  , termToGeneratedClauseWithoutEta
   ) where
 
 import Control.Monad (foldM, zipWithM)
@@ -31,10 +32,16 @@ type Expression = Generated.Expression HSymbol
 -- | Convert and simplify one proof expression without constructing Djinn's
 -- historical recursive output tree.
 termToGeneratedExpression :: Term -> Either String Expression
-termToGeneratedExpression term = do
+termToGeneratedExpression = termToGeneratedExpressionWithEta True
+
+termToGeneratedExpressionWithEta :: Bool -> Term -> Either String Expression
+termToGeneratedExpressionWithEta contractEta term = do
   validateTermMetadata term
   (expression, _) <- convert [] renamedTerm
-  let simplified = niceNames $ Generated.simplifyExpressionBy id
+  let simplifyBindings
+        | contractEta = Generated.simplifyExpressionBy id
+        | otherwise = Generated.simplifyExpressionWithoutEtaBy id
+      simplified = niceNames $ simplifyBindings
         $ Generated.simplifyExpressionCases
         $ Generated.discardUnusedPatternBindingsBy id
         $ Generated.normalizeExpressionPatterns
@@ -300,6 +307,25 @@ termToGeneratedClause
   -> Either String (Generated.FunctionClause HSymbol)
 termToGeneratedClause target term = do
   expression <- termToGeneratedExpression term
+  expressionToClause target expression
+
+-- | Convert a proof while retaining every eta expansion. This is used only
+-- when erased rank-N instantiation evidence exposes an eta redex: Haskell's
+-- simplified subsumption can accept @\x -> finish x@ while rejecting the
+-- propositionally eta-equivalent @finish@ at the higher-rank type.
+termToGeneratedClauseWithoutEta
+  :: Generated.DefinitionName
+  -> Term
+  -> Either String (Generated.FunctionClause HSymbol)
+termToGeneratedClauseWithoutEta target term = do
+  expression <- termToGeneratedExpressionWithEta False term
+  expressionToClause target expression
+
+expressionToClause
+  :: Generated.DefinitionName
+  -> Expression
+  -> Either String (Generated.FunctionClause HSymbol)
+expressionToClause target expression = do
   let clause = Generated.functionClauseFromExpression target expression
   either (Left . show) Right $
     Generated.validateFunctionClauseScope clause
@@ -348,9 +374,9 @@ alphaRenameTerm term = evalState
 --   t'Djinn.Internal.Generated.HClause' compatibility view, and every
 --   identity-preference render
 --   site (REPL, CLI, @hPrClause@) observe them directly;
--- * candidate de-duplication in "Djinn.Core" compares checked shared clauses
---   structurally, so alpha-equivalent proofs collapse only because this pass
---   canonicalizes their binder spellings first;
+-- * candidate de-duplication in "Djinn.Core" is alpha-aware, but canonical
+--   stored names still keep direct tree inspection and legacy projections
+--   stable independently of which proof plan produced a clause;
 -- * the collision set is intentionally qualification-independent
 --   ('unqualifiedValueGlobals' rather than the renderer's
 --   qualification-sensitive emitted set), so one candidate has one spelling

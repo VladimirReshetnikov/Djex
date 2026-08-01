@@ -93,8 +93,18 @@ tests =
     , ("round-trip shared source types", testSharedTypeAdapter)
     , ("infer simple positive rank-N types with an opaque fallback",
           testRankNTypeAtoms)
+    , ("retain nominal parametric-data transport beside structural search",
+          testNominalParametricDataPlans)
+    , ("preserve nominal parametric-data projection boundaries",
+          testNominalDataProjectionBoundaries)
+    , ("reach nominal parametric data behind a closed goal",
+          testNominalClosedGoalReachability)
+    , ("reach nominal data through closed aggregate providers",
+          testNominalAggregateProviderReachability)
     , ("merge complementary rank-N formula plans within global bounds",
           testComplementaryRankNPlans)
+    , ("deduplicate multi-argument eta expansions alpha-equivalently",
+          testMultiArgumentEtaDeduplication)
     , ("round-trip shared declarations", testSharedDeclarationAdapter)
     , ("round-trip shared environments", testSharedEnvironmentAdapter)
     , ("normalize raw abstract definitions at every environment boundary",
@@ -1438,6 +1448,456 @@ testRankNTypeAtoms = do
             defaultQueryOptions target (targetSpelling ++ ".djinn") source
         expectShownRight $ Djex.runDjinnQuery session request
 
+-- A declared datatype normally lowers to its constructor sum, which is still
+-- the primary Djinn search vocabulary. The complementary nominal projection
+-- must retain the complete @MaybeLike argument@ atom long enough for guarded
+-- impredicative instantiation to recover the direct Haskell transport. Both
+-- projections remain observable: the nominal result is the source hypothesis
+-- itself, while structural alternatives still introduce and eliminate the
+-- declared constructors.
+testNominalParametricDataPlans :: IO ()
+testNominalParametricDataPlans = do
+    let maybeName = sharedName "MaybeLike"
+        nothingName = sharedName "NothingLike"
+        justName = sharedName "JustLike"
+        resultName = sharedName "NominalResult"
+        finishName = sharedName "finish"
+        parameter = SharedDeclaration.TypeParameter "parameter" Nothing
+        parameterType = SharedType.TypeVariable "parameter"
+        maybeType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor maybeName) element
+        polymorphicIdentity binder = SharedType.ForallType [binder] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable binder)
+                (SharedType.TypeVariable binder)
+        maybeDeclaration = SharedDeclaration.DataTypeDeclaration () maybeName
+            [parameter]
+            [ SharedDeclaration.DataConstructor () nothingName []
+            , SharedDeclaration.DataConstructor () justName [parameterType]
+            ]
+        goal = SharedType.FunctionType
+            (SharedType.ForallType ["element"] [] $
+                maybeType $ SharedType.TypeVariable "element")
+            (maybeType $ polymorphicIdentity "nested")
+    session <- seal [maybeDeclaration]
+    rendered <- runRendered session "transportMaybeLike" goal
+    assertBool ("the nominal data family lost direct guarded instantiation: " ++
+        show rendered)
+        $ "\\a -> a" `elem` rendered
+    assertBool "the nominal family replaced structural constructor search"
+        $ any (\source ->
+            "case " `isInfixOf` source &&
+            "NothingLike" `isInfixOf` source &&
+            "JustLike" `isInfixOf` source) rendered
+    -- A loaded consumer catches the subtler case where structural and nominal
+    -- goal formulas coincide: only the global premise differs. The local
+    -- polymorphic value must be instantiated at the polytype already present
+    -- under the consumer's nominal datatype application.
+    let resultType = SharedType.TypeConstructor resultName
+        resultDeclaration = SharedDeclaration.AbstractTypeDeclaration ()
+            resultName SharedKind.ProperTypeKind
+        finishDeclaration = SharedDeclaration.ValueDeclaration $
+            SharedDeclaration.ValueSignature () finishName $
+                SharedType.FunctionType
+                    (maybeType $ polymorphicIdentity "accepted")
+                    resultType
+        finishGoal = SharedType.FunctionType
+            (SharedType.ForallType ["supplied"] [] $
+                maybeType $ SharedType.TypeVariable "supplied")
+            resultType
+    finishEnvironment <- mkNeutralDjinnEnvironment
+        [resultDeclaration, maybeDeclaration, finishDeclaration]
+    finishPrepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment finishEnvironment
+    let (structuralPremises, _, _) =
+            RawEnvironment.preparedEnvironmentPolarizedFunctionPremises
+                finishPrepared
+        (nominalPremises, _, _) =
+            RawEnvironment.preparedEnvironmentNominalPolarizedFunctionPremises
+                finishPrepared
+    structuralGoal <- expectShownRight $
+        RawEnvironment.preparedEnvironmentSynthesisFormulaTranslator
+            finishPrepared finishGoal
+    nominalGoal <- expectShownRight $
+        RawEnvironment.preparedEnvironmentNominalSynthesisFormulaTranslator
+            finishPrepared finishGoal
+    assertEqual "the coincident loaded-consumer goal projections drifted"
+        structuralGoal nominalGoal
+    assertBool "the nominal global-premise cache reused structural formulas"
+        $ structuralPremises /= nominalPremises
+    finishSession <- expectShownRight $
+        Djex.mkDjinnSession finishEnvironment
+    finishRendered <- runRendered finishSession
+        "finishNominalMaybeLike" finishGoal
+    assertBool ("the nominal premise used a structurally compiled axiom: " ++
+        show finishRendered)
+        $ "\\a -> finish a" `elem` finishRendered
+  where
+    seal declarations = do
+        environment <- mkNeutralDjinnEnvironment declarations
+        expectShownRight $ Djex.mkDjinnSession environment
+
+    runRendered session targetSpelling goal = do
+        runRenderedWith defaultQueryOptions session targetSpelling goal
+
+    runRenderedWith options session targetSpelling goal = do
+        target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+            sharedName targetSpelling
+        request <- expectShownRight $ Djex.mkDjinnRequest SharedQuery.QueryRequest
+            { SharedQuery.requestTarget = target
+            , SharedQuery.requestGoal = goal
+            , SharedQuery.requestContexts = []
+            , SharedQuery.requestOptions = options
+            }
+        result <- expectShownRight $ Djex.runDjinnQuery session request
+        mapM
+            (expectShownRight . Djex.renderDjinnCandidateExpression
+                SharedGenerated.Unqualified)
+            $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
+-- The second compiler is intentionally narrow: only applications of
+-- parametric data need their complete nominal shape preserved. A nullary data
+-- declaration must keep its constructor formula, and an alias of a
+-- parametric datatype must remain transparent in both projections.
+testNominalDataProjectionBoundaries :: IO ()
+testNominalDataProjectionBoundaries = do
+    let flagName = sharedName "NominalFlag"
+        offName = sharedName "NominalOff"
+        onName = sharedName "NominalOn"
+        flagType = SharedType.TypeConstructor flagName
+        flagDeclaration = SharedDeclaration.DataTypeDeclaration () flagName []
+            [ SharedDeclaration.DataConstructor () offName []
+            , SharedDeclaration.DataConstructor () onName []
+            ]
+    flagEnvironment <- mkNeutralDjinnEnvironment [flagDeclaration]
+    flagPrepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment flagEnvironment
+    flagStructural <- translateStructural flagPrepared flagType
+    flagNominal <- translateNominal flagPrepared flagType
+    assertEqual "a nullary datatype acquired a redundant nominal projection"
+        flagStructural flagNominal
+
+    let dataName = sharedName "NominalData"
+        constructorName = sharedName "NominalDataValue"
+        aliasName = sharedName "NominalAlias"
+        parameter = SharedDeclaration.TypeParameter "parameter" Nothing
+        parameterType = SharedType.TypeVariable "parameter"
+        dataType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor dataName) element
+        aliasType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor aliasName) element
+        dataDeclaration = SharedDeclaration.DataTypeDeclaration () dataName
+            [parameter]
+            [SharedDeclaration.DataConstructor () constructorName
+                [parameterType]]
+        aliasDeclaration = SharedDeclaration.TypeSynonymDeclaration ()
+            aliasName [parameter] $ dataType parameterType
+        polytype = SharedType.ForallType ["nested"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "nested")
+                (SharedType.TypeVariable "nested")
+    aliasEnvironment <- mkNeutralDjinnEnvironment
+        [dataDeclaration, aliasDeclaration]
+    aliasPrepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment aliasEnvironment
+    structuralData <- translateStructural aliasPrepared $ dataType polytype
+    structuralAlias <- translateStructural aliasPrepared $ aliasType polytype
+    nominalData <- translateNominal aliasPrepared $ dataType polytype
+    nominalAlias <- translateNominal aliasPrepared $ aliasType polytype
+    assertEqual "a structural datatype alias stopped expanding transparently"
+        structuralData structuralAlias
+    assertEqual "a nominal datatype alias stopped expanding transparently"
+        nominalData nominalAlias
+    assertBool "the parametric datatype lost its complementary projection"
+        $ structuralData /= nominalData
+
+    -- Result matching must specialize a provider before adding its domains.
+    -- @bridge@ fixes @a := IntLike@, so the next frontier is @XLike IntLike@;
+    -- retaining the unspecialized @XLike a@ would miss @producer@ and the
+    -- parametric datatype in its domain.
+    let intName = sharedName "IntLike"
+        boxName = sharedName "BoxLike"
+        xName = sharedName "XLike"
+        bridgeName = sharedName "bridge"
+        producerName = sharedName "producer"
+        proper = SharedKind.ProperTypeKind
+        unary = SharedKind.FunctionKind proper proper
+        nominal name = SharedType.TypeConstructor name
+        apply name argument = SharedType.TypeApplication
+            (nominal name) argument
+        intType = nominal intName
+        bridgeDeclaration = SharedDeclaration.ValueDeclaration $
+            SharedDeclaration.ValueSignature () bridgeName $
+                SharedType.FunctionType
+                    (apply xName parameterType)
+                    (apply boxName parameterType)
+        producerDeclaration = SharedDeclaration.ValueDeclaration $
+            SharedDeclaration.ValueSignature () producerName $
+                SharedType.FunctionType
+                    (dataType polytype)
+                    (apply xName intType)
+        specializationDeclarations =
+            [ SharedDeclaration.AbstractTypeDeclaration () intName proper
+            , SharedDeclaration.AbstractTypeDeclaration () boxName unary
+            , SharedDeclaration.AbstractTypeDeclaration () xName unary
+            , dataDeclaration
+            , bridgeDeclaration
+            , producerDeclaration
+            ]
+        specializationGoal = apply boxName intType
+    specializationEnvironment <- mkNeutralDjinnEnvironment
+        specializationDeclarations
+    specializationPrepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment
+            specializationEnvironment
+    assertBool "the nominal reachability slice lost result specialization"
+        $ RawEnvironment.preparedEnvironmentQueryUsesParametricData
+            specializationPrepared specializationGoal
+
+    -- A datatype declaration is only a projection template. Without a loaded
+    -- value whose positive result actually provides its owner, the flexible
+    -- field parameter must not match an arbitrary rigid goal or insert nominal
+    -- search ahead of the historical candidate stream.
+    let unrelatedBoxName = sharedName "UnrelatedBox"
+        unrelatedBoxConstructorName = sharedName "UnrelatedBoxValue"
+        unrelatedBoxDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            unrelatedBoxName [parameter]
+            [ SharedDeclaration.DataConstructor ()
+                unrelatedBoxConstructorName [parameterType]
+            ]
+        rigidName = sharedName "UnrelatedRigid"
+        rigidLeftName = sharedName "unrelatedRigidLeft"
+        rigidRightName = sharedName "unrelatedRigidRight"
+        rigidType = nominal rigidName
+        rigidDeclaration = SharedDeclaration.AbstractTypeDeclaration ()
+            rigidName proper
+        rigidValue name = SharedDeclaration.ValueDeclaration $
+            SharedDeclaration.ValueSignature () name rigidType
+        rigidValues =
+            [rigidValue rigidLeftName, rigidValue rigidRightName]
+        rigidOptions = defaultQueryOptions
+            { optionAlternatives = True
+            , optionSorted = False
+            , optionCutoff = 10
+            }
+        runRigid environment = do
+            session <- expectShownRight $ Djex.mkDjinnSession environment
+            target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+                sharedName "selectUnrelatedRigid"
+            request <- expectShownRight $ Djex.mkDjinnRequest
+                SharedQuery.QueryRequest
+                    { SharedQuery.requestTarget = target
+                    , SharedQuery.requestGoal = rigidType
+                    , SharedQuery.requestContexts = []
+                    , SharedQuery.requestOptions = rigidOptions
+                    }
+            result <- expectShownRight $ Djex.runDjinnQuery session request
+            rendered <- mapM
+                (expectShownRight . Djex.renderDjinnCandidateExpression
+                    SharedGenerated.Unqualified)
+                $ SharedSearch.batchCandidates
+                $ SharedQuery.resultSearch result
+            pure (rendered, SharedSearch.batchProgress $
+                SharedQuery.resultSearch result)
+    baselineRigidEnvironment <- mkNeutralDjinnEnvironment $
+        rigidDeclaration : rigidValues
+    unrelatedDataEnvironment <- mkNeutralDjinnEnvironment $
+        rigidDeclaration : unrelatedBoxDeclaration : rigidValues
+    unrelatedPrepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment
+            unrelatedDataEnvironment
+    assertBool "an unreachable Box-like field activated nominal search" $
+        not $ RawEnvironment.preparedEnvironmentQueryUsesParametricData
+            unrelatedPrepared rigidType
+    baselineRigid@(baselineRigidCandidates, _) <-
+        runRigid baselineRigidEnvironment
+    unrelatedRigid <- runRigid unrelatedDataEnvironment
+    assertEqual "the rigid-prefix fixture lost its historical candidates"
+        ["unrelatedRigidRight", "unrelatedRigidLeft"]
+        baselineRigidCandidates
+    assertEqual "an unreachable parametric datatype changed the rigid prefix"
+        baselineRigid unrelatedRigid
+  where
+    translateStructural prepared = expectShownRight .
+        RawEnvironment.preparedEnvironmentSynthesisFormulaTranslator prepared
+    translateNominal prepared = expectShownRight .
+        RawEnvironment.preparedEnvironmentNominalSynthesisFormulaTranslator
+            prepared
+
+-- A parametric datatype need not occur in the requested result. Backward
+-- slicing from the closed result must reach its consumer, then enable the
+-- nominal provider/instantiation chain without activating every unrelated
+-- declaration in the sealed environment.
+testNominalClosedGoalReachability :: IO ()
+testNominalClosedGoalReachability = do
+    let tokenName = sharedName "ClosedToken"
+        resultName = sharedName "ClosedResult"
+        phantomName = sharedName "ClosedPhantom"
+        tokenValueName = sharedName "closedToken"
+        polyName = sharedName "closedPoly"
+        finishName = sharedName "closedFinish"
+        parameter = SharedDeclaration.TypeParameter "parameter" Nothing
+        nominal name = SharedType.TypeConstructor name
+        phantom element = SharedType.TypeApplication
+            (nominal phantomName) element
+        polymorphicIdentity binder = SharedType.ForallType [binder] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable binder)
+                (SharedType.TypeVariable binder)
+        tokenType = nominal tokenName
+        resultType = nominal resultName
+        declarations =
+            [ SharedDeclaration.AbstractTypeDeclaration () tokenName
+                SharedKind.ProperTypeKind
+            , SharedDeclaration.AbstractTypeDeclaration () resultName
+                SharedKind.ProperTypeKind
+            , SharedDeclaration.DataTypeDeclaration () phantomName [parameter]
+                []
+            , SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () tokenValueName tokenType
+            , SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () polyName $
+                    SharedType.FunctionType tokenType $
+                        SharedType.ForallType ["provided"] [] $
+                            phantom $ SharedType.TypeVariable "provided"
+            , SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () finishName $
+                    SharedType.FunctionType
+                        (phantom $ polymorphicIdentity "accepted")
+                        resultType
+            ]
+    environment <- mkNeutralDjinnEnvironment declarations
+    prepared <- expectShownRight $
+        RawEnvironment.prepareGroundSynthesisEnvironment environment
+    assertBool "the closed goal did not reach its nominal consumer"
+        $ RawEnvironment.preparedEnvironmentQueryUsesParametricData
+            prepared resultType
+    session <- expectShownRight $ Djex.mkDjinnSession environment
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "useClosedNominalChain"
+    request <- expectShownRight $ Djex.mkDjinnRequest SharedQuery.QueryRequest
+        { SharedQuery.requestTarget = target
+        , SharedQuery.requestGoal = resultType
+        , SharedQuery.requestContexts = []
+        , SharedQuery.requestOptions = defaultQueryOptions
+        }
+    result <- expectShownRight $ Djex.runDjinnQuery session request
+    rendered <- mapM
+        (expectShownRight . Djex.renderDjinnCandidateExpression
+            SharedGenerated.Unqualified)
+        $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+    assertEqual "the nominal chain must be the only non-empty inhabitant"
+        ["closedFinish (closedPoly closedToken)"] $
+            filter (not . isInfixOf " of {}") rendered
+
+-- Aggregate eliminations can hide the relevant consumer from a closed goal.
+-- Both a datatype field and a tuple element expose @D Poly -> Result@; the
+-- backward slice must project that result, demand the aggregate provider, and
+-- continue through @poly token@ without broadly enabling unrelated values.
+testNominalAggregateProviderReachability :: IO ()
+testNominalAggregateProviderReachability = do
+    let tokenName = sharedName "AggregateToken"
+        resultName = sharedName "AggregateResult"
+        dataName = sharedName "AggregateEmpty"
+        holderName = sharedName "AggregateHolder"
+        holderConstructorName = sharedName "AggregateHolderValue"
+        tokenValueName = sharedName "aggregateToken"
+        polyName = sharedName "aggregatePoly"
+        holderValueName = sharedName "aggregateHolder"
+        tupleValueName = sharedName "aggregateTuple"
+        parameter = SharedDeclaration.TypeParameter "parameter" Nothing
+        nominal name = SharedType.TypeConstructor name
+        dataType element = SharedType.TypeApplication
+            (nominal dataName) element
+        polymorphicIdentity binder = SharedType.ForallType [binder] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable binder)
+                (SharedType.TypeVariable binder)
+        tokenType = nominal tokenName
+        resultType = nominal resultName
+        consumerType = SharedType.FunctionType
+            (dataType $ polymorphicIdentity "accepted") resultType
+        baseDeclarations =
+            [ SharedDeclaration.AbstractTypeDeclaration () tokenName
+                SharedKind.ProperTypeKind
+            , SharedDeclaration.AbstractTypeDeclaration () resultName
+                SharedKind.ProperTypeKind
+            , SharedDeclaration.DataTypeDeclaration () dataName [parameter] []
+            , SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () tokenValueName tokenType
+            , SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () polyName $
+                    SharedType.FunctionType tokenType $
+                        SharedType.ForallType ["provided"] [] $
+                            dataType $ SharedType.TypeVariable "provided"
+            ]
+        holderDeclaration =
+            SharedDeclaration.DataTypeDeclaration () holderName []
+                [ SharedDeclaration.DataConstructor () holderConstructorName
+                    [consumerType]
+                ]
+        holderDeclarations =
+            [ holderDeclaration
+            , SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () holderValueName $
+                    nominal holderName
+            ]
+        tupleDeclarations =
+            [ SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature () tupleValueName $
+                    SharedType.TupleType SharedName.Boxed
+                        [consumerType, tokenType]
+            ]
+        usesAll fragments source =
+            all (`isInfixOf` source) fragments &&
+                not (" of {}" `isInfixOf` source)
+        localHolderGoal = SharedType.FunctionType
+            (nominal holderName) resultType
+        runAggregate targetSpelling additions goal expectedFragments = do
+            environment <- mkNeutralDjinnEnvironment $
+                baseDeclarations ++ additions
+            prepared <- expectShownRight $
+                RawEnvironment.prepareGroundSynthesisEnvironment environment
+            assertBool (targetSpelling ++
+                " did not activate nominal aggregate reachability") $
+                RawEnvironment.preparedEnvironmentQueryUsesParametricData
+                    prepared goal
+            session <- expectShownRight $ Djex.mkDjinnSession environment
+            target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+                sharedName targetSpelling
+            request <- expectShownRight $ Djex.mkDjinnRequest
+                SharedQuery.QueryRequest
+                    { SharedQuery.requestTarget = target
+                    , SharedQuery.requestGoal = goal
+                    , SharedQuery.requestContexts = []
+                    , SharedQuery.requestOptions = defaultQueryOptions
+                    }
+            result <- expectShownRight $ Djex.runDjinnQuery session request
+            rendered <- mapM
+                (expectShownRight . Djex.renderDjinnCandidateExpression
+                    SharedGenerated.Unqualified)
+                $ SharedSearch.batchCandidates
+                $ SharedQuery.resultSearch result
+            assertBool
+                (targetSpelling ++
+                    " did not synthesize its non-empty aggregate path: " ++
+                    show rendered)
+                $ any (usesAll expectedFragments) rendered
+    runAggregate "useAggregateHolder" holderDeclarations resultType
+        [ "case aggregateHolder of"
+        , "AggregateHolderValue"
+        , "aggregatePoly aggregateToken"
+        ]
+    runAggregate "useAggregateTuple" tupleDeclarations resultType
+        ["aggregateTuple", "aggregatePoly aggregateToken"]
+    runAggregate "useLocalAggregateHolder" [holderDeclaration]
+        localHolderGoal
+        [ "\\a ->"
+        , "case a of"
+        , "AggregateHolderValue"
+        , "aggregatePoly aggregateToken"
+        ]
+
 -- The polarized plan constructs either Church projection, while only the
 -- alpha-opaque plan can reuse the exact loaded polytype. Alternative search
 -- must retain all three without granting either plan its own cutoff budget.
@@ -1465,16 +1925,59 @@ testComplementaryRankNPlans = do
         withToken <- declare (AbstractType "Token" KStar) emptyEnvironment
         declare (Function "church" $ churchType "result") withToken
 
-    -- The appended instantiation-axiom plans add the provider's instantiated
-    -- applications to the historical three-candidate union, so the complete
-    -- family needs a larger cutoff to finish.
+    -- Relevance is true here because the goal transports a parametric data
+    -- value. The exact opaque Church provider belongs to a later historical
+    -- structural frontier; it must consume the cutoff before the complementary
+    -- nominal family can transport the data argument directly.
+    let orderingData element = HTApp (HTCon "OrderingData") element
+        polymorphicData binder = HTForall [binder] [] $
+            orderingData $ HTVar binder
+        orderingGoal = HTArrow (polymorphicData "input") $ HTTuple
+            [ orderingData $ polyIdentity "stored"
+            , goal
+            ]
+    orderingEnvironment <- expectRight $ do
+        withToken <- declare (AbstractType "Token" KStar) emptyEnvironment
+        withData <- declare
+            (DataType "OrderingData" ["element"]
+                [("OrderingDataValue", [])])
+            withToken
+        declare (Function "orderingChurch" $ churchType "provided")
+            withData
+    structuralPrefixReport <- run unsortedOptions {optionCutoff = 7}
+        "orderNominalAfterStructuralFrontier" orderingEnvironment orderingGoal
+    structuralPrefix <- realizedClauses
+        "parametric structural-frontier prefix" structuralPrefixReport
+    assertEqual "the low cutoff lost a historical structural frontier"
+        3 $ length structuralPrefix
+    assertBool "the exact structural provider moved behind nominal search"
+        $ any ("(OrderingDataValue, orderingChurch)" `isInfixOf`)
+            structuralPrefix
+    assertBool "nominal search was inserted before the structural prefix ended"
+        $ all (not . isInfixOf "(a, \\b -> orderingChurch b)")
+            structuralPrefix
+
+    nominalThresholdReport <- run unsortedOptions {optionCutoff = 13}
+        "orderNominalAfterStructuralFrontier" orderingEnvironment orderingGoal
+    nominalThreshold <- realizedClauses
+        "nominal search after structural frontier" nominalThresholdReport
+    assertEqual "nominal search changed the historical candidate prefix"
+        structuralPrefix $ take (length structuralPrefix) nominalThreshold
+    assertBool "the nominal candidate did not follow the structural frontier"
+        $ any ("(a, \\b -> orderingChurch b)" `isInfixOf`)
+            nominalThreshold
+
+    -- The appended instantiation-axiom plans add two eta-distinct provider
+    -- applications to the historical three-candidate union. Fully eta-normal
+    -- comparison removes their compact/expanded duplicates without rewriting
+    -- whichever checked spelling appeared first.
     complete <- run
         unsortedOptions {optionCutoff = 60} "allRankNPlans" environment goal
     assertEqual "complementary plans did not finish within the global cutoff"
         SharedSearch.Finished $ reportCompletion complete
     allClauses <- realizedClauses "complementary rank-N plans" complete
     assertEqual "the plan union lost or duplicated a candidate"
-        7 $ length allClauses
+        5 $ length allClauses
     assertBool "the opaque church candidate disappeared behind polarized hits"
         $ any ("church" `isInfixOf`) allClauses
 
@@ -1675,6 +2178,33 @@ testComplementaryRankNPlans = do
     realizedClauses description report = case reportOutcome report of
         Realized clauses -> return clauses
         outcome -> fail $ description ++ " failed: " ++ show outcome
+
+testMultiArgumentEtaDeduplication :: IO ()
+testMultiArgumentEtaDeduplication = do
+    target <- expectShownRight $ SharedGenerated.mkDefinitionName $
+        sharedName "deduplicatedEta"
+    let selector = sharedName "etaSelector"
+        compact = SharedGenerated.FunctionClause target [] $
+            SharedGenerated.Global selector
+        expanded first second = SharedGenerated.FunctionClause target
+            [ SharedGenerated.Bind first
+            , SharedGenerated.Bind second
+            ] $
+            SharedGenerated.Apply
+                (SharedGenerated.Apply
+                    (SharedGenerated.Global selector)
+                    (SharedGenerated.Local first))
+                (SharedGenerated.Local second)
+        firstExpanded = expanded "record" "argument"
+        alphaRenamed = expanded "renamedRecord" "renamedArgument"
+    assertEqual "eta de-duplication rewrote the first expanded candidate"
+        [firstExpanded] $
+            DjinnGenerated.deduplicateEtaEquivalentClauses
+                [firstExpanded, alphaRenamed, compact]
+    assertEqual "eta de-duplication did not retain the first compact candidate"
+        [compact] $
+            DjinnGenerated.deduplicateEtaEquivalentClauses
+                [compact, alphaRenamed]
 
 testSharedDeclarationAdapter :: IO ()
 testSharedDeclarationAdapter = do

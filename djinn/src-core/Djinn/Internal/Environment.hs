@@ -10,9 +10,13 @@ module Djinn.Internal.Environment (
     preparedEnvironmentSource, preparedEnvironmentInventory,
     checkPreparedTypesKinds, checkPreparedSynthesisTypesKinds,
     preparedEnvironmentSynthesisFormulaTranslator,
+    preparedEnvironmentNominalSynthesisFormulaTranslator,
     preparedEnvironmentPolarizedSynthesisFormulaPlans,
+    preparedEnvironmentNominalPolarizedSynthesisFormulaPlans,
     preparedEnvironmentFunctionPremises,
     preparedEnvironmentPolarizedFunctionPremises,
+    preparedEnvironmentNominalPolarizedFunctionPremises,
+    preparedEnvironmentQueryUsesParametricData,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
     elaboratePreparedSynthesisTypes,
     SynthesisEnvironment, SynthesisInventory,
@@ -81,7 +85,32 @@ data PreparedEnvironment = PreparedEnvironment
     (SharedClass.PreparedClassIndex HSymbol)
     [(Symbol, Formula)]
     PreparedPolarizedPremises
+    PreparedPolarizedPremises
     PreparedFormulaCompiler
+    PreparedFormulaCompiler
+    PreparedNominalReachability
+
+-- A small query-directed dependency index for deciding whether the nominal
+-- datatype projection is relevant. Value and aggregate-projection results are
+-- matched backward from the goal; selecting a provider adds the positive
+-- demand structure of its domains. The source types have already crossed
+-- synonym expansion.
+data PreparedNominalReachability = PreparedNominalReachability
+    (Set.Set SharedName.Name)
+    PreparedDatatypeProjections
+    [PreparedValueFlow]
+
+data PreparedValueFlow = PreparedValueFlow
+    (Set.Set HSymbol)
+    [SharedType.Type HSymbol]
+    (SharedType.Type HSymbol)
+
+data PreparedDatatypeProjection = PreparedDatatypeProjection
+    [HSymbol]
+    [SharedType.Type HSymbol]
+
+type PreparedDatatypeProjections =
+    Map.Map SharedName.Name PreparedDatatypeProjection
 
 -- Alternate opaque views of a premise are safe and do not themselves weaken
 -- negative evidence. The aggregate bit records only whether a declaration's
@@ -473,6 +502,214 @@ prepareSynthesisFormulaCompiler declarations = do
         mapM synthesisFormulaDefinition declarations
     prepareFormulaCompiler synthesisFormulaTypeView definitions
 
+-- Build the complementary nominal-family compiler from the same checked
+-- declaration stream. Synonyms remain definitions so aliases still normalize
+-- to their real heads, while parametric datatypes are deliberately absent: a
+-- saturated application such as @MaybeLike (forall a. a -> a)@ therefore
+-- follows the ordinary unknown-head path and becomes one alpha-aware atom
+-- containing the complete application. Nullary datatypes remain structural;
+-- without an argument to preserve they need no second projection. Abstract
+-- declarations retain their historical handling. This is a search projection
+-- only; the structural compiler above remains authoritative for constructor
+-- introduction and elimination.
+prepareNominalSynthesisFormulaCompiler
+    :: [SharedDeclaration.Declaration HSymbol kindVariable annotation]
+    -> Either String PreparedFormulaCompiler
+prepareNominalSynthesisFormulaCompiler declarations = do
+    definitions <- concat `fmap`
+        mapM nominalFormulaDefinition declarations
+    prepareFormulaCompiler synthesisFormulaTypeView definitions
+  where
+    nominalFormulaDefinition declaration = case declaration of
+        SharedDeclaration.DataTypeDeclaration _ _ (_ : _) _ -> Right []
+        _ -> synthesisFormulaDefinition declaration
+
+prepareValueFlows
+    :: PreparedDatatypeProjections
+    -> SharedType.Type HSymbol
+    -> [PreparedValueFlow]
+prepareValueFlows = prepareValueFlowsWithFreeVariables True
+
+prepareLocalValueFlows
+    :: PreparedDatatypeProjections
+    -> SharedType.Type HSymbol
+    -> [PreparedValueFlow]
+prepareLocalValueFlows = prepareValueFlowsWithFreeVariables False
+
+prepareValueFlowsWithFreeVariables
+    :: Bool
+    -> PreparedDatatypeProjections
+    -> SharedType.Type HSymbol
+    -> [PreparedValueFlow]
+prepareValueFlowsWithFreeVariables includeFreeVariables projections source =
+    positiveResultFlows projections Set.empty flexible domains result
+  where
+    canonical = SharedType.canonicalizeType source
+    (outerBinders, _, body) = SharedType.splitLeadingForalls canonical
+    (domains, result) = SharedType.functionSpine body
+    flexible = Set.fromList outerBinders `Set.union` if includeFreeVariables
+        then SharedType.freeVariables canonical
+        else Set.empty
+
+-- Function parameters introduced while constructing the positive query are
+-- local value providers. Enclosing query binders remain rigid because this
+-- traversal returns only the parameter type itself; an explicit forall inside
+-- that parameter is reopened later by 'prepareLocalValueFlows'. Class
+-- constraints do not introduce term providers in Djinn.
+queryLocalHypotheses
+    :: SharedType.Type HSymbol
+    -> [SharedType.Type HSymbol]
+queryLocalHypotheses source = case SharedType.canonicalizeType source of
+    SharedType.ForallType _ _ body -> queryLocalHypotheses body
+    SharedType.FunctionType parameter result ->
+        parameter : queryLocalHypotheses result
+    SharedType.TupleType _ elements -> concatMap queryLocalHypotheses elements
+    _ -> []
+
+-- A loaded aggregate can provide more than its complete result. Tuple
+-- elimination exposes each element, and an exposed function can in turn
+-- produce its positive result after its parameter is supplied. Retain the
+-- aggregate/function itself as a route too: a query may consume that complete
+-- value directly. Leading result-local foralls are specialization variables,
+-- consistently with ordinary value-flow matching.
+positiveResultFlows
+    :: PreparedDatatypeProjections
+    -> Set.Set SharedName.Name
+    -> Set.Set HSymbol
+    -> [SharedType.Type HSymbol]
+    -> SharedType.Type HSymbol
+    -> [PreparedValueFlow]
+positiveResultFlows projections visited flexible domains source =
+    PreparedValueFlow flexible' domains body : case body of
+        SharedType.FunctionType parameter result ->
+            positiveResultFlows projections visited flexible'
+                (parameter : domains) result
+        SharedType.TupleType _ elements -> concatMap
+            (positiveResultFlows projections visited flexible' domains)
+            elements
+        _ -> datatypeFieldFlows body
+  where
+    canonical = SharedType.canonicalizeType source
+    (binders, _, body) = SharedType.splitLeadingForalls canonical
+    flexible' = Set.fromList binders `Set.union` flexible
+
+    -- Project fields only from this loaded value's actual positive owner
+    -- occurrence. A declaration such as @data Box a = Box a@ therefore cannot
+    -- make an arbitrary rigid goal relevant unless some loaded value first
+    -- provides @Box t@. The visited-head guard keeps even future recursive
+    -- declaration support finite. Multi-constructor fields deliberately
+    -- overapproximate after that owner evidence exists; proof search remains
+    -- authoritative about whether all branches can be eliminated.
+    datatypeFieldFlows typeExpression = case
+            SharedType.applicationSpine typeExpression of
+        (SharedType.TypeConstructor owner, arguments)
+            | owner `Set.notMember` visited
+            , Just (PreparedDatatypeProjection parameters fields) <-
+                Map.lookup owner projections
+            , length parameters == length arguments -> concatMap
+                (positiveResultFlows projections
+                    (Set.insert owner visited) flexible' domains .
+                    specialize parameters arguments)
+                fields
+        _ -> []
+
+    specialize parameters arguments field = case
+            SharedType.substituteTypeVariables
+                (\reserved variable -> Just $ fst $
+                    freshPrimedVariable reserved variable)
+                Set.empty
+                (Map.fromList $ zip parameters arguments)
+                field of
+        Right specialized -> specialized
+        Left failure -> error $
+            "Djinn datatype projection substitution invariant failed: " ++
+                show failure
+
+-- Positive demand structure only: when constructing a function, its result is
+-- demanded and its parameter becomes a local hypothesis. The complete type is
+-- retained as well so a loaded value can discharge the whole demand directly.
+demandStructure
+    :: SharedType.Type HSymbol
+    -> [SharedType.Type HSymbol]
+demandStructure source = SharedCollection.distinctOn
+    SharedTypeAtom.alphaTypeKey $ canonical : nested canonical
+  where
+    canonical = SharedType.canonicalizeType source
+    nested typeExpression = case typeExpression of
+        SharedType.FunctionType _ result -> demandStructure result
+        SharedType.TupleType _ elements -> concatMap demandStructure elements
+        SharedType.ForallType _ _ body -> demandStructure body
+        _ -> []
+
+-- Directional first-order matching is enough for reachability: a provider's
+-- explicit, result-local, and implicit variables may instantiate to the
+-- current demand, while constructors and rigid structure must agree. Nested
+-- quantified types remain alpha-aware atoms, matching the guarded
+-- instantiation policy used by proof search.
+flowMatch
+    :: PreparedValueFlow
+    -> SharedType.Type HSymbol
+    -> Maybe (Map.Map HSymbol (SharedType.Type HSymbol))
+flowMatch (PreparedValueFlow flexible _ result) demand =
+    matchReachableType flexible Map.empty result demand
+
+matchReachableType
+    :: Set.Set HSymbol
+    -> Map.Map HSymbol (SharedType.Type HSymbol)
+    -> SharedType.Type HSymbol
+    -> SharedType.Type HSymbol
+    -> Maybe (Map.Map HSymbol (SharedType.Type HSymbol))
+matchReachableType flexible substitutions source target =
+    case (SharedType.canonicalizeType source,
+            SharedType.canonicalizeType target) of
+        (SharedType.TypeVariable variable, targetType)
+            | variable `Set.member` flexible ->
+                case Map.lookup variable substitutions of
+                    Nothing -> Just $ Map.insert variable targetType
+                        substitutions
+                    Just previous
+                        | SharedTypeAtom.alphaTypeKey previous ==
+                            SharedTypeAtom.alphaTypeKey targetType ->
+                                Just substitutions
+                        | otherwise -> Nothing
+        (SharedType.TypeVariable left, SharedType.TypeVariable right)
+            | left == right -> Just substitutions
+        (SharedType.TypeConstructor left, SharedType.TypeConstructor right)
+            | left == right -> Just substitutions
+        (SharedType.TypeApplication leftFunction leftArgument,
+                SharedType.TypeApplication rightFunction rightArgument) -> do
+            afterFunction <- matchReachableType flexible substitutions
+                leftFunction rightFunction
+            matchReachableType flexible afterFunction
+                leftArgument rightArgument
+        (SharedType.FunctionType leftParameter leftResult,
+                SharedType.FunctionType rightParameter rightResult) -> do
+            afterParameter <- matchReachableType flexible substitutions
+                leftParameter rightParameter
+            matchReachableType flexible afterParameter leftResult rightResult
+        (SharedType.TupleType leftBoxity leftElements,
+                SharedType.TupleType rightBoxity rightElements)
+            | leftBoxity == rightBoxity ->
+                matchReachableTypes flexible substitutions
+                    leftElements rightElements
+        (left@SharedType.ForallType{}, right@SharedType.ForallType{})
+            | SharedTypeAtom.alphaTypeKey left ==
+                SharedTypeAtom.alphaTypeKey right -> Just substitutions
+        _ -> Nothing
+
+matchReachableTypes
+    :: Set.Set HSymbol
+    -> Map.Map HSymbol (SharedType.Type HSymbol)
+    -> [SharedType.Type HSymbol]
+    -> [SharedType.Type HSymbol]
+    -> Maybe (Map.Map HSymbol (SharedType.Type HSymbol))
+matchReachableTypes _ substitutions [] [] = Just substitutions
+matchReachableTypes flexible substitutions
+        (source : sources) (target : targets) = do
+    next <- matchReachableType flexible substitutions source target
+    matchReachableTypes flexible next sources targets
+matchReachableTypes _ _ _ _ = Nothing
+
 synthesisFormulaDefinition
     :: SharedDeclaration.Declaration HSymbol kindVariable annotation
     -> Either String
@@ -555,6 +792,8 @@ sealPreparedEnvironment
 sealPreparedEnvironment expansion = do
     compiler <- first InvalidSynthesisFormulaDefinitions $
         prepareSynthesisFormulaCompiler expandedDeclarations
+    nominalCompiler <- first InvalidSynthesisFormulaDefinitions $
+        prepareNominalSynthesisFormulaCompiler expandedDeclarations
     -- Moving an invariant translation failure from query execution to sealing
     -- is deliberate. Kind checking plus whole-definition graph validation
     -- excludes such failures for supported declarations, and eager preparation
@@ -565,15 +804,16 @@ sealPreparedEnvironment expansion = do
             | SharedDeclaration.ValueDeclaration signature <-
                 expandedDeclarations
             ]
+    nominalTranslatedPremises <- first InvalidSynthesisFormulaDefinitions $
+        mapM (translateFunction nominalCompiler) $ zip [1 ..]
+            [ signature
+            | SharedDeclaration.ValueDeclaration signature <-
+                expandedDeclarations
+            ]
     let premises = map opaquePremise translatedPremises
-        premiseVariantGroups = map polarizedPremiseVariants translatedPremises
-        polarizedPremises = PreparedPolarizedPremises
-            ( concatMap primaryPremise premiseVariantGroups ++
-                concatMap alternatePremises premiseVariantGroups
-            )
-            (any premiseTranslationIncomplete translatedPremises)
-            (SharedCollection.distinctOn id $
-                concatMap premiseCandidateSpellings translatedPremises)
+        polarizedPremises = preparePolarizedPremises translatedPremises
+        nominalPolarizedPremises =
+            preparePolarizedPremises nominalTranslatedPremises
     let classIndex = SharedClass.prepareClassIndex inventory
     -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
     -- ground kind. Check that backend-specific requirement at sealing while
@@ -582,15 +822,40 @@ sealPreparedEnvironment expansion = do
         SharedClass.preparedClasses classIndex
     -- Force each retained projection so it cannot keep the transient
     -- expanded declaration product alive through an unevaluated selector.
-    prepared `seq` compiler `seq` classIndex `seq`
+    prepared `seq` compiler `seq` nominalCompiler `seq` classIndex `seq`
+        nominalReachability `seq`
         return (PreparedEnvironment
-            prepared classIndex premises polarizedPremises compiler)
+            prepared classIndex premises polarizedPremises
+                nominalPolarizedPremises compiler nominalCompiler
+                nominalReachability)
   where
     prepared =
         SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
     expandedDeclarations =
         SharedTypeSynonym.inventoryExpansionDeclarations expansion
     inventory = SharedTypeSynonym.preparedInventory prepared
+    parametricDataNames = Set.fromList
+        [ name
+        | SharedDeclaration.DataTypeDeclaration _ name (_ : _) _ <-
+            expandedDeclarations
+        ]
+    datatypeProjections = Map.fromList
+        [ ( owner
+          , PreparedDatatypeProjection
+                (map SharedDeclaration.parameterVariable parameters)
+                (concatMap SharedDeclaration.constructorFields constructors)
+          )
+        | SharedDeclaration.DataTypeDeclaration
+            _ owner parameters constructors <- expandedDeclarations
+        ]
+    nominalReachability = PreparedNominalReachability
+        parametricDataNames
+        datatypeProjections
+        [ flow
+        | SharedDeclaration.ValueDeclaration signature <- expandedDeclarations
+        , flow <- prepareValueFlows datatypeProjections
+            (SharedDeclaration.valueType signature)
+        ]
 
     translateFunction compiler (namespace, signature) = do
         name <- synthesisValueSymbol FunctionOwner "function" $
@@ -615,6 +880,17 @@ sealPreparedEnvironment expansion = do
 
     opaquePremise (symbol, plans, _) =
         (symbol, exactOpaqueFormulaPlan plans)
+
+    preparePolarizedPremises translated = PreparedPolarizedPremises
+        ( concatMap primaryPremise premiseVariantGroups ++
+            concatMap alternatePremises premiseVariantGroups
+        )
+        (any premiseTranslationIncomplete translated)
+        (SharedCollection.distinctOn id $
+            concatMap premiseCandidateSpellings translated)
+      where
+        premiseVariantGroups = map polarizedPremiseVariants translated
+
     polarizedPremiseVariants (symbol, plans, _) =
         [ (symbol, formula)
         | formula <- SharedCollection.distinctOn id $
@@ -671,13 +947,93 @@ preparedEnvironmentWitness
     :: PreparedEnvironment
     -> PreparedSynthesisInventory
 preparedEnvironmentWitness
-        (PreparedEnvironment prepared _ _ _ _) =
+        (PreparedEnvironment prepared _ _ _ _ _ _ _) =
     prepared
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
 preparedEnvironmentInventory =
     SharedTypeSynonym.preparedInventory .
         preparedEnvironmentWitness
+
+-- | Whether an already elaborated query can reach a datatype with at least
+-- one parameter. The goal is checked directly, then its positive result
+-- structure seeds a backward slice through loaded value codomains and
+-- domains. This admits closed goals whose consumer/provider chain contains
+-- the datatype without letting unrelated sealed premises perturb historical
+-- searches. Callers elaborate aliases first, so aliases remain transparent.
+preparedEnvironmentQueryUsesParametricData
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> Bool
+preparedEnvironmentQueryUsesParametricData
+        (PreparedEnvironment _ _ _ _ _ _ _
+            (PreparedNominalReachability
+                parametricDataNames datatypeProjections valueFlows))
+        source =
+    reachesParametricData (demandStructure source) $
+        localValueFlows ++ valueFlows
+  where
+    -- A function parameter in the elaborated query is already available when
+    -- its result is constructed, so its complete value and finite aggregate
+    -- projections are zero-domain providers. Build those projections from the
+    -- same specialized declaration templates as loaded values. Merely
+    -- declaring a parametric datatype still contributes no flow of its own.
+    localValueFlows =
+        [ flow
+        | hypothesis <- queryLocalHypotheses source
+        , flow <- prepareLocalValueFlows datatypeProjections hypothesis
+        ]
+
+    reachesParametricData frontier remaining
+        | any usesParametricData frontier = True
+        | null reached = False
+        | any (flowUsesParametricData . fst) reached = True
+        | otherwise = reachesParametricData expanded unreached
+      where
+        reached =
+            [ (flow, matches)
+            | flow <- remaining
+            , let matches =
+                    [ substitutions
+                    | demand <- frontier
+                    , Just substitutions <- [flowMatch flow demand]
+                    ]
+            , not $ null matches
+            ]
+        unreached =
+            [ flow
+            | flow <- remaining
+            , not $ any (hasFlowMatch flow) frontier
+            ]
+        expanded = SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
+            frontier ++
+                [ demand
+                | (flow, matches) <- reached
+                , substitutions <- matches
+                , demand <- flowDemands flow substitutions
+                ]
+
+    hasFlowMatch flow demand = case flowMatch flow demand of
+        Just _ -> True
+        Nothing -> False
+
+    usesParametricData typeExpression = not $ Set.null $
+        SharedType.typeConstructors typeExpression `Set.intersection`
+            parametricDataNames
+    flowUsesParametricData (PreparedValueFlow _ domains result) =
+        any usesParametricData $ result : domains
+    flowDemands (PreparedValueFlow _ domains _) substitutions =
+        concatMap (demandStructure . specialize substitutions) domains
+
+    specialize substitutions typeExpression = case
+            SharedType.substituteTypeVariables
+                (\reserved variable -> Just $ fst $
+                    freshPrimedVariable reserved variable)
+                Set.empty substitutions typeExpression of
+        Right specialized -> specialized
+        Left failure -> error $
+            "Djinn nominal reachability substitution invariant failed: " ++
+                show failure
 
 preparedEnvironmentKindAssumptions
     :: PreparedEnvironment
@@ -734,7 +1090,7 @@ preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
     -> [(Symbol, Formula)]
 preparedEnvironmentFunctionPremises
-        (PreparedEnvironment _ _ premises _ _) = premises
+        (PreparedEnvironment _ _ premises _ _ _ _ _) = premises
 
 -- | Every sound rank-N view of each premise, with all historical primary views
 -- first in declaration order, paired with whether any primary translation had
@@ -745,7 +1101,20 @@ preparedEnvironmentPolarizedFunctionPremises
     -> ([(Symbol, Formula)], Bool, [String])
 preparedEnvironmentPolarizedFunctionPremises
         (PreparedEnvironment _ _ _
-            (PreparedPolarizedPremises premises incomplete spellings) _) =
+            (PreparedPolarizedPremises premises incomplete spellings)
+            _ _ _ _) =
+        (premises, incomplete, spellings)
+
+-- | The complementary premise cache in which datatype applications retain
+-- their complete nominal heads and arguments. It is searched only by the
+-- matching nominal goal family, after the primary historical structural plan.
+preparedEnvironmentNominalPolarizedFunctionPremises
+    :: PreparedEnvironment
+    -> ([(Symbol, Formula)], Bool, [String])
+preparedEnvironmentNominalPolarizedFunctionPremises
+        (PreparedEnvironment _ _ _ _
+            (PreparedPolarizedPremises premises incomplete spellings)
+            _ _ _) =
         (premises, incomplete, spellings)
 
 -- | Translate a checked shared type directly. Stable raw and native queries
@@ -758,7 +1127,18 @@ preparedEnvironmentSynthesisFormulaTranslator
     -> SharedType.Type HSymbol
     -> Either String Formula
 preparedEnvironmentSynthesisFormulaTranslator
-        (PreparedEnvironment _ _ _ _ compiler) =
+        (PreparedEnvironment _ _ _ _ _ compiler _ _) =
+    compileSynthesisFormula compiler
+
+-- | Translate with datatypes retained as complete nominal applications. This
+-- translator must accompany the nominal goal and premise projection when
+-- constructing erased hypothesis-instantiation axioms.
+preparedEnvironmentNominalSynthesisFormulaTranslator
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> Either String Formula
+preparedEnvironmentNominalSynthesisFormulaTranslator
+        (PreparedEnvironment _ _ _ _ _ _ compiler _) =
     compileSynthesisFormula compiler
 
 -- | Translate a checked positive goal into one nonempty, categorized plan
@@ -770,7 +1150,19 @@ preparedEnvironmentPolarizedSynthesisFormulaPlans
     -> SharedType.Type HSymbol
     -> Either String PolarizedFormulaPlans
 preparedEnvironmentPolarizedSynthesisFormulaPlans
-        (PreparedEnvironment _ _ _ _ compiler) =
+        (PreparedEnvironment _ _ _ _ _ compiler _ _) =
+    compilePolarizedSynthesisFormulaPlans 0 PositiveFormula compiler
+
+-- | Compile the complementary positive goal family without unfolding
+-- parametric datatypes. The caller marks this approximation unsuitable for
+-- negative evidence and schedules it after the primary historical structural
+-- plan.
+preparedEnvironmentNominalPolarizedSynthesisFormulaPlans
+    :: PreparedEnvironment
+    -> SharedType.Type HSymbol
+    -> Either String PolarizedFormulaPlans
+preparedEnvironmentNominalPolarizedSynthesisFormulaPlans
+        (PreparedEnvironment _ _ _ _ _ _ compiler _) =
     compilePolarizedSynthesisFormulaPlans 0 PositiveFormula compiler
 
 projectPreparedInventory
@@ -797,7 +1189,7 @@ lookupPreparedSynthesisClass
         , [(SharedName.Name, SharedType.Type HSymbol)]
         )
 lookupPreparedSynthesisClass name
-        (PreparedEnvironment _ classes _ _ _) = do
+        (PreparedEnvironment _ classes _ _ _ _ _ _) = do
     preparedClass <- SharedClass.lookupPreparedClass name classes
     case projectPreparedSynthesisClass preparedClass of
         Right projected -> Just projected

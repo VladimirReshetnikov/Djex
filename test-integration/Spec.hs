@@ -551,6 +551,169 @@ tests = testGroup "Djex facade"
           ("GHC rejected generated visible type application\nstdout:\n"
             ++ output ++ "\nstderr:\n" ++ errors)
           ExitSuccess exitCode
+  , testCase "render nominal Djinn transport accepted by GHC 9.12" $ do
+      dataName <- expectRight $ parseName "MaybeLike"
+      nothingName <- expectRight $ parseName "NothingLike"
+      justName <- expectRight $ parseName "JustLike"
+      resultName <- expectRight $ parseName "NominalResult"
+      finishName <- expectRight $ parseName "finish"
+      targetName <- expectRight $ mkIdentifier "finishNominalMaybeLike"
+      target <- expectRight $ mkDefinitionName targetName
+      let parameter = TypeParameter "parameter" Nothing
+          parameterType = TypeVariable "parameter"
+          maybeType element = TypeApplication
+            (TypeConstructor dataName) element
+          polymorphic binder = ForallType [binder] [] $
+            FunctionType (TypeVariable binder) (TypeVariable binder)
+          resultType = TypeConstructor resultName
+          declarations =
+            [ AbstractTypeDeclaration () resultName ProperTypeKind
+            , DataTypeDeclaration () dataName [parameter]
+                [ DataConstructor () nothingName []
+                , DataConstructor () justName [parameterType]
+                ]
+            , ValueDeclaration $ ValueSignature () finishName $
+                FunctionType (maybeType $ polymorphic "accepted") resultType
+            ]
+          goal = FunctionType
+            (ForallType ["supplied"] [] $
+              maybeType $ TypeVariable "supplied")
+            resultType
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      request <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+        }
+      result <- expectRight $ runDjinnQuery session request
+      rendered <- traverse
+        (expectRight . renderDjinnCandidateDefinition Unqualified)
+        $ batchCandidates $ resultSearch result
+      let expected = "finishNominalMaybeLike a = finish a"
+      generated <- case filter (== expected) rendered of
+        candidate : _ -> pure candidate
+        [] -> fail $ "Djinn omitted required eta expansion: " ++ show rendered
+
+      let fixture = unlines
+            [ "module NominalDjinnTransportFixture where"
+            , ""
+            , "data MaybeLike a = NothingLike | JustLike a"
+            , ""
+            , "data NominalResult = NominalResult"
+            , ""
+            , "finish :: MaybeLike (forall a. a -> a) -> NominalResult"
+            , "finish _ = NominalResult"
+            , ""
+            , "finishNominalMaybeLike ::"
+            , "  (forall a. MaybeLike a) -> NominalResult"
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XRankNTypes"
+          , "-XImpredicativeTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected generated nominal Djinn transport\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors)
+          ExitSuccess exitCode
+  , testCase "retain nominal eta through selector presentation for GHC" $ do
+      dataName <- expectRight $ parseName "SelectorData"
+      dataConstructorName <- expectRight $ parseName "SelectorDataValue"
+      holderName <- expectRight $ parseName "SelectorHolder"
+      holderConstructorName <- expectRight $ parseName "SelectorHolderValue"
+      selectorName <- expectRight $ parseName "selectorField"
+      resultName <- expectRight $ parseName "SelectorResult"
+      targetName <- expectRight $ mkIdentifier "finishThroughSelector"
+      target <- expectRight $ mkDefinitionName targetName
+      let parameter = TypeParameter "parameter" Nothing
+          parameterType = TypeVariable "parameter"
+          dataType element = TypeApplication
+            (TypeConstructor dataName) element
+          polymorphic binder = ForallType [binder] [] $
+            FunctionType (TypeVariable binder) (TypeVariable binder)
+          resultType = TypeConstructor resultName
+          holderType = TypeConstructor holderName
+          fieldType = FunctionType
+            (dataType $ polymorphic "accepted") resultType
+          declarations =
+            [ AbstractTypeDeclaration () resultName ProperTypeKind
+            , DataTypeDeclaration () dataName [parameter]
+                [DataConstructor () dataConstructorName [parameterType]]
+            , DataTypeDeclaration () holderName []
+                [DataConstructor () holderConstructorName [fieldType]]
+            ]
+          goal = FunctionType holderType $
+            FunctionType
+              (ForallType ["supplied"] [] $
+                dataType $ TypeVariable "supplied")
+              resultType
+          selectors = Map.singleton (holderConstructorName, 0) selectorName
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      request <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+        }
+      result <- expectRight $ runDjinnQuery session request
+      rendered <- traverse
+        (expectRight . renderDjinnCandidateDefinition Unqualified
+          . fmap (projectFieldSelectorsWithoutEta selectors))
+        $ batchCandidates $ resultSearch result
+      let expected =
+            "finishThroughSelector a b = selectorField a b"
+      generated <- case filter (== expected) rendered of
+        candidate : _ -> pure candidate
+        [] -> fail $
+          "selector presentation omitted protected eta expansion: "
+            ++ show rendered
+
+      let fixture = unlines
+            [ "module NominalSelectorFixture where"
+            , ""
+            , "data SelectorData a = SelectorDataValue a"
+            , ""
+            , "data SelectorResult = SelectorResult"
+            , ""
+            , "data SelectorHolder = SelectorHolderValue"
+            , "  { selectorField ::"
+            , "      SelectorData (forall a. a -> a) -> SelectorResult"
+            , "  }"
+            , ""
+            , "finishThroughSelector ::"
+            , "  SelectorHolder ->"
+            , "  (forall a. SelectorData a) -> SelectorResult"
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XRankNTypes"
+          , "-XImpredicativeTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected selector-presented nominal transport\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors)
+          ExitSuccess exitCode
   , testCase "run a checked Exference session through the shared envelope" $ do
       checked <- expectRight $ checkSourceEnvironment emptyExferenceSource
       session <- expectRight $ ExferenceCompatibility.mkExferenceSession checked

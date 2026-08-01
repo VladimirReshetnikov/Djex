@@ -307,7 +307,7 @@ testBoundedRankNSearch = do
         [ "instantiate ? (forall a. a) -> b"
         , "twoOpaque ? (forall a. a) -> (forall b. b -> q) -> " ++
             "((forall c. c), (forall d. d -> q), (forall e. e -> e))"
-        , "inconclusive ? (forall a b c d. a -> (a, b, c, d)) -> e"
+        , "inconclusive ? (forall a b c d e. a -> (a, b, c, d, e)) -> f"
         , ":quit"
         ]
     assertContains "hypothesis instantiation realizes the opaque elimination"

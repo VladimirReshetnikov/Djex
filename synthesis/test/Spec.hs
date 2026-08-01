@@ -4455,13 +4455,46 @@ generatedTests = testGroup "generated syntax"
           usedTwice = Let (Bind xBinder) (global "shared")
             $ Tuple [Local xUse, Local xBinder]
       simplifyExpressionBy fst eta @?= global "function"
+      simplifyExpressionWithoutEtaBy fst eta @?= eta
       simplifyExpressionBy fst captured @?= captured
       simplifyExpressionBy fst nestedPatternCapture @?= nestedPatternCapture
       simplifyExpressionBy fst shadowed @?=
         Lambda [Bind xUse] (Local xBinder)
       simplifyExpressionBy fst inlined @?=
         Apply (global "consume") (global "value")
+      simplifyExpressionWithoutEtaBy fst inlined @?=
+        Apply (global "consume") (global "value")
       simplifyExpressionBy fst usedTwice @?= usedTwice
+  , testCase "project selectors without contracting protected eta" $ do
+      let targetName = right $ mkIdentifier "projected"
+          target = right $ mkDefinitionName targetName
+          recordName = right $ mkIdentifier "Record"
+          selectorName = right $ mkIdentifier "recordField"
+          selectors = Map.singleton (recordName, 0) selectorName
+          record = "record"
+          argument = "argument"
+          field = "field"
+          source = FunctionClause target [Bind record, Bind argument] $
+            Apply
+              (Case (Local record)
+                [(Constructor recordName [Bind field], Local field)])
+              (Local argument)
+          distributedSource =
+            FunctionClause target [Bind record, Bind argument] $
+              Case (Local record)
+                [ ( Constructor recordName [Bind field]
+                  , Apply (Local field) (Local argument)
+                  )
+                ]
+          projectedBody = Apply
+            (Apply (Global selectorName) (Local record))
+            (Local argument)
+          projected = FunctionClause target
+            [Bind record, Bind argument] projectedBody
+      map (projectFieldSelectors selectors) [source, distributedSource] @?=
+        replicate 2 (FunctionClause target [] $ Global selectorName)
+      map (projectFieldSelectorsWithoutEta selectors)
+          [source, distributedSource] @?= replicate 2 projected
   , testCase "render local hints with fallback, reservations, and policy" $ do
       let namespace = right $ mkModuleName "Data.List"
           mapping = right $ mkQualifiedIdentifier namespace "map"

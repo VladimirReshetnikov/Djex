@@ -75,17 +75,22 @@ import qualified Language.Haskell.Synthesis.Type as SharedType
 
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
+import Djinn.Internal.Generated (deduplicateEtaEquivalentClauses)
 import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation
     ( eliminateInstantiationEvidence
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
     , instantiationAxioms
+    , usesInstantiationEvidence
     )
 import Djinn.Internal.LJT
 import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
-import Djinn.Internal.ProofToGenerated (termToGeneratedClause)
+import Djinn.Internal.ProofToGenerated
+    ( termToGeneratedClause
+    , termToGeneratedClauseWithoutEta
+    )
 import Djinn.Internal.Type
 import Djinn.Internal.TypeFormula
     ( PolarizedFormulaPlans
@@ -843,6 +848,8 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
         contexts
     let translatePlans =
             preparedEnvironmentPolarizedSynthesisFormulaPlans prepared
+        translateNominalPlans =
+            preparedEnvironmentNominalPolarizedSynthesisFormulaPlans prepared
         translateType translator label source =
             first (label ++) $ translator source
     -- Contexts have been checked against the same inventory and kind scope as
@@ -853,9 +860,17 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
     -- which the synthesized term does not require a class method.
     plans <- translatorFailure $
         translateType translatePlans "goal type: " elaboratedGoal
+    let parametricDataRelevant =
+            preparedEnvironmentQueryUsesParametricData prepared elaboratedGoal
+    nominalPlans <- if parametricDataRelevant
+        then translatorFailure $
+            translateType translateNominalPlans
+                "nominal goal type: " elaboratedGoal
+        else Right plans
     searchPreparedFormula options prepared target
         (SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal)
-        plans
+        parametricDataRelevant
+        plans nominalPlans
   where
     translatorFailure = first DjinnInternalQueryFailure
 
@@ -901,11 +916,16 @@ searchPreparedFormula
     -> PreparedEnvironment
     -> SharedGenerated.DefinitionName
     -> [HSymbol]
+    -> Bool
+    -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target goalVariables formulaPlans = do
+searchPreparedFormula options prepared target goalVariables
+        parametricDataRelevant formulaPlans nominalFormulaPlans = do
     let (premises, premiseTranslationIncomplete, premiseSpellings) =
             preparedEnvironmentPolarizedFunctionPremises prepared
+        (nominalPremises, _, nominalPremiseSpellings) =
+            preparedEnvironmentNominalPolarizedFunctionPremises prepared
         collectAcrossPlans =
             optionAlternatives options || optionSorted options
         primary = primaryFormulaPlan formulaPlans
@@ -933,6 +953,16 @@ searchPreparedFormula options prepared target goalVariables formulaPlans = do
             | formula <- alternativeForms
             ]
         plans = SharedCollection.distinctOn fst rawPlans
+        nominalPlans = SharedCollection.distinctOn fst
+            [ (formula, False)
+            | formula <- formulaFamilyForms nominalFormulaPlans
+            ]
+        nominalProjectionDistinct =
+            map fst nominalPlans /= map fst plans ||
+                nominalPremises /= premises
+        useNominalProjection =
+            parametricDataRelevant &&
+                not primarySound && nominalProjectionDistinct
         -- The candidate spellings are source-level facts: the goal's free
         -- variables, every opened-forall skolem of the goal plans, and the
         -- sealed premise scopes. No rendered atom text is parsed back.
@@ -945,20 +975,52 @@ searchPreparedFormula options prepared target goalVariables formulaPlans = do
             (map snd premises)
         axiomSymbols = instantiationAxiomSymbols axioms
         axiomPremises = instantiationAxiomPremises axioms
-        -- Instantiation axioms search only after every historical plan, and
-        -- under the shared global cutoff and fuel. Running them first would
-        -- let one polymorphic hypothesis flood the candidate stream and
-        -- starve the frontier plans whose exact-transport candidates rank
-        -- best. A query the historical family already decides therefore
-        -- keeps its exact results, ranking, and completion behavior.
-        searchPlans =
+        nominalAxioms = instantiationAxioms
+            (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
+            (goalVariables ++
+                polarizedFormulaPlanSkolems nominalFormulaPlans ++
+                nominalPremiseSpellings)
+            (map fst nominalPlans)
+            (map snd nominalPremises)
+        nominalAxiomSymbols = instantiationAxiomSymbols nominalAxioms
+        nominalAxiomPremises = instantiationAxiomPremises nominalAxioms
+        -- Preserve the complete historical structural/no-axiom prefix. This
+        -- keeps first-result behavior, frontier ordering, and finite-budget
+        -- observations stable; the nominal family shares only the cutoff and
+        -- fuel left by that prefix and still precedes the structural axiom
+        -- phase which previously formed the appended transport tail.
+        structuralSearchPlans =
             [ (premises, Set.empty, form, sound)
             | (form, sound) <- plans
-            ] ++
+            ]
+        structuralAxiomSearchPlans =
             [ (premises ++ axiomPremises, axiomSymbols, form, False)
             | not (null axiomPremises)
             , (form, _) <- plans
             ]
+        -- The nominal-data family is a complementary proof-producing
+        -- approximation, never a refutation. Its premise views and erased
+        -- instantiation axioms are compiled independently with the matching
+        -- nominal translator, so structural candidate caps and ordering are
+        -- unchanged. Pair each plain nominal form with its guarded transport
+        -- form before moving to the next frontier; policy remains part of the
+        -- search plan even when a formula happens to equal a structural view.
+        nominalSearchPlans
+            | not useNominalProjection = []
+            | otherwise = concatMap nominalFormSearchPlans nominalPlans
+        nominalFormSearchPlans (form, _) =
+            (nominalPremises, Set.empty, form, False) :
+            [ ( nominalPremises ++ nominalAxiomPremises
+              , nominalAxiomSymbols
+              , form
+              , False
+              )
+            | not (null nominalAxiomPremises)
+            ]
+        searchPlans =
+            structuralSearchPlans ++
+            nominalSearchPlans ++
+            structuralAxiomSearchPlans
     results <- runPlans collectAcrossPlans
         options (optionCutoff options) [] searchPlans
     mergeFormulaPlanResults options results
@@ -982,6 +1044,16 @@ searchPreparedFormula options prepared target goalVariables formulaPlans = do
                     }
                 nextLimit completed' remaining
             else Right $ reverse completed'
+
+    formulaFamilyForms plans = SharedCollection.distinctOn id $
+        translatedFormula (primaryFormulaPlan plans) :
+        exactOpaqueFormulaPlan plans :
+        map translatedFormula (singleOpaqueFormulaPlans plans) ++
+        map translatedFormula (singleOpenFormulaPlans plans) ++
+        map translatedFormula (pairOpaqueFormulaPlans plans) ++
+        map translatedFormula (pairOpenFormulaPlans plans) ++
+        map translatedFormula (tripleOpaqueFormulaPlans plans) ++
+        map translatedFormula (tripleOpenFormulaPlans plans)
 
 -- Goal plans retain their historical linear prefix: the fully opened
 -- translation, the exact opaque fallback, one independently opaque positive
@@ -1083,17 +1155,23 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
             let (internalProofs, overflow) =
                     splitAt candidateLimit proofs
                 candidateLimitReached = not $ null overflow
+                convertProof internalProof =
+                    let restored = restoreProofTerm proofEnv internalProof
+                        erased = eliminateInstantiationEvidence
+                            axiomSymbols restored
+                        convert
+                            | usesInstantiationEvidence
+                                axiomSymbols restored =
+                                termToGeneratedClauseWithoutEta
+                            | otherwise = termToGeneratedClause
+                    in convert target erased
             -- Every candidate must check against the requested formula
             -- before display names are restored and it is rendered.
             internalFailure "generated an invalid proof" $
                 mapM_ (checkProof internalEnv form) internalProofs
             generatedClauses <- internalFailure
                 "cannot construct generated clause" $
-                mapM
-                    (termToGeneratedClause target .
-                        eliminateInstantiationEvidence axiomSymbols .
-                        restoreProofTerm proofEnv)
-                    internalProofs
+                mapM convertProof internalProofs
             let firstProof = case internalProofs of
                     firstProofTerm : _ -> Just $ show firstProofTerm
                     [] -> Nothing
@@ -1139,7 +1217,13 @@ mergeFormulaPlanResults options results = makeDjinnResult
         result : _ -> result
         [] -> terminalPlan
     mergedClauses = concatMap formulaPlanClauses results
-    distinctClauses = SharedCollection.distinctOn id mergedClauses
+    -- Axiom-consuming proofs retain eta expansion because Haskell simplified
+    -- subsumption is not closed under the propositional eta law. Use the
+    -- historical eta-normal form only for alpha-aware de-duplication. This
+    -- collapses safe expanded spellings against their earlier compact
+    -- candidate without rewriting the first, potentially eta-sensitive output
+    -- we retain.
+    distinctClauses = deduplicateEtaEquivalentClauses mergedClauses
     unrankedCandidates = map makeCandidate distinctClauses
     candidates
         | optionSorted options = sortOn

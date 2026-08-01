@@ -270,7 +270,8 @@ presentDjinn options fieldSelectors result = case
     candidateDetails
     (const True)
     [result]
-  candidates = map (fmap $ projectFieldSelectors fieldSelectors)
+  candidates = map
+    (fmap $ projectFieldSelectorsWithoutEta fieldSelectors)
     $ selectionCandidates selection
   progress = selectionProgress selection
 

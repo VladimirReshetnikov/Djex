@@ -70,6 +70,8 @@ property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. Exference's finite recursive-pattern rule
 is recorded in the
 [2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
+Djinn's widened bounded hypothesis-instantiation rule is recorded in the
+[2026-08-01 four-binder instantiation report](docs/reports/2026-08-01-four-binder-instantiation.md).
 Djinn's cubic extension of its bounded rank-N plan family is recorded in the
 [2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md),
 following the
@@ -270,9 +272,12 @@ independent sites, a proof requiring exactly four open and four opaque
 occurrences may remain inconclusive. When the transported hypotheses are
 instantiable, the appended
 hypothesis-instantiation plans cover many omitted middle subsets, but chains
-beyond three binders, constrained chains, and candidates outside the sequent's
+beyond four binders, constrained chains, and candidates outside the sequent's
 own vocabulary stay out of reach, and the instantiation closure is capped per
-scheme and per query. Those caps lose completeness only, never soundness. An
+scheme and per query. Four-binder tuple selection fairly mixes source-order,
+repeated, sparse, and Cartesian shapes while one- through three-binder schemes
+retain their historical order. Those caps lose completeness only, never
+soundness. An
 incomplete primary premise also makes negative evidence conservative for the
 whole query. The examples use the same
 Church Boolean and Church List shapes as the

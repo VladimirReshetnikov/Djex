@@ -149,7 +149,7 @@ deliberately bounded rank-N rule families:
   preserve polarity; crossing an arrow parameter reverses it. Context methods
   are not LJT premises, so the body must be dictionary-independent. Djinn also
   eliminates a hypothesis-side
-  context-free chain of at most three leading binders by instantiating it at
+  context-free chain of at most four leading binders by instantiating it at
   candidates the sequent itself supplies — goal variables, opened-forall
   skolems, premise-scope variables, and query-supplied subtrees that are
   independent of enclosing binders and contain quantification, including
@@ -218,7 +218,7 @@ historical expression projection rejects visible type application explicitly.
 Exference does not perform non-exact subsumption between contextual schemes,
 while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,
-Djinn keeps constrained hypothesis occurrences and chains beyond three binders
+Djinn keeps constrained hypothesis occurrences and chains beyond four binders
 opaque; if the bounded approximation finds no term, the result is inconclusive
 rather than a proof of uninhabitability. Its plan family is deliberately cubic
 rather than exponential. The historical prefix is fully opened,

@@ -195,9 +195,12 @@ can therefore instantiate the provider binder at the complete
 `Maybe (forall b. b -> b)` shape already present in the sequent. The
 enclosing-binder check, deterministic rendering, alpha-key deduplication, the
 three-binder scheme bound, and the per-scheme and global instantiation caps are
-unchanged. The broader collector loses no soundness because it still chooses
-only exact subtrees supplied by the query; it does not assemble a new
-polytype.
+unchanged at this historical checkpoint. The later
+[four-binder instantiation extension](2026-08-01-four-binder-instantiation.md)
+widens only Djinn's binder bound and tuple priority while retaining those
+axiom and attempt caps. The broader collector loses no soundness because it
+still chooses only exact subtrees supplied by the query; it does not assemble
+a new polytype.
 
 ## Regression and integration boundary
 

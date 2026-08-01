@@ -5,6 +5,12 @@
 > Exference goal introduction and then
 > [contextual positive introduction](2026-07-29-contextual-rank-n-introduction.md)
 > in both engines; Djinn's hypothesis-side rule remains context-free.
+>
+> **2026-08-01 follow-up.** The
+> [four-binder instantiation extension](2026-08-01-four-binder-instantiation.md)
+> raises Djinn's chain bound from three to four without raising its axiom or
+> attempt caps. References below to a three-binder limit and a four-binder gap
+> describe this historical snapshot.
 
 ## Scope
 

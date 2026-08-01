@@ -219,14 +219,18 @@ The family is
 exhaustive for seven independent occurrences but does not enumerate the power
 set: an eight-site proof requiring exactly four open and four opaque
 occurrences can remain inconclusive. When a hypothesis-side
-context-free chain of at most three binders exists, the same plans run once
+context-free chain of at most four binders exists, the same plans run once
 more with bounded instantiation axioms appended after every historical plan:
 each axiom eliminates that chain completely at a candidate tuple drawn from
 the sequent's variables, opened-forall skolems, premise scopes, and already
 mentioned subtrees that are independent of enclosing binders and contain
 quantification, including structural wrappers around quantified atoms. Each
-axiom's generated evidence is the hypothesis expression itself. Positive
-contexts do not become LJT premises: as at the prenex query boundary, Djinn can
+axiom's generated evidence is the hypothesis expression itself. One- through
+three-binder schemes retain their historical lexical Cartesian order. The new
+four-binder prefix fairly interleaves source-order windows, repeated arguments,
+sparse monotone selections, and the Cartesian tail without raising any search
+cap. Positive contexts do not become LJT premises: as at the prenex query
+boundary, Djinn can
 only construct a dictionary-independent body. Constrained hypothesis-side
 schemes remain opaque. If the primary projection is incomplete, an empty search
 carries no negative evidence. Ordinary enclosing

@@ -3588,6 +3588,82 @@ tests = testGroup "Exference"
             $ find isDoneCandidate candidates
           checkExpression (mkQueryClassEnv emptyClassEnv []) constructors
             [deconstructor] goal [] expression @?= Right ()
+      , testCase "recursive deconstructors project an impredicative field once" $ do
+          let recursiveName = name "Headed"
+              headedName = name "HeadedValue"
+              recursive parameter = TypeApp
+                (TypeCons recursiveName) parameter
+              polymorphic = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              genericRecursive = recursive $ TypeVar 1
+              specializedRecursive = recursive polymorphic
+              deconstructor = DeconstructorBinding genericRecursive
+                [ ConstructorBinding headedName
+                    [TypeVar 1, genericRecursive]
+                ] True
+              goal = TypeArrow specializedRecursive polymorphic
+              input = identityInput
+                { input_goalType = goal
+                , input_envDeconsS = [deconstructor]
+                , input_allowUnused = True
+                , input_maxSteps = 128
+                }
+              isProjection candidate = case candidate of
+                ( ExpLambda scrutinee declared
+                    (ExpLetMatch selected
+                      [(payload, payloadType), (tailValue, tailType)]
+                      (ExpVar matched matchedType)
+                      (ExpVar returned returnedType))
+                  , []
+                  , _
+                  ) -> selected == headedName
+                    && declared == specializedRecursive
+                    && matched == scrutinee
+                    && matchedType == specializedRecursive
+                    && returned == payload
+                    && payloadType == polymorphic
+                    && returnedType == polymorphic
+                    && tailValue /= payload
+                    && tailType == specializedRecursive
+                _ -> False
+          candidates <- expectRight $ findExpressionsEither input
+          (expression, _, _) <- maybe
+            (fail $ "one-layer impredicative projection produced no term: "
+              ++ show
+                [ showExpression candidate
+                | (candidate, _, _) <- candidates
+                ])
+            pure
+            $ find isProjection candidates
+          checkExpression (mkQueryClassEnv emptyClassEnv []) []
+            [deconstructor] goal [] expression @?= Right ()
+          sourceHints <- expectRight $ mkExferenceSourceTypeVariableHints
+            goal Map.empty
+          target <- checkedIdentifierTarget "headedProjection"
+          environment <- expectRight $ sealLegacyEnvironment input
+          results <- expectRight $ findQueryResultsInEnvironmentEither
+            target sourceHints environment (legacyInputQuery input)
+          let clauses =
+                [ SharedCandidate.candidateOutput candidate
+                | result <- results
+                , candidate <- SharedSearch.batchCandidates
+                    $ SharedQuery.resultSearch result
+                ]
+              projectedWithWildcard clause = case clause of
+                Generated.FunctionClause _ [Generated.Bind scrutinee]
+                    (Generated.Let
+                      (Generated.Constructor selected
+                        [Generated.Bind payload, Generated.Wildcard])
+                      (Generated.Local matched)
+                      (Generated.Local returned)) ->
+                  selected == headedName
+                    && matched == scrutinee
+                    && returned == payload
+                _ -> False
+          assertBool
+            ("stable recursive projection retained an unused tail binder: "
+              ++ show clauses)
+            (any projectedWithWildcard clauses)
       , testCase "recursive deconstructors expose exactly one eager layer" $ do
           let natural = TypeCons $ name "Natural"
               result = TypeCons $ name "Result"
@@ -10169,6 +10245,7 @@ assertSameBatch label target historical canonical = do
     }
   expectedCandidates =
     [ ( Generated.functionClauseFromExpression target
+          $ Generated.discardUnusedPatternBindingsBy id
           $ toGeneratedExpression expression
       , constraints
       , statistics

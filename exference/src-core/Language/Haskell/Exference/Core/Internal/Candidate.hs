@@ -245,7 +245,7 @@ projectValidatedCandidate
   -> ExferenceCandidate
 projectValidatedCandidate target typeNames expression constraints statistics =
   fmap (Generated.functionClauseFromExpression target) $ force
-  $ Candidate (Exference.toGeneratedExpression expression)
+  $ Candidate cleanedExpression
       constraints ExferenceCandidateDetails
       { exferenceCandidateStats = statistics
           { exference_complexityRating = normalizePenalty
@@ -254,6 +254,15 @@ projectValidatedCandidate target typeNames expression constraints statistics =
       , exferenceLocalNameHints = Exference.expressionNameHints expression
       , exferenceTypeVariableHints = typeNames
       }
+ where
+  -- Search and the independent checker consume the fully typed expression.
+  -- Once that boundary has accepted a candidate, an intentionally unused
+  -- lambda or constructor-field binder carries no evidence and can be exposed
+  -- honestly as a wildcard.  Keeping this cleanup at projection time avoids
+  -- teaching Exference's typed compatibility patterns about an unannotated
+  -- binder while giving @exferenceAllowUnused@ clean stable output.
+  cleanedExpression = Generated.discardUnusedPatternBindingsBy id
+    $ Exference.toGeneratedExpression expression
 
 -- | Apply source spellings to the exact rigid-instantiation plan consumed by
 -- search and independent checking.  The opaque input guarantees that raw

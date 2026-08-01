@@ -19,6 +19,13 @@ and the exact-opaque view atomic. The bounded projection cannot establish
 negative evidence when it finds no term. See the
 [bounded Djinn recursive-introduction report](2026-08-01-bounded-djinn-recursive-introduction.md).
 
+**Successor note — 2026-08-01:** parameterized recursive deconstructors now
+have focused coverage for projecting a field specialized to an impredicative
+type. When the recursive tail is unused, the relaxed policy admits the fully
+checked term and stable generated output renders the tail as a wildcard. See
+the
+[impredicative recursive projection report](2026-08-01-impredicative-recursive-projection.md).
+
 ## Finite search rule
 
 When a scoped value has a recursive datatype and pattern matching is otherwise

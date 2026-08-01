@@ -70,6 +70,9 @@ property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. Exference's finite recursive-pattern rule
 is recorded in the
 [2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
+Its impredicative-field follow-up and checked wildcard projection are recorded
+in the
+[2026-08-01 impredicative recursive projection report](docs/reports/2026-08-01-impredicative-recursive-projection.md).
 Djinn's complementary bounded recursive-constructor rule is recorded in the
 [2026-08-01 bounded recursive introduction report](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).
 Djinn's widened bounded hypothesis-instantiation rule is recorded in the
@@ -817,7 +820,12 @@ a recursive scrutinee exposes one constructor layer, and its fields become
 ordinary providers in that branch without being fed back into eager pattern
 decomposition. This constructs finite case expressions, not recursive calls or
 induction. Multiple-constructor recursive types still require the existing
-multiple-pattern opt-in, so their search-space cost remains explicit.
+multiple-pattern opt-in, so their search-space cost remains explicit. A field
+specialized to a quantified type remains available at that exact type. When a
+one-layer projection deliberately ignores the recursive tail,
+`exferenceAllowUnused` must be enabled; after the fully annotated term passes
+independent checking, the stable generated candidate renders that unused field
+as `_`.
 
 `Language.Haskell.Djex.Exference.HaskellSrc.parseExferenceRequest` resolves
 Haskell syntax against the session's retained type names, classes, and kind

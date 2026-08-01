@@ -253,6 +253,20 @@ from one other independent recursive SCC, but same-SCC revisits, a third SCC,
 and every negative recursive occurrence stay opaque. Its exact fallback
 preserves `Rec a -> Rec a` identity.
 
+Exference can also inspect one layer of a parameterized recursive input while
+preserving a quantified field at its exact specialization. For example, with
+
+```haskell
+data Headed a = HeadedValue a (Headed a)
+```
+
+the request
+`Headed (forall x. x -> x) -> (forall x. x -> x)` can return the first field.
+Enable `allow-unused` because the recursive tail is intentionally ignored. The
+candidate is searched and independently checked with its complete typed
+pattern; stable output then renders the unused tail binder as `_`. This is
+still one-layer elimination, not recursion or general impredicative inference.
+
 Every nested `forall` outside those boundaries is a shared opaque type atom.
 Both engines can carry it through constructors, arrows, declarations,
 equality, substitution, and rendering without decomposing it in ordinary

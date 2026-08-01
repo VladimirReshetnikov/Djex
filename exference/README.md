@@ -863,7 +863,19 @@ any / the right solution. Some common current limitations are:
   principle. Multiple-constructor recursive datatypes, including lists, still
   require the ordinary multiple-pattern opt-in. The legacy
   `RecursiveDataEliminationUnsupported` omission reason remains source
-  compatible but is no longer produced by current sessions;
+  compatible but is no longer produced by current sessions. Parameter
+  specialization preserves quantified fields, so for
+
+  ```haskell
+  data Headed a = HeadedValue a (Headed a)
+  ```
+
+  the request
+  `Headed (forall x. x -> x) -> (forall x. x -> x)` can project the first
+  field when `input_allowUnused` is true. The recursive tail is deliberately
+  unused, so the strict default rejects that candidate. Search and independent
+  checking retain the complete typed constructor pattern; only the accepted
+  stable generated candidate replaces the unused tail binder with `_`;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
 
 ### Constructorless declarations in curated directories

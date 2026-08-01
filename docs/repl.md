@@ -247,9 +247,10 @@ its eta-expanded form) for:
   -> Rec (forall y. (Seed -> y) -> y)
 ```
 
-Djinn reaches that term through its first positive recursive constructor layer;
-Exference uses the retained constructor binding. Djinn still keeps a recursive
-field and every negative recursive occurrence opaque, while its exact fallback
+Djinn reaches that term through the first layer of `Rec`'s recursive SCC;
+Exference uses the retained constructor binding. Djinn may compose one layer
+from one other independent recursive SCC, but same-SCC revisits, a third SCC,
+and every negative recursive occurrence stay opaque. Its exact fallback
 preserves `Rec a -> Rec a` identity.
 
 Every nested `forall` outside those boundaries is a shared opaque type atom.
@@ -897,10 +898,11 @@ so the projection degrades rather than fails:
 - Names are projected at their unqualified in-scope spellings; a name whose
   unqualified spelling is ambiguous in scope is omitted.
 - A visible recursive datatype retains its declaration and constructors. Djinn
-  may expose the first positive constructor layer on an expansion path, but a
-  recursive field below it, a negative occurrence, and the exact-opaque view
-  keep the complete alias-normalized application atomic. The exact fallback
-  consequently preserves identity such as `Rec a -> Rec a`. Any translation
+  may expose one positive constructor layer from each of at most two distinct
+  alias-normalized recursive SCCs on a logical path. Same-SCC revisits, a third
+  SCC, negative occurrences, and the exact-opaque view keep the complete
+  application atomic. The exact fallback consequently preserves identity such
+  as `Rec a -> Rec a`. Any translation
   that touches this bounded rule is incomplete, so exhausting the search cannot
   establish non-inhabitation. `:show omissions` reports that its constructors
   are introduction-only.

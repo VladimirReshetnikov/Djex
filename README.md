@@ -245,15 +245,18 @@ the requested scheme itself supplies. This covers, for example:
 
 Nonrecursive declared datatypes remain fully structural in Djinn: their
 constructor sums support introduction and case elimination and stay first in
-search. Recursive datatypes use a narrower structural view. The first positive
-recursive occurrence on an expansion path exposes one real constructor layer;
-recursive fields below it, negative occurrences, and the exact-opaque view
-retain the complete alias-normalized application as an atom. The exact view
-therefore preserves forwarding such as `Rec a -> Rec a`, while the positive
-view can construct `Done a :: Rec a` without admitting recursive elimination,
-recursive calls, or induction. Every query translation that touches this
-bounded rule is incomplete, so an empty search is inconclusive rather than
-proof of non-inhabitation.
+search. Recursive datatypes use a narrower structural view. A positive logical
+path may expose one real constructor layer from each of at most two distinct
+alias-normalized recursive SCCs. Reopening the same SCC through direct, mutual,
+alias-hidden, or parameter-mediated recursion, reaching a third SCC, every
+negative occurrence, and the exact-opaque view all retain the complete
+application as an atom. This lets an independent `Outer` and `Inner` compose
+one finite layer each while preventing unbounded or exponentially duplicated
+expansion. The exact view preserves forwarding such as `Rec a -> Rec a`, and
+the positive view can construct `Done a :: Rec a` without admitting recursive
+elimination, recursive calls, or induction. Every query translation that
+touches this bounded rule is incomplete, so an empty search is inconclusive
+rather than proof of non-inhabitation.
 
 A query-directed backward slice additionally identifies reachable applications
 of datatypes with at least one parameter. When the slice reaches one, Djinn can
@@ -803,11 +806,12 @@ every environment to define them. A rating override claims to change search,
 so a non-finite rating or a name unavailable after exclusion and capability
 filtering is a fatal structured diagnostic. Quantified subtrees remain
 searchable through opaque atoms outside each backend's bounded rank-N rule.
-Djinn retains visible recursive constructors for bounded introduction: the
-first positive recursive occurrence exposes one constructor layer, while a
-recursive field, negative occurrence, and exact-opaque view remain atomic. Its
-exact fallback preserves recursive identity, and any search that encounters
-the bounded projection withholds negative evidence when it finds no term.
+Djinn retains visible recursive constructors for bounded introduction: at most
+two distinct alias-normalized recursive SCCs may expose one positive
+constructor layer each on a logical path. Same-SCC revisits, a third SCC,
+negative occurrences, and the exact-opaque view remain atomic. Its exact
+fallback preserves recursive identity, and any search that encounters the
+bounded projection withholds negative evidence when it finds no term.
 Exference retains recursive datatype eliminators under a finite rule: matching
 a recursive scrutinee exposes one constructor layer, and its fields become
 ordinary providers in that branch without being fed back into eager pattern

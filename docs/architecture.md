@@ -212,15 +212,18 @@ which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.
 
 Djinn's formula compiler applies a similarly bounded rule to recursive
-datatypes classified by the prepared inventory expansion. On each expansion
-path, the first positive recursive occurrence exposes one constructor layer;
-recursive fields beneath it, negative occurrences, and the exact-opaque view
-retain the complete alias-normalized application as an atom. Real constructor
-injections still lower through the ordinary proof term, while the exact plan
-preserves recursive identity. Every translation that encounters recursive
-structure is marked incomplete, so its empty proof stream cannot become
-negative evidence. An unrelated recursive SCC does not weaken a complete
-translation for a query which never reaches it.
+datatypes classified by the prepared inventory expansion. It derives
+alias-normalized recursive SCC identity from the same graph used for definition
+validation. A positive logical path may expose one constructor layer from each
+of at most two distinct SCCs. Its branch-local SCC trail survives restored type
+arguments, so direct, mutual, alias-hidden, and parameter-mediated same-SCC
+revisits remain complete atoms; a third SCC, negative occurrences, and the
+exact-opaque view are atomized as well. Real constructor injections still lower
+through the ordinary proof term, while the exact plan preserves recursive
+identity. Every translation that encounters recursive structure is marked
+incomplete, so its empty proof stream cannot become negative evidence. An
+unrelated recursive SCC does not weaken a complete translation for a query
+which never reaches it.
 
 The Exference runtime is deliberately richer than a bare session. Source
 targets, ratings, prompt scope, and command policy are not recoverable from its

@@ -9,6 +9,14 @@ the first constructor layer of a requested recursive result, but it does not
 case-analyze a recursive input, recursively call the synthesized definition, or
 derive an induction principle.
 
+Follow-up commits `271b7c87`, `0105bb48`, and `9bc48ca9` refine that boundary.
+Recursive heads are grouped by the same alias-normalized SCC graph used for
+definition validation. A logical path may now compose one constructor layer
+from two independent SCCs, while a persistent trail blocks same-SCC revisits
+even across restored type arguments. The fixed two-component ceiling prevents
+duplicated SCC chains from expanding the proof formula exponentially before a
+search budget can apply.
+
 This is particularly useful at a rank-N or impredicative payload boundary. For
 example, with an opaque `Seed` and
 
@@ -49,22 +57,26 @@ are still rejected. The historical low-level compiler retains its strict
 all-cycle rejection unless a checked caller explicitly supplies the recursive
 datatype set.
 
-## Polarized one-layer rule
+## Polarized component-layer rule
 
 The formula compiler uses the following conservative matrix:
 
 | Occurrence | Formula view |
 | --- | --- |
-| First recursive datatype in a positive expansion path | Expose exactly one constructor layer. |
-| Recursive field beneath that layer | Keep the complete alias-normalized application as one atom. |
+| Positive recursive datatype whose SCC is new on a path with fewer than two opened SCCs | Expose exactly one constructor layer. |
+| Direct, mutual, alias-hidden, or parameter-mediated revisit of an opened SCC | Keep the complete alias-normalized application as one atom. |
+| Third distinct recursive SCC on the same logical path | Keep the complete application as one atom. |
 | Any recursive occurrence in a negative position | Keep the complete application as one atom; do not add case elimination. |
 | Exact-opaque plan | Keep the complete application as one atom. |
 
-The path guard stops after the first recursive head, rather than after the first
-occurrence of each distinct head. That detail also bounds mutual recursion: in
+The path guard stores component representatives rather than surface heads. In
 `Even = ToEven Odd` and `Odd = ToOdd Even`, an `Odd -> Even` query may produce
-`ToEven`, but lowering cannot continue through `Odd` and then reopen `Even`.
-Recursive fields remain opaque formula atoms below the first constructor.
+`ToEven`, but lowering cannot continue through `Odd` because both heads share
+one SCC. The same remains true when the edge is hidden by a synonym or restored
+from a datatype argument. In contrast, independent recursive declarations such
+as `Outer = Wrap Inner | More Outer` and `Inner = Base | Again Inner` may produce
+`Wrap Base`: each SCC contributes one layer. A third independent component is
+atomized, bounding both depth and duplicated formula growth.
 
 The exact-opaque plan is a necessary complement to positive introduction. It
 preserves exact transport such as `Rec a -> Rec a`, whose candidate remains
@@ -109,9 +121,12 @@ projection.
 ## Verification boundary
 
 The regression suites cover direct, mutual, alias-hidden, seedless, and phantom
-recursion; exact recursive identity; rank-N constructor transport; absence of
-recursive elimination and false negative evidence; unrelated complete
-refutations; higher-kinded recursive constructors; hidden-constructor safety;
+recursion; same-SCC type-argument restoration; direct and parameter-mediated
+composition of independent SCCs; the total component-layer ceiling; exact
+recursive identity; rank-N constructor transport without same-SCC reopening;
+absence of recursive elimination and false negative evidence; unrelated
+complete refutations;
+higher-kinded recursive constructors; hidden-constructor safety;
 alias-recursive record selectors; and agreement between Djinn and Exference.
 
 The completed verification was:

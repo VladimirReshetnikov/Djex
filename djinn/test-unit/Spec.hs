@@ -1631,6 +1631,84 @@ testRecursiveDataIntroduction = do
         ("independent recursive components did not compose one layer each: "
             ++ show nestedSources)
         $ "OuterFromInner InnerBase" `elem` nestedSources
+    assertBool
+        ("the outer recursive component reopened below its constructor layer: "
+            ++ show nestedSources)
+        $ not $ any ("OuterAgain" `isInfixOf`) nestedSources
+
+    -- A query-side polymorphic observer mirrors the generic and impredicative
+    -- occurrence shape used by clients such as Leant without supplying a
+    -- result.  The payload premise must still pass through exactly one layer
+    -- from each independent SCC; bounded instantiation must not turn the exact
+    -- recursive fallback into a way to reopen either component.
+    let nestedParameter =
+            SharedDeclaration.TypeParameter "nestedParameter" Nothing
+        nestedParameterType = SharedType.TypeVariable "nestedParameter"
+        parameterInnerName = sharedName "ParameterInner"
+        parameterInner element = SharedType.TypeApplication
+            (SharedType.TypeConstructor parameterInnerName) element
+        parameterInnerDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            parameterInnerName [nestedParameter]
+            [ SharedDeclaration.DataConstructor ()
+                (sharedName "ParameterInnerDone") [nestedParameterType]
+            , SharedDeclaration.DataConstructor ()
+                (sharedName "ParameterInnerAgain")
+                [parameterInner nestedParameterType]
+            ]
+        parameterOuterName = sharedName "ParameterOuter"
+        parameterOuter element = SharedType.TypeApplication
+            (SharedType.TypeConstructor parameterOuterName) element
+        parameterOuterDeclaration = SharedDeclaration.DataTypeDeclaration ()
+            parameterOuterName [nestedParameter]
+            [ SharedDeclaration.DataConstructor ()
+                (sharedName "ParameterOuterWrap")
+                [parameterInner nestedParameterType]
+            , SharedDeclaration.DataConstructor ()
+                (sharedName "ParameterOuterAgain")
+                [parameterOuter nestedParameterType]
+            ]
+        polymorphicBottom binder = SharedType.ForallType [binder] [] $
+            SharedType.TypeVariable binder
+        observer = SharedType.ForallType ["observed"] [] $
+            SharedType.FunctionType
+                (parameterOuter $ SharedType.TypeVariable "observed")
+                (SharedType.TypeConstructor seedName)
+    parameterNestedEnvironment <- mkNeutralDjinnEnvironment
+        [ seedDeclaration
+        , parameterInnerDeclaration
+        , parameterOuterDeclaration
+        ]
+    parameterNestedSession <- expectShownRight $
+        Djex.mkDjinnSession parameterNestedEnvironment
+    parameterNestedRankN <- run parameterNestedSession
+        "introduceParameterNestedRankN" $
+        SharedType.FunctionType observer $
+            SharedType.FunctionType (polymorphicBottom "source") $
+                parameterOuter $ polymorphicBottom "target"
+    parameterNestedRankNSources <- renderCandidates parameterNestedRankN
+    assertBool
+        ("independent parameterized recursive components lost rank-N "
+            ++ "construction: " ++ show parameterNestedRankNSources)
+        $ any (\source ->
+            "ParameterOuterWrap" `isInfixOf` source &&
+            "ParameterInnerDone" `isInfixOf` source)
+            parameterNestedRankNSources
+    assertBool
+        ("rank-N instantiation reopened the outer recursive component: "
+            ++ show parameterNestedRankNSources)
+        $ all (\source -> sum
+            [ substringCount constructor source
+            | constructor <-
+                ["ParameterOuterWrap", "ParameterOuterAgain"]
+            ] <= 1) parameterNestedRankNSources
+    assertBool
+        ("rank-N instantiation reopened the inner recursive component: "
+            ++ show parameterNestedRankNSources)
+        $ all (\source -> sum
+            [ substringCount constructor source
+            | constructor <-
+                ["ParameterInnerDone", "ParameterInnerAgain"]
+            ] <= 1) parameterNestedRankNSources
 
     parameterNested <- run nestedSession "introduceArgumentRecursive" $
         recursive innerType
@@ -1694,6 +1772,13 @@ testRecursiveDataIntroduction = do
         assertEqual (description ++ " did not exhaust its bounded plans")
             (SharedSearch.Completed SharedSearch.Finished)
             $ SharedSearch.batchProgress $ SharedQuery.resultSearch result
+
+    substringCount :: String -> String -> Int
+    substringCount needle = go
+      where
+        go [] = 0
+        go rest@(_ : suffix) =
+            (if needle `isPrefixOf` rest then 1 else 0) + go suffix
 
 -- A declared datatype normally lowers to its constructor sum, which is still
 -- the primary Djinn search vocabulary. The complementary nominal projection

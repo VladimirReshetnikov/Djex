@@ -187,19 +187,19 @@ data Empty
 ```
 
 Recursive datatypes are accepted by checked Djinn environments, but they have
-a deliberately bounded logical projection. The first recursive occurrence in
-a positive expansion path exposes one constructor layer. Recursive fields
-below that layer, negative occurrences, and the exact-opaque formula view keep
-the complete alias-normalized datatype application as one atom. Thus Djinn can
-construct a finite value such as `Zero :: Nat` or forward a supplied payload
-through `Done`, and the exact fallback still finds `\x -> x` for
-`Rec a -> Rec a`; it does not gain case elimination for `Rec a`, recursive
-calls, or induction. Direct and mutual recursion use the same one-layer bound.
-Because every translation which touches recursive structure is marked
-incomplete, exhausting it without a term reports an undecided result rather
-than non-inhabitation. Standalone low-level formula-definition preparation
-keeps its historical strict cycle rejection unless the caller supplies the
-checked recursive-datatype classification.
+a deliberately bounded logical projection. A positive logical path may expose
+one constructor layer from each of at most two distinct alias-normalized
+recursive SCCs. Reopening the same SCC through direct, mutual, alias-hidden, or
+parameter-mediated recursion, reaching a third SCC, every negative occurrence,
+and the exact-opaque formula view keep the complete datatype application as one
+atom. Thus Djinn can compose finite independent wrappers, construct
+`Zero :: Nat`, or forward a supplied payload through `Done`, and the exact fallback
+still finds `\x -> x` for `Rec a -> Rec a`; it does not gain case elimination
+for `Rec a`, recursive calls, or induction. Because every translation which
+touches recursive structure is marked incomplete, exhausting it without a term
+reports an undecided result rather than non-inhabitation. Standalone low-level
+formula-definition preparation keeps its historical strict cycle rejection
+unless the caller supplies the checked recursive-datatype classification.
 
 Unit is deliberately wired in rather than user-declared. The spelling `()` is
 part of Djinn's type grammar but is not an ordinary Haskell constructor
@@ -871,12 +871,14 @@ knowing before editing the source:
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract
   constructors may still be used partially in higher-kinded positions.
 - Genuinely recursive datatypes retain only bounded positive constructor
-  introduction. Their recursive fields, negative occurrences, and exact-opaque
-  view are atomic; the exact fallback preserves identity, and an empty
-  incomplete search cannot establish non-inhabitation. Recursion is classified
-  after synonym expansion, so alias-hidden direct and mutual cycles receive the
-  same rule while a phantom alias can erase an apparent surface cycle. List
-  types remain opaque rather than being expanded into `[]` and `(:)`.
+  introduction: no more than two distinct SCCs per logical path and one layer
+  per SCC. Same-SCC revisits, a third SCC, negative occurrences, and the
+  exact-opaque view are atomic; the exact fallback preserves identity, and an
+  empty incomplete search cannot establish non-inhabitation. Recursion is
+  classified after synonym expansion, so alias-hidden direct and mutual cycles
+  receive the same rule while a phantom alias can erase an apparent surface
+  cycle. List types remain opaque rather than being expanded into `[]` and
+  `(:)`.
 - Empty data types are logically false but retain nominal tags. Identity is used
   only for the same empty type; conversion to another result uses explicit empty
   elimination.

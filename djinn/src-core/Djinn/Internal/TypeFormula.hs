@@ -812,14 +812,26 @@ recursiveDataCanUnfold
     -> Bool
 recursiveDataCanUnfold lowering definitions name path = case lowering of
     PolarizedForalls _ PositiveFormula _ _ ->
-        not $ expansionPathContainsRecursiveComponent definitions name path
+        recursiveComponentLayerAvailable path &&
+            not (expansionPathContainsRecursiveComponent definitions name path)
     OpaqueForalls -> False
     PolarizedForalls _ NegativeFormula _ _ -> False
 
--- Each recursive SCC may expose one positive constructor layer along a path.
--- A field in an independent recursive component can therefore contribute its
--- own finite layer, while direct, alias-hidden, and mutual recursion stop as
--- soon as the path would reopen the same component.
+-- Two independent recursive components recover the common finite wrapper
+-- shape (@Outer (Inner a)@) without allowing a duplicated component chain to
+-- grow the proof formula exponentially before search budgets can apply.
+maximumRecursiveComponentLayers :: Int
+maximumRecursiveComponentLayers = 2
+
+recursiveComponentLayerAvailable :: ExpansionPath -> Bool
+recursiveComponentLayerAvailable (ExpansionPath _ _ openedComponents) =
+    Set.size openedComponents < maximumRecursiveComponentLayers
+
+-- Within the total layer bound, each recursive SCC may expose one positive
+-- constructor layer along a path.  A field in an independent recursive
+-- component can therefore contribute its own finite layer, while direct,
+-- alias-hidden, and mutual recursion stop as soon as the path would reopen the
+-- same component.
 expansionPathContainsRecursiveComponent
     :: PreparedFormulaCompiler -> String -> ExpansionPath -> Bool
 expansionPathContainsRecursiveComponent definitions name

@@ -1623,7 +1623,7 @@ testRecursiveDataIntroduction = do
             , SharedDeclaration.DataConstructor () outerAgainName [outerType]
             ]
     nestedEnvironment <- mkNeutralDjinnEnvironment
-        [innerDeclaration, outerDeclaration]
+        [recursiveDeclaration, innerDeclaration, outerDeclaration]
     nestedSession <- expectShownRight $ Djex.mkDjinnSession nestedEnvironment
     nested <- run nestedSession "introduceNestedRecursive" outerType
     nestedSources <- renderCandidates nested
@@ -1631,6 +1631,44 @@ testRecursiveDataIntroduction = do
         ("independent recursive components did not compose one layer each: "
             ++ show nestedSources)
         $ "OuterFromInner InnerBase" `elem` nestedSources
+
+    parameterNested <- run nestedSession "introduceArgumentRecursive" $
+        recursive innerType
+    parameterNestedSources <- renderCandidates parameterNested
+    assertBool
+        ("a distinct recursive type argument lost its own layer: "
+            ++ show parameterNestedSources)
+        $ "Done InnerBase" `elem` parameterNestedSources
+
+    -- A fixed total component-layer budget keeps duplicated independent
+    -- recursion from expanding exponentially before the query's search budget
+    -- can take effect.  The base remains deliberately beyond that boundary.
+    let lastLayer = 12 :: Int
+        layerName index = sharedName $ "RecursiveLayer" ++ show index
+        layerType index = SharedType.TypeConstructor $ layerName index
+        layerDeclaration index = SharedDeclaration.DataTypeDeclaration ()
+            (layerName index) [] $
+            if index == lastLayer
+              then
+                [ SharedDeclaration.DataConstructor ()
+                    (sharedName "RecursiveLayerBase") []
+                , SharedDeclaration.DataConstructor ()
+                    (sharedName "RecursiveLayerLastAgain") [layerType index]
+                ]
+              else
+                [ SharedDeclaration.DataConstructor ()
+                    (sharedName $ "RecursiveLayerStep" ++ show index)
+                    [layerType (index + 1), layerType (index + 1)]
+                , SharedDeclaration.DataConstructor ()
+                    (sharedName $ "RecursiveLayerAgain" ++ show index)
+                    [layerType index]
+                ]
+    boundedEnvironment <- mkNeutralDjinnEnvironment
+        [layerDeclaration index | index <- [0 .. lastLayer]]
+    boundedSession <- expectShownRight $ Djex.mkDjinnSession boundedEnvironment
+    bounded <- run boundedSession "boundRecursiveComponentChain" $
+        layerType (0 :: Int)
+    assertUndecided "recursive component layer budget" bounded
   where
     run session targetSpelling goal = do
         target <- expectShownRight $ SharedGenerated.mkDefinitionName $

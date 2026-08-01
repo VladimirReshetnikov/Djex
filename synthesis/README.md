@@ -111,7 +111,7 @@ retain different resolution and search policies.
 | `Language.Haskell.Synthesis.Candidate` | Generated output with residual constraints and backend-owned details, plus common candidate renderers. |
 | `Language.Haskell.Synthesis.Selection` | First, best, lookahead-best, all, and preferred-tier policies over lazy result batches. |
 | `Language.Haskell.Synthesis.Diagnostic` | Severity, stable code, checked source locations/spans, ordered context, and deterministic rendering. |
-| `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
+| `Language.Haskell.Synthesis.Generated` | Scope-aware expressions, patterns, clauses, holes, mixed term/type application spines, bottom-up rewriting, simplification, alpha-equivalence, substitution, and Haskell rendering through the common qualification policy. |
 
 Logical evidence is independent of operational progress. A truncated search can
 return validated candidates; a finished heuristic search can return no logical
@@ -121,7 +121,10 @@ change backend search semantics.
 `Generated` separates backend-local identity from structural global `Name`s.
 Its checked `DefinitionName` narrows top-level output names once, and its scope
 checker and renderer prevent free locals, binder reuse, capture, and ambiguous
-qualification from becoming generated Haskell.
+qualification from becoming generated Haskell. Structural consumers can use
+`expressionFullApplicationSpine` without losing visible type arguments, and
+`rewriteExpressionBottomUp` or `rewriteExpressionBottomUpM` to cover every
+expression constructor in one postorder pass.
 
 ### Small shared utilities
 

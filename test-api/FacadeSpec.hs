@@ -183,6 +183,31 @@ facadeTests = testGroup "public Djex facade"
       renderFunctionClause (defaultRenderOptions id)
           (FunctionClause checkedTarget [Bind "value"] $ Local "value") @?=
         Right "identity value = value"
+  , testCase "exports generated-expression consumer helpers" $ do
+      generatedFunctionName <- expectRight $ mkIdentifier "function"
+      let function = Global generatedFunctionName :: Expression String
+          source = Apply
+            (VisibleTypeApplication function inferredVisibleTypeArgument)
+            (Local "value")
+          preserve
+            :: Expression String
+            -> Either String (Expression String)
+          preserve = Right
+      expressionFullApplicationSpine source @?=
+        ( function
+        , [ VisibleTypeArgumentArgument inferredVisibleTypeArgument
+          , TermArgument $ Local "value"
+          ]
+        )
+      rewriteExpressionBottomUp
+          (\expression -> case expression of
+            Local local -> Hole local
+            other -> other)
+          source @?=
+        Apply
+          (VisibleTypeApplication function inferredVisibleTypeArgument)
+          (Hole "value")
+      rewriteExpressionBottomUpM preserve source @?= Right source
   , testCase "rejects residual constraints at the Djinn render boundary" $ do
       target <- expectRight $ mkIdentifier "identity"
       checkedTarget <- expectRight $ mkDefinitionName target

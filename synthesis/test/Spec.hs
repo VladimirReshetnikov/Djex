@@ -6,6 +6,7 @@ import Control.Monad (forM_)
 import Data.Either (isLeft)
 import Data.Foldable (toList)
 import qualified Data.IntSet as IntSet
+import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.List (intercalate, isInfixOf)
 import Data.List.NonEmpty (NonEmpty ((:|)))
 import qualified Data.Map.Strict as Map
@@ -4170,6 +4171,104 @@ generatedTests = testGroup "generated syntax"
             (VisibleTypeApplication function specifiedInteger)
       _ <- evaluate $ force source
       pure ()
+  , testCase "decompose mixed term and visible type applications" $ do
+      let function, first, second :: Expression Int
+          function = Global $ right $ mkIdentifier "function"
+          first = Local 1
+          second = Local 2
+          integer :: SharedType.Type String
+          integer = SharedType.TypeConstructor
+            $ right $ mkIdentifier "Int"
+          specified = right $ specifiedVisibleTypeArgument integer
+          throughFirst = Apply
+            (VisibleTypeApplication function specified) first
+          throughInferred = VisibleTypeApplication
+            throughFirst inferredVisibleTypeArgument
+          application = Apply throughInferred second
+      expressionFullApplicationSpine application @?=
+        ( function
+        , [ VisibleTypeArgumentArgument specified
+          , TermArgument first
+          , VisibleTypeArgumentArgument inferredVisibleTypeArgument
+          , TermArgument second
+          ]
+        )
+      expressionFullApplicationSpine function @?= (function, [])
+      -- The historical observation remains deliberately term-only.
+      expressionApplicationSpine application @?=
+        (throughInferred, [second])
+      _ <- evaluate $ force $ expressionFullApplicationSpine application
+      pure ()
+  , testCase "rewrite every expression constructor bottom-up" $ do
+      let build = right $ mkIdentifier "build"
+          source :: Expression Int
+          source = Lambda [Bind 0]
+            $ Let (Bind 1)
+                (Apply
+                  (VisibleTypeApplication
+                    (Global build) inferredVisibleTypeArgument)
+                  (Tuple [Local 0, Hole 2]))
+            $ Case (Local 1)
+                [ (Wildcard, Tuple [])
+                , (Bind 3, Local 3)
+                ]
+          expected = Lambda [Bind 0]
+            $ Let (Bind 1)
+                (Apply
+                  (VisibleTypeApplication
+                    (Global build) inferredVisibleTypeArgument)
+                  (Tuple [Local 10, Hole 22]))
+            $ Case (Local 11)
+                [ (Wildcard, Tuple [])
+                , (Bind 3, Local 13)
+                ]
+          rewriteLocal expression = case expression of
+            Local local -> Local $ local + 10
+            Hole local -> Hole $ local + 20
+            other -> other
+          nodeTag expression = case expression of
+            Local local -> "local " ++ show local
+            Global{} -> "global"
+            Lambda{} -> "lambda"
+            Apply{} -> "apply"
+            VisibleTypeApplication{} -> "visible type application"
+            Tuple{} -> "tuple"
+            Hole local -> "hole " ++ show local
+            Let{} -> "let"
+            Case{} -> "case"
+      rewriteExpressionBottomUp rewriteLocal source @?= expected
+
+      visits <- newIORef []
+      effectfulResult <- rewriteExpressionBottomUpM
+        (\expression -> do
+          modifyIORef' visits (nodeTag expression :)
+          pure expression)
+        source
+      effectfulResult @?= source
+      visitOrder <- reverse <$> readIORef visits
+      visitOrder @?=
+        [ "global"
+        , "visible type application"
+        , "local 0"
+        , "hole 2"
+        , "tuple"
+        , "apply"
+        , "local 1"
+        , "tuple"
+        , "local 3"
+        , "case"
+        , "let"
+        , "lambda"
+        ]
+
+      let stopped :: Either String (Expression Int)
+          stopped = rewriteExpressionBottomUpM reject
+            $ Apply (Local 99)
+            $ error "bottom-up rewrite inspected a later sibling"
+          reject expression = case expression of
+            Local 99 -> Left "stop"
+            other -> Right other
+      stopped @?= Left "stop"
   , testCase "allocate locals against globals and explicit reservations" $ do
       let namespace = right $ mkModuleName "M"
           globalA = right $ mkQualifiedIdentifier namespace "a"

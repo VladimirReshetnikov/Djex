@@ -21,6 +21,7 @@ module Language.Haskell.Synthesis.Generated
   , specifiedVisibleTypeArgument
   , visibleTypeArgumentType
   , Expression (..)
+  , ApplicationArgument (..)
   , FunctionClause (..)
   , Qualification (..)
   , RenderOptions (..)
@@ -38,6 +39,9 @@ module Language.Haskell.Synthesis.Generated
   , functionClauseFromExpression
   , functionClauseExpression
   , expressionApplicationSpine
+  , expressionFullApplicationSpine
+  , rewriteExpressionBottomUp
+  , rewriteExpressionBottomUpM
   , patternBindingSites
   , expressionBindingSites
   , functionClauseBindingSites
@@ -66,6 +70,7 @@ import Prelude hiding ((<>))
 import Control.DeepSeq (NFData (rnf))
 import qualified Data.Bifunctor as Bifunctor
 import Data.Foldable (toList)
+import Data.Functor.Identity (Identity (..))
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
@@ -231,6 +236,16 @@ data Expression local
 
 instance NFData local => NFData (Expression local)
 
+-- | One term or visible type argument in a complete expression application
+-- spine. The constructors distinguish the two surface forms while the
+-- containing spine retains their source order.
+data ApplicationArgument local
+  = TermArgument (Expression local)
+  | VisibleTypeArgumentArgument VisibleTypeArgument
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData local => NFData (ApplicationArgument local)
+
 -- | One ordinary top-level function equation.
 data FunctionClause local = FunctionClause
   { clauseName :: DefinitionName
@@ -312,6 +327,74 @@ expressionApplicationSpine = collect []
   collect arguments (Apply function argument) =
     collect (argument : arguments) function
   collect arguments function = (function, arguments)
+
+-- | Decompose a complete left-associated expression application into its head
+-- and interleaved term and visible type arguments in source order.
+--
+-- Unlike 'expressionApplicationSpine', this crosses both 'Apply' and
+-- 'VisibleTypeApplication' nodes. A non-application has no arguments.
+expressionFullApplicationSpine
+  :: Expression local
+  -> (Expression local, [ApplicationArgument local])
+expressionFullApplicationSpine = collect []
+ where
+  collect arguments (Apply function argument) =
+    collect (TermArgument argument : arguments) function
+  collect arguments (VisibleTypeApplication function argument) =
+    collect (VisibleTypeArgumentArgument argument : arguments) function
+  collect arguments function = (function, arguments)
+
+-- | Rewrite every expression node bottom-up. Children are rewritten from left
+-- to right before the supplied function is applied once to their rebuilt
+-- parent. Patterns and visible type arguments are retained unchanged.
+--
+-- Nodes introduced by the supplied function are results, not new traversal
+-- roots, so this operation always makes one pass over the source tree.
+rewriteExpressionBottomUp
+  :: (Expression local -> Expression local)
+  -> Expression local
+  -> Expression local
+rewriteExpressionBottomUp rewrite expression = runIdentity
+  $ rewriteExpressionBottomUpM (Identity . rewrite) expression
+
+-- | Effectful 'rewriteExpressionBottomUp'. Effects run in left-to-right
+-- postorder and a failing monad can stop before later siblings are inspected.
+rewriteExpressionBottomUpM
+  :: Monad effect
+  => (Expression local -> effect (Expression local))
+  -> Expression local
+  -> effect (Expression local)
+rewriteExpressionBottomUpM rewrite = visit
+ where
+  visit expression = do
+    rebuilt <- descend expression
+    rewrite rebuilt
+
+  descend expression = case expression of
+    Local{} -> pure expression
+    Global{} -> pure expression
+    Lambda patterns body -> Lambda patterns <$> visit body
+    Apply function argument -> do
+      function' <- visit function
+      argument' <- visit argument
+      pure $ Apply function' argument'
+    VisibleTypeApplication function argument -> do
+      function' <- visit function
+      pure $ VisibleTypeApplication function' argument
+    Tuple elements -> Tuple <$> traverse visit elements
+    Hole{} -> pure expression
+    Let pattern inner body -> do
+      inner' <- visit inner
+      body' <- visit body
+      pure $ Let pattern inner' body'
+    Case scrutinee alternatives -> do
+      scrutinee' <- visit scrutinee
+      alternatives' <- traverse visitAlternative alternatives
+      pure $ Case scrutinee' alternatives'
+
+  visitAlternative (pattern, body) = do
+    body' <- visit body
+    pure (pattern, body')
 
 -- | Observe every pattern binding site in source order.  A present value is
 -- an ordinary or as-pattern binder; 'Nothing' is a wildcard.  Unlike the

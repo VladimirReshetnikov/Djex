@@ -707,6 +707,14 @@ reject any nonempty residual list with `UnexpectedResidualConstraints`, since
 every genuine Djinn result is closed. Generated-clause failures deliberately
 take precedence if a caller forges both the output and residual fields.
 
+For structural consumers, `expressionFullApplicationSpine` returns one
+source-ordered list whose `TermArgument` and `VisibleTypeArgumentArgument`
+constructors preserve mixed applications. The older
+`expressionApplicationSpine` remains term-only. `rewriteExpressionBottomUp`
+and its monadic `rewriteExpressionBottomUpM` variant visit expression children
+left-to-right before their parent; patterns and checked visible type arguments
+are retained, and callback-produced nodes are not traversed again.
+
 ## Import guidance
 
 - Start with `Language.Haskell.Djex` for a compact application or an API tour.

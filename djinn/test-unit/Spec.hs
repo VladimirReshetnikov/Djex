@@ -1168,6 +1168,36 @@ testRankNTypeAtoms = do
     defaultBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
             valueDeclaration "defaultMonoBox" defaultBoxScheme]
+    ambiguousTokenSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ valueDeclaration "ambiguousMonoToken" $
+            SharedType.ForallType ["chosen"] [] tokenType
+        ]
+    prefixAmbiguousSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ valueDeclaration "prefixAmbiguousMonoToken" $
+            SharedType.ForallType ["hidden", "payload"] [] $
+                SharedType.FunctionType
+                    (SharedType.TypeVariable "payload") tokenType
+        ]
+    let higherKindName = sharedName "HigherKindConstructor"
+        higherKindArgumentName = sharedName "HigherKindArgument"
+        higherKindType = SharedType.TypeConstructor higherKindName
+        higherKindArgumentType =
+            SharedType.TypeConstructor higherKindArgumentName
+        mixedKindProvider = SharedType.ForallType ["f", "a", "hidden"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeApplication
+                    (SharedType.TypeVariable "f")
+                    (SharedType.TypeVariable "a"))
+                tokenType
+    mixedKindSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ SharedDeclaration.AbstractTypeDeclaration () higherKindName $
+            SharedKind.FunctionKind closedKind closedKind
+        , abstractClosed higherKindArgumentName
+        , valueDeclaration "mixedKindAmbiguousMonoToken" mixedKindProvider
+        ]
     sealedBoxSession <- sealDjinnSessionFrom stableSession $
         closedDeclarations ++ [boxDeclaration,
             valueDeclaration "sealedMonoBox" sealedBoxScheme]
@@ -1182,6 +1212,57 @@ testRankNTypeAtoms = do
         ("a result-only loaded scheme ignored the goal monotype: " ++
             show defaultBoxRendered)
         $ any ("defaultMonoBox" `isInfixOf`) defaultBoxRendered
+    ambiguousToken <- runStableQuery ambiguousTokenSession
+        "instantiateLoadedAmbiguousProvider"
+        "MonoClosed -> MonoToken"
+    ambiguousTokenRendered <- renderStableCandidates ambiguousToken
+    assertBool
+        ("a vacuous loaded scheme erased its selected goal monotype: " ++
+            show ambiguousTokenRendered)
+        $ any ("ambiguousMonoToken @MonoClosed" `isInfixOf`)
+            ambiguousTokenRendered
+    assertBool
+        ("identical logical axioms collapsed distinct visible choices: " ++
+            show ambiguousTokenRendered)
+        $ any ("ambiguousMonoToken @MonoToken" `isInfixOf`)
+            ambiguousTokenRendered
+    ambiguousOpen <- runStableQuery ambiguousTokenSession
+        "retainInferredAmbiguousProviderEvidence"
+        "forall goal. goal -> MonoToken"
+    ambiguousOpenRendered <- renderStableCandidates ambiguousOpen
+    assertBool
+        ("an open vacuous choice lost its explicit evidence: " ++
+            show ambiguousOpenRendered)
+        $ any ("ambiguousMonoToken @_" `isInfixOf`)
+            ambiguousOpenRendered
+    prefixAmbiguous <- runStableQuery prefixAmbiguousSession
+        "retainShortestVisibleProviderPrefix"
+        "MonoClosed -> MonoToken"
+    prefixAmbiguousRendered <- renderStableCandidates prefixAmbiguous
+    assertBool
+        ("a leading vacuous binder was not selected explicitly: " ++
+            show prefixAmbiguousRendered)
+        $ any ("prefixAmbiguousMonoToken @MonoClosed" `isInfixOf`)
+            prefixAmbiguousRendered
+    assertBool
+        ("a later inferable binder was selected visibly: " ++
+            show prefixAmbiguousRendered)
+        $ not $ any
+            ("prefixAmbiguousMonoToken @MonoClosed @" `isInfixOf`)
+            prefixAmbiguousRendered
+    mixedKind <- runStableQuery mixedKindSession
+        "retainMixedKindVisibleProviderPrefix" $
+        SharedTypeRender.renderType id
+            (SharedType.FunctionType
+                (SharedType.TypeApplication
+                    higherKindType higherKindArgumentType)
+                tokenType)
+    mixedKindRendered <- renderStableCandidates mixedKind
+    assertBool
+        ("higher-kinded prefix choices discarded vacuous evidence: " ++
+            show mixedKindRendered)
+        $ any ("mixedKindAmbiguousMonoToken @_ @_ @" `isInfixOf`)
+            mixedKindRendered
     irrelevant <- runStableQuery defaultBoxSession
         "doNotRefuteIrrelevantLoadedScheme" "MonoResult"
     assertEqual "an irrelevant loaded scheme produced a candidate"

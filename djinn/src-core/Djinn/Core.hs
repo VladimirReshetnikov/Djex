@@ -83,6 +83,7 @@ import Djinn.Internal.Instantiation
     , eliminateInstantiationEvidence
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
+    , instantiationVisibleApplications
     , instantiationAxioms
     , loadedInstantiationAxioms
     , usesInstantiationEvidence
@@ -92,7 +93,7 @@ import Djinn.Internal.ProofCheck (checkProof)
 import Djinn.Internal.ProofEnv
 import Djinn.Internal.ProofToGenerated
     ( termToGeneratedClause
-    , termToGeneratedClauseWithoutEta
+    , termToGeneratedClauseWithVisibleApplications
     )
 import Djinn.Internal.Type
 import Djinn.Internal.TypeFormula
@@ -958,6 +959,13 @@ searchPreparedFormula options prepared target elaboratedGoal
         checkedTranslator translator source = do
             checkPreparedSynthesisTypesKinds prepared [(KStar, source)]
             translator source
+        visibleArgument source = case
+                checkPreparedSynthesisTypesKinds prepared [(KStar, source)] of
+            Left _ -> Nothing
+            Right () -> Just $ either
+                (const SharedGenerated.inferredVisibleTypeArgument)
+                id
+                $ SharedGenerated.specifiedVisibleTypeArgument source
         structuralTranslator = checkedTranslator $
             preparedEnvironmentSynthesisFormulaTranslator prepared
         nominalTranslator = checkedTranslator $
@@ -1043,6 +1051,7 @@ searchPreparedFormula options prepared target elaboratedGoal
             instantiationAxiomPremises targetNominalAxioms
         activeLoadedAxioms = loadedInstantiationAxioms
             structuralTranslator
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems formulaPlans ++
                 premiseSpellings)
@@ -1054,8 +1063,11 @@ searchPreparedFormula options prepared target elaboratedGoal
             instantiationAxiomSymbols activeLoadedAxioms
         activeLoadedAxiomPremises =
             instantiationAxiomPremises activeLoadedAxioms
+        activeLoadedVisibleApplications =
+            instantiationVisibleApplications activeLoadedAxioms
         targetLoadedAxioms = loadedInstantiationAxioms
             structuralTranslator
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems formulaPlans ++
                 premiseSpellings)
@@ -1067,6 +1079,7 @@ searchPreparedFormula options prepared target elaboratedGoal
             instantiationAxiomPremises targetLoadedAxioms
         activeNominalLoadedAxioms = loadedInstantiationAxioms
             nominalTranslator
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems nominalFormulaPlans ++
                 nominalPremiseSpellings)
@@ -1078,8 +1091,11 @@ searchPreparedFormula options prepared target elaboratedGoal
             instantiationAxiomSymbols activeNominalLoadedAxioms
         activeNominalLoadedAxiomPremises =
             instantiationAxiomPremises activeNominalLoadedAxioms
+        activeNominalLoadedVisibleApplications =
+            instantiationVisibleApplications activeNominalLoadedAxioms
         targetNominalLoadedAxioms = loadedInstantiationAxioms
             nominalTranslator
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems nominalFormulaPlans ++
                 nominalPremiseSpellings)
@@ -1103,13 +1119,14 @@ searchPreparedFormula options prepared target elaboratedGoal
         -- fuel left by that prefix and still precedes the structural axiom
         -- phase which previously formed the appended transport tail.
         structuralSearchPlans =
-            [ (premises, [], Set.empty, form, sound)
+            [ (premises, [], Set.empty, Map.empty, form, sound)
             | (form, sound) <- plans
             ]
         structuralAxiomSearchPlans =
             [ ( premises ++ activeAxiomPremises
               , targetAxiomPremises
               , activeAxiomSymbols
+              , Map.empty
               , form
               , sound && null activeAxiomPremises
               )
@@ -1122,6 +1139,7 @@ searchPreparedFormula options prepared target elaboratedGoal
                     activeLoadedAxiomPremises
               , targetAxiomPremises ++ targetLoadedAxiomPremises
               , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+              , activeLoadedVisibleApplications
               , form
               , sound && null activeAxiomPremises &&
                     null activeLoadedSchemePremises
@@ -1140,10 +1158,11 @@ searchPreparedFormula options prepared target elaboratedGoal
             | not useNominalProjection = []
             | otherwise = concatMap nominalFormSearchPlans nominalPlans
         nominalFormSearchPlans (form, _) =
-            (nominalPremises, [], Set.empty, form, False) :
+            (nominalPremises, [], Set.empty, Map.empty, form, False) :
             [ ( nominalPremises ++ activeNominalAxiomPremises
               , targetNominalAxiomPremises
               , activeNominalAxiomSymbols
+              , Map.empty
               , form
               , False
               )
@@ -1160,6 +1179,7 @@ searchPreparedFormula options prepared target elaboratedGoal
                         targetNominalLoadedAxiomPremises
                   , activeNominalAxiomSymbols `Set.union`
                         activeNominalLoadedAxiomSymbols
+                  , activeNominalLoadedVisibleApplications
                   , form
                   , False
                   )
@@ -1181,13 +1201,15 @@ searchPreparedFormula options prepared target elaboratedGoal
             (( planPremises
               , diagnosticOnlyPremises
               , axiomSymbols
+              , visibleApplications
               , form
               , negativeEvidenceSound
               )
                 : remaining) = do
         result <- searchPreparedFormulaPlan
             currentOptions candidateLimit target planPremises axiomSymbols
-            diagnosticOnlyPremises form negativeEvidenceSound
+            visibleApplications diagnosticOnlyPremises form
+            negativeEvidenceSound
         let completed' = result : completed
             nextLimit = candidateLimit - formulaPlanProofCount result
             continue =
@@ -1262,12 +1284,14 @@ searchPreparedFormulaPlan
     -> SharedGenerated.DefinitionName
     -> [(Symbol, Formula)]
     -> Set.Set Symbol
+    -> Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
     -> [(Symbol, Formula)]
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
 searchPreparedFormulaPlan options candidateLimit target externalEnv
-        axiomSymbols diagnosticOnlyEnv form negativeEvidenceSound = do
+        axiomSymbols visibleApplications diagnosticOnlyEnv form
+        negativeEvidenceSound = do
     let name = SharedGenerated.definitionSpelling target
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
@@ -1331,12 +1355,16 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                 candidateLimitReached = not $ null overflow
                 convertProof internalProof =
                     let restored = restoreProofTerm proofEnv internalProof
+                        implicitAxiomSymbols = axiomSymbols
+                            `Set.difference`
+                            Map.keysSet visibleApplications
                         erased = eliminateInstantiationEvidence
-                            axiomSymbols restored
+                            implicitAxiomSymbols restored
                         convert
                             | usesInstantiationEvidence
                                 axiomSymbols restored =
-                                termToGeneratedClauseWithoutEta
+                                termToGeneratedClauseWithVisibleApplications
+                                    visibleApplications
                             | otherwise = termToGeneratedClause
                     in convert target erased
             -- Every candidate must check against the requested formula

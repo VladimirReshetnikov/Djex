@@ -728,6 +728,143 @@ tests = testGroup "Djex facade"
           ("GHC rejected a twice-instantiated loaded Djinn value\nstdout:\n"
             ++ output ++ "\nstderr:\n" ++ errors)
           ExitSuccess exitCode
+  , testCase "compile explicit evidence for an ambiguous Djinn provider" $ do
+      seedName <- expectRight $ parseName "AmbiguousSeed"
+      tokenName <- expectRight $ parseName "AmbiguousToken"
+      providerName <- expectRight $ parseName "ambiguousToken"
+      targetName <- expectRight $ mkIdentifier "useAmbiguousToken"
+      target <- expectRight $ mkDefinitionName targetName
+      let seedType = TypeConstructor seedName
+          tokenType = TypeConstructor tokenName
+          providerType = ForallType ["chosen"] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () seedName ProperTypeKind
+            , AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      request <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType seedType tokenType
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+        }
+      result <- expectRight $ runDjinnQuery session request
+      rendered <- traverse
+        (expectRight . renderDjinnCandidateDefinition Unqualified)
+        $ batchCandidates $ resultSearch result
+      generated <- case filter
+          ("ambiguousToken @AmbiguousSeed" `isInfixOf`) rendered of
+        candidate : _ -> pure candidate
+        [] -> fail $ "Djinn erased the provider's selected type: "
+          ++ show rendered
+
+      let fixture = unlines
+            [ "module AmbiguousDjinnProviderFixture where"
+            , ""
+            , "data AmbiguousSeed = AmbiguousSeed"
+            , "data AmbiguousToken = AmbiguousToken"
+            , ""
+            , "ambiguousToken :: forall a. AmbiguousToken"
+            , "ambiguousToken = AmbiguousToken"
+            , ""
+            , "useAmbiguousToken :: AmbiguousSeed -> AmbiguousToken"
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected explicit ambiguous-provider evidence\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\ngenerated:\n" ++ generated)
+          ExitSuccess exitCode
+  , testCase "compile a mixed-kind visible Djinn prefix" $ do
+      higherConstructorName <- expectRight $
+        parseName "MixedKindConstructor"
+      argumentName <- expectRight $ parseName "MixedKindArgument"
+      tokenName <- expectRight $ parseName "MixedKindToken"
+      providerName <- expectRight $ parseName "mixedKindProvider"
+      targetName <- expectRight $ mkIdentifier "useMixedKindProvider"
+      target <- expectRight $ mkDefinitionName targetName
+      let constructorType = TypeConstructor higherConstructorName
+          argumentType = TypeConstructor argumentName
+          tokenType = TypeConstructor tokenName
+          appliedType = TypeApplication constructorType argumentType
+          providerType = ForallType ["f", "a", "hidden"] [] $
+            FunctionType
+              (TypeApplication (TypeVariable "f") (TypeVariable "a"))
+              tokenType
+          declarations =
+            [ AbstractTypeDeclaration () higherConstructorName $
+                FunctionKind ProperTypeKind ProperTypeKind
+            , AbstractTypeDeclaration () argumentName ProperTypeKind
+            , AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      request <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType appliedType tokenType
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+        }
+      result <- expectRight $ runDjinnQuery session request
+      rendered <- traverse
+        (expectRight . renderDjinnCandidateDefinition Unqualified)
+        $ batchCandidates $ resultSearch result
+      generated <- case filter
+          ("mixedKindProvider @_ @_ @" `isInfixOf`) rendered of
+        candidate : _ -> pure candidate
+        [] -> fail $ "Djinn discarded the higher-kinded visible prefix: "
+          ++ show rendered
+
+      let fixture = unlines
+            [ "module MixedKindDjinnProviderFixture where"
+            , ""
+            , "data MixedKindConstructor a = MixedKindConstructor a"
+            , "data MixedKindArgument = MixedKindArgument"
+            , "data MixedKindToken = MixedKindToken"
+            , ""
+            , "mixedKindProvider :: forall f a hidden. f a -> MixedKindToken"
+            , "mixedKindProvider _ = MixedKindToken"
+            , ""
+            , "useMixedKindProvider ::"
+            , "  MixedKindConstructor MixedKindArgument -> MixedKindToken"
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected a mixed-kind visible prefix\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\ngenerated:\n" ++ generated)
+          ExitSuccess exitCode
   , testCase "retain nominal eta through selector presentation for GHC" $ do
       dataName <- expectRight $ parseName "SelectorData"
       dataConstructorName <- expectRight $ parseName "SelectorDataValue"

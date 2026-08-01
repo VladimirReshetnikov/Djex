@@ -8,12 +8,14 @@ module Djinn.Internal.ProofToGenerated
   ( termToGeneratedExpression
   , termToGeneratedClause
   , termToGeneratedClauseWithoutEta
+  , termToGeneratedClauseWithVisibleApplications
   ) where
 
 import Control.Monad (foldM, zipWithM)
 import Control.Monad.Trans.State.Strict (evalState, state)
 import Data.List ((\\))
 import Data.Maybe (catMaybes, fromMaybe)
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import Numeric.Natural (Natural)
 
@@ -35,7 +37,15 @@ termToGeneratedExpression :: Term -> Either String Expression
 termToGeneratedExpression = termToGeneratedExpressionWithEta True
 
 termToGeneratedExpressionWithEta :: Bool -> Term -> Either String Expression
-termToGeneratedExpressionWithEta contractEta term = do
+termToGeneratedExpressionWithEta contractEta =
+  termToGeneratedExpressionWithEvidence contractEta Map.empty
+
+termToGeneratedExpressionWithEvidence
+  :: Bool
+  -> Map.Map Symbol [Generated.VisibleTypeArgument]
+  -> Term
+  -> Either String Expression
+termToGeneratedExpressionWithEvidence contractEta visibleEvidence term = do
   validateTermMetadata term
   (expression, _) <- convert [] renamedTerm
   let simplifyBindings
@@ -61,6 +71,15 @@ termToGeneratedExpressionWithEta contractEta term = do
   renamedTerm = alphaRenameTerm term
   reservedNames = termNames renamedTerm
 
+  convert _ (Var symbol)
+      | Just typeArguments <- Map.lookup symbol visibleEvidence =
+          pure
+            ( Generated.lambdaExpression
+                [Generated.Bind evidenceBinder]
+                $ applyVisibleTypeArguments typeArguments
+                $ Generated.Local evidenceBinder
+            , []
+            )
   convert enclosing (Var symbol) = do
     let spelling = unSymbol symbol
     expression <- if spelling `elem` enclosing
@@ -119,6 +138,18 @@ termToGeneratedExpressionWithEta contractEta term = do
 
   convertApplication enclosing (Apply function argument) arguments =
     convertApplication enclosing function (argument : arguments)
+  convertApplication enclosing (Var symbol) (argument : arguments)
+      | Just typeArguments <- Map.lookup symbol visibleEvidence = do
+          (convertedArgument, argumentRefinements) <-
+            convert enclosing argument
+          convertedRest <- mapM (convert enclosing) arguments
+          let (restExpressions, restRefinements) = unzip convertedRest
+          pure
+            ( foldl' Generated.Apply
+                (applyVisibleTypeArguments typeArguments convertedArgument)
+                restExpressions
+            , argumentRefinements ++ concat restRefinements
+            )
   convertApplication enclosing (Ctuple arity) arguments
     | length arguments == arity = do
         converted <- mapM (convert enclosing) arguments
@@ -300,6 +331,61 @@ termToGeneratedExpressionWithEta contractEta term = do
     (patterns, body) = Generated.expressionLambdaSpine expression
     (used, remaining) = splitAt arity patterns
 
+  -- GHC can visibly instantiate a variable-headed application, but not an
+  -- arbitrary expression whose inferred type happens to be polymorphic. In
+  -- particular, @(case ... of ...) @T@ loses the branch signatures before
+  -- visible application. Push the complete application into case and let
+  -- bodies until it reaches an inferable head. A locally constructed value
+  -- at any other head remains implicitly instantiated; it carries no erased
+  -- loaded-provider constraint of its own.
+  applyVisibleTypeArguments arguments expression =
+    pushVisibleArguments expression arguments
+
+  pushVisibleArguments expression arguments =
+    pushAtHead applicationHead existing arguments
+   where
+    (applicationHead, existing) =
+      Generated.expressionFullApplicationSpine expression
+
+  pushAtHead applicationHead existing arguments = case applicationHead of
+    Generated.Case scrutinee alternatives ->
+      Generated.Case scrutinee
+        [ (pattern', pushVisibleArguments
+            (rebuildApplication branch existing) arguments)
+        | (pattern', branch) <- alternatives
+        ]
+    Generated.Let pattern' binding body ->
+      Generated.Let pattern' binding $
+        pushVisibleArguments (rebuildApplication body existing) arguments
+    Generated.Global{} -> appendVisible
+      applicationHead existing arguments
+    Generated.Local{} -> appendVisible
+      applicationHead existing arguments
+    _ -> rebuildApplication applicationHead existing
+
+  appendVisible applicationHead existing arguments =
+    rebuildApplication applicationHead $
+      existing ++ map Generated.VisibleTypeArgumentArgument arguments
+
+  rebuildApplication = foldl' applyArgument
+
+  applyArgument function argument = case argument of
+    Generated.TermArgument value -> Generated.Apply function value
+    Generated.VisibleTypeArgumentArgument typeArgument ->
+      Generated.VisibleTypeApplication function typeArgument
+
+  evidenceBinder = selected
+   where
+    (selected, _, _) = allocateFresh
+      (\suffix ->
+        ( "$djinn$instantiated" ++ suffixSpelling suffix
+        , suffix + 1
+        ))
+      reservedNames (0 :: Natural)
+
+  suffixSpelling 0 = ""
+  suffixSpelling suffix = show suffix
+
 -- | Construct and validate the shared clause used by the stable Djinn core.
 termToGeneratedClause
   :: Generated.DefinitionName
@@ -319,6 +405,19 @@ termToGeneratedClauseWithoutEta
   -> Either String (Generated.FunctionClause HSymbol)
 termToGeneratedClauseWithoutEta target term = do
   expression <- termToGeneratedExpressionWithEta False term
+  expressionToClause target expression
+
+-- | Convert a proof whose retained instantiation axioms carry explicit type
+-- choices. Applied evidence becomes @provider @T@; a bare axiom becomes the
+-- corresponding @\provider -> provider @T@ function. Eta contraction stays
+-- disabled for the same rank-N reason as 'termToGeneratedClauseWithoutEta'.
+termToGeneratedClauseWithVisibleApplications
+  :: Map.Map Symbol [Generated.VisibleTypeArgument]
+  -> Generated.DefinitionName
+  -> Term
+  -> Either String (Generated.FunctionClause HSymbol)
+termToGeneratedClauseWithVisibleApplications evidence target term = do
+  expression <- termToGeneratedExpressionWithEvidence False evidence term
   expressionToClause target expression
 
 expressionToClause

@@ -3,16 +3,18 @@
 --
 -- LJT search is propositional: a quantified type is one opaque proposition.
 -- A hypothesis of type @forall as. t@ nevertheless justifies every instance
--- @t[as := ss]@, and the generated Haskell evidence for that step is the
--- hypothesis expression itself, because GHC instantiates value occurrences
--- implicitly. This module turns that semantic fact into explicit premise
--- axioms @Opaque(forall as. t) -> compile(t[as := ss])@ over a finite
--- candidate set: the sequent's type variables (including skolems introduced
--- by opened positive foralls), every quantified atom the sequent already
--- mentions, and—for the separate loaded-value tail—closed forall-free
--- subtrees of checked queries and value signatures. Quantified candidates give
--- guarded impredicative instantiation; closed candidates may have any kind,
--- but the complete substituted body is kind-checked before compilation.
+-- @t[as := ss]@. Generated Haskell normally uses the hypothesis expression
+-- directly and lets GHC instantiate it implicitly. A loaded scheme with a
+-- binder absent from its residual body instead retains a bounded visible type
+-- application: frontends may have erased the constraint which originally
+-- determined that binder. This module turns both cases into premise axioms
+-- @Opaque(forall as. t) -> compile(t[as := ss])@ over a finite candidate set:
+-- the sequent's type variables (including skolems introduced by opened
+-- positive foralls), every quantified atom the sequent already mentions,
+-- and—for the separate loaded-value tail—closed forall-free subtrees of
+-- checked queries and value signatures. Quantified candidates give guarded
+-- impredicative instantiation; closed candidates may have any kind, but the
+-- complete substituted body is kind-checked before compilation.
 --
 -- Each axiom is a self-contained semantic truth about Haskell types, so
 -- adding them can only enlarge the set of provable goals; they never
@@ -27,6 +29,7 @@ module Djinn.Internal.Instantiation
     , closedMonotypeSubtrees
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
+    , instantiationVisibleApplications
     , usesInstantiationEvidence
     , eliminateInstantiationEvidence
     ) where
@@ -41,6 +44,7 @@ import Language.Haskell.Synthesis.Constraint (constraintArguments)
 import qualified Language.Haskell.Synthesis.Type as SharedType
 import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 import qualified Language.Haskell.Synthesis.TypeRender as SharedTypeRender
+import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 
 -- Instantiating a leading chain replaces every binder at once, mirroring
 -- Exference's provider rule. Longer chains multiply the candidate tuple space
@@ -72,12 +76,26 @@ maxInstantiationAxiomsPerScheme = 16
 
 -- | The generated axiom premises together with their reserved proof symbols.
 -- The symbols use Djinn's private @$@ namespace, so they cannot collide with
--- declared functions, and they must be erased from checked proofs by
--- 'eliminateInstantiationEvidence' before code generation.
+-- declared functions. Ordinary evidence is erased before code generation;
+-- loaded evidence whose vacuous binders require a visible choice is retained
+-- in 'instantiationVisibleApplications' until proof conversion.
 data InstantiationAxioms = InstantiationAxioms
     { instantiationAxiomPremises :: [(Symbol, Formula)]
     , instantiationAxiomSymbols :: Set.Set Symbol
+    , instantiationVisibleApplications ::
+        Map.Map Symbol [SharedGenerated.VisibleTypeArgument]
     }
+
+-- One retained logical axiom plus the explicit type arguments required when
+-- its proof evidence cannot safely collapse to an implicitly instantiated
+-- occurrence.  The latter is populated only for loaded schemes and only when
+-- a leading binder is absent from the residual body.
+data InstantiationAxiom = InstantiationAxiom
+    { instantiationAxiomFormula :: Formula
+    , instantiationAxiomVisibleArguments ::
+        Maybe [SharedGenerated.VisibleTypeArgument]
+    }
+    deriving (Eq, Ord)
 
 -- Whether a subformula position provides data to the prover or demands it.
 -- A premise root is hypothesis-side; a goal root is obligation-side; each
@@ -145,6 +163,7 @@ instantiationAxioms translator variableSpellings goalFormulas
         premiseFormulas =
     buildInstantiationAxioms "$djinn$instantiation$" translator
         False
+        (const Nothing)
         (historicalCandidateTuples historicalCandidates wideCandidates)
         initialSchemes
   where
@@ -186,16 +205,19 @@ instantiationAxioms translator variableSpellings goalFormulas
 -- rediscovered under a second proof-symbol family.
 loadedInstantiationAxioms
     :: (SharedType.Type String -> Either String Formula)
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
     -> [String]
     -> [SharedType.Type String]
     -> [Formula]
     -> [Formula]
     -> [Formula]
     -> InstantiationAxioms
-loadedInstantiationAxioms translator variableSpellings closedCandidates
-        goalFormulas premiseFormulas loadedSchemeFormulas =
+loadedInstantiationAxioms translator visibleArgument variableSpellings
+        closedCandidates goalFormulas premiseFormulas loadedSchemeFormulas =
     buildInstantiationAxioms "$djinn$loaded-instantiation$" translator
         True
+        visibleArgument
         (fairCandidateTuples candidates) initialSchemes
   where
     candidateAtoms =
@@ -227,18 +249,30 @@ buildInstantiationAxioms
     :: String
     -> (SharedType.Type String -> Either String Formula)
     -> Bool
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
     -> (Int -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> InstantiationAxioms
 buildInstantiationAxioms symbolPrefix translator interleaveSchemes
-        candidateTuples schemes =
-    InstantiationAxioms premises $ Set.fromList $ map fst premises
+        visibleArgument candidateTuples schemes =
+    InstantiationAxioms premises symbols visibleApplications
   where
-    premises =
-        [ (Symbol $ symbolPrefix ++ show index, formula)
-        | (index, formula) <- zip [0 :: Int ..] $
+    entries =
+        [ (Symbol $ symbolPrefix ++ show index, axiom)
+        | (index, axiom) <- zip [0 :: Int ..] $
             buildAxiomFormulas interleaveSchemes translator
-                candidateTuples schemes
+                visibleArgument candidateTuples schemes
+        ]
+    premises =
+        [ (symbol, instantiationAxiomFormula axiom)
+        | (symbol, axiom) <- entries
+        ]
+    symbols = Set.fromList $ map fst premises
+    visibleApplications = Map.fromList
+        [ (symbol, arguments)
+        | (symbol, axiom) <- entries
+        , Just arguments <- [instantiationAxiomVisibleArguments axiom]
         ]
 
 -- | Enumerate every source subtree which is closed and contains no explicit
@@ -319,11 +353,13 @@ data InstantiationJob
 buildAxiomFormulas
     :: Bool
     -> (SharedType.Type String -> Either String Formula)
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
     -> (Int -> [[SharedType.Type String]])
     -> [InstantiationScheme]
-    -> [Formula]
-buildAxiomFormulas interleaveSchemes translator candidateTuples
-        initialSchemes = loop
+    -> [InstantiationAxiom]
+buildAxiomFormulas interleaveSchemes translator visibleArgument
+        candidateTuples initialSchemes = loop
     (Set.fromList $ map schemeKey initialSchemes)
     Set.empty
     maxInstantiationAttempts
@@ -348,7 +384,8 @@ buildAxiomFormulas interleaveSchemes translator candidateTuples
                     | axiom `Set.notMember` seenAxioms ->
                         let discovered = distinctOn schemeKey
                                 [ found
-                                | found <- discoveredSchemes axiom
+                                | found <- discoveredSchemes
+                                    $ instantiationAxiomFormula axiom
                                 , schemeKey found
                                     `Set.notMember` seenSchemes
                                 ]
@@ -381,7 +418,29 @@ buildAxiomFormulas interleaveSchemes translator candidateTuples
         let hypothesis = PVar $ opaqueTypeSymbol $ schemeSource scheme
         if bodyFormula == hypothesis
             then Nothing
-            else Just $ hypothesis :-> bodyFormula
+            else Just $ InstantiationAxiom
+                (hypothesis :-> bodyFormula)
+                (visibleArguments scheme arguments)
+
+    visibleArguments scheme arguments = case vacuousPrefixLengths of
+        [] -> Nothing
+        lengths -> traverse retainArgument $
+            take (last lengths) $ zip (schemeBinders scheme) arguments
+      where
+        bodyVariables = SharedType.freeVariables $ schemeBody scheme
+        retainArgument (binder, argument)
+            | binder `Set.member` bodyVariables =
+                Just SharedGenerated.inferredVisibleTypeArgument
+            | otherwise = visibleArgument argument
+        -- Visible application is positional. Retain the shortest prefix that
+        -- reaches every vacuous binder, using inferred placeholders for any
+        -- earlier open choice; later binders remain implicit so GHC can still
+        -- perform ordinary and guarded impredicative inference for them.
+        vacuousPrefixLengths =
+            [ index
+            | (index, binder) <- zip [1 :: Int ..] $ schemeBinders scheme
+            , binder `Set.notMember` bodyVariables
+            ]
 
     -- The axiom itself acts as a premise: its domain atom becomes an
     -- obligation while its body joins the hypothesis side, so only body
@@ -504,14 +563,16 @@ usesInstantiationEvidence axioms
         Xsel _ _ expression -> go expression
         _ -> False
 
--- | Erase instantiation-axiom evidence from a checked proof before code
--- generation. Semantically every axiom is the identity function: an applied
--- occurrence reduces to its argument, so the generated Haskell uses the
--- polymorphic hypothesis directly and GHC re-instantiates it at the required
--- type; a bare occurrence becomes an explicit identity lambda, which GHC
--- checks against the implication's rank-N domain bidirectionally. LJT
--- allocates binders away from every environment symbol, so an axiom symbol
--- can never be shadowed inside a proof term.
+-- | Erase the caller-selected implicit instantiation evidence from a checked
+-- proof before code generation. Semantically each selected axiom is the
+-- identity function: an applied occurrence reduces to its argument, so the
+-- generated Haskell uses the polymorphic hypothesis directly and GHC
+-- re-instantiates it at the required type; a bare occurrence becomes an
+-- explicit identity lambda, which GHC checks against the implication's rank-N
+-- domain bidirectionally. Evidence with a visible type choice is deliberately
+-- excluded by the caller and lowered separately. LJT allocates binders away
+-- from every environment symbol, so an axiom symbol can never be shadowed
+-- inside a proof term.
 eliminateInstantiationEvidence :: Set.Set Symbol -> Term -> Term
 eliminateInstantiationEvidence axioms
     | Set.null axioms = id

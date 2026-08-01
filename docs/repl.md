@@ -237,6 +237,21 @@ providers too, so a `Holder -> R` request can project a hidden consumer from
 its `Holder` argument. Projection visits each datatype head at most once per
 path to remain finite through nested or recursive shapes.
 
+Visible recursive constructors can carry the same quantified payloads without
+making recursion itself transparent. With `Seed` opaque and
+`data Rec a = Done a | Again (Rec a)`, both engines can synthesize `Done` (or
+its eta-expanded form) for:
+
+```haskell
+(forall x. (Seed -> x) -> x)
+  -> Rec (forall y. (Seed -> y) -> y)
+```
+
+Djinn reaches that term through its first positive recursive constructor layer;
+Exference uses the retained constructor binding. Djinn still keeps a recursive
+field and every negative recursive occurrence opaque, while its exact fallback
+preserves `Rec a -> Rec a` identity.
+
 Every nested `forall` outside those boundaries is a shared opaque type atom.
 Both engines can carry it through constructors, arrows, declarations,
 equality, substitution, and rendering without decomposing it in ordinary
@@ -881,14 +896,23 @@ so the projection degrades rather than fails:
 
 - Names are projected at their unqualified in-scope spellings; a name whose
   unqualified spelling is ambiguous in scope is omitted.
-- Recursive datatypes and datatypes with hidden constructors are projected as
-  opaque abstract types, keeping their signatures usable without giving LJT
-  an elimination it cannot decide. Constructorless catalogue stubs have
-  already become explicit abstract declarations at the visibility-aware source
-  boundary, while genuine zero-constructor datatypes remain concrete and keep
-  Djinn's explicit empty-case elimination. Every degradation retains the exact
-  kind inferred by the shared source inventory, including higher-kinded
-  parameters.
+- A visible recursive datatype retains its declaration and constructors. Djinn
+  may expose the first positive constructor layer on an expansion path, but a
+  recursive field below it, a negative occurrence, and the exact-opaque view
+  keep the complete alias-normalized application atomic. The exact fallback
+  consequently preserves identity such as `Rec a -> Rec a`. Any translation
+  that touches this bounded rule is incomplete, so exhausting the search cannot
+  establish non-inhabitation. `:show omissions` reports that its constructors
+  are introduction-only.
+- A datatype with hidden constructors is still projected as an opaque abstract
+  type, so no hidden constructor can enter search or generated output. A later
+  scope or sealing repair can likewise degrade a declaration before the
+  recursive-introduction report is produced. Constructorless catalogue stubs
+  have already become explicit abstract declarations at the visibility-aware
+  source boundary, while genuine zero-constructor datatypes remain concrete and
+  keep Djinn's explicit empty-case elimination. Every abstract replacement
+  retains the exact kind inferred by the shared source inventory, including
+  higher-kinded parameters.
 - Instance declarations and classes with superclasses are omitted. Ordinary
   classes without superclasses remain available for validating Djinn query
   contexts.
@@ -919,6 +943,14 @@ so the projection degrades rather than fails:
   Selectors of fully eliminable records stay out of the axiom set — they would
   only multiply equivalent proofs of what structural elimination already
   derives.
+
+The recursive-head set is not rediscovered from the already shaped prompt
+declarations. It comes from the prepared Exference session's exact
+deconstructor metadata after source-synonym expansion, then is translated
+through the prompt renaming used by Djinn. Alias-hidden recursion therefore
+cannot accidentally make a record appear eliminable or withhold its visible
+selector. Recursive records are never classed as fully eliminable, so their
+visible selectors remain axioms under either `djinn-axioms` policy.
 
 Field projections are also normalized at presentation for both backends: a
 candidate that eliminates a record merely to return one field, or that

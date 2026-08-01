@@ -70,6 +70,8 @@ property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. Exference's finite recursive-pattern rule
 is recorded in the
 [2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
+Djinn's complementary bounded recursive-constructor rule is recorded in the
+[2026-08-01 bounded recursive introduction report](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).
 Djinn's widened bounded hypothesis-instantiation rule is recorded in the
 [2026-08-01 four-binder instantiation report](docs/reports/2026-08-01-four-binder-instantiation.md).
 Djinn's complementary nominal view of reachable parameterized datatypes is
@@ -241,9 +243,19 @@ the requested scheme itself supplies. This covers, for example:
 :exference (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
 
-Declared datatypes normally remain structural in Djinn: their constructor
-sums support introduction and case elimination and stay first in search. A
-query-directed backward slice additionally identifies reachable applications
+Nonrecursive declared datatypes remain fully structural in Djinn: their
+constructor sums support introduction and case elimination and stay first in
+search. Recursive datatypes use a narrower structural view. The first positive
+recursive occurrence on an expansion path exposes one real constructor layer;
+recursive fields below it, negative occurrences, and the exact-opaque view
+retain the complete alias-normalized application as an atom. The exact view
+therefore preserves forwarding such as `Rec a -> Rec a`, while the positive
+view can construct `Done a :: Rec a` without admitting recursive elimination,
+recursive calls, or induction. Every query translation that touches this
+bounded rule is incomplete, so an empty search is inconclusive rather than
+proof of non-inhabitation.
+
+A query-directed backward slice additionally identifies reachable applications
 of datatypes with at least one parameter. When the slice reaches one, Djinn can
 run a complementary formula view that retains parameterized datatype
 applications as alpha-aware nominal atoms. With these declarations loaded,
@@ -519,14 +531,15 @@ table, expands operational declarations in source order, and classifies
 recursion from that same operationally alias-free stream. An opaque shared
 `PreparedInventory` then keeps the Inventory and its exact normalized
 synonym table inseparable after the transient stream has supplied Djinn's
-formula, premise, and no-recursion checks; the mutable raw
+formula compilers, premise caches, reachability index, and exact recursive-data
+classification; the mutable raw
 `Djinn.Core.Environment` never crosses the curated facade. Synonyms are
-expanded for saturation and recursive datatype validation before ordered
+expanded for saturation and recursive datatype classification before ordered
 global assumptions are translated once into proof premises. The sealed
-environment retains exactly the prepared Inventory/synonym witness, the
-foundation's annotation-free prepared class index, formula compiler, and
-those ordered premises; historical raw declaration tables are derived only
-when a compatibility caller asks to display them.
+environment retains the prepared Inventory/synonym witness, the foundation's
+annotation-free class index, structural and nominal formula compilers and
+premise views, and the nominal reachability index; historical raw declaration
+tables are derived only when a compatibility caller asks to display them.
 
 At query time Djinn elaborates the goal and all class arguments as one
 shared kind scope, then compiles the alias-free goal directly into a formula
@@ -790,6 +803,11 @@ every environment to define them. A rating override claims to change search,
 so a non-finite rating or a name unavailable after exclusion and capability
 filtering is a fatal structured diagnostic. Quantified subtrees remain
 searchable through opaque atoms outside each backend's bounded rank-N rule.
+Djinn retains visible recursive constructors for bounded introduction: the
+first positive recursive occurrence exposes one constructor layer, while a
+recursive field, negative occurrence, and exact-opaque view remain atomic. Its
+exact fallback preserves recursive identity, and any search that encounters
+the bounded projection withholds negative evidence when it finds no term.
 Exference retains recursive datatype eliminators under a finite rule: matching
 a recursive scrutinee exposes one constructor layer, and its fields become
 ordinary providers in that branch without being fed back into eager pattern

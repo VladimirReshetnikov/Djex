@@ -12,6 +12,13 @@ Djinn's recursive-datatype policy is unchanged. Its complete LJT decision
 procedure still treats recursive source datatypes as outside the structurally
 expanded fragment.
 
+**Successor note — 2026-08-01:** that sentence records Djinn's policy when this
+Exference change landed. Djinn now retains visible recursive datatypes for one
+positive constructor layer while keeping recursive fields, negative positions,
+and the exact-opaque view atomic. The bounded projection cannot establish
+negative evidence when it finds no term. See the
+[bounded Djinn recursive-introduction report](2026-08-01-bounded-djinn-recursive-introduction.md).
+
 ## Finite search rule
 
 When a scoped value has a recursive datatype and pattern matching is otherwise

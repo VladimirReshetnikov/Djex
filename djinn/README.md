@@ -186,8 +186,20 @@ data Choice a b = This a | That b
 data Empty
 ```
 
-Recursive type declarations are rejected because the logical translation
-expands data types structurally.
+Recursive datatypes are accepted by checked Djinn environments, but they have
+a deliberately bounded logical projection. The first recursive occurrence in
+a positive expansion path exposes one constructor layer. Recursive fields
+below that layer, negative occurrences, and the exact-opaque formula view keep
+the complete alias-normalized datatype application as one atom. Thus Djinn can
+construct a finite value such as `Zero :: Nat` or forward a supplied payload
+through `Done`, and the exact fallback still finds `\x -> x` for
+`Rec a -> Rec a`; it does not gain case elimination for `Rec a`, recursive
+calls, or induction. Direct and mutual recursion use the same one-layer bound.
+Because every translation which touches recursive structure is marked
+incomplete, exhausting it without a term reports an undecided result rather
+than non-inhabitation. Standalone low-level formula-definition preparation
+keeps its historical strict cycle rejection unless the caller supplies the
+checked recursive-datatype classification.
 
 Unit is deliberately wired in rather than user-declared. The spelling `()` is
 part of Djinn's type grammar but is not an ordinary Haskell constructor
@@ -591,14 +603,18 @@ synonym saturation in every type-bearing declaration position, and consumes
 the foundation's transient prepared-expansion witness. That witness expands
 operational declarations in source order, attributes a failure to its exact
 declaration, and classifies recursive datatypes only from the same
-operationally alias-free stream. Djinn adds only its policy of rejecting a
-nonempty recursion set. The resulting sealed state has four products: the
-opaque prepared Inventory/synonym witness, nominal class index, checked formula
-compiler, and ordered global proof premises. There is no session-retained raw
-kind checker or seal-time raw `Environment` projection. Native saturation is a
-prepared-witness `TypeSynonym` operation; raw `HType` retains one separate
-source-order traversal solely to preserve its malformed-input diagnostics,
-with individual alias-head facts supplied by that same witness.
+operationally alias-free stream. Djinn passes that exact set into its structural
+and nominal compilers: only checked datatype SCCs receive bounded positive
+constructor expansion, while synonym cycles and mixed or unmarked recursive
+components remain errors. The resulting sealed state has eight private
+products: the opaque prepared Inventory/synonym witness, nominal class index,
+ordered historical premises, structural and nominal polarized premise caches,
+structural and nominal formula compilers, and the nominal reachability index.
+There is no session-retained raw kind checker or seal-time raw `Environment`
+projection. Native saturation is a prepared-witness `TypeSynonym` operation;
+raw `HType` retains one separate source-order traversal solely to preserve its
+malformed-input diagnostics, with individual alias-head facts supplied by that
+same witness.
 Even the trusted unit declaration used to bootstrap `standardEnvironment`
 now enters through this operational shared preparation path. The separate
 `validateEnvironment` function remains quarantined as a raw research
@@ -854,10 +870,13 @@ knowing before editing the source:
   type variables are not freshly instantiated at each use.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract
   constructors may still be used partially in higher-kinded positions.
-- Genuinely recursive data types cannot be declared structurally. Recursion is
-  classified after synonym expansion, so a phantom alias can erase an apparent
-  surface cycle; list types remain opaque rather than being expanded into `[]`
-  and `(:)`.
+- Genuinely recursive datatypes retain only bounded positive constructor
+  introduction. Their recursive fields, negative occurrences, and exact-opaque
+  view are atomic; the exact fallback preserves identity, and an empty
+  incomplete search cannot establish non-inhabitation. Recursion is classified
+  after synonym expansion, so alias-hidden direct and mutual cycles receive the
+  same rule while a phantom alias can erase an apparent surface cycle. List
+  types remain opaque rather than being expanded into `[]` and `(:)`.
 - Empty data types are logically false but retain nominal tags. Identity is used
   only for the same empty type; conversion to another result uses explicit empty
   elimination.
@@ -867,10 +886,12 @@ knowing before editing the source:
 - Empty-type elimination is printed structurally as `case value of {}`. This
   avoids an implicit helper name that could capture or be captured by a user
   declaration; generated code using it requires GHC's `EmptyCase` extension.
-- Proof search is a decision procedure, but the search space and the number of
-  inhabitants can grow rapidly. Keep `cutoff` modest when requesting multiple
-  or sorted solutions, and consider `:set budget=N` as a safety net for
-  queries that may explode; an expired budget is reported as undecided.
+- Proof search is a decision procedure for a complete formula projection, but
+  the search space and the number of inhabitants can grow rapidly. Bounded
+  rank-N and recursive projections deliberately report an empty search as
+  undecided. Keep `cutoff` modest when requesting multiple or sorted solutions,
+  and consider `:set budget=N` as a safety net for queries that may explode; an
+  expired budget is likewise reported as undecided.
 - Proof terms are independently checked, but generated clauses are not passed
   through GHC automatically. Treat the output as a strong candidate that still
   belongs in the normal compile/test loop.
@@ -878,6 +899,9 @@ knowing before editing the source:
 The dual structural/nominal design, scheduling, and regression boundary are
 recorded in the
 [nominal parametric-data transport report](../docs/reports/2026-08-01-nominal-parametric-data-transport.md).
+The recursive constructor rule, opacity boundary, and REPL projection are
+recorded in the
+[bounded Djinn recursive-introduction report](../docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).
 
 See [`docs/reports/`](docs/reports/) for the local review history:
 [the correctness review](docs/reports/2026-07-10-code-review.md) covering the

@@ -6,6 +6,12 @@
 -- grammar is stricter than the neutral vocabulary, so the projection degrades
 -- rather than fails: unrepresentable declarations become abstract types where
 -- that preserves meaning and are omitted with a recorded reason otherwise.
+-- Visible recursive datatypes are not degraded merely for being recursive.
+-- Their exact alias-expanded identities come from the prepared Exference
+-- session; Djinn retains their constructors for bounded positive introduction
+-- while withholding recursive elimination. Constructor-hidden datatypes and
+-- declarations which require a later repair remain abstract, so no unavailable
+-- constructor can enter search or presentation.
 --
 -- Value declarations become LJT axioms, and axiom sets of even moderate size
 -- make Djinn's otherwise-terminating proof search intractable. They are

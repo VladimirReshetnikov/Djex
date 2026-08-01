@@ -211,6 +211,17 @@ Structure surrounding those opaque quantifiers retains its ordinary form,
 which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.
 
+Djinn's formula compiler applies a similarly bounded rule to recursive
+datatypes classified by the prepared inventory expansion. On each expansion
+path, the first positive recursive occurrence exposes one constructor layer;
+recursive fields beneath it, negative occurrences, and the exact-opaque view
+retain the complete alias-normalized application as an atom. Real constructor
+injections still lower through the ordinary proof term, while the exact plan
+preserves recursive identity. Every translation that encounters recursive
+structure is marked incomplete, so its empty proof stream cannot become
+negative evidence. An unrelated recursive SCC does not weaken a complete
+translation for a query which never reaches it.
+
 The Exference runtime is deliberately richer than a bare session. Source
 targets, ratings, prompt scope, and command policy are not recoverable from its
 annotation-erased neutral environment, so `:load`, `:reload`, and `:set fix`
@@ -459,11 +470,17 @@ expression typing and search receive the value surface; Djinn receives both as
 separate visibility sets. This preserves `type`/`pattern` import items and
 namespace-specific `hiding` even when a datatype and constructor share one
 neutral `Name`. The scope then drives a checked Djinn declaration projection.
-Every abstract projection reuses the exact ground kind inferred by the shared inventory,
-including referenced stubs and concrete datatypes degraded because they are
-recursive, constructor-hidden, or require a later repair. Arity-derived kinds
-are only the fallback for genuinely absent external names. Record selectors
-are axioms only when their parent cannot be eliminated structurally. For an
+The prepared Exference session supplies the exact recursive datatype heads from
+its alias-expanded deconstructor metadata; Djinn translates those canonical
+identities through the prompt renaming rather than reclassifying shaped source
+declarations. A visible recursive datatype therefore retains its constructors
+for bounded positive introduction but is not considered structurally
+eliminable. Constructor-hidden datatypes and declarations requiring a later
+repair are instead degraded to abstract types. Every abstract projection reuses
+the exact ground kind inferred by the shared inventory; arity-derived kinds are
+only the fallback for genuinely absent external names. Record selectors are
+axioms only when their parent cannot be eliminated structurally, including a
+recursive record, and remain available under either Djinn axiom policy. For an
 eliminable record, presentation may replace the structural projection with a
 selector spelling only when that selector is visible unqualified, so hidden
 names never leak into output. Every unsupported or hidden declaration is

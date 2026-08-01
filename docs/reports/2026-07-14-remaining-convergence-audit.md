@@ -1609,6 +1609,14 @@ recursion policies and public
 error mappings; an integration regression exercises the alias-hidden and
 phantom cases through both stable session constructors.
 
+**Successor note — 2026-08-01:** the preceding paragraphs record the policy at
+the time of this convergence step. Djinn checked sessions now consume that same
+alias-expanded recursive-datatype set to permit one bounded positive constructor
+layer. Recursive fields, negative occurrences, and the exact-opaque view remain
+atomic; incomplete translations do not provide negative evidence. Synonym and
+mixed expansion cycles remain invalid. See the
+[bounded Djinn recursive-introduction report](2026-08-01-bounded-djinn-recursive-introduction.md).
+
 ## Exference implementation dependencies point inward
 
 **Completed on 2026-07-16:** several Exference implementation modules still

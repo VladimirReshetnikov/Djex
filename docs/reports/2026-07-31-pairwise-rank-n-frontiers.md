@@ -2,6 +2,10 @@
 
 Date: 2026-07-31
 
+Follow-up: the
+[2026-08-01 triple-frontier report](2026-08-01-triple-rank-n-frontiers.md)
+extends this historical quadratic boundary through seven independent sites.
+
 ## Outcome
 
 Djinn now explores the balanced rank-N choices that its historical singleton

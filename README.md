@@ -70,8 +70,9 @@ property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. Exference's finite recursive-pattern rule
 is recorded in the
 [2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
-Djinn's quadratic extension of its bounded rank-N plan family is recorded in
-the
+Djinn's cubic extension of its bounded rank-N plan family is recorded in the
+[2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md),
+following the
 [2026-07-31 pairwise rank-N frontiers report](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md).
 Contextual goal introduction and its
 lexical evidence boundary are recorded in the
@@ -256,17 +257,18 @@ refutation. Exference still does not perform non-exact subsumption between
 contextual schemes; quantified types outside an exposed goal/provider boundary
 remain opaque. Finite identifier or search-budget exhaustion is truncation, not
 negative evidence.
-Djinn searches a quadratically bounded family. Its historical prefix remains
+Djinn searches a cubically bounded family. Its historical prefix remains
 the fully opened polarized plan, the exact-opaque plan, and the two singleton
 frontiers: one positive `forall` stays opaque while its siblings open, or one
 occurrence opens while unrelated siblings remain opaque. A deterministic tail
-then makes the same choices for each unordered pair of sites. Opening nested
-occurrences also opens the union of their enclosing chains. Loaded functions
-expose those sound views together, so a reusable premise can be consumed at
-different views in one proof. The family is exhaustive for five independent
-sites without enumerating the power set; for six independent sites, a proof
-requiring exactly three open and three opaque occurrences may remain
-inconclusive. When the transported hypotheses are instantiable, the appended
+then makes the same choices for each unordered pair and triple of sites.
+Opening nested occurrences also opens the union of their enclosing chains.
+Loaded functions expose those sound views together, so a reusable premise can
+be consumed at different views in one proof. The family is exhaustive for
+seven independent sites without enumerating the power set; for eight
+independent sites, a proof requiring exactly four open and four opaque
+occurrences may remain inconclusive. When the transported hypotheses are
+instantiable, the appended
 hypothesis-instantiation plans cover many omitted middle subsets, but chains
 beyond three binders, constrained chains, and candidates outside the sequent's
 own vocabulary stay out of reach, and the instantiation closure is capped per

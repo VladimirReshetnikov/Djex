@@ -220,21 +220,21 @@ while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,
 Djinn keeps constrained hypothesis occurrences and chains beyond three binders
 opaque; if the bounded approximation finds no term, the result is inconclusive
-rather than a proof of uninhabitability. Its plan family is deliberately
-quadratic rather than exponential. The historical prefix is fully opened,
+rather than a proof of uninhabitability. Its plan family is deliberately cubic
+rather than exponential. The historical prefix is fully opened,
 exactly opaque, one plan per positive occurrence retained opaquely while the
 others open, and the dual plans opening one occurrence while unrelated
-siblings stay opaque. A deterministic tail retains each unordered pair
-opaquely, or opens each pair while unrelated siblings remain opaque. Opening
-nested occurrences includes the union of their enclosing forall chains. A
-single proof can therefore mix exact transport with structural introduction at
-sibling occurrences; the family covers every combination of five independent
-sites without enumerating a power set.
+siblings stay opaque. A deterministic tail makes the same opaque/open choices
+for each unordered pair and triple. Opening nested occurrences includes the
+union of their enclosing forall chains. A single proof can therefore mix exact
+transport with structural introduction at sibling occurrences; the family
+covers every combination of seven independent sites without enumerating a
+power set.
 When instantiation axioms exist, the same plans are appended once more with
 those axioms available, after every historical plan and under the shared
 cutoff and fuel, so previously decided queries keep their exact results and
-rankings. The base family still omits the central subsets from six sites
-onward, such as exactly three open and three opaque sites among six, though
+rankings. The base family still omits central subsets from eight sites onward,
+such as exactly four open and four opaque sites among eight, though
 instantiable hypotheses often cover such middle subsets through the appended
 axiom plans. Reusable loaded premises expose the same sound views
 simultaneously. An incomplete primary premise also conservatively disables

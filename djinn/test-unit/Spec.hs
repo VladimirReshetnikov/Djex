@@ -1560,11 +1560,18 @@ testRecursiveDataIntroduction = do
 
     let evenName = sharedName "EvenLoop"
         oddName = sharedName "OddLoop"
+        mutualAliasName = sharedName "MutualIdentity"
+        mutualParameter = SharedDeclaration.TypeParameter "mutual" Nothing
         evenType = SharedType.TypeConstructor evenName
         oddType = SharedType.TypeConstructor oddName
+        hiddenOddType = SharedType.TypeApplication
+            (SharedType.TypeConstructor mutualAliasName) oddType
+        mutualAliasDeclaration = SharedDeclaration.TypeSynonymDeclaration ()
+            mutualAliasName [mutualParameter] $
+                SharedType.TypeVariable "mutual"
         evenDeclaration = SharedDeclaration.DataTypeDeclaration () evenName []
             [SharedDeclaration.DataConstructor () (sharedName "ToEven")
-                [oddType]]
+                [hiddenOddType]]
         oddDeclaration = SharedDeclaration.DataTypeDeclaration () oddName []
             [ SharedDeclaration.DataConstructor () (sharedName "ToOdd")
                 [evenType]
@@ -1572,7 +1579,11 @@ testRecursiveDataIntroduction = do
                 [SharedType.TypeConstructor seedName]
             ]
     mutualEnvironment <- mkNeutralDjinnEnvironment
-        [seedDeclaration, evenDeclaration, oddDeclaration]
+        [ seedDeclaration
+        , mutualAliasDeclaration
+        , evenDeclaration
+        , oddDeclaration
+        ]
     mutualSession <- expectShownRight $ Djex.mkDjinnSession mutualEnvironment
     mutualIntroduced <- run mutualSession "introduceMutual" $
         SharedType.FunctionType oddType evenType

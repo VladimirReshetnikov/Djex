@@ -891,13 +891,7 @@ tests = testGroup "Djex facade"
         (mkEnvironment exferenceDeclarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       exferenceSession <- expectRight $ mkExferenceSession exferenceEnvironment
-      case exferenceSessionOmissions exferenceSession of
-        [omission] -> do
-          omittedName omission @?= loopName
-          omittedReason omission @?=
-            RecursiveDataEliminationUnsupported
-        omissions -> fail $ "unexpected shared-recursion omissions: "
-          ++ show omissions
+      exferenceSessionOmissions exferenceSession @?= []
   , testCase "do not reuse erased hints for synonym-introduced binders" $ do
       innerName <- expectRight $ parseName "Fixture.Inner"
       phantomName <- expectRight $ parseName "Fixture.Phantom"
@@ -1029,23 +1023,55 @@ tests = testGroup "Djex facade"
         $ ratedPreferred < baselinePreferred
       assertBool "positive override did not increase the candidate penalty"
         $ ratedOrdinary > baselineOrdinary
-  , testCase "report recursive Exference elimination as a session omission" $ do
-      loopName <- expectRight $ parseName "Fixture.Loop"
-      let declaration = DataTypeDeclaration () loopName []
-            [DataConstructor () loopName [TypeConstructor loopName]]
+  , testCase "synthesize one recursive Exference elimination layer" $ do
+      naturalName <- expectRight $ parseName "Fixture.Natural"
+      zeroName <- expectRight $ parseName "Fixture.Zero"
+      successorName <- expectRight $ parseName "Fixture.Successor"
+      targetName <- expectRight $ mkIdentifier "dispatchNatural"
+      target <- expectRight $ mkDefinitionName targetName
+      let natural = TypeConstructor naturalName
+          result = TypeVariable $ FlexibleVariable 0
+          declaration = DataTypeDeclaration () naturalName []
+            [ DataConstructor () zeroName []
+            , DataConstructor () successorName [natural]
+            ]
+          goal = FunctionType result
+            $ FunctionType (FunctionType natural result)
+            $ FunctionType natural result
       environment <- expectRight
         (mkEnvironment [declaration] :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
       session <- expectRight $ mkExferenceSession environment
-      case exferenceSessionOmissions session of
-        [omission] -> do
-          omittedName omission @?= loopName
-          omittedCapability omission @?= DataElimination
-          omittedReason omission @?=
-            RecursiveDataEliminationUnsupported
-        omissions -> fail $ "unexpected recursive omissions: " ++ show omissions
-      map diagnosticCode (exferenceSessionDiagnostics session) @?=
-        [Just "DJEX_EXF_RECURSIVE_OMISSION"]
+      exferenceSessionOmissions session @?= []
+      exferenceSessionDiagnostics session @?= []
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = goal
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceMultiConstructorPatterns = True
+            , exferenceMaximumSteps = 256
+            }
+        }
+      candidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      candidateResidualConstraints candidate @?= []
+      case candidateOutput candidate of
+        FunctionClause _
+            [Bind zeroResult, Bind onSuccessor, Bind scrutinee]
+            (Case (Local matchedScrutinee)
+              [ (Constructor matchedZero [], Local returnedZero)
+              , ( Constructor matchedSuccessor [Bind predecessor]
+                , Apply (Local usedSuccessor) (Local usedPredecessor)
+                )
+              ]) -> do
+          matchedScrutinee @?= scrutinee
+          matchedZero @?= zeroName
+          returnedZero @?= zeroResult
+          matchedSuccessor @?= successorName
+          usedSuccessor @?= onSuccessor
+          usedPredecessor @?= predecessor
+        output -> fail $ "unexpected recursive candidate: " ++ show output
   , testCase "reject Exference contexts whose variables escape the goal" $ do
       target <- expectRight $ mkIdentifier "constrained"
       checkedTarget <- expectRight $ mkDefinitionName target

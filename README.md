@@ -67,7 +67,10 @@ library deliberately trades Haskeline/HSE dependency
 isolation for one dependency and version contract; parser-independent module
 boundaries remain visible in the source graph. Integration, backend,
 property, CLI, API, and benchmark suites preserve differential testing while
-the two engines continue converging. Contextual goal introduction and its
+the two engines continue converging. Exference's finite recursive-pattern rule
+is recorded in the
+[2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
+Contextual goal introduction and its
 lexical evidence boundary are recorded in the
 [2026-07-29 contextual rank-N report](docs/reports/2026-07-29-contextual-rank-n-introduction.md).
 The bounded generated-term and Exference provider-use extension is recorded in
@@ -711,10 +714,12 @@ every environment to define them. A rating override claims to change search,
 so a non-finite rating or a name unavailable after exclusion and capability
 filtering is a fatal structured diagnostic. Quantified subtrees remain
 searchable through opaque atoms outside each backend's bounded rank-N rule.
-Recursive-data elimination is still a structured omission and warning rather
-than silently
-disappearing per query; omission order follows introduction order and then
-elimination order.
+Exference retains recursive datatype eliminators under a finite rule: matching
+a recursive scrutinee exposes one constructor layer, and its fields become
+ordinary providers in that branch without being fed back into eager pattern
+decomposition. This constructs finite case expressions, not recursive calls or
+induction. Multiple-constructor recursive types still require the existing
+multiple-pattern opt-in, so their search-space cost remains explicit.
 
 `Language.Haskell.Djex.Exference.HaskellSrc.parseExferenceRequest` resolves
 Haskell syntax against the session's retained type names, classes, and kind
@@ -782,11 +787,14 @@ same shared generated `Expression`/`Pattern` tree directly; `HExpr` and
 Incremental hole filling, capture-safe let cleanup, and eta reduction live
 in the shared generated-syntax module, parameterized only by Exference's
 projection from an annotated local to its stable numeric identity. Djinn's
-pattern alias normalization, unused-binder pruning, application-spine
-inspection, and case-body alpha-equivalence use that same authority, as do
-leading-lambda construction and decomposition: both backends promote the
-complete nonempty lambda spine through the same expression-to-clause
-operation, the inverse clause operation restores one canonical group, and a
+pattern alias normalization, unused-binder pruning, mixed term/type
+application-spine inspection, and case-body alpha-equivalence use that same
+authority. Generated-expression consumers can also use the shared pure or
+effectful bottom-up rewriter instead of duplicating constructor walks.
+Leading-lambda construction and decomposition are likewise shared: both
+backends promote the complete nonempty lambda spine through the same
+expression-to-clause operation, the inverse clause operation restores one
+canonical group, and a
 caller-built `Lambda []` is a validation error rather than being silently
 erased.
 

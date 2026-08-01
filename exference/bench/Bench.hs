@@ -182,6 +182,7 @@ containsCase expression = case expression of
   Generated.Lambda _ body -> containsCase body
   Generated.Apply function argument ->
     containsCase function || containsCase argument
+  Generated.VisibleTypeApplication function _ -> containsCase function
   Generated.Tuple elements -> any containsCase elements
   Generated.Let _ value body -> containsCase value || containsCase body
   Generated.Case{} -> True

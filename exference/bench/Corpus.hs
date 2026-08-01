@@ -80,6 +80,11 @@ corpus =
       (boundedQuery (TypeArrow choiceType resultType) True)
       FirstCaseCandidate
   , Entry
+      "pattern/recursive-one-layer"
+      recursivePatternEnvironment
+      (boundedQuery recursiveDispatchType True)
+      FirstCaseCandidate
+  , Entry
       "class/ground-instance"
       classEnvironment
       (boundedQuery (TypeArrow integerType booleanType) False)
@@ -153,6 +158,25 @@ patternEnvironment = checkedEnvironment $ EnvDictionary
 
 choiceType :: HsType
 choiceType = TypeCons $ name "Choice"
+
+recursivePatternEnvironment :: ExferenceEnvironment
+recursivePatternEnvironment = checkedEnvironment $ EnvDictionary
+  []
+  [ DeconstructorBinding naturalType
+      [ ConstructorBinding (name "Zero") []
+      , ConstructorBinding (name "Successor") [naturalType]
+      ]
+      True
+  ]
+  emptyStaticClassEnv
+
+naturalType :: HsType
+naturalType = TypeCons $ name "Natural"
+
+recursiveDispatchType :: HsType
+recursiveDispatchType = TypeArrow resultType
+  $ TypeArrow (TypeArrow naturalType resultType)
+  $ TypeArrow naturalType resultType
 
 classEnvironment :: ExferenceEnvironment
 classEnvironment = checkedEnvironment $ EnvDictionary

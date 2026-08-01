@@ -1765,7 +1765,7 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
           mapFunc
             :: DeconstructorBinding
             -> Maybe (StateT SearchNode SearchBranches [TGoal])
-          mapFunc (DeconstructorBinding matchParam [] False) =
+          mapFunc (DeconstructorBinding matchParam [] _) =
             let eliminateEmpty = do
                   -- An empty case evaluates its scrutinee once and has no
                   -- branch goals. Recording that use is also what lets a
@@ -1791,7 +1791,7 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
             in (eliminateEmpty <|> defaultHandleRest)
               <$ unifyRight vtResult matchParam
           mapFunc (DeconstructorBinding matchParam
-                    [ConstructorBinding matchId matchRs] False) =
+                    [ConstructorBinding matchId matchRs] recursive) =
             fmap mapFunc1 $ unifyRight vtResult matchParam
            where
             mapFunc1 substs = do
@@ -1810,16 +1810,27 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
               modify $ \node -> node
                 { nodeExpression = fillExprHole vid expr
                     $ nodeExpression node }
-              addScopePatternMatch
-                allocators
-                multiPM
-                goalType
-                vid
-                sid
-                givens
-                (reverse newBinds ++ bindingRest)
+              if recursive
+                then do
+                  -- A recursive datatype may be inspected once without
+                  -- synthesizing recursion. Retain its fields as ordinary
+                  -- providers in this branch, but do not feed them back into
+                  -- eager pattern decomposition: a self- or mutually-
+                  -- recursive field would otherwise make this state
+                  -- transformation diverge before search can apply its normal
+                  -- step, queue, or depth bounds.
+                  addBindingsToScope sid newBinds
+                  defaultHandleRest
+                else addScopePatternMatch
+                  allocators
+                  multiPM
+                  goalType
+                  vid
+                  sid
+                  givens
+                  (reverse newBinds ++ bindingRest)
           mapFunc (DeconstructorBinding matchParam
-              matchers@(_ : _) False)
+              matchers@(_ : _) recursive)
             | multiPM = fmap mapFunc2 $ unifyRight vtResult matchParam
            where
             mapFunc2 substs = do
@@ -1849,8 +1860,22 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
                     (ExpCaseMatch expVar $ map fst matchData)
                     (nodeExpression node) }
               fmap concat $ map snd matchData `forM`
-                \(newVid, newBinds, newSid) ->
-                  addScopePatternMatch
+                \(newVid, newBinds, newSid) -> if recursive
+                  then do
+                    -- Each alternative owns a child scope. Fields from one
+                    -- recursive constructor must remain usable in that branch
+                    -- without becoming visible to a sibling or triggering a
+                    -- second eager match layer.
+                    addBindingsToScope newSid $ reverse newBinds
+                    addScopePatternMatch
+                      allocators
+                      multiPM
+                      goalType
+                      newVid
+                      newSid
+                      givens
+                      bindingRest
+                  else addScopePatternMatch
                     allocators
                     multiPM
                     goalType
@@ -1859,6 +1884,15 @@ addScopePatternMatch allocators multiPM goalType vid sid givens bindings =
                     givens
                     (newBinds ++ bindingRest)
           mapFunc _ = Nothing
-            -- TODO: deconstructors for recursive data types.
+
+          -- Add a complete constructor-field group in declaration order.
+          -- 'scopesAddPBinding' prepends, so the right fold preserves the same
+          -- innermost-first order produced by ordinary recursive calls above.
+          addBindingsToScope scope bindings' = modify $ \node -> node
+            { nodeProvidedScopes = foldr
+                (scopesAddPBinding scope)
+                (nodeProvidedScopes node)
+                bindings'
+            }
   -- where
   --  (<&>) = flip (<$>)

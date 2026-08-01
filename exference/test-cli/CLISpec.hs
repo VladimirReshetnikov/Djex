@@ -42,8 +42,8 @@ main = defaultMain $ testGroup "Exference CLI integration"
       testLoaderWarningVisibility
   , testCase "loader warnings survive fatal environment validation"
       testLoaderWarningsBeforeFatal
-  , testCase "session warnings are visible without verbose mode"
-      testSessionWarningVisibility
+  , testCase "recursive sessions need no elimination warning"
+      testRecursiveSessionVisibility
   , testCase "missing environment directories fail closed" testMissingEnvironment
   , testCase "invalid class environments fail closed" testInvalidEnvironment
   , testCase "invalid synonym inventories fail closed" testInvalidSynonyms
@@ -299,8 +299,8 @@ testLoaderWarningsBeforeFatal =
     assertBool "a fatally invalid environment cannot enter synthesis"
       $ not $ "\\a -> a" `isInfixOf` output
 
-testSessionWarningVisibility :: Assertion
-testSessionWarningVisibility =
+testRecursiveSessionVisibility :: Assertion
+testRecursiveSessionVisibility =
   withTemporaryEnvironment $ \environmentDirectory -> do
     writeFile (environmentDirectory ++ "/Recursive.hs") $ unlines
       [ "module Recursive where"
@@ -310,12 +310,9 @@ testSessionWarningVisibility =
     (output, errors) <- runExferenceCapture
       ["--envdir", environmentDirectory]
     assertEqual "a load-only command should keep stdout quiet" "" output
-    assertContains "the default command must report session warnings on stderr"
-      "session warning [DJEX_EXF_RECURSIVE_OMISSION]:" errors
-    assertContains "the omission should identify the affected datatype"
-      "Recursive.Nat" errors
-    assertEqual "the recursive fixture should be diagnosed exactly once"
-      1 $ countOccurrences "context: Recursive.Nat" errors
+    assertEqual
+      "bounded recursive elimination should not emit an obsolete warning"
+      "" errors
 
 testMissingEnvironment :: Assertion
 testMissingEnvironment = withMissingTemporaryEnvironment $ \environmentDirectory -> do

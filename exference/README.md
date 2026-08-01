@@ -467,8 +467,8 @@ from a parser-independent
 `ExferenceEnvironment = Environment ExferenceTypeVariable Void ()`. Both paths
 use the annotation-polymorphic `prepareSynthesisInventory` boundary to prepare
 the shared inventory and synonym table, then seal one core search
-projection, and report recursive-data elimination limitations structurally;
-the source path preserves its historical ratings
+projection. Recursive datatype eliminators use the same bounded one-layer
+policy in either path; the source path preserves its historical ratings
 and equal-cost order. Its explicit `prepareSourceSynthesisInventory` refinement
 also copies alias-aware recursion into the retained source annotations; there
 is no separate neutral Inventory type or preparation API. The CLI parses
@@ -856,11 +856,14 @@ any / the right solution. Some common current limitations are:
   `case value of {}` and requires GHC's `EmptyCase` extension. A
   constructorless declaration is not automatically assumed empty in a curated
   directory that supplies the visibility manifest described below;
-- Recursive datatypes remain valid input, but recursive deconstructors are
-  currently omitted from search with a structured
-  `RecursiveDataEliminationUnsupported` warning rather than risking an
-  unsound or divergent elimination projection. This includes the built-in
-  list deconstructor, so HSE-loaded sessions report the limitation explicitly;
+- Recursive datatypes remain valid input and may be eliminated through one
+  constructor layer. Constructor fields become ordinary branch-local
+  providers, but search does not eagerly decompose them again; the generated
+  term is therefore a finite match, never a recursive definition or induction
+  principle. Multiple-constructor recursive datatypes, including lists, still
+  require the ordinary multiple-pattern opt-in. The legacy
+  `RecursiveDataEliminationUnsupported` omission reason remains source
+  compatible but is no longer produced by current sessions;
 - See also the detailed feature description in the [exference.pdf](https://github.com/lspitzner/exference-paper/raw/master/exference.pdf) report.
 
 ### Constructorless declarations in curated directories

@@ -32,10 +32,8 @@ module Language.Haskell.Djex.Exference.Internal.Session
 
 import Control.DeepSeq (NFData, deepseq)
 import Data.Bifunctor (first)
-import Data.List (partition)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import Data.Void (Void)
 import GHC.Generics (Generic)
@@ -59,8 +57,6 @@ import Language.Haskell.Exference.Core.Score
   ( Penalty
   , isFiniteScore
   )
-import Language.Haskell.Exference.Core.TypeUtils
-  ( typeConstructorHead )
 import Language.Haskell.Exference.Core.Types
   ( HsType
   , QueryClassEnv
@@ -128,7 +124,8 @@ data ExferenceOmissionReason
     -- ^ Legacy compatibility value. Current sessions retain nested universal
     -- quantifiers as opaque type atoms and never produce this omission.
   | RecursiveDataEliminationUnsupported
-    -- ^ Exference cannot safely eliminate this recursive datatype.
+    -- ^ Legacy compatibility reason. Current sessions retain recursive
+    -- datatypes for bounded one-layer elimination and do not produce it.
   | ExcludedByPolicy
     -- ^ The session policy explicitly disabled this binding.
   deriving (Eq, Ord, Show, Generic)
@@ -237,12 +234,8 @@ sealPreparedEnvironment policy prepared = do
         , not $ functionExcluded binding
         ]
   supportedFunctions <- applyRatingOverrides overrides retainedFunctions
-  let deconstructors = environmentDeconstructors backend
-      (supportedDeconstructors, omittedDeconstructors) =
-        partition deconstructorSupported deconstructors
-      supportedBackend = backend
+  let supportedBackend = backend
         { environmentFunctions = supportedFunctions
-        , environmentDeconstructors = supportedDeconstructors
         }
       omissions =
         [ ExferenceOmission
@@ -253,7 +246,7 @@ sealPreparedEnvironment policy prepared = do
         , reason <- if functionExcluded binding
             then [ExcludedByPolicy]
             else []
-        ] ++ mapMaybe deconstructorOmission omittedDeconstructors
+        ]
   searchEnvironment <- first
     (shownErrorDiagnostic "DJEX_EXF_ENV"
       "cannot seal the Exference session environment")
@@ -437,19 +430,6 @@ sessionInspectionClasses = inspectionClassesView
 
 sessionOmissions :: ExferenceSession -> [ExferenceOmission]
 sessionOmissions = omissionView
-
-deconstructorSupported :: DeconstructorBinding -> Bool
-deconstructorSupported = not . deconstructorRecursive
-
-deconstructorOmission :: DeconstructorBinding -> Maybe ExferenceOmission
-deconstructorOmission binding = do
-  name <- typeConstructorHead $ deconstructorInput binding
-  pure $ ExferenceOmission
-    name
-    DataElimination
-    reason
- where
-  reason = RecursiveDataEliminationUnsupported
 
 preparationFailure
   :: Show detail

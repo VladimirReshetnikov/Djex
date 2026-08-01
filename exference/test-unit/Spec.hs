@@ -25,6 +25,7 @@ import System.Directory
   , removePathForcibly
   )
 import System.IO (hClose, hPutStr, openTempFile)
+import System.Timeout (timeout)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
 import Control.Monad.Trans.Except (catchE, runExceptT, throwE)
@@ -2744,7 +2745,7 @@ tests = testGroup "Exference"
                     @?= Just 3
                 rendered -> fail
                   $ "unexpected rendered diagnostics: " ++ show rendered
-      , testCase "HSE sessions report built-in recursive list elimination" $
+      , testCase "HSE sessions retain built-in recursive list elimination" $
           withTemporaryFile (unlines
             [ "module Omissions where"
             , "identity :: a -> a"
@@ -2753,15 +2754,8 @@ tests = testGroup "Exference"
               checked <- expectRight result
               session <- expectRight
                 $ ExferenceSession.mkExferenceSession checked
-              case exferenceSessionOmissions session of
-                [omission] -> do
-                  omittedName omission @?= SharedName.listName
-                  omittedReason omission @?=
-                    RecursiveDataEliminationUnsupported
-                omissions -> fail $ "unexpected HSE omissions: "
-                  ++ show omissions
-              map diagnosticCode (exferenceSessionDiagnostics session) @?=
-                [Just "DJEX_EXF_RECURSIVE_OMISSION"]
+              exferenceSessionOmissions session @?= []
+              exferenceSessionDiagnostics session @?= []
       , testCase "HSE sessions preserve and retain rank-N result bindings" $
           withTemporaryFile (unlines
             [ "{-# LANGUAGE RankNTypes #-}"
@@ -3542,6 +3536,67 @@ tests = testGroup "Exference"
             Left failure -> fail
               $ "valid deconstructors failed environment sealing: " ++ show failure
             Right _ -> pure ()
+      , testCase "recursive deconstructors expose exactly one eager layer" $ do
+          let natural = TypeCons $ name "Natural"
+              result = TypeCons $ name "Result"
+              zero = name "Zero"
+              successor = name "Successor"
+              deconstructor = DeconstructorBinding natural
+                [ ConstructorBinding zero []
+                , ConstructorBinding successor [natural]
+                ] True
+              goal = TypeArrow result
+                $ TypeArrow (TypeArrow natural result)
+                $ TypeArrow natural result
+              input = identityInput
+                { input_goalType = goal
+                , input_envDeconsS = [deconstructor]
+                , input_multiPM = True
+                , input_maxSteps = 128
+                }
+          -- Before the bounded recursive rule, feeding the Successor field
+          -- back into eager decomposition diverged inside one state step and
+          -- never reached the ordinary search budget.
+          completed <- timeout 5000000 $ evaluate $ force
+            $ findOneExpression input
+          (expression, constraints, _) <- case completed of
+            Nothing -> fail "one-layer recursive elimination did not terminate"
+            Just Nothing -> fail
+              "one-layer recursive elimination produced no expression"
+            Just (Just candidate) -> pure candidate
+          constraints @?= []
+          case expression of
+            ExpLambda zeroResult zeroResultType
+                (ExpLambda onSuccessor onSuccessorType
+                  (ExpLambda scrutinee scrutineeType
+                    (ExpCaseMatch
+                      (ExpVar matchedScrutinee matchedScrutineeType)
+                      [ (matchedZero, [], ExpVar returnedZero returnedZeroType)
+                      , ( matchedSuccessor
+                        , [(predecessor, predecessorType)]
+                        , ExpApply
+                            (ExpVar usedSuccessor usedSuccessorType)
+                            (ExpVar usedPredecessor usedPredecessorType)
+                        )
+                      ]))) -> do
+              zeroResultType @?= result
+              onSuccessorType @?= TypeArrow natural result
+              scrutineeType @?= natural
+              matchedScrutinee @?= scrutinee
+              matchedScrutineeType @?= natural
+              matchedZero @?= zero
+              returnedZero @?= zeroResult
+              returnedZeroType @?= result
+              matchedSuccessor @?= successor
+              predecessorType @?= natural
+              usedSuccessor @?= onSuccessor
+              usedSuccessorType @?= TypeArrow natural result
+              usedPredecessor @?= predecessor
+              usedPredecessorType @?= natural
+            _ -> fail $ "unexpected recursive elimination: "
+              ++ showExpression expression
+          checkExpression (mkQueryClassEnv emptyClassEnv []) []
+            [deconstructor] goal [] expression @?= Right ()
       , testCase "generated constructor patterns are validated at input" $ do
           let arrowName = validQualifiedName [] "->"
               invalidBinding = FunctionBinding

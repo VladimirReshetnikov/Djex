@@ -70,6 +70,9 @@ property, CLI, API, and benchmark suites preserve differential testing while
 the two engines continue converging. Exference's finite recursive-pattern rule
 is recorded in the
 [2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
+Djinn's quadratic extension of its bounded rank-N plan family is recorded in
+the
+[2026-07-31 pairwise rank-N frontiers report](docs/reports/2026-07-31-pairwise-rank-n-frontiers.md).
 Contextual goal introduction and its
 lexical evidence boundary are recorded in the
 [2026-07-29 contextual rank-N report](docs/reports/2026-07-29-contextual-rank-n-introduction.md).
@@ -253,21 +256,21 @@ refutation. Exference still does not perform non-exact subsumption between
 contextual schemes; quantified types outside an exposed goal/provider boundary
 remain opaque. Finite identifier or search-budget exhaustion is truncation, not
 negative evidence.
-Djinn searches a linearly bounded family: the fully opened
-polarized plan, the historical exact-opaque plan, and one plan for each single
-positive `forall` retained opaquely while its siblings open, plus the dual
-frontier in which one occurrence opens and unrelated siblings remain opaque.
-Opening a nested occurrence also opens the enclosing chain needed to reach it.
-Loaded functions expose those sound views together, so a reusable premise can
-be consumed at different views in one proof. This is exhaustive for three
-independent sites, with at most `2n + 2` categorized plans for `n` sites, but it
-does not enumerate the power set: for four independent sites, a proof requiring
-exactly two open and two opaque occurrences may remain inconclusive. When the
-transported hypotheses are instantiable, the appended hypothesis-instantiation
-plans cover many such middle subsets, but chains beyond three binders,
-constrained chains, and candidates outside the sequent's own vocabulary stay
-out of reach, and the instantiation closure is capped per scheme and per
-query. Those caps lose completeness only, never soundness. An
+Djinn searches a quadratically bounded family. Its historical prefix remains
+the fully opened polarized plan, the exact-opaque plan, and the two singleton
+frontiers: one positive `forall` stays opaque while its siblings open, or one
+occurrence opens while unrelated siblings remain opaque. A deterministic tail
+then makes the same choices for each unordered pair of sites. Opening nested
+occurrences also opens the union of their enclosing chains. Loaded functions
+expose those sound views together, so a reusable premise can be consumed at
+different views in one proof. The family is exhaustive for five independent
+sites without enumerating the power set; for six independent sites, a proof
+requiring exactly three open and three opaque occurrences may remain
+inconclusive. When the transported hypotheses are instantiable, the appended
+hypothesis-instantiation plans cover many omitted middle subsets, but chains
+beyond three binders, constrained chains, and candidates outside the sequent's
+own vocabulary stay out of reach, and the instantiation closure is capped per
+scheme and per query. Those caps lose completeness only, never soundness. An
 incomplete primary premise also makes negative evidence conservative for the
 whole query. The examples use the same
 Church Boolean and Church List shapes as the

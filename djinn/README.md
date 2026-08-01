@@ -528,12 +528,14 @@ preserve it. The context contributes no LJT premises. Outer applications
 containing an atom, such as
 `[(forall result. result -> result -> result)]`, retain their structure and
 compare alpha-equivalently without exposing the quantified body.
-The checked worker bounds composition with two occurrence-local frontiers:
-one site may stay opaque while its siblings open, or one site may open while
-unrelated siblings stay opaque. A nested selected site brings along only its
-required enclosing forall chain. Together with the fully opened and exact
-opaque plans, this covers every combination of three independent sites in
-linear rather than exponential space.
+The checked worker bounds composition with singleton and pairwise
+occurrence-local frontiers: one or two sites may stay opaque while their
+siblings open, or one or two sites may open while unrelated siblings stay
+opaque. Nested selected sites bring along the union of their required enclosing
+forall chains. Together with the fully opened and exact opaque plans, this
+covers every combination of five independent sites in quadratic rather than
+exponential space. The historical fully-open, exact-opaque, and singleton
+prefix retains its order before the deterministic pairwise tail.
 `inhabitResult` then runs formula translation, budgeted proof search,
 independent proof checking, and constructs the shared `QueryResult` directly
 without choosing a renderer or passing through a backend-owned report envelope.
@@ -793,14 +795,14 @@ knowing before editing the source:
   inconclusive rather than proof of uninhabitability. Search tries the fully
   opened polarized view,
   the historical exact-opaque view, one plan retaining each positive forall
-  opaquely while its siblings open, and the dual plans opening one occurrence
-  while unrelated siblings stay opaque; when instantiation axioms exist, the
-  same plans are appended once more with those axioms available, after every
-  historical plan and under the shared cutoff and fuel. The base family is
-  exhaustive for three
-  independent sites and grows linearly; it does not enumerate balanced subsets
-  such as two open and two opaque sites among four, although instantiable
-  hypotheses often cover such middle subsets through the appended axiom plans.
+  opaquely while its siblings open, the dual plans opening one occurrence
+  while unrelated siblings stay opaque, and the corresponding unordered-pair
+  frontiers. When instantiation axioms exist, the same plans are appended once
+  more with those axioms available, after every historical plan and under the
+  shared cutoff and fuel. The base family is exhaustive for five independent
+  sites and grows quadratically; it does not enumerate central subsets such as
+  three open and three opaque sites among six, although instantiable hypotheses
+  often cover such middle subsets through the appended axiom plans.
   Reusable loaded functions
   expose all of those sound views in one proof environment. Any incomplete
   primary premise conservatively disables negative evidence for the whole

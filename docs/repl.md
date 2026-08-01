@@ -219,23 +219,24 @@ Exference does not perform non-exact subsumption between contextual schemes,
 while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,
 Djinn keeps constrained hypothesis occurrences and chains beyond three binders
-opaque; if the bounded approximation
-finds no term, the result is inconclusive rather than a proof of
-uninhabitability. Its plan family is deliberately linear: fully opened,
+opaque; if the bounded approximation finds no term, the result is inconclusive
+rather than a proof of uninhabitability. Its plan family is deliberately
+quadratic rather than exponential. The historical prefix is fully opened,
 exactly opaque, one plan per positive occurrence retained opaquely while the
 others open, and the dual plans opening one occurrence while unrelated
-siblings stay opaque. Opening a nested occurrence includes its enclosing
-forall chain. A single proof can therefore mix exact transport with structural
-introduction at sibling occurrences; the family covers every combination of
-three independent sites with at most `2n + 2` categorized plans for `n` sites.
+siblings stay opaque. A deterministic tail retains each unordered pair
+opaquely, or opens each pair while unrelated siblings remain opaque. Opening
+nested occurrences includes the union of their enclosing forall chains. A
+single proof can therefore mix exact transport with structural introduction at
+sibling occurrences; the family covers every combination of five independent
+sites without enumerating a power set.
 When instantiation axioms exist, the same plans are appended once more with
 those axioms available, after every historical plan and under the shared
 cutoff and fuel, so previously decided queries keep their exact results and
-rankings. The base family still omits balanced subsets such as exactly two
-open and two opaque sites
-among four, though instantiable hypotheses often cover such middle subsets
-through the appended axiom plans. Reusable loaded premises expose the same
-sound views
+rankings. The base family still omits the central subsets from six sites
+onward, such as exactly three open and three opaque sites among six, though
+instantiable hypotheses often cover such middle subsets through the appended
+axiom plans. Reusable loaded premises expose the same sound views
 simultaneously. An incomplete primary premise also conservatively disables
 negative evidence for the whole query, even when that premise would turn out
 to be irrelevant. Generated code that transports quantified atoms or uses

@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through linear occurrence frontiers; plus context-free bounded hypothesis instantiation at sequent-supplied candidates | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton and pairwise occurrence frontiers; plus context-free bounded hypothesis instantiation at sequent-supplied candidates | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -206,15 +206,18 @@ that prefix is retained as a shared `TypeAtom`. Djinn's ordinary formula
 projection treats it as one proposition and compares it by lexical
 alpha-equivalence. The checked query worker also tries a polarized projection
 that opens atoms in positive positions, including atoms with validated class
-contexts, the historical exact opaque projection, and two linear occurrence
-frontiers: one positive occurrence
-may stay opaque while its siblings open, or one may open while unrelated
-siblings stay opaque. Selecting a nested occurrence also opens its required
-enclosing chain. Prepared functions cache the same views under distinct
-internal proof identities, allowing a reusable source function to be used at
-different sound views in one term. The family is exhaustive for three
-independent occurrences but does not enumerate balanced subsets such as two
-open and two opaque occurrences among four. When a hypothesis-side
+contexts, the historical exact opaque projection, two singleton occurrence
+frontiers, and two pairwise frontiers. One or two positive occurrences may
+stay opaque while their siblings open, or one or two may open while unrelated
+siblings stay opaque. Selecting nested occurrences also opens the union of
+their required enclosing chains. Prepared functions cache the same views under
+distinct internal proof identities, allowing a reusable source function to be
+used at different sound views in one term. The historical fully-open,
+exact-opaque, and singleton prefix retains its order; the deterministic
+pairwise tail raises growth from linear to quadratic. The family is exhaustive
+for five independent occurrences but does not enumerate the power set: a
+six-site proof requiring exactly three open and three opaque occurrences can
+remain inconclusive. When a hypothesis-side
 context-free chain of at most three binders exists, the same plans run once
 more with bounded instantiation axioms appended after every historical plan:
 each axiom eliminates that chain completely at a candidate tuple drawn from

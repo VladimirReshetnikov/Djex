@@ -72,6 +72,9 @@ is recorded in the
 [2026-07-31 bounded recursive elimination report](docs/reports/2026-07-31-bounded-recursive-elimination.md).
 Djinn's widened bounded hypothesis-instantiation rule is recorded in the
 [2026-08-01 four-binder instantiation report](docs/reports/2026-08-01-four-binder-instantiation.md).
+Djinn's complementary nominal view of reachable parameterized datatypes is
+recorded in the
+[2026-08-01 nominal parametric-data transport report](docs/reports/2026-08-01-nominal-parametric-data-transport.md).
 Djinn's cubic extension of its bounded rank-N plan family is recorded in the
 [2026-08-01 triple rank-N frontiers report](docs/reports/2026-08-01-triple-rank-n-frontiers.md),
 following the
@@ -192,7 +195,7 @@ context, in a positive position: arrow results, products, and datatype fields
 preserve that position, while each arrow parameter reverses it. As at the query
 root, the context contributes no proof premises, so the result must remain
 dictionary-independent. Djinn can also eliminate a hypothesis-side
-context-free `forall` of up to three leading binders by instantiating its
+context-free `forall` of up to four leading binders by instantiating its
 complete chain at sequent-supplied candidates: the goal's type variables, the
 skolems of opened positive occurrences, premise-scope variables, and — as a
 guarded form of impredicativity — any query-supplied subtree that is
@@ -238,6 +241,62 @@ the requested scheme itself supplies. This covers, for example:
 :exference (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
 
+Declared datatypes normally remain structural in Djinn: their constructor
+sums support introduction and case elimination and stay first in search. A
+query-directed backward slice additionally identifies reachable applications
+of datatypes with at least one parameter. When the slice reaches one, Djinn can
+run a complementary formula view that retains parameterized datatype
+applications as alpha-aware nominal atoms. With these declarations loaded,
+
+```haskell
+data D a = EmptyD | FullD a
+data R = R
+data Token = Token
+
+finish :: D (forall b. b -> b) -> R
+token :: Token
+poly :: Token -> (forall a. D a)
+```
+
+the complementary view covers direct transport, composition through a loaded
+consumer, and a closed global provider/consumer chain:
+
+```text
+(forall a. D a) -> D (forall b. b -> b)  -- \x -> x
+(forall a. D a) -> R                     -- \x -> finish x
+R                                        -- finish (poly token)
+```
+
+Synonyms are expanded before the slice is computed, so an alias of `D` is
+transparent. A nullary datatype keeps only its historical structural
+constructor view. Unrelated parameterized declarations do not activate or
+reshape a query's plan family.
+
+The slice can look through positive function results, tuple elements, and
+fields of an aggregate value that is actually available. Datatype fields are
+specialized at that value's concrete owner arguments; a declaration such as
+`data Box a = Box a` creates no reachability edge by itself. Function
+parameters introduced while constructing the query result are treated as
+query-local providers, so the same projection works for a goal such as
+`Holder -> R`. A per-path datatype-head guard keeps nested and future recursive
+field projection finite.
+
+The full historical structural no-axiom prefix runs in its established order
+before the focused nominal work. Each nominal formula is tried both plainly
+and, when available, with its separately compiled bounded instantiation
+axioms. These plans consume the same global candidate cutoff and choice-point
+fuel as every structural plan. They are proof-producing, positive-only
+approximations: failure of a nominal plan never establishes uninhabitability.
+
+Instantiation evidence is erased only after independent proof checking. Every
+proof that consumes it uses conservative no-eta conversion. It retains the
+lambda when erasure would expose a higher-rank application boundary under
+GHC's simplified subsumption rules. Consequently, the second
+example remains `\x -> finish x`, rather than being eta-contracted to
+`finish`. The same protection applies when presentation turns structural
+record elimination into a selector projection. Such signatures and generated
+terms may require both `RankNTypes` and `ImpredicativeTypes`.
+
 Every quantified subtree outside those explicit boundaries remains an opaque
 atom. Alpha-renamed binders compare by lexical scope and declaration position,
 while free variables remain significant. Ordinary structure outside the atom
@@ -269,17 +328,17 @@ Loaded functions expose those sound views together, so a reusable premise can
 be consumed at different views in one proof. The family is exhaustive for
 seven independent sites without enumerating the power set; for eight
 independent sites, a proof requiring exactly four open and four opaque
-occurrences may remain inconclusive. When the transported hypotheses are
-instantiable, the appended
-hypothesis-instantiation plans cover many omitted middle subsets, but chains
+occurrences may remain inconclusive. After that complete structural no-axiom
+prefix, bounded instantiation plans cover many omitted middle subsets, but
+chains
 beyond four binders, constrained chains, and candidates outside the sequent's
 own vocabulary stay out of reach, and the instantiation closure is capped per
 scheme and per query. Four-binder tuple selection fairly mixes source-order,
 repeated, sparse, and Cartesian shapes while one- through three-binder schemes
 retain their historical order. Those caps lose completeness only, never
-soundness. An
-incomplete primary premise also makes negative evidence conservative for the
-whole query. The examples use the same
+soundness. The nominal parametric-datatype plans obey the same caps and add no
+negative evidence. An incomplete primary premise also makes negative evidence
+conservative for the whole query. The examples use the same
 Church Boolean and Church List shapes as the
 [church-encoding reference](https://github.com/VladimirReshetnikov/Haskell/blob/main/church-encoding/src/Church.hs).
 

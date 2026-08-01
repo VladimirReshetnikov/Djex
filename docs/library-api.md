@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; plus context-free bounded hypothesis instantiation at sequent-supplied candidates | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -219,9 +219,8 @@ The family is
 exhaustive for seven independent occurrences but does not enumerate the power
 set: an eight-site proof requiring exactly four open and four opaque
 occurrences can remain inconclusive. When a hypothesis-side
-context-free chain of at most four binders exists, the same plans run once
-more with bounded instantiation axioms appended after every historical plan:
-each axiom eliminates that chain completely at a candidate tuple drawn from
+context-free chain of at most four binders exists, bounded instantiation axioms
+can eliminate it completely at a candidate tuple drawn from
 the sequent's variables, opened-forall skolems, premise scopes, and already
 mentioned subtrees that are independent of enclosing binders and contain
 quantification, including structural wrappers around quantified atoms. Each
@@ -233,8 +232,65 @@ cap. Positive contexts do not become LJT premises: as at the prenex query
 boundary, Djinn can
 only construct a dictionary-independent body. Constrained hypothesis-side
 schemes remain opaque. If the primary projection is incomplete, an empty search
-carries no negative evidence. Ordinary enclosing
-applications remain structural, so impredicative arguments are supported.
+carries no negative evidence.
+
+The stable request worker retains datatype expansion as its primary formula
+semantics. After query elaboration and synonym expansion, it computes a
+backward slice from the goal to decide whether positive demand can reach a
+datatype with one or more parameters. A second sealed compiler retains
+parameterized saturated applications as complete alpha-aware nominal atoms and
+supplies matching goal plans, cached loaded premises, and instantiation axioms.
+Aliases therefore remain
+transparent, while nullary datatypes retain their constructor formulas in both
+views. Unrelated parameterized declarations neither activate the nominal
+family nor perturb existing candidate prefixes.
+
+Prepared value flows retain each whole result and project its positive function
+results and tuple elements. A datatype declaration is only a field-projection
+template: fields are exposed after a loaded value actually provides that owner,
+and its declared parameters are specialized with the arguments of that exact
+occurrence. Function parameters introduced along the query's positive result
+path are available local values and seed the same projections without loaded
+domains. Only explicit leading `forall` binders inside such a hypothesis become
+specialization variables; free variables and enclosing query binders remain
+rigid. Consequently a loaded `Holder`, a loaded tuple, and a local `Holder -> R`
+premise can reveal a hidden consumer, while a declaration-only
+`data Box a = Box a` cannot match an arbitrary rigid demand. Datatype heads are
+visited at most once per projection path, bounding nested and future recursive
+field traversal.
+
+The complete historical structural no-axiom prefix runs before this focused
+nominal family. Each nominal formula is paired with a plain proof plan and,
+when present, an axiom-enabled proof plan. Every plan consumes the same
+query-wide candidate cutoff and choice-point budget. The nominal family is
+positive-only: returned terms are checked against the exact nominal formula,
+but an empty result never contributes logical negative evidence. Thus ordinary
+applications remain structural in the primary projection, while reachable
+parameterized datatype applications have a complementary nominal transport
+view for impredicative arguments.
+
+For a declared `data D a = EmptyD | FullD a`, the checked request
+`(forall a. D a) -> D (forall b. b -> b)` can return `\x -> x`. If the
+environment also contains `finish :: D (forall b. b -> b) -> R`, the request
+`(forall a. D a) -> R` can return `\x -> finish x`. Proof checking occurs
+before instantiation evidence is erased. Every proof that consumes that
+evidence takes the conservative no-eta conversion path, so cleanup cannot
+contract a higher-rank application boundary exposed by erasure. GHC's
+simplified subsumption rejects the bare `finish` at that expected type.
+The same rule protects a selector application introduced by field-projection
+normalization. Consumers compiling these signatures or candidates may need
+`RankNTypes` and `ImpredicativeTypes`.
+
+Reachability also supports closed global composition. With
+`token :: Token`, `poly :: Token -> (forall a. D a)`, and the `finish` signature
+above in the prepared environment, a request for `R` can return
+`finish (poly token)`. The backward slice matches loaded codomains against the
+current demand, specializes matched variables, and adds the providers' domains
+to the next demand frontier.
+
+See the
+[nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md)
+for the proof-policy and regression boundary.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
 representation. A sealed atom retains normalized source syntax, a cached

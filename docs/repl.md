@@ -194,6 +194,45 @@ c -> (forall a. Eq a => a -> a)
 (forall a b. a -> b -> a) -> (forall x. x -> x -> x)
 ```
 
+Parameterized datatype applications have one additional Djinn boundary. The
+historical structural projection still expands declarations into constructor
+sums and is searched first. A query-directed backward slice then decides
+whether the goal's positive demands reach a datatype with at least one
+parameter. If so, a complementary nominal projection retains complete
+saturated applications as alpha-aware atoms. For example, after loading
+
+```haskell
+data D a = EmptyD | FullD a
+data R = R
+data Token = Token
+
+finish :: D (forall b. b -> b) -> R
+token :: Token
+poly :: Token -> (forall a. D a)
+```
+
+Djinn can find all three forms:
+
+```haskell
+(forall a. D a) -> D (forall b. b -> b)  -- \x -> x
+(forall a. D a) -> R                     -- \x -> finish x
+R                                        -- finish (poly token)
+```
+
+The slice is computed after synonym expansion, so aliases of `D` are
+transparent. Nullary datatypes keep their structural constructor formula, and
+unrelated parameterized declarations do not add nominal plans to the query.
+The nominal goal, loaded-premise cache, and hypothesis-instantiation axioms are
+all compiled through the same view.
+
+Loaded tuple elements, positive function results, and fields of an available
+aggregate can continue the slice. A field is specialized from that value's
+actual datatype occurrence; its declaration alone is not a global provider.
+Function parameters introduced on the positive query path count as local
+providers too, so a `Holder -> R` request can project a hidden consumer from
+its `Holder` argument. Projection visits each datatype head at most once per
+path to remain finite through nested or recursive shapes.
+
 Every nested `forall` outside those boundaries is a shared opaque type atom.
 Both engines can carry it through constructors, arrows, declarations,
 equality, substitution, and rendering without decomposing it in ordinary
@@ -230,17 +269,30 @@ union of their enclosing forall chains. A single proof can therefore mix exact
 transport with structural introduction at sibling occurrences; the family
 covers every combination of seven independent sites without enumerating a
 power set.
-When instantiation axioms exist, the same plans are appended once more with
-those axioms available, after every historical plan and under the shared
-cutoff and fuel, so previously decided queries keep their exact results and
-rankings. The base family still omits central subsets from eight sites onward,
+The full historical structural no-axiom prefix runs before the focused nominal
+family. Every nominal formula is tried plainly and, when an instantiation is
+available, again with its separately compiled nominal axioms. Those attempts
+are positive-only and share the one query-wide cutoff and fuel with structural
+search: they may add independently checked candidates, but their failure never
+supports a proof of uninhabitability. The structural base family still omits
+central subsets from eight sites onward,
 such as exactly four open and four opaque sites among eight, though
-instantiable hypotheses often cover such middle subsets through the appended
-axiom plans. Reusable loaded premises expose the same sound views
+instantiable hypotheses often cover such middle subsets through bounded axiom
+plans. Reusable loaded premises expose the same sound views
 simultaneously. An incomplete primary premise also conservatively disables
 negative evidence for the whole query, even when that premise would turn out
-to be irrelevant. Generated code that transports quantified atoms or uses
-impredicative instances may require `RankNTypes` and `ImpredicativeTypes`.
+to be irrelevant.
+
+Every proof that consumes instantiation evidence uses conservative no-eta
+conversion. This retains a lambda when erasure would otherwise expose an eta
+redex across a higher-rank application. In the
+loaded example, the result stays `\x -> finish x`; contracting it to `finish`
+is rejected by GHC's simplified subsumption. Selector projection normalization
+uses the same boundary, so a required `\x -> field x` is not collapsed to
+`field`. Generated code that transports quantified atoms or uses impredicative
+instances may require `RankNTypes` and `ImpredicativeTypes`.
+The projection and evidence boundary is detailed in the
+[nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md).
 A generated visible application requires `TypeApplications`; its surrounding
 rank-N provider signature commonly also requires `RankNTypes`, and an ambiguous
 contextual signature may require `AllowAmbiguousTypes`.

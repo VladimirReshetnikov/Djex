@@ -528,14 +528,26 @@ preserve it. The context contributes no LJT premises. Outer applications
 containing an atom, such as
 `[(forall result. result -> result -> result)]`, retain their structure and
 compare alpha-equivalently without exposing the quantified body.
-The checked worker bounds composition with singleton and pairwise
-occurrence-local frontiers: one or two sites may stay opaque while their
-siblings open, or one or two sites may open while unrelated siblings stay
+The checked worker bounds composition with singleton, pairwise, and triple
+occurrence-local frontiers: up to three sites may stay opaque while their
+siblings open, or up to three sites may open while unrelated siblings stay
 opaque. Nested selected sites bring along the union of their required enclosing
 forall chains. Together with the fully opened and exact opaque plans, this
-covers every combination of five independent sites in quadratic rather than
+covers every combination of seven independent sites in cubic rather than
 exponential space. The historical fully-open, exact-opaque, and singleton
-prefix retains its order before the deterministic pairwise tail.
+prefix retains its order before the deterministic pairwise and triple tail.
+
+Datatype declarations still compile structurally for that historical family.
+At query time, a backward slice rooted in the elaborated goal decides whether
+its positive demands can reach a datatype with parameters. A separately sealed
+compiler can retain parameterized applications as complete alpha-aware nominal
+atoms, with matching cached premise views and matching instantiation axioms.
+This complementary family starts only after the full structural no-axiom
+prefix and uses its remaining global cutoff and fuel. It is positive-only:
+proofs are independently checked, but an empty nominal search provides no
+negative evidence. Synonyms have already been expanded when reachability and
+formula translation run, while nullary datatypes keep their structural sums in
+both compilers.
 `inhabitResult` then runs formula translation, budgeted proof search,
 independent proof checking, and constructs the shared `QueryResult` directly
 without choosing a renderer or passing through a backend-owned report envelope.
@@ -784,7 +796,7 @@ knowing before editing the source:
   type system. A query's prenex `forall`/constraint prefix is elaborated, and a
   nested forall, including one with a validated context, can be introduced in a
   positive formula position when its body is dictionary-independent.
-  A hypothesis-side context-free forall of at most three leading binders can
+  A hypothesis-side context-free forall of at most four leading binders can
   additionally be eliminated through bounded instantiation axioms: the chain is
   instantiated completely at candidates the sequent itself supplies (goal
   variables, opened-forall skolems, premise-scope variables, and quantified
@@ -797,16 +809,39 @@ knowing before editing the source:
   the historical exact-opaque view, one plan retaining each positive forall
   opaquely while its siblings open, the dual plans opening one occurrence
   while unrelated siblings stay opaque, and the corresponding unordered-pair
-  frontiers. When instantiation axioms exist, the same plans are appended once
-  more with those axioms available, after every historical plan and under the
-  shared cutoff and fuel. The base family is exhaustive for five independent
-  sites and grows quadratically; it does not enumerate central subsets such as
-  three open and three opaque sites among six, although instantiable hypotheses
-  often cover such middle subsets through the appended axiom plans.
-  Reusable loaded functions
-  expose all of those sound views in one proof environment. Any incomplete
-  primary premise conservatively disables negative evidence for the whole
-  query.
+  and unordered-triple frontiers. The structural no-axiom family is exhaustive
+  for seven independent sites and grows cubically; it does not enumerate
+  central subsets such as four open and four opaque sites among eight.
+  Reusable loaded functions expose all of those sound views in one proof
+  environment.
+
+  The full historical structural no-axiom prefix completes before bounded
+  nominal parametric-datatype work. A query-directed backward slice restricts
+  that complementary view to reachable datatype applications with parameters;
+  aliases are transparent and nullary datatypes remain structural. Each
+  nominal formula runs plainly and, when possible, with instantiation axioms
+  produced by the same nominal compiler. Every plan spends the same global
+  cutoff and fuel. Nominal plans can contribute checked candidates but never a
+  refutation, and any incomplete primary premise conservatively disables
+  negative evidence for the whole query.
+
+  For example, a declared `data D a = EmptyD | FullD a` admits direct
+  `(forall a. D a) -> D (forall b. b -> b)` transport as `\x -> x`. Given a
+  loaded `finish :: D (forall b. b -> b) -> R`, the goal
+  `(forall a. D a) -> R` can compose as `\x -> finish x`. Evidence erasure
+  deliberately retains this eta boundary: contracting it to `finish` would
+  ask GHC's simplified subsumption to perform the missing higher-rank
+  coercion. Selector projections receive the same protection.
+  With `token :: Token` and `poly :: Token -> (forall a. D a)` loaded too, a
+  closed `R` goal can compose globally as `finish (poly token)`; the backward
+  slice follows matching loaded results and their specialized input demands.
+  Loaded tuple elements and positive function results are projection routes as
+  well. Datatype fields become routes only from an available value of their
+  actual owner and are specialized at that occurrence's type arguments;
+  declaring `data Box a = Box a` alone cannot make an arbitrary goal relevant.
+  Function parameters on the positive query path supply the same finite,
+  zero-domain projections locally, and a per-path owner guard bounds nested or
+  recursive field traversal.
   Djinn does not implement general higher-rank subsumption,
   and it ignores valid contexts for proof power; it also has no GADTs, type
   families, package instance import, or general type-class solver. Generated
@@ -836,6 +871,10 @@ knowing before editing the source:
 - Proof terms are independently checked, but generated clauses are not passed
   through GHC automatically. Treat the output as a strong candidate that still
   belongs in the normal compile/test loop.
+
+The dual structural/nominal design, scheduling, and regression boundary are
+recorded in the
+[nominal parametric-data transport report](../docs/reports/2026-08-01-nominal-parametric-data-transport.md).
 
 See [`docs/reports/`](docs/reports/) for the local review history:
 [the correctness review](docs/reports/2026-07-10-code-review.md) covering the

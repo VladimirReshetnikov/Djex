@@ -819,7 +819,13 @@ knowing before editing the source:
   atoms already present, the last giving guarded impredicative instantiation),
   and the generated evidence is the hypothesis expression itself. Constrained
   hypothesis occurrences, longer eliminable chains, and candidates outside that
-  vocabulary remain opaque, alpha-equated atoms. An empty incomplete search is
+  vocabulary remain opaque, alpha-equated atoms. A separate appended family
+  retains exact context-free schemes for loaded values, including implicitly
+  quantified free signature variables, and extends their candidate vocabulary
+  with closed, forall-free subtrees of the checked query and loaded value
+  signatures. The complete substituted body is kind-checked, so a closed
+  higher-kinded constructor is usable only at a compatible binder. An empty
+  incomplete search is
   inconclusive rather than proof of uninhabitability. Search tries the fully
   opened polarized view,
   the historical exact-opaque view, one plan retaining each positive forall
@@ -866,8 +872,11 @@ knowing before editing the source:
   families, package instance import, or general type-class solver. Generated
   code that transports quantified atoms or uses impredicative instances may
   require `RankNTypes` and `ImpredicativeTypes` to compile.
-- Added functions are used at exactly their declared type; their polymorphic
-  type variables are not freshly instantiated at each use.
+- Context-free polymorphic functions are instantiated independently at each use
+  by the bounded positive-only tail above. Its fixed binder, axiom, and tuple
+  limits can still miss valid instances; any retained non-target scheme makes
+  such an empty search inconclusive rather than a proof of uninhabitability.
+  Loaded functions with direct class contexts remain unsupported.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract
   constructors may still be used partially in higher-kinded positions.
 - Genuinely recursive datatypes retain only bounded positive constructor
@@ -901,6 +910,9 @@ knowing before editing the source:
 The dual structural/nominal design, scheduling, and regression boundary are
 recorded in the
 [nominal parametric-data transport report](../docs/reports/2026-08-01-nominal-parametric-data-transport.md).
+Loaded-scheme retention, closed monotype discovery, kind checking, and honest
+negative evidence are recorded in the
+[loaded polymorphic values report](../docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
 The recursive constructor rule, opacity boundary, and REPL projection are
 recorded in the
 [bounded Djinn recursive-introduction report](../docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).

@@ -2,6 +2,11 @@
 
 Date: 2026-08-01
 
+> **Follow-up.** The
+> [loaded polymorphic values extension](2026-08-01-loaded-polymorphic-djinn-values.md)
+> adds matching structural and nominal tails for retained global schemes. The
+> historical nominal family and ordering recorded below remain unchanged.
+
 ## Outcome
 
 Djinn now preserves its historical structural datatype search while adding a

@@ -12,7 +12,7 @@ import Control.Exception
   , try
   )
 import Data.Either (isRight)
-import Data.List (isInfixOf, isPrefixOf, nub)
+import Data.List (isInfixOf, isPrefixOf, nub, tails)
 import qualified Data.Map.Strict as Map
 import System.Directory (getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode (ExitSuccess))
@@ -625,6 +625,107 @@ tests = testGroup "Djex facade"
           ] ""
         assertEqual
           ("GHC rejected generated nominal Djinn transport\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors)
+          ExitSuccess exitCode
+  , testCase "compile a loaded Djinn scheme used at two monotypes" $ do
+      leftName <- expectRight $ parseName "LoadedLeft"
+      rightName <- expectRight $ parseName "LoadedRight"
+      familyName <- expectRight $ parseName "LoadedFamily"
+      resultName <- expectRight $ parseName "LoadedResult"
+      leftValueName <- expectRight $ parseName "loadedLeft"
+      rightValueName <- expectRight $ parseName "loadedRight"
+      makeName <- expectRight $ parseName "loadedMake"
+      finishName <- expectRight $ parseName "loadedFinish"
+      targetName <- expectRight $ mkIdentifier "buildLoadedPair"
+      target <- expectRight $ mkDefinitionName targetName
+      let proper = ProperTypeKind
+          unary = FunctionKind proper proper
+          leftType = TypeConstructor leftName
+          rightType = TypeConstructor rightName
+          resultType = TypeConstructor resultName
+          familyType element = TypeApplication
+            (TypeConstructor familyName) element
+          makeType = ForallType ["made"] [] $
+            FunctionType (TypeVariable "made") $
+              familyType $ TypeVariable "made"
+          finishType = FunctionType (familyType leftType) $
+            FunctionType (familyType rightType) resultType
+          value name signatureType = ValueDeclaration $
+            ValueSignature () name signatureType
+          declarations =
+            [ AbstractTypeDeclaration () leftName proper
+            , AbstractTypeDeclaration () rightName proper
+            , AbstractTypeDeclaration () familyName unary
+            , AbstractTypeDeclaration () resultName proper
+            , value leftValueName leftType
+            , value rightValueName rightType
+            , value makeName makeType
+            , value finishName finishType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      request <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = resultType
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+        }
+      result <- expectRight $ runDjinnQuery session request
+      rendered <- traverse
+        (expectRight . renderDjinnCandidateDefinition Unqualified)
+        $ batchCandidates $ resultSearch result
+      let isTwoInstanceTerm candidate =
+            all (`isInfixOf` candidate)
+              ["loadedFinish", "loadedLeft", "loadedRight"] &&
+            length
+              [ ()
+              | suffix <- tails candidate
+              , "loadedMake" `isPrefixOf` suffix
+              ] >= 2
+      generated <- case filter isTwoInstanceTerm rendered of
+        candidate : _ -> pure candidate
+        [] -> fail $ "Djinn omitted the two-instance term: " ++ show rendered
+
+      let fixture = unlines
+            [ "{-# LANGUAGE RankNTypes #-}"
+            , "module LoadedDjinnInstantiationFixture where"
+            , ""
+            , "data LoadedLeft = LoadedLeft"
+            , "data LoadedRight = LoadedRight"
+            , "newtype LoadedFamily a = LoadedFamily a"
+            , "data LoadedResult = LoadedResult"
+            , ""
+            , "loadedLeft :: LoadedLeft"
+            , "loadedLeft = LoadedLeft"
+            , ""
+            , "loadedRight :: LoadedRight"
+            , "loadedRight = LoadedRight"
+            , ""
+            , "loadedMake :: forall a. a -> LoadedFamily a"
+            , "loadedMake = LoadedFamily"
+            , ""
+            , "loadedFinish ::"
+            , "  LoadedFamily LoadedLeft ->"
+            , "  LoadedFamily LoadedRight -> LoadedResult"
+            , "loadedFinish _ _ = LoadedResult"
+            , ""
+            , "buildLoadedPair :: LoadedResult"
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XRankNTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected a twice-instantiated loaded Djinn value\nstdout:\n"
             ++ output ++ "\nstderr:\n" ++ errors)
           ExitSuccess exitCode
   , testCase "retain nominal eta through selector presentation for GHC" $ do

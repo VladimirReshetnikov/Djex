@@ -72,16 +72,19 @@ import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
 import Djinn.Internal.Environment
 import Djinn.Internal.Declaration
 import Djinn.Internal.Generated (deduplicateEtaEquivalentClauses)
 import Djinn.Internal.HTypes
 import Djinn.Internal.Instantiation
-    ( eliminateInstantiationEvidence
+    ( closedMonotypeSubtrees
+    , eliminateInstantiationEvidence
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
     , instantiationAxioms
+    , loadedInstantiationAxioms
     , usesInstantiationEvidence
     )
 import Djinn.Internal.LJT
@@ -868,7 +871,7 @@ inhabitSynthesisResultPreparedChecked options prepared contexts target goal = do
                 "nominal goal type: " elaboratedGoal
         else Right plans
     searchPreparedFormula options prepared target
-        (SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal)
+        elaboratedGoal
         parametricDataRelevant
         plans nominalPlans
   where
@@ -910,29 +913,64 @@ inhabitResultPreparedChecked options prepared contexts target goal = do
 -- Proof search is representation-independent once the checked source query
 -- has become a formula. Both the native and raw entrances meet at this single
 -- worker; validated class contexts add no premises here, while bounded
--- hypothesis-instantiation axioms join every plan under erased evidence.
+-- hypothesis-instantiation axioms occupy appended plans under erased
+-- evidence.
 searchPreparedFormula
     :: QueryOptions
     -> PreparedEnvironment
     -> SharedGenerated.DefinitionName
-    -> [HSymbol]
+    -> SharedType.Type HSymbol
     -> Bool
     -> PolarizedFormulaPlans
     -> PolarizedFormulaPlans
     -> Either DjinnQueryError DjinnResult
-searchPreparedFormula options prepared target goalVariables
+searchPreparedFormula options prepared target elaboratedGoal
         parametricDataRelevant formulaPlans nominalFormulaPlans = do
     let (premises, premiseTranslationIncomplete, premiseSpellings) =
             preparedEnvironmentPolarizedFunctionPremises prepared
         (nominalPremises, _, nominalPremiseSpellings) =
             preparedEnvironmentNominalPolarizedFunctionPremises prepared
+        ( loadedSchemePremises
+          , nominalLoadedSchemePremises
+          , environmentClosedCandidates
+          ) = preparedEnvironmentLoadedFunctionInstantiation prepared
+        targetSymbol = Symbol $ SharedGenerated.definitionSpelling target
+        activePremises = filter ((/= targetSymbol) . fst) premises
+        targetPremises = filter ((== targetSymbol) . fst) premises
+        activeNominalPremises =
+            filter ((/= targetSymbol) . fst) nominalPremises
+        targetNominalPremises =
+            filter ((== targetSymbol) . fst) nominalPremises
+        activeLoadedSchemePremises = filter
+            ((/= targetSymbol) . fst) loadedSchemePremises
+        targetLoadedSchemePremises = filter
+            ((== targetSymbol) . fst) loadedSchemePremises
+        activeNominalLoadedSchemePremises = filter
+            ((/= targetSymbol) . fst) nominalLoadedSchemePremises
+        targetNominalLoadedSchemePremises = filter
+            ((== targetSymbol) . fst) nominalLoadedSchemePremises
+        goalVariables =
+            SharedType.freeVariablesInFirstOccurrenceOrder elaboratedGoal
+        closedCandidates =
+            SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
+                closedMonotypeSubtrees elaboratedGoal ++
+                    environmentClosedCandidates
+        checkedTranslator translator source = do
+            checkPreparedSynthesisTypesKinds prepared [(KStar, source)]
+            translator source
+        structuralTranslator = checkedTranslator $
+            preparedEnvironmentSynthesisFormulaTranslator prepared
+        nominalTranslator = checkedTranslator $
+            preparedEnvironmentNominalSynthesisFormulaTranslator prepared
         collectAcrossPlans =
             optionAlternatives options || optionSorted options
         primary = primaryFormulaPlan formulaPlans
-        primarySound = not $
+        primaryTranslationSound = not $
             translationIncomplete primary || premiseTranslationIncomplete
+        primarySound = primaryTranslationSound &&
+            null activeLoadedSchemePremises
         alternativeForms
-            | primarySound = []
+            | primaryTranslationSound = []
             | otherwise =
                 exactOpaqueFormulaPlan formulaPlans :
                 map translatedFormula
@@ -962,41 +1000,134 @@ searchPreparedFormula options prepared target goalVariables
                 nominalPremises /= premises
         useNominalProjection =
             parametricDataRelevant &&
-                not primarySound && nominalProjectionDistinct
+                not primaryTranslationSound && nominalProjectionDistinct
         -- The candidate spellings are source-level facts: the goal's free
         -- variables, every opened-forall skolem of the goal plans, and the
         -- sealed premise scopes. No rendered atom text is parsed back.
-        axioms = instantiationAxioms
+        activeAxioms = instantiationAxioms
             (preparedEnvironmentSynthesisFormulaTranslator prepared)
             (goalVariables ++
                 polarizedFormulaPlanSkolems formulaPlans ++
                 premiseSpellings)
             (map fst plans)
-            (map snd premises)
-        axiomSymbols = instantiationAxiomSymbols axioms
-        axiomPremises = instantiationAxiomPremises axioms
-        nominalAxioms = instantiationAxioms
+            (map snd activePremises)
+        activeAxiomSymbols = instantiationAxiomSymbols activeAxioms
+        activeAxiomPremises = instantiationAxiomPremises activeAxioms
+        targetAxioms = instantiationAxioms
+            (preparedEnvironmentSynthesisFormulaTranslator prepared)
+            (goalVariables ++
+                polarizedFormulaPlanSkolems formulaPlans ++
+                premiseSpellings)
+            (map fst plans)
+            (map snd targetPremises)
+        targetAxiomPremises = instantiationAxiomPremises targetAxioms
+        activeNominalAxioms = instantiationAxioms
             (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
             (goalVariables ++
                 polarizedFormulaPlanSkolems nominalFormulaPlans ++
                 nominalPremiseSpellings)
             (map fst nominalPlans)
+            (map snd activeNominalPremises)
+        activeNominalAxiomSymbols =
+            instantiationAxiomSymbols activeNominalAxioms
+        activeNominalAxiomPremises =
+            instantiationAxiomPremises activeNominalAxioms
+        targetNominalAxioms = instantiationAxioms
+            (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
+            (goalVariables ++
+                polarizedFormulaPlanSkolems nominalFormulaPlans ++
+                nominalPremiseSpellings)
+            (map fst nominalPlans)
+            (map snd targetNominalPremises)
+        targetNominalAxiomPremises =
+            instantiationAxiomPremises targetNominalAxioms
+        activeLoadedAxioms = loadedInstantiationAxioms
+            structuralTranslator
+            (goalVariables ++
+                polarizedFormulaPlanSkolems formulaPlans ++
+                premiseSpellings)
+            closedCandidates
+            (map fst plans)
+            (map snd premises)
+            (map snd activeLoadedSchemePremises)
+        activeLoadedAxiomSymbols =
+            instantiationAxiomSymbols activeLoadedAxioms
+        activeLoadedAxiomPremises =
+            instantiationAxiomPremises activeLoadedAxioms
+        targetLoadedAxioms = loadedInstantiationAxioms
+            structuralTranslator
+            (goalVariables ++
+                polarizedFormulaPlanSkolems formulaPlans ++
+                premiseSpellings)
+            closedCandidates
+            (map fst plans)
+            (map snd premises)
+            (map snd targetLoadedSchemePremises)
+        targetLoadedAxiomPremises =
+            instantiationAxiomPremises targetLoadedAxioms
+        activeNominalLoadedAxioms = loadedInstantiationAxioms
+            nominalTranslator
+            (goalVariables ++
+                polarizedFormulaPlanSkolems nominalFormulaPlans ++
+                nominalPremiseSpellings)
+            closedCandidates
+            (map fst nominalPlans)
             (map snd nominalPremises)
-        nominalAxiomSymbols = instantiationAxiomSymbols nominalAxioms
-        nominalAxiomPremises = instantiationAxiomPremises nominalAxioms
+            (map snd activeNominalLoadedSchemePremises)
+        activeNominalLoadedAxiomSymbols =
+            instantiationAxiomSymbols activeNominalLoadedAxioms
+        activeNominalLoadedAxiomPremises =
+            instantiationAxiomPremises activeNominalLoadedAxioms
+        targetNominalLoadedAxioms = loadedInstantiationAxioms
+            nominalTranslator
+            (goalVariables ++
+                polarizedFormulaPlanSkolems nominalFormulaPlans ++
+                nominalPremiseSpellings)
+            closedCandidates
+            (map fst nominalPlans)
+            (map snd nominalPremises)
+            (map snd targetNominalLoadedSchemePremises)
+        targetNominalLoadedAxiomPremises =
+            instantiationAxiomPremises targetNominalLoadedAxioms
+        useNominalLoadedProjection =
+            parametricDataRelevant &&
+                ( useNominalProjection ||
+                    activeNominalLoadedSchemePremises /=
+                        activeLoadedSchemePremises ||
+                    activeNominalLoadedAxiomPremises /=
+                        activeLoadedAxiomPremises
+                )
         -- Preserve the complete historical structural/no-axiom prefix. This
         -- keeps first-result behavior, frontier ordering, and finite-budget
         -- observations stable; the nominal family shares only the cutoff and
         -- fuel left by that prefix and still precedes the structural axiom
         -- phase which previously formed the appended transport tail.
         structuralSearchPlans =
-            [ (premises, Set.empty, form, sound)
+            [ (premises, [], Set.empty, form, sound)
             | (form, sound) <- plans
             ]
         structuralAxiomSearchPlans =
-            [ (premises ++ axiomPremises, axiomSymbols, form, False)
-            | not (null axiomPremises)
-            , (form, _) <- plans
+            [ ( premises ++ activeAxiomPremises
+              , targetAxiomPremises
+              , activeAxiomSymbols
+              , form
+              , sound && null activeAxiomPremises
+              )
+            | not (null activeAxiomPremises) ||
+                not (null targetAxiomPremises)
+            , (form, sound) <- plans
+            ]
+        loadedStructuralSearchPlans =
+            [ ( premises ++ loadedSchemePremises ++ activeAxiomPremises ++
+                    activeLoadedAxiomPremises
+              , targetAxiomPremises ++ targetLoadedAxiomPremises
+              , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
+              , form
+              , sound && null activeAxiomPremises &&
+                    null activeLoadedSchemePremises
+              )
+            | not (null loadedSchemePremises)
+            , (form, sound) <- plans
             ]
         -- The nominal-data family is a complementary proof-producing
         -- approximation, never a refutation. Its premise views and erased
@@ -1009,34 +1140,60 @@ searchPreparedFormula options prepared target goalVariables
             | not useNominalProjection = []
             | otherwise = concatMap nominalFormSearchPlans nominalPlans
         nominalFormSearchPlans (form, _) =
-            (nominalPremises, Set.empty, form, False) :
-            [ ( nominalPremises ++ nominalAxiomPremises
-              , nominalAxiomSymbols
+            (nominalPremises, [], Set.empty, form, False) :
+            [ ( nominalPremises ++ activeNominalAxiomPremises
+              , targetNominalAxiomPremises
+              , activeNominalAxiomSymbols
               , form
               , False
               )
-            | not (null nominalAxiomPremises)
+            | not (null activeNominalAxiomPremises) ||
+                not (null targetNominalAxiomPremises)
             ]
+        loadedNominalSearchPlans
+            | not useNominalLoadedProjection = []
+            | otherwise =
+                [ ( nominalPremises ++ nominalLoadedSchemePremises ++
+                        activeNominalAxiomPremises ++
+                        activeNominalLoadedAxiomPremises
+                  , targetNominalAxiomPremises ++
+                        targetNominalLoadedAxiomPremises
+                  , activeNominalAxiomSymbols `Set.union`
+                        activeNominalLoadedAxiomSymbols
+                  , form
+                  , False
+                  )
+                | not (null nominalLoadedSchemePremises)
+                , (form, _) <- nominalPlans
+                ]
         searchPlans =
             structuralSearchPlans ++
             nominalSearchPlans ++
-            structuralAxiomSearchPlans
+            structuralAxiomSearchPlans ++
+            loadedStructuralSearchPlans ++
+            loadedNominalSearchPlans
     results <- runPlans collectAcrossPlans
         options (optionCutoff options) [] searchPlans
     mergeFormulaPlanResults options results
   where
     runPlans _ _ _ completed [] = Right $ reverse completed
     runPlans collect currentOptions candidateLimit completed
-            ((planPremises, axiomSymbols, form, negativeEvidenceSound)
+            (( planPremises
+              , diagnosticOnlyPremises
+              , axiomSymbols
+              , form
+              , negativeEvidenceSound
+              )
                 : remaining) = do
         result <- searchPreparedFormulaPlan
             currentOptions candidateLimit target planPremises axiomSymbols
-            form negativeEvidenceSound
+            diagnosticOnlyPremises form negativeEvidenceSound
         let completed' = result : completed
             nextLimit = candidateLimit - formulaPlanProofCount result
             continue =
                 formulaPlanFinished result &&
-                (collect || null (formulaPlanClauses result))
+                (collect || null (formulaPlanClauses result)) &&
+                evidenceCanBenefitFromAnotherPlan result
         if continue
             then runPlans collect
                 currentOptions {
@@ -1044,6 +1201,18 @@ searchPreparedFormula options prepared target goalVariables
                     }
                 nextLimit completed' remaining
             else Right $ reverse completed'
+
+    -- A proof-backed target diagnostic is already the sharpest candidate-free
+    -- result. A completed refutation may still be sharpened by a later
+    -- target-instantiation plan, but only while finite search fuel remains;
+    -- running that optional tail at zero fuel would replace established
+    -- logical evidence with an operational truncation.
+    evidenceCanBenefitFromAnotherPlan result =
+        case formulaPlanEvidence result of
+            SharedQuery.RequiresTargetReference -> False
+            SharedQuery.ProvedUninhabitable ->
+                formulaPlanRemainingBudget result /= Just 0
+            _ -> True
 
     formulaFamilyForms plans = SharedCollection.distinctOn id $
         translatedFormula (primaryFormulaPlan plans) :
@@ -1081,21 +1250,24 @@ data FormulaPlanResult = FormulaPlanResult
 -- | One proof-search plan. The final flag authorizes logical negative
 -- evidence only when translation covered every quantified subtree. Checked
 -- proofs remain useful under an incomplete plan, but absence of one does not
--- establish that the original Haskell type is uninhabited. Instantiation
--- axioms participate in search and proof checking under their reserved
--- symbols; their evidence is erased only after checking, immediately before
--- the proof becomes generated code.
+-- establish that the original Haskell type is uninhabited. The extra premise
+-- list is diagnostic-only: it contains target-derived instantiation axioms
+-- which must never enter safe proof search. Other instantiation axioms
+-- participate in search and proof checking under their reserved symbols;
+-- their evidence is erased only after checking, immediately before the proof
+-- becomes generated code.
 searchPreparedFormulaPlan
     :: QueryOptions
     -> Int
     -> SharedGenerated.DefinitionName
     -> [(Symbol, Formula)]
     -> Set.Set Symbol
+    -> [(Symbol, Formula)]
     -> Formula
     -> Bool
     -> Either DjinnQueryError FormulaPlanResult
 searchPreparedFormulaPlan options candidateLimit target externalEnv
-        axiomSymbols form negativeEvidenceSound = do
+        axiomSymbols diagnosticOnlyEnv form negativeEvidenceSound = do
     let name = SharedGenerated.definitionSpelling target
         proofEnv = prepareProofEnvironment (Symbol name) externalEnv
         internalEnv = proofBindings proofEnv
@@ -1123,7 +1295,9 @@ searchPreparedFormulaPlan options candidateLimit target externalEnv
                     -- the first search's unused fuel.  Exhaustion here cannot
                     -- make the already-decided safe result 'Undecided'.
                     let diagnosticEnv =
-                            proofBindingsIncludingTarget proofEnv
+                            proofBindingsIncludingTarget $
+                                prepareProofEnvironment (Symbol name) $
+                                    externalEnv ++ diagnosticOnlyEnv
                         diagnosticMode = mode {
                             searchAlternatives = False,
                             searchBudget = remainingSearchBudget outcome

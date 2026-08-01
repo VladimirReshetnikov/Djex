@@ -1095,6 +1095,243 @@ testRankNTypeAtoms = do
     runStableIdentity stableSession "instantiateAtImpredicativeWrapper"
         "(forall a. f a) -> f (Maybe (forall b. b -> b))"
 
+    -- Preserve the established query-local closed-monotype behavior beside
+    -- the loaded-scheme tail. Keep the fixture abstract so neither datatype
+    -- construction nor empty elimination can hide the compatibility result.
+    let closedKind = SharedKind.ProperTypeKind
+        closedName = sharedName "MonoClosed"
+        tokenName = sharedName "MonoToken"
+        resultName = sharedName "MonoResult"
+        closedType = SharedType.TypeConstructor closedName
+        tokenType = SharedType.TypeConstructor tokenName
+        resultType = SharedType.TypeConstructor resultName
+        abstractClosed name = SharedDeclaration.AbstractTypeDeclaration ()
+            name closedKind
+        closedScheme = SharedType.ForallType ["instanceType"] [] $
+            SharedType.FunctionType
+                (SharedType.FunctionType
+                    (SharedType.TypeVariable "instanceType") tokenType)
+                (SharedType.FunctionType
+                    (SharedType.TypeVariable "instanceType") resultType)
+        valueDeclaration spelling valueType =
+            SharedDeclaration.ValueDeclaration $
+                SharedDeclaration.ValueSignature ()
+                    (sharedName spelling) valueType
+        closedDeclarations =
+            [ abstractClosed closedName
+            , abstractClosed tokenName
+            , abstractClosed resultName
+            ]
+    closedSession <- sealDjinnSessionFrom stableSession closedDeclarations
+    runStableIdentity closedSession "instantiateAtMentionedClosedMonotype" $
+        "(forall a. (a -> MonoToken) -> a -> MonoResult) -> "
+        ++ "(MonoClosed -> MonoToken) -> MonoClosed -> MonoResult"
+
+    -- Loaded polymorphic values cross the same checked boundary.  The only
+    -- possible inhabitant composes the three named globals, so this pins both
+    -- closed-monotype discovery and post-check instantiation-evidence erasure.
+    loadedSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ valueDeclaration "monoToToken" $
+            SharedType.FunctionType closedType tokenType
+        , valueDeclaration "monoValue" closedType
+        , valueDeclaration "monoPoly" closedScheme
+        ]
+    loaded <- runStableQuery loadedSession
+        "instantiateLoadedAtMentionedClosedMonotype" "MonoResult"
+    loadedRendered <- renderStableCandidates loaded
+    assertBool
+        ("a loaded polymorphic value was not instantiated at MonoClosed: "
+            ++ show loadedRendered)
+        $ any (\term -> all (`isInfixOf` term)
+            ["monoPoly", "monoToToken", "monoValue"]) loadedRendered
+
+    -- Closed candidates may come from the checked goal rather than a loaded
+    -- monomorphic value. Pin both a result-only provider and an argument/result
+    -- provider; the latter also carries a rank-N monotype through the same
+    -- retained global scheme.
+    let boxName = sharedName "MonoBox"
+        boxKind = SharedKind.FunctionKind closedKind closedKind
+        boxConstructor = SharedType.TypeConstructor boxName
+        boxType element = SharedType.TypeApplication boxConstructor element
+        boxDeclaration = SharedDeclaration.AbstractTypeDeclaration ()
+            boxName boxKind
+        defaultBoxScheme = SharedType.ForallType ["boxed"] [] $
+            boxType $ SharedType.TypeVariable "boxed"
+        sealedBoxScheme = SharedType.ForallType ["boxed"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "boxed")
+                (boxType $ SharedType.TypeVariable "boxed")
+        implicitBoxScheme = SharedType.FunctionType
+            (SharedType.TypeVariable "implicitBoxed")
+            (boxType $ SharedType.TypeVariable "implicitBoxed")
+    defaultBoxSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++ [boxDeclaration,
+            valueDeclaration "defaultMonoBox" defaultBoxScheme]
+    sealedBoxSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++ [boxDeclaration,
+            valueDeclaration "sealedMonoBox" sealedBoxScheme]
+    implicitBoxSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++ [boxDeclaration,
+            valueDeclaration "implicitMonoBox" implicitBoxScheme]
+    defaultBox <- runStableQuery defaultBoxSession
+        "instantiateLoadedResultProvider"
+        "MonoBox MonoClosed"
+    defaultBoxRendered <- renderStableCandidates defaultBox
+    assertBool
+        ("a result-only loaded scheme ignored the goal monotype: " ++
+            show defaultBoxRendered)
+        $ any ("defaultMonoBox" `isInfixOf`) defaultBoxRendered
+    irrelevant <- runStableQuery defaultBoxSession
+        "doNotRefuteIrrelevantLoadedScheme" "MonoResult"
+    assertEqual "an irrelevant loaded scheme produced a candidate"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch irrelevant
+    assertEqual "an irrelevant retained scheme was ignored by evidence"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence irrelevant
+    sealedBox <- runStableQuery sealedBoxSession "instantiateLoadedArrowProvider"
+        "MonoClosed -> MonoBox MonoClosed"
+    sealedBoxRendered <- renderStableCandidates sealedBox
+    assertBool
+        ("an explicit loaded scheme ignored the goal monotype: " ++
+            show sealedBoxRendered)
+        $ any ("sealedMonoBox" `isInfixOf`) sealedBoxRendered
+    implicitBox <- runStableQuery implicitBoxSession
+        "instantiateImplicitlyQuantifiedLoadedProvider"
+        "MonoClosed -> MonoBox MonoClosed"
+    implicitBoxRendered <- renderStableCandidates implicitBox
+    assertBool
+        ("an implicitly quantified loaded signature was not retained: " ++
+            show implicitBoxRendered)
+        $ any ("implicitMonoBox" `isInfixOf`) implicitBoxRendered
+    let aliasName = sharedName "MonoClosedAlias"
+        aliasDeclaration = SharedDeclaration.TypeSynonymDeclaration ()
+            aliasName [] closedType
+        aliasType = SharedType.TypeConstructor aliasName
+    aliasBoxSession <- sealDjinnSessionFrom stableSession $
+        closedDeclarations ++
+        [ boxDeclaration
+        , aliasDeclaration
+        , valueDeclaration "monoAliasValue" aliasType
+        , valueDeclaration "sealedAliasBox" sealedBoxScheme
+        ]
+    aliasBox <- runStableQuery aliasBoxSession
+        "instantiateFromExpandedLoadedAlias" "MonoBox MonoClosed"
+    aliasBoxRendered <- renderStableCandidates aliasBox
+    assertBool
+        ("a synonym-expanded loaded candidate was not discovered: " ++
+            show aliasBoxRendered)
+        $ any (\term -> all (`isInfixOf` term)
+            ["sealedAliasBox", "monoAliasValue"]) aliasBoxRendered
+    rankNBox <- runStableQuery sealedBoxSession
+        "instantiateLoadedAtRankNCargo"
+        $ "(forall x. x -> x) -> "
+        ++ "MonoBox (forall x. x -> x)"
+    rankNBoxRendered <- renderStableCandidates rankNBox
+    assertBool
+        ("a loaded scheme lost its guarded impredicative instance: " ++
+            show rankNBoxRendered)
+        $ any ("sealedMonoBox" `isInfixOf`) rankNBoxRendered
+
+    -- One global occurrence is independently instantiated each time it is
+    -- used. Duplicate restored proof names must therefore retain distinct
+    -- internal premise identities until after proof checking.
+    let familyName = sharedName "MonoFamily"
+        leftName = sharedName "MonoLeft"
+        rightName = sharedName "MonoRight"
+        pairResultName = sharedName "MonoPairResult"
+        familyType element = SharedType.TypeApplication
+            (SharedType.TypeConstructor familyName) element
+        makeScheme = SharedType.ForallType ["made"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeVariable "made")
+                (familyType $ SharedType.TypeVariable "made")
+        finishType = SharedType.FunctionType
+            (familyType $ SharedType.TypeConstructor leftName) $
+            SharedType.FunctionType
+                (familyType $ SharedType.TypeConstructor rightName)
+                (SharedType.TypeConstructor pairResultName)
+        familyDeclarations =
+            [ SharedDeclaration.AbstractTypeDeclaration () familyName boxKind
+            , abstractClosed leftName
+            , abstractClosed rightName
+            , abstractClosed pairResultName
+            , valueDeclaration "monoLeft" $
+                SharedType.TypeConstructor leftName
+            , valueDeclaration "monoRight" $
+                SharedType.TypeConstructor rightName
+            , valueDeclaration "monoMake" makeScheme
+            , valueDeclaration "monoFinish" finishType
+            ]
+    familySession <- sealDjinnSessionFrom stableSession familyDeclarations
+    familyResult <- runStableQuery familySession
+        "instantiateLoadedProviderTwice" "MonoPairResult"
+    familyRendered <- renderStableCandidates familyResult
+    assertBool
+        ("one loaded scheme was not used at two monotypes: " ++
+            show familyRendered)
+        $ any (\term ->
+            occurrenceCount "monoMake" term >= 2 &&
+            all (`isInfixOf` term) ["monoFinish", "monoLeft", "monoRight"])
+            familyRendered
+
+    -- Candidate subtrees are not restricted to kind @Type@: a higher-kinded
+    -- constructor is the required image here. Ill-kinded earlier tuples are
+    -- discarded by checking the complete instantiated body, not by aborting
+    -- the optional capability.
+    let higherName = sharedName "MonoHigher"
+        higherInputName = sharedName "MonoHigherInput"
+        higherResultName = sharedName "MonoHigherResult"
+        higherConstructor = SharedType.TypeConstructor higherName
+        higherInput = SharedType.TypeConstructor higherInputName
+        higherResult = SharedType.TypeConstructor higherResultName
+        higherApplied = SharedType.TypeApplication higherConstructor higherInput
+        higherConsumer = SharedType.ForallType ["constructor"] [] $
+            SharedType.FunctionType
+                (SharedType.TypeApplication
+                    (SharedType.TypeVariable "constructor") higherInput)
+                higherResult
+    higherSession <- sealDjinnSessionFrom stableSession
+        [ SharedDeclaration.AbstractTypeDeclaration () higherName boxKind
+        , abstractClosed higherInputName
+        , abstractClosed higherResultName
+        , valueDeclaration "monoHigherValue" higherApplied
+        , valueDeclaration "monoHigherConsumer" higherConsumer
+        ]
+    higher <- runStableQuery higherSession
+        "instantiateLoadedHigherKindedBinder" "MonoHigherResult"
+    higherRendered <- renderStableCandidates higher
+    assertBool
+        ("a higher-kinded closed candidate was not instantiated safely: " ++
+            show higherRendered)
+        $ any (\term -> all (`isInfixOf` term)
+            ["monoHigherConsumer", "monoHigherValue"]) higherRendered
+
+    -- Retaining a scheme is also an honesty witness. A leading chain beyond
+    -- the four-binder bound must stay inconclusive even though every required
+    -- closed monotype and value is loaded in the environment.
+    let fiveNames = map (sharedName . ("MonoFive" ++) . show)
+            ([1 .. 5] :: [Int])
+        fiveResultName = sharedName "MonoFiveResult"
+        fiveVariables = map (("five" ++) . show) ([1 .. 5] :: [Int])
+        fiveProviderType = SharedType.ForallType fiveVariables [] $
+            foldr SharedType.FunctionType
+                (SharedType.TypeConstructor fiveResultName)
+                (map SharedType.TypeVariable fiveVariables)
+        fiveDeclarations =
+            map abstractClosed (fiveNames ++ [fiveResultName]) ++
+            zipWith
+                (\index name -> valueDeclaration ("monoFiveValue" ++ show index)
+                    $ SharedType.TypeConstructor name)
+                ([1 ..] :: [Int]) fiveNames ++
+            [valueDeclaration "monoFiveProvider" fiveProviderType]
+    fiveSession <- sealDjinnSessionFrom stableSession fiveDeclarations
+    fiveLoaded <- runStableQuery fiveSession
+        "doNotRefuteBoundedLoadedScheme" "MonoFiveResult"
+    assertEqual "a five-binder loaded scheme escaped its bound"
+        [] $ SharedSearch.batchCandidates $ SharedQuery.resultSearch fiveLoaded
+    assertEqual "a bounded loaded-scheme miss was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence fiveLoaded
+
     -- Four-binder chains remain practical under the existing per-scheme and
     -- per-query attempt caps. The generated evidence is still the original
     -- hypothesis occurrence; GHC performs its ordinary implicit instantiation.
@@ -1458,6 +1695,18 @@ testRankNTypeAtoms = do
         request <- expectShownRight $ Djex.parseDjinnRequest session
             defaultQueryOptions target (targetSpelling ++ ".djinn") source
         expectShownRight $ Djex.runDjinnQuery session request
+
+    renderStableCandidates result = mapM
+        (expectShownRight . Djex.renderDjinnCandidateExpression
+            SharedGenerated.Unqualified)
+        $ SharedSearch.batchCandidates $ SharedQuery.resultSearch result
+
+    occurrenceCount :: String -> String -> Int
+    occurrenceCount needle = go
+      where
+        go [] = 0
+        go source@(_ : suffix) =
+            (if needle `isPrefixOf` source then 1 else 0) + go suffix
 
 -- Recursive datatypes retain real constructor introduction in the bounded
 -- positive projection. Recursive inputs and every recursive field below that
@@ -4488,11 +4737,20 @@ testSelfReferenceEvidence = do
     assertEqual "an unrelated collision does not justify a recursion warning"
         Unrealizable (reportOutcome unrelated)
 
+    -- Keep this diagnostic fixture monomorphic. A free variable in a loaded
+    -- Haskell signature is implicitly quantified, so @seed :: a@ is itself a
+    -- valid inhabitant of any proper-type goal once loaded schemes are honored.
+    let selfInput = HTCon "SelfReferenceInput"
+        selfResult = HTCon "SelfReferenceResult"
     combinedEnvironment <- expectRight $ do
-        withSeed <- declare (Function "seed" a) standardEnvironment
-        declare (Function "token" $ HTArrow a b) withSeed
+        withInput <- declare
+            (AbstractType "SelfReferenceInput" KStar) standardEnvironment
+        withResult <- declare
+            (AbstractType "SelfReferenceResult" KStar) withInput
+        withSeed <- declare (Function "seed" selfInput) withResult
+        declare (Function "token" $ HTArrow selfInput selfResult) withSeed
     combined <- expectRight $
-        inhabit defaultQueryOptions combinedEnvironment [] "token" b
+        inhabit defaultQueryOptions combinedEnvironment [] "token" selfResult
     assertEqual
         "a proof needing both safe and excluded assumptions justifies the warning"
         UnrealizableWithoutSelfReference (reportOutcome combined)

@@ -8,20 +8,23 @@
 -- implicitly. This module turns that semantic fact into explicit premise
 -- axioms @Opaque(forall as. t) -> compile(t[as := ss])@ over a finite
 -- candidate set: the sequent's type variables (including skolems introduced
--- by opened positive foralls) and every quantified atom the sequent already
--- mentions. The quantified candidates give a guarded form of impredicative
--- instantiation: a binder may be solved with a polytype, but only one that
--- already occurs in the query or its premises.
+-- by opened positive foralls), every quantified atom the sequent already
+-- mentions, and—for the separate loaded-value tail—closed forall-free
+-- subtrees of checked queries and value signatures. Quantified candidates give
+-- guarded impredicative instantiation; closed candidates may have any kind,
+-- but the complete substituted body is kind-checked before compilation.
 --
 -- Each axiom is a self-contained semantic truth about Haskell types, so
 -- adding them can only enlarge the set of provable goals; they never
 -- threaten negative evidence. Boundedness loses completeness only, and the
--- polarized translation already reports incompleteness whenever a
--- hypothesis-side forall exists, so exhausting a search that includes these
--- axioms still yields no refutation.
+-- query translation and retained non-target loaded schemes report the
+-- corresponding incompleteness, so exhausting bounded plans cannot justify a
+-- refutation.
 module Djinn.Internal.Instantiation
     ( InstantiationAxioms
     , instantiationAxioms
+    , loadedInstantiationAxioms
+    , closedMonotypeSubtrees
     , instantiationAxiomPremises
     , instantiationAxiomSymbols
     , usesInstantiationEvidence
@@ -51,18 +54,19 @@ maxInstantiationBinders = 4
 maxCartesianInstantiationBinders :: Int
 maxCartesianInstantiationBinders = 3
 
--- Axioms are premises in every plan of the query, so their count bounds both
--- formula size and search branching. The caps are deliberate completeness
--- boundaries, never soundness ones: a dropped axiom can only cause a miss,
--- and misses in this fragment already report 'NoEvidence'.
+-- Axioms are premises in every plan of one instantiation family, so their
+-- count bounds both formula size and search branching. The caps are deliberate
+-- completeness boundaries, never soundness ones: a dropped axiom can only
+-- cause a miss, and misses in this fragment already report 'NoEvidence'.
 maxInstantiationAxioms :: Int
 maxInstantiationAxioms = 64
 
 maxInstantiationAttempts :: Int
 maxInstantiationAttempts = 512
 
--- One scheme with a large tuple space must not starve its siblings under the
--- global cap; each scheme receives its own smaller allowance as well.
+-- Each scheme has a smaller distinct-axiom allowance. Loaded jobs also
+-- interleave tuple attempts, so duplicate or ill-kinded tuples from one scheme
+-- cannot starve its siblings under the family attempt cap.
 maxInstantiationAxiomsPerScheme :: Int
 maxInstantiationAxiomsPerScheme = 16
 
@@ -139,7 +143,10 @@ instantiationAxioms
     -> InstantiationAxioms
 instantiationAxioms translator variableSpellings goalFormulas
         premiseFormulas =
-    InstantiationAxioms premises $ Set.fromList $ map fst premises
+    buildInstantiationAxioms "$djinn$instantiation$" translator
+        False
+        (historicalCandidateTuples historicalCandidates wideCandidates)
+        initialSchemes
   where
     atoms =
         concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
@@ -170,12 +177,95 @@ instantiationAxioms translator variableSpellings goalFormulas
         , Just source <- [opaqueSymbolSource symbol]
         , Just scheme <- [instantiationScheme source]
         ]
-    premises =
-        [ (Symbol $ "$djinn$instantiation$" ++ show index, formula)
-        | (index, formula) <- zip [0 :: Int ..] $
-            buildAxiomFormulas translator historicalCandidates wideCandidates
-                initialSchemes
+
+-- | Build the additive instantiation tail for polymorphic values retained from
+-- the sealed environment. Unlike the historical hypothesis rule, this phase
+-- extends the variable and guarded-impredicative candidates with closed
+-- monotype subtrees supplied by the checked query and loaded signatures. Its
+-- scheme seeds are explicit so ordinary query-local schemes are not
+-- rediscovered under a second proof-symbol family.
+loadedInstantiationAxioms
+    :: (SharedType.Type String -> Either String Formula)
+    -> [String]
+    -> [SharedType.Type String]
+    -> [Formula]
+    -> [Formula]
+    -> [Formula]
+    -> InstantiationAxioms
+loadedInstantiationAxioms translator variableSpellings closedCandidates
+        goalFormulas premiseFormulas loadedSchemeFormulas =
+    buildInstantiationAxioms "$djinn$loaded-instantiation$" translator
+        True
+        (fairCandidateTuples candidates) initialSchemes
+  where
+    candidateAtoms =
+        concatMap (sidedAtomSymbols ObligationSide) goalFormulas ++
+        concatMap (sidedAtomSymbols HypothesisSide) premiseFormulas
+    schemeAtoms = concatMap (sidedAtomSymbols HypothesisSide)
+        loadedSchemeFormulas
+    opaqueSources =
+        [ source
+        | (_, symbol) <- candidateAtoms
+        , Just source <- [opaqueSymbolSource symbol]
         ]
+    variableCandidates = map SharedType.TypeVariable $
+        distinctOn id variableSpellings
+    quantifiedCandidates =
+        distinctOn SharedTypeAtom.alphaTypeKey $
+        sortOn (SharedTypeRender.renderType id) $
+        concatMap closedQuantifiedSubtrees opaqueSources
+    candidates = distinctOn SharedTypeAtom.alphaTypeKey $
+        variableCandidates ++ quantifiedCandidates ++ closedCandidates
+    initialSchemes = distinctOn schemeKey
+        [ scheme
+        | (HypothesisSide, symbol) <- schemeAtoms
+        , Just source <- [opaqueSymbolSource symbol]
+        , Just scheme <- [instantiationScheme source]
+        ]
+
+buildInstantiationAxioms
+    :: String
+    -> (SharedType.Type String -> Either String Formula)
+    -> Bool
+    -> (Int -> [[SharedType.Type String]])
+    -> [InstantiationScheme]
+    -> InstantiationAxioms
+buildInstantiationAxioms symbolPrefix translator interleaveSchemes
+        candidateTuples schemes =
+    InstantiationAxioms premises $ Set.fromList $ map fst premises
+  where
+    premises =
+        [ (Symbol $ symbolPrefix ++ show index, formula)
+        | (index, formula) <- zip [0 :: Int ..] $
+            buildAxiomFormulas interleaveSchemes translator
+                candidateTuples schemes
+        ]
+
+-- | Enumerate every source subtree which is closed and contains no explicit
+-- forall. Candidates may have any kind: a higher-kinded subtree can be the
+-- correct image of a higher-kinded binder. The caller checks the complete
+-- instantiated body in its prepared kind scope before retaining an axiom.
+closedMonotypeSubtrees
+    :: SharedType.Type String -> [SharedType.Type String]
+closedMonotypeSubtrees = distinctOn SharedTypeAtom.alphaTypeKey .
+    filter isClosedMonotype . typeSubtrees . SharedType.canonicalizeType
+  where
+    isClosedMonotype source =
+        Set.null (SharedType.freeVariables source) &&
+            not (SharedType.containsForall source)
+
+typeSubtrees :: SharedType.Type String -> [SharedType.Type String]
+typeSubtrees source = source : case source of
+    SharedType.TypeVariable{} -> []
+    SharedType.TypeConstructor{} -> []
+    SharedType.TypeApplication function argument ->
+        typeSubtrees function ++ typeSubtrees argument
+    SharedType.FunctionType parameter result ->
+        typeSubtrees parameter ++ typeSubtrees result
+    SharedType.TupleType _ elements -> concatMap typeSubtrees elements
+    SharedType.ForallType _ constraints body ->
+        concatMap typeSubtrees (concatMap constraintArguments constraints) ++
+            typeSubtrees body
 
 -- Quantified subtrees and their impredicative wrappers are usable as
 -- instantiation arguments. A nested forall whose body mentions an enclosing
@@ -220,19 +310,19 @@ quantifiedSubtrees source = case source of
 
 -- Worklist over schemes. Instantiating a scheme can expose a strictly
 -- shallower hypothesis-side forall in its own body; such discoveries join the
--- end of the queue, and every scheme owns a private allowance so one large
--- tuple space cannot starve a sibling hypothesis under the global cap.
+-- end of the queue. Loaded jobs are interleaved for attempt fairness, while
+-- historical jobs retain their compatibility order.
 data InstantiationJob
     = SchemeJob InstantiationScheme
     | AxiomJob InstantiationScheme Int [[SharedType.Type String]]
 
 buildAxiomFormulas
-    :: (SharedType.Type String -> Either String Formula)
-    -> [SharedType.Type String]
-    -> [SharedType.Type String]
+    :: Bool
+    -> (SharedType.Type String -> Either String Formula)
+    -> (Int -> [[SharedType.Type String]])
     -> [InstantiationScheme]
     -> [Formula]
-buildAxiomFormulas translator historicalCandidates wideCandidates
+buildAxiomFormulas interleaveSchemes translator candidateTuples
         initialSchemes = loop
     (Set.fromList $ map schemeKey initialSchemes)
     Set.empty
@@ -268,54 +358,21 @@ buildAxiomFormulas translator historicalCandidates wideCandidates
                             (Set.insert axiom seenAxioms)
                             (attempts - 1)
                             (allowance - 1)
-                            (AxiomJob scheme (schemeAllowance - 1) tuples
-                                : jobs ++ map SchemeJob discovered)
+                            (reschedule
+                                (AxiomJob scheme
+                                    (schemeAllowance - 1) tuples)
+                                jobs ++ map SchemeJob discovered)
                 _ -> loop seenSchemes seenAxioms (attempts - 1) allowance
-                    (AxiomJob scheme schemeAllowance tuples : jobs)
+                    (reschedule
+                        (AxiomJob scheme schemeAllowance tuples) jobs)
 
-    -- One- through three-binder schemes retain their exact historical lexical
-    -- Cartesian order. Four-binder schemes need a useful bounded prefix: draw
-    -- fairly from source-order windows, repeated arguments, sparse monotone
-    -- selections, and the complete Cartesian tail. Edge-first ordering keeps
-    -- a useful late goal variable from being hidden by unrelated source
-    -- variables, while round-robin merging prevents any one family from
-    -- consuming the full per-scheme allowance.
-    candidateTuples arity
-        | arity <= maxCartesianInstantiationBinders =
-            sequence $ replicate arity historicalCandidates
-        | otherwise = distinctOn id $ roundRobin
-            [ edgeFirst $ candidateWindows arity wideCandidates
-            , map (replicate arity) $ edgeFirst wideCandidates
-            , roundRobin
-                [ orderedSelections arity wideCandidates
-                , orderedSelections arity $ reverse wideCandidates
-                ]
-            , sequence $ replicate arity wideCandidates
-            ]
-
-    candidateWindows arity values
-        | arity <= 0 = [[]]
-        | otherwise = case splitAt arity values of
-            (window, _)
-                | length window == arity ->
-                    window : candidateWindows arity (drop 1 values)
-            _ -> []
-
-    orderedSelections 0 _ = [[]]
-    orderedSelections _ [] = []
-    orderedSelections count (value : values) =
-        map (value :)
-            (orderedSelections (count - 1) values) ++
-        orderedSelections count values
-
-    edgeFirst values = distinctOn id $ roundRobin [values, reverse values]
-
-    roundRobin streams = case
-            [ (value, remaining)
-            | value : remaining <- streams
-            ] of
-        [] -> []
-        active -> map fst active ++ roundRobin (map snd active)
+    -- Historical query-local axioms retain their exact depth-first sequence.
+    -- Loaded declarations instead take one tuple attempt per turn, so a
+    -- vacuous or mostly ill-kinded early scheme cannot spend the global
+    -- attempt allowance before a later provider receives its first chance.
+    reschedule job jobs
+        | interleaveSchemes = jobs ++ [job]
+        | otherwise = job : jobs
 
     schemeAxiom scheme arguments = do
         instantiated <- rightToMaybe $
@@ -338,6 +395,82 @@ buildAxiomFormulas translator historicalCandidates wideCandidates
         ]
 
     rightToMaybe = either (const Nothing) Just
+
+-- One- through three-binder query-local schemes retain their exact historical
+-- lexical Cartesian order. Four-binder schemes use the source-order widening
+-- introduced with the original bounded rule.
+historicalCandidateTuples
+    :: [SharedType.Type String]
+    -> [SharedType.Type String]
+    -> Int
+    -> [[SharedType.Type String]]
+historicalCandidateTuples historicalCandidates wideCandidates arity
+    | arity <= maxCartesianInstantiationBinders =
+        sequence $ replicate arity historicalCandidates
+    | otherwise = fairCandidateTuplesWith False wideCandidates arity
+
+-- Loaded declarations can be late in a standard session. Draw from both ends
+-- and interleave useful tuple families for every arity so the bounded prefix
+-- cannot be monopolized by unrelated earlier declarations.
+fairCandidateTuples
+    :: [SharedType.Type String]
+    -> Int
+    -> [[SharedType.Type String]]
+fairCandidateTuples = fairCandidateTuplesWith True
+
+fairCandidateTuplesWith
+    :: Bool
+    -> [SharedType.Type String]
+    -> Int
+    -> [[SharedType.Type String]]
+fairCandidateTuplesWith recentFirst candidates arity =
+    distinctOn id $ roundRobin
+    [ prioritizeEdges recentFirst $ candidateWindows arity candidates
+    , map (replicate arity) $ prioritizeEdges recentFirst candidates
+    , roundRobin
+        [ orderedSelections arity candidates
+        , orderedSelections arity $ reverse candidates
+        ]
+    , sequence $ replicate arity candidates
+    ]
+
+candidateWindows :: Int -> [value] -> [[value]]
+candidateWindows arity values
+    | arity <= 0 = [[]]
+    | otherwise = case splitAt arity values of
+        (window, _)
+            | length window == arity ->
+                window : candidateWindows arity (drop 1 values)
+        _ -> []
+
+orderedSelections :: Int -> [value] -> [[value]]
+orderedSelections 0 _ = [[]]
+orderedSelections _ [] = []
+orderedSelections count (value : values) =
+    map (value :)
+        (orderedSelections (count - 1) values) ++
+    orderedSelections count values
+
+edgeFirst :: Ord value => [value] -> [value]
+edgeFirst values = distinctOn id $ roundRobin [values, reverse values]
+
+-- Loaded declarations are commonly appended to the standard environment, so
+-- give that recent edge the first slot while still alternating both ends.
+lateEdgeFirst :: Ord value => [value] -> [value]
+lateEdgeFirst values = distinctOn id $ roundRobin [reverse values, values]
+
+prioritizeEdges :: Ord value => Bool -> [value] -> [value]
+prioritizeEdges recentFirst
+    | recentFirst = lateEdgeFirst
+    | otherwise = edgeFirst
+
+roundRobin :: [[value]] -> [value]
+roundRobin streams = case
+        [ (value, remaining)
+        | value : remaining <- streams
+        ] of
+    [] -> []
+    active -> map fst active ++ roundRobin (map snd active)
 
 instantiateSchemeBody
     :: InstantiationScheme

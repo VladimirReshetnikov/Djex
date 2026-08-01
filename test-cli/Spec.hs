@@ -68,6 +68,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplRankNQueries
   , testCase "REPL retains safe Djinn rank-N axioms"
       testReplRankNAxioms
+  , testCase "REPL instantiates loaded Djinn values"
+      testReplLoadedPolymorphicValue
   , testCase "REPL reports a shared both-mode parse failure once"
       testReplSharedParseFailure
   , testCase "REPL multiline, repeat, and command errors recover"
@@ -670,6 +672,37 @@ testReplRankNAxioms = withTemporaryEnvironment
     "its residual class context cannot become a proof axiom" output
   assertBool "the safe rank-N value was reported as an omission" $
     not $ "church: " `isInfixOf` output
+  assertNoCallStack errors
+
+testReplLoadedPolymorphicValue :: Assertion
+testReplLoadedPolymorphicValue = withTemporaryEnvironment
+    [ ("LoadedProvider.hs", unlines
+      [ "{-# LANGUAGE RankNTypes #-}"
+      , "{-# LANGUAGE EmptyDataDecls #-}"
+      , "module LoadedProvider where"
+      , "data LoadedInput"
+      , "data LoadedResult"
+      , "loadedSeed :: LoadedInput"
+      , "loadedConsume :: forall item. item -> LoadedResult"
+      ])
+    , ("loaded.visibility", unlines
+      [ "abstract LoadedProvider.LoadedInput 0"
+      , "abstract LoadedProvider.LoadedResult 0"
+      ])
+    ] $ \directory -> do
+  (exitCode, output, errors) <- runRepl directory
+    [ ":backend djinn"
+    , ":set djinn-axioms on"
+    , ":set select all"
+    , ":set render expression"
+    , ":set qualification none"
+    , "LoadedResult"
+    ]
+  assertEqual "loaded-provider REPL exit" ExitSuccess exitCode
+  assertContains "a loaded provider is instantiated in the shared REPL"
+    "loadedConsume" output
+  assertContains "the instantiated provider consumes the loaded seed"
+    "loadedSeed" output
   assertNoCallStack errors
 
 testReplSharedParseFailure :: Assertion

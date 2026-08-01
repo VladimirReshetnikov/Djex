@@ -46,6 +46,8 @@ main = defaultMain $ testGroup "Djinn CLI integration"
         testSearchBudget
     , testCase "bounded rank-N searches distinguish success from uncertainty"
         testBoundedRankNSearch
+    , testCase "loaded polymorphic values instantiate at closed monotypes"
+        testLoadedPolymorphicValue
     , testCase "class arguments are checked against inferred kinds"
         testClassKindEnforcement
     , testCase "structured query context is rendered once"
@@ -108,6 +110,14 @@ testVerboseHelpVersion = do
         not $ "<package-version>" `isInfixOf` output
     assertContains "verbose help qualifies completeness for rank-N types"
         "Rank-N support is deliberately bounded" output
+    assertContains "verbose help documents bounded loaded instantiation"
+        "Context-free polymorphic functions use a bounded instantiation rule"
+        output
+    assertContains "verbose help keeps class evidence dictionary-independent"
+        "its methods are not proof premises" output
+    assertBool "verbose help retained the obsolete instantiation claim" $
+        not $ "does *not* instantiate polymorphic functions"
+            `isInfixOf` output
   where
     welcomePrefix = "Welcome to Djinn version "
 
@@ -320,6 +330,44 @@ testBoundedRankNSearch = do
     assertBool "a valid inconclusive result was reported as an internal error"
         $ not $ "Djinn returned no evidence" `isInfixOf` output
 
+testLoadedPolymorphicValue :: Assertion
+testLoadedPolymorphicValue = do
+    output <- runSession
+        [ "type Input :: *"
+        , "type Result :: *"
+        , "seed :: Input"
+        , "consume :: forall item. item -> Result"
+        , "use ? Result"
+        , "type FairInput :: *"
+        , "type FairResult :: *"
+        , "type FairJunk :: *"
+        , "type FairX1 :: *"
+        , "type FairX2 :: *"
+        , "type FairX3 :: *"
+        , "type FairX4 :: *"
+        , "fairX1 :: FairX1"
+        , "fairX2 :: FairX2"
+        , "fairX3 :: FairX3"
+        , "fairX4 :: FairX4"
+        , "aaaVacuous :: forall a b c d. FairJunk"
+        , "fairSeed :: FairInput"
+        , "mmmConsume :: forall item. item -> FairResult"
+        , "zzzVacuous :: forall a b c d. FairJunk"
+        , "fairUse ? FairResult"
+        , ":quit"
+        ]
+    assertContains "a loaded forall provider should reach the closed result"
+        "use = consume" output
+    assertContains "the composition should consume the loaded closed value"
+        "seed" output
+    assertBool "a valid loaded-provider composition was falsely refuted"
+        $ not $ "use cannot be realized" `isInfixOf` output
+    assertContains
+        "vacuous wide schemes must not starve a later useful provider"
+        "fairUse = mmmConsume" output
+    assertBool "scheme starvation made a supported query inconclusive"
+        $ not $ "fairUse: no proof found" `isInfixOf` output
+
 testEof :: Assertion
 testEof = do
     output <- runSession ["identity ? a -> a"]
@@ -334,6 +382,25 @@ testSelfReference = do
         , "token ? a"
         , "fallback :: a"
         , "token ? a"
+        , ":clear"
+        , "type SelfInput :: *"
+        , "type SelfBox :: * -> *"
+        , "selfSeed :: SelfInput"
+        , "selfUse :: forall a. a -> SelfBox a"
+        , "selfUse ? SelfBox SelfInput"
+        , ":clear"
+        , "type NominalInput :: *"
+        , "type NominalLocked :: *"
+        , "data NominalBox a = NominalBox a NominalLocked"
+        , "nominalSeed :: NominalInput"
+        , "nominalUse :: forall a. a -> NominalBox a"
+        , "nominalUse ? NominalBox NominalInput"
+        , ":clear"
+        , "type UnusedInput :: *"
+        , "type UnusedLocked :: *"
+        , "data UnusedBox a = UnusedBox a UnusedLocked"
+        , "unusedUse :: forall a. a -> UnusedBox a"
+        , "unusedUse ? UnusedBox UnusedInput"
         , ":quit"
         ]
     assertContains "the unsafe query should be diagnosed"
@@ -341,8 +408,19 @@ testSelfReference = do
         output
     assertContains "a different safe assumption should remain usable"
         "token = fallback" output
+    assertContains "a specialized polymorphic target stays diagnostic-only"
+        ("selfUse cannot be safely realized without a recursive " ++
+            "self-reference") output
+    assertContains "a nominal tail preserves target-reference evidence"
+        ("nominalUse cannot be safely realized without a recursive " ++
+            "self-reference") output
+    assertContains "an unusable target-only scheme preserves refutation"
+        "unusedUse cannot be realized" output
     assertBool "recursive output must never be emitted"
         (not $ "token = token" `isInfixOf` output)
+    assertBool "target instantiation axioms must never become output"
+        (not $ any (`isInfixOf` output)
+            ["selfUse =", "nominalUse =", "unusedUse ="])
 
 testNominalEmptyTypes :: Assertion
 testNominalEmptyTypes = do

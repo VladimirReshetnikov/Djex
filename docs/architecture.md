@@ -205,8 +205,16 @@ forall chain, substitute fresh rigids through each layer's contexts and body,
 and make those contexts lexical givens only for that body. Deferred obligations
 retain their exact given snapshot, preventing binderless or sibling evidence
 leakage. Exference may also instantiate a scoped provider's leading binders
-immediately before ordinary type unification. Quantifiers outside these
-explicit boundaries remain opaque.
+immediately before ordinary type unification. Djinn has one additional
+query-time boundary for context-free loaded values: environment sealing
+retains their exact schemes in a private structural/nominal index, and an
+appended search family instantiates up to four leading binders from the
+historical variable and guarded quantified candidates plus closed, forall-free
+subtrees of the checked query and synonym-expanded loaded signatures. The
+complete substituted body is kind-checked before formula compilation. These
+bounded axioms are proof-producing only; a missed non-target scheme cannot
+support negative evidence. Quantifiers outside these explicit boundaries
+remain opaque.
 Structure surrounding those opaque quantifiers retains its ordinary form,
 which permits impredicative values such as
 `[(forall a. a -> a)]` without claiming general higher-rank subsumption.

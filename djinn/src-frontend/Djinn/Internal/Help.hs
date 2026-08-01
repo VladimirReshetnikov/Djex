@@ -48,12 +48,18 @@ verboseHelp = "\
 \   Djinn> f ? Int -> Bool\n\
 \   f :: Int -> Bool\n\
 \   f a = bar (foo a)\n\
-\  This feature is not as powerful as it first might seem.  Djinn does\n\
-\*not* instantiate polymorphic functions.  It will only use the function\n\
-\with exactly the given type.  Example:\n\
-\   Djinn> cast :: a -> b\n\
-\   Djinn> f ? c->d\n\
-\   -- f cannot be realized.\n\
+\  Context-free polymorphic functions use a bounded instantiation rule.\n\
+\Djinn draws monotypes from the checked query and loaded signatures; it\n\
+\does not invent arbitrary type structure.  Example:\n\
+\   Djinn> type Input :: *\n\
+\   Djinn> type Result :: *\n\
+\   Djinn> seed :: Input\n\
+\   Djinn> consume :: forall item. item -> Result\n\
+\   Djinn> f ? Result\n\
+\A result can instantiate consume at Input and apply it to seed; its exact\n\
+\depth-first spelling may contain additional valid uses.  Directly constrained\n\
+\loaded declarations are rejected.  A supported context-free scheme beyond\n\
+\the documented bounds instead leaves an empty search undecided.\n\
 \\n\
 \type <sym> <vars> = <type>\n\
 \  Add a Haskell style type synonym.  Type synonyms are expanded before\n\
@@ -173,13 +179,13 @@ verboseHelp = "\
 \\n\
 \\n\
 \  The function type may have a type class context, e.g.,\n\
-\   Djinn> refl ? (Eq a) => a -> Bool\n\
-\   refl :: (Eq a) => a -> Bool\n\
-\   refl a = a == a\n\
-\A context is simply interpreted as an additional (hidden) argument\n\
-\that contains all the methods.  Again, there is no instantiation of\n\
-\polymorphic functions, so classes where the methods are polymorphic\n\
-\do not work as expected.\n\
+\   Djinn> keep ? (Eq a) => a -> a\n\
+\   keep :: (Eq a) => a -> a\n\
+\   keep _ a = a\n\
+\A context is validated and rendered as an additional hidden argument, but\n\
+\its methods are not proof premises.  The generated body must therefore be\n\
+\dictionary-independent; Djinn will not synthesize a use of (==) merely from\n\
+\an Eq context.\n\
 \\n\
 \It is also possible to query for an instance of a class, which is executed\n\
 \as a query for each of the methods, e.g.,\n\

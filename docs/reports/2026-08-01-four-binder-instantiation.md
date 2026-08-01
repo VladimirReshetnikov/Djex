@@ -2,6 +2,11 @@
 
 Date: 2026-08-01
 
+> **Follow-up.** The
+> [loaded polymorphic values extension](2026-08-01-loaded-polymorphic-djinn-values.md)
+> retains this historical query-local ordering and adds a separate appended
+> family for loaded schemes and closed source monotypes.
+
 ## Outcome
 
 Djinn now instantiates context-free hypothesis-side `forall` chains with up to

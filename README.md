@@ -77,6 +77,9 @@ Djinn's complementary bounded recursive-constructor rule is recorded in the
 [2026-08-01 bounded recursive introduction report](docs/reports/2026-08-01-bounded-djinn-recursive-introduction.md).
 Djinn's widened bounded hypothesis-instantiation rule is recorded in the
 [2026-08-01 four-binder instantiation report](docs/reports/2026-08-01-four-binder-instantiation.md).
+Its per-occurrence instantiation of loaded polymorphic values and closed source
+monotypes is recorded in the
+[2026-08-01 loaded polymorphic values report](docs/reports/2026-08-01-loaded-polymorphic-djinn-values.md).
 Djinn's complementary nominal view of reachable parameterized datatypes is
 recorded in the
 [2026-08-01 nominal parametric-data transport report](docs/reports/2026-08-01-nominal-parametric-data-transport.md).
@@ -205,7 +208,16 @@ complete chain at sequent-supplied candidates: the goal's type variables, the
 skolems of opened positive occurrences, premise-scope variables, and — as a
 guarded form of impredicativity — any query-supplied subtree that is
 independent of enclosing binders and contains quantification, including a
-structural wrapper around a quantified atom. Exference can introduce a nested
+structural wrapper around a quantified atom. A separate appended Djinn family
+retains context-free schemes from loaded values and additionally instantiates
+them at closed, forall-free subtrees of the elaborated query and loaded value
+signatures. In the shared REPL, ordinary workspace values enter this family
+only after `:set djinn-axioms on`; value axioms are off by default. Each
+substituted body is kind-checked, so a closed higher-kinded
+constructor is admitted only when its complete use has kind `Type`. The search
+remains bounded and positive-only; a missed non-target retained scheme makes
+the result inconclusive rather than proving non-inhabitation. Exference can
+introduce a nested
 `forall`, with or without class contexts, once ordinary search exposes it as a
 goal, for example as a callback argument or an arrow result. It opens the
 complete leading chain with branch-local fresh rigid constants and treats each
@@ -333,9 +345,11 @@ booleans:
 
 This is not general higher-rank subsumption, polymorphic-let generalization, or
 general visible type application. Explicitly visible open arguments such as
-`@a` and visible impredicative type arguments remain unsupported; the nominal
-rule above performs only bounded implicit instantiation from the sequent's
-candidate vocabulary. Djinn search does not gain the Exference visible-
+`@a` and visible impredicative type arguments remain unsupported. Djinn's
+bounded rules perform only implicit instantiation from the sequent's variable
+and guarded quantified vocabulary; the loaded-value tail additionally draws
+closed monotypes from the checked query and loaded signatures. Djinn search
+does not gain the Exference visible-
 application rule, and its historical expression projection rejects the new
 generated node explicitly. Unsupported Djinn positions remain opaque and make
 an otherwise empty search inconclusive rather than manufacturing a logical
@@ -355,12 +369,14 @@ seven independent sites without enumerating the power set; for eight
 independent sites, a proof requiring exactly four open and four opaque
 occurrences may remain inconclusive. After that complete structural no-axiom
 prefix, bounded instantiation plans cover many omitted middle subsets, but
-chains
-beyond four binders, constrained chains, and candidates outside the sequent's
-own vocabulary stay out of reach, and the instantiation closure is capped per
-scheme and per query. Four-binder tuple selection fairly mixes source-order,
+chains beyond four binders, constrained chains, and candidates outside the
+finite query/value-signature vocabulary stay out of reach. Each structural or
+nominal instantiation family is capped per scheme and per family. Four-binder
+query-local tuple selection fairly mixes source-order,
 repeated, sparse, and Cartesian shapes while one- through three-binder schemes
-retain their historical order. Those caps lose completeness only, never
+retain their historical order; the appended loaded-value family uses the same
+tuple shapes while alternating both ends of its source-ordered candidate list.
+Those caps lose completeness only, never
 soundness. The nominal parametric-datatype plans obey the same caps and add no
 negative evidence. An incomplete primary premise also makes negative evidence
 conservative for the whole query. The examples use the same

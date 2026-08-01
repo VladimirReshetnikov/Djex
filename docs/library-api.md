@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -228,7 +228,20 @@ axiom's generated evidence is the hypothesis expression itself. One- through
 three-binder schemes retain their historical lexical Cartesian order. The new
 four-binder prefix fairly interleaves source-order windows, repeated arguments,
 sparse monotone selections, and the Cartesian tail without raising any search
-cap. Positive contexts do not become LJT premises: as at the prenex query
+cap.
+
+Prepared environments additionally retain each context-free loaded scheme
+before leading binders are implicitized. An appended positive-only family can
+instantiate those schemes at the historical variable and quantified
+candidates plus closed, forall-free subtrees of the elaborated query and
+synonym-expanded loaded value signatures. A candidate may be higher-kinded;
+the complete substituted body must kind-check at `Type` in the exact prepared
+environment before its axiom is compiled. Free signature variables are closed
+implicitly, and each restored global occurrence can use an independent
+instance. A non-target retained scheme makes bounded exhaustion inconclusive,
+preventing the former false `ProvedUninhabitable` result.
+
+Positive contexts do not become LJT premises: as at the prenex query
 boundary, Djinn can
 only construct a dictionary-independent body. Constrained hypothesis-side
 schemes remain opaque. If the primary projection is incomplete, an empty search
@@ -261,8 +274,10 @@ field traversal.
 
 The complete historical structural no-axiom prefix runs before this focused
 nominal family. Each nominal formula is paired with a plain proof plan and,
-when present, an axiom-enabled proof plan. Every plan consumes the same
-query-wide candidate cutoff and choice-point budget. The nominal family is
+when present, an axiom-enabled proof plan. Historical structural instantiation
+then completes before the appended loaded-scheme structural and, when needed,
+nominal families. Every plan consumes the same query-wide candidate cutoff and
+choice-point budget. The nominal and loaded-scheme families are
 positive-only: returned terms are checked against the exact nominal formula,
 but an empty result never contributes logical negative evidence. Thus ordinary
 applications remain structural in the primary projection, while reachable
@@ -294,7 +309,9 @@ would otherwise end first-result search before that family is reached.
 
 See the
 [nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md)
-for the proof-policy and regression boundary.
+and the
+[loaded polymorphic values report](reports/2026-08-01-loaded-polymorphic-djinn-values.md)
+for the proof-policy and regression boundaries.
 
 Both stable adapters use the same `Language.Haskell.Synthesis.TypeAtom`
 representation. A sealed atom retains normalized source syntax, a cached
@@ -302,8 +319,9 @@ alpha-normal key, and capture-avoiding free-variable substitution. Bound
 variables are keyed by lexical scope and binder position; free identities are
 not renamed away. The representation itself remains an inert transport/equality
 feature. Each backend must opt into explicit typing rules: positive
-introduction (with validated contexts ignored for proof power) and bounded
-context-free hypothesis instantiation in Djinn; or fresh per-use provider
+introduction (with validated contexts ignored for proof power), bounded
+context-free hypothesis instantiation, and bounded loaded-value instantiation
+in Djinn; or fresh per-use provider
 instantiation, contextual quantified-goal introduction, and shallow subsumption
 between context-free quantified schemes with no free flexible variables in
 Exference. Neither backend implements general rank-N subsumption.

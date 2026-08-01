@@ -155,6 +155,14 @@ deliberately bounded rank-N rule families:
   independent of enclosing binders and contain quantification, including
   wrappers around quantified atoms. The last family gives a guarded form of
   impredicative instantiation.
+- Djinn retains context-free schemes for loaded values, including implicitly
+  quantified free signature variables, in a separate appended family. That
+  family adds closed, forall-free subtrees of the checked query and loaded
+  value signatures to its candidates. Closed higher-kinded constructors are
+  allowed when the complete substituted body kind-checks. Each occurrence can
+  use an independent instance; bounded misses are inconclusive. In the shared
+  `djex` REPL, ordinary workspace values enter this family only after
+  `:set djinn-axioms on`; value axioms remain off by default.
 - Exference can introduce a nested `forall`, with or without class contexts,
   when it reaches an active goal such as a callback argument or arrow result.
   It opens the complete leading chain with branch-local fresh rigids. Each
@@ -286,8 +294,9 @@ Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
 polymorphic-let generalization, or general visible type application. Explicitly
 visible open arguments such as `@a` and visible impredicative type arguments
-remain unsupported; the nominal rule above performs only bounded implicit
-instantiation from the sequent's candidate vocabulary. Djinn search does not
+remain unsupported; the Djinn rules above perform only bounded implicit
+instantiation from the finite query and loaded-value vocabulary. Djinn search
+does not
 gain the Exference ground-instantiation rule, and its historical expression
 projection rejects visible type application explicitly.
 Exference does not perform non-exact subsumption between contextual schemes,
@@ -314,10 +323,11 @@ supports a proof of uninhabitability. The structural base family still omits
 central subsets from eight sites onward,
 such as exactly four open and four opaque sites among eight, though
 instantiable hypotheses often cover such middle subsets through bounded axiom
-plans. Reusable loaded premises expose the same sound views
-simultaneously. An incomplete primary premise also conservatively disables
-negative evidence for the whole query, even when that premise would turn out
-to be irrelevant.
+plans. Historical structural instantiation completes before the new
+loaded-scheme structural and optional nominal tails. Those tails retain exact
+global schemes only for their bounded axioms and share the remaining cutoff and
+fuel. A retained non-target scheme conservatively disables negative evidence,
+even when that premise would turn out to be irrelevant.
 
 Every proof that consumes instantiation evidence uses conservative no-eta
 conversion. This retains a lambda when erasure would otherwise expose an eta
@@ -329,6 +339,8 @@ uses the same boundary, so a required `\x -> field x` is not collapsed to
 instances may require `RankNTypes` and `ImpredicativeTypes`.
 The projection and evidence boundary is detailed in the
 [nominal parametric-data transport report](reports/2026-08-01-nominal-parametric-data-transport.md).
+Loaded-scheme retention and closed monotype discovery are detailed in the
+[loaded polymorphic values report](reports/2026-08-01-loaded-polymorphic-djinn-values.md).
 A generated visible application requires `TypeApplications`; its surrounding
 rank-N provider signature commonly also requires `RankNTypes`, and an ambiguous
 contextual signature may require `AllowAmbiguousTypes`.

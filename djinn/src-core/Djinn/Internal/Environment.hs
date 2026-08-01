@@ -16,6 +16,7 @@ module Djinn.Internal.Environment (
     preparedEnvironmentFunctionPremises,
     preparedEnvironmentPolarizedFunctionPremises,
     preparedEnvironmentNominalPolarizedFunctionPremises,
+    preparedEnvironmentLoadedFunctionInstantiation,
     preparedEnvironmentQueryUsesParametricData,
     lookupPreparedSynthesisClass, synthesisMethodSymbol,
     elaboratePreparedSynthesisTypes,
@@ -54,6 +55,7 @@ import Djinn.Internal.HCheck.Implementation
     , prepareKindEnvironment
     )
 import Djinn.Internal.HTypes
+import Djinn.Internal.Instantiation (closedMonotypeSubtrees)
 import Djinn.Internal.LJTFormula (Formula, Symbol(..))
 import Djinn.Internal.TypeFormula
 import Djinn.Internal.Type
@@ -86,9 +88,25 @@ data PreparedEnvironment = PreparedEnvironment
     [(Symbol, Formula)]
     PreparedPolarizedPremises
     PreparedPolarizedPremises
+    PreparedLoadedInstantiation
     PreparedFormulaCompiler
     PreparedFormulaCompiler
     PreparedNominalReachability
+
+-- Exact quantified premises are retained only for the additive bounded
+-- instantiation tail. Their structural and nominal formulas must stay paired
+-- with the matching compiler, while the closed source subtrees are shared and
+-- receive their compatibility check after substitution in the query's exact
+-- prepared kind scope.
+data PreparedLoadedInstantiation = PreparedLoadedInstantiation
+    [(Symbol, Formula)]
+    [(Symbol, Formula)]
+    [SharedType.Type HSymbol]
+
+loadedInstantiationSize :: PreparedLoadedInstantiation -> Int
+loadedInstantiationSize
+        (PreparedLoadedInstantiation structural nominal candidates) =
+    length structural + length nominal + length candidates
 
 -- A small query-directed dependency index for deciding whether the nominal
 -- datatype projection is relevant. Value and aggregate-projection results are
@@ -803,21 +821,20 @@ sealPreparedEnvironment expansion = do
     -- excludes such failures for supported declarations, and eager preparation
     -- ensures every published environment owns a complete premise cache.
     translatedPremises <- first InvalidSynthesisFormulaDefinitions $
-        mapM (translateFunction compiler) $ zip [1 ..]
-            [ signature
-            | SharedDeclaration.ValueDeclaration signature <-
-                expandedDeclarations
-            ]
+        mapM (translateFunction compiler) $ zip [1 ..] valueSignatures
     nominalTranslatedPremises <- first InvalidSynthesisFormulaDefinitions $
-        mapM (translateFunction nominalCompiler) $ zip [1 ..]
-            [ signature
-            | SharedDeclaration.ValueDeclaration signature <-
-                expandedDeclarations
-            ]
+        mapM (translateFunction nominalCompiler) $ zip [1 ..] valueSignatures
     let premises = map opaquePremise translatedPremises
         polarizedPremises = preparePolarizedPremises translatedPremises
         nominalPolarizedPremises =
             preparePolarizedPremises nominalTranslatedPremises
+        loadedInstantiation = PreparedLoadedInstantiation
+            (loadedSchemePremises translatedPremises)
+            (loadedSchemePremises nominalTranslatedPremises)
+            (SharedCollection.distinctOn SharedTypeAtom.alphaTypeKey $
+                concatMap
+                    (closedMonotypeSubtrees . SharedDeclaration.valueType)
+                    valueSignatures)
     let classIndex = SharedClass.prepareClassIndex inventory
     -- Djinn uses Haskell-98 kind defaulting, so every parameter must have a
     -- ground kind. Check that backend-specific requirement at sealing while
@@ -827,16 +844,21 @@ sealPreparedEnvironment expansion = do
     -- Force each retained projection so it cannot keep the transient
     -- expanded declaration product alive through an unevaluated selector.
     prepared `seq` compiler `seq` nominalCompiler `seq` classIndex `seq`
+        loadedInstantiationSize loadedInstantiation `seq`
         nominalReachability `seq`
         return (PreparedEnvironment
             prepared classIndex premises polarizedPremises
-                nominalPolarizedPremises compiler nominalCompiler
-                nominalReachability)
+                nominalPolarizedPremises loadedInstantiation compiler
+                nominalCompiler nominalReachability)
   where
     prepared =
         SharedTypeSynonym.inventoryExpansionPreparedInventory expansion
     expandedDeclarations =
         SharedTypeSynonym.inventoryExpansionDeclarations expansion
+    valueSignatures =
+        [ signature
+        | SharedDeclaration.ValueDeclaration signature <- expandedDeclarations
+        ]
     recursiveDataNames =
         SharedTypeSynonym.inventoryExpansionRecursiveDataTypeNames expansion
     inventory = SharedTypeSynonym.preparedInventory prepared
@@ -867,7 +889,11 @@ sealPreparedEnvironment expansion = do
         name <- synthesisValueSymbol FunctionOwner "function" $
             SharedDeclaration.valueName signature
         let sourceType = SharedDeclaration.valueType signature
+            quantifiedSource =
+                SharedType.quantifyFreeVariables (const True) sourceType
             (_, constraints, _) = SharedType.splitLeadingForalls sourceType
+            (schemeBinders, _, _) =
+                SharedType.splitLeadingForalls quantifiedSource
         if null constraints then pure () else Left $
             "function " ++ prHSymbolOp name ++
                 ": constrained premises are unsupported"
@@ -882,10 +908,22 @@ sealPreparedEnvironment expansion = do
         let spellings =
                 SharedType.freeVariablesInFirstOccurrenceOrder body ++
                 polarizedFormulaPlanSkolems plans
-        return (Symbol name, plans, spellings)
+        schemePremise <- case schemeBinders of
+            [] -> Right Nothing
+            _ : _ -> do
+                formula <- first
+                    (("function " ++ prHSymbolOp name ++ ": ") ++)
+                    $ compileSynthesisFormula compiler quantifiedSource
+                Right $ Just (Symbol name, formula)
+        return (Symbol name, plans, spellings, schemePremise)
 
-    opaquePremise (symbol, plans, _) =
+    opaquePremise (symbol, plans, _, _) =
         (symbol, exactOpaqueFormulaPlan plans)
+
+    loadedSchemePremises translated =
+        [ premise
+        | (_, _, _, Just premise) <- translated
+        ]
 
     preparePolarizedPremises translated = PreparedPolarizedPremises
         ( concatMap primaryPremise premiseVariantGroups ++
@@ -897,7 +935,7 @@ sealPreparedEnvironment expansion = do
       where
         premiseVariantGroups = map polarizedPremiseVariants translated
 
-    polarizedPremiseVariants (symbol, plans, _) =
+    polarizedPremiseVariants (symbol, plans, _, _) =
         [ (symbol, formula)
         | formula <- SharedCollection.distinctOn id $
             map translatedFormula
@@ -915,9 +953,13 @@ sealPreparedEnvironment expansion = do
     alternatePremises variants = case variants of
         _ : alternatives -> alternatives
         [] -> []
-    premiseTranslationIncomplete (_, plans, _) =
+    -- Loaded-scheme boundedness is target-sensitive: a target-named premise is
+    -- excluded from proof search and therefore cannot make that safe sequent
+    -- incomplete. Preserve only translation-local loss here; the query worker
+    -- accounts for retained non-target schemes after applying that exclusion.
+    premiseTranslationIncomplete (_, plans, _, _) =
         translationIncomplete $ primaryFormulaPlan plans
-    premiseCandidateSpellings (_, _, spellings) = spellings
+    premiseCandidateSpellings (_, _, spellings, _) = spellings
 
     freshBinder reserved variable = Just
         $ fst $ freshPrimedVariable reserved variable
@@ -953,7 +995,7 @@ preparedEnvironmentWitness
     :: PreparedEnvironment
     -> PreparedSynthesisInventory
 preparedEnvironmentWitness
-        (PreparedEnvironment prepared _ _ _ _ _ _ _) =
+        (PreparedEnvironment prepared _ _ _ _ _ _ _ _) =
     prepared
 
 preparedEnvironmentInventory :: PreparedEnvironment -> SynthesisInventory
@@ -972,7 +1014,7 @@ preparedEnvironmentQueryUsesParametricData
     -> SharedType.Type HSymbol
     -> Bool
 preparedEnvironmentQueryUsesParametricData
-        (PreparedEnvironment _ _ _ _ _ _ _
+        (PreparedEnvironment _ _ _ _ _ _ _ _
             (PreparedNominalReachability
                 parametricDataNames datatypeProjections valueFlows))
         source =
@@ -1096,7 +1138,7 @@ preparedEnvironmentFunctionPremises
     :: PreparedEnvironment
     -> [(Symbol, Formula)]
 preparedEnvironmentFunctionPremises
-        (PreparedEnvironment _ _ premises _ _ _ _ _) = premises
+        (PreparedEnvironment _ _ premises _ _ _ _ _ _) = premises
 
 -- | Every sound rank-N view of each premise, with all historical primary views
 -- first in declaration order, paired with whether any primary translation had
@@ -1108,7 +1150,7 @@ preparedEnvironmentPolarizedFunctionPremises
 preparedEnvironmentPolarizedFunctionPremises
         (PreparedEnvironment _ _ _
             (PreparedPolarizedPremises premises incomplete spellings)
-            _ _ _ _) =
+            _ _ _ _ _) =
         (premises, incomplete, spellings)
 
 -- | The complementary premise cache in which datatype applications retain
@@ -1120,8 +1162,24 @@ preparedEnvironmentNominalPolarizedFunctionPremises
 preparedEnvironmentNominalPolarizedFunctionPremises
         (PreparedEnvironment _ _ _ _
             (PreparedPolarizedPremises premises incomplete spellings)
-            _ _ _) =
+            _ _ _ _) =
         (premises, incomplete, spellings)
+
+-- | Exact loaded schemes for the structural and nominal instantiation tails,
+-- plus source-order closed monotype subtrees from every loaded signature.
+-- Callers must kind-check each instantiated body before compiling its axiom.
+preparedEnvironmentLoadedFunctionInstantiation
+    :: PreparedEnvironment
+    -> ( [(Symbol, Formula)]
+       , [(Symbol, Formula)]
+       , [SharedType.Type HSymbol]
+       )
+preparedEnvironmentLoadedFunctionInstantiation
+        (PreparedEnvironment _ _ _ _ _
+            (PreparedLoadedInstantiation
+                structuralSchemes nominalSchemes candidates)
+            _ _ _) =
+    (structuralSchemes, nominalSchemes, candidates)
 
 -- | Translate a checked shared type directly. Stable raw and native queries
 -- meet here after raw compatibility validation and use the exact same
@@ -1133,7 +1191,7 @@ preparedEnvironmentSynthesisFormulaTranslator
     -> SharedType.Type HSymbol
     -> Either String Formula
 preparedEnvironmentSynthesisFormulaTranslator
-        (PreparedEnvironment _ _ _ _ _ compiler _ _) =
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _) =
     compileSynthesisFormula compiler
 
 -- | Translate with datatypes retained as complete nominal applications. This
@@ -1144,7 +1202,7 @@ preparedEnvironmentNominalSynthesisFormulaTranslator
     -> SharedType.Type HSymbol
     -> Either String Formula
 preparedEnvironmentNominalSynthesisFormulaTranslator
-        (PreparedEnvironment _ _ _ _ _ _ compiler _) =
+        (PreparedEnvironment _ _ _ _ _ _ _ compiler _) =
     compileSynthesisFormula compiler
 
 -- | Translate a checked positive goal into one nonempty, categorized plan
@@ -1156,7 +1214,7 @@ preparedEnvironmentPolarizedSynthesisFormulaPlans
     -> SharedType.Type HSymbol
     -> Either String PolarizedFormulaPlans
 preparedEnvironmentPolarizedSynthesisFormulaPlans
-        (PreparedEnvironment _ _ _ _ _ compiler _ _) =
+        (PreparedEnvironment _ _ _ _ _ _ compiler _ _) =
     compilePolarizedSynthesisFormulaPlans 0 PositiveFormula compiler
 
 -- | Compile the complementary positive goal family without unfolding
@@ -1168,7 +1226,7 @@ preparedEnvironmentNominalPolarizedSynthesisFormulaPlans
     -> SharedType.Type HSymbol
     -> Either String PolarizedFormulaPlans
 preparedEnvironmentNominalPolarizedSynthesisFormulaPlans
-        (PreparedEnvironment _ _ _ _ _ _ compiler _) =
+        (PreparedEnvironment _ _ _ _ _ _ _ compiler _) =
     compilePolarizedSynthesisFormulaPlans 0 PositiveFormula compiler
 
 projectPreparedInventory
@@ -1195,7 +1253,7 @@ lookupPreparedSynthesisClass
         , [(SharedName.Name, SharedType.Type HSymbol)]
         )
 lookupPreparedSynthesisClass name
-        (PreparedEnvironment _ classes _ _ _ _ _ _) = do
+        (PreparedEnvironment _ classes _ _ _ _ _ _ _) = do
     preparedClass <- SharedClass.lookupPreparedClass name classes
     case projectPreparedSynthesisClass preparedClass of
         Right projected -> Just projected

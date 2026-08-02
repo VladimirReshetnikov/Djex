@@ -13,12 +13,12 @@ import Control.Monad.Trans.Reader (ReaderT, ask, runReaderT)
 import Data.Bifunctor (first)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Void (Void, absurd)
 import Language.Haskell.Exts.SrcLoc (SrcSpanInfo, noSrcSpan)
 import Language.Haskell.Exts.Syntax
 
 import qualified Language.Haskell.Exference.Core.Expression as E
 import qualified Language.Haskell.Exference.Core.Types as T
+import qualified Language.Haskell.Synthesis.Constraint as SharedConstraint
 import qualified Language.Haskell.Synthesis.Generated as Generated
 import qualified Language.Haskell.Synthesis.Name as SharedName
 import qualified Language.Haskell.Synthesis.Qualification as SharedQualification
@@ -317,11 +317,15 @@ visibleTypeArgument
   :: Generated.Qualification
   -> Generated.VisibleTypeArgument
   -> Type SrcSpanInfo
-visibleTypeArgument qualification argument = case
-    Generated.visibleTypeArgumentType argument of
-  Nothing -> TyWildCard noLoc Nothing
-  Just typeExpression -> atomicVisibleTypeArgument
-    $ closedMonotype qualification typeExpression
+visibleTypeArgument qualification argument
+  | Generated.isInferredVisibleTypeArgument argument =
+      TyWildCard noLoc Nothing
+  | otherwise = case Generated.visibleTypeArgumentClosedType argument of
+      -- 'VisibleTypeArgument' is abstract, so only the inferred constructor
+      -- can lack a closed type. Retain a total fallback if that API grows.
+      Nothing -> TyWildCard noLoc Nothing
+      Just typeExpression -> atomicVisibleTypeArgument
+        $ closedType qualification typeExpression
 
 -- Visible type application accepts one atomic type after the @. Structural
 -- constructors, tuples, and list sugar are already atomic; applications and
@@ -333,36 +337,69 @@ atomicVisibleTypeArgument typeExpression = case typeExpression of
   TyList{} -> typeExpression
   _ -> TyParen noLoc typeExpression
 
--- The shared smart constructor has already excluded variables and forall
--- layers. Keeping this conversion structural avoids a render/parse round trip
--- and applies the expression's exact qualification policy to nominal types.
-closedMonotype
+-- The shared smart constructor guarantees lexical closure and assigns stable
+-- alpha-safe identities to every forall binder. Keeping this conversion
+-- structural avoids a render/parse round trip, retains nested contexts and
+-- shadowing, and applies the expression's exact qualification policy to both
+-- type constructors and class names.
+closedType
   :: Generated.Qualification
-  -> SharedType.Type Void
+  -> SharedType.Type Generated.ClosedVisibleTypeVariable
   -> Type SrcSpanInfo
-closedMonotype qualification typeExpression = case typeExpression of
-  SharedType.TypeVariable variable -> absurd variable
+closedType qualification typeExpression = case typeExpression of
+  SharedType.TypeVariable variable -> TyVar noLoc $ Ident noLoc
+    $ Generated.closedVisibleTypeVariableSpelling variable
   SharedType.TypeConstructor name -> TyCon noLoc $ toQName qualification name
   SharedType.TypeApplication (SharedType.TypeConstructor name) argument
     | SharedName.nameSpecial name == Just SharedName.ListConstructor ->
-        TyList noLoc $ closedMonotype qualification argument
+        TyList noLoc $ closedType qualification argument
   SharedType.TypeApplication function argument -> TyApp noLoc
-    (closedMonotype qualification function)
-    (closedMonotype qualification argument)
+    (closedType qualification function)
+    (closedType qualification argument)
   SharedType.FunctionType parameter result -> TyFun noLoc
-    (closedMonotype qualification parameter)
-    (closedMonotype qualification result)
+    (closedType qualification parameter)
+    (closedType qualification result)
   SharedType.TupleType boxity elements -> TyTuple noLoc
     (case boxity of
       SharedName.Boxed -> Boxed
       SharedName.Unboxed -> Unboxed)
-    (map (closedMonotype qualification) elements)
-  -- This branch is unreachable for an abstract 'VisibleTypeArgument'. The
-  -- empty-binder fallback keeps the helper total over its visible structure;
-  -- a nonempty binder has the uninhabited variable identity.
-  SharedType.ForallType variables _ body -> case variables of
-    variable : _ -> absurd variable
-    [] -> closedMonotype qualification body
+    (map (closedType qualification) elements)
+  SharedType.ForallType variables constraints body -> TyForall noLoc
+    (case variables of
+      [] -> Nothing
+      _ -> Just $ map closedTypeBinder variables)
+    (closedTypeContext qualification constraints)
+    (closedType qualification body)
+
+closedTypeBinder
+  :: Generated.ClosedVisibleTypeVariable
+  -> TyVarBind SrcSpanInfo
+closedTypeBinder variable = UnkindedVar noLoc $ Ident noLoc
+  $ Generated.closedVisibleTypeVariableSpelling variable
+
+closedTypeContext
+  :: Generated.Qualification
+  -> [SharedConstraint.Constraint
+        (SharedType.Type Generated.ClosedVisibleTypeVariable)]
+  -> Maybe (Context SrcSpanInfo)
+closedTypeContext _ [] = Nothing
+closedTypeContext qualification [constraint] = Just $ CxSingle noLoc
+  $ closedTypeConstraint qualification constraint
+closedTypeContext qualification constraints = Just $ CxTuple noLoc
+  $ map (closedTypeConstraint qualification) constraints
+
+closedTypeConstraint
+  :: Generated.Qualification
+  -> SharedConstraint.Constraint
+       (SharedType.Type Generated.ClosedVisibleTypeVariable)
+  -> Asst SrcSpanInfo
+closedTypeConstraint qualification constraint = TypeA noLoc
+  $ foldl (TyApp noLoc) classType argumentTypes
+ where
+  classType = TyCon noLoc $ toQName qualification
+    $ SharedConstraint.constraintClass constraint
+  argumentTypes = map (closedType qualification)
+    $ SharedConstraint.constraintArguments constraint
 
 toQName :: Generated.Qualification -> SharedName.Name -> QName SrcSpanInfo
 toQName qualification name = case SharedName.nameOccurrence name of

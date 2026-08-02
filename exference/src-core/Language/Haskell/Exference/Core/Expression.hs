@@ -82,8 +82,9 @@ pattern ExpApply function argument <-
     Expression $ Generated.Apply function argument
 
 -- | One bounded visible type application. The shared argument is either @\@_@
--- or a checked variable-free monotype, so it carries no Exference-local type
--- identity into the stable generated tree.
+-- or a checked lexically closed type. Quantified arguments use alpha-normal
+-- scope/slot identities, so they carry no Exference-local type identity into
+-- the stable generated tree.
 pattern ExpTypeApply
   :: Expression
   -> Generated.VisibleTypeArgument

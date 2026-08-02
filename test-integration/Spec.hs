@@ -1270,6 +1270,85 @@ tests = testGroup "Djex facade"
             ++ output ++ "\nstderr:\n" ++ errors
             ++ "\ngenerated:\n" ++ rendered)
           ExitSuccess exitCode
+  , testCase "specialize an Exference provider at a closed quantified type" $ do
+      tokenName <- expectRight $ mkIdentifier "Token"
+      globalName <- expectRight $ mkIdentifier "globalPoly"
+      targetName <- expectRight $ mkIdentifier "usePoly"
+      target <- expectRight $ mkDefinitionName targetName
+      let providerVariable = FlexibleVariable 0
+          identityVariable = FlexibleVariable 1
+          identityType = TypeVariable identityVariable
+          quantifiedIdentity = ForallType [identityVariable] [] $
+            FunctionType identityType identityType
+          tokenType = TypeConstructor tokenName
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () globalName
+                $ ForallType [providerVariable] [] tokenType
+            ]
+      quantifiedArgument <- expectRight
+        $ specifiedVisibleTypeArgument quantifiedIdentity
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      session <- expectRight $ mkExferenceSession environment
+      request <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType quantifiedIdentity tokenType
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceAllowUnused = True
+            , exferenceMaximumSteps = 512
+            }
+        }
+      results <- expectRight $ runExferenceQuery session request
+      let candidates = concatMap
+            (batchCandidates . resultSearch) results
+          isQuantifiedGlobal candidate = case candidateOutput candidate of
+            FunctionClause _ [_]
+                (VisibleTypeApplication (Global occurrence) argument) ->
+              occurrence == globalName && argument == quantifiedArgument
+            _ -> False
+      candidate <- maybe
+        (fail $ "query-supplied forall did not produce globalPoly @(forall): "
+          ++ show (map candidateOutput candidates))
+        pure
+        $ find isQuantifiedGlobal candidates
+      candidateResidualConstraints candidate @?= []
+      rendered <- expectRight
+        $ renderExferenceCandidateDefinition Unqualified candidate
+      assertBool "quantified visible evidence was rendered as inferred"
+        $ "globalPoly @(forall a0_0. a0_0 -> a0_0)" `isInfixOf` rendered
+
+      let fixture = unlines
+            [ "module QuerySelectedQuantifiedProviderFixture where"
+            , ""
+            , "data Token = Token"
+            , ""
+            , "globalPoly :: forall a. Token"
+            , "globalPoly = Token"
+            , ""
+            , "usePoly :: (forall x. x -> x) -> Token"
+            , rendered
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected quantified Exference specialization\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\ngenerated:\n" ++ rendered)
+          ExitSuccess exitCode
   , testCase "do not guess visible arguments for non-vacuous providers" $ do
       seedName <- expectRight $ mkIdentifier "Seed"
       tokenName <- expectRight $ mkIdentifier "Token"

@@ -30,6 +30,7 @@ import Language.Haskell.Exference.Core.Internal.Options
   )
 import Language.Haskell.Exference.Core.Internal.Polytype
   ( GroundProviderInstantiation (..)
+  , candidateProviderInstantiations
   , groundProviderInstantiations
   , instantiateLeadingForallsWith
   , quantifiedProviderSubsumes
@@ -413,6 +414,34 @@ tests = testGroup "Exference private engine boundaries"
                 [ evidence outerClass $ TypeVar 0
                 , evidence innerClass boolean
                 ]
+            }
+        ]
+  , testCase "query candidates admit only closed context-free foralls" $ do
+      let token = TypeCons $ name "Token"
+          evidence ty = HsConstraint (name "C") [ty]
+          identity binder = TypeForall [binder] []
+            $ TypeArrow (TypeVar binder) (TypeVar binder)
+          selected = identity 1
+          renamed = identity 7
+          open = TypeForall [2] []
+            $ TypeArrow (TypeVar 2) (TypeVar 3)
+          rigidlyOpen = TypeForall [4] []
+            $ TypeArrow (TypeVar 4) (TypeConstant 9)
+          contextual = TypeForall [5] [evidence $ TypeVar 5]
+            $ TypeArrow (TypeVar 5) (TypeVar 5)
+          nestedContextual = TypeForall [6] []
+            $ TypeArrow
+                (TypeForall [8] [evidence $ TypeVar 8]
+                  $ TypeVar 8)
+                (TypeVar 6)
+          provider = TypeForall [0] [] token
+      candidateProviderInstantiations
+          [selected, renamed, open, rigidlyOpen, contextual, nestedContextual]
+          provider @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = [selected]
+            , groundProviderType = token
+            , groundProviderConstraints = []
             }
         ]
   , testCase "generic deconstructors need no persistent flexible IDs" $ do

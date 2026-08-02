@@ -80,12 +80,14 @@ import Language.Haskell.Exference.Core.Internal.Options
   , heuristicFields
   )
 import qualified Language.Haskell.Synthesis.Count as SharedCount
+import qualified Language.Haskell.Synthesis.Collection as SharedCollection
 import qualified Language.Haskell.Synthesis.Search as SharedSearch
 import qualified Language.Haskell.Synthesis.Generated as SharedGenerated
 import qualified Language.Haskell.Synthesis.Name as SynthesisName
 import qualified Language.Haskell.Synthesis.Candidate as SharedCandidate
 import qualified Language.Haskell.Synthesis.Query as SharedQuery
 import qualified Language.Haskell.Synthesis.Type as SharedType
+import qualified Language.Haskell.Synthesis.TypeAtom as SharedTypeAtom
 
 import qualified Data.PQueue.Prio.Max as Q
 import qualified Data.Map.Strict as M
@@ -439,15 +441,32 @@ findEngineBatchesWith allocators
   -- core, so the traversal retains the complete application but deliberately
   -- does not descend into its function or argument.  Arrow and tuple children
   -- are independently known to have kind Type.
-  properTypeCandidates = L.nub $ filter groundMonotype
-    $ properSubtrees t
-  properSubtrees source = case source of
+  properTypeCandidates = SharedCollection.distinctOn
+    SharedTypeAtom.alphaTypeKey $ filter visibleTypeCandidate
+      $ properSubtrees False t
+  -- A query's leading forall chain is its synthesis boundary, not a type
+  -- argument suggested by the query. Quantification reached through an arrow
+  -- or tuple child, however, is itself in a proper-type position. Retain that
+  -- complete scheme after visiting its body so the established monotype
+  -- candidate order remains unchanged.
+  properSubtrees retainQuantified source = case source of
     TypeArrow parameter result ->
-      properSubtrees parameter ++ properSubtrees result ++ [source]
-    TypeTuple _ elements -> concatMap properSubtrees elements ++ [source]
-    TypeForall _ _ body -> properSubtrees body
+      properSubtrees True parameter ++ properSubtrees True result ++ [source]
+    TypeTuple _ elements ->
+      concatMap (properSubtrees True) elements ++ [source]
+    TypeForallNative _ _ body ->
+      properSubtrees False body ++ [source | retainQuantified]
     TypeApp{} -> [source]
     _ -> [source]
+  visibleTypeCandidate source =
+    groundMonotype source || closedContextFreeForall source
+  -- The whole quantified value has a proven proper kind at this traversal
+  -- point. Its binders may occur in the body, so closure must use lexical free
+  -- variables rather than the representation's ordinary Foldable traversal.
+  closedContextFreeForall source@TypeForallNative{} =
+    S.null (SharedType.freeVariables source)
+      && null (SharedType.typeConstraints source)
+  closedContextFreeForall _ = False
   groundMonotype source =
     null (toList source) && not (SharedType.containsForall source)
 

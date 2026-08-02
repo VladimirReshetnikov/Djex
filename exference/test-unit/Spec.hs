@@ -4323,6 +4323,20 @@ tests = testGroup "Exference"
                 ordinaryResidual @?= []
             _ -> fail
               "ground visible instantiation suppressed the ordinary sibling"
+      , testCase "checker replays a closed quantified visible argument" $ do
+          let listOf element = TypeApp
+                (TypeCons SharedName.listName) element
+              quantified = TypeForall [0] []
+                $ TypeArrow (TypeVar 0) (TypeVar 0)
+              provider = TypeForall [0] [] $ listOf $ TypeVar 0
+              result = listOf quantified
+              goal = TypeArrow provider result
+          argument <- expectRight
+            $ Generated.specifiedVisibleTypeArgument quantified
+          let expression = ExpLambda 10 provider
+                $ ExpTypeApply (ExpVar 10 provider) argument
+          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+            goal [] expression @?= Right ()
       , testCase "visible applications preserve every leading context layer" $ do
           let outerClass = name "Outer"
               firstClass = name "First"
@@ -8602,6 +8616,42 @@ tests = testGroup "Exference"
                   "function @(Data.Maybe.Maybe Int)"
             expression -> fail $ "unexpected specified type application: "
               ++ show expression
+      , testCase "shared conversion retains quantified visible type scope" $ do
+          functionGlobal <- expectRight $ SharedName.mkIdentifier "function"
+          namespace <- expectRight $ SharedName.mkModuleName "Fixture"
+          className <- expectRight
+            $ SharedName.mkQualifiedIdentifier namespace "C"
+          let outer = "outer"
+              inner = "inner"
+              source = SharedType.ForallType [outer]
+                [SharedConstraint.Constraint className
+                  [SharedType.TypeVariable outer]]
+                $ SharedType.FunctionType
+                    (SharedType.ForallType [inner] []
+                      $ SharedType.FunctionType
+                          (SharedType.TypeVariable inner)
+                          (SharedType.TypeVariable inner))
+                    (SharedType.TypeVariable outer)
+          argument <- expectRight
+            $ Generated.specifiedVisibleTypeArgument source
+          let expression :: Generated.Expression Int
+              expression = Generated.VisibleTypeApplication
+                (Generated.Global functionGlobal) argument
+              options = Generated.defaultRenderOptions show
+          converted <- expectRight
+            $ generatedExpressionToHaskellSrc options expression
+          unwords (words $ HSE.prettyPrint converted) @?=
+            "function @(forall a0_0 . Fixture.C a0_0 => \
+            \(forall a1_0 . a1_0 -> a1_0) -> a0_0)"
+          case converted of
+            HSE.App _ _
+                (HSE.TypeApp _
+                  (HSE.TyParen _
+                    (HSE.TyForall _
+                      (Just [HSE.UnkindedVar _ (HSE.Ident _ "a0_0")])
+                      (Just HSE.CxSingle{}) HSE.TyFun{}))) -> pure ()
+            unexpected -> fail $ "unexpected quantified type application: "
+              ++ show unexpected
       , testCase "shared conversion parenthesizes only non-atomic type arguments" $ do
           functionGlobal <- expectRight $ SharedName.mkIdentifier "function"
           integerName <- expectRight $ SharedName.mkIdentifier "Int"

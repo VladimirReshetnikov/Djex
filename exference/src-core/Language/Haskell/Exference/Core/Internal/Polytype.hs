@@ -53,13 +53,15 @@ data ProviderUseMode
   | InstantiateProviderUse
   deriving (Eq, Show)
 
--- | One evidence-directed visible instantiation of a scoped provider.
+-- | One bounded visible instantiation of a provider.
 --
--- Every argument is a closed monotype already present in a validated instance
--- head.  Search therefore neither invents a type nor needs a source spelling
--- for a free type variable.  The instantiated body and its direct obligations
--- are cached beside the ordered arguments so expression construction and
--- constraint solving consume exactly the same witness.
+-- An evidence-directed argument is a closed monotype already present in a
+-- validated instance head. The query-derived route may additionally retain a
+-- complete closed, context-free quantified proper type. Search therefore
+-- neither invents a type nor needs a source spelling for a free type variable.
+-- The instantiated body and its direct obligations are cached beside the
+-- ordered arguments so expression construction and constraint solving consume
+-- exactly the same witness.
 data GroundProviderInstantiation = GroundProviderInstantiation
   { groundProviderArguments :: [HsType]
   , groundProviderType :: HsType
@@ -247,7 +249,7 @@ groundProviderInstantiations environment source =
       $ traverse (`IntMap.lookup` substitutions) binder
     guard $ all isGroundMonotype orderedArguments
     (instantiated, instantiatedConstraints) <- maybe [] pure
-      $ instantiateLeadingForallsAtGround orderedArguments source
+      $ instantiateLeadingForallsAt isGroundMonotype orderedArguments source
     pure GroundProviderInstantiation
       { groundProviderArguments = orderedArguments
       , groundProviderType = instantiated
@@ -260,8 +262,8 @@ groundProviderInstantiations environment source =
 -- dictionary binders while retaining an otherwise ambiguous type binder (Lean
 -- class-instance arguments are one example), so no Haskell instance head is
 -- available to select it.  The caller owns the kind proof for every candidate;
--- this worker only enforces the shared closed-monotype boundary and a finite
--- prefix.
+-- this worker admits ground monotypes and complete closed, context-free
+-- quantified types while retaining a finite prefix.
 --
 -- The complete leading binder chain is instantiated in source order.  Four is
 -- the same practical rank-N bound used by the neighboring Djinn rule, and the
@@ -273,7 +275,7 @@ candidateProviderInstantiations
   -> [GroundProviderInstantiation]
 candidateProviderInstantiations rawCandidates source =
   take 32 $ SharedCollection.distinctOn groundProviderArguments $ do
-    guard $ Set.null $ freeVars source
+    guard $ Set.null $ SharedType.freeVariables source
     normalized <- either (const []) (pure . fst)
       $ alphaNormalizeForalls IntSet.empty source
     let (binders, constraints, body) =
@@ -294,25 +296,28 @@ candidateProviderInstantiations rawCandidates source =
           SharedTypeAtom.alphaTypeKey
           [ candidate
           | candidate <- rawCandidates
-          , isGroundMonotype candidate
+          , isVisibleTypeCandidate candidate
           ]
     arguments <- sequence $ replicate (length orderedBinders) candidates
     (instantiated, instantiatedConstraints) <- maybe [] pure
-      $ instantiateLeadingForallsAtGround arguments normalized
+      $ instantiateLeadingForallsAt isVisibleTypeCandidate arguments normalized
     pure GroundProviderInstantiation
       { groundProviderArguments = arguments
       , groundProviderType = instantiated
       , groundProviderConstraints = instantiatedConstraints
       }
 
--- Replace a complete leading prefix with an ordered collection of closed
--- monotypes. Closed replacements cannot be captured, so deleting shadowed
--- binder identities is sufficient for capture avoidance at nested layers.
-instantiateLeadingForallsAtGround
-  :: [HsType]
+-- Replace a complete leading prefix with an ordered collection of admissible
+-- closed types. Closed replacements cannot be captured, so deleting shadowed
+-- binder identities is sufficient for capture avoidance at nested layers. The
+-- caller supplies the route-specific boundary: instance-head evidence remains
+-- monotype-only while query-derived candidates may include bounded polytypes.
+instantiateLeadingForallsAt
+  :: (HsType -> Bool)
+  -> [HsType]
   -> HsType
   -> Maybe (HsType, [HsConstraint])
-instantiateLeadingForallsAtGround arguments source =
+instantiateLeadingForallsAt admissible arguments source =
   go arguments [] source
  where
   go remaining contextChunks (TypeForallNative binders contexts body) = do
@@ -321,10 +326,10 @@ instantiateLeadingForallsAtGround arguments source =
     let (currentArguments, laterArguments) =
           splitAt (length identifiers) remaining
     guard $ length currentArguments == length identifiers
-    guard $ all isGroundMonotype currentArguments
+    guard $ all admissible currentArguments
     let substitutions = Map.fromList
           $ zip (map SharedType.FlexibleVariable identifiers) currentArguments
-        substitute = substituteGroundVariables substitutions
+        substitute = substituteClosedVariables substitutions
     go laterArguments
       (map (fmap substitute) contexts : contextChunks)
       (substitute body)
@@ -332,27 +337,41 @@ instantiateLeadingForallsAtGround arguments source =
     (body, concat $ reverse contextChunks)
   go _ _ _ = Nothing
 
-substituteGroundVariables
+substituteClosedVariables
   :: Map.Map SynthesisVariable HsType
   -> HsType
   -> HsType
-substituteGroundVariables substitutions source = case source of
+substituteClosedVariables substitutions source = case source of
   SharedType.TypeVariable variable ->
     Map.findWithDefault source variable substitutions
   SharedType.TypeConstructor{} -> source
   SharedType.TypeApplication function argument -> SharedType.TypeApplication
-    (substituteGroundVariables substitutions function)
-    (substituteGroundVariables substitutions argument)
+    (substituteClosedVariables substitutions function)
+    (substituteClosedVariables substitutions argument)
   SharedType.FunctionType parameter result -> SharedType.FunctionType
-    (substituteGroundVariables substitutions parameter)
-    (substituteGroundVariables substitutions result)
+    (substituteClosedVariables substitutions parameter)
+    (substituteClosedVariables substitutions result)
   SharedType.TupleType boxity elements -> SharedType.TupleType boxity
-    $ map (substituteGroundVariables substitutions) elements
+    $ map (substituteClosedVariables substitutions) elements
   SharedType.ForallType binders constraints body ->
     let visible = foldr Map.delete substitutions binders
     in SharedType.ForallType binders
-      (map (fmap $ substituteGroundVariables visible) constraints)
-      (substituteGroundVariables visible body)
+      (map (fmap $ substituteClosedVariables visible) constraints)
+      (substituteClosedVariables visible body)
+
+-- Query-derived visible arguments stay deliberately narrower than arbitrary
+-- closed types. A quantified candidate must be the complete forall-rooted type
+-- observed in a proper-type position, and every context in its tree must be
+-- empty. In particular, an application merely containing a forall is not
+-- independently kind-proven by the first-order core.
+isVisibleTypeCandidate :: HsType -> Bool
+isVisibleTypeCandidate source =
+  isGroundMonotype source || closedContextFreeForall source
+ where
+  closedContextFreeForall quantified@TypeForallNative{} =
+    Set.null (SharedType.freeVariables quantified)
+      && null (SharedType.typeConstraints quantified)
+  closedContextFreeForall _ = False
 
 isGroundMonotype :: HsType -> Bool
 isGroundMonotype typeExpression =

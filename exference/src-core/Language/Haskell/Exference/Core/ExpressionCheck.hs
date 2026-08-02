@@ -25,7 +25,6 @@ import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import Data.Void (absurd)
 import Numeric.Natural (Natural)
 
 import Language.Haskell.Exference.Core.Expression
@@ -593,9 +592,18 @@ checkValidatedExpression provenCandidateRigids
           (throwCheck $ VisibleTypeApplicationRigidBinder binder)
           (const $ pure ())
           $ SharedType.flexibleVariableIdentity binder
-        replacement <- case SharedGenerated.visibleTypeArgumentType argument of
-          Nothing -> freshTypeVariable
-          Just ground -> pure $ absurd <$> ground
+        replacement <- case
+            ( SharedGenerated.isInferredVisibleTypeArgument argument
+            , SharedGenerated.visibleTypeArgumentClosedType argument
+            ) of
+          (True, Nothing) -> freshTypeVariable
+          (False, Just closed) ->
+            instantiateClosedVisibleTypeArgument closed
+          -- The shared constructor is abstract, so the discriminator and
+          -- structural view cannot disagree. Fail closed if that contract is
+          -- ever extended rather than silently changing explicit evidence
+          -- into inference.
+          _ -> throwCheck FlexibleIdentifierSupplyExhausted
         let substitute = substituteScopedVariable binder replacement
             instantiatedContexts = map (fmap substitute) contexts
             instantiatedBody = substitute body
@@ -639,6 +647,31 @@ checkValidatedExpression provenCandidateRigids
           (TypeForallNative [] nestedContexts nestedBody) =
         peelBinderlessContexts (contexts ++ nestedContexts) nestedBody
       peelBinderlessContexts contexts body = (contexts, body)
+
+    -- A specified visible argument owns a separate, alpha-normalized binder
+    -- namespace. Reserve one checker-local flexible identity for every binder
+    -- before translating any occurrence. Unlike an inference metavariable,
+    -- these identities are lexically bound by the translated forall tree, so
+    -- they must not enter 'checkAliveFlexibleIds' as live free variables.
+    -- Mapping the complete type preserves nested shadowing and contexts: the
+    -- shared closed identities distinguish every lexical scope and slot.
+    instantiateClosedVisibleTypeArgument source = do
+      let binders = SharedType.typeBinderVariables source
+      replacements <- mapM (const reserveClosedVisibleTypeBinder) binders
+      let renaming = Map.fromList $ zip binders replacements
+      case traverse (`Map.lookup` renaming) source of
+        -- The abstract shared constructor proves lexical closure, hence every
+        -- occurrence is owned by one of the binders collected above.
+        Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
+        Just translated -> pure translated
+
+    reserveClosedVisibleTypeBinder = do
+      supply <- gets checkFlexibleIds
+      case allocateFreshIdentifier supply of
+        Nothing -> throwCheck FlexibleIdentifierSupplyExhausted
+        Just (identifier, nextSupply) -> do
+          modify' $ \current -> current {checkFlexibleIds = nextSupply}
+          pure $ SharedType.FlexibleVariable identifier
 
     -- Replace occurrences owned by this forall layer while respecting a
     -- nested layer that deliberately shadows the same nominal binder.

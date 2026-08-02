@@ -15,11 +15,15 @@ module Language.Haskell.Synthesis.Generated
   , definitionName
   , definitionSpelling
   , Pattern (..)
+  , ClosedVisibleTypeVariable (..)
+  , closedVisibleTypeVariableSpelling
   , VisibleTypeArgument
   , VisibleTypeArgumentError (..)
   , inferredVisibleTypeArgument
   , specifiedVisibleTypeArgument
+  , isInferredVisibleTypeArgument
   , visibleTypeArgumentType
+  , visibleTypeArgumentClosedType
   , Expression (..)
   , ApplicationArgument (..)
   , FunctionClause (..)
@@ -78,11 +82,12 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import Data.Set (Set)
-import Data.Void (Void, absurd)
+import Data.Void (Void)
 import GHC.Generics (Generic)
 import Language.Haskell.Synthesis.Collection (observedListLength)
 import Language.Haskell.Synthesis.Count (saturatingNaturalToInt)
 import qualified Language.Haskell.Synthesis.Fresh as Fresh
+import qualified Language.Haskell.Synthesis.Internal.Alpha as Alpha
 import Language.Haskell.Synthesis.Name
 import Language.Haskell.Synthesis.Qualification
   ( Qualification (..)
@@ -152,16 +157,35 @@ data Pattern local
 
 instance NFData local => NFData (Pattern local)
 
+-- | Alpha-safe identity for a variable bound inside a closed visible type
+-- argument. The scope is allocated in lexical preorder and the slot records
+-- the binder's position within that scope. Consequently binder spelling is
+-- irrelevant while shadowed binders remain distinct.
+data ClosedVisibleTypeVariable = ClosedVisibleTypeVariable
+  { closedVisibleTypeVariableScope :: !Natural
+  , closedVisibleTypeVariableSlot :: !Natural
+  }
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData ClosedVisibleTypeVariable
+
+-- | Stable, valid source spelling for one alpha-normalized bound variable.
+closedVisibleTypeVariableSpelling :: ClosedVisibleTypeVariable -> String
+closedVisibleTypeVariableSpelling variable =
+  "a" ++ show (closedVisibleTypeVariableScope variable)
+    ++ "_" ++ show (closedVisibleTypeVariableSlot variable)
+
 -- | One checked visible type argument in generated term syntax.
 --
 -- The representation is deliberately abstract. An inferred argument renders
--- as @\@_@. A specified argument retains a canonical, structurally validated
--- monotype with neither variables nor forall layers. This bounded vocabulary
--- lets generated terms make closed instantiations explicit without inventing
--- a type-variable scope that their enclosing 'FunctionClause' does not carry.
+-- as @\@_@. A specified argument retains a canonical, structurally validated,
+-- lexically closed type. Bound variables are alpha-normalized independently
+-- of their source spellings, so quantified arguments do not depend on a type
+-- variable scope carried by the enclosing 'FunctionClause'.
 data VisibleTypeArgument
   = InferredVisibleTypeArgument
-  | SpecifiedVisibleTypeArgument (SharedType.Type Void)
+  | SpecifiedVisibleTypeArgument
+      (SharedType.Type ClosedVisibleTypeVariable)
   deriving (Eq, Ord, Show)
 
 instance NFData VisibleTypeArgument where
@@ -183,9 +207,11 @@ instance NFData variable => NFData (VisibleTypeArgumentError variable)
 inferredVisibleTypeArgument :: VisibleTypeArgument
 inferredVisibleTypeArgument = InferredVisibleTypeArgument
 
--- | Check and erase a variable-free monotype into the bounded generated-term
--- vocabulary. Saturated arrows and tuples are canonicalized by the shared type
--- boundary before the safe 'Void'-indexed representation is retained.
+-- | Check and alpha-normalize a lexically closed type into generated-term
+-- syntax. Saturated arrows and tuples are canonicalized by the shared type
+-- boundary. A variable is accepted only when an explicit enclosing forall
+-- owns it; genuinely free variables retain their source identity in the
+-- diagnostic.
 specifiedVisibleTypeArgument
   :: Ord variable
   => SharedType.Type variable
@@ -193,30 +219,46 @@ specifiedVisibleTypeArgument
 specifiedVisibleTypeArgument source = do
   canonical <- Bifunctor.first InvalidVisibleTypeArgument
     $ SharedType.normalizeType source
-  SpecifiedVisibleTypeArgument <$> eraseVariables canonical
+  SpecifiedVisibleTypeArgument <$> traverse closeVariable
+    (Alpha.alphaNormalizeTypeWith Alpha.PositionalBinderSlots canonical)
  where
-  eraseVariables typeExpression = case typeExpression of
-    SharedType.TypeVariable variable ->
-      Left $ VisibleTypeArgumentVariable variable
-    SharedType.TypeConstructor name ->
-      Right $ SharedType.TypeConstructor name
-    SharedType.TypeApplication function argument ->
-      SharedType.TypeApplication
-        <$> eraseVariables function
-        <*> eraseVariables argument
-    SharedType.FunctionType parameter result ->
-      SharedType.FunctionType
-        <$> eraseVariables parameter
-        <*> eraseVariables result
-    SharedType.TupleType boxity elements ->
-      SharedType.TupleType boxity <$> traverse eraseVariables elements
-    SharedType.ForallType{} -> Left VisibleTypeArgumentForall
+  closeVariable variable = case variable of
+    Alpha.AlphaBoundVariable scope slot ->
+      Right $ ClosedVisibleTypeVariable scope slot
+    Alpha.AlphaFreeVariable free ->
+      Left $ VisibleTypeArgumentVariable free
 
--- | Recover the specified closed monotype, or 'Nothing' for @\@_@.
+-- | Whether this argument is the inferred placeholder @\@_@.
+--
+-- This discriminator is intentionally separate from the legacy monotype
+-- projection: a specified quantified argument also has no monotype view.
+isInferredVisibleTypeArgument :: VisibleTypeArgument -> Bool
+isInferredVisibleTypeArgument argument = case argument of
+  InferredVisibleTypeArgument -> True
+  SpecifiedVisibleTypeArgument{} -> False
+
+-- | Recover the specified closed monotype when the argument has no forall
+-- layer, or 'Nothing' for either @\@_@ or a specified quantified type.
+--
+-- This compatibility projection preserves its historical @Void@ index.
+-- New consumers which need to distinguish or render quantified arguments
+-- should use 'isInferredVisibleTypeArgument' and
+-- 'visibleTypeArgumentClosedType'.
 visibleTypeArgumentType
   :: VisibleTypeArgument
   -> Maybe (SharedType.Type Void)
 visibleTypeArgumentType argument = case argument of
+  InferredVisibleTypeArgument -> Nothing
+  SpecifiedVisibleTypeArgument typeExpression
+    | SharedType.containsForall typeExpression -> Nothing
+    | otherwise -> traverse (const Nothing) typeExpression
+
+-- | Recover the complete specified closed type, including explicit forall
+-- layers, or 'Nothing' only for @\@_@.
+visibleTypeArgumentClosedType
+  :: VisibleTypeArgument
+  -> Maybe (SharedType.Type ClosedVisibleTypeVariable)
+visibleTypeArgumentClosedType argument = case argument of
   InferredVisibleTypeArgument -> Nothing
   SpecifiedVisibleTypeArgument typeExpression -> Just typeExpression
 
@@ -1696,11 +1738,11 @@ ppExpression options names precedence expression = case expression of
         ppExpression options names 0 body
 
 renderVisibleTypeArgument :: Qualification -> VisibleTypeArgument -> String
-renderVisibleTypeArgument qualification argument = case
-    visibleTypeArgumentType argument of
-  Nothing -> "_"
-  Just typeExpression -> SharedTypeRender.showsTypeWithQualification
-    qualification absurd 2 typeExpression ""
+renderVisibleTypeArgument qualification argument = case argument of
+  InferredVisibleTypeArgument -> "_"
+  SpecifiedVisibleTypeArgument typeExpression ->
+    SharedTypeRender.showsTypeWithQualification qualification
+      closedVisibleTypeVariableSpelling 2 typeExpression ""
 
 ppApplication
   :: Ord local

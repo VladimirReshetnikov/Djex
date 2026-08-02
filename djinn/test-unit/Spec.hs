@@ -1235,6 +1235,17 @@ testRankNTypeAtoms = do
             show ambiguousOpenRendered)
         $ any ("ambiguousMonoToken @_" `isInfixOf`)
             ambiguousOpenRendered
+    ambiguousRankN <- runStableQuery ambiguousTokenSession
+        "instantiateLoadedAmbiguousProviderAtClosedRankN"
+        "(forall selected. selected -> selected) -> MonoToken"
+    ambiguousRankNRendered <- renderStableCandidates ambiguousRankN
+    assertBool
+        ("a closed quantified choice was downgraded to inferred evidence: " ++
+            show ambiguousRankNRendered)
+        $ any
+            ("ambiguousMonoToken @(forall a0_0. a0_0 -> a0_0)"
+                `isInfixOf`)
+            ambiguousRankNRendered
     prefixAmbiguous <- runStableQuery prefixAmbiguousSession
         "retainShortestVisibleProviderPrefix"
         "MonoClosed -> MonoToken"

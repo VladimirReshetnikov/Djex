@@ -791,6 +791,73 @@ tests = testGroup "Djex facade"
             ++ output ++ "\nstderr:\n" ++ errors
             ++ "\ngenerated:\n" ++ generated)
           ExitSuccess exitCode
+  , testCase "compile quantified evidence for an ambiguous Djinn provider" $ do
+      tokenName <- expectRight $ parseName "QuantifiedToken"
+      providerName <- expectRight $ parseName "ambiguousQuantifiedToken"
+      targetName <- expectRight $
+        mkIdentifier "useQuantifiedAmbiguousToken"
+      target <- expectRight $ mkDefinitionName targetName
+      let tokenType = TypeConstructor tokenName
+          quantifiedIdentity = ForallType ["identity"] [] $
+            FunctionType
+              (TypeVariable "identity")
+              (TypeVariable "identity")
+          providerType = ForallType ["chosen"] [] tokenType
+          declarations =
+            [ AbstractTypeDeclaration () tokenName ProperTypeKind
+            , ValueDeclaration $ ValueSignature () providerName providerType
+            ]
+      environment <- expectRight
+        (mkEnvironment declarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      session <- expectRight $ mkDjinnSession environment
+      request <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = target
+        , requestGoal = FunctionType quantifiedIdentity tokenType
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+        }
+      result <- expectRight $ runDjinnQuery session request
+      rendered <- traverse
+        (expectRight . renderDjinnCandidateDefinition Unqualified)
+        $ batchCandidates $ resultSearch result
+      generated <- case filter
+          ("ambiguousQuantifiedToken @(forall a0_0. a0_0 -> a0_0)"
+            `isInfixOf`) rendered of
+        candidate : _ -> pure candidate
+        [] -> fail $ "Djinn downgraded the selected quantified type: "
+          ++ show rendered
+
+      let fixture = unlines
+            [ "module QuantifiedDjinnProviderFixture where"
+            , ""
+            , "data QuantifiedToken = QuantifiedToken"
+            , ""
+            , "ambiguousQuantifiedToken :: forall a. QuantifiedToken"
+            , "ambiguousQuantifiedToken = QuantifiedToken"
+            , ""
+            , "useQuantifiedAmbiguousToken ::"
+            , "  (forall x. x -> x) -> QuantifiedToken"
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected quantified ambiguous-provider evidence\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\ngenerated:\n" ++ generated)
+          ExitSuccess exitCode
   , testCase "compile a mixed-kind visible Djinn prefix" $ do
       higherConstructorName <- expectRight $
         parseName "MixedKindConstructor"

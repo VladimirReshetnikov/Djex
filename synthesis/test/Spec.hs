@@ -4090,7 +4090,7 @@ generatedTests = testGroup "generated syntax"
       validateExpressionScope
           (Lambda [Bind (0 :: Int)] $ Lambda [Bind 0] $ Local 0)
         @?= Left (DuplicatePatternBinder 0)
-  , testCase "bound visible type arguments exclude variables and foralls" $ do
+  , testCase "visible type arguments retain closed quantified structure" $ do
       let integer, boolean :: SharedType.Type String
           integer = SharedType.TypeConstructor $ right $ mkIdentifier "Int"
           boolean = SharedType.TypeConstructor $ right $ mkIdentifier "Bool"
@@ -4101,18 +4101,66 @@ generatedTests = testGroup "generated syntax"
             boolean
           malformed = SharedType.TupleType Boxed [integer]
           quantified = SharedType.ForallType ["a"] []
-            $ SharedType.TypeVariable "a"
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "a")
+                (SharedType.TypeVariable "a")
+          renamed = SharedType.ForallType ["renamed"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "renamed")
+                (SharedType.TypeVariable "renamed")
+          shadowed = SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "a")
+                (SharedType.ForallType ["a"] []
+                  $ SharedType.FunctionType
+                      (SharedType.TypeVariable "a")
+                      (SharedType.TypeVariable "a"))
+          open = SharedType.ForallType ["a"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "a")
+                (SharedType.TypeVariable "free")
+          outer = ClosedVisibleTypeVariable 0 0
+          inner = ClosedVisibleTypeVariable 1 0
+          expectedQuantified = SharedType.ForallType [outer] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable outer)
+                (SharedType.TypeVariable outer)
+          expectedShadowed = SharedType.ForallType [outer] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable outer)
+                (SharedType.ForallType [inner] []
+                  $ SharedType.FunctionType
+                      (SharedType.TypeVariable inner)
+                      (SharedType.TypeVariable inner))
       specified <- case specifiedVisibleTypeArgument source of
         Left failure -> assertFailure $ show failure
         Right argument -> pure argument
+      specifiedQuantified <- case specifiedVisibleTypeArgument quantified of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      specifiedRenamed <- case specifiedVisibleTypeArgument renamed of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      specifiedShadowed <- case specifiedVisibleTypeArgument shadowed of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      isInferredVisibleTypeArgument inferredVisibleTypeArgument @?= True
+      isInferredVisibleTypeArgument specified @?= False
+      isInferredVisibleTypeArgument specifiedQuantified @?= False
       visibleTypeArgumentType inferredVisibleTypeArgument @?= Nothing
       (fmap (absurd :: Void -> String) <$>
           visibleTypeArgumentType specified) @?=
         Just (SharedType.FunctionType integer boolean)
+      visibleTypeArgumentType specifiedQuantified @?= Nothing
+      visibleTypeArgumentClosedType specifiedQuantified @?=
+        Just expectedQuantified
+      visibleTypeArgumentClosedType specifiedShadowed @?=
+        Just expectedShadowed
+      specifiedQuantified @?= specifiedRenamed
       specifiedVisibleTypeArgument (SharedType.TypeVariable "a") @?=
         Left (VisibleTypeArgumentVariable "a")
-      specifiedVisibleTypeArgument quantified @?=
-        Left VisibleTypeArgumentForall
+      specifiedVisibleTypeArgument open @?=
+        Left (VisibleTypeArgumentVariable "free")
       specifiedVisibleTypeArgument malformed @?=
         Left (InvalidVisibleTypeArgument
           $ SharedType.InvalidTupleTypeArity Boxed 1)
@@ -4541,12 +4589,23 @@ generatedTests = testGroup "generated syntax"
             (SharedType.TypeConstructor maybeName)
             (SharedType.TypeConstructor integerName)
           specified = right $ specifiedVisibleTypeArgument maybeInteger
+          quantified = right $ specifiedVisibleTypeArgument
+            $ SharedType.ForallType ["identity"] []
+            $ SharedType.FunctionType
+                (SharedType.TypeVariable "identity")
+                (SharedType.TypeVariable "identity")
           applied :: Expression Int
           applied = VisibleTypeApplication (Global functionName') specified
+          quantifiedApplied :: Expression Int
+          quantifiedApplied =
+            VisibleTypeApplication (Global functionName') quantified
           inferred = VisibleTypeApplication applied inferredVisibleTypeArgument
           options qualification = RenderOptions qualification show []
       renderExpression (options Unqualified) inferred @?=
         Right "function @(Maybe Int) @_"
+      renderExpression (options Unqualified)
+          quantifiedApplied @?=
+        Right "function @(forall a0_0. a0_0 -> a0_0)"
       renderExpression (options FullyQualified) inferred @?=
         Right "function @(Data.Maybe.Maybe Int) @_"
       renderExpression (options Unqualified)

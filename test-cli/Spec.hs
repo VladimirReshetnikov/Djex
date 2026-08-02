@@ -68,6 +68,8 @@ main = defaultMain $ testGroup "Djex CLI integration"
       testReplRankNQueries
   , testCase "REPL retains safe Djinn rank-N axioms"
       testReplRankNAxioms
+  , testCase "REPL contextual Djinn omissions weaken only negative evidence"
+      testReplDjinnContextualOmissionEvidence
   , testCase "REPL instantiates loaded Djinn values"
       testReplLoadedPolymorphicValue
   , testCase "REPL reports a shared both-mode parse failure once"
@@ -673,6 +675,76 @@ testReplRankNAxioms = withTemporaryEnvironment
   assertBool "the safe rank-N value was reported as an omission" $
     not $ "church: " `isInfixOf` output
   assertNoCallStack errors
+
+testReplDjinnContextualOmissionEvidence :: Assertion
+testReplDjinnContextualOmissionEvidence = do
+  -- A direct contextual provider is not an unconditional Djinn premise, but
+  -- the source instance can make it a real Haskell inhabitant. Its omission
+  -- must therefore turn an empty proof search into uncertainty.
+  withTemporaryEnvironment
+      [ ("ContextualProvider.hs", unlines
+        [ "{-# LANGUAGE AllowAmbiguousTypes #-}"
+        , "{-# LANGUAGE EmptyDataDecls #-}"
+        , "{-# LANGUAGE ExplicitForAll #-}"
+        , "module ContextualProvider where"
+        , "data Ground = Ground"
+        , "data Result"
+        , "class C a"
+        , "instance C Ground"
+        , "provider :: forall a. C a => Result"
+        ])
+      , ("contextual.visibility",
+          "abstract ContextualProvider.Result 0\n")
+      ] $ \directory -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ ":backend djinn"
+      , ":set djinn-axioms on"
+      , ":set qualification none"
+      , "Ground"
+      , "Result"
+      , ":show omissions"
+      ]
+    assertEqual "contextual-omission REPL exit" ExitSuccess exitCode
+    assertContains "checked candidates survive the incompleteness marker"
+      "djexResult = Ground" output
+    assertContains "the contextual provider remains visibly omitted"
+      "provider: its residual class context cannot become a proof axiom"
+      output
+    assertContains "the omitted provider makes negative evidence uncertain"
+      "[DJEX_DJINN_UNDECIDED]" errors
+    assertBool "the omitted provider still allowed a false refutation" $
+      not $ "[DJEX_DJINN_UNINHABITABLE]" `isInfixOf` errors
+    assertNoCallStack errors
+
+  -- Instance declarations alone add no term-level provider and remain a
+  -- harmless reporting omission. They must not globally disable ordinary
+  -- Djinn refutations.
+  withTemporaryEnvironment
+      [ ("InstanceOnly.hs", unlines
+        [ "{-# LANGUAGE EmptyDataDecls #-}"
+        , "module InstanceOnly where"
+        , "data Ground = Ground"
+        , "data Missing"
+        , "class C a"
+        , "instance C Ground"
+        ])
+      , ("instance-only.visibility",
+          "abstract InstanceOnly.Missing 0\n")
+      ] $ \directory -> do
+    (exitCode, output, errors) <- runRepl directory
+      [ ":backend djinn"
+      , "Missing"
+      , ":show omissions"
+      ]
+    assertEqual "instance-only REPL exit" ExitSuccess exitCode
+    assertContains "the harmless instance omission remains reported"
+      "1 instance declarations: instance declarations are not supported by Djinn"
+      output
+    assertContains "instance-only projection keeps exact negative evidence"
+      "[DJEX_DJINN_UNINHABITABLE]" errors
+    assertBool "instance-only projection became spuriously uncertain" $
+      not $ "[DJEX_DJINN_UNDECIDED]" `isInfixOf` errors
+    assertNoCallStack errors
 
 testReplLoadedPolymorphicValue :: Assertion
 testReplLoadedPolymorphicValue = withTemporaryEnvironment

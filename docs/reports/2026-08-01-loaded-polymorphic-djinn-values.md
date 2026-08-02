@@ -156,12 +156,17 @@ Focused stable-API and CLI regressions cover:
 
 This is bounded implicit instantiation, not general higher-rank subsumption or
 a class-constraint solver. Loaded schemes with direct contexts are still
-rejected by Djinn's declaration boundary. Five-or-more-binder schemes, useful
-tuples beyond the fixed allowances, and types absent from the finite source
-vocabulary can remain inconclusive. Generated terms transporting quantified
-types may still require `RankNTypes` and `ImpredicativeTypes`.
+rejected by Djinn's declaration boundary. A shared workspace projection that
+omits such a provider records the lost proof power: checked candidates survive,
+but a candidate-free query reports `NoEvidence` because an unavailable class
+instance may make the source provider usable. Instance-summary and recursive
+introduction-only omissions do not set this marker. Five-or-more-binder
+schemes, useful tuples beyond the fixed allowances, and types absent from the
+finite source vocabulary can remain inconclusive. Generated terms transporting
+quantified types may still require `RankNTypes` and `ImpredicativeTypes`.
 
-Exference's separate loaded ambiguous-context problem is unchanged. Emitting a
-global visible type application such as `provider @Int` requires preserving
-specified-binder provenance and extending its expression checker; implicit
-forall closure alone is not enough to do that safely.
+Exference's separate specified-scheme path now preserves binder provenance and
+can emit bounded closed ground applications such as `provider @Int` when an
+instance head or checked query type determines the choice. Visible open and
+impredicative type arguments remain outside that rule; implicit forall closure
+alone is not enough to emit either safely.

@@ -876,7 +876,10 @@ knowing before editing the source:
   by the bounded positive-only tail above. Its fixed binder, axiom, and tuple
   limits can still miss valid instances; any retained non-target scheme makes
   such an empty search inconclusive rather than a proof of uninhabitability.
-  Loaded functions with direct class contexts remain unsupported.
+  Loaded functions with direct class contexts remain unsupported. When the
+  shared workspace projection omits one, it likewise makes every candidate-free
+  query inconclusive instead of permitting a false refutation; checked
+  candidates remain valid.
 - Type synonyms must be fully saturated, matching Haskell. Data and abstract
   constructors may still be used partially in higher-kinded positions.
 - Genuinely recursive datatypes retain only bounded positive constructor

@@ -946,9 +946,12 @@ so the projection degrades rather than fails:
   contexts.
 - A value whose leading `forall` chain retains class constraints is omitted
   from Djinn's axiom projection. Stripping that context and admitting the value
-  as an unconditional proof premise would be unsound. Context-free leading
-  quantifiers are implicitized as Djinn assumptions, and nested rank-N atoms
-  remain intact at the projection boundary. Djinn's polarized formula
+  as an unconditional proof premise would be unsound. The omission also marks
+  candidate-free searches inconclusive: an instance outside Djinn's proof
+  vocabulary may make the source value usable, so the projected session cannot
+  claim non-inhabitation. Checked candidates are unaffected. Context-free
+  leading quantifiers are implicitized as Djinn assumptions, and nested rank-N
+  atoms remain intact at the projection boundary. Djinn's polarized formula
   translation may subsequently open a supported positive atom even when its
   context is nonempty; that context is validated but supplies no proof premise.
   A Djinn query may also carry a prenex context, provided the synthesized

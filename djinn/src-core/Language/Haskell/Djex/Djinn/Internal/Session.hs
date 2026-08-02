@@ -22,6 +22,8 @@ module Language.Haskell.Djex.Djinn.Internal.Session
   , declareDjinnDeclaration
   , removeDjinnDeclaration
   , resolveDjinnInstanceMethods
+  , markDjinnSessionContextualProvidersOmitted
+  , sessionContextualProvidersOmitted
   , sessionClassArity
   , sessionPreparedEnvironment
   ) where
@@ -66,7 +68,13 @@ type DjinnInventory = Inventory String ()
 -- from it. The constructor is private; compatibility editing derives its
 -- neutral source view on demand and publishes a replacement only after the
 -- complete environment has been sealed transactionally.
-newtype DjinnSession = DjinnSession PreparedEnvironment
+--
+-- The strict flag records that a source projection omitted at least one
+-- loaded value solely because its direct class context cannot become a Djinn
+-- proof premise. Such a value may still be usable in Haskell through an
+-- instance unavailable to Djinn, so an empty search cannot soundly become
+-- negative evidence. Ordinary sessions are complete at this boundary.
+data DjinnSession = DjinnSession PreparedEnvironment !Bool
 
 -- | One coherent projection of the declaration tables retained for Djinn's
 -- compatibility frontend. The constructor is private so the stable adapter
@@ -92,8 +100,10 @@ mkDjinnSession = first environmentFailure . mkDjinnSessionChecked
 mkDjinnSessionChecked
   :: DjinnEnvironment
   -> Either Core.SynthesisEnvironmentError DjinnSession
-mkDjinnSessionChecked sharedEnvironment = DjinnSession
-  <$> RawEnvironment.prepareGroundSynthesisEnvironment sharedEnvironment
+mkDjinnSessionChecked sharedEnvironment = do
+  prepared <- RawEnvironment.prepareGroundSynthesisEnvironment
+    sharedEnvironment
+  pure $ DjinnSession prepared False
 
 -- | The historical checked Djinn prelude. Its raw declaration spelling is a
 -- compatibility source only: convert it once and use the same neutral session
@@ -116,7 +126,7 @@ djinnSessionEnvironment =
 
 -- | Recover the checked inventory authoritative for every session projection.
 djinnSessionInventory :: DjinnSession -> DjinnInventory
-djinnSessionInventory (DjinnSession prepared) =
+djinnSessionInventory (DjinnSession prepared _) =
   preparedEnvironmentInventory prepared
 
 -- | Reconstruct all historical declaration tables from the authoritative
@@ -126,7 +136,7 @@ djinnSessionInventory (DjinnSession prepared) =
 djinnSessionDeclarationSnapshot
   :: DjinnSession
   -> DjinnDeclarationSnapshot
-djinnSessionDeclarationSnapshot (DjinnSession prepared) =
+djinnSessionDeclarationSnapshot (DjinnSession prepared _) =
   let compatibilityEnvironment = preparedEnvironmentSource prepared
   in DjinnDeclarationSnapshot
       { snapshotTypeDeclarations =
@@ -168,7 +178,7 @@ declareDjinnDeclaration declaration session = do
   (_, prepared) <- first environmentEditFailure
     $ RawEnvironment.declareGroundSynthesisEnvironment declaration
     $ djinnSessionEnvironment session
-  pure $ DjinnSession prepared
+  pure $ DjinnSession prepared $ sessionContextualProvidersOmitted session
 
 -- | Transactional counterpart of the historical @:delete@ command.
 removeDjinnDeclaration
@@ -179,7 +189,7 @@ removeDjinnDeclaration name session = do
   (_, prepared) <- first environmentEditFailure
     $ RawEnvironment.removeGroundSynthesisDeclaration name
     $ djinnSessionEnvironment session
-  pure $ DjinnSession prepared
+  pure $ DjinnSession prepared $ sessionContextualProvidersOmitted session
 
 -- | Check one historical instance head and instantiate its declared methods.
 resolveDjinnInstanceMethods
@@ -187,9 +197,23 @@ resolveDjinnInstanceMethods
   -> [Core.Context]
   -> Core.Context
   -> Either Diagnostic [(Core.HSymbol, Core.HType)]
-resolveDjinnInstanceMethods (DjinnSession prepared) prerequisites target =
+resolveDjinnInstanceMethods (DjinnSession prepared _) prerequisites target =
   first instanceResolutionFailure
     $ resolvePreparedInstanceMethods prepared prerequisites target
+
+-- | Conservatively record one projection-local loss of loaded value proof
+-- power. This operation is idempotent and private to trusted frontends: the
+-- omitted declaration itself never enters the prepared proof environment.
+markDjinnSessionContextualProvidersOmitted
+  :: DjinnSession
+  -> DjinnSession
+markDjinnSessionContextualProvidersOmitted (DjinnSession prepared _) =
+  DjinnSession prepared True
+
+-- | Whether an omitted contextual source provider prevents candidate-free
+-- searches from carrying backend-independent negative evidence.
+sessionContextualProvidersOmitted :: DjinnSession -> Bool
+sessionContextualProvidersOmitted (DjinnSession _ omitted) = omitted
 
 -- | Look up the exact class width retained by the authoritative neutral
 -- inventory.  Exference derives the same query bound from the same shared
@@ -202,7 +226,7 @@ sessionClassArity = inventoryClassArity . djinnSessionInventory
 -- accessor stays in the private module and is never re-exported by the stable
 -- adapter, so callers cannot combine a session with unrelated raw indexes.
 sessionPreparedEnvironment :: DjinnSession -> PreparedEnvironment
-sessionPreparedEnvironment (DjinnSession prepared) = prepared
+sessionPreparedEnvironment (DjinnSession prepared _) = prepared
 
 environmentFailure
   :: Core.SynthesisEnvironmentError

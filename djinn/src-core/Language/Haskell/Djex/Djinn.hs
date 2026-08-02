@@ -96,8 +96,12 @@ import Language.Haskell.Synthesis.Generated
   )
 import Language.Haskell.Synthesis.Name (Name)
 import Language.Haskell.Synthesis.Query
-  ( QueryRequest (..)
+  ( QueryEvidence (..)
+  , QueryRequest (..)
   , RequestProvenance (..)
+  , mkQueryResult
+  , resultEvidence
+  , resultSearch
   , withRequestProvenance
   )
 
@@ -173,7 +177,21 @@ runDjinnQuery session request = do
       goal of
     Left failure -> Left $
       djinnQueryFailure request failure
-    Right result -> Right result
+    Right result
+      | Session.sessionContextualProvidersOmitted session ->
+          weakenCandidateFreeEvidence result
+      | otherwise -> Right result
+ where
+  -- A projected contextual provider is absent from proof search, not proved
+  -- unusable. Preserve every checked candidate, but make all candidate-free
+  -- conclusions explicitly inconclusive, including the self-reference-only
+  -- diagnostic which an omitted ordinary provider could have avoided.
+  weakenCandidateFreeEvidence result = case resultEvidence result of
+    ValidatedCandidates -> Right result
+    _ -> case mkQueryResult NoEvidence $ resultSearch result of
+      Left invariant -> Left $ djinnQueryFailure request
+        $ DjinnResultInvariantFailure invariant
+      Right weakened -> Right weakened
 
 -- | Render only a Djinn candidate's generated expression.
 --

@@ -44,6 +44,7 @@ import qualified Djinn.Internal.Declaration as DjinnDeclaration
 import Language.Haskell.Djex.Djinn.Internal.Session
   ( DjinnSession
   , djinnSessionEnvironment
+  , markDjinnSessionContextualProvidersOmitted
   , mkDjinnSessionChecked
   )
 import Language.Haskell.Synthesis.Constraint (Constraint (..))
@@ -200,12 +201,19 @@ projectDjinnScope policy records inferredKinds recursive declarations
         , selector `Set.member` visibleValues
         , Just renamedSelector <- [unqualifyName selector]
         ]
-      (admitted, admissionOmissions) = admitDeclarations renamed
+      ( admitted
+        , admissionOmissions
+        , contextualProvidersOmitted
+        ) = admitDeclarations renamed
       (stubbed, stubOmissions) =
         stubUnknownReferences projectionKinds admitted
   (resolved, referenceOmissions) <-
     resolveScopeReferences projectionKinds stubbed
-  (session, sealOmissions) <- sealWithRepairs projectionKinds resolved
+  (sealedSession, sealOmissions) <- sealWithRepairs projectionKinds resolved
+  let session
+        | contextualProvidersOmitted =
+            markDjinnSessionContextualProvidersOmitted sealedSession
+        | otherwise = sealedSession
   let recursionOmissions = recursiveDataTypeIntroductionOmissions
         recursivePromptNames
         (environmentDeclarations $ djinnSessionEnvironment session)
@@ -441,10 +449,11 @@ unzipOmissions results = (map fst results, mapMaybe snd results)
 -- given up on.
 admitDeclarations
   :: [ScopeDeclaration]
-  -> ([ScopeDeclaration], [DjinnScopeOmission])
-admitDeclarations = foldr admit ([], [])
+  -> ([ScopeDeclaration], [DjinnScopeOmission], Bool)
+admitDeclarations = foldr admit ([], [], False)
  where
-  admit declaration (kept, omitted) = case declaration of
+  admit declaration (kept, omitted, contextualProvidersOmitted) =
+    case declaration of
     ClassDeclaration annotation name parameters superclasses methods ->
       let (goodMethods, badMethods) = partition admissibleMethod methods
           shrunk = ClassDeclaration annotation name parameters
@@ -455,8 +464,16 @@ admitDeclarations = foldr admit ([], [])
             | method <- badMethods
             ]
       in case checkDeclaration shrunk of
-        Right () -> (shrunk : kept, methodOmissions ++ omitted)
-        Left failure -> (kept, describeOmission name failure : omitted)
+        Right () ->
+          ( shrunk : kept
+          , methodOmissions ++ omitted
+          , contextualProvidersOmitted
+          )
+        Left failure ->
+          ( kept
+          , describeOmission name failure : omitted
+          , contextualProvidersOmitted
+          )
     ValueDeclaration signature
       | hasLeadingContext $ valueType signature ->
           ( kept
@@ -464,13 +481,16 @@ admitDeclarations = foldr admit ([], [])
               (renderCanonical $ valueName signature)
               "its residual class context cannot become a proof axiom"
               : omitted
+          , True
           )
     _ -> case checkDeclaration declaration of
-      Right () -> (declaration : kept, omitted)
+      Right () ->
+        (declaration : kept, omitted, contextualProvidersOmitted)
       Left failure ->
         ( kept
         , describeOmission (declarationSubjectName declaration) failure
             : omitted
+        , contextualProvidersOmitted
         )
   admissibleMethod signature =
     checkDeclaration (ValueDeclaration signature) == Right ()

@@ -6,6 +6,10 @@ Date: 2026-08-01
 > [loaded polymorphic values extension](2026-08-01-loaded-polymorphic-djinn-values.md)
 > retains this historical query-local ordering and adds a separate appended
 > family for loaded schemes and closed source monotypes.
+> The later
+> [scoped closed-polytype extension](2026-08-01-scoped-closed-polytype-applications.md)
+> retains a bounded visible application when a selected query-local binder is
+> vacuous.
 
 ## Outcome
 

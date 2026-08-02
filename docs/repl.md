@@ -154,13 +154,17 @@ deliberately bounded rank-N rule families:
   skolems, premise-scope variables, and query-supplied subtrees that are
   independent of enclosing binders and contain quantification, including
   wrappers around quantified atoms. The last family gives a guarded form of
-  impredicative instantiation.
+  impredicative instantiation. Inferable evidence stays implicit; if a selected
+  binder is vacuous, Djinn retains the shortest visible prefix and can preserve
+  a query-supplied closed quantified choice.
 - Djinn retains context-free schemes for loaded values, including implicitly
   quantified free signature variables, in a separate appended family. That
   family adds closed, forall-free subtrees of the checked query and loaded
   value signatures to its candidates. Closed higher-kinded constructors are
   allowed when the complete substituted body kind-checks. Each occurrence can
-  use an independent instance; bounded misses are inconclusive. In the shared
+  use an independent instance, and a vacuous binder uses the same retained
+  visible-evidence rule as a query-local hypothesis. Bounded misses are
+  inconclusive. In the shared
   `djex` REPL, ordinary workspace values enter this family only after
   `:set djinn-axioms on`; value axioms remain off by default.
 - Exference can introduce a nested `forall`, with or without class contexts,
@@ -179,14 +183,16 @@ deliberately bounded rank-N rule families:
   without solving ambient inference variables; a provider binder may be solved
   impredicatively with a quantified subtree the requested scheme itself
   supplies.
-- For a constrained scoped rank-N provider, Exference has an additional
-  evidence-directed branch when a matching explicit ground instance head
-  determines the complete leading binder prefix. That branch emits specified
-  closed applications such as `provider @Int`; its type arguments are
-  variable-free, `forall`-free monotypes. The ordinary implicit branch remains
-  available and global bindings retain their existing behavior. Shared
-  generated syntax can also carry the inferred argument `@_`, but Exference
-  search emits only specified ground arguments from this rule.
+- An instantiable scoped or retained global provider has an additional bounded
+  visible branch. A matching explicit ground instance head may determine its
+  complete leading binder prefix and emit `provider @Int`. A closed,
+  context-free provider whose leading binders are fully vacuous may instead
+  select checked query proper types, including complete closed context-free
+  foralls below arrows or tuples, and emit
+  `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
+  binders and 32 combinations; the instance-head route remains monotype-only.
+  Ordinary implicit instantiation stays first. Shared generated syntax can
+  also carry the inferred argument `@_`.
 
 For example:
 
@@ -292,13 +298,13 @@ position, scope, and free-variable identity remain significant, so shadowing
 and impredicative wrappers cannot accidentally capture or conflate variables.
 Rendering chooses fresh binder spellings when a source hint would capture a
 free name. These bounded rules do not add general higher-rank subsumption,
-polymorphic-let generalization, or general visible type application. Explicitly
-visible open arguments such as `@a` and visible impredicative type arguments
-remain unsupported; the Djinn rules above perform only bounded implicit
-instantiation from the finite query and loaded-value vocabulary. Djinn search
-does not
-gain the Exference ground-instantiation rule, and its historical expression
-projection rejects visible type application explicitly.
+polymorphic-let generalization, or general visible type application. Explicit
+open arguments such as `@a` remain unsupported. A closed quantified visible
+argument is admitted only when the finite checked query vocabulary already
+supplies it and a bounded vacuous-provider rule selects it; neither backend
+invents a polytype. Djinn can retain that evidence for a query-local or loaded
+scheme, although its historical expression projection still rejects visible
+type application explicitly.
 Exference does not perform non-exact subsumption between contextual schemes,
 while unexposed quantified atoms remain opaque; finite identifier or
 search-budget exhaustion is an inconclusive truncation. In particular,

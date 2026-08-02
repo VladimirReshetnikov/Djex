@@ -11,6 +11,10 @@
 > raises Djinn's chain bound from three to four without raising its axiom or
 > attempt caps. References below to a three-binder limit and a four-binder gap
 > describe this historical snapshot.
+>
+> A later
+> [scoped closed-polytype extension](2026-08-01-scoped-closed-polytype-applications.md)
+> retains selected visible evidence when a query-local binder is vacuous.
 
 ## Scope
 

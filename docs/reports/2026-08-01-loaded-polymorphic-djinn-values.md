@@ -2,6 +2,11 @@
 
 Date: 2026-08-01
 
+> **Follow-up.** The
+> [scoped closed-polytype extension](2026-08-01-scoped-closed-polytype-applications.md)
+> applies loaded schemes' visible-evidence retention to query-local Djinn
+> schemes and admits complete closed query polytypes in both engines.
+
 ## Outcome
 
 Djinn now gives a checked loaded value its ordinary per-occurrence implicit

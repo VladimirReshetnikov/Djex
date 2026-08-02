@@ -817,13 +817,17 @@ knowing before editing the source:
   instantiated completely at candidates the sequent itself supplies (goal
   variables, opened-forall skolems, premise-scope variables, and quantified
   atoms already present, the last giving guarded impredicative instantiation),
-  and the generated evidence is the hypothesis expression itself. Constrained
-  hypothesis occurrences, longer eliminable chains, and candidates outside that
-  vocabulary remain opaque, alpha-equated atoms. A separate appended family
+  and inferable generated evidence is the hypothesis expression itself. When a
+  selected binder is vacuous, conversion retains the shortest visible prefix,
+  including a specified closed quantified choice already supplied by the query.
+  Constrained hypothesis occurrences, longer eliminable chains, and candidates
+  outside that vocabulary remain opaque, alpha-equated atoms. A separate
+  appended family
   retains exact context-free schemes for loaded values, including implicitly
   quantified free signature variables, and extends their candidate vocabulary
   with closed, forall-free subtrees of the checked query and loaded value
-  signatures. The complete substituted body is kind-checked, so a closed
+  signatures. Loaded vacuous binders share the same visible-evidence rule. The
+  complete substituted body is kind-checked, so a closed
   higher-kinded constructor is usable only at a compatible binder. An empty
   incomplete search is
   inconclusive rather than proof of uninhabitability. Search tries the fully

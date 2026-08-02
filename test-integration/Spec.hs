@@ -1349,6 +1349,118 @@ tests = testGroup "Djex facade"
             ++ output ++ "\nstderr:\n" ++ errors
             ++ "\ngenerated:\n" ++ rendered)
           ExitSuccess exitCode
+  , testCase "compile scoped quantified provider evidence from both engines" $ do
+      tokenName <- expectRight $ parseName "ScopedToken"
+      djinnTargetName <- expectRight $ mkIdentifier "useDjinnScoped"
+      djinnTarget <- expectRight $ mkDefinitionName djinnTargetName
+      let hasQuantifiedApplication =
+            ("@(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
+          djinnIdentity :: Type String
+          djinnIdentity = ForallType ["identity"] [] $
+            FunctionType
+              (TypeVariable "identity")
+              (TypeVariable "identity")
+          djinnProvider = ForallType ["chosen"] [] $
+            TypeConstructor tokenName
+          djinnGoal = FunctionType djinnIdentity $
+            FunctionType djinnProvider $ TypeConstructor tokenName
+          djinnDeclarations =
+            [AbstractTypeDeclaration () tokenName ProperTypeKind]
+      djinnEnvironment <- expectRight
+        (mkEnvironment djinnDeclarations :: Either
+          (EnvironmentError DjinnTypeVariable) DjinnEnvironment)
+      djinnSession <- expectRight $ mkDjinnSession djinnEnvironment
+      djinnRequest <- expectRight $ mkDjinnRequest QueryRequest
+        { requestTarget = djinnTarget
+        , requestGoal = djinnGoal
+        , requestContexts = []
+        , requestOptions = defaultQueryOptions
+        }
+      djinnResult <- expectRight $ runDjinnQuery djinnSession djinnRequest
+      djinnRendered <- traverse
+        (expectRight . renderDjinnCandidateDefinition Unqualified)
+        $ batchCandidates $ resultSearch djinnResult
+      djinnGenerated <- case filter hasQuantifiedApplication djinnRendered of
+        candidate : _ -> pure candidate
+        [] -> fail $ "Djinn lost scoped quantified evidence: "
+          ++ show djinnRendered
+
+      exferenceTargetName <- expectRight $
+        mkIdentifier "useExferenceScoped"
+      exferenceTarget <- expectRight $
+        mkDefinitionName exferenceTargetName
+      let providerVariable = FlexibleVariable 0
+          identityVariable = FlexibleVariable 1
+          identityType = TypeVariable identityVariable
+          quantifiedIdentity = ForallType [identityVariable] [] $
+            FunctionType identityType identityType
+          tokenType = TypeConstructor tokenName
+          providerType = ForallType [providerVariable] [] tokenType
+          exferenceGoal = FunctionType quantifiedIdentity $
+            FunctionType providerType tokenType
+          exferenceDeclarations =
+            [AbstractTypeDeclaration () tokenName ProperTypeKind]
+      exferenceEnvironment <- expectRight
+        (mkEnvironment exferenceDeclarations :: Either
+          (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
+      exferenceSession <- expectRight $
+        mkExferenceSession exferenceEnvironment
+      exferenceRequest <- expectRight $ mkExferenceRequest QueryRequest
+        { requestTarget = exferenceTarget
+        , requestGoal = exferenceGoal
+        , requestContexts = []
+        , requestOptions = defaultExferenceOptions
+            { exferenceAllowUnused = True
+            , exferenceMaximumSteps = 512
+            }
+        }
+      exferenceResults <- expectRight $
+        runExferenceQuery exferenceSession exferenceRequest
+      let findQuantifiedCandidate [] =
+            fail "Exference lost scoped quantified evidence"
+          findQuantifiedCandidate (candidate : remaining) = do
+            rendered <- expectRight $
+              renderExferenceCandidateDefinition Unqualified candidate
+            if hasQuantifiedApplication rendered
+              then pure rendered
+              else findQuantifiedCandidate remaining
+      exferenceGenerated <- findQuantifiedCandidate $
+        concatMap (batchCandidates . resultSearch) exferenceResults
+
+      let fixture = unlines
+            [ "module ScopedQuantifiedProviderFixture where"
+            , ""
+            , "data ScopedToken = ScopedToken"
+            , ""
+            , "useDjinnScoped ::"
+            , "  (forall x. x -> x) ->"
+            , "  (forall a. ScopedToken) -> ScopedToken"
+            , djinnGenerated
+            , ""
+            , "useExferenceScoped ::"
+            , "  (forall x. x -> x) ->"
+            , "  (forall a. ScopedToken) -> ScopedToken"
+            , exferenceGenerated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , "-XTypeApplications"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected scoped quantified provider evidence\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nDjinn generated:\n" ++ djinnGenerated
+            ++ "\nExference generated:\n" ++ exferenceGenerated)
+          ExitSuccess exitCode
   , testCase "do not guess visible arguments for non-vacuous providers" $ do
       seedName <- expectRight $ mkIdentifier "Seed"
       tokenName <- expectRight $ mkIdentifier "Token"

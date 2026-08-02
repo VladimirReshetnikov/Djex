@@ -958,6 +958,14 @@ classifies the opaque base-library signature stubs as abstract and retains only
   ordinary search. Thus a value of type
   `forall a. C a => a -> a` can be applied at `Int` when `C Int` is available,
   and a rank-N datatype field can participate after pattern elimination.
+  A separate bounded visible branch may select the complete prefix from a
+  matching ground instance head. For a closed, context-free provider whose
+  leading binders are all vacuous, it may instead select checked query proper
+  types, including complete closed context-free foralls already present below
+  arrows or tuples. This works for scoped values and retained globals, retains
+  at most four binders and 32 query combinations, and can emit
+  `provider @(forall a0_0. a0_0 -> a0_0)`. Ordinary fresh instantiation keeps
+  priority, and explicit instance-head selection remains monotype-only.
   A nested quantified type exposed as a goal can now be constructed as well,
   including a contextual type whose body needs its local evidence. For example,
   the callback request
@@ -995,7 +1003,7 @@ classifies the opaque base-library signature stubs as abstract and retains only
   alpha-aware `TypeAtom`s. Nested quantified subtrees may still compare exactly,
   but shallow subsumption never recurses into them. These limited rules do not
   provide deep or general higher-rank subsumption, polymorphic let
-  generalization, or visible type application.
+  generalization, or arbitrary caller-directed visible type application.
 
   The contextual evidence boundary and its regression matrix are detailed in
   the

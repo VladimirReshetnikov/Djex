@@ -1,5 +1,12 @@
 # Bounded visible type application — 2026-07-29
 
+> **2026-08-01 follow-up.** The
+> [scoped closed-polytype extension](2026-08-01-scoped-closed-polytype-applications.md)
+> replaces the monotype-only shared argument invariant with a structurally
+> closed, alpha-normal type and lets both engines retain bounded query-selected
+> quantified applications for vacuous providers. The limits below describe
+> this historical first slice.
+
 ## Outcome
 
 Djex now has one backend-independent generated-expression node for visible

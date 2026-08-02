@@ -93,6 +93,9 @@ lexical evidence boundary are recorded in the
 The bounded generated-term and Exference provider-use extension is recorded in
 the
 [2026-07-29 visible type application report](docs/reports/2026-07-29-visible-type-application.md).
+Its closed-polytype extension to scoped providers in both engines is recorded
+in the
+[2026-08-01 scoped closed-polytype application report](docs/reports/2026-08-01-scoped-closed-polytype-applications.md).
 The preceding context-free Exference rule and Djinn quantified-wrapper
 follow-up are recorded in the
 [2026-07-29 forall-introduction report](docs/reports/2026-07-29-exference-forall-introduction.md).
@@ -233,14 +236,16 @@ also eliminate the complete leading `forall` chain of a scoped value at a
 monomorphic use site, freshly and
 independently for each occurrence; direct contexts become ordinary proof
 obligations.
-For a constrained scoped provider, a separate evidence-directed branch can
-make that instantiation visible when an explicit ground instance head fixes
-its complete leading binder prefix. It emits closed applications such as
-`provider @Int`; every specified argument is a variable-free, `forall`-free
-monotype. The ordinary implicit branch remains available, and global bindings
-retain their existing implicit behavior. The shared generated-expression tree
-also represents the inferred argument `@_`, although Exference search itself
-emits only specified ground arguments from this rule.
+For an instantiable scoped or retained global provider, a separate bounded
+branch can make the choice visible. A direct constraint may select its complete
+leading binder prefix from an explicit ground instance head, producing an
+application such as `provider @Int`. A closed, context-free provider whose
+leading binders are all vacuous may instead select checked proper types already
+supplied below arrows or tuples in the query. Those candidates include complete
+closed context-free foralls, so search can emit
+`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
+binders and 32 combinations. Ordinary implicit instantiation remains first,
+and the instance-head route remains monotype-only.
 Exference can also forward a context-free quantified provider with no free
 flexible variables to a less-general such goal; provider binders are solved
 with monotypes or, in the guarded Quick-Look sense, with quantified subtrees
@@ -323,10 +328,14 @@ axioms. These plans consume the same global candidate cutoff and choice-point
 fuel as every structural plan. They are proof-producing, positive-only
 approximations: failure of a nominal plan never establishes uninhabitability.
 
-Instantiation evidence is erased only after independent proof checking. Every
-proof that consumes it uses conservative no-eta conversion. It retains the
-lambda when erasure would expose a higher-rank application boundary under
-GHC's simplified subsumption rules. Consequently, the second
+Inferable instantiation evidence is erased only after independent proof
+checking. When a selected leading binder is vacuous, conversion instead
+retains the shortest visible prefix, using `@_` for earlier inferable positions
+and a specified closed argument—including a quantified one—for the selected
+choice. Every proof that consumes instantiation evidence uses conservative
+no-eta conversion. It retains the lambda when erasure would expose a
+higher-rank application boundary under GHC's simplified subsumption rules.
+Consequently, the second
 example remains `\x -> finish x`, rather than being eta-contracted to
 `finish`. The same protection applies when presentation turns structural
 record elimination into a selector projection. Such signatures and generated
@@ -344,14 +353,12 @@ booleans:
 ```
 
 This is not general higher-rank subsumption, polymorphic-let generalization, or
-general visible type application. Explicitly visible open arguments such as
-`@a` and visible impredicative type arguments remain unsupported. Djinn's
-bounded rules perform only implicit instantiation from the sequent's variable
-and guarded quantified vocabulary; the loaded-value tail additionally draws
-closed monotypes from the checked query and loaded signatures. Djinn search
-does not gain the Exference visible-
-application rule, and its historical expression projection rejects the new
-generated node explicitly. Unsupported Djinn positions remain opaque and make
+general visible type application. Explicit open arguments such as `@a` remain
+unsupported. A closed quantified argument is admitted only through the bounded
+query-supplied routes above; neither backend invents a polytype. Djinn can
+retain the chosen application for a vacuous query-local or loaded scheme, while
+its historical `HExpr` compatibility projection still rejects the shared node
+explicitly. Unsupported Djinn positions remain opaque and make
 an otherwise empty search inconclusive rather than manufacturing a logical
 refutation. Exference still does not perform non-exact subsumption between
 contextual schemes; quantified types outside an exposed goal/provider boundary
@@ -899,11 +906,14 @@ private local payload, the historical `ExpVar`/`ExpLambda`/`ExpLet`/case
 constructors are bundled bidirectional compatibility patterns over that
 tree, and erasing annotations is a functor projection rather than a
 recursive conversion. Its bounded visible-type-application node accepts `@_`
-or a checked closed, variable-free, `forall`-free monotype and renders with
-Haskell's required type-argument parentheses. Compiling such a candidate
-requires `TypeApplications`; the surrounding provider signature will commonly
-also require `RankNTypes`, and an ambiguous contextual signature may require
-`AllowAmbiguousTypes`. Djinn's LJT lowering constructs and simplifies that
+or a structurally valid, lexically closed type and renders with Haskell's
+required type-argument parentheses. Quantified binders are alpha-normalized;
+`visibleTypeArgumentClosedType` recovers the complete type while
+`visibleTypeArgumentType` remains the monotype compatibility projection.
+Compiling such a candidate requires `TypeApplications`; a quantified argument
+generally also requires `RankNTypes` and `ImpredicativeTypes`, and an ambiguous
+contextual signature may require `AllowAmbiguousTypes`. Djinn's LJT lowering
+constructs and simplifies that
 same shared generated `Expression`/`Pattern` tree directly; `HExpr` and
 `HPat` remain only as projections for historical low-level callers.
 Incremental hole filling, capture-safe let cleanup, and eta reduction live

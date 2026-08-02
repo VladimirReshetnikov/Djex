@@ -46,7 +46,7 @@ build-depends: djex
 | Proof-backed non-inhabitation result | Yes when formula translation is complete | No |
 | Ranked heuristic candidates | No | Yes |
 | Explicit prenex polymorphism | Yes at the checked request edge | Yes |
-| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems, scoped-provider instantiation, closed ground visible instantiation fixed by explicit instance heads, and guarded context-free shallow quantified-provider subsumption |
+| Bounded rank-N rule | Positive introduction, including validated contexts under dictionary-independent semantics, through singleton, pairwise, and triple occurrence frontiers; context-free bounded hypothesis instantiation at sequent-supplied candidates with retained visible choices for vacuous local or loaded binders; per-use loaded-scheme instantiation at those variable/guarded-quantified candidates plus closed query/value monotypes; and positive-only nominal transport through reachable parameterized datatype applications | Contextual quantified-goal introduction with lexical givens and escape-checked skolems; scoped-provider instantiation; closed visible instantiation selected by monomorphic instance heads or, for fully vacuous scoped and retained global providers, checked query monotypes and polytypes; and guarded context-free shallow quantified-provider subsumption |
 | Type-class participation | Validates contexts; synthesizes only dictionary-independent terms | Resolves givens, superclasses, and instances |
 | Main controls | Candidate and choice-point limits | Step, queue, depth, constraint, and pattern controls |
 
@@ -223,9 +223,12 @@ context-free chain of at most four binders exists, bounded instantiation axioms
 can eliminate it completely at a candidate tuple drawn from
 the sequent's variables, opened-forall skolems, premise scopes, and already
 mentioned subtrees that are independent of enclosing binders and contain
-quantification, including structural wrappers around quantified atoms. Each
-axiom's generated evidence is the hypothesis expression itself. One- through
-three-binder schemes retain their historical lexical Cartesian order. The new
+quantification, including structural wrappers around quantified atoms.
+Inferable axiom evidence lowers to the hypothesis expression itself. If a
+selected binder is vacuous, proof conversion retains the shortest visible
+prefix, including a specified closed quantified argument when the query
+supplied one. One- through three-binder schemes retain their historical lexical
+Cartesian order. The new
 four-binder prefix fairly interleaves source-order windows, repeated arguments,
 sparse monotone selections, and the Cartesian tail without raising any search
 cap.
@@ -288,9 +291,10 @@ For a declared `data D a = EmptyD | FullD a`, the checked request
 `(forall a. D a) -> D (forall b. b -> b)` can return `\x -> x`. If the
 environment also contains `finish :: D (forall b. b -> b) -> R`, the request
 `(forall a. D a) -> R` can return `\x -> finish x`. Proof checking occurs
-before instantiation evidence is erased. Every proof that consumes that
-evidence takes the conservative no-eta conversion path, so cleanup cannot
-contract a higher-rank application boundary exposed by erasure. GHC's
+before inferable instantiation evidence is erased or a vacuous choice is
+retained as a visible application. Every proof that consumes that evidence
+takes the conservative no-eta conversion path, so cleanup cannot contract a
+higher-rank application boundary exposed by erasure. GHC's
 simplified subsumption rejects the bare `finish` at that expected type.
 The same rule protects a selector application introduced by field-projection
 normalization. Consumers compiling these signatures or candidates may need
@@ -363,30 +367,35 @@ and independent expression checking classifies the occurrence again. A
 non-quantified request instead freshly instantiates the complete leading
 provider chain and turns its direct contexts into proof obligations.
 
-For a constrained scoped rank-N provider, Exference also tries one bounded
-evidence-directed construction. A direct provider constraint must match an
-explicit instance head whose arguments are closed ground monotypes, and that
-single match must determine the provider's complete leading binder prefix.
-Search can then emit a left-associated chain such as `provider @Int`, carrying
-the instantiated contexts through the ordinary obligation resolver. The
-ordinary implicit per-use branch remains available, and global bindings do not
-participate in this construction.
+Exference also tries one bounded visible construction for an instantiable
+scoped or retained global provider. A direct provider constraint can match an
+explicit instance head whose arguments are closed ground monotypes, with one
+head determining the complete leading binder prefix. Independently, a closed,
+context-free provider whose complete leading prefix is vacuous can select
+proper types already supplied by the checked query. That pool contains ground
+monotypes and complete closed context-free foralls observed below arrows or
+tuples. Search can therefore emit `provider @Int` or
+`provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
+binders and 32 combinations; the instance-head route stays monotype-only. The
+ordinary implicit per-use branch remains available and retains priority.
 
 The shared generated-term API represents this with
 `VisibleTypeApplication` and an abstract `VisibleTypeArgument`.
 `inferredVisibleTypeArgument` renders as `@_`;
-`specifiedVisibleTypeArgument` accepts only a structurally valid,
-variable-free, `forall`-free monotype. The independent Exference checker
+`specifiedVisibleTypeArgument` accepts a structurally valid, lexically closed
+type and alpha-normalizes quantified binders. The complete value is available
+through `visibleTypeArgumentClosedType`; `visibleTypeArgumentType` remains the
+monotype-only compatibility projection. The independent Exference checker
 consumes one flexible leading binder for each node and accepts either bounded
-form, but the search rule above emits only specified ground arguments. Open
-arguments such as `@a`, quantified type arguments, and general impredicative
-visible instantiation remain outside the API invariant. Djinn search gains no
-corresponding rule, and its historical `HExpr` projection rejects a shared
-visible-type-application node instead of erasing it.
+form. Open arguments such as `@a` and arbitrary caller-directed instantiation
+remain outside the API invariant. Djinn's bounded axiom routes can also retain
+the node for vacuous local or loaded binders; its historical `HExpr` projection
+rejects the shared node instead of erasing it.
 
 Candidate source containing such a node must be compiled with
 `TypeApplications`. Its enclosing signature will commonly also need
-`RankNTypes`; an ambiguous contextual provider such as
+`RankNTypes`; a quantified type argument generally needs `ImpredicativeTypes`,
+and an ambiguous contextual provider such as
 `forall a. C a => Token` may additionally need `AllowAmbiguousTypes`.
 
 Validated contexts do not contribute methods to proof search. This is the

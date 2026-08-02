@@ -76,9 +76,10 @@ maxInstantiationAxiomsPerScheme = 16
 
 -- | The generated axiom premises together with their reserved proof symbols.
 -- The symbols use Djinn's private @$@ namespace, so they cannot collide with
--- declared functions. Ordinary evidence is erased before code generation;
--- loaded evidence whose vacuous binders require a visible choice is retained
--- in 'instantiationVisibleApplications' until proof conversion.
+-- declared functions. Ordinary inferable evidence is erased before code
+-- generation. Query-local or loaded evidence whose vacuous binders require a
+-- visible choice is retained in 'instantiationVisibleApplications' until proof
+-- conversion.
 data InstantiationAxioms = InstantiationAxioms
     { instantiationAxiomPremises :: [(Symbol, Formula)]
     , instantiationAxiomSymbols :: Set.Set Symbol
@@ -88,8 +89,8 @@ data InstantiationAxioms = InstantiationAxioms
 
 -- One retained logical axiom plus the explicit type arguments required when
 -- its proof evidence cannot safely collapse to an implicitly instantiated
--- occurrence.  The latter is populated only for loaded schemes and only when
--- a leading binder is absent from the residual body.
+-- occurrence. The latter is populated only when a leading binder is absent
+-- from the residual body.
 data InstantiationAxiom = InstantiationAxiom
     { instantiationAxiomFormula :: Formula
     , instantiationAxiomVisibleArguments ::
@@ -155,15 +156,17 @@ schemeKey = SharedTypeAtom.alphaTypeKey . schemeSource
 -- uses.
 instantiationAxioms
     :: (SharedType.Type String -> Either String Formula)
+    -> (SharedType.Type String ->
+        Maybe SharedGenerated.VisibleTypeArgument)
     -> [String]
     -> [Formula]
     -> [Formula]
     -> InstantiationAxioms
-instantiationAxioms translator variableSpellings goalFormulas
+instantiationAxioms translator visibleArgument variableSpellings goalFormulas
         premiseFormulas =
     buildInstantiationAxioms "$djinn$instantiation$" translator
         False
-        (const Nothing)
+        visibleArgument
         (historicalCandidateTuples historicalCandidates wideCandidates)
         initialSchemes
   where

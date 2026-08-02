@@ -1014,6 +1014,7 @@ searchPreparedFormula options prepared target elaboratedGoal
         -- sealed premise scopes. No rendered atom text is parsed back.
         activeAxioms = instantiationAxioms
             (preparedEnvironmentSynthesisFormulaTranslator prepared)
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems formulaPlans ++
                 premiseSpellings)
@@ -1021,8 +1022,11 @@ searchPreparedFormula options prepared target elaboratedGoal
             (map snd activePremises)
         activeAxiomSymbols = instantiationAxiomSymbols activeAxioms
         activeAxiomPremises = instantiationAxiomPremises activeAxioms
+        activeVisibleApplications =
+            instantiationVisibleApplications activeAxioms
         targetAxioms = instantiationAxioms
             (preparedEnvironmentSynthesisFormulaTranslator prepared)
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems formulaPlans ++
                 premiseSpellings)
@@ -1031,6 +1035,7 @@ searchPreparedFormula options prepared target elaboratedGoal
         targetAxiomPremises = instantiationAxiomPremises targetAxioms
         activeNominalAxioms = instantiationAxioms
             (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems nominalFormulaPlans ++
                 nominalPremiseSpellings)
@@ -1040,8 +1045,11 @@ searchPreparedFormula options prepared target elaboratedGoal
             instantiationAxiomSymbols activeNominalAxioms
         activeNominalAxiomPremises =
             instantiationAxiomPremises activeNominalAxioms
+        activeNominalVisibleApplications =
+            instantiationVisibleApplications activeNominalAxioms
         targetNominalAxioms = instantiationAxioms
             (preparedEnvironmentNominalSynthesisFormulaTranslator prepared)
+            visibleArgument
             (goalVariables ++
                 polarizedFormulaPlanSkolems nominalFormulaPlans ++
                 nominalPremiseSpellings)
@@ -1126,7 +1134,7 @@ searchPreparedFormula options prepared target elaboratedGoal
             [ ( premises ++ activeAxiomPremises
               , targetAxiomPremises
               , activeAxiomSymbols
-              , Map.empty
+              , activeVisibleApplications
               , form
               , sound && null activeAxiomPremises
               )
@@ -1139,7 +1147,8 @@ searchPreparedFormula options prepared target elaboratedGoal
                     activeLoadedAxiomPremises
               , targetAxiomPremises ++ targetLoadedAxiomPremises
               , activeAxiomSymbols `Set.union` activeLoadedAxiomSymbols
-              , activeLoadedVisibleApplications
+              , activeVisibleApplications `Map.union`
+                    activeLoadedVisibleApplications
               , form
               , sound && null activeAxiomPremises &&
                     null activeLoadedSchemePremises
@@ -1162,7 +1171,7 @@ searchPreparedFormula options prepared target elaboratedGoal
             [ ( nominalPremises ++ activeNominalAxiomPremises
               , targetNominalAxiomPremises
               , activeNominalAxiomSymbols
-              , Map.empty
+              , activeNominalVisibleApplications
               , form
               , False
               )
@@ -1179,7 +1188,8 @@ searchPreparedFormula options prepared target elaboratedGoal
                         targetNominalLoadedAxiomPremises
                   , activeNominalAxiomSymbols `Set.union`
                         activeNominalLoadedAxiomSymbols
-                  , activeNominalLoadedVisibleApplications
+                  , activeNominalVisibleApplications `Map.union`
+                        activeNominalLoadedVisibleApplications
                   , form
                   , False
                   )

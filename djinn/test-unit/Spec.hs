@@ -1127,6 +1127,18 @@ testRankNTypeAtoms = do
         "(forall a. (a -> MonoToken) -> a -> MonoResult) -> "
         ++ "(MonoClosed -> MonoToken) -> MonoClosed -> MonoResult"
 
+    localVacuous <- runStableQuery closedSession
+        "instantiateVacuousHypothesisAtClosedRankN" $
+        "(forall selected. selected -> selected) -> "
+        ++ "(forall hidden. MonoToken) -> MonoToken"
+    localVacuousRendered <- renderStableCandidates localVacuous
+    assertBool
+        ("a query-local vacuous scheme lost its closed quantified choice: "
+            ++ show localVacuousRendered)
+        $ any
+            ("@(forall a0_0. a0_0 -> a0_0)" `isInfixOf`)
+            localVacuousRendered
+
     -- Loaded polymorphic values cross the same checked boundary.  The only
     -- possible inhabitant composes the three named globals, so this pins both
     -- closed-monotype discovery and post-check instantiation-evidence erasure.

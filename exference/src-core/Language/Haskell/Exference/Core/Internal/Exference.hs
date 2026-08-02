@@ -1612,12 +1612,17 @@ stateStep allocators multiPM allowConstrs h
                   instantiatedParameters
                   (unifyShared goalType instantiatedResult)
 
-          -- A separate evidence-directed branch selects only closed monotypes
-          -- already named by explicit instance heads. The ordinary branch
-          -- remains available and never gains unnecessary visible syntax.
+          -- A separate evidence-directed branch selects either closed
+          -- monotypes named by explicit instance heads or checked proper-type
+          -- candidates supplied by the query. This mirrors global-provider
+          -- instantiation for scoped values while the ordinary branch remains
+          -- available and never gains unnecessary visible syntax.
           visibleGroundInstantiation = do
+            candidates <- gets nodeVisibleTypeCandidates
             instantiation <- lift . chooseBranches
-              $ groundProviderInstantiations contxt scheme
+              $ L.nub
+              $ groundProviderInstantiations contxt scheme ++
+                candidateProviderInstantiations candidates scheme
             typeArguments <- maybe mzero pure
               $ traverse
                   (either (const Nothing) Just

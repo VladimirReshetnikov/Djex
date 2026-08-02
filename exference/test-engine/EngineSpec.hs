@@ -444,6 +444,22 @@ tests = testGroup "Exference private engine boundaries"
             , groundProviderConstraints = []
             }
         ]
+  , testCase "query candidates retain ambient rigids, not flexibles" $ do
+      let selected = TypeForall [1] []
+            $ TypeArrow (TypeVar 1) (TypeVar 1)
+          provider result = TypeForall [0] [] result
+          ambientRigid = TypeConstant 9
+          ambientFlexible = TypeVar 9
+      candidateProviderInstantiations [selected]
+          (provider ambientRigid) @?=
+        [ GroundProviderInstantiation
+            { groundProviderArguments = [selected]
+            , groundProviderType = ambientRigid
+            , groundProviderConstraints = []
+            }
+        ]
+      candidateProviderInstantiations [selected]
+          (provider ambientFlexible) @?= []
   , testCase "generic deconstructors need no persistent flexible IDs" $ do
       let integer = TypeCons $ name "Int"
           box argument = TypeApp (TypeCons $ name "Box") argument

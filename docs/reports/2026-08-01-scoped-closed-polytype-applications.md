@@ -6,14 +6,17 @@ A vacuous provider can need a visible type argument even when it is local:
 
 ```haskell
 use
-  :: (forall x. x -> x)
-  -> (forall hidden. Token)
-  -> Token
+  :: forall result.
+     (forall x. x -> x)
+  -> (forall hidden. result)
+  -> result
 use _ provider = provider @(forall x. x -> x)
 ```
 
-The provider's binder does not occur in `Token`, so result unification cannot
-recover the selected type. Djex already retained this evidence for bounded
+The provider's binder does not occur in `result`, so result unification cannot
+recover the selected type. The residual body may itself be an ambient query
+variable, as it is when Leant projects an opaque Lean atom. Djex already
+retained this evidence for bounded
 loaded Djinn schemes, and Exference already selected checked query candidates
 for retained globals. Query-local Djinn axioms erased the choice, while
 Exference's scoped-provider branch considered only explicit instance heads.
@@ -30,7 +33,8 @@ alpha-aware atom; neither backend invents or decomposes it.
 
 For the query-selected Exference route:
 
-- the provider is closed and has no direct context;
+- the provider has no free flexible variables and no direct context; ambient
+  rigids opened from the same query may remain in its body;
 - every selected leading binder is absent from the residual body;
 - at most four leading binders are selected;
 - each candidate is a ground monotype or a complete lexically closed,
@@ -75,6 +79,11 @@ terms keep their priority. Visible candidates are additive. The independent
 expression checker consumes the explicit argument again and verifies the
 result against the original provider annotation and query goal.
 
+Query preparation turns free goal variables into fixed ambient rigids. The
+visible branch deliberately preserves those constants while still rejecting a
+provider with unresolved free flexible variables; it therefore cannot become a
+second ordinary-inference path.
+
 ## Generated syntax
 
 `VisibleTypeArgument` stores a specified type structurally. Quantified binders
@@ -93,10 +102,11 @@ Coverage includes:
 
 - a Djinn query-local vacuous provider retaining the exact closed quantified
   argument;
-- an Exference scoped provider carrying that argument through independent
-  expression checking;
-- a shared facade fixture that obtains the local application from both engines
-  and compiles both generated definitions with GHC 9.12; and
+- Exference scoped providers with nominal and ambient-rigid result types
+  carrying that argument through independent expression checking;
+- a shared facade fixture that obtains the local application from both engines,
+  including the ambient `forall result` Exference case, and compiles both
+  generated definitions with GHC 9.12; and
 - the complete Djinn, Exference, private-engine, shared-synthesis, facade, and
   downstream API suites.
 

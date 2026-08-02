@@ -1391,15 +1391,15 @@ tests = testGroup "Djex facade"
         mkDefinitionName exferenceTargetName
       let providerVariable = FlexibleVariable 0
           identityVariable = FlexibleVariable 1
+          ambientVariable = FlexibleVariable 2
           identityType = TypeVariable identityVariable
           quantifiedIdentity = ForallType [identityVariable] [] $
             FunctionType identityType identityType
-          tokenType = TypeConstructor tokenName
-          providerType = ForallType [providerVariable] [] tokenType
+          ambientType = TypeVariable ambientVariable
+          providerType = ForallType [providerVariable] [] ambientType
           exferenceGoal = FunctionType quantifiedIdentity $
-            FunctionType providerType tokenType
-          exferenceDeclarations =
-            [AbstractTypeDeclaration () tokenName ProperTypeKind]
+            FunctionType providerType ambientType
+          exferenceDeclarations = []
       exferenceEnvironment <- expectRight
         (mkEnvironment exferenceDeclarations :: Either
           (EnvironmentError ExferenceTypeVariable) ExferenceEnvironment)
@@ -1437,9 +1437,9 @@ tests = testGroup "Djex facade"
             , "  (forall a. ScopedToken) -> ScopedToken"
             , djinnGenerated
             , ""
-            , "useExferenceScoped ::"
+            , "useExferenceScoped :: forall r."
             , "  (forall x. x -> x) ->"
-            , "  (forall a. ScopedToken) -> ScopedToken"
+            , "  (forall a. r) -> r"
             , exferenceGenerated
             ]
       withTemporaryHaskellModule fixture $ \sourcePath -> do

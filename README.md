@@ -239,10 +239,11 @@ obligations.
 For an instantiable scoped or retained global provider, a separate bounded
 branch can make the choice visible. A direct constraint may select its complete
 leading binder prefix from an explicit ground instance head, producing an
-application such as `provider @Int`. A closed, context-free provider whose
-leading binders are all vacuous may instead select checked proper types already
-supplied below arrows or tuples in the query. Those candidates include complete
-closed context-free foralls, so search can emit
+application such as `provider @Int`. A context-free provider with no free
+flexible variables whose leading binders are all vacuous may instead select
+checked proper types already supplied below arrows or tuples in the query. Its
+residual body may mention ambient rigids opened from that same query. The
+candidates include complete closed context-free foralls, so search can emit
 `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
 binders and 32 combinations. Ordinary implicit instantiation remains first,
 and the instance-head route remains monotype-only.

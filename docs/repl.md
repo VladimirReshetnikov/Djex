@@ -185,12 +185,13 @@ deliberately bounded rank-N rule families:
   supplies.
 - An instantiable scoped or retained global provider has an additional bounded
   visible branch. A matching explicit ground instance head may determine its
-  complete leading binder prefix and emit `provider @Int`. A closed,
-  context-free provider whose leading binders are fully vacuous may instead
-  select checked query proper types, including complete closed context-free
-  foralls below arrows or tuples, and emit
+  complete leading binder prefix and emit `provider @Int`. A context-free
+  provider with no free flexible variables whose leading binders are fully
+  vacuous may instead select checked query proper types, including complete
+  closed context-free foralls below arrows or tuples, and emit
   `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
-  binders and 32 combinations; the instance-head route remains monotype-only.
+  binders and 32 combinations. Ambient query rigids may remain in the provider
+  body; the instance-head route remains monotype-only.
   Ordinary implicit instantiation stays first. Shared generated syntax can
   also carry the inferred argument `@_`.
 

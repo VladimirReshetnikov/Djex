@@ -207,9 +207,11 @@ retain their exact given snapshot, preventing binderless or sibling evidence
 leakage. Exference may also instantiate a scoped provider's leading binders
 immediately before ordinary type unification. A separate visible branch keeps
 explicit-instance selection monotype-only, while a fully vacuous,
-context-free scoped or retained global provider may select complete closed
-context-free foralls from the checked query's proven proper-type positions.
-Both sources are bounded and the independent checker replays the choice.
+context-free scoped or retained global provider with no free flexible
+variables may select complete closed context-free foralls from the checked
+query's proven proper-type positions. Ambient query rigids may remain in the
+provider body; they are never solved by this branch. Both sources are bounded
+and the independent checker replays the choice.
 
 Djinn's historical query-local and appended loaded instantiation-axiom families
 now share visible-evidence retention: inferable choices erase, but a vacuous

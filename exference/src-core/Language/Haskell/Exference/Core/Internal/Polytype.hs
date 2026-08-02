@@ -275,7 +275,13 @@ candidateProviderInstantiations
   -> [GroundProviderInstantiation]
 candidateProviderInstantiations rawCandidates source =
   take 32 $ SharedCollection.distinctOn groundProviderArguments $ do
-    guard $ Set.null $ SharedType.freeVariables source
+    -- A query may open its free proper-type variables into ambient rigids
+    -- before this scoped provider is considered. Those constants are fixed by
+    -- the query's rigid-instantiation plan and remain untouched by the visible
+    -- substitution below. Reject only unresolved flexible variables: admitting
+    -- one would let this evidence-directed branch participate in ordinary
+    -- inference instead of selecting a closed caller-supplied argument.
+    guard $ Set.null $ freeVars source
     normalized <- either (const []) (pure . fst)
       $ alphaNormalizeForalls IntSet.empty source
     let (binders, constraints, body) =

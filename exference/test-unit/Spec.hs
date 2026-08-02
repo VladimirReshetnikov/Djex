@@ -4159,61 +4159,60 @@ tests = testGroup "Exference"
           checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
             goal [] expression @?= Right ()
       , testCase "scoped vacuous providers instantiate at query polytypes" $ do
-          let token = TypeCons $ name "Token"
-              quantified = TypeForall [1] []
+          let quantified = TypeForall [1] []
                 $ TypeArrow (TypeVar 1) (TypeVar 1)
-              provider = TypeForall [0] [] token
-              goal = TypeArrow quantified $ TypeArrow provider token
-              input = identityInput
-                { input_goalType = goal
-                , input_maxSteps = 300
-                }
           argument <- expectRight
             $ Generated.specifiedVisibleTypeArgument quantified
-          candidates <- expectRight $ findExpressionsEither input
-          let containsExplicit providerBinder expression = case expression of
-                ExpVar _ _ -> False
-                ExpName _ -> False
-                ExpLambda _ _ body -> containsExplicit providerBinder body
-                ExpApply function actual ->
-                  containsExplicit providerBinder function
-                    || containsExplicit providerBinder actual
-                ExpTypeApply function actualArgument ->
-                  case function of
-                    ExpVar returned annotation ->
-                      providerBinder == returned
-                        && annotation == provider
-                        && actualArgument == argument
-                    _ -> containsExplicit providerBinder function
-                ExpHole _ -> False
-                ExpLetMatch _ _ binding body ->
-                  containsExplicit providerBinder binding
-                    || containsExplicit providerBinder body
-                ExpLet _ _ binding body ->
-                  containsExplicit providerBinder binding
-                    || containsExplicit providerBinder body
-                ExpCaseMatch scrutinee alternatives ->
-                  containsExplicit providerBinder scrutinee
-                    || any
-                      (\(_, _, body) -> containsExplicit providerBinder body)
-                      alternatives
-              isExplicit (expression, residual, _) =
-                null residual && case expression of
-                  ExpLambda _ declaredQuantified
-                      (ExpLambda providerBinder declaredProvider body) ->
-                    declaredQuantified == quantified
-                      && declaredProvider == provider
-                      && containsExplicit providerBinder body
-                  _ -> False
-          (expression, _, _) <- maybe
-            (fail $ "a scoped vacuous provider lost its query polytype:\n"
-              ++ unlines
-                [ showExpression candidate
-                | (candidate, _, _) <- take 20 candidates
-                ]) pure
-            $ find isExplicit candidates
-          checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
-            goal [] expression @?= Right ()
+          forM_
+              [ ("nominal result", TypeCons $ name "Token")
+              , ("ambient query result", TypeVar 9)
+              ] $ \(label, token) -> do
+            let provider = TypeForall [0] [] token
+                goal = TypeArrow quantified $ TypeArrow provider token
+                input = identityInput
+                  { input_goalType = goal
+                  , input_maxSteps = 300
+                  }
+            candidates <- expectRight $ findExpressionsEither input
+            let containsExplicit providerBinder expression = case expression of
+                  ExpVar _ _ -> False
+                  ExpName _ -> False
+                  ExpLambda _ _ body -> containsExplicit providerBinder body
+                  ExpApply function actual ->
+                    containsExplicit providerBinder function
+                      || containsExplicit providerBinder actual
+                  ExpTypeApply function actualArgument ->
+                    case function of
+                      ExpVar returned _ ->
+                        providerBinder == returned
+                          && actualArgument == argument
+                      _ -> containsExplicit providerBinder function
+                  ExpHole _ -> False
+                  ExpLetMatch _ _ binding body ->
+                    containsExplicit providerBinder binding
+                      || containsExplicit providerBinder body
+                  ExpLet _ _ binding body ->
+                    containsExplicit providerBinder binding
+                      || containsExplicit providerBinder body
+                  ExpCaseMatch scrutinee alternatives ->
+                    containsExplicit providerBinder scrutinee
+                      || any
+                        (\(_, _, body) -> containsExplicit providerBinder body)
+                        alternatives
+                isExplicit (expression, residual, _) =
+                  null residual && case expression of
+                    ExpLambda _ _ (ExpLambda providerBinder _ body) ->
+                      containsExplicit providerBinder body
+                    _ -> False
+            (expression, _, _) <- maybe
+              (fail $ label ++ " provider lost its query polytype:\n"
+                ++ unlines
+                  [ showExpression candidate
+                  | (candidate, _, _) <- take 20 candidates
+                  ]) pure
+              $ find isExplicit candidates
+            checkExpression (mkQueryClassEnv emptyClassEnv []) [] []
+              goal [] expression @?= Right ()
       , testCase "bare forall providers instantiate flexible occurrences" $ do
           let unit = TypeTuple Boxed []
               vacuousUnit = TypeForall [] [] unit

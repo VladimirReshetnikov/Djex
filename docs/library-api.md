@@ -370,11 +370,12 @@ provider chain and turns its direct contexts into proof obligations.
 Exference also tries one bounded visible construction for an instantiable
 scoped or retained global provider. A direct provider constraint can match an
 explicit instance head whose arguments are closed ground monotypes, with one
-head determining the complete leading binder prefix. Independently, a closed,
-context-free provider whose complete leading prefix is vacuous can select
-proper types already supplied by the checked query. That pool contains ground
-monotypes and complete closed context-free foralls observed below arrows or
-tuples. Search can therefore emit `provider @Int` or
+head determining the complete leading binder prefix. Independently, a
+context-free provider with no free flexible variables whose complete leading
+prefix is vacuous can select proper types already supplied by the checked
+query. Its residual body may retain ambient rigids opened by that query. The
+candidate pool contains ground monotypes and complete closed context-free
+foralls observed below arrows or tuples. Search can therefore emit `provider @Int` or
 `provider @(forall a0_0. a0_0 -> a0_0)`. The query route retains at most four
 binders and 32 combinations; the instance-head route stays monotype-only. The
 ordinary implicit per-use branch remains available and retains priority.

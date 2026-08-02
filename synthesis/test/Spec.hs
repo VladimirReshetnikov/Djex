@@ -4099,11 +4099,13 @@ generatedTests = testGroup "generated syntax"
             (SharedType.TypeApplication
               (SharedType.TypeConstructor functionName) integer)
             boolean
+          vacuousSource = SharedType.ForallType [] [] source
           malformed = SharedType.TupleType Boxed [integer]
           quantified = SharedType.ForallType ["a"] []
             $ SharedType.FunctionType
                 (SharedType.TypeVariable "a")
                 (SharedType.TypeVariable "a")
+          vacuousQuantified = SharedType.ForallType [] [] quantified
           renamed = SharedType.ForallType ["renamed"] []
             $ SharedType.FunctionType
                 (SharedType.TypeVariable "renamed")
@@ -4138,6 +4140,13 @@ generatedTests = testGroup "generated syntax"
       specifiedQuantified <- case specifiedVisibleTypeArgument quantified of
         Left failure -> assertFailure $ show failure
         Right argument -> pure argument
+      specifiedVacuous <- case specifiedVisibleTypeArgument vacuousSource of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
+      specifiedVacuousQuantified <- case
+          specifiedVisibleTypeArgument vacuousQuantified of
+        Left failure -> assertFailure $ show failure
+        Right argument -> pure argument
       specifiedRenamed <- case specifiedVisibleTypeArgument renamed of
         Left failure -> assertFailure $ show failure
         Right argument -> pure argument
@@ -4147,6 +4156,8 @@ generatedTests = testGroup "generated syntax"
       isInferredVisibleTypeArgument inferredVisibleTypeArgument @?= True
       isInferredVisibleTypeArgument specified @?= False
       isInferredVisibleTypeArgument specifiedQuantified @?= False
+      specifiedVacuous @?= specified
+      specifiedVacuousQuantified @?= specifiedQuantified
       visibleTypeArgumentType inferredVisibleTypeArgument @?= Nothing
       (fmap (absurd :: Void -> String) <$>
           visibleTypeArgumentType specified) @?=

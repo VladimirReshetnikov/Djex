@@ -220,13 +220,40 @@ specifiedVisibleTypeArgument source = do
   canonical <- Bifunctor.first InvalidVisibleTypeArgument
     $ SharedType.normalizeType source
   SpecifiedVisibleTypeArgument <$> traverse closeVariable
-    (Alpha.alphaNormalizeTypeWith Alpha.PositionalBinderSlots canonical)
+    (Alpha.alphaNormalizeTypeWith Alpha.PositionalBinderSlots
+      $ eraseVacuousVisibleForalls canonical)
  where
   closeVariable variable = case variable of
     Alpha.AlphaBoundVariable scope slot ->
       Right $ ClosedVisibleTypeVariable scope slot
     Alpha.AlphaFreeVariable free ->
       Left $ VisibleTypeArgumentVariable free
+
+-- A binderless, context-free forall is semantically and textually invisible.
+-- Erase it before allocating lexical scope numbers so equivalent source trees
+-- compare and render identically, including when the no-op wrapper surrounds a
+-- later genuine binder.
+eraseVacuousVisibleForalls
+  :: SharedType.Type variable
+  -> SharedType.Type variable
+eraseVacuousVisibleForalls source = case source of
+  SharedType.TypeVariable{} -> source
+  SharedType.TypeConstructor{} -> source
+  SharedType.TypeApplication function argument ->
+    SharedType.TypeApplication
+      (eraseVacuousVisibleForalls function)
+      (eraseVacuousVisibleForalls argument)
+  SharedType.FunctionType parameter result ->
+    SharedType.FunctionType
+      (eraseVacuousVisibleForalls parameter)
+      (eraseVacuousVisibleForalls result)
+  SharedType.TupleType boxity elements -> SharedType.TupleType boxity
+    $ map eraseVacuousVisibleForalls elements
+  SharedType.ForallType [] [] body -> eraseVacuousVisibleForalls body
+  SharedType.ForallType variables constraints body ->
+    SharedType.ForallType variables
+      (map (fmap eraseVacuousVisibleForalls) constraints)
+      (eraseVacuousVisibleForalls body)
 
 -- | Whether this argument is the inferred placeholder @\@_@.
 --

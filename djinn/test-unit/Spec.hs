@@ -1342,7 +1342,7 @@ testComplementaryRankNPlans = do
     -- budget to stop before the final direct construction; resetting the
     -- budget for that appended plan would incorrectly admit the construction.
     dualBudgeted <- run
-        unsortedOptions {optionBudget = Just 150}
+        unsortedOptions {optionBudget = Just 60}
         "budgetDualFrontier" dualPlanEnvironment dualGoal
     dualBudgetedClauses <- realizedClauses
         "choice-bounded dual-frontier plans" dualBudgeted

@@ -953,7 +953,9 @@ sealPreparedEnvironment expansion = do
             map translatedFormula (pairOpaqueFormulaPlans plans) ++
             map translatedFormula (pairOpenFormulaPlans plans) ++
             map translatedFormula (tripleOpaqueFormulaPlans plans) ++
-            map translatedFormula (tripleOpenFormulaPlans plans)
+            map translatedFormula (tripleOpenFormulaPlans plans) ++
+            map translatedFormula (quadrupleOpaqueFormulaPlans plans) ++
+            map translatedFormula (quadrupleOpenFormulaPlans plans)
         ]
     primaryPremise variants = case variants of
         primary : _ -> [primary]

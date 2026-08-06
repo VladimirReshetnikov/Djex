@@ -28,6 +28,8 @@ module Djinn.Internal.TypeFormula
     , pairOpenFormulaPlans
     , tripleOpaqueFormulaPlans
     , tripleOpenFormulaPlans
+    , quadrupleOpaqueFormulaPlans
+    , quadrupleOpenFormulaPlans
     , polarizedFormulaPlanSkolems
     , prepareFormulaCompiler
     , prepareFormulaCompilerWithRecursiveData
@@ -189,8 +191,9 @@ data FormulaTranslation = FormulaTranslation
 -- | One nonempty, deliberately bounded family of coherent translations.  The
 -- primary plan opens every supported positive forall.  The historical exact
 -- plan opens none; the first two local frontiers differ from either extreme at
--- one independently reachable occurrence.  Quadratic and cubic tail frontiers
--- make the corresponding choice at unordered pairs and triples of sites.
+-- one independently reachable occurrence.  Quadratic, cubic, and quartic tail
+-- frontiers make the corresponding choice at unordered pairs, triples, and
+-- quadruples of sites.
 -- Keeping the categories explicit lets goal search and prepared-premise
 -- caching preserve their established order without reconstructing it from an
 -- unlabelled list.
@@ -203,6 +206,8 @@ data PolarizedFormulaPlans = PolarizedFormulaPlans
     , pairOpenFormulaPlans :: [FormulaTranslation]
     , tripleOpaqueFormulaPlans :: [FormulaTranslation]
     , tripleOpenFormulaPlans :: [FormulaTranslation]
+    , quadrupleOpaqueFormulaPlans :: [FormulaTranslation]
+    , quadrupleOpenFormulaPlans :: [FormulaTranslation]
     }
     deriving (Eq, Show)
 
@@ -216,7 +221,9 @@ polarizedFormulaPlanSkolems plans = SharedCollection.distinctOn id $
     concatMap translationIntroducedSkolems
         (singleOpaqueFormulaPlans plans ++ singleOpenFormulaPlans plans ++
             pairOpaqueFormulaPlans plans ++ pairOpenFormulaPlans plans ++
-            tripleOpaqueFormulaPlans plans ++ tripleOpenFormulaPlans plans)
+            tripleOpaqueFormulaPlans plans ++ tripleOpenFormulaPlans plans ++
+            quadrupleOpaqueFormulaPlans plans ++
+            quadrupleOpenFormulaPlans plans)
 
 -- A definition origin plus the reverse source path is stable across alias
 -- expansion, duplicated arguments, datatype fields, and reopened forall
@@ -351,10 +358,10 @@ compileFormula view prepared source = do
 -- Besides the two historical extremes, retain both singleton frontiers: one
 -- opaque occurrence among opened siblings, and one opened occurrence (plus
 -- any enclosing forall chain needed to reach it) among opaque siblings.
--- Pairwise and triple tail frontiers make the same choices at unordered pairs
--- and triples. This is exhaustive for seven independent sites without
--- constructing a power set; its additional plan count is cubic rather than
--- exponential.
+-- Pairwise, triple, and quadruple tail frontiers make the same choices at
+-- unordered pairs, triples, and quadruples. This is exhaustive for nine
+-- independent sites without constructing a power set; its additional plan
+-- count is quartic rather than exponential.
 -- The numeric namespace must be distinct for independently compiled goals and
 -- premises so their locally introduced skolems cannot accidentally meet.
 compilePolarizedFormulaPlans
@@ -381,14 +388,16 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
     singleOpaque <- mapM
         (compileSelection expanded . Set.singleton) sites
     singleOpen <- if atLeast 3 sites then mapM
-            (compileSelection expanded . opaqueExceptReachable allSites) sites
+            (compileSelection expanded . opaqueExceptTargets allSites . (: []))
+            sites
         else Right []
     let sitePairs = unorderedPairs sites
     pairOpaque <- if atLeast 4 sites then mapM
             (compileSelection expanded . Set.fromList . pairMembers) sitePairs
         else Right []
     pairOpen <- if atLeast 5 sites then mapM
-            (compileSelection expanded . opaqueExceptPair allSites) sitePairs
+            (compileSelection expanded . opaqueExceptTargets allSites .
+                pairMembers) sitePairs
         else Right []
     let siteTriples = unorderedTriples sites
     tripleOpaque <- if atLeast 6 sites then mapM
@@ -396,8 +405,19 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
             siteTriples
         else Right []
     tripleOpen <- if atLeast 7 sites then mapM
-            (compileSelection expanded . opaqueExceptTriple allSites)
+            (compileSelection expanded . opaqueExceptTargets allSites .
+                tripleMembers)
             siteTriples
+        else Right []
+    let siteQuadruples = unorderedQuadruples sites
+    quadrupleOpaque <- if atLeast 8 sites then mapM
+            (compileSelection expanded . Set.fromList . quadrupleMembers)
+            siteQuadruples
+        else Right []
+    quadrupleOpen <- if atLeast 9 sites then mapM
+            (compileSelection expanded . opaqueExceptTargets allSites .
+                quadrupleMembers)
+            siteQuadruples
         else Right []
     return PolarizedFormulaPlans
         { primaryFormulaPlan = primary
@@ -408,41 +428,27 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         , pairOpenFormulaPlans = pairOpen
         , tripleOpaqueFormulaPlans = tripleOpaque
         , tripleOpenFormulaPlans = tripleOpen
+        , quadrupleOpaqueFormulaPlans = quadrupleOpaque
+        , quadrupleOpenFormulaPlans = quadrupleOpen
         }
   where
     compileSelection expanded opaqueSites = lowerExpansionType
         (PolarizedForalls namespace polarity openedView opaqueSites)
         prepared emptyExpansionPath [] expanded
 
-    -- Opening a nested target necessarily opens its enclosing forall chain.
-    -- Every unrelated site remains opaque, so this is the dual of selecting
-    -- one opaque site in the fully opened plan rather than an accidental exact
-    -- plan whenever the chosen occurrence is nested.
-    opaqueExceptReachable sites target = Set.filter
-        (not . (`forallSiteLeadsTo` target)) sites
-
-    -- Opening either nested target necessarily opens the union of both
-    -- ancestor chains.  Unrelated occurrences remain opaque, making this the
-    -- exact dual of selecting two opaque sites in the fully opened plan.
-    opaqueExceptPair sites (firstSite, secondSite) = Set.filter
-        (\site -> not
-            (site `forallSiteLeadsTo` firstSite ||
-                site `forallSiteLeadsTo` secondSite))
-        sites
+    -- Opening nested targets necessarily opens the union of every enclosing
+    -- forall chain. Every unrelated occurrence remains opaque, making this
+    -- the exact dual of selecting those sites in the fully opened plan.
+    opaqueExceptTargets sites targets = Set.filter
+        (\site -> not $ any (site `forallSiteLeadsTo`) targets) sites
 
     pairMembers (firstSite, secondSite) = [firstSite, secondSite]
 
-    -- The triple dual follows the same ancestry rule as the singleton and
-    -- pair frontiers: reaching a nested target opens every enclosing forall.
-    opaqueExceptTriple sites (firstSite, secondSite, thirdSite) = Set.filter
-        (\site -> not
-            (site `forallSiteLeadsTo` firstSite ||
-                site `forallSiteLeadsTo` secondSite ||
-                site `forallSiteLeadsTo` thirdSite))
-        sites
-
     tripleMembers (firstSite, secondSite, thirdSite) =
         [firstSite, secondSite, thirdSite]
+
+    quadrupleMembers (firstSite, secondSite, thirdSite, fourthSite) =
+        [firstSite, secondSite, thirdSite, fourthSite]
 
     unorderedPairs [] = []
     unorderedPairs (firstSite : remaining) =
@@ -453,6 +459,12 @@ compilePolarizedFormulaPlans namespace polarity openedView view prepared
         [ (firstSite, secondSite, thirdSite)
         | (secondSite, thirdSite) <- unorderedPairs remaining
         ] ++ unorderedTriples remaining
+
+    unorderedQuadruples [] = []
+    unorderedQuadruples (firstSite : remaining) =
+        [ (firstSite, secondSite, thirdSite, fourthSite)
+        | (secondSite, thirdSite, fourthSite) <- unorderedTriples remaining
+        ] ++ unorderedQuadruples remaining
 
     atLeast :: Int -> [element] -> Bool
     atLeast count = go count

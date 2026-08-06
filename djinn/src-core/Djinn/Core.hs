@@ -115,6 +115,8 @@ import Djinn.Internal.TypeFormula
     , pairOpenFormulaPlans
     , tripleOpaqueFormulaPlans
     , tripleOpenFormulaPlans
+    , quadrupleOpaqueFormulaPlans
+    , quadrupleOpenFormulaPlans
     , singleOpaqueFormulaPlans
     , singleOpenFormulaPlans
     , translatedFormula
@@ -1368,7 +1370,11 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
                 map translatedFormula
                     (tripleOpaqueFormulaPlans formulaPlans) ++
                 map translatedFormula
-                    (tripleOpenFormulaPlans formulaPlans)
+                    (tripleOpenFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (quadrupleOpaqueFormulaPlans formulaPlans) ++
+                map translatedFormula
+                    (quadrupleOpenFormulaPlans formulaPlans)
         rawPlans =
             (translatedFormula primary, primarySound) :
             [ (formula, False)
@@ -1868,13 +1874,15 @@ searchPreparedFormula options prepared providerCandidates providerAssignments
         map translatedFormula (pairOpaqueFormulaPlans plans) ++
         map translatedFormula (pairOpenFormulaPlans plans) ++
         map translatedFormula (tripleOpaqueFormulaPlans plans) ++
-        map translatedFormula (tripleOpenFormulaPlans plans)
+        map translatedFormula (tripleOpenFormulaPlans plans) ++
+        map translatedFormula (quadrupleOpaqueFormulaPlans plans) ++
+        map translatedFormula (quadrupleOpenFormulaPlans plans)
 
 -- Goal plans retain their historical linear prefix: the fully opened
 -- translation, the exact opaque fallback, one independently opaque positive
 -- forall at a time, and one independently opened branch among opaque siblings.
--- Pairwise opaque and pairwise open choices form a deterministic quadratic
--- tail. Global premises expose the same sound views simultaneously under
+-- Pairwise, triple, and quadruple choices form deterministic polynomial tails.
+-- Global premises expose the same sound views simultaneously under
 -- distinct internal proof identities, so one term may use different views at
 -- different occurrences of a reusable source function. Every proof remains
 -- checked against the exact goal formula that produced it.

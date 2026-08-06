@@ -2365,12 +2365,11 @@ testRankNTypeAtoms = do
         ++ "(forall outer. ((forall e. e -> e), "
         ++ "(forall f. f -> f), (forall g. g -> g))))"
 
-    -- Eight independent sites retain one deliberately omitted central layer.
-    -- Four exact transports plus four structural identities require a flat
-    -- 4/4 selection, so the cubic family must remain inconclusive rather than
-    -- claiming a refutation.
-    quarticOpacityGap <- runStableQuery stableSession
-        "eightSiteCentralOpacityRankNGap"
+    -- The quartic frontier closes the next balanced gap. Five-binder
+    -- hypotheses remain beyond the instantiation-axiom bound, so four exact
+    -- transports beside four structural identities specifically require a
+    -- flat 4/4 selection.
+    runStableIdentity stableSession "eightSiteCentralOpacityRankNQuartic"
         $ "(forall a b c d e. (a, b, c, d, e)) -> "
         ++ "(forall a b c d e. (a, b, c, d, e) -> q) -> "
         ++ "(forall a b c d e. (a, b, c, d, e) -> r) -> "
@@ -2381,11 +2380,68 @@ testRankNTypeAtoms = do
         ++ "(forall v w x y u. (v, w, x, y, u) -> z), "
         ++ "(forall e. e -> e), (forall f. f -> f), "
         ++ "(forall g. g -> g), (forall h. h -> h))"
-    assertEqual "the cubic frontier unexpectedly covered a flat 4/4 subset"
+
+    -- At nine sites the dual quartic frontier is independently necessary:
+    -- five schemes remain exact while exactly four identities open. Together
+    -- with the earlier frontiers this completes every independent choice
+    -- subset through nine sites.
+    runStableIdentity stableSession "nineSiteQuarticOpenRankN"
+        $ "(forall a b c d e. (a, b, c, d, e)) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> q) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> r) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> z) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> m) -> "
+        ++ "((forall v w x y u. (v, w, x, y, u)), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> q), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> r), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> z), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> m), "
+        ++ "(forall e. e -> e), (forall f. f -> f), "
+        ++ "(forall g. g -> g), (forall h. h -> h))"
+
+    -- Selecting four nested targets opens their shared enclosing forall as
+    -- well. This reaches a five-open/five-opaque formula at ten recorded
+    -- sites while leaving an independent 5/5 selection outside the quartic
+    -- bound.
+    runStableIdentity stableSession "nestedQuarticRankNFrontier"
+        $ "(forall a b c d e. (a, b, c, d, e)) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> q) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> r) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> z) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> m) -> "
+        ++ "((forall v w x y u. (v, w, x, y, u)), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> q), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> r), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> z), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> m), "
+        ++ "(forall outer. ((forall e. e -> e), "
+        ++ "(forall f. f -> f), (forall g. g -> g), "
+        ++ "(forall h. h -> h))))"
+
+    -- Ten independent sites expose the next omitted central layer. Five exact
+    -- transports plus five structural identities need a flat 5/5 selection,
+    -- so bounded search must remain inconclusive rather than claim a
+    -- refutation.
+    quinticOpacityGap <- runStableQuery stableSession
+        "tenSiteCentralOpacityRankNGap"
+        $ "(forall a b c d e. (a, b, c, d, e)) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> q) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> r) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> z) -> "
+        ++ "(forall a b c d e. (a, b, c, d, e) -> m) -> "
+        ++ "((forall v w x y u. (v, w, x, y, u)), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> q), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> r), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> z), "
+        ++ "(forall v w x y u. (v, w, x, y, u) -> m), "
+        ++ "(forall e. e -> e), (forall f. f -> f), "
+        ++ "(forall g. g -> g), (forall h. h -> h), "
+        ++ "(forall i. i -> i))"
+    assertEqual "the quartic frontier unexpectedly covered a flat 5/5 subset"
         [] $ SharedSearch.batchCandidates
-            $ SharedQuery.resultSearch quarticOpacityGap
-    assertEqual "a bounded quartic-subset gap was falsely refuted"
-        SharedQuery.NoEvidence $ SharedQuery.resultEvidence quarticOpacityGap
+            $ SharedQuery.resultSearch quinticOpacityGap
+    assertEqual "a bounded quintic-subset gap was falsely refuted"
+        SharedQuery.NoEvidence $ SharedQuery.resultEvidence quinticOpacityGap
 
     -- Prepared global premises cache the same pairwise views as a goal.  The
     -- only route to the abstract result is to call this loaded consumer with
@@ -2441,6 +2497,36 @@ testRankNTypeAtoms = do
         outcome -> fail $ "triple prepared premise failed: " ++ show outcome
     assertBool "the triple prepared premise was not used"
         $ any ("consumeTriple" `isInfixOf`) tripleClauses
+
+    -- Prepared global premises retain quartic views too. Four exact
+    -- five-binder values and four structurally introduced identities make the
+    -- loaded consumer unavailable through every earlier premise variant.
+    let wideConsumerZ =
+            "(forall s t u v w. (s, t, u, v, w) -> QuarticPremiseZ)"
+        quarticArgument = "(" ++ wideValue ++ ", " ++ wideConsumer ++ ", "
+            ++ wideConsumerR ++ ", " ++ wideConsumerZ
+            ++ ", (forall e. e -> e), (forall f. f -> f), "
+            ++ "(forall g. g -> g), (forall h. h -> h))"
+    quarticConsumer <- expectRight $ parseHType
+        $ quarticArgument ++ " -> QuarticPremiseResult"
+    quarticGoal <- expectRight $ parseHType
+        $ wideValue ++ " -> " ++ wideConsumer ++ " -> " ++ wideConsumerR
+        ++ " -> " ++ wideConsumerZ ++ " -> QuarticPremiseResult"
+    quarticEnvironment <- expectRight $ do
+        withQ <- declare (AbstractType "PairwisePremiseQ" KStar)
+            standardEnvironment
+        withR <- declare (AbstractType "TriplePremiseR" KStar) withQ
+        withZ <- declare (AbstractType "QuarticPremiseZ" KStar) withR
+        withResult <- declare
+            (AbstractType "QuarticPremiseResult" KStar) withZ
+        declare (Function "consumeQuartic" quarticConsumer) withResult
+    quarticReport <- expectRight $ inhabit defaultQueryOptions
+        quarticEnvironment [] "useQuarticPreparedPremise" quarticGoal
+    quarticClauses <- case reportOutcome quarticReport of
+        Realized clauses -> pure clauses
+        outcome -> fail $ "quartic prepared premise failed: " ++ show outcome
+    assertBool "the quartic prepared premise was not used"
+        $ any ("consumeQuartic" `isInfixOf`) quarticClauses
 
     -- Goal and premise translation are separate skolem scopes. Reusing the
     -- same internal proposition for both would admit the ill-typed proof

@@ -2432,6 +2432,72 @@ tests = testGroup "Djex facade"
             ++ "\nDjinn generated:\n" ++ djinnGenerated
             ++ "\nExference generated:\n" ++ exferenceGenerated)
           ExitSuccess exitCode
+  , testCase "compile the quartic rank-N frontier through the Djinn facade" $ do
+      let source =
+            "(forall a b c d e. q) -> "
+            ++ "(forall a b c d e. r) -> "
+            ++ "(forall a b c d e. z) -> "
+            ++ "(forall a b c d e. m) -> "
+            ++ "((forall v w x y u. q), "
+            ++ "(forall v w x y u. r), "
+            ++ "(forall v w x y u. z), "
+            ++ "(forall v w x y u. m), "
+            ++ "(forall e. e -> e), (forall f. f -> f), "
+            ++ "(forall g. g -> g), (forall h. h -> h))"
+          signature target = unlines
+            [ target ++ " :: forall q r z m."
+            , "  (forall a b c d e. q) ->"
+            , "  (forall a b c d e. r) ->"
+            , "  (forall a b c d e. z) ->"
+            , "  (forall a b c d e. m) ->"
+            , "  ( (forall v w x y u. q)"
+            , "  , (forall v w x y u. r)"
+            , "  , (forall v w x y u. z)"
+            , "  , (forall v w x y u. m)"
+            , "  , (forall e. e -> e)"
+            , "  , (forall f. f -> f)"
+            , "  , (forall g. g -> g)"
+            , "  , (forall h. h -> h)"
+            , "  )"
+            ]
+
+      djinnSession <- sealDjinnEnvironment standardEnvironment
+      djinnTarget <- expectRight $ mkIdentifier "quarticDjinn"
+      djinnGoal <- expectRight $ parseHType source
+      djinnRequest <- sharedDjinnRequest
+        djinnTarget [] defaultQueryOptions djinnGoal
+      djinnResult <- expectRight $ runDjinnQuery djinnSession djinnRequest
+      resultEvidence djinnResult @?= ValidatedCandidates
+      djinnCandidate <- case batchCandidates $ resultSearch djinnResult of
+        candidate : _ -> pure candidate
+        [] -> fail "Djinn returned quartic candidate evidence without a term"
+      candidateResidualConstraints djinnCandidate @?= []
+      djinnGenerated <- expectRight $
+        renderDjinnCandidateDefinition Unqualified djinnCandidate
+
+      let fixture = unlines
+            [ "module QuarticRankNFixture where"
+            , ""
+            , signature "quarticDjinn"
+            , djinnGenerated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected the public quartic rank-N candidate\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nDjinn generated:\n" ++ djinnGenerated)
+          ExitSuccess exitCode
   , testCase "do not guess visible arguments for non-vacuous providers" $ do
       seedName <- expectRight $ mkIdentifier "Seed"
       tokenName <- expectRight $ mkIdentifier "Token"

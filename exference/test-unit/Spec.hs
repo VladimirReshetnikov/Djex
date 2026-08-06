@@ -3917,6 +3917,52 @@ tests = testGroup "Exference"
             @?= [outerConstraint, nestedConstraint]
           validateExferenceInput input { input_goalType = constrainedGoal }
             @?= Right ()
+      , testCase
+          "bounded search checks four forwarded and four introduced schemes" $
+          do
+            let forallChain binders body =
+                  foldr (\binder -> TypeForall [binder] []) body binders
+                identity binder = TypeForall [binder] []
+                  $ TypeArrow (TypeVar binder) (TypeVar binder)
+                nestedProducts = foldr1
+                  (\left right -> TypeTuple Boxed [left, right])
+                inputs =
+                  [ forallChain [10 .. 14] $ TypeVar 0
+                  , forallChain [15 .. 19] $ TypeVar 1
+                  , forallChain [20 .. 24] $ TypeVar 2
+                  , forallChain [25 .. 29] $ TypeVar 3
+                  ]
+                output = nestedProducts
+                  ( [ forallChain [30 .. 34] $ TypeVar 0
+                    , forallChain [35 .. 39] $ TypeVar 1
+                    , forallChain [40 .. 44] $ TypeVar 2
+                    , forallChain [45 .. 49] $ TypeVar 3
+                    ]
+                    ++ map identity [50 .. 53]
+                  )
+                goal = TypeForall [0, 1, 2, 3] []
+                  $ foldr TypeArrow output inputs
+                pairName = validTupleName 2
+                pairResult = TypeTuple Boxed [TypeVar 100, TypeVar 101]
+                pairBinding = FunctionBinding pairResult pairName 0 []
+                  [TypeVar 100, TypeVar 101]
+                input = identityInput
+                  { input_goalType = goal
+                  , input_envFuncs = [pairBinding]
+                  , input_maxSteps = 4096
+                  , input_maxQueueSize = Just 1024
+                  }
+            (expression, residual, statistics) <- maybe
+              (fail "bounded quartic rank-N search produced no candidate")
+              pure
+              $ findOneExpression input
+            residual @?= []
+            assertBool
+              ("direct quartic candidate took "
+                ++ show (exference_steps statistics) ++ " steps")
+              (exference_steps statistics <= 512)
+            checkExpression (mkQueryClassEnv emptyClassEnv []) [pairBinding] []
+              goal [] expression @?= Right ()
       , testCase "nested contextual forall givens discharge body obligations" $ do
           let className = name "C"
               evidence ty = HsConstraint className [ty]
@@ -9585,6 +9631,31 @@ tests = testGroup "Exference"
           checkExpression classes [] []
             (TypeArrow outer identityScheme) [] direct @?= Right ()
           checkExpression classes [consume] [] result [] applied @?= Right ()
+      , testCase
+          "propagates quantified tuple results through application spines" $ do
+          staticClasses <- expectRight $ mkStaticClassEnv [] []
+          let identity binder = TypeForall [binder] []
+                $ TypeArrow (TypeVar binder) (TypeVar binder)
+              expected = TypeTuple Boxed [identity 2, identity 3]
+              pairName = validTupleName 2
+              pairResult = TypeTuple Boxed [TypeVar 10, TypeVar 11]
+              pairBinding = FunctionBinding pairResult pairName 0 []
+                [TypeVar 10, TypeVar 11]
+              rigidIdentity rigid local =
+                ExpLambda local (TypeConstant rigid)
+                  $ ExpVar local $ TypeConstant rigid
+              pair left right = ExpApply
+                (ExpApply (ExpName pairName) left) right
+              direct = pair (rigidIdentity 0 20) (rigidIdentity 1 21)
+              forged = pair (rigidIdentity 0 20) (rigidIdentity 7 21)
+              classes = mkQueryClassEnv staticClasses []
+          checkExpression classes [pairBinding] [] expected [] direct @?=
+            Right ()
+          case checkExpression classes [pairBinding] [] expected [] forged of
+            Left TypeMismatch{} -> pure ()
+            actual -> fail
+              $ "result-directed checking trusted a foreign annotation: "
+              ++ show actual
       , testCase "contextual forall introduction uses substituted local givens" $ do
           let className = name "C"
               evidence ty = HsConstraint className [ty]

@@ -399,6 +399,21 @@ checkValidatedExpression provenCandidateRigids
             (IntMap.insert variable annotation variables)
             body
             result
+        -- Checking an application from its result propagates the trusted
+        -- expected type back through a partial application spine.  Pure
+        -- bottom-up inference instantiates a constructor's parameters before
+        -- it can see that, for example, one tuple component must itself be a
+        -- quantified value; a lambda in that position is then irreversibly
+        -- inferred as a monotype.  The fresh parameter below is still solved
+        -- solely by the function's independently reconstructed type, and the
+        -- argument is checked only after that solution is zonked, so this
+        -- admits no guessed polytype or unchecked annotation.
+        (ExpApply function argument, _) -> do
+          parameter <- freshTypeVariable
+          checkAgainst variables function
+            (TypeArrow parameter expectedType)
+          parameter' <- zonk parameter
+          checkAgainst variables argument parameter'
         _ -> infer variables checkedExpression
           >>= (`unifyTypes` expectedType)
 

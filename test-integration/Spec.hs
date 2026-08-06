@@ -57,10 +57,12 @@ import Language.Haskell.Exference.Core.Types
   , pattern TypeVar
   )
 import Language.Haskell.Exference.EnvironmentParser
-  ( SourceBinding (SourceFunction)
+  ( LoadReport (..)
+  , SourceBinding (SourceFunction)
   , SourceEnvironment (..)
   , checkSourceEnvironment
   , checkedSourceInventory
+  , environmentFromFiles
   )
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit ((@?=), assertBool, assertEqual, testCase)
@@ -2497,6 +2499,69 @@ tests = testGroup "Djex facade"
           ("GHC rejected the public quartic rank-N candidate\nstdout:\n"
             ++ output ++ "\nstderr:\n" ++ errors
             ++ "\nDjinn generated:\n" ++ djinnGenerated)
+          ExitSuccess exitCode
+  , testCase
+      "compile nested quartic rank-N values through the Exference facade" $ do
+      let inputs =
+            [ "(forall a b c d e. q)"
+            , "(forall a b c d e. r)"
+            , "(forall a b c d e. z)"
+            , "(forall a b c d e. m)"
+            ]
+          components =
+            [ "(forall v w x y u. q)"
+            , "(forall v w x y u. r)"
+            , "(forall v w x y u. z)"
+            , "(forall v w x y u. m)"
+            , "(forall e. e -> e)"
+            , "(forall f. f -> f)"
+            , "(forall g. g -> g)"
+            , "(forall h. h -> h)"
+            ]
+          nestedProducts = foldr1
+            (\left right -> "(" ++ left ++ ", " ++ right ++ ")")
+            components
+          source = foldr (\input body -> input ++ " -> " ++ body)
+            nestedProducts inputs
+      LoadReport checkedResult _ <- environmentFromFiles [] []
+      checked <- expectRight checkedResult
+      session <- expectRight $
+        ExferenceCompatibility.mkExferenceSession checked
+      target <- expectRight $ mkIdentifier "quarticExference"
+      request <- expectRight $ parseExferenceRequest session
+        defaultExferenceOptions
+          { exferenceMaximumSteps = 4096
+          , exferenceMaximumQueueSize = Just 1024
+          }
+        target "quartic-rank-n-exference" source
+      candidate <- firstExferenceCandidate =<< expectRight
+        (runExferenceQuery session request)
+      candidateResidualConstraints candidate @?= []
+      generated <- expectRight $
+        renderExferenceCandidateDefinition Unqualified candidate
+
+      let fixture = unlines
+            [ "module NestedQuarticRankNFixture where"
+            , ""
+            , "quarticExference :: forall q r z m. " ++ source
+            , generated
+            ]
+      withTemporaryHaskellModule fixture $ \sourcePath -> do
+        (exitCode, output, errors) <- readProcessWithExitCode "ghc"
+          [ "-v0"
+          , "-fforce-recomp"
+          , "-fno-code"
+          , "-fno-write-interface"
+          , "-XHaskell2010"
+          , "-XAllowAmbiguousTypes"
+          , "-XImpredicativeTypes"
+          , "-XRankNTypes"
+          , sourcePath
+          ] ""
+        assertEqual
+          ("GHC rejected the public nested quartic Exference candidate\nstdout:\n"
+            ++ output ++ "\nstderr:\n" ++ errors
+            ++ "\nExference generated:\n" ++ generated)
           ExitSuccess exitCode
   , testCase "do not guess visible arguments for non-vacuous providers" $ do
       seedName <- expectRight $ mkIdentifier "Seed"

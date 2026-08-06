@@ -227,12 +227,20 @@ before entering an element. Assignment runners also bound each argument spine
 at four before entering an argument. They resolve every `Name` against the
 exact sealed session, require an eligible context-free retained polymorphic
 scheme whose complete leading arity matches the vector, and elaborate each
-argument as a closed, context-free proper type in that session's synonym and
-kind scope. Djinn additionally substitutes the complete vector and checks the
-whole specialized body at kind `Type`. Scalar types and complete vectors are
-alpha-deduplicated only within one provider. Both relations remain keyed by
-provider identity, not by scheme shape: two globals with alpha-equivalent
-schemes cannot donate evidence to one another.
+scalar candidate as a closed, context-free proper type in that session's
+synonym and kind scope. That compatibility relation remains proper-type-only.
+For an assignment, both adapters infer the ground kind of every leading binder
+from the exact provider body, default an otherwise unconstrained vacuous binder
+to `Type`, and elaborate each closed, context-free visible argument at its
+positional kind. They then substitute the complete vector and independently
+check the whole specialized body at kind `Type`. Thus higher-kinded vectors and
+mixed higher-kinded/impredicative vectors are accepted when the context-free
+body determines the higher-kinded positions and vacuous positions take their
+default `Type` kind; contextual providers and kind-mismatched vectors are
+rejected. Scalar types and complete vectors are alpha-deduplicated only
+within one provider. Both relations remain keyed by provider identity, not by
+scheme shape: two globals with alpha-equivalent schemes cannot donate evidence
+to one another.
 
 Calling either historical runner is definitionally the same as calling its
 `WithInstantiationCandidates` variant with `[]`; calling the corresponding

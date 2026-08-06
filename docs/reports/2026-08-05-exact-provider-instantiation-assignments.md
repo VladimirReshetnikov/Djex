@@ -34,7 +34,9 @@ The argument list is the complete vector in the provider's leading-forall
 order. Each vector is consumed once. Neither backend flattens it into a scalar
 pool or reconstructs a Cartesian product, so evidence for `[T1, T2]` does not
 also authorize `[T1, T1]`, `[T2, T1]`, or a tuple assembled from a different
-external proof.
+external proof. Each position is checked at the corresponding provider
+binder's inferred ground kind rather than forcing every vector member to have
+kind `Type`.
 
 ## Stable contract
 
@@ -62,9 +64,9 @@ list therefore fails finitely at the checked boundary.
 
 `ProviderInstantiationCandidate`,
 `maximumProviderInstantiationCandidates`, and both
-`WithInstantiationCandidates` runners retain their original behavior. The two
-payloads deliberately have separate entrances: an exact vector is never
-silently downgraded to the scalar compatibility model.
+`WithInstantiationCandidates` runners retain their original proper-type-only
+behavior. The two payloads deliberately have separate entrances: an exact
+vector is never silently downgraded to the scalar compatibility model.
 
 ## Checked assignment boundary
 
@@ -80,26 +82,34 @@ For every assignment, the stable runner checks:
    retained polymorphic global. A monomorphic value, scoped value, missing
    name, or alpha-identically typed sibling is not a substitute.
 2. The retained provider must have a context-free complete leading forall
-   chain with arity from one through four.
+   chain with arity from one through four. Contextual provider schemes remain
+   unsupported.
 3. The argument-vector length must equal that exact arity. Empty and partial
    vectors are rejected rather than completed from another source.
-4. Every argument is synonym-elaborated in the same sealed session, checked at
-   kind `Type`, and required to be closed and context-free.
+4. The runner infers each leading binder's ground kind from the exact provider
+   body and synonym-elaborates the argument in that position at that kind. A
+   binder whose kind the body does not otherwise constrain is vacuous and
+   defaults to `Type`. Every argument is required to be closed and
+   context-free.
 5. Every argument must have the shared specified-visible-argument
-   representation, including a closed quantified type or a structural proper
-   type containing one.
+   representation, including a higher-kinded constructor, a closed quantified
+   `Type`, or a structural proper type containing one where its positional kind
+   permits that form.
 6. Alpha-equivalent vectors are deduplicated as complete ordered lists within
    one provider, retaining the first occurrence. Provider identity remains
    part of the key.
 
-Djinn performs one additional whole-assignment proof. It capture-avoidably
-substitutes the complete checked vector into the retained provider body and
-kind-checks that specialized body at `Type` in the prepared environment. This
-rejects, for example, supplying a separately proper type for a binder which the
-provider body uses at kind `Type -> Type`. Per-argument checks alone cannot
-establish that invariant.
+Both adapters perform an additional whole-assignment proof. They
+capture-avoidably substitute the complete checked vector into the retained
+provider body and kind-check that specialized body at `Type` in the sealed
+environment. This independent guard rejects both a proper type supplied at a
+`Type -> Type` position and a higher-kinded constructor supplied at a `Type`
+position. Positional inference also permits a higher-kinded vector, or a vector
+mixing a higher-kinded constructor with a closed impredicative `Type`, when the
+provider body determines the higher-kinded position and the vacuous position
+takes its default `Type` kind.
 
-Exference lowers each checked argument only after the stable shared-type
+Exference lowers each checked argument only after those stable shared-type
 checks. Its private engine boundary independently rechecks provider closure,
 context freedom, leading arity, vector length, argument closure, and visible
 application shape before producing an instantiation.
@@ -191,17 +201,17 @@ numeric limits.
 
 Djinn regressions cover empty-runner equality; finite outer and inner cyclic
 list rejection; empty, wrong-width, five-binder, open, contextual,
-higher-kinded, monomorphic-provider, and unknown-provider failures; unary
-quantified success; whole-vector alpha deduplication; cross-provider
-non-donation; composition with loaded instantiation evidence; and a correlated
-four-binder vector deliberately outside the legacy first-sixteen Cartesian
-prefix.
+higher-kinded mismatch, monomorphic-provider, and unknown-provider failures;
+unary quantified, higher-kinded, and mixed higher-kinded/impredicative success;
+whole-vector alpha deduplication; cross-provider non-donation; composition with
+loaded instantiation evidence; and a correlated four-binder vector deliberately
+outside the legacy first-sixteen Cartesian prefix.
 
 Exference core and integration regressions cover direct vector consumption,
 non-vacuous provider bodies, structural arguments containing nested
-quantification, ordered four-binder visible applications, proper-type arguments
-used in the provider body, rejection of a proper type at a higher-kinded binder,
-finite outer and inner bounds, exact arity, empty compatibility, and
-cross-provider non-donation. Every positive integration candidate still passes
-the shared generated-syntax boundary and the engine's independent expression
-checker.
+quantification, ordered four-binder visible applications, higher-kinded and
+mixed higher-kinded/impredicative vectors, both directions of assignment kind
+mismatch, legacy scalar rejection of a higher-kinded argument, finite outer and
+inner bounds, exact arity, empty compatibility, and cross-provider
+non-donation. Every positive integration candidate still passes the shared
+generated-syntax boundary and the engine's independent expression checker.

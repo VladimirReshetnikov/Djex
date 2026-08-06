@@ -831,15 +831,22 @@ entrance additionally observes at most five cells of an argument spine to
 enforce the four-argument maximum before entering an argument. Each provider
 must resolve by exact `Name` to a retained loaded polymorphic scheme in the
 sealed session. Candidate types and assignment arguments are synonym-expanded
-there, checked at kind `Type`, and required to be closed, context-free, and
-representable as specified visible arguments. An assignment must have the
-scheme's exact complete leading arity, between one and four. Djinn substitutes
-the whole vector into the retained body and proves that the specialized body
-still has kind `Type`; this prevents a separately proper argument from being
-assigned to a higher-kinded binder. Scalar types and whole ordered vectors are
-alpha-deduplicated per provider in caller order. Provider identity stays in the
-key, so an alpha-identically typed sibling cannot inherit either form of
-evidence.
+there and required to be closed, context-free, and representable as specified
+visible arguments. The legacy scalar Candidate route remains proper-type-only:
+it continues to check every candidate at kind `Type`. An assignment must have
+the scheme's exact complete leading arity, between one and four, and cannot
+target a contextual scheme.
+Djinn infers each leading binder's ground kind from the retained provider body,
+defaulting a vacuous binder to `Type`, and checks the argument in that position
+at exactly that kind. It then substitutes the whole vector into the retained
+body and independently proves that the specialized body still has kind `Type`.
+Consequently, a higher-kinded vector, or one mixing a higher-kinded constructor
+with a closed impredicative `Type` argument, is supported when the body
+determines the higher-kinded position and the vacuous position takes its
+default `Type` kind; either direction of a kind mismatch is rejected. Scalar
+types and whole ordered vectors are alpha-deduplicated per provider in caller
+order. Provider identity stays in the key, so an
+alpha-identically typed sibling cannot inherit either form of evidence.
 
 Each retained scalar specialization or exact vector produces a direct premise
 for that provider. The structural and, when relevant, nominal provider plans
@@ -862,8 +869,9 @@ candidate call, and the empty assignment call returns the same candidates,
 ordering, diagnostics, and finite-budget observations. Current regressions
 cover empty compatibility, lazy outer and inner bounds, wrong arity and
 ineligible types/providers, whole-vector alpha deduplication, exact locality,
-mixed historical and supplied evidence, target exclusion, and a four-binder
-vector beyond the scalar Cartesian prefix. This remains a bounded
+mixed historical and supplied evidence, target exclusion, higher-kinded and
+mixed higher-kinded/impredicative assignments, kind mismatch, and a
+four-binder vector beyond the scalar Cartesian prefix. This remains a bounded
 proof-producing extension, not general impredicative inference or higher-rank
 subsumption. See the original
 [provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)

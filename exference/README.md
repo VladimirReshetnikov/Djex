@@ -928,11 +928,22 @@ assignment runner additionally bounds every argument spine at four before
 entering an argument, requires a nonempty vector whose length exactly matches
 the retained provider's complete leading forall chain, and rejects a contextual
 provider scheme. Every candidate or argument is synonym-elaborated in the
-sealed session and checked at kind `Type`. Assignment arguments must be closed,
-context-free, and representable as specified visible type arguments; the
-private core independently rechecks provider closure, context, arity, and the
-lowered visible-argument shape. Scalar types and complete ordered vectors are
-alpha-deduplicated per provider while retaining their first occurrences.
+sealed session. The legacy scalar Candidate route continues to require a
+closed, context-free proper type and check it at kind `Type`; it remains
+proper-type-only. For an exact assignment, Exference infers every leading
+binder's ground kind from the retained provider body, defaulting a vacuous
+binder to `Type`, and checks the argument in that position at exactly that
+kind. Assignment arguments must be closed, context-free, and representable as
+specified visible type arguments.
+The complete substituted provider body is independently checked at kind
+`Type`, after which the private core rechecks provider closure, context, arity,
+and the lowered visible-argument shape. Higher-kinded vectors and vectors
+mixing higher-kinded constructors with closed impredicative `Type` arguments
+are therefore supported when the provider body determines the higher-kinded
+positions and vacuous positions take their default `Type` kind; either
+direction of a kind mismatch is rejected. Scalar types and complete ordered
+vectors are alpha-deduplicated per provider while retaining their first
+occurrences.
 Association is nominal: a different global with an alpha-equivalent scheme
 receives no choice, and neither a scoped value nor a sibling global consults
 the supplied map. The caller remains responsible for the source-language fact
@@ -955,8 +966,10 @@ checker consume their applications through the same checked representation.
 explicit runner with `[]` returns the same batches, candidate order, budget
 observations, and diagnostics. Current regressions cover empty compatibility,
 lazy outer and inner bounds, exact arity and locality, non-vacuous and
-structural impredicative arguments, higher-kinded-binder rejection, and an
-ordered four-binder application. Nonempty evidence remains a bounded
+structural impredicative arguments, higher-kinded and mixed
+higher-kinded/impredicative assignments, both directions of kind mismatch,
+legacy scalar rejection of a higher-kinded argument, and an ordered
+four-binder application. Nonempty evidence remains a bounded
 global-only capability. It does not enable scoped-provider donation, invent a
 polytype, decompose a quantified body in ordinary unification, or provide
 general impredicative inference. See the original

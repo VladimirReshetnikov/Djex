@@ -240,23 +240,29 @@ source-language reason that a provider may be selected at the supplied types.
 The runners are the representation and session trust boundary. Candidate
 runners require the exact `Name` to denote an eligible loaded global, elaborate
 each type in that sealed session's synonym and kind scope, and accept only a
-closed, context-free proper type representable as a visible argument.
+closed, context-free proper type representable as a visible argument. This
+legacy scalar Candidate contract remains proper-type-only.
 Exference's scalar route narrows that shape to a ground monotype or a complete
 forall-rooted type and uses it only for a context-free provider whose complete
 leading prefix is vacuous.
 
 Assignment runners additionally require an exact retained polymorphic scheme,
 a context-free leading chain of arity one through four, and a vector whose
-length equals that complete chain. Every argument is synonym-elaborated in the
-same sealed session, checked at kind `Type`, and required to be closed,
-context-free, and representable as a specified visible type argument. Djinn
-then substitutes the complete vector into the retained scheme and proves that
-the whole specialized body still has kind `Type`; this catches a proper-type
-argument assigned to a higher-kinded binder even when the argument is valid in
-isolation. Exference rechecks the retained scheme's closure, context, arity, and
-visible-argument shape at its private search boundary. Unlike its scalar
-route, the exact Exference route may instantiate binders which occur in the
-provider body because the complete correlated vector is already known.
+length equals that complete chain; contextual schemes are unsupported. The
+runner infers each binder's ground kind from the exact provider body, defaulting
+a vacuous binder to `Type`, then synonym-elaborates the argument in that
+position at exactly that kind. Every argument must still be closed,
+context-free, and representable as a specified visible type argument. Both
+backends substitute the complete vector and independently check that the whole
+specialized body has kind `Type` in the sealed inventory. Exference then
+rechecks the retained scheme's closure, context, arity, and visible-argument
+shape at its private search boundary. Higher-kinded vectors, including vectors
+which mix a higher-kinded constructor with a closed impredicative `Type`
+argument, are supported when the provider body determines the higher-kinded
+positions and vacuous positions take their default `Type` kind. Unlike its
+scalar route, the exact Exference route may also instantiate
+binders which occur in the provider body because the complete correlated vector
+is already known.
 
 First occurrences are retained. Scalar types are alpha-deduplicated per
 provider; assignments are alpha-deduplicated as whole ordered vectors per

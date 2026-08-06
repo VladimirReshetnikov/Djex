@@ -256,7 +256,28 @@ freshTests = testGroup "fresh allocation"
 
 queryTests :: TestTree
 queryTests = testGroup "queries"
-  [ testCase "label every request type site uniformly" $
+  [ testCase "retain provider-local instantiation evidence" $ do
+      let provider = right $ mkQualifiedIdentifier
+            (right $ mkModuleName "Fixture") "provider"
+          candidate = ProviderInstantiationCandidate
+            provider
+            (SharedType.FunctionType
+              (SharedType.TypeVariable "source")
+              (SharedType.TypeVariable "result"))
+      providerInstantiationCandidateProvider candidate @?= provider
+      providerInstantiationCandidateType candidate @?=
+        SharedType.FunctionType
+          (SharedType.TypeVariable "source")
+          (SharedType.TypeVariable "result")
+      fmap length candidate @?= ProviderInstantiationCandidate
+        provider
+        (SharedType.FunctionType
+          (SharedType.TypeVariable 6)
+          (SharedType.TypeVariable 6))
+      maximumProviderInstantiationCandidates @?= 32
+      _ <- evaluate $ force candidate
+      pure ()
+  , testCase "label every request type site uniformly" $
       map requestTypeSiteLabel [minBound .. maxBound] @?=
         ["goal", "context"]
   , testCase "validate adapter targets through one diagnostic policy" $ do

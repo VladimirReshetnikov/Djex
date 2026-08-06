@@ -12,6 +12,8 @@
 -- participate in a common session API.
 module Language.Haskell.Synthesis.Query
   ( QueryRequest (..)
+  , ProviderInstantiationCandidate (..)
+  , maximumProviderInstantiationCandidates
   , validateRequestTarget
   , RequestTypeSite (..)
   , requestTypeSiteLabel
@@ -84,6 +86,37 @@ data QueryRequest ty options = QueryRequest
 
 instance (NFData ty, NFData options) =>
     NFData (QueryRequest ty options)
+
+-- | One externally established type choice for an exact named provider.
+--
+-- This is deliberately separate from t'QueryRequest': it describes evidence
+-- available in the provider's originating environment rather than syntax or
+-- policy intrinsic to the query. Backends validate the provider against the
+-- sealed session, elaborate the candidate in that session's exact synonym and
+-- kind scope, and keep the association provider-local during search.
+--
+-- The constructor remains public because compiler and theorem-prover
+-- frontends commonly obtain this evidence from a richer source environment.
+-- Constructing a value does not itself certify the claim; checked backend
+-- runners are the trust boundary.
+data ProviderInstantiationCandidate variable =
+  ProviderInstantiationCandidate
+    { providerInstantiationCandidateProvider :: Name
+    , providerInstantiationCandidateType :: Type variable
+    }
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Generic)
+
+instance NFData variable =>
+    NFData (ProviderInstantiationCandidate variable)
+
+-- | Maximum number of externally supplied provider/type associations accepted
+-- by one checked query execution.
+--
+-- Runners observe at most one list cell beyond this bound before entering any
+-- candidate value. Thus a cyclic caller-built list is rejected finitely and
+-- cannot reach search code whose fairness schedules require finite inputs.
+maximumProviderInstantiationCandidates :: Int
+maximumProviderInstantiationCandidates = 32
 
 -- | Validate the shared generated-definition namespace and attach one
 -- adapter-specific code and summary to the common failure detail. Keeping the

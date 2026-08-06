@@ -73,6 +73,7 @@ The shared limits are public as well:
 ```haskell
 maximumProviderInstantiationAssignments = 32
 maximumProviderInstantiationArguments = 4
+maximumProviderInstantiationKindNodes = 129
 ```
 
 The 32-vector bound is global to one call, before grouping or
@@ -81,6 +82,17 @@ observed through at most the first extra cell before an assignment value is
 entered. Each argument spine is likewise observed only through the fifth cell
 before an argument is entered. An over-wide, infinite, or cyclic caller-built
 list therefore fails finitely at the checked boundary.
+
+The per-kind assignment limit applies independently to every caller-supplied
+`GroundKind`. A productive node observer runs before kind inference,
+same-provider kind-vector equality, backend kind conversion, or forcing the
+paired type argument. It counts at most 129 constructors and, if work remains,
+returns the sentinel 130 without entering the pending constructor. Cyclic kinds
+and finite kind trees above the bound therefore fail without traversing an
+unbounded remainder. The value `129 = 2 * 64 + 1` deliberately preserves the
+shared 64-tuple constructor's complete right-associated all-`Type` kind. That
+per-kind capacity is independent of the four type arguments allowed in one
+assignment vector.
 
 `ProviderInstantiationCandidate`,
 `maximumProviderInstantiationCandidates`, and both
@@ -112,20 +124,23 @@ For every assignment, the stable runner checks:
    provider body. A binder whose kind the body does not constrain is vacuous
    and defaults to `Type`; the argument is synonym-elaborated at that inferred
    kind. This historical behavior remains unchanged.
-5. The kinded runner instead checks the provider body at `Type` in one scope
+5. The kinded runner productively preflights every supplied `GroundKind`
+   independently. An over-limit or cyclic kind is rejected before kind
+   inference, same-provider kind-vector comparison, backend conversion, or the
+   paired type argument is forced.
+6. The kinded runner then checks the provider body at `Type` in one scope
    shared with every caller-supplied binder-kind obligation. Every observable
    use must agree with its supplied `GroundKind`. A vacuous position supplies
    no such constraint, so its kind remains a caller assertion; the backend
    still synonym-elaborates the paired argument at exactly that kind.
-6. Every argument must be closed, context-free, and have the shared
+7. Repeated kinded assignments for the same provider must agree on the
+   complete binder-kind vector. This consistency check happens before any
+   paired type argument is entered.
+8. Every argument must be closed, context-free, and have the shared
    specified-visible-argument
    representation, including a higher-kinded constructor, a closed quantified
    `Type`, or a structural proper type containing one where its positional kind
    permits that form.
-7. Repeated kinded assignments for the same provider must agree on the
-   complete binder-kind vector. This consistency check happens before
-   alpha-equivalent type vectors are deduplicated as complete ordered lists,
-   retaining the first occurrence. Provider identity remains part of the key.
 
 Both adapters perform an additional whole-assignment proof. They
 capture-avoidably substitute the complete checked vector into the retained
@@ -138,6 +153,11 @@ provider body determines the higher-kinded position and every vacuous position
 takes its default `Type` kind. The kinded runner additionally admits a bare or
 partially applied higher-kinded constructor at a vacuous position whose exact
 ground kind was retained by the frontend.
+
+After that proof, alpha-equivalent type vectors are deduplicated as complete
+ordered lists, retaining the first occurrence. Distinct type vectors remain
+separate choices when their complete kind vectors agree. Provider identity
+remains part of the key.
 
 Exference lowers each checked argument only after those stable shared-type
 checks. Its private engine boundary independently rechecks provider closure,
@@ -231,15 +251,21 @@ vacuous binder.
 Current validation exercises the full project matrix without changing the
 historical scalar or inferred-assignment fixtures. Focused shared-API coverage
 pins both assignment records, accessors, traversal/deep-evaluation behavior,
-public runner names, and both numeric limits.
+public runner names, and all four public numeric limits. The shared kind
+observer tests the exact 129-node 64-arrow all-`Type` chain, the first
+over-limit arrow chain, both left- and right-cyclic trees, productive non-entry
+of branches beyond the bound, and non-forcing of kind-variable payloads.
 
 Djinn regressions cover empty-runner equality; finite outer and inner cyclic
 list rejection; empty, wrong-width, five-binder, open, contextual,
 higher-kinded mismatch, monomorphic-provider, and unknown-provider failures;
 unary quantified, higher-kinded, and mixed higher-kinded/impredicative success;
-kinded vacuous higher-kinded success; same-provider kind-vector consistency;
-whole-vector alpha deduplication; cross-provider non-donation; composition with
-loaded instantiation evidence; and a correlated four-binder vector deliberately
+kinded vacuous higher-kinded success; productive cyclic-kind rejection before
+type forcing and same-provider comparison; same-provider kind-vector
+consistency; two distinct vectors retained for one vacuous provider at the
+genuinely higher-order kind `(Type -> Type) -> Type`; whole-vector alpha
+deduplication; cross-provider non-donation; composition with loaded
+instantiation evidence; and a correlated four-binder vector deliberately
 outside the legacy first-sixteen Cartesian prefix.
 
 Exference integration regressions, together with the existing core assignment
@@ -247,8 +273,11 @@ coverage, exercise direct vector consumption,
 non-vacuous provider bodies, structural arguments containing nested
 quantification, ordered four-binder visible applications, higher-kinded and
 mixed higher-kinded/impredicative vectors, kinded vacuous higher-kinded
-success, same-provider kind-vector consistency, both directions of assignment
-kind mismatch, legacy scalar rejection of a higher-kinded argument, finite
-outer and inner bounds, exact arity, empty compatibility, and cross-provider
-non-donation. Every positive integration candidate still passes the shared
-generated-syntax boundary and the engine's independent expression checker.
+success, productive cyclic-kind rejection before type forcing and
+same-provider comparison, same-provider kind-vector consistency, two distinct
+same-provider vectors at the genuinely higher-order kind
+`(Type -> Type) -> Type`, both directions of assignment kind mismatch, legacy
+scalar rejection of a higher-kinded argument, finite outer and inner bounds,
+exact arity, empty compatibility, and cross-provider non-donation. Every
+positive integration candidate still passes the shared generated-syntax
+boundary and the engine's independent expression checker.

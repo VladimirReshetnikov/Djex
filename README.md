@@ -270,14 +270,26 @@ with a caller-attested `GroundKind`. Each adapter checks those supplied kinds
 against all observable uses in the retained body, elaborates every argument at
 its paired kind, requires repeated assignments for the same provider to agree
 on the complete kind vector, and still checks the fully specialized body at
-`Type`. A vacuous binder supplies no body constraint from which its source kind
-could be inferred; its higher kind is therefore frontend evidence, not a
-backend inference. This admits a bare or partially applied higher-kinded
-constructor at such a position, including vectors that also contain a closed
-impredicative `Type` argument. Both assignment forms retain the 32-vector and
-four-argument bounds, and contextual provider schemes remain unsupported. The
-legacy scalar `ProviderInstantiationCandidate` entrances are unchanged and remain
-proper-type-only.
+`Type`. For each assignment that passes provider, scheme, and exact-arity
+checks, all its supplied kinds receive a productive node preflight under the
+public `maximumProviderInstantiationKindNodes = 129` bound. That preflight
+precedes the assignment's kind inference, same-provider kind-vector equality,
+backend kind conversion, and paired-type forcing; cyclic kinds and finite trees
+above the bound are therefore rejected without traversing an unbounded
+remainder. The shared 64-tuple constructor's right-associated all-`Type` kind
+has exactly 129 nodes and remains accepted.
+
+A vacuous binder supplies no body constraint from which its source kind could
+be inferred; its higher kind is therefore frontend evidence, not a backend
+inference. This admits a bare or partially applied higher-kinded constructor at
+such a position, including vectors that also contain a closed impredicative
+`Type` argument. Multiple distinct vectors may be retained for the same
+provider when their complete kind vectors agree; regressions exercise two such
+choices at the genuinely higher-order kind `(Type -> Type) -> Type`. Both
+assignment forms retain the 32-vector and four-argument bounds, the kinded form
+adds the 129-node per-kind bound, and contextual provider schemes remain
+unsupported. The legacy scalar `ProviderInstantiationCandidate` entrances are
+unchanged and remain proper-type-only.
 Exference can also forward a context-free quantified provider with no free
 flexible variables to a less-general such goal; provider binders are solved
 with monotypes or, in the guarded Quick-Look sense, with quantified subtrees

@@ -186,11 +186,11 @@ maximumProviderInstantiationArguments = 4
 
 -- | Maximum number of constructors in one caller-supplied provider kind.
 --
--- A fully saturated 64-argument constructor has a right-associated kind tree
--- with @2 * 64 + 1@ nodes, so this admits the complete shared tuple arity while
--- bounding arbitrary higher-order shapes. Checked runners use a productive
--- node observer and therefore reject cyclic kind values without traversing
--- them indefinitely.
+-- The maximum-arity boxed tuple constructor has an all-'ProperTypeKind',
+-- right-associated kind tree with @2 * 64 + 1@ nodes, so this admits the
+-- complete shared tuple arity while bounding arbitrary higher-order shapes.
+-- Checked runners use a productive node observer and therefore reject cyclic
+-- kind values without traversing them indefinitely.
 maximumProviderInstantiationKindNodes :: Int
 maximumProviderInstantiationKindNodes = 2 * maximumTupleArity + 1
 

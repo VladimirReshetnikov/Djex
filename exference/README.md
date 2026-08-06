@@ -928,18 +928,28 @@ frontend-attested `GroundKind` of that provider-binder position.
 
 All outer lists are globally bounded at 32 before any element is entered. The
 assignment runners additionally bound every argument spine at four before
-entering an argument, require a nonempty vector whose length exactly matches
-the retained provider's complete leading forall chain, and reject a contextual
-provider scheme. Every candidate or argument is synonym-elaborated in the
-sealed session. The legacy scalar Candidate route continues to require a
-closed, context-free proper type and check it at kind `Type`; it remains
-proper-type-only. For a legacy exact assignment, Exference infers every leading
-binder's ground kind from the retained provider body, defaults a vacuous binder
-to `Type`, and checks the argument at that inferred kind. For a kinded
-assignment, it checks all observable binder uses against the supplied complete
-kind vector and elaborates each paired argument at its supplied kind. A
-vacuous binder has no body occurrence capable of proving its source kind; that
-`GroundKind` is therefore caller-attested rather than inferred by Exference.
+entering an argument. They then resolve the exact retained polymorphic provider,
+require a nonempty vector whose length matches its complete leading forall
+chain, and reject a contextual scheme. After those checks, the kinded runner
+applies a productive node preflight to each supplied kind under the public
+`maximumProviderInstantiationKindNodes = 129` bound. This happens before kind
+inference, same-provider kind-vector equality, recursive conversion of that
+supplied kind, or forcing the paired type. Cyclic kinds and finite trees above
+129 nodes thus fail after a bounded observation, while the shared 64-tuple
+constructor's right-associated all-`Type` kind remains accepted at exactly
+`2 * 64 + 1` nodes. That kind capacity is separate from the four-argument
+provider-vector limit.
+
+Every candidate or argument is synonym-elaborated in the sealed session. The
+legacy scalar Candidate route continues to require a closed, context-free
+proper type and check it at kind `Type`; it remains proper-type-only. For a
+legacy exact assignment, Exference infers every leading binder's ground kind
+from the retained provider body, defaults a vacuous binder to `Type`, and
+checks the argument at that inferred kind. For a kinded assignment, it checks
+all observable binder uses against the supplied complete kind vector and
+elaborates each paired argument at its supplied kind. A vacuous binder has no
+body occurrence capable of proving its source kind; that `GroundKind` is
+therefore caller-attested rather than inferred by Exference.
 Repeated assignments naming one provider must agree on their complete kind
 vector before their type vectors are alpha-deduplicated. Assignment arguments
 in both forms must be closed, context-free, and representable as specified
@@ -975,15 +985,18 @@ checker consume their applications through the same checked representation.
 `runExferenceQuery` follows the exact empty-evidence path. Calling any explicit
 evidence runner with `[]` returns the same batches, candidate order, budget
 observations, and diagnostics. Current regressions cover empty compatibility,
-lazy outer and inner bounds, exact arity and locality, non-vacuous and
-structural impredicative arguments, higher-kinded and mixed
-higher-kinded/impredicative assignments, vacuous higher-kinded evidence,
-same-provider kind-vector consistency, both directions of kind mismatch,
-legacy scalar rejection of a higher-kinded argument, and an ordered
-four-binder application. Nonempty evidence remains a bounded
-global-only capability. It does not enable scoped-provider donation, invent a
-polytype, decompose a quantified body in ordinary unification, or provide
-general impredicative inference. See the original
+lazy outer and inner bounds, productive rejection of cyclic supplied kinds plus
+shared finite-tree node-bound coverage, exact arity and locality, non-vacuous
+and structural impredicative arguments, higher-kinded and mixed
+higher-kinded/impredicative
+assignments, vacuous higher-kinded evidence, same-provider kind-vector
+consistency, two distinct same-provider vectors at the genuine kind
+`(Type -> Type) -> Type`, both directions of kind mismatch, legacy scalar
+rejection of a higher-kinded argument, and an ordered four-binder application.
+Nonempty evidence remains a bounded global-only capability. It does not enable
+scoped-provider donation, invent a polytype, decompose a quantified body in
+ordinary unification, or provide general impredicative inference. See the
+original
 [provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)
 and the
 [exact provider-assignment report](../docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).

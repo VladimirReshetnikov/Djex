@@ -227,14 +227,27 @@ recover.
 
 The checked Djinn and Exference runners first bound either outer relation at 32
 before entering an element. Assignment runners also bound each argument spine
-at four before entering an argument. They resolve every `Name` against the
-exact sealed session, require an eligible context-free retained polymorphic
-scheme whose complete leading arity matches the vector, and elaborate each
-scalar candidate as a closed, context-free proper type in that session's
-synonym and kind scope. That compatibility relation remains proper-type-only.
-For a legacy assignment, both adapters infer the ground kind of every leading
-binder from the exact provider body, default an otherwise unconstrained
-vacuous binder to `Type`, and elaborate each argument at that inferred kind.
+at four before entering an argument. The runners then resolve every `Name`
+against the exact sealed session and require an eligible context-free retained
+polymorphic scheme whose complete leading arity matches the vector.
+
+After those checks, kinded runners productively count at most 129 constructors
+in each caller-supplied kind under the public
+`maximumProviderInstantiationKindNodes = 129` bound. If work remains, the
+observer returns the one-over-bound sentinel without entering the pending
+constructor. This per-kind preflight precedes kind inference, same-provider
+vector equality, backend kind conversion, and forcing the paired type. It
+rejects a cyclic kind or any finite tree above the bound without entering an
+unbounded remainder, while preserving the shared 64-tuple constructor's
+129-node right-associated all-`Type` kind. The latter is a capacity within one
+argument's kind, independent of the four-argument vector limit.
+
+Each scalar candidate is elaborated as a closed, context-free proper type in
+the sealed session's synonym and kind scope. That compatibility relation
+remains proper-type-only. For a legacy assignment, both adapters infer the
+ground kind of every leading binder from the exact provider body, default an
+otherwise unconstrained vacuous binder to `Type`, and elaborate each argument
+at that inferred kind.
 
 For a kinded assignment, the adapters check the retained body at `Type` in one
 kind-inference scope shared with every supplied binder-kind obligation. A
@@ -244,7 +257,11 @@ caller-attested rather than backend-inferred; the paired argument is still
 elaborated at exactly that supplied kind. This admits bare and partially
 applied higher-kinded constructors in vacuous positions. Repeated assignments
 for one provider must present the same complete binder-kind vector before
-their type vectors are alpha-deduplicated.
+their type vectors are alpha-deduplicated. Multiple distinct vectors with that
+same kind vector remain available independently; cross-engine regressions pin
+two choices for one vacuous provider at the genuinely higher-order kind
+`(Type -> Type) -> Type`, using both a bare and a partially applied
+constructor.
 
 Both assignment forms require closed, context-free visible arguments, then
 substitute the complete vector and independently check the whole specialized

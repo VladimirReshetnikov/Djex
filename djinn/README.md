@@ -832,13 +832,25 @@ All checked entrances run only after ordinary request preparation. Their
 outer lists are bounded at 32 before an element is entered. The assignment
 entrances additionally observe at most five cells of an argument spine to
 enforce the four-argument maximum before entering an argument. Each provider
-must resolve by exact `Name` to a retained loaded polymorphic scheme in the
-sealed session. Candidate types and assignment arguments are synonym-expanded
-there and required to be closed, context-free, and representable as specified
+must then resolve by exact `Name` to a retained loaded polymorphic scheme in the
+sealed session. An assignment must have that scheme's exact complete leading
+arity, between one and four, and cannot target a contextual scheme.
+
+After those structural and provider checks, each supplied kind in the kinded
+entrance receives an independent productive node preflight under the public
+`maximumProviderInstantiationKindNodes = 129` bound. Djinn performs that
+preflight before kind inference, same-provider kind-vector equality, conversion
+into its internal kind representation, or forcing the paired type. A cyclic
+kind or a finite kind tree above 129 nodes is therefore rejected after only the
+bounded prefix is observed. The limit still accepts the shared 64-tuple
+constructor's right-associated all-`Type` kind, which has `2 * 64 + 1` nodes;
+this capacity is independent of the four arguments allowed in one
+provider-assignment vector.
+
+Candidate types and assignment arguments are synonym-expanded in the sealed
+session and required to be closed, context-free, and representable as specified
 visible arguments. The legacy scalar Candidate route remains proper-type-only:
-it continues to check every candidate at kind `Type`. An assignment must have
-the scheme's exact complete leading arity, between one and four, and cannot
-target a contextual scheme.
+it continues to check every candidate at kind `Type`.
 
 The legacy assignment runner infers each leading binder's ground kind from the
 retained provider body, defaults a vacuous binder to `Type`, and checks the
@@ -878,14 +890,16 @@ omits the provider plans completely: `runDjinnQuery` is exactly the empty
 candidate call, and the empty assignment call returns the same candidates,
 ordering, diagnostics, and finite-budget observations for either assignment
 runner. Current regressions cover empty compatibility, lazy outer and inner
-bounds, wrong arity and
-ineligible types/providers, whole-vector alpha deduplication, exact locality,
-mixed historical and supplied evidence, target exclusion, higher-kinded and
-mixed higher-kinded/impredicative assignments, vacuous higher-kinded evidence,
-same-provider kind-vector consistency, kind mismatch, and a
-four-binder vector beyond the scalar Cartesian prefix. This remains a bounded
-proof-producing extension, not general impredicative inference or higher-rank
-subsumption. See the original
+bounds, productive rejection of cyclic supplied kinds plus shared finite-tree
+node-bound coverage, wrong arity and ineligible types/providers, whole-vector
+alpha deduplication, exact locality, mixed historical and supplied evidence,
+target exclusion,
+higher-kinded and mixed higher-kinded/impredicative assignments, vacuous
+higher-kinded evidence, same-provider kind-vector consistency, two distinct
+same-provider vectors at the genuine kind `(Type -> Type) -> Type`, kind
+mismatch, and a four-binder vector beyond the scalar Cartesian prefix. This
+remains a bounded proof-producing extension, not general impredicative
+inference or higher-rank subsumption. See the original
 [provider-local candidate report](../docs/reports/2026-08-05-provider-local-instantiation-evidence.md)
 and the
 [exact provider-assignment report](../docs/reports/2026-08-05-exact-provider-instantiation-assignments.md).

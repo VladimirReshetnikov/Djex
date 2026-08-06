@@ -250,19 +250,31 @@ exferenceKindedAssignmentResults =
 ```
 
 The payload's type variable must match the selected backend's neutral
-type-variable namespace. All payload types and all three bounds are exported
+type-variable namespace. All payload types and all four bounds are exported
 by `Language.Haskell.Djex`:
 
 - `maximumProviderInstantiationCandidates` is 32 scalar associations per call;
 - `maximumProviderInstantiationAssignments` is 32 complete vectors per call;
-  and
 - `maximumProviderInstantiationArguments` is four ordered arguments per
-  vector.
+  vector; and
+- `maximumProviderInstantiationKindNodes` is 129 constructors in each
+  caller-supplied `GroundKind`.
 
 Each checked runner observes an outer list through at most its first extra cell
 before entering an element. Assignment runners likewise bound each argument
 spine before entering an argument. Over-wide or cyclic caller-built lists
 therefore fail finitely.
+
+For each assignment that passes provider, scheme, context, and exact-arity
+checks, kinded runners apply a productive node observer to all its supplied
+kinds before that assignment's kind inference, same-provider kind-vector
+equality, backend kind conversion, or paired-type forcing. The observer counts
+at most 129 constructors; if work remains, it returns the sentinel 130 without
+entering the pending constructor. Cyclic kinds and finite trees above the bound
+therefore fail finitely. The shared 64-tuple constructor's right-associated
+all-`Type` kind contains exactly `2 * 64 + 1 = 129` nodes and remains accepted.
+This kind capacity does not change the four-argument limit on one
+provider-assignment vector.
 
 Construction is not certification. The caller remains responsible for the
 source-language reason that a provider may be selected at the supplied types.
@@ -307,10 +319,14 @@ First occurrences are retained. Scalar types are alpha-deduplicated per
 provider; assignments are alpha-deduplicated as whole ordered vectors per
 provider. Kinded assignments first require one consistent complete kind vector
 per provider; kinds are not discarded to make conflicting assertions compare
-equal. In every case the provider remains part of the key, so an
-alpha-identical scheme under another name receives no evidence. Target-named
-Djinn specializations remain diagnostic-only, and Exference's normal exact
-target exclusion keeps the requested definition out of provider search.
+equal. Distinct type vectors with that same kind vector remain independent
+choices. The public-runner regressions include two such vectors for one vacuous
+provider at the genuinely higher-order kind `(Type -> Type) -> Type`, one a
+bare constructor and one a partially applied constructor. In every case the
+provider remains part of the key, so an alpha-identical scheme under another
+name receives no evidence. Target-named Djinn specializations remain
+diagnostic-only, and Exference's normal exact target exclusion keeps the
+requested definition out of provider search.
 
 The original runners retain their exact historical behavior. They delegate
 through the empty candidate path, and an explicit empty call to either the
